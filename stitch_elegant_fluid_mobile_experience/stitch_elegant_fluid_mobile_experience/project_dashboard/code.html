@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Manrope:wght@600;700;800&amp;family=Geist:wght@500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        body {
+            background-color: #f8f9ff;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-secondary": "#ffffff",
+                        "error-container": "#ffdad6",
+                        "surface-variant": "#d3e4fe",
+                        "on-primary-fixed": "#131b2e",
+                        "on-error-container": "#93000a",
+                        "surface-container-low": "#eff4ff",
+                        "on-tertiary-container": "#b87500",
+                        "on-surface-variant": "#45464d",
+                        "primary-fixed-dim": "#bec6e0",
+                        "tertiary-fixed-dim": "#ffb95f",
+                        "on-background": "#0b1c30",
+                        "secondary": "#006c49",
+                        "on-primary-fixed-variant": "#3f465c",
+                        "inverse-on-surface": "#eaf1ff",
+                        "on-tertiary": "#ffffff",
+                        "surface-container-lowest": "#ffffff",
+                        "secondary-fixed-dim": "#4edea3",
+                        "on-surface": "#0b1c30",
+                        "on-primary": "#ffffff",
+                        "surface-container": "#e5eeff",
+                        "error": "#ba1a1a",
+                        "secondary-container": "#6cf8bb",
+                        "primary-container": "#131b2e",
+                        "primary-fixed": "#dae2fd",
+                        "on-primary-container": "#7c839b",
+                        "surface": "#f8f9ff",
+                        "on-secondary-container": "#00714d",
+                        "surface-bright": "#f8f9ff",
+                        "surface-container-high": "#dce9ff",
+                        "surface-tint": "#565e74",
+                        "secondary-fixed": "#6ffbbe",
+                        "outline-variant": "#c6c6cd",
+                        "inverse-surface": "#213145",
+                        "on-secondary-fixed": "#002113",
+                        "background": "#f8f9ff",
+                        "inverse-primary": "#bec6e0",
+                        "tertiary-fixed": "#ffddb8",
+                        "tertiary-container": "#2a1700",
+                        "on-tertiary-fixed-variant": "#653e00",
+                        "surface-dim": "#cbdbf5",
+                        "tertiary": "#000000",
+                        "surface-container-highest": "#d3e4fe",
+                        "primary": "#000000",
+                        "on-tertiary-fixed": "#2a1700",
+                        "outline": "#76777d",
+                        "on-secondary-fixed-variant": "#005236",
+                        "on-error": "#ffffff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "stack-md": "12px",
+                        "base": "8px",
+                        "margin-mobile": "16px",
+                        "gutter": "16px",
+                        "stack-sm": "4px",
+                        "stack-lg": "24px",
+                        "margin-desktop": "32px"
+                    },
+                    "fontFamily": {
+                        "body-sm": ["Inter"],
+                        "headline-md": ["Manrope"],
+                        "label-caps": ["Inter"],
+                        "headline-lg-mobile": ["Manrope"],
+                        "headline-lg": ["Manrope"],
+                        "data-mono": ["Geist"],
+                        "body-lg": ["Inter"]
+                    },
+                    "fontSize": {
+                        "body-sm": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "headline-md": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                        "label-caps": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}],
+                        "headline-lg-mobile": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "700"}],
+                        "headline-lg": ["30px", {"lineHeight": "38px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                        "data-mono": ["14px", {"lineHeight": "20px", "fontWeight": "500"}],
+                        "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-surface">
+<!-- Navigation Drawer (Desktop) -->
+<aside class="hidden md:flex flex-col h-full fixed left-0 top-0 py-8 gap-stack-lg bg-surface-container-low w-72 shadow-sm z-50">
+<div class="px-8 mb-8">
+<span class="text-headline-lg font-headline-lg font-black text-primary">Briklay</span>
+</div>
+<nav class="flex flex-col flex-grow px-4 gap-2">
+<a class="text-on-surface-variant pl-4 flex items-center gap-3 py-3 rounded-lg hover:bg-surface-container-highest transition-all duration-300 ease-in-out" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span class="font-body-lg text-body-lg">Dashboard</span>
+</a>
+<a class="text-secondary font-bold border-l-4 border-secondary flex items-center gap-3 py-3 bg-surface-container-high transition-all duration-300 ease-in-out" href="#">
+<div class="pl-3 flex items-center gap-3">
+<span class="material-symbols-outlined" data-icon="construction">construction</span>
+<span class="font-body-lg text-body-lg">Projects</span>
+</div>
+</a>
+<a class="text-on-surface-variant pl-4 flex items-center gap-3 py-3 rounded-lg hover:bg-surface-container-highest transition-all duration-300 ease-in-out" href="#">
+<span class="material-symbols-outlined" data-icon="receipt_long">receipt_long</span>
+<span class="font-body-lg text-body-lg">Transactions</span>
+</a>
+<a class="text-on-surface-variant pl-4 flex items-center gap-3 py-3 rounded-lg hover:bg-surface-container-highest transition-all duration-300 ease-in-out" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="font-body-lg text-body-lg">Settings</span>
+</a>
+</nav>
+<div class="px-8 mt-auto flex items-center gap-4">
+<div class="w-10 h-10 rounded-full bg-primary-container flex items-center justify-center text-on-primary-container">
+<span class="material-symbols-outlined" data-icon="person">person</span>
+</div>
+<div>
+<p class="font-headline-md text-headline-md text-sm leading-tight">Project Manager</p>
+<p class="text-body-sm text-on-surface-variant">Briklay Construction</p>
+</div>
+</div>
+</aside>
+<!-- Top App Bar -->
+<header class="sticky top-0 z-40 flex justify-between items-center w-full px-margin-mobile md:pl-[312px] md:pr-margin-desktop py-4 bg-surface-bright">
+<div class="flex items-center gap-4">
+<button class="md:hidden">
+<span class="material-symbols-outlined text-on-surface" data-icon="menu">menu</span>
+</button>
+<h1 class="text-headline-md font-headline-md font-bold text-primary">Briklay</h1>
+</div>
+<button class="bg-primary text-on-primary px-4 py-2 rounded-lg font-label-caps text-label-caps hover:opacity-80 transition-opacity flex items-center gap-2">
+<span class="material-symbols-outlined text-sm" data-icon="add">add</span>
+            New Transaction
+        </button>
+</header>
+<main class="md:ml-72 min-h-screen px-margin-mobile md:px-margin-desktop pb-32 pt-4">
+<!-- Project Header Section -->
+<section class="mb-stack-lg">
+<div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
+<div>
+<div class="flex items-center gap-2 mb-2">
+<span class="bg-secondary-container text-on-secondary-container px-3 py-1 rounded-full text-label-caps font-label-caps">ACTIVE PROJECT</span>
+<span class="text-on-surface-variant text-body-sm flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px]" data-icon="location_on">location_on</span>
+                            Austin, TX • Sector 7G
+                        </span>
+</div>
+<h2 class="text-headline-lg font-headline-lg text-on-surface">The Mercer Residential Complex</h2>
+</div>
+<div class="flex gap-stack-md">
+<button class="bg-surface-container-highest text-on-surface px-4 py-2 rounded-xl font-label-caps text-label-caps flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]" data-icon="share">share</span>
+                        Report
+                    </button>
+<button class="bg-primary text-on-primary px-4 py-2 rounded-xl font-label-caps text-label-caps flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]" data-icon="edit">edit</span>
+                        Edit Project
+                    </button>
+</div>
+</div>
+</section>
+<!-- Financial Summary Grid (Bento Style) -->
+<section class="grid grid-cols-1 md:grid-cols-12 gap-gutter mb-stack-lg">
+<!-- Work Orders Panel -->
+<div class="md:col-span-6 bg-surface-container-lowest p-6 rounded-xl shadow-[0_2px_4px_rgba(13,28,48,0.04)] border border-outline-variant/30 flex flex-col justify-between">
+<div>
+<div class="flex justify-between items-start mb-6">
+<div>
+<p class="text-label-caps font-label-caps text-on-surface-variant mb-1 uppercase tracking-wider">Work Orders Summary</p>
+<h3 class="text-headline-lg font-headline-lg text-primary">$1,245,000.00</h3>
+</div>
+<div class="p-3 bg-primary-container/10 rounded-lg">
+<span class="material-symbols-outlined text-primary" data-icon="engineering">engineering</span>
+</div>
+</div>
+<div class="space-y-4 mb-6">
+<div class="flex justify-between text-body-sm">
+<span class="text-on-surface-variant">Paid to Date</span>
+<span class="font-data-mono text-secondary font-bold">$842,500.00</span>
+</div>
+<div class="w-full bg-surface-container rounded-full h-2.5">
+<div class="bg-secondary h-2.5 rounded-full" style="width: 68%"></div>
+</div>
+<div class="flex justify-between text-body-sm">
+<span class="text-on-surface-variant">Remaining Balance</span>
+<span class="font-data-mono text-on-surface">$402,500.00</span>
+</div>
+</div>
+</div>
+<div class="pt-4 border-t border-outline-variant/20 flex gap-4">
+<div class="flex flex-col">
+<span class="text-label-caps font-label-caps text-on-surface-variant">OPEN WOs</span>
+<span class="text-headline-md font-headline-md">14</span>
+</div>
+<div class="flex flex-col">
+<span class="text-label-caps font-label-caps text-on-surface-variant">COMPLETION</span>
+<span class="text-headline-md font-headline-md">68%</span>
+</div>
+</div>
+</div>
+<!-- Purchase Orders Panel -->
+<div class="md:col-span-6 bg-surface-container-lowest p-6 rounded-xl shadow-[0_2px_4px_rgba(13,28,48,0.04)] border border-outline-variant/30 flex flex-col justify-between">
+<div>
+<div class="flex justify-between items-start mb-6">
+<div>
+<p class="text-label-caps font-label-caps text-on-surface-variant mb-1 uppercase tracking-wider">Purchase Orders Summary</p>
+<h3 class="text-headline-lg font-headline-lg text-primary">$450,200.00</h3>
+</div>
+<div class="p-3 bg-secondary-container/20 rounded-lg">
+<span class="material-symbols-outlined text-secondary" data-icon="shopping_cart">shopping_cart</span>
+</div>
+</div>
+<div class="space-y-4 mb-6">
+<div class="flex justify-between text-body-sm">
+<span class="text-on-surface-variant">Paid to Date</span>
+<span class="font-data-mono text-secondary font-bold">$410,000.00</span>
+</div>
+<div class="w-full bg-surface-container rounded-full h-2.5">
+<div class="bg-secondary h-2.5 rounded-full" style="width: 91%"></div>
+</div>
+<div class="flex justify-between text-body-sm">
+<span class="text-on-surface-variant">Remaining Balance</span>
+<span class="font-data-mono text-on-surface">$40,200.00</span>
+</div>
+</div>
+</div>
+<div class="pt-4 border-t border-outline-variant/20 flex gap-4">
+<div class="flex flex-col">
+<span class="text-label-caps font-label-caps text-on-surface-variant">OPEN POs</span>
+<span class="text-headline-md font-headline-md">8</span>
+</div>
+<div class="flex flex-col">
+<span class="text-label-caps font-label-caps text-on-surface-variant">UTILIZATION</span>
+<span class="text-headline-md font-headline-md">91%</span>
+</div>
+</div>
+</div>
+</section>
+<!-- Main Content Area: Milestones and Tabs -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-gutter">
+<!-- Pending Approvals (Sidebar on Desktop) -->
+<aside class="lg:col-span-1 space-y-gutter">
+<div class="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/30">
+<div class="flex items-center justify-between mb-6">
+<h4 class="text-headline-md font-headline-md text-on-surface">Pending Approvals</h4>
+<span class="bg-error-container text-on-error-container px-2 py-1 rounded text-label-caps font-label-caps">3 ACTION REQUIRED</span>
+</div>
+<div class="space-y-4">
+<!-- Approval Item 1 -->
+<div class="p-4 rounded-lg bg-surface-container-low border-l-4 border-secondary transition-all hover:translate-x-1 cursor-pointer">
+<div class="flex justify-between items-start mb-2">
+<span class="text-label-caps font-label-caps text-on-surface-variant">MILESTONE 4</span>
+<span class="text-data-mono font-data-mono font-bold">$42,000</span>
+</div>
+<p class="text-body-lg font-body-lg mb-2">Foundation Pouring - Phase B</p>
+<div class="flex items-center justify-between">
+<span class="text-body-sm text-on-surface-variant">Submitted 2h ago</span>
+<button class="text-secondary font-label-caps text-label-caps flex items-center gap-1">
+                                    REVIEW <span class="material-symbols-outlined text-sm" data-icon="chevron_right">chevron_right</span>
+</button>
+</div>
+</div>
+<!-- Approval Item 2 -->
+<div class="p-4 rounded-lg bg-surface-container-low border-l-4 border-secondary transition-all hover:translate-x-1 cursor-pointer">
+<div class="flex justify-between items-start mb-2">
+<span class="text-label-caps font-label-caps text-on-surface-variant">PO-8821</span>
+<span class="text-data-mono font-data-mono font-bold">$12,450</span>
+</div>
+<p class="text-body-lg font-body-lg mb-2">Structural Steel Delivery</p>
+<div class="flex items-center justify-between">
+<span class="text-body-sm text-on-surface-variant">Submitted 5h ago</span>
+<button class="text-secondary font-label-caps text-label-caps flex items-center gap-1">
+                                    REVIEW <span class="material-symbols-outlined text-sm" data-icon="chevron_right">chevron_right</span>
+</button>
+</div>
+</div>
+<!-- Approval Item 3 -->
+<div class="p-4 rounded-lg bg-surface-container-low border-l-4 border-on-tertiary-container transition-all hover:translate-x-1 cursor-pointer">
+<div class="flex justify-between items-start mb-2">
+<span class="text-label-caps font-label-caps text-on-surface-variant">CHANGE ORDER</span>
+<span class="text-data-mono font-data-mono font-bold">$3,200</span>
+</div>
+<p class="text-body-lg font-body-lg mb-2">HVAC Conduit Rerouting</p>
+<div class="flex items-center justify-between">
+<span class="text-body-sm text-on-surface-variant">Submitted Yesterday</span>
+<button class="text-secondary font-label-caps text-label-caps flex items-center gap-1">
+                                    REVIEW <span class="material-symbols-outlined text-sm" data-icon="chevron_right">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</aside>
+<!-- Detailed Tabs Area -->
+<main class="lg:col-span-2">
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant/30 overflow-hidden">
+<nav class="flex border-b border-outline-variant/30 px-6">
+<button class="px-6 py-4 border-b-2 border-secondary text-secondary font-label-caps text-label-caps">WORK ORDERS</button>
+<button class="px-6 py-4 text-on-surface-variant hover:text-on-surface font-label-caps text-label-caps">PURCHASE ORDERS</button>
+<button class="px-6 py-4 text-on-surface-variant hover:text-on-surface font-label-caps text-label-caps">TRANSACTIONS</button>
+</nav>
+<div class="p-6">
+<div class="flex items-center justify-between mb-6">
+<div class="relative w-full max-w-xs">
+<span class="material-symbols-outlined absolute left-3 top-2.5 text-on-surface-variant text-sm" data-icon="search">search</span>
+<input class="w-full bg-surface-container-low border-none rounded-lg pl-10 pr-4 py-2 text-body-sm focus:ring-1 focus:ring-primary" placeholder="Search orders..." type="text"/>
+</div>
+<div class="flex gap-2">
+<button class="p-2 bg-surface-container rounded-lg">
+<span class="material-symbols-outlined text-on-surface-variant" data-icon="filter_list">filter_list</span>
+</button>
+</div>
+</div>
+<!-- Data Table Replacement (Mobile-First Cards for Dashboard) -->
+<div class="space-y-4">
+<!-- List Item 1 -->
+<div class="flex items-center gap-4 p-4 rounded-xl border border-outline-variant/20 hover:bg-surface-container-low transition-colors">
+<div class="flex-shrink-0 w-12 h-12 rounded-lg bg-surface-container-high flex items-center justify-center">
+<span class="material-symbols-outlined text-primary" data-icon="description">description</span>
+</div>
+<div class="flex-grow min-w-0">
+<div class="flex justify-between items-start">
+<h5 class="text-body-lg font-bold text-on-surface truncate">WO-2024-041 • MEP Installation</h5>
+<span class="bg-secondary-container/40 text-on-secondary-container px-2 py-0.5 rounded text-[10px] font-bold">IN PROGRESS</span>
+</div>
+<div class="flex items-center gap-4 mt-1">
+<p class="text-body-sm text-on-surface-variant">United Mechanical Inc.</p>
+<span class="text-on-surface-variant">•</span>
+<p class="text-body-sm text-on-surface-variant">Due Oct 12, 2024</p>
+</div>
+</div>
+<div class="text-right flex-shrink-0">
+<p class="text-data-mono font-data-mono font-bold">$280,000</p>
+<p class="text-[10px] text-on-surface-variant uppercase tracking-widest">Total Value</p>
+</div>
+</div>
+<!-- List Item 2 -->
+<div class="flex items-center gap-4 p-4 rounded-xl border border-outline-variant/20 hover:bg-surface-container-low transition-colors">
+<div class="flex-shrink-0 w-12 h-12 rounded-lg bg-surface-container-high flex items-center justify-center">
+<span class="material-symbols-outlined text-primary" data-icon="description">description</span>
+</div>
+<div class="flex-grow min-w-0">
+<div class="flex justify-between items-start">
+<h5 class="text-body-lg font-bold text-on-surface truncate">WO-2024-039 • Roofing &amp; Enclosure</h5>
+<span class="bg-surface-container-highest text-on-surface-variant px-2 py-0.5 rounded text-[10px] font-bold">DRAFT</span>
+</div>
+<div class="flex items-center gap-4 mt-1">
+<p class="text-body-sm text-on-surface-variant">Apex Exteriors Group</p>
+<span class="text-on-surface-variant">•</span>
+<p class="text-body-sm text-on-surface-variant">Due Nov 01, 2024</p>
+</div>
+</div>
+<div class="text-right flex-shrink-0">
+<p class="text-data-mono font-data-mono font-bold">$145,000</p>
+<p class="text-[10px] text-on-surface-variant uppercase tracking-widest">Total Value</p>
+</div>
+</div>
+<!-- List Item 3 -->
+<div class="flex items-center gap-4 p-4 rounded-xl border border-outline-variant/20 hover:bg-surface-container-low transition-colors">
+<div class="flex-shrink-0 w-12 h-12 rounded-lg bg-surface-container-high flex items-center justify-center">
+<span class="material-symbols-outlined text-primary" data-icon="check_circle">check_circle</span>
+</div>
+<div class="flex-grow min-w-0">
+<div class="flex justify-between items-start">
+<h5 class="text-body-lg font-bold text-on-surface truncate">WO-2024-032 • Foundation &amp; Grading</h5>
+<span class="bg-secondary/10 text-secondary px-2 py-0.5 rounded text-[10px] font-bold">COMPLETED</span>
+</div>
+<div class="flex items-center gap-4 mt-1">
+<p class="text-body-sm text-on-surface-variant">Solid Ground Construction</p>
+<span class="text-on-surface-variant">•</span>
+<p class="text-body-sm text-on-surface-variant">Paid Aug 28, 2024</p>
+</div>
+</div>
+<div class="text-right flex-shrink-0">
+<p class="text-data-mono font-data-mono font-bold">$420,000</p>
+<p class="text-[10px] text-on-surface-variant uppercase tracking-widest">Total Value</p>
+</div>
+</div>
+</div>
+<div class="mt-8 flex justify-center">
+<button class="text-primary font-label-caps text-label-caps border border-primary/20 px-6 py-2 rounded-lg hover:bg-primary/5 transition-colors">
+                                VIEW ALL WORK ORDERS
+                            </button>
+</div>
+</div>
+</div>
+</main>
+</div>
+</main>
+<!-- Bottom Nav Bar (Mobile Only) -->
+<nav class="md:hidden fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 py-2 bg-surface dark:bg-surface-dim shadow-md rounded-t-xl">
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-2" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span class="text-label-caps font-label-caps">Home</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-2" href="#">
+<span class="material-symbols-outlined" data-icon="receipt_long">receipt_long</span>
+<span class="text-label-caps font-label-caps">Bills</span>
+</a>
+<a class="flex flex-col items-center justify-center bg-secondary-container text-on-secondary-container rounded-full px-4 py-1" href="#">
+<span class="material-symbols-outlined" data-icon="construction">construction</span>
+<span class="text-label-caps font-label-caps">Projects</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-2" href="#">
+<span class="material-symbols-outlined" data-icon="more_horiz">more_horiz</span>
+<span class="text-label-caps font-label-caps">More</span>
+</a>
+</nav>
+<!-- Floating Action Button Contextual Check: Supressed on detail/settings screen -->
+</body></html>

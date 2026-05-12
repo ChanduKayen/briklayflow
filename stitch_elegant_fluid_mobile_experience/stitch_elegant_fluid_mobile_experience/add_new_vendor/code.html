@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Add New Vendor | Briklay</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Manrope:wght@600;700;800&amp;family=Geist:wght@500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        body {
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "on-error": "#ffffff",
+                      "on-primary-fixed": "#131b2e",
+                      "on-background": "#0b1c30",
+                      "surface-container": "#e5eeff",
+                      "secondary-fixed": "#6ffbbe",
+                      "on-tertiary-fixed": "#2a1700",
+                      "background": "#f8f9ff",
+                      "primary-fixed-dim": "#bec6e0",
+                      "on-primary": "#ffffff",
+                      "error-container": "#ffdad6",
+                      "outline-variant": "#c6c6cd",
+                      "surface-container-high": "#dce9ff",
+                      "tertiary-fixed": "#ffddb8",
+                      "primary-container": "#131b2e",
+                      "primary-fixed": "#dae2fd",
+                      "inverse-on-surface": "#eaf1ff",
+                      "secondary-container": "#6cf8bb",
+                      "on-tertiary": "#ffffff",
+                      "on-surface": "#0b1c30",
+                      "surface-variant": "#d3e4fe",
+                      "tertiary": "#000000",
+                      "on-tertiary-container": "#b87500",
+                      "on-primary-fixed-variant": "#3f465c",
+                      "tertiary-container": "#2a1700",
+                      "secondary-fixed-dim": "#4edea3",
+                      "on-secondary-fixed": "#002113",
+                      "on-primary-container": "#7c839b",
+                      "inverse-surface": "#213145",
+                      "on-secondary-container": "#00714d",
+                      "on-secondary": "#ffffff",
+                      "surface-dim": "#cbdbf5",
+                      "on-secondary-fixed-variant": "#005236",
+                      "surface-container-low": "#eff4ff",
+                      "surface-container-highest": "#d3e4fe",
+                      "surface-tint": "#565e74",
+                      "on-surface-variant": "#45464d",
+                      "on-tertiary-fixed-variant": "#653e00",
+                      "surface-bright": "#f8f9ff",
+                      "surface": "#f8f9ff",
+                      "outline": "#76777d",
+                      "primary": "#000000",
+                      "on-error-container": "#93000a",
+                      "tertiary-fixed-dim": "#ffb95f",
+                      "surface-container-lowest": "#ffffff",
+                      "secondary": "#006c49",
+                      "inverse-primary": "#bec6e0",
+                      "error": "#ba1a1a"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "base": "8px",
+                      "margin-desktop": "32px",
+                      "stack-md": "12px",
+                      "gutter": "16px",
+                      "stack-sm": "4px",
+                      "stack-lg": "24px",
+                      "margin-mobile": "16px"
+              },
+              "fontFamily": {
+                      "headline-md": ["Manrope"],
+                      "headline-lg": ["Manrope"],
+                      "headline-lg-mobile": ["Manrope"],
+                      "body-sm": ["Inter"],
+                      "body-lg": ["Inter"],
+                      "data-mono": ["Geist"],
+                      "label-caps": ["Inter"]
+              },
+              "fontSize": {
+                      "headline-md": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                      "headline-lg": ["30px", {"lineHeight": "38px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                      "headline-lg-mobile": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "700"}],
+                      "body-sm": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                      "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                      "data-mono": ["14px", {"lineHeight": "20px", "fontWeight": "500"}],
+                      "label-caps": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}]
+              }
+            },
+          },
+        }
+      </script>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-surface min-h-screen pb-24">
+<!-- Top Navigation Bar -->
+<header class="sticky top-0 z-40 flex justify-between items-center w-full px-margin-mobile md:px-margin-desktop py-4 bg-surface-bright dark:bg-surface-dim">
+<div class="flex items-center gap-4">
+<button class="flex items-center justify-center p-2 rounded-full hover:bg-surface-variant transition-colors">
+<span class="material-symbols-outlined text-on-surface" data-icon="arrow_back">arrow_back</span>
+</button>
+<h1 class="text-headline-md font-headline-md font-bold text-primary">New Vendor</h1>
+</div>
+<button class="flex items-center justify-center p-2 rounded-full hover:bg-surface-variant transition-colors">
+<span class="material-symbols-outlined text-on-surface" data-icon="help_outline">help_outline</span>
+</button>
+</header>
+<main class="px-margin-mobile pt-stack-lg max-w-xl mx-auto">
+<form class="flex flex-col gap-stack-lg">
+<!-- Section: Identity -->
+<div class="flex flex-col gap-stack-md">
+<h2 class="text-label-caps font-label-caps text-on-surface-variant uppercase">Identity &amp; Classification</h2>
+<div class="bg-surface-container-low p-stack-lg rounded-xl flex flex-col gap-stack-lg shadow-sm border border-surface-variant/30">
+<!-- Company Name -->
+<div class="flex flex-col gap-stack-sm">
+<label class="text-label-caps font-label-caps text-on-surface-variant uppercase" for="company_name">Company Name</label>
+<input class="w-full bg-surface-bright border border-outline-variant rounded-lg px-4 py-3 text-body-lg focus:border-primary focus:ring-0 transition-all placeholder:text-outline" id="company_name" placeholder="e.g. Skyline Aggregates Ltd" type="text"/>
+</div>
+<div class="grid grid-cols-2 gap-stack-md">
+<!-- Category -->
+<div class="flex flex-col gap-stack-sm">
+<label class="text-label-caps font-label-caps text-on-surface-variant uppercase" for="category">Category</label>
+<select class="w-full bg-surface-bright border border-outline-variant rounded-lg px-4 py-3 text-body-lg focus:border-primary focus:ring-0 transition-all" id="category">
+<option value="">Select...</option>
+<option value="material">Material Supply</option>
+<option value="rental">Equipment Rental</option>
+<option value="labor">Labor Contractor</option>
+<option value="logistics">Logistics</option>
+</select>
+</div>
+<!-- Tax ID -->
+<div class="flex flex-col gap-stack-sm">
+<label class="text-label-caps font-label-caps text-on-surface-variant uppercase" for="tax_id">GSTIN/Tax ID</label>
+<input class="w-full bg-surface-bright border border-outline-variant rounded-lg px-4 py-3 text-data-mono focus:border-primary focus:ring-0 transition-all placeholder:text-outline" id="tax_id" placeholder="22AAAAA0000A1Z5" type="text"/>
+</div>
+</div>
+</div>
+</div>
+<!-- Section: Contact Details -->
+<div class="flex flex-col gap-stack-md">
+<h2 class="text-label-caps font-label-caps text-on-surface-variant uppercase">Primary Contact</h2>
+<div class="bg-surface-container-low p-stack-lg rounded-xl flex flex-col gap-stack-lg shadow-sm border border-surface-variant/30">
+<!-- Contact Person -->
+<div class="flex flex-col gap-stack-sm">
+<label class="text-label-caps font-label-caps text-on-surface-variant uppercase" for="contact_name">Full Name</label>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline" data-icon="person">person</span>
+<input class="w-full bg-surface-bright border border-outline-variant rounded-lg pl-10 pr-4 py-3 text-body-lg focus:border-primary focus:ring-0 transition-all" id="contact_name" placeholder="John Doe" type="text"/>
+</div>
+</div>
+<div class="flex flex-col gap-stack-sm">
+<label class="text-label-caps font-label-caps text-on-surface-variant uppercase" for="phone">Phone Number</label>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline" data-icon="call">call</span>
+<input class="w-full bg-surface-bright border border-outline-variant rounded-lg pl-10 pr-4 py-3 text-body-lg focus:border-primary focus:ring-0 transition-all" id="phone" placeholder="+1 (555) 000-0000" type="tel"/>
+</div>
+</div>
+<div class="flex flex-col gap-stack-sm">
+<label class="text-label-caps font-label-caps text-on-surface-variant uppercase" for="email">Email Address</label>
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline" data-icon="mail">mail</span>
+<input class="w-full bg-surface-bright border border-outline-variant rounded-lg pl-10 pr-4 py-3 text-body-lg focus:border-primary focus:ring-0 transition-all" id="email" placeholder="john@skyline.com" type="email"/>
+</div>
+</div>
+</div>
+</div>
+<!-- Section: Banking -->
+<div class="flex flex-col gap-stack-md">
+<h2 class="text-label-caps font-label-caps text-on-surface-variant uppercase">Banking Details</h2>
+<div class="bg-surface-container-low p-stack-lg rounded-xl flex flex-col gap-stack-lg shadow-sm border border-surface-variant/30">
+<div class="flex flex-col gap-stack-sm">
+<label class="text-label-caps font-label-caps text-on-surface-variant uppercase" for="account_holder">Account Holder Name</label>
+<input class="w-full bg-surface-bright border border-outline-variant rounded-lg px-4 py-3 text-body-lg focus:border-primary focus:ring-0 transition-all" id="account_holder" type="text"/>
+</div>
+<div class="flex flex-col gap-stack-sm">
+<label class="text-label-caps font-label-caps text-on-surface-variant uppercase" for="bank_name">Bank Name</label>
+<input class="w-full bg-surface-bright border border-outline-variant rounded-lg px-4 py-3 text-body-lg focus:border-primary focus:ring-0 transition-all" id="bank_name" placeholder="e.g. National Commerce Bank" type="text"/>
+</div>
+<div class="flex flex-col gap-stack-sm">
+<label class="text-label-caps font-label-caps text-on-surface-variant uppercase" for="account_number">Account Number / IFSC</label>
+<input class="w-full bg-surface-bright border border-outline-variant rounded-lg px-4 py-3 text-data-mono focus:border-primary focus:ring-0 transition-all" id="account_number" type="text"/>
+</div>
+</div>
+</div>
+<!-- Section: Documents -->
+<div class="flex flex-col gap-stack-md">
+<h2 class="text-label-caps font-label-caps text-on-surface-variant uppercase">Compliance Documents</h2>
+<div class="bg-surface-container-low p-stack-lg rounded-xl flex flex-col gap-stack-md shadow-sm border border-surface-variant/30">
+<div class="flex flex-col gap-stack-sm">
+<span class="text-label-caps font-label-caps text-on-surface-variant uppercase">Vendor Registration Certificate</span>
+<div class="border-2 border-dashed border-outline-variant rounded-xl p-8 flex flex-col items-center justify-center gap-stack-md hover:bg-surface-variant/20 transition-colors cursor-pointer group">
+<span class="material-symbols-outlined text-primary text-4xl" data-icon="cloud_upload">cloud_upload</span>
+<div class="text-center">
+<p class="text-body-lg font-semibold text-on-surface">Tap to upload file</p>
+<p class="text-body-sm text-on-surface-variant">PDF, JPG or PNG (Max 5MB)</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Footer Spacing -->
+<div class="h-24"></div>
+</form>
+</main>
+<!-- Fixed Bottom Action Bar -->
+<div class="fixed bottom-0 left-0 w-full z-50 bg-surface px-margin-mobile py-4 shadow-[0_-4px_16px_rgba(0,0,0,0.05)] md:flex md:justify-center">
+<div class="w-full max-w-xl flex gap-stack-md">
+<button class="flex-1 bg-surface-container-high text-on-surface-variant font-semibold py-4 rounded-xl hover:bg-surface-variant transition-all active:scale-95">
+                Cancel
+            </button>
+<button class="flex-[2] bg-primary text-on-primary font-semibold py-4 rounded-xl shadow-lg hover:opacity-90 transition-all active:scale-95 flex items-center justify-center gap-2">
+<span>Create Vendor</span>
+<span class="material-symbols-outlined text-[20px]" data-icon="chevron_right">chevron_right</span>
+</button>
+</div>
+</div>
+</body></html>

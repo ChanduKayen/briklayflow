@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Manrope:wght@600;700;800&amp;family=Geist:wght@500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #d3e4fe; border-radius: 10px; }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-secondary": "#ffffff",
+                        "error-container": "#ffdad6",
+                        "surface-variant": "#d3e4fe",
+                        "on-primary-fixed": "#131b2e",
+                        "on-error-container": "#93000a",
+                        "surface-container-low": "#eff4ff",
+                        "on-tertiary-container": "#b87500",
+                        "on-surface-variant": "#45464d",
+                        "primary-fixed-dim": "#bec6e0",
+                        "tertiary-fixed-dim": "#ffb95f",
+                        "on-background": "#0b1c30",
+                        "secondary": "#006c49",
+                        "on-primary-fixed-variant": "#3f465c",
+                        "inverse-on-surface": "#eaf1ff",
+                        "on-tertiary": "#ffffff",
+                        "surface-container-lowest": "#ffffff",
+                        "secondary-fixed-dim": "#4edea3",
+                        "on-surface": "#0b1c30",
+                        "on-primary": "#ffffff",
+                        "surface-container": "#e5eeff",
+                        "error": "#ba1a1a",
+                        "secondary-container": "#6cf8bb",
+                        "primary-container": "#131b2e",
+                        "primary-fixed": "#dae2fd",
+                        "on-primary-container": "#7c839b",
+                        "surface": "#f8f9ff",
+                        "on-secondary-container": "#00714d",
+                        "surface-bright": "#f8f9ff",
+                        "surface-container-high": "#dce9ff",
+                        "surface-tint": "#565e74",
+                        "secondary-fixed": "#6ffbbe",
+                        "outline-variant": "#c6c6cd",
+                        "inverse-surface": "#213145",
+                        "on-secondary-fixed": "#002113",
+                        "background": "#f8f9ff",
+                        "inverse-primary": "#bec6e0",
+                        "tertiary-fixed": "#ffddb8",
+                        "tertiary-container": "#2a1700",
+                        "on-tertiary-fixed-variant": "#653e00",
+                        "surface-dim": "#cbdbf5",
+                        "tertiary": "#000000",
+                        "surface-container-highest": "#d3e4fe",
+                        "primary": "#000000",
+                        "on-tertiary-fixed": "#2a1700",
+                        "outline": "#76777d",
+                        "on-secondary-fixed-variant": "#005236",
+                        "on-error": "#ffffff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "stack-md": "12px",
+                        "base": "8px",
+                        "margin-mobile": "16px",
+                        "gutter": "16px",
+                        "stack-sm": "4px",
+                        "stack-lg": "24px",
+                        "margin-desktop": "32px"
+                    },
+                    "fontFamily": {
+                        "body-sm": ["Inter"],
+                        "headline-md": ["Manrope"],
+                        "label-caps": ["Inter"],
+                        "headline-lg-mobile": ["Manrope"],
+                        "headline-lg": ["Manrope"],
+                        "data-mono": ["Geist"],
+                        "body-lg": ["Inter"]
+                    },
+                    "fontSize": {
+                        "body-sm": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "headline-md": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                        "label-caps": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}],
+                        "headline-lg-mobile": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "700"}],
+                        "headline-lg": ["30px", {"lineHeight": "38px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                        "data-mono": ["14px", {"lineHeight": "20px", "fontWeight": "500"}],
+                        "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-surface text-on-surface font-body-lg min-h-screen">
+<!-- Navigation Drawer (Desktop) -->
+<aside class="hidden md:flex flex-col h-full fixed left-0 top-0 py-8 gap-stack-lg bg-surface-container-low w-72 shadow-sm z-50">
+<div class="px-6 mb-4">
+<h1 class="text-headline-lg font-headline-lg font-black text-primary">Briklay</h1>
+</div>
+<div class="flex items-center gap-4 px-6 mb-8">
+<div class="w-12 h-12 rounded-full overflow-hidden bg-surface-container-highest">
+<img alt="Project Manager" class="w-full h-full object-cover" data-alt="A professional headshot of a senior project manager in a clean, modern corporate setting. He is wearing a crisp white shirt and has a focused, confident expression. The lighting is bright and even, reflecting a professional light-mode aesthetic with soft blue shadows." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCRHcvMcScoWSj5kor7TbCsy0OCwRmvQsLGWWMthJvjnocCfK2Xn9RhsrF_rj55PBLHID6UZyAwODIMvCpuvlhYTWctFPnpPkrBz66YsB77eSi2H0yft982zd5eShTzMauc2zhu2nPWNeyc939vnShQ4Vqvp9E9QykIBLPQ_n4B75o-mX6j3JIc3oY11VI54eIDw-Dqs2nfdRxWEUKhKu_bwzIOH7swp59sqAjUs-AgyBFHNPoLT6Xs9e47eIQH2dO_JCEcRBmyjoE5"/>
+</div>
+<div>
+<p class="text-headline-md font-headline-md">Project Manager</p>
+<p class="text-body-sm font-body-sm text-on-surface-variant">Briklay Construction</p>
+</div>
+</div>
+<nav class="flex flex-col gap-1 px-2">
+<a class="flex items-center gap-3 py-3 px-4 text-on-surface-variant hover:bg-surface-container-highest transition-all duration-300 ease-in-out pl-4" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="text-body-lg font-body-lg">Dashboard</span>
+</a>
+<a class="flex items-center gap-3 py-3 px-4 text-on-surface-variant hover:bg-surface-container-highest transition-all duration-300 ease-in-out pl-4" href="#">
+<span class="material-symbols-outlined">receipt_long</span>
+<span class="text-body-lg font-body-lg">Transactions</span>
+</a>
+<a class="flex items-center gap-3 py-3 px-4 text-on-surface-variant hover:bg-surface-container-highest transition-all duration-300 ease-in-out pl-4" href="#">
+<span class="material-symbols-outlined">construction</span>
+<span class="text-body-lg font-body-lg">Projects</span>
+</a>
+<a class="flex items-center gap-3 py-3 px-4 text-secondary font-bold border-l-4 border-secondary bg-surface-container-highest transition-all duration-300 ease-in-out" href="#">
+<span class="material-symbols-outlined">folder_shared</span>
+<span class="text-body-lg font-body-lg">Document Vault</span>
+</a>
+<a class="flex items-center gap-3 py-3 px-4 text-on-surface-variant hover:bg-surface-container-highest transition-all duration-300 ease-in-out pl-4" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="text-body-lg font-body-lg">Settings</span>
+</a>
+</nav>
+</aside>
+<!-- Top AppBar -->
+<header class="sticky top-0 z-40 flex justify-between items-center w-full px-margin-mobile md:px-margin-desktop py-4 bg-surface-bright md:pl-[312px]">
+<div class="flex items-center gap-4">
+<button class="md:hidden material-symbols-outlined text-on-surface">menu</button>
+<h2 class="text-headline-md font-headline-md font-bold text-primary">Document Vault</h2>
+</div>
+<button class="bg-primary text-on-primary px-6 py-2 rounded-full font-label-caps text-label-caps hover:opacity-80 transition-opacity">
+            Upload Document
+        </button>
+</header>
+<!-- Main Content -->
+<main class="md:pl-[312px] p-margin-mobile md:p-margin-desktop pb-24 md:pb-12">
+<!-- Search and Filter Section -->
+<section class="mb-stack-lg flex flex-col gap-4">
+<div class="relative w-full">
+<span class="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-outline">search</span>
+<input class="w-full bg-surface-container-lowest border border-outline-variant rounded-xl pl-12 pr-4 py-3 focus:border-primary focus:ring-1 focus:ring-primary outline-none text-body-lg font-body-lg" placeholder="Search by document name, tag, or associated entity..." type="text"/>
+</div>
+<div class="flex flex-wrap items-center gap-stack-md">
+<div class="flex items-center gap-2 bg-surface-container-high px-4 py-2 rounded-lg border border-outline-variant cursor-pointer hover:bg-surface-container-highest transition-colors">
+<span class="text-label-caps font-label-caps text-on-surface-variant">Entity Type:</span>
+<span class="text-body-sm font-body-sm font-semibold">All Entities</span>
+<span class="material-symbols-outlined text-body-sm">expand_more</span>
+</div>
+<div class="flex items-center gap-2 bg-surface-container-high px-4 py-2 rounded-lg border border-outline-variant cursor-pointer hover:bg-surface-container-highest transition-colors">
+<span class="text-label-caps font-label-caps text-on-surface-variant">Project:</span>
+<span class="text-body-sm font-body-sm font-semibold">Blue Horizon Towers</span>
+<span class="material-symbols-outlined text-body-sm">expand_more</span>
+</div>
+<div class="flex items-center gap-2 bg-surface-container-high px-4 py-2 rounded-lg border border-outline-variant cursor-pointer hover:bg-surface-container-highest transition-colors">
+<span class="text-label-caps font-label-caps text-on-surface-variant">Date Range:</span>
+<span class="text-body-sm font-body-sm font-semibold">Last 30 Days</span>
+<span class="material-symbols-outlined text-body-sm">calendar_today</span>
+</div>
+<button class="ml-auto text-secondary text-label-caps font-label-caps hover:underline">Clear all filters</button>
+</div>
+</section>
+<!-- Bento Grid Document Archive -->
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-gutter">
+<!-- Document Card 1: PDF Invoice -->
+<div class="group bg-surface-container-lowest rounded-xl shadow-md overflow-hidden border border-transparent hover:border-secondary transition-all">
+<div class="aspect-video bg-surface-container-high relative overflow-hidden flex items-center justify-center p-6">
+<img alt="Invoice Thumbnail" class="w-full h-full object-cover opacity-50 blur-sm group-hover:scale-105 transition-transform" data-alt="A clean, minimalist close-up of a structural blueprint spread across a wooden architect's table. The lighting is a bright, high-key midday sun that casts sharp, professional shadows. The palette is dominated by off-whites, greys, and deep architectural blues, conveying a sense of institutional stability and precision." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCYVDtB9loZNvEZe8MNreT4xlbpBKWLHXVzemMQU6AWkVh6N1mVjAuryCFEDxX3_LTXiVU5wPgUPQdu34X012aY20n4jyS_iyPQDQgab3oiPfjqQ6EbJRMnggygT8iBKj_1vXR4ql4cDGIEjmoLnZVCxRkHr94rZuc5jbHcqEbc1KXS8MIKPx7ZD8yRlsd3RipQFZ2sjG2-JO8zQUZcB0nqY0_ePZMCBb2HfwENaEtinjWE9AeciqNqYyaHfy_KIe5K7i3B2g14qcDB"/>
+<div class="absolute inset-0 flex items-center justify-center">
+<span class="material-symbols-outlined text-5xl text-error opacity-80" data-weight="fill">picture_as_pdf</span>
+</div>
+<div class="absolute top-2 right-2">
+<span class="bg-secondary-container text-on-secondary-container px-2 py-1 rounded text-[10px] font-label-caps">APPROVED</span>
+</div>
+</div>
+<div class="p-4">
+<h3 class="text-body-lg font-bold truncate">INV-2023-0892_Structural.pdf</h3>
+<p class="text-body-sm text-on-surface-variant mt-1">Uploaded Oct 12, 2023</p>
+<div class="mt-4 flex flex-col gap-2 border-t border-outline-variant pt-4">
+<div class="flex justify-between items-center">
+<span class="text-label-caps font-label-caps text-on-surface-variant">Linked To</span>
+<span class="bg-surface-container text-primary px-2 py-0.5 rounded text-[10px] font-label-caps">TXN-4820</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="text-label-caps font-label-caps text-on-surface-variant">Entity</span>
+<span class="text-body-sm font-data-mono">Invoice</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Document Card 2: Image/Photo -->
+<div class="group bg-surface-container-lowest rounded-xl shadow-md overflow-hidden border border-transparent hover:border-secondary transition-all">
+<div class="aspect-video bg-surface-container-high relative overflow-hidden">
+<img alt="Site Photo" class="w-full h-full object-cover group-hover:scale-105 transition-transform" data-alt="A high-resolution wide shot of a massive steel-and-glass skyscraper construction site during the golden hour. Warm, amber sunlight glints off the crane structures and raw concrete surfaces. The aesthetic is modern and industrial, with a sophisticated balance of warm highlights and deep navy shadows, suggesting progress and institutional growth." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBZduPMxjBNQpb5nNiGGZFyUWeaRo1YlRsCXUXLlxXyRaCg8ZuzRLAWsSqFrfyNiay_VLA8s8R3eJIgsSFUXY4QismDiYlPsYjpxC0k-d68Oq7SO47LUKiYKlDF1KYsStUx046bHqS077_MNHEHtV700BvUkxhfMDXQXkDdMFmIrb1SybB50Szq6TcJTt0djHF7sUlT7IdkFnsgKUXrNOmd4wMHxn_30uO9JWMo7TTbYniR7_imUQkyoRGswyZf6vNdzvyIvxQsQtid"/>
+<div class="absolute top-2 right-2">
+<span class="bg-surface-container-highest text-on-surface-variant px-2 py-1 rounded text-[10px] font-label-caps">SITE PHOTO</span>
+</div>
+</div>
+<div class="p-4">
+<h3 class="text-body-lg font-bold truncate">Site_Progress_Lobby_North.jpg</h3>
+<p class="text-body-sm text-on-surface-variant mt-1">Uploaded Oct 10, 2023</p>
+<div class="mt-4 flex flex-col gap-2 border-t border-outline-variant pt-4">
+<div class="flex justify-between items-center">
+<span class="text-label-caps font-label-caps text-on-surface-variant">Linked To</span>
+<span class="bg-surface-container text-primary px-2 py-0.5 rounded text-[10px] font-label-caps">WO-882</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="text-label-caps font-label-caps text-on-surface-variant">Entity</span>
+<span class="text-body-sm font-data-mono">Work Order</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Document Card 3: PO PDF -->
+<div class="group bg-surface-container-lowest rounded-xl shadow-md overflow-hidden border border-transparent hover:border-secondary transition-all">
+<div class="aspect-video bg-surface-container-high relative overflow-hidden flex items-center justify-center p-6">
+<img alt="Document Placeholder" class="w-full h-full object-cover opacity-50 blur-sm group-hover:scale-105 transition-transform" data-alt="An abstract composition of layered architectural papers and semi-transparent vellum sheets in a bright, modern studio. The scene is illuminated by soft, diffused light that highlights the tactile textures of the paper. The color palette consists of cool grays, pristine whites, and deep corporate blue accents, evoking a sense of organized precision and financial clarity." src="https://lh3.googleusercontent.com/aida-public/AB6AXuB5Qzh5HRtiaf_kweXb3A7go8Lph__07yeED_S2MOQIcA1rzcq8L57Wu5lPQYLWQFTes1RGH8tbCUKzFEniZsKbZicd0FdTFlI3Mvh4sQUD4riMAxwP6a2Hs3oFtPgHq_o_x7xiaH8JpWoJVCXBepQHaFfUpmbglKPnKKIOykKM7VhV4NaMO0bR-qdfUdOwtsUvQu_X3zhECiJdTEq4c5ztzChOEOZVeAnor3B-5eR-XLTIwjiuPJfUu1DIGvZbS5DebkYBzgHEGVDW"/>
+<div class="absolute inset-0 flex items-center justify-center">
+<span class="material-symbols-outlined text-5xl text-on-surface-variant opacity-60">description</span>
+</div>
+<div class="absolute top-2 right-2">
+<span class="bg-tertiary-fixed text-on-tertiary-fixed px-2 py-1 rounded text-[10px] font-label-caps">PENDING SIGNATURE</span>
+</div>
+</div>
+<div class="p-4">
+<h3 class="text-body-lg font-bold truncate">PO-331_Concrete_Supply.pdf</h3>
+<p class="text-body-sm text-on-surface-variant mt-1">Uploaded Oct 08, 2023</p>
+<div class="mt-4 flex flex-col gap-2 border-t border-outline-variant pt-4">
+<div class="flex justify-between items-center">
+<span class="text-label-caps font-label-caps text-on-surface-variant">Linked To</span>
+<span class="bg-surface-container text-primary px-2 py-0.5 rounded text-[10px] font-label-caps">PO-331</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="text-label-caps font-label-caps text-on-surface-variant">Entity</span>
+<span class="text-body-sm font-data-mono">Purchase Order</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Document Card 4: Safety Image -->
+<div class="group bg-surface-container-lowest rounded-xl shadow-md overflow-hidden border border-transparent hover:border-secondary transition-all">
+<div class="aspect-video bg-surface-container-high relative overflow-hidden">
+<img alt="Compliance Doc" class="w-full h-full object-cover group-hover:scale-105 transition-transform" data-alt="A close-up shot of a bright yellow construction safety helmet and a pair of industrial protective glasses resting on a steel beam. The background is a slightly blurred, modern construction interior with cool, high-key lighting. The overall mood is focused on compliance and safety, with a clean professional palette of yellow, gray, and deep navy." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAshlpeSix25odzj77VFos9KP624ye1EvtasQ2QRALmOzljZKNY9NEtdQpmwZDhW2hAtni9AxTz3aM1-y_kPvagkS8t2gD68AQ0WBofwPskPa0DR6DFDn093y9wvxCBnUfWjuZyEBU1NFhiW1aKWQOZSjYiK1-LObRI6FWBefzjHCwWEq1kpMHNodZq16fQEcqK5OAxRPfwgQp61ay4SsbKzO4HNJYLqksQq0L_tzrnOiF_YR0hAci_xaCyuy2mfEh8E0BPOLfaLihI"/>
+<div class="absolute top-2 right-2">
+<span class="bg-error-container text-on-error-container px-2 py-1 rounded text-[10px] font-label-caps">COMPLIANCE</span>
+</div>
+</div>
+<div class="p-4">
+<h3 class="text-body-lg font-bold truncate">Safety_Log_Week_40.png</h3>
+<p class="text-body-sm text-on-surface-variant mt-1">Uploaded Oct 05, 2023</p>
+<div class="mt-4 flex flex-col gap-2 border-t border-outline-variant pt-4">
+<div class="flex justify-between items-center">
+<span class="text-label-caps font-label-caps text-on-surface-variant">Linked To</span>
+<span class="bg-surface-container text-primary px-2 py-0.5 rounded text-[10px] font-label-caps">PROJ-BLU</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="text-label-caps font-label-caps text-on-surface-variant">Entity</span>
+<span class="text-body-sm font-data-mono">Compliance</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Additional Placeholder Items for Grid Depth -->
+<div class="group bg-surface-container-lowest rounded-xl shadow-md overflow-hidden border border-transparent hover:border-secondary transition-all">
+<div class="aspect-video bg-surface-container-high relative flex items-center justify-center">
+<span class="material-symbols-outlined text-5xl text-outline opacity-40">description</span>
+</div>
+<div class="p-4">
+<h3 class="text-body-lg font-bold truncate">Subcontractor_Agreement_Final.pdf</h3>
+<p class="text-body-sm text-on-surface-variant mt-1">Uploaded Sep 29, 2023</p>
+<div class="mt-4 border-t border-outline-variant pt-4">
+<span class="text-label-caps font-label-caps text-on-surface-variant">Linked To: </span>
+<span class="text-body-sm font-semibold">Multiple Entities</span>
+</div>
+</div>
+</div>
+<div class="group bg-surface-container-lowest rounded-xl shadow-md overflow-hidden border border-transparent hover:border-secondary transition-all">
+<div class="aspect-video bg-surface-container-high relative flex items-center justify-center">
+<span class="material-symbols-outlined text-5xl text-outline opacity-40">image</span>
+</div>
+<div class="p-4">
+<h3 class="text-body-lg font-bold truncate">HVAC_Install_Proof.jpg</h3>
+<p class="text-body-sm text-on-surface-variant mt-1">Uploaded Sep 25, 2023</p>
+<div class="mt-4 border-t border-outline-variant pt-4">
+<span class="text-label-caps font-label-caps text-on-surface-variant">Linked To: </span>
+<span class="text-body-sm font-semibold">WO-901</span>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Bottom Navigation (Mobile) -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 py-2 bg-surface rounded-t-xl shadow-md md:hidden">
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-2 hover:bg-surface-container-high transition-colors" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="text-[10px] font-label-caps uppercase mt-1">Dashboard</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-2 hover:bg-surface-container-high transition-colors" href="#">
+<span class="material-symbols-outlined">receipt_long</span>
+<span class="text-[10px] font-label-caps uppercase mt-1">Transactions</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant p-2 hover:bg-surface-container-high transition-colors" href="#">
+<span class="material-symbols-outlined">construction</span>
+<span class="text-[10px] font-label-caps uppercase mt-1">Projects</span>
+</a>
+<a class="flex flex-col items-center justify-center bg-secondary-container text-on-secondary-container rounded-full px-4 py-1" href="#">
+<span class="material-symbols-outlined">more_horiz</span>
+<span class="text-[10px] font-label-caps uppercase">More</span>
+</a>
+</nav>
+</body></html>

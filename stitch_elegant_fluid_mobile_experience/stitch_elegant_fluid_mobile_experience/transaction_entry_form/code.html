@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>New Transaction | Briklay</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Manrope:wght@600;700;800&amp;family=Geist:wght@500&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8f9ff;
+        }
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                "surface-container-highest": "#d3e4fe",
+                "surface-dim": "#cbdbf5",
+                "tertiary-fixed": "#ffddb8",
+                "on-background": "#0b1c30",
+                "on-error": "#ffffff",
+                "on-secondary-fixed": "#002113",
+                "on-tertiary": "#ffffff",
+                "surface-container-low": "#eff4ff",
+                "tertiary": "#000000",
+                "on-tertiary-container": "#b87500",
+                "surface-container": "#e5eeff",
+                "outline-variant": "#c6c6cd",
+                "secondary": "#006c49",
+                "on-tertiary-fixed-variant": "#653e00",
+                "primary-fixed-dim": "#bec6e0",
+                "on-error-container": "#93000a",
+                "on-secondary": "#ffffff",
+                "outline": "#76777d",
+                "primary": "#000000",
+                "on-primary-container": "#7c839b",
+                "surface-variant": "#d3e4fe",
+                "inverse-primary": "#bec6e0",
+                "surface-tint": "#565e74",
+                "inverse-on-surface": "#eaf1ff",
+                "tertiary-container": "#2a1700",
+                "on-surface": "#0b1c30",
+                "secondary-container": "#6cf8bb",
+                "on-primary-fixed-variant": "#3f465c",
+                "surface-bright": "#f8f9ff",
+                "error-container": "#ffdad6",
+                "surface-container-high": "#dce9ff",
+                "surface-container-lowest": "#ffffff",
+                "on-tertiary-fixed": "#2a1700",
+                "on-secondary-fixed-variant": "#005236",
+                "surface": "#f8f9ff",
+                "primary-fixed": "#dae2fd",
+                "on-surface-variant": "#45464d",
+                "on-primary-fixed": "#131b2e",
+                "on-secondary-container": "#00714d",
+                "error": "#ba1a1a",
+                "secondary-fixed": "#6ffbbe",
+                "primary-container": "#131b2e",
+                "inverse-surface": "#213145",
+                "on-primary": "#ffffff",
+                "secondary-fixed-dim": "#4edea3",
+                "background": "#f8f9ff",
+                "tertiary-fixed-dim": "#ffb95f"
+              },
+              "borderRadius": {
+                "DEFAULT": "0.25rem",
+                "lg": "0.5rem",
+                "xl": "0.75rem",
+                "full": "9999px"
+              },
+              "spacing": {
+                "stack-md": "12px",
+                "stack-lg": "24px",
+                "base": "8px",
+                "gutter": "16px",
+                "margin-mobile": "16px",
+                "margin-desktop": "32px",
+                "stack-sm": "4px"
+              },
+              "fontFamily": {
+                "headline-md": ["Manrope"],
+                "data-mono": ["Geist"],
+                "headline-lg-mobile": ["Manrope"],
+                "body-sm": ["Inter"],
+                "label-caps": ["Inter"],
+                "body-lg": ["Inter"],
+                "headline-lg": ["Manrope"]
+              },
+              "fontSize": {
+                "headline-md": ["20px", {"lineHeight": "28px", "fontWeight": "600"}],
+                "data-mono": ["14px", {"lineHeight": "20px", "fontWeight": "500"}],
+                "headline-lg-mobile": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "700"}],
+                "body-sm": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                "label-caps": ["12px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600"}],
+                "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                "headline-lg": ["30px", {"lineHeight": "38px", "letterSpacing": "-0.02em", "fontWeight": "700"}]
+              }
+            },
+          },
+        }
+    </script>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-surface min-h-screen flex flex-col md:flex-row">
+<!-- Navigation Drawer (Desktop Only) -->
+<aside class="hidden md:flex flex-col h-full fixed left-0 top-0 py-8 gap-stack-lg bg-surface-container-low dark:bg-surface-container-lowest w-72 shadow-sm z-50">
+<div class="px-6 mb-8">
+<span class="text-headline-lg font-headline-lg font-black text-primary">Briklay</span>
+</div>
+<div class="px-6 mb-8 flex items-center gap-3">
+<div class="w-12 h-12 rounded-full bg-primary-fixed flex items-center justify-center text-primary overflow-hidden">
+<img alt="Profile" class="w-full h-full object-cover" data-alt="A professional headshot of a middle-aged male project manager in a clean, high-key office setting. He wears a subtle blue shirt, projecting expertise and approachability. The lighting is bright and even, consistent with a clean fintech aesthetic. The background is a soft-focus architectural office with drafting tables and blueprints." src="https://lh3.googleusercontent.com/aida-public/AB6AXuC3Y78hduH7jHz2ldNsPyhjXMg1gGlQQastyNzg7wrjH9sYGlLjur1p5lkK0kXjRgmv6jFlNCeaDuHGMmqgc8erg7D3bPLLDBeuNCfUM2Km5qLEkIc4bv0DHyNZ5gJgxOtg5l0P5NsgFWQ1kY0iUR-7PGUbt5hQISd36hIWxbBU_sFRFPv5FYHhgKuwyid0-DNPW52traKFsNB5DhJpuaqlJAv6pBiaRumlq_Jku0iIzBW8bD59CYYSsjSrgApNnpajeKZGPs_Rk1oM"/>
+</div>
+<div>
+<p class="text-headline-md font-headline-md font-bold leading-tight">Project Manager</p>
+<p class="text-body-sm text-on-surface-variant">Briklay Construction</p>
+</div>
+</div>
+<nav class="flex-1 space-y-2">
+<a class="flex items-center px-6 py-3 text-on-surface-variant dark:text-surface-variant pl-4 hover:bg-surface-container-highest dark:hover:bg-surface-variant transition-all" href="#">
+<span class="material-symbols-outlined mr-3">dashboard</span>
+<span class="font-body-lg text-body-lg">Dashboard</span>
+</a>
+<a class="flex items-center px-6 py-3 text-secondary dark:text-secondary-fixed-dim font-bold border-l-4 border-secondary hover:bg-surface-container-highest dark:hover:bg-surface-variant transition-all" href="#">
+<span class="material-symbols-outlined mr-3">receipt_long</span>
+<span class="font-body-lg text-body-lg">Transactions</span>
+</a>
+<a class="flex items-center px-6 py-3 text-on-surface-variant dark:text-surface-variant pl-4 hover:bg-surface-container-highest dark:hover:bg-surface-variant transition-all" href="#">
+<span class="material-symbols-outlined mr-3">construction</span>
+<span class="font-body-lg text-body-lg">Projects</span>
+</a>
+<a class="flex items-center px-6 py-3 text-on-surface-variant dark:text-surface-variant pl-4 hover:bg-surface-container-highest dark:hover:bg-surface-variant transition-all" href="#">
+<span class="material-symbols-outlined mr-3">settings</span>
+<span class="font-body-lg text-body-lg">Settings</span>
+</a>
+</nav>
+</aside>
+<!-- Top App Bar (Mobile Only) -->
+<header class="sticky top-0 z-40 flex justify-between items-center w-full px-margin-mobile md:px-margin-desktop py-4 bg-surface-bright dark:bg-surface-dim md:hidden">
+<div class="flex items-center gap-3">
+<button class="material-symbols-outlined text-on-surface">menu</button>
+<h1 class="text-headline-md font-headline-md font-bold text-primary">New Transaction</h1>
+</div>
+<button class="text-secondary font-bold text-body-sm">Cancel</button>
+</header>
+<!-- Main Content -->
+<main class="flex-1 md:ml-72 pb-32 md:pb-8">
+<div class="max-w-4xl mx-auto px-margin-mobile md:px-margin-desktop pt-6">
+<!-- Desktop Page Header -->
+<div class="hidden md:flex justify-between items-end mb-8">
+<div>
+<h2 class="text-headline-lg font-headline-lg text-primary">New Transaction</h2>
+<p class="text-on-surface-variant mt-1">Record a new payment or invoice for project stakeholders.</p>
+</div>
+<div class="flex gap-4">
+<button class="px-6 py-2 border border-outline text-on-surface rounded-lg font-bold hover:bg-surface-container transition-colors">Discard</button>
+<button class="px-6 py-2 bg-primary text-on-primary rounded-lg font-bold hover:opacity-90 transition-opacity">Save Transaction</button>
+</div>
+</div>
+<div class="space-y-6">
+<!-- Header Section: Basic Details -->
+<section class="bg-surface-container-lowest p-6 rounded-xl shadow-sm border border-outline-variant/30">
+<div class="grid grid-cols-1 md:grid-cols-2 gap-stack-lg">
+<!-- Stakeholder Search -->
+<div class="space-y-stack-sm">
+<label class="text-label-caps font-label-caps text-on-surface-variant uppercase">Stakeholder</label>
+<div class="relative group">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline">search</span>
+<input class="w-full pl-10 pr-4 py-3 bg-white border border-outline-variant rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all text-body-lg" placeholder="Search vendor or subcontractor..." type="text"/>
+</div>
+</div>
+<!-- Amount Input -->
+<div class="space-y-stack-sm">
+<label class="text-label-caps font-label-caps text-on-surface-variant uppercase">Total Amount</label>
+<div class="relative group">
+<span class="absolute left-4 top-1/2 -translate-y-1/2 font-data-mono text-on-surface">₹</span>
+<input class="w-full pl-8 pr-4 py-3 bg-white border border-outline-variant rounded-lg font-data-mono text-headline-md focus:ring-2 focus:ring-primary focus:border-primary outline-none transition-all" placeholder="0.00" type="number"/>
+</div>
+</div>
+<!-- Date and Mode -->
+<div class="grid grid-cols-2 gap-stack-md">
+<div class="space-y-stack-sm">
+<label class="text-label-caps font-label-caps text-on-surface-variant uppercase">Date</label>
+<input class="w-full px-4 py-3 bg-white border border-outline-variant rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none text-body-lg" type="date"/>
+</div>
+<div class="space-y-stack-sm">
+<label class="text-label-caps font-label-caps text-on-surface-variant uppercase">Mode</label>
+<select class="w-full px-4 py-3 bg-white border border-outline-variant rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none text-body-lg">
+<option>NEFT/RTGS</option>
+<option>UPI</option>
+<option>Cheque</option>
+<option>Cash</option>
+</select>
+</div>
+</div>
+<!-- Category -->
+<div class="space-y-stack-sm">
+<label class="text-label-caps font-label-caps text-on-surface-variant uppercase">Category</label>
+<select class="w-full px-4 py-3 bg-white border border-outline-variant rounded-lg focus:ring-2 focus:ring-primary focus:border-primary outline-none text-body-lg">
+<option>Material Supply</option>
+<option>Labor Charges</option>
+<option>Consultancy</option>
+<option>Compliance/Permits</option>
+</select>
+</div>
+</div>
+</section>
+<!-- Allocation Section -->
+<section class="space-y-4">
+<div class="flex items-center justify-between">
+<h3 class="text-headline-md font-headline-md">Allocate across projects</h3>
+<div class="bg-secondary-container/20 px-3 py-1 rounded-full border border-secondary-container">
+<span class="text-body-sm font-semibold text-on-secondary-container">₹0 of ₹50,000</span>
+</div>
+</div>
+<!-- Allocation Rows -->
+<div class="space-y-3">
+<div class="bg-surface-container-low p-4 rounded-xl border border-outline-variant/40 relative overflow-hidden">
+<!-- Blue side accent for active row -->
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-primary"></div>
+<div class="grid grid-cols-1 md:grid-cols-12 gap-stack-md items-end">
+<!-- Project -->
+<div class="md:col-span-4 space-y-stack-sm">
+<label class="text-label-caps font-label-caps text-on-surface-variant">Project</label>
+<select class="w-full px-3 py-2 bg-white border border-outline-variant rounded-lg text-body-sm focus:ring-1 focus:ring-primary">
+<option>Azure Heights - Block A</option>
+<option>The Grand Plaza</option>
+</select>
+</div>
+<!-- Order Type -->
+<div class="md:col-span-2 space-y-stack-sm">
+<label class="text-label-caps font-label-caps text-on-surface-variant">Order Type</label>
+<select class="w-full px-3 py-2 bg-white border border-outline-variant rounded-lg text-body-sm focus:ring-1 focus:ring-primary">
+<option>Purchase Order</option>
+<option>Work Order</option>
+</select>
+</div>
+<!-- Milestone Picker -->
+<div class="md:col-span-3 space-y-stack-sm">
+<label class="text-label-caps font-label-caps text-on-surface-variant">Order/Milestone</label>
+<select class="w-full px-3 py-2 bg-white border border-outline-variant rounded-lg text-body-sm focus:ring-1 focus:ring-primary">
+<option>Select Milestone...</option>
+<option>Foundation Slab - Step 1</option>
+</select>
+</div>
+<!-- Amount -->
+<div class="md:col-span-2 space-y-stack-sm">
+<label class="text-label-caps font-label-caps text-on-surface-variant">Amount</label>
+<input class="w-full px-3 py-2 bg-white border border-outline-variant rounded-lg font-data-mono text-body-sm focus:ring-1 focus:ring-primary" placeholder="₹0" type="number"/>
+</div>
+<!-- Remove Action -->
+<div class="md:col-span-1 flex justify-end">
+<button class="p-2 text-error hover:bg-error-container/20 rounded-full transition-colors">
+<span class="material-symbols-outlined">delete</span>
+</button>
+</div>
+</div>
+<!-- Unlinked Warning Logic -->
+<div class="mt-4 flex items-center gap-2 text-error bg-error-container/10 p-2 rounded-lg border border-error-container/30">
+<span class="material-symbols-outlined text-[18px]">info</span>
+<p class="text-[12px] font-medium leading-none">Unlinked: No specific order or milestone selected for this allocation.</p>
+</div>
+</div>
+</div>
+<!-- Add Project Button -->
+<button class="w-full py-4 border-2 border-dashed border-outline-variant rounded-xl text-primary font-bold flex items-center justify-center gap-2 hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined">add_circle</span>
+<span>Add project</span>
+</button>
+</section>
+<!-- Document Upload Section -->
+<section class="space-y-stack-sm">
+<label class="text-label-caps font-label-caps text-on-surface-variant uppercase">Document Upload</label>
+<div class="border-2 border-dashed border-outline-variant bg-surface-container-lowest rounded-xl p-8 flex flex-col items-center justify-center text-center space-y-4 hover:border-primary transition-colors">
+<div class="w-16 h-16 rounded-full bg-surface-container flex items-center justify-center text-primary-container">
+<span class="material-symbols-outlined text-4xl">cloud_upload</span>
+</div>
+<div>
+<p class="text-body-lg font-bold">Drag and drop bills or invoices</p>
+<p class="text-body-sm text-on-surface-variant mt-1">Supports PDF, JPG, PNG (Max 10MB)</p>
+</div>
+<button class="px-6 py-2 bg-surface-container-high text-primary font-bold rounded-lg hover:bg-surface-container-highest transition-colors">Browse Files</button>
+</div>
+</section>
+</div>
+</div>
+</main>
+<!-- Sticky Footer (Mobile Priority) -->
+<footer class="fixed bottom-0 left-0 w-full z-50 bg-surface shadow-[0_-4px_12px_rgba(0,0,0,0.08)] flex flex-col p-4 gap-3 md:hidden">
+<div class="flex justify-between items-center px-2">
+<span class="text-label-caps font-label-caps text-on-surface-variant uppercase">Remaining to Allocate</span>
+<span class="text-headline-md font-data-mono text-error">₹50,000.00</span>
+</div>
+<button class="w-full py-4 bg-primary text-on-primary font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all">
+<span class="material-symbols-outlined">check_circle</span>
+<span>Save Transaction</span>
+</button>
+</footer>
+<!-- Bottom Navigation (Mobile Only) - Hidden for focused task as per mandate -->
+<!-- Navigation shell suppressed for transactional screen -->
+</body></html>
