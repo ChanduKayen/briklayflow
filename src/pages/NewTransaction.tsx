@@ -463,7 +463,9 @@ export default function NewTransaction({ session }: { session: Session }) {
                           </div>
                         </div>
                         <div className="mb-4">
-                          <label className="text-[10px] font-medium text-on-surface-variant/60 block mb-1.5">Trade</label>
+                          <label className="text-[10px] font-medium text-on-surface-variant/60 block mb-1.5">
+                            Trade <span className="text-red-500">*</span>
+                          </label>
                           <select className="bk-input" value={newStkTrade} onChange={(e) => { setNewStkTrade(e.target.value); setNewStkTradeOther(''); }}>
                             <option value="" disabled>Select trade…</option>
                             {(txnType === 'worker' ? WORKER_TRADE_GROUPS : VENDOR_TRADE_GROUPS).map((g) => (
@@ -482,8 +484,16 @@ export default function NewTransaction({ session }: { session: Session }) {
                         </div>
                         <div className="flex gap-2 justify-end">
                           <button type="button" className="bk-btn-ghost px-4 py-2 rounded-xl text-[13px]" onClick={() => { setShowCreate(false); setNewStkTrade(''); setNewStkTradeOther(''); }}>Cancel</button>
-                          <button type="button" className="bk-btn px-4 py-2 rounded-xl text-[13px]"
-                            onClick={() => { const fd = new FormData(); fd.append('first_name', (document.getElementById('stk_fn') as HTMLInputElement).value); fd.append('last_name', (document.getElementById('stk_ln') as HTMLInputElement).value); fd.append('contact', (document.getElementById('stk_contact') as HTMLInputElement).value); createStakeholder.mutate(fd); }}>
+                          <button
+                            type="button"
+                            className="bk-btn px-4 py-2 rounded-xl text-[13px] disabled:opacity-50"
+                            disabled={
+                              !newStkTrade ||
+                              (newStkTrade === OTHER_TRADE && !newStkTradeOther.trim()) ||
+                              createStakeholder.isPending
+                            }
+                            onClick={() => { const fd = new FormData(); fd.append('first_name', (document.getElementById('stk_fn') as HTMLInputElement).value); fd.append('last_name', (document.getElementById('stk_ln') as HTMLInputElement).value); fd.append('contact', (document.getElementById('stk_contact') as HTMLInputElement).value); createStakeholder.mutate(fd); }}
+                          >
                             {createStakeholder.isPending ? 'Saving…' : 'Save & select'}
                           </button>
                         </div>

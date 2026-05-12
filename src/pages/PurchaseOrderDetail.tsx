@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
@@ -81,6 +81,27 @@ async function genGRNNumber(): Promise<string> {
   return `${prefix}${String(seq).padStart(4, '0')}`;
 }
 
+// ── Count-up hook ─────────────────────────────────────────────────────────────
+
+function useCountUp(target: number, duration = 500): number {
+  const [value, setValue] = useState(0);
+  const rafRef = useRef<number>(0);
+  useEffect(() => {
+    let start: number | null = null;
+    const animate = (ts: number) => {
+      if (!start) start = ts;
+      const elapsed = ts - start;
+      const progress = Math.min(elapsed / duration, 1);
+      const eased = 1 - (1 - progress) * (1 - progress);
+      setValue(Math.round(eased * target));
+      if (progress < 1) rafRef.current = requestAnimationFrame(animate);
+    };
+    rafRef.current = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [target, duration]);
+  return value;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function PurchaseOrderDetail({ session }: { session: Session }) {
@@ -124,9 +145,10 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const [grnNotes,          setGrnNotes]          = useState('');
 
   // Vendor bill form fields
-  const [billNo,    setBillNo]    = useState('');
-  const [billDate,  setBillDate]  = useState(new Date().toISOString().split('T')[0]);
+  const [billNo,     setBillNo]     = useState('');
+  const [billDate,   setBillDate]   = useState(new Date().toISOString().split('T')[0]);
   const [billAmount, setBillAmount] = useState('');
+  const [billFile,   setBillFile]   = useState<File | null>(null);
 
   // Settle modal fields
   const [settleAmount,     setSettleAmount]     = useState('');
@@ -265,17 +287,36 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     mutationFn: async () => {
       if (!billNo.trim()) throw new Error('Bill number is required');
       const poValue = Number(po?.total_value || po?.order_value) || 0;
-      const bAmt    = parseFloat(billAmount) || poValue;
-      const ratio   = poValue > 0 ? Math.abs(bAmt - poValue) / poValue : 0;
-      const match   = ratio < 0.02 ? 'MATCHED' : 'MISMATCHED';
+      const parsedAmt = parseFloat(billAmount);
+      const hasAmount = !isNaN(parsedAmt) && billAmount.trim() !== '';
 
-      const { error } = await supabase.from('purchase_orders').update({
-        vendor_bill_no:     billNo.trim(),
-        vendor_bill_date:   billDate || null,
-        vendor_bill_amount: bAmt,
-        three_way_match:    match,
-        status:             match === 'MATCHED' ? 'Tallied' : 'Disputed',
-      }).eq('po_id', poId!);
+      let vendor_bill_doc_url: string | undefined;
+      if (billFile) {
+        const ext  = billFile.name.split('.').pop();
+        const path = `po-bills/${poId}-${Date.now()}.${ext}`;
+        const { error: upErr } = await supabase.storage.from('documents').upload(path, billFile);
+        if (upErr) throw upErr;
+        const { data: pub } = supabase.storage.from('documents').getPublicUrl(path);
+        vendor_bill_doc_url = pub.publicUrl;
+      }
+
+      const patch: Record<string, any> = {
+        vendor_bill_no:   billNo.trim(),
+        vendor_bill_date: billDate || null,
+        three_way_match:  'PENDING',
+        ...(vendor_bill_doc_url ? { vendor_bill_doc_url } : {}),
+      };
+
+      let match = 'PENDING';
+      if (hasAmount) {
+        const ratio = poValue > 0 ? Math.abs(parsedAmt - poValue) / poValue : 0;
+        match = ratio < 0.02 ? 'MATCHED' : 'MISMATCHED';
+        patch.vendor_bill_amount = parsedAmt;
+        patch.three_way_match    = match;
+        patch.status             = match === 'MATCHED' ? 'Tallied' : 'Disputed';
+      }
+
+      const { error } = await supabase.from('purchase_orders').update(patch).eq('po_id', poId!);
       if (error) throw error;
       return match;
     },
@@ -283,7 +324,12 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
       qc.invalidateQueries({ queryKey: ['po_detail', poId] });
       qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
       setShowVendorBillForm(false);
-      showSnackbar(match === 'MATCHED' ? 'Bill matched — PO tallied' : 'Mismatch detected — PO marked Disputed');
+      setBillFile(null);
+      showSnackbar(
+        match === 'MATCHED'    ? 'Bill matched — PO tallied' :
+        match === 'MISMATCHED' ? 'Mismatch detected — PO marked Disputed' :
+                                 'Bill attached — enter amount to run match'
+      );
     },
     onError: (err: any) => showSnackbar(err.message || 'Failed to attach bill', { type: 'error' }),
   });
@@ -391,7 +437,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
       if (allocErr) throw allocErr;
       return txnId;
     },
-    onSuccess: (txnId) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['po_linked_txns', poId] });
       qc.invalidateQueries({ queryKey: ['po_detail', poId] });
       setShowRecordPayment(false);
@@ -532,42 +578,47 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const project = po.projects;
   const totalValue = Number(po.total_value || po.order_value) || 0;
 
+  const paidTotal = (linkedTxns ?? []).reduce((s: number, t: any) => s + (Number(t.allocated_amount) || 0), 0);
+  const billAmt   = Number(po.vendor_bill_amount) || totalValue;
+  const balance   = billAmt - paidTotal;
+  const pct       = billAmt > 0 ? Math.min(100, (paidTotal / billAmt) * 100) : 0;
+
+  const isTalliedMatch = po.three_way_match === 'MATCHED' && po.status === 'Tallied';
+
+  // Count-up component
+  function AmountDisplay({ amount }: { amount: number }) {
+    const displayed = useCountUp(amount);
+    return <span className="count-up-amount">₹{displayed.toLocaleString('en-IN')}</span>;
+  }
+
   return (
     <div className="px-margin-mobile md:px-margin-desktop pt-6 pb-16">
+      <div className="max-w-[680px] mx-auto">
 
-      {/* Page header */}
-      <div className="flex items-center gap-3 mb-6">
-        <button
-          onClick={() => navigate('/purchase-orders')}
-          className="p-2 rounded-xl hover:bg-surface-container-low transition-colors text-on-surface-variant"
-        >
-          <span className="material-symbols-outlined text-[22px]">arrow_back</span>
-        </button>
-        <div className="flex-1">
-          <h2 className="text-[20px] font-bold text-on-surface tracking-tight font-data-mono">{po.po_id}</h2>
-          <p className="text-[12px] text-on-surface-variant/60 mt-0.5">
-            {fmtDate(po.date_issued)}
-            {po.ordered_by ? ` · ${po.ordered_by}` : ''}
+        {/* TOP STRIP */}
+        <div className="detail-reveal" style={{ animationDelay: '0ms' }}>
+          <p className="text-[14px] font-bold font-data-mono text-on-surface">{po.po_id}</p>
+          <p className="text-[14px] text-on-surface mt-0.5">{vendor?.name ?? '—'}</p>
+          <p className="text-[12px] text-on-surface-variant">
+            {vendor?.category ?? ''}
+            {vendor?.gstin ? ' · MSME' : ''}
+          </p>
+          <p className="text-[14px] text-on-surface mt-0.5">{project?.name ?? '—'}</p>
+          <p className="text-[12px] text-on-surface-variant">
+            Ordered {fmtDate(po.date_issued)}{po.ordered_by ? ` by ${po.ordered_by}` : ''}
+          </p>
+          <p className="text-[18px] font-bold font-data-mono text-on-surface mt-2">
+            <AmountDisplay amount={totalValue} />
           </p>
         </div>
-        <button
-          onClick={handleDownloadPDF}
-          className="hidden md:flex items-center gap-2 bk-btn-ghost border border-outline-variant/30 text-[12px] px-3 py-2 rounded-xl"
-        >
-          <span className="material-symbols-outlined text-[16px]">download</span>
-          Download PDF
-        </button>
-      </div>
 
-      {/* Status action strip */}
-      <div className="bg-surface-container-lowest rounded-xl border border-outline-variant/30 shadow-sm mb-6 overflow-hidden">
-        <div className="flex items-center gap-3 px-5 py-3 flex-wrap">
-          <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${statusDotColor(po.status)}`} />
-          <span className={`px-2.5 py-0.5 text-[11px] font-bold rounded-full ${STATUS_BADGE[po.status] ?? STATUS_BADGE['Draft']}`}>
+        {/* ACTION ROW */}
+        <div className="detail-reveal mt-3 flex items-center gap-2 flex-wrap" style={{ animationDelay: '40ms' }}>
+          <span className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${STATUS_BADGE[po.status] ?? STATUS_BADGE['Draft']}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${statusDotColor(po.status)}`} />
             {po.status?.toUpperCase()}
           </span>
 
-          {/* Action buttons */}
           {po.status === 'Draft' && canManage && (
             <button
               onClick={() => updateStatus.mutate('Ordered')}
@@ -595,7 +646,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
               className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold border border-outline-variant/40 rounded-lg hover:bg-surface-container-low transition-colors text-on-surface"
             >
               <span className="material-symbols-outlined text-[16px]">receipt</span>
-              Attach Vendor Bill
+              Attach Bill
             </button>
           )}
 
@@ -605,9 +656,17 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
               className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors"
             >
               <span className="material-symbols-outlined text-[15px]">cancel</span>
-              Cancel PO
+              Cancel
             </button>
           )}
+
+          <button
+            onClick={handleDownloadPDF}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-outline-variant/40 text-[12px] text-on-surface-variant hover:text-on-surface transition-colors"
+          >
+            <span className="material-symbols-outlined text-[14px]">download</span>
+            Export PDF
+          </button>
 
           <button
             onClick={() => setShowLog(v => !v)}
@@ -618,626 +677,433 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
           </button>
         </div>
 
-        {/* Collapsible log */}
-        {showLog && (
-          <div className="border-t border-outline-variant/15 px-5 py-4">
-            <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-3">Status History</p>
-            <div className="space-y-2">
+        {/* DIVIDER */}
+        <hr className="border-outline-variant/15 my-5" />
+
+        {/* ITEMS ORDERED */}
+        <div className="detail-reveal mb-6" style={{ animationDelay: '80ms' }}>
+          <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-3">ITEMS ORDERED</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr className="border-b border-outline-variant/20">
+                  <th className="pb-2 text-left text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">#</th>
+                  <th className="pb-2 text-left text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Code</th>
+                  <th className="pb-2 text-left text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Item</th>
+                  <th className="pb-2 text-center text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Unit</th>
+                  <th className="pb-2 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Qty</th>
+                  {lineItems?.some(li => (li.quantity_delivered ?? 0) > 0) && (
+                    <th className="pb-2 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Del.</th>
+                  )}
+                  <th className="pb-2 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Rate</th>
+                  <th className="pb-2 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">GST</th>
+                  <th className="pb-2 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lineItems && lineItems.length > 0 ? (
+                  lineItems.map((li, i) => (
+                    <tr key={li.id ?? i} className="border-b border-outline-variant/[0.06] hover:bg-surface-container-low/20 transition-colors">
+                      <td className="py-2.5 pr-2 text-on-surface-variant/40 font-bold">{li.line_number}</td>
+                      <td className="py-2.5 pr-2">
+                        {li.category_id ? (
+                          <span className="font-data-mono text-[10px] text-on-surface-variant/60">{li.category_id}</span>
+                        ) : (
+                          <span className="text-on-surface-variant/20">—</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 pr-2">
+                        <div className="flex items-center gap-1.5">
+                          <div>
+                            <p className="text-[13px] font-medium text-on-surface">{li.item_name}</p>
+                            {li.specification && (
+                              <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{li.specification}</p>
+                            )}
+                          </div>
+                          {li.is_ai_extracted && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 shrink-0">AI</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-2.5 text-center text-on-surface-variant/70">{li.unit}</td>
+                      <td className="py-2.5 text-right font-data-mono">{li.quantity_ordered}</td>
+                      {lineItems.some(l => (l.quantity_delivered ?? 0) > 0) && (
+                        <td className="py-2.5 text-right font-data-mono text-teal-600">{li.quantity_delivered ?? 0}</td>
+                      )}
+                      <td className="py-2.5 text-right font-data-mono text-on-surface-variant/70">
+                        ₹{Number(li.unit_rate).toLocaleString('en-IN')}
+                      </td>
+                      <td className="py-2.5 text-right text-on-surface-variant/50">{li.gst_rate}%</td>
+                      <td className="py-2.5 text-right font-data-mono font-semibold text-on-surface">
+                        ₹{Number(li.total_amount).toLocaleString('en-IN')}
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  /* Legacy items fallback */
+                  (po.items || []).map((it: any, i: number) => (
+                    <tr key={i} className="border-b border-outline-variant/[0.06]">
+                      <td className="py-2.5 pr-2 text-on-surface-variant/40 font-bold">{i + 1}</td>
+                      <td className="py-2.5 pr-2" />
+                      <td className="py-2.5 pr-2">
+                        <p className="text-[13px] font-medium text-on-surface">{it.description}</p>
+                      </td>
+                      <td className="py-2.5 text-center text-on-surface-variant/70">{it.unit || 'LS'}</td>
+                      <td className="py-2.5 text-right font-data-mono">{it.qty}</td>
+                      <td className="py-2.5 text-right font-data-mono text-on-surface-variant/70">
+                        ₹{Number(it.rate).toLocaleString('en-IN')}
+                      </td>
+                      <td className="py-2.5 text-right text-on-surface-variant/50">—</td>
+                      <td className="py-2.5 text-right font-data-mono font-semibold text-on-surface">
+                        ₹{Number(it.amount).toLocaleString('en-IN')}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Totals footer */}
+          <div className="flex justify-end mt-3 pt-2 border-t border-outline-variant/15">
+            <div className="space-y-1 text-[13px] min-w-[200px]">
+              <div className="flex justify-between text-on-surface-variant/60">
+                <span>Order Value</span>
+                <span className="font-data-mono">₹{Number(po.order_value).toLocaleString('en-IN')}</span>
+              </div>
+              {po.gst_value && Number(po.gst_value) > 0 && (
+                <div className="flex justify-between text-on-surface-variant/60">
+                  <span>GST</span>
+                  <span className="font-data-mono">₹{Number(po.gst_value).toLocaleString('en-IN')}</span>
+                </div>
+              )}
+              <div className="flex justify-between font-bold text-[14px] border-t border-outline-variant/20 pt-1">
+                <span>Grand Total</span>
+                <span className="font-data-mono text-primary">₹{totalValue.toLocaleString('en-IN')}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Notes */}
+          {(po.vendor_notes || po.internal_notes) && (
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              {po.vendor_notes && (
+                <div>
+                  <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1.5">Vendor Terms</p>
+                  <p className="text-[12px] text-on-surface-variant/70 whitespace-pre-line">{po.vendor_notes}</p>
+                </div>
+              )}
+              {po.internal_notes && (
+                <div>
+                  <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1.5">Internal Notes</p>
+                  <p className="text-[12px] text-on-surface-variant/70 whitespace-pre-line">{po.internal_notes}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* BILL RECONCILIATION */}
+        {po.vendor_bill_no && (
+          <div className="detail-reveal mb-6" style={{ animationDelay: '130ms' }}>
+            <div className={`flex items-center gap-2 mb-3 ${isTalliedMatch ? 'shimmer-green rounded px-1 py-0.5' : ''}`}>
+              <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">BILL</p>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${matchStatusBadge(po.three_way_match)}`}>
+                {po.three_way_match ?? 'PENDING'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              {/* Bill Number */}
+              <div>
+                <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1.5">Bill Number</p>
+                {editingBillField === 'bill_no' ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      autoFocus
+                      className="bk-input text-[13px] font-data-mono py-1.5 px-2 h-8"
+                      value={billNoEdit}
+                      onChange={e => setBillNoEdit(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') saveBillField.mutate({ vendor_bill_no: billNoEdit.trim() });
+                        if (e.key === 'Escape') setEditingBillField(null);
+                      }}
+                      onBlur={() => { if (billNoEdit.trim()) saveBillField.mutate({ vendor_bill_no: billNoEdit.trim() }); else setEditingBillField(null); }}
+                    />
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => { setBillNoEdit(po.vendor_bill_no || ''); setEditingBillField('bill_no'); }}
+                    className="group flex items-center gap-1.5 text-left"
+                  >
+                    <p className="font-data-mono text-[14px] font-semibold text-on-surface">
+                      {po.vendor_bill_no || <span className="text-on-surface-variant/30 text-[13px] font-normal">Click to add</span>}
+                    </p>
+                    <span className="material-symbols-outlined text-[14px] text-on-surface-variant/25 group-hover:text-primary transition-colors">edit</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Bill Date */}
+              <div>
+                <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1.5">Bill Date</p>
+                {editingBillField === 'bill_date' ? (
+                  <input
+                    autoFocus
+                    type="date"
+                    className="bk-input text-[13px] py-1.5 px-2 h-8"
+                    value={billDateEdit}
+                    onChange={e => setBillDateEdit(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') saveBillField.mutate({ vendor_bill_date: billDateEdit });
+                      if (e.key === 'Escape') setEditingBillField(null);
+                    }}
+                    onBlur={() => { if (billDateEdit) saveBillField.mutate({ vendor_bill_date: billDateEdit }); else setEditingBillField(null); }}
+                  />
+                ) : (
+                  <button
+                    onClick={() => { setBillDateEdit(po.vendor_bill_date || new Date().toISOString().split('T')[0]); setEditingBillField('bill_date'); }}
+                    className="group flex items-center gap-1.5 text-left"
+                  >
+                    <p className="text-[14px] text-on-surface">
+                      {po.vendor_bill_date ? fmtDate(po.vendor_bill_date) : <span className="text-on-surface-variant/30 text-[13px]">Click to add</span>}
+                    </p>
+                    <span className="material-symbols-outlined text-[14px] text-on-surface-variant/25 group-hover:text-primary transition-colors">edit</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Bill Amount */}
+              <div>
+                <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1.5">Bill Amount</p>
+                {editingBillField === 'bill_amount' ? (
+                  <input
+                    autoFocus
+                    type="number"
+                    className="bk-input font-data-mono text-[13px] py-1.5 px-2 h-8"
+                    value={billAmountEdit}
+                    onChange={e => setBillAmountEdit(e.target.value)}
+                    step="any"
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') saveBillField.mutate({ vendor_bill_amount: parseFloat(billAmountEdit) || 0 });
+                      if (e.key === 'Escape') setEditingBillField(null);
+                    }}
+                    onBlur={() => { if (billAmountEdit) saveBillField.mutate({ vendor_bill_amount: parseFloat(billAmountEdit) || 0 }); else setEditingBillField(null); }}
+                  />
+                ) : (
+                  <button
+                    onClick={() => { setBillAmountEdit(po.vendor_bill_amount ? String(po.vendor_bill_amount) : ''); setEditingBillField('bill_amount'); }}
+                    className="group flex items-center gap-1.5 text-left"
+                  >
+                    <p className="font-data-mono text-[14px] font-bold text-on-surface">
+                      {po.vendor_bill_amount
+                        ? `₹${Number(po.vendor_bill_amount).toLocaleString('en-IN')}`
+                        : <span className="text-on-surface-variant/30 text-[13px] font-normal">Click to add</span>
+                      }
+                    </p>
+                    <span className="material-symbols-outlined text-[14px] text-on-surface-variant/25 group-hover:text-primary transition-colors">edit</span>
+                  </button>
+                )}
+                {po.vendor_bill_amount && Number(po.vendor_bill_amount) !== totalValue && (
+                  <p className={`text-[11px] mt-1 font-semibold ${
+                    Math.abs(Number(po.vendor_bill_amount) - totalValue) / totalValue > 0.02
+                      ? 'text-red-500'
+                      : 'text-amber-600'
+                  }`}>
+                    {Number(po.vendor_bill_amount) > totalValue ? '▲' : '▼'} ₹{Math.abs(Number(po.vendor_bill_amount) - totalValue).toLocaleString('en-IN')} variance
+                  </p>
+                )}
+                {po.vendor_bill_amount && Math.abs(Number(po.vendor_bill_amount) - totalValue) / totalValue <= 0.02 && (
+                  <p className="text-[11px] mt-1 text-green-600 font-semibold">✓ Within tolerance</p>
+                )}
+              </div>
+
+              {/* Bill Document */}
+              <div>
+                <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1.5">Bill Document</p>
+                {po.vendor_bill_doc_url ? (
+                  <a
+                    href={po.vendor_bill_doc_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-[13px] text-primary font-semibold hover:underline"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">open_in_new</span>
+                    View Document
+                  </a>
+                ) : (
+                  <p className="text-[13px] text-on-surface-variant/30">No document</p>
+                )}
+              </div>
+            </div>
+
+            {/* Match banner — inline line */}
+            {po.three_way_match === 'MATCHED' && (
+              <p className="mt-3 text-[12px] font-semibold text-green-700">✓ PO ↔ GRN ↔ Bill matched — safe to proceed to payment</p>
+            )}
+            {po.three_way_match === 'MISMATCHED' && (
+              <p className="mt-3 text-[12px] font-semibold text-red-600">⚠ Mismatch — variance exceeds 2%. Update bill amount or dispute before payment.</p>
+            )}
+          </div>
+        )}
+
+        {/* FINANCIAL */}
+        <div className="detail-reveal mb-6" style={{ animationDelay: '180ms' }}>
+          <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-3">FINANCIAL</p>
+          <div className="space-y-1.5 text-[13px]">
+            <div className="flex justify-between">
+              <span className="text-on-surface-variant">PO Value</span>
+              <span className="font-data-mono font-semibold text-on-surface">₹{totalValue.toLocaleString('en-IN')}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-on-surface-variant">Total Paid</span>
+              <span className="font-data-mono font-semibold text-on-surface">₹{paidTotal.toLocaleString('en-IN')}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-on-surface-variant">Balance</span>
+              <span className={`font-data-mono font-bold ${balance <= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {balance <= 0 ? '₹0 · Fully settled ✓' : `₹${balance.toLocaleString('en-IN')}`}
+              </span>
+            </div>
+          </div>
+
+          {/* Progress bar */}
+          <div className="mt-4">
+            <div className="flex justify-between items-center mb-1.5">
+              <span className="text-[11px] text-on-surface-variant">Payment progress</span>
+              <span className="text-[11px] font-semibold text-on-surface">{pct.toFixed(0)}%</span>
+            </div>
+            <div className="h-2 rounded-full bg-surface-container overflow-hidden">
+              <div
+                className={`h-full rounded-full progress-bar-animate ${pct >= 100 ? 'bg-secondary' : 'bg-primary'}`}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          </div>
+
+          {canManage && (
+            <button
+              onClick={() => setShowRecordPayment(true)}
+              className="mt-3 flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold bg-primary/10 text-primary rounded-lg hover:bg-primary/20 transition-colors"
+            >
+              <span className="material-symbols-outlined text-[14px]">add</span>
+              Record Payment
+            </button>
+          )}
+        </div>
+
+        {/* PAYMENTS */}
+        {(linkedTxns ?? []).length > 0 && (
+          <div className="detail-reveal mb-6" style={{ animationDelay: '230ms' }}>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-3">PAYMENTS</p>
+            <div className="space-y-1.5">
+              {(linkedTxns ?? []).map((t: any) => (
+                <button
+                  key={t.id}
+                  className="w-full flex items-center gap-3 py-2 text-left hover:bg-surface-container-low/30 transition-colors rounded-lg px-1 group"
+                  onClick={() => navigate(`/ledger/${t.transactions?.txn_id}`)}
+                >
+                  <span className="font-data-mono font-bold text-[12px] text-primary group-hover:underline">{t.transactions?.txn_id}</span>
+                  <span className="text-[12px] text-on-surface-variant">{fmtDate(t.transactions?.date)}</span>
+                  <span className="font-data-mono font-semibold text-[12px] text-on-surface ml-auto">₹{Number(t.allocated_amount).toLocaleString('en-IN')}</span>
+                  <span className="text-[11px] text-on-surface-variant">{t.transactions?.payment_mode ?? '—'}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* GRNs */}
+        {grns && grns.length > 0 && (
+          <div className="detail-reveal mb-6" style={{ animationDelay: '280ms' }}>
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">GOODS RECEIPTS</p>
+              {canManage && ['Ordered', 'Partially Delivered', 'Issued'].includes(po.status) && (
+                <button
+                  onClick={async () => { const n = await genGRNNumber(); setGrnNumber(n); setShowGRNForm(true); }}
+                  className="flex items-center gap-1 text-[11px] text-primary font-semibold hover:underline"
+                >
+                  <span className="material-symbols-outlined text-[13px]">add</span>
+                  Record GRN
+                </button>
+              )}
+            </div>
+            <div className="space-y-3">
+              {grns.map(grn => (
+                <div key={grn.id} className="py-2 border-b border-outline-variant/10 last:border-0">
+                  <div className="flex items-center justify-between">
+                    <p className="font-data-mono font-bold text-[13px] text-on-surface">{grn.grn_number}</p>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                      grn.condition === 'GOOD'    ? 'bg-secondary-container text-on-secondary-container' :
+                      grn.condition === 'DAMAGED' ? 'bg-red-100 text-red-800' :
+                      'bg-amber-100 text-amber-800'
+                    }`}>
+                      {grn.condition}
+                    </span>
+                  </div>
+                  <p className="text-[12px] text-on-surface-variant/60 mt-0.5">
+                    {fmtDate(grn.receipt_date)}
+                    {grn.received_by_name && ` · ${grn.received_by_name}`}
+                    {grn.delivery_challan_no && ` · DC: ${grn.delivery_challan_no}`}
+                    {grn.vehicle_number && ` · ${grn.vehicle_number}`}
+                  </p>
+                  {grn.notes && <p className="text-[12px] text-on-surface-variant/50 mt-0.5">{grn.notes}</p>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* TRAIL */}
+        <div className="detail-reveal" style={{ animationDelay: '330ms' }}>
+          <button
+            onClick={() => setShowLog(v => !v)}
+            className="flex items-center gap-1.5 text-[12px] text-on-surface-variant hover:text-primary transition-colors"
+          >
+            GRN record · Status history · View log
+            <span className="material-symbols-outlined text-[14px]">{showLog ? 'expand_less' : 'chevron_right'}</span>
+          </button>
+
+          {showLog && (
+            <div className="mt-3 space-y-2">
               <div className="flex items-center gap-3">
-                <span className="w-1.5 h-1.5 rounded-full bg-on-surface-variant/30" />
+                <span className="w-1.5 h-1.5 rounded-full bg-on-surface-variant/30 shrink-0" />
                 <span className="text-[12px] text-on-surface-variant/60">{fmtDate(po.created_at)}</span>
                 <span className="text-[12px] text-on-surface">Draft created</span>
               </div>
               {po.status !== 'Draft' && (
                 <div className="flex items-center gap-3">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />
                   <span className="text-[12px] text-on-surface-variant/60">{fmtDate(po.date_issued)}</span>
                   <span className="text-[12px] text-on-surface">Order placed</span>
                 </div>
               )}
               {grns?.map(grn => (
                 <div key={grn.id} className="flex items-center gap-3">
-                  <span className="w-1.5 h-1.5 rounded-full bg-teal-400" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-teal-400 shrink-0" />
                   <span className="text-[12px] text-on-surface-variant/60">{fmtDate(grn.receipt_date)}</span>
                   <span className="text-[12px] text-on-surface">GRN {grn.grn_number} recorded · {grn.condition}</span>
                 </div>
               ))}
               {po.vendor_bill_no && (
                 <div className="flex items-center gap-3">
-                  <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
                   <span className="text-[12px] text-on-surface-variant/60">{fmtDate(po.vendor_bill_date)}</span>
                   <span className="text-[12px] text-on-surface">Vendor bill {po.vendor_bill_no} attached · {po.three_way_match}</span>
                 </div>
               )}
               {approvals?.map(ap => (
                 <div key={ap.id} className="flex items-center gap-3">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
                   <span className="text-[12px] text-on-surface-variant/60">{fmtDate(ap.actioned_at)}</span>
                   <span className="text-[12px] text-on-surface">{ap.action} {ap.remarks ? `· ${ap.remarks}` : ''}</span>
                 </div>
               ))}
             </div>
-          </div>
-        )}
-      </div>
-
-      {/* PO Document Card */}
-      <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm mb-6 overflow-hidden">
-        {/* PO header info */}
-        <div className="px-6 py-5 border-b border-outline-variant/10">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* Vendor */}
-            <div>
-              <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1.5">Vendor</p>
-              <p className="text-[14px] font-bold text-on-surface">{vendor?.name ?? '—'}</p>
-              {vendor?.category && <p className="text-[12px] text-on-surface-variant/60 mt-0.5">{vendor.category}</p>}
-              {vendor?.gstin && <p className="text-[11px] text-on-surface-variant/40 mt-0.5 font-data-mono">{vendor.gstin}</p>}
-              {vendor?.is_approved && (
-                <span className="inline-block mt-1.5 text-[10px] font-bold px-2 py-0.5 rounded bg-secondary-container text-on-secondary-container">✓ Approved</span>
-              )}
-            </div>
-
-            {/* Project + Delivery */}
-            <div>
-              <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1.5">Project</p>
-              <p className="text-[14px] font-bold text-on-surface">{project?.name ?? '—'}</p>
-              {project?.site_location && <p className="text-[12px] text-on-surface-variant/60 mt-0.5">{project.site_location}</p>}
-              {po.delivery_location && po.delivery_location !== project?.site_location && (
-                <p className="text-[11px] text-on-surface-variant/50 mt-1">Delivery: {po.delivery_location}</p>
-              )}
-            </div>
-
-            {/* Dates & Value */}
-            <div>
-              <div className="flex justify-between mb-3">
-                <div>
-                  <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1">Order Date</p>
-                  <p className="text-[13px] text-on-surface">{fmtDate(po.date_issued)}</p>
-                </div>
-                {po.expected_delivery && (
-                  <div className="text-right">
-                    <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1">Delivery By</p>
-                    <p className="text-[13px] text-on-surface">{fmtDate(po.expected_delivery)}</p>
-                  </div>
-                )}
-              </div>
-              <div className="mt-2 p-3 bg-surface-container-low/50 rounded-xl">
-                <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1">Order Value</p>
-                <p className="font-data-mono text-[18px] font-bold text-on-surface">
-                  ₹{totalValue.toLocaleString('en-IN')}
-                </p>
-                {po.gst_value && Number(po.gst_value) > 0 && (
-                  <p className="text-[11px] text-on-surface-variant/50 font-data-mono mt-0.5">
-                    incl. GST ₹{Number(po.gst_value).toLocaleString('en-IN')}
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Line Items Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-[12px]">
-            <thead>
-              <tr className="bg-surface-container-low/40 border-b border-outline-variant/10">
-                <th className="px-4 py-3 text-left text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">#</th>
-                <th className="px-4 py-3 text-left text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Code</th>
-                <th className="px-4 py-3 text-left text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Item</th>
-                <th className="px-4 py-3 text-center text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Unit</th>
-                <th className="px-4 py-3 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Qty Ordered</th>
-                {lineItems?.some(li => (li.quantity_delivered ?? 0) > 0) && (
-                  <th className="px-4 py-3 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Delivered</th>
-                )}
-                <th className="px-4 py-3 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Rate</th>
-                <th className="px-4 py-3 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">GST</th>
-                <th className="px-4 py-3 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {lineItems && lineItems.length > 0 ? (
-                lineItems.map((li, i) => (
-                  <tr key={li.id ?? i} className="border-b border-outline-variant/[0.06] hover:bg-surface-container-low/20 transition-colors">
-                    <td className="px-4 py-3 text-on-surface-variant/40 font-bold">{li.line_number}</td>
-                    <td className="px-4 py-3">
-                      {li.category_id ? (
-                        <span className="font-data-mono text-[10px] text-on-surface-variant/60">{li.category_id}</span>
-                      ) : (
-                        <span className="text-on-surface-variant/20">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <div>
-                          <p className="text-[13px] font-medium text-on-surface">{li.item_name}</p>
-                          {li.specification && (
-                            <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{li.specification}</p>
-                          )}
-                        </div>
-                        {li.is_ai_extracted && (
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 shrink-0">AI</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-center text-on-surface-variant/70">{li.unit}</td>
-                    <td className="px-4 py-3 text-right font-data-mono">{li.quantity_ordered}</td>
-                    {lineItems.some(l => (l.quantity_delivered ?? 0) > 0) && (
-                      <td className="px-4 py-3 text-right font-data-mono text-teal-600">{li.quantity_delivered ?? 0}</td>
-                    )}
-                    <td className="px-4 py-3 text-right font-data-mono text-on-surface-variant/70">
-                      ₹{Number(li.unit_rate).toLocaleString('en-IN')}
-                    </td>
-                    <td className="px-4 py-3 text-right text-on-surface-variant/50">{li.gst_rate}%</td>
-                    <td className="px-4 py-3 text-right font-data-mono font-semibold text-on-surface">
-                      ₹{Number(li.total_amount).toLocaleString('en-IN')}
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                /* Legacy items fallback */
-                (po.items || []).map((it: any, i: number) => (
-                  <tr key={i} className="border-b border-outline-variant/[0.06]">
-                    <td className="px-4 py-3 text-on-surface-variant/40 font-bold">{i + 1}</td>
-                    <td className="px-4 py-3" />
-                    <td className="px-4 py-3">
-                      <p className="text-[13px] font-medium text-on-surface">{it.description}</p>
-                    </td>
-                    <td className="px-4 py-3 text-center text-on-surface-variant/70">{it.unit || 'LS'}</td>
-                    <td className="px-4 py-3 text-right font-data-mono">{it.qty}</td>
-                    <td className="px-4 py-3 text-right font-data-mono text-on-surface-variant/70">
-                      ₹{Number(it.rate).toLocaleString('en-IN')}
-                    </td>
-                    <td className="px-4 py-3 text-right text-on-surface-variant/50">—</td>
-                    <td className="px-4 py-3 text-right font-data-mono font-semibold text-on-surface">
-                      ₹{Number(it.amount).toLocaleString('en-IN')}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Totals footer */}
-        <div className="px-6 py-4 bg-surface-container-low/20 border-t border-outline-variant/10 flex justify-end">
-          <div className="w-64 space-y-1.5 text-[13px]">
-            <div className="flex justify-between text-on-surface-variant/60">
-              <span>Order Value</span>
-              <span className="font-data-mono">₹{Number(po.order_value).toLocaleString('en-IN')}</span>
-            </div>
-            {po.gst_value && Number(po.gst_value) > 0 && (
-              <div className="flex justify-between text-on-surface-variant/60">
-                <span>GST</span>
-                <span className="font-data-mono">₹{Number(po.gst_value).toLocaleString('en-IN')}</span>
-              </div>
-            )}
-            <div className="flex justify-between font-bold text-[15px] border-t border-outline-variant/20 pt-2">
-              <span>Grand Total</span>
-              <span className="font-data-mono text-primary">₹{totalValue.toLocaleString('en-IN')}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Notes */}
-        {(po.vendor_notes || po.internal_notes) && (
-          <div className="px-6 py-4 border-t border-outline-variant/10 grid grid-cols-1 md:grid-cols-2 gap-4">
-            {po.vendor_notes && (
-              <div>
-                <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1.5">Vendor Terms</p>
-                <p className="text-[12px] text-on-surface-variant/70 whitespace-pre-line">{po.vendor_notes}</p>
-              </div>
-            )}
-            {po.internal_notes && (
-              <div>
-                <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1.5">Internal Notes</p>
-                <p className="text-[12px] text-on-surface-variant/70 whitespace-pre-line">{po.internal_notes}</p>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* GRN Section */}
-      {['Ordered', 'Partially Delivered', 'Delivered', 'Tallied', 'Issued', 'Received', 'Closed'].includes(po.status) && (
-        <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm mb-6 overflow-hidden">
-          <div className="flex items-center justify-between px-6 py-3 bg-surface-container-low/40 border-b border-outline-variant/10">
-            <p className="text-[11px] font-bold text-on-surface-variant/60 uppercase tracking-wider">Goods Receipt Notes</p>
-            {canManage && ['Ordered', 'Partially Delivered', 'Issued'].includes(po.status) && (
-              <button
-                onClick={async () => { const n = await genGRNNumber(); setGrnNumber(n); setShowGRNForm(true); }}
-                className="flex items-center gap-1.5 text-[12px] font-semibold text-primary hover:underline"
-              >
-                <span className="material-symbols-outlined text-[14px]">add</span>
-                Record GRN
-              </button>
-            )}
-          </div>
-
-          {grns?.map(grn => (
-            <div key={grn.id} className="px-6 py-4 border-b border-outline-variant/[0.06] last:border-0">
-              <div className="flex items-center justify-between">
-                <p className="font-data-mono font-bold text-[13px] text-on-surface">{grn.grn_number}</p>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                  grn.condition === 'GOOD'    ? 'bg-secondary-container text-on-secondary-container' :
-                  grn.condition === 'DAMAGED' ? 'bg-red-100 text-red-800' :
-                  'bg-amber-100 text-amber-800'
-                }`}>
-                  {grn.condition}
-                </span>
-              </div>
-              <p className="text-[12px] text-on-surface-variant/60 mt-1">
-                {fmtDate(grn.receipt_date)}
-                {grn.received_by_name && ` · ${grn.received_by_name}`}
-                {grn.delivery_challan_no && ` · DC: ${grn.delivery_challan_no}`}
-                {grn.vehicle_number && ` · ${grn.vehicle_number}`}
-              </p>
-              {grn.notes && <p className="text-[12px] text-on-surface-variant/50 mt-1">{grn.notes}</p>}
-            </div>
-          ))}
-
-          {!grns?.length && (
-            <p className="px-6 py-5 text-[13px] text-on-surface-variant/40">No GRNs recorded yet.</p>
-          )}
-        </div>
-      )}
-
-      {/* ── Feature 4: Vendor Bill Card (always visible) ─────────────────── */}
-      <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm mb-6 overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-3 bg-surface-container-low/40 border-b border-outline-variant/10">
-          <div className="flex items-center gap-3">
-            <p className="text-[11px] font-bold text-on-surface-variant/60 uppercase tracking-wider">Vendor Bill</p>
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${matchStatusBadge(po.three_way_match)}`}>
-              {po.vendor_bill_no ? (po.three_way_match ?? 'PENDING') : 'NOT ATTACHED'}
-            </span>
-          </div>
-          {!po.vendor_bill_no && canManage && (
-            <button
-              onClick={() => setShowVendorBillForm(true)}
-              className="flex items-center gap-1.5 text-[12px] font-semibold text-primary hover:underline"
-            >
-              <span className="material-symbols-outlined text-[14px]">add</span>
-              Attach Bill
-            </button>
           )}
         </div>
 
-        <div className="px-6 py-4 grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* Bill Number */}
-          <div>
-            <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1.5">Bill Number</p>
-            {editingBillField === 'bill_no' ? (
-              <div className="flex items-center gap-2">
-                <input
-                  autoFocus
-                  className="bk-input text-[13px] font-data-mono py-1.5 px-2 h-8"
-                  value={billNoEdit}
-                  onChange={e => setBillNoEdit(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') saveBillField.mutate({ vendor_bill_no: billNoEdit.trim() });
-                    if (e.key === 'Escape') setEditingBillField(null);
-                  }}
-                  onBlur={() => { if (billNoEdit.trim()) saveBillField.mutate({ vendor_bill_no: billNoEdit.trim() }); else setEditingBillField(null); }}
-                />
-              </div>
-            ) : (
-              <button
-                onClick={() => { setBillNoEdit(po.vendor_bill_no || ''); setEditingBillField('bill_no'); }}
-                className="group flex items-center gap-1.5 text-left"
-              >
-                <p className="font-data-mono text-[14px] font-semibold text-on-surface">
-                  {po.vendor_bill_no || <span className="text-on-surface-variant/30 text-[13px] font-normal">Click to add</span>}
-                </p>
-                <span className="material-symbols-outlined text-[14px] text-on-surface-variant/25 group-hover:text-primary transition-colors">edit</span>
-              </button>
-            )}
-          </div>
-
-          {/* Bill Date */}
-          <div>
-            <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1.5">Bill Date</p>
-            {editingBillField === 'bill_date' ? (
-              <input
-                autoFocus
-                type="date"
-                className="bk-input text-[13px] py-1.5 px-2 h-8"
-                value={billDateEdit}
-                onChange={e => setBillDateEdit(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') saveBillField.mutate({ vendor_bill_date: billDateEdit });
-                  if (e.key === 'Escape') setEditingBillField(null);
-                }}
-                onBlur={() => { if (billDateEdit) saveBillField.mutate({ vendor_bill_date: billDateEdit }); else setEditingBillField(null); }}
-              />
-            ) : (
-              <button
-                onClick={() => { setBillDateEdit(po.vendor_bill_date || new Date().toISOString().split('T')[0]); setEditingBillField('bill_date'); }}
-                className="group flex items-center gap-1.5 text-left"
-              >
-                <p className="text-[14px] text-on-surface">
-                  {po.vendor_bill_date ? fmtDate(po.vendor_bill_date) : <span className="text-on-surface-variant/30 text-[13px]">Click to add</span>}
-                </p>
-                <span className="material-symbols-outlined text-[14px] text-on-surface-variant/25 group-hover:text-primary transition-colors">edit</span>
-              </button>
-            )}
-          </div>
-
-          {/* Bill Amount */}
-          <div>
-            <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1.5">Bill Amount</p>
-            {editingBillField === 'bill_amount' ? (
-              <input
-                autoFocus
-                type="number"
-                className="bk-input font-data-mono text-[13px] py-1.5 px-2 h-8"
-                value={billAmountEdit}
-                onChange={e => setBillAmountEdit(e.target.value)}
-                step="any"
-                onKeyDown={e => {
-                  if (e.key === 'Enter') saveBillField.mutate({ vendor_bill_amount: parseFloat(billAmountEdit) || 0 });
-                  if (e.key === 'Escape') setEditingBillField(null);
-                }}
-                onBlur={() => { if (billAmountEdit) saveBillField.mutate({ vendor_bill_amount: parseFloat(billAmountEdit) || 0 }); else setEditingBillField(null); }}
-              />
-            ) : (
-              <button
-                onClick={() => { setBillAmountEdit(po.vendor_bill_amount ? String(po.vendor_bill_amount) : ''); setEditingBillField('bill_amount'); }}
-                className="group flex items-center gap-1.5 text-left"
-              >
-                <p className="font-data-mono text-[14px] font-bold text-on-surface">
-                  {po.vendor_bill_amount
-                    ? `₹${Number(po.vendor_bill_amount).toLocaleString('en-IN')}`
-                    : <span className="text-on-surface-variant/30 text-[13px] font-normal">Click to add</span>
-                  }
-                </p>
-                <span className="material-symbols-outlined text-[14px] text-on-surface-variant/25 group-hover:text-primary transition-colors">edit</span>
-              </button>
-            )}
-            {po.vendor_bill_amount && Number(po.vendor_bill_amount) !== totalValue && (
-              <p className={`text-[11px] mt-1 font-semibold ${
-                Math.abs(Number(po.vendor_bill_amount) - totalValue) / totalValue > 0.02
-                  ? 'text-red-500'
-                  : 'text-amber-600'
-              }`}>
-                {Number(po.vendor_bill_amount) > totalValue ? '▲' : '▼'} ₹{Math.abs(Number(po.vendor_bill_amount) - totalValue).toLocaleString('en-IN')} variance
-              </p>
-            )}
-            {po.vendor_bill_amount && Math.abs(Number(po.vendor_bill_amount) - totalValue) / totalValue <= 0.02 && (
-              <p className="text-[11px] mt-1 text-green-600 font-semibold">✓ Within tolerance</p>
-            )}
-          </div>
-        </div>
-
-        {/* Match result banner */}
-        {po.three_way_match === 'MATCHED' && (
-          <div className="mx-6 mb-4 px-4 py-3 bg-green-50 rounded-xl flex items-center gap-3">
-            <span className="material-symbols-outlined text-green-600 text-[20px]">check_circle</span>
-            <div className="flex-1">
-              <p className="text-[13px] font-semibold text-on-surface">PO ↔ GRN ↔ Bill matched</p>
-              <p className="text-[12px] text-on-surface-variant/60">Safe to proceed to payment</p>
-            </div>
-            {canManage && (
-              <button
-                onClick={() => setShowRecordPayment(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold bg-primary text-on-primary rounded-lg hover:bg-primary/90 transition-colors"
-              >
-                <span className="material-symbols-outlined text-[16px]">payments</span>
-                Record Payment
-              </button>
-            )}
-          </div>
-        )}
-        {po.three_way_match === 'MISMATCHED' && (
-          <div className="mx-6 mb-4 px-4 py-3 bg-red-50 rounded-xl flex items-center gap-3">
-            <span className="material-symbols-outlined text-red-500 text-[20px]">warning</span>
-            <div>
-              <p className="text-[13px] font-semibold text-red-700">Mismatch — variance exceeds 2%</p>
-              <p className="text-[12px] text-on-surface-variant/60">Update the bill amount or dispute before payment.</p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* ── Feature 3: Financial Summary + Linked Transactions ─────────── */}
-      {(() => {
-        const paidTotal = (linkedTxns ?? []).reduce((s: number, t: any) => s + (Number(t.allocated_amount) || 0), 0);
-        const billAmt   = Number(po.vendor_bill_amount) || totalValue;
-        const balance   = billAmt - paidTotal;
-        const pct       = billAmt > 0 ? Math.min(100, (paidTotal / billAmt) * 100) : 0;
-        return (
-          <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm mb-6 overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-3 bg-surface-container-low/40 border-b border-outline-variant/10">
-              <p className="text-[11px] font-bold text-on-surface-variant/60 uppercase tracking-wider">Financial Summary</p>
-              {canManage && (
-                <button
-                  onClick={() => setShowRecordPayment(true)}
-                  className="flex items-center gap-1.5 text-[12px] font-semibold text-primary hover:underline"
-                >
-                  <span className="material-symbols-outlined text-[14px]">add</span>
-                  Record Payment
-                </button>
-              )}
-            </div>
-
-            {/* KPI row */}
-            <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-outline-variant/10 border-b border-outline-variant/10">
-              {[
-                { label: 'PO Value',    val: `₹${totalValue.toLocaleString('en-IN')}`,   sub: 'Committed' },
-                { label: 'Bill Amount', val: po.vendor_bill_amount ? `₹${Number(po.vendor_bill_amount).toLocaleString('en-IN')}` : '—', sub: 'From vendor' },
-                { label: 'Paid',        val: `₹${paidTotal.toLocaleString('en-IN')}`,   sub: `${(linkedTxns ?? []).length} payment${(linkedTxns ?? []).length !== 1 ? 's' : ''}` },
-                { label: 'Balance Due', val: balance > 0 ? `₹${balance.toLocaleString('en-IN')}` : '₹0', sub: balance <= 0 ? 'Fully paid' : 'Outstanding', err: balance > 0 },
-              ].map(k => (
-                <div key={k.label} className="px-5 py-4">
-                  <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1">{k.label}</p>
-                  <p className={`font-data-mono text-[17px] font-bold ${k.err ? 'text-red-600' : 'text-on-surface'}`}>{k.val}</p>
-                  <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{k.sub}</p>
-                </div>
-              ))}
-            </div>
-
-            {/* Progress bar */}
-            <div className="px-6 py-3 border-b border-outline-variant/10">
-              <div className="flex justify-between items-center mb-1.5">
-                <span className="text-[11px] text-on-surface-variant/50">Payment progress</span>
-                <span className="text-[11px] font-semibold text-on-surface">{pct.toFixed(0)}%</span>
-              </div>
-              <div className="h-2 rounded-full bg-surface-container overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all duration-700 ${pct >= 100 ? 'bg-secondary' : 'bg-primary'}`}
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
-            </div>
-
-            {/* Linked transactions */}
-            {(linkedTxns ?? []).length === 0 ? (
-              <p className="px-6 py-5 text-[13px] text-on-surface-variant/40">No payments recorded yet.</p>
-            ) : (
-              <table className="w-full text-[12px]">
-                <thead>
-                  <tr className="border-b border-outline-variant/10">
-                    <th className="px-5 py-2.5 text-left text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider">Txn ID</th>
-                    <th className="px-5 py-2.5 text-left text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider">Date</th>
-                    <th className="px-5 py-2.5 text-left text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider">Mode</th>
-                    <th className="px-5 py-2.5 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider">Amount</th>
-                    <th className="px-5 py-2.5 text-left text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider">Remarks</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(linkedTxns ?? []).map((t: any) => (
-                    <tr
-                      key={t.id}
-                      className="border-b border-outline-variant/[0.06] hover:bg-surface-container-low/30 cursor-pointer transition-colors"
-                      onClick={() => navigate(`/ledger/${t.transactions?.txn_id}`)}
-                    >
-                      <td className="px-5 py-3 font-data-mono font-bold text-primary">{t.transactions?.txn_id}</td>
-                      <td className="px-5 py-3 text-on-surface-variant">{fmtDate(t.transactions?.date)}</td>
-                      <td className="px-5 py-3 text-on-surface-variant">{t.transactions?.payment_mode ?? '—'}</td>
-                      <td className="px-5 py-3 text-right font-data-mono font-semibold text-on-surface">
-                        ₹{Number(t.allocated_amount).toLocaleString('en-IN')}
-                      </td>
-                      <td className="px-5 py-3 text-on-surface-variant/60 max-w-[200px] truncate">{t.transactions?.remarks ?? '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        );
-      })()}
-
-      {/* ── Feature 2: Bill ↔ PO Reconciliation ───────────────────────── */}
-      {(po.vendor_bill_no || po.status === 'Delivered') && lineItems && lineItems.length > 0 && (
-        <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm mb-6 overflow-hidden">
-          <div className="flex items-center gap-3 px-6 py-3 bg-surface-container-low/40 border-b border-outline-variant/10">
-            <p className="text-[11px] font-bold text-on-surface-variant/60 uppercase tracking-wider">Line-Item Reconciliation</p>
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${matchStatusBadge(po.three_way_match)}`}>
-              {po.three_way_match ?? 'PENDING'}
-            </span>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-[12px]">
-              <thead>
-                <tr className="border-b border-outline-variant/10 bg-surface-container-low/30">
-                  <th className="px-4 py-2.5 text-left text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider">Item</th>
-                  <th className="px-4 py-2.5 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider">PO Qty</th>
-                  <th className="px-4 py-2.5 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider">Delivered</th>
-                  <th className="px-4 py-2.5 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider">PO Rate</th>
-                  <th className="px-4 py-2.5 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider">PO Total</th>
-                  <th className="px-4 py-2.5 text-center text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider w-[60px]">Match</th>
-                </tr>
-              </thead>
-              <tbody>
-                {lineItems.map((li: any, i: number) => {
-                  const qtyOrdered   = Number(li.quantity_ordered) || 0;
-                  const qtyDelivered = Number(li.quantity_delivered) || 0;
-                  const lineTotal    = Number(li.total_amount) || 0;
-                  const fullyDelivered = qtyDelivered >= qtyOrdered;
-                  const noDelivery     = qtyDelivered === 0;
-                  const matchIcon = !po.vendor_bill_no ? null
-                    : fullyDelivered ? '✓'
-                    : noDelivery     ? '—'
-                    : '⚠';
-                  const matchColor = !po.vendor_bill_no ? 'text-on-surface-variant/20'
-                    : fullyDelivered ? 'text-green-600'
-                    : noDelivery     ? 'text-on-surface-variant/30'
-                    : 'text-amber-500';
-                  return (
-                    <tr key={li.id ?? i} className="border-b border-outline-variant/[0.06] hover:bg-surface-container-low/20 transition-colors">
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-on-surface">{li.item_name}</p>
-                        {li.specification && <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{li.specification}</p>}
-                      </td>
-                      <td className="px-4 py-3 text-right font-data-mono text-on-surface">{qtyOrdered} {li.unit}</td>
-                      <td className="px-4 py-3 text-right font-data-mono">
-                        <span className={qtyDelivered === 0 ? 'text-on-surface-variant/30' : qtyDelivered >= qtyOrdered ? 'text-secondary font-semibold' : 'text-amber-600 font-semibold'}>
-                          {qtyDelivered} {li.unit}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right font-data-mono text-on-surface-variant">
-                        ₹{Number(li.unit_rate).toLocaleString('en-IN')}
-                      </td>
-                      <td className="px-4 py-3 text-right font-data-mono font-semibold text-on-surface">
-                        ₹{lineTotal.toLocaleString('en-IN')}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className={`text-[15px] font-bold ${matchColor}`}>{matchIcon ?? '·'}</span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-              <tfoot>
-                <tr className="border-t border-outline-variant/20 bg-surface-container-low/20">
-                  <td className="px-4 py-3 font-bold text-[12px] text-on-surface-variant/60 uppercase">Total</td>
-                  <td className="px-4 py-3 text-right font-data-mono font-bold text-on-surface">
-                    {lineItems.reduce((s: number, l: any) => s + (Number(l.quantity_ordered) || 0), 0)}
-                  </td>
-                  <td className="px-4 py-3 text-right font-data-mono font-bold text-secondary">
-                    {lineItems.reduce((s: number, l: any) => s + (Number(l.quantity_delivered) || 0), 0)}
-                  </td>
-                  <td />
-                  <td className="px-4 py-3 text-right font-data-mono font-bold text-on-surface">
-                    ₹{lineItems.reduce((s: number, l: any) => s + (Number(l.total_amount) || 0), 0).toLocaleString('en-IN')}
-                  </td>
-                  <td />
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-
-          {/* Actions row */}
-          {canManage && po.vendor_bill_no && (
-            <div className="px-6 py-3 border-t border-outline-variant/10 flex gap-3 flex-wrap">
-              {po.status !== 'Tallied' && po.three_way_match === 'MATCHED' && (
-                <button
-                  onClick={() => updateStatus.mutate('Tallied')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold bg-secondary text-on-secondary rounded-lg hover:bg-secondary/90 transition-colors"
-                >
-                  <span className="material-symbols-outlined text-[15px]">done_all</span>
-                  Mark Tallied
-                </button>
-              )}
-              {po.status !== 'Disputed' && po.three_way_match === 'MISMATCHED' && (
-                <button
-                  onClick={() => updateStatus.mutate('Disputed')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors"
-                >
-                  <span className="material-symbols-outlined text-[15px]">flag</span>
-                  Raise Dispute
-                </button>
-              )}
-              <button
-                onClick={() => setShowRecordPayment(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold border border-outline-variant/30 text-on-surface rounded-lg hover:bg-surface-container-low transition-colors"
-              >
-                <span className="material-symbols-outlined text-[15px]">payments</span>
-                Record Payment
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+      </div>{/* end max-w container */}
 
       {/* ── GRN Form Modal ──────────────────────────────────────────────── */}
       {showGRNForm && (
@@ -1352,6 +1218,30 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
                     step="any"
                   />
                 </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1.5">Bill Document</label>
+                <label className="flex items-center gap-2 px-3 py-2 rounded-xl border border-outline-variant/30 cursor-pointer hover:bg-surface-container-low transition-colors w-fit">
+                  <span className="material-symbols-outlined text-[16px] text-on-surface-variant">upload_file</span>
+                  <span className="text-[12px] text-on-surface-variant">
+                    {billFile ? billFile.name : 'Upload PDF / image'}
+                  </span>
+                  <input
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    className="hidden"
+                    onChange={e => setBillFile(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+                {billFile && (
+                  <button
+                    onClick={() => setBillFile(null)}
+                    className="mt-1 text-[11px] text-on-surface-variant/50 hover:text-red-500 flex items-center gap-1"
+                  >
+                    <span className="material-symbols-outlined text-[13px]">close</span>
+                    Remove
+                  </button>
+                )}
               </div>
               <p className="text-[11px] text-on-surface-variant/50">
                 If bill amount matches PO value (within 2%), the PO will be automatically tallied.

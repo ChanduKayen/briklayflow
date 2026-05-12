@@ -43,6 +43,7 @@ function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -74,8 +75,26 @@ function App() {
   return (
     <SnackbarProvider>
     <div className="bg-background text-on-surface min-h-screen">
-      <Sidebar session={session} mobileOpen={mobileOpen} onMobileClose={() => setMobileOpen(false)} />
-      <main className="md:ml-[220px] min-h-screen pb-8">
+      <Sidebar
+        session={session}
+        mobileOpen={mobileOpen}
+        onMobileClose={() => setMobileOpen(false)}
+        isOpen={sidebarOpen}
+        onToggle={() => setSidebarOpen(o => !o)}
+      />
+      {/* Desktop reopen button — only when sidebar is collapsed */}
+      {!sidebarOpen && (
+        <button
+          onClick={() => setSidebarOpen(true)}
+          className="hidden md:flex fixed top-4 left-4 z-40 p-1.5 rounded-lg bg-surface-container-lowest border border-outline-variant/20 text-on-surface-variant hover:bg-surface-container shadow-sm transition-colors items-center justify-center"
+          title="Open sidebar"
+        >
+          <IconMenu2 size={18} strokeWidth={1.5} />
+        </button>
+      )}
+      <main
+        className={`min-h-screen pb-8 transition-[margin-left] duration-[220ms] ease-[cubic-bezier(0.4,0,0.6,1)] ${sidebarOpen ? 'md:ml-[220px]' : 'md:ml-0'}`}
+      >
         {/* Mobile topbar */}
         <div className="md:hidden sticky top-0 z-30 flex items-center h-12 px-4 bg-surface-container-lowest border-b border-outline-variant/15">
           <button
@@ -122,7 +141,15 @@ function App() {
 
 // ── Sidebar content (shared between desktop + mobile drawer) ──────────────────
 
-function SidebarContent({ session, onNavigate }: { session: Session; onNavigate: () => void }) {
+function SidebarContent({
+  session,
+  onNavigate,
+  onCollapse,
+}: {
+  session: Session;
+  onNavigate: () => void;
+  onCollapse?: () => void;
+}) {
   const navigate = useNavigate();
   const location = useLocation();
   const { data: profile } = useUserProfile(session.user.id);
@@ -198,53 +225,43 @@ function SidebarContent({ session, onNavigate }: { session: Session; onNavigate:
     icon: React.ElementType;
     label: string;
     show: boolean;
+    color: string;
     badge?: number;
-    badgeType?: 'red' | 'amber';
   };
   type NavGroup = { label: string; show: boolean; items: NavItem[] };
 
   const navGroups: NavGroup[] = [
     {
-      label: 'OVERVIEW', show: true,
+      label: 'WORK', show: true,
       items: [
-        { path: '/', icon: IconLayoutDashboard, label: 'Dashboard', show: true },
+        { path: '/',                icon: IconLayoutDashboard, label: 'Dashboard',       show: true,                                           color: '#5B6AF5' },
+        { path: '/ledger',          icon: IconArrowsExchange,  label: 'Transactions',    show: role !== 'supervisor',                          color: '#10B981' },
+        { path: '/work-orders',     icon: IconFileText,        label: 'Work Orders',     show: true,                                           color: '#F59E0B', badge: woPendingCount },
+        { path: '/purchase-orders', icon: IconShoppingCart,    label: 'Purchase Orders', show: role !== 'supervisor' && role !== 'accountant', color: '#3B82F6', badge: poUntalliedCount },
+        { path: '/attendance',      icon: IconCalendarStats,   label: 'Attendance',      show: true,                                           color: '#14B8A6' },
       ],
     },
     {
-      label: 'OPERATIONS', show: true,
+      label: 'BUILD', show: true,
       items: [
-        { path: '/ledger',          icon: IconArrowsExchange, label: 'Transactions',    show: role !== 'supervisor' },
-        { path: '/work-orders',     icon: IconFileText,       label: 'Work Orders',     show: true, badge: woPendingCount, badgeType: 'amber' },
-        { path: '/purchase-orders', icon: IconShoppingCart,   label: 'Purchase Orders', show: role !== 'supervisor' && role !== 'accountant', badge: poUntalliedCount, badgeType: 'amber' },
-        { path: '/attendance',      icon: IconCalendarStats,  label: 'Attendance',      show: true },
-      ],
-    },
-    {
-      label: 'PROJECTS', show: true,
-      items: [
-        { path: '/projects', icon: IconBuilding, label: 'Projects', show: true },
-        { path: '/billing',  icon: IconReceipt,  label: 'Billing',  show: role !== 'supervisor', badge: billOverdueCount, badgeType: 'red' },
-      ],
-    },
-    {
-      label: 'PEOPLE', show: role !== 'supervisor' && role !== 'accountant',
-      items: [
-        { path: '/stakeholders', icon: IconUsers, label: 'Stakeholders', show: true },
+        { path: '/projects',     icon: IconBuilding, label: 'Projects',     show: true,                                           color: '#8B5CF6' },
+        { path: '/billing',      icon: IconReceipt,  label: 'Billing',      show: role !== 'supervisor',                         color: '#EF4444', badge: billOverdueCount },
+        { path: '/stakeholders', icon: IconUsers,    label: 'Stakeholders', show: role !== 'supervisor' && role !== 'accountant', color: '#06B6D4' },
       ],
     },
     {
       label: 'FINANCE', show: role !== 'supervisor',
       items: [
-        { path: '/fund-register', icon: IconWallet,    label: 'Fund Register', show: true },
-        { path: '/financials',    icon: IconChartLine, label: 'Financials',    show: showFinancials },
+        { path: '/fund-register', icon: IconWallet,    label: 'Fund Register', show: true,          color: '#059669' },
+        { path: '/financials',    icon: IconChartLine, label: 'Financials',    show: showFinancials, color: '#6366F1' },
       ],
     },
     {
-      label: 'SETTINGS', show: role === 'principal' || role === 'management',
+      label: 'ADMIN', show: role === 'principal' || role === 'management',
       items: [
-        { path: '/cost-codes', icon: IconListTree, label: 'Cost Codes',   show: true },
-        { path: '/team',       icon: IconShield,   label: 'Team & Access', show: true },
-        { path: '/settings',   icon: IconSettings, label: 'Settings',     show: true },
+        { path: '/cost-codes', icon: IconListTree, label: 'Cost Codes',    show: true, color: '#64748B' },
+        { path: '/team',       icon: IconShield,   label: 'Team & Access', show: true, color: '#C45B39' },
+        { path: '/settings',   icon: IconSettings, label: 'Settings',      show: true, color: '#6B7280' },
       ],
     },
   ];
@@ -269,21 +286,41 @@ function SidebarContent({ session, onNavigate }: { session: Session; onNavigate:
 
   const go = (path: string) => { navigate(path); setShowQuickAdd(false); onNavigate(); };
 
+  const quickCreateItems = [
+    { label: 'New Transaction',    path: '/ledger/new',          icon: IconArrowsExchange, color: '#10B981' },
+    { label: 'New Work Order',     path: '/work-orders/new',     icon: IconFileText,       color: '#F59E0B' },
+    { label: 'New Purchase Order', path: '/purchase-orders/new', icon: IconShoppingCart,   color: '#3B82F6' },
+    { label: 'Raise Bill',         path: '/billing/new',         icon: IconReceipt,        color: '#EF4444' },
+    { label: 'New Project',        path: '/projects',            icon: IconBuilding,       color: '#8B5CF6' },
+    { label: 'Add Stakeholder',    path: '/stakeholders',        icon: IconUsers,          color: '#06B6D4' },
+  ];
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
 
       {/* ── Company identity ─────────────────────────────────────────────── */}
       <div className="px-5 pt-5 pb-4 border-b border-outline-variant/15 shrink-0">
-        <div className="flex items-center gap-2.5">
-          <div className="w-5 h-5 rounded-sm bg-[#C45B39] shrink-0" />
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-on-surface leading-none">BRIKLAY</p>
-            <p className="text-[11px] text-on-surface-variant/50 leading-tight mt-0.5">Engineering</p>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-5 h-5 rounded-sm bg-[#C45B39] shrink-0" />
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-on-surface leading-none">BRIKLAY</p>
+              <p className="text-[11px] text-on-surface-variant/50 leading-tight mt-0.5">Engineering</p>
+            </div>
           </div>
+          {onCollapse && (
+            <button
+              onClick={onCollapse}
+              className="p-1 rounded-md text-on-surface-variant/40 hover:text-on-surface-variant/70 hover:bg-surface-container transition-colors"
+              title="Collapse sidebar"
+            >
+              <IconMenu2 size={16} strokeWidth={1.5} />
+            </button>
+          )}
         </div>
       </div>
 
-      {/* ── Quick Add ────────────────────────────────────────────────────── */}
+      {/* ── Quick Create ─────────────────────────────────────────────────── */}
       <div className="px-4 pt-3 pb-1 shrink-0 relative" ref={quickAddRef}>
         <button
           onClick={() => setShowQuickAdd(o => !o)}
@@ -291,26 +328,21 @@ function SidebarContent({ session, onNavigate }: { session: Session; onNavigate:
         >
           <span className="flex items-center gap-1.5">
             <IconPlus size={14} strokeWidth={2} />
-            New
+            Quick Create
           </span>
           <IconChevronDown size={14} strokeWidth={2} className={`transition-transform duration-150 ${showQuickAdd ? 'rotate-180' : ''}`} />
         </button>
 
         {showQuickAdd && (
           <div className="absolute left-4 right-4 top-[calc(100%-4px)] bg-surface-container-lowest border border-outline-variant/30 rounded-xl shadow-elevation-8 overflow-hidden z-50 popover-animate">
-            {[
-              { label: 'New Transaction',    path: '/ledger/new' },
-              { label: 'New Work Order',     path: '/work-orders/new' },
-              { label: 'New Purchase Order', path: '/purchase-orders/new' },
-              { label: 'Raise Bill',         path: '/billing/new' },
-              { label: 'New Project',        path: '/projects' },
-              { label: 'Add Stakeholder',    path: '/stakeholders' },
-            ].map(item => (
+            {quickCreateItems.map(item => (
               <button key={item.path}
                 onClick={() => go(item.path)}
-                className="w-full flex items-center gap-2 px-4 py-2.5 text-[13px] text-on-surface hover:bg-surface-container transition-colors text-left"
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-[13px] text-on-surface hover:bg-surface-container transition-colors text-left"
               >
-                <IconPlus size={13} strokeWidth={2} className="text-on-surface-variant/50 shrink-0" />
+                <div style={{ width: 22, height: 22, borderRadius: 5, backgroundColor: item.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <item.icon size={12} strokeWidth={2} color="white" />
+                </div>
                 {item.label}
               </button>
             ))}
@@ -332,12 +364,44 @@ function SidebarContent({ session, onNavigate }: { session: Session; onNavigate:
                 const Icon = item.icon;
                 const active = isActive(item.path);
                 return (
-                  <Link key={item.path} to={item.path} onClick={onNavigate}
-                    className={`sidebar-link-v2 ${active ? 'active' : ''}`}>
-                    <Icon size={18} strokeWidth={1.5} className="shrink-0" />
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    onClick={onNavigate}
+                    className="sidebar-link-v2"
+                    style={active ? {
+                      backgroundColor: `${item.color}14`,
+                      color: item.color,
+                      fontWeight: 500,
+                    } : undefined}
+                  >
+                    <div style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: 7,
+                      backgroundColor: item.color,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                    }}>
+                      <Icon size={15} strokeWidth={1.75} color="white" />
+                    </div>
                     <span className="flex-1 leading-none">{item.label}</span>
                     {(item.badge ?? 0) > 0 && (
-                      <span className={`nav-badge nav-badge-${item.badgeType ?? 'amber'}`}>
+                      <span
+                        className="inline-flex items-center justify-center rounded-full shrink-0"
+                        style={{
+                          minWidth: 18,
+                          height: 18,
+                          padding: '0 4px',
+                          fontSize: 11,
+                          fontWeight: 500,
+                          lineHeight: 1,
+                          backgroundColor: `${item.color}26`,
+                          color: item.color,
+                        }}
+                      >
                         {(item.badge ?? 0) > 9 ? '9+' : item.badge}
                       </span>
                     )}
@@ -383,18 +447,37 @@ function SidebarContent({ session, onNavigate }: { session: Session; onNavigate:
           </div>
         )}
       </div>
+
     </div>
   );
 }
 
 // ── Sidebar shell ──────────────────────────────────────────────────────────────
 
-function Sidebar({ session, mobileOpen, onMobileClose }: { session: Session; mobileOpen: boolean; onMobileClose: () => void }) {
+function Sidebar({
+  session,
+  mobileOpen,
+  onMobileClose,
+  isOpen,
+  onToggle,
+}: {
+  session: Session;
+  mobileOpen: boolean;
+  onMobileClose: () => void;
+  isOpen: boolean;
+  onToggle: () => void;
+}) {
   return (
     <>
-      {/* Desktop — fixed 220px */}
-      <aside className="hidden md:block fixed left-0 top-0 h-full w-[220px] bg-surface-container-low border-r border-outline-variant/12 z-50">
-        <SidebarContent session={session} onNavigate={() => {}} />
+      {/* Desktop — animated width (220px ↔ 0px) */}
+      <aside
+        style={{ width: isOpen ? 220 : 0 }}
+        className="hidden md:block fixed left-0 top-0 h-full bg-surface-container-low border-r border-outline-variant/12 z-50 overflow-hidden transition-[width] duration-[220ms] ease-[cubic-bezier(0.4,0,0.6,1)]"
+      >
+        {/* Inner wrapper keeps content at full width so it doesn't squish during animation */}
+        <div style={{ width: 220, height: '100%' }}>
+          <SidebarContent session={session} onNavigate={() => {}} onCollapse={onToggle} />
+        </div>
       </aside>
 
       {/* Mobile backdrop */}

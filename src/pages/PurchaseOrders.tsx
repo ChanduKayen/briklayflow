@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { LinearProgress } from '../components/LinearProgress';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
+import { useSnackbar } from '../components/Snackbar';
 
 // ── Status config ─────────────────────────────────────────────────────────────
 
@@ -162,12 +163,13 @@ function Dropdown({
 // ── Quick Attach Bill Modal ───────────────────────────────────────────────────
 
 function QuickAttachModal({
-  po, onClose, onSave,
-}: { po: any; onClose: () => void; onSave: (bill: { billNo: string; billDate: string; billAmount: string }) => void }) {
+  po, onClose, onSave, isPending,
+}: { po: any; onClose: () => void; onSave: (bill: { billNo: string; billDate: string; billAmount: string; file: File | null }) => void; isPending?: boolean }) {
   const totalValue = Number(po.total_value || po.order_value) || 0;
-  const [billNo, setBillNo]       = useState(po.vendor_bill_no || '');
-  const [billDate, setBillDate]   = useState(po.vendor_bill_date || new Date().toISOString().split('T')[0]);
+  const [billNo, setBillNo]         = useState(po.vendor_bill_no || '');
+  const [billDate, setBillDate]     = useState(po.vendor_bill_date || new Date().toISOString().split('T')[0]);
   const [billAmount, setBillAmount] = useState(po.vendor_bill_amount ? String(po.vendor_bill_amount) : '');
+  const [billFile, setBillFile]     = useState<File | null>(null);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-end md:items-center justify-center p-0 md:p-4" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
@@ -211,18 +213,42 @@ function QuickAttachModal({
               </span>
             )}
           </p>
+          <div>
+            <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1.5">Bill Document</label>
+            <label className="flex items-center gap-2 px-3 py-2 rounded-xl border border-outline-variant/30 cursor-pointer hover:bg-surface-container-low transition-colors w-fit">
+              <span className="material-symbols-outlined text-[16px] text-on-surface-variant">upload_file</span>
+              <span className="text-[12px] text-on-surface-variant">
+                {billFile ? billFile.name : 'Upload PDF / image'}
+              </span>
+              <input
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png"
+                className="hidden"
+                onChange={e => setBillFile(e.target.files?.[0] ?? null)}
+              />
+            </label>
+            {billFile && (
+              <button
+                onClick={() => setBillFile(null)}
+                className="mt-1 text-[11px] text-on-surface-variant/50 hover:text-red-500 flex items-center gap-1"
+              >
+                <span className="material-symbols-outlined text-[13px]">close</span>
+                Remove
+              </button>
+            )}
+          </div>
         </div>
         <div className="px-6 py-4 border-t border-outline-variant/10 flex gap-3 justify-end">
           <button onClick={onClose} className="bk-btn-ghost border border-outline-variant/30 text-[13px] px-4 py-2 rounded-xl">
             Cancel
           </button>
           <button
-            onClick={() => onSave({ billNo, billDate, billAmount })}
-            disabled={!billNo.trim()}
+            onClick={() => onSave({ billNo, billDate, billAmount, file: billFile })}
+            disabled={!billNo.trim() || isPending}
             className="bk-btn text-[13px] px-5 py-2 rounded-xl flex items-center gap-2 disabled:opacity-50"
           >
-            Save Bill
-            <span className="material-symbols-outlined text-[16px]">rule</span>
+            {isPending ? 'Saving…' : 'Save Bill'}
+            <span className="material-symbols-outlined text-[16px]">{isPending ? 'hourglass_empty' : 'rule'}</span>
           </button>
         </div>
       </div>
@@ -236,6 +262,7 @@ export default function PurchaseOrders({ session }: { session: Session }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { data: profile } = useUserProfile(session.user.id);
+  const { show: showSnackbar } = useSnackbar();
 
   // ── Filter state ───────────────────────────────────────────────────────────
   const [datePreset, setDatePreset]       = useState<DatePreset>('all');
@@ -277,27 +304,53 @@ export default function PurchaseOrders({ session }: { session: Session }) {
   });
 
   const attachBill = useMutation({
-    mutationFn: async ({ po, billNo, billDate, billAmount }: { po: any; billNo: string; billDate: string; billAmount: string }) => {
-      const totalValue = Number(po.total_value || po.order_value) || 0;
-      const bAmt = parseFloat(billAmount) || totalValue;
-      const ratio = totalValue > 0 ? Math.abs(bAmt - totalValue) / totalValue : 0;
-      const match = ratio < 0.02 ? 'MATCHED' : 'MISMATCHED';
+    mutationFn: async ({ po, billNo, billDate, billAmount, file }: { po: any; billNo: string; billDate: string; billAmount: string; file: File | null }) => {
+      const totalValue  = Number(po.total_value || po.order_value) || 0;
+      const parsedAmt   = parseFloat(billAmount);
+      const hasAmount   = !isNaN(parsedAmt) && billAmount.trim() !== '';
 
-      const { error } = await supabase.from('purchase_orders').update({
-        vendor_bill_no:    billNo.trim(),
-        vendor_bill_date:  billDate || null,
-        vendor_bill_amount: bAmt,
-        three_way_match:   match,
-        status:            match === 'MATCHED' ? 'Tallied' : 'Disputed',
-      }).eq('po_id', po.po_id);
+      let vendor_bill_doc_url: string | undefined;
+      if (file) {
+        const ext  = file.name.split('.').pop();
+        const path = `po-bills/${po.po_id}-${Date.now()}.${ext}`;
+        const { error: upErr } = await supabase.storage.from('documents').upload(path, file);
+        if (upErr) throw upErr;
+        const { data: pub } = supabase.storage.from('documents').getPublicUrl(path);
+        vendor_bill_doc_url = pub.publicUrl;
+      }
+
+      const patch: Record<string, any> = {
+        vendor_bill_no:   billNo.trim(),
+        vendor_bill_date: billDate || null,
+        three_way_match:  'PENDING',
+        ...(vendor_bill_doc_url ? { vendor_bill_doc_url } : {}),
+      };
+
+      let match = 'PENDING';
+      if (hasAmount) {
+        const ratio = totalValue > 0 ? Math.abs(parsedAmt - totalValue) / totalValue : 0;
+        match = ratio < 0.02 ? 'MATCHED' : 'MISMATCHED';
+        patch.vendor_bill_amount = parsedAmt;
+        patch.three_way_match    = match;
+        patch.status             = match === 'MATCHED' ? 'Tallied' : 'Disputed';
+      }
+
+      const { error } = await supabase.from('purchase_orders').update(patch).eq('po_id', po.po_id);
       if (error) throw error;
       return match;
     },
     onSuccess: (match) => {
       qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
       setAttachPO(null);
+      showSnackbar(
+        match === 'MATCHED'    ? 'Bill tallied — amounts match' :
+        match === 'MISMATCHED' ? 'Bill attached — amounts differ, marked Disputed' :
+                                 'Bill attached — enter amount to run match'
+      );
     },
-    onError: () => setAttachPO(null),
+    onError: (err: any) => {
+      showSnackbar(err?.message || 'Failed to attach bill', { type: 'error' });
+    },
   });
 
   // ── Derived filter options ─────────────────────────────────────────────────
@@ -707,8 +760,9 @@ export default function PurchaseOrders({ session }: { session: Session }) {
         <QuickAttachModal
           po={attachPO}
           onClose={() => setAttachPO(null)}
-          onSave={({ billNo, billDate, billAmount }) =>
-            attachBill.mutate({ po: attachPO, billNo, billDate, billAmount })
+          isPending={attachBill.isPending}
+          onSave={({ billNo, billDate, billAmount, file }) =>
+            attachBill.mutate({ po: attachPO, billNo, billDate, billAmount, file })
           }
         />
       )}

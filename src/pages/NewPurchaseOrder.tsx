@@ -6,6 +6,7 @@ import { useSnackbar } from '../components/Snackbar';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { MAT_DIVISIONS } from '../lib/costCodes';
+import { VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -142,14 +143,21 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
   const orderedBy = profile?.name ?? '';
 
   // ── Section 02: Vendor & Project ─────────────────────────────────────────
-  const [projectId, setProjectId]             = useState('');
-  const [vendorId, setVendorId]               = useState('');
-  const [vendorSearch, setVendorSearch]       = useState('');
-  const [showVendorSug, setShowVendorSug]     = useState(false);
-  const [selectedVendor, setSelectedVendor]   = useState<any>(null);
+  const [projectId, setProjectId]               = useState('');
+  const [vendorId, setVendorId]                 = useState('');
+  const [vendorSearch, setVendorSearch]         = useState('');
+  const [showVendorSug, setShowVendorSug]       = useState(false);
+  const [selectedVendor, setSelectedVendor]     = useState<any>(null);
   const [paymentTermsDays, setPaymentTermsDays] = useState(30);
-  const [customTerms, setCustomTerms]         = useState('');
+  const [customTerms, setCustomTerms]           = useState('');
   const [deliveryLocation, setDeliveryLocation] = useState('');
+
+  // Add-vendor inline form
+  const [showVendorCreate, setShowVendorCreate] = useState(false);
+  const [newVendorName, setNewVendorName]             = useState('');
+  const [newVendorCategory, setNewVendorCategory]     = useState('');
+  const [newVendorCategoryOther, setNewVendorCategoryOther] = useState('');
+  const [newVendorGstin, setNewVendorGstin]           = useState('');
 
   // ── Section 04: Line Items ────────────────────────────────────────────────
   const [lineItems, setLineItems] = useState<DraftLineItem[]>([newLine(1)]);
@@ -299,6 +307,41 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
     onError: (err: any) => showSnackbar(err.message || 'Failed to save', { type: 'error' }),
   });
 
+  const createVendor = useMutation({
+    mutationFn: async () => {
+      if (!newVendorName.trim()) throw new Error('Vendor name is required');
+      const resolvedCategory =
+        newVendorCategory === OTHER_TRADE
+          ? (newVendorCategoryOther.trim() || 'Other')
+          : newVendorCategory;
+      if (!resolvedCategory) throw new Error('Category is required');
+      const payload = {
+        stakeholder_id: `STK-${Math.floor(1000 + Math.random() * 9000)}`,
+        name:     newVendorName.trim(),
+        type:     'Vendor',
+        category: resolvedCategory,
+        gstin:    newVendorGstin.trim() || undefined,
+      };
+      const { data, error } = await supabase.from('stakeholders').insert([payload]).select().single();
+      if (error) throw error;
+      return data as any;
+    },
+    onSuccess: (v) => {
+      qc.invalidateQueries({ queryKey: ['vendors_all'] });
+      setVendorId(v.stakeholder_id);
+      setSelectedVendor(v);
+      setVendorSearch(v.name);
+      setShowVendorCreate(false);
+      setShowVendorSug(false);
+      setNewVendorName('');
+      setNewVendorCategory('');
+      setNewVendorCategoryOther('');
+      setNewVendorGstin('');
+      showSnackbar(`Vendor "${v.name}" created`);
+    },
+    onError: (err: any) => showSnackbar(err.message || 'Failed to create vendor', { type: 'error' }),
+  });
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -429,16 +472,16 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
                     className="bk-input"
                     placeholder="Search vendor by name…"
                     value={vendorSearch}
-                    onChange={e => { setVendorSearch(e.target.value); setShowVendorSug(true); }}
+                    onChange={e => { setVendorSearch(e.target.value); setShowVendorSug(true); setShowVendorCreate(false); }}
                     onFocus={() => setShowVendorSug(true)}
                     onBlur={() => setTimeout(() => setShowVendorSug(false), 200)}
                   />
-                  {showVendorSug && vendorSuggestions.length > 0 && (
-                    <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white rounded-xl border border-outline-variant/20 shadow-lg overflow-hidden max-h-56 overflow-y-auto">
+                  {showVendorSug && (vendorSuggestions.length > 0 || vendorSearch.trim()) && (
+                    <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white rounded-xl border border-outline-variant/20 shadow-lg overflow-hidden max-h-64 overflow-y-auto">
                       {vendorSuggestions.map(v => (
                         <button
                           key={v.stakeholder_id}
-                          className="w-full px-4 py-3 text-left hover:bg-surface-container-low/60 flex flex-col gap-0.5 border-b border-outline-variant/[0.06] last:border-0 transition-colors"
+                          className="w-full px-4 py-3 text-left hover:bg-surface-container-low/60 flex flex-col gap-0.5 border-b border-outline-variant/[0.06] transition-colors"
                           onMouseDown={() => {
                             setVendorId(v.stakeholder_id);
                             setSelectedVendor(v);
@@ -450,21 +493,110 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
                           <span className="text-[11px] text-on-surface-variant/50">{v.category}</span>
                         </button>
                       ))}
+                      {/* Add vendor row — always shown at the bottom */}
+                      <button
+                        className="w-full px-4 py-3 text-left flex items-center gap-2 text-primary hover:bg-primary/5 transition-colors border-t border-outline-variant/10"
+                        onMouseDown={() => {
+                          setNewVendorName(vendorSearch.trim());
+                          setShowVendorCreate(true);
+                          setShowVendorSug(false);
+                        }}
+                      >
+                        <span className="material-symbols-outlined text-[16px]">add</span>
+                        <span className="text-[13px] font-semibold">
+                          {vendorSearch.trim() ? `Add "${vendorSearch.trim()}" as new vendor` : 'Add new vendor'}
+                        </span>
+                      </button>
                     </div>
                   )}
                 </div>
 
+                {/* Inline add-vendor form */}
+                {showVendorCreate && (
+                  <div className="mt-2 p-4 bg-surface-container-low/40 rounded-xl border border-primary/20 space-y-3">
+                    <p className="text-[11px] font-bold text-primary uppercase tracking-wider">New Vendor</p>
+                    <div>
+                      <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1">Name *</label>
+                      <input
+                        autoFocus
+                        className="bk-input text-[13px]"
+                        placeholder="Vendor / company name"
+                        value={newVendorName}
+                        onChange={e => setNewVendorName(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1">
+                        Category <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        className="bk-input text-[13px]"
+                        value={newVendorCategory}
+                        onChange={e => { setNewVendorCategory(e.target.value); setNewVendorCategoryOther(''); }}
+                      >
+                        <option value="" disabled>Select category…</option>
+                        {VENDOR_TRADE_GROUPS.map(g => (
+                          <optgroup key={g.group} label={g.group}>
+                            {g.trades.map(t => <option key={t} value={t}>{t}</option>)}
+                          </optgroup>
+                        ))}
+                      </select>
+                      {newVendorCategory === OTHER_TRADE && (
+                        <input
+                          autoFocus
+                          className="bk-input text-[13px] mt-2"
+                          placeholder="Specify category…"
+                          value={newVendorCategoryOther}
+                          onChange={e => setNewVendorCategoryOther(e.target.value)}
+                        />
+                      )}
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1">GSTIN</label>
+                      <input
+                        className="bk-input text-[13px] font-data-mono"
+                        placeholder="Optional"
+                        value={newVendorGstin}
+                        onChange={e => setNewVendorGstin(e.target.value)}
+                      />
+                    </div>
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        onClick={() => { setShowVendorCreate(false); setNewVendorName(''); setNewVendorCategory(''); setNewVendorCategoryOther(''); setNewVendorGstin(''); }}
+                        className="bk-btn-ghost border border-outline-variant/30 text-[12px] px-3 py-1.5 rounded-lg"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => createVendor.mutate()}
+                        disabled={
+                          !newVendorName.trim() ||
+                          !newVendorCategory ||
+                          (newVendorCategory === OTHER_TRADE && !newVendorCategoryOther.trim()) ||
+                          createVendor.isPending
+                        }
+                        className="bk-btn text-[12px] px-4 py-1.5 rounded-lg flex items-center gap-1.5 disabled:opacity-50"
+                      >
+                        {createVendor.isPending ? 'Saving…' : 'Create & Select'}
+                        <span className="material-symbols-outlined text-[14px]">check</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Vendor info card */}
-                {selectedVendor && (
+                {selectedVendor && !showVendorCreate && (
                   <div className="mt-2 p-4 bg-surface-container-low/60 rounded-xl border border-outline-variant/20">
-                    <p className="text-[13px] font-bold text-on-surface">{selectedVendor.name}</p>
-                    <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{selectedVendor.category}</p>
-                    {selectedVendor.gstin && (
-                      <p className="text-[11px] text-on-surface-variant/50">GSTIN: {selectedVendor.gstin}</p>
-                    )}
-                    <div className="flex items-center gap-2 mt-2">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="text-[13px] font-bold text-on-surface">{selectedVendor.name}</p>
+                        <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{selectedVendor.category}</p>
+                        {selectedVendor.gstin && (
+                          <p className="text-[11px] text-on-surface-variant/50">GSTIN: {selectedVendor.gstin}</p>
+                        )}
+                      </div>
                       {selectedVendor.is_approved && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-secondary-container text-on-secondary-container">✓ Approved</span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-secondary-container text-on-secondary-container shrink-0">✓ Approved</span>
                       )}
                     </div>
                   </div>
