@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
@@ -42,9 +42,6 @@ function SectionLabel({ n, title }: { n: string; title: string }) {
   );
 }
 
-function fmtMono(n: number) {
-  return n === 0 ? '—' : `₹${Number(n).toLocaleString('en-IN')}`;
-}
 
 function fmtPreview(n: number) {
   if (n === 0) return '—';

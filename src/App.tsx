@@ -616,7 +616,7 @@ function Projects({ session }: { session: Session }) {
         .from('txn_allocations')
         .select('project_id, allocated_amount, transactions(txn_id, status)');
       if (error) throw error;
-      return data as { project_id: string; allocated_amount: number; transactions: { txn_id: string; status: string } | null }[];
+      return data as unknown as { project_id: string; allocated_amount: number; transactions: { txn_id: string; status: string } | null }[];
     },
   });
 

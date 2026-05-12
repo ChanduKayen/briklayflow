@@ -16,7 +16,7 @@ export default function Financials() {
         .from('txn_allocations')
         .select('project_id, allocated_amount, transactions(status, total_amount, date)');
       if (error) throw error;
-      return data as {
+      return data as unknown as {
         project_id: string;
         allocated_amount: number;
         transactions: { status: string; total_amount: number; date: string } | null;

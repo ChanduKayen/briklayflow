@@ -17,7 +17,8 @@ const STATUS_STYLE: Record<InvoiceStatus, string> = {
   Partial: 'bg-amber-50 text-amber-700',
   Paid:    'bg-secondary-container text-on-secondary-container',
   Overdue: 'bg-error-container text-error',
-  Void:    'bg-surface-container text-on-surface-variant/40',
+  Void:      'bg-surface-container text-on-surface-variant/40',
+  Cancelled: 'bg-gray-100 text-gray-500',
 };
 
 const TYPE_LABEL: Record<string, string> = {

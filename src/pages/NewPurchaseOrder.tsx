@@ -37,22 +37,6 @@ async function genPONumber(): Promise<string> {
   return `${prefix}${String(seq).padStart(4, '0')}`;
 }
 
-async function genGRNNumber(): Promise<string> {
-  const year = new Date().getFullYear();
-  const prefix = `GRN-${year}-`;
-  const { data } = await supabase
-    .from('po_grn')
-    .select('grn_number')
-    .like('grn_number', `${prefix}%`)
-    .order('grn_number', { ascending: false })
-    .limit(1);
-  let seq = 1;
-  if (data?.length) {
-    const num = parseInt(data[0].grn_number.replace(prefix, ''), 10);
-    if (!isNaN(num)) seq = num + 1;
-  }
-  return `${prefix}${String(seq).padStart(4, '0')}`;
-}
 
 const UNITS = ['Nos', 'Bags', 'MT', 'm³', 'm²', 'RFT', 'Ltr', 'kg', 'Set', 'LS', 'Pair', 'Rmt', 'Sqft'];
 const GST_RATES = [0, 5, 12, 18, 28];

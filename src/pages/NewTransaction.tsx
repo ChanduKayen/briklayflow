@@ -40,7 +40,7 @@ function SectionLabel({ n, title }: { n: string; title: string }) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function NewTransaction({ session }: { session: Session }) {
+export default function NewTransaction({ session: _session }: { session: Session }) {
   const navigate = useNavigate();
   const location = useLocation();
   const qc = useQueryClient();
@@ -298,12 +298,6 @@ export default function NewTransaction({ session }: { session: Session }) {
       return ms?.status === 'Completed' || ms?.status === 'Approved';
     });
 
-  const handleRaiseBillFromReceipt = () => {
-    // Save the receipt first then navigate to new bill
-    createTxn.mutate({ saveMode: 'exit' });
-    // Note: navigation to /billing/new happens inside onSuccess via navigate('/ledger')
-    // override: we navigate manually after mutation completes
-  };
 
   const handleRaiseBillFromReceiptNav = () => {
     navigate('/billing/new', {

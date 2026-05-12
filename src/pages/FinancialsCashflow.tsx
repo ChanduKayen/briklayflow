@@ -46,7 +46,7 @@ export default function FinancialsCashflow() {
       }
       const { data, error } = await q;
       if (error) throw error;
-      return data as {
+      return data as unknown as {
         txn_id: string;
         total_amount: number;
         date: string;

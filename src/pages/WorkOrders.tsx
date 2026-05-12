@@ -186,8 +186,6 @@ export default function WorkOrders({ session }: { session: Session }) {
     setFilterContractor([]); setDatePreset('all'); setCustomFrom(''); setCustomTo('');
   };
 
-  const toggleFilter = (opt: string, curr: string[], set: (v: string[]) => void) =>
-    set(curr.includes(opt) ? curr.filter(c => c !== opt) : [...curr, opt]);
 
   const renderFilterChip = (
     key: string, label: string, options: string[],

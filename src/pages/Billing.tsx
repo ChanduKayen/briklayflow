@@ -36,15 +36,6 @@ const STATUS_LABEL: Record<string, string> = {
   Cancelled: 'Cancelled',
 };
 
-const TYPE_LABEL: Record<string, string> = {
-  progress:    'Progress Bill',
-  final:       'Final Bill',
-  advance:     'Advance Bill',
-  invoice:     'Tax Invoice',
-  proforma:    'Proforma',
-  credit_note: 'Credit Note',
-  receipt:     'Receipt',
-};
 
 function fmt(n: number) {
   return `₹${Number(n).toLocaleString('en-IN')}`;

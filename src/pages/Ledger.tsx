@@ -57,16 +57,11 @@ export default function Ledger({ session }: { session: Session }) {
       return data;
     },
   });
-  const { data: stakeholders } = useQuery({ queryKey: ['stakeholders'], queryFn: async () => { const { data } = await supabase.from('stakeholders').select('*'); return data as Stakeholder[]; } });
-  const { data: projects } = useQuery({ queryKey: ['projects'], queryFn: async () => { const { data } = await supabase.from('projects').select('*'); return data as Project[]; } });
+  const { data: _stakeholders } = useQuery({ queryKey: ['stakeholders'], queryFn: async () => { const { data } = await supabase.from('stakeholders').select('*'); return data as Stakeholder[]; } });
+  const { data: _projects } = useQuery({ queryKey: ['projects'], queryFn: async () => { const { data } = await supabase.from('projects').select('*'); return data as Project[]; } });
 
   const { show: showSnackbar } = useSnackbar();
 
-  const voidTxn = useMutation({
-    mutationFn: async (id: string) => { const { error } = await supabase.from('transactions').update({ status: 'Voided', voided_by: session.user.id, voided_at: new Date().toISOString() }).eq('txn_id', id); if (error) throw error; },
-    onSuccess: (_d, id) => { qc.invalidateQueries({ queryKey: ['ledger'] }); showSnackbar(`${id} voided`); },
-    onError: (err: any) => showSnackbar(err.message || 'Failed to void', { type: 'error' }),
-  });
 
   const voidAllMutation = useMutation({
     mutationFn: async (ids: string[]) => {
@@ -239,10 +234,6 @@ export default function Ledger({ session }: { session: Session }) {
   const uniqueProjects = Array.from(new Set((ledger || []).flatMap((t: any) => (t.txn_allocations || []).map((a: any) => a.projects?.name).filter(Boolean)))) as string[];
   const uniqueTypes = ['Worker Payment', 'Material Purchase', 'General Expense'];
 
-  const toggleFilter = (opt: string, current: string[], setFilt: (f: string[]) => void) => {
-    if (current.includes(opt)) setFilt(current.filter(c => c !== opt));
-    else setFilt([...current, opt]);
-  };
 
   const hasAnyFilter = filterFlagged || filterStakeholder.length > 0 || filterCategory.length > 0
     || filterStatus.length > 0 || filterProject.length > 0 || filterType.length > 0
@@ -511,9 +502,6 @@ export default function Ledger({ session }: { session: Session }) {
                     <div className="py-1">
                       {(['Active', 'Flagged', 'Voided', 'Amended'] as string[]).map(opt => {
                         const isChecked = opt === 'Flagged' ? filterFlagged : filterStatus.includes(opt);
-                        const handleChange = opt === 'Flagged'
-                          ? () => setFilterFlagged(!filterFlagged)
-                          : () => toggleFilter(opt, filterStatus, setFilterStatus);
                         return (
                           <label key={opt} className="flex items-center gap-2.5 px-3 py-2 hover:bg-surface-container-low/50 cursor-pointer">
                             <div className={`w-4 h-4 rounded-[4px] border-2 flex items-center justify-center transition-colors flex-shrink-0 ${isChecked ? 'bg-primary border-primary' : 'border-outline-variant/40'}`}>
