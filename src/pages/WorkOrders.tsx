@@ -300,8 +300,8 @@ export default function WorkOrders({ session }: { session: Session }) {
           </div>
         </div>
 
-        {/* ── Filter bar ─────────────────────────────────────────────────── */}
-        <div ref={filterBarRef} className="flex items-center gap-2 mb-5 flex-wrap">
+        {/* ── Filter bar — horizontal scroll on mobile, wraps on desktop ── */}
+        <div ref={filterBarRef} className="flex items-center gap-2 mb-5 overflow-x-auto no-scrollbar md:flex-wrap flex-nowrap pb-0.5">
 
           {/* Date chip */}
           <div className="relative" ref={dateDropdownRef}>
@@ -396,8 +396,87 @@ export default function WorkOrders({ session }: { session: Session }) {
           )}
         </div>
 
-        {/* ── Table card ─────────────────────────────────────────────────── */}
-        <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm overflow-hidden">
+        {/* ── Mobile card stack ─────────────────────────────────────────── */}
+        <div className="md:hidden">
+          {isLoading ? (
+            <div className="py-2"><LinearProgress /></div>
+          ) : filtered.length === 0 ? (
+            <div className="py-20 text-center">
+              <span className="material-symbols-outlined text-[56px] text-on-surface-variant/15 block mb-4">
+                {hasAnyFilter ? 'search_off' : 'file_present'}
+              </span>
+              <p className="text-[15px] font-medium text-on-surface/50">No work orders found</p>
+              {hasAnyFilter && (
+                <button onClick={clearAllFilters}
+                  className="mt-5 h-11 px-5 rounded-full border border-outline-variant/30 text-[13px] font-medium text-on-surface-variant/60">
+                  Clear filters
+                </button>
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="space-y-2">
+                {filtered.slice(0, visibleCount).map((wo) => {
+                  const issued = new Date(wo.date_issued);
+                  const isCurrentYear = issued.getFullYear() === new Date().getFullYear();
+                  const dateStr = issued.toLocaleDateString('en-IN', {
+                    day: 'numeric', month: 'short',
+                    ...(!isCurrentYear ? { year: 'numeric' } : {}),
+                  });
+                  const paidPct = wo.order_value > 0
+                    ? Math.round(((wo as any).paid_amount ?? 0) / Number(wo.order_value) * 100)
+                    : 0;
+
+                  return (
+                    <div
+                      key={wo.wo_id}
+                      className={`bg-white rounded-xl border border-black/[0.06] p-3 cursor-pointer bk-row-ripple ${wo.status === 'Cancelled' ? 'opacity-50' : ''}`}
+                      onClick={() => navigate(`/work-orders/${wo.wo_id}`)}
+                    >
+                      {/* Row 1: WO ID + Status */}
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[13px] font-data-mono text-on-surface-variant/60">{wo.wo_id}</span>
+                        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${STATUS_BADGE[wo.status] || 'bg-surface-container text-on-surface'}`}>
+                          {wo.status}
+                        </span>
+                      </div>
+                      {/* Row 2: Contractor name */}
+                      <p className="text-[15px] font-[500] text-on-surface mb-0.5">
+                        {wo.stakeholders?.name || '—'}
+                        {wo.stakeholders?.category && <span className="text-[13px] font-normal text-on-surface-variant/60 ml-1">· {wo.stakeholders.category}</span>}
+                      </p>
+                      {/* Row 3: Project */}
+                      {wo.projects?.name && (
+                        <p className="text-[13px] text-on-surface-variant mb-2">{wo.projects.name}</p>
+                      )}
+                      {/* Row 4: Value + paid pct + date */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[15px] font-bold font-data-mono text-on-surface">
+                            ₹{Number(wo.order_value).toLocaleString('en-IN')}
+                          </span>
+                          {paidPct > 0 && (
+                            <span className="text-[12px] text-on-surface-variant">{paidPct}% paid</span>
+                          )}
+                        </div>
+                        <span className="text-[13px] text-on-surface-variant">{dateStr}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {filtered.length > visibleCount && (
+                <button onClick={() => setVisibleCount(c => c + PAGE_SIZE)}
+                  className="w-full mt-3 py-3 rounded-xl border border-outline-variant/30 text-[13px] font-semibold text-primary">
+                  Load more ({filtered.length - visibleCount} remaining)
+                </button>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* ── Desktop table card ─────────────────────────────────────────── */}
+        <div className="hidden md:block bg-white rounded-2xl border border-black/[0.06] shadow-sm overflow-hidden">
           {isLoading ? (
             <div className="py-2"><LinearProgress /></div>
           ) : visible.length === 0 ? (
@@ -536,6 +615,7 @@ export default function WorkOrders({ session }: { session: Session }) {
             </div>
           )}
         </div>
+        {/* end desktop table */}
 
       </div>
 

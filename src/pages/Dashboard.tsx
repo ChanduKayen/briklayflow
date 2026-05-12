@@ -119,7 +119,32 @@ export default function Dashboard({ session }: { session: Session }) {
               <h2 className="text-headline-md font-headline-md text-on-surface">Active Projects</h2>
               <Link to="/projects" className="text-label-caps font-label-caps text-secondary cursor-pointer hover:underline">VIEW ALL</Link>
             </div>
-            <div className="flex flex-col gap-stack-md">
+
+            {/* Mobile: horizontal scroll snap cards */}
+            <div className="md:hidden -mx-4 px-4">
+              <div
+                className="flex gap-3 overflow-x-auto no-scrollbar pb-1"
+                style={{ scrollSnapType: 'x mandatory' }}
+              >
+                {projects && projects.length > 0 ? projects.slice(0, 6).map((p: any) => (
+                  <Link
+                    to={`/projects/${p.project_id}`}
+                    key={p.project_id}
+                    className="bg-white rounded-xl shadow-card border border-outline-variant/10 p-4 flex-shrink-0 block"
+                    style={{ width: 200, scrollSnapAlign: 'start' }}
+                  >
+                    <span className="bg-secondary-container text-on-secondary-container px-2 py-0.5 rounded text-[10px] font-semibold inline-block mb-2">{p.status?.toUpperCase()}</span>
+                    <h3 className="font-bold text-[14px] text-on-surface leading-tight mb-1 line-clamp-2">{p.name}</h3>
+                    <p className="text-[12px] text-on-surface-variant truncate">{p.site_location}</p>
+                  </Link>
+                )) : (
+                  <p className="text-body-sm text-on-surface-variant py-2">No active projects.</p>
+                )}
+              </div>
+            </div>
+
+            {/* Desktop: vertical list */}
+            <div className="hidden md:flex flex-col gap-stack-md">
               {projects?.slice(0, 3).map((p: any) => (
                 <Link to={`/projects/${p.project_id}`} key={p.project_id} className="bg-white p-4 rounded-xl shadow-card border border-outline-variant/10 cursor-pointer hover:shadow-card-md transition-shadow block">
                   <div className="flex justify-between items-start mb-4">
@@ -141,11 +166,41 @@ export default function Dashboard({ session }: { session: Session }) {
           <section>
             <div className="flex justify-between items-center mb-stack-md">
               <h2 className="text-headline-md font-headline-md text-on-surface">Recent Transactions</h2>
-              <span className="text-label-caps font-label-caps text-secondary cursor-pointer">HISTORY</span>
+              <Link to="/ledger" className="text-label-caps font-label-caps text-secondary cursor-pointer hover:underline">VIEW ALL</Link>
             </div>
-            <div className="bg-white rounded-xl shadow-card border border-outline-variant/10 overflow-hidden">
+
+            {/* Mobile: card stack */}
+            <div className="md:hidden space-y-2">
+              {recentTxns && recentTxns.length > 0 ? recentTxns.map((txn: any) => (
+                <Link
+                  key={txn.txn_id}
+                  to={`/ledger/${txn.txn_id}`}
+                  className="bg-white rounded-xl border border-black/[0.06] p-3 block"
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[15px] font-[500] text-on-surface truncate mr-3">{txn.stakeholders?.name || txn.txn_id}</span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {txn.ai_flag_status === 'Flagged' && <span className="material-symbols-outlined text-error text-[14px]" style={{ fontVariationSettings: "'FILL' 1" }}>flag</span>}
+                      <span className="text-[15px] font-bold font-data-mono text-on-surface">₹{Number(txn.total_amount).toLocaleString()}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[13px] text-on-surface-variant uppercase">{txn.category}</span>
+                    <span className={`text-[11px] font-semibold ${txn.status === 'Active' ? 'text-emerald-600' : 'text-on-surface-variant/50'}`}>{txn.status}</span>
+                  </div>
+                </Link>
+              )) : (
+                <div className="py-8 text-center text-on-surface-variant text-body-sm">No transactions yet.</div>
+              )}
+              <Link to="/ledger" className="block w-full py-3 text-center text-[14px] font-semibold text-secondary border border-secondary/20 rounded-xl">
+                View All Transactions →
+              </Link>
+            </div>
+
+            {/* Desktop: table-style card */}
+            <div className="hidden md:block bg-white rounded-xl shadow-card border border-outline-variant/10 overflow-hidden">
               {recentTxns && recentTxns.length > 0 ? recentTxns.map((txn: any, idx: number) => (
-                <div key={txn.txn_id} className={`p-4 flex items-center justify-between ${idx < recentTxns.length - 1 ? 'border-b border-outline-variant/10' : ''}`}>
+                <Link key={txn.txn_id} to={`/ledger/${txn.txn_id}`} className={`p-4 flex items-center justify-between hover:bg-surface-container-low/40 transition-colors block ${idx < recentTxns.length - 1 ? 'border-b border-outline-variant/10' : ''}`}>
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center">
                       <span className="material-symbols-outlined text-primary text-[18px]">receipt_long</span>
@@ -162,7 +217,7 @@ export default function Dashboard({ session }: { session: Session }) {
                     </div>
                     <p className={`text-body-sm font-semibold ${txn.status === 'Active' ? 'text-secondary' : 'text-on-surface-variant'}`}>{txn.status?.toUpperCase()}</p>
                   </div>
-                </div>
+                </Link>
               )) : (
                 <div className="p-8 text-center text-on-surface-variant text-body-sm">No transactions yet.</div>
               )}

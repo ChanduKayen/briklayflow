@@ -401,8 +401,8 @@ export default function Ledger({ session }: { session: Session }) {
           </div>
         </div>
 
-        {/* Filter bar */}
-        <div ref={filterBarRef} className="flex items-center gap-2 mb-5 flex-wrap">
+        {/* Filter bar — horizontal scroll on mobile, wraps on desktop */}
+        <div ref={filterBarRef} className="flex items-center gap-2 mb-5 overflow-x-auto no-scrollbar md:flex-wrap flex-nowrap pb-0.5">
 
           {/* Date chip */}
           <div className="relative" ref={dateDropdownRef}>
@@ -540,8 +540,96 @@ export default function Ledger({ session }: { session: Session }) {
           )}
         </div>
 
-        {/* Table card */}
-        <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm overflow-hidden">
+        {/* ── Mobile card stack ─────────────────────────────────────────── */}
+        <div className="md:hidden">
+          {isLoading ? (
+            <div className="py-2"><LinearProgress /></div>
+          ) : filteredTransactions.length === 0 ? (
+            <div className="py-20 text-center">
+              <span className="material-symbols-outlined text-[56px] text-on-surface-variant/15 block mb-4">
+                {hasAnyFilter ? 'search_off' : 'receipt_long'}
+              </span>
+              <p className="text-[15px] font-medium text-on-surface/50">No transactions found</p>
+              {hasAnyFilter && (
+                <button onClick={clearAllFilters} className="mt-5 h-11 px-5 rounded-full border border-outline-variant/30 text-[13px] font-medium text-on-surface-variant/60">
+                  Clear filters
+                </button>
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="space-y-2">
+                {filteredTransactions.slice(0, visibleCount).map((txn: any) => {
+                  const txnDate = new Date(txn.date);
+                  const isCurrentYear = txnDate.getFullYear() === new Date().getFullYear();
+                  const dateStr = txnDate.toLocaleDateString('en-IN', {
+                    day: 'numeric', month: 'short',
+                    ...(!isCurrentYear ? { year: 'numeric' } : {}),
+                  });
+                  const projectNames = (txn.txn_allocations || [])
+                    .map((a: any) => a.projects?.name).filter(Boolean).join(', ') || null;
+                  const type = getTxnType(txn);
+                  const typeColors: Record<string, string> = {
+                    'Worker Payment': 'bg-blue-50 text-blue-600',
+                    'Material Purchase': 'bg-amber-50 text-amber-600',
+                    'General Expense': 'bg-slate-100 text-slate-500',
+                  };
+
+                  return (
+                    <div
+                      key={txn.txn_id}
+                      className={`bg-white rounded-xl border border-black/[0.06] p-3 cursor-pointer bk-row-ripple ${txn.status === 'Voided' ? 'opacity-50' : ''}`}
+                      onClick={() => navigate(`/ledger/${txn.txn_id}`)}
+                    >
+                      {/* Row 1: Payee + Amount */}
+                      <div className="flex items-start justify-between mb-1.5">
+                        <div className="flex-1 min-w-0 mr-3">
+                          <span className="text-[15px] font-[500] text-on-surface leading-tight line-clamp-1">
+                            {txn.stakeholders?.name || txn.txn_id}
+                          </span>
+                          {txn.stakeholders?.category && (
+                            <span className="text-[12px] text-on-surface-variant ml-1">· {txn.stakeholders.category}</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {txn.ai_flag_status === 'Flagged' && (
+                            <span className="material-symbols-outlined text-error text-[14px]" style={{ fontVariationSettings: "'FILL' 1" }}>flag</span>
+                          )}
+                          <span className="text-[15px] font-bold font-data-mono text-on-surface">
+                            ₹{Number(txn.total_amount).toLocaleString('en-IN')}
+                          </span>
+                        </div>
+                      </div>
+                      {/* Row 2: Type + Project */}
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded-full ${typeColors[type] ?? 'bg-surface-container text-on-surface'}`}>{type}</span>
+                        {projectNames && (
+                          <span className="text-[13px] text-on-surface-variant truncate">· {projectNames}</span>
+                        )}
+                      </div>
+                      {/* Row 3: Date + Mode + Status */}
+                      <div className="flex items-center justify-between">
+                        <span className="text-[13px] text-on-surface-variant">
+                          {dateStr}{txn.payment_mode ? ` · ${txn.payment_mode}` : ''}
+                        </span>
+                        {statusBadge(txn)}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {filteredTransactions.length > visibleCount && (
+                <button onClick={() => setVisibleCount(c => c + PAGE_SIZE)}
+                  className="w-full mt-3 py-3 rounded-xl border border-outline-variant/30 text-[13px] font-semibold text-primary">
+                  Load more ({filteredTransactions.length - visibleCount} remaining)
+                </button>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* ── Desktop table card ─────────────────────────────────────────── */}
+        <div className="hidden md:block bg-white rounded-2xl border border-black/[0.06] shadow-sm overflow-hidden">
           {isLoading ? (
             <div className="py-2">
               <LinearProgress />
@@ -621,22 +709,17 @@ export default function Ledger({ session }: { session: Session }) {
                         style={{ height: '52px' }}
                         onClick={() => navigate(navTarget)}
                       >
-                        {/* Checkbox */}
                         <td className="px-3 align-middle w-10" onClick={e => e.stopPropagation()}>
                           {isFirstInGroup && (
                             <input type="checkbox" checked={isChecked} onChange={() => toggleTxn(txn.txn_id)}
                               className="w-3.5 h-3.5 rounded border-outline-variant/50 text-primary focus:ring-primary cursor-pointer" />
                           )}
                         </td>
-
-                        {/* Date */}
                         <td className="px-4 align-middle">
                           {isFirstInGroup && (
                             <span className="text-[13px] text-on-surface/80 font-medium whitespace-nowrap">{dateStr}</span>
                           )}
                         </td>
-
-                        {/* Payee */}
                         <td className="px-4 align-middle">
                           {isFirstInGroup && (
                             <div className="flex items-center gap-2 min-w-0">
@@ -649,20 +732,14 @@ export default function Ledger({ session }: { session: Session }) {
                             </div>
                           )}
                         </td>
-
-                        {/* Trade */}
                         <td className="px-4 align-middle">
                           {isFirstInGroup && tradeLabel && (
                             <span className="text-[12px] text-on-surface-variant/55 whitespace-nowrap">{tradeLabel}</span>
                           )}
                         </td>
-
-                        {/* Type */}
                         <td className="px-4 align-middle">
                           {isFirstInGroup && typeBadge(txn)}
                         </td>
-
-                        {/* Project */}
                         <td className="px-4 align-middle max-w-[140px]">
                           {!isFirstInGroup ? (
                             <div className="flex items-center gap-1 pl-3">
@@ -673,15 +750,11 @@ export default function Ledger({ session }: { session: Session }) {
                             <span className="text-[13px] text-on-surface/70 truncate block">{projectName}</span>
                           )}
                         </td>
-
-                        {/* Cost Code */}
                         <td className="px-4 align-middle max-w-[200px]">
                           {isFirstInGroup && costCodeName && (
                             <span className="text-[12px] text-on-surface-variant/55 leading-snug line-clamp-2">{costCodeName}</span>
                           )}
                         </td>
-
-                        {/* Amount */}
                         <td
                           data-cell-select="true"
                           className={`px-4 align-middle text-right cursor-cell select-none transition-colors ${selectedRows.has(idx) ? 'bg-primary/5 text-primary' : ''}`}
@@ -693,8 +766,6 @@ export default function Ledger({ session }: { session: Session }) {
                             ₹{rowAmount.toLocaleString('en-IN')}
                           </span>
                         </td>
-
-                        {/* Status */}
                         <td className="px-4 align-middle">
                           {isFirstInGroup && statusBadge(txn)}
                         </td>

@@ -12,7 +12,7 @@ import {
   IconLayoutDashboard, IconArrowsExchange, IconFileText, IconShoppingCart,
   IconCalendarStats, IconBuilding, IconReceipt, IconUsers, IconWallet,
   IconChartLine, IconListTree, IconShield, IconSettings, IconPlus,
-  IconChevronDown, IconLogout, IconDotsVertical, IconX, IconMenu2,
+  IconChevronDown, IconLogout, IconDotsVertical, IconMenu2, IconChevronLeft,
 } from '@tabler/icons-react';
 
 import Stakeholders from './pages/Stakeholders';
@@ -44,6 +44,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [showMoreSheet, setShowMoreSheet] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -93,18 +94,10 @@ function App() {
         </button>
       )}
       <main
-        className={`min-h-screen pb-8 transition-[margin-left] duration-[220ms] ease-[cubic-bezier(0.4,0,0.6,1)] ${sidebarOpen ? 'md:ml-[220px]' : 'md:ml-0'}`}
+        className={`min-h-screen mobile-main-pb transition-[margin-left] duration-[220ms] ease-[cubic-bezier(0.4,0,0.6,1)] ${sidebarOpen ? 'md:ml-[220px]' : 'md:ml-0'}`}
       >
-        {/* Mobile topbar */}
-        <div className="md:hidden sticky top-0 z-30 flex items-center h-12 px-4 bg-surface-container-lowest border-b border-outline-variant/15">
-          <button
-            onClick={() => setMobileOpen(true)}
-            className="p-1.5 -ml-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container transition-colors"
-          >
-            <IconMenu2 size={20} />
-          </button>
-          <span className="ml-3 text-[15px] font-semibold text-on-surface tracking-tight">Briklay</span>
-        </div>
+        {/* Mobile topbar (phones only — replaces sidebar hamburger) */}
+        <MobileTopbar session={session} />
         <Routes>
           <Route path="/" element={<Dashboard session={session} />} />
           <Route path="/ledger" element={<Ledger session={session} />} />
@@ -134,6 +127,16 @@ function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
+
+      {/* Bottom tab bar — mobile only */}
+      <BottomTabBar session={session} onMoreTap={() => setShowMoreSheet(true)} />
+
+      {/* More nav sheet — mobile only */}
+      <MoreNavSheet
+        session={session}
+        isOpen={showMoreSheet}
+        onClose={() => setShowMoreSheet(false)}
+      />
     </div>
     </SnackbarProvider>
   );
@@ -456,8 +459,8 @@ function SidebarContent({
 
 function Sidebar({
   session,
-  mobileOpen,
-  onMobileClose,
+  mobileOpen: _mobileOpen,
+  onMobileClose: _onMobileClose,
   isOpen,
   onToggle,
 }: {
@@ -480,24 +483,226 @@ function Sidebar({
         </div>
       </aside>
 
-      {/* Mobile backdrop */}
-      <div
-        className={`md:hidden fixed inset-0 bg-black/[0.32] z-40 transition-opacity duration-[250ms] ${mobileOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
-        onClick={onMobileClose}
-      />
+      {/* Mobile drawer — hidden on phones (bottom tab bar handles mobile nav) */}
+      {/* Kept for tablet use if needed, but currently not triggered on mobile */}
+    </>
+  );
+}
 
-      {/* Mobile drawer */}
-      <aside
-        className={`md:hidden fixed left-0 top-0 h-full w-[220px] bg-surface-container-low z-50 shadow-elevation-16 transition-transform duration-[250ms] ease-[cubic-bezier(0,0,0.2,1)] ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}
-      >
+// ── Mobile helpers ────────────────────────────────────────────────────────────
+
+function getMobileTitle(pathname: string): string {
+  const routes: Record<string, string> = {
+    '/':                    'Dashboard',
+    '/ledger':              'Transactions',
+    '/ledger/new':          'New Transaction',
+    '/projects':            'Projects',
+    '/work-orders':         'Work Orders',
+    '/work-orders/new':     'New Work Order',
+    '/purchase-orders':     'Purchase Orders',
+    '/purchase-orders/new': 'New Purchase Order',
+    '/billing':             'Billing',
+    '/billing/new':         'New Bill',
+    '/stakeholders':        'Stakeholders',
+    '/settings':            'Settings',
+    '/team':                'Team & Access',
+    '/financials':          'Financials',
+    '/financials/pl':       'P&L',
+    '/financials/cashflow': 'Cashflow',
+    '/invoices':            'Invoices',
+    '/invoices/new':        'New Invoice',
+    '/attendance':          'Attendance',
+    '/cost-codes':          'Cost Codes',
+  };
+  if (routes[pathname]) return routes[pathname];
+  const seg = pathname.split('/').filter(Boolean);
+  const detailTitles: Record<string, string> = {
+    'ledger': 'Transaction', 'projects': 'Project', 'work-orders': 'Work Order',
+    'purchase-orders': 'Purchase Order', 'billing': 'Bill', 'stakeholders': 'Stakeholder', 'invoices': 'Invoice',
+  };
+  return detailTitles[seg[0]] ?? 'Briklay';
+}
+
+function MobileTopbar({ session }: { session: Session }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { data: profile } = useUserProfile(session.user.id);
+
+  const pathSegments = location.pathname.split('/').filter(Boolean);
+  const isDetailPage = pathSegments.length >= 2;
+  const title = getMobileTitle(location.pathname);
+
+  const avatarColor: Record<string, string> = {
+    principal: 'bg-[#C45B39] text-white', management: 'bg-blue-500 text-white',
+    supervisor: 'bg-teal-500 text-white', accountant: 'bg-purple-500 text-white',
+  };
+  const initials = (name: string) =>
+    name.split(' ').filter(Boolean).map(w => w[0]).join('').toUpperCase().slice(0, 2) || '?';
+
+  return (
+    <div
+      className="md:hidden sticky top-0 z-30 flex items-end gap-2 px-4 bg-white border-b border-black/[0.06]"
+      style={{ minHeight: 'calc(52px + env(safe-area-inset-top))', paddingTop: 'calc(env(safe-area-inset-top) + 8px)', paddingBottom: 8 }}
+    >
+      {isDetailPage && (
         <button
-          onClick={onMobileClose}
-          className="absolute top-4 right-3 p-1.5 rounded-lg hover:bg-surface-container text-on-surface-variant/60 transition-colors z-10"
+          onClick={() => navigate(-1)}
+          className="flex items-center justify-center w-9 h-9 -ml-2 rounded-xl text-on-surface-variant transition-colors hover:bg-surface-container"
         >
-          <IconX size={16} strokeWidth={2} />
+          <IconChevronLeft size={24} strokeWidth={2} />
         </button>
-        <SidebarContent session={session} onNavigate={onMobileClose} />
-      </aside>
+      )}
+      <span className="flex-1 text-[16px] font-[500] text-on-surface leading-none tracking-tight">{title}</span>
+      {profile && (
+        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 ${avatarColor[profile.role] ?? 'bg-surface-container-high text-on-surface'}`}>
+          {initials(profile.name ?? 'U')}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const TERRACOTTA = '#C45B39';
+
+function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () => void }) {
+  const location = useLocation();
+  const { data: profile } = useUserProfile(session.user.id);
+  const role = profile?.role ?? '';
+
+  const isActive = (path: string) =>
+    path === '/' ? location.pathname === '/' : location.pathname === path || location.pathname.startsWith(path + '/');
+
+  const moreActive = [
+    '/purchase-orders', '/billing', '/stakeholders', '/team', '/settings',
+    '/financials', '/invoices', '/fund-register', '/cost-codes', '/attendance',
+  ].some(p => isActive(p));
+
+  type Tab = { path: string; icon: React.ElementType; label: string; show: boolean };
+  const tabs: Tab[] = [
+    { path: '/',           icon: IconLayoutDashboard, label: 'Home',     show: true },
+    { path: '/ledger',     icon: IconArrowsExchange,  label: 'Txns',     show: role !== 'supervisor' },
+    { path: '/projects',   icon: IconBuilding,        label: 'Projects', show: true },
+    { path: '/work-orders',icon: IconFileText,         label: 'WOs',      show: true },
+  ].filter(t => t.show);
+
+  return (
+    <nav
+      className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-black/[0.08]"
+    >
+      <div className="flex items-stretch" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+        {tabs.map(tab => {
+          const active = isActive(tab.path);
+          const Icon = tab.icon;
+          return (
+            <Link
+              key={tab.path}
+              to={tab.path}
+              className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 transition-colors"
+              style={{ minHeight: 56, color: active ? TERRACOTTA : '#9ca3af' }}
+            >
+              <Icon size={22} strokeWidth={active ? 2 : 1.5} />
+              <span className="text-[10px] font-medium leading-none">{tab.label}</span>
+            </Link>
+          );
+        })}
+        <button
+          onClick={onMoreTap}
+          className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 transition-colors"
+          style={{ minHeight: 56, color: moreActive ? TERRACOTTA : '#9ca3af' }}
+        >
+          <IconDotsVertical size={22} strokeWidth={moreActive ? 2 : 1.5} />
+          <span className="text-[10px] font-medium leading-none">More</span>
+        </button>
+      </div>
+    </nav>
+  );
+}
+
+function MoreNavSheet({
+  session, isOpen, onClose,
+}: { session: Session; isOpen: boolean; onClose: () => void }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { data: profile } = useUserProfile(session.user.id);
+  const role = profile?.role ?? '';
+
+  const { data: hasPrincipal } = useQuery({
+    queryKey: ['has_principal'],
+    queryFn: async () => {
+      const { data } = await supabase.from('user_profiles').select('id').eq('role', 'principal').limit(1);
+      return (data?.length || 0) > 0;
+    },
+    staleTime: 5 * 60 * 1000,
+    enabled: role === 'principal' || role === 'management',
+  });
+
+  const showFinancials = role === 'principal' || (role === 'management' && !hasPrincipal);
+
+  const isActive = (path: string) =>
+    location.pathname === path || location.pathname.startsWith(path + '/');
+
+  const go = (path: string) => { navigate(path); onClose(); };
+
+  const items = [
+    { path: '/purchase-orders', icon: IconShoppingCart, label: 'Purchase Orders', show: role !== 'supervisor' && role !== 'accountant', color: '#3B82F6' },
+    { path: '/attendance',      icon: IconCalendarStats, label: 'Attendance',      show: true,                                             color: '#14B8A6' },
+    { path: '/billing',         icon: IconReceipt,       label: 'Billing',         show: role !== 'supervisor',                            color: '#EF4444' },
+    { path: '/stakeholders',    icon: IconUsers,         label: 'Stakeholders',    show: role !== 'supervisor' && role !== 'accountant',   color: '#06B6D4' },
+    { path: '/invoices',        icon: IconReceipt,       label: 'Invoices',        show: true,                                             color: '#8B5CF6' },
+    { path: '/financials',      icon: IconChartLine,     label: 'Financials',      show: showFinancials,                                   color: '#6366F1' },
+    { path: '/cost-codes',      icon: IconListTree,      label: 'Cost Codes',      show: role === 'principal' || role === 'management',    color: '#64748B' },
+    { path: '/team',            icon: IconShield,        label: 'Team & Access',   show: role === 'principal' || role === 'management',    color: '#C45B39' },
+    { path: '/settings',        icon: IconSettings,      label: 'Settings',        show: true,                                             color: '#6B7280' },
+  ].filter(i => i.show);
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className={`md:hidden fixed inset-0 z-[45] bg-black/40 transition-opacity duration-300 ${isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+        onClick={onClose}
+      />
+      {/* Sheet */}
+      <div
+        className={`md:hidden fixed bottom-0 left-0 right-0 z-[50] bg-white rounded-t-[20px] shadow-2xl transition-transform duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${isOpen ? 'translate-y-0' : 'translate-y-full'}`}
+        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)' }}
+      >
+        {/* Drag handle */}
+        <div className="flex justify-center pt-3 pb-2">
+          <div className="w-8 h-1 rounded-full bg-black/15" />
+        </div>
+        <div className="px-4 pb-2">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-on-surface-variant/40">More</p>
+        </div>
+        <div className="overflow-y-auto" style={{ maxHeight: '60vh' }}>
+          {items.map(item => {
+            const Icon = item.icon;
+            const active = isActive(item.path);
+            return (
+              <button
+                key={item.path}
+                onClick={() => go(item.path)}
+                className="w-full flex items-center gap-3 px-4 transition-colors"
+                style={{
+                  minHeight: 56,
+                  backgroundColor: active ? `${TERRACOTTA}08` : undefined,
+                }}
+              >
+                <div style={{ width: 36, height: 36, borderRadius: 9, backgroundColor: item.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Icon size={18} strokeWidth={1.75} color="white" />
+                </div>
+                <span
+                  className="flex-1 text-[15px] text-left"
+                  style={{ fontWeight: active ? 600 : 500, color: active ? TERRACOTTA : '#1a1a1a' }}
+                >
+                  {item.label}
+                </span>
+                {active && <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: TERRACOTTA }} />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </>
   );
 }

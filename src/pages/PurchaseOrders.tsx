@@ -462,8 +462,8 @@ export default function PurchaseOrders({ session }: { session: Session }) {
           )}
         </div>
 
-        {/* Filter bar */}
-        <div className="flex items-center gap-2 flex-wrap mb-4">
+        {/* Filter bar — horizontal scroll on mobile, wraps on desktop */}
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar md:flex-wrap flex-nowrap mb-4 pb-0.5">
 
           {/* Date chip */}
           <div ref={dateRef} className="relative">
