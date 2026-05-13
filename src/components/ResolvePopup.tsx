@@ -783,13 +783,16 @@ function PopupContents({
                 </div>
 
                 {showPayeeDrop && (
-                  <div className="absolute left-0 right-0 top-full mt-1 z-10 bg-white border border-black/[0.08] rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                  /* stopPropagation on mousedown prevents the hidden PopupContents instance's
+                     document mousedown handler from closing this dropdown before onClick fires */
+                  <div className="absolute left-0 right-0 top-full mt-1 z-10 bg-white border border-black/[0.08] rounded-xl shadow-lg max-h-48 overflow-y-auto"
+                       onMouseDown={(e) => e.stopPropagation()}>
                     {searchedPayees.slice(0, 8).map((s: any) => {
                       const score = payeeSimilarityScore(s.name, ai.payee_raw || '');
                       const showHint = ai.payee_raw && score > 30 && s.name.toLowerCase() !== (ai.payee_raw || '').toLowerCase();
                       return (
                         <button key={s.stakeholder_id} type="button"
-                          onClick={() => selectPayee(s.stakeholder_id, s.name)}
+                          onMouseDown={(e) => { e.preventDefault(); selectPayee(s.stakeholder_id, s.name); }}
                           className="w-full flex items-start gap-2.5 px-3 py-2 hover:bg-surface-container-low text-left border-b border-outline-variant/[0.06] last:border-0"
                         >
                           <div className="flex-1 min-w-0">
@@ -808,7 +811,7 @@ function PopupContents({
                       <p className="px-3 py-3 text-[12px] text-on-surface-variant/50 text-center">No matches</p>
                     )}
                     <button type="button"
-                      onClick={() => { setShowPayeeDrop(false); setShowCreateStkForm(true); }}
+                      onMouseDown={(e) => { e.preventDefault(); setShowPayeeDrop(false); setShowCreateStkForm(true); }}
                       className="w-full flex items-center gap-1.5 px-3 py-2.5 text-[12px] text-primary font-semibold hover:bg-primary/[0.04] border-t border-outline-variant/[0.06]"
                     >
                       <span className="material-symbols-outlined text-[14px]">add_circle</span>
