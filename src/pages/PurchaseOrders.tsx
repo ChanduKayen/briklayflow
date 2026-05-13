@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
@@ -139,24 +140,37 @@ function Dropdown({
   anchorRef, open, onClose, children,
 }: { anchorRef: React.RefObject<HTMLElement>; open: boolean; onClose: () => void; children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
   useEffect(() => {
     if (!open) return;
+    if (anchorRef.current) {
+      const r = anchorRef.current.getBoundingClientRect();
+      setPos({ top: r.bottom + 4, left: r.left });
+    }
     function handler(e: MouseEvent) {
       if (!ref.current?.contains(e.target as Node) && !anchorRef.current?.contains(e.target as Node))
         onClose();
     }
+    function scrollHandler() { onClose(); }
     document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    window.addEventListener('scroll', scrollHandler, true);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      window.removeEventListener('scroll', scrollHandler, true);
+    };
   }, [open, onClose, anchorRef]);
 
-  if (!open) return null;
-  return (
+  if (!open || !pos) return null;
+  return createPortal(
     <div
       ref={ref}
-      className="popover-animate absolute top-full mt-1 left-0 z-50 bg-white rounded-xl shadow-elevation-8 border border-outline-variant/20 py-1 min-w-[180px]"
+      className="popover-animate bg-white rounded-xl shadow-elevation-8 border border-outline-variant/20 py-1 min-w-[180px]"
+      style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 9999 }}
     >
       {children}
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -300,6 +314,22 @@ export default function PurchaseOrders({ session }: { session: Session }) {
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data as any[];
+    },
+  });
+
+  const { data: poPayments } = useQuery({
+    queryKey: ['po_payment_totals'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('txn_allocations')
+        .select('order_ref, allocated_amount')
+        .eq('order_type', 'PO');
+      if (error) throw error;
+      const totals: Record<string, number> = {};
+      for (const row of data ?? []) {
+        if (row.order_ref) totals[row.order_ref] = (totals[row.order_ref] || 0) + Number(row.allocated_amount);
+      }
+      return totals;
     },
   });
 
@@ -655,13 +685,20 @@ export default function PurchaseOrders({ session }: { session: Session }) {
                       {/* Amount */}
                       <td className="px-4 py-3 text-right">
                         <p className="font-data-mono text-[13px] font-semibold text-on-surface">
-                          ₹{Number(po.order_value).toLocaleString('en-IN')}
+                          ₹{Number(po.total_value || po.order_value).toLocaleString('en-IN')}
                         </p>
-                        {po.gst_value && Number(po.gst_value) > 0 && (
-                          <p className="text-[11px] text-on-surface-variant/50 mt-0.5 font-data-mono">
-                            +GST ₹{Number(po.gst_value).toLocaleString('en-IN')}
-                          </p>
-                        )}
+                        {(() => {
+                          const paid = poPayments?.[po.po_id] ?? 0;
+                          if (paid > 0) {
+                            const total = Number(po.total_value || po.order_value) || 0;
+                            return (
+                              <p className={`text-[11px] mt-0.5 font-data-mono ${paid >= total ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                Paid ₹{paid.toLocaleString('en-IN')}
+                              </p>
+                            );
+                          }
+                          return null;
+                        })()}
                       </td>
 
                       {/* Status */}
@@ -733,9 +770,23 @@ export default function PurchaseOrders({ session }: { session: Session }) {
                   <p className="text-[11px] text-on-surface-variant/60 mt-0.5 line-clamp-1">{getItemsPreview(po)}</p>
                   <div className="flex justify-between items-center mt-3 pt-2.5 border-t border-outline-variant/10">
                     <p className="text-[11px] text-on-surface-variant/60">{po.projects?.name ?? '—'}</p>
-                    <p className="font-data-mono text-[13px] font-bold text-on-surface">
-                      ₹{Number(po.order_value).toLocaleString('en-IN')}
-                    </p>
+                    <div className="text-right">
+                      <p className="font-data-mono text-[13px] font-bold text-on-surface">
+                        ₹{Number(po.total_value || po.order_value).toLocaleString('en-IN')}
+                      </p>
+                      {(() => {
+                        const paid = poPayments?.[po.po_id] ?? 0;
+                        if (paid > 0) {
+                          const total = Number(po.total_value || po.order_value) || 0;
+                          return (
+                            <p className={`text-[10px] font-data-mono ${paid >= total ? 'text-emerald-600' : 'text-amber-600'}`}>
+                              Paid ₹{paid.toLocaleString('en-IN')}
+                            </p>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </div>
                   </div>
                 </div>
               );

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
@@ -57,6 +58,7 @@ export default function WorkOrders({ session }: { session: Session }) {
   const [customFrom, setCustomFrom]                 = useState('');
   const [customTo, setCustomTo]                     = useState('');
   const [activeFilterDropdown, setActiveFilterDropdown] = useState<string | null>(null);
+  const [chipDropPos, setChipDropPos]               = useState<{ top: number; left: number } | null>(null);
   const [showDateDropdown, setShowDateDropdown]     = useState(false);
   const [visibleCount, setVisibleCount]             = useState(PAGE_SIZE);
   const [selectedIds, setSelectedIds]               = useState<Set<string>>(new Set());
@@ -64,13 +66,24 @@ export default function WorkOrders({ session }: { session: Session }) {
   // ── Refs for click-outside ────────────────────────────────────────────────
   const filterBarRef    = useRef<HTMLDivElement>(null);
   const dateDropdownRef = useRef<HTMLDivElement>(null);
+  const chipDropRef     = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const h = (e: MouseEvent) => {
-      if (filterBarRef.current && !filterBarRef.current.contains(e.target as Node)) setActiveFilterDropdown(null);
+      const t = e.target as Node;
+      if (
+        (filterBarRef.current && !filterBarRef.current.contains(t)) &&
+        (!chipDropRef.current || !chipDropRef.current.contains(t))
+      ) setActiveFilterDropdown(null);
     };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
+  }, []);
+
+  useEffect(() => {
+    const h = () => setActiveFilterDropdown(null);
+    window.addEventListener('scroll', h, true);
+    return () => window.removeEventListener('scroll', h, true);
   }, []);
 
   useEffect(() => {
@@ -196,9 +209,15 @@ export default function WorkOrders({ session }: { session: Session }) {
     const displayLabel = current.length === 1 ? current[0]
       : current.length > 1 ? `${label}: ${current.length}` : label;
     return (
-      <div className="relative" key={key}>
+      <div key={key}>
         <button
-          onClick={() => setActiveFilterDropdown(isOpen ? null : key)}
+          onClick={(e) => {
+            if (!isOpen) {
+              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+              setChipDropPos({ top: rect.bottom + 6, left: rect.left });
+            }
+            setActiveFilterDropdown(isOpen ? null : key);
+          }}
           className={`flex items-center gap-1 h-8 px-3 rounded-full text-[12px] font-medium border transition-all whitespace-nowrap ${
             isActive ? 'border-primary/30 bg-primary/5 text-primary' : 'border-outline-variant/25 bg-white text-on-surface-variant/70 hover:border-outline-variant/50'
           }`}
@@ -212,15 +231,20 @@ export default function WorkOrders({ session }: { session: Session }) {
             <span className="material-symbols-outlined text-[13px]">expand_more</span>
           )}
         </button>
-        {isOpen && (
-          <div className="absolute top-full left-0 mt-1.5 w-52 bg-white border border-black/[0.08] rounded-xl shadow-lg z-50 overflow-hidden">
+        {isOpen && chipDropPos && createPortal(
+          <div
+            ref={chipDropRef}
+            className="w-52 bg-white border border-black/[0.08] rounded-xl shadow-lg overflow-hidden"
+            style={{ position: 'fixed', top: chipDropPos.top, left: chipDropPos.left, zIndex: 9999 }}
+          >
             <div className="px-3 py-2 border-b border-black/[0.05] flex gap-3">
               <button className="text-[11px] font-semibold text-primary" onClick={() => setFilter([...options])}>Select all</button>
               <button className="text-[11px] font-semibold text-on-surface-variant/50" onClick={() => setFilter([])}>Clear</button>
             </div>
             <div className="py-1 max-h-52 overflow-y-auto">
               {options.map(opt => (
-                <label key={opt} className="flex items-center gap-2.5 px-3 py-2 hover:bg-surface-container-low/50 cursor-pointer">
+                <label key={opt} className="flex items-center gap-2.5 px-3 py-2 hover:bg-surface-container-low/50 cursor-pointer"
+                  onClick={() => setFilter(current.includes(opt) ? current.filter(v => v !== opt) : [...current, opt])}>
                   <div className={`w-4 h-4 rounded-[4px] border-2 flex items-center justify-center transition-colors flex-shrink-0 ${current.includes(opt) ? 'bg-primary border-primary' : 'border-outline-variant/40'}`}>
                     {current.includes(opt) && <span className="material-symbols-outlined text-[10px] text-on-primary" style={{ fontVariationSettings: "'FILL' 1, 'wght' 700" }}>check</span>}
                   </div>
@@ -228,7 +252,8 @@ export default function WorkOrders({ session }: { session: Session }) {
                 </label>
               ))}
             </div>
-          </div>
+          </div>,
+          document.body
         )}
       </div>
     );

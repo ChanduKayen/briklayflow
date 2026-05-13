@@ -23,13 +23,26 @@ export default function Dashboard({ session }: { session: Session }) {
         const myTotalPayments = allocs?.reduce((sum, a) => sum + Number(a.allocated_amount), 0) || 0;
         const { data: myWOs } = await supabase.from('work_orders').select('order_value').eq('status', 'Active').in('project_id', myProjects);
         const myWOValue = myWOs?.reduce((sum, wo) => sum + Number(wo.order_value), 0) || 0;
-        return { totalPayments: myTotalPayments, activeWOValue: myWOValue, flaggedCount: 0, isScoped: true };
+        return { totalPayments: myTotalPayments, activeWOValue: myWOValue, flaggedCount: 0, needsActionCount: 0, isScoped: true };
       } else {
         const [txnRes, woRes, flaggedRes] = await Promise.all([txnQuery, woQuery, flaggedQuery]);
+        // Needs action: active Worker/Vendor transactions with at least one unlinked allocation
+        const [activeWVRes, unlinkedAllocsRes] = await Promise.all([
+          supabase.from('transactions').select('txn_id, stakeholders(type)').eq('status', 'Active'),
+          supabase.from('txn_allocations').select('txn_id').is('order_type', null),
+        ]);
+        const wvIds = new Set(
+          (activeWVRes.data || [])
+            .filter((t: any) => ['Worker', 'Vendor'].includes(t.stakeholders?.type))
+            .map((t: any) => t.txn_id)
+        );
+        const unlinkedIds = new Set((unlinkedAllocsRes.data || []).map((a: any) => a.txn_id));
+        const needsActionCount = [...wvIds].filter(id => unlinkedIds.has(id)).length;
         return {
           totalPayments: txnRes.data?.reduce((sum, t) => sum + Number(t.total_amount), 0) || 0,
           activeWOValue: woRes.data?.reduce((sum, wo) => sum + Number(wo.order_value), 0) || 0,
           flaggedCount: flaggedRes.count || 0,
+          needsActionCount,
           isScoped: false
         };
       }
@@ -101,13 +114,25 @@ export default function Dashboard({ session }: { session: Session }) {
             </div>
             {!metrics?.isScoped && (
               <div
-                className={`p-4 rounded-xl shadow-card border cursor-pointer transition-opacity hover:opacity-80 ${metrics?.flaggedCount ? 'bg-error-container border-error/10' : 'bg-surface-container-low border-outline-variant/10'}`}
+                className={`p-4 rounded-xl shadow-card border cursor-pointer transition-opacity hover:opacity-80 ${metrics?.needsActionCount ? 'bg-amber-50 border-amber-200/40' : 'bg-surface-container-low border-outline-variant/10'}`}
+                onClick={() => navigate('/ledger?needs_action=true')}
+              >
+                <p className="text-label-caps font-label-caps text-on-surface-variant mb-1">NEEDS ACTION</p>
+                <div className="flex items-end justify-between">
+                  <span className={`text-headline-lg-mobile font-headline-lg-mobile ${metrics?.needsActionCount ? 'text-amber-700' : 'text-on-surface'}`}>{metrics?.needsActionCount || 0}</span>
+                  <span className={`material-symbols-outlined ${metrics?.needsActionCount ? 'text-amber-500' : 'text-on-surface-variant/40'}`}>link_off</span>
+                </div>
+              </div>
+            )}
+            {!metrics?.isScoped && (
+              <div
+                className={`p-4 rounded-xl shadow-card border cursor-pointer transition-opacity hover:opacity-80 ${metrics?.flaggedCount ? 'bg-error-container border-error/10' : 'bg-surface-container-low border-outline-variant/10 opacity-60'}`}
                 onClick={() => navigate('/ledger?flagged=true')}
               >
                 <p className="text-label-caps font-label-caps text-on-surface-variant mb-1">FLAGGED</p>
                 <div className="flex items-end justify-between">
                   <span className={`text-headline-lg-mobile font-headline-lg-mobile ${metrics?.flaggedCount ? 'text-on-error-container' : 'text-on-surface'}`}>{metrics?.flaggedCount || 0}</span>
-                  <span className="material-symbols-outlined text-error" style={{ fontVariationSettings: "'FILL' 1" }}>flag</span>
+                  <span className={`material-symbols-outlined ${metrics?.flaggedCount ? 'text-error' : 'text-on-surface-variant/30'}`} style={{ fontVariationSettings: "'FILL' 1" }}>flag</span>
                 </div>
               </div>
             )}

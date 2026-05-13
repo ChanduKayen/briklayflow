@@ -440,6 +440,8 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['po_linked_txns', poId] });
       qc.invalidateQueries({ queryKey: ['po_detail', poId] });
+      qc.invalidateQueries({ queryKey: ['po_payment_totals'] });
+      qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
       setShowRecordPayment(false);
       setPayAmount('');
       setPayRef('');

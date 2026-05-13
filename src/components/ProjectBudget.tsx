@@ -122,10 +122,9 @@ export function ProjectBudget({ projectId, canEdit }: Props) {
   const spentByCode: Record<string, number>     = {};
   const txnsByCode:  Record<string, string[]>   = {};
   allocations.forEach((alloc: any) => {
-    const code = alloc.transactions?.category;
-    if (!code) return;
+    const code = alloc.transactions?.category || 'Uncategorized';
     spentByCode[code] = (spentByCode[code] || 0) + Number(alloc.allocated_amount);
-    (txnsByCode[code] ??= []).push(alloc.transactions.txn_id);
+    (txnsByCode[code] ??= []).push(alloc.transactions?.txn_id);
   });
 
   // Planned by code
@@ -136,14 +135,14 @@ export function ProjectBudget({ projectId, canEdit }: Props) {
   const allCodes = new Set([...Object.keys(spentByCode), ...Object.keys(plannedByCode)]);
 
   // Active commitments
-  const activeWOs = workOrders.filter(wo => ['Issued', 'Active'].includes(wo.status));
-  const activePOs = purchaseOrders.filter(po => ['Issued', 'Received'].includes(po.status));
+  const activeWOs = workOrders.filter(wo => !['Draft', 'Cancelled', 'Settled'].includes(wo.status));
+  const activePOs = purchaseOrders.filter(po => !['Draft', 'Cancelled', 'Tallied'].includes(po.status));
   const totalCommitted = [...activeWOs, ...activePOs]
     .reduce((s, o) => s + Number(o.order_value || 0), 0);
 
   // Header totals
   const totalPlanned = Object.values(plannedByCode).reduce((s, v) => s + v, 0);
-  const totalSpent   = Object.values(spentByCode).reduce((s, v) => s + v, 0);
+  const totalSpent   = allocations.reduce((s: number, a: any) => s + Number(a.allocated_amount), 0);
   const remaining    = totalPlanned - totalCommitted - totalSpent;
 
   // Progress

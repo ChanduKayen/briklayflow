@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
@@ -19,6 +20,7 @@ export default function Ledger({ session }: { session: Session }) {
 
   type DatePreset = 'today' | 'week' | 'month' | 'last_month' | 'quarter' | 'fy' | 'all' | 'custom';
   const [filterFlagged, setFilterFlagged] = useState(() => searchParams.get('flagged') === 'true');
+  const [filterNeedsAction, setFilterNeedsAction] = useState(() => searchParams.get('needs_action') === 'true');
   const [searchTerm, setSearchTerm] = useState('');
   const [sortKey, setSortKey] = useState<'txn_id' | 'date' | 'type' | 'stakeholder' | 'project' | 'category' | 'payment_mode' | 'total_amount' | 'status'>('date');
   const [sortAsc, setSortAsc] = useState<boolean>(false);
@@ -28,6 +30,7 @@ export default function Ledger({ session }: { session: Session }) {
   const [filterProject, setFilterProject] = useState<string[]>([]);
   const [filterType, setFilterType] = useState<string[]>([]);
   const [activeFilterDropdown, setActiveFilterDropdown] = useState<string | null>(null);
+  const [chipDropPos, setChipDropPos] = useState<{ top: number; left: number } | null>(null);
   const [datePreset, setDatePreset] = useState<DatePreset>('month');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
@@ -51,7 +54,7 @@ export default function Ledger({ session }: { session: Session }) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('transactions')
-        .select('*, stakeholders(name, type, category), txn_allocations(project_id, allocated_amount, projects(name))')
+        .select('*, stakeholders(name, type, category), txn_allocations(project_id, allocated_amount, order_type, order_ref, projects(name))')
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data;
@@ -85,12 +88,24 @@ export default function Ledger({ session }: { session: Session }) {
   });
 
   const filterBarRef = useRef<HTMLDivElement>(null);
+  const chipDropRef  = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     const h = (e: MouseEvent) => {
-      if (filterBarRef.current && !filterBarRef.current.contains(e.target as Node)) setActiveFilterDropdown(null);
+      const t = e.target as Node;
+      if (
+        (filterBarRef.current && !filterBarRef.current.contains(t)) &&
+        (!chipDropRef.current || !chipDropRef.current.contains(t))
+      ) setActiveFilterDropdown(null);
     };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
+  }, []);
+
+  useEffect(() => {
+    const h = () => setActiveFilterDropdown(null);
+    window.addEventListener('scroll', h, true);
+    return () => window.removeEventListener('scroll', h, true);
   }, []);
 
   const dateDropdownRef = useRef<HTMLDivElement>(null);
@@ -115,9 +130,21 @@ export default function Ledger({ session }: { session: Session }) {
   useEffect(() => {
     setSelectedTxnIds(new Set());
     setVisibleCount(PAGE_SIZE);
-  }, [searchTerm, filterStakeholder, filterCategory, filterStatus, filterProject, filterType, datePreset, customFrom, customTo, filterFlagged]);
+  }, [searchTerm, filterStakeholder, filterCategory, filterStatus, filterProject, filterType, datePreset, customFrom, customTo, filterFlagged, filterNeedsAction]);
 
   const MATERIAL_CATEGORIES_LEGACY = ['Material Supply', 'PO Advance', 'PO Settlement', 'Transport & Handling'];
+
+  const getNeedsAction = (txn: any): 'link_wo' | 'link_po' | false => {
+    if (txn.status === 'Voided') return false;
+    const stkType = txn.stakeholders?.type;
+    if (stkType !== 'Worker' && stkType !== 'Vendor') return false;
+    const allocs = txn.txn_allocations || [];
+    if (allocs.length === 0) return false;
+    const hasUnlinked = allocs.some((a: any) => !a.order_type);
+    if (!hasUnlinked) return false;
+    return stkType === 'Worker' ? 'link_wo' : 'link_po';
+  };
+
   const getTxnType = (txn: any): string => {
     if (txn.stakeholders?.type === 'Worker') return 'Worker Payment';
     if (txn.stakeholders?.type === 'Vendor') {
@@ -172,6 +199,7 @@ export default function Ledger({ session }: { session: Session }) {
     const matchesCategory = filterCategory.length ? filterCategory.includes(txn.category || '') : true;
     const matchesStatus = filterStatus.length ? filterStatus.includes(txn.status || '') : true;
     const matchesFlagged = filterFlagged ? txn.ai_flag_status === 'Flagged' : true;
+    const matchesNeedsAction = filterNeedsAction ? !!getNeedsAction(txn) : true;
     const matchesType = filterType.length ? filterType.includes(getTxnType(txn)) : true;
     const matchesDate = (() => {
       const { from, to } = activeDateRange;
@@ -179,7 +207,7 @@ export default function Ledger({ session }: { session: Session }) {
       const d = new Date(txn.date); d.setHours(0, 0, 0, 0);
       return d >= from && d <= to;
     })();
-    return matchesSearch && matchesStakeholder && matchesCategory && matchesStatus && matchesFlagged && matchesType && matchesDate;
+    return matchesSearch && matchesStakeholder && matchesCategory && matchesStatus && matchesFlagged && matchesNeedsAction && matchesType && matchesDate;
   });
 
   const expandedRows: ExpandedRow[] = filteredTransactions.flatMap(txn => {
@@ -235,13 +263,13 @@ export default function Ledger({ session }: { session: Session }) {
   const uniqueTypes = ['Worker Payment', 'Material Purchase', 'General Expense'];
 
 
-  const hasAnyFilter = filterFlagged || filterStakeholder.length > 0 || filterCategory.length > 0
+  const hasAnyFilter = filterFlagged || filterNeedsAction || filterStakeholder.length > 0 || filterCategory.length > 0
     || filterStatus.length > 0 || filterProject.length > 0 || filterType.length > 0
     || datePreset !== 'month' || searchTerm !== '';
 
   const clearAllFilters = () => {
     setDatePreset('month'); setCustomFrom(''); setCustomTo('');
-    setFilterFlagged(false); setFilterStakeholder([]); setFilterCategory([]);
+    setFilterFlagged(false); setFilterNeedsAction(false); setFilterStakeholder([]); setFilterCategory([]);
     setFilterStatus([]); setFilterProject([]); setFilterType([]); setSearchTerm('');
   };
 
@@ -258,9 +286,15 @@ export default function Ledger({ session }: { session: Session }) {
       : currentFilter.length > 1 ? `${label}: ${currentFilter.length}`
       : label;
     return (
-      <div className="relative">
+      <div>
         <button
-          onClick={() => setActiveFilterDropdown(isOpen ? null : filterKey)}
+          onClick={(e) => {
+            if (!isOpen) {
+              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+              setChipDropPos({ top: rect.bottom + 6, left: rect.left });
+            }
+            setActiveFilterDropdown(isOpen ? null : filterKey);
+          }}
           className={`flex items-center gap-1 h-8 px-3 rounded-full text-[12px] font-medium border transition-all whitespace-nowrap ${
             isActive ? 'border-primary/30 bg-primary/5 text-primary' : 'border-outline-variant/25 bg-white text-on-surface-variant/70 hover:border-outline-variant/50'
           }`}
@@ -274,15 +308,20 @@ export default function Ledger({ session }: { session: Session }) {
             <span className="material-symbols-outlined text-[13px]">expand_more</span>
           )}
         </button>
-        {isOpen && (
-          <div className="absolute top-full left-0 mt-1.5 w-52 bg-white border border-black/[0.08] rounded-xl shadow-lg z-50 overflow-hidden">
+        {isOpen && chipDropPos && createPortal(
+          <div
+            ref={chipDropRef}
+            className="w-52 bg-white border border-black/[0.08] rounded-xl shadow-lg overflow-hidden"
+            style={{ position: 'fixed', top: chipDropPos.top, left: chipDropPos.left, zIndex: 9999 }}
+          >
             <div className="px-3 py-2 border-b border-black/[0.05] flex gap-3">
               <button className="text-[11px] font-semibold text-primary" onClick={() => setFilter([...options])}>Select all</button>
               <button className="text-[11px] font-semibold text-on-surface-variant/50" onClick={() => setFilter([])}>Clear</button>
             </div>
             <div className="py-1 max-h-52 overflow-y-auto">
               {options.map(opt => (
-                <label key={opt} className="flex items-center gap-2.5 px-3 py-2 hover:bg-surface-container-low/50 cursor-pointer">
+                <label key={opt} className="flex items-center gap-2.5 px-3 py-2 hover:bg-surface-container-low/50 cursor-pointer"
+                  onClick={() => setFilter(currentFilter.includes(opt) ? currentFilter.filter(v => v !== opt) : [...currentFilter, opt])}>
                   <div className={`w-4 h-4 rounded-[4px] border-2 flex items-center justify-center transition-colors flex-shrink-0 ${currentFilter.includes(opt) ? 'bg-primary border-primary' : 'border-outline-variant/40'}`}>
                     {currentFilter.includes(opt) && <span className="material-symbols-outlined text-[10px] text-on-primary" style={{ fontVariationSettings: "'FILL' 1, 'wght' 700" }}>check</span>}
                   </div>
@@ -290,7 +329,8 @@ export default function Ledger({ session }: { session: Session }) {
                 </label>
               ))}
             </div>
-          </div>
+          </div>,
+          document.body
         )}
       </div>
     );
@@ -357,14 +397,23 @@ export default function Ledger({ session }: { session: Session }) {
       'Voided':  'bg-slate-100 text-slate-400',
       'Amended': 'bg-purple-50 text-purple-600',
     };
-    const flagged = txn.ai_flag_status === 'Flagged' && s !== 'Voided';
+    const needsAction = getNeedsAction(txn);
+    const isManualFlagged = txn.ai_flag_status === 'Flagged' && s !== 'Voided';
     return (
-      <div className="flex items-center gap-1.5 flex-wrap">
-        {flagged && (
-          <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-600">
-            <span className="material-symbols-outlined text-[11px]" style={{ fontVariationSettings: "'FILL' 1" }}>flag</span>
-            Flagged
-          </span>
+      <div className="flex items-center gap-1">
+        {needsAction && (
+          <span
+            className="material-symbols-outlined text-[13px] text-amber-400 cursor-pointer hover:text-amber-600 transition-colors shrink-0"
+            title={needsAction === 'link_wo' ? 'Unlinked — tap to map' : 'Unlinked — tap to map'}
+            onClick={e => { e.stopPropagation(); navigate(`/ledger/${txn.txn_id}`); }}
+          >link_off</span>
+        )}
+        {isManualFlagged && (
+          <span
+            className="material-symbols-outlined text-[12px] text-red-400 shrink-0"
+            title="Flagged for review"
+            style={{ fontVariationSettings: "'FILL' 1" }}
+          >flag</span>
         )}
         <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap ${cls[s] || 'bg-surface-container-high text-on-surface'}`}>{s}</span>
       </div>
@@ -470,49 +519,69 @@ export default function Ledger({ session }: { session: Session }) {
           {/* Project chip */}
           {renderFilterChip('project', 'Project', uniqueProjects, filterProject, setFilterProject)}
 
-          {/* Status chip — merges filterStatus + filterFlagged */}
+          {/* Status chip — merges filterStatus + filterFlagged + filterNeedsAction */}
           {(() => {
-            const isStatusActive = filterStatus.length > 0 || filterFlagged;
+            const isStatusActive = filterStatus.length > 0 || filterFlagged || filterNeedsAction;
             const isOpen = activeFilterDropdown === 'status';
-            const activeCount = filterStatus.length + (filterFlagged ? 1 : 0);
+            const activeCount = filterStatus.length + (filterFlagged ? 1 : 0) + (filterNeedsAction ? 1 : 0);
             const displayLabel = activeCount === 0 ? 'Status'
-              : activeCount === 1 ? (filterFlagged && filterStatus.length === 0 ? 'Flagged' : filterStatus[0])
+              : activeCount === 1
+                ? (filterNeedsAction && !filterFlagged && filterStatus.length === 0 ? 'Needs Action'
+                  : filterFlagged && !filterNeedsAction && filterStatus.length === 0 ? 'Flagged'
+                  : filterStatus[0])
               : `Status: ${activeCount}`;
             return (
-              <div className="relative">
-                <button onClick={() => setActiveFilterDropdown(isOpen ? null : 'status')}
+              <div>
+                <button
+                  onClick={(e) => {
+                    if (!isOpen) {
+                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                      setChipDropPos({ top: rect.bottom + 6, left: rect.left });
+                    }
+                    setActiveFilterDropdown(isOpen ? null : 'status');
+                  }}
                   className={`flex items-center gap-1 h-8 px-3 rounded-full text-[12px] font-medium border transition-all whitespace-nowrap ${
                     isStatusActive ? 'border-primary/30 bg-primary/5 text-primary' : 'border-outline-variant/25 bg-white text-on-surface-variant/70 hover:border-outline-variant/50'
                   }`}>
                   <span className="truncate max-w-[140px]">{displayLabel}</span>
                   {isStatusActive ? (
-                    <span className="hover:opacity-60 flex items-center ml-0.5" onClick={(e) => { e.stopPropagation(); setFilterStatus([]); setFilterFlagged(false); }}>
+                    <span className="hover:opacity-60 flex items-center ml-0.5" onClick={(e) => { e.stopPropagation(); setFilterStatus([]); setFilterFlagged(false); setFilterNeedsAction(false); }}>
                       <span className="material-symbols-outlined text-[13px]">close</span>
                     </span>
                   ) : (
                     <span className="material-symbols-outlined text-[13px]">expand_more</span>
                   )}
                 </button>
-                {isOpen && (
-                  <div className="absolute top-full left-0 mt-1.5 w-44 bg-white border border-black/[0.08] rounded-xl shadow-lg z-50 overflow-hidden">
+                {isOpen && chipDropPos && createPortal(
+                  <div
+                    ref={chipDropRef}
+                    className="w-48 bg-white border border-black/[0.08] rounded-xl shadow-lg overflow-hidden"
+                    style={{ position: 'fixed', top: chipDropPos.top, left: chipDropPos.left, zIndex: 9999 }}
+                  >
                     <div className="px-3 py-2 border-b border-black/[0.05] flex gap-3">
-                      <button className="text-[11px] font-semibold text-primary" onClick={() => { setFilterStatus(['Active', 'Voided', 'Amended']); setFilterFlagged(true); }}>All</button>
-                      <button className="text-[11px] font-semibold text-on-surface-variant/50" onClick={() => { setFilterStatus([]); setFilterFlagged(false); }}>Clear</button>
+                      <button className="text-[11px] font-semibold text-primary" onClick={() => { setFilterStatus(['Active', 'Voided', 'Amended']); setFilterFlagged(true); setFilterNeedsAction(true); }}>All</button>
+                      <button className="text-[11px] font-semibold text-on-surface-variant/50" onClick={() => { setFilterStatus([]); setFilterFlagged(false); setFilterNeedsAction(false); }}>Clear</button>
                     </div>
                     <div className="py-1">
-                      {(['Active', 'Flagged', 'Voided', 'Amended'] as string[]).map(opt => {
-                        const isChecked = opt === 'Flagged' ? filterFlagged : filterStatus.includes(opt);
+                      {(['Active', 'Needs Action', 'Flagged', 'Amended', 'Voided'] as string[]).map(opt => {
+                        const isChecked = opt === 'Flagged' ? filterFlagged : opt === 'Needs Action' ? filterNeedsAction : filterStatus.includes(opt);
                         return (
-                          <label key={opt} className="flex items-center gap-2.5 px-3 py-2 hover:bg-surface-container-low/50 cursor-pointer">
+                          <label key={opt} className="flex items-center gap-2.5 px-3 py-2 hover:bg-surface-container-low/50 cursor-pointer"
+                            onClick={() => {
+                              if (opt === 'Flagged') { setFilterFlagged(!filterFlagged); }
+                              else if (opt === 'Needs Action') { setFilterNeedsAction(!filterNeedsAction); }
+                              else { setFilterStatus(filterStatus.includes(opt) ? filterStatus.filter(s => s !== opt) : [...filterStatus, opt]); }
+                            }}>
                             <div className={`w-4 h-4 rounded-[4px] border-2 flex items-center justify-center transition-colors flex-shrink-0 ${isChecked ? 'bg-primary border-primary' : 'border-outline-variant/40'}`}>
                               {isChecked && <span className="material-symbols-outlined text-[10px] text-on-primary" style={{ fontVariationSettings: "'FILL' 1, 'wght' 700" }}>check</span>}
                             </div>
-                            <span className="text-[13px] text-on-surface select-none">{opt}</span>
+                            <span className={`text-[13px] select-none ${opt === 'Needs Action' ? 'text-amber-600' : opt === 'Flagged' ? 'text-red-600' : 'text-on-surface'}`}>{opt}</span>
                           </label>
                         );
                       })}
                     </div>
-                  </div>
+                  </div>,
+                  document.body
                 )}
               </div>
             );
@@ -592,8 +661,11 @@ export default function Ledger({ session }: { session: Session }) {
                           )}
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
+                          {getNeedsAction(txn) && (
+                            <span className="material-symbols-outlined text-amber-400 text-[13px]">link_off</span>
+                          )}
                           {txn.ai_flag_status === 'Flagged' && (
-                            <span className="material-symbols-outlined text-error text-[14px]" style={{ fontVariationSettings: "'FILL' 1" }}>flag</span>
+                            <span className="material-symbols-outlined text-red-400 text-[13px]" style={{ fontVariationSettings: "'FILL' 1" }}>flag</span>
                           )}
                           <span className="text-[15px] font-bold font-data-mono text-on-surface">
                             ₹{Number(txn.total_amount).toLocaleString('en-IN')}

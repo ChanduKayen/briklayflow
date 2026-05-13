@@ -15,6 +15,7 @@ function genTxnId() {
 }
 
 type Confidence = 'HIGH' | 'MEDIUM' | 'LOW' | null;
+type PayeeState = 'A' | 'B' | 'C' | 'confirmed';
 
 function ConfBadge({ c, label }: { c: Confidence; label?: string }) {
   if (!c) return <span className="text-[11px] text-red-500 font-semibold">✗ {label || 'Required'}</span>;
@@ -41,6 +42,68 @@ function FieldRow({
       </div>
       <div className="flex-1 min-w-0">{children}</div>
     </div>
+  );
+}
+
+// ── Cost code suggestion ──────────────────────────────────────────────────────
+
+function suggestCostCode(extracted: any): { code: string; name: string } | null {
+  const desc = (extracted?.description_raw || extracted?.category_name || '').toLowerCase();
+  const type = extracted?.transaction_type || '';
+
+  if (type === 'Worker Payment') {
+    if (/plaster|plastering/i.test(desc)) return { code: 'WRK-06-01', name: 'Internal wall plastering' };
+    if (/tile|tiling|floor/i.test(desc))  return { code: 'WRK-07-01', name: 'Ceramic and vitrified tile laying' };
+    if (/electr|wiring|wire/i.test(desc)) return { code: 'WRK-15-01', name: 'Conduit laying (concealed)' };
+    if (/plumb|pipe/i.test(desc))         return { code: 'WRK-13-01', name: 'Water supply rough-in' };
+    if (/paint/i.test(desc))              return { code: 'WRK-10-01', name: 'Interior wall and ceiling painting' };
+    if (/mason|brick|block/i.test(desc))  return { code: 'WRK-04-01', name: 'Brick masonry' };
+    if (/carpenter|wood|door/i.test(desc))return { code: 'WRK-11-02', name: 'Finished carpentry' };
+    if (/steel|rod|bar|rebar/i.test(desc))return { code: 'WRK-03-01', name: 'Reinforcement bar bending' };
+    if (/concrete|slab|column|beam/i.test(desc)) return { code: 'WRK-03-04', name: 'RMC placement and compaction' };
+    if (/false ceil|ceiling/i.test(desc)) return { code: 'WRK-08-01', name: 'Gypsum board false ceiling' };
+    return { code: 'WRK-22-01', name: 'Site labour (general)' };
+  }
+  if (type === 'Material Purchase') {
+    if (/cement/i.test(desc))             return { code: 'MAT-04-01', name: 'OPC/PPC cement' };
+    if (/sand/i.test(desc))               return { code: 'MAT-05-01', name: 'River sand / M-sand' };
+    if (/aggregate|jelly|gravel/i.test(desc)) return { code: 'MAT-05-02', name: 'Coarse aggregate' };
+    if (/steel|tmt|rod|bar/i.test(desc))  return { code: 'MAT-06-01', name: 'TMT steel bars' };
+    if (/tile/i.test(desc))               return { code: 'MAT-09-02', name: 'Vitrified tiles' };
+    if (/paint/i.test(desc))              return { code: 'MAT-11-01', name: 'Interior emulsion paint' };
+    if (/wire|cable|conduit/i.test(desc)) return { code: 'MAT-16-01', name: 'Cables and wires' };
+    if (/pipe|plumb/i.test(desc))         return { code: 'MAT-14-01', name: 'CPVC/UPVC pipes' };
+    if (/brick|block/i.test(desc))        return { code: 'MAT-05-04', name: 'Red clay bricks' };
+    if (/marble/i.test(desc))             return { code: 'MAT-09-04', name: 'Marble slabs and tiles' };
+    if (/granite/i.test(desc))            return { code: 'MAT-09-05', name: 'Granite slabs and tiles' };
+    return null;
+  }
+  if (type === 'General Expense') {
+    if (/diesel|fuel/i.test(desc))           return { code: 'WRK-22-07', name: 'Diesel and fuel for equipment' };
+    if (/transport|lorry|vehicle/i.test(desc)) return { code: 'OHD-005', name: 'Transport and logistics' };
+    if (/tool/i.test(desc))                  return { code: 'MAT-23-01', name: 'Hand tools' };
+    return { code: 'OHD-003', name: 'Site utilities' };
+  }
+  return null;
+}
+
+// ── Payee fuzzy sort ──────────────────────────────────────────────────────────
+
+function payeeSimilarityScore(name: string, q: string): number {
+  if (!q) return 0;
+  const n  = name.toLowerCase();
+  const qL = q.toLowerCase();
+  if (n === qL) return 100;
+  if (n.includes(qL) || qL.includes(n.split(' ')[0])) return 80;
+  if (n.split(' ')[0] === qL.split(' ')[0]) return 60;
+  const overlap = [...qL].filter((c) => n.includes(c)).length;
+  return Math.round((overlap / Math.max(qL.length, 1)) * 40);
+}
+
+function sortByPayeeSimilarity(list: any[], rawName: string): any[] {
+  if (!rawName) return list;
+  return [...list].sort(
+    (a, b) => payeeSimilarityScore(b.name, rawName) - payeeSimilarityScore(a.name, rawName),
   );
 }
 
@@ -150,19 +213,16 @@ export function ResolvePopup({ entry, onClose, onUpdated, session }: Props) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { show: showSnackbar } = useSnackbar();
-  useUserProfile(session.user.id); // keeps the cache warm for other callers
+  useUserProfile(session.user.id);
 
   const ai = entry.ai_extracted;
 
   // ── Field state ────────────────────────────────────────────────────────────
-  // sender_name is the WhatsApp sender / logged-in user — NOT the payee.
-  // Payee init reads only ai_extracted.payee_id / payee_name / payee_raw.
   const [payeeId, setPayeeId] = useState(ai.payee_id || '');
   const [payeeName, setPayeeName] = useState(ai.payee_name || '');
   const [payeeSearch, setPayeeSearch] = useState(ai.payee_name || ai.payee_raw || '');
   const [showPayeeDrop, setShowPayeeDrop] = useState(false);
   const [amount, setAmount] = useState<number | ''>(ai.amount ?? '');
-  // description_raw comes from new WhatsApp extraction; description from ai-extract-entry
   const [description, setDescription] = useState(ai.description || ai.description_raw || '');
   const [projectId, setProjectId] = useState(ai.project_id || '');
   const [mode, setMode] = useState<'Cash' | 'NEFT' | 'UPI' | 'Cheque'>(ai.mode || 'Cash');
@@ -233,10 +293,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, session }: Props) {
     enabled: !!projectId,
   });
 
-  // ── Sync payee selection after stakeholders load ───────────────────────────
-  // stakeholders is fetched async; payeeId from ai.payee_id is set at mount.
-  // Without this effect, displayPayee falls back to payeeSearch (raw text)
-  // until the user interacts. This effect runs once when the list arrives.
+  // ── Sync payee after stakeholders load ─────────────────────────────────────
   const hasPreselected = useRef(false);
   useEffect(() => {
     if (hasPreselected.current || !stakeholders.length || !ai.payee_id) return;
@@ -274,9 +331,6 @@ export function ResolvePopup({ entry, onClose, onUpdated, session }: Props) {
   const missingAmount = !amount || Number(amount) <= 0;
   const missingDescription = !description.trim();
   const missingProject = !projectId;
-  // Amber state: AI/session extracted a name but couldn't match a stakeholder ID.
-  // Covers both ai.payee_unmatched (session-reply path) and the WhatsApp extraction
-  // path where payee_name / payee_raw exist but payee_id was never resolved.
   const payeeUnmatched = !payeeId && !!(ai.payee_unmatched || ai.payee_name || ai.payee_raw);
   const projectUnmatched = !projectId && !!ai.project_unmatched;
 
@@ -467,7 +521,7 @@ interface ContentProps {
 function PopupContents({
   entry, sm, fmtTime,
   payeeId, payeeName, payeeSearch, setPayeeId, setPayeeName, setPayeeSearch,
-  showPayeeDrop, setShowPayeeDrop, stakeholders, filteredPayees,
+  showPayeeDrop, setShowPayeeDrop, stakeholders,
   amount, setAmount,
   description, setDescription,
   projectId, setProjectId, projectRef, projects,
@@ -483,26 +537,34 @@ function PopupContents({
   showDismissConfirm, setShowDismissConfirm,
   onClose, handlePost, handleDismiss,
 }: ContentProps) {
-  const payeeDropRef = useRef<HTMLDivElement>(null);
+  const payeeDropRef    = useRef<HTMLDivElement>(null);
   const [showCreateStkForm, setShowCreateStkForm] = useState(false);
-  const [showChangePicker, setShowChangePicker] = useState(false);
-
-  const selectPayee = (id: string, name: string) => {
-    setPayeeId(id);
-    setPayeeName(name);
-    setPayeeSearch(name);
-    setShowPayeeDrop(false);
-    setShowChangePicker(false);
-    setShowCreateStkForm(false);
-  };
 
   const ai = entry.ai_extracted;
-  // Resolve confidence values: prefer flat fields, fall back to nested
-  const payeeConf = ai.payee_confidence ?? ai.confidence?.payee ?? null;
+
+  // Confidence values
+  const payeeConf  = ai.payee_confidence  ?? ai.confidence?.payee  ?? null;
   const amountConf = ai.amount_confidence ?? ai.confidence?.amount ?? null;
-  const descConf = ai.description_confidence ?? ai.confidence?.description ?? null;
-  const projConf = ai.project_confidence ?? ai.confidence?.project ?? null;
+  const descConf   = ai.description_confidence ?? ai.confidence?.description ?? null;
+  const projConf   = ai.project_confidence ?? ai.confidence?.project ?? null;
   const overallConf = ai.overall_confidence ?? ai.confidence?.overall ?? null;
+
+  // ── Payee state machine ────────────────────────────────────────────────────
+  // A = confirmed HIGH (auto-accepted)
+  // B = matched but LOW confidence → show confirmation prompt
+  // C = not matched / user searching
+  // confirmed = user explicitly chose from B or C
+  const [payeeState, setPayeeState] = useState<PayeeState>(() => {
+    if (!ai.payee_id) return 'C';
+    if (ai.payee_matched === true && ai.payee_confidence === 'LOW') return 'B';
+    return 'A';
+  });
+
+  // ── Cost code suggestion ───────────────────────────────────────────────────
+  const suggestedCode = suggestCostCode(ai);
+  const [costCodeSuggested, setCostCodeSuggested] = useState(
+    !ai.category_code && !!suggestedCode
+  );
 
   // Confidence banner
   const bannerState = (() => {
@@ -512,6 +574,7 @@ function PopupContents({
     return 'ok' as const;
   })();
 
+  // Close payee dropdown on outside click
   useEffect(() => {
     const h = (e: MouseEvent) => {
       if (payeeDropRef.current && !payeeDropRef.current.contains(e.target as Node)) {
@@ -522,9 +585,20 @@ function PopupContents({
     return () => document.removeEventListener('mousedown', h);
   }, []);
 
-  const displayPayee = payeeId
-    ? filteredPayees.find(s => s.stakeholder_id === payeeId)?.name || payeeSearch
-    : payeeSearch;
+  const selectPayee = (id: string, name: string) => {
+    setPayeeId(id);
+    setPayeeName(name);
+    setPayeeSearch(name);
+    setShowPayeeDrop(false);
+    setPayeeState('confirmed');
+    setShowCreateStkForm(false);
+  };
+
+  // Payee search list: sorted by similarity to ai.payee_raw, filtered by typed text
+  const sortedPayees = sortByPayeeSimilarity(stakeholders, ai.payee_raw || '');
+  const searchedPayees = payeeSearch
+    ? sortedPayees.filter((s: any) => s.name.toLowerCase().includes(payeeSearch.toLowerCase()))
+    : sortedPayees;
 
   return (
     <>
@@ -592,69 +666,147 @@ function PopupContents({
       <div className="flex-1 overflow-y-auto px-4 py-2">
 
         {/* 1. Payee */}
-        <FieldRow icon="person" label="Payee" required missing={missingPayee && !payeeId && !payeeUnmatched}>
+        <FieldRow icon="person" label="Payee" required missing={missingPayee && payeeState !== 'B'}>
 
-          {/* MATCHED: payee resolved, not in change mode */}
-          {payeeId && !showChangePicker ? (
+          {/* STATE A / confirmed — green ✓ */}
+          {(payeeState === 'A' || payeeState === 'confirmed') && (
             <div className="flex items-center justify-between py-0.5">
               <div className="flex items-center gap-2 min-w-0">
-                <span className="material-symbols-outlined text-[16px] text-emerald-600 shrink-0"
-                  style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>
+                <span className="text-emerald-600 text-[15px] font-bold shrink-0">✓</span>
                 <div className="min-w-0">
                   <span className="text-[13px] font-semibold text-on-surface">{payeeName}</span>
                   {(() => {
                     const s = stakeholders.find((x: any) => x.stakeholder_id === payeeId);
-                    return s ? <span className="text-[11px] text-on-surface-variant/50 ml-1.5">· {s.category}</span> : null;
+                    return s?.category
+                      ? <span className="text-[11px] text-on-surface-variant/50 ml-1.5">· {s.category}</span>
+                      : null;
                   })()}
                 </div>
               </div>
               <button type="button"
-                onClick={() => setShowChangePicker(true)}
+                onClick={() => {
+                  setPayeeState('C');
+                  setPayeeId('');
+                  setPayeeName('');
+                  setPayeeSearch(ai.payee_raw || '');
+                  setTimeout(() => setShowPayeeDrop(true), 50);
+                }}
                 className="text-[11px] text-primary hover:underline shrink-0 ml-2">
                 change
               </button>
             </div>
+          )}
 
-          ) : showChangePicker || payeeUnmatched ? (
-            /* UNMATCHED / CHANGE PICKER */
-            <div className={`mt-1 p-2.5 rounded-xl border ${
-              showChangePicker
-                ? 'bg-surface-container/40 border-outline-variant/20'
-                : 'bg-amber-50 border-amber-200'
-            }`}>
-              {!showChangePicker && (
-                <p className="text-[11px] text-amber-700 font-medium mb-2 flex items-center gap-1">
+          {/* STATE B — amber ⚠ confirm */}
+          {payeeState === 'B' && (
+            <div className="mt-1 p-2.5 bg-amber-50 border border-amber-200 rounded-xl">
+              <p className="text-[11px] font-semibold text-amber-700 flex items-center gap-1 mb-2">
+                <span className="text-[13px]">⚠</span> Confirm match
+              </p>
+              <p className="text-[12px] text-on-surface-variant/80 mb-2.5">
+                AI matched{' '}
+                <span className="font-semibold text-on-surface">"{ai.payee_raw}"</span>
+                {' → '}
+                <span className="font-semibold text-on-surface">{payeeName}</span>
+                {(() => {
+                  const s = stakeholders.find((x: any) => x.stakeholder_id === payeeId);
+                  return s?.category
+                    ? <span className="text-on-surface-variant/50"> · {s.category}</span>
+                    : null;
+                })()}
+              </p>
+              <div className="flex gap-2">
+                <button type="button"
+                  onClick={() => setPayeeState('A')}
+                  className="flex-1 py-1.5 rounded-lg bg-emerald-600 text-white text-[12px] font-semibold hover:bg-emerald-700 transition-colors"
+                >
+                  ✓ Yes, that's right
+                </button>
+                <button type="button"
+                  onClick={() => {
+                    setPayeeId('');
+                    setPayeeName('');
+                    setPayeeSearch(ai.payee_raw || '');
+                    setPayeeState('C');
+                    setTimeout(() => setShowPayeeDrop(true), 50);
+                  }}
+                  className="flex-1 py-1.5 rounded-lg border border-outline-variant/30 text-[12px] font-semibold text-on-surface-variant hover:bg-surface-container transition-colors"
+                >
+                  ✗ No
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* STATE C — search + dropdown */}
+          {payeeState === 'C' && (
+            <>
+              {ai.payee_raw && (ai.payee_unmatched || payeeUnmatched) && (
+                <p className="text-[11px] text-amber-700 font-medium mb-1.5 flex items-center gap-1">
                   <span className="material-symbols-outlined text-[13px]">warning</span>
-                  "<span className="italic">{ai.payee_raw}</span>" not found in stakeholders
+                  "{ai.payee_raw}" not found — search or add below
                 </p>
               )}
-              {(ai.payee_closest_match?.length ?? 0) > 0 && !showCreateStkForm && (
-                <div className="space-y-1 mb-2">
-                  <p className="text-[10px] text-on-surface-variant/40 uppercase tracking-wide font-semibold mb-1">
-                    {showChangePicker ? 'Select stakeholder' : 'Did you mean?'}
-                  </p>
-                  {ai.payee_closest_match!.map(m => (
-                    <div key={m.id}
-                      onClick={() => selectPayee(m.id, m.name)}
-                      className="flex items-center justify-between px-2.5 py-2 rounded-lg bg-white border border-outline-variant/15 hover:border-emerald-300 hover:bg-emerald-50/30 cursor-pointer transition-colors"
-                    >
-                      <div>
-                        <span className="text-[13px] font-semibold text-on-surface">{m.name}</span>
-                        <span className="text-[11px] text-on-surface-variant/50 ml-1.5">· {m.type} · {m.category}</span>
-                      </div>
-                      <span className="material-symbols-outlined text-[16px] text-on-surface-variant/25">check</span>
-                    </div>
-                  ))}
+              <div className="relative" ref={payeeDropRef}>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={payeeSearch}
+                    onChange={(e) => {
+                      setPayeeSearch(e.target.value);
+                      if (payeeId) { setPayeeId(''); setPayeeName(''); }
+                      setShowPayeeDrop(true);
+                    }}
+                    onFocus={() => setShowPayeeDrop(true)}
+                    placeholder="Search name…"
+                    className={`w-full text-[13px] px-2.5 py-1.5 pr-8 rounded-lg border outline-none transition-colors ${
+                      missingPayee
+                        ? 'border-red-300 bg-red-50'
+                        : 'border-outline-variant/30 bg-surface-container-lowest/60'
+                    }`}
+                    autoComplete="off"
+                  />
+                  <span className="material-symbols-outlined absolute right-2 top-1/2 -translate-y-1/2 text-[15px] text-on-surface-variant/30 pointer-events-none">
+                    search
+                  </span>
                 </div>
-              )}
-              {!showCreateStkForm && (
-                <button type="button"
-                  onClick={() => setShowCreateStkForm(true)}
-                  className="text-[12px] text-primary font-semibold hover:underline flex items-center gap-1">
-                  <span className="material-symbols-outlined text-[14px]">add_circle</span>
-                  Add new stakeholder
-                </button>
-              )}
+
+                {showPayeeDrop && (
+                  <div className="absolute left-0 right-0 top-full mt-1 z-10 bg-white border border-black/[0.08] rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                    {searchedPayees.slice(0, 8).map((s: any) => {
+                      const score = payeeSimilarityScore(s.name, ai.payee_raw || '');
+                      const showHint = ai.payee_raw && score > 30 && s.name.toLowerCase() !== (ai.payee_raw || '').toLowerCase();
+                      return (
+                        <button key={s.stakeholder_id} type="button"
+                          onClick={() => selectPayee(s.stakeholder_id, s.name)}
+                          className="w-full flex items-start gap-2.5 px-3 py-2 hover:bg-surface-container-low text-left border-b border-outline-variant/[0.06] last:border-0"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[13px] font-semibold text-on-surface">{s.name}</p>
+                            <p className="text-[11px] text-on-surface-variant/50">
+                              {s.type} · {s.category}
+                              {showHint && (
+                                <span className="text-on-surface-variant/35 ml-1">· matched '{ai.payee_raw}'</span>
+                              )}
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                    {searchedPayees.length === 0 && (
+                      <p className="px-3 py-3 text-[12px] text-on-surface-variant/50 text-center">No matches</p>
+                    )}
+                    <button type="button"
+                      onClick={() => { setShowPayeeDrop(false); setShowCreateStkForm(true); }}
+                      className="w-full flex items-center gap-1.5 px-3 py-2.5 text-[12px] text-primary font-semibold hover:bg-primary/[0.04] border-t border-outline-variant/[0.06]"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">add_circle</span>
+                      Add new stakeholder
+                    </button>
+                  </div>
+                )}
+              </div>
+
               {showCreateStkForm && (
                 <CreateStakeholderForm
                   defaultName={ai.payee_raw || payeeSearch}
@@ -662,47 +814,7 @@ function PopupContents({
                   onCancel={() => setShowCreateStkForm(false)}
                 />
               )}
-            </div>
-
-          ) : (
-            /* EMPTY: no AI-extracted payee — text search */
-            <div className="relative" ref={payeeDropRef}>
-              <input
-                type="text"
-                value={displayPayee}
-                onChange={(e) => {
-                  setPayeeSearch(e.target.value);
-                  if (payeeId) { setPayeeId(''); setPayeeName(''); }
-                  setShowPayeeDrop(true);
-                }}
-                onFocus={() => setShowPayeeDrop(true)}
-                placeholder="Search stakeholder…"
-                className={`w-full text-[13px] px-2.5 py-1.5 rounded-lg border outline-none transition-colors ${
-                  missingPayee
-                    ? 'border-red-300 bg-red-50'
-                    : 'border-outline-variant/30 bg-surface-container-lowest/60'
-                }`}
-                autoComplete="off"
-              />
-              {showPayeeDrop && (
-                <div className="absolute left-0 right-0 top-full mt-1 z-10 bg-white border border-black/[0.08] rounded-xl shadow-lg max-h-48 overflow-y-auto">
-                  {filteredPayees.slice(0, 10).map((s) => (
-                    <button key={s.stakeholder_id} type="button"
-                      onClick={() => selectPayee(s.stakeholder_id, s.name)}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-surface-container-low text-left border-b border-outline-variant/[0.06] last:border-0"
-                    >
-                      <div>
-                        <p className="text-[13px] font-semibold text-on-surface">{s.name}</p>
-                        <p className="text-[11px] text-on-surface-variant/50">{s.type} · {s.category}</p>
-                      </div>
-                    </button>
-                  ))}
-                  {filteredPayees.length === 0 && (
-                    <p className="px-3 py-3 text-[12px] text-on-surface-variant/50 text-center">No matches</p>
-                  )}
-                </div>
-              )}
-            </div>
+            </>
           )}
 
           <div className="mt-1">
@@ -772,7 +884,6 @@ function PopupContents({
             ))}
           </select>
 
-          {/* STATE B: project unmatched — show closest matches */}
           {projectUnmatched && !projectId && (ai.project_closest_match?.length ?? 0) > 0 && (
             <div className="mt-2 p-2.5 bg-amber-50 border border-amber-200 rounded-xl">
               <p className="text-[11px] text-amber-700 font-medium mb-2 flex items-center gap-1">
@@ -780,7 +891,7 @@ function PopupContents({
                 "<span className="italic">{ai.project_raw}</span>" didn't match a project
               </p>
               <div className="space-y-1">
-                {ai.project_closest_match!.map(p => (
+                {ai.project_closest_match!.map((p: any) => (
                   <button key={p.id} type="button"
                     onClick={() => setProjectId(p.id)}
                     className="w-full text-left px-2.5 py-1.5 rounded-lg bg-white border border-amber-200 hover:border-amber-400 hover:bg-amber-50/50 transition-colors text-[13px] font-semibold text-on-surface"
@@ -817,9 +928,44 @@ function PopupContents({
           <div className="mt-1"><ConfBadge c="HIGH" /></div>
         </FieldRow>
 
-        {/* 6. Category */}
+        {/* 6. Category / Cost Code */}
         <FieldRow icon="sell" label="Category">
-          <CostCodePicker value={categoryCode} onChange={setCategoryCode} />
+          {costCodeSuggested && suggestedCode ? (
+            /* 💡 Client-side suggestion — needs confirmation */
+            <div className="p-2.5 bg-blue-50/70 border border-blue-200 rounded-xl">
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <span className="text-[13px]">💡</span>
+                <span className="text-[11px] font-semibold text-blue-700">Suggested</span>
+                <span className="text-[10px] text-on-surface-variant/40 ml-1">· based on description</span>
+              </div>
+              <p className="text-[13px] font-semibold text-on-surface font-data-mono">{suggestedCode.code}</p>
+              <p className="text-[12px] text-on-surface-variant/60 mb-2.5">{suggestedCode.name}</p>
+              <div className="flex gap-2">
+                <button type="button"
+                  onClick={() => {
+                    setCategoryCode(suggestedCode.code);
+                    setCostCodeSuggested(false);
+                  }}
+                  className="flex-1 py-1.5 rounded-lg bg-primary text-on-primary text-[12px] font-semibold hover:opacity-90 transition-colors"
+                >
+                  ✓ Use this
+                </button>
+                <button type="button"
+                  onClick={() => setCostCodeSuggested(false)}
+                  className="flex-1 py-1.5 rounded-lg border border-outline-variant/30 text-[12px] font-semibold text-on-surface-variant hover:bg-surface-container transition-colors"
+                >
+                  Pick different
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* CostCodePicker handles both empty and selected-chip display */
+            <CostCodePicker
+              value={categoryCode}
+              onChange={setCategoryCode}
+              defaultType={ai.transaction_type === 'Worker Payment' ? 'WRK' : 'MAT'}
+            />
+          )}
         </FieldRow>
 
         {/* 7. Work Order */}

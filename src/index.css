@@ -33,6 +33,26 @@ html, body {
   }
 }
 
+/* ── Inbox entry bar positioning ── */
+/* Mobile: entry bar sits above the bottom tab bar (56px) */
+@media (max-width: 767px) {
+  .entry-bar {
+    bottom: calc(56px + env(safe-area-inset-bottom));
+  }
+  .inbox-content-pb {
+    padding-bottom: calc(56px + env(safe-area-inset-bottom) + 64px + 16px) !important;
+  }
+}
+/* Desktop: entry bar is at the very bottom */
+@media (min-width: 768px) {
+  .entry-bar {
+    bottom: 0;
+  }
+  .inbox-content-pb {
+    padding-bottom: 80px !important;
+  }
+}
+
 /* ---- Fonts ---- */
 /* Inter, Manrope, Geist are loaded via index.html */
 

@@ -13,6 +13,7 @@ import {
   IconCalendarStats, IconBuilding, IconReceipt, IconUsers, IconWallet,
   IconChartLine, IconListTree, IconShield, IconSettings, IconPlus,
   IconChevronDown, IconLogout, IconDotsVertical, IconMenu2, IconChevronLeft,
+  IconInbox,
 } from '@tabler/icons-react';
 
 import Stakeholders from './pages/Stakeholders';
@@ -38,6 +39,7 @@ import InvoiceDetail from './pages/InvoiceDetail';
 import Billing from './pages/Billing';
 import NewBill from './pages/NewBill';
 import BillDetail from './pages/BillDetail';
+import Inbox from './pages/Inbox';
 
 function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -100,6 +102,7 @@ function App() {
         <MobileTopbar session={session} />
         <Routes>
           <Route path="/" element={<Dashboard session={session} />} />
+          <Route path="/inbox" element={<Inbox session={session} />} />
           <Route path="/ledger" element={<Ledger session={session} />} />
           <Route path="/ledger/new" element={<NewTransaction session={session} />} />
           <Route path="/ledger/:txnId" element={<TransactionDetail session={session} />} />
@@ -222,6 +225,18 @@ function SidebarContent({
     enabled: role !== 'supervisor',
   });
 
+  const { data: inboxBadgeCount = 0 } = useQuery({
+    queryKey: ['inbox_badge'],
+    queryFn: async () => {
+      const { count } = await supabase
+        .from('rough_entries')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'PENDING');
+      return count ?? 0;
+    },
+    staleTime: 30_000,
+  });
+
   // ── Nav groups ───────────────────────────────────────────────────────────
   type NavItem = {
     path: string;
@@ -237,6 +252,7 @@ function SidebarContent({
     {
       label: 'WORK', show: true,
       items: [
+        { path: '/inbox',           icon: IconInbox,           label: 'Inbox',           show: true,                                           color: '#F59E0B', badge: inboxBadgeCount },
         { path: '/',                icon: IconLayoutDashboard, label: 'Dashboard',       show: true,                                           color: '#5B6AF5' },
         { path: '/ledger',          icon: IconArrowsExchange,  label: 'Transactions',    show: role !== 'supervisor',                          color: '#10B981' },
         { path: '/work-orders',     icon: IconFileText,        label: 'Work Orders',     show: true,                                           color: '#F59E0B', badge: woPendingCount },
@@ -494,6 +510,7 @@ function Sidebar({
 function getMobileTitle(pathname: string): string {
   const routes: Record<string, string> = {
     '/':                    'Dashboard',
+    '/inbox':               'Inbox',
     '/ledger':              'Transactions',
     '/ledger/new':          'New Transaction',
     '/projects':            'Projects',
@@ -575,14 +592,24 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
   const moreActive = [
     '/purchase-orders', '/billing', '/stakeholders', '/team', '/settings',
     '/financials', '/invoices', '/fund-register', '/cost-codes', '/attendance',
+    '/work-orders',
   ].some(p => isActive(p));
 
-  type Tab = { path: string; icon: React.ElementType; label: string; show: boolean };
+  const { data: inboxBadge = 0 } = useQuery({
+    queryKey: ['inbox_badge'],
+    queryFn: async () => {
+      const { count } = await supabase.from('rough_entries').select('*', { count: 'exact', head: true }).eq('status', 'PENDING');
+      return count ?? 0;
+    },
+    staleTime: 30_000,
+  });
+
+  type Tab = { path: string; icon: React.ElementType; label: string; show: boolean; badge?: number };
   const tabs: Tab[] = [
-    { path: '/',           icon: IconLayoutDashboard, label: 'Home',     show: true },
-    { path: '/ledger',     icon: IconArrowsExchange,  label: 'Txns',     show: role !== 'supervisor' },
-    { path: '/projects',   icon: IconBuilding,        label: 'Projects', show: true },
-    { path: '/work-orders',icon: IconFileText,         label: 'WOs',      show: true },
+    { path: '/',       icon: IconLayoutDashboard, label: 'Home',     show: true },
+    { path: '/inbox',  icon: IconInbox,           label: 'Inbox',    show: true, badge: inboxBadge },
+    { path: '/ledger', icon: IconArrowsExchange,  label: 'Txns',     show: role !== 'supervisor' },
+    { path: '/projects', icon: IconBuilding,      label: 'Projects', show: true },
   ].filter(t => t.show);
 
   return (
@@ -597,10 +624,17 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
             <Link
               key={tab.path}
               to={tab.path}
-              className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 transition-colors"
+              className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 transition-colors relative"
               style={{ minHeight: 56, color: active ? TERRACOTTA : '#9ca3af' }}
             >
-              <Icon size={22} strokeWidth={active ? 2 : 1.5} />
+              <div className="relative">
+                <Icon size={22} strokeWidth={active ? 2 : 1.5} />
+                {(tab.badge ?? 0) > 0 && (
+                  <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 flex items-center justify-center rounded-full bg-amber-500 text-white text-[9px] font-bold px-1 leading-none">
+                    {(tab.badge ?? 0) > 9 ? '9+' : tab.badge}
+                  </span>
+                )}
+              </div>
               <span className="text-[10px] font-medium leading-none">{tab.label}</span>
             </Link>
           );
@@ -644,7 +678,8 @@ function MoreNavSheet({
   const go = (path: string) => { navigate(path); onClose(); };
 
   const items = [
-    { path: '/purchase-orders', icon: IconShoppingCart, label: 'Purchase Orders', show: role !== 'supervisor' && role !== 'accountant', color: '#3B82F6' },
+    { path: '/work-orders',     icon: IconFileText,      label: 'Work Orders',     show: true,                                             color: '#F59E0B' },
+    { path: '/purchase-orders', icon: IconShoppingCart,  label: 'Purchase Orders', show: role !== 'supervisor' && role !== 'accountant',   color: '#3B82F6' },
     { path: '/attendance',      icon: IconCalendarStats, label: 'Attendance',      show: true,                                             color: '#14B8A6' },
     { path: '/billing',         icon: IconReceipt,       label: 'Billing',         show: role !== 'supervisor',                            color: '#EF4444' },
     { path: '/stakeholders',    icon: IconUsers,         label: 'Stakeholders',    show: role !== 'supervisor' && role !== 'accountant',   color: '#06B6D4' },

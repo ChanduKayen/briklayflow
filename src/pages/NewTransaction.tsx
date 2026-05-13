@@ -172,7 +172,6 @@ export default function NewTransaction({ session: _session }: { session: Session
   const createTxn = useMutation({
     mutationFn: async ({ saveMode }: { saveMode: 'new' | 'exit' }) => {
       const isClientReceipt = txnType === 'client_receipt';
-      const hasUnmapped = isClientReceipt ? false : effectiveAllocs.some((a) => !a.order_type || !a.order_ref);
       let bill_doc_url: string | null = null;
       if (billFile) {
         const ext = billFile.name.split('.').pop();
@@ -191,8 +190,8 @@ export default function NewTransaction({ session: _session }: { session: Session
         payment_mode: mode,
         category: effectiveCategory,
         remarks: effectiveRemarks, bill_doc_url,
-        ai_flag_status: hasUnmapped ? 'Flagged' : 'Clean',
-        ai_flag_data: hasUnmapped ? { reason: 'Unmapped allocation' } : {},
+        ai_flag_status: 'Clean',
+        ai_flag_data: {},
       };
       const mapped = effectiveAllocs.map((a) => {
         if (isClientReceipt) {
@@ -209,6 +208,8 @@ export default function NewTransaction({ session: _session }: { session: Session
     },
     onSuccess: ({ savedId, saveMode }) => {
       qc.invalidateQueries({ queryKey: ['ledger'] });
+      qc.invalidateQueries({ queryKey: ['po_payment_totals'] });
+      qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
       const stk = stakeholders?.find((s) => s.stakeholder_id === stkId);
       if (stk) setRecentPayees((prev) => [{ id: stk.stakeholder_id, name: stk.name, type: stk.type }, ...prev.filter((p) => p.id !== stk.stakeholder_id)].slice(0, 5));
       if (saveMode === 'exit') {
@@ -733,9 +734,9 @@ export default function NewTransaction({ session: _session }: { session: Session
                       {/* Unmapped warning */}
                       {isUnmapped && (
                         <div className="flex items-center gap-2.5 px-3 py-2.5 bg-amber-50 border border-amber-200/60 rounded-xl">
-                          <span className="material-symbols-outlined text-amber-500 text-[15px] shrink-0">warning</span>
+                          <span className="material-symbols-outlined text-amber-500 text-[15px] shrink-0">link_off</span>
                           <p className="text-[11px] text-amber-700/80">
-                            Not linked to a {txnType === 'worker' ? 'Work Order' : 'PO'} — this payment will be flagged for review
+                            Not linked to a {txnType === 'worker' ? 'Work Order' : 'PO'} — you can link it later from the transaction detail
                           </p>
                         </div>
                       )}

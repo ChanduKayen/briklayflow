@@ -158,11 +158,14 @@ export default function TransactionDetail({ session }: { session: Session }) {
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ['txn_allocations', txnId] });
       qc.invalidateQueries({ queryKey: ['transaction', txnId] });
+      qc.invalidateQueries({ queryKey: ['ledger'] });
+      qc.invalidateQueries({ queryKey: ['dashboard_metrics'] });
       // Invalidate WO or PO detail so the linked page reflects the new payment
       if (vars.order_type === 'PO' && vars.order_ref) {
         qc.invalidateQueries({ queryKey: ['po_linked_txns', vars.order_ref] });
         qc.invalidateQueries({ queryKey: ['po_detail', vars.order_ref] });
         qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
+        qc.invalidateQueries({ queryKey: ['po_payment_totals'] });
       }
       if (vars.order_type === 'WO' && vars.order_ref) {
         qc.invalidateQueries({ queryKey: ['wo_allocations', vars.order_ref] });
@@ -289,6 +292,16 @@ export default function TransactionDetail({ session }: { session: Session }) {
 
   const isImage = txn.bill_doc_url?.match(/\.(jpeg|jpg|gif|png|webp)(\?.*)?$/i);
 
+  // Needs-action: Worker/Vendor transactions with at least one unlinked allocation
+  const needsActionType = (() => {
+    if (txn.status === 'Voided') return false;
+    const stkType = txn.stakeholders?.type;
+    if (stkType !== 'Worker' && stkType !== 'Vendor') return false;
+    const hasUnlinked = allocs?.some(a => !a.order_type);
+    if (!hasUnlinked) return false;
+    return stkType === 'Worker' ? 'link_wo' as const : 'link_po' as const;
+  })();
+
   const primaryAlloc = focusProjectId
     ? (allocs?.find((a) => a.project_id === focusProjectId) ?? allocs?.[0])
     : allocs?.[0];
@@ -361,6 +374,21 @@ export default function TransactionDetail({ session }: { session: Session }) {
             <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-error-container text-error">FLAGGED</span>
           )}
         </div>
+        {needsActionType && (
+          <div className="mt-2.5 flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200/60 rounded-xl">
+            <span className="material-symbols-outlined text-amber-500 text-[15px] shrink-0">link_off</span>
+            <p className="text-[12px] text-amber-700 flex-1">
+              {needsActionType === 'link_wo' ? 'Not linked to a Work Order' : 'Not linked to a Purchase Order'}
+              {' · '}
+              <button
+                onClick={() => document.getElementById('alloc-table')?.scrollIntoView({ behavior: 'smooth' })}
+                className="font-semibold underline"
+              >
+                Map below
+              </button>
+            </p>
+          </div>
+        )}
       </div>
 
       {/* ACTION ROW */}
