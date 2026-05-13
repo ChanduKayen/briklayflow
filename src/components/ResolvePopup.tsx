@@ -7,6 +7,7 @@ import type { RoughEntry } from '../types';
 import { useSnackbar } from './Snackbar';
 import { useUserProfile } from '../App';
 import { CostCodePicker } from './CostCodePicker';
+import { ImageLightbox } from './ImageLightbox';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -560,6 +561,8 @@ function PopupContents({
     return 'A';
   });
 
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+
   // ── Cost code suggestion ───────────────────────────────────────────────────
   const suggestedCode = suggestCostCode(ai);
   const [costCodeSuggested, setCostCodeSuggested] = useState(
@@ -623,9 +626,17 @@ function PopupContents({
         </div>
         {entry.raw_image_url ? (
           <div className="flex items-center gap-2.5 mt-2">
-            <img src={entry.raw_image_url} className="w-16 h-16 rounded-lg object-cover border border-outline-variant/20" />
-            <a href={entry.raw_image_url} target="_blank" rel="noopener noreferrer"
-               className="text-[12px] text-primary underline">View full image →</a>
+            <button
+              onClick={() => setLightboxUrl(entry.raw_image_url!)}
+              className="relative group shrink-0"
+            >
+              <img src={entry.raw_image_url} className="w-16 h-16 rounded-lg object-cover border border-outline-variant/20 group-hover:opacity-80 transition-opacity" />
+              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                <span className="bg-black/50 text-white text-[10px] px-1.5 py-0.5 rounded-full">View</span>
+              </div>
+            </button>
+            <button onClick={() => setLightboxUrl(entry.raw_image_url!)}
+               className="text-[12px] text-primary underline hover:text-primary/80">View full image →</button>
           </div>
         ) : entry.raw_text ? (
           <p className="text-[12px] italic text-on-surface-variant/60 leading-relaxed">
@@ -1064,6 +1075,8 @@ function PopupContents({
           </button>
         </div>
       </div>
+
+      <ImageLightbox url={lightboxUrl} title="Source Image" onClose={() => setLightboxUrl(null)} />
     </>
   );
 }

@@ -13,7 +13,7 @@ import {
   IconCalendarStats, IconBuilding, IconReceipt, IconUsers, IconWallet,
   IconChartLine, IconListTree, IconShield, IconSettings, IconPlus,
   IconChevronDown, IconLogout, IconDotsVertical, IconMenu2, IconChevronLeft,
-  IconInbox,
+  IconNotebook,
 } from '@tabler/icons-react';
 
 import Stakeholders from './pages/Stakeholders';
@@ -39,7 +39,7 @@ import InvoiceDetail from './pages/InvoiceDetail';
 import Billing from './pages/Billing';
 import NewBill from './pages/NewBill';
 import BillDetail from './pages/BillDetail';
-import Inbox from './pages/Inbox';
+import Logbook from './pages/Logbook';
 
 function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -102,7 +102,7 @@ function App() {
         <MobileTopbar session={session} />
         <Routes>
           <Route path="/" element={<Dashboard session={session} />} />
-          <Route path="/inbox" element={<Inbox session={session} />} />
+          <Route path="/logbook" element={<Logbook session={session} />} />
           <Route path="/ledger" element={<Ledger session={session} />} />
           <Route path="/ledger/new" element={<NewTransaction session={session} />} />
           <Route path="/ledger/:txnId" element={<TransactionDetail session={session} />} />
@@ -252,7 +252,7 @@ function SidebarContent({
     {
       label: 'WORK', show: true,
       items: [
-        { path: '/inbox',           icon: IconInbox,           label: 'Inbox',           show: true,                                           color: '#F59E0B', badge: inboxBadgeCount },
+        { path: '/logbook',          icon: IconNotebook,        label: 'Logbook',         show: true,                                           color: '#F59E0B', badge: inboxBadgeCount },
         { path: '/',                icon: IconLayoutDashboard, label: 'Dashboard',       show: true,                                           color: '#5B6AF5' },
         { path: '/ledger',          icon: IconArrowsExchange,  label: 'Transactions',    show: role !== 'supervisor',                          color: '#10B981' },
         { path: '/work-orders',     icon: IconFileText,        label: 'Work Orders',     show: true,                                           color: '#F59E0B', badge: woPendingCount },
@@ -510,7 +510,7 @@ function Sidebar({
 function getMobileTitle(pathname: string): string {
   const routes: Record<string, string> = {
     '/':                    'Dashboard',
-    '/inbox':               'Inbox',
+    '/logbook':             'Logbook',
     '/ledger':              'Transactions',
     '/ledger/new':          'New Transaction',
     '/projects':            'Projects',
@@ -607,7 +607,7 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
   type Tab = { path: string; icon: React.ElementType; label: string; show: boolean; badge?: number };
   const tabs: Tab[] = [
     { path: '/',       icon: IconLayoutDashboard, label: 'Home',     show: true },
-    { path: '/inbox',  icon: IconInbox,           label: 'Inbox',    show: true, badge: inboxBadge },
+    { path: '/logbook', icon: IconNotebook,        label: 'Logbook',  show: true, badge: inboxBadge },
     { path: '/ledger', icon: IconArrowsExchange,  label: 'Txns',     show: role !== 'supervisor' },
     { path: '/projects', icon: IconBuilding,      label: 'Projects', show: true },
   ].filter(t => t.show);

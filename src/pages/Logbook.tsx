@@ -8,6 +8,7 @@ import type { RoughEntry } from '../types';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
 import { ResolvePopup } from '../components/ResolvePopup';
+import { ImageLightbox } from '../components/ImageLightbox';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -287,7 +288,7 @@ function MobileCards({
 
 // ── Main page ──────────────────────────────────────────────────────────────────
 
-export default function Inbox({ session }: { session: Session }) {
+export default function Logbook({ session }: { session: Session }) {
   const qc = useQueryClient();
   const { show: showSnackbar } = useSnackbar();
   const { data: profile } = useUserProfile(session.user.id);
@@ -319,7 +320,7 @@ export default function Inbox({ session }: { session: Session }) {
   // ── Realtime subscription ──────────────────────────────────────────────────
   useEffect(() => {
     const channel = supabase
-      .channel('inbox_rt')
+      .channel('logbook_rt')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rough_entries' }, () => {
         qc.invalidateQueries({ queryKey: ['rough_entries'] });
         qc.invalidateQueries({ queryKey: ['inbox_badge'] });
@@ -352,7 +353,7 @@ export default function Inbox({ session }: { session: Session }) {
       let raw_image_url: string | null = null;
       if (imageFile) {
         const ext = imageFile.name.split('.').pop() || 'jpg';
-        const fname = `inbox/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+        const fname = `logbook/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
         const { error: upErr } = await supabase.storage.from('documents').upload(fname, imageFile);
         if (upErr) throw upErr;
         const { data: pub } = supabase.storage.from('documents').getPublicUrl(fname);
@@ -418,7 +419,7 @@ export default function Inbox({ session }: { session: Session }) {
           Rough Entries
         </h2>
         <p className="text-body-sm text-on-surface-variant mt-1">
-          {pending.length} pending · {todayPostedCount} posted today
+          {pending.length} pending entries · {todayPostedCount} posted today
         </p>
       </div>
 
@@ -553,24 +554,7 @@ export default function Inbox({ session }: { session: Session }) {
       )}
 
       {/* ── Image Lightbox ────────────────────────────────────────────────── */}
-      {lightboxUrl && (
-        <div
-          className="fixed inset-0 z-[90] bg-black/92 flex items-center justify-center p-4"
-          onClick={() => setLightboxUrl(null)}
-        >
-          <img
-            src={lightboxUrl}
-            className="max-w-full max-h-full rounded-lg object-contain shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          />
-          <button
-            onClick={() => setLightboxUrl(null)}
-            className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/15 backdrop-blur-sm flex items-center justify-center text-white hover:bg-white/25 transition-colors"
-          >
-            <span className="material-symbols-outlined text-[22px]">close</span>
-          </button>
-        </div>
-      )}
+      <ImageLightbox url={lightboxUrl} title="Image" onClose={() => setLightboxUrl(null)} />
     </div>
   );
 }

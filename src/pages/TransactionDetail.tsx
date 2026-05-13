@@ -2,10 +2,11 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { Loader2, ExternalLink } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import type { Session } from '@supabase/supabase-js';
 import Breadcrumb from '../components/Breadcrumb';
 import { useUserProfile } from '../App';
+import { ImageLightbox } from '../components/ImageLightbox';
 
 // ─── Amendment types ──────────────────────────────────────────────────────────
 // Requires: ALTER TABLE transactions ADD COLUMN amendments jsonb DEFAULT '[]'::jsonb;
@@ -96,6 +97,9 @@ export default function TransactionDetail({ session }: { session: Session }) {
 
   // ─── Trail state ──────────────────────────────────────────────────────────────
   const [showTrail, setShowTrail] = useState(false);
+
+  // ─── Lightbox state ────────────────────────────────────────────────────────────
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   const isManagement = profile?.role === 'management';
   const canVoid = profile?.role === 'management' || profile?.role === 'accountant';
@@ -541,24 +545,32 @@ export default function TransactionDetail({ session }: { session: Session }) {
       {/* PROOF DOCUMENT */}
       {txn.bill_doc_url && (
         <div className="detail-reveal mb-6" style={{ animationDelay: '220ms' }}>
-          <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-2">PROOF DOCUMENT</p>
-          <div className="flex items-center gap-3">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-2">PROOF</p>
+          {isImage ? (
+            <div>
+              <div
+                className="relative inline-block cursor-pointer group"
+                onClick={() => setLightboxUrl(txn.bill_doc_url!)}
+              >
+                <img
+                  src={txn.bill_doc_url}
+                  alt="Payment proof"
+                  className="h-24 w-auto rounded-xl object-cover border border-outline-variant/20 group-hover:opacity-90 transition-opacity"
+                />
+                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  <span className="bg-black/50 text-white text-xs px-2 py-1 rounded-full">View</span>
+                </div>
+              </div>
+              <p className="text-[11px] text-on-surface-variant mt-1.5">📎 Uploaded · Tap to view</p>
+            </div>
+          ) : (
             <a
               href={txn.bill_doc_url}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1.5 text-[13px] text-primary font-semibold hover:underline"
             >
-              <ExternalLink size={14} /> View Document
-            </a>
-          </div>
-          {isImage && (
-            <a href={txn.bill_doc_url} target="_blank" rel="noopener noreferrer">
-              <img
-                src={txn.bill_doc_url}
-                alt="Proof"
-                className="mt-2 h-[120px] w-auto object-cover rounded-lg border border-outline-variant/20 hover:scale-[1.02] transition-transform duration-300"
-              />
+              <span className="material-symbols-outlined text-[14px]">open_in_new</span> View Document
             </a>
           )}
         </div>
@@ -896,6 +908,9 @@ export default function TransactionDetail({ session }: { session: Session }) {
           </div>
         </div>
       )}
+
+      {/* ── IMAGE LIGHTBOX ───────────────────────────────────────────── */}
+      <ImageLightbox url={lightboxUrl} title="Payment Proof" onClose={() => setLightboxUrl(null)} />
 
       {/* ── AMEND MODAL ───────────────────────────────────────────────── */}
       {amendStep !== 'idle' && (
