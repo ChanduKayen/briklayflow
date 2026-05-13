@@ -350,6 +350,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, session }: Props) {
         category: categoryCode || null,
         remarks: [description.trim(), notes.trim()].filter(Boolean).join(' · '),
         bill_doc_url: null,
+        proof_document_url: entry.raw_image_url || null,
         ai_flag_status: 'Clean',
         ai_flag_data: {},
       };

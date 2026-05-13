@@ -7,15 +7,16 @@ interface ImageLightboxProps {
 }
 
 export function ImageLightbox({ url, title, onClose }: ImageLightboxProps) {
-  if (!url) return null
-
   useEffect(() => {
+    if (!url) return
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [onClose])
+  }, [url, onClose])
+
+  if (!url) return null
 
   return (
     <div

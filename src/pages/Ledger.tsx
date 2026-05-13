@@ -9,6 +9,8 @@ import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
 import { LinearProgress } from '../components/LinearProgress';
 import { getCostCode } from '../lib/costCodes';
+import { IconPaperclip } from '@tabler/icons-react';
+import { ImageLightbox } from '../components/ImageLightbox';
 
 const PAGE_SIZE = 25;
 
@@ -36,6 +38,8 @@ export default function Ledger({ session }: { session: Session }) {
   const [customTo, setCustomTo] = useState('');
   const [showDateDropdown, setShowDateDropdown] = useState(false);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
   const [isDragging, setIsDragging] = useState(false);
@@ -743,6 +747,9 @@ export default function Ledger({ session }: { session: Session }) {
                     <th className={thSort} onClick={() => toggleSort('project')}><div className="flex items-center gap-1">Project {renderSortIcon('project')}</div></th>
                     <th className={thCls}>Cost Code</th>
                     <th className={`${thSort} text-right`} onClick={() => toggleSort('total_amount')}><div className="flex items-center justify-end gap-1">Amount {renderSortIcon('total_amount')}</div></th>
+                    <th className="w-12 px-3 py-3 text-center">
+                      <IconPaperclip size={13} className="opacity-35 mx-auto" />
+                    </th>
                     <th className={thSort} onClick={() => toggleSort('status')}><div className="flex items-center gap-1">Status {renderSortIcon('status')}</div></th>
                   </tr>
                 </thead>
@@ -838,6 +845,20 @@ export default function Ledger({ session }: { session: Session }) {
                             ₹{rowAmount.toLocaleString('en-IN')}
                           </span>
                         </td>
+                        <td className="px-3 align-middle w-12 text-center" onClick={(e) => e.stopPropagation()}>
+                          {isFirstInGroup && (() => {
+                            const proofUrl = (txn as any).proof_document_url || txn.bill_doc_url || null;
+                            if (!proofUrl) return null;
+                            return (
+                              <img
+                                src={proofUrl}
+                                alt="proof"
+                                className="w-8 h-8 rounded-md object-cover cursor-pointer border border-black/[0.08] hover:opacity-80 transition-opacity mx-auto"
+                                onClick={(e) => { e.stopPropagation(); setLightboxUrl(proofUrl); }}
+                              />
+                            );
+                          })()}
+                        </td>
                         <td className="px-4 align-middle">
                           {isFirstInGroup && statusBadge(txn)}
                         </td>
@@ -873,6 +894,8 @@ export default function Ledger({ session }: { session: Session }) {
           <div className="flex flex-col"><span className="text-[10px] font-bold text-on-surface-variant/50 uppercase">Sum</span><span className="font-data-mono font-bold text-[15px] text-primary">₹{sum.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span></div>
         </div>
       )}
+
+      <ImageLightbox url={lightboxUrl} title="Payment Proof" onClose={() => setLightboxUrl(null)} />
 
       {/* FAB — mobile only */}
       <button className="bk-fab" onClick={() => navigate('/ledger/new')} title="New Transaction">

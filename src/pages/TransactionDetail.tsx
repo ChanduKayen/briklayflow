@@ -294,7 +294,8 @@ export default function TransactionDetail({ session }: { session: Session }) {
     setAmendStep('edit');
   };
 
-  const isImage = txn.bill_doc_url?.match(/\.(jpeg|jpg|gif|png|webp)(\?.*)?$/i);
+  const proofUrl = (txn as any).proof_document_url || txn.bill_doc_url || null;
+  const isImage = proofUrl?.match(/\.(jpeg|jpg|gif|png|webp)(\?.*)?$/i);
 
   // Needs-action: Worker/Vendor transactions with at least one unlinked allocation
   const needsActionType = (() => {
@@ -543,29 +544,31 @@ export default function TransactionDetail({ session }: { session: Session }) {
       )}
 
       {/* PROOF DOCUMENT */}
-      {txn.bill_doc_url && (
+      {proofUrl && (
         <div className="detail-reveal mb-6" style={{ animationDelay: '220ms' }}>
           <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-2">PROOF</p>
           {isImage ? (
             <div>
               <div
                 className="relative inline-block cursor-pointer group"
-                onClick={() => setLightboxUrl(txn.bill_doc_url!)}
+                onClick={() => setLightboxUrl(proofUrl)}
               >
                 <img
-                  src={txn.bill_doc_url}
+                  src={proofUrl}
                   alt="Payment proof"
-                  className="h-24 w-auto rounded-xl object-cover border border-outline-variant/20 group-hover:opacity-90 transition-opacity"
+                  className="h-28 w-auto rounded-xl object-cover border border-outline-variant/20 group-hover:opacity-90 transition-opacity"
                 />
-                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                  <span className="bg-black/50 text-white text-xs px-2 py-1 rounded-full">View</span>
+                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-xl">
+                  <span className="bg-black/50 text-white text-xs px-3 py-1 rounded-full">View</span>
                 </div>
               </div>
-              <p className="text-[11px] text-on-surface-variant mt-1.5">📎 Uploaded · Tap to view</p>
+              <p className="text-[11px] text-on-surface-variant mt-1.5">
+                {(txn as any).proof_document_url ? '📱 From WhatsApp' : '📎 Uploaded document'}
+              </p>
             </div>
           ) : (
             <a
-              href={txn.bill_doc_url}
+              href={proofUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-1.5 text-[13px] text-primary font-semibold hover:underline"
