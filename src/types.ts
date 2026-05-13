@@ -260,6 +260,84 @@ export interface POApproval {
   actioned_at?: string;
 }
 
+// ── Rough Entries (Inbox) ─────────────────────────────────────────────────────
+
+export type RoughEntrySource =
+  | 'WHATSAPP_TEXT' | 'WHATSAPP_IMAGE' | 'WHATSAPP_VOICE'
+  | 'UI_TEXT' | 'UI_IMAGE';
+
+export type RoughEntryStatus = 'PENDING' | 'POSTED' | 'DISMISSED';
+
+export type ConfidenceLevel = 'HIGH' | 'MEDIUM' | 'LOW';
+
+export interface AIExtracted {
+  processed?: boolean;
+  error?: string;
+  // Raw strings from AI (Step 1)
+  payee_raw?: string | null;
+  project_raw?: string | null;
+  // Server-matched payee (Step 2)
+  payee_id?: string | null;
+  payee_name?: string | null;
+  payee_matched?: boolean;
+  payee_unmatched?: boolean;
+  payee_confidence?: ConfidenceLevel | null;
+  payee_closest_match?: Array<{ id: string; name: string; type: string; category: string }> | null;
+  // Server-matched project (Step 3)
+  project_id?: string | null;
+  project_name?: string | null;
+  project_matched?: boolean;
+  project_unmatched?: boolean;
+  project_confidence?: ConfidenceLevel | null;
+  project_closest_match?: Array<{ id: string; name: string }> | null;
+  // Transaction fields
+  amount?: number | null;
+  date?: string | null;
+  mode?: 'Cash' | 'NEFT' | 'UPI' | 'Cheque' | null;
+  transaction_type?: 'Worker Payment' | 'Material Purchase' | 'General Expense' | null;
+  category_code?: string | null;
+  category_name?: string | null;
+  description?: string | null;
+  description_raw?: string | null;
+  work_type?: string | null;
+  floor_or_area?: string | null;
+  material_name?: string | null;
+  material_quantity?: string | null;
+  material_unit?: string | null;
+  wo_id?: string | null;
+  wo_number?: string | null;
+  // Flat confidence fields (Step 5)
+  amount_confidence?: ConfidenceLevel | null;
+  description_confidence?: ConfidenceLevel | null;
+  overall_confidence?: ConfidenceLevel | null;
+  // Legacy nested confidence (backward compat with old entries)
+  confidence?: {
+    payee: ConfidenceLevel;
+    amount: ConfidenceLevel;
+    description: ConfidenceLevel;
+    project: ConfidenceLevel;
+    mode: ConfidenceLevel;
+    overall: ConfidenceLevel;
+  };
+}
+
+export interface RoughEntry {
+  id: string;
+  re_number: string;
+  source: RoughEntrySource;
+  raw_text?: string | null;
+  raw_image_url?: string | null;
+  raw_audio_url?: string | null;
+  transcribed_text?: string | null;
+  sender_name?: string | null;
+  sender_number?: string | null;
+  ai_extracted: AIExtracted;
+  status: RoughEntryStatus;
+  resolved_txn_id?: string | null;
+  created_at: string;
+  created_by?: string | null;
+}
+
 export interface EnhancedPurchaseOrder {
   po_id: string;
   project_id: string;
