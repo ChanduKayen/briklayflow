@@ -9,11 +9,13 @@ import type { Project, UserProfile } from './types';
 import { SnackbarProvider, useSnackbar } from './components/Snackbar';
 import { LinearProgress } from './components/LinearProgress';
 import {
-  IconLayoutDashboard, IconArrowsExchange, IconFileText, IconShoppingCart,
-  IconCalendarStats, IconBuilding, IconReceipt, IconUsers, IconWallet,
-  IconChartLine, IconListTree, IconShield, IconSettings, IconPlus,
-  IconChevronDown, IconLogout, IconDotsVertical, IconMenu2, IconChevronLeft,
-  IconNotebook,
+  IconLayoutDashboard, IconArrowsExchange,
+  IconNotebook, IconClipboardList, IconShoppingBag, IconCalendarCheck,
+  IconBuildingEstate, IconFileInvoice, IconUsersGroup, IconCash, IconChartBar,
+  IconSitemap, IconShieldLock, IconAdjustmentsHorizontal,
+  IconLayoutSidebarLeftCollapse, IconLayoutSidebar,
+  IconSettings, IconLogout, IconChevronDown, IconChevronLeft, IconDots,
+  IconDotsVertical,
 } from '@tabler/icons-react';
 
 import Stakeholders from './pages/Stakeholders';
@@ -89,10 +91,13 @@ function App() {
       {!sidebarOpen && (
         <button
           onClick={() => setSidebarOpen(true)}
-          className="hidden md:flex fixed top-4 left-4 z-40 p-1.5 rounded-lg bg-surface-container-lowest border border-outline-variant/20 text-on-surface-variant hover:bg-surface-container shadow-sm transition-colors items-center justify-center"
+          className="hidden md:flex fixed top-4 left-4 z-40 p-1.5 rounded-lg transition-colors items-center justify-center"
+          style={{ color: 'var(--nav-text-muted)', background: 'transparent' }}
           title="Open sidebar"
+          onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.color = 'var(--nav-text-active)'}
+          onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.color = 'var(--nav-text-muted)'}
         >
-          <IconMenu2 size={18} strokeWidth={1.5} />
+          <IconLayoutSidebar size={18} strokeWidth={1.5} />
         </button>
       )}
       <main
@@ -145,7 +150,7 @@ function App() {
   );
 }
 
-// ── Sidebar content (shared between desktop + mobile drawer) ──────────────────
+// ── Sidebar content ────────────────────────────────────────────────────────────
 
 function SidebarContent({
   session,
@@ -163,6 +168,7 @@ function SidebarContent({
 
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [userRowHovered, setUserRowHovered] = useState(false);
   const quickAddRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
@@ -187,12 +193,10 @@ function SidebarContent({
 
   const showFinancials = role === 'principal' || (role === 'management' && !hasPrincipal);
 
-  // ── Badge queries ────────────────────────────────────────────────────────
   const { data: woPendingCount = 0 } = useQuery({
     queryKey: ['nav_wo_pending'],
     queryFn: async () => {
-      const { count } = await supabase.from('work_orders')
-        .select('*', { count: 'exact', head: true }).eq('status', 'Pending Approval');
+      const { count } = await supabase.from('work_orders').select('*', { count: 'exact', head: true }).eq('status', 'Pending Approval');
       return count ?? 0;
     },
     staleTime: 60_000,
@@ -202,9 +206,7 @@ function SidebarContent({
   const { data: poUntalliedCount = 0 } = useQuery({
     queryKey: ['nav_po_untallied'],
     queryFn: async () => {
-      const { count } = await supabase.from('purchase_orders')
-        .select('*', { count: 'exact', head: true })
-        .not('status', 'in', '("Tallied","Cancelled","Draft")');
+      const { count } = await supabase.from('purchase_orders').select('*', { count: 'exact', head: true }).not('status', 'in', '("Tallied","Cancelled","Draft")');
       return count ?? 0;
     },
     staleTime: 60_000,
@@ -215,10 +217,7 @@ function SidebarContent({
     queryKey: ['nav_bill_overdue'],
     queryFn: async () => {
       const today = new Date().toISOString().split('T')[0];
-      const { count } = await supabase.from('client_invoices')
-        .select('*', { count: 'exact', head: true })
-        .lt('due_date', today)
-        .not('status', 'in', '("Paid","Void","Cancelled")');
+      const { count } = await supabase.from('client_invoices').select('*', { count: 'exact', head: true }).lt('due_date', today).not('status', 'in', '("Paid","Void","Cancelled")');
       return count ?? 0;
     },
     staleTime: 60_000,
@@ -228,59 +227,48 @@ function SidebarContent({
   const { data: inboxBadgeCount = 0 } = useQuery({
     queryKey: ['inbox_badge'],
     queryFn: async () => {
-      const { count } = await supabase
-        .from('rough_entries')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'PENDING');
+      const { count } = await supabase.from('rough_entries').select('*', { count: 'exact', head: true }).eq('status', 'PENDING');
       return count ?? 0;
     },
     staleTime: 30_000,
   });
 
-  // ── Nav groups ───────────────────────────────────────────────────────────
-  type NavItem = {
-    path: string;
-    icon: React.ElementType;
-    label: string;
-    show: boolean;
-    color: string;
-    badge?: number;
-  };
+  type NavItem = { path: string; icon: React.ElementType; label: string; show: boolean; badge?: number };
   type NavGroup = { label: string; show: boolean; items: NavItem[] };
 
   const navGroups: NavGroup[] = [
     {
       label: 'WORK', show: true,
       items: [
-        { path: '/logbook',          icon: IconNotebook,        label: 'Logbook',         show: true,                                           color: '#F59E0B', badge: inboxBadgeCount },
-        { path: '/',                icon: IconLayoutDashboard, label: 'Dashboard',       show: true,                                           color: '#5B6AF5' },
-        { path: '/ledger',          icon: IconArrowsExchange,  label: 'Transactions',    show: role !== 'supervisor',                          color: '#10B981' },
-        { path: '/work-orders',     icon: IconFileText,        label: 'Work Orders',     show: true,                                           color: '#F59E0B', badge: woPendingCount },
-        { path: '/purchase-orders', icon: IconShoppingCart,    label: 'Purchase Orders', show: role !== 'supervisor' && role !== 'accountant', color: '#3B82F6', badge: poUntalliedCount },
-        { path: '/attendance',      icon: IconCalendarStats,   label: 'Attendance',      show: true,                                           color: '#14B8A6' },
+        { path: '/logbook',          icon: IconNotebook,         label: 'Logbook',         show: true,                                           badge: inboxBadgeCount },
+        { path: '/',                 icon: IconLayoutDashboard,  label: 'Dashboard',       show: true },
+        { path: '/ledger',           icon: IconArrowsExchange,   label: 'Transactions',    show: role !== 'supervisor' },
+        { path: '/work-orders',      icon: IconClipboardList,    label: 'Work Orders',     show: true,                                           badge: woPendingCount },
+        { path: '/purchase-orders',  icon: IconShoppingBag,      label: 'Purchase Orders', show: role !== 'supervisor' && role !== 'accountant', badge: poUntalliedCount },
+        { path: '/attendance',       icon: IconCalendarCheck,    label: 'Attendance',      show: true },
       ],
     },
     {
       label: 'BUILD', show: true,
       items: [
-        { path: '/projects',     icon: IconBuilding, label: 'Projects',     show: true,                                           color: '#8B5CF6' },
-        { path: '/billing',      icon: IconReceipt,  label: 'Billing',      show: role !== 'supervisor',                         color: '#EF4444', badge: billOverdueCount },
-        { path: '/stakeholders', icon: IconUsers,    label: 'Stakeholders', show: role !== 'supervisor' && role !== 'accountant', color: '#06B6D4' },
+        { path: '/projects',     icon: IconBuildingEstate, label: 'Projects',     show: true },
+        { path: '/billing',      icon: IconFileInvoice,    label: 'Billing',      show: role !== 'supervisor',                         badge: billOverdueCount },
+        { path: '/stakeholders', icon: IconUsersGroup,     label: 'Stakeholders', show: role !== 'supervisor' && role !== 'accountant' },
       ],
     },
     {
       label: 'FINANCE', show: role !== 'supervisor',
       items: [
-        { path: '/fund-register', icon: IconWallet,    label: 'Fund Register', show: true,          color: '#059669' },
-        { path: '/financials',    icon: IconChartLine, label: 'Financials',    show: showFinancials, color: '#6366F1' },
+        { path: '/fund-register', icon: IconCash,     label: 'Fund Register', show: true },
+        { path: '/financials',    icon: IconChartBar, label: 'Financials',    show: showFinancials },
       ],
     },
     {
       label: 'ADMIN', show: role === 'principal' || role === 'management',
       items: [
-        { path: '/cost-codes', icon: IconListTree, label: 'Cost Codes',    show: true, color: '#64748B' },
-        { path: '/team',       icon: IconShield,   label: 'Team & Access', show: true, color: '#C45B39' },
-        { path: '/settings',   icon: IconSettings, label: 'Settings',      show: true, color: '#6B7280' },
+        { path: '/cost-codes', icon: IconSitemap,                label: 'Cost Codes',    show: true },
+        { path: '/team',       icon: IconShieldLock,             label: 'Team & Access', show: true },
+        { path: '/settings',   icon: IconAdjustmentsHorizontal, label: 'Settings',      show: true },
       ],
     },
   ];
@@ -288,95 +276,101 @@ function SidebarContent({
   const isActive = (path: string) =>
     path === '/' ? location.pathname === '/' : location.pathname === path || location.pathname.startsWith(path + '/');
 
-  // ── Avatar ───────────────────────────────────────────────────────────────
-  const avatarColor: Record<string, string> = {
-    principal:  'bg-[#C45B39] text-white',
-    management: 'bg-blue-500 text-white',
-    supervisor: 'bg-teal-500 text-white',
-    accountant: 'bg-purple-500 text-white',
-  };
   const initials = (name: string) =>
     name.split(' ').filter(Boolean).map(w => w[0]).join('').toUpperCase().slice(0, 2) || '?';
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    navigate('/');
-  };
-
+  const handleLogout = async () => { await supabase.auth.signOut(); navigate('/'); };
   const go = (path: string) => { navigate(path); setShowQuickAdd(false); onNavigate(); };
 
   const quickCreateItems = [
-    { label: 'New Transaction',    path: '/ledger/new',          icon: IconArrowsExchange, color: '#10B981' },
-    { label: 'New Work Order',     path: '/work-orders/new',     icon: IconFileText,       color: '#F59E0B' },
-    { label: 'New Purchase Order', path: '/purchase-orders/new', icon: IconShoppingCart,   color: '#3B82F6' },
-    { label: 'Raise Bill',         path: '/billing/new',         icon: IconReceipt,        color: '#EF4444' },
-    { label: 'New Project',        path: '/projects',            icon: IconBuilding,       color: '#8B5CF6' },
-    { label: 'Add Stakeholder',    path: '/stakeholders',        icon: IconUsers,          color: '#06B6D4' },
+    { label: 'New Transaction',    path: '/ledger/new',          icon: IconArrowsExchange },
+    { label: 'New Work Order',     path: '/work-orders/new',     icon: IconClipboardList },
+    { label: 'New Purchase Order', path: '/purchase-orders/new', icon: IconShoppingBag },
+    { label: 'Raise Bill',         path: '/billing/new',         icon: IconFileInvoice },
+    { label: 'New Project',        path: '/projects',            icon: IconBuildingEstate },
+    { label: 'Add Stakeholder',    path: '/stakeholders',        icon: IconUsersGroup },
   ];
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--nav-bg)' }}>
 
       {/* ── Company identity ─────────────────────────────────────────────── */}
-      <div className="px-5 pt-5 pb-4 border-b border-outline-variant/15 shrink-0">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-5 h-5 rounded-sm bg-[#C45B39] shrink-0" />
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-on-surface leading-none">BRIKLAY</p>
-              <p className="text-[11px] text-on-surface-variant/50 leading-tight mt-0.5">Engineering</p>
-            </div>
-          </div>
-          {onCollapse && (
-            <button
-              onClick={onCollapse}
-              className="p-1 rounded-md text-on-surface-variant/40 hover:text-on-surface-variant/70 hover:bg-surface-container transition-colors"
-              title="Collapse sidebar"
-            >
-              <IconMenu2 size={16} strokeWidth={1.5} />
-            </button>
-          )}
+      <div style={{ height: 56, padding: '0 16px', display: 'flex', alignItems: 'center', borderBottom: '1px solid var(--nav-border)', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
+          <div style={{ width: 8, height: 8, background: 'var(--nav-accent)', transform: 'rotate(45deg)', flexShrink: 0 }} />
+          <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--nav-text-active)' }}>
+            Briklay
+          </span>
         </div>
       </div>
 
-      {/* ── Quick Create ─────────────────────────────────────────────────── */}
-      <div className="px-4 pt-3 pb-1 shrink-0 relative" ref={quickAddRef}>
+      {/* ── + New button ─────────────────────────────────────────────────── */}
+      <div style={{ margin: '12px 12px 4px', position: 'relative' }} ref={quickAddRef}>
         <button
           onClick={() => setShowQuickAdd(o => !o)}
-          className="w-full flex items-center justify-between px-3 py-2 text-[13px] text-on-surface-variant bg-surface-container-lowest border border-outline-variant/40 rounded-lg hover:bg-surface-container transition-colors duration-[120ms]"
+          style={{
+            width: '100%', height: 30, borderRadius: 6,
+            background: showQuickAdd ? 'rgba(0,0,0,0.03)' : 'transparent',
+            border: '1px solid var(--nav-border)',
+            color: 'var(--nav-text-default)',
+            fontSize: 12, fontWeight: 400,
+            cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '0 10px',
+            transition: 'background 80ms, border-color 80ms',
+          }}
+          onMouseEnter={e => { if (!showQuickAdd) { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,0,0,0.03)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(0,0,0,0.12)'; }}}
+          onMouseLeave={e => { if (!showQuickAdd) { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--nav-border)'; }}}
         >
-          <span className="flex items-center gap-1.5">
-            <IconPlus size={14} strokeWidth={2} />
-            Quick Create
+          <span>
+            <span style={{ color: 'var(--nav-accent)', fontWeight: 500 }}>+</span>
+            {' '}New
           </span>
-          <IconChevronDown size={14} strokeWidth={2} className={`transition-transform duration-150 ${showQuickAdd ? 'rotate-180' : ''}`} />
+          <IconChevronDown size={12} strokeWidth={1.5} style={{ transition: 'transform 150ms', transform: showQuickAdd ? 'rotate(180deg)' : 'none' }} />
         </button>
 
         {showQuickAdd && (
-          <div className="absolute left-4 right-4 top-[calc(100%-4px)] bg-surface-container-lowest border border-outline-variant/30 rounded-xl shadow-elevation-8 overflow-hidden z-50 popover-animate">
-            {quickCreateItems.map(item => (
-              <button key={item.path}
-                onClick={() => go(item.path)}
-                className="w-full flex items-center gap-3 px-4 py-2.5 text-[13px] text-on-surface hover:bg-surface-container transition-colors text-left"
-              >
-                <div style={{ width: 22, height: 22, borderRadius: 5, backgroundColor: item.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <item.icon size={12} strokeWidth={2} color="white" />
-                </div>
-                {item.label}
-              </button>
-            ))}
+          <div
+            className="popover-animate"
+            style={{
+              position: 'absolute', left: 0, right: 0, top: 'calc(100% + 4px)',
+              background: '#ffffff', border: '1px solid var(--nav-border)',
+              borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+              overflow: 'hidden', zIndex: 50,
+            }}
+          >
+            {quickCreateItems.map(item => {
+              const Icon = item.icon;
+              return (
+                <button key={item.path}
+                  onClick={() => go(item.path)}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '8px 12px', fontSize: 13,
+                    color: 'var(--nav-text-default)', background: 'transparent',
+                    border: 'none', cursor: 'pointer', textAlign: 'left',
+                    transition: 'background 60ms',
+                  }}
+                  onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,0,0,0.03)'}
+                  onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}
+                >
+                  <Icon size={14} strokeWidth={1.5} style={{ color: 'var(--nav-text-muted)', flexShrink: 0 }} />
+                  {item.label}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
 
       {/* ── Nav groups ───────────────────────────────────────────────────── */}
-      <nav className="flex-1 overflow-y-auto no-scrollbar px-3 py-1">
+      <nav style={{ flex: 1, overflowY: 'auto', padding: '0 0 4px' }} className="no-scrollbar">
         {navGroups.filter(g => g.show).map((group, gi) => {
           const visible = group.items.filter(i => i.show);
           if (visible.length === 0) return null;
           return (
             <div key={group.label} className="nav-group-animate" style={{ animationDelay: `${gi * 40}ms` }}>
-              <p className="px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-on-surface-variant/40 select-none">
+              <p style={{ padding: '16px 16px 4px', fontSize: 10, fontWeight: 500, color: 'var(--nav-text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase', userSelect: 'none' }}>
                 {group.label}
               </p>
               {visible.map(item => {
@@ -387,40 +381,13 @@ function SidebarContent({
                     key={item.path}
                     to={item.path}
                     onClick={onNavigate}
-                    className="sidebar-link-v2"
-                    style={active ? {
-                      backgroundColor: `${item.color}14`,
-                      color: item.color,
-                      fontWeight: 500,
-                    } : undefined}
+                    className="nav-item"
+                    data-active={active}
                   >
-                    <div style={{
-                      width: 28,
-                      height: 28,
-                      borderRadius: 7,
-                      backgroundColor: item.color,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexShrink: 0,
-                    }}>
-                      <Icon size={15} strokeWidth={1.75} color="white" />
-                    </div>
-                    <span className="flex-1 leading-none">{item.label}</span>
+                    <Icon size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+                    <span style={{ flex: 1, lineHeight: 1 }}>{item.label}</span>
                     {(item.badge ?? 0) > 0 && (
-                      <span
-                        className="inline-flex items-center justify-center rounded-full shrink-0"
-                        style={{
-                          minWidth: 18,
-                          height: 18,
-                          padding: '0 4px',
-                          fontSize: 11,
-                          fontWeight: 500,
-                          lineHeight: 1,
-                          backgroundColor: `${item.color}26`,
-                          color: item.color,
-                        }}
-                      >
+                      <span className="nav-badge-mono">
                         {(item.badge ?? 0) > 9 ? '9+' : item.badge}
                       </span>
                     )}
@@ -432,35 +399,77 @@ function SidebarContent({
         })}
       </nav>
 
+      {/* ── Collapse trigger ─────────────────────────────────────────────── */}
+      {onCollapse && (
+        <button
+          onClick={onCollapse}
+          style={{
+            height: 32, width: '100%',
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '0 16px',
+            fontSize: 11, color: 'var(--nav-text-muted)',
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            transition: 'color 100ms',
+          }}
+          onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.color = 'var(--nav-text-default)'}
+          onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.color = 'var(--nav-text-muted)'}
+        >
+          <IconLayoutSidebarLeftCollapse size={14} strokeWidth={1.5} />
+          Collapse
+        </button>
+      )}
+
       {/* ── User identity ────────────────────────────────────────────────── */}
-      <div className="shrink-0 border-t border-outline-variant/15 px-4 py-3 relative" ref={userMenuRef}>
+      <div
+        style={{ borderTop: '1px solid var(--nav-border)', padding: '10px 12px', flexShrink: 0, position: 'relative' }}
+        ref={userMenuRef}
+      >
         <button
           onClick={() => setShowUserMenu(o => !o)}
-          className="w-full flex items-center gap-2.5 group rounded-lg p-1 -mx-1 hover:bg-surface-container transition-colors"
+          onMouseEnter={() => setUserRowHovered(true)}
+          onMouseLeave={() => setUserRowHovered(false)}
+          style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, textAlign: 'left' }}
         >
-          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 ${avatarColor[role] ?? 'bg-surface-container-high text-on-surface'}`}>
+          <div style={{ width: 26, height: 26, borderRadius: '50%', background: 'rgba(0,0,0,0.08)', color: 'var(--nav-text-active)', fontSize: 10, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, userSelect: 'none' }}>
             {initials(profile?.name ?? 'User')}
           </div>
-          <div className="flex-1 min-w-0 text-left">
-            <p className="text-[13px] font-semibold text-on-surface leading-tight truncate">{profile?.name ?? 'User'}</p>
-            <p className="text-[11px] text-on-surface-variant/50 capitalize leading-tight">{role}</p>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--nav-text-active)', lineHeight: '1.2', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {profile?.name ?? 'User'}
+            </p>
+            <p style={{ fontSize: 11, fontWeight: 400, color: 'var(--nav-text-muted)', lineHeight: '1.2', textTransform: 'capitalize' }}>
+              {role}
+            </p>
           </div>
-          <IconDotsVertical size={15} strokeWidth={2} className="text-on-surface-variant/30 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+          <IconDots size={14} strokeWidth={1.5} style={{ color: 'var(--nav-text-muted)', marginLeft: 'auto', opacity: userRowHovered ? 1 : 0, transition: 'opacity 100ms', flexShrink: 0 }} />
         </button>
 
         {showUserMenu && (
-          <div className="absolute bottom-full left-4 right-4 mb-1 bg-surface-container-lowest border border-outline-variant/30 rounded-xl shadow-elevation-8 overflow-hidden z-50 popover-animate">
-            <button className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[13px] text-on-surface hover:bg-surface-container transition-colors">
-              <IconSettings size={15} strokeWidth={1.5} className="text-on-surface-variant/60" />
-              My Profile
+          <div
+            className="popover-animate"
+            style={{
+              position: 'absolute', bottom: '100%', left: 12, right: 12, marginBottom: 4,
+              background: '#ffffff', border: '1px solid var(--nav-border)',
+              borderRadius: 8, boxShadow: '0 -4px 16px rgba(0,0,0,0.08)',
+              overflow: 'hidden', zIndex: 50,
+            }}
+          >
+            <button
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', fontSize: 13, color: 'var(--nav-text-default)', background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left', transition: 'background 60ms' }}
+              onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,0,0,0.03)'}
+              onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}
+            >
+              <IconSettings size={14} strokeWidth={1.5} style={{ color: 'var(--nav-text-muted)' }} />
+              Profile
             </button>
-            <button className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[13px] text-on-surface hover:bg-surface-container transition-colors">
-              <IconShield size={15} strokeWidth={1.5} className="text-on-surface-variant/60" />
-              Change Password
-            </button>
-            <div className="border-t border-outline-variant/20" />
-            <button onClick={handleLogout} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[13px] text-error hover:bg-error-container/20 transition-colors">
-              <IconLogout size={15} strokeWidth={1.5} />
+            <div style={{ borderTop: '1px solid var(--nav-border)' }} />
+            <button
+              onClick={handleLogout}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', fontSize: 13, color: '#c0392b', background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left', transition: 'background 60ms' }}
+              onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = 'rgba(192,57,43,0.06)'}
+              onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}
+            >
+              <IconLogout size={14} strokeWidth={1.5} />
               Sign Out
             </button>
           </div>
@@ -490,8 +499,8 @@ function Sidebar({
     <>
       {/* Desktop — animated width (220px ↔ 0px) */}
       <aside
-        style={{ width: isOpen ? 220 : 0 }}
-        className="hidden md:block fixed left-0 top-0 h-full bg-surface-container-low border-r border-outline-variant/12 z-50 overflow-hidden transition-[width] duration-[220ms] ease-[cubic-bezier(0.4,0,0.6,1)]"
+        style={{ width: isOpen ? 220 : 0, background: 'var(--nav-bg)' }}
+        className="hidden md:block fixed left-0 top-0 h-full z-50 overflow-hidden transition-[width] duration-[220ms] ease-[cubic-bezier(0.4,0,0.6,1)]"
       >
         {/* Inner wrapper keeps content at full width so it doesn't squish during animation */}
         <div style={{ width: 220, height: '100%' }}>
@@ -609,12 +618,13 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
     { path: '/',       icon: IconLayoutDashboard, label: 'Home',     show: true },
     { path: '/logbook', icon: IconNotebook,        label: 'Logbook',  show: true, badge: inboxBadge },
     { path: '/ledger', icon: IconArrowsExchange,  label: 'Txns',     show: role !== 'supervisor' },
-    { path: '/projects', icon: IconBuilding,      label: 'Projects', show: true },
+    { path: '/projects', icon: IconBuildingEstate, label: 'Projects', show: true },
   ].filter(t => t.show);
 
   return (
     <nav
-      className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-black/[0.08]"
+      className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white"
+      style={{ borderTop: '1px solid var(--nav-border)' }}
     >
       <div className="flex items-stretch" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
         {tabs.map(tab => {
@@ -624,13 +634,14 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
             <Link
               key={tab.path}
               to={tab.path}
-              className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 transition-colors relative"
-              style={{ minHeight: 56, color: active ? TERRACOTTA : '#9ca3af' }}
+              className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 relative"
+              style={{ minHeight: 56, color: active ? TERRACOTTA : 'var(--nav-text-muted)' }}
             >
               <div className="relative">
                 <Icon size={22} strokeWidth={active ? 2 : 1.5} />
                 {(tab.badge ?? 0) > 0 && (
-                  <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 flex items-center justify-center rounded-full bg-amber-500 text-white text-[9px] font-bold px-1 leading-none">
+                  <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 flex items-center justify-center rounded-full text-[9px] font-bold px-1 leading-none"
+                    style={{ background: 'rgba(0,0,0,0.10)', color: 'var(--nav-text-default)' }}>
                     {(tab.badge ?? 0) > 9 ? '9+' : tab.badge}
                   </span>
                 )}
@@ -641,8 +652,8 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
         })}
         <button
           onClick={onMoreTap}
-          className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 transition-colors"
-          style={{ minHeight: 56, color: moreActive ? TERRACOTTA : '#9ca3af' }}
+          className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2"
+          style={{ minHeight: 56, color: moreActive ? TERRACOTTA : 'var(--nav-text-muted)' }}
         >
           <IconDotsVertical size={22} strokeWidth={moreActive ? 2 : 1.5} />
           <span className="text-[10px] font-medium leading-none">More</span>
@@ -678,16 +689,15 @@ function MoreNavSheet({
   const go = (path: string) => { navigate(path); onClose(); };
 
   const items = [
-    { path: '/work-orders',     icon: IconFileText,      label: 'Work Orders',     show: true,                                             color: '#F59E0B' },
-    { path: '/purchase-orders', icon: IconShoppingCart,  label: 'Purchase Orders', show: role !== 'supervisor' && role !== 'accountant',   color: '#3B82F6' },
-    { path: '/attendance',      icon: IconCalendarStats, label: 'Attendance',      show: true,                                             color: '#14B8A6' },
-    { path: '/billing',         icon: IconReceipt,       label: 'Billing',         show: role !== 'supervisor',                            color: '#EF4444' },
-    { path: '/stakeholders',    icon: IconUsers,         label: 'Stakeholders',    show: role !== 'supervisor' && role !== 'accountant',   color: '#06B6D4' },
-    { path: '/invoices',        icon: IconReceipt,       label: 'Invoices',        show: true,                                             color: '#8B5CF6' },
-    { path: '/financials',      icon: IconChartLine,     label: 'Financials',      show: showFinancials,                                   color: '#6366F1' },
-    { path: '/cost-codes',      icon: IconListTree,      label: 'Cost Codes',      show: role === 'principal' || role === 'management',    color: '#64748B' },
-    { path: '/team',            icon: IconShield,        label: 'Team & Access',   show: role === 'principal' || role === 'management',    color: '#C45B39' },
-    { path: '/settings',        icon: IconSettings,      label: 'Settings',        show: true,                                             color: '#6B7280' },
+    { path: '/work-orders',     icon: IconClipboardList,        label: 'Work Orders',     show: true },
+    { path: '/purchase-orders', icon: IconShoppingBag,          label: 'Purchase Orders', show: role !== 'supervisor' && role !== 'accountant' },
+    { path: '/attendance',      icon: IconCalendarCheck,        label: 'Attendance',      show: true },
+    { path: '/billing',         icon: IconFileInvoice,          label: 'Billing',         show: role !== 'supervisor' },
+    { path: '/stakeholders',    icon: IconUsersGroup,           label: 'Stakeholders',    show: role !== 'supervisor' && role !== 'accountant' },
+    { path: '/financials',      icon: IconChartBar,             label: 'Financials',      show: showFinancials },
+    { path: '/cost-codes',      icon: IconSitemap,              label: 'Cost Codes',      show: role === 'principal' || role === 'management' },
+    { path: '/team',            icon: IconShieldLock,           label: 'Team & Access',   show: role === 'principal' || role === 'management' },
+    { path: '/settings',        icon: IconAdjustmentsHorizontal, label: 'Settings',        show: true },
   ].filter(i => i.show);
 
   return (
@@ -717,22 +727,20 @@ function MoreNavSheet({
               <button
                 key={item.path}
                 onClick={() => go(item.path)}
-                className="w-full flex items-center gap-3 px-4 transition-colors"
+                className="w-full flex items-center gap-3 px-5"
                 style={{
-                  minHeight: 56,
-                  backgroundColor: active ? `${TERRACOTTA}08` : undefined,
+                  minHeight: 52,
+                  backgroundColor: active ? 'rgba(200,96,58,0.06)' : undefined,
                 }}
               >
-                <div style={{ width: 36, height: 36, borderRadius: 9, backgroundColor: item.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <Icon size={18} strokeWidth={1.75} color="white" />
-                </div>
+                <Icon size={18} strokeWidth={1.5} style={{ color: active ? TERRACOTTA : 'var(--nav-text-muted)', flexShrink: 0 }} />
                 <span
-                  className="flex-1 text-[15px] text-left"
-                  style={{ fontWeight: active ? 600 : 500, color: active ? TERRACOTTA : '#1a1a1a' }}
+                  className="flex-1 text-[14px] text-left"
+                  style={{ fontWeight: active ? 600 : 400, color: active ? TERRACOTTA : 'var(--nav-text-default)' }}
                 >
                   {item.label}
                 </span>
-                {active && <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: TERRACOTTA }} />}
+                {active && <div style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: TERRACOTTA, flexShrink: 0 }} />}
               </button>
             );
           })}

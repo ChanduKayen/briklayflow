@@ -2,6 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Nav design tokens ── */
+:root {
+  --nav-bg:           #f6f6f5;
+  --nav-text-muted:   rgba(0, 0, 0, 0.38);
+  --nav-text-default: rgba(0, 0, 0, 0.58);
+  --nav-text-active:  #1a1a1a;
+  --nav-accent:       #C8603A;
+  --nav-border:       rgba(0, 0, 0, 0.06);
+}
+
 /* ── Mobile globals ── */
 * {
   -webkit-tap-highlight-color: transparent;
@@ -87,7 +97,56 @@ html, body {
   .no-scrollbar::-webkit-scrollbar { display: none; }
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-  /* Sidebar nav link — v2 (colored-square icon design) */
+  /* ── Minimal nav item (redesign) ── */
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    padding: 0 12px;
+    margin: 1px 6px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--nav-text-default);
+    text-decoration: none;
+    cursor: pointer;
+    transition: background 80ms, color 80ms;
+    white-space: nowrap;
+  }
+  .nav-item:hover {
+    background: rgba(0, 0, 0, 0.04);
+    color: var(--nav-text-active);
+  }
+  .nav-item[data-active="true"] {
+    margin-left: 0;
+    border-left: 2px solid var(--nav-accent);
+    border-radius: 0 6px 6px 0;
+    padding-left: 16px; /* 6px margin equiv + 12px padding - 2px border */
+    background: rgba(200, 96, 58, 0.08);
+    color: var(--nav-accent);
+    font-weight: 500;
+  }
+
+  /* Monochrome badge */
+  .nav-badge-mono {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: auto;
+    height: 16px;
+    min-width: 16px;
+    border-radius: 99px;
+    background: rgba(0, 0, 0, 0.08);
+    color: var(--nav-text-default);
+    font-size: 10px;
+    font-weight: 500;
+    padding: 0 4px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+
+  /* Legacy — kept for any fallback */
   .sidebar-link-v2 {
     @apply flex items-center gap-2.5 px-3 rounded-md transition-colors cursor-pointer no-underline;
     height: 38px;
@@ -96,22 +155,6 @@ html, body {
     font-weight: 400;
     text-decoration: none;
   }
-  .sidebar-link-v2:hover {
-    background: rgba(229,238,255,0.50);
-  }
-
-  /* Nav badges */
-  .nav-badge {
-    @apply inline-flex items-center justify-center rounded-full shrink-0;
-    min-width: 18px;
-    height: 18px;
-    padding: 0 4px;
-    font-size: 11px;
-    font-weight: 500;
-    line-height: 1;
-  }
-  .nav-badge-red  { background: rgba(186,26,26,0.10); color: #ba1a1a; }
-  .nav-badge-amber { background: rgba(180,120,0,0.10); color: #b47800; }
 
   /* Sidebar group stagger-fade */
   .nav-group-animate {
