@@ -466,7 +466,7 @@ interface ContentProps {
 
 function PopupContents({
   entry, sm, fmtTime,
-  payeeId, payeeSearch, setPayeeId, setPayeeName, setPayeeSearch,
+  payeeId, payeeName, payeeSearch, setPayeeId, setPayeeName, setPayeeSearch,
   showPayeeDrop, setShowPayeeDrop, stakeholders, filteredPayees,
   amount, setAmount,
   description, setDescription,
@@ -485,12 +485,15 @@ function PopupContents({
 }: ContentProps) {
   const payeeDropRef = useRef<HTMLDivElement>(null);
   const [showCreateStkForm, setShowCreateStkForm] = useState(false);
+  const [showChangePicker, setShowChangePicker] = useState(false);
 
   const selectPayee = (id: string, name: string) => {
     setPayeeId(id);
     setPayeeName(name);
     setPayeeSearch(name);
     setShowPayeeDrop(false);
+    setShowChangePicker(false);
+    setShowCreateStkForm(false);
   };
 
   const ai = entry.ai_extracted;
@@ -590,110 +593,116 @@ function PopupContents({
 
         {/* 1. Payee */}
         <FieldRow icon="person" label="Payee" required missing={missingPayee && !payeeId && !payeeUnmatched}>
-          <div className="relative" ref={payeeDropRef}>
-            <input
-              type="text"
-              value={displayPayee}
-              onChange={(e) => {
-                setPayeeSearch(e.target.value);
-                if (payeeId) { setPayeeId(''); setPayeeName(''); }
-                setShowPayeeDrop(true);
-              }}
-              onFocus={() => setShowPayeeDrop(true)}
-              placeholder="Search stakeholder…"
-              className={`w-full text-[13px] px-2.5 py-1.5 rounded-lg border outline-none transition-colors ${
-                missingPayee && !payeeId && !payeeUnmatched
-                  ? 'border-red-300 bg-red-50'
-                  : payeeId
-                  ? 'border-emerald-300 bg-emerald-50/30'
-                  : payeeUnmatched
-                  ? 'border-amber-300 bg-amber-50/30'
-                  : 'border-outline-variant/30 bg-surface-container-lowest/60'
-              }`}
-              autoComplete="off"
-            />
-            {payeeId && (
-              <span className="absolute right-2 top-1/2 -translate-y-1/2 material-symbols-outlined text-[15px] text-emerald-600"
-                style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>
-            )}
-            {showPayeeDrop && !payeeId && (
-              <div className="absolute left-0 right-0 top-full mt-1 z-10 bg-white border border-black/[0.08] rounded-xl shadow-lg max-h-48 overflow-y-auto">
-                {filteredPayees.slice(0, 10).map((s) => (
-                  <button key={s.stakeholder_id} type="button"
-                    onClick={() => { selectPayee(s.stakeholder_id, s.name); setShowCreateStkForm(false); }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-surface-container-low text-left border-b border-outline-variant/[0.06] last:border-0"
-                  >
-                    <div>
-                      <p className="text-[13px] font-semibold text-on-surface">{s.name}</p>
-                      <p className="text-[11px] text-on-surface-variant/50">{s.type} · {s.category}</p>
-                    </div>
-                  </button>
-                ))}
-                {filteredPayees.length === 0 && (
-                  <p className="px-3 py-3 text-[12px] text-on-surface-variant/50 text-center">No matches</p>
-                )}
-              </div>
-            )}
-          </div>
 
-          {/* STATE B: Unmatched — show closest matches + create option */}
-          {payeeUnmatched && !payeeId && !showCreateStkForm && (
-            <div className="mt-2 p-2.5 bg-amber-50 border border-amber-200 rounded-xl">
-              <p className="text-[11px] text-amber-700 font-medium mb-2 flex items-center gap-1">
-                <span className="material-symbols-outlined text-[13px]">warning</span>
-                "<span className="italic">{ai.payee_raw}</span>" not found in stakeholders
-              </p>
-              {(ai.payee_closest_match?.length ?? 0) > 0 && (
+          {/* MATCHED: payee resolved, not in change mode */}
+          {payeeId && !showChangePicker ? (
+            <div className="flex items-center justify-between py-0.5">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="material-symbols-outlined text-[16px] text-emerald-600 shrink-0"
+                  style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>
+                <div className="min-w-0">
+                  <span className="text-[13px] font-semibold text-on-surface">{payeeName}</span>
+                  {(() => {
+                    const s = stakeholders.find((x: any) => x.stakeholder_id === payeeId);
+                    return s ? <span className="text-[11px] text-on-surface-variant/50 ml-1.5">· {s.category}</span> : null;
+                  })()}
+                </div>
+              </div>
+              <button type="button"
+                onClick={() => setShowChangePicker(true)}
+                className="text-[11px] text-primary hover:underline shrink-0 ml-2">
+                change
+              </button>
+            </div>
+
+          ) : showChangePicker || payeeUnmatched ? (
+            /* UNMATCHED / CHANGE PICKER */
+            <div className={`mt-1 p-2.5 rounded-xl border ${
+              showChangePicker
+                ? 'bg-surface-container/40 border-outline-variant/20'
+                : 'bg-amber-50 border-amber-200'
+            }`}>
+              {!showChangePicker && (
+                <p className="text-[11px] text-amber-700 font-medium mb-2 flex items-center gap-1">
+                  <span className="material-symbols-outlined text-[13px]">warning</span>
+                  "<span className="italic">{ai.payee_raw}</span>" not found in stakeholders
+                </p>
+              )}
+              {(ai.payee_closest_match?.length ?? 0) > 0 && !showCreateStkForm && (
                 <div className="space-y-1 mb-2">
-                  <p className="text-[10px] text-amber-600/70 uppercase tracking-wide font-semibold mb-1">Did you mean?</p>
+                  <p className="text-[10px] text-on-surface-variant/40 uppercase tracking-wide font-semibold mb-1">
+                    {showChangePicker ? 'Select stakeholder' : 'Did you mean?'}
+                  </p>
                   {ai.payee_closest_match!.map(m => (
-                    <button key={m.id} type="button"
+                    <div key={m.id}
                       onClick={() => selectPayee(m.id, m.name)}
-                      className="w-full text-left px-2.5 py-1.5 rounded-lg bg-white border border-amber-200 hover:border-amber-400 hover:bg-amber-50/50 transition-colors"
+                      className="flex items-center justify-between px-2.5 py-2 rounded-lg bg-white border border-outline-variant/15 hover:border-emerald-300 hover:bg-emerald-50/30 cursor-pointer transition-colors"
                     >
-                      <span className="text-[13px] font-semibold text-on-surface">{m.name}</span>
-                      <span className="text-[11px] text-on-surface-variant/50 ml-1.5">· {m.type} · {m.category}</span>
-                    </button>
+                      <div>
+                        <span className="text-[13px] font-semibold text-on-surface">{m.name}</span>
+                        <span className="text-[11px] text-on-surface-variant/50 ml-1.5">· {m.type} · {m.category}</span>
+                      </div>
+                      <span className="material-symbols-outlined text-[16px] text-on-surface-variant/25">check</span>
+                    </div>
                   ))}
                 </div>
               )}
-              <button type="button"
-                onClick={() => setShowCreateStkForm(true)}
-                className="text-[12px] text-primary font-semibold hover:underline flex items-center gap-1"
-              >
-                <span className="material-symbols-outlined text-[14px]">add_circle</span>
-                Create new stakeholder
-              </button>
-
-              {/* Full dropdown escape hatch */}
-              <div className="mt-2 pt-2 border-t border-amber-200">
-                <p className="text-[10px] text-amber-600/70 uppercase tracking-wide font-semibold mb-1">Or select from all stakeholders:</p>
-                <select
-                  defaultValue=""
-                  onChange={(e) => {
-                    const s = stakeholders.find((x: any) => x.stakeholder_id === e.target.value);
-                    if (s) selectPayee(s.stakeholder_id, s.name);
-                  }}
-                  className="w-full text-[13px] px-2.5 py-1.5 rounded-lg border border-amber-300 bg-white outline-none focus:border-amber-500 transition-colors"
-                >
-                  <option value="">Select stakeholder…</option>
-                  {stakeholders.map((s: any) => (
-                    <option key={s.stakeholder_id} value={s.stakeholder_id}>
-                      {s.name} · {s.category}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {!showCreateStkForm && (
+                <button type="button"
+                  onClick={() => setShowCreateStkForm(true)}
+                  className="text-[12px] text-primary font-semibold hover:underline flex items-center gap-1">
+                  <span className="material-symbols-outlined text-[14px]">add_circle</span>
+                  Add new stakeholder
+                </button>
+              )}
+              {showCreateStkForm && (
+                <CreateStakeholderForm
+                  defaultName={ai.payee_raw || payeeSearch}
+                  onCreated={(id, name) => { selectPayee(id, name); setShowCreateStkForm(false); }}
+                  onCancel={() => setShowCreateStkForm(false)}
+                />
+              )}
             </div>
-          )}
 
-          {/* STATE C: Inline create form */}
-          {showCreateStkForm && (
-            <CreateStakeholderForm
-              defaultName={ai.payee_raw || payeeSearch}
-              onCreated={(id, name) => { selectPayee(id, name); setShowCreateStkForm(false); }}
-              onCancel={() => setShowCreateStkForm(false)}
-            />
+          ) : (
+            /* EMPTY: no AI-extracted payee — text search */
+            <div className="relative" ref={payeeDropRef}>
+              <input
+                type="text"
+                value={displayPayee}
+                onChange={(e) => {
+                  setPayeeSearch(e.target.value);
+                  if (payeeId) { setPayeeId(''); setPayeeName(''); }
+                  setShowPayeeDrop(true);
+                }}
+                onFocus={() => setShowPayeeDrop(true)}
+                placeholder="Search stakeholder…"
+                className={`w-full text-[13px] px-2.5 py-1.5 rounded-lg border outline-none transition-colors ${
+                  missingPayee
+                    ? 'border-red-300 bg-red-50'
+                    : 'border-outline-variant/30 bg-surface-container-lowest/60'
+                }`}
+                autoComplete="off"
+              />
+              {showPayeeDrop && (
+                <div className="absolute left-0 right-0 top-full mt-1 z-10 bg-white border border-black/[0.08] rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                  {filteredPayees.slice(0, 10).map((s) => (
+                    <button key={s.stakeholder_id} type="button"
+                      onClick={() => selectPayee(s.stakeholder_id, s.name)}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-surface-container-low text-left border-b border-outline-variant/[0.06] last:border-0"
+                    >
+                      <div>
+                        <p className="text-[13px] font-semibold text-on-surface">{s.name}</p>
+                        <p className="text-[11px] text-on-surface-variant/50">{s.type} · {s.category}</p>
+                      </div>
+                    </button>
+                  ))}
+                  {filteredPayees.length === 0 && (
+                    <p className="px-3 py-3 text-[12px] text-on-surface-variant/50 text-center">No matches</p>
+                  )}
+                </div>
+              )}
+            </div>
           )}
 
           <div className="mt-1">
