@@ -6,7 +6,15 @@
       "Bash(powershell -Command ':*)",
       "Bash(npx tsc *)",
       "Bash(npx vite *)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(npx supabase *)",
+      "PowerShell(Start-Sleep -Seconds 15; \\(Get-Content \"C:\\\\Users\\\\koppi\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-koppi-OneDrive-Desktop-Briklay-Fly\\\\23195eee-6709-48aa-a42f-229c05a92f89\\\\tasks\\\\bdntpdib7.output\" | Measure-Object -Line\\).Lines)",
+      "Bash(where deno *)",
+      "Bash(where npx *)",
+      "PowerShell(deno check \"C:\\\\Users\\\\koppi\\\\OneDrive\\\\Desktop\\\\Briklay Fly\\\\supabase\\\\functions\\\\whatsapp-webhook\\\\index.ts\" 2>&1)",
+      "Bash(git commit -m ' *)",
+      "Bash(git add *)",
+      "Bash(git push *)"
     ]
   }
 }
