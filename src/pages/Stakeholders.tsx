@@ -8,7 +8,6 @@ import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 
-// GSTIN: 2 state digits + 5 PAN letters + 4 PAN digits + 1 PAN letter + 1 entity + Z + 1 check
 const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$/;
 function validateGSTIN(v: string) { return GSTIN_REGEX.test(v.trim().toUpperCase()); }
 
@@ -44,6 +43,43 @@ export function StarDisplay({ value, size = 14 }: { value: number; size?: number
   );
 }
 
+function initials(name: string) {
+  const parts = name.trim().split(' ').filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return parts[0][0].toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function avatarBg(name: string) {
+  const palette = ['#e5e7eb', '#dbeafe', '#fef3c7', '#d1fae5', '#ede9fe', '#fce7f3'];
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) & 0xffff;
+  return palette[h % palette.length];
+}
+
+function TypePill({ type }: { type: string }) {
+  const styles: Record<string, { bg: string; color: string }> = {
+    Worker: { bg: '#dbeafe', color: '#1e40af' },
+    Vendor: { bg: '#fef3c7', color: '#92400e' },
+    Client: { bg: '#d1fae5', color: '#065f46' },
+  };
+  const s = styles[type] || { bg: '#f3f4f6', color: '#374151' };
+  return (
+    <span style={{
+      display: 'inline-block', fontSize: 11, fontWeight: 600, padding: '2px 8px',
+      borderRadius: 99, background: s.bg, color: s.color,
+    }}>
+      {type}
+    </span>
+  );
+}
+
+function fmt(n: number) {
+  if (n >= 100000) return `₹${(n / 100000).toFixed(1)}L`;
+  if (n >= 1000)   return `₹${(n / 1000).toFixed(1)}K`;
+  return `₹${n.toLocaleString('en-IN')}`;
+}
+
 export default function Stakeholders({ session }: { session: Session }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -51,10 +87,13 @@ export default function Stakeholders({ session }: { session: Session }) {
   const [showForm, setShowForm] = useState(false);
 
   // ── Filter state ──────────────────────────────────────────────────────────
-  const [filterType, setFilterType] = useState<'all' | 'Worker' | 'Vendor'>('all');
-  const [filterApprovedOnly, setFilterApprovedOnly] = useState(false);
+  const [filterType, setFilterType] = useState<'all' | 'Worker' | 'Vendor' | 'Client'>('all');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'approved' | 'unapproved'>('all');
+  const [search, setSearch] = useState('');
+  const [showTypeMenu, setShowTypeMenu] = useState(false);
+  const [showStatusMenu, setShowStatusMenu] = useState(false);
 
-  // ── Form controlled state ─────────────────────────────────────────────────
+  // ── Form state ────────────────────────────────────────────────────────────
   const [formType, setFormType] = useState<'Worker' | 'Vendor'>('Worker');
   const [formCategory, setFormCategory] = useState('');
   const [formCategoryOther, setFormCategoryOther] = useState('');
@@ -73,13 +112,9 @@ export default function Stakeholders({ session }: { session: Session }) {
     setIsApproved(false); setRating(0); setRatingDelivery(0);
     setRatingQuality(0); setRatingPricing(0); setShowSubRatings(false);
   };
+  const resetForm = () => { setFormCategory(''); setFormCategoryOther(''); resetVendorFields(); };
 
-  const resetForm = () => {
-    setFormCategory('');
-    setFormCategoryOther('');
-    resetVendorFields();
-  };
-
+  // ── Queries ───────────────────────────────────────────────────────────────
   const { data: stakeholders, isLoading } = useQuery({
     queryKey: ['stakeholders'],
     queryFn: async () => {
@@ -89,9 +124,23 @@ export default function Stakeholders({ session }: { session: Session }) {
     },
   });
 
+  const { data: paidMap } = useQuery({
+    queryKey: ['stakeholders_paid'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('transactions')
+        .select('stakeholder_id, total_amount')
+        .eq('status', 'Active');
+      const map: Record<string, number> = {};
+      (data || []).forEach((t: any) => {
+        if (t.stakeholder_id) map[t.stakeholder_id] = (map[t.stakeholder_id] || 0) + Number(t.total_amount);
+      });
+      return map;
+    },
+  });
+
   const createStakeholder = useMutation({
     mutationFn: async (formData: FormData) => {
-      // Validate GSTIN if vendor + not unregistered + value provided
       if (formType === 'Vendor' && gstRegType !== 'Unregistered' && gstinValue) {
         if (!validateGSTIN(gstinValue)) {
           setGstinError('Invalid GSTIN format. Expected format: 37AADCB2230M1Z3');
@@ -99,16 +148,13 @@ export default function Stakeholders({ session }: { session: Session }) {
         }
       }
       const firstName = (formData.get('first_name') as string || '').trim();
-      const lastName = (formData.get('last_name') as string || '').trim();
-      const fullName = lastName ? `${firstName} ${lastName}` : firstName;
+      const lastName  = (formData.get('last_name')  as string || '').trim();
+      const fullName  = lastName ? `${firstName} ${lastName}` : firstName;
       const resolvedCategory = formCategory === OTHER_TRADE
-        ? (formCategoryOther.trim() || 'Other')
-        : formCategory;
+        ? (formCategoryOther.trim() || 'Other') : formCategory;
       const payload: any = {
         stakeholder_id: formData.get('stakeholder_id') as string,
-        name: fullName,
-        type: formType,
-        category: resolvedCategory,
+        name: fullName, type: formType, category: resolvedCategory,
         contact: formData.get('contact') as string || null,
         bank_details: formData.get('bank_details') as string || null,
       };
@@ -119,8 +165,8 @@ export default function Stakeholders({ session }: { session: Session }) {
         if (rating > 0) {
           payload.rating = rating;
           if (ratingDelivery > 0) payload.rating_delivery = ratingDelivery;
-          if (ratingQuality > 0) payload.rating_quality = ratingQuality;
-          if (ratingPricing > 0) payload.rating_pricing = ratingPricing;
+          if (ratingQuality  > 0) payload.rating_quality  = ratingQuality;
+          if (ratingPricing  > 0) payload.rating_pricing  = ratingPricing;
         }
       }
       const { data, error } = await supabase.from('stakeholders').insert([payload]).select().single();
@@ -129,44 +175,70 @@ export default function Stakeholders({ session }: { session: Session }) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stakeholders'] });
-      setShowForm(false);
-      setFormType('Worker');
-      resetForm();
+      setShowForm(false); setFormType('Worker'); resetForm();
     },
   });
 
-  const canManage = profile?.role === 'management' || profile?.role === 'accountant' || profile?.role === 'principal';
+  const canManage = ['management', 'accountant', 'principal'].includes(profile?.role || '');
 
-  const displayed = (stakeholders || []).filter((stk) => {
+  // ── Derived ───────────────────────────────────────────────────────────────
+  const all = stakeholders || [];
+  const workerCount = all.filter(s => s.type === 'Worker').length;
+  const vendorCount = all.filter(s => s.type === 'Vendor').length;
+
+  const displayed = all.filter((stk) => {
     if (filterType !== 'all' && stk.type !== filterType) return false;
-    if (filterApprovedOnly && stk.type === 'Vendor' && !stk.is_approved) return false;
+    if (filterStatus === 'approved'   && !(stk.type === 'Vendor' && stk.is_approved)) return false;
+    if (filterStatus === 'unapproved' && !(stk.type === 'Vendor' && !stk.is_approved)) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      return (
+        stk.name.toLowerCase().includes(q) ||
+        stk.stakeholder_id.toLowerCase().includes(q) ||
+        (stk.category || '').toLowerCase().includes(q) ||
+        (stk.contact || '').toLowerCase().includes(q)
+      );
+    }
     return true;
   });
 
   return (
-    <div className="px-margin-mobile md:px-margin-desktop pt-6">
-      <div className="flex justify-between items-end mb-stack-lg">
-        <h2 className="text-headline-lg font-headline-lg text-primary">Stakeholders</h2>
+    <div className="px-margin-mobile md:px-margin-desktop pt-6 mobile-main-pb">
+
+      {/* PAGE HEADER */}
+      <div className="flex justify-between items-start mb-6">
+        <div>
+          <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.02em', color: '#0b1c30', margin: 0, fontFamily: 'Manrope, sans-serif' }}>
+            Stakeholders
+          </h1>
+          <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.45)', margin: '3px 0 0' }}>
+            {all.length} total · {workerCount} workers · {vendorCount} vendors
+          </p>
+        </div>
         {canManage && (
-          <button className="bk-btn flex items-center gap-2" onClick={() => { setShowForm(!showForm); if (showForm) { setFormType('Worker'); resetForm(); } }}>
-            <span className="material-symbols-outlined text-[18px]">{showForm ? 'close' : 'add'}</span>
-            {showForm ? 'Cancel' : 'Add Person'}
+          <button
+            onClick={() => { setShowForm(!showForm); if (showForm) { setFormType('Worker'); resetForm(); } }}
+            style={{
+              fontSize: 13, fontWeight: 500, color: '#C8603A', background: 'white',
+              border: '1px solid rgba(200,96,58,0.4)', borderRadius: 8,
+              padding: '6px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5,
+            }}
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: 16 }}>{showForm ? 'close' : 'add'}</span>
+            {showForm ? 'Cancel' : 'Add Stakeholder'}
           </button>
         )}
       </div>
 
-      {/* ── ADD FORM ─────────────────────────────────────────────────────────── */}
+      {/* ADD FORM — unchanged functionality */}
       {showForm && (
-        <div className="bg-surface-container-lowest rounded-xl shadow-card border border-outline-variant/30 overflow-hidden mb-stack-lg">
+        <div className="bg-surface-container-lowest rounded-xl shadow-card border border-outline-variant/30 overflow-hidden mb-6">
           <div className="px-6 py-4 bg-surface-container-low border-b border-outline-variant/30">
             <h3 className="text-headline-md font-headline-md">Add New Stakeholder</h3>
             <p className="text-body-sm text-on-surface-variant">Register a new worker or vendor.</p>
           </div>
-
           <form onSubmit={(e) => { e.preventDefault(); createStakeholder.mutate(new FormData(e.currentTarget)); }} className="p-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-stack-lg">
-
-              {/* Shared fields */}
               <div className="space-y-stack-sm">
                 <label className="text-label-caps font-label-caps text-on-surface-variant">ID</label>
                 <input name="stakeholder_id" className="bk-input" placeholder="STK-001" required />
@@ -189,30 +261,18 @@ export default function Stakeholders({ session }: { session: Session }) {
               </div>
               <div className="space-y-stack-sm">
                 <label className="text-label-caps font-label-caps text-on-surface-variant">TRADE / CATEGORY</label>
-                <select
-                  className="bk-input"
-                  value={formCategory}
-                  onChange={(e) => { setFormCategory(e.target.value); setFormCategoryOther(''); }}
-                  required
-                >
+                <select className="bk-input" value={formCategory}
+                  onChange={(e) => { setFormCategory(e.target.value); setFormCategoryOther(''); }} required>
                   <option value="" disabled>Select trade…</option>
                   {(formType === 'Worker' ? WORKER_TRADE_GROUPS : VENDOR_TRADE_GROUPS).map((g) => (
                     <optgroup key={g.group} label={g.group}>
-                      {g.trades.map((t) => (
-                        <option key={t} value={t}>{t}</option>
-                      ))}
+                      {g.trades.map((t) => <option key={t} value={t}>{t}</option>)}
                     </optgroup>
                   ))}
                 </select>
                 {formCategory === OTHER_TRADE && (
-                  <input
-                    className="bk-input mt-1"
-                    placeholder="Specify trade…"
-                    value={formCategoryOther}
-                    onChange={(e) => setFormCategoryOther(e.target.value)}
-                    autoFocus
-                    required
-                  />
+                  <input className="bk-input mt-1" placeholder="Specify trade…"
+                    value={formCategoryOther} onChange={(e) => setFormCategoryOther(e.target.value)} autoFocus required />
                 )}
               </div>
               <div className="space-y-stack-sm">
@@ -223,19 +283,14 @@ export default function Stakeholders({ session }: { session: Session }) {
                 <label className="text-label-caps font-label-caps text-on-surface-variant">BANK / UPI</label>
                 <input name="bank_details" className="bk-input" placeholder="Account No / UPI ID" />
               </div>
-
-              {/* ── Vendor-only fields ───────────────────────────────── */}
               {formType === 'Vendor' && (
                 <>
-                  {/* Divider */}
                   <div className="md:col-span-2 border-t border-outline-variant/30 pt-2">
                     <p className="text-label-caps font-label-caps text-on-surface-variant flex items-center gap-2">
                       <span className="material-symbols-outlined text-[14px]">receipt_long</span>
                       GST & COMPLIANCE
                     </p>
                   </div>
-
-                  {/* GST Registration Type */}
                   <div className="space-y-stack-sm">
                     <label className="text-label-caps font-label-caps text-on-surface-variant">GST REGISTRATION TYPE</label>
                     <select className="bk-input" value={gstRegType}
@@ -245,21 +300,14 @@ export default function Stakeholders({ session }: { session: Session }) {
                       <option value="Unregistered">Unregistered</option>
                     </select>
                   </div>
-
-                  {/* GSTIN — hidden if Unregistered */}
                   {gstRegType !== 'Unregistered' ? (
                     <div className="space-y-stack-sm">
                       <label className="text-label-caps font-label-caps text-on-surface-variant">GSTIN (OPTIONAL)</label>
                       <input
                         className={`bk-input uppercase tracking-wider font-data-mono ${gstinError ? 'border-error ring-1 ring-error/30' : ''}`}
-                        placeholder="37AADCB2230M1Z3"
-                        value={gstinValue}
+                        placeholder="37AADCB2230M1Z3" value={gstinValue} maxLength={15}
                         onChange={(e) => { setGstinValue(e.target.value.toUpperCase()); setGstinError(''); }}
-                        onBlur={() => {
-                          if (gstinValue && !validateGSTIN(gstinValue))
-                            setGstinError('Invalid format. e.g. 37AADCB2230M1Z3');
-                        }}
-                        maxLength={15}
+                        onBlur={() => { if (gstinValue && !validateGSTIN(gstinValue)) setGstinError('Invalid format. e.g. 37AADCB2230M1Z3'); }}
                       />
                       {gstinError
                         ? <p className="text-[11px] text-error">{gstinError}</p>
@@ -270,23 +318,16 @@ export default function Stakeholders({ session }: { session: Session }) {
                       <p className="text-body-sm text-on-surface-variant italic mt-6">No GSTIN for unregistered vendors</p>
                     </div>
                   )}
-
-                  {/* Approved Vendor toggle */}
                   <div className="md:col-span-2 flex items-center justify-between p-4 bg-surface-container-low rounded-xl border border-outline-variant/30">
                     <div>
                       <p className="text-body-sm font-semibold text-on-surface">Approved Vendor</p>
                       <p className="text-[12px] text-on-surface-variant mt-0.5">Mark this vendor as approved for use on projects</p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setIsApproved((v) => !v)}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${isApproved ? 'bg-secondary' : 'bg-outline-variant/50'}`}
-                    >
+                    <button type="button" onClick={() => setIsApproved(v => !v)}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${isApproved ? 'bg-secondary' : 'bg-outline-variant/50'}`}>
                       <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${isApproved ? 'translate-x-6' : 'translate-x-1'}`} />
                     </button>
                   </div>
-
-                  {/* Vendor Rating */}
                   <div className="md:col-span-2 border-t border-outline-variant/30 pt-2">
                     <p className="text-label-caps font-label-caps text-on-surface-variant flex items-center gap-2 mb-4">
                       <span className="material-symbols-outlined text-[14px]">star</span>
@@ -300,22 +341,19 @@ export default function Stakeholders({ session }: { session: Session }) {
                           ? <span className="text-body-sm font-semibold text-on-surface">{rating}/5</span>
                           : <span className="text-body-sm text-on-surface-variant italic">Not yet rated</span>}
                       </div>
-
                       {rating > 0 && (
-                        <button type="button"
-                          onClick={() => setShowSubRatings((v) => !v)}
+                        <button type="button" onClick={() => setShowSubRatings(v => !v)}
                           className="flex items-center gap-1.5 text-[12px] text-primary hover:underline">
                           <span className="material-symbols-outlined text-[14px]">{showSubRatings ? 'expand_less' : 'expand_more'}</span>
                           {showSubRatings ? 'Hide' : 'Add'} subcategory ratings
                         </button>
                       )}
-
                       {showSubRatings && (
                         <div className="pl-4 border-l-2 border-outline-variant/30 space-y-3">
                           {([
                             { label: 'Delivery', value: ratingDelivery, onChange: setRatingDelivery },
-                            { label: 'Quality', value: ratingQuality, onChange: setRatingQuality },
-                            { label: 'Pricing', value: ratingPricing, onChange: setRatingPricing },
+                            { label: 'Quality',  value: ratingQuality,  onChange: setRatingQuality  },
+                            { label: 'Pricing',  value: ratingPricing,  onChange: setRatingPricing  },
                           ] as const).map((r) => (
                             <div key={r.label} className="flex items-center gap-4">
                               <span className="text-body-sm text-on-surface-variant w-20 shrink-0">{r.label}</span>
@@ -330,7 +368,6 @@ export default function Stakeholders({ session }: { session: Session }) {
                 </>
               )}
             </div>
-
             <div className="mt-8 flex justify-end pt-4 border-t border-outline-variant/30">
               <button type="submit" className="bk-btn px-8" disabled={createStakeholder.isPending}>
                 {createStakeholder.isPending ? 'Saving...' : 'Save Stakeholder'}
@@ -345,98 +382,213 @@ export default function Stakeholders({ session }: { session: Session }) {
         </div>
       )}
 
-      {/* ── FILTER BAR ───────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-2 mb-stack-md">
-        {(['all', 'Worker', 'Vendor'] as const).map((t) => (
-          <button key={t}
-            onClick={() => { setFilterType(t); if (t !== 'Vendor') setFilterApprovedOnly(false); }}
-            className={`px-3 py-1.5 rounded-full text-[12px] font-bold transition-colors border ${
-              filterType === t
-                ? 'bg-primary text-on-primary border-primary'
-                : 'border-outline-variant/40 text-on-surface-variant hover:border-primary/40 hover:text-primary'
-            }`}>
-            {t === 'all' ? 'All' : t === 'Worker' ? 'Workers' : 'Vendors'}
-          </button>
-        ))}
-        {(filterType === 'all' || filterType === 'Vendor') && (
+      {/* FILTER ROW */}
+      <div className="flex flex-wrap items-center gap-2 mb-4" style={{ position: 'relative' }}>
+
+        {/* Type filter */}
+        <div style={{ position: 'relative' }}>
           <button
-            onClick={() => setFilterApprovedOnly((v) => !v)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-bold transition-colors border ${
-              filterApprovedOnly
-                ? 'bg-green-100 text-green-800 border-green-300'
-                : 'border-outline-variant/40 text-on-surface-variant hover:border-green-400 hover:text-green-700'
-            }`}>
-            <span className="material-symbols-outlined text-[14px]" style={{ fontVariationSettings: filterApprovedOnly ? "'FILL' 1" : "'FILL' 0" }}>verified</span>
-            Approved Only
+            onClick={() => { setShowTypeMenu(v => !v); setShowStatusMenu(false); }}
+            style={{
+              fontSize: 13, padding: '6px 12px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.12)',
+              background: filterType !== 'all' ? '#fff0eb' : 'white', cursor: 'pointer',
+              color: filterType !== 'all' ? '#C8603A' : '#45464d', display: 'flex', alignItems: 'center', gap: 4,
+            }}
+          >
+            {filterType === 'all' ? 'Type' : filterType} ▾
           </button>
-        )}
-        <span className="text-[12px] text-on-surface-variant ml-auto">{displayed.length} {displayed.length === 1 ? 'result' : 'results'}</span>
+          {showTypeMenu && (
+            <div style={{
+              position: 'absolute', top: '100%', left: 0, marginTop: 4, background: 'white',
+              border: '1px solid rgba(0,0,0,0.10)', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.10)',
+              zIndex: 50, minWidth: 120, overflow: 'hidden',
+            }}>
+              {(['all', 'Worker', 'Vendor', 'Client'] as const).map(t => (
+                <button key={t} onClick={() => { setFilterType(t); setShowTypeMenu(false); }}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left', padding: '9px 14px',
+                    fontSize: 13, color: filterType === t ? '#C8603A' : '#0b1c30',
+                    background: filterType === t ? '#fff0eb' : 'transparent', border: 'none', cursor: 'pointer',
+                  }}
+                >
+                  {t === 'all' ? 'All types' : t === 'Worker' ? 'Workers' : t === 'Vendor' ? 'Vendors' : 'Clients'}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Status filter */}
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={() => { setShowStatusMenu(v => !v); setShowTypeMenu(false); }}
+            style={{
+              fontSize: 13, padding: '6px 12px', borderRadius: 8, border: '1px solid rgba(0,0,0,0.12)',
+              background: filterStatus !== 'all' ? '#fff0eb' : 'white', cursor: 'pointer',
+              color: filterStatus !== 'all' ? '#C8603A' : '#45464d', display: 'flex', alignItems: 'center', gap: 4,
+            }}
+          >
+            {filterStatus === 'all' ? 'Status' : filterStatus === 'approved' ? 'Approved' : 'Unapproved'} ▾
+          </button>
+          {showStatusMenu && (
+            <div style={{
+              position: 'absolute', top: '100%', left: 0, marginTop: 4, background: 'white',
+              border: '1px solid rgba(0,0,0,0.10)', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.10)',
+              zIndex: 50, minWidth: 130, overflow: 'hidden',
+            }}>
+              {([
+                { key: 'all', label: 'All' },
+                { key: 'approved', label: 'Approved' },
+                { key: 'unapproved', label: 'Unapproved' },
+              ] as const).map(s => (
+                <button key={s.key} onClick={() => { setFilterStatus(s.key); setShowStatusMenu(false); }}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left', padding: '9px 14px',
+                    fontSize: 13, color: filterStatus === s.key ? '#C8603A' : '#0b1c30',
+                    background: filterStatus === s.key ? '#fff0eb' : 'transparent', border: 'none', cursor: 'pointer',
+                  }}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Search */}
+        <div style={{ display: 'flex', alignItems: 'center', flex: 1, minWidth: 160, maxWidth: 280,
+          background: 'white', border: '1px solid rgba(0,0,0,0.12)', borderRadius: 8, padding: '6px 10px', gap: 6 }}>
+          <span className="material-symbols-outlined" style={{ fontSize: 16, color: 'rgba(0,0,0,0.35)' }}>search</span>
+          <input
+            value={search} onChange={e => setSearch(e.target.value)} placeholder="Search…"
+            style={{ flex: 1, border: 'none', outline: 'none', fontSize: 13, color: '#0b1c30', background: 'transparent' }}
+          />
+        </div>
+
+        <span style={{ fontSize: 12, color: 'rgba(0,0,0,0.4)', marginLeft: 'auto' }}>
+          {displayed.length} result{displayed.length !== 1 ? 's' : ''}
+        </span>
       </div>
 
-      {/* ── CARDS GRID ───────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-stack-md">
-        {isLoading && <div className="col-span-full flex justify-center py-8"><Loader2 className="animate-spin text-secondary" /></div>}
-        {!isLoading && displayed.length === 0 && (
-          <p className="col-span-full text-body-sm text-on-surface-variant py-8 text-center">No stakeholders found.</p>
-        )}
-        {displayed.map((stk) => (
-          <div key={stk.stakeholder_id}
-            onClick={() => navigate(`/stakeholders/${stk.stakeholder_id}`)}
-            className="bg-surface-container-lowest p-5 rounded-xl shadow-card border border-outline-variant/30 flex flex-col gap-3 cursor-pointer hover:shadow-card-md hover:border-outline-variant/60 transition-all">
-
-            {/* Header row */}
-            <div className="flex justify-between items-start">
-              <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${stk.type === 'Worker' ? 'bg-primary-container text-on-primary' : 'bg-tertiary-container text-on-tertiary-container'}`}>
-                  <span className="material-symbols-outlined">{stk.type === 'Worker' ? 'engineering' : 'store'}</span>
-                </div>
-                <div>
-                  <h3 className="font-body-lg font-bold text-on-surface leading-tight">{stk.name}</h3>
-                  <p className="text-label-caps text-on-surface-variant">{stk.stakeholder_id}</p>
-                </div>
-              </div>
-              <div className="flex flex-col items-end gap-1.5">
-                <span className={`px-2 py-1 text-[10px] font-bold rounded-full ${stk.type === 'Worker' ? 'bg-secondary-container text-on-secondary-container' : 'bg-surface-container-high text-on-surface'}`}>
-                  {stk.type?.toUpperCase()}
-                </span>
-                {stk.type === 'Vendor' && stk.is_approved && (
-                  <span className="flex items-center gap-1 px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-[10px] font-bold">
-                    <span className="material-symbols-outlined text-[11px]" style={{ fontVariationSettings: "'FILL' 1" }}>verified</span>
-                    Approved
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* Details */}
-            <div className="text-body-sm text-on-surface-variant space-y-1">
-              <p className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[16px]">label</span>
-                {stk.category}
-                {stk.type === 'Vendor' && stk.gst_reg_type && (
-                  <span className="text-[11px] text-on-surface-variant/60">· {stk.gst_reg_type}</span>
-                )}
-              </p>
-              {stk.contact && <p className="flex items-center gap-2"><span className="material-symbols-outlined text-[16px]">call</span> {stk.contact}</p>}
-              {stk.bank_details && <p className="flex items-center gap-2"><span className="material-symbols-outlined text-[16px]">account_balance</span> {stk.bank_details}</p>}
-              {stk.type === 'Vendor' && stk.gstin && (
-                <p className="flex items-center gap-2 font-data-mono text-[11px]">
-                  <span className="material-symbols-outlined text-[16px]">receipt_long</span>
-                  {stk.gstin}
-                </p>
-              )}
-            </div>
-
-            {/* Rating row (vendors only) */}
-            {stk.type === 'Vendor' && stk.rating != null && stk.rating > 0 && (
-              <div className="flex items-center gap-2 pt-2 border-t border-outline-variant/20">
-                <StarDisplay value={stk.rating} size={14} />
-                <span className="text-[12px] font-semibold text-on-surface">{stk.rating}/5</span>
-              </div>
-            )}
+      {/* STAKEHOLDER TABLE */}
+      {isLoading ? (
+        <div className="flex justify-center py-16"><Loader2 className="animate-spin text-secondary" /></div>
+      ) : displayed.length === 0 ? (
+        <p className="text-body-sm text-on-surface-variant py-12 text-center">No stakeholders found.</p>
+      ) : (
+        <>
+          {/* Desktop table */}
+          <div className="hidden md:block bg-white rounded-xl border border-black/[0.06] overflow-hidden">
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
+                  {['Name', 'Type', 'Trade', 'Phone', 'Paid', ''].map(h => (
+                    <th key={h} style={{
+                      padding: '10px 16px', fontSize: 10, textTransform: 'uppercase',
+                      letterSpacing: '0.06em', color: 'rgba(0,0,0,0.4)', fontWeight: 600,
+                      textAlign: h === 'Paid' ? 'right' : 'left', whiteSpace: 'nowrap',
+                    }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {displayed.map((stk, idx) => {
+                  const paid = paidMap?.[stk.stakeholder_id] ?? null;
+                  return (
+                    <tr
+                      key={stk.stakeholder_id}
+                      onClick={() => navigate(`/stakeholders/${stk.stakeholder_id}`)}
+                      style={{
+                        cursor: 'pointer', height: 52,
+                        borderBottom: idx < displayed.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none',
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,0,0,0.02)')}
+                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                    >
+                      {/* Name */}
+                      <td style={{ padding: '0 16px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <span style={{
+                            width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
+                            background: avatarBg(stk.name), display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: 10, fontWeight: 700, color: 'rgba(0,0,0,0.55)',
+                          }}>{initials(stk.name)}</span>
+                          <div>
+                            <p style={{ fontSize: 14, fontWeight: 500, color: '#0b1c30', margin: 0, whiteSpace: 'nowrap' }}>{stk.name}</p>
+                            <p style={{ fontSize: 11, color: 'rgba(0,0,0,0.4)', margin: 0, fontFamily: 'Geist, monospace' }}>{stk.stakeholder_id}</p>
+                          </div>
+                        </div>
+                      </td>
+                      {/* Type */}
+                      <td style={{ padding: '0 16px' }}><TypePill type={stk.type} /></td>
+                      {/* Trade */}
+                      <td style={{ padding: '0 16px', fontSize: 12, color: 'rgba(0,0,0,0.5)', maxWidth: 160 }}>
+                        <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {stk.category || '—'}
+                        </span>
+                      </td>
+                      {/* Phone */}
+                      <td style={{ padding: '0 16px', fontSize: 12, color: 'rgba(0,0,0,0.5)' }}>
+                        {stk.contact
+                          ? <a href={`tel:${stk.contact}`} onClick={e => e.stopPropagation()} style={{ color: 'inherit', textDecoration: 'none' }}>{stk.contact}</a>
+                          : '—'}
+                      </td>
+                      {/* Paid */}
+                      <td style={{ padding: '0 16px', textAlign: 'right' }}>
+                        <span style={{ fontSize: 14, fontWeight: 500, fontVariantNumeric: 'tabular-nums', color: '#0b1c30' }}>
+                          {paid !== null ? fmt(paid) : '—'}
+                        </span>
+                      </td>
+                      {/* Arrow */}
+                      <td style={{ padding: '0 16px 0 0', textAlign: 'right' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: 14, color: 'rgba(0,0,0,0.3)' }}>chevron_right</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-        ))}
-      </div>
+
+          {/* Mobile list */}
+          <div className="md:hidden space-y-px bg-white rounded-xl border border-black/[0.06] overflow-hidden">
+            {displayed.map((stk, idx) => {
+              const paid = paidMap?.[stk.stakeholder_id] ?? null;
+              return (
+                <div
+                  key={stk.stakeholder_id}
+                  onClick={() => navigate(`/stakeholders/${stk.stakeholder_id}`)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', cursor: 'pointer',
+                    borderBottom: idx < displayed.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none',
+                  }}
+                >
+                  <span style={{
+                    width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
+                    background: avatarBg(stk.name), display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 12, fontWeight: 700, color: 'rgba(0,0,0,0.55)',
+                  }}>{initials(stk.name)}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                      <p style={{ fontSize: 14, fontWeight: 500, color: '#0b1c30', margin: 0 }}>{stk.name}</p>
+                      <TypePill type={stk.type} />
+                    </div>
+                    <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.4)', margin: 0 }}>
+                      {stk.category}{stk.contact ? ` · ${stk.contact}` : ''}
+                    </p>
+                  </div>
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    <p style={{ fontSize: 14, fontWeight: 500, fontVariantNumeric: 'tabular-nums', color: '#0b1c30', margin: 0 }}>
+                      {paid !== null ? fmt(paid) : '—'}
+                    </p>
+                    <span className="material-symbols-outlined" style={{ fontSize: 14, color: 'rgba(0,0,0,0.3)' }}>chevron_right</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 }
