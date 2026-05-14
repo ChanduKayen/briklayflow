@@ -9,6 +9,11 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { ProjectBudget } from '../components/ProjectBudget';
 import { useUserProfile } from '../App';
+import {
+  fmtDate as pdfFmtDate, fmtRupee,
+  MARGIN, C,
+  drawRule, valueText, drawHeader, drawFooter,
+} from '../lib/pdfHelpers';
 
 export default function ProjectDetail({ session }: { session: Session }) {
   const { projectId } = useParams();
@@ -203,32 +208,73 @@ export default function ProjectDetail({ session }: { session: Session }) {
   const avg = selectedAmounts.length ? sum / selectedAmounts.length : 0;
 
   const handleDownloadPDF = () => {
-    const doc = new jsPDF();
-    doc.text(`Transactions - ${project.name}`, 14, 15);
-    doc.setFontSize(10);
-    doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 22);
+    if (!project) return;
+    const doc = new jsPDF('p', 'mm', 'a4');
 
+    // ── Header ────────────────────────────────────────────────────────────────
+    let y = drawHeader(doc, 'PROJECT LEDGER', pdfFmtDate(new Date()));
+
+    // ── Project identity ──────────────────────────────────────────────────────
+    valueText(doc, project.name, MARGIN, y, { bold: true, size: 13 });
+    y += 5.5;
+    if (project.site_location) {
+      valueText(doc, project.site_location, MARGIN, y, { color: C.muted, size: 8 });
+      y += 4.5;
+    }
+
+    // Summary row
+    const totalOut = sortedTxns.reduce((s: number, a: any) => s + (Number(a.allocated_amount) || 0), 0);
+    valueText(doc, `${sortedTxns.length} transaction${sortedTxns.length !== 1 ? 's' : ''}  ·  Total: ${fmtRupee(totalOut)}`, MARGIN, y, { size: 8, color: C.mid });
+    y += 8;
+
+    drawRule(doc, y, true);
+    y += 7;
+
+    // ── Transactions table ────────────────────────────────────────────────────
+    // Column widths sum to CONTENT 182mm:
+    // Date:26  TxnID:38  Payee:52  Category:40  Amount:26 = 182
     const tableData = sortedTxns.map((alloc: any) => {
       const txn = alloc.transactions;
-      const isInflow = txn.category?.toLowerCase().includes('receipt') || txn.category?.toLowerCase().includes('funding');
       return [
-        new Date(txn.date).toLocaleDateString(),
-        txn.txn_id,
-        txn.stakeholders?.name || '-',
-        txn.category || 'General',
-        `${isInflow ? '+' : '-'} Rs.${Number(alloc.allocated_amount).toLocaleString()}`
+        pdfFmtDate(txn.date),
+        txn.txn_id ?? '—',
+        txn.stakeholders?.name ?? '—',
+        txn.category ?? 'General',
+        fmtRupee(Number(alloc.allocated_amount) || 0),
       ];
     });
 
     autoTable(doc, {
-      startY: 28,
-      head: [['Date', 'Txn ID', 'Stakeholder', 'Category', 'Allocated Amount']],
+      startY: y,
+      head: [['Date', 'Txn ID', 'Payee', 'Category', 'Amount']],
       body: tableData,
-      theme: 'grid',
-      headStyles: { fillColor: [41, 128, 185] },
+      theme: 'plain',
+      columnStyles: {
+        0: { cellWidth: 26, font: 'helvetica' },
+        1: { cellWidth: 38, font: 'courier', fontSize: 7.5 },
+        2: { cellWidth: 52, font: 'helvetica' },
+        3: { cellWidth: 40, font: 'helvetica' },
+        4: { cellWidth: 26, halign: 'right', font: 'courier', fontStyle: 'bold' },
+      },
+      headStyles: {
+        fillColor: C.bg, textColor: C.muted as any,
+        fontStyle: 'bold', fontSize: 7,
+        cellPadding: { top: 2, bottom: 2, left: 2, right: 2 },
+      },
+      bodyStyles: { fontSize: 8.5, cellPadding: { top: 2.5, bottom: 2.5, left: 2, right: 2 } },
+      alternateRowStyles: { fillColor: C.bg },
+      footStyles: {
+        fillColor: C.white, textColor: C.dark as any,
+        fontStyle: 'bold', fontSize: 9,
+        cellPadding: { top: 3, bottom: 3, left: 2, right: 2 },
+      },
+      foot: [['', '', '', 'TOTAL', fmtRupee(totalOut)]],
+      showFoot: 'lastPage',
+      margin: { left: MARGIN, right: MARGIN },
     });
 
-    doc.save(`${project.project_id}_Transactions.pdf`);
+    drawFooter(doc);
+    doc.save(`${project.project_id}_Ledger.pdf`);
   };
 
   return (

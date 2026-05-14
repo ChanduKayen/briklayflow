@@ -10,6 +10,11 @@ import type { Session } from '@supabase/supabase-js';
 import type { ClientInvoice, ClientPayment, InvoiceStatus, Stakeholder, Project } from '../types';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import {
+  fmtDate as pdfFmtDate, fmtRupee, amountInWords,
+  MARGIN, CONTENT, RIGHT, PAGE_W, C,
+  setColor, setDraw, drawRule, sectionLabel, valueText, drawFooter, drawSignatures,
+} from '../lib/pdfHelpers';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -58,25 +63,6 @@ function genTxnId() {
   return `TXN-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
 }
 
-function numberToWords(n: number): string {
-  const a = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
-    'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
-  const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
-
-  function inWords(num: number): string {
-    if (num === 0) return '';
-    if (num < 20) return a[num] + ' ';
-    if (num < 100) return b[Math.floor(num / 10)] + (num % 10 ? ' ' + a[num % 10] : '') + ' ';
-    if (num < 1000) return a[Math.floor(num / 100)] + ' Hundred ' + inWords(num % 100);
-    if (num < 100000) return inWords(Math.floor(num / 1000)) + 'Thousand ' + inWords(num % 1000);
-    if (num < 10000000) return inWords(Math.floor(num / 100000)) + 'Lakh ' + inWords(num % 100000);
-    return inWords(Math.floor(num / 10000000)) + 'Crore ' + inWords(num % 10000000);
-  }
-
-  const rounded = Math.round(n);
-  if (rounded === 0) return 'Zero';
-  return inWords(rounded).trim();
-}
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -243,89 +229,77 @@ export default function BillDetail({ session }: { session: Session }) {
   // ── PDF Download ─────────────────────────────────────────────────────────
   const handleDownloadPDF = () => {
     if (!bill) return;
-    const doc = new jsPDF();
-    const pageW = doc.internal.pageSize.getWidth();
-    const margin = 14;
-
-    // Watermark for draft/void
-    if (bill.status === 'Draft' || bill.status === 'Void' || bill.status === 'Cancelled') {
-      doc.setFontSize(60);
-      doc.setTextColor(230, 230, 230);
-      doc.setFont('helvetica', 'bold');
-      doc.text(bill.status.toUpperCase(), pageW / 2, 160, { angle: 45, align: 'center' });
-      doc.setTextColor(0, 0, 0);
-    }
-
-    // Header left
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    doc.text('BRIKLAY ENGINEERING', margin, 18);
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(100);
-    doc.text('Kakinada, East Godavari, AP', margin, 24);
-    doc.text('GSTIN: —', margin, 30);
-
-    // Header right
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(0);
+    const doc = new jsPDF('p', 'mm', 'a4');
     const typeLabel = TYPE_LABEL[bill.invoice_type] ?? bill.invoice_type.toUpperCase();
-    doc.text('TAX INVOICE', pageW - margin, 18, { align: 'right' });
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(80);
-    doc.text(`Bill No: ${bill.invoice_id}`, pageW - margin, 24, { align: 'right' });
-    doc.text(`Date: ${fmtDate(bill.invoice_date)}`, pageW - margin, 30, { align: 'right' });
-    if (bill.due_date) doc.text(`Due: ${fmtDate(bill.due_date)}`, pageW - margin, 36, { align: 'right' });
 
-    // Divider
-    doc.setDrawColor(200, 200, 200);
-    doc.line(margin, 42, pageW - margin, 42);
+    // ── Draft/Void watermark ──────────────────────────────────────────────────
+    if (bill.status === 'Draft' || bill.status === 'Void' || bill.status === 'Cancelled') {
+      doc.setFontSize(55);
+      doc.setTextColor(235, 235, 235);
+      doc.setFont('helvetica', 'bold');
+      doc.text(bill.status.toUpperCase(), PAGE_W / 2, 155, { angle: 45, align: 'center' });
+    }
 
-    // Bill to
-    let y = 50;
-    doc.setFontSize(8);
-    doc.setTextColor(130);
-    doc.text('BILL TO', margin, y);
+    // ── Header ────────────────────────────────────────────────────────────────
+    // Custom header for invoice — two-sided
+    let y = 16;
+    // Left: branding
+    doc.setFontSize(11); doc.setFont('helvetica', 'bold'); setColor(doc, C.dark);
+    doc.text('BRIKLAY ENGINEERING', MARGIN, y);
+    doc.setFontSize(7.5); doc.setFont('helvetica', 'normal'); setColor(doc, C.muted);
+    doc.text('Kakinada, East Godavari, Andhra Pradesh — 533001', MARGIN, y + 4.5);
+    doc.text('GSTIN: XXXXXXXXXXXXXXXXX', MARGIN, y + 9);
+
+    // Right: invoice type + number
+    doc.setFontSize(13); doc.setFont('helvetica', 'bold'); setColor(doc, C.dark);
+    doc.text('TAX INVOICE', RIGHT, y, { align: 'right' });
+    doc.setFontSize(8); doc.setFont('courier', 'bold'); setColor(doc, C.accent);
+    doc.text(bill.invoice_id, RIGHT, y + 5, { align: 'right' });
+    doc.setFont('helvetica', 'normal'); setColor(doc, C.muted);
+    doc.text(`Date: ${pdfFmtDate(bill.invoice_date)}`, RIGHT, y + 10, { align: 'right' });
+    if (bill.due_date) {
+      doc.text(`Due: ${pdfFmtDate(bill.due_date)}`, RIGHT, y + 14.5, { align: 'right' });
+    }
+
+    y += 19;
+    setDraw(doc, C.dark);
+    doc.setLineWidth(0.5);
+    doc.line(MARGIN, y, RIGHT, y);
+    y += 7;
+
+    // ── Bill To + Project ─────────────────────────────────────────────────────
+    const rx = MARGIN + CONTENT / 2;
+
+    sectionLabel(doc, 'BILL TO', MARGIN, y);
+    sectionLabel(doc, 'PROJECT', rx, y);
+    y += 4;
+
+    valueText(doc, client?.name ?? '—', MARGIN, y, { bold: true, size: 10 });
+    valueText(doc, project?.name ?? '—', rx, y, { bold: true, size: 10 });
     y += 5;
-    doc.setFontSize(11);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(0);
-    doc.text(client?.name || '—', margin, y);
+
     if (client?.gstin) {
-      y += 5;
-      doc.setFontSize(8);
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(100);
-      doc.text(`GSTIN: ${client.gstin}`, margin, y);
+      valueText(doc, `GSTIN: ${client.gstin}`, MARGIN, y, { color: C.muted, size: 8 });
     }
+    if ((project as any)?.site_location) {
+      valueText(doc, (project as any).site_location, rx, y, { color: C.muted, size: 8 });
+    }
+    y += 5;
 
-    // Project info on right
-    doc.setFontSize(8);
-    doc.setTextColor(80);
-    doc.text(`PROJECT: ${project?.name || '—'}`, pageW - margin, 55, { align: 'right' });
-
-    y += 10;
-
-    // Milestone
+    // Milestone + Bill type line
     if (bill.milestone_name) {
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'italic');
-      doc.setTextColor(80);
-      doc.text(bill.milestone_name, margin, y);
-      y += 5;
+      valueText(doc, bill.milestone_name, MARGIN, y, { color: C.mid, size: 8.5 });
+      y += 4.5;
     }
-
-    // Bill type label
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(60);
-    doc.text(`${typeLabel.toUpperCase()} BILL`, margin, y);
+    doc.setFontSize(9.5); doc.setFont('helvetica', 'bold'); setColor(doc, C.dark);
+    doc.text(`${typeLabel.toUpperCase()} BILL`, MARGIN, y);
     y += 8;
 
-    // Abstract of Cost table
-    const tableRows: any[] = [];
+    drawRule(doc, y, true);
+    y += 7;
+
+    // ── Abstract of Cost table ────────────────────────────────────────────────
+    // Column widths: Desc 132mm + Amount 50mm = 182mm ✓
     const g  = Number(bill.gross_amount ?? 0);
     const pb = Number(bill.previous_bills_amount ?? 0);
     const nb = Number(bill.net_bill_amount ?? 0);
@@ -334,80 +308,91 @@ export default function BillDetail({ session }: { session: Session }) {
     const np = Number(bill.net_payable_pretax ?? 0);
     const ca = Number(bill.cgst_amount ?? 0);
     const sa = Number(bill.sgst_amount ?? 0);
+    const cr = Number(bill.cgst_rate ?? 0);
+    const grandTotal = Number(bill.total_amount ?? 0);
 
-    tableRows.push(['Gross Value of Work Done', `₹ ${g.toLocaleString('en-IN')}`]);
-    tableRows.push([`Less: Value of Previous Bills`, `(₹ ${pb.toLocaleString('en-IN')})`]);
-    tableRows.push([{ content: 'Net Value This Bill', styles: { fontStyle: 'bold' } }, { content: `₹ ${nb.toLocaleString('en-IN')}`, styles: { fontStyle: 'bold' } }]);
+    const tableRows: any[] = [
+      ['Gross Value of Work Done',  fmtRupee(g)],
+      [{ content: `Less: Value of Previous Bills`, styles: { textColor: C.muted } },
+       { content: pb > 0 ? `(${fmtRupee(pb)})` : fmtRupee(0), styles: { textColor: C.muted } }],
+      [{ content: 'Net Value This Bill', styles: { fontStyle: 'bold' } },
+       { content: fmtRupee(nb), styles: { fontStyle: 'bold' } }],
+    ];
+
     if (rr > 0) {
-      tableRows.push([`Less: Retention @ ${rr}%`, `(₹ ${ra.toLocaleString('en-IN')})`]);
-    }
-    tableRows.push([{ content: 'Net Payable (before tax)', styles: { fontStyle: 'bold' } }, { content: `₹ ${np.toLocaleString('en-IN')}`, styles: { fontStyle: 'bold' } }]);
-
-    if (bill.gst_applicable !== false) {
-      const cr = Number(bill.cgst_rate ?? 0);
-      tableRows.push([`Add: CGST @ ${cr}%`, `₹ ${ca.toLocaleString('en-IN')}`]);
-      tableRows.push([`Add: SGST @ ${cr}%`, `₹ ${sa.toLocaleString('en-IN')}`]);
+      tableRows.push([
+        { content: `Less: Retention @ ${rr}%`, styles: { textColor: C.muted } },
+        { content: `(${fmtRupee(ra)})`, styles: { textColor: C.muted } },
+      ]);
     }
 
-    const grandTotal = Number(bill.total_amount);
+    tableRows.push([
+      { content: 'Net Payable (before tax)', styles: { fontStyle: 'bold' } },
+      { content: fmtRupee(np), styles: { fontStyle: 'bold' } },
+    ]);
+
+    if (bill.gst_applicable !== false && cr > 0) {
+      tableRows.push([`Add: CGST @ ${cr}%`, fmtRupee(ca)]);
+      tableRows.push([`Add: SGST @ ${cr}%`, fmtRupee(sa)]);
+    }
+
     tableRows.push([
       { content: 'GRAND TOTAL', styles: { fontStyle: 'bold', fontSize: 11 } },
-      { content: `₹ ${grandTotal.toLocaleString('en-IN')}`, styles: { fontStyle: 'bold', fontSize: 11 } },
+      { content: fmtRupee(grandTotal), styles: { fontStyle: 'bold', fontSize: 11, font: 'courier' } },
     ]);
 
     autoTable(doc, {
       startY: y,
-      head: [['Description', 'Amount (₹)']],
+      head: [['Description', 'Amount']],
       body: tableRows,
-      theme: 'grid',
+      theme: 'plain',
       columnStyles: {
-        0: { cellWidth: 'auto' },
-        1: { cellWidth: 60, halign: 'right', font: 'courier' },
+        0: { cellWidth: 132, font: 'helvetica' },
+        1: { cellWidth: 50,  halign: 'right', font: 'courier' },
       },
-      headStyles: { fillColor: [41, 65, 128], textColor: 255, fontStyle: 'bold', fontSize: 9 },
-      styles: { fontSize: 9, cellPadding: 3 },
-      margin: { left: margin, right: margin },
+      headStyles: {
+        fillColor: C.bg, textColor: C.muted as any,
+        fontStyle: 'bold', fontSize: 7,
+        cellPadding: { top: 2, bottom: 2, left: 3, right: 3 },
+      },
+      bodyStyles: {
+        fontSize: 9, cellPadding: { top: 3, bottom: 3, left: 3, right: 3 },
+      },
+      alternateRowStyles: { fillColor: C.bg },
+      margin: { left: MARGIN, right: MARGIN },
     });
 
-    const finalY = (doc as any).lastAutoTable.finalY + 8;
+    let finalY = (doc as any).lastAutoTable.finalY + 8;
 
-    // Amount in words
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'italic');
-    doc.setTextColor(60);
-    doc.text(`Amount in Words: Rupees ${numberToWords(grandTotal)} Only`, margin, finalY);
+    // ── Amount in words ───────────────────────────────────────────────────────
+    doc.setFontSize(8.5); doc.setFont('helvetica', 'italic'); setColor(doc, C.mid);
+    const words = `Amount in Words: Rupees ${amountInWords(grandTotal)}`;
+    const wordLines = doc.splitTextToSize(words, CONTENT);
+    doc.text(wordLines, MARGIN, finalY);
+    finalY += wordLines.length * 4 + 8;
 
-    // Payment details
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(0);
-    doc.text('PAYMENT DETAILS', margin, finalY + 10);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(80);
-    doc.text('Bank: SBI  |  A/C: XXXXXX  |  IFSC: SBIN0001234', margin, finalY + 16);
+    // ── Payment details ───────────────────────────────────────────────────────
+    drawRule(doc, finalY);
+    finalY += 6;
+    sectionLabel(doc, 'PAYMENT DETAILS', MARGIN, finalY);
+    finalY += 5;
+    doc.setFontSize(8.5); doc.setFont('helvetica', 'normal'); setColor(doc, C.mid);
+    doc.text('Bank: State Bank of India  ·  A/C: XXXXXXXXXXXXXXX  ·  IFSC: SBIN0001234', MARGIN, finalY);
+    finalY += 5;
+    doc.text('UPI: briklay@upi', MARGIN, finalY);
+    finalY += 8;
 
-    // Certification
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'italic');
-    doc.setTextColor(100);
+    // ── Certification ─────────────────────────────────────────────────────────
+    doc.setFontSize(8); doc.setFont('helvetica', 'italic'); setColor(doc, C.muted);
     doc.text(
-      'Certified that the above work has been executed as per contract terms.',
-      margin,
-      finalY + 26,
+      'Certified that the above work has been executed as per contract terms and specifications.',
+      MARGIN, finalY, { maxWidth: CONTENT }
     );
+    finalY += 10;
 
-    // Signatures
-    const sigY = finalY + 44;
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(0);
-    doc.line(margin, sigY, margin + 60, sigY);
-    doc.line(pageW - margin - 60, sigY, pageW - margin, sigY);
-    doc.setFontSize(8);
-    doc.text('Client Acknowledgement', margin, sigY + 5);
-    doc.text('Authorized Signatory', pageW - margin - 60, sigY + 5);
-    doc.setTextColor(80);
-    doc.text('Briklay Engineering', pageW - margin - 60, sigY + 10);
-
+    // ── Signatures ────────────────────────────────────────────────────────────
+    drawSignatures(doc, finalY, 'Client Acknowledgement', client?.name);
+    drawFooter(doc);
     doc.save(`${bill.invoice_id}.pdf`);
   };
 

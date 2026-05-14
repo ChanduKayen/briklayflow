@@ -9,6 +9,11 @@ import autoTable from 'jspdf-autotable';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import type { POLineItem, POGRN, POApproval } from '../types';
+import {
+  fmtDate as pdfFmtDate, fmtRupee, amountInWords,
+  MARGIN, CONTENT, RIGHT, C,
+  setColor, drawRule, sectionLabel, valueText, drawHeader, drawFooter, drawSignatures,
+} from '../lib/pdfHelpers';
 
 // ── Status helpers ────────────────────────────────────────────────────────────
 
@@ -454,110 +459,163 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
 
   const handleDownloadPDF = () => {
     if (!po) return;
-    const doc = new jsPDF();
-    const pageW  = doc.internal.pageSize.getWidth();
-    const margin = 14;
+    const doc = new jsPDF('p', 'mm', 'a4');
 
-    // Header
-    doc.setFontSize(14); doc.setFont('helvetica', 'bold');
-    doc.text('BRIKLAY ENGINEERING', margin, 18);
-    doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(100);
-    doc.text('Kakinada, East Godavari, AP', margin, 24);
+    // ── Header ────────────────────────────────────────────────────────────────
+    let y = drawHeader(
+      doc,
+      'PURCHASE ORDER',
+      `${po.po_id}  ·  ${pdfFmtDate(po.date_issued)}`,
+    );
 
-    // PO info right
-    doc.setFontSize(12); doc.setFont('helvetica', 'bold'); doc.setTextColor(0);
-    doc.text('PURCHASE ORDER', pageW - margin, 18, { align: 'right' });
-    doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(80);
-    doc.text(`PO No: ${po.po_id}`, pageW - margin, 24, { align: 'right' });
-    doc.text(`Date: ${fmtDate(po.date_issued)}`, pageW - margin, 30, { align: 'right' });
-    if (po.expected_delivery) {
-      doc.text(`Delivery by: ${fmtDate(po.expected_delivery)}`, pageW - margin, 36, { align: 'right' });
-    }
+    // ── Vendor + Project block ────────────────────────────────────────────────
+    const rx = MARGIN + CONTENT / 2;
 
-    // Divider
-    doc.setDrawColor(200); doc.line(margin, 42, pageW - margin, 42);
+    sectionLabel(doc, 'VENDOR', MARGIN, y);
+    sectionLabel(doc, 'PROJECT', rx, y);
+    y += 4;
 
-    // Vendor
-    let y = 50;
-    doc.setFontSize(8); doc.setTextColor(130); doc.text('VENDOR', margin, y);
+    valueText(doc, vendor?.name ?? '—', MARGIN, y, { bold: true, size: 10 });
+    valueText(doc, project?.name ?? '—', rx, y, { bold: true, size: 10 });
     y += 5;
-    doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(0);
-    doc.text(po.stakeholders?.name || '—', margin, y);
-    if (po.stakeholders?.gstin) {
-      y += 5;
-      doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(100);
-      doc.text(`GSTIN: ${po.stakeholders.gstin}`, margin, y);
+
+    if (vendor?.category) {
+      valueText(doc, vendor.category + (vendor.gstin ? ' · MSME' : ''), MARGIN, y, { color: C.muted, size: 8 });
     }
-
-    // Project right
-    doc.setFontSize(8); doc.setTextColor(80);
-    doc.text(`PROJECT: ${po.projects?.name || '—'}`, pageW - margin, 55, { align: 'right' });
-    if (po.delivery_location) {
-      doc.text(`DELIVERY: ${po.delivery_location}`, pageW - margin, 62, { align: 'right' });
+    if (project?.site_location) {
+      valueText(doc, project.site_location, rx, y, { color: C.muted, size: 8 });
     }
+    y += 4.5;
 
-    y += 12;
+    if (vendor?.gstin) {
+      valueText(doc, `GSTIN: ${vendor.gstin}`, MARGIN, y, { color: C.muted, size: 8 });
+    }
+    y += 4;
 
-    // Line items table
-    const itemsToRender = lineItems?.length
+    if (po.expected_delivery) {
+      valueText(doc, `Expected Delivery: ${pdfFmtDate(po.expected_delivery)}`, MARGIN, y, { size: 8, color: C.mid });
+      y += 4;
+    }
+    if (po.ordered_by) {
+      valueText(doc, `Ordered by: ${po.ordered_by}`, MARGIN, y, { size: 8, color: C.mid });
+      y += 4;
+    }
+    y += 4;
+
+    drawRule(doc, y);
+    y += 7;
+
+    // ── Line items table ──────────────────────────────────────────────────────
+    sectionLabel(doc, 'ITEMS ORDERED', MARGIN, y);
+    y += 4;
+
+    // Column widths must sum to CONTENT (182mm):
+    // #:8  Desc:84  Unit:18  Qty:14  Rate:29  Amount:29 = 182
+    const itemRows = lineItems?.length
       ? lineItems.map((li, i) => [
-          String(i + 1),
-          li.category_id || '',
+          String(li.line_number ?? i + 1),
           li.item_name + (li.specification ? `\n${li.specification}` : ''),
-          li.unit,
-          String(li.quantity_ordered),
-          `${Number(li.unit_rate).toLocaleString('en-IN')}`,
-          `${Number(li.total_amount).toLocaleString('en-IN')}`,
+          li.unit ?? '',
+          String(li.quantity_ordered ?? ''),
+          fmtRupee(Number(li.unit_rate) || 0),
+          fmtRupee(Number(li.total_amount) || 0),
         ])
       : (po.items || []).map((it: any, i: number) => [
-          String(i + 1), '', it.description, it.unit || 'LS', String(it.qty),
-          `${Number(it.rate).toLocaleString('en-IN')}`,
-          `${Number(it.amount).toLocaleString('en-IN')}`,
+          String(i + 1),
+          it.description ?? '',
+          it.unit ?? 'LS',
+          String(it.qty ?? ''),
+          fmtRupee(Number(it.rate) || 0),
+          fmtRupee(Number(it.amount) || 0),
         ]);
+
+    const orderValueNum = Number(po.order_value) || 0;
+    const gstValueNum   = Number(po.gst_value)   || 0;
+    const totalValueNum = Number(po.total_value || po.order_value) || 0;
 
     autoTable(doc, {
       startY: y,
-      head: [['#', 'Code', 'Item Description', 'Unit', 'Qty', 'Rate (₹)', 'Amount (₹)']],
-      body: itemsToRender,
-      theme: 'grid',
-      headStyles: { fillColor: [41, 65, 128], textColor: 255, fontStyle: 'bold', fontSize: 8 },
-      styles: { fontSize: 8, cellPadding: 2 },
+      head: [['#', 'Item Description', 'Unit', 'Qty', 'Rate (₹)', 'Amount (₹)']],
+      body: itemRows,
+      theme: 'plain',
       columnStyles: {
-        0: { cellWidth: 8,  halign: 'center' },
-        1: { cellWidth: 20 },
-        3: { cellWidth: 15, halign: 'center' },
-        4: { cellWidth: 12, halign: 'center' },
-        5: { cellWidth: 25, halign: 'right'  },
-        6: { cellWidth: 30, halign: 'right'  },
+        0: { cellWidth: 8,  halign: 'center', font: 'courier', fontSize: 7.5 },
+        1: { cellWidth: 84, font: 'helvetica' },
+        2: { cellWidth: 18, halign: 'center', font: 'helvetica' },
+        3: { cellWidth: 14, halign: 'right',  font: 'courier' },
+        4: { cellWidth: 29, halign: 'right',  font: 'courier' },
+        5: { cellWidth: 29, halign: 'right',  font: 'courier', fontStyle: 'bold' },
       },
-      margin: { left: margin, right: margin },
+      headStyles: {
+        fillColor: C.bg, textColor: C.muted as any,
+        fontStyle: 'bold', fontSize: 7,
+        cellPadding: { top: 2, bottom: 2, left: 2, right: 2 },
+      },
+      bodyStyles: { fontSize: 8.5, cellPadding: { top: 2.5, bottom: 2.5, left: 2, right: 2 } },
+      alternateRowStyles: { fillColor: C.bg },
+      margin: { left: MARGIN, right: MARGIN },
     });
 
-    const finalY = (doc as any).lastAutoTable.finalY + 8;
+    y = (doc as any).lastAutoTable.finalY + 5;
 
-    // Totals
-    doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(80);
-    doc.text(`GST: ₹${Number(po.gst_value || 0).toLocaleString('en-IN')}`, pageW - margin, finalY, { align: 'right' });
-    doc.setFont('helvetica', 'bold'); doc.setTextColor(0); doc.setFontSize(11);
-    doc.text(`Grand Total: ₹${Number(po.total_value || po.order_value).toLocaleString('en-IN')}`, pageW - margin, finalY + 8, { align: 'right' });
+    // Totals block — right-aligned, 80mm wide
+    const totW = 90;
+    const totX = RIGHT - totW;
 
-    // Terms
-    if (po.vendor_notes) {
-      doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(80);
-      doc.text('Terms:', margin, finalY + 20);
-      doc.text(po.vendor_notes.substring(0, 200), margin, finalY + 27, { maxWidth: pageW - margin * 2 });
-    }
+    const totRows: [string, number, boolean][] = [
+      ['Order Value', orderValueNum, false],
+      ...(gstValueNum > 0 ? [['GST', gstValueNum, false] as [string, number, boolean]] : []),
+      ['TOTAL', totalValueNum, true],
+    ];
+
+    totRows.forEach(([label, val, bold]) => {
+      doc.setFontSize(bold ? 10 : 8.5);
+      doc.setFont('helvetica', bold ? 'bold' : 'normal');
+      setColor(doc, bold ? C.dark : C.muted);
+      doc.text(label as string, totX, y);
+      doc.setFont('courier', bold ? 'bold' : 'normal');
+      doc.text(fmtRupee(val as number), RIGHT, y, { align: 'right' });
+      if (bold) {
+        drawRule(doc, y - 4);
+      }
+      y += bold ? 6 : 5;
+    });
+
+    // Amount in words
+    y += 3;
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'italic');
+    setColor(doc, C.mid);
+    const words = `Rupees ${amountInWords(totalValueNum)}`;
+    const wordLines = doc.splitTextToSize(words, CONTENT);
+    doc.text(wordLines, MARGIN, y);
+    y += wordLines.length * 4 + 6;
+
+    // Notes / Terms
+    const termsToShow = po.vendor_notes || [
+      '1. Delivery as per approved specifications and schedule.',
+      '2. Rejected or damaged materials to be returned at vendor cost.',
+      '3. Payment within 30 days of GRN acceptance and bill submission.',
+      '4. Any price variation requires written approval before supply.',
+    ].join('\n');
+
+    drawRule(doc, y);
+    y += 6;
+    sectionLabel(doc, 'TERMS', MARGIN, y);
+    y += 5;
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    setColor(doc, C.mid);
+    const termLines = doc.splitTextToSize(String(termsToShow).substring(0, 400), CONTENT);
+    doc.text(termLines, MARGIN, y);
+    y += termLines.length * 4 + 8;
 
     // Signatures
-    const sigY = finalY + 55;
-    doc.setTextColor(0); doc.setFont('helvetica', 'normal');
-    doc.line(margin, sigY, margin + 60, sigY);
-    doc.line(pageW - margin - 60, sigY, pageW - margin, sigY);
-    doc.setFontSize(8);
-    doc.text('Vendor Acknowledgement', margin, sigY + 5);
-    doc.text('Authorised Signatory', pageW - margin - 60, sigY + 5);
-    doc.text('Briklay Engineering', pageW - margin - 60, sigY + 10);
+    drawRule(doc, y);
+    y += 8;
+    drawSignatures(doc, y, 'Vendor Acknowledgement', vendor?.name);
 
+    drawFooter(doc);
     doc.save(`${po.po_id}.pdf`);
   };
 

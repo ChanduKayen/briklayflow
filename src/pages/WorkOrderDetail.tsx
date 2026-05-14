@@ -1,14 +1,20 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import Breadcrumb from '../components/Breadcrumb';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { Loader2, ArrowLeft, Download } from 'lucide-react';
-import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import type { StatusHistoryEntry, PaymentMode } from '../types';
+import {
+  fmtDate as pdfFmtDate, fmtRupee,
+  MARGIN, CONTENT, RIGHT, C,
+  setColor, setFill, drawRule,
+  sectionLabel, valueText, drawHeader, drawFooter, drawSignatures,
+} from '../lib/pdfHelpers';
 
 type ConfirmAction = 'issue' | 'activate' | 'close' | 'cancel';
 type MilestoneStatus = 'PENDING' | 'DUE' | 'PARTIALLY_PAID' | 'PAID' | 'OVERPAID';
@@ -99,7 +105,6 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
-  const printRef = useRef<HTMLDivElement>(null);
   const navState = (location.state as { from?: string; projectId?: string; projectName?: string }) || {};
 
   const { data: profile } = useUserProfile(session.user.id);
@@ -362,20 +367,229 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
 
   // ─── PDF export ────────────────────────────────────────────────────────────
 
-  const handleDownloadPdf = async () => {
-    if (!printRef.current) return;
-    try {
-      const canvas = await html2canvas(printRef.current, { scale: 2, useCORS: true });
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`WorkOrder_${woId}.pdf`);
-    } catch (err) {
-      console.error('PDF error', err);
-      alert('Failed to generate PDF.');
+  const handleDownloadPdf = () => {
+    if (!wo) return;
+    const doc = new jsPDF('p', 'mm', 'a4');
+
+    // ── Header ────────────────────────────────────────────────────────────────
+    let y = drawHeader(doc, 'WORK ORDER', wo.wo_id);
+
+    // ── Identity block ────────────────────────────────────────────────────────
+    const rx = MARGIN + CONTENT / 2;
+
+    // Left: ISSUED TO
+    sectionLabel(doc, 'ISSUED TO', MARGIN, y);
+    y += 4;
+    valueText(doc, wo.stakeholders?.name ?? '—', MARGIN, y, { bold: true, size: 11 });
+    y += 5;
+    valueText(doc, wo.stakeholders?.category ?? '', MARGIN, y, { color: C.muted, size: 8 });
+    y += 4;
+
+    // Right: PROJECT (same y block)
+    let ry = y - 13;
+    sectionLabel(doc, 'PROJECT', rx, ry);
+    ry += 4;
+    valueText(doc, wo.projects?.name ?? '—', rx, ry, { bold: true, size: 11 });
+    ry += 5;
+    if (wo.projects?.site_location) {
+      valueText(doc, wo.projects.site_location, rx, ry, { color: C.muted, size: 8 });
     }
+
+    y += 2;
+
+    // Issued + Status row
+    sectionLabel(doc, 'ISSUED', MARGIN, y);
+    sectionLabel(doc, 'STATUS', rx, y);
+    y += 4;
+    valueText(doc, pdfFmtDate(wo.date_issued), MARGIN, y, { size: 9 });
+    valueText(doc, wo.status?.toUpperCase() ?? '—', rx, y, { size: 9, bold: true, color: wo.status === 'Active' ? C.warning : wo.status === 'Closed' ? C.success : C.muted });
+    y += 8;
+
+    drawRule(doc, y);
+    y += 7;
+
+    // ── Scope of work ─────────────────────────────────────────────────────────
+    if (wo.scope_of_work) {
+      sectionLabel(doc, 'SCOPE OF WORK', MARGIN, y);
+      y += 4;
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      setColor(doc, C.dark);
+      const lines = doc.splitTextToSize(wo.scope_of_work, CONTENT);
+      doc.text(lines, MARGIN, y);
+      y += lines.length * 4.5 + 6;
+      drawRule(doc, y);
+      y += 7;
+    }
+
+    // ── Financial summary ─────────────────────────────────────────────────────
+    sectionLabel(doc, 'FINANCIAL SUMMARY', MARGIN, y);
+    y += 6;
+
+    const rows: [string, number][] = [
+      ['Order Value',  orderValue],
+      ['Total Paid',   totalPaid],
+      ['Balance Due',  balance],
+    ];
+
+    rows.forEach(([label, val], i) => {
+      const isLast = i === rows.length - 1;
+      doc.setFontSize(9);
+      doc.setFont('helvetica', isLast ? 'bold' : 'normal');
+      setColor(doc, isLast && balance > 0 ? C.warning : C.dark);
+      doc.text(label, MARGIN, y);
+      doc.setFont('courier', isLast ? 'bold' : 'normal');
+      doc.text(fmtRupee(val), RIGHT, y, { align: 'right' });
+      y += 5.5;
+    });
+
+    // Payment progress bar
+    y += 2;
+    const barW = CONTENT;
+    const barH = 2.5;
+    setFill(doc, C.border);
+    doc.roundedRect(MARGIN, y, barW, barH, 1, 1, 'F');
+    if (progressPercentage > 0) {
+      setFill(doc, progressPercentage >= 100 ? C.success : C.accent);
+      doc.roundedRect(MARGIN, y, barW * (progressPercentage / 100), barH, 1, 1, 'F');
+    }
+    y += barH + 3;
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'normal');
+    setColor(doc, C.muted);
+    doc.text(`Payment: ${progressPercentage}%`, MARGIN, y);
+    y += 6;
+
+    drawRule(doc, y);
+    y += 7;
+
+    // ── Milestones table ──────────────────────────────────────────────────────
+    if (milestones && milestones.length > 0) {
+      sectionLabel(doc, 'PAYMENT MILESTONES', MARGIN, y);
+      y += 4;
+
+      const msHead = [['#', 'Milestone', 'Amount', 'Status']];
+      const msBody = milestones.map((m: any) => {
+        const paid = milestonePayments[m.milestone_id] || 0;
+        const status = getMilestoneStatus(m, paid);
+        const statusStr = status === 'PAID' ? 'PAID ✓' : status === 'PARTIALLY_PAID' ? 'PARTIAL' : status === 'DUE' ? 'DUE' : 'PENDING';
+        return [
+          String(m.seq_no ?? ''),
+          m.name ?? '',
+          fmtRupee(Number(m.planned_amount) || 0),
+          statusStr,
+        ];
+      });
+
+      autoTable(doc, {
+        startY: y,
+        head: msHead,
+        body: msBody,
+        theme: 'plain',
+        columnStyles: {
+          0: { cellWidth: 10,  halign: 'center', font: 'courier', fontSize: 8 },
+          1: { cellWidth: 98,  font: 'helvetica' },
+          2: { cellWidth: 40,  halign: 'right',  font: 'courier' },
+          3: { cellWidth: 34,  halign: 'center', font: 'helvetica' },
+        },
+        headStyles: {
+          fillColor: C.bg, textColor: C.muted as any,
+          fontStyle: 'bold', fontSize: 7, cellPadding: { top: 2, bottom: 2, left: 2, right: 2 },
+        },
+        bodyStyles: { fontSize: 8.5, cellPadding: { top: 2.5, bottom: 2.5, left: 2, right: 2 } },
+        alternateRowStyles: { fillColor: C.bg },
+        footStyles: {
+          fillColor: C.white, textColor: C.dark as any,
+          fontStyle: 'bold', fontSize: 9,
+        },
+        foot: [['', 'Total', fmtRupee(orderValue), '']],
+        showFoot: 'lastPage',
+        margin: { left: MARGIN, right: MARGIN },
+        didParseCell: (data: any) => {
+          if (data.section === 'body' && data.column.index === 3) {
+            const val = String(data.cell.raw);
+            if (val.includes('✓')) data.cell.styles.textColor = C.success;
+            else if (val === 'DUE') data.cell.styles.textColor = C.warning;
+          }
+        },
+      });
+
+      y = (doc as any).lastAutoTable.finalY + 8;
+      drawRule(doc, y);
+      y += 7;
+    }
+
+    // ── Payments made ─────────────────────────────────────────────────────────
+    if (allocations && allocations.length > 0) {
+      sectionLabel(doc, 'PAYMENTS MADE', MARGIN, y);
+      y += 4;
+
+      const paymentsBody = allocations.map((a: any) => {
+        const t = a.transactions;
+        return [
+          t ? pdfFmtDate(t.date) : '—',
+          t?.txn_id ?? '—',
+          t?.category ?? '—',
+          t?.payment_mode ?? '—',
+          fmtRupee(Number(a.allocated_amount) || 0),
+        ];
+      });
+
+      autoTable(doc, {
+        startY: y,
+        head: [['Date', 'TXN ID', 'Category', 'Mode', 'Amount']],
+        body: paymentsBody,
+        theme: 'plain',
+        columnStyles: {
+          0: { cellWidth: 28, font: 'helvetica' },
+          1: { cellWidth: 42, font: 'courier', fontSize: 7.5 },
+          2: { cellWidth: 48, font: 'helvetica' },
+          3: { cellWidth: 24, halign: 'center', font: 'helvetica' },
+          4: { cellWidth: 40, halign: 'right', font: 'courier' },
+        },
+        headStyles: {
+          fillColor: C.bg, textColor: C.muted as any,
+          fontStyle: 'bold', fontSize: 7, cellPadding: { top: 2, bottom: 2, left: 2, right: 2 },
+        },
+        bodyStyles: { fontSize: 8.5, cellPadding: { top: 2.5, bottom: 2.5, left: 2, right: 2 } },
+        margin: { left: MARGIN, right: MARGIN },
+      });
+
+      y = (doc as any).lastAutoTable.finalY + 8;
+    }
+
+    // ── Terms ─────────────────────────────────────────────────────────────────
+    if (y < 220) {
+      drawRule(doc, y);
+      y += 7;
+      sectionLabel(doc, 'TERMS & CONDITIONS', MARGIN, y);
+      y += 5;
+      const terms = [
+        '1. Work to be executed as per approved drawings and specifications.',
+        '2. Payment shall be released upon milestone completion and site verification.',
+        '3. Defects liability period: 12 months from date of completion.',
+        '4. Any variations must be approved in writing before execution.',
+      ];
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      setColor(doc, C.mid);
+      terms.forEach((t) => {
+        const wrapped = doc.splitTextToSize(t, CONTENT);
+        doc.text(wrapped, MARGIN, y);
+        y += wrapped.length * 4 + 1.5;
+      });
+      y += 4;
+    }
+
+    // ── Signatures ────────────────────────────────────────────────────────────
+    drawRule(doc, y);
+    y += 8;
+    drawSignatures(doc, y, 'Contractor Signature', wo.stakeholders?.name);
+
+    // ── Footer ────────────────────────────────────────────────────────────────
+    drawFooter(doc);
+
+    doc.save(`WorkOrder_${wo.wo_id}.pdf`);
   };
 
   // ─── Closed celebration effect ─────────────────────────────────────────────
@@ -468,7 +682,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
 
   return (
     <div className="px-margin-mobile md:px-margin-desktop pt-6 pb-12">
-      <div ref={printRef} className="max-w-[680px] mx-auto">
+      <div className="max-w-[680px] mx-auto">
 
         {/* BREADCRUMB */}
         <div className="detail-reveal" style={{ animationDelay: '0ms' }}>
