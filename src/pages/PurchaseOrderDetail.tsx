@@ -535,7 +535,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
 
     autoTable(doc, {
       startY: y,
-      head: [['#', 'Item Description', 'Unit', 'Qty', 'Rate (₹)', 'Amount (₹)']],
+      head: [['#', 'Item Description', 'Unit', 'Qty', 'Rate (Rs.)', 'Amount (Rs.)']],
       body: itemRows,
       theme: 'plain',
       columnStyles: {

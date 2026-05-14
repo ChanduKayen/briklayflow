@@ -3,7 +3,7 @@ import jsPDF from 'jspdf';
 // ── Formatting ────────────────────────────────────────────────────────────────
 
 export function fmtRupee(amount: number): string {
-  return `₹${amount.toLocaleString('en-IN', {
+  return `Rs. ${amount.toLocaleString('en-IN', {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   })}`;
