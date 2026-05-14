@@ -18,6 +18,22 @@ interface StageDraft {
   rate: number | null;
   amount: number | null;   // directly-entered lumpsum; null means computed from qty×rate
   trigger_condition: string;
+  ambiguous?: boolean;     // amber border flag for AI-extracted stages needing review
+}
+
+interface ExtractedStage {
+  _id: string;
+  name: string;
+  mode: 'measured' | 'lumpsum' | 'ambiguous';
+  unit_type: string | null;
+  qty: number | null;
+  rate: number | null;
+  amount: number;
+  amount_verified: boolean;
+  arithmetic_mismatch: boolean;
+  mismatch_note: string | null;
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  confidence_reason: string;
 }
 
 type StageMode = 'empty' | 'measured' | 'lumpsum';
@@ -126,6 +142,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
   const [dateIssued, setDateIssued] = useState('');
   const [stages, setStages] = useState<StageDraft[]>([]);
   const [newStageId, setNewStageId] = useState<string | null>(null);
+  const [pendingStages, setPendingStages] = useState<ExtractedStage[]>([]);
   const [source, setSource] = useState<'manual' | 'uploaded_doc'>('manual');
   const [isAiExtracted, setIsAiExtracted] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
@@ -223,6 +240,41 @@ export default function NewWorkOrder({ session }: { session: Session }) {
     }
   };
 
+  // ─── Stage add helpers ────────────────────────────────────────────────────
+
+  const addPendingStage = (es: ExtractedStage, amountOverride?: number) => {
+    const resolvedAmount = amountOverride ?? es.amount;
+    const newStage: StageDraft = {
+      id: Math.random().toString(),
+      name: es.name,
+      unit_type: es.unit_type ?? '',
+      quantity: es.mode === 'measured' ? es.qty : null,
+      rate: es.mode === 'measured' ? es.rate : null,
+      amount: es.mode === 'measured' ? null : resolvedAmount,
+      trigger_condition: '',
+      ambiguous: es.mode === 'ambiguous',
+    };
+    setStages(prev => [...prev, newStage]);
+    setPendingStages(prev => prev.filter(p => p._id !== es._id));
+  };
+
+  const addAllPendingStages = () => {
+    const newStages = pendingStages
+      .filter(es => !es.arithmetic_mismatch)
+      .map(es => ({
+        id: Math.random().toString(),
+        name: es.name,
+        unit_type: es.unit_type ?? '',
+        quantity: es.mode === 'measured' ? es.qty : null,
+        rate: es.mode === 'measured' ? es.rate : null,
+        amount: es.mode === 'measured' ? null : es.amount,
+        trigger_condition: '',
+        ambiguous: es.mode === 'ambiguous',
+      }));
+    setStages(prev => [...prev, ...newStages]);
+    setPendingStages(prev => prev.filter(p => p.arithmetic_mismatch));
+  };
+
   // ─── AI file upload ────────────────────────────────────────────────────────
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -237,40 +289,109 @@ export default function NewWorkOrder({ session }: { session: Session }) {
         const base64String = (reader.result as string).split(',')[1];
         const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
         if (!apiKey) throw new Error('OpenAI API Key is not configured.');
+        const systemPrompt = `You are a construction BOQ (Bill of Quantities) extraction assistant for Indian construction work orders and quotations.
+
+Extract the document header fields AND each work stage/line item. Determine if each stage is MEASURED (qty × rate) or LUMP SUM.
+
+DETECTION RULES:
+
+MEASURED — all three present:
+  Unit of measurement (Sqft, Cum, Rmt etc.), Quantity (a number), Rate (price per unit).
+  Amount should equal qty × rate — verify.
+
+LUMP SUM — when:
+  Document says LS, L.S., Lump Sum, Lumpsum, Fixed, Package
+  OR only amount is given with no qty/rate
+  OR work described as 'complete job' or 'all inclusive'
+
+AMBIGUOUS — flag when:
+  Amount present but qty × rate doesn't match (arithmetic error?)
+  Unit present but qty OR rate missing
+
+INDIAN CONSTRUCTION UNITS to recognise:
+  Sqft, Sft, sq.ft → Sqft
+  Sqm, sq.m → Sqm
+  Cum, Cu.m, cmt → Cum
+  Cft, cu.ft → Cft
+  Rmt, RM, rft → Rmt
+  Nos, No., Nrs → Nos
+  Kg, KG → Kg
+  MT, M.T. → MT
+  Per point, point → Per Point
+  Per flat, flat → Per Flat
+  Per floor, floor → Per Floor
+  LS, L.S., lump → LS
+
+AMOUNT VERIFICATION:
+  If qty and rate both extracted, compute expected = qty × rate.
+  If Math.abs(extracted_amount - expected) / expected > 0.02: flag arithmetic_mismatch: true.
+
+Return ONLY this JSON object, no other text:
+{
+  "worker_name_fuzzy": "contractor name or null",
+  "scope_of_work": "overall scope or null",
+  "order_value": totalValueOrNull,
+  "date_issued": "YYYY-MM-DD or null",
+  "stages": [
+    {
+      "name": "string",
+      "mode": "measured | lumpsum | ambiguous",
+      "unit_type": "string or null",
+      "qty": "number or null",
+      "rate": "number or null",
+      "amount": "number",
+      "amount_verified": "boolean",
+      "arithmetic_mismatch": "boolean",
+      "mismatch_note": "string or null",
+      "confidence": "HIGH | MEDIUM | LOW",
+      "confidence_reason": "string"
+    }
+  ]
+}`;
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
           body: JSON.stringify({
             model: 'gpt-4o',
             messages: [
-              { role: 'system', content: `You are a construction contract extractor. Extract details from the provided image and return ONLY a valid JSON object. Format: { "worker_name_fuzzy": "Name", "scope_of_work": "Scope", "order_value": 100000, "date_issued": "YYYY-MM-DD", "milestones": [{ "name": "Milestone", "trigger_condition": "Condition", "planned_amount": 50000 }] }` },
-              { role: 'user', content: [{ type: 'text', text: 'Extract details.' }, { type: 'image_url', image_url: { url: `data:${file.type};base64,${base64String}` } }] },
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: [{ type: 'text', text: 'Extract all details from this construction document.' }, { type: 'image_url', image_url: { url: `data:${file.type};base64,${base64String}` } }] },
             ],
-            temperature: 0.2,
+            temperature: 0.1,
           }),
         });
         if (!response.ok) throw new Error(`API Error: ${response.statusText}`);
         const result = await response.json();
         const jsonStr = result.choices[0].message.content.trim().replace(/^```json\n?/, '').replace(/\n?```$/, '');
         const data = JSON.parse(jsonStr);
-        setScope(data.scope_of_work || '');
-        setOrderValue(data.order_value || 0);
+
+        // Set header fields
+        if (data.scope_of_work) setScope(data.scope_of_work);
+        if (data.order_value)   setOrderValue(data.order_value);
         if (data.date_issued && !isNaN(Date.parse(data.date_issued))) setDateIssued(data.date_issued);
-        if (Array.isArray(data.milestones)) {
-          setStages(data.milestones.map((m: any) => ({
-            id: Math.random().toString(),
-            name: m.name || '',
-            unit_type: 'LS',
-            quantity: null,
-            rate: null,
-            amount: m.planned_amount || 0,
-            trigger_condition: m.trigger_condition || '',
-          })));
-        }
         if (data.worker_name_fuzzy && workers) {
-          const match = workers.find(w => w.name.toLowerCase().includes(data.worker_name_fuzzy.toLowerCase()));
+          const match = workers.find(w => w.name.toLowerCase().includes((data.worker_name_fuzzy as string).toLowerCase()));
           if (match) setStakeholderId(match.stakeholder_id);
         }
+
+        // Queue stages for review instead of adding directly
+        if (Array.isArray(data.stages) && data.stages.length > 0) {
+          setPendingStages(data.stages.map((s: any) => ({
+            _id: Math.random().toString(),
+            name: s.name ?? '',
+            mode: s.mode ?? 'ambiguous',
+            unit_type: s.unit_type ?? null,
+            qty: s.qty ?? null,
+            rate: s.rate ?? null,
+            amount: Number(s.amount) || 0,
+            amount_verified: Boolean(s.amount_verified),
+            arithmetic_mismatch: Boolean(s.arithmetic_mismatch),
+            mismatch_note: s.mismatch_note ?? null,
+            confidence: s.confidence ?? 'LOW',
+            confidence_reason: s.confidence_reason ?? '',
+          })));
+        }
+
         setSource('uploaded_doc');
         setIsAiExtracted(true);
         setIsExtracting(false);
@@ -453,7 +574,35 @@ export default function NewWorkOrder({ session }: { session: Session }) {
               </button>
             </div>
 
-            {stages.length === 0 ? (
+            {/* AI Review Panel */}
+            {pendingStages.length > 0 && (
+              <div className="mb-4 rounded-xl border border-secondary/20 bg-secondary-container/10 overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-2.5 border-b border-secondary/10">
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[16px] text-secondary">auto_awesome</span>
+                    <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">
+                      {pendingStages.length} extracted stage{pendingStages.length > 1 ? 's' : ''} — review before adding
+                    </p>
+                  </div>
+                  {pendingStages.some(p => !p.arithmetic_mismatch) && (
+                    <button
+                      type="button"
+                      onClick={addAllPendingStages}
+                      className="text-[11px] font-semibold text-primary hover:text-primary/80 px-3 py-1 rounded-lg hover:bg-primary/5 transition-colors"
+                    >
+                      Add All
+                    </button>
+                  )}
+                </div>
+                <div className="p-3 space-y-2">
+                  {pendingStages.map(es => (
+                    <ExtractedStageCard key={es._id} stage={es} onAdd={addPendingStage} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {stages.length === 0 && pendingStages.length === 0 ? (
               <button
                 type="button"
                 onClick={addStage}
@@ -462,7 +611,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
                 <span className="material-symbols-outlined text-[36px] opacity-30 group-hover:opacity-60 mb-2 block transition-opacity">playlist_add</span>
                 <p className="text-body-sm">No work stages yet — click to add the first row.</p>
               </button>
-            ) : (
+            ) : stages.length > 0 ? (
               <div className="overflow-x-auto -mx-1 px-1">
                 {/* Column header */}
                 <div
@@ -489,8 +638,9 @@ export default function NewWorkOrder({ session }: { session: Session }) {
                   return (
                     <div
                       key={s.id}
-                      className="sm:grid gap-x-2 items-start py-2 border-b border-black/[0.04] last:border-0 flex flex-col gap-2"
+                      className={`sm:grid gap-x-2 items-start py-2 border-b border-black/[0.04] last:border-0 flex flex-col gap-2 ${s.ambiguous ? 'border-l-2 border-l-amber-400 pl-2' : ''}`}
                       style={{ gridTemplateColumns: '1fr 130px 80px 100px 110px 120px 36px' }}
+                      title={s.ambiguous ? 'Verify this stage — add qty & rate if measured' : undefined}
                     >
                       {/* Work Stage name */}
                       <div className="flex flex-col gap-0.5 w-full">
@@ -678,7 +828,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
                   )}
                 </div>
               </div>
-            )}
+            ) : null}
           </section>
 
           {createWO.isError && (
@@ -773,6 +923,121 @@ function SummaryRow({ icon, label, value }: { icon: string; label: string; value
       <div className="min-w-0 flex-1">
         <p className="text-[10px] font-bold text-on-surface-variant">{label.toUpperCase()}</p>
         <div className="text-body-sm text-on-surface font-medium mt-0.5 truncate">{value}</div>
+      </div>
+    </div>
+  );
+}
+
+// ─── AI Extraction Review Card ─────────────────────────────────────────────
+
+const CONFIDENCE_STYLE = {
+  HIGH:   { bar: '████',  cls: 'bg-green-100 text-green-700' },
+  MEDIUM: { bar: '███░',  cls: 'bg-amber-100 text-amber-700' },
+  LOW:    { bar: '██░░',  cls: 'bg-red-100 text-red-700' },
+} as const;
+
+function ExtractedStageCard({
+  stage,
+  onAdd,
+}: {
+  stage: ExtractedStage;
+  onAdd: (s: ExtractedStage, amountOverride?: number) => void;
+}) {
+  const conf = CONFIDENCE_STYLE[stage.confidence];
+  const calcAmt =
+    stage.qty != null && stage.rate != null
+      ? Math.round(stage.qty * stage.rate * 100) / 100
+      : null;
+
+  return (
+    <div className={`rounded-lg border bg-surface p-3 ${
+      stage.arithmetic_mismatch
+        ? 'border-amber-300'
+        : stage.confidence === 'HIGH'
+          ? 'border-outline-variant/20'
+          : 'border-amber-200/70'
+    }`}>
+      <div className="flex items-start gap-3">
+        <div className="flex-1 min-w-0">
+
+          {/* Confidence badge row */}
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[10px] text-on-surface-variant">🤖 Extracted</span>
+            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded font-data-mono ${conf.cls}`}>
+              {stage.confidence} {conf.bar}
+            </span>
+          </div>
+
+          {/* Name */}
+          <p className="text-[13px] font-semibold text-on-surface mb-0.5 truncate">{stage.name}</p>
+
+          {/* Mode display */}
+          {stage.mode === 'measured' && (
+            <p className="text-[12px] text-on-surface-variant font-data-mono">
+              {(stage.qty ?? 0).toLocaleString('en-IN')} {stage.unit_type} &times; ₹{(stage.rate ?? 0).toLocaleString('en-IN')} ={' '}
+              <span className="text-on-surface font-semibold">{fmtRupee(stage.amount)}</span>
+              {stage.amount_verified && !stage.arithmetic_mismatch && (
+                <span className="text-green-600 ml-1 not-italic">✓</span>
+              )}
+            </p>
+          )}
+          {stage.mode === 'lumpsum' && (
+            <p className="text-[12px] text-on-surface-variant">
+              {stage.unit_type === 'LS' ? 'Lump Sum — ' : ''}{fmtRupee(stage.amount)}
+            </p>
+          )}
+          {stage.mode === 'ambiguous' && (
+            <p className="text-[12px] text-on-surface-variant">
+              {fmtRupee(stage.amount)} — no qty/rate found
+            </p>
+          )}
+
+          {/* Confidence warning */}
+          {stage.confidence !== 'HIGH' && !stage.arithmetic_mismatch && (
+            <p className="text-[11px] text-amber-700 mt-0.5">
+              ⚠ {stage.mode === 'ambiguous' ? 'Assumed lump sum — verify' : stage.confidence_reason}
+            </p>
+          )}
+
+          {/* Arithmetic mismatch — user must resolve */}
+          {stage.arithmetic_mismatch && (
+            <div className="mt-2 rounded-md bg-amber-50 border border-amber-200/60 p-2.5">
+              <p className="text-[11px] text-amber-800 font-medium mb-1">
+                ⚠ {stage.mismatch_note}
+              </p>
+              <p className="text-[11px] text-on-surface-variant mb-2">Which amount is correct?</p>
+              <div className="flex gap-2 flex-wrap">
+                {calcAmt != null && (
+                  <button
+                    type="button"
+                    onClick={() => onAdd(stage, calcAmt)}
+                    className="text-[11px] px-2.5 py-1.5 rounded-lg bg-white border border-outline-variant/30 text-on-surface hover:bg-surface-container-low transition-colors font-medium"
+                  >
+                    Use calculated {fmtRupee(calcAmt)}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => onAdd(stage, stage.amount)}
+                  className="text-[11px] px-2.5 py-1.5 rounded-lg bg-white border border-outline-variant/30 text-on-surface hover:bg-surface-container-low transition-colors font-medium"
+                >
+                  Use document {fmtRupee(stage.amount)}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Add button (hidden for mismatch — user must pick via choice buttons) */}
+        {!stage.arithmetic_mismatch && (
+          <button
+            type="button"
+            onClick={() => onAdd(stage)}
+            className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+          >
+            <span className="material-symbols-outlined text-[13px]">check</span> Add
+          </button>
+        )}
       </div>
     </div>
   );
