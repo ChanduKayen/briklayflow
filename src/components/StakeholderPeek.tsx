@@ -30,7 +30,7 @@ export function StakeholderPeek({ stakeholderId, onClose }: StakeholderPeekProps
   const { data: recentTxns } = useQuery({
     queryKey: ['stk_peek_txns', stakeholderId],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data: txns, error } = await supabase
         .from('transactions')
         .select('txn_id, total_amount, date, category, status, payment_mode, remarks')
         .eq('stakeholder_id', stakeholderId)
@@ -38,7 +38,21 @@ export function StakeholderPeek({ stakeholderId, onClose }: StakeholderPeekProps
         .order('date', { ascending: false })
         .limit(6);
       if (error) throw error;
-      return data as any[];
+      if (!txns || txns.length === 0) return [];
+
+      const { data: allocData } = await supabase
+        .from('txn_allocations')
+        .select('txn_id, projects(name)')
+        .in('txn_id', txns.map((t: any) => t.txn_id));
+
+      const projectByTxn: Record<string, string> = {};
+      (allocData || []).forEach((a: any) => {
+        if (a.projects?.name && !projectByTxn[a.txn_id]) {
+          projectByTxn[a.txn_id] = a.projects.name;
+        }
+      });
+
+      return txns.map((t: any) => ({ ...t, projectName: projectByTxn[t.txn_id] || null }));
     },
     enabled: !!stk,
   });
@@ -92,8 +106,10 @@ export function StakeholderPeek({ stakeholderId, onClose }: StakeholderPeekProps
               <p className="text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant mb-2">Recent Payments</p>
               <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
                 {recentTxns.map((t: any, i: number) => {
+                  const isCostCode = (s: string) => /^[A-Z]{2,4}-\d{2}(-\d{2})?$/.test(s);
                   const line1 = [stk?.name, stk?.category].filter(Boolean).join(' · ') || 'Payment';
-                  const line2 = t.remarks?.slice(0, 60) || t.category || '';
+                  const annotation = t.remarks?.slice(0, 60) || (!isCostCode(t.category || '') ? t.category : '') || '';
+                  const line2 = [t.projectName, annotation].filter(Boolean).join(' · ');
                   const line3 = [t.payment_mode, t.date ? new Date(t.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : ''].filter(Boolean).join(' · ');
                   return (
                     <button

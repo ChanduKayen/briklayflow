@@ -191,8 +191,10 @@ export function POPeek({ poId, onClose }: POPeekProps) {
               <p className="text-[10px] font-semibold tracking-wider text-on-surface-variant uppercase mb-2">Payments</p>
               <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
                 {linkedTxns.map((a: any, i: number) => {
+                  const isCostCode = (s: string) => /^[A-Z]{2,4}-\d{2}(-\d{2})?$/.test(s);
                   const line1 = [po?.stakeholders?.name, po?.stakeholders?.category].filter(Boolean).join(' · ') || 'Payment';
-                  const line2 = [po?.projects?.name, a.transactions?.remarks?.slice(0, 60) || a.transactions?.category].filter(Boolean).join(' · ');
+                  const annotation = a.transactions?.remarks?.slice(0, 60) || (!isCostCode(a.transactions?.category || '') ? a.transactions?.category : '') || '';
+                  const line2 = [po?.projects?.name, annotation].filter(Boolean).join(' · ');
                   const line3 = [a.transactions?.payment_mode, a.transactions?.date ? new Date(a.transactions.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : ''].filter(Boolean).join(' · ');
                   return (
                     <button

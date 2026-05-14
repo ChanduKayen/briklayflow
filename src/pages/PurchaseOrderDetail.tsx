@@ -306,9 +306,7 @@ function BillSummaryCard({ po, activeTxns, onNavigate }: { po: any; activeTxns: 
                 <p className="text-[11px] font-[500] text-on-surface truncate">
                   {[po.stakeholders?.name, po.stakeholders?.category].filter(Boolean).join(' · ') || 'Payment'}
                 </p>
-                {(t.transactions?.remarks || t.transactions?.category) && (
-                  <p className="text-[10px] text-on-surface-variant/60 truncate">{t.transactions?.remarks?.slice(0, 60) || t.transactions?.category}</p>
-                )}
+                {(() => { const ann = t.transactions?.remarks?.slice(0, 60) || (!/^[A-Z]{2,4}-\d{2}(-\d{2})?$/.test(t.transactions?.category || '') ? t.transactions?.category : ''); return ann ? <p className="text-[10px] text-on-surface-variant/60 truncate">{ann}</p> : null; })()}
                 <p className="text-[9px] font-mono text-on-surface-variant/25 opacity-0 group-hover:opacity-100 transition-opacity">{t.transactions?.txn_id}</p>
               </div>
               <div className="shrink-0 text-right">
@@ -1428,9 +1426,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
                     <p className="text-[12px] font-[500] text-on-surface truncate">
                       {[po?.stakeholders?.name, po?.stakeholders?.category].filter(Boolean).join(' · ') || 'Payment'}
                     </p>
-                    {(t.transactions?.remarks || t.transactions?.category) && (
-                      <p className="text-[10px] text-on-surface-variant/60 truncate">{t.transactions?.remarks?.slice(0, 60) || t.transactions?.category}</p>
-                    )}
+                    {(() => { const ann = t.transactions?.remarks?.slice(0, 60) || (!/^[A-Z]{2,4}-\d{2}(-\d{2})?$/.test(t.transactions?.category || '') ? t.transactions?.category : ''); return ann ? <p className="text-[10px] text-on-surface-variant/60 truncate">{ann}</p> : null; })()}
                     <p className="text-[9px] font-mono text-on-surface-variant/25 opacity-0 group-hover:opacity-100 transition-opacity">{t.transactions?.txn_id}</p>
                   </div>
                   <div className="shrink-0 text-right">

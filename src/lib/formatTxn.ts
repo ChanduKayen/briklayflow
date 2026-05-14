@@ -6,14 +6,18 @@ export interface TxnDisplay {
   amount: number;
 }
 
+function isCostCode(s: string): boolean {
+  return /^[A-Z]{2,4}-\d{2}(-\d{2})?$/.test(s);
+}
+
 export function formatTxn(txn: any): TxnDisplay {
   const name  = txn.stakeholders?.name || '';
   const trade = txn.stakeholders?.category || '';
   const line1 = dot([name, trade]) || 'Payment';
 
-  const project    = txn.projects?.name || txn.txn_allocations?.[0]?.projects?.name || '';
-  const annotation = txn.remarks?.slice(0, 60) || txn.category || '';
-  const line2      = dot([project, annotation]);
+  const project    = txn.projects?.name || txn.txn_allocations?.[0]?.projects?.name || (txn as any).projectName || '';
+  const rawAnnotation = txn.remarks?.slice(0, 60) || (!isCostCode(txn.category || '') ? txn.category : '') || '';
+  const line2      = dot([project, rawAnnotation]);
 
   const mode = txn.payment_mode || '';
   const date = txn.date ? formatShortDate(txn.date) : '';

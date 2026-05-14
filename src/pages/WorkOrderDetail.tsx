@@ -1130,9 +1130,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                                           <p className="text-[11px] font-[500] text-on-surface truncate">
                                             {[wo?.stakeholders?.name, wo?.stakeholders?.category].filter(Boolean).join(' · ') || 'Payment'}
                                           </p>
-                                          {(txn.remarks || txn.category) && (
-                                            <p className="text-[10px] text-on-surface-variant/60 truncate">{txn.remarks?.slice(0, 60) || txn.category}</p>
-                                          )}
+                                          {(() => { const ann = txn.remarks?.slice(0, 60) || (!/^[A-Z]{2,4}-\d{2}(-\d{2})?$/.test(txn.category || '') ? txn.category : ''); return ann ? <p className="text-[10px] text-on-surface-variant/60 truncate">{ann}</p> : null; })()}
                                           <p className="text-[9px] font-mono text-on-surface-variant/25 opacity-0 group-hover:opacity-100 transition-opacity">{txn.txn_id}</p>
                                         </button>
                                         <span className="font-data-mono text-[12px] text-on-surface ml-auto shrink-0">₹{Number(alloc.allocated_amount).toLocaleString('en-IN')}</span>
@@ -1399,9 +1397,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                       <p className="text-[12px] font-[500] text-on-surface truncate">
                         {[wo?.stakeholders?.name, wo?.stakeholders?.category].filter(Boolean).join(' · ') || 'Payment'}
                       </p>
-                      {(txn.remarks || txn.category) && (
-                        <p className="text-[10px] text-on-surface-variant/60 truncate">{txn.remarks?.slice(0, 60) || txn.category}</p>
-                      )}
+                      {(() => { const ann = txn.remarks?.slice(0, 60) || (!/^[A-Z]{2,4}-\d{2}(-\d{2})?$/.test(txn.category || '') ? txn.category : ''); return ann ? <p className="text-[10px] text-on-surface-variant/60 truncate">{ann}</p> : null; })()}
                       <p className="text-[9px] font-mono text-on-surface-variant/25 opacity-0 group-hover:opacity-100 transition-opacity">{txn.txn_id}</p>
                     </div>
                     <div className="shrink-0 text-right">

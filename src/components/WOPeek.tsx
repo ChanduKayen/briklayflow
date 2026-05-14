@@ -272,8 +272,10 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
               <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
                 {allocations.map((a: any, i: number) => {
                   const enriched = { ...a.transactions, stakeholders: wo?.stakeholders, projects: wo?.projects, total_amount: a.allocated_amount };
+                  const isCostCode = (s: string) => /^[A-Z]{2,4}-\d{2}(-\d{2})?$/.test(s);
                   const line1 = [wo?.stakeholders?.name, wo?.stakeholders?.category].filter(Boolean).join(' · ') || 'Payment';
-                  const line2 = [wo?.projects?.name, a.transactions?.remarks?.slice(0, 60) || a.transactions?.category].filter(Boolean).join(' · ');
+                  const annotation = a.transactions?.remarks?.slice(0, 60) || (!isCostCode(a.transactions?.category || '') ? a.transactions?.category : '') || '';
+                  const line2 = [wo?.projects?.name, annotation].filter(Boolean).join(' · ');
                   const line3 = [a.transactions?.payment_mode, a.transactions?.date ? new Date(a.transactions.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : ''].filter(Boolean).join(' · ');
                   return (
                     <button
