@@ -16,12 +16,26 @@ interface StageDraft {
   unit_type: string;
   quantity: number | null;
   rate: number | null;
+  amount: number | null;   // directly-entered lumpsum; null means computed from qty×rate
   trigger_condition: string;
+}
+
+type StageMode = 'empty' | 'measured' | 'lumpsum';
+
+function getMode(s: StageDraft): StageMode {
+  if (!s.name && !(s.amount ?? 0) && !(s.quantity ?? 0) && !(s.rate ?? 0)) return 'empty';
+  if (s.unit_type === 'LS') return 'lumpsum';
+  if ((s.quantity ?? 0) > 0 && (s.rate ?? 0) > 0) return 'measured';
+  if ((s.amount ?? 0) > 0) return 'lumpsum';
+  return 'empty';
 }
 
 // ─── Unit system ──────────────────────────────────────────────────────────
 
 const UNIT_GROUPS = [
+  { group: 'LUMP SUM', items: [
+    { value: 'LS',    label: 'LS — Lump Sum' },
+  ]},
   { group: 'AREA', items: [
     { value: 'Sqft',  label: 'Sqft — Square Feet' },
     { value: 'Sqm',   label: 'Sqm — Square Metres' },
@@ -56,9 +70,6 @@ const UNIT_GROUPS = [
     { value: 'MT',      label: 'MT — Metric Tonnes' },
     { value: 'Quintal', label: 'Quintal — 100 Kg' },
   ]},
-  { group: 'LUMP SUM', items: [
-    { value: 'LS', label: 'LS — Lump Sum' },
-  ]},
 ];
 
 const UNIT_SUGGESTIONS: Array<{ pattern: RegExp; unit: string }> = [
@@ -87,9 +98,10 @@ const QTY_LABELS: Record<string, string> = {
 };
 
 function calcAmount(s: StageDraft): number {
-  const r = s.rate ?? 0;
-  if (!s.unit_type || s.unit_type === 'LS') return r;
-  return Math.round((s.quantity ?? 0) * r * 100) / 100;
+  const mode = getMode(s);
+  if (mode === 'measured') return Math.round((s.quantity ?? 0) * (s.rate ?? 0) * 100) / 100;
+  if (mode === 'lumpsum')  return s.amount ?? 0;
+  return 0;
 }
 
 const fmtRupee = (n: number) =>
@@ -166,16 +178,19 @@ export default function NewWorkOrder({ session }: { session: Session }) {
       }]).select().single();
       if (woError) throw woError;
       if (stages.length > 0) {
-        const rows = stages.map((s, idx) => ({
-          wo_id: woId, seq_no: idx + 1, name: s.name,
-          trigger_condition: s.trigger_condition || null,
-          unit_type: s.unit_type || null,
-          quantity: s.unit_type === 'LS' ? 1 : (s.quantity ?? null),
-          rate: s.rate ?? null,
-          planned_amount: calcAmount(s),
-          status: 'Pending' as const,
-          ai_extracted: isAiExtracted,
-        }));
+        const rows = stages.map((s, idx) => {
+          const mode = getMode(s);
+          return {
+            wo_id: woId, seq_no: idx + 1, name: s.name,
+            trigger_condition: s.trigger_condition || null,
+            unit_type: s.unit_type || null,
+            quantity: mode === 'measured' ? s.quantity : (mode === 'lumpsum' ? 1 : null),
+            rate: mode === 'measured' ? s.rate : null,
+            planned_amount: calcAmount(s),
+            status: 'Pending' as const,
+            ai_extracted: isAiExtracted,
+          };
+        });
         const { error: mError } = await supabase.from('wo_milestones').insert(rows);
         if (mError) throw mError;
       }
@@ -191,7 +206,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
 
   const addStage = () => {
     const id = Math.random().toString();
-    setStages(prev => [...prev, { id, name: '', unit_type: '', quantity: null, rate: null, trigger_condition: '' }]);
+    setStages(prev => [...prev, { id, name: '', unit_type: '', quantity: null, rate: null, amount: null, trigger_condition: '' }]);
     setNewStageId(id);
   };
 
@@ -247,7 +262,8 @@ export default function NewWorkOrder({ session }: { session: Session }) {
             name: m.name || '',
             unit_type: 'LS',
             quantity: null,
-            rate: m.planned_amount || 0,
+            rate: null,
+            amount: m.planned_amount || 0,
             trigger_condition: m.trigger_condition || '',
           })));
         }
@@ -464,8 +480,12 @@ export default function NewWorkOrder({ session }: { session: Session }) {
 
                 {/* Stage rows */}
                 {stages.map((s, idx) => {
-                  const isLS = s.unit_type === 'LS';
-                  const amount = calcAmount(s);
+                  const mode    = getMode(s);
+                  const isLS    = s.unit_type === 'LS';
+                  const amount  = calcAmount(s);
+                  const dimCell = 'h-9 flex items-center justify-center text-[13px] text-on-surface-variant/40 rounded-md border border-black/[0.04] bg-black/[0.015] select-none';
+                  const inputCls = 'h-9 w-full px-2.5 text-[13px] border border-black/10 rounded-md focus:outline-none focus:border-primary/40 bg-transparent placeholder:text-on-surface-variant/40';
+
                   return (
                     <div
                       key={s.id}
@@ -480,7 +500,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
                           value={s.name}
                           onChange={e => updateStage(s.id, 'name', e.target.value)}
                           onBlur={() => handleNameBlur(s)}
-                          className="h-9 w-full px-2.5 text-[13px] border border-black/10 rounded-md focus:outline-none focus:border-primary/40 bg-transparent placeholder:text-on-surface-variant/40"
+                          className={inputCls}
                           placeholder="e.g. Foundation slab, 2nd floor plastering"
                         />
                         <span className="h-3" />
@@ -493,8 +513,14 @@ export default function NewWorkOrder({ session }: { session: Session }) {
                           value={s.unit_type}
                           onChange={e => {
                             const u = e.target.value;
-                            updateStage(s.id, 'unit_type', u);
-                            if (u === 'LS') updateStage(s.id, 'quantity', 1);
+                            // Switching to LS → clear qty/rate; switching away → clear direct amount
+                            setStages(prev => prev.map(st => st.id !== s.id ? st : {
+                              ...st,
+                              unit_type: u,
+                              quantity: u === 'LS' ? null : st.quantity,
+                              rate:     u === 'LS' ? null : st.rate,
+                              amount:   u === 'LS' ? st.amount : null,
+                            }));
                           }}
                           className="h-9 w-full px-2 text-[13px] border border-black/10 rounded-md focus:outline-none focus:border-primary/40 bg-transparent"
                         >
@@ -512,13 +538,17 @@ export default function NewWorkOrder({ session }: { session: Session }) {
                       <div className="flex flex-col gap-0.5 w-full sm:w-auto">
                         <label className="sm:hidden text-[10px] font-bold text-on-surface-variant">QTY</label>
                         {isLS ? (
-                          <div className="h-9 flex items-center justify-center text-[13px] text-on-surface-variant rounded-md border border-black/[0.05] bg-black/[0.02]">—</div>
+                          <div className={dimCell}>—</div>
                         ) : (
                           <input
                             type="number" step="0.01" min="0"
                             value={s.quantity ?? ''}
-                            onChange={e => updateStage(s.id, 'quantity', parseFloat(e.target.value) || null)}
-                            className="h-9 w-full px-2.5 text-[13px] border border-black/10 rounded-md focus:outline-none focus:border-primary/40 bg-transparent placeholder:text-on-surface-variant/40"
+                            onChange={e => {
+                              const v = parseFloat(e.target.value) || null;
+                              // typing qty clears any direct amount
+                              setStages(prev => prev.map(st => st.id !== s.id ? st : { ...st, quantity: v, amount: null }));
+                            }}
+                            className={inputCls}
                             placeholder="0"
                           />
                         )}
@@ -530,25 +560,53 @@ export default function NewWorkOrder({ session }: { session: Session }) {
                       {/* Rate */}
                       <div className="flex flex-col gap-0.5 w-full sm:w-auto">
                         <label className="sm:hidden text-[10px] font-bold text-on-surface-variant">RATE ₹</label>
-                        <input
-                          type="number" step="0.01" min="0"
-                          value={s.rate ?? ''}
-                          onChange={e => updateStage(s.id, 'rate', parseFloat(e.target.value) || null)}
-                          className="h-9 w-full px-2.5 text-[13px] border border-black/10 rounded-md focus:outline-none focus:border-primary/40 bg-transparent placeholder:text-on-surface-variant/40"
-                          placeholder="0"
-                        />
+                        {isLS ? (
+                          <div className={dimCell}>—</div>
+                        ) : (
+                          <input
+                            type="number" step="0.01" min="0"
+                            value={s.rate ?? ''}
+                            onChange={e => {
+                              const v = parseFloat(e.target.value) || null;
+                              // typing rate clears any direct amount
+                              setStages(prev => prev.map(st => st.id !== s.id ? st : { ...st, rate: v, amount: null }));
+                            }}
+                            className={inputCls}
+                            placeholder="0"
+                          />
+                        )}
                         <span className="text-[10px] text-on-surface-variant h-3 leading-3">
-                          {s.unit_type ? `per ${s.unit_type}` : ''}
+                          {s.unit_type && !isLS ? `per ${s.unit_type}` : ''}
                         </span>
                       </div>
 
-                      {/* Amount (read-only) */}
+                      {/* Amount — editable in lumpsum, read-only when measured */}
                       <div className="flex flex-col gap-0.5 w-full sm:w-auto">
                         <label className="sm:hidden text-[10px] font-bold text-on-surface-variant">AMOUNT</label>
-                        <div className={`h-9 flex items-center justify-end px-2.5 rounded-md bg-black/[0.02] font-data-mono text-[13px] ${amount > 0 ? 'text-primary font-semibold' : 'text-on-surface-variant'}`}>
-                          {amount > 0 ? fmtRupee(amount) : '—'}
-                        </div>
-                        <span className="h-3" />
+                        {mode === 'measured' ? (
+                          // Computed — read-only tinted display
+                          <div className="h-9 flex items-center justify-end px-2.5 rounded-md bg-black/[0.025] font-data-mono text-[13px] text-primary font-semibold">
+                            {fmtRupee(amount)}
+                          </div>
+                        ) : (
+                          // Editable — lumpsum path A (LS unit) or path B (direct entry)
+                          <input
+                            type="number" step="0.01" min="0"
+                            value={s.amount ?? ''}
+                            onChange={e => {
+                              const v = parseFloat(e.target.value) || null;
+                              // typing amount clears qty/rate to lock into lumpsum mode
+                              setStages(prev => prev.map(st => st.id !== s.id ? st : { ...st, amount: v, quantity: null, rate: null }));
+                            }}
+                            className={`${inputCls} font-data-mono text-right ${(s.amount ?? 0) > 0 ? 'text-primary font-semibold' : ''}`}
+                            placeholder="₹ amount"
+                          />
+                        )}
+                        <span className="text-[10px] text-on-surface-variant h-3 leading-3">
+                          {mode === 'measured'
+                            ? `${(s.quantity ?? 0).toLocaleString('en-IN')} × ₹${(s.rate ?? 0).toLocaleString('en-IN')}`
+                            : mode === 'lumpsum' ? 'Lump sum stage' : ''}
+                        </span>
                       </div>
 
                       {/* Due Date */}
