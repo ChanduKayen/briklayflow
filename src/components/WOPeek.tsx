@@ -27,11 +27,11 @@ const MS_BADGE: Record<string, string> = {
 };
 
 function getMilestoneStatus(milestone: any, paid: number): string {
-  const planned = Number(milestone.planned_amount) || 0;
+  const planned = Number(milestone.amount) || 0;
   if (planned > 0 && paid > planned + 100) return 'OVERPAID';
   if (planned > 0 && paid >= planned - 100) return 'PAID';
   if (paid > 0) return 'PARTIALLY_PAID';
-  const d = milestone.trigger_condition ? new Date(milestone.trigger_condition) : null;
+  const d = milestone.due_date ? new Date(milestone.due_date) : null;
   const today = new Date(); today.setHours(0, 0, 0, 0);
   if (d && !isNaN(d.getTime()) && d < today) return 'DUE';
   return 'PENDING';
@@ -68,7 +68,7 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
         .from('wo_milestones')
         .select('*')
         .eq('wo_id', woId)
-        .order('seq_no', { ascending: true });
+        .order('created_at', { ascending: true });
       if (error) throw error;
       return data;
     },
@@ -106,7 +106,7 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
   });
 
   const orderValue  = Number(wo?.order_value) || 0;
-  const msTotal     = (milestones || []).reduce((s: number, m: any) => s + (Number(m.planned_amount) || 0), 0);
+  const msTotal     = (milestones || []).reduce((s: number, m: any) => s + (Number(m.amount) || 0), 0);
   const totalPaid   = (allocations || []).reduce((s: number, a: any) => s + Number(a.allocated_amount || 0), 0);
   // Derive a display total even when order_value is not set on the WO
   const displayTotal  = orderValue > 0 ? orderValue : msTotal > 0 ? msTotal : totalPaid;
@@ -239,19 +239,19 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
               <p className="text-[10px] font-semibold tracking-wider text-on-surface-variant uppercase mb-2">Milestones</p>
               <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
                 {milestones.map((m: any, i: number) => {
-                  const paid   = paidByMilestone[m.milestone_id] || 0;
+                  const paid   = paidByMilestone[m.id] || 0;
                   const status = getMilestoneStatus(m, paid);
                   return (
                     <div
-                      key={m.milestone_id}
+                      key={m.id}
                       className={`flex items-center justify-between px-3 py-2.5 text-[12px] ${i > 0 ? 'border-t border-outline-variant/10' : ''}`}
                     >
                       <div className="flex items-center gap-2 min-w-0">
-                        <span className="text-on-surface-variant shrink-0 font-data-mono">{m.seq_no}.</span>
+                        <span className="text-on-surface-variant shrink-0 font-data-mono">{i + 1}.</span>
                         <span className="text-on-surface truncate">{m.name}</span>
                       </div>
                       <div className="flex items-center gap-2 ml-3 shrink-0">
-                        <span className="font-data-mono text-on-surface">{fmtRupee(Number(m.planned_amount) || 0)}</span>
+                        <span className="font-data-mono text-on-surface">{fmtRupee(Number(m.amount) || 0)}</span>
                         <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${MS_BADGE[status] || MS_BADGE.PENDING}`}>
                           {status.replace('_', ' ')}
                         </span>

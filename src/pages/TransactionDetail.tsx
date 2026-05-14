@@ -81,6 +81,9 @@ export default function TransactionDetail({ session }: { session: Session }) {
   const [mapType, setMapType] = useState<'WO' | 'PO' | ''>('');
   const [mapRef, setMapRef] = useState('');
   const [showMapPanel, setShowMapPanel] = useState(false);
+  const [selectedWoId, setSelectedWoId] = useState('');
+  const [availablePhases, setAvailablePhases] = useState<any[]>([]);
+  const [phasesLoading, setPhasesLoading] = useState(false);
 
   // ─── Void state ─────────────────────────────────────────────────────────────
   const [voidConfirm, setVoidConfirm] = useState(false);
@@ -154,6 +157,33 @@ export default function TransactionDetail({ session }: { session: Session }) {
       return data as any[];
     },
   });
+
+  const { data: workerWOs } = useQuery({
+    queryKey: ['wo_for_stakeholder', txn?.stakeholder_id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('work_orders')
+        .select('wo_id, project_id')
+        .eq('stakeholder_id', txn!.stakeholder_id);
+      if (error) throw error;
+      return data as any[];
+    },
+    enabled: !!txn?.stakeholder_id && txn?.stakeholders?.type === 'Worker',
+  });
+
+  useEffect(() => {
+    if (!selectedWoId) { setAvailablePhases([]); return; }
+    setPhasesLoading(true);
+    supabase
+      .from('wo_milestones')
+      .select('id, name, amount, status, due_date')
+      .eq('wo_id', selectedWoId)
+      .order('created_at', { ascending: true })
+      .then(({ data, error }) => {
+        setPhasesLoading(false);
+        setAvailablePhases(!error && data ? data : []);
+      });
+  }, [selectedWoId]);
 
   // ─── Mutations ────────────────────────────────────────────────────────────────
 
@@ -461,10 +491,10 @@ export default function TransactionDetail({ session }: { session: Session }) {
               const isUnlinked = !a.order_type;
               const isMapping = mappingId === a.allocation_id;
               const stkType = txn.stakeholders?.type;
-              const relMS = stkType === 'Worker' ? milestones?.filter((m) => m.work_orders?.stakeholder_id === txn.stakeholder_id && m.work_orders?.project_id === a.project_id) : [];
+              const relWOs = stkType === 'Worker' ? (workerWOs?.filter((wo) => wo.project_id === a.project_id) ?? []) : [];
               const relPOs = stkType === 'Vendor' ? purchaseOrders?.filter((p) => p.stakeholder_id === txn.stakeholder_id && p.project_id === a.project_id) : [];
               const milestoneName = a.milestone_id
-                ? (milestones?.find((m: any) => m.milestone_id === a.milestone_id)?.name ?? null)
+                ? (milestones?.find((m: any) => m.id === a.milestone_id)?.name ?? null)
                 : null;
               return (
                 <div key={a.allocation_id}>
@@ -501,15 +531,25 @@ export default function TransactionDetail({ session }: { session: Session }) {
                   {isMapping && (
                     <div className="mt-2 flex flex-col gap-2">
                       <div className="flex items-center gap-2">
-                        <select value={mapType} onChange={(e) => { setMapType(e.target.value as any); setMapRef(''); }} className="bk-input py-1.5 text-body-sm w-28">
+                        <select value={mapType} onChange={(e) => { setMapType(e.target.value as any); setMapRef(''); setSelectedWoId(''); }} className="bk-input py-1.5 text-body-sm w-28">
                           <option value="">Type...</option>
                           {stkType === 'Worker' && <option value="WO">Work Order</option>}
                           {stkType === 'Vendor' && <option value="PO">Purchase Order</option>}
                         </select>
                         {mapType === 'WO' && (
-                          <select value={mapRef} onChange={(e) => setMapRef(e.target.value)} className="bk-input py-1.5 text-body-sm flex-1">
-                            <option value="">Select phase...</option>
-                            {relMS?.map((m: any) => <option key={m.milestone_id} value={m.milestone_id}>{m.wo_id} - {m.name} (₹{m.planned_amount})</option>)}
+                          <select value={selectedWoId} onChange={(e) => { setSelectedWoId(e.target.value); setMapRef(''); }} className="bk-input py-1.5 text-body-sm flex-1">
+                            <option value="">Select WO...</option>
+                            {relWOs.map((wo: any) => (
+                              <option key={wo.wo_id} value={wo.wo_id}>{wo.wo_id}</option>
+                            ))}
+                          </select>
+                        )}
+                        {mapType === 'WO' && selectedWoId && (
+                          <select value={mapRef} onChange={(e) => setMapRef(e.target.value)} className="bk-input py-1.5 text-body-sm flex-1" disabled={phasesLoading}>
+                            <option value="">{phasesLoading ? 'Loading...' : 'Select phase...'}</option>
+                            {availablePhases.map((m: any) => (
+                              <option key={m.id} value={m.id}>{m.name} (₹{Number(m.amount).toLocaleString('en-IN')})</option>
+                            ))}
                           </select>
                         )}
                         {mapType === 'PO' && (
@@ -522,16 +562,22 @@ export default function TransactionDetail({ session }: { session: Session }) {
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => {
-                            if (!mapType || !mapRef) return;
-                            const ms = mapType === 'WO' ? milestones?.find((m) => m.milestone_id === mapRef) : null;
-                            updateAlloc.mutate({ allocId: a.allocation_id, order_type: mapType, order_ref: ms?.wo_id || mapRef, milestone_id: mapType === 'WO' ? mapRef : undefined });
+                            if (!mapType) return;
+                            if (mapType === 'WO' && (!selectedWoId || !mapRef)) return;
+                            if (mapType === 'PO' && !mapRef) return;
+                            updateAlloc.mutate({
+                              allocId: a.allocation_id,
+                              order_type: mapType,
+                              order_ref: mapType === 'WO' ? selectedWoId : mapRef,
+                              milestone_id: mapType === 'WO' ? mapRef : undefined,
+                            });
                           }}
-                          disabled={!mapType || !mapRef || updateAlloc.isPending}
+                          disabled={!mapType || (mapType === 'WO' ? (!selectedWoId || !mapRef) : !mapRef) || updateAlloc.isPending}
                           className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-secondary text-on-primary hover:opacity-80 disabled:opacity-40"
                         >
                           <span className="material-symbols-outlined text-[14px]">link</span> {updateAlloc.isPending ? 'Saving...' : 'Map'}
                         </button>
-                        <button onClick={() => { setMappingId(null); setMapType(''); setMapRef(''); }} className="text-[11px] font-bold text-on-surface-variant hover:text-on-surface">Cancel</button>
+                        <button onClick={() => { setMappingId(null); setMapType(''); setMapRef(''); setSelectedWoId(''); }} className="text-[11px] font-bold text-on-surface-variant hover:text-on-surface">Cancel</button>
                       </div>
                     </div>
                   )}
@@ -626,8 +672,8 @@ export default function TransactionDetail({ session }: { session: Session }) {
                     </div>
                     <div className="divide-y divide-outline-variant/10 max-h-64 overflow-y-auto">
                       {stkType === 'Worker' && allRelMS.map((m: any) => (
-                        <button key={m.milestone_id}
-                          onClick={() => { const unlinked = unlinkedAllocs[0]; if (unlinked) updateAlloc.mutate({ allocId: unlinked.allocation_id, order_type: 'WO', order_ref: m.wo_id, milestone_id: m.milestone_id }); setShowMapPanel(false); }}
+                        <button key={m.id}
+                          onClick={() => { const unlinked = unlinkedAllocs[0]; if (unlinked) updateAlloc.mutate({ allocId: unlinked.allocation_id, order_type: 'WO', order_ref: m.wo_id, milestone_id: m.id }); setShowMapPanel(false); }}
                           className="w-full flex items-center gap-4 px-4 py-3 text-left hover:bg-primary/5 transition-colors group">
                           <div className="w-9 h-9 rounded-full bg-secondary-container/30 flex items-center justify-center shrink-0 group-hover:bg-secondary-container/60 transition-colors">
                             <span className="material-symbols-outlined text-[18px] text-secondary">assignment</span>
@@ -637,7 +683,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
                             <p className="text-[10px] text-on-surface-variant font-data-mono">{m.wo_id} · {m.work_orders?.scope_of_work?.substring(0, 40) || 'No scope'}</p>
                           </div>
                           <div className="text-right shrink-0">
-                            <p className="font-data-mono font-bold text-body-sm text-on-surface">₹{Number(m.planned_amount).toLocaleString()}</p>
+                            <p className="font-data-mono font-bold text-body-sm text-on-surface">₹{Number(m.amount).toLocaleString()}</p>
                             <p className={`text-[10px] font-bold ${m.status === 'Completed' ? 'text-secondary' : 'text-on-surface-variant'}`}>{m.status}</p>
                           </div>
                           <span className="material-symbols-outlined text-[18px] text-primary opacity-0 group-hover:opacity-100 transition-opacity">arrow_forward</span>
@@ -689,10 +735,10 @@ export default function TransactionDetail({ session }: { session: Session }) {
                 const isUnlinked = !a.order_type;
                 const isMapping = mappingId === a.allocation_id;
                 const stkType = txn.stakeholders?.type;
-                const relMS = stkType === 'Worker' ? milestones?.filter((m) => m.work_orders?.stakeholder_id === txn.stakeholder_id && m.work_orders?.project_id === a.project_id) : [];
+                const relWOs2 = stkType === 'Worker' ? (workerWOs?.filter((wo) => wo.project_id === a.project_id) ?? []) : [];
                 const relPOs = stkType === 'Vendor' ? purchaseOrders?.filter((p) => p.stakeholder_id === txn.stakeholder_id && p.project_id === a.project_id) : [];
                 const milestoneName = a.milestone_id
-                  ? (milestones?.find((m: any) => m.milestone_id === a.milestone_id)?.name ?? null)
+                  ? (milestones?.find((m: any) => m.id === a.milestone_id)?.name ?? null)
                   : null;
                 return (
                   <tr key={a.allocation_id} className={`border-b border-outline-variant/10 transition-colors ${isUnlinked ? 'bg-tertiary-container/5' : 'hover:bg-surface-container-lowest'}`}>
@@ -711,15 +757,25 @@ export default function TransactionDetail({ session }: { session: Session }) {
                       ) : isMapping ? (
                         <div className="flex flex-col gap-2">
                           <div className="flex items-center gap-2">
-                            <select value={mapType} onChange={(e) => { setMapType(e.target.value as any); setMapRef(''); }} className="bk-input py-1.5 text-body-sm w-28">
+                            <select value={mapType} onChange={(e) => { setMapType(e.target.value as any); setMapRef(''); setSelectedWoId(''); }} className="bk-input py-1.5 text-body-sm w-28">
                               <option value="">Type...</option>
                               {stkType === 'Worker' && <option value="WO">Work Order</option>}
                               {stkType === 'Vendor' && <option value="PO">Purchase Order</option>}
                             </select>
                             {mapType === 'WO' && (
-                              <select value={mapRef} onChange={(e) => setMapRef(e.target.value)} className="bk-input py-1.5 text-body-sm flex-1">
-                                <option value="">Select phase...</option>
-                                {relMS?.map((m: any) => <option key={m.milestone_id} value={m.milestone_id}>{m.wo_id} - {m.name} (₹{m.planned_amount})</option>)}
+                              <select value={selectedWoId} onChange={(e) => { setSelectedWoId(e.target.value); setMapRef(''); }} className="bk-input py-1.5 text-body-sm flex-1">
+                                <option value="">Select WO...</option>
+                                {relWOs2.map((wo: any) => (
+                                  <option key={wo.wo_id} value={wo.wo_id}>{wo.wo_id}</option>
+                                ))}
+                              </select>
+                            )}
+                            {mapType === 'WO' && selectedWoId && (
+                              <select value={mapRef} onChange={(e) => setMapRef(e.target.value)} className="bk-input py-1.5 text-body-sm flex-1" disabled={phasesLoading}>
+                                <option value="">{phasesLoading ? 'Loading...' : 'Select phase...'}</option>
+                                {availablePhases.map((m: any) => (
+                                  <option key={m.id} value={m.id}>{m.name} (₹{Number(m.amount).toLocaleString('en-IN')})</option>
+                                ))}
                               </select>
                             )}
                             {mapType === 'PO' && (
@@ -732,16 +788,22 @@ export default function TransactionDetail({ session }: { session: Session }) {
                           <div className="flex items-center gap-2">
                             <button
                               onClick={() => {
-                                if (!mapType || !mapRef) return;
-                                const ms = mapType === 'WO' ? milestones?.find((m) => m.milestone_id === mapRef) : null;
-                                updateAlloc.mutate({ allocId: a.allocation_id, order_type: mapType, order_ref: ms?.wo_id || mapRef, milestone_id: mapType === 'WO' ? mapRef : undefined });
+                                if (!mapType) return;
+                                if (mapType === 'WO' && (!selectedWoId || !mapRef)) return;
+                                if (mapType === 'PO' && !mapRef) return;
+                                updateAlloc.mutate({
+                                  allocId: a.allocation_id,
+                                  order_type: mapType,
+                                  order_ref: mapType === 'WO' ? selectedWoId : mapRef,
+                                  milestone_id: mapType === 'WO' ? mapRef : undefined,
+                                });
                               }}
-                              disabled={!mapType || !mapRef || updateAlloc.isPending}
+                              disabled={!mapType || (mapType === 'WO' ? (!selectedWoId || !mapRef) : !mapRef) || updateAlloc.isPending}
                               className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-secondary text-on-primary hover:opacity-80 disabled:opacity-40"
                             >
                               <span className="material-symbols-outlined text-[14px]">link</span> {updateAlloc.isPending ? 'Saving...' : 'Map'}
                             </button>
-                            <button onClick={() => { setMappingId(null); setMapType(''); setMapRef(''); }} className="text-[11px] font-bold text-on-surface-variant hover:text-on-surface">Cancel</button>
+                            <button onClick={() => { setMappingId(null); setMapType(''); setMapRef(''); setSelectedWoId(''); }} className="text-[11px] font-bold text-on-surface-variant hover:text-on-surface">Cancel</button>
                           </div>
                         </div>
                       ) : (
