@@ -225,14 +225,8 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
 
   const approveMutation = useMutation({
     mutationFn: async () => {
-      const userName = profile?.name || session.user.email || 'Unknown';
-      const newEntry: StatusHistoryEntry = { status: 'Assigned', at: new Date().toISOString(), by: userName };
       const updatePayload: Record<string, any> = {
         status: 'Assigned',
-        approved_by: session.user.id,
-        approved_at: new Date().toISOString(),
-        approved_by_name: userName,
-        status_history: [...((wo as any)?.status_history || []), newEntry],
       };
       const { data, error } = await supabase
         .from('work_orders').update(updatePayload).eq('wo_id', woId).select().single();
@@ -326,15 +320,6 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
         }],
       }).eq('txn_id', vars.txnId);
 
-      if (wo) {
-        const woHistory: any[] = (wo as any).status_history || [];
-        await supabase.from('work_orders').update({
-          status_history: [...woHistory, {
-            status: 'phase_move', at: new Date().toISOString(), by: userName,
-            txn_id: vars.txnId, amount: vars.amount, from: vars.fromName, to: vars.toName,
-          }],
-        }).eq('wo_id', woId);
-      }
     },
     onSuccess: (_, vars) => {
       queryClient.invalidateQueries({ queryKey: ['wo_allocations', woId] });
@@ -376,16 +361,6 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
         }],
       }).eq('txn_id', ud.txnId);
 
-      if (wo) {
-        const woHistory: any[] = (wo as any).status_history || [];
-        await supabase.from('work_orders').update({
-          status_history: [...woHistory, {
-            status: 'phase_move_undo', at: new Date().toISOString(), by: userName,
-            txn_id: ud.txnId, amount: ud.amount,
-            from: ud.targetMilestoneName, to: ud.originalMilestoneName,
-          }],
-        }).eq('wo_id', woId);
-      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['wo_allocations', woId] });

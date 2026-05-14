@@ -92,11 +92,8 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
   const approveMutation = useMutation({
     mutationFn: async () => {
       if (!wo || !session) throw new Error('Not ready');
-      const userName = profile?.name || session.user.email || 'Unknown';
-      const newEntry = { status: 'Assigned', at: new Date().toISOString(), by: userName };
       const { error } = await supabase.from('work_orders').update({
         status: 'Assigned',
-        status_history: [...((wo as any).status_history || []), newEntry],
       }).eq('wo_id', woId);
       if (error) throw error;
     },
