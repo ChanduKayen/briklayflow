@@ -544,24 +544,24 @@ export default function NewTransaction({ session: _session }: { session: Session
     if (!text || text.trim().length < 5) { setAiCodeState('idle'); return; }
     setAiCodeState('loading');
     setAiSuggestedCode(null);
-    const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
+    const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
     if (!apiKey) { setAiCodeState('idle'); return; }
     const codeList = ALL_COST_CODES.map(c => `${c.code}: ${c.name}`).join('\n');
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
-        headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
+          model: 'gpt-4o-mini',
           max_tokens: 15,
-          messages: [{
-            role: 'user',
-            content: `You classify construction payment remarks into cost codes.\n\nRemark: "${text.trim()}"\n\nCost codes:\n${codeList}\n\nReturn ONLY the single best matching code (e.g. "WRK-07-02") or "NONE" if ambiguous or unclear. Nothing else.`,
-          }],
+          messages: [
+            { role: 'system', content: 'You classify Indian construction payment remarks into cost codes. Return ONLY the single best matching code (e.g. "WRK-07-02") or "NONE" if ambiguous. Nothing else.' },
+            { role: 'user', content: `Remark: "${text.trim()}"\n\nCost codes:\n${codeList}` },
+          ],
         }),
       });
       const data = await res.json();
-      const result = (data.content?.[0]?.text || 'NONE').trim().replace(/["'.]/g, '').toUpperCase();
+      const result = (data.choices?.[0]?.message?.content || 'NONE').trim().replace(/["'.]/g, '').toUpperCase();
       if (result === 'NONE' || !getCostCode(result)) {
         setAiSuggestedCode(null);
         setAiCodeState('none');
