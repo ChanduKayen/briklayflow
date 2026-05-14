@@ -139,9 +139,10 @@ export default function TransactionDetail({ session }: { session: Session }) {
   const { data: milestones } = useQuery({
     queryKey: ['milestones'],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('wo_milestones')
         .select('*, work_orders(project_id, stakeholder_id, scope_of_work)');
+      if (error) throw error;
       return data as any[];
     },
   });

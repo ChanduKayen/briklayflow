@@ -274,7 +274,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
         .from('txn_allocations')
         .select('*, transactions(txn_id, date, total_amount, payment_mode, category, remarks, status)')
         .eq('order_ref', poId!)
-        .order('created_at', { ascending: false });
+        .eq('order_type', 'PO');
       if (error) throw error;
       return data as any[];
     },
@@ -425,6 +425,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
       return txnId;
     },
     onSuccess: (txnId) => {
+      qc.invalidateQueries({ queryKey: ['po_linked_txns', poId] });
       qc.invalidateQueries({ queryKey: ['po_detail', poId] });
       qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
       setShowSettleModal(false);
@@ -736,7 +737,8 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const project = po.projects;
   const totalValue = Number(po.total_value || po.order_value) || 0;
 
-  const paidTotal = (linkedTxns ?? []).reduce((s: number, t: any) => s + (Number(t.allocated_amount) || 0), 0);
+  const activeTxns = (linkedTxns ?? []).filter((t: any) => t.transactions?.status !== 'Voided');
+  const paidTotal = activeTxns.reduce((s: number, t: any) => s + (Number(t.allocated_amount) || 0), 0);
   const billAmt   = Number(po.vendor_bill_amount) || totalValue;
   const balance   = billAmt - paidTotal;
   const pct       = billAmt > 0 ? Math.min(100, (paidTotal / billAmt) * 100) : 0;
@@ -1361,11 +1363,11 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
         </div>
 
         {/* PAYMENTS */}
-        {(linkedTxns ?? []).length > 0 && (
+        {activeTxns.length > 0 && (
           <div className="detail-reveal mb-6" style={{ animationDelay: '230ms' }}>
             <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-3">PAYMENTS</p>
             <div className="space-y-1.5">
-              {(linkedTxns ?? []).map((t: any) => (
+              {activeTxns.map((t: any) => (
                 <button
                   key={t.id}
                   className="w-full flex items-center gap-3 py-2 text-left hover:bg-surface-container-low/30 transition-colors rounded-lg px-1 group"
