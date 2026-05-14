@@ -7,9 +7,8 @@ export function formatTxn(txn: any) {
     'Payment';
 
   const what =
-    txn.annotation?.slice(0, 40) ||
+    txn.remarks?.slice(0, 40) ||
     txn.category ||
-    txn.transaction_type ||
     '';
 
   const site = txn.projects?.name || null;

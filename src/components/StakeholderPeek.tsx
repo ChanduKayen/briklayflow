@@ -32,7 +32,7 @@ export function StakeholderPeek({ stakeholderId, onClose }: StakeholderPeekProps
     queryFn: async () => {
       const { data, error } = await supabase
         .from('transactions')
-        .select('txn_id, total_amount, date, category, status, payment_mode, annotation, projects(name)')
+        .select('txn_id, total_amount, date, category, status, payment_mode, remarks')
         .eq('stakeholder_id', stakeholderId)
         .neq('status', 'Voided')
         .order('date', { ascending: false })
