@@ -196,11 +196,11 @@ function SidebarContent({
   const { data: woPendingCount = 0 } = useQuery({
     queryKey: ['nav_wo_pending'],
     queryFn: async () => {
-      const { count } = await supabase.from('work_orders').select('*', { count: 'exact', head: true }).eq('status', 'Pending Approval');
+      const { count } = await supabase.from('work_orders').select('*', { count: 'exact', head: true }).eq('status', 'Draft');
       return count ?? 0;
     },
     staleTime: 60_000,
-    enabled: role !== 'supervisor',
+    enabled: role === 'management' || role === 'principal',
   });
 
   const { data: poUntalliedCount = 0 } = useQuery({

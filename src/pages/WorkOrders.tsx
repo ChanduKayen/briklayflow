@@ -18,15 +18,15 @@ type WORow = WorkOrder & {
 };
 
 const STATUS_BADGE: Record<string, string> = {
-  Draft:              'bg-slate-100 text-slate-500',
-  Issued:             'bg-blue-50 text-blue-600',
-  Active:             'bg-amber-50 text-amber-600',
-  Closed:             'bg-emerald-50 text-emerald-600',
-  Cancelled:          'bg-red-50 text-red-500',
-  'Pending Approval': 'bg-purple-50 text-purple-600',
+  Draft:     'bg-slate-100 text-slate-500',
+  Assigned:  'bg-blue-50 text-blue-600',
+  Issued:    'bg-violet-50 text-violet-700',
+  Active:    'bg-amber-50 text-amber-600',
+  Closed:    'bg-emerald-50 text-emerald-600',
+  Cancelled: 'bg-rose-50 text-rose-600',
 };
 
-const ALL_STATUSES = ['Draft', 'Pending Approval', 'Issued', 'Active', 'Closed', 'Cancelled'];
+const ALL_STATUSES = ['Draft', 'Assigned', 'Issued', 'Active', 'Closed', 'Cancelled'];
 
 function getDateRange(preset: DatePreset, customFrom: string, customTo: string) {
   const today = new Date(); today.setHours(0, 0, 0, 0);

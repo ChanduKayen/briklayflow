@@ -16,7 +16,7 @@ import {
   sectionLabel, valueText, drawHeader, drawFooter, drawSignatures,
 } from '../lib/pdfHelpers';
 
-type ConfirmAction = 'issue' | 'activate' | 'close' | 'cancel';
+type ConfirmAction = 'approve' | 'issue' | 'activate' | 'close' | 'cancel';
 type MilestoneStatus = 'PENDING' | 'DUE' | 'PARTIALLY_PAID' | 'PAID' | 'OVERPAID';
 
 // ─── Status badge helpers ────────────────────────────────────────────────────
@@ -24,10 +24,11 @@ type MilestoneStatus = 'PENDING' | 'DUE' | 'PARTIALLY_PAID' | 'PAID' | 'OVERPAID
 export function statusBadgeClass(status: string) {
   switch (status) {
     case 'Draft':     return 'bg-surface-container-high text-on-surface-variant';
-    case 'Issued':    return 'bg-blue-100 text-blue-800';
+    case 'Assigned':  return 'bg-blue-50 text-blue-700';
+    case 'Issued':    return 'bg-violet-100 text-violet-800';
     case 'Active':    return 'bg-amber-100 text-amber-800';
     case 'Closed':    return 'bg-green-100 text-green-800';
-    case 'Cancelled': return 'bg-error-container text-on-error-container';
+    case 'Cancelled': return 'bg-rose-50 text-rose-700';
     default:          return 'bg-surface-container-high text-on-surface-variant';
   }
 }
@@ -35,10 +36,11 @@ export function statusBadgeClass(status: string) {
 function statusDotColor(status: string) {
   switch (status) {
     case 'Draft':     return 'bg-on-surface-variant/50';
-    case 'Issued':    return 'bg-blue-500';
+    case 'Assigned':  return 'bg-blue-500';
+    case 'Issued':    return 'bg-violet-600';
     case 'Active':    return 'bg-amber-500';
     case 'Closed':    return 'bg-green-500';
-    case 'Cancelled': return 'bg-error';
+    case 'Cancelled': return 'bg-rose-600';
     default:          return 'bg-on-surface-variant/30';
   }
 }
@@ -57,10 +59,10 @@ function getMilestoneStatus(milestone: any, paid: number): MilestoneStatus {
 }
 
 const ACTION_TO_STATUS: Record<ConfirmAction, string> = {
-  issue: 'Issued', activate: 'Active', close: 'Closed', cancel: 'Cancelled',
+  approve: 'Assigned', issue: 'Issued', activate: 'Active', close: 'Closed', cancel: 'Cancelled',
 };
 
-const FLOW_STATES = ['Draft', 'Issued', 'Active', 'Closed'] as const;
+const FLOW_STATES = ['Draft', 'Assigned', 'Issued', 'Active', 'Closed'] as const;
 
 function fmtDate(d: string | null | undefined) {
   if (!d) return '—';
@@ -147,6 +149,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
   // Closed celebration state
   const [showClosedMsg, setShowClosedMsg] = useState(true);
 
+  const canApprove    = profile?.role === 'management' || profile?.role === 'principal';
   const canTransition = profile?.role === 'management' || profile?.role === 'accountant';
 
   // ─── Queries ───────────────────────────────────────────────────────────────
@@ -216,6 +219,34 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
       setTransitionError(null);
     },
     onError: (err: any) => setTransitionError(err.message || 'Transition failed.'),
+  });
+
+  // ─── Approve mutation ─────────────────────────────────────────────────────
+
+  const approveMutation = useMutation({
+    mutationFn: async () => {
+      const userName = profile?.name || session.user.email || 'Unknown';
+      const newEntry: StatusHistoryEntry = { status: 'Assigned', at: new Date().toISOString(), by: userName };
+      const updatePayload: Record<string, any> = {
+        status: 'Assigned',
+        approved_by: session.user.id,
+        approved_at: new Date().toISOString(),
+        approved_by_name: userName,
+        status_history: [...((wo as any)?.status_history || []), newEntry],
+      };
+      const { data, error } = await supabase
+        .from('work_orders').update(updatePayload).eq('wo_id', woId).select().single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['wo', woId] });
+      queryClient.invalidateQueries({ queryKey: ['work_orders'] });
+      queryClient.invalidateQueries({ queryKey: ['nav_wo_pending'] });
+      setConfirmAction(null);
+      setTransitionError(null);
+    },
+    onError: (err: any) => setTransitionError(err.message || 'Approval failed.'),
   });
 
   // ─── Release payment mutation ──────────────────────────────────────────────
@@ -663,7 +694,6 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
 
   const statusHistory: StatusHistoryEntry[] = (wo as any).status_history || [];
   const isCancelled = wo.status === 'Cancelled';
-  const isFinal = wo.status === 'Closed' || wo.status === 'Cancelled';
   const currentFlowIdx = FLOW_STATES.indexOf(wo.status as any);
   const cancelledEntry = isCancelled ? statusHistory.find((e) => e.status === 'Cancelled') : null;
 
@@ -736,32 +766,61 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
             </span>
           )}
 
-          {!isFinal && canTransition && (
+          {/* DRAFT — approve (management/principal) or awaiting message */}
+          {wo.status === 'Draft' && (
+            canApprove ? (
+              <>
+                <button onClick={() => setConfirmAction('approve')} className="bk-btn flex items-center gap-1.5 py-1.5 px-3 text-[13px]">
+                  <span className="material-symbols-outlined text-[16px]">verified</span>
+                  Approve &amp; Assign
+                </button>
+                <button onClick={() => setConfirmAction('cancel')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error/30 text-error text-[13px] font-semibold hover:bg-error-container/30 transition-colors">
+                  <span className="material-symbols-outlined text-[15px]">cancel</span> Cancel WO
+                </button>
+              </>
+            ) : (
+              <span className="text-[12px] text-amber-600 flex items-center gap-1">
+                <span className="material-symbols-outlined text-[15px]">schedule</span>
+                Pending management approval
+              </span>
+            )
+          )}
+
+          {/* ASSIGNED → ISSUED */}
+          {wo.status === 'Assigned' && canTransition && (
             <>
-              {wo.status === 'Draft' && (
-                <button onClick={() => setConfirmAction('issue')} className="bk-btn flex items-center gap-1.5 py-1.5 px-3 text-[13px]">
-                  <span className="material-symbols-outlined text-[16px]">send</span>
-                  Issue Work Order
-                </button>
-              )}
-              {wo.status === 'Issued' && (
-                <button onClick={() => setConfirmAction('activate')} className="bk-btn flex items-center gap-1.5 py-1.5 px-3 text-[13px]">
-                  <span className="material-symbols-outlined text-[16px]">play_circle</span>
-                  Mark as Active
-                </button>
-              )}
-              {wo.status === 'Active' && (
-                <button onClick={() => setConfirmAction('close')} className="bk-btn flex items-center gap-1.5 py-1.5 px-3 text-[13px]">
-                  <span className="material-symbols-outlined text-[16px]">check_circle</span>
-                  Close Work Order
-                </button>
-              )}
-              <button
-                onClick={() => setConfirmAction('cancel')}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error/30 text-error text-[13px] font-semibold hover:bg-error-container/30 transition-colors"
-              >
-                <span className="material-symbols-outlined text-[15px]">cancel</span>
-                Cancel WO
+              <button onClick={() => setConfirmAction('issue')} className="bk-btn flex items-center gap-1.5 py-1.5 px-3 text-[13px]">
+                <span className="material-symbols-outlined text-[16px]">send</span>
+                Issue Work Order
+              </button>
+              <button onClick={() => setConfirmAction('cancel')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error/30 text-error text-[13px] font-semibold hover:bg-error-container/30 transition-colors">
+                <span className="material-symbols-outlined text-[15px]">cancel</span> Cancel WO
+              </button>
+            </>
+          )}
+
+          {/* ISSUED → ACTIVE */}
+          {wo.status === 'Issued' && canTransition && (
+            <>
+              <button onClick={() => setConfirmAction('activate')} className="bk-btn flex items-center gap-1.5 py-1.5 px-3 text-[13px]">
+                <span className="material-symbols-outlined text-[16px]">play_circle</span>
+                Mark as Active
+              </button>
+              <button onClick={() => setConfirmAction('cancel')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error/30 text-error text-[13px] font-semibold hover:bg-error-container/30 transition-colors">
+                <span className="material-symbols-outlined text-[15px]">cancel</span> Cancel WO
+              </button>
+            </>
+          )}
+
+          {/* ACTIVE → CLOSED */}
+          {wo.status === 'Active' && canTransition && (
+            <>
+              <button onClick={() => setConfirmAction('close')} className="bk-btn flex items-center gap-1.5 py-1.5 px-3 text-[13px]">
+                <span className="material-symbols-outlined text-[16px]">check_circle</span>
+                Close Work Order
+              </button>
+              <button onClick={() => setConfirmAction('cancel')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error/30 text-error text-[13px] font-semibold hover:bg-error-container/30 transition-colors">
+                <span className="material-symbols-outlined text-[15px]">cancel</span> Cancel WO
               </button>
             </>
           )}
@@ -1368,6 +1427,9 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                       <div className="pb-3 min-w-0">
                         <p className={`text-[12px] font-semibold ${reached ? 'text-on-surface' : 'text-on-surface-variant/50'}`}>
                           {state}
+                          {state === 'Assigned' && (wo as any).approved_by_name && (
+                            <span className="ml-1 text-[10px] font-normal text-blue-600">· Approved by {(wo as any).approved_by_name}</span>
+                          )}
                         </p>
                         {entry && (
                           <p className="text-[11px] text-on-surface-variant">
@@ -1448,6 +1510,41 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
           onClick={(e) => { if (e.target === e.currentTarget) { setConfirmAction(null); setTransitionError(null); } }}>
           <div className="bg-surface-container-lowest rounded-2xl shadow-card-lg border border-outline-variant/30 w-full max-w-md p-6">
+
+            {confirmAction === 'approve' && (
+              <>
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
+                    <span className="material-symbols-outlined text-[20px] text-blue-700">verified</span>
+                  </div>
+                  <div>
+                    <h3 className="text-headline-sm font-headline-sm">Approve Work Order</h3>
+                    <p className="text-[11px] text-on-surface-variant font-data-mono mt-0.5">{wo.wo_id}</p>
+                  </div>
+                </div>
+                <div className="rounded-xl bg-surface-container-low p-4 mb-4 space-y-1.5">
+                  <p className="text-[13px] text-on-surface"><span className="font-semibold">{wo.stakeholders?.name}</span> · {wo.projects?.name}</p>
+                  {orderValue > 0 && (
+                    <p className="text-[13px] font-data-mono text-on-surface">Value: ₹{orderValue.toLocaleString('en-IN')}</p>
+                  )}
+                </div>
+                <p className="text-body-sm text-on-surface-variant mb-1">Approving will:</p>
+                <ul className="text-body-sm text-on-surface-variant mb-5 list-disc pl-5 space-y-1">
+                  <li>Assign this WO to <strong>{wo.stakeholders?.name}</strong></li>
+                  {orderValue > 0 && <li>Create a financial commitment of ₹{orderValue.toLocaleString('en-IN')} against {wo.projects?.name}</li>}
+                  <li>Allow milestone payments to be released</li>
+                </ul>
+                {transitionError && <p className="text-error text-body-sm mb-4 p-3 bg-error-container/30 rounded-lg">{transitionError}</p>}
+                <div className="flex gap-3 justify-end">
+                  <button onClick={() => { setConfirmAction(null); setTransitionError(null); }} className="bk-btn-ghost px-5 py-2 text-body-sm border border-outline-variant/30">Cancel</button>
+                  <button onClick={() => approveMutation.mutate()} disabled={approveMutation.isPending} className="bk-btn flex items-center gap-2">
+                    {approveMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <span className="material-symbols-outlined text-[16px]">verified</span>}
+                    Approve &amp; Assign
+                  </button>
+                </div>
+              </>
+            )}
+
             {confirmAction === 'issue' && (
               <>
                 <div className="flex items-center gap-3 mb-4">

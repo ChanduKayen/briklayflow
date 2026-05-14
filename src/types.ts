@@ -20,7 +20,7 @@ export interface Project {
 }
 
 export type StakeholderType = 'Worker' | 'Vendor' | 'Client';
-export type WOStatus = 'Draft' | 'Issued' | 'Active' | 'Closed' | 'Cancelled';
+export type WOStatus = 'Draft' | 'Assigned' | 'Issued' | 'Active' | 'Closed' | 'Cancelled';
 export type WOSource = 'uploaded_doc' | 'manual';
 export type MilestoneStatus = 'Pending' | 'Completed' | 'Approved' | 'Paid' | 'Partially Paid';
 export type POStatus = 'Draft' | 'Issued' | 'Received' | 'Closed';
@@ -69,6 +69,9 @@ export interface WorkOrder {
   // status_history column (JSONB) — add to DB with:
   // ALTER TABLE work_orders ADD COLUMN status_history jsonb DEFAULT '[]'::jsonb;
   status_history?: StatusHistoryEntry[];
+  approved_by?: string;
+  approved_at?: string;
+  approved_by_name?: string;
 }
 
 export interface WOMilestone {

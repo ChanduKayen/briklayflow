@@ -1,8 +1,11 @@
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { Loader2 } from 'lucide-react';
+import type { Session } from '@supabase/supabase-js';
 import { PeekModal } from './PeekModal';
 import { statusBadgeClass } from '../pages/WorkOrderDetail';
+import { useUserProfile } from '../App';
 
 function fmtDate(d: string | null | undefined) {
   if (!d) return '—';
@@ -37,9 +40,14 @@ function getMilestoneStatus(milestone: any, paid: number): string {
 interface WOPeekProps {
   woId: string;
   onClose: () => void;
+  session?: Session;
 }
 
-export function WOPeek({ woId, onClose }: WOPeekProps) {
+export function WOPeek({ woId, onClose, session }: WOPeekProps) {
+  const qc = useQueryClient();
+  const { data: profile } = useUserProfile(session?.user.id ?? '');
+  const canApprove = profile?.role === 'management' || profile?.role === 'principal';
+  const [approving, setApproving] = useState(false);
   const { data: wo, isLoading: loadingWo } = useQuery({
     queryKey: ['wo_peek', woId],
     queryFn: async () => {
@@ -79,6 +87,28 @@ export function WOPeek({ woId, onClose }: WOPeekProps) {
       return data.filter((a: any) => a.transactions?.status !== 'Voided');
     },
     enabled: !!wo,
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: async () => {
+      if (!wo || !session) throw new Error('Not ready');
+      const userName = profile?.name || session.user.email || 'Unknown';
+      const newEntry = { status: 'Assigned', at: new Date().toISOString(), by: userName };
+      const { error } = await supabase.from('work_orders').update({
+        status: 'Assigned',
+        approved_by: session.user.id,
+        approved_at: new Date().toISOString(),
+        approved_by_name: userName,
+        status_history: [...((wo as any).status_history || []), newEntry],
+      }).eq('wo_id', woId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['wo_peek', woId] });
+      qc.invalidateQueries({ queryKey: ['work_orders'] });
+      qc.invalidateQueries({ queryKey: ['nav_wo_pending'] });
+      setApproving(false);
+    },
   });
 
   const orderValue  = Number(wo?.order_value) || 0;
@@ -122,6 +152,40 @@ export function WOPeek({ woId, onClose }: WOPeekProps) {
               <span className="text-[12px] text-on-surface-variant">{wo.scope_of_work}</span>
             )}
           </div>
+
+          {/* Approve banner — Draft WO, management/principal only */}
+          {wo.status === 'Draft' && canApprove && (
+            <div className="rounded-xl bg-blue-50 border border-blue-200/60 p-3">
+              {!approving ? (
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-[12px] text-blue-700 font-medium">Awaiting approval</p>
+                  <button
+                    onClick={() => setApproving(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-[12px] font-semibold hover:bg-blue-700 transition-colors shrink-0"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">verified</span>
+                    Approve &amp; Assign
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-[12px] text-blue-800 font-semibold mb-2">Confirm approval of {woId}?</p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => approveMutation.mutate()}
+                      disabled={approveMutation.isPending}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-[12px] font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                    >
+                      {approveMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <span className="material-symbols-outlined text-[14px]">verified</span>}
+                      Confirm
+                    </button>
+                    <button onClick={() => setApproving(false)} className="px-3 py-1.5 rounded-lg text-[12px] text-blue-700 hover:bg-blue-100 transition-colors">Cancel</button>
+                  </div>
+                  {approveMutation.isError && <p className="text-[11px] text-red-600 mt-1">{(approveMutation.error as any)?.message}</p>}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Key fields */}
           <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-[13px]">
