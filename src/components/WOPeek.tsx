@@ -96,9 +96,6 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
       const newEntry = { status: 'Assigned', at: new Date().toISOString(), by: userName };
       const { error } = await supabase.from('work_orders').update({
         status: 'Assigned',
-        approved_by: session.user.id,
-        approved_at: new Date().toISOString(),
-        approved_by_name: userName,
         status_history: [...((wo as any).status_history || []), newEntry],
       }).eq('wo_id', woId);
       if (error) throw error;
