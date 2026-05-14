@@ -925,7 +925,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
       <ImageLightbox url={lightboxUrl} title="Payment Proof" onClose={() => setLightboxUrl(null)} />
 
       {/* ── WO / PO PEEK ─────────────────────────────────────────────── */}
-      {peek?.type === 'WO' && <WOPeek woId={peek.id} onClose={() => setPeek(null)} />}
+      {peek?.type === 'WO' && <WOPeek woId={peek.id} onClose={() => setPeek(null)} session={session} />}
       {peek?.type === 'PO' && <POPeek poId={peek.id} onClose={() => setPeek(null)} />}
 
       {/* ── AMEND MODAL ───────────────────────────────────────────────── */}

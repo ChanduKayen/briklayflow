@@ -362,7 +362,10 @@ export function ResolvePopup({ entry, onClose, onUpdated, session }: Props) {
       });
       if (rpcErr) throw rpcErr;
 
-      await supabase.from('transactions').update({ source_re_id: entry.id }).eq('txn_id', newTxnId);
+      await supabase.from('transactions').update({
+        source_re_id: entry.id,
+        proof_document_url: entry.raw_image_url || null,
+      }).eq('txn_id', newTxnId);
 
       const { data: updatedEntry } = await supabase
         .from('rough_entries')
