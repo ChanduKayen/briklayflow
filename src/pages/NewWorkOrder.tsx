@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Breadcrumb from '../components/Breadcrumb';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -8,9 +8,94 @@ import type { Project, Stakeholder } from '../types';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 
-interface MilestoneDraft { id: string; name: string; trigger_condition: string; planned_amount: number; }
+// ─── Work Stage types ──────────────────────────────────────────────────────
 
-const fmtVal = (n: number) => `₹${Number(n || 0).toLocaleString()}`;
+interface StageDraft {
+  id: string;
+  name: string;
+  unit_type: string;
+  quantity: number | null;
+  rate: number | null;
+  trigger_condition: string;
+}
+
+// ─── Unit system ──────────────────────────────────────────────────────────
+
+const UNIT_GROUPS = [
+  { group: 'AREA', items: [
+    { value: 'Sqft',  label: 'Sqft — Square Feet' },
+    { value: 'Sqm',   label: 'Sqm — Square Metres' },
+    { value: 'Sqyd',  label: 'Sqyd — Square Yards' },
+  ]},
+  { group: 'VOLUME', items: [
+    { value: 'Cum',   label: 'Cum — Cubic Metres' },
+    { value: 'Cft',   label: 'Cft — Cubic Feet' },
+    { value: 'Cu.yd', label: 'Cu.yd — Cubic Yards' },
+  ]},
+  { group: 'LENGTH', items: [
+    { value: 'Rmt',   label: 'Rmt — Running Metres' },
+    { value: 'Rft',   label: 'Rft — Running Feet' },
+  ]},
+  { group: 'COUNT', items: [
+    { value: 'Nos',         label: 'Nos — Numbers' },
+    { value: 'Per Point',   label: 'Per Point — Electrical' },
+    { value: 'Per Fixture', label: 'Per Fixture — Plumbing' },
+    { value: 'Per Set',     label: 'Per Set' },
+    { value: 'Per Column',  label: 'Per Column' },
+    { value: 'Per Beam',    label: 'Per Beam' },
+    { value: 'Per Footing', label: 'Per Footing' },
+  ]},
+  { group: 'RESIDENTIAL', items: [
+    { value: 'Per Flat',  label: 'Per Flat' },
+    { value: 'Per Floor', label: 'Per Floor' },
+    { value: 'Per Room',  label: 'Per Room' },
+    { value: 'Per Bay',   label: 'Per Bay' },
+  ]},
+  { group: 'WEIGHT', items: [
+    { value: 'Kg',      label: 'Kg — Kilograms' },
+    { value: 'MT',      label: 'MT — Metric Tonnes' },
+    { value: 'Quintal', label: 'Quintal — 100 Kg' },
+  ]},
+  { group: 'LUMP SUM', items: [
+    { value: 'LS', label: 'LS — Lump Sum' },
+  ]},
+];
+
+const UNIT_SUGGESTIONS: Array<{ pattern: RegExp; unit: string }> = [
+  { pattern: /plastering|brickwork|masonry|tiling|flooring|painting|false.?ceiling|waterproofing/, unit: 'Sqft' },
+  { pattern: /concrete|slab|excavation/,   unit: 'Cum' },
+  { pattern: /steel|reinforcement/,         unit: 'Kg' },
+  { pattern: /plumbing/,                    unit: 'Per Fixture' },
+  { pattern: /electrical/,                  unit: 'Per Point' },
+  { pattern: /door|window/,                 unit: 'Nos' },
+];
+
+function suggestUnit(name: string): string {
+  const n = name.toLowerCase();
+  for (const { pattern, unit } of UNIT_SUGGESTIONS) {
+    if (pattern.test(n)) return unit;
+  }
+  return '';
+}
+
+const QTY_LABELS: Record<string, string> = {
+  Sqft: 'sq. feet',   Sqm: 'sq. metres',    Sqyd: 'sq. yards',
+  Cum: 'cu. metres',  Cft: 'cu. feet',       'Cu.yd': 'cu. yards',
+  Rmt: 'run. metres', Rft: 'run. feet',
+  Nos: 'count',       Kg: 'kilograms',        MT: 'metric tonnes',
+  Quintal: 'quintals',
+};
+
+function calcAmount(s: StageDraft): number {
+  const r = s.rate ?? 0;
+  if (!s.unit_type || s.unit_type === 'LS') return r;
+  return Math.round((s.quantity ?? 0) * r * 100) / 100;
+}
+
+const fmtRupee = (n: number) =>
+  '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+
+// ─── Component ────────────────────────────────────────────────────────────
 
 export default function NewWorkOrder({ session }: { session: Session }) {
   const navigate = useNavigate();
@@ -27,11 +112,20 @@ export default function NewWorkOrder({ session }: { session: Session }) {
   const [scope, setScope] = useState('');
   const [orderValue, setOrderValue] = useState<number>(0);
   const [dateIssued, setDateIssued] = useState('');
-  const [milestones, setMilestones] = useState<MilestoneDraft[]>([]);
+  const [stages, setStages] = useState<StageDraft[]>([]);
+  const [newStageId, setNewStageId] = useState<string | null>(null);
   const [source, setSource] = useState<'manual' | 'uploaded_doc'>('manual');
   const [isAiExtracted, setIsAiExtracted] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+
+  // Auto-focus newly added stage name input
+  useEffect(() => {
+    if (!newStageId) return;
+    const el = document.querySelector(`[data-stage-id="${newStageId}"]`) as HTMLInputElement | null;
+    el?.focus();
+    setNewStageId(null);
+  }, [newStageId]);
 
   const { data: projects } = useQuery({
     queryKey: ['projects'],
@@ -52,24 +146,33 @@ export default function NewWorkOrder({ session }: { session: Session }) {
   });
 
   const selectedProject = projects?.find(p => p.project_id === projectId);
-  const selectedWorker = workers?.find(w => w.stakeholder_id === stakeholderId);
-  const totalMilestones = milestones.reduce((sum, m) => sum + (Number(m.planned_amount) || 0), 0);
-  const isBalanced = milestones.length === 0 || totalMilestones === Number(orderValue);
+  const selectedWorker  = workers?.find(w => w.stakeholder_id === stakeholderId);
+  const stagesTotal = stages.reduce((sum, s) => sum + calcAmount(s), 0);
+  const pct     = orderValue > 0 ? Math.min((stagesTotal / orderValue) * 100, 100) : 0;
+  const isOver  = orderValue > 0 && stagesTotal > orderValue + 0.01;
+  const isExact = orderValue > 0 && Math.abs(stagesTotal - orderValue) < 0.01;
+  const isUnder = orderValue > 0 && stagesTotal < orderValue - 0.01;
+
+  // ─── Save mutation ───────────────────────────────────────────────────────
 
   const createWO = useMutation({
     mutationFn: async () => {
-      if (!projectId || !stakeholderId || !scope || !dateIssued) throw new Error('Please fill in all required fields.');
-      const newWO = {
+      if (!projectId || !stakeholderId || !scope || !dateIssued)
+        throw new Error('Please fill in all required fields.');
+      const { data: woData, error: woError } = await supabase.from('work_orders').insert([{
         wo_id: woId, project_id: projectId, stakeholder_id: stakeholderId,
         scope_of_work: scope, order_value: orderValue, date_issued: dateIssued,
         source, status: 'Draft' as const,
-      };
-      const { data: woData, error: woError } = await supabase.from('work_orders').insert([newWO]).select().single();
+      }]).select().single();
       if (woError) throw woError;
-      if (milestones.length > 0) {
-        const rows = milestones.map((m, idx) => ({
-          wo_id: woId, seq_no: idx + 1, name: m.name,
-          trigger_condition: m.trigger_condition, planned_amount: m.planned_amount,
+      if (stages.length > 0) {
+        const rows = stages.map((s, idx) => ({
+          wo_id: woId, seq_no: idx + 1, name: s.name,
+          trigger_condition: s.trigger_condition || null,
+          unit_type: s.unit_type || null,
+          quantity: s.unit_type === 'LS' ? 1 : (s.quantity ?? null),
+          rate: s.rate ?? null,
+          planned_amount: calcAmount(s),
           status: 'Pending' as const,
           ai_extracted: isAiExtracted,
         }));
@@ -84,12 +187,28 @@ export default function NewWorkOrder({ session }: { session: Session }) {
     },
   });
 
-  const addMilestone = () =>
-    setMilestones(prev => [...prev, { id: Math.random().toString(), name: '', trigger_condition: '', planned_amount: 0 }]);
-  const updateMilestone = (id: string, field: keyof MilestoneDraft, value: string | number) =>
-    setMilestones(prev => prev.map(m => m.id === id ? { ...m, [field]: value } : m));
-  const removeMilestone = (id: string) =>
-    setMilestones(prev => prev.filter(m => m.id !== id));
+  // ─── Stage helpers ────────────────────────────────────────────────────────
+
+  const addStage = () => {
+    const id = Math.random().toString();
+    setStages(prev => [...prev, { id, name: '', unit_type: '', quantity: null, rate: null, trigger_condition: '' }]);
+    setNewStageId(id);
+  };
+
+  const updateStage = (id: string, field: keyof StageDraft, value: string | number | null) =>
+    setStages(prev => prev.map(s => s.id === id ? { ...s, [field]: value } : s));
+
+  const removeStage = (id: string) =>
+    setStages(prev => prev.filter(s => s.id !== id));
+
+  const handleNameBlur = (s: StageDraft) => {
+    if (!s.unit_type && s.name.trim()) {
+      const suggested = suggestUnit(s.name);
+      if (suggested) updateStage(s.id, 'unit_type', suggested);
+    }
+  };
+
+  // ─── AI file upload ────────────────────────────────────────────────────────
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -123,9 +242,13 @@ export default function NewWorkOrder({ session }: { session: Session }) {
         setOrderValue(data.order_value || 0);
         if (data.date_issued && !isNaN(Date.parse(data.date_issued))) setDateIssued(data.date_issued);
         if (Array.isArray(data.milestones)) {
-          setMilestones(data.milestones.map((m: any) => ({
-            id: Math.random().toString(), name: m.name || '',
-            trigger_condition: m.trigger_condition || '', planned_amount: m.planned_amount || 0,
+          setStages(data.milestones.map((m: any) => ({
+            id: Math.random().toString(),
+            name: m.name || '',
+            unit_type: 'LS',
+            quantity: null,
+            rate: m.planned_amount || 0,
+            trigger_condition: m.trigger_condition || '',
           })));
         }
         if (data.worker_name_fuzzy && workers) {
@@ -142,6 +265,8 @@ export default function NewWorkOrder({ session }: { session: Session }) {
     }
   };
 
+  // ─── Access guard ─────────────────────────────────────────────────────────
+
   if (profile && profile.role !== 'management' && profile.role !== 'principal') {
     return (
       <div className="px-margin-mobile md:px-margin-desktop pt-6">
@@ -152,6 +277,8 @@ export default function NewWorkOrder({ session }: { session: Session }) {
       </div>
     );
   }
+
+  // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="px-margin-mobile md:px-margin-desktop pt-6 pb-32">
@@ -172,13 +299,11 @@ export default function NewWorkOrder({ session }: { session: Session }) {
             ]
       } />
 
-      {/* Page header */}
       <div className="mb-8">
         <h1 className="text-headline-lg font-headline-lg text-on-background">New Work Order</h1>
         <p className="text-body-sm text-on-surface-variant mt-1">Fill in the details manually, or use AI extraction to auto-populate from a document.</p>
       </div>
 
-      {/* Banners */}
       {aiError && (
         <div className="mb-6 p-4 bg-error-container text-on-error-container rounded-xl text-body-sm flex items-center gap-2">
           <span className="material-symbols-outlined shrink-0">error</span> {aiError}
@@ -191,17 +316,16 @@ export default function NewWorkOrder({ session }: { session: Session }) {
         </div>
       )}
 
-      {/* Two-column layout */}
       <div className="flex flex-col lg:flex-row gap-8 items-start">
 
-        {/* ── Left: Form ──────────────────────────────────────── */}
+        {/* ── Left: Form ─────────────────────────────────────────────── */}
         <form
           id="wo-new-form"
           onSubmit={e => { e.preventDefault(); createWO.mutate(); }}
           className="flex-1 min-w-0 space-y-10"
         >
 
-          {/* ── 01 Order Details ── */}
+          {/* 01 Order Details */}
           <section>
             <SectionLabel n="01" label="Order Details" />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -248,7 +372,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
             </div>
           </section>
 
-          {/* ── 02 Assigned Worker ── */}
+          {/* 02 Assigned Worker */}
           <section>
             <SectionLabel n="02" label="Assigned Worker" />
             <div className="space-y-2 max-w-sm">
@@ -260,7 +384,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
             </div>
           </section>
 
-          {/* ── 03 Scope of Work ── */}
+          {/* 03 Scope of Work */}
           <section>
             <SectionLabel n="03" label="Scope of Work" />
             <textarea
@@ -273,7 +397,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
             />
           </section>
 
-          {/* ── 04 Financial ── */}
+          {/* 04 Financial */}
           <section>
             <SectionLabel n="04" label="Financial" />
             <div className="flex flex-col sm:flex-row gap-5 items-start">
@@ -282,9 +406,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
                 <div className="relative">
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 font-data-mono font-bold text-on-surface">₹</span>
                   <input
-                    type="number"
-                    step="0.01"
-                    min="0"
+                    type="number" step="0.01" min="0"
                     value={orderValue || ''}
                     onChange={e => setOrderValue(parseFloat(e.target.value) || 0)}
                     className="bk-input pl-8 font-data-mono text-headline-sm font-bold"
@@ -305,99 +427,198 @@ export default function NewWorkOrder({ session }: { session: Session }) {
             </div>
           </section>
 
-          {/* ── 05 Milestones ── */}
+          {/* 05 Work Stages */}
           <section>
             <div className="flex items-center justify-between mb-5">
-              <SectionLabel n="05" label="Milestones" noMargin />
-              <button type="button" onClick={addMilestone}
+              <SectionLabel n="05" label="Work Stages" noMargin />
+              <button type="button" onClick={addStage}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-label-caps font-label-caps text-primary border border-primary/30 rounded-lg hover:bg-primary/5 transition-colors">
                 <span className="material-symbols-outlined text-[16px]">add</span> Add Row
               </button>
             </div>
 
-            {milestones.length === 0 ? (
+            {stages.length === 0 ? (
               <button
                 type="button"
-                onClick={addMilestone}
+                onClick={addStage}
                 className="w-full border-2 border-dashed border-outline-variant/40 rounded-xl p-8 text-center text-on-surface-variant hover:border-primary/30 hover:bg-primary/5 transition-all group"
               >
                 <span className="material-symbols-outlined text-[36px] opacity-30 group-hover:opacity-60 mb-2 block transition-opacity">playlist_add</span>
-                <p className="text-body-sm">No milestones yet — click to add the first row.</p>
+                <p className="text-body-sm">No work stages yet — click to add the first row.</p>
               </button>
             ) : (
-              <div className="space-y-3">
-                <div className="hidden sm:grid grid-cols-12 gap-3 px-3 text-[10px] font-bold text-on-surface-variant tracking-[0.08em] uppercase">
-                  <div className="col-span-5">Name</div>
-                  <div className="col-span-3">Amount (₹)</div>
-                  <div className="col-span-3">Due Date</div>
-                  <div className="col-span-1" />
+              <div className="overflow-x-auto -mx-1 px-1">
+                {/* Column header */}
+                <div
+                  className="hidden sm:grid gap-x-2 pb-2 border-b border-black/[0.06] text-[10px] font-bold text-on-surface-variant tracking-[0.08em] uppercase"
+                  style={{ gridTemplateColumns: '1fr 130px 80px 100px 110px 120px 36px' }}
+                >
+                  <div className="pl-1">Work Stage</div>
+                  <div>Unit</div>
+                  <div>Qty</div>
+                  <div>Rate ₹</div>
+                  <div className="text-right pr-2">Amount</div>
+                  <div>Due</div>
+                  <div />
                 </div>
-                {milestones.map(m => (
-                  <div key={m.id} className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center bg-surface-container-low p-3 rounded-xl border border-outline-variant/20">
-                    <div className="sm:col-span-5">
-                      <label className="sm:hidden text-[10px] font-bold text-on-surface-variant mb-1 block">NAME</label>
-                      <input value={m.name} onChange={e => updateMilestone(m.id, 'name', e.target.value)} className="bk-input py-1.5 w-full" placeholder="e.g. Foundation Complete" required />
-                    </div>
-                    <div className="sm:col-span-3">
-                      <label className="sm:hidden text-[10px] font-bold text-on-surface-variant mb-1 block">AMOUNT</label>
-                      <input type="number" min="0" value={m.planned_amount || ''} onChange={e => updateMilestone(m.id, 'planned_amount', parseFloat(e.target.value) || 0)} className="bk-input py-1.5 font-data-mono w-full" placeholder="0" required />
-                    </div>
-                    <div className="sm:col-span-3">
-                      <label className="sm:hidden text-[10px] font-bold text-on-surface-variant mb-1 block">DUE DATE</label>
-                      <input type="date" value={m.trigger_condition} onChange={e => updateMilestone(m.id, 'trigger_condition', e.target.value)} className="bk-input py-1.5 w-full" />
-                    </div>
-                    <div className="sm:col-span-1 flex sm:justify-center">
-                      <button type="button" onClick={() => removeMilestone(m.id)} className="p-2 text-error hover:bg-error-container/20 rounded-lg transition-colors">
-                        <span className="material-symbols-outlined text-[18px]">delete</span>
-                      </button>
-                    </div>
-                  </div>
-                ))}
 
-                {/* Balance bar */}
-                {(() => {
-                  const over = totalMilestones > (orderValue || 0);
-                  const under = orderValue > 0 && totalMilestones < orderValue;
-                  const balanced = orderValue > 0 && totalMilestones === orderValue;
+                {/* Stage rows */}
+                {stages.map((s, idx) => {
+                  const isLS = s.unit_type === 'LS';
+                  const amount = calcAmount(s);
                   return (
-                    <div className={`mt-1 p-4 rounded-xl flex flex-wrap gap-4 items-center justify-between border ${
-                      balanced ? 'bg-green-50 border-green-200'
-                      : over   ? 'bg-error-container/20 border-error/20'
-                      : under  ? 'bg-amber-50 border-amber-200'
-                      :          'bg-surface-container border-outline-variant/20'
-                    }`}>
-                      <div className="flex gap-6">
-                        <div>
-                          <p className="text-[10px] font-bold text-on-surface-variant">MILESTONE SUM</p>
-                          <p className={`font-data-mono font-bold text-body-lg ${balanced ? 'text-green-700' : over ? 'text-error' : under ? 'text-amber-700' : 'text-on-surface'}`}>
-                            {fmtVal(totalMilestones)}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-bold text-on-surface-variant">ORDER VALUE</p>
-                          <p className="font-data-mono font-bold text-body-lg text-on-surface">{fmtVal(orderValue)}</p>
-                        </div>
+                    <div
+                      key={s.id}
+                      className="sm:grid gap-x-2 items-start py-2 border-b border-black/[0.04] last:border-0 flex flex-col gap-2"
+                      style={{ gridTemplateColumns: '1fr 130px 80px 100px 110px 120px 36px' }}
+                    >
+                      {/* Work Stage name */}
+                      <div className="flex flex-col gap-0.5 w-full">
+                        <label className="sm:hidden text-[10px] font-bold text-on-surface-variant">WORK STAGE</label>
+                        <input
+                          data-stage-id={s.id}
+                          value={s.name}
+                          onChange={e => updateStage(s.id, 'name', e.target.value)}
+                          onBlur={() => handleNameBlur(s)}
+                          className="h-9 w-full px-2.5 text-[13px] border border-black/10 rounded-md focus:outline-none focus:border-primary/40 bg-transparent placeholder:text-on-surface-variant/40"
+                          placeholder="e.g. Foundation slab, 2nd floor plastering"
+                        />
+                        <span className="h-3" />
                       </div>
-                      {over && (
-                        <span className="text-body-sm text-error flex items-center gap-1.5">
-                          <span className="material-symbols-outlined text-[16px]">error</span>
-                          Over by {fmtVal(totalMilestones - orderValue)}
+
+                      {/* Unit */}
+                      <div className="flex flex-col gap-0.5 w-full sm:w-auto">
+                        <label className="sm:hidden text-[10px] font-bold text-on-surface-variant">UNIT</label>
+                        <select
+                          value={s.unit_type}
+                          onChange={e => {
+                            const u = e.target.value;
+                            updateStage(s.id, 'unit_type', u);
+                            if (u === 'LS') updateStage(s.id, 'quantity', 1);
+                          }}
+                          className="h-9 w-full px-2 text-[13px] border border-black/10 rounded-md focus:outline-none focus:border-primary/40 bg-transparent"
+                        >
+                          <option value="">Unit</option>
+                          {UNIT_GROUPS.map(g => (
+                            <optgroup key={g.group} label={`── ${g.group} ──`}>
+                              {g.items.map(i => <option key={i.value} value={i.value}>{i.label}</option>)}
+                            </optgroup>
+                          ))}
+                        </select>
+                        <span className="h-3" />
+                      </div>
+
+                      {/* Qty */}
+                      <div className="flex flex-col gap-0.5 w-full sm:w-auto">
+                        <label className="sm:hidden text-[10px] font-bold text-on-surface-variant">QTY</label>
+                        {isLS ? (
+                          <div className="h-9 flex items-center justify-center text-[13px] text-on-surface-variant rounded-md border border-black/[0.05] bg-black/[0.02]">—</div>
+                        ) : (
+                          <input
+                            type="number" step="0.01" min="0"
+                            value={s.quantity ?? ''}
+                            onChange={e => updateStage(s.id, 'quantity', parseFloat(e.target.value) || null)}
+                            className="h-9 w-full px-2.5 text-[13px] border border-black/10 rounded-md focus:outline-none focus:border-primary/40 bg-transparent placeholder:text-on-surface-variant/40"
+                            placeholder="0"
+                          />
+                        )}
+                        <span className="text-[10px] text-on-surface-variant h-3 leading-3">
+                          {s.unit_type && !isLS ? (QTY_LABELS[s.unit_type] ?? s.unit_type.toLowerCase()) : ''}
                         </span>
-                      )}
-                      {under && (
-                        <span className="text-body-sm text-amber-700 flex items-center gap-1.5">
-                          <span className="material-symbols-outlined text-[16px]">warning</span>
-                          {fmtVal(orderValue - totalMilestones)} unassigned
+                      </div>
+
+                      {/* Rate */}
+                      <div className="flex flex-col gap-0.5 w-full sm:w-auto">
+                        <label className="sm:hidden text-[10px] font-bold text-on-surface-variant">RATE ₹</label>
+                        <input
+                          type="number" step="0.01" min="0"
+                          value={s.rate ?? ''}
+                          onChange={e => updateStage(s.id, 'rate', parseFloat(e.target.value) || null)}
+                          className="h-9 w-full px-2.5 text-[13px] border border-black/10 rounded-md focus:outline-none focus:border-primary/40 bg-transparent placeholder:text-on-surface-variant/40"
+                          placeholder="0"
+                        />
+                        <span className="text-[10px] text-on-surface-variant h-3 leading-3">
+                          {s.unit_type ? `per ${s.unit_type}` : ''}
                         </span>
-                      )}
-                      {balanced && (
-                        <span className="text-body-sm text-green-700 flex items-center gap-1.5">
-                          <span className="material-symbols-outlined text-[16px]">check_circle</span> Fully assigned
-                        </span>
-                      )}
+                      </div>
+
+                      {/* Amount (read-only) */}
+                      <div className="flex flex-col gap-0.5 w-full sm:w-auto">
+                        <label className="sm:hidden text-[10px] font-bold text-on-surface-variant">AMOUNT</label>
+                        <div className={`h-9 flex items-center justify-end px-2.5 rounded-md bg-black/[0.02] font-data-mono text-[13px] ${amount > 0 ? 'text-primary font-semibold' : 'text-on-surface-variant'}`}>
+                          {amount > 0 ? fmtRupee(amount) : '—'}
+                        </div>
+                        <span className="h-3" />
+                      </div>
+
+                      {/* Due Date */}
+                      <div className="flex flex-col gap-0.5 w-full sm:w-auto">
+                        <label className="sm:hidden text-[10px] font-bold text-on-surface-variant">DUE DATE</label>
+                        <input
+                          type="date"
+                          value={s.trigger_condition}
+                          onChange={e => updateStage(s.id, 'trigger_condition', e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Tab' && !e.shiftKey && idx === stages.length - 1) {
+                              e.preventDefault();
+                              addStage();
+                            }
+                          }}
+                          className="h-9 w-full px-2 text-[13px] border border-black/10 rounded-md focus:outline-none focus:border-primary/40 bg-transparent"
+                        />
+                        <span className="h-3" />
+                      </div>
+
+                      {/* Delete */}
+                      <div className="flex sm:flex-col items-start sm:items-center gap-0.5">
+                        <label className="sm:hidden text-[10px] font-bold text-on-surface-variant opacity-0 select-none">×</label>
+                        <button
+                          type="button"
+                          onClick={() => removeStage(s.id)}
+                          className="h-9 w-9 flex items-center justify-center rounded-lg text-on-surface-variant/50 hover:text-error hover:bg-error-container/20 transition-colors"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">close</span>
+                        </button>
+                        <span className="h-3" />
+                      </div>
                     </div>
                   );
-                })()}
+                })}
+
+                {/* Summary */}
+                <div className="mt-4 pt-4 border-t border-outline-variant/20">
+                  <div className="flex items-baseline justify-between gap-4 mb-3">
+                    <span className="text-[12px] text-on-surface-variant">
+                      {stages.length} work stage{stages.length !== 1 ? 's' : ''}
+                    </span>
+                    <div className="text-right">
+                      <div className="text-[10px] font-bold tracking-wider text-on-surface-variant uppercase mb-0.5">Stages Total</div>
+                      <div className="font-data-mono font-bold text-[18px] text-on-surface">{fmtRupee(stagesTotal)}</div>
+                    </div>
+                  </div>
+
+                  {orderValue > 0 && (
+                    <div>
+                      <div className="flex items-center justify-between text-[11px] mb-1.5">
+                        <span className="text-on-surface-variant">
+                          Order Value: <span className="font-data-mono text-on-surface font-medium">{fmtRupee(orderValue)}</span>
+                        </span>
+                        <span className={`font-medium ${isOver ? 'text-error' : isExact ? 'text-green-700' : 'text-amber-600'}`}>
+                          {isOver  && `⚠ Over by ${fmtRupee(stagesTotal - orderValue)}`}
+                          {isExact && '✓ Fully allocated'}
+                          {isUnder && `${fmtRupee(orderValue - stagesTotal)} unallocated`}
+                          {!isOver && !isExact && !isUnder && ''}
+                        </span>
+                      </div>
+                      <div className="h-2 rounded-full bg-surface-container-highest overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 ${isOver ? 'bg-error' : 'bg-primary'}`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </section>
@@ -410,7 +631,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
           )}
         </form>
 
-        {/* ── Right: Live Summary ──────────────────────────── */}
+        {/* ── Right: Summary sidebar ──────────────────────────────── */}
         <aside className="w-full lg:w-80 xl:w-88 shrink-0 lg:sticky lg:top-8">
           <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/30 shadow-card overflow-hidden">
             <div className="px-5 py-4 bg-surface-container-low border-b border-outline-variant/20 flex items-center gap-2">
@@ -418,10 +639,10 @@ export default function NewWorkOrder({ session }: { session: Session }) {
               <h3 className="text-label-caps font-label-caps text-on-surface-variant">Order Summary</h3>
             </div>
             <div className="p-5 space-y-4">
-              <SummaryRow icon="tag" label="WO ID" value={<span className="font-data-mono text-primary">{woId}</span>} />
-              <SummaryRow icon="construction" label="Project" value={selectedProject?.name ?? <span className="text-on-surface-variant italic text-body-sm">Not selected</span>} />
-              <SummaryRow icon="person" label="Worker" value={selectedWorker?.name ?? <span className="text-on-surface-variant italic text-body-sm">Not selected</span>} />
-              <SummaryRow icon="payments" label="Order Value" value={<span className="font-data-mono font-bold">{fmtVal(orderValue)}</span>} />
+              <SummaryRow icon="tag"         label="WO ID"        value={<span className="font-data-mono text-primary">{woId}</span>} />
+              <SummaryRow icon="construction" label="Project"      value={selectedProject?.name ?? <span className="text-on-surface-variant italic text-body-sm">Not selected</span>} />
+              <SummaryRow icon="person"       label="Worker"       value={selectedWorker?.name  ?? <span className="text-on-surface-variant italic text-body-sm">Not selected</span>} />
+              <SummaryRow icon="payments"     label="Order Value"  value={<span className="font-data-mono font-bold">{fmtRupee(orderValue)}</span>} />
               <div className="pt-4 border-t border-outline-variant/20">
                 <p className="text-[10px] font-bold text-on-surface-variant mb-2 flex items-center gap-1.5">
                   <span className="material-symbols-outlined text-[14px]">description</span> SCOPE PREVIEW
@@ -434,18 +655,18 @@ export default function NewWorkOrder({ session }: { session: Session }) {
               </div>
               <div className="pt-4 border-t border-outline-variant/20 flex items-center justify-between">
                 <span className="text-[10px] font-bold text-on-surface-variant flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-[14px]">playlist_add_check</span> MILESTONES
+                  <span className="material-symbols-outlined text-[14px]">layers</span> WORK STAGES
                 </span>
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                  milestones.length > 0 && isBalanced && orderValue > 0
+                  stages.length > 0 && isExact
                     ? 'bg-secondary-container text-on-secondary-container'
-                    : milestones.length > 0
+                    : stages.length > 0
                       ? 'bg-tertiary-container text-on-tertiary-container'
                       : 'bg-surface-container-high text-on-surface-variant'
                 }`}>
-                  {milestones.length === 0
+                  {stages.length === 0
                     ? 'None'
-                    : `${milestones.length} row${milestones.length > 1 ? 's' : ''} · ${isBalanced && orderValue > 0 ? 'Balanced' : 'Unbalanced'}`}
+                    : `${stages.length} stage${stages.length > 1 ? 's' : ''} · ${fmtRupee(stagesTotal)}`}
                 </span>
               </div>
             </div>
@@ -453,7 +674,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
         </aside>
       </div>
 
-      {/* ── Fixed bottom action bar ── */}
+      {/* Fixed bottom action bar */}
       <div className="fixed bottom-16 md:bottom-0 left-0 md:left-72 right-0 z-40 bg-surface/95 backdrop-blur-sm border-t border-outline-variant/20 px-margin-mobile md:px-margin-desktop py-3 flex items-center justify-between gap-4">
         <button
           type="button"
@@ -466,7 +687,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
           type="submit"
           form="wo-new-form"
           className="bk-btn flex items-center gap-2 px-8 py-2.5 rounded-xl"
-          disabled={createWO.isPending}
+          disabled={createWO.isPending || isOver}
         >
           {createWO.isPending
             ? <><Loader2 className="animate-spin" size={16} /> Saving…</>

@@ -986,6 +986,22 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                             )}
                           </div>
 
+                          {/* BOQ rate line */}
+                          {m.unit_type && m.rate ? (
+                            <p className="text-[11px] text-on-surface-variant mt-0.5">
+                              {m.unit_type === 'LS' ? (
+                                <span>Lump Sum</span>
+                              ) : (
+                                <>
+                                  <span className="font-data-mono">{Number(m.quantity ?? 0).toLocaleString('en-IN')}</span>
+                                  {' '}{m.unit_type}{' × '}
+                                  <span className="font-data-mono">₹{Number(m.rate).toLocaleString('en-IN')}</span>
+                                  <span>/{m.unit_type.toLowerCase()}</span>
+                                </>
+                              )}
+                            </p>
+                          ) : null}
+
                           {/* Phase financials */}
                           <div className="flex items-center gap-2 mt-1 flex-wrap">
                             <span className="text-[12px] text-on-surface-variant">
