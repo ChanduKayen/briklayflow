@@ -8,6 +8,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
+import { usePeek } from '../context/PeekContext';
 import type { StatusHistoryEntry, PaymentMode } from '../types';
 import {
   fmtDate as pdfFmtDate, fmtRupee,
@@ -107,6 +108,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
+  const { openPeek } = usePeek();
   const navState = (location.state as { from?: string; projectId?: string; projectName?: string }) || {};
 
   const { data: profile } = useUserProfile(session.user.id);
@@ -1122,7 +1124,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                                       {/* TXN row */}
                                       <div className="flex items-center gap-2 py-1.5 px-2 hover:bg-surface-container-low rounded-lg transition-colors">
                                         <button
-                                          onClick={(e) => { e.stopPropagation(); navigate(`/ledger/${txn.txn_id}`); }}
+                                          onClick={(e) => { e.stopPropagation(); openPeek('TRANSACTION', txn.txn_id); }}
                                           className="font-data-mono text-[11px] text-primary hover:underline shrink-0"
                                         >
                                           {txn.txn_id}
@@ -1279,7 +1281,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                       <div key={alloc.allocation_id} className="group rounded-lg">
                         <div className="flex items-center gap-2 py-1.5 px-2 hover:bg-surface-container-low rounded-lg transition-colors">
                           <button
-                            onClick={() => navigate(`/ledger/${txn.txn_id}`)}
+                            onClick={() => openPeek('TRANSACTION', txn.txn_id)}
                             className="font-data-mono text-[11px] text-primary hover:underline shrink-0"
                           >
                             {txn.txn_id}
@@ -1382,7 +1384,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                 return (
                   <button
                     key={alloc.allocation_id}
-                    onClick={() => navigate(`/ledger/${txn.txn_id}`)}
+                    onClick={() => openPeek('TRANSACTION', txn.txn_id)}
                     className="w-full flex items-center gap-3 py-2 text-left hover:bg-surface-container-low/50 transition-colors rounded-lg px-1 group"
                   >
                     <span className="font-data-mono text-[12px] text-primary group-hover:underline">{txn.txn_id}</span>

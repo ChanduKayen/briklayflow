@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
+import { usePeek } from '../context/PeekContext';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -100,6 +101,7 @@ function ActionRow({
 export default function Dashboard({ session }: { session: Session }) {
   const { data: profile } = useUserProfile(session.user.id);
   const navigate = useNavigate();
+  const { openPeek } = usePeek();
 
   const greeting = getGreeting();
   const dateStr = getDateStr();
@@ -449,13 +451,13 @@ export default function Dashboard({ session }: { session: Session }) {
         </div>
         <div>
           {(recentTxns || []).map((txn: any, idx: number) => (
-            <Link
+            <button
               key={txn.txn_id}
-              to={`/ledger/${txn.txn_id}`}
+              onClick={() => openPeek('TRANSACTION', txn.txn_id)}
               style={{
                 display: 'flex', alignItems: 'center', padding: '10px 0',
                 borderBottom: idx < (recentTxns?.length || 0) - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none',
-                textDecoration: 'none',
+                width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left',
               }}
             >
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -469,7 +471,7 @@ export default function Dashboard({ session }: { session: Session }) {
               <p style={{ fontSize: 14, fontWeight: 500, fontVariantNumeric: 'tabular-nums', color: '#0b1c30', margin: 0, paddingLeft: 12, flexShrink: 0 }}>
                 ₹{Number(txn.total_amount).toLocaleString('en-IN')}
               </p>
-            </Link>
+            </button>
           ))}
           {(!recentTxns || recentTxns.length === 0) && (
             <p style={{ fontSize: 13, color: 'rgba(0,0,0,0.35)', textAlign: 'center', padding: '24px 0', margin: 0 }}>

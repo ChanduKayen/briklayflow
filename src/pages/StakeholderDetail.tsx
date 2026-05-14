@@ -5,9 +5,8 @@ import { supabase } from '../lib/supabase';
 import type { Session } from '@supabase/supabase-js';
 import Breadcrumb from '../components/Breadcrumb';
 import { useUserProfile } from '../App';
+import { usePeek } from '../context/PeekContext';
 import { StarDisplay } from './Stakeholders';
-import { WOPeek } from '../components/WOPeek';
-import { POPeek } from '../components/POPeek';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -88,8 +87,8 @@ export default function StakeholderDetail({ session }: { session: Session }) {
 
   const [dateFilter, setDateFilter] = useState<DateFilter>('all');
   const [showWOs, setShowWOs] = useState(false);
-  const [peek, setPeek] = useState<{ type: 'WO' | 'PO'; id: string } | null>(null);
   const [sortByDate, setSortByDate] = useState(false);
+  const { openPeek } = usePeek();
 
   // Rating modal
   const [showRateModal, setShowRateModal] = useState(false);
@@ -681,7 +680,7 @@ export default function StakeholderDetail({ session }: { session: Session }) {
                                 </td>
                                 <td className="px-3 py-3 align-top hidden md:table-cell w-[110px]">
                                   {row.ref_number ? (
-                                    <button type="button" onMouseDown={e => { e.stopPropagation(); setPeek({ type: row.ref_type === 'WO' ? 'WO' : 'PO', id: row.ref_id! }); }}
+                                    <button type="button" onMouseDown={e => { e.stopPropagation(); openPeek(row.ref_type === 'WO' ? 'WO' : 'PO', row.ref_id!); }}
                                       className="font-data-mono text-[11px] text-primary hover:underline text-left">{row.ref_number} ↗</button>
                                   ) : <span className="text-on-surface-variant/40 text-[12px]">—</span>}
                                   {row.txn_id && <p className="font-data-mono text-[10px] text-on-surface-variant/50 mt-0.5">{row.txn_id}</p>}
@@ -731,7 +730,7 @@ export default function StakeholderDetail({ session }: { session: Session }) {
                                   )}
                                   {groupKey !== 'unlinked' ? (
                                     <button type="button"
-                                      onMouseDown={e => { e.stopPropagation(); setPeek({ type: refType === 'WO' ? 'WO' : 'PO', id: groupKey }); }}
+                                      onMouseDown={e => { e.stopPropagation(); openPeek(refType === 'WO' ? 'WO' : 'PO', groupKey); }}
                                       className="font-data-mono text-[12px] font-semibold text-on-surface hover:text-primary hover:underline">
                                       {groupKey} ↗
                                     </button>
@@ -779,7 +778,7 @@ export default function StakeholderDetail({ session }: { session: Session }) {
                                 </td>
                                 <td className="px-3 py-3 align-top hidden md:table-cell w-[110px]">
                                   {row.ref_number ? (
-                                    <button type="button" onMouseDown={e => { e.stopPropagation(); setPeek({ type: row.ref_type === 'WO' ? 'WO' : 'PO', id: row.ref_id! }); }}
+                                    <button type="button" onMouseDown={e => { e.stopPropagation(); openPeek(row.ref_type === 'WO' ? 'WO' : 'PO', row.ref_id!); }}
                                       className="font-data-mono text-[11px] text-primary hover:underline text-left">{row.ref_number} ↗</button>
                                   ) : <span className="text-on-surface-variant/40 text-[12px]">—</span>}
                                   {row.txn_id && <p className="font-data-mono text-[10px] text-on-surface-variant/50 mt-0.5">{row.txn_id}</p>}
@@ -912,14 +911,6 @@ export default function StakeholderDetail({ session }: { session: Session }) {
           </div>
         )}
       </div>
-
-      {/* ── PEEK ─────────────────────────────────────────────────────── */}
-      {peek?.type === 'WO' && (
-        <WOPeek woId={peek.id} onClose={() => setPeek(null)} session={session} />
-      )}
-      {peek?.type === 'PO' && (
-        <POPeek poId={peek.id} onClose={() => setPeek(null)} />
-      )}
 
       {/* ── RATING MODAL ─────────────────────────────────────────────── */}
       {showRateModal && (

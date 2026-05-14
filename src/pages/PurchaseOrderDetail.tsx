@@ -9,6 +9,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
+import { usePeek } from '../context/PeekContext';
 import type { POLineItem, POGRN, POApproval } from '../types';
 import {
   fmtDate as pdfFmtDate, fmtRupee, amountInWords,
@@ -321,6 +322,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const navigate   = useNavigate();
   const qc         = useQueryClient();
   const { show: showSnackbar } = useSnackbar();
+  const { openPeek } = usePeek();
   const { data: profile } = useUserProfile(session.user.id);
 
   const canManage =
@@ -1410,7 +1412,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
                 <button
                   key={t.id}
                   className="w-full flex items-center gap-3 py-2 text-left hover:bg-surface-container-low/30 transition-colors rounded-lg px-1 group"
-                  onClick={() => navigate(`/ledger/${t.transactions?.txn_id}`)}
+                  onClick={() => openPeek('TRANSACTION', t.transactions?.txn_id)}
                 >
                   <span className="font-data-mono font-bold text-[12px] text-primary group-hover:underline">{t.transactions?.txn_id}</span>
                   <span className="text-[12px] text-on-surface-variant">{fmtDate(t.transactions?.date)}</span>

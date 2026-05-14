@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
+import { usePeek } from '../context/PeekContext';
 import type { RoughEntry } from '../types';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
@@ -72,6 +73,7 @@ function DesktopTable({
   onReview: (e: RoughEntry) => void;
   onLightbox: (url: string) => void;
 }) {
+  const { openPeek } = usePeek();
   return (
     <div className="hidden md:block bg-white rounded-xl border border-black/[0.06] overflow-x-auto">
       <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
@@ -164,12 +166,12 @@ function DesktopTable({
                       Review
                     </button>
                   ) : entry.status === 'POSTED' && entry.resolved_txn_id ? (
-                    <Link
-                      to={`/ledger/${entry.resolved_txn_id}`}
-                      style={{ fontSize: 11, color: 'rgba(0,0,0,0.45)', textDecoration: 'none', fontFamily: 'Geist, monospace' }}
+                    <button
+                      onClick={() => openPeek('TRANSACTION', entry.resolved_txn_id!)}
+                      style={{ fontSize: 11, color: 'rgba(0,0,0,0.45)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'Geist, monospace' }}
                     >
                       {entry.resolved_txn_id} →
-                    </Link>
+                    </button>
                   ) : (
                     <span style={{ fontSize: 11, color: 'rgba(0,0,0,0.3)', fontStyle: 'italic' }}>
                       {entry.status === 'DISMISSED' ? 'Dismissed' : 'Waiting…'}
@@ -194,7 +196,7 @@ function MobileCards({
   onReview: (e: RoughEntry) => void;
   onLightbox: (url: string) => void;
 }) {
-  const navigate = useNavigate();
+  const { openPeek } = usePeek();
   return (
     <div className="md:hidden space-y-2">
       {entries.map((entry) => {
@@ -255,7 +257,7 @@ function MobileCards({
                   Review
                 </button>
               ) : entry.status === 'POSTED' && entry.resolved_txn_id ? (
-                <button onClick={() => navigate(`/ledger/${entry.resolved_txn_id}`)}
+                <button onClick={() => openPeek('TRANSACTION', entry.resolved_txn_id!)}
                   style={{ fontSize: 11, color: 'rgba(0,0,0,0.4)', background: 'none', border: 'none', cursor: 'pointer', flexShrink: 0, fontFamily: 'Geist, monospace' }}>
                   {entry.resolved_txn_id} →
                 </button>

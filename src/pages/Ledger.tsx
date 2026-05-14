@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { usePeek } from '../context/PeekContext';
 import type { Stakeholder, Project } from '../types';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
@@ -17,6 +18,7 @@ const PAGE_SIZE = 25;
 export default function Ledger({ session }: { session: Session }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const { openPeek } = usePeek();
   const [searchParams] = useSearchParams();
   const { data: profile } = useUserProfile(session.user.id);
 
@@ -409,7 +411,7 @@ export default function Ledger({ session }: { session: Session }) {
           <span
             className="material-symbols-outlined text-[13px] text-amber-400 cursor-pointer hover:text-amber-600 transition-colors shrink-0"
             title={needsAction === 'link_wo' ? 'Unlinked — tap to map' : 'Unlinked — tap to map'}
-            onClick={e => { e.stopPropagation(); navigate(`/ledger/${txn.txn_id}`); }}
+            onClick={e => { e.stopPropagation(); openPeek('TRANSACTION', txn.txn_id); }}
           >link_off</span>
         )}
         {isManualFlagged && (
@@ -652,7 +654,7 @@ export default function Ledger({ session }: { session: Session }) {
                     <div
                       key={txn.txn_id}
                       className={`bg-white rounded-xl border border-black/[0.06] p-3 cursor-pointer bk-row-ripple ${txn.status === 'Voided' ? 'opacity-50' : ''}`}
-                      onClick={() => navigate(`/ledger/${txn.txn_id}`)}
+                      onClick={() => openPeek('TRANSACTION', txn.txn_id)}
                     >
                       {/* Row 1: Payee + Amount */}
                       <div className="flex items-start justify-between mb-1.5">

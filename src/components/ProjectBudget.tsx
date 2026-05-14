@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { usePeek } from '../context/PeekContext';
 import { getCostCode, MAT_DIVISIONS, WRK_DIVISIONS } from '../lib/costCodes';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -44,9 +44,9 @@ function MetricCard({
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export function ProjectBudget({ projectId, canEdit }: Props) {
-  const navigate  = useNavigate();
   const qc        = useQueryClient();
   const inputRef  = useRef<HTMLInputElement>(null);
+  const { openPeek } = usePeek();
 
   const [editingCode, setEditingCode]     = useState<string | null>(null);
   const [editValue,   setEditValue]       = useState('');
@@ -495,7 +495,7 @@ export function ProjectBudget({ projectId, canEdit }: Props) {
               <div className="divide-y divide-outline-variant/[0.05]">
                 {activeWOs.map((wo: any) => (
                   <button key={wo.wo_id} type="button"
-                    onClick={() => navigate(`/work-orders/${wo.wo_id}`)}
+                    onClick={() => openPeek('WO', wo.wo_id)}
                     className="w-full flex items-center gap-3 px-5 py-3.5 text-left hover:bg-surface-container-lowest/50 transition-colors group">
                     <span className="font-data-mono text-[9.5px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded font-bold shrink-0">WO</span>
                     <span className="font-data-mono text-[10.5px] text-on-surface-variant/50 shrink-0 w-28">{wo.wo_id}</span>
@@ -512,7 +512,7 @@ export function ProjectBudget({ projectId, canEdit }: Props) {
                 ))}
                 {activePOs.map((po: any) => (
                   <button key={po.po_id} type="button"
-                    onClick={() => navigate(`/purchase-orders/${po.po_id}`)}
+                    onClick={() => openPeek('PO', po.po_id)}
                     className="w-full flex items-center gap-3 px-5 py-3.5 text-left hover:bg-surface-container-lowest/50 transition-colors group">
                     <span className="font-data-mono text-[9.5px] text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded font-bold shrink-0">PO</span>
                     <span className="font-data-mono text-[10.5px] text-on-surface-variant/50 shrink-0 w-28">{po.po_id}</span>

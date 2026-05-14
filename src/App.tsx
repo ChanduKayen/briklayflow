@@ -7,6 +7,7 @@ import { Edit2, Trash2 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { Project, UserProfile } from './types';
 import { SnackbarProvider, useSnackbar } from './components/Snackbar';
+import { PeekProvider } from './context/PeekContext';
 import { LinearProgress } from './components/LinearProgress';
 import {
   IconLayoutDashboard, IconArrowsExchange,
@@ -79,6 +80,7 @@ function App() {
 
   return (
     <SnackbarProvider>
+    <PeekProvider>
     <div className="bg-background text-on-surface min-h-screen">
       <Sidebar
         session={session}
@@ -146,6 +148,7 @@ function App() {
         onClose={() => setShowMoreSheet(false)}
       />
     </div>
+    </PeekProvider>
     </SnackbarProvider>
   );
 }

@@ -6,9 +6,8 @@ import { Loader2 } from 'lucide-react';
 import type { Session } from '@supabase/supabase-js';
 import Breadcrumb from '../components/Breadcrumb';
 import { useUserProfile } from '../App';
+import { usePeek } from '../context/PeekContext';
 import { ImageLightbox } from '../components/ImageLightbox';
-import { WOPeek } from '../components/WOPeek';
-import { POPeek } from '../components/POPeek';
 
 // ─── Amendment types ──────────────────────────────────────────────────────────
 // Requires: ALTER TABLE transactions ADD COLUMN amendments jsonb DEFAULT '[]'::jsonb;
@@ -360,8 +359,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
   // ─── Lightbox state ────────────────────────────────────────────────────────────
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
-  // ─── Peek state ────────────────────────────────────────────────────────────────
-  const [peek, setPeek] = useState<{ type: 'WO' | 'PO'; id: string } | null>(null);
+  const { openPeek } = usePeek();
 
   const isManagement = profile?.role === 'management';
   const canVoid = profile?.role === 'management' || profile?.role === 'accountant';
@@ -637,7 +635,13 @@ export default function TransactionDetail({ session }: { session: Session }) {
       <div className="detail-reveal mt-4" style={{ animationDelay: '40ms' }}>
         <p className="text-[12px] text-on-surface-variant">{dateStr}{timeStr ? ` · ${timeStr}` : ''}</p>
         <div className="mt-1">
-          <p className="text-[14px] text-on-surface font-medium">{txn.stakeholders?.name || '—'}</p>
+          {txn.stakeholder_id ? (
+            <button onClick={() => openPeek('STAKEHOLDER', txn.stakeholder_id!)} className="text-[14px] text-primary font-medium hover:underline text-left">
+              {txn.stakeholders?.name || '—'}
+            </button>
+          ) : (
+            <p className="text-[14px] text-on-surface font-medium">{txn.stakeholders?.name || '—'}</p>
+          )}
           <p className="text-[12px] text-on-surface-variant">{txn.stakeholders?.type}{txn.stakeholders?.category ? ` · ${txn.stakeholders.category}` : ''}</p>
         </div>
         {primaryAlloc && (
@@ -743,7 +747,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
                       <>
                         {' · '}
                         <button
-                          onClick={() => setPeek({ type: a.order_type as 'WO' | 'PO', id: a.order_ref })}
+                          onClick={() => openPeek(a.order_type as 'WO' | 'PO', a.order_ref)}
                           className="text-primary hover:underline font-data-mono"
                         >
                           {a.order_ref} ↗
@@ -886,7 +890,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
                         {a.order_type ? (
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-surface-container-high text-on-surface shrink-0">{a.order_type}</span>
-                            <button onClick={() => setPeek({ type: a.order_type as 'WO' | 'PO', id: a.order_ref })}
+                            <button onClick={() => openPeek(a.order_type as 'WO' | 'PO', a.order_ref)}
                               className="text-[12px] font-data-mono text-primary hover:underline cursor-pointer">{a.order_ref} ↗</button>
                             {milestoneName && <span className="text-on-surface-variant text-[11px]">· {milestoneName}</span>}
                           </div>
@@ -1094,10 +1098,6 @@ export default function TransactionDetail({ session }: { session: Session }) {
 
       {/* ── IMAGE LIGHTBOX ───────────────────────────────────────────── */}
       <ImageLightbox url={lightboxUrl} title="Payment Proof" onClose={() => setLightboxUrl(null)} />
-
-      {/* ── WO / PO PEEK ─────────────────────────────────────────────── */}
-      {peek?.type === 'WO' && <WOPeek woId={peek.id} onClose={() => setPeek(null)} session={session} />}
-      {peek?.type === 'PO' && <POPeek poId={peek.id} onClose={() => setPeek(null)} />}
 
       {/* ── AMEND MODAL ───────────────────────────────────────────────── */}
       {amendStep !== 'idle' && (

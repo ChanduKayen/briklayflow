@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { Loader2 } from 'lucide-react';
 import type { Stakeholder, GSTRegType } from '../types';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
+import { usePeek } from '../context/PeekContext';
 import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 
 const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$/;
@@ -82,8 +82,8 @@ function fmt(n: number) {
 
 export default function Stakeholders({ session }: { session: Session }) {
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
   const { data: profile } = useUserProfile(session.user.id);
+  const { openPeek } = usePeek();
   const [showForm, setShowForm] = useState(false);
 
   // ── Filter state ──────────────────────────────────────────────────────────
@@ -497,7 +497,7 @@ export default function Stakeholders({ session }: { session: Session }) {
                   return (
                     <tr
                       key={stk.stakeholder_id}
-                      onClick={() => navigate(`/stakeholders/${stk.stakeholder_id}`)}
+                      onClick={() => openPeek('STAKEHOLDER', stk.stakeholder_id)}
                       style={{
                         cursor: 'pointer', height: 52,
                         borderBottom: idx < displayed.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none',
@@ -557,7 +557,7 @@ export default function Stakeholders({ session }: { session: Session }) {
               return (
                 <div
                   key={stk.stakeholder_id}
-                  onClick={() => navigate(`/stakeholders/${stk.stakeholder_id}`)}
+                  onClick={() => openPeek('STAKEHOLDER', stk.stakeholder_id)}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', cursor: 'pointer',
                     borderBottom: idx < displayed.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none',

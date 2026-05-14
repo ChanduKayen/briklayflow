@@ -9,6 +9,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { ProjectBudget } from '../components/ProjectBudget';
 import { useUserProfile } from '../App';
+import { usePeek } from '../context/PeekContext';
 import {
   fmtDate as pdfFmtDate, fmtRupee,
   MARGIN, C,
@@ -19,6 +20,7 @@ export default function ProjectDetail({ session }: { session: Session }) {
   const { projectId } = useParams();
   const navigate = useNavigate();
   const { data: profile } = useUserProfile(session.user.id);
+  const { openPeek } = usePeek();
   const [activeTab, setActiveTab] = useState<'overview' | 'transactions' | 'documents' | 'budget' | 'billing'>('transactions');
 
   // --- Sorting & Filtering ---
@@ -467,7 +469,7 @@ export default function ProjectDetail({ session }: { session: Session }) {
                   return (
                     <tr key={`${txn.txn_id}-${idx}`} 
                         className="hover:bg-surface-container-low transition-colors cursor-pointer border-b border-outline-variant/10"
-                        onClick={() => navigate(`/ledger/${txn.txn_id}`, { state: { from: 'project', projectId: project.project_id, projectName: project.name } })}>
+                        onClick={() => openPeek('TRANSACTION', txn.txn_id)}>
                       <td className="p-4 text-body-sm">{new Date(txn.date).toLocaleDateString()}</td>
                       <td className="p-4 font-data-mono text-body-sm">{txn.txn_id}</td>
                       <td className="p-4 text-body-sm font-semibold">{txn.stakeholders?.name || '-'}</td>
