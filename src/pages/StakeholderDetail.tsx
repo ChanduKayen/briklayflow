@@ -435,7 +435,7 @@ export default function StakeholderDetail({ session }: { session: Session }) {
     <div className="px-margin-mobile md:px-margin-desktop pt-6 pb-16 max-w-[900px] mx-auto">
       <Breadcrumb items={[
         { label: 'Dashboard', href: '/' },
-        { label: 'Stakeholders', href: '/stakeholders' },
+        { label: 'Parties', href: '/stakeholders' },
         { label: stk.name },
       ]} />
 

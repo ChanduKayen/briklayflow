@@ -209,7 +209,7 @@ export default function Stakeholders({ session }: { session: Session }) {
       <div className="flex justify-between items-start mb-6">
         <div>
           <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.02em', color: '#0b1c30', margin: 0, fontFamily: 'Manrope, sans-serif' }}>
-            Stakeholders
+            Parties
           </h1>
           <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.45)', margin: '3px 0 0' }}>
             {all.length} total · {workerCount} workers · {vendorCount} vendors

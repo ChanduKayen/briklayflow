@@ -48,12 +48,12 @@ const RESULT_ORDER: ResultType[] = ['project', 'person', 'work_order', 'purchase
 function getContextAction(path: string) {
   if (path === '/')                         return { label: 'Logbook Inbox',  Icon: IconNotebook,        href: '/logbook' };
   if (path.startsWith('/logbook'))          return { label: 'Go to Ledger',   Icon: IconArrowsExchange,  href: '/ledger' };
-  if (path.startsWith('/ledger'))           return { label: 'Raise Bill',      Icon: IconFileInvoice,     href: '/billing/new' };
+  if (path.startsWith('/ledger'))           return { label: 'Add New Party',   Icon: IconUsersGroup,      href: '/stakeholders' };
   if (path.startsWith('/work-orders'))      return { label: 'New Project',     Icon: IconBuildingEstate,  href: '/projects' };
-  if (path.startsWith('/purchase-orders'))  return { label: 'Raise Bill',      Icon: IconFileInvoice,     href: '/billing/new' };
+  if (path.startsWith('/purchase-orders'))  return { label: 'Add New Party',   Icon: IconUsersGroup,      href: '/stakeholders' };
   if (path.startsWith('/billing'))          return { label: 'New Invoice',     Icon: IconFileInvoice,     href: '/invoices/new' };
   if (path.startsWith('/stakeholders'))     return { label: 'New Project',     Icon: IconBuildingEstate,  href: '/projects' };
-  if (path.startsWith('/projects'))         return { label: 'New Stakeholder', Icon: IconUsersGroup,      href: '/stakeholders' };
+  if (path.startsWith('/projects'))         return { label: 'Add New Party',   Icon: IconUsersGroup,      href: '/stakeholders' };
   if (path.startsWith('/financials'))       return { label: 'Open Ledger',     Icon: IconArrowsExchange,  href: '/ledger' };
   return                                           { label: 'Logbook Inbox',  Icon: IconNotebook,        href: '/logbook' };
 }

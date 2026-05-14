@@ -265,7 +265,7 @@ function SidebarContent({
       items: [
         { path: '/projects',     icon: IconBuildingEstate, label: 'Projects',     show: true },
         { path: '/billing',      icon: IconFileInvoice,    label: 'Billing',      show: role !== 'supervisor',                         badge: billOverdueCount },
-        { path: '/stakeholders', icon: IconUsersGroup,     label: 'Stakeholders', show: role !== 'supervisor' && role !== 'accountant' },
+        { path: '/stakeholders', icon: IconUsersGroup,     label: 'Parties',      show: role !== 'supervisor' && role !== 'accountant' },
       ],
     },
     {
@@ -562,7 +562,7 @@ function getMobileTitle(pathname: string): string {
     '/purchase-orders/new': 'New Purchase Order',
     '/billing':             'Billing',
     '/billing/new':         'New Bill',
-    '/stakeholders':        'Stakeholders',
+    '/stakeholders':        'Parties',
     '/settings':            'Settings',
     '/team':                'Team & Access',
     '/financials':          'Financials',
@@ -726,7 +726,7 @@ function MoreNavSheet({
     { path: '/purchase-orders', icon: IconShoppingBag,          label: 'Purchase Orders', show: role !== 'supervisor' && role !== 'accountant' },
     { path: '/attendance',      icon: IconCalendarCheck,        label: 'Attendance',      show: true },
     { path: '/billing',         icon: IconFileInvoice,          label: 'Billing',         show: role !== 'supervisor' },
-    { path: '/stakeholders',    icon: IconUsersGroup,           label: 'Stakeholders',    show: role !== 'supervisor' && role !== 'accountant' },
+    { path: '/stakeholders',    icon: IconUsersGroup,           label: 'Parties',         show: role !== 'supervisor' && role !== 'accountant' },
     { path: '/financials',      icon: IconChartBar,             label: 'Financials',      show: showFinancials },
     { path: '/cost-codes',      icon: IconSitemap,              label: 'Cost Codes',      show: role === 'principal' || role === 'management' },
     { path: '/team',            icon: IconShieldLock,           label: 'Team & Access',   show: role === 'principal' || role === 'management' },
