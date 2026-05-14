@@ -124,7 +124,7 @@ export function CommandBar() {
           supabase.from('stakeholders').select('stakeholder_id, name, category').ilike('name', q).limit(4),
           supabase.from('work_orders').select('wo_id, scope_of_work').ilike('wo_id', q).limit(3),
           supabase.from('purchase_orders').select('po_id, status').ilike('po_id', q).limit(3),
-          supabase.from('transactions').select('txn_id, category').ilike('txn_id', q).limit(3),
+          supabase.from('transactions').select('txn_id, category, stakeholders(name)').ilike('txn_id', q).limit(3),
         ]);
         if (cancelRef.current) return;
         setResults([
@@ -132,7 +132,7 @@ export function CommandBar() {
           ...(stkRes.data  || []).map(s => ({ type: 'person'         as ResultType, id: s.stakeholder_id, primary: s.name,   secondary: s.category })),
           ...(woRes.data   || []).map(w => ({ type: 'work_order'     as ResultType, id: w.wo_id,          primary: w.wo_id,  secondary: w.scope_of_work })),
           ...(poRes.data   || []).map(p => ({ type: 'purchase_order' as ResultType, id: p.po_id,          primary: p.po_id,  secondary: p.status })),
-          ...(txnRes.data  || []).map(t => ({ type: 'transaction'    as ResultType, id: t.txn_id,         primary: t.txn_id, secondary: t.category })),
+          ...(txnRes.data  || []).map(t => ({ type: 'transaction' as ResultType, id: t.txn_id, primary: (t.stakeholders as any)?.name || t.category || t.txn_id, secondary: t.txn_id })),
         ]);
         setSearching(false);
         setSelectedIdx(-1);

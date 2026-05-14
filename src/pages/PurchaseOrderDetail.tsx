@@ -301,9 +301,12 @@ function BillSummaryCard({ po, activeTxns, onNavigate }: { po: any; activeTxns: 
           <p className="text-[10px] uppercase tracking-wide text-on-surface-variant/60 mb-2">Payments</p>
           {activeTxns.map((t: any) => (
             <div key={t.id} onClick={() => onNavigate(`/ledger/${t.transactions?.txn_id}`)}
-              className="flex justify-between py-1.5 cursor-pointer hover:bg-surface-container-low/30 rounded px-1">
+              className="flex justify-between py-1.5 cursor-pointer hover:bg-surface-container-low/30 rounded px-1 group">
               <div className="flex items-center gap-2">
-                <span className="font-data-mono text-[11px] text-primary">{t.transactions?.txn_id}</span>
+                <span className="text-[11px] text-primary">
+                  {t.transactions?.category || t.transactions?.payment_mode || 'Payment'}
+                  <span className="text-[10px] font-mono text-primary/30 opacity-0 group-hover:opacity-100 transition-opacity ml-1">{t.transactions?.txn_id}</span>
+                </span>
                 <span className="text-[11px] text-on-surface-variant/50">{fmtDate(t.transactions?.date)}</span>
               </div>
               <span className="text-[13px] font-medium font-data-mono">₹{Number(t.allocated_amount).toLocaleString('en-IN')}</span>
@@ -1414,7 +1417,10 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
                   className="w-full flex items-center gap-3 py-2 text-left hover:bg-surface-container-low/30 transition-colors rounded-lg px-1 group"
                   onClick={() => openPeek('TRANSACTION', t.transactions?.txn_id)}
                 >
-                  <span className="font-data-mono font-bold text-[12px] text-primary group-hover:underline">{t.transactions?.txn_id}</span>
+                  <span className="font-bold text-[12px] text-primary group-hover:underline">
+                    {t.transactions?.category || t.transactions?.payment_mode || 'Payment'}
+                    <span className="text-[10px] font-mono text-primary/30 opacity-0 group-hover:opacity-100 transition-opacity ml-1">{t.transactions?.txn_id}</span>
+                  </span>
                   <span className="text-[12px] text-on-surface-variant">{fmtDate(t.transactions?.date)}</span>
                   <span className="font-data-mono font-semibold text-[12px] text-on-surface ml-auto">₹{Number(t.allocated_amount).toLocaleString('en-IN')}</span>
                   <span className="text-[11px] text-on-surface-variant">{t.transactions?.payment_mode ?? '—'}</span>

@@ -32,7 +32,7 @@ export function StakeholderPeek({ stakeholderId, onClose }: StakeholderPeekProps
     queryFn: async () => {
       const { data, error } = await supabase
         .from('transactions')
-        .select('txn_id, total_amount, date, category, status, payment_mode')
+        .select('txn_id, total_amount, date, category, status, payment_mode, annotation, projects(name)')
         .eq('stakeholder_id', stakeholderId)
         .neq('status', 'Voided')
         .order('date', { ascending: false })
@@ -95,11 +95,16 @@ export function StakeholderPeek({ stakeholderId, onClose }: StakeholderPeekProps
                   <button
                     key={t.txn_id}
                     onClick={() => openPeek('TRANSACTION', t.txn_id)}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-surface-container-low transition-colors ${i > 0 ? 'border-t border-outline-variant/10' : ''}`}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-surface-container-low transition-colors group ${i > 0 ? 'border-t border-outline-variant/10' : ''}`}
                   >
                     <div>
-                      <p className="font-data-mono text-[12px] text-primary">{t.txn_id}</p>
-                      <p className="text-[11px] text-on-surface-variant">{fmtDate(t.date)} · {t.category}</p>
+                      <p className="text-[13px] font-medium text-on-surface">
+                        {t.category || t.payment_mode || 'Payment'}
+                      </p>
+                      <p className="text-[11px] text-on-surface-variant">{fmtDate(t.date)}</p>
+                      <p className="text-[10px] font-mono text-on-surface-variant/30 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {t.txn_id}
+                      </p>
                     </div>
                     <span className="font-data-mono font-semibold text-[13px] text-on-surface">
                       ₹{Number(t.total_amount).toLocaleString('en-IN')}

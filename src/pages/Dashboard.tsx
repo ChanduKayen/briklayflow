@@ -462,7 +462,7 @@ export default function Dashboard({ session }: { session: Session }) {
             >
               <div style={{ flex: 1, minWidth: 0 }}>
                 <p style={{ fontSize: 14, fontWeight: 500, color: '#0b1c30', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {txn.stakeholders?.name || txn.txn_id}
+                  {txn.stakeholders?.name || txn.category || 'Payment'}
                 </p>
                 <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.4)', margin: '1px 0 0', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   {txn.category}

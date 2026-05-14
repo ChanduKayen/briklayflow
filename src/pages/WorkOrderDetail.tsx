@@ -1125,9 +1125,10 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                                       <div className="flex items-center gap-2 py-1.5 px-2 hover:bg-surface-container-low rounded-lg transition-colors">
                                         <button
                                           onClick={(e) => { e.stopPropagation(); openPeek('TRANSACTION', txn.txn_id); }}
-                                          className="font-data-mono text-[11px] text-primary hover:underline shrink-0"
+                                          className="text-[11px] text-primary hover:underline shrink-0"
                                         >
-                                          {txn.txn_id}
+                                          {txn.category || txn.payment_mode || 'Payment'}
+                                          <span className="text-[10px] font-mono text-primary/30 opacity-0 group-hover:opacity-100 transition-opacity ml-1">{txn.txn_id}</span>
                                         </button>
                                         <span className="text-[11px] text-on-surface-variant shrink-0">
                                           {new Date(txn.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
@@ -1282,9 +1283,10 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                         <div className="flex items-center gap-2 py-1.5 px-2 hover:bg-surface-container-low rounded-lg transition-colors">
                           <button
                             onClick={() => openPeek('TRANSACTION', txn.txn_id)}
-                            className="font-data-mono text-[11px] text-primary hover:underline shrink-0"
+                            className="text-[11px] text-primary hover:underline shrink-0"
                           >
-                            {txn.txn_id}
+                            {txn.category || txn.payment_mode || 'Payment'}
+                            <span className="text-[10px] font-mono text-primary/30 opacity-0 group-hover:opacity-100 transition-opacity ml-1">{txn.txn_id}</span>
                           </button>
                           <span className="text-[11px] text-on-surface-variant shrink-0">
                             {new Date(txn.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
@@ -1387,7 +1389,10 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                     onClick={() => openPeek('TRANSACTION', txn.txn_id)}
                     className="w-full flex items-center gap-3 py-2 text-left hover:bg-surface-container-low/50 transition-colors rounded-lg px-1 group"
                   >
-                    <span className="font-data-mono text-[12px] text-primary group-hover:underline">{txn.txn_id}</span>
+                    <span className="text-[12px] text-primary group-hover:underline">
+                      {txn.category || txn.payment_mode || 'Payment'}
+                      <span className="text-[10px] font-mono text-primary/30 opacity-0 group-hover:opacity-100 transition-opacity ml-1">{txn.txn_id}</span>
+                    </span>
                     <span className="text-[12px] text-on-surface-variant">{new Date(txn.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</span>
                     <span className="font-data-mono text-[12px] text-on-surface ml-auto">₹{Number(alloc.allocated_amount).toLocaleString('en-IN')}</span>
                     <span className="text-[11px] text-on-surface-variant">{txn.payment_mode}</span>

@@ -271,11 +271,16 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
                 {allocations.map((a: any, i: number) => (
                   <div
                     key={a.allocation_id}
-                    className={`flex items-center justify-between px-3 py-2.5 text-[12px] ${i > 0 ? 'border-t border-outline-variant/10' : ''}`}
+                    className={`flex items-center justify-between px-3 py-2.5 text-[12px] group ${i > 0 ? 'border-t border-outline-variant/10' : ''}`}
                   >
                     <div>
-                      <p className="text-on-surface font-data-mono">{a.transactions?.txn_id || '—'}</p>
-                      <p className="text-on-surface-variant text-[10px]">{fmtDate(a.transactions?.date)} · {a.transactions?.payment_mode || '—'}</p>
+                      <p className="text-[13px] font-medium text-on-surface">
+                        {a.transactions?.category || a.transactions?.payment_mode || '—'}
+                      </p>
+                      <p className="text-on-surface-variant text-[10px]">{fmtDate(a.transactions?.date)}</p>
+                      <p className="text-[10px] font-mono text-on-surface-variant/30 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {a.transactions?.txn_id}
+                      </p>
                     </div>
                     <span className="font-data-mono font-semibold text-on-surface">{fmtRupee(Number(a.allocated_amount) || 0)}</span>
                   </div>

@@ -435,7 +435,7 @@ export default function ProjectDetail({ session }: { session: Session }) {
                   </th>
                   <th className="p-3 align-top min-w-[120px] border-l border-outline-variant/20">
                     <div className="flex items-center justify-between cursor-pointer hover:text-primary transition-colors text-label-caps font-label-caps text-on-surface-variant" onClick={() => toggleSort('txn_id')}>
-                      <span>TXN ID</span> {renderSortIcon('txn_id')}
+                      <span>DESCRIPTION</span> {renderSortIcon('txn_id')}
                     </div>
                   </th>
                   <th className="p-3 align-top min-w-[160px] border-l border-outline-variant/20 relative" ref={activeFilterDropdown === 'stakeholder' ? filterRef : null}>
@@ -467,11 +467,14 @@ export default function ProjectDetail({ session }: { session: Session }) {
                   const isInflow = txn.category?.toLowerCase().includes('receipt') || txn.category?.toLowerCase().includes('funding');
                   
                   return (
-                    <tr key={`${txn.txn_id}-${idx}`} 
-                        className="hover:bg-surface-container-low transition-colors cursor-pointer border-b border-outline-variant/10"
+                    <tr key={`${txn.txn_id}-${idx}`}
+                        className="group hover:bg-surface-container-low transition-colors cursor-pointer border-b border-outline-variant/10"
                         onClick={() => openPeek('TRANSACTION', txn.txn_id)}>
                       <td className="p-4 text-body-sm">{new Date(txn.date).toLocaleDateString()}</td>
-                      <td className="p-4 font-data-mono text-body-sm">{txn.txn_id}</td>
+                      <td className="p-4 text-body-sm">
+                        {txn.stakeholders?.name || txn.category || '—'}
+                        <span className="text-[10px] font-mono text-on-surface-variant/30 opacity-0 group-hover:opacity-100 transition-opacity block">{txn.txn_id}</span>
+                      </td>
                       <td className="p-4 text-body-sm font-semibold">{txn.stakeholders?.name || '-'}</td>
                       <td className="p-4 text-body-sm">
                         <span className={`px-2 py-1 text-[10px] rounded-full font-bold uppercase ${isInflow ? 'bg-secondary-container text-on-secondary-container' : 'bg-surface-container-high text-on-surface'}`}>

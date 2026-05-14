@@ -170,7 +170,7 @@ function DesktopTable({
                       onClick={() => openPeek('TRANSACTION', entry.resolved_txn_id!)}
                       style={{ fontSize: 11, color: 'rgba(0,0,0,0.45)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'Geist, monospace' }}
                     >
-                      {entry.resolved_txn_id} →
+                      View payment →
                     </button>
                   ) : (
                     <span style={{ fontSize: 11, color: 'rgba(0,0,0,0.3)', fontStyle: 'italic' }}>
