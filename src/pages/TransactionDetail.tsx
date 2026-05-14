@@ -7,6 +7,8 @@ import type { Session } from '@supabase/supabase-js';
 import Breadcrumb from '../components/Breadcrumb';
 import { useUserProfile } from '../App';
 import { ImageLightbox } from '../components/ImageLightbox';
+import { WOPeek } from '../components/WOPeek';
+import { POPeek } from '../components/POPeek';
 
 // ─── Amendment types ──────────────────────────────────────────────────────────
 // Requires: ALTER TABLE transactions ADD COLUMN amendments jsonb DEFAULT '[]'::jsonb;
@@ -100,6 +102,9 @@ export default function TransactionDetail({ session }: { session: Session }) {
 
   // ─── Lightbox state ────────────────────────────────────────────────────────────
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+
+  // ─── Peek state ────────────────────────────────────────────────────────────────
+  const [peek, setPeek] = useState<{ type: 'WO' | 'PO'; id: string } | null>(null);
 
   const isManagement = profile?.role === 'management';
   const canVoid = profile?.role === 'management' || profile?.role === 'accountant';
@@ -466,10 +471,10 @@ export default function TransactionDetail({ session }: { session: Session }) {
                       <>
                         {' · '}
                         <button
-                          onClick={() => navigate(a.order_type === 'WO' ? `/work-orders/${a.order_ref}` : '/purchase-orders')}
+                          onClick={() => setPeek({ type: a.order_type as 'WO' | 'PO', id: a.order_ref })}
                           className="text-primary hover:underline font-data-mono"
                         >
-                          {a.order_ref}
+                          {a.order_ref} ↗
                         </button>
                         {a.order_type && (
                           <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-surface-container-high text-on-surface">
@@ -694,8 +699,8 @@ export default function TransactionDetail({ session }: { session: Session }) {
                       {a.order_type ? (
                         <div className="flex items-center gap-2">
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-surface-container-high text-on-surface shrink-0">{a.order_type}</span>
-                          <button onClick={() => navigate(a.order_type === 'WO' ? `/work-orders/${a.order_ref}` : '/purchase-orders')}
-                            className="text-[12px] font-data-mono text-primary hover:underline cursor-pointer">{a.order_ref}</button>
+                          <button onClick={() => setPeek({ type: a.order_type as 'WO' | 'PO', id: a.order_ref })}
+                            className="text-[12px] font-data-mono text-primary hover:underline cursor-pointer">{a.order_ref} ↗</button>
                           {a.milestone_id && <span className="text-on-surface-variant text-[11px]">(Phase: {a.milestone_id})</span>}
                         </div>
                       ) : isMapping ? (
@@ -914,6 +919,10 @@ export default function TransactionDetail({ session }: { session: Session }) {
 
       {/* ── IMAGE LIGHTBOX ───────────────────────────────────────────── */}
       <ImageLightbox url={lightboxUrl} title="Payment Proof" onClose={() => setLightboxUrl(null)} />
+
+      {/* ── WO / PO PEEK ─────────────────────────────────────────────── */}
+      {peek?.type === 'WO' && <WOPeek woId={peek.id} onClose={() => setPeek(null)} />}
+      {peek?.type === 'PO' && <POPeek poId={peek.id} onClose={() => setPeek(null)} />}
 
       {/* ── AMEND MODAL ───────────────────────────────────────────────── */}
       {amendStep !== 'idle' && (

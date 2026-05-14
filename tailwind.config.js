@@ -133,12 +133,17 @@ export default {
           "70%":  { transform: "translate(-50%,-50%) scale(2)", opacity: "0.07" },
           "100%": { transform: "translate(-50%,-50%) scale(3)", opacity: "0"    },
         },
+        "peek-in": {
+          "0%":   { transform: "translateY(24px) scale(0.97)", opacity: "0" },
+          "100%": { transform: "translateY(0)    scale(1)",    opacity: "1" },
+        },
       },
       animation: {
         "snackbar-in":  "snackbar-in  0.22s cubic-bezier(0.0,0,0.2,1) forwards",
         "snackbar-out": "snackbar-out 0.18s cubic-bezier(0.4,0,1,1) forwards",
         "fab-enter":    "fab-enter    0.28s cubic-bezier(0.0,0,0.2,1) both",
         "linear-progress": "linear-progress 1.5s infinite cubic-bezier(0.4,0,0.2,1)",
+        "peek-in":      "peek-in      0.22s cubic-bezier(0.0,0,0.2,1) both",
       },
       transitionTimingFunction: {
         "material":       "cubic-bezier(0.4,0,0.2,1)",
