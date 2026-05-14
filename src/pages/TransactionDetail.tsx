@@ -195,7 +195,7 @@ function POObligationRow({ po, selectedObligation, onSelect }: {
   );
 }
 
-function DetailLinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip, onConfirm, isPending, projectId: _projectId }: {
+function DetailLinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip, onConfirm, isPending, projectId, stkType }: {
   wos: any[]; pos: any[]; loading: boolean;
   selectedObligation: SelectedObligation | null;
   onSelect: (ob: SelectedObligation) => void;
@@ -203,8 +203,12 @@ function DetailLinkingPanel({ wos, pos, loading, selectedObligation, onSelect, o
   onConfirm: (ob: SelectedObligation) => void;
   isPending: boolean;
   projectId: string;
+  stkType: string;
 }) {
+  const nav = useNavigate();
   const [expandedWOs, setExpandedWOs] = useState<string[]>([]);
+  const isWorker = stkType === 'Worker';
+  const isVendor = stkType === 'Vendor';
 
   if (loading) {
     return (
@@ -220,11 +224,27 @@ function DetailLinkingPanel({ wos, pos, loading, selectedObligation, onSelect, o
     return (
       <div className="rounded-xl border border-dashed border-outline-variant/30 p-5 text-center">
         <span className="material-symbols-outlined text-[28px] text-on-surface-variant/20 mb-2 block">link_off</span>
-        <p className="text-[13px] font-medium text-on-surface mb-1">No open WOs or POs found</p>
-        <p className="text-[11px] text-on-surface-variant/50 mb-3">No active work orders or purchase orders for this stakeholder and project.</p>
-        <button type="button" onClick={onSkip} className="text-[12px] text-on-surface-variant/50 hover:text-on-surface transition-colors">
-          Keep unlinked
-        </button>
+        <p className="text-[13px] font-medium text-on-surface mb-1">No open {isWorker ? 'Work Orders' : isVendor ? 'Purchase Orders' : 'WOs or POs'} found</p>
+        <p className="text-[11px] text-on-surface-variant/50 mb-4">Create one to link this payment, or keep unlinked.</p>
+        <div className="flex gap-2 justify-center flex-wrap">
+          {isWorker && (
+            <button type="button"
+              onClick={() => nav(`/work-orders/new?project=${projectId}`)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-outline-variant/30 text-[12px] font-medium text-on-surface hover:bg-surface-container transition-colors">
+              <span className="material-symbols-outlined text-[15px]">assignment_add</span> New Work Order
+            </button>
+          )}
+          {isVendor && (
+            <button type="button"
+              onClick={() => nav(`/purchase-orders/new?project=${projectId}`)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-outline-variant/30 text-[12px] font-medium text-on-surface hover:bg-surface-container transition-colors">
+              <span className="material-symbols-outlined text-[15px]">receipt_long</span> New Purchase Order
+            </button>
+          )}
+          <button type="button" onClick={onSkip} className="px-4 py-2 rounded-lg text-[12px] text-on-surface-variant/50 hover:text-on-surface transition-colors">
+            Keep unlinked
+          </button>
+        </div>
       </div>
     );
   }
@@ -260,7 +280,7 @@ function DetailLinkingPanel({ wos, pos, loading, selectedObligation, onSelect, o
           </div>
         )}
       </div>
-      <div className="px-4 py-2.5 border-t border-outline-variant/[0.08] bg-black/[0.01] flex items-center gap-3">
+      <div className="px-4 py-2.5 border-t border-outline-variant/[0.08] bg-black/[0.01] flex items-center gap-2 flex-wrap">
         {selectedObligation ? (
           <>
             <div className="flex-1 min-w-0">
@@ -274,9 +294,25 @@ function DetailLinkingPanel({ wos, pos, loading, selectedObligation, onSelect, o
             </button>
           </>
         ) : (
-          <button type="button" onClick={onSkip} className="text-[12px] text-on-surface-variant/40 hover:text-on-surface transition-colors hover:underline underline-offset-2">
-            Skip — keep unlinked
-          </button>
+          <>
+            {isWorker && (
+              <button type="button"
+                onClick={() => nav(`/work-orders/new?project=${projectId}`)}
+                className="flex items-center gap-1 text-[11px] font-medium text-on-surface-variant/50 hover:text-primary transition-colors">
+                <span className="material-symbols-outlined text-[13px]">add</span> New WO
+              </button>
+            )}
+            {isVendor && (
+              <button type="button"
+                onClick={() => nav(`/purchase-orders/new?project=${projectId}`)}
+                className="flex items-center gap-1 text-[11px] font-medium text-on-surface-variant/50 hover:text-primary transition-colors">
+                <span className="material-symbols-outlined text-[13px]">add</span> New PO
+              </button>
+            )}
+            <button type="button" onClick={onSkip} className="ml-auto text-[12px] text-on-surface-variant/40 hover:text-on-surface transition-colors hover:underline underline-offset-2">
+              Skip — keep unlinked
+            </button>
+          </>
         )}
       </div>
     </div>
@@ -883,6 +919,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
                             })}
                             isPending={updateAlloc.isPending}
                             projectId={a.project_id}
+                            stkType={txn.stakeholders?.type || ''}
                           />
                         </td>
                       </tr>
