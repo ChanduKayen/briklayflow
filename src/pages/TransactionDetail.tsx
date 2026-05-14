@@ -462,6 +462,9 @@ export default function TransactionDetail({ session }: { session: Session }) {
               const stkType = txn.stakeholders?.type;
               const relMS = stkType === 'Worker' ? milestones?.filter((m) => m.work_orders?.stakeholder_id === txn.stakeholder_id && m.work_orders?.project_id === a.project_id) : [];
               const relPOs = stkType === 'Vendor' ? purchaseOrders?.filter((p) => p.stakeholder_id === txn.stakeholder_id && p.project_id === a.project_id) : [];
+              const milestoneName = a.milestone_id
+                ? (milestones?.find((m: any) => m.milestone_id === a.milestone_id)?.name ?? null)
+                : null;
               return (
                 <div key={a.allocation_id}>
                   <p className="text-[14px] text-on-surface font-medium">{a.projects?.name || a.project_id}</p>
@@ -476,10 +479,8 @@ export default function TransactionDetail({ session }: { session: Session }) {
                         >
                           {a.order_ref} ↗
                         </button>
-                        {a.order_type && (
-                          <span className="ml-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-surface-container-high text-on-surface">
-                            {a.order_type}
-                          </span>
+                        {milestoneName && (
+                          <span className="ml-1 text-on-surface-variant">· {milestoneName}</span>
                         )}
                       </>
                     ) : (
@@ -689,6 +690,9 @@ export default function TransactionDetail({ session }: { session: Session }) {
                 const stkType = txn.stakeholders?.type;
                 const relMS = stkType === 'Worker' ? milestones?.filter((m) => m.work_orders?.stakeholder_id === txn.stakeholder_id && m.work_orders?.project_id === a.project_id) : [];
                 const relPOs = stkType === 'Vendor' ? purchaseOrders?.filter((p) => p.stakeholder_id === txn.stakeholder_id && p.project_id === a.project_id) : [];
+                const milestoneName = a.milestone_id
+                  ? (milestones?.find((m: any) => m.milestone_id === a.milestone_id)?.name ?? null)
+                  : null;
                 return (
                   <tr key={a.allocation_id} className={`border-b border-outline-variant/10 transition-colors ${isUnlinked ? 'bg-tertiary-container/5' : 'hover:bg-surface-container-lowest'}`}>
                     <td className="py-3 pr-4">
@@ -697,11 +701,11 @@ export default function TransactionDetail({ session }: { session: Session }) {
                     </td>
                     <td className="py-3 pr-4">
                       {a.order_type ? (
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-surface-container-high text-on-surface shrink-0">{a.order_type}</span>
                           <button onClick={() => setPeek({ type: a.order_type as 'WO' | 'PO', id: a.order_ref })}
                             className="text-[12px] font-data-mono text-primary hover:underline cursor-pointer">{a.order_ref} ↗</button>
-                          {a.milestone_id && <span className="text-on-surface-variant text-[11px]">(Phase: {a.milestone_id})</span>}
+                          {milestoneName && <span className="text-on-surface-variant text-[11px]">· {milestoneName}</span>}
                         </div>
                       ) : isMapping ? (
                         <div className="flex flex-col gap-2">

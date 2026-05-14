@@ -81,9 +81,13 @@ export function WOPeek({ woId, onClose }: WOPeekProps) {
     enabled: !!wo,
   });
 
-  const totalValue = Number(wo?.total_value) || 0;
-  const totalPaid  = (allocations || []).reduce((s: number, a: any) => s + Number(a.allocated_amount || 0), 0);
-  const pctPaid    = totalValue > 0 ? Math.min((totalPaid / totalValue) * 100, 100) : 0;
+  const orderValue  = Number(wo?.order_value) || 0;
+  const msTotal     = (milestones || []).reduce((s: number, m: any) => s + (Number(m.planned_amount) || 0), 0);
+  const totalPaid   = (allocations || []).reduce((s: number, a: any) => s + Number(a.allocated_amount || 0), 0);
+  // Derive a display total even when order_value is not set on the WO
+  const displayTotal  = orderValue > 0 ? orderValue : msTotal > 0 ? msTotal : totalPaid;
+  const orderValueSet = orderValue > 0;
+  const pctPaid       = displayTotal > 0 ? Math.min((totalPaid / displayTotal) * 100, 100) : 100;
 
   // Paid per milestone
   const paidByMilestone: Record<string, number> = {};
@@ -147,11 +151,17 @@ export function WOPeek({ woId, onClose }: WOPeekProps) {
 
           {/* Financial summary */}
           <div className="rounded-xl bg-surface-container-low p-4">
-            <div className="flex justify-between items-baseline mb-2">
-              <span className="text-[11px] font-semibold tracking-wider text-on-surface-variant uppercase">Total Value</span>
-              <span className="text-[16px] font-bold font-data-mono text-on-surface">{fmtRupee(totalValue)}</span>
+            <div className="flex justify-between items-baseline mb-1">
+              <span className="text-[11px] font-semibold tracking-wider text-on-surface-variant uppercase">Order Value</span>
+              {orderValueSet
+                ? <span className="text-[16px] font-bold font-data-mono text-on-surface">{fmtRupee(orderValue)}</span>
+                : <span className="text-[13px] font-medium text-on-surface-variant">—</span>
+              }
             </div>
-            <div className="h-1.5 rounded-full bg-surface-container-highest overflow-hidden mb-2">
+            {!orderValueSet && (
+              <p className="text-[10px] text-amber-600 mb-1">Order value not set on this WO</p>
+            )}
+            <div className="h-1.5 rounded-full bg-surface-container-highest overflow-hidden mb-2 mt-2">
               <div
                 className="h-full rounded-full bg-secondary transition-all duration-700"
                 style={{ width: `${pctPaid}%` }}
@@ -159,7 +169,9 @@ export function WOPeek({ woId, onClose }: WOPeekProps) {
             </div>
             <div className="flex justify-between text-[11px] text-on-surface-variant">
               <span>Paid: <span className="font-data-mono text-on-surface font-medium">{fmtRupee(totalPaid)}</span></span>
-              <span>Remaining: <span className="font-data-mono text-on-surface font-medium">{fmtRupee(Math.max(totalValue - totalPaid, 0))}</span></span>
+              <span>Remaining: <span className="font-data-mono text-on-surface font-medium">
+                {orderValueSet ? fmtRupee(Math.max(orderValue - totalPaid, 0)) : '—'}
+              </span></span>
             </div>
           </div>
 
