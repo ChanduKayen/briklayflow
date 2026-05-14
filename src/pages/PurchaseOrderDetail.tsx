@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import confetti from 'canvas-confetti';
 import { supabase } from '../lib/supabase';
 import { useSnackbar } from '../components/Snackbar';
 import { LinearProgress } from '../components/LinearProgress';
@@ -17,47 +18,39 @@ import {
 
 // ── Status helpers ────────────────────────────────────────────────────────────
 
-function statusDotColor(status: string): string {
-  switch (status) {
-    case 'Draft':               return 'bg-on-surface-variant/40';
-    case 'Pending Approval':    return 'bg-amber-400';
-    case 'Approved':            return 'bg-blue-300';
-    case 'Ordered':             return 'bg-blue-500';
-    case 'Partially Delivered': return 'bg-teal-300';
-    case 'Delivered':           return 'bg-teal-500';
-    case 'Tallied':             return 'bg-green-500';
-    case 'Disputed':            return 'bg-red-500';
-    case 'Cancelled':           return 'bg-on-surface-variant/30';
-    // Legacy
-    case 'Issued':              return 'bg-blue-500';
-    case 'Received':            return 'bg-teal-500';
-    case 'Closed':              return 'bg-green-500';
-    default:                    return 'bg-on-surface-variant/30';
-  }
-}
-
 const STATUS_BADGE: Record<string, string> = {
-  'Draft':               'bg-surface-container-highest text-on-surface-variant',
-  'Pending Approval':    'bg-amber-100 text-amber-800',
-  'Approved':            'bg-blue-100 text-blue-700',
-  'Ordered':             'bg-blue-100 text-blue-800',
-  'Partially Delivered': 'bg-teal-100 text-teal-700',
-  'Delivered':           'bg-teal-100 text-teal-800',
-  'Tallied':             'bg-green-100 text-green-800',
-  'Disputed':            'bg-red-100 text-red-800',
-  'Cancelled':           'bg-surface-container text-on-surface-variant/50',
-  'Issued':              'bg-blue-100 text-blue-800',
-  'Received':            'bg-teal-100 text-teal-800',
-  'Closed':              'bg-green-100 text-green-800',
+  'ORDERED':   'bg-[#EFF6FF] text-[#3B82F6]',
+  'AT_SITE':   'bg-[#F5F3FF] text-[#7C3AED]',
+  'BILLED':    'bg-[#FFFBEB] text-[#D97706]',
+  'PARTIAL':   'bg-[#FFF7ED] text-[#EA580C]',
+  'PAID':      'bg-[#F0FDF4] text-[#16A34A]',
+  'CANCELLED': 'bg-[#F9FAFB] text-[#6B7280]',
 };
 
-function matchStatusBadge(match?: string | null): string {
-  switch (match) {
-    case 'MATCHED':    return 'bg-green-100 text-green-800';
-    case 'MISMATCHED': return 'bg-red-100 text-red-800';
-    case 'PARTIAL':    return 'bg-amber-100 text-amber-800';
-    default:           return 'bg-surface-container-highest text-on-surface-variant';
-  }
+const STATUS_DOT: Record<string, string> = {
+  'ORDERED':   'bg-[#3B82F6]',
+  'AT_SITE':   'bg-[#7C3AED]',
+  'BILLED':    'bg-[#D97706]',
+  'PARTIAL':   'bg-[#EA580C]',
+  'PAID':      'bg-[#16A34A]',
+  'CANCELLED': 'bg-[#6B7280]',
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  'ORDERED':   'Ordered',
+  'AT_SITE':   'At Site',
+  'BILLED':    'Billed',
+  'PARTIAL':   'Partially Paid',
+  'PAID':      'Paid',
+  'CANCELLED': 'Cancelled',
+};
+
+function isOverdue(po: any): boolean {
+  if (!po.expected_delivery) return false;
+  const d = new Date(po.expected_delivery);
+  if (isNaN(d.getTime())) return false;
+  if (['AT_SITE', 'BILLED', 'PARTIAL', 'PAID', 'CANCELLED'].includes(po.status)) return false;
+  return d < new Date();
 }
 
 // ── Reconciliation types ──────────────────────────────────────────────────────
@@ -149,6 +142,209 @@ function useCountUp(target: number, duration = 500): number {
   return value;
 }
 
+function fireCelebration() {
+  confetti({ particleCount: 60, spread: 50, origin: { y: 0.6 }, colors: ['#C8603A', '#16A34A', '#D97706', '#ffffff'] });
+}
+
+// ── BillEntryForm ─────────────────────────────────────────────────────────────
+
+interface BillEntryFormProps {
+  po: any;
+  poId: string;
+  currentUserName: string;
+  onBillSaved: (data: { billAmount: number; billNo: string; billUrl: string | null }) => void;
+}
+
+function BillEntryForm({ po, poId, currentUserName, onBillSaved }: BillEntryFormProps) {
+  const [billNo, setBillNo]         = useState('');
+  const [billAmount, setBillAmount] = useState('');
+  const [billDate, setBillDate]     = useState(new Date().toISOString().split('T')[0]);
+  const [billFile, setBillFile]     = useState<File | null>(null);
+  const [uploading, setUploading]   = useState(false);
+  const [saving, setSaving]         = useState(false);
+  const qc = useQueryClient();
+
+  const poValue = Number(po?.total_value || po?.order_value) || 0;
+  const bill    = parseFloat(billAmount) || 0;
+  const diff    = bill - poValue;
+  const pct     = poValue > 0 ? Math.abs(diff / poValue) * 100 : 0;
+  const canSave = bill > 0;
+
+  const handleSave = async () => {
+    if (!canSave) return;
+    setSaving(true);
+    let billUrl: string | null = null;
+    if (billFile) {
+      setUploading(true);
+      const ext = billFile.type === 'application/pdf' ? 'pdf' : 'jpg';
+      const { error: upErr } = await supabase.storage
+        .from('documents')
+        .upload(`po-bills/bill_${poId}_${Date.now()}.${ext}`, billFile, { contentType: billFile.type });
+      if (!upErr) {
+        const { data: pub } = supabase.storage.from('documents').getPublicUrl(`po-bills/bill_${poId}_${Date.now()}.${ext}`);
+        billUrl = pub.publicUrl;
+      }
+      setUploading(false);
+    }
+    const { error } = await supabase.from('purchase_orders').update({
+      vendor_bill_number:    billNo.trim() || null,
+      vendor_bill_no:        billNo.trim() || null,
+      vendor_bill_amount:    bill,
+      vendor_bill_date:      billDate,
+      vendor_bill_url:       billUrl,
+      vendor_bill_doc_url:   billUrl,
+      bill_recorded_at:      new Date().toISOString(),
+      bill_recorded_by_name: currentUserName,
+      status:                'BILLED',
+    }).eq('po_id', poId);
+    setSaving(false);
+    if (!error) {
+      qc.invalidateQueries({ queryKey: ['po_detail', poId] });
+      qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
+      onBillSaved({ billAmount: bill, billNo: billNo.trim(), billUrl });
+    }
+  };
+
+  return (
+    <div className="mt-4 space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-[11px] font-bold uppercase tracking-wide text-amber-700 mb-1 block">Bill / Invoice No</label>
+          <input type="text" placeholder="e.g. INV-2023-0445" value={billNo} onChange={e => setBillNo(e.target.value)}
+            className="w-full text-[13px] px-3 py-2 border border-amber-300 rounded-lg bg-white focus:outline-none focus:border-amber-500" />
+        </div>
+        <div>
+          <label className="text-[11px] font-bold uppercase tracking-wide text-amber-700 mb-1 block">Bill Date</label>
+          <input type="date" value={billDate} onChange={e => setBillDate(e.target.value)}
+            className="w-full text-[13px] px-3 py-2 border border-amber-300 rounded-lg bg-white focus:outline-none focus:border-amber-500" />
+        </div>
+      </div>
+      <div>
+        <label className="text-[11px] font-bold uppercase tracking-wide text-amber-700 mb-1 block">
+          Bill Amount *
+          <span className="text-[10px] font-normal ml-1 normal-case">(PO value: ₹{poValue.toLocaleString('en-IN')})</span>
+        </label>
+        <div className="relative">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[14px] font-medium text-amber-700">₹</span>
+          <input type="number" placeholder="0" value={billAmount} onChange={e => setBillAmount(e.target.value)} autoFocus
+            className="w-full text-[16px] font-semibold pl-7 pr-4 py-3 border-2 border-amber-400 rounded-lg bg-white focus:outline-none focus:border-amber-600 focus:ring-2 focus:ring-amber-200" />
+        </div>
+        {billAmount && Math.abs(diff) >= 1 && (
+          <p className={`text-[11px] mt-1 ${diff > 0 ? 'text-red-600' : 'text-green-600'}`}>
+            {diff > 0
+              ? `⚠ Bill is ₹${Math.abs(diff).toLocaleString('en-IN')} (${pct.toFixed(1)}%) above PO value`
+              : `✓ Bill is ₹${Math.abs(diff).toLocaleString('en-IN')} below PO value`}
+          </p>
+        )}
+      </div>
+      <div>
+        <label className="text-[11px] font-bold uppercase tracking-wide text-amber-700 mb-1 block">
+          Bill Document <span className="text-[10px] font-normal normal-case">(PDF or image)</span>
+        </label>
+        {billFile ? (
+          <div className="flex items-center gap-2 p-3 border border-amber-300 rounded-lg bg-white">
+            <span className="material-symbols-outlined text-[16px] text-amber-500">attach_file</span>
+            <p className="text-[13px] flex-1 truncate">{billFile.name}</p>
+            <button onClick={() => setBillFile(null)} className="text-[11px] text-on-surface-variant hover:text-red-500">Remove</button>
+          </div>
+        ) : (
+          <label className="flex items-center gap-2 p-3 border border-dashed border-amber-300 rounded-lg bg-white cursor-pointer hover:border-amber-500 transition-colors">
+            <span className="material-symbols-outlined text-[16px] text-amber-500">upload_file</span>
+            <span className="text-[13px] text-amber-700">Upload vendor bill</span>
+            <input type="file" accept="image/jpeg,image/png,image/jpg,application/pdf"
+              onChange={e => setBillFile(e.target.files?.[0] || null)} className="hidden" />
+          </label>
+        )}
+      </div>
+      <button onClick={handleSave} disabled={!canSave || saving}
+        className={`w-full h-11 rounded-lg text-[14px] font-semibold transition-all ${canSave && !saving
+          ? 'bg-amber-500 text-white hover:bg-amber-600 shadow-md shadow-amber-200'
+          : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}>
+        {saving ? (uploading ? 'Uploading…' : 'Saving…')
+          : `Record Bill${billAmount ? ` — ₹${parseFloat(billAmount).toLocaleString('en-IN')}` : ''}`}
+      </button>
+    </div>
+  );
+}
+
+// ── BillSummaryCard ───────────────────────────────────────────────────────────
+
+function BillSummaryCard({ po, activeTxns, onNavigate }: { po: any; activeTxns: any[]; onNavigate: (p: string) => void }) {
+  const totalPaid = activeTxns.reduce((s: number, t: any) => s + (Number(t.allocated_amount) || 0), 0);
+  const billAmt   = Number(po.vendor_bill_amount) || Number(po.total_value || po.order_value) || 0;
+  const poVal     = Number(po.total_value || po.order_value) || 0;
+  const balance   = billAmt - totalPaid;
+  const variance  = billAmt - poVal;
+  const billNo    = po.vendor_bill_number || po.vendor_bill_no || null;
+  const billUrl   = po.vendor_bill_url || po.vendor_bill_doc_url || null;
+
+  return (
+    <div className="rounded-xl border border-outline-variant/20 bg-white p-4">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <p className="text-[10px] uppercase tracking-wide text-on-surface-variant/60 mb-0.5">Vendor Bill</p>
+          <p className="text-[14px] font-medium text-on-surface">{billNo || 'No bill number'}</p>
+          {po.vendor_bill_date && <p className="text-[11px] text-on-surface-variant/50">{fmtDate(po.vendor_bill_date)}</p>}
+        </div>
+        {billUrl && (
+          <a href={billUrl} target="_blank" rel="noopener noreferrer"
+            className="text-[12px] text-[#C8603A] hover:underline flex items-center gap-1">
+            View bill <span className="material-symbols-outlined text-[13px]">open_in_new</span>
+          </a>
+        )}
+      </div>
+      <div className="space-y-2">
+        <div className="flex justify-between text-[12px]">
+          <span className="text-on-surface-variant/60">PO Value</span>
+          <span className="font-data-mono">₹{poVal.toLocaleString('en-IN')}</span>
+        </div>
+        <div className="flex justify-between text-[12px]">
+          <span className="text-on-surface-variant/60">Bill Amount</span>
+          <span className="font-data-mono font-medium text-[#16A34A]">₹{billAmt.toLocaleString('en-IN')}</span>
+        </div>
+        {Math.abs(variance) > 1 && (
+          <div className="flex justify-between text-[11px]">
+            <span className={variance > 0 ? 'text-red-500' : 'text-green-600'}>
+              {variance > 0 ? '⚠ Bill exceeds PO' : '✓ Bill under PO'}
+            </span>
+            <span className={`font-data-mono ${variance > 0 ? 'text-red-500' : 'text-green-600'}`}>
+              {variance > 0 ? '+' : ''}₹{Math.abs(variance).toLocaleString('en-IN')}
+            </span>
+          </div>
+        )}
+        <div className="h-px bg-outline-variant/15 my-1" />
+        <div className="flex justify-between text-[12px]">
+          <span className="text-on-surface-variant/60">Total Paid</span>
+          <span className="font-data-mono">₹{totalPaid.toLocaleString('en-IN')}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-[13px] font-semibold text-on-surface">
+            {balance > 0 ? 'Balance Due' : balance < 0 ? 'Overpaid' : 'Settled'}
+          </span>
+          <span className={`text-[14px] font-bold font-data-mono ${balance > 0 ? 'text-[#DC2626]' : balance < 0 ? 'text-amber-600' : 'text-[#16A34A]'}`}>
+            {balance === 0 ? '₹0 ✓' : `₹${Math.abs(balance).toLocaleString('en-IN')}`}
+          </span>
+        </div>
+      </div>
+      {activeTxns.length > 0 && (
+        <div className="mt-4 pt-3 border-t border-outline-variant/10">
+          <p className="text-[10px] uppercase tracking-wide text-on-surface-variant/60 mb-2">Payments</p>
+          {activeTxns.map((t: any) => (
+            <div key={t.id} onClick={() => onNavigate(`/ledger/${t.transactions?.txn_id}`)}
+              className="flex justify-between py-1.5 cursor-pointer hover:bg-surface-container-low/30 rounded px-1">
+              <div className="flex items-center gap-2">
+                <span className="font-data-mono text-[11px] text-primary">{t.transactions?.txn_id}</span>
+                <span className="text-[11px] text-on-surface-variant/50">{fmtDate(t.transactions?.date)}</span>
+              </div>
+              <span className="text-[13px] font-medium font-data-mono">₹{Number(t.allocated_amount).toLocaleString('en-IN')}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function PurchaseOrderDetail({ session }: { session: Session }) {
@@ -163,24 +359,21 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     profile?.role === 'principal' ||
     profile?.role === 'accountant';
 
+  const currentUserName: string = (profile as any)?.display_name || (profile as any)?.name || session.user.email || 'Unknown';
+
   // ── UI state ───────────────────────────────────────────────────────────────
   const [showLog,              setShowLog]             = useState(false);
   const [showGRNForm,          setShowGRNForm]         = useState(false);
-  const [showVendorBillForm,   setShowVendorBillForm]  = useState(false);
   const [showSettleModal,      setShowSettleModal]     = useState(false);
   const [showRecordPayment,    setShowRecordPayment]   = useState(false);
+  const [showReceiveModal,     setShowReceiveModal]    = useState(false);
+  const [billCelebration,      setBillCelebration]     = useState<{ billAmount: number; billNo: string; vendorName: string } | null>(null);
 
   // AI reconciliation state
   const [reconFile, setReconFile]     = useState<File | null>(null);
   const [reconciling, setReconciling] = useState(false);
   const [reconResult, setReconResult] = useState<ReconResult | null>(null);
   const [reconError, setReconError]   = useState<string | null>(null);
-
-  // Vendor bill inline-edit state (Feature 4)
-  const [editingBillField, setEditingBillField] = useState<'bill_no' | 'bill_date' | 'bill_amount' | null>(null);
-  const [billNoEdit,       setBillNoEdit]       = useState('');
-  const [billDateEdit,     setBillDateEdit]     = useState('');
-  const [billAmountEdit,   setBillAmountEdit]   = useState('');
 
   // Record payment fields (Feature 3)
   const [payAmount,   setPayAmount]   = useState('');
@@ -196,12 +389,6 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const [grnEwaybill,       setGrnEwaybill]       = useState('');
   const [grnCondition,      setGrnCondition]      = useState<'GOOD' | 'PARTIAL' | 'DAMAGED'>('GOOD');
   const [grnNotes,          setGrnNotes]          = useState('');
-
-  // Vendor bill form fields
-  const [billNo,     setBillNo]     = useState('');
-  const [billDate,   setBillDate]   = useState(new Date().toISOString().split('T')[0]);
-  const [billAmount, setBillAmount] = useState('');
-  const [billFile,   setBillFile]   = useState<File | null>(null);
 
   // Settle modal fields
   const [settleAmount,     setSettleAmount]     = useState('');
@@ -314,7 +501,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
       if (error) throw error;
 
       // Update PO status
-      const newStatus = grnCondition === 'GOOD' ? 'Delivered' : 'Partially Delivered';
+      const newStatus = 'AT_SITE';
       await supabase.from('purchase_orders').update({ status: newStatus }).eq('po_id', poId!);
 
       return num;
@@ -336,55 +523,24 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     onError: (err: any) => showSnackbar(err.message || 'Failed to save GRN', { type: 'error' }),
   });
 
-  const saveVendorBill = useMutation({
+  const markReceived = useMutation({
     mutationFn: async () => {
-      if (!billNo.trim()) throw new Error('Bill number is required');
-      const poValue = Number(po?.total_value || po?.order_value) || 0;
-      const parsedAmt = parseFloat(billAmount);
-      const hasAmount = !isNaN(parsedAmt) && billAmount.trim() !== '';
-
-      let vendor_bill_doc_url: string | undefined;
-      if (billFile) {
-        const ext  = billFile.name.split('.').pop();
-        const path = `po-bills/${poId}-${Date.now()}.${ext}`;
-        const { error: upErr } = await supabase.storage.from('documents').upload(path, billFile);
-        if (upErr) throw upErr;
-        const { data: pub } = supabase.storage.from('documents').getPublicUrl(path);
-        vendor_bill_doc_url = pub.publicUrl;
-      }
-
-      const patch: Record<string, any> = {
-        vendor_bill_no:   billNo.trim(),
-        vendor_bill_date: billDate || null,
-        three_way_match:  'PENDING',
-        ...(vendor_bill_doc_url ? { vendor_bill_doc_url } : {}),
-      };
-
-      let match = 'PENDING';
-      if (hasAmount) {
-        const ratio = poValue > 0 ? Math.abs(parsedAmt - poValue) / poValue : 0;
-        match = ratio < 0.02 ? 'MATCHED' : 'MISMATCHED';
-        patch.vendor_bill_amount = parsedAmt;
-        patch.three_way_match    = match;
-        patch.status             = match === 'MATCHED' ? 'Tallied' : 'Disputed';
-      }
-
-      const { error } = await supabase.from('purchase_orders').update(patch).eq('po_id', poId!);
+      const { error } = await supabase.from('purchase_orders').update({
+        status:              'AT_SITE',
+        received_at_site:    new Date().toISOString(),
+        received_by_name:    currentUserName,
+        received_by_user_id: session.user.id,
+      }).eq('po_id', poId!);
       if (error) throw error;
-      return match;
     },
-    onSuccess: (match) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['po_detail', poId] });
       qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
-      setShowVendorBillForm(false);
-      setBillFile(null);
-      showSnackbar(
-        match === 'MATCHED'    ? 'Bill matched — PO tallied' :
-        match === 'MISMATCHED' ? 'Mismatch detected — PO marked Disputed' :
-                                 'Bill attached — enter amount to run match'
-      );
+      setShowReceiveModal(false);
+      fireCelebration();
+      showSnackbar(`📦 Receipt confirmed! Now attach the vendor bill to proceed.`);
     },
-    onError: (err: any) => showSnackbar(err.message || 'Failed to attach bill', { type: 'error' }),
+    onError: (err: any) => showSnackbar(err.message || 'Failed to record receipt', { type: 'error' }),
   });
 
   const settlePO = useMutation({
@@ -419,8 +575,8 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
       });
       if (allocError) throw allocError;
 
-      // Mark PO tallied
-      await supabase.from('purchase_orders').update({ status: 'Tallied' }).eq('po_id', poId!);
+      // Mark PO as fully paid
+      await supabase.from('purchase_orders').update({ status: 'PAID' }).eq('po_id', poId!);
 
       return txnId;
     },
@@ -433,32 +589,6 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
       navigate(`/ledger/${txnId}`);
     },
     onError: (err: any) => showSnackbar(err.message || 'Failed to settle PO', { type: 'error' }),
-  });
-
-  // Feature 4 — save individual bill fields inline
-  const saveBillField = useMutation({
-    mutationFn: async (patch: Record<string, any>) => {
-      // Recalculate match whenever bill_amount changes
-      if ('vendor_bill_amount' in patch) {
-        const tv = Number(po?.total_value || po?.order_value) || 0;
-        const bAmt = Number(patch.vendor_bill_amount) || tv;
-        const ratio = tv > 0 ? Math.abs(bAmt - tv) / tv : 0;
-        const match = ratio < 0.02 ? 'MATCHED' : 'MISMATCHED';
-        patch.three_way_match = match;
-        if (po?.vendor_bill_no) {
-          patch.status = match === 'MATCHED' ? 'Tallied' : 'Disputed';
-        }
-      }
-      const { error } = await supabase.from('purchase_orders').update(patch).eq('po_id', poId!);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['po_detail', poId] });
-      qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
-      setEditingBillField(null);
-      showSnackbar('Bill updated');
-    },
-    onError: (err: any) => showSnackbar(err.message || 'Failed to save', { type: 'error' }),
   });
 
   // Feature 3 — record payment against PO
@@ -489,9 +619,18 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
         allocated_amount: amount,
       });
       if (allocErr) throw allocErr;
-      return txnId;
+
+      // Auto-advance PO status: compute total paid after this payment
+      const prevPaid = (linkedTxns ?? [])
+        .filter((t: any) => t.transactions?.status !== 'Voided')
+        .reduce((s: number, t: any) => s + (Number(t.allocated_amount) || 0), 0);
+      const newTotalPaid = prevPaid + amount;
+      const billOrPoValue = Number(po?.vendor_bill_amount) || Number(po?.total_value || po?.order_value) || 0;
+      const newStatus = newTotalPaid >= billOrPoValue ? 'PAID' : 'PARTIAL';
+      await supabase.from('purchase_orders').update({ status: newStatus }).eq('po_id', poId!);
+      return { txnId, newStatus };
     },
-    onSuccess: () => {
+    onSuccess: ({ newStatus }) => {
       qc.invalidateQueries({ queryKey: ['po_linked_txns', poId] });
       qc.invalidateQueries({ queryKey: ['po_detail', poId] });
       qc.invalidateQueries({ queryKey: ['po_payment_totals'] });
@@ -499,7 +638,12 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
       setShowRecordPayment(false);
       setPayAmount('');
       setPayRef('');
-      showSnackbar('Payment recorded');
+      if (newStatus === 'PAID') {
+        fireCelebration();
+        showSnackbar('🎉 Fully paid and settled!');
+      } else {
+        showSnackbar('Payment recorded');
+      }
     },
     onError: (err: any) => showSnackbar(err.message || 'Failed to record payment', { type: 'error' }),
   });
@@ -743,8 +887,6 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const balance   = billAmt - paidTotal;
   const pct       = billAmt > 0 ? Math.min(100, (paidTotal / billAmt) * 100) : 0;
 
-  const isTalliedMatch = po.three_way_match === 'MATCHED' && po.status === 'Tallied';
-
   // Count-up component
   function AmountDisplay({ amount }: { amount: number }) {
     const displayed = useCountUp(amount);
@@ -772,66 +914,124 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
           </p>
         </div>
 
-        {/* ACTION ROW */}
-        <div className="detail-reveal mt-3 flex items-center gap-2 flex-wrap" style={{ animationDelay: '40ms' }}>
-          <span className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${STATUS_BADGE[po.status] ?? STATUS_BADGE['Draft']}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${statusDotColor(po.status)}`} />
-            {po.status?.toUpperCase()}
-          </span>
+        {/* STATUS + ACTIONS */}
+        <div className="detail-reveal mt-3" style={{ animationDelay: '40ms' }}>
 
-          {po.status === 'Draft' && canManage && (
-            <button
-              onClick={() => updateStatus.mutate('Ordered')}
-              disabled={updateStatus.isPending}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold bg-primary text-on-primary rounded-lg hover:bg-primary/90 transition-colors"
-            >
-              <span className="material-symbols-outlined text-[16px]">send</span>
-              Place Order
-            </button>
+          {/* Status badge row */}
+          <div className="flex items-center gap-2 flex-wrap mb-3">
+            <span className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${STATUS_BADGE[po.status] ?? 'bg-surface-container-highest text-on-surface-variant'}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[po.status] ?? 'bg-on-surface-variant/30'}`} />
+              {STATUS_LABEL[po.status] ?? po.status}
+            </span>
+            {isOverdue(po) && (
+              <span className="text-[10px] font-bold text-red-500">Overdue</span>
+            )}
+            <div className="ml-auto flex items-center gap-2">
+              <button onClick={handleDownloadPDF}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-outline-variant/40 text-[12px] text-on-surface-variant hover:text-on-surface transition-colors">
+                <span className="material-symbols-outlined text-[14px]">download</span>
+                PDF
+              </button>
+              {['ORDERED', 'AT_SITE', 'BILLED', 'PARTIAL'].includes(po.status) && canManage && (
+                <button onClick={() => { if (window.confirm('Cancel this PO?')) updateStatus.mutate('CANCELLED'); }}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-red-200 text-red-600 text-[12px] hover:bg-red-50 transition-colors">
+                  <span className="material-symbols-outlined text-[14px]">cancel</span>
+                  Cancel
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Status-driven primary action */}
+          {po.status === 'ORDERED' && canManage && (
+            <div className="mt-1">
+              <button onClick={() => setShowReceiveModal(true)}
+                className="h-9 px-4 rounded-lg bg-[#7C3AED] text-white text-[13px] font-medium hover:opacity-90 flex items-center gap-2">
+                <span className="material-symbols-outlined text-[16px]">inventory_2</span>
+                Mark Received at Site
+              </button>
+              <p className="text-[11px] text-on-surface-variant/60 mt-1.5">Confirm material has arrived and been checked at site</p>
+            </div>
           )}
 
-          {['Ordered', 'Partially Delivered'].includes(po.status) && canManage && (
-            <button
-              onClick={async () => { const n = await genGRNNumber(); setGrnNumber(n); setShowGRNForm(true); }}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold bg-secondary text-on-secondary rounded-lg hover:bg-secondary/90 transition-colors"
-            >
-              <span className="material-symbols-outlined text-[16px]">inventory_2</span>
-              Record GRN
-            </button>
+          {po.status === 'AT_SITE' && canManage && (
+            <div className="mt-2">
+              {/* Bill celebration card */}
+              {billCelebration ? (
+                <div className="rounded-xl border-2 border-green-500 bg-[#F0FDF4] p-4">
+                  <div className="flex items-start gap-3">
+                    <span className="text-2xl">🎉</span>
+                    <div className="flex-1">
+                      <p className="text-[15px] font-bold text-green-800">Bill recorded!</p>
+                      <p className="text-[22px] font-bold text-green-700 leading-tight mt-1">
+                        ₹{billCelebration.billAmount.toLocaleString('en-IN')}
+                      </p>
+                      <p className="text-[12px] text-green-700 mt-0.5">credited to {billCelebration.vendorName}'s account</p>
+                      {billCelebration.billNo && (
+                        <p className="text-[11px] text-green-600 mt-0.5 font-data-mono">Bill No: {billCelebration.billNo}</p>
+                      )}
+                      <button onClick={() => navigate(`/stakeholders/${po.stakeholder_id}`)}
+                        className="mt-3 text-[12px] font-semibold text-green-700 hover:underline">
+                        View vendor ledger →
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-4">
+                  <div className="flex items-start gap-3 mb-1">
+                    <span className="text-2xl">📄</span>
+                    <div className="flex-1">
+                      <p className="text-[14px] font-semibold text-amber-900">Vendor bill required</p>
+                      <p className="text-[12px] text-amber-700 mt-0.5">
+                        Material received{po.received_at_site ? ` on ${fmtDate(po.received_at_site)}` : ''}.
+                        Record the vendor's invoice to proceed with payment.
+                      </p>
+                    </div>
+                  </div>
+                  <BillEntryForm
+                    po={po}
+                    poId={poId!}
+                    currentUserName={currentUserName}
+                    onBillSaved={(data) => {
+                      fireCelebration();
+                      setBillCelebration({ billAmount: data.billAmount, billNo: data.billNo, vendorName: vendor?.name || 'vendor' });
+                      showSnackbar(`🎉 Bill recorded! ₹${data.billAmount.toLocaleString('en-IN')} credited to vendor account`);
+                      setTimeout(() => setBillCelebration(null), 4000);
+                    }}
+                  />
+                </div>
+              )}
+            </div>
           )}
 
-          {po.status === 'Delivered' && canManage && !po.vendor_bill_no && (
-            <button
-              onClick={() => setShowVendorBillForm(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold border border-outline-variant/40 rounded-lg hover:bg-surface-container-low transition-colors text-on-surface"
-            >
-              <span className="material-symbols-outlined text-[16px]">receipt</span>
-              Attach Bill
-            </button>
+          {(po.status === 'BILLED' || po.status === 'PARTIAL') && canManage && (
+            <div className="mt-2 space-y-3">
+              <BillSummaryCard po={po} activeTxns={activeTxns} onNavigate={navigate} />
+              <button onClick={() => setShowRecordPayment(true)}
+                className="h-9 px-4 rounded-lg bg-[#C8603A] text-white text-[13px] font-medium hover:opacity-90 flex items-center gap-2">
+                <span className="material-symbols-outlined text-[16px]">add</span>
+                Record Payment
+              </button>
+            </div>
           )}
 
-          {['Ordered', 'Partially Delivered', 'Delivered'].includes(po.status) && canManage && (
-            <button
-              onClick={() => { if (window.confirm('Cancel this PO?')) updateStatus.mutate('Cancelled'); }}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition-colors"
-            >
-              <span className="material-symbols-outlined text-[15px]">cancel</span>
-              Cancel
-            </button>
+          {po.status === 'PAID' && (
+            <div className="mt-2">
+              <div className="flex items-center gap-2 text-green-600 mb-3">
+                <span className="material-symbols-outlined text-[20px]" style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>
+                <p className="text-[14px] font-medium">Fully paid and settled</p>
+              </div>
+              <BillSummaryCard po={po} activeTxns={activeTxns} onNavigate={navigate} />
+            </div>
           )}
 
-          <button
-            onClick={handleDownloadPDF}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-outline-variant/40 text-[12px] text-on-surface-variant hover:text-on-surface transition-colors"
-          >
-            <span className="material-symbols-outlined text-[14px]">download</span>
-            Export PDF
-          </button>
+          {po.status === 'CANCELLED' && (
+            <p className="text-[13px] text-on-surface-variant/60 mt-2">This PO has been cancelled.</p>
+          )}
 
-          <button
-            onClick={() => setShowLog(v => !v)}
-            className="ml-auto flex items-center gap-1 text-[12px] text-on-surface-variant hover:text-on-surface transition-colors"
-          >
+          <button onClick={() => setShowLog(v => !v)}
+            className="mt-3 flex items-center gap-1 text-[12px] text-on-surface-variant hover:text-on-surface transition-colors">
             {showLog ? 'Hide log' : 'View log'}
             <span className="material-symbols-outlined text-[14px]">{showLog ? 'expand_less' : 'chevron_right'}</span>
           </button>
@@ -963,149 +1163,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
           )}
         </div>
 
-        {/* BILL RECONCILIATION */}
-        {po.vendor_bill_no && (
-          <div className="detail-reveal mb-6" style={{ animationDelay: '130ms' }}>
-            <div className={`flex items-center gap-2 mb-3 ${isTalliedMatch ? 'shimmer-green rounded px-1 py-0.5' : ''}`}>
-              <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">BILL</p>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${matchStatusBadge(po.three_way_match)}`}>
-                {po.three_way_match ?? 'PENDING'}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              {/* Bill Number */}
-              <div>
-                <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1.5">Bill Number</p>
-                {editingBillField === 'bill_no' ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      autoFocus
-                      className="bk-input text-[13px] font-data-mono py-1.5 px-2 h-8"
-                      value={billNoEdit}
-                      onChange={e => setBillNoEdit(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') saveBillField.mutate({ vendor_bill_no: billNoEdit.trim() });
-                        if (e.key === 'Escape') setEditingBillField(null);
-                      }}
-                      onBlur={() => { if (billNoEdit.trim()) saveBillField.mutate({ vendor_bill_no: billNoEdit.trim() }); else setEditingBillField(null); }}
-                    />
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => { setBillNoEdit(po.vendor_bill_no || ''); setEditingBillField('bill_no'); }}
-                    className="group flex items-center gap-1.5 text-left"
-                  >
-                    <p className="font-data-mono text-[14px] font-semibold text-on-surface">
-                      {po.vendor_bill_no || <span className="text-on-surface-variant/30 text-[13px] font-normal">Click to add</span>}
-                    </p>
-                    <span className="material-symbols-outlined text-[14px] text-on-surface-variant/25 group-hover:text-primary transition-colors">edit</span>
-                  </button>
-                )}
-              </div>
-
-              {/* Bill Date */}
-              <div>
-                <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1.5">Bill Date</p>
-                {editingBillField === 'bill_date' ? (
-                  <input
-                    autoFocus
-                    type="date"
-                    className="bk-input text-[13px] py-1.5 px-2 h-8"
-                    value={billDateEdit}
-                    onChange={e => setBillDateEdit(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') saveBillField.mutate({ vendor_bill_date: billDateEdit });
-                      if (e.key === 'Escape') setEditingBillField(null);
-                    }}
-                    onBlur={() => { if (billDateEdit) saveBillField.mutate({ vendor_bill_date: billDateEdit }); else setEditingBillField(null); }}
-                  />
-                ) : (
-                  <button
-                    onClick={() => { setBillDateEdit(po.vendor_bill_date || new Date().toISOString().split('T')[0]); setEditingBillField('bill_date'); }}
-                    className="group flex items-center gap-1.5 text-left"
-                  >
-                    <p className="text-[14px] text-on-surface">
-                      {po.vendor_bill_date ? fmtDate(po.vendor_bill_date) : <span className="text-on-surface-variant/30 text-[13px]">Click to add</span>}
-                    </p>
-                    <span className="material-symbols-outlined text-[14px] text-on-surface-variant/25 group-hover:text-primary transition-colors">edit</span>
-                  </button>
-                )}
-              </div>
-
-              {/* Bill Amount */}
-              <div>
-                <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1.5">Bill Amount</p>
-                {editingBillField === 'bill_amount' ? (
-                  <input
-                    autoFocus
-                    type="number"
-                    className="bk-input font-data-mono text-[13px] py-1.5 px-2 h-8"
-                    value={billAmountEdit}
-                    onChange={e => setBillAmountEdit(e.target.value)}
-                    step="any"
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') saveBillField.mutate({ vendor_bill_amount: parseFloat(billAmountEdit) || 0 });
-                      if (e.key === 'Escape') setEditingBillField(null);
-                    }}
-                    onBlur={() => { if (billAmountEdit) saveBillField.mutate({ vendor_bill_amount: parseFloat(billAmountEdit) || 0 }); else setEditingBillField(null); }}
-                  />
-                ) : (
-                  <button
-                    onClick={() => { setBillAmountEdit(po.vendor_bill_amount ? String(po.vendor_bill_amount) : ''); setEditingBillField('bill_amount'); }}
-                    className="group flex items-center gap-1.5 text-left"
-                  >
-                    <p className="font-data-mono text-[14px] font-bold text-on-surface">
-                      {po.vendor_bill_amount
-                        ? `₹${Number(po.vendor_bill_amount).toLocaleString('en-IN')}`
-                        : <span className="text-on-surface-variant/30 text-[13px] font-normal">Click to add</span>
-                      }
-                    </p>
-                    <span className="material-symbols-outlined text-[14px] text-on-surface-variant/25 group-hover:text-primary transition-colors">edit</span>
-                  </button>
-                )}
-                {po.vendor_bill_amount && Number(po.vendor_bill_amount) !== totalValue && (
-                  <p className={`text-[11px] mt-1 font-semibold ${
-                    Math.abs(Number(po.vendor_bill_amount) - totalValue) / totalValue > 0.02
-                      ? 'text-red-500'
-                      : 'text-amber-600'
-                  }`}>
-                    {Number(po.vendor_bill_amount) > totalValue ? '▲' : '▼'} ₹{Math.abs(Number(po.vendor_bill_amount) - totalValue).toLocaleString('en-IN')} variance
-                  </p>
-                )}
-                {po.vendor_bill_amount && Math.abs(Number(po.vendor_bill_amount) - totalValue) / totalValue <= 0.02 && (
-                  <p className="text-[11px] mt-1 text-green-600 font-semibold">✓ Within tolerance</p>
-                )}
-              </div>
-
-              {/* Bill Document */}
-              <div>
-                <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1.5">Bill Document</p>
-                {po.vendor_bill_doc_url ? (
-                  <a
-                    href={po.vendor_bill_doc_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 text-[13px] text-primary font-semibold hover:underline"
-                  >
-                    <span className="material-symbols-outlined text-[16px]">open_in_new</span>
-                    View Document
-                  </a>
-                ) : (
-                  <p className="text-[13px] text-on-surface-variant/30">No document</p>
-                )}
-              </div>
-            </div>
-
-            {/* Match banner — inline line */}
-            {po.three_way_match === 'MATCHED' && (
-              <p className="mt-3 text-[12px] font-semibold text-green-700">✓ PO ↔ GRN ↔ Bill matched — safe to proceed to payment</p>
-            )}
-            {po.three_way_match === 'MISMATCHED' && (
-              <p className="mt-3 text-[12px] font-semibold text-red-600">⚠ Mismatch — variance exceeds 2%. Update bill amount or dispute before payment.</p>
-            )}
-          </div>
-        )}
+        {/* BILL — shown when BILLED/PARTIAL/PAID (summary card already shown in action section above for those states; this is just a fallback for viewing bill details without the action) */}
 
         {/* AI RECONCILIATION */}
         {lineItems && lineItems.length > 0 && (
@@ -1388,7 +1446,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
           <div className="detail-reveal mb-6" style={{ animationDelay: '280ms' }}>
             <div className="flex items-center justify-between mb-3">
               <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">GOODS RECEIPTS</p>
-              {canManage && ['Ordered', 'Partially Delivered', 'Issued'].includes(po.status) && (
+              {canManage && po.status === 'ORDERED' && (
                 <button
                   onClick={async () => { const n = await genGRNNumber(); setGrnNumber(n); setShowGRNForm(true); }}
                   className="flex items-center gap-1 text-[11px] text-primary font-semibold hover:underline"
@@ -1455,11 +1513,11 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
                   <span className="text-[12px] text-on-surface">GRN {grn.grn_number} recorded · {grn.condition}</span>
                 </div>
               ))}
-              {po.vendor_bill_no && (
+              {(po.vendor_bill_number || po.vendor_bill_no) && (
                 <div className="flex items-center gap-3">
                   <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
                   <span className="text-[12px] text-on-surface-variant/60">{fmtDate(po.vendor_bill_date)}</span>
-                  <span className="text-[12px] text-on-surface">Vendor bill {po.vendor_bill_no} attached · {po.three_way_match}</span>
+                  <span className="text-[12px] text-on-surface">Vendor bill {po.vendor_bill_number || po.vendor_bill_no} recorded{po.bill_recorded_by_name ? ` by ${po.bill_recorded_by_name}` : ''}</span>
                 </div>
               )}
               {approvals?.map(ap => (
@@ -1557,78 +1615,47 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
         </div>
       )}
 
-      {/* ── Vendor Bill Form Modal ─────────────────────────────────────── */}
-      {showVendorBillForm && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-end md:items-center justify-center p-0 md:p-4">
-          <div className="bg-white w-full md:max-w-md rounded-t-2xl md:rounded-2xl shadow-xl overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant/10">
-              <p className="text-[15px] font-bold text-on-surface">Attach Vendor Bill</p>
-              <button onClick={() => setShowVendorBillForm(false)} className="text-on-surface-variant hover:text-on-surface p-1 rounded-lg">
-                <span className="material-symbols-outlined">close</span>
-              </button>
-            </div>
-            <div className="px-6 py-5 space-y-4">
-              <div>
-                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1.5">Vendor Bill No *</label>
-                <input className="bk-input font-data-mono" placeholder="e.g. INV/2026/001" value={billNo} onChange={e => setBillNo(e.target.value)} />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1.5">Bill Date</label>
-                  <input type="date" className="bk-input" value={billDate} onChange={e => setBillDate(e.target.value)} />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1.5">Bill Amount (₹)</label>
-                  <input
-                    type="number"
-                    className="bk-input font-data-mono"
-                    placeholder={String(totalValue)}
-                    value={billAmount}
-                    onChange={e => setBillAmount(e.target.value)}
-                    step="any"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1.5">Bill Document</label>
-                <label className="flex items-center gap-2 px-3 py-2 rounded-xl border border-outline-variant/30 cursor-pointer hover:bg-surface-container-low transition-colors w-fit">
-                  <span className="material-symbols-outlined text-[16px] text-on-surface-variant">upload_file</span>
-                  <span className="text-[12px] text-on-surface-variant">
-                    {billFile ? billFile.name : 'Upload PDF / image'}
-                  </span>
-                  <input
-                    type="file"
-                    accept=".pdf,.jpg,.jpeg,.png"
-                    className="hidden"
-                    onChange={e => setBillFile(e.target.files?.[0] ?? null)}
-                  />
-                </label>
-                {billFile && (
-                  <button
-                    onClick={() => setBillFile(null)}
-                    className="mt-1 text-[11px] text-on-surface-variant/50 hover:text-red-500 flex items-center gap-1"
-                  >
-                    <span className="material-symbols-outlined text-[13px]">close</span>
-                    Remove
-                  </button>
+      {/* ── Mark Received Confirmation Modal ──────────────────────────── */}
+      {showReceiveModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+          onClick={e => { if (e.target === e.currentTarget) setShowReceiveModal(false); }}>
+          <div className="bg-white w-full max-w-sm rounded-2xl shadow-xl overflow-hidden">
+            <div className="px-6 pt-6 pb-5">
+              <p className="text-[16px] font-bold text-on-surface mb-1">Confirm Site Receipt</p>
+              <div className="text-[12px] text-on-surface-variant space-y-1 mt-3 mb-4">
+                <p className="font-data-mono font-semibold text-on-surface">{po.po_id} · {vendor?.name}</p>
+                {lineItems && lineItems.length > 0 && (
+                  <p className="text-on-surface-variant/70 line-clamp-2">
+                    {lineItems.slice(0, 2).map((li: any) => li.item_name).join(', ')}
+                    {lineItems.length > 2 ? ` +${lineItems.length - 2} more` : ''}
+                  </p>
                 )}
               </div>
-              <p className="text-[11px] text-on-surface-variant/50">
-                If bill amount matches PO value (within 2%), the PO will be automatically tallied.
-              </p>
-            </div>
-            <div className="px-6 py-4 border-t border-outline-variant/10 flex gap-3 justify-end">
-              <button onClick={() => setShowVendorBillForm(false)} className="bk-btn-ghost border border-outline-variant/30 text-[13px] px-4 py-2 rounded-xl">
-                Cancel
-              </button>
-              <button
-                onClick={() => saveVendorBill.mutate()}
-                disabled={saveVendorBill.isPending}
-                className="bk-btn text-[13px] px-5 py-2 rounded-xl flex items-center gap-2"
-              >
-                {saveVendorBill.isPending ? 'Saving…' : 'Save & Run Match'}
-                <span className="material-symbols-outlined text-[16px]">rule</span>
-              </button>
+              <div className="space-y-2 text-[12px] bg-surface-container-low/50 rounded-xl px-4 py-3 mb-4">
+                <div className="flex justify-between">
+                  <span className="text-on-surface-variant/60">Received by</span>
+                  <span className="font-medium text-on-surface">{currentUserName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-on-surface-variant/60">Date</span>
+                  <span className="font-medium text-on-surface">{new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                </div>
+              </div>
+              <div className="flex items-start gap-2 text-[11px] text-blue-700 bg-blue-50 rounded-lg px-3 py-2 mb-5">
+                <span className="material-symbols-outlined text-[14px] mt-0.5">info</span>
+                <span>After confirming, you must attach the vendor bill before payment can be processed.</span>
+              </div>
+              <div className="flex gap-3">
+                <button onClick={() => setShowReceiveModal(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-outline-variant/30 text-[13px] text-on-surface-variant font-medium hover:bg-surface-container-low transition-colors">
+                  Cancel
+                </button>
+                <button onClick={() => markReceived.mutate()} disabled={markReceived.isPending}
+                  className="flex-1 py-2.5 rounded-xl bg-[#7C3AED] text-white text-[13px] font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-1.5">
+                  <span className="material-symbols-outlined text-[16px]">check</span>
+                  {markReceived.isPending ? 'Confirming…' : 'Confirm Receipt'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
