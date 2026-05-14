@@ -20,7 +20,6 @@ import {
 
 const STATUS_BADGE: Record<string, string> = {
   'ORDERED':   'bg-[#EFF6FF] text-[#3B82F6]',
-  'AT_SITE':   'bg-[#F5F3FF] text-[#7C3AED]',
   'BILLED':    'bg-[#FFFBEB] text-[#D97706]',
   'PARTIAL':   'bg-[#FFF7ED] text-[#EA580C]',
   'PAID':      'bg-[#F0FDF4] text-[#16A34A]',
@@ -29,7 +28,6 @@ const STATUS_BADGE: Record<string, string> = {
 
 const STATUS_DOT: Record<string, string> = {
   'ORDERED':   'bg-[#3B82F6]',
-  'AT_SITE':   'bg-[#7C3AED]',
   'BILLED':    'bg-[#D97706]',
   'PARTIAL':   'bg-[#EA580C]',
   'PAID':      'bg-[#16A34A]',
@@ -38,7 +36,6 @@ const STATUS_DOT: Record<string, string> = {
 
 const STATUS_LABEL: Record<string, string> = {
   'ORDERED':   'Ordered',
-  'AT_SITE':   'At Site',
   'BILLED':    'Billed',
   'PARTIAL':   'Partially Paid',
   'PAID':      'Paid',
@@ -49,7 +46,7 @@ function isOverdue(po: any): boolean {
   if (!po.expected_delivery) return false;
   const d = new Date(po.expected_delivery);
   if (isNaN(d.getTime())) return false;
-  if (['AT_SITE', 'BILLED', 'PARTIAL', 'PAID', 'CANCELLED'].includes(po.status)) return false;
+  if (['BILLED', 'PARTIAL', 'PAID', 'CANCELLED'].includes(po.status)) return false;
   return d < new Date();
 }
 
@@ -473,8 +470,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
       if (error) throw error;
 
       // Update PO status
-      const newStatus = 'AT_SITE';
-      await supabase.from('purchase_orders').update({ status: newStatus }).eq('po_id', poId!);
+      await supabase.from('purchase_orders').update({ status: 'ORDERED' }).eq('po_id', poId!);
 
       return num;
     },
@@ -498,7 +494,6 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const markReceived = useMutation({
     mutationFn: async () => {
       const { error } = await supabase.from('purchase_orders').update({
-        status:              'AT_SITE',
         received_at_site:    new Date().toISOString(),
         received_by_name:    currentUserName,
         received_by_user_id: session.user.id,
@@ -906,7 +901,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
                 <span className="material-symbols-outlined text-[14px]">download</span>
                 PDF
               </button>
-              {['ORDERED', 'AT_SITE', 'BILLED', 'PARTIAL'].includes(po.status) && canManage && (
+              {['ORDERED', 'BILLED', 'PARTIAL'].includes(po.status) && canManage && (
                 <button onClick={() => { if (window.confirm('Cancel this PO?')) updateStatus.mutate('CANCELLED'); }}
                   className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-red-200 text-red-600 text-[12px] hover:bg-red-50 transition-colors">
                   <span className="material-symbols-outlined text-[14px]">cancel</span>
@@ -918,20 +913,11 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
 
           {/* Status-driven primary action */}
           {po.status === 'ORDERED' && canManage && (
-            <div className="mt-1">
-              <button onClick={() => setShowReceiveModal(true)}
-                className="h-9 px-4 rounded-lg bg-[#7C3AED] text-white text-[13px] font-medium hover:opacity-90 flex items-center gap-2">
-                <span className="material-symbols-outlined text-[16px]">inventory_2</span>
-                Mark Received at Site
-              </button>
-              <p className="text-[11px] text-on-surface-variant/60 mt-1.5">Confirm material has arrived and been checked at site</p>
-            </div>
-          )}
-
-          {po.status === 'AT_SITE' && canManage && (
-            <div className="mt-2">
-              {/* Bill celebration card */}
-              {billCelebration ? (
+            <div className="mt-2 space-y-3">
+              {Number(po.vendor_bill_amount) > 0 ? (
+                /* Bill already entered — show summary */
+                <BillSummaryCard po={po} activeTxns={activeTxns} onNavigate={navigate} />
+              ) : billCelebration ? (
                 <div className="rounded-xl border-2 border-green-500 bg-[#F0FDF4] p-4">
                   <div className="flex items-start gap-3">
                     <span className="text-2xl">🎉</span>
@@ -944,10 +930,6 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
                       {billCelebration.billNo && (
                         <p className="text-[11px] text-green-600 mt-0.5 font-data-mono">Bill No: {billCelebration.billNo}</p>
                       )}
-                      <button onClick={() => navigate(`/stakeholders/${po.stakeholder_id}`)}
-                        className="mt-3 text-[12px] font-semibold text-green-700 hover:underline">
-                        View vendor ledger →
-                      </button>
                     </div>
                   </div>
                 </div>
@@ -956,11 +938,8 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
                   <div className="flex items-start gap-3 mb-1">
                     <span className="text-2xl">📄</span>
                     <div className="flex-1">
-                      <p className="text-[14px] font-semibold text-amber-900">Vendor bill required</p>
-                      <p className="text-[12px] text-amber-700 mt-0.5">
-                        Material received{po.received_at_site ? ` on ${fmtDate(po.received_at_site)}` : ''}.
-                        Record the vendor's invoice to proceed with payment.
-                      </p>
+                      <p className="text-[14px] font-semibold text-amber-900">Enter vendor bill</p>
+                      <p className="text-[12px] text-amber-700 mt-0.5">Record the vendor's invoice amount before marking as received.</p>
                     </div>
                   </div>
                   <BillEntryForm
@@ -975,8 +954,17 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
                   />
                 </div>
               )}
+              <div>
+                <button onClick={() => setShowReceiveModal(true)}
+                  className="h-9 px-4 rounded-lg bg-[#7C3AED] text-white text-[13px] font-medium hover:opacity-90 flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[16px]">inventory_2</span>
+                  Mark Received at Site
+                </button>
+                <p className="text-[11px] text-on-surface-variant/60 mt-1.5">Confirm material has arrived and been checked at site</p>
+              </div>
             </div>
           )}
+
 
           {(po.status === 'BILLED' || po.status === 'PARTIAL') && canManage && (
             <div className="mt-2 space-y-3">
@@ -1348,38 +1336,59 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
         {/* FINANCIAL */}
         <div className="detail-reveal mb-6" style={{ animationDelay: '180ms' }}>
           <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-3">FINANCIAL</p>
-          <div className="space-y-1.5 text-[13px]">
-            {totalValue > 0 && (
-              <div className="flex justify-between">
-                <span className="text-on-surface-variant">PO Value</span>
-                <span className="font-data-mono font-semibold text-on-surface">₹{totalValue.toLocaleString('en-IN')}</span>
+          <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
+            {/* Credit row — vendor gave material */}
+            {billAmt > 0 && (
+              <div className="flex items-center justify-between px-4 py-3 bg-[rgba(22,163,74,0.03)] border-b border-outline-variant/10">
+                <div>
+                  <p className="text-[12px] font-medium text-[#16A34A]">Credit — By Purchase</p>
+                  <p className="text-[11px] text-on-surface-variant/60 mt-0.5">Vendor bill recorded</p>
+                </div>
+                <span className="font-data-mono font-semibold text-[14px] text-[#16A34A]">
+                  ₹{billAmt.toLocaleString('en-IN')}
+                </span>
               </div>
             )}
-            <div className="flex justify-between">
-              <span className="text-on-surface-variant">Total Paid</span>
-              <span className="font-data-mono font-semibold text-on-surface">₹{paidTotal.toLocaleString('en-IN')}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-on-surface-variant">Balance</span>
-              <span className={`font-data-mono font-bold ${balance <= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {balance <= 0 ? '₹0 · Fully settled ✓' : `₹${balance.toLocaleString('en-IN')}`}
+            {/* Debit row — payment made */}
+            {paidTotal > 0 && (
+              <div className="flex items-center justify-between px-4 py-3 border-b border-outline-variant/10">
+                <div>
+                  <p className="text-[12px] font-medium text-on-surface">Debit — To Bank / Cash</p>
+                  <p className="text-[11px] text-on-surface-variant/60 mt-0.5">Payment made</p>
+                </div>
+                <span className="font-data-mono font-semibold text-[14px] text-on-surface">
+                  ₹{paidTotal.toLocaleString('en-IN')}
+                </span>
+              </div>
+            )}
+            {/* Balance */}
+            <div className="flex items-center justify-between px-4 py-3">
+              <p className="text-[13px] font-bold text-on-surface">Balance</p>
+              <span className={`font-data-mono font-bold text-[15px] ${balance > 0 ? 'text-[#DC2626]' : balance < 0 ? 'text-[#D97706]' : 'text-[#16A34A]'}`}>
+                {balance === 0
+                  ? 'Nil — Settled ✓'
+                  : balance > 0
+                  ? `₹${balance.toLocaleString('en-IN')} Cr`
+                  : `₹${Math.abs(balance).toLocaleString('en-IN')} Dr`}
               </span>
             </div>
           </div>
 
-          {/* Progress bar */}
-          <div className="mt-4">
-            <div className="flex justify-between items-center mb-1.5">
-              <span className="text-[11px] text-on-surface-variant">Payment progress</span>
-              <span className="text-[11px] font-semibold text-on-surface">{pct.toFixed(0)}%</span>
+          {/* Progress bar — only when bill amount is known */}
+          {billAmt > 0 && (
+            <div className="mt-4">
+              <div className="flex justify-between items-center mb-1.5">
+                <span className="text-[11px] text-on-surface-variant">Payment progress</span>
+                <span className="text-[11px] font-semibold text-on-surface">{pct.toFixed(0)}%</span>
+              </div>
+              <div className="h-2 rounded-full bg-surface-container overflow-hidden">
+                <div
+                  className={`h-full rounded-full progress-bar-animate ${pct >= 100 ? 'bg-secondary' : 'bg-primary'}`}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
             </div>
-            <div className="h-2 rounded-full bg-surface-container overflow-hidden">
-              <div
-                className={`h-full rounded-full progress-bar-animate ${pct >= 100 ? 'bg-secondary' : 'bg-primary'}`}
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-          </div>
+          )}
 
           {canManage && (
             <button

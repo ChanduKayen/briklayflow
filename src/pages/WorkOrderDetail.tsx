@@ -636,7 +636,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
       milestonePayments[alloc.milestone_id] = (milestonePayments[alloc.milestone_id] || 0) + amount;
     }
   });
-  const balance = Math.max(0, orderValue - totalPaid);
+  const balance = orderValue - totalPaid; // Cr positive = payable, Dr negative = advance/overpaid
   const progressPercentage = orderValue > 0 ? Math.min(100, Math.round((totalPaid / orderValue) * 100)) : 0;
 
   // Overpaid phases (for warning in FINANCIAL section)
@@ -825,24 +825,42 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
         {/* FINANCIAL */}
         <div className="detail-reveal mb-6" style={{ animationDelay: '170ms' }}>
           <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-3">FINANCIAL</p>
-          <div className="space-y-2 text-[13px]">
-            <div className="flex justify-between items-center">
-              <span className="text-on-surface-variant">Total WO Amount</span>
-              <span className="font-data-mono font-semibold text-on-surface">₹{orderValue.toLocaleString('en-IN')}</span>
-            </div>
-            <div className="flex justify-between items-start">
-              <span className="text-on-surface-variant leading-tight">
-                Total Paid
-                <span className="block text-[11px] text-on-surface-variant/55 mt-0.5">
-                  as of {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+          <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
+            {/* Credit — worker gave labour (certified milestones) */}
+            {orderValue > 0 && (
+              <div className="flex items-center justify-between px-4 py-3 bg-[rgba(22,163,74,0.03)] border-b border-outline-variant/10">
+                <div>
+                  <p className="text-[12px] font-medium text-[#16A34A]">Credit — By Work Done</p>
+                  <p className="text-[11px] text-on-surface-variant/60 mt-0.5">Work order value</p>
+                </div>
+                <span className="font-data-mono font-semibold text-[14px] text-[#16A34A]">
+                  ₹{orderValue.toLocaleString('en-IN')}
                 </span>
-              </span>
-              <span className="font-data-mono font-semibold text-on-surface"><AmountDisplay amount={totalPaid} /></span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-on-surface-variant">Balance Due</span>
-              <span className={`font-data-mono font-bold ${balance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                {balance > 0 ? `₹${balance.toLocaleString('en-IN')}` : '₹0 · Fully Settled ✓'}
+              </div>
+            )}
+            {/* Debit — payments made */}
+            {totalPaid > 0 && (
+              <div className="flex items-center justify-between px-4 py-3 border-b border-outline-variant/10">
+                <div>
+                  <p className="text-[12px] font-medium text-on-surface">Debit — To Bank / Cash</p>
+                  <p className="text-[11px] text-on-surface-variant/60 mt-0.5">
+                    Payments made · as of {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  </p>
+                </div>
+                <span className="font-data-mono font-semibold text-[14px] text-on-surface">
+                  <AmountDisplay amount={totalPaid} />
+                </span>
+              </div>
+            )}
+            {/* Balance */}
+            <div className="flex items-center justify-between px-4 py-3">
+              <p className="text-[13px] font-bold text-on-surface">Balance</p>
+              <span className={`font-data-mono font-bold text-[15px] ${balance > 0 ? 'text-[#DC2626]' : balance < 0 ? 'text-[#D97706]' : 'text-[#16A34A]'}`}>
+                {balance === 0
+                  ? 'Nil — Settled ✓'
+                  : balance > 0
+                  ? `₹${balance.toLocaleString('en-IN')} Cr`
+                  : `₹${Math.abs(balance).toLocaleString('en-IN')} Dr`}
               </span>
             </div>
           </div>

@@ -13,7 +13,6 @@ import { useSnackbar } from '../components/Snackbar';
 
 const STATUS_CHIP: Record<string, string> = {
   'ORDERED':   'bg-[#EFF6FF] text-[#3B82F6]',
-  'AT_SITE':   'bg-[#F5F3FF] text-[#7C3AED]',
   'BILLED':    'bg-[#FFFBEB] text-[#D97706]',
   'PARTIAL':   'bg-[#FFF7ED] text-[#EA580C]',
   'PAID':      'bg-[#F0FDF4] text-[#16A34A]',
@@ -22,7 +21,6 @@ const STATUS_CHIP: Record<string, string> = {
 
 const STATUS_BORDER: Record<string, string> = {
   'ORDERED':   'border-l-4 border-l-[#3B82F6]',
-  'AT_SITE':   'border-l-4 border-l-[#7C3AED]',
   'BILLED':    'border-l-4 border-l-[#D97706]',
   'PARTIAL':   'border-l-4 border-l-[#EA580C]',
   'PAID':      'border-l-4 border-l-[#16A34A]',
@@ -31,14 +29,13 @@ const STATUS_BORDER: Record<string, string> = {
 
 const STATUS_LABEL: Record<string, string> = {
   'ORDERED':   'Ordered',
-  'AT_SITE':   'At Site',
   'BILLED':    'Billed',
   'PARTIAL':   'Partially Paid',
   'PAID':      'Paid',
   'CANCELLED': 'Cancelled',
 };
 
-const ALL_STATUSES = ['ORDERED', 'AT_SITE', 'BILLED', 'PARTIAL', 'PAID', 'CANCELLED'];
+const ALL_STATUSES = ['ORDERED', 'BILLED', 'PARTIAL', 'PAID', 'CANCELLED'];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -60,7 +57,7 @@ function isOverdue(po: any): boolean {
   if (!po.expected_delivery) return false;
   const d = new Date(po.expected_delivery);
   if (isNaN(d.getTime())) return false;
-  if (['AT_SITE', 'BILLED', 'PARTIAL', 'PAID', 'CANCELLED'].includes(po.status)) return false;
+  if (['BILLED', 'PARTIAL', 'PAID', 'CANCELLED'].includes(po.status)) return false;
   return d < new Date();
 }
 

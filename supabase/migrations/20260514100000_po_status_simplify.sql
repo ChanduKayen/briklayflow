@@ -1,5 +1,5 @@
--- STEP 1: Simplify PO statuses to 6 clear states
--- ORDERED → AT_SITE → BILLED → PARTIAL/PAID → CANCELLED
+-- STEP 1: Simplify PO statuses to 5 clear states
+-- ORDERED → BILLED → PARTIAL/PAID → CANCELLED
 
 -- Drop old constraint
 ALTER TABLE purchase_orders
@@ -9,25 +9,21 @@ ALTER TABLE purchase_orders
 UPDATE purchase_orders SET status = 'ORDERED'
   WHERE status IN ('Draft', 'Pending Approval', 'Approved', 'Ordered', 'Issued', 'DRAFT', 'SENT');
 
-UPDATE purchase_orders SET status = 'AT_SITE'
-  WHERE status IN ('Partially Delivered', 'Delivered', 'Received', 'AT_SITE');
-
 UPDATE purchase_orders SET status = 'BILLED'
-  WHERE status IN ('Tallied', 'Disputed', 'TALLIED', 'INVOICED');
+  WHERE status IN ('Partially Delivered', 'Delivered', 'Received', 'AT_SITE', 'Tallied', 'Disputed', 'TALLIED', 'INVOICED');
 
 UPDATE purchase_orders SET status = 'PAID'
   WHERE status IN ('Closed', 'SETTLED', 'CLOSED');
 
 -- Catch anything that slipped through
 UPDATE purchase_orders SET status = 'ORDERED'
-  WHERE status NOT IN ('ORDERED', 'AT_SITE', 'BILLED', 'PARTIAL', 'PAID', 'CANCELLED');
+  WHERE status NOT IN ('ORDERED', 'BILLED', 'PARTIAL', 'PAID', 'CANCELLED');
 
 -- Add new simplified constraint
 ALTER TABLE purchase_orders
   ADD CONSTRAINT purchase_orders_status_check
   CHECK (status IN (
     'ORDERED',    -- PO sent to vendor
-    'AT_SITE',    -- Material received + GRN confirmed
     'BILLED',     -- Vendor bill recorded
     'PARTIAL',    -- Partially paid
     'PAID',       -- Fully settled

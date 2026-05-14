@@ -23,7 +23,8 @@ export type StakeholderType = 'Worker' | 'Vendor' | 'Client';
 export type WOStatus = 'Draft' | 'Assigned' | 'Issued' | 'Active' | 'Closed' | 'Cancelled';
 export type WOSource = 'uploaded_doc' | 'manual';
 export type MilestoneStatus = 'Pending' | 'Completed' | 'Approved' | 'Paid' | 'Partially Paid';
-export type POStatus = 'Draft' | 'Issued' | 'Received' | 'Closed';
+export type POStatus = 'ORDERED' | 'BILLED' | 'PARTIAL' | 'PAID' | 'CANCELLED'
+  | 'Draft' | 'Issued' | 'Received' | 'Closed'; // legacy values
 export type PaymentMode = 'Cash' | 'NEFT' | 'UPI' | 'Cheque';
 export type TxnStatus = 'Active' | 'Voided';
 export type AIFlagStatus = 'Clean' | 'Flagged' | 'Acknowledged';

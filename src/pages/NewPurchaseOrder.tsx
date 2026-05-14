@@ -271,7 +271,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
 
   // ── Save ──────────────────────────────────────────────────────────────────
   const saveMutation = useMutation({
-    mutationFn: async (status: 'Draft' | 'Ordered') => {
+    mutationFn: async (status: string) => {
       if (!vendorId)     throw new Error('Please select a vendor');
       if (!projectId)    throw new Error('Please select a project');
       if (!lineItems.length || !lineItems.some(li => li.item_name.trim())) {
@@ -341,9 +341,9 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
 
       return finalPoId;
     },
-    onSuccess: (finalPoId, status) => {
+    onSuccess: (finalPoId) => {
       qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
-      showSnackbar(status === 'Ordered' ? `PO ${finalPoId} placed` : `Draft ${finalPoId} saved`);
+      showSnackbar(`PO ${finalPoId} created`);
       navigate(`/purchase-orders/${finalPoId}`);
     },
     onError: (err: any) => showSnackbar(err.message || 'Failed to save', { type: 'error' }),
@@ -1242,14 +1242,14 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
         </button>
         <div className="flex-1" />
         <button
-          onClick={() => saveMutation.mutate('Draft')}
+          onClick={() => saveMutation.mutate('ORDERED')}
           disabled={saveMutation.isPending}
           className="bk-btn-ghost border border-outline-variant/30 text-[13px] px-4 py-2.5 rounded-xl font-semibold"
         >
           {saveMutation.isPending ? 'Saving…' : 'Save as Draft'}
         </button>
         <button
-          onClick={() => saveMutation.mutate('Ordered')}
+          onClick={() => saveMutation.mutate('ORDERED')}
           disabled={saveMutation.isPending}
           className="bk-btn text-[13px] px-5 py-2.5 rounded-xl flex items-center gap-2 font-semibold"
         >
