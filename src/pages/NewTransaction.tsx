@@ -388,10 +388,10 @@ export default function NewTransaction({ session: _session }: { session: Session
     queryKey: ['projects'],
     queryFn: async () => { const { data } = await supabase.from('projects').select('*'); return data as Project[]; },
   });
-  // Fetch WOs + POs when project changes (non-split, non-expense)
+  // Fetch WOs + POs filtered by stakeholder + project
   const selectedProjectId = !splitMode ? (allocs[0]?.project_id || '') : '';
   useEffect(() => {
-    if (!selectedProjectId || txnType === 'expense' || txnType === 'client_receipt') {
+    if (!selectedProjectId || !stkId || txnType === 'expense' || txnType === 'client_receipt') {
       setProjectWOs([]); setProjectPOs([]); setSelectedObligation(null); setSkipped(false);
       return;
     }
@@ -403,12 +403,14 @@ export default function NewTransaction({ session: _session }: { session: Session
         .from('work_orders')
         .select('wo_id, scope_of_work, order_value, status, stakeholders(name, category), wo_milestones(*)')
         .eq('project_id', selectedProjectId)
+        .eq('stakeholder_id', stkId)
         .in('status', ['Active', 'Issued', 'Assigned', 'ACTIVE', 'ISSUED', 'ASSIGNED'])
         .order('date_issued', { ascending: false }),
       supabase
         .from('purchase_orders')
         .select('po_id, status, vendor_bill_amount, total_value, stakeholders(name, category), po_line_items(*)')
         .eq('project_id', selectedProjectId)
+        .eq('stakeholder_id', stkId)
         .in('status', ['ORDERED', 'BILLED', 'PARTIAL'])
         .order('created_at', { ascending: false }),
     ]).then(([{ data: wos, error: woErr }, { data: pos, error: poErr }]) => {
@@ -417,7 +419,7 @@ export default function NewTransaction({ session: _session }: { session: Session
       if (!cancelled) { setProjectWOs(wos || []); setProjectPOs(pos || []); setLoadingObligations(false); }
     });
     return () => { cancelled = true; };
-  }, [selectedProjectId, txnType]);
+  }, [selectedProjectId, stkId, txnType]);
 
   // ── Derived ──────────────────────────────────────────────────────────────
   const tgtType = txnType === 'worker' ? 'Worker' : txnType === 'material' ? 'Vendor' : txnType === 'client_receipt' ? 'Client' : '';
