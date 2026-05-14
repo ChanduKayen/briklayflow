@@ -5,12 +5,6 @@ import { PeekSkeleton } from './PeekSkeleton';
 import { usePeek } from '../context/PeekContext';
 import { TxnRow } from './TxnRow';
 
-function fmtDate(d: string | null | undefined) {
-  if (!d) return '—';
-  const p = new Date(d);
-  if (isNaN(p.getTime())) return d;
-  return p.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-}
 
 interface StakeholderPeekProps { stakeholderId: string; onClose: () => void; }
 

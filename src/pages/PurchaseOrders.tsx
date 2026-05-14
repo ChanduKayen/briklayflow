@@ -12,11 +12,11 @@ import { useSnackbar } from '../components/Snackbar';
 // ── Status config ─────────────────────────────────────────────────────────────
 
 const STATUS_CHIP: Record<string, string> = {
-  'ORDERED':   'bg-[#EFF6FF] text-[#3B82F6]',
-  'BILLED':    'bg-[#FFFBEB] text-[#D97706]',
-  'PARTIAL':   'bg-[#FFF7ED] text-[#EA580C]',
-  'PAID':      'bg-[#F0FDF4] text-[#16A34A]',
-  'CANCELLED': 'bg-[#F9FAFB] text-[#6B7280]',
+  'ORDERED':   'bg-[#EFF6FF] text-[#3B82F6] ring-1 ring-[#3B82F6]/20',
+  'BILLED':    'bg-[#FFFBEB] text-[#D97706] ring-1 ring-[#D97706]/20',
+  'PARTIAL':   'bg-[#FFF7ED] text-[#EA580C] ring-1 ring-[#EA580C]/20',
+  'PAID':      'bg-[#F0FDF4] text-[#16A34A] ring-1 ring-[#16A34A]/20',
+  'CANCELLED': 'bg-[#F9FAFB] text-[#6B7280] ring-1 ring-[#6B7280]/20',
 };
 
 const STATUS_BORDER: Record<string, string> = {
@@ -610,6 +610,7 @@ export default function PurchaseOrders({ session }: { session: Session }) {
   const totalCount      = pos.length;
   const pendingDelivery = pos.filter(p => p.status === 'ORDERED').length;
   const pendingBill     = pos.filter(p => p.status === 'ORDERED' && !Number(p.vendor_bill_amount)).length;
+  const totalOrderValue = pos.reduce((sum, p) => sum + (Number(p.total_value) || Number(p.order_value) || 0), 0);
 
   // ── Filtering ──────────────────────────────────────────────────────────────
   const { from: dateFrom, to: dateTo } = dateRange(datePreset);
@@ -674,35 +675,48 @@ export default function PurchaseOrders({ session }: { session: Session }) {
 
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 mb-6">
-          <div>
-            <h2 className="text-[24px] font-bold text-on-surface tracking-tight">Purchase Orders</h2>
-            <div className="flex flex-wrap gap-2.5 mt-2">
-              <span className="px-3 py-1 bg-surface-container text-[12px] rounded-full text-on-surface-variant">
-                <span className="font-bold text-on-surface">{totalCount}</span> orders
-              </span>
-              <span className="px-3 py-1 bg-amber-50 text-amber-700 text-[12px] rounded-full">
-                <span className="font-bold">{pendingDelivery}</span> pending delivery
-              </span>
+          <div className="flex-1">
+            <div className="flex items-center justify-between">
+              <h2 className="text-[24px] font-bold text-on-surface tracking-tight">Purchase Orders</h2>
+              {canManage && (
+                <button
+                  className="hidden md:flex bk-btn items-center gap-2 h-9 px-4 rounded-xl text-[13px] shrink-0"
+                  onClick={() => navigate('/purchase-orders/new')}
+                >
+                  <span className="material-symbols-outlined text-[16px]">add</span>
+                  New PO
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2.5 mt-3">
+              <div className="flex items-center gap-2.5 bg-white rounded-xl px-3 py-2 border border-outline-variant/15 shadow-sm">
+                <span className="text-[22px] font-bold text-on-surface tabular-nums leading-none">{totalCount}</span>
+                <span className="text-[11px] text-on-surface-variant/70 leading-tight">Total<br/>Orders</span>
+              </div>
+              {totalOrderValue > 0 && (
+                <div className="flex items-center gap-2.5 bg-white rounded-xl px-3 py-2 border border-outline-variant/15 shadow-sm">
+                  <span className="text-[22px] font-bold text-on-surface font-mono tabular-nums leading-none">₹{totalOrderValue >= 100000 ? `${(totalOrderValue/100000).toFixed(1)}L` : totalOrderValue.toLocaleString('en-IN')}</span>
+                  <span className="text-[11px] text-on-surface-variant/70 leading-tight">Total<br/>Value</span>
+                </div>
+              )}
+              {pendingDelivery > 0 && (
+                <div className="flex items-center gap-2.5 bg-amber-50 rounded-xl px-3 py-2 border border-amber-100">
+                  <span className="text-[22px] font-bold text-amber-700 tabular-nums leading-none">{pendingDelivery}</span>
+                  <span className="text-[11px] text-amber-600 leading-tight">Pending<br/>Delivery</span>
+                </div>
+              )}
               {pendingBill > 0 && (
-                <span className="px-3 py-1 bg-orange-50 text-orange-700 text-[12px] rounded-full">
-                  <span className="font-bold">{pendingBill}</span> need bill entry
-                </span>
+                <div className="flex items-center gap-2.5 bg-orange-50 rounded-xl px-3 py-2 border border-orange-100">
+                  <span className="text-[22px] font-bold text-orange-700 tabular-nums leading-none">{pendingBill}</span>
+                  <span className="text-[11px] text-orange-600 leading-tight">Need<br/>Bill Entry</span>
+                </div>
               )}
             </div>
           </div>
-          {canManage && (
-            <button
-              className="hidden md:flex bk-btn items-center gap-2 h-9 px-4 rounded-xl text-[13px] shrink-0"
-              onClick={() => navigate('/purchase-orders/new')}
-            >
-              <span className="material-symbols-outlined text-[16px]">add</span>
-              New PO
-            </button>
-          )}
         </div>
 
         {/* Filter bar */}
-        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar md:flex-wrap flex-nowrap mb-4 pb-0.5">
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar md:flex-wrap flex-nowrap mb-4 pb-0.5 bg-white rounded-2xl border border-outline-variant/10 px-4 py-3 shadow-sm">
 
           <div ref={dateRef} className="relative">
             <FilterChip
@@ -799,9 +813,22 @@ export default function PurchaseOrders({ session }: { session: Session }) {
         {isLoading && <LinearProgress className="mb-4" />}
 
         {!isLoading && filtered.length === 0 && (
-          <div className="text-center py-16 text-on-surface-variant/50">
-            <span className="material-symbols-outlined text-[48px] block mb-3">shopping_cart</span>
-            <p className="text-[14px] font-semibold">No purchase orders found</p>
+          <div className="text-center py-20 text-on-surface-variant/50">
+            <span className="material-symbols-outlined text-[52px] block mb-3 text-on-surface-variant/20">receipt_long</span>
+            <p className="text-[15px] font-semibold text-on-surface/60">
+              {hasFilters ? 'No orders match your filters' : 'No purchase orders yet'}
+            </p>
+            <p className="text-[13px] mt-1 text-on-surface-variant/40">
+              {hasFilters ? 'Try adjusting or clearing the filters above' : 'Purchase orders will appear here once created'}
+            </p>
+            {hasFilters && (
+              <button
+                onClick={() => { setDatePreset('all'); setFilterStatus([]); setFilterVendor([]); setFilterProject([]); setSearchTerm(''); setSearchOpen(false); }}
+                className="mt-4 bk-btn text-[13px]"
+              >
+                Clear filters
+              </button>
+            )}
             {canManage && !hasFilters && (
               <button onClick={() => navigate('/purchase-orders/new')} className="mt-4 bk-btn text-[13px]">
                 Create your first PO
@@ -844,22 +871,32 @@ export default function PurchaseOrders({ session }: { session: Session }) {
                 {filtered.map((po, idx) => (
                   <tr
                     key={po.po_id}
-                    className={`border-b border-outline-variant/[0.06] wo-row-animate ${STATUS_BORDER[po.status] ?? 'border-l-4 border-l-transparent'}`}
+                    className={`group border-b border-outline-variant/[0.06] wo-row-animate hover:bg-surface-container-low/20 transition-colors ${STATUS_BORDER[po.status] ?? 'border-l-4 border-l-transparent'}`}
                     style={{ animationDelay: `${Math.min(idx, 20) * 15}ms` }}
                   >
                     {/* PO No / Date */}
                     <td
-                      className="px-4 py-3 cursor-pointer hover:bg-surface-container-low/40 transition-colors"
+                      className="px-4 py-3 cursor-pointer"
                       onClick={() => navigate(`/purchase-orders/${po.po_id}`)}
                     >
-                      <p className="font-data-mono text-[13px] font-bold text-primary hover:underline">{po.po_id}</p>
+                      <p className="font-data-mono text-[13px] font-bold text-primary group-hover:underline">{po.po_id}</p>
                       <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{fmtDate(po.date_issued)}</p>
+                      {(Number(po.total_value) > 0 || Number(po.order_value) > 0) && (
+                        <p className="text-[11px] font-mono font-semibold text-on-surface/70 mt-1 tabular-nums">
+                          ₹{(Number(po.total_value) || Number(po.order_value)).toLocaleString('en-IN')}
+                        </p>
+                      )}
                     </td>
 
                     {/* Vendor */}
                     <td className="px-4 py-3">
                       <p className="text-[13px] font-semibold text-on-surface">{po.stakeholders?.name ?? '—'}</p>
-                      <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{po.stakeholders?.category ?? ''}</p>
+                      {po.stakeholders?.category && (
+                        <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{po.stakeholders.category}</p>
+                      )}
+                      {getItemsPreview(po) !== '—' && (
+                        <p className="text-[11px] text-on-surface-variant/40 mt-0.5 truncate max-w-[220px]">{getItemsPreview(po)}</p>
+                      )}
                     </td>
 
                     {/* Project */}
@@ -909,7 +946,7 @@ export default function PurchaseOrders({ session }: { session: Session }) {
                     <td className="px-2 py-3 w-[44px]">
                       <button
                         onClick={() => navigate(`/purchase-orders/${po.po_id}`)}
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant/30 hover:bg-surface-container hover:text-on-surface transition-colors"
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant/10 group-hover:text-on-surface-variant/50 hover:bg-surface-container hover:text-on-surface transition-colors"
                         title="Open detail"
                       >
                         <span className="material-symbols-outlined text-[16px]">chevron_right</span>
@@ -928,31 +965,58 @@ export default function PurchaseOrders({ session }: { session: Session }) {
             {filtered.map((po, idx) => (
               <div
                 key={po.po_id}
-                className={`bg-white rounded-2xl border border-black/[0.06] shadow-sm p-4 cursor-pointer active:scale-[0.99] transition-transform wo-row-animate ${STATUS_BORDER[po.status] ?? ''}`}
+                className={`bg-white rounded-2xl border border-black/[0.06] shadow-sm overflow-hidden cursor-pointer active:scale-[0.99] transition-transform wo-row-animate ${STATUS_BORDER[po.status] ?? ''}`}
                 style={{ animationDelay: `${Math.min(idx, 20) * 15}ms` }}
                 onClick={() => navigate(`/purchase-orders/${po.po_id}`)}
               >
-                <div className="flex justify-between items-start mb-2">
-                  <div>
-                    <p className="font-data-mono text-[13px] font-bold text-on-surface">{po.po_id}</p>
-                    <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{fmtDate(po.date_issued)}</p>
+                <div className="p-4">
+                  {/* Top row: PO ID + status chip */}
+                  <div className="flex justify-between items-center mb-2.5">
+                    <p className="font-data-mono text-[13px] font-bold text-primary">{po.po_id}</p>
+                    <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${STATUS_CHIP[po.status] ?? 'bg-surface-container text-on-surface-variant'}`}>
+                      {STATUS_LABEL[po.status] ?? po.status}
+                    </span>
                   </div>
-                  <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${STATUS_CHIP[po.status] ?? 'bg-surface-container text-on-surface-variant'}`}>
-                    {STATUS_LABEL[po.status] ?? po.status}
-                  </span>
-                </div>
-                <p className="text-[13px] font-semibold text-on-surface">{po.stakeholders?.name ?? '—'}</p>
-                <p className="text-[11px] text-on-surface-variant/60 mt-0.5 line-clamp-1">{getItemsPreview(po)}</p>
-                <div className="flex justify-between items-center mt-3 pt-2.5 border-t border-outline-variant/10">
-                  <p className="text-[11px] text-on-surface-variant/60">{po.projects?.name ?? '—'}</p>
-                  {Number(po.vendor_bill_amount) > 0 ? (
-                    <p className="font-data-mono text-[13px] font-bold text-[#16A34A]">
-                      ₹{Number(po.vendor_bill_amount).toLocaleString('en-IN')}
-                      <span className="text-[10px] font-normal text-on-surface-variant/50 ml-1">bill</span>
-                    </p>
-                  ) : (
-                    <p className="text-[11px] text-amber-600 font-medium">No bill entered</p>
+
+                  {/* Vendor + items */}
+                  <p className="text-[14px] font-semibold text-on-surface leading-snug">{po.stakeholders?.name ?? '—'}</p>
+                  {po.stakeholders?.category && (
+                    <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{po.stakeholders.category}</p>
                   )}
+                  {getItemsPreview(po) !== '—' && (
+                    <p className="text-[11px] text-on-surface-variant/50 mt-1 line-clamp-1">{getItemsPreview(po)}</p>
+                  )}
+                </div>
+
+                {/* Footer row */}
+                <div className="flex items-center justify-between px-4 py-2.5 bg-surface-container-low/30 border-t border-outline-variant/[0.06]">
+                  <div>
+                    <p className="text-[11px] text-on-surface-variant/70 font-medium">{po.projects?.name ?? '—'}</p>
+                    {po.expected_delivery && (
+                      <p className={`text-[10px] mt-0.5 ${isOverdue(po) ? 'text-red-500 font-semibold' : 'text-on-surface-variant/40'}`}>
+                        {isOverdue(po) ? 'Overdue · ' : 'Due '}
+                        {fmtShortDate(po.expected_delivery)}
+                      </p>
+                    )}
+                    {!po.expected_delivery && (
+                      <p className="text-[10px] text-on-surface-variant/40 mt-0.5">{fmtShortDate(po.date_issued)}</p>
+                    )}
+                  </div>
+                  <div className="text-right">
+                    {Number(po.vendor_bill_amount) > 0 ? (
+                      <p className="font-mono text-[13px] font-bold text-[#16A34A] tabular-nums">
+                        ₹{Number(po.vendor_bill_amount).toLocaleString('en-IN')}
+                        <span className="text-[10px] font-normal text-on-surface-variant/50 ml-1">billed</span>
+                      </p>
+                    ) : (Number(po.total_value) > 0 || Number(po.order_value) > 0) ? (
+                      <p className="font-mono text-[13px] font-semibold text-on-surface/70 tabular-nums">
+                        ₹{(Number(po.total_value) || Number(po.order_value)).toLocaleString('en-IN')}
+                        <span className="text-[10px] font-normal text-amber-500 ml-1">no bill</span>
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-amber-600 font-medium">No bill entered</p>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
