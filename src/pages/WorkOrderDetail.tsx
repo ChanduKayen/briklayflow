@@ -48,11 +48,11 @@ function statusDotColor(status: string) {
 const OVERPAID_TOLERANCE = 100; // within ₹100 is treated as fully paid
 
 function getMilestoneStatus(milestone: any, paid: number): MilestoneStatus {
-  const planned = Number(milestone.amount) || 0;
+  const planned = Number(milestone.planned_amount) || 0;
   if (planned > 0 && paid > planned + OVERPAID_TOLERANCE) return 'OVERPAID';
   if (planned > 0 && paid >= planned - OVERPAID_TOLERANCE) return 'PAID';
   if (paid > 0) return 'PARTIALLY_PAID';
-  const d = milestone.due_date ? new Date(milestone.due_date) : null;
+  const d = milestone.due_date ? new Date(milestone.due_date) : null; // due_date is optional; may be null
   const today = new Date(); today.setHours(0, 0, 0, 0);
   if (d && !isNaN(d.getTime()) && d < today) return 'DUE';
   return 'PENDING';
@@ -164,7 +164,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
           *,
           projects(name, site_location),
           stakeholders(name, category, contact),
-          wo_milestones(id, name, amount, status, due_date, unit_type, qty, rate)
+          wo_milestones(*)
         `)
         .eq('wo_id', woId)
         .single();
@@ -268,7 +268,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
         project_id: wo.project_id,
         order_type: 'WO',
         order_ref: wo.wo_id,
-        milestone_id: releaseModal.milestone.id,
+        milestone_id: releaseModal.milestone.milestone_id,
         allocated_amount: amount,
       }]);
       if (allocError) throw allocError;
@@ -468,13 +468,13 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
 
       const msHead = [['#', 'Milestone', 'Amount', 'Status']];
       const msBody = ((wo as any).wo_milestones ?? []).map((m: any, msIdx: number) => {
-        const paid = milestonePayments[m.id] || 0;
+        const paid = milestonePayments[m.milestone_id] || 0;
         const status = getMilestoneStatus(m, paid);
         const statusStr = status === 'PAID' ? 'PAID ✓' : status === 'PARTIALLY_PAID' ? 'PARTIAL' : status === 'DUE' ? 'DUE' : 'PENDING';
         return [
           String(msIdx + 1),
           m.name ?? '',
-          fmtRupee(Number(m.amount) || 0),
+          fmtRupee(Number(m.planned_amount) || 0),
           statusStr,
         ];
       });
@@ -641,8 +641,8 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
 
   // Overpaid phases (for warning in FINANCIAL section)
   const overpaidPhases = (milestones || []).filter((m: any) => {
-    const planned = Number(m.amount) || 0;
-    const paid = milestonePayments[m.id] || 0;
+    const planned = Number(m.planned_amount) || 0;
+    const paid = milestonePayments[m.milestone_id] || 0;
     return planned > 0 && paid > planned + OVERPAID_TOLERANCE;
   });
 
@@ -851,10 +851,10 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
           {overpaidPhases.length > 0 && (
             <div className="mt-2 space-y-1">
               {overpaidPhases.map((m: any) => {
-                const planned = Number(m.amount) || 0;
-                const paid = milestonePayments[m.id] || 0;
+                const planned = Number(m.planned_amount) || 0;
+                const paid = milestonePayments[m.milestone_id] || 0;
                 return (
-                  <p key={m.id} className="text-[12px] text-amber-700 flex items-center gap-1">
+                  <p key={m.milestone_id} className="text-[12px] text-amber-700 flex items-center gap-1">
                     <span className="material-symbols-outlined text-[14px]">warning</span>
                     {m.name} overpaid by ₹{(paid - planned).toLocaleString('en-IN')}
                   </p>
@@ -905,19 +905,19 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                 let cumPlanned = 0;
                 let cumPaid = 0;
                 return milestones.map((m: any, idx: number) => {
-                  cumPlanned += Number(m.amount) || 0;
-                  cumPaid += milestonePayments[m.id] || 0;
+                  cumPlanned += Number(m.planned_amount) || 0;
+                  cumPaid += milestonePayments[m.milestone_id] || 0;
                   const thisCumPlanned = cumPlanned;
                   const thisCumPaid = cumPaid;
 
-                  const planned = Number(m.amount) || 0;
-                  const paid = milestonePayments[m.id] || 0;
+                  const planned = Number(m.planned_amount) || 0;
+                  const paid = milestonePayments[m.milestone_id] || 0;
                   const remaining = Math.max(0, planned - paid);
                   const overpay = Math.max(0, paid - planned);
                   const ms = getMilestoneStatus(m, paid);
                   const isOverpaid = ms === 'OVERPAID';
-                  const isExpanded = expandedMilestone === m.id;
-                  const txns = milestoneTxns[m.id] || [];
+                  const isExpanded = expandedMilestone === m.milestone_id;
+                  const txns = milestoneTxns[m.milestone_id] || [];
                   const dueDateStr = m.due_date;
                   const showDueDate = dueDateStr && !isNaN(new Date(dueDateStr).getTime());
                   const phaseRatio = planned > 0 ? Math.min(1, paid / planned) : 0;
@@ -926,14 +926,14 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
 
                   return (
                     <div
-                      key={m.id}
+                      key={m.milestone_id}
                       className="border-b border-outline-variant/10 last:border-0"
                       style={isOverpaid ? { backgroundColor: 'rgba(220,38,38,0.03)', borderRadius: 8 } : undefined}
                     >
                       {/* Clickable milestone header */}
                       <button
                         className="w-full flex items-start gap-3 py-3 text-left hover:bg-surface-container-low/40 transition-colors rounded-lg px-1"
-                        onClick={() => setExpandedMilestone(isExpanded ? null : m.id)}
+                        onClick={() => setExpandedMilestone(isExpanded ? null : m.milestone_id)}
                       >
                         {/* Status icon */}
                         <div className="shrink-0 mt-1">
@@ -988,7 +988,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                                 <span>Lump Sum</span>
                               ) : (
                                 <>
-                                  <span className="font-data-mono">{Number(m.qty ?? 0).toLocaleString('en-IN')}</span>
+                                  <span className="font-data-mono">{Number(m.quantity ?? 0).toLocaleString('en-IN')}</span>
                                   {' '}{m.unit_type}{' × '}
                                   <span className="font-data-mono">₹{Number(m.rate).toLocaleString('en-IN')}</span>
                                   <span>/{m.unit_type.toLowerCase()}</span>
@@ -1123,8 +1123,8 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                                             if (isThisPopoverOpen) {
                                               setShiftPopover(null);
                                             } else {
-                                              setShiftPopover({ allocId: alloc.allocation_id, txnId: txn.txn_id, amount: Number(alloc.allocated_amount), currentMilestoneId: m.id });
-                                              setShiftTarget(m.id);
+                                              setShiftPopover({ allocId: alloc.allocation_id, txnId: txn.txn_id, amount: Number(alloc.allocated_amount), currentMilestoneId: m.milestone_id });
+                                              setShiftTarget(m.milestone_id);
                                             }
                                           }}
                                           className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center w-5 h-5 rounded hover:bg-surface-container-high shrink-0 ml-0.5"
@@ -1149,19 +1149,19 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                                           <p className="text-[11px] font-bold text-on-surface-variant mb-2">Move to a different phase</p>
                                           <div className="space-y-0.5 mb-3 max-h-48 overflow-y-auto">
                                             {milestones.map((ph: any) => {
-                                              const isCurrent = ph.id === m.id;
+                                              const isCurrent = ph.milestone_id === m.milestone_id;
                                               return (
                                                 <label
-                                                  key={ph.id}
+                                                  key={ph.milestone_id}
                                                   className={`flex items-center gap-2 py-1.5 px-2 rounded-lg cursor-pointer ${isCurrent ? 'opacity-40 cursor-not-allowed' : 'hover:bg-surface-container-low'}`}
                                                 >
                                                   <input
                                                     type="radio"
                                                     name={`shift-${alloc.allocation_id}`}
-                                                    value={ph.id}
-                                                    checked={shiftTarget === ph.id}
+                                                    value={ph.milestone_id}
+                                                    checked={shiftTarget === ph.milestone_id}
                                                     disabled={isCurrent}
-                                                    onChange={() => setShiftTarget(ph.id)}
+                                                    onChange={() => setShiftTarget(ph.milestone_id)}
                                                     className="accent-primary shrink-0"
                                                   />
                                                   <span className="text-[12px] text-on-surface flex-1 leading-tight">{ph.name}</span>
@@ -1184,11 +1184,11 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                                           </div>
                                           <div className="flex gap-2">
                                             <button
-                                              disabled={!shiftTarget || shiftTarget === m.id || shiftPhaseMutation.isPending}
+                                              disabled={!shiftTarget || shiftTarget === m.milestone_id || shiftPhaseMutation.isPending}
                                               onClick={(e) => {
                                                 e.stopPropagation();
-                                                if (!shiftTarget || shiftTarget === m.id) return;
-                                                const targetMs = shiftTarget === 'unallocated' ? null : milestones.find((ph: any) => ph.id === shiftTarget);
+                                                if (!shiftTarget || shiftTarget === m.milestone_id) return;
+                                                const targetMs = shiftTarget === 'unallocated' ? null : milestones.find((ph: any) => ph.milestone_id === shiftTarget);
                                                 const toName = shiftTarget === 'unallocated' ? 'Unallocated' : (targetMs?.name || shiftTarget);
                                                 setExitingAllocIds(prev => new Set([...prev, alloc.allocation_id]));
                                                 setTimeout(() => {
@@ -1199,7 +1199,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                                                     amount: Number(alloc.allocated_amount),
                                                     fromName: m.name,
                                                     toName,
-                                                    fromId: m.id,
+                                                    fromId: m.milestone_id,
                                                   });
                                                 }, 200);
                                                 setShiftPopover(null);
@@ -1298,13 +1298,13 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                             <p className="text-[11px] font-bold text-on-surface-variant mb-2">Assign to a phase</p>
                             <div className="space-y-0.5 mb-3 max-h-48 overflow-y-auto">
                               {milestones.map((ph: any) => (
-                                <label key={ph.id} className="flex items-center gap-2 py-1.5 px-2 rounded-lg cursor-pointer hover:bg-surface-container-low">
+                                <label key={ph.milestone_id} className="flex items-center gap-2 py-1.5 px-2 rounded-lg cursor-pointer hover:bg-surface-container-low">
                                   <input
                                     type="radio"
                                     name={`shift-unalloc-${alloc.allocation_id}`}
-                                    value={ph.id}
-                                    checked={shiftTarget === ph.id}
-                                    onChange={() => setShiftTarget(ph.id)}
+                                    value={ph.milestone_id}
+                                    checked={shiftTarget === ph.milestone_id}
+                                    onChange={() => setShiftTarget(ph.milestone_id)}
                                     className="accent-primary shrink-0"
                                   />
                                   <span className="text-[12px] text-on-surface leading-tight">{ph.name}</span>
@@ -1316,7 +1316,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                                 disabled={!shiftTarget || shiftTarget === 'unallocated' || shiftPhaseMutation.isPending}
                                 onClick={() => {
                                   if (!shiftTarget || shiftTarget === 'unallocated') return;
-                                  const targetMs = milestones.find((ph: any) => ph.id === shiftTarget);
+                                  const targetMs = milestones.find((ph: any) => ph.milestone_id === shiftTarget);
                                   const toName = targetMs?.name || shiftTarget;
                                   setExitingAllocIds(prev => new Set([...prev, alloc.allocation_id]));
                                   setTimeout(() => {
@@ -1659,7 +1659,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
             <div className="grid grid-cols-2 gap-3 my-4">
               <div className="bg-surface-container-low rounded-lg p-3">
                 <p className="text-[10px] font-bold text-on-surface-variant uppercase">Planned</p>
-                <p className="font-data-mono font-bold text-body-sm mt-0.5">₹{Number(releaseModal.milestone.amount).toLocaleString()}</p>
+                <p className="font-data-mono font-bold text-body-sm mt-0.5">₹{Number(releaseModal.milestone.planned_amount).toLocaleString()}</p>
               </div>
               <div className="bg-surface-container-low rounded-lg p-3">
                 <p className="text-[10px] font-bold text-on-surface-variant uppercase">Remaining</p>

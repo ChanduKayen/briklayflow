@@ -176,9 +176,9 @@ export default function TransactionDetail({ session }: { session: Session }) {
     setPhasesLoading(true);
     supabase
       .from('wo_milestones')
-      .select('id, name, amount, status, due_date')
+      .select('milestone_id, name, planned_amount, status')
       .eq('wo_id', selectedWoId)
-      .order('created_at', { ascending: true })
+      .order('seq_no', { ascending: true })
       .then(({ data, error }) => {
         setPhasesLoading(false);
         setAvailablePhases(!error && data ? data : []);
@@ -494,7 +494,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
               const relWOs = stkType === 'Worker' ? (workerWOs?.filter((wo) => wo.project_id === a.project_id) ?? []) : [];
               const relPOs = stkType === 'Vendor' ? purchaseOrders?.filter((p) => p.stakeholder_id === txn.stakeholder_id && p.project_id === a.project_id) : [];
               const milestoneName = a.milestone_id
-                ? (milestones?.find((m: any) => m.id === a.milestone_id)?.name ?? null)
+                ? (milestones?.find((m: any) => m.milestone_id === a.milestone_id)?.name ?? null)
                 : null;
               return (
                 <div key={a.allocation_id}>
@@ -548,7 +548,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
                           <select value={mapRef} onChange={(e) => setMapRef(e.target.value)} className="bk-input py-1.5 text-body-sm flex-1" disabled={phasesLoading}>
                             <option value="">{phasesLoading ? 'Loading...' : 'Select phase...'}</option>
                             {availablePhases.map((m: any) => (
-                              <option key={m.id} value={m.id}>{m.name} (₹{Number(m.amount).toLocaleString('en-IN')})</option>
+                              <option key={m.milestone_id} value={m.milestone_id}>{m.name} (₹{Number(m.planned_amount).toLocaleString('en-IN')})</option>
                             ))}
                           </select>
                         )}
@@ -672,8 +672,8 @@ export default function TransactionDetail({ session }: { session: Session }) {
                     </div>
                     <div className="divide-y divide-outline-variant/10 max-h-64 overflow-y-auto">
                       {stkType === 'Worker' && allRelMS.map((m: any) => (
-                        <button key={m.id}
-                          onClick={() => { const unlinked = unlinkedAllocs[0]; if (unlinked) updateAlloc.mutate({ allocId: unlinked.allocation_id, order_type: 'WO', order_ref: m.wo_id, milestone_id: m.id }); setShowMapPanel(false); }}
+                        <button key={m.milestone_id}
+                          onClick={() => { const unlinked = unlinkedAllocs[0]; if (unlinked) updateAlloc.mutate({ allocId: unlinked.allocation_id, order_type: 'WO', order_ref: m.wo_id, milestone_id: m.milestone_id }); setShowMapPanel(false); }}
                           className="w-full flex items-center gap-4 px-4 py-3 text-left hover:bg-primary/5 transition-colors group">
                           <div className="w-9 h-9 rounded-full bg-secondary-container/30 flex items-center justify-center shrink-0 group-hover:bg-secondary-container/60 transition-colors">
                             <span className="material-symbols-outlined text-[18px] text-secondary">assignment</span>
@@ -683,7 +683,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
                             <p className="text-[10px] text-on-surface-variant font-data-mono">{m.wo_id} · {m.work_orders?.scope_of_work?.substring(0, 40) || 'No scope'}</p>
                           </div>
                           <div className="text-right shrink-0">
-                            <p className="font-data-mono font-bold text-body-sm text-on-surface">₹{Number(m.amount).toLocaleString()}</p>
+                            <p className="font-data-mono font-bold text-body-sm text-on-surface">₹{Number(m.planned_amount).toLocaleString()}</p>
                             <p className={`text-[10px] font-bold ${m.status === 'Completed' ? 'text-secondary' : 'text-on-surface-variant'}`}>{m.status}</p>
                           </div>
                           <span className="material-symbols-outlined text-[18px] text-primary opacity-0 group-hover:opacity-100 transition-opacity">arrow_forward</span>
@@ -738,7 +738,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
                 const relWOs2 = stkType === 'Worker' ? (workerWOs?.filter((wo) => wo.project_id === a.project_id) ?? []) : [];
                 const relPOs = stkType === 'Vendor' ? purchaseOrders?.filter((p) => p.stakeholder_id === txn.stakeholder_id && p.project_id === a.project_id) : [];
                 const milestoneName = a.milestone_id
-                  ? (milestones?.find((m: any) => m.id === a.milestone_id)?.name ?? null)
+                  ? (milestones?.find((m: any) => m.milestone_id === a.milestone_id)?.name ?? null)
                   : null;
                 return (
                   <tr key={a.allocation_id} className={`border-b border-outline-variant/10 transition-colors ${isUnlinked ? 'bg-tertiary-container/5' : 'hover:bg-surface-container-lowest'}`}>
@@ -774,7 +774,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
                               <select value={mapRef} onChange={(e) => setMapRef(e.target.value)} className="bk-input py-1.5 text-body-sm flex-1" disabled={phasesLoading}>
                                 <option value="">{phasesLoading ? 'Loading...' : 'Select phase...'}</option>
                                 {availablePhases.map((m: any) => (
-                                  <option key={m.id} value={m.id}>{m.name} (₹{Number(m.amount).toLocaleString('en-IN')})</option>
+                                  <option key={m.milestone_id} value={m.milestone_id}>{m.name} (₹{Number(m.planned_amount).toLocaleString('en-IN')})</option>
                                 ))}
                               </select>
                             )}

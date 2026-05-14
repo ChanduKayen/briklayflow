@@ -80,7 +80,7 @@ export interface WOMilestone {
   seq_no: number;
   name: string;
   description?: string;
-  trigger_condition: string;
+  trigger_condition?: string;
   planned_amount: number;
   status: MilestoneStatus;
   ai_extracted: boolean;

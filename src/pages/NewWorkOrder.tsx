@@ -17,7 +17,6 @@ interface StageDraft {
   quantity: number | null;
   rate: number | null;
   amount: number | null;   // directly-entered lumpsum; null means computed from qty×rate
-  trigger_condition: string;
   ambiguous?: boolean;     // amber border flag for AI-extracted stages needing review
 }
 
@@ -147,6 +146,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
   const [isAiExtracted, setIsAiExtracted] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [showOneTimeDialog, setShowOneTimeDialog] = useState(false);
 
   // Auto-focus newly added stage name input
   useEffect(() => {
@@ -194,23 +194,28 @@ export default function NewWorkOrder({ session }: { session: Session }) {
         source, status: 'Draft' as const,
       }]).select().single();
       if (woError) throw woError;
-      if (stages.length > 0) {
-        const rows = stages.map((s, idx) => {
-          const mode = getMode(s);
-          return {
-            wo_id: woId, seq_no: idx + 1, name: s.name,
-            trigger_condition: s.trigger_condition || null,
-            unit_type: s.unit_type || null,
-            quantity: mode === 'measured' ? s.quantity : (mode === 'lumpsum' ? 1 : null),
-            rate: mode === 'measured' ? s.rate : null,
-            planned_amount: calcAmount(s),
+      const milestoneRows = stages.length > 0
+        ? stages.map((s, idx) => {
+            const mode = getMode(s);
+            return {
+              wo_id: woId, seq_no: idx + 1, name: s.name,
+              unit_type: s.unit_type || null,
+              quantity: mode === 'measured' ? s.quantity : (mode === 'lumpsum' ? 1 : null),
+              rate: mode === 'measured' ? s.rate : null,
+              planned_amount: calcAmount(s),
+              status: 'Pending' as const,
+              ai_extracted: isAiExtracted,
+            };
+          })
+        : [{
+            wo_id: woId, seq_no: 1, name: 'Full Payment',
+            unit_type: 'LS', quantity: 1, rate: null,
+            planned_amount: orderValue,
             status: 'Pending' as const,
-            ai_extracted: isAiExtracted,
-          };
-        });
-        const { error: mError } = await supabase.from('wo_milestones').insert(rows);
-        if (mError) throw mError;
-      }
+            ai_extracted: false,
+          }];
+      const { error: mError } = await supabase.from('wo_milestones').insert(milestoneRows);
+      if (mError) throw mError;
       return woData;
     },
     onSuccess: () => {
@@ -223,7 +228,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
 
   const addStage = () => {
     const id = Math.random().toString();
-    setStages(prev => [...prev, { id, name: '', unit_type: '', quantity: null, rate: null, amount: null, trigger_condition: '' }]);
+    setStages(prev => [...prev, { id, name: '', unit_type: '', quantity: null, rate: null, amount: null }]);
     setNewStageId(id);
   };
 
@@ -251,7 +256,6 @@ export default function NewWorkOrder({ session }: { session: Session }) {
       quantity: es.mode === 'measured' ? es.qty : null,
       rate: es.mode === 'measured' ? es.rate : null,
       amount: es.mode === 'measured' ? null : resolvedAmount,
-      trigger_condition: '',
       ambiguous: es.mode === 'ambiguous',
     };
     setStages(prev => [...prev, newStage]);
@@ -268,7 +272,6 @@ export default function NewWorkOrder({ session }: { session: Session }) {
         quantity: es.mode === 'measured' ? es.qty : null,
         rate: es.mode === 'measured' ? es.rate : null,
         amount: es.mode === 'measured' ? null : es.amount,
-        trigger_condition: '',
         ambiguous: es.mode === 'ambiguous',
       }));
     setStages(prev => [...prev, ...newStages]);
@@ -458,7 +461,7 @@ Return ONLY this JSON object, no other text:
         {/* ── Left: Form ─────────────────────────────────────────────── */}
         <form
           id="wo-new-form"
-          onSubmit={e => { e.preventDefault(); createWO.mutate(); }}
+          onSubmit={e => { e.preventDefault(); if (stages.length === 0) { setShowOneTimeDialog(true); } else { createWO.mutate(); } }}
           className="flex-1 min-w-0 space-y-10"
         >
 
@@ -628,7 +631,7 @@ Return ONLY this JSON object, no other text:
                 </div>
 
                 {/* Stage rows */}
-                {stages.map((s, idx) => {
+                {stages.map((s) => {
                   const mode    = getMode(s);
                   const isLS    = s.unit_type === 'LS';
                   const amount  = calcAmount(s);
@@ -759,24 +762,6 @@ Return ONLY this JSON object, no other text:
                         </span>
                       </div>
 
-                      {/* Due Date */}
-                      <div className="flex flex-col gap-0.5 w-full sm:w-auto">
-                        <label className="sm:hidden text-[10px] font-bold text-on-surface-variant">DUE DATE</label>
-                        <input
-                          type="date"
-                          value={s.trigger_condition}
-                          onChange={e => updateStage(s.id, 'trigger_condition', e.target.value)}
-                          onKeyDown={e => {
-                            if (e.key === 'Tab' && !e.shiftKey && idx === stages.length - 1) {
-                              e.preventDefault();
-                              addStage();
-                            }
-                          }}
-                          className="h-9 w-full px-2 text-[13px] border border-black/10 rounded-md focus:outline-none focus:border-primary/40 bg-transparent"
-                        />
-                        <span className="h-3" />
-                      </div>
-
                       {/* Delete */}
                       <div className="flex sm:flex-col items-start sm:items-center gap-0.5">
                         <label className="sm:hidden text-[10px] font-bold text-on-surface-variant opacity-0 select-none">×</label>
@@ -902,6 +887,42 @@ Return ONLY this JSON object, no other text:
             : <><span className="material-symbols-outlined text-[18px]">save</span> Save as Draft</>}
         </button>
       </div>
+
+      {/* ── One-time job confirmation dialog ──────────────────────────── */}
+      {showOneTimeDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4">
+          <div className="bg-surface rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <span className="material-symbols-outlined text-[28px] text-amber-500 shrink-0">info</span>
+              <div>
+                <h3 className="text-title-md font-semibold text-on-surface">One-Time Job?</h3>
+                <p className="text-body-sm text-on-surface-variant mt-1">
+                  No work stages have been added. Is this a one-shot job? A single <strong>Full Payment</strong> milestone will be created for the full order value.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2 pt-1">
+              <button
+                className="bk-btn w-full py-2.5 rounded-xl text-body-sm font-semibold"
+                onClick={() => { setShowOneTimeDialog(false); createWO.mutate(); }}
+              >
+                Yes, it's a one-time job
+              </button>
+              <button
+                className="bk-btn-ghost w-full py-2.5 rounded-xl border border-outline-variant/40 text-body-sm font-semibold"
+                onClick={() => {
+                  setShowOneTimeDialog(false);
+                  const id = Math.random().toString();
+                  setStages([{ id, name: '', unit_type: '', quantity: null, rate: null, amount: null }]);
+                  setNewStageId(id);
+                }}
+              >
+                Add milestones
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
