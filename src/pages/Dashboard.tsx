@@ -480,6 +480,45 @@ export default function Dashboard({ session }: { session: Session }) {
           )}
         </div>
       </section>
+
+      <CommandBarFirstTimeHint />
+    </div>
+  );
+}
+
+// ── First-time command bar hint ────────────────────────────────────────────────
+
+const HINT_KEY = 'bk_cmdbar_hint_seen';
+
+function CommandBarFirstTimeHint() {
+  const [phase, setPhase] = useState<'hidden' | 'entering' | 'visible' | 'leaving'>('hidden');
+
+  useEffect(() => {
+    if (localStorage.getItem(HINT_KEY)) return;
+
+    const showTimer = setTimeout(() => {
+      setPhase('entering');
+      setTimeout(() => setPhase('visible'), 300);
+    }, 2000);
+
+    const hideTimer = setTimeout(() => {
+      setPhase('leaving');
+      setTimeout(() => {
+        setPhase('hidden');
+        localStorage.setItem(HINT_KEY, '1');
+      }, 300);
+    }, 6000);
+
+    return () => { clearTimeout(showTimer); clearTimeout(hideTimer); };
+  }, []);
+
+  if (phase === 'hidden') return null;
+
+  return (
+    <div
+      className={`cmdbar-hint ${phase === 'entering' || phase === 'visible' ? 'entering' : 'leaving'}`}
+    >
+      Press <strong style={{ color: 'rgba(255,255,255,0.88)', margin: '0 3px' }}>Space</strong> to search and act quickly
     </div>
   );
 }

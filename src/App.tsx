@@ -8,6 +8,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { Project, UserProfile } from './types';
 import { SnackbarProvider, useSnackbar } from './components/Snackbar';
 import { PeekProvider } from './context/PeekContext';
+import { CommandBarProvider, useCommandBar } from './context/CommandBarContext';
+import { CommandBar } from './components/CommandBar';
 import { LinearProgress } from './components/LinearProgress';
 import {
   IconLayoutDashboard, IconArrowsExchange,
@@ -81,6 +83,7 @@ function App() {
   return (
     <SnackbarProvider>
     <PeekProvider>
+    <CommandBarProvider>
     <div className="bg-background text-on-surface min-h-screen">
       <Sidebar
         session={session}
@@ -148,6 +151,12 @@ function App() {
         onClose={() => setShowMoreSheet(false)}
       />
     </div>
+
+    {/* Command bar — rendered outside the scroll container, above everything */}
+    <CommandBar />
+    <SpaceKeyListener />
+
+    </CommandBarProvider>
     </PeekProvider>
     </SnackbarProvider>
   );
@@ -481,6 +490,27 @@ function SidebarContent({
 
     </div>
   );
+}
+
+// ── Space key listener ─────────────────────────────────────────────────────────
+
+function SpaceKeyListener() {
+  const { isOpen, open } = useCommandBar();
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== ' ' && !(e.key === 'k' && (e.metaKey || e.ctrlKey))) return;
+      const target = e.target as HTMLElement;
+      const tag = target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (target.isContentEditable) return;
+      if (isOpen) return;
+      e.preventDefault();
+      open();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isOpen, open]);
+  return null;
 }
 
 // ── Sidebar shell ──────────────────────────────────────────────────────────────
