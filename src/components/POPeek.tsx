@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { Loader2 } from 'lucide-react';
 import { PeekModal } from './PeekModal';
 import type { POLineItem } from '../types';
+import { usePeek } from '../context/PeekContext';
 
 function fmtDate(d: string | null | undefined) {
   if (!d) return '—';
@@ -36,6 +37,7 @@ interface POPeekProps {
 }
 
 export function POPeek({ poId, onClose }: POPeekProps) {
+  const { openPeek } = usePeek();
   const { data: po, isLoading } = useQuery({
     queryKey: ['po_peek', poId],
     queryFn: async () => {
@@ -189,13 +191,14 @@ export function POPeek({ poId, onClose }: POPeekProps) {
               <p className="text-[10px] font-semibold tracking-wider text-on-surface-variant uppercase mb-2">Payments</p>
               <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
                 {linkedTxns.map((a: any, i: number) => (
-                  <div
+                  <button
                     key={a.allocation_id}
-                    className={`flex items-center justify-between px-3 py-2.5 text-[12px] group ${i > 0 ? 'border-t border-outline-variant/10' : ''}`}
+                    onClick={() => a.transactions?.txn_id && openPeek('TRANSACTION', a.transactions.txn_id)}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-surface-container-low transition-colors group ${i > 0 ? 'border-t border-outline-variant/10' : ''}`}
                   >
                     <div>
                       <p className="text-[13px] font-medium text-on-surface">
-                        {a.transactions?.category || a.transactions?.payment_mode || '—'}
+                        {a.transactions?.payment_mode || a.transactions?.category || fmtDate(a.transactions?.date)}
                       </p>
                       <p className="text-on-surface-variant text-[10px]">{fmtDate(a.transactions?.date)}</p>
                       <p className="text-[10px] font-mono text-on-surface-variant/30 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -203,7 +206,7 @@ export function POPeek({ poId, onClose }: POPeekProps) {
                       </p>
                     </div>
                     <span className="font-data-mono font-semibold text-on-surface">{fmtRupee(Number(a.allocated_amount) || 0)}</span>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>

@@ -99,7 +99,7 @@ export function StakeholderPeek({ stakeholderId, onClose }: StakeholderPeekProps
                   >
                     <div>
                       <p className="text-[13px] font-medium text-on-surface">
-                        {t.category || t.payment_mode || 'Payment'}
+                        {t.payment_mode || t.category || fmtDate(t.date)}
                       </p>
                       <p className="text-[11px] text-on-surface-variant">{fmtDate(t.date)}</p>
                       <p className="text-[10px] font-mono text-on-surface-variant/30 opacity-0 group-hover:opacity-100 transition-opacity">
