@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { Loader2 } from 'lucide-react';
-import type { Stakeholder, Project, PurchaseOrder } from '../types';
+import type { Stakeholder, Project } from '../types';
 import type { Session } from '@supabase/supabase-js';
 import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 import { useSnackbar } from '../components/Snackbar';
@@ -34,6 +34,267 @@ function SectionLabel({ n, title }: { n: string; title: string }) {
       <span className="text-[10px] font-bold text-on-surface-variant/40 tabular-nums">{n}</span>
       <span className="h-px flex-1 bg-outline-variant/20" />
       <span className="text-[10px] font-semibold text-on-surface-variant/50 uppercase tracking-[0.1em]">{title}</span>
+    </div>
+  );
+}
+
+// ── Obligation types + balance helpers ───────────────────────────────────────
+
+interface SelectedObligation {
+  type: 'WO_PHASE' | 'WO' | 'PO';
+  wo_id?: string;
+  phase_id?: string;
+  po_id?: string;
+  label: string;
+  balance: number;
+}
+
+function getWOBalance(wo: any): number { return Number(wo.order_value || 0); }
+function getPhaseBalance(phase: any): number { return Number(phase.planned_amount || 0); }
+function getPOBalance(po: any): number { return Number(po.vendor_bill_amount || po.total_value || 0); }
+
+// ── NoObligationsState ────────────────────────────────────────────────────────
+
+function NoObligationsState({ projectId, onSkip }: { projectId: string; onSkip: () => void }) {
+  const nav = useNavigate();
+  return (
+    <div className="mt-3 rounded-xl border border-dashed border-outline-variant/30 p-6 text-center">
+      <span className="material-symbols-outlined text-[32px] text-on-surface-variant/20 mb-2 block">link_off</span>
+      <p className="text-[14px] font-medium text-on-surface mb-1">No open WOs or POs</p>
+      <p className="text-[12px] text-on-surface-variant/50 mb-4">Create one to link this payment, or record without linking.</p>
+      <div className="flex gap-2 justify-center flex-wrap">
+        <button type="button" onClick={() => nav(`/work-orders/new?project=${projectId}`)}
+          className="px-4 py-2 rounded-lg border border-outline-variant/30 text-[13px] font-medium text-on-surface hover:bg-surface-container transition-colors">
+          + Work Order
+        </button>
+        <button type="button" onClick={() => nav(`/purchase-orders/new?project=${projectId}`)}
+          className="px-4 py-2 rounded-lg border border-outline-variant/30 text-[13px] font-medium text-on-surface hover:bg-surface-container transition-colors">
+          + Purchase Order
+        </button>
+        <button type="button" onClick={onSkip}
+          className="px-4 py-2 rounded-lg text-[13px] text-on-surface-variant/50 hover:text-on-surface transition-colors">
+          Record without linking
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── WOObligationRow ───────────────────────────────────────────────────────────
+
+function WOObligationRow({ wo, selectedObligation, expanded, onToggleExpand, onSelect }: {
+  wo: any; selectedObligation: SelectedObligation | null;
+  expanded: boolean; onToggleExpand: () => void;
+  onSelect: (ob: SelectedObligation) => void;
+}) {
+  const hasPhases = (wo.wo_milestones?.length || 0) > 0;
+  const woBalance = getWOBalance(wo);
+  const isSelected = selectedObligation?.wo_id === wo.wo_id && !selectedObligation?.phase_id;
+
+  return (
+    <div className={isSelected ? 'bg-[rgba(200,96,58,0.04)]' : ''}>
+      <div
+        className="px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-black/[0.02] transition-colors"
+        onClick={hasPhases ? onToggleExpand : () => onSelect({
+          type: 'WO', wo_id: wo.wo_id,
+          label: `${wo.wo_id} · ${wo.stakeholders?.name || ''}`,
+          balance: woBalance,
+        })}
+      >
+        <div className="w-5 shrink-0 flex items-center justify-center">
+          {hasPhases ? (
+            <span className="material-symbols-outlined text-[16px] text-on-surface-variant/40">
+              {expanded ? 'expand_more' : 'chevron_right'}
+            </span>
+          ) : isSelected ? (
+            <div className="w-4 h-4 rounded-full bg-[#C8603A] flex items-center justify-center">
+              <span className="material-symbols-outlined text-white text-[10px]" style={{ fontVariationSettings: "'FILL' 1" }}>check</span>
+            </div>
+          ) : (
+            <div className="w-4 h-4 rounded-full border-2 border-outline-variant/40" />
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="text-[13px] font-medium text-on-surface truncate">{wo.stakeholders?.name || 'Unknown'}</p>
+            <span className="font-data-mono text-[10px] text-on-surface-variant/40 shrink-0">{wo.wo_id}</span>
+          </div>
+          {wo.scope_of_work && (
+            <p className="text-[11px] text-on-surface-variant/50 truncate mt-0.5">{(wo.scope_of_work as string).slice(0, 60)}</p>
+          )}
+        </div>
+        <div className="text-right shrink-0">
+          <p className={`text-[13px] font-medium font-data-mono ${woBalance > 0 ? 'text-on-surface' : 'text-on-surface-variant/40'}`}>
+            {woBalance > 0 ? `₹${woBalance.toLocaleString('en-IN')}` : 'Settled'}
+          </p>
+          {hasPhases && <p className="text-[10px] text-on-surface-variant/40">{wo.wo_milestones.length} phases</p>}
+        </div>
+      </div>
+
+      {hasPhases && expanded && (
+        <div className="border-t border-black/[0.04] bg-black/[0.01]">
+          {wo.wo_milestones.map((phase: any) => {
+            const balance = getPhaseBalance(phase);
+            const isPhaseSelected = selectedObligation?.phase_id === phase.milestone_id;
+            const settled = phase.status === 'PAID' || phase.status === 'Paid';
+            return (
+              <div key={phase.milestone_id}
+                className={`pl-9 pr-4 py-3 flex items-center gap-3 border-b border-black/[0.03] last:border-0 transition-colors
+                  ${settled ? 'opacity-50 cursor-not-allowed' : isPhaseSelected ? 'bg-[rgba(200,96,58,0.06)] cursor-pointer' : 'cursor-pointer hover:bg-black/[0.02]'}`}
+                onClick={() => {
+                  if (settled) return;
+                  onSelect({ type: 'WO_PHASE', wo_id: wo.wo_id, phase_id: phase.milestone_id, label: `${phase.name} · ${wo.wo_id}`, balance });
+                }}
+              >
+                <div className="w-4 shrink-0 flex items-center justify-center">
+                  {isPhaseSelected ? (
+                    <div className="w-4 h-4 rounded-full bg-[#C8603A] flex items-center justify-center">
+                      <span className="material-symbols-outlined text-white text-[10px]" style={{ fontVariationSettings: "'FILL' 1" }}>check</span>
+                    </div>
+                  ) : (
+                    <div className="w-4 h-4 rounded-full border-2 border-outline-variant/40" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[13px] font-medium text-on-surface">{phase.name}</p>
+                  {phase.qty && phase.unit_type && (
+                    <p className="text-[10px] text-on-surface-variant/40 mt-0.5">
+                      {phase.qty} {phase.unit_type}{phase.rate ? ` × ₹${Number(phase.rate).toLocaleString('en-IN')}` : ''}
+                    </p>
+                  )}
+                </div>
+                <div className="text-right shrink-0 ml-3">
+                  <p className="text-[13px] font-medium font-data-mono text-on-surface">₹{balance.toLocaleString('en-IN')}</p>
+                  {settled
+                    ? <p className="text-[10px] text-[#16A34A] font-medium">Settled ✓</p>
+                    : <p className="text-[10px] text-[#C8603A] font-medium">due</p>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── POObligationRow ───────────────────────────────────────────────────────────
+
+function POObligationRow({ po, selectedObligation, onSelect }: {
+  po: any; selectedObligation: SelectedObligation | null;
+  onSelect: (ob: SelectedObligation) => void;
+}) {
+  const balance = getPOBalance(po);
+  const isSelected = selectedObligation?.po_id === po.po_id;
+  return (
+    <div
+      className={`px-4 py-3 flex items-center gap-3 transition-colors
+        ${balance <= 0 ? 'opacity-50 cursor-not-allowed' : isSelected ? 'bg-[rgba(200,96,58,0.06)] cursor-pointer' : 'cursor-pointer hover:bg-black/[0.02]'}`}
+      onClick={() => {
+        if (balance <= 0) return;
+        onSelect({ type: 'PO', po_id: po.po_id, label: `${po.po_id} · ${po.stakeholders?.name || ''}`, balance });
+      }}
+    >
+      <div className="w-5 shrink-0 flex items-center justify-center">
+        {isSelected ? (
+          <div className="w-4 h-4 rounded-full bg-[#C8603A] flex items-center justify-center">
+            <span className="material-symbols-outlined text-white text-[10px]" style={{ fontVariationSettings: "'FILL' 1" }}>check</span>
+          </div>
+        ) : (
+          <div className="w-4 h-4 rounded-full border-2 border-outline-variant/40" />
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <p className="text-[13px] font-medium text-on-surface">{po.stakeholders?.name || 'Unknown'}</p>
+          <span className="font-data-mono text-[10px] text-on-surface-variant/40 shrink-0">{po.po_id}</span>
+        </div>
+        {po.po_line_items?.[0] && (
+          <p className="text-[11px] text-on-surface-variant/50 truncate mt-0.5">
+            {po.po_line_items[0].description || po.po_line_items[0].item_name || ''}
+            {po.po_line_items.length > 1 && ` +${po.po_line_items.length - 1} more`}
+          </p>
+        )}
+      </div>
+      <div className="text-right shrink-0 ml-3">
+        {balance > 0
+          ? <><p className="text-[13px] font-medium font-data-mono text-on-surface">₹{balance.toLocaleString('en-IN')}</p><p className="text-[10px] text-[#C8603A] font-medium">due</p></>
+          : <p className="text-[12px] text-[#16A34A] font-medium">Settled ✓</p>}
+      </div>
+    </div>
+  );
+}
+
+// ── LinkingPanel ──────────────────────────────────────────────────────────────
+
+function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip, projectId }: {
+  wos: any[]; pos: any[]; loading: boolean;
+  selectedObligation: SelectedObligation | null;
+  onSelect: (ob: SelectedObligation) => void;
+  onSkip: () => void; projectId: string;
+}) {
+  const [expandedWOs, setExpandedWOs] = useState<string[]>([]);
+  const hasData = wos.length > 0 || pos.length > 0;
+
+  if (loading) {
+    return (
+      <div className="mt-3 rounded-xl border border-outline-variant/20 p-4 space-y-3">
+        <div className="h-3 w-36 bg-surface-container-highest rounded animate-pulse" />
+        <div className="h-12 bg-surface-container-highest rounded-lg animate-pulse" />
+        <div className="h-12 bg-surface-container-highest rounded-lg animate-pulse" />
+      </div>
+    );
+  }
+
+  if (!hasData) return <NoObligationsState projectId={projectId} onSkip={onSkip} />;
+
+  return (
+    <div className="mt-3 rounded-xl border border-outline-variant/20 overflow-hidden">
+      <div className="px-4 py-2.5 bg-black/[0.02] border-b border-outline-variant/[0.08]">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/50">
+          Link to Work Order or Purchase Order
+        </p>
+        <p className="text-[11px] text-on-surface-variant/40 mt-0.5">Select what this payment is for</p>
+      </div>
+
+      <div className="divide-y divide-outline-variant/[0.06]">
+        {wos.length > 0 && (
+          <div>
+            <div className="px-4 py-1.5 bg-black/[0.01]">
+              <p className="text-[9px] font-bold uppercase tracking-wide text-on-surface-variant/40">
+                Work Orders ({wos.length})
+              </p>
+            </div>
+            {wos.map((wo: any) => (
+              <WOObligationRow key={wo.wo_id} wo={wo} selectedObligation={selectedObligation}
+                expanded={expandedWOs.includes(wo.wo_id)}
+                onToggleExpand={() => setExpandedWOs(prev =>
+                  prev.includes(wo.wo_id) ? prev.filter(id => id !== wo.wo_id) : [...prev, wo.wo_id]
+                )}
+                onSelect={onSelect} />
+            ))}
+          </div>
+        )}
+        {pos.length > 0 && (
+          <div>
+            <div className="px-4 py-1.5 bg-black/[0.01]">
+              <p className="text-[9px] font-bold uppercase tracking-wide text-on-surface-variant/40">
+                Purchase Orders ({pos.length})
+              </p>
+            </div>
+            {pos.map((po: any) => (
+              <POObligationRow key={po.po_id} po={po} selectedObligation={selectedObligation} onSelect={onSelect} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="px-4 py-2.5 border-t border-outline-variant/[0.08] bg-black/[0.01]">
+        <button type="button" onClick={onSkip}
+          className="text-[12px] text-on-surface-variant/40 hover:text-on-surface transition-colors hover:underline underline-offset-2">
+          Skip — record without linking
+        </button>
+      </div>
     </div>
   );
 }
@@ -77,6 +338,14 @@ export default function NewTransaction({ session: _session }: { session: Session
   } | null>(null);
   const [pendingSaveMode, setPendingSaveMode] = useState<'new' | 'exit' | null>(null);
 
+  // ── Obligation linking state ─────────────────────────────────────────────
+  const [selectedObligation, setSelectedObligation] = useState<SelectedObligation | null>(null);
+  const [skipped, setSkipped] = useState(false);
+  const [loadingObligations, setLoadingObligations] = useState(false);
+  const [projectWOs, setProjectWOs] = useState<any[]>([]);
+  const [projectPOs, setProjectPOs] = useState<any[]>([]);
+  const [amountTouched, setAmountTouched] = useState(false);
+
   // ── Client receipt smart suggestion state ────────────────────────────────
   const [dismissedReceiptSuggestion, setDismissedReceiptSuggestion] = useState(false);
   const [dismissedMilestoneSuggestion, setDismissedMilestoneSuggestion] = useState(false);
@@ -119,14 +388,34 @@ export default function NewTransaction({ session: _session }: { session: Session
     queryKey: ['projects'],
     queryFn: async () => { const { data } = await supabase.from('projects').select('*'); return data as Project[]; },
   });
-  const { data: purchaseOrders } = useQuery({
-    queryKey: ['purchase_orders'],
-    queryFn: async () => { const { data } = await supabase.from('purchase_orders').select('*'); return data as PurchaseOrder[]; },
-  });
-  const { data: milestones } = useQuery({
-    queryKey: ['milestones'],
-    queryFn: async () => { const { data } = await supabase.from('wo_milestones').select('*, work_orders(project_id, stakeholder_id, scope_of_work)'); return data as any[]; },
-  });
+  // Fetch WOs + POs when project changes (non-split, non-expense)
+  const selectedProjectId = !splitMode ? (allocs[0]?.project_id || '') : '';
+  useEffect(() => {
+    if (!selectedProjectId || txnType === 'expense' || txnType === 'client_receipt') {
+      setProjectWOs([]); setProjectPOs([]); setSelectedObligation(null); setSkipped(false);
+      return;
+    }
+    let cancelled = false;
+    setLoadingObligations(true);
+    setSelectedObligation(null); setSkipped(false);
+    Promise.all([
+      supabase
+        .from('work_orders')
+        .select('wo_id, scope_of_work, order_value, status, stakeholders(name, category), wo_milestones(milestone_id, name, planned_amount, status, unit_type, qty, rate)')
+        .eq('project_id', selectedProjectId)
+        .in('status', ['Active', 'Issued', 'Assigned'])
+        .order('date_issued', { ascending: false }),
+      supabase
+        .from('purchase_orders')
+        .select('po_id, status, vendor_bill_amount, total_value, stakeholders(name, category), po_line_items(description, item_name)')
+        .eq('project_id', selectedProjectId)
+        .in('status', ['ORDERED', 'BILLED', 'PARTIAL'])
+        .order('created_at', { ascending: false }),
+    ]).then(([{ data: wos }, { data: pos }]) => {
+      if (!cancelled) { setProjectWOs(wos || []); setProjectPOs(pos || []); setLoadingObligations(false); }
+    });
+    return () => { cancelled = true; };
+  }, [selectedProjectId, txnType]);
 
   // ── Derived ──────────────────────────────────────────────────────────────
   const tgtType = txnType === 'worker' ? 'Worker' : txnType === 'material' ? 'Vendor' : txnType === 'client_receipt' ? 'Client' : '';
@@ -197,10 +486,13 @@ export default function NewTransaction({ session: _session }: { session: Session
         if (isClientReceipt) {
           return { project_id: a.project_id, order_type: null, order_ref: null, milestone_id: null, allocated_amount: a.allocated_amount };
         }
-        let wo_id = null, po_id = null, m_id = null;
-        if (a.order_type === 'WO' && a.order_ref) { const ms = milestones?.find((m) => m.milestone_id === a.order_ref); wo_id = ms?.wo_id; m_id = a.order_ref; }
-        else if (a.order_type === 'PO' && a.order_ref) { po_id = a.order_ref; }
-        return { project_id: a.project_id, order_type: a.order_type || null, order_ref: wo_id || po_id || null, milestone_id: m_id || null, allocated_amount: a.allocated_amount };
+        let order_type: string | null = null, order_ref: string | null = null, milestone_id: string | null = null;
+        if (selectedObligation?.type === 'WO' || selectedObligation?.type === 'WO_PHASE') {
+          order_type = 'WO'; order_ref = selectedObligation.wo_id || null; milestone_id = selectedObligation.phase_id || null;
+        } else if (selectedObligation?.type === 'PO') {
+          order_type = 'PO'; order_ref = selectedObligation.po_id || null;
+        }
+        return { project_id: a.project_id, order_type, order_ref, milestone_id, allocated_amount: a.allocated_amount };
       });
       const { error } = await supabase.rpc('insert_transaction_with_allocations', { p_txn: payload, p_allocations: mapped });
       if (error) throw error;
@@ -222,6 +514,8 @@ export default function NewTransaction({ session: _session }: { session: Session
         setSaveAttempted(false); setSplitMode(false);
         setDate(new Date().toISOString().split('T')[0]);
         setAllocs([{ id: Math.random().toString(), project_id: keptProject, order_type: '', order_ref: '', allocated_amount: 0 }]);
+        setSelectedObligation(null); setSkipped(false); setAmountTouched(false);
+        setProjectWOs([]); setProjectPOs([]);
         setDismissedReceiptSuggestion(false);
         setDismissedMilestoneSuggestion(false);
         setReceiptDescription('');
@@ -290,14 +584,15 @@ export default function NewTransaction({ session: _session }: { session: Session
   const missingCategory = saveAttempted && !category && txnType !== 'client_receipt';
   const missingProject = saveAttempted && effectiveAllocs.some((a) => !a.project_id);
 
-  // ── Smart suggestion: completed milestone linked ──────────────────────────
+  // ── Smart suggestion: completed phase linked ─────────────────────────────
   const completedMilestoneLinked = !dismissedMilestoneSuggestion &&
     (txnType === 'worker' || txnType === 'material') &&
-    effectiveAllocs.some(a => {
-      if (!a.order_ref) return false;
-      const ms = milestones?.find(m => m.milestone_id === a.order_ref);
-      return ms?.status === 'Completed' || ms?.status === 'Approved';
-    });
+    selectedObligation?.type === 'WO_PHASE' &&
+    (() => {
+      const wo = projectWOs.find(w => w.wo_id === selectedObligation?.wo_id);
+      const phase = wo?.wo_milestones?.find((m: any) => m.milestone_id === selectedObligation?.phase_id);
+      return phase?.status === 'Completed' || phase?.status === 'Approved';
+    })();
 
 
   const handleRaiseBillFromReceiptNav = () => {
@@ -532,7 +827,7 @@ export default function NewTransaction({ session: _session }: { session: Session
                       <input
                         type="number" inputMode="decimal" step="0.01" min="0"
                         value={totalAmt || ''}
-                        onChange={(e) => setTotalAmt(parseFloat(e.target.value) || 0)}
+                        onChange={(e) => { setAmountTouched(true); setTotalAmt(parseFloat(e.target.value) || 0); }}
                         onFocus={(e) => e.target.select()}
                         className={`w-full pl-8 pr-2 py-2 text-[36px] font-bold font-data-mono bg-transparent border-b-2 outline-none transition-colors placeholder:text-on-surface-variant/20 ${
                           missingAmount ? 'border-error text-error' : 'border-outline-variant/30 text-on-surface focus:border-primary'
@@ -648,10 +943,6 @@ export default function NewTransaction({ session: _session }: { session: Session
               <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm overflow-hidden">
 
                 {effectiveAllocs.map((a, idx) => {
-                  const relPOs = txnType === 'material' ? purchaseOrders?.filter((p) => p.stakeholder_id === stkId && p.project_id === a.project_id) ?? [] : [];
-                  const relMS  = txnType === 'worker'   ? milestones?.filter((m) => m.work_orders?.stakeholder_id === stkId && m.work_orders?.project_id === a.project_id) ?? [] : [];
-                  const linkLabel = txnType === 'worker' ? 'Work Order Milestone' : 'Purchase Order';
-                  const isUnmapped = txnType !== 'expense' && !!a.project_id && !a.order_ref;
 
                   return (
                     <div key={a.id} className={`p-5 space-y-4 ${idx > 0 ? 'border-t border-black/[0.04]' : ''}`}>
@@ -684,61 +975,31 @@ export default function NewTransaction({ session: _session }: { session: Session
                         </select>
                       </div>
 
-                      {/* WO / PO linker — only for worker or material */}
-                      {txnType !== 'expense' && (
-                        <div>
-                          <div className="flex items-center justify-between mb-1.5">
-                            <label className="text-[11px] font-medium text-on-surface-variant/60">{linkLabel}</label>
-                            <span className="text-[10px] text-on-surface-variant/35 italic">optional</span>
-                          </div>
-
-                          {!a.project_id ? (
-                            <div className="bk-input bg-surface-container-low/40 text-on-surface-variant/30 text-[12px] cursor-default">
-                              Select a project first
-                            </div>
-                          ) : txnType === 'worker' && relMS.length > 0 ? (
-                            <select
-                              value={a.order_ref}
-                              onChange={(e) => upAlloc(a.id, { order_ref: e.target.value, order_type: e.target.value ? 'WO' : '' })}
-                              className="bk-input"
-                            >
-                              <option value="">Skip — link later</option>
-                              {relMS.map((m) => (
-                                <option key={m.milestone_id} value={m.milestone_id}>
-                                  {m.name} · ₹{Number(m.planned_amount)?.toLocaleString()}
-                                </option>
-                              ))}
-                            </select>
-                          ) : txnType === 'material' && relPOs.length > 0 ? (
-                            <select
-                              value={a.order_ref}
-                              onChange={(e) => upAlloc(a.id, { order_ref: e.target.value, order_type: e.target.value ? 'PO' : '' })}
-                              className="bk-input"
-                            >
-                              <option value="">Skip — link later</option>
-                              {relPOs.map((p) => (
-                                <option key={p.po_id} value={p.po_id}>
-                                  {p.po_id} · ₹{p.order_value?.toLocaleString()}
-                                </option>
-                              ))}
-                            </select>
-                          ) : (
-                            <div className="bk-input bg-surface-container-low/40 text-on-surface-variant/35 text-[12px] flex items-center gap-1.5 cursor-default">
-                              <span className="material-symbols-outlined text-[14px]">info</span>
-                              No {txnType === 'worker' ? 'Work Orders' : 'Purchase Orders'} found for this project
-                            </div>
-                          )}
-                        </div>
+                      {/* Linking Panel — replaces old WO/PO dropdowns */}
+                      {!splitMode && txnType !== 'expense' && a.project_id && !skipped && (
+                        <LinkingPanel
+                          wos={projectWOs}
+                          pos={projectPOs}
+                          loading={loadingObligations}
+                          selectedObligation={selectedObligation}
+                          onSelect={(ob) => {
+                            setSelectedObligation(ob);
+                            setSkipped(false);
+                            if (!amountTouched) setTotalAmt(ob.balance);
+                          }}
+                          onSkip={() => { setSelectedObligation(null); setSkipped(true); }}
+                          projectId={a.project_id}
+                        />
                       )}
 
-                      {/* Unmapped warning */}
-                      {isUnmapped && (
-                        <div className="flex items-center gap-2.5 px-3 py-2.5 bg-amber-50 border border-amber-200/60 rounded-xl">
-                          <span className="material-symbols-outlined text-amber-500 text-[15px] shrink-0">link_off</span>
-                          <p className="text-[11px] text-amber-700/80">
-                            Not linked to a {txnType === 'worker' ? 'Work Order' : 'PO'} — you can link it later from the transaction detail
-                          </p>
-                        </div>
+                      {/* Relink button shown after skip */}
+                      {!splitMode && txnType !== 'expense' && a.project_id && skipped && (
+                        <button type="button"
+                          onClick={() => { setSkipped(false); setSelectedObligation(null); }}
+                          className="flex items-center gap-1.5 text-[12px] text-on-surface-variant/50 hover:text-primary transition-colors">
+                          <span className="material-symbols-outlined text-[14px]">link</span>
+                          Link to a Work Order or PO
+                        </button>
                       )}
 
                       {/* Split amount */}
@@ -864,6 +1125,19 @@ export default function NewTransaction({ session: _session }: { session: Session
                 )}
               </label>
             </div>
+
+            {/* Unlinked warning */}
+            {saveAttempted && !selectedObligation && !skipped &&
+              (txnType === 'worker' || txnType === 'material') &&
+              allocs[0]?.project_id && (
+              <div className="flex items-start gap-3 px-4 py-3 bg-amber-50 border border-amber-200/60 rounded-xl">
+                <span className="material-symbols-outlined text-amber-500 text-[16px] shrink-0 mt-0.5">warning</span>
+                <div>
+                  <p className="text-[12px] font-medium text-amber-800">Not linked to a Work Order or Purchase Order</p>
+                  <p className="text-[11px] text-amber-700/70 mt-0.5">This payment won't appear in any WO or PO balance. That's fine for general expenses.</p>
+                </div>
+              </div>
+            )}
 
             {/* Error */}
             {createTxn.isError && (
