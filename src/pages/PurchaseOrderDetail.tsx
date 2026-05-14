@@ -60,6 +60,48 @@ function matchStatusBadge(match?: string | null): string {
   }
 }
 
+// ── Reconciliation types ──────────────────────────────────────────────────────
+
+interface ReconLineMatch {
+  po_line:      string;
+  bill_line:    string | null;
+  matched:      boolean;
+  flags:        string[];
+  flag_details: string;
+  po_qty:       number;
+  bill_qty:     number | null;
+  po_rate:      number;
+  bill_rate:    number | null;
+  po_amount:    number;
+  bill_amount:  number | null;
+}
+
+interface ReconGhostItem {
+  item:   string;
+  amount: number;
+}
+
+interface ReconResult {
+  summary:               string;
+  risk_level:            'LOW' | 'MEDIUM' | 'HIGH';
+  bill_total_extracted:  number | null;
+  line_matches:          ReconLineMatch[];
+  ghost_items:           ReconGhostItem[];
+  overall_flags:         string[];
+}
+
+const FLAG_LABEL: Record<string, string> = {
+  BRAND_STRIPPED:          'Brand Stripped',
+  GRADE_DOWNGRADE:         'Grade Downgrade',
+  QTY_INFLATION:           'Qty Inflation',
+  RATE_INCREASE:           'Rate Increase',
+  UNIT_MISMATCH:           'Unit Mismatch',
+  GHOST_ITEM:              'Ghost Item',
+  DUPLICATE_ITEM:          'Duplicate Item',
+  AMOUNT_ARITHMETIC_ERROR: 'Arithmetic Error',
+  HSN_MISMATCH:            'HSN Mismatch',
+};
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtDate(d: string | null | undefined): string {
@@ -127,6 +169,12 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const [showVendorBillForm,   setShowVendorBillForm]  = useState(false);
   const [showSettleModal,      setShowSettleModal]     = useState(false);
   const [showRecordPayment,    setShowRecordPayment]   = useState(false);
+
+  // AI reconciliation state
+  const [reconFile, setReconFile]     = useState<File | null>(null);
+  const [reconciling, setReconciling] = useState(false);
+  const [reconResult, setReconResult] = useState<ReconResult | null>(null);
+  const [reconError, setReconError]   = useState<string | null>(null);
 
   // Vendor bill inline-edit state (Feature 4)
   const [editingBillField, setEditingBillField] = useState<'bill_no' | 'bill_date' | 'bill_amount' | null>(null);
@@ -454,6 +502,56 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     },
     onError: (err: any) => showSnackbar(err.message || 'Failed to record payment', { type: 'error' }),
   });
+
+  // ── AI Reconciliation ─────────────────────────────────────────────────────
+
+  function fileToBase64Str(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string).split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function runReconciliation(file: File | null) {
+    if (!lineItems?.length) return;
+    setReconciling(true);
+    setReconError(null);
+    try {
+      const body: Record<string, any> = {
+        po_id:         poId,
+        po_line_items: lineItems.map(li => ({
+          item_name:       li.item_name,
+          specification:   li.specification,
+          quantity_ordered: li.quantity_ordered,
+          unit:            li.unit,
+          unit_rate:       li.unit_rate,
+          total_amount:    li.total_amount,
+          gst_rate:        li.gst_rate,
+        })),
+        bill_total: totalValue,
+      };
+
+      if (file) {
+        body.bill_base64   = await fileToBase64Str(file);
+        body.bill_mime_type = file.type || 'image/jpeg';
+      } else if (po?.vendor_bill_doc_url) {
+        body.bill_url = po.vendor_bill_doc_url;
+      } else {
+        throw new Error('No bill document available — upload the vendor bill image first');
+      }
+
+      const { data, error } = await supabase.functions.invoke('reconcile-po-bill', { body });
+      if (error) throw error;
+      if (!data?.ok) throw new Error(data?.error || 'Reconciliation failed');
+      setReconResult(data as ReconResult);
+    } catch (err: any) {
+      setReconError(err.message || 'Reconciliation failed');
+    } finally {
+      setReconciling(false);
+    }
+  }
 
   // ── PDF Download ───────────────────────────────────────────────────────────
 
@@ -1003,6 +1101,216 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
             )}
             {po.three_way_match === 'MISMATCHED' && (
               <p className="mt-3 text-[12px] font-semibold text-red-600">⚠ Mismatch — variance exceeds 2%. Update bill amount or dispute before payment.</p>
+            )}
+          </div>
+        )}
+
+        {/* AI RECONCILIATION */}
+        {lineItems && lineItems.length > 0 && (
+          <div className="detail-reveal mb-6" style={{ animationDelay: '155ms' }}>
+            <div className="flex items-center gap-2 mb-3">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">AI RECONCILIATION</p>
+              {reconResult && (
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                  reconResult.risk_level === 'HIGH'   ? 'bg-red-100 text-red-800' :
+                  reconResult.risk_level === 'MEDIUM' ? 'bg-amber-100 text-amber-800' :
+                  'bg-green-100 text-green-800'
+                }`}>{reconResult.risk_level} RISK</span>
+              )}
+            </div>
+
+            {/* Upload / run panel */}
+            {!reconResult && (
+              <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
+
+                {/* Quick-run from attached bill URL */}
+                {po.vendor_bill_doc_url && !reconFile && (
+                  <div className="px-4 py-3 bg-surface-container-low/40 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[12px] font-semibold text-on-surface">Use attached bill document</p>
+                      <p className="text-[11px] text-on-surface-variant/50">AI compares the uploaded bill against PO line items</p>
+                    </div>
+                    <button
+                      onClick={() => runReconciliation(null)}
+                      disabled={reconciling}
+                      className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold bg-primary text-on-primary rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                    >
+                      {reconciling ? (
+                        <><span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>Analyzing…</>
+                      ) : (
+                        <><span className="material-symbols-outlined text-[14px]">smart_toy</span>Run AI Check</>
+                      )}
+                    </button>
+                  </div>
+                )}
+
+                {/* Upload zone */}
+                <div className={`px-4 py-3 ${po.vendor_bill_doc_url && !reconFile ? 'border-t border-outline-variant/10' : ''}`}>
+                  <label className="flex items-center gap-3 cursor-pointer group">
+                    <span className="material-symbols-outlined text-[20px] text-on-surface-variant/40 group-hover:text-primary transition-colors">upload_file</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[12px] text-on-surface-variant group-hover:text-on-surface transition-colors truncate">
+                        {reconFile
+                          ? reconFile.name
+                          : po.vendor_bill_doc_url
+                            ? 'Or upload a different bill image'
+                            : 'Upload vendor bill/invoice image'
+                        }
+                      </p>
+                      {reconFile && <p className="text-[10px] text-on-surface-variant/50">{(reconFile.size / 1024).toFixed(0)} KB</p>}
+                    </div>
+                    {reconFile && (
+                      <button
+                        onClick={e => { e.preventDefault(); setReconFile(null); setReconError(null); }}
+                        className="shrink-0 text-on-surface-variant/40 hover:text-red-500 transition-colors"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">close</span>
+                      </button>
+                    )}
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept=".jpg,.jpeg,.png,.webp"
+                      onChange={e => { const f = e.target.files?.[0]; if (f) { setReconFile(f); setReconError(null); } e.target.value = ''; }}
+                    />
+                  </label>
+
+                  {reconFile && (
+                    <button
+                      onClick={() => runReconciliation(reconFile)}
+                      disabled={reconciling}
+                      className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-primary text-on-primary text-[12px] font-semibold hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                    >
+                      {reconciling ? (
+                        <><span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>Analyzing document…</>
+                      ) : (
+                        <><span className="material-symbols-outlined text-[14px]">smart_toy</span>Run AI Reconciliation</>
+                      )}
+                    </button>
+                  )}
+                </div>
+
+                {reconError && (
+                  <div className="px-4 py-2.5 bg-red-50 border-t border-red-100">
+                    <p className="text-[12px] text-red-700">{reconError}</p>
+                  </div>
+                )}
+
+                <div className="px-4 py-2.5 border-t border-outline-variant/[0.06] bg-surface-container-low/20">
+                  <p className="text-[10px] text-on-surface-variant/40">
+                    Checks for grade downgrades, qty inflation, rate increases, ghost items &amp; arithmetic errors · JPG / PNG
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Results panel */}
+            {reconResult && (
+              <div className="space-y-3">
+
+                {/* Summary banner */}
+                <div className={`px-4 py-3 rounded-xl border ${
+                  reconResult.risk_level === 'HIGH'   ? 'bg-red-50 border-red-200/60' :
+                  reconResult.risk_level === 'MEDIUM' ? 'bg-amber-50 border-amber-200/60' :
+                  'bg-green-50 border-green-200/60'
+                }`}>
+                  <p className={`text-[13px] font-semibold ${
+                    reconResult.risk_level === 'HIGH'   ? 'text-red-800' :
+                    reconResult.risk_level === 'MEDIUM' ? 'text-amber-800' :
+                    'text-green-800'
+                  }`}>{reconResult.summary}</p>
+                  {reconResult.bill_total_extracted != null && (
+                    <p className="text-[11px] mt-1 text-on-surface-variant/60">
+                      Bill total: <span className="font-data-mono font-semibold text-on-surface">₹{reconResult.bill_total_extracted.toLocaleString('en-IN')}</span>
+                      {Math.abs(reconResult.bill_total_extracted - totalValue) > 100 && (
+                        <span className={`ml-2 font-semibold ${reconResult.bill_total_extracted > totalValue ? 'text-red-600' : 'text-green-600'}`}>
+                          ({reconResult.bill_total_extracted > totalValue ? '+' : ''}₹{Math.abs(reconResult.bill_total_extracted - totalValue).toLocaleString('en-IN')} vs PO)
+                        </span>
+                      )}
+                    </p>
+                  )}
+                  {reconResult.overall_flags.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {reconResult.overall_flags.map(f => (
+                        <span key={f} className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                          reconResult.risk_level === 'HIGH' ? 'bg-red-200/60 text-red-900' : 'bg-amber-200/60 text-amber-900'
+                        }`}>{FLAG_LABEL[f] ?? f}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Line-by-line breakdown */}
+                {reconResult.line_matches.length > 0 && (
+                  <div className="rounded-xl border border-outline-variant/20 overflow-hidden divide-y divide-outline-variant/[0.08]">
+                    {reconResult.line_matches.map((m, i) => (
+                      <div key={i} className={`px-3 py-2.5 ${m.flags.length > 0 ? 'bg-amber-50/40' : ''}`}>
+                        <div className="flex items-start gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {m.matched
+                                ? <span className="text-[9px] font-bold text-green-600">✓</span>
+                                : <span className="text-[9px] font-bold text-red-500">✕</span>
+                              }
+                              <p className="text-[12px] font-semibold text-on-surface">{m.po_line}</p>
+                              {m.flags.map(f => (
+                                <span key={f} className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                                  {FLAG_LABEL[f] ?? f}
+                                </span>
+                              ))}
+                            </div>
+                            {m.flag_details && m.flags.length > 0 && (
+                              <p className="text-[11px] text-amber-700 mt-0.5 leading-snug">{m.flag_details}</p>
+                            )}
+                            {m.bill_line && m.bill_line !== m.po_line && (
+                              <p className="text-[10px] text-on-surface-variant/50 mt-0.5">Bill: "{m.bill_line}"</p>
+                            )}
+                            {!m.matched && (
+                              <p className="text-[10px] text-red-500 font-semibold mt-0.5">Not found in bill</p>
+                            )}
+                          </div>
+                          <div className="text-right shrink-0 text-[11px] space-y-0.5">
+                            <p className="font-data-mono text-on-surface-variant/60">PO ₹{(m.po_amount ?? 0).toLocaleString('en-IN')}</p>
+                            {m.bill_amount != null && (
+                              <p className={`font-data-mono font-semibold ${
+                                m.bill_amount > m.po_amount * 1.02 ? 'text-red-600' :
+                                m.bill_amount < m.po_amount * 0.98 ? 'text-green-600' :
+                                'text-on-surface'
+                              }`}>Bill ₹{m.bill_amount.toLocaleString('en-IN')}</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Ghost items */}
+                {reconResult.ghost_items.length > 0 && (
+                  <div className="rounded-xl border border-red-200/60 bg-red-50 px-3 py-3">
+                    <p className="text-[10px] font-bold text-red-700 uppercase tracking-wider mb-2">
+                      Ghost Items — billed but not in PO
+                    </p>
+                    <div className="space-y-1">
+                      {reconResult.ghost_items.map((g, i) => (
+                        <div key={i} className="flex items-center justify-between text-[12px]">
+                          <span className="text-red-800 font-medium">{g.item}</span>
+                          <span className="font-data-mono font-bold text-red-800">₹{(g.amount ?? 0).toLocaleString('en-IN')}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Re-run link */}
+                <button
+                  onClick={() => { setReconResult(null); setReconFile(null); setReconError(null); }}
+                  className="flex items-center gap-1 text-[11px] text-on-surface-variant hover:text-primary transition-colors"
+                >
+                  <span className="material-symbols-outlined text-[13px]">refresh</span>
+                  Run again with a different document
+                </button>
+              </div>
             )}
           </div>
         )}

@@ -300,6 +300,11 @@ export default function PurchaseOrders({ session }: { session: Session }) {
   // bill attach modal
   const [attachPO, setAttachPO] = useState<any | null>(null);
 
+  // inline bill editing
+  const [editingBill, setEditingBill] = useState<string | null>(null);
+  const [billEditNo, setBillEditNo]   = useState('');
+  const [billEditAmt, setBillEditAmt] = useState('');
+
   const canManage =
     profile?.role === 'management' ||
     profile?.role === 'principal' ||
@@ -382,6 +387,64 @@ export default function PurchaseOrders({ session }: { session: Session }) {
       showSnackbar(err?.message || 'Failed to attach bill', { type: 'error' });
     },
   });
+
+  const saveBillInline = useMutation({
+    mutationFn: async ({ po, billNo, billAmt }: { po: any; billNo: string; billAmt: string }) => {
+      const totalValue = Number(po.total_value || po.order_value) || 0;
+      const parsedAmt  = parseFloat(billAmt);
+      const hasAmount  = !isNaN(parsedAmt) && billAmt.trim() !== '';
+
+      const patch: Record<string, any> = {
+        vendor_bill_no:  billNo.trim(),
+        three_way_match: 'PENDING',
+      };
+
+      let match = 'PENDING';
+      if (hasAmount) {
+        const ratio = totalValue > 0 ? Math.abs(parsedAmt - totalValue) / totalValue : 0;
+        match = ratio < 0.02 ? 'MATCHED' : 'MISMATCHED';
+        patch.vendor_bill_amount = parsedAmt;
+        patch.three_way_match    = match;
+        patch.status             = match === 'MATCHED' ? 'Tallied' : 'Disputed';
+      }
+
+      const { error } = await supabase.from('purchase_orders').update(patch).eq('po_id', po.po_id);
+      if (error) throw error;
+      return match;
+    },
+    onSuccess: (match) => {
+      qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
+      setEditingBill(null);
+      showSnackbar(
+        match === 'MATCHED'    ? 'Bill tallied — amounts match' :
+        match === 'MISMATCHED' ? 'Bill attached — amounts differ, marked Disputed' :
+                                 'Bill attached'
+      );
+    },
+    onError: (err: any) => showSnackbar(err?.message || 'Failed to save bill', { type: 'error' }),
+  });
+
+  const recordSiteReceipt = useMutation({
+    mutationFn: async (po: any) => {
+      const { error } = await supabase.from('purchase_orders').update({
+        received_at_site:    new Date().toISOString(),
+        received_by_name:    session.user.email,
+        received_by_user_id: session.user.id,
+      }).eq('po_id', po.po_id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
+      showSnackbar('Site receipt recorded ✓');
+    },
+    onError: (err: any) => showSnackbar(err?.message || 'Failed to record receipt', { type: 'error' }),
+  });
+
+  function startBillEdit(po: any) {
+    setEditingBill(po.po_id);
+    setBillEditNo(po.vendor_bill_no || '');
+    setBillEditAmt(po.vendor_bill_amount ? String(po.vendor_bill_amount) : '');
+  }
 
   // ── Derived filter options ─────────────────────────────────────────────────
   const vendors  = [...new Set((pos ?? []).map(p => p.stakeholders?.name).filter(Boolean))].sort();
@@ -641,6 +704,12 @@ export default function PurchaseOrders({ session }: { session: Session }) {
                   <th className="px-4 py-3 text-right">
                     <span className="text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-wider">Amount</span>
                   </th>
+                  <th className="px-4 py-3 text-right w-[120px]">
+                    <span className="text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-wider">Bill Amt</span>
+                  </th>
+                  <th className="px-4 py-3 text-center w-[90px]">
+                    <span className="text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-wider">At Site</span>
+                  </th>
                   <th className="px-4 py-3 text-left">
                     <span className="text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-wider">Status</span>
                   </th>
@@ -699,6 +768,97 @@ export default function PurchaseOrders({ session }: { session: Session }) {
                           }
                           return null;
                         })()}
+                      </td>
+
+                      {/* Bill Amount — inline edit */}
+                      <td className="px-4 py-3 text-right w-[120px]" onClick={e => e.stopPropagation()}>
+                        {editingBill === po.po_id ? (
+                          <div className="flex flex-col gap-1 items-end">
+                            <input
+                              autoFocus
+                              className="w-full text-right text-[11px] border border-outline-variant/40 rounded px-1.5 py-0.5 font-data-mono focus:outline-none focus:border-primary bg-white"
+                              placeholder="Bill #"
+                              value={billEditNo}
+                              onChange={e => setBillEditNo(e.target.value)}
+                              onClick={e => e.stopPropagation()}
+                            />
+                            <input
+                              type="number"
+                              className="w-full text-right text-[11px] border border-outline-variant/40 rounded px-1.5 py-0.5 font-data-mono focus:outline-none focus:border-primary bg-white"
+                              placeholder="₹ Amount"
+                              value={billEditAmt}
+                              onChange={e => setBillEditAmt(e.target.value)}
+                              onClick={e => e.stopPropagation()}
+                            />
+                            <div className="flex gap-1 mt-0.5">
+                              <button
+                                onClick={() => saveBillInline.mutate({ po, billNo: billEditNo, billAmt: billEditAmt })}
+                                disabled={!billEditNo.trim() || saveBillInline.isPending}
+                                className="px-2 py-0.5 rounded text-[10px] font-bold bg-primary text-white disabled:opacity-50 hover:bg-primary/90"
+                              >
+                                {saveBillInline.isPending ? '…' : '✓'}
+                              </button>
+                              <button
+                                onClick={() => setEditingBill(null)}
+                                className="px-2 py-0.5 rounded text-[10px] text-on-surface-variant hover:bg-surface-container"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          </div>
+                        ) : po.vendor_bill_amount ? (
+                          <div className="cursor-pointer" onClick={() => startBillEdit(po)}>
+                            <p className="font-data-mono text-[13px] font-semibold text-on-surface">
+                              ₹{Number(po.vendor_bill_amount).toLocaleString('en-IN')}
+                            </p>
+                            {(() => {
+                              const total = Number(po.total_value || po.order_value) || 0;
+                              const diff  = Number(po.vendor_bill_amount) - total;
+                              const abs   = Math.abs(diff);
+                              if (abs < 100) return <p className="text-[10px] text-green-600 font-semibold">✓ Exact</p>;
+                              return (
+                                <p className={`text-[10px] font-data-mono font-semibold ${diff > 0 ? 'text-red-500' : 'text-green-600'}`}>
+                                  {diff > 0 ? '+' : '-'}₹{abs.toLocaleString('en-IN')}
+                                </p>
+                              );
+                            })()}
+                          </div>
+                        ) : po.vendor_bill_no ? (
+                          <div className="cursor-pointer text-right" onClick={() => startBillEdit(po)}>
+                            <p className="text-[10px] text-amber-600 font-data-mono truncate max-w-[100px] ml-auto">{po.vendor_bill_no}</p>
+                            <p className="text-[10px] text-on-surface-variant/50">No amount</p>
+                          </div>
+                        ) : canManage ? (
+                          <button
+                            onClick={() => startBillEdit(po)}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity text-[11px] text-on-surface-variant/40 hover:text-primary flex items-center gap-0.5 ml-auto"
+                          >
+                            <span className="material-symbols-outlined text-[13px]">add</span>
+                            Add bill
+                          </button>
+                        ) : (
+                          <span className="text-on-surface-variant/30 text-[12px]">—</span>
+                        )}
+                      </td>
+
+                      {/* At Site */}
+                      <td className="px-4 py-3 text-center w-[90px]" onClick={e => e.stopPropagation()}>
+                        {po.received_at_site ? (
+                          <div>
+                            <p className="text-[10px] font-bold text-teal-600">✓ Received</p>
+                            <p className="text-[10px] text-on-surface-variant/50 mt-0.5">{fmtDate(po.received_at_site)}</p>
+                          </div>
+                        ) : (['Ordered','Partially Delivered','Delivered','Received','Issued','Approved'].includes(po.status) && canManage) ? (
+                          <button
+                            onClick={() => recordSiteReceipt.mutate(po)}
+                            disabled={recordSiteReceipt.isPending}
+                            title="Record site receipt"
+                            className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 mx-auto text-[10px] text-on-surface-variant/40 hover:text-teal-600 disabled:opacity-50"
+                          >
+                            <span className="material-symbols-outlined text-[14px]">local_shipping</span>
+                            <span>At site?</span>
+                          </button>
+                        ) : null}
                       </td>
 
                       {/* Status */}

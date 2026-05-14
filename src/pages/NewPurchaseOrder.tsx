@@ -60,6 +60,18 @@ interface DraftLineItem {
   total_amount: number;
 }
 
+interface ExtractedItem {
+  _id: string;
+  item_name: string;
+  specification: string;
+  unit: string;
+  quantity: number;
+  unit_rate: number;
+  gst_rate: number;
+  amount: number;
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+}
+
 function newLine(lineNumber: number): DraftLineItem {
   return {
     id: crypto.randomUUID(),
@@ -101,6 +113,45 @@ function fmtDate(d: string | null | undefined) {
   const parsed = new Date(d);
   if (isNaN(parsed.getTime())) return d;
   return parsed.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+const EXTRACT_PROMPT = `You are a purchase-order line-item extractor specialising in Indian construction materials and vendor quotations.
+
+Given an image of a quotation, proforma invoice, or price list, extract ALL line items.
+
+Return ONLY valid JSON:
+{
+  "vendor_name": "string or null",
+  "items": [
+    {
+      "item_name": "exact name from document",
+      "specification": "grade / brand / spec string, or null",
+      "unit": "one of: Nos Bags MT m³ m² RFT Ltr kg Set LS Pair Rmt Sqft",
+      "quantity": number,
+      "unit_rate": number (EXCLUSIVE of GST — if document shows inclusive price, divide by 1 + gst_rate/100),
+      "gst_rate": 5 or 12 or 18 or 28,
+      "amount": number (quantity × unit_rate before GST),
+      "confidence": "HIGH" | "MEDIUM" | "LOW"
+    }
+  ]
+}
+
+Confidence: HIGH = all fields clearly visible, MEDIUM = some fields inferred, LOW = heavy guessing.
+For lump-sum items use unit "LS", quantity 1, unit_rate = lump-sum value.
+Do not invent items not visible in the document.`;
+
+async function fileToBase64(file: File): Promise<{ base64: string; mimeType: string }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const [header, base64] = dataUrl.split(',');
+      const mimeType = header.match(/data:([^;]+)/)?.[1] || file.type || 'image/jpeg';
+      resolve({ base64, mimeType });
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -145,6 +196,13 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
 
   // ── Section 04: Line Items ────────────────────────────────────────────────
   const [lineItems, setLineItems] = useState<DraftLineItem[]>([newLine(1)]);
+
+  // ── Section 03: AI Extraction ─────────────────────────────────────────────
+  const [extractFile, setExtractFile]   = useState<File | null>(null);
+  const [extracting, setExtracting]     = useState(false);
+  const [extractError, setExtractError] = useState<string | null>(null);
+  const [pendingItems, setPendingItems] = useState<ExtractedItem[] | null>(null);
+  const [selectedIds, setSelectedIds]   = useState<Set<string>>(new Set());
 
   // ── Section 05: Terms ─────────────────────────────────────────────────────
   const [vendorNotes, setVendorNotes]   = useState('');
@@ -325,6 +383,92 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
     },
     onError: (err: any) => showSnackbar(err.message || 'Failed to create vendor', { type: 'error' }),
   });
+
+  // ── AI Extraction helpers ─────────────────────────────────────────────────
+
+  async function extractFromDocument(file: File) {
+    setExtracting(true);
+    setExtractError(null);
+    try {
+      const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+      if (!apiKey) throw new Error('OpenAI API key not configured (VITE_OPENAI_API_KEY)');
+
+      const { base64, mimeType } = await fileToBase64(file);
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: 'gpt-4o',
+          response_format: { type: 'json_object' },
+          max_tokens: 2000,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}`, detail: 'high' } },
+              { type: 'text', text: EXTRACT_PROMPT },
+            ],
+          }],
+        }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error((err as any).error?.message || `API error ${response.status}`);
+      }
+
+      const result = await response.json();
+      const content = result.choices?.[0]?.message?.content;
+      if (!content) throw new Error('Empty response from AI');
+
+      const parsed = JSON.parse(content);
+      const items: ExtractedItem[] = ((parsed.items ?? []) as any[])
+        .map(it => ({
+          _id:           crypto.randomUUID(),
+          item_name:     String(it.item_name   || ''),
+          specification: String(it.specification || ''),
+          unit:          String(it.unit         || 'Nos'),
+          quantity:      Number(it.quantity)    || 1,
+          unit_rate:     Number(it.unit_rate)   || 0,
+          gst_rate:      Number(it.gst_rate)    || 18,
+          amount:        Number(it.amount)      || 0,
+          confidence:    (['HIGH','MEDIUM','LOW'].includes(it.confidence) ? it.confidence : 'MEDIUM') as 'HIGH' | 'MEDIUM' | 'LOW',
+        }))
+        .filter((it: ExtractedItem) => it.item_name);
+
+      if (items.length === 0) throw new Error('No line items found in document');
+
+      setPendingItems(items);
+      setSelectedIds(new Set(items.map((i: ExtractedItem) => i._id)));
+
+      if (parsed.vendor_name && !vendorId) {
+        setVendorSearch(String(parsed.vendor_name));
+      }
+    } catch (err: any) {
+      setExtractError(err.message || 'Extraction failed');
+    } finally {
+      setExtracting(false);
+    }
+  }
+
+  function applyExtractedItems() {
+    if (!pendingItems) return;
+    const toApply = pendingItems.filter(it => selectedIds.has(it._id));
+    if (!toApply.length) return;
+    setLineItems(toApply.map((it, i) => computeLine({
+      ...newLine(i + 1),
+      item_name:        it.item_name,
+      specification:    it.specification,
+      unit:             it.unit,
+      quantity_ordered: it.quantity,
+      unit_rate:        it.unit_rate,
+      gst_rate:         it.gst_rate,
+    })));
+    setPendingItems(null);
+    setExtractFile(null);
+    setSelectedIds(new Set());
+    showSnackbar(`${toApply.length} line item${toApply.length !== 1 ? 's' : ''} applied`);
+  }
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -640,20 +784,163 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
             </div>
           </div>
 
-          {/* SECTION 03 — AI Extract (placeholder) */}
+          {/* SECTION 03 — AI Document Extraction */}
           <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm p-6">
             <SectionLabel n="03" title="AI Document Extraction" />
-            <div className="bg-white rounded-2xl border-2 border-dashed border-outline-variant/30 p-6 text-center">
-              <span className="material-symbols-outlined text-[40px] text-on-surface-variant/20 block mb-3">smart_toy</span>
-              <p className="text-[14px] font-semibold text-on-surface-variant/50">Extract line items from document</p>
-              <p className="text-[12px] text-on-surface-variant/35 mt-1">Upload a quotation or proforma — AI detects items, quantities and rates</p>
-              <label className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-outline-variant/30 text-[13px] text-on-surface-variant cursor-pointer hover:bg-surface-container-low transition-colors">
-                <span className="material-symbols-outlined text-[16px]">upload_file</span>
-                Upload quotation
-                <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png" />
+
+            {/* Drop zone — no file yet */}
+            {!extractFile && !pendingItems && (
+              <label className="group flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-outline-variant/30 hover:border-primary/40 p-8 text-center cursor-pointer transition-colors">
+                <span className="material-symbols-outlined text-[40px] text-on-surface-variant/20 group-hover:text-primary/30 transition-colors mb-3">upload_file</span>
+                <p className="text-[14px] font-semibold text-on-surface-variant/60">Upload quotation or proforma</p>
+                <p className="text-[12px] text-on-surface-variant/35 mt-1">AI extracts line items, quantities &amp; rates</p>
+                <span className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-outline-variant/30 text-[13px] text-on-surface-variant group-hover:border-primary/30 transition-colors">
+                  <span className="material-symbols-outlined text-[16px]">smart_toy</span>
+                  Choose file
+                </span>
+                <p className="text-[11px] text-on-surface-variant/35 mt-2">JPG · PNG · PDF · max 10 MB</p>
+                <input
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.jpg,.jpeg,.png,.webp"
+                  onChange={e => {
+                    const f = e.target.files?.[0];
+                    if (f) { setExtractFile(f); setExtractError(null); setPendingItems(null); }
+                    e.target.value = '';
+                  }}
+                />
               </label>
-              <p className="text-[11px] text-on-surface-variant/35 mt-2">PDF · JPG · PNG · max 10MB · AI extraction coming soon</p>
-            </div>
+            )}
+
+            {/* File selected — ready to extract */}
+            {extractFile && !pendingItems && (
+              <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
+                <div className="flex items-center gap-3 px-4 py-3 bg-surface-container-low/40">
+                  <span className="material-symbols-outlined text-[24px] text-primary/50 shrink-0">description</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-semibold text-on-surface truncate">{extractFile.name}</p>
+                    <p className="text-[11px] text-on-surface-variant/50">{(extractFile.size / 1024).toFixed(0)} KB</p>
+                  </div>
+                  {!extracting && (
+                    <button
+                      onClick={() => { setExtractFile(null); setExtractError(null); }}
+                      className="text-on-surface-variant/40 hover:text-red-500 transition-colors shrink-0"
+                      title="Remove file"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">close</span>
+                    </button>
+                  )}
+                </div>
+
+                {extractError && (
+                  <div className="px-4 py-2.5 bg-red-50 border-t border-red-100">
+                    <p className="text-[12px] text-red-700">{extractError}</p>
+                  </div>
+                )}
+
+                <div className="px-4 py-3 border-t border-outline-variant/10">
+                  <button
+                    onClick={() => extractFromDocument(extractFile)}
+                    disabled={extracting}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-on-primary text-[13px] font-semibold hover:bg-primary/90 disabled:opacity-60 transition-colors"
+                  >
+                    {extracting ? (
+                      <>
+                        <span className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>
+                        Analyzing document…
+                      </>
+                    ) : (
+                      <>
+                        <span className="material-symbols-outlined text-[16px]">smart_toy</span>
+                        Extract Line Items
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Review panel — extracted items */}
+            {pendingItems && (
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-[12px] font-bold text-on-surface">
+                    {pendingItems.length} item{pendingItems.length !== 1 ? 's' : ''} found
+                    <span className="font-normal text-on-surface-variant/50 ml-1">— select to apply</span>
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => { setPendingItems(null); setExtractFile(null); setSelectedIds(new Set()); }}
+                      className="text-[12px] text-on-surface-variant hover:text-red-500 transition-colors"
+                    >
+                      Discard
+                    </button>
+                    <button
+                      onClick={applyExtractedItems}
+                      disabled={selectedIds.size === 0}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-[12px] font-semibold hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">check</span>
+                      Apply {selectedIds.size} item{selectedIds.size !== 1 ? 's' : ''}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-outline-variant/20 overflow-hidden divide-y divide-outline-variant/[0.08]">
+                  {/* Select all row */}
+                  <label className="flex items-center gap-3 px-3 py-2 bg-surface-container-low/60 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.size === pendingItems.length}
+                      onChange={() => {
+                        if (selectedIds.size === pendingItems.length) setSelectedIds(new Set());
+                        else setSelectedIds(new Set(pendingItems.map(i => i._id)));
+                      }}
+                      className="accent-primary w-3.5 h-3.5"
+                    />
+                    <span className="text-[11px] font-semibold text-on-surface-variant/60 uppercase tracking-wider">
+                      All items
+                    </span>
+                  </label>
+
+                  {pendingItems.map(item => (
+                    <label key={item._id} className={`flex items-start gap-3 px-3 py-2.5 cursor-pointer transition-colors ${selectedIds.has(item._id) ? 'bg-white' : 'bg-surface-container-low/30'}`}>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(item._id)}
+                        onChange={() => {
+                          setSelectedIds(prev => {
+                            const next = new Set(prev);
+                            next.has(item._id) ? next.delete(item._id) : next.add(item._id);
+                            return next;
+                          });
+                        }}
+                        className="mt-0.5 accent-primary w-3.5 h-3.5 shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-[12px] font-semibold text-on-surface">{item.item_name}</p>
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                            item.confidence === 'HIGH'   ? 'bg-green-100 text-green-700' :
+                            item.confidence === 'MEDIUM' ? 'bg-amber-100 text-amber-700' :
+                            'bg-red-100 text-red-700'
+                          }`}>{item.confidence}</span>
+                        </div>
+                        {item.specification && (
+                          <p className="text-[10px] text-on-surface-variant/50 mt-0.5 truncate">{item.specification}</p>
+                        )}
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="font-data-mono text-[11px] text-on-surface">
+                          {item.quantity} {item.unit} × ₹{item.unit_rate.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                        </p>
+                        <p className="font-data-mono text-[10px] text-on-surface-variant/50">GST {item.gst_rate}%</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* SECTION 04 — Line Items */}
