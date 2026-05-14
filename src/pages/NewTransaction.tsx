@@ -211,7 +211,7 @@ function POObligationRow({ po, selectedObligation, onSelect }: {
         </div>
         {po.po_line_items?.[0] && (
           <p className="text-[11px] text-on-surface-variant/50 truncate mt-0.5">
-            {po.po_line_items[0].description || po.po_line_items[0].item_name || ''}
+            {po.po_line_items[0].item_name || po.po_line_items[0].description || po.po_line_items[0].name || ''}
             {po.po_line_items.length > 1 && ` +${po.po_line_items.length - 1} more`}
           </p>
         )}
@@ -401,17 +401,19 @@ export default function NewTransaction({ session: _session }: { session: Session
     Promise.all([
       supabase
         .from('work_orders')
-        .select('wo_id, scope_of_work, order_value, status, stakeholders(name, category), wo_milestones(milestone_id, name, planned_amount, status, unit_type, qty, rate)')
+        .select('wo_id, scope_of_work, order_value, status, stakeholders(name, category), wo_milestones(*)')
         .eq('project_id', selectedProjectId)
-        .in('status', ['Active', 'Issued', 'Assigned'])
+        .in('status', ['Active', 'Issued', 'Assigned', 'ACTIVE', 'ISSUED', 'ASSIGNED'])
         .order('date_issued', { ascending: false }),
       supabase
         .from('purchase_orders')
-        .select('po_id, status, vendor_bill_amount, total_value, stakeholders(name, category), po_line_items(description, item_name)')
+        .select('po_id, status, vendor_bill_amount, total_value, stakeholders(name, category), po_line_items(*)')
         .eq('project_id', selectedProjectId)
         .in('status', ['ORDERED', 'BILLED', 'PARTIAL'])
         .order('created_at', { ascending: false }),
-    ]).then(([{ data: wos }, { data: pos }]) => {
+    ]).then(([{ data: wos, error: woErr }, { data: pos, error: poErr }]) => {
+      if (woErr) console.error('[LinkingPanel] WO fetch error:', woErr);
+      if (poErr) console.error('[LinkingPanel] PO fetch error:', poErr);
       if (!cancelled) { setProjectWOs(wos || []); setProjectPOs(pos || []); setLoadingObligations(false); }
     });
     return () => { cancelled = true; };
