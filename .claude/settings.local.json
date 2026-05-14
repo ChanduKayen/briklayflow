@@ -14,7 +14,10 @@
       "PowerShell(deno check \"C:\\\\Users\\\\koppi\\\\OneDrive\\\\Desktop\\\\Briklay Fly\\\\supabase\\\\functions\\\\whatsapp-webhook\\\\index.ts\" 2>&1)",
       "Bash(git commit -m ' *)",
       "Bash(git add *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(sed -n '1406,1422p' src/pages/PurchaseOrderDetail.tsx)",
+      "Bash(sed -n '460,480p' src/pages/ProjectDetail.tsx)",
+      "Bash(grep -n \"function.*{$\\\\|export function\\\\|export default function\" src/pages/Logbook.tsx)"
     ]
   }
 }
