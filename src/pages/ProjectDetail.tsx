@@ -10,6 +10,7 @@ import autoTable from 'jspdf-autotable';
 import { ProjectBudget } from '../components/ProjectBudget';
 import { useUserProfile } from '../App';
 import { usePeek } from '../context/PeekContext';
+import { formatTxn } from '../lib/formatTxn';
 import {
   fmtDate as pdfFmtDate, fmtRupee,
   MARGIN, C,
@@ -472,13 +473,7 @@ export default function ProjectDetail({ session }: { session: Session }) {
                         onClick={() => openPeek('TRANSACTION', txn.txn_id)}>
                       <td className="p-4 text-body-sm">{new Date(txn.date).toLocaleDateString()}</td>
                       <td className="p-4 text-body-sm">
-                        <p className="font-[500] text-on-surface truncate">
-                          {[txn.stakeholders?.name, txn.stakeholders?.category].filter(Boolean).join(' · ') || txn.category || '—'}
-                        </p>
-                        {txn.category && txn.stakeholders?.name && (
-                          <p className="text-[11px] text-on-surface-variant/60 truncate">{txn.category}</p>
-                        )}
-                        <span className="text-[10px] font-mono text-on-surface-variant/25 opacity-0 group-hover:opacity-100 transition-opacity block">{txn.txn_id}</span>
+                        {(() => { const f = formatTxn(txn, 'project'); return (<><p className="font-[500] text-on-surface truncate">{f.primary}</p>{f.secondary && <p className="text-[11px] text-on-surface-variant/60 truncate">{f.secondary}</p>}{f.tertiary && <p className="text-[11px] text-on-surface-variant/40 truncate">{f.tertiary}</p>}<span className="text-[10px] font-mono text-on-surface-variant/25 opacity-0 group-hover:opacity-100 transition-opacity block">{txn.txn_id}</span></>); })()}
                       </td>
                       <td className="p-4 text-body-sm font-semibold">{txn.stakeholders?.name || '-'}</td>
                       <td className="p-4 text-body-sm">

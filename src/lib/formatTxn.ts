@@ -1,33 +1,80 @@
+export type TxnContext = 'global' | 'wo' | 'po' | 'stakeholder' | 'project';
+
 export interface TxnDisplay {
-  line1: string; // Name · Trade
-  line2: string; // Project · Annotation
-  line3: string; // Mode · Date
+  primary: string;
+  secondary: string | null;
+  tertiary: string | null;
   id: string;
   amount: number;
+  status?: string;
 }
 
 function isCostCode(s: string): boolean {
   return /^[A-Z]{2,4}-\d{2}(-\d{2})?$/.test(s);
 }
 
-export function formatTxn(txn: any): TxnDisplay {
-  const name  = txn.stakeholders?.name || '';
-  const trade = txn.stakeholders?.category || '';
-  const line1 = dot([name, trade]) || 'Payment';
-
-  const project    = txn.projects?.name || txn.txn_allocations?.[0]?.projects?.name || (txn as any).projectName || '';
-  const rawAnnotation = txn.remarks?.slice(0, 60) || (!isCostCode(txn.category || '') ? txn.category : '') || '';
-  const line2      = dot([project, rawAnnotation]);
-
-  const mode = txn.payment_mode || '';
-  const date = txn.date ? formatShortDate(txn.date) : '';
-  const line3 = dot([mode, date]);
-
-  return { line1, line2, line3, id: txn.txn_id || '', amount: txn.total_amount || 0 };
+function dot(parts: (string | null | undefined)[]): string | null {
+  const joined = parts.filter(Boolean).join(' · ');
+  return joined || null;
 }
 
-function dot(parts: string[]): string {
-  return parts.filter(Boolean).join(' · ');
+export function formatTxn(txn: any, context: TxnContext = 'global'): TxnDisplay {
+  const name    = txn.stakeholders?.name || null;
+  const trade   = txn.stakeholders?.category || null;
+  const project = txn.projects?.name
+    || txn.txn_allocations?.[0]?.projects?.name
+    || (txn as any).projectName
+    || null;
+  const rawDetail = txn.remarks?.slice(0, 60)
+    || (!isCostCode(txn.category || '') ? (txn.category || null) : null);
+  const mode = txn.payment_mode || null;
+  const date = txn.date ? formatShortDate(txn.date) : null;
+  const modeDate = dot([mode, date]);
+
+  let primary: string;
+  let secondary: string | null;
+  let tertiary: string | null;
+
+  switch (context) {
+    case 'wo':
+    case 'po':
+      // Stakeholder + project already shown in page header — show WHAT · WHEN
+      primary   = rawDetail || 'Payment';
+      secondary = modeDate;
+      tertiary  = null;
+      break;
+
+    case 'stakeholder':
+      // Person known — show WHERE · WHAT, then WHEN
+      primary   = dot([project, rawDetail]) || 'Payment';
+      secondary = modeDate;
+      tertiary  = null;
+      break;
+
+    case 'project':
+      // Project known — show WHO · TRADE, then WHAT, then WHEN
+      primary   = dot([name, trade]) || rawDetail || 'Payment';
+      secondary = name ? rawDetail : null;
+      tertiary  = modeDate;
+      break;
+
+    case 'global':
+    default:
+      // Show everything: WHO · TRADE / WHERE · WHAT / WHEN
+      primary   = dot([name, trade]) || rawDetail || 'Payment';
+      secondary = dot([project, rawDetail]);
+      tertiary  = modeDate;
+      break;
+  }
+
+  return {
+    primary,
+    secondary,
+    tertiary,
+    id: txn.txn_id || '',
+    amount: Number(txn.total_amount) || 0,
+    status: txn.status,
+  };
 }
 
 function formatShortDate(d: string): string {

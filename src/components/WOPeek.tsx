@@ -7,6 +7,7 @@ import { PeekModal } from './PeekModal';
 import { statusBadgeClass } from '../pages/WorkOrderDetail';
 import { useUserProfile } from '../App';
 import { usePeek } from '../context/PeekContext';
+import { TxnRow } from './TxnRow';
 
 function fmtDate(d: string | null | undefined) {
   if (!d) return '—';
@@ -270,31 +271,14 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
             <div>
               <p className="text-[10px] font-semibold tracking-wider text-on-surface-variant uppercase mb-2">Payments</p>
               <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
-                {allocations.map((a: any, i: number) => {
-                  const enriched = { ...a.transactions, stakeholders: wo?.stakeholders, projects: wo?.projects, total_amount: a.allocated_amount };
-                  const isCostCode = (s: string) => /^[A-Z]{2,4}-\d{2}(-\d{2})?$/.test(s);
-                  const line1 = [wo?.stakeholders?.name, wo?.stakeholders?.category].filter(Boolean).join(' · ') || 'Payment';
-                  const annotation = a.transactions?.remarks?.slice(0, 60) || (!isCostCode(a.transactions?.category || '') ? a.transactions?.category : '') || '';
-                  const line2 = [wo?.projects?.name, annotation].filter(Boolean).join(' · ');
-                  const line3 = [a.transactions?.payment_mode, a.transactions?.date ? new Date(a.transactions.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : ''].filter(Boolean).join(' · ');
-                  return (
-                    <button
-                      key={a.allocation_id}
-                      onClick={() => a.transactions?.txn_id && openPeek('TRANSACTION', a.transactions.txn_id)}
-                      className={`w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-surface-container-low transition-colors group ${i > 0 ? 'border-t border-outline-variant/10' : ''}`}
-                    >
-                      <div className="min-w-0 flex-1 pr-3">
-                        <p className="text-[13px] font-[500] text-on-surface truncate">{line1}</p>
-                        {line2 && <p className="text-[11px] text-on-surface-variant/70 mt-0.5 truncate">{line2}</p>}
-                        {line3 && <p className="text-[11px] text-on-surface-variant/40 mt-0.5 truncate">{line3}</p>}
-                        <p className="text-[10px] font-mono text-on-surface-variant/25 opacity-0 group-hover:opacity-100 transition-opacity">
-                          {a.transactions?.txn_id}
-                        </p>
-                      </div>
-                      <span className="font-data-mono font-semibold text-on-surface shrink-0">{fmtRupee(Number(a.allocated_amount) || 0)}</span>
-                    </button>
-                  );
-                })}
+                {allocations.map((a: any) => (
+                  <TxnRow
+                    key={a.allocation_id}
+                    txn={{ ...a.transactions, total_amount: a.allocated_amount }}
+                    context="wo"
+                    onClick={() => a.transactions?.txn_id && openPeek('TRANSACTION', a.transactions.txn_id)}
+                  />
+                ))}
               </div>
             </div>
           )}

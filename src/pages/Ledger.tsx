@@ -10,6 +10,7 @@ import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
 import { LinearProgress } from '../components/LinearProgress';
 import { getCostCode } from '../lib/costCodes';
+import { formatTxn } from '../lib/formatTxn';
 import { IconPaperclip } from '@tabler/icons-react';
 import { ImageLightbox } from '../components/ImageLightbox';
 
@@ -660,7 +661,7 @@ export default function Ledger({ session }: { session: Session }) {
                       <div className="flex items-start justify-between mb-1.5">
                         <div className="flex-1 min-w-0 mr-3">
                           <span className="text-[15px] font-[500] text-on-surface leading-tight line-clamp-1">
-                            {[txn.stakeholders?.name, txn.stakeholders?.category].filter(Boolean).join(' · ') || txn.category || 'Payment'}
+                            {formatTxn(txn, 'global').primary}
                           </span>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">

@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { usePeek } from '../context/PeekContext';
+import { formatTxn } from '../lib/formatTxn';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -460,24 +461,7 @@ export default function Dashboard({ session }: { session: Session }) {
                 width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left',
               }}
             >
-              <div style={{ flex: 1, minWidth: 0, marginRight: 12 }}>
-                <p style={{ fontSize: 13, fontWeight: 500, color: '#0b1c30', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {[txn.stakeholders?.name, txn.stakeholders?.category].filter(Boolean).join(' · ') || txn.category || 'Payment'}
-                </p>
-                {(txn.remarks || txn.category) && (
-                  <p style={{ fontSize: 11, color: 'rgba(0,0,0,0.45)', margin: '1px 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {txn.remarks?.slice(0, 60) || txn.category}
-                  </p>
-                )}
-                {(txn.payment_mode || txn.date) && (
-                  <p style={{ fontSize: 11, color: 'rgba(0,0,0,0.28)', margin: '1px 0 0' }}>
-                    {[txn.payment_mode, txn.date ? new Date(txn.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : ''].filter(Boolean).join(' · ')}
-                  </p>
-                )}
-              </div>
-              <p style={{ fontSize: 14, fontWeight: 500, fontVariantNumeric: 'tabular-nums', color: '#0b1c30', margin: 0, flexShrink: 0 }}>
-                ₹{Number(txn.total_amount).toLocaleString('en-IN')}
-              </p>
+              {(() => { const f = formatTxn(txn, 'global'); return (<><div style={{ flex: 1, minWidth: 0, marginRight: 12 }}><p style={{ fontSize: 13, fontWeight: 500, color: '#0b1c30', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.primary}</p>{f.secondary && <p style={{ fontSize: 11, color: 'rgba(0,0,0,0.45)', margin: '1px 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.secondary}</p>}{f.tertiary && <p style={{ fontSize: 11, color: 'rgba(0,0,0,0.28)', margin: '1px 0 0' }}>{f.tertiary}</p>}</div><p style={{ fontSize: 14, fontWeight: 500, fontVariantNumeric: 'tabular-nums', color: '#0b1c30', margin: 0, flexShrink: 0 }}>₹{Number(txn.total_amount).toLocaleString('en-IN')}</p></>); })()}
             </button>
           ))}
           {(!recentTxns || recentTxns.length === 0) && (
