@@ -8,7 +8,7 @@ import type { Session } from '@supabase/supabase-js';
 import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 import { useSnackbar } from '../components/Snackbar';
 import { CostCodePicker } from '../components/CostCodePicker';
-import { getCostCode } from '../lib/costCodes';
+import { getCostCode, costCodeLabel, ALL_COST_CODES } from '../lib/costCodes';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -352,6 +352,11 @@ export default function NewTransaction({ session: _session }: { session: Session
   const [receiptDescription, setReceiptDescription] = useState('');
   const [receiptRef, setReceiptRef] = useState('');
 
+  // ── AI cost-code suggestion state ────────────────────────────────────────
+  const [aiCodeState, setAiCodeState] = useState<'idle' | 'loading' | 'suggested' | 'none'>('idle');
+  const [aiSuggestedCode, setAiSuggestedCode] = useState<string | null>(null);
+  const aiDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // ── High-volume state ────────────────────────────────────────────────────
   const [recentPayees, setRecentPayees] = useState<{ id: string; name: string; type: string }[]>([]);
   const [saveAttempted, setSaveAttempted] = useState(false);
@@ -520,6 +525,7 @@ export default function NewTransaction({ session: _session }: { session: Session
         setAllocs([{ id: Math.random().toString(), project_id: keptProject, order_type: '', order_ref: '', allocated_amount: 0 }]);
         setSelectedObligation(null); setSkipped(false); setAmountTouched(false);
         setProjectWOs([]); setProjectPOs([]);
+        setAiCodeState('idle'); setAiSuggestedCode(null);
         setDismissedReceiptSuggestion(false);
         setDismissedMilestoneSuggestion(false);
         setReceiptDescription('');
@@ -534,6 +540,40 @@ export default function NewTransaction({ session: _session }: { session: Session
   const rmAlloc = (id: string) => setAllocs((prev) => prev.filter((a) => a.id !== id));
   const upAlloc = (id: string, updates: Partial<AllocDraft>) => setAllocs((prev) => prev.map((a) => (a.id === id ? { ...a, ...updates } : a)));
 
+  const suggestCostCode = async (text: string) => {
+    if (!text || text.trim().length < 5) { setAiCodeState('idle'); return; }
+    setAiCodeState('loading');
+    setAiSuggestedCode(null);
+    const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
+    if (!apiKey) { setAiCodeState('idle'); return; }
+    const codeList = ALL_COST_CODES.map(c => `${c.code}: ${c.name}`).join('\n');
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 15,
+          messages: [{
+            role: 'user',
+            content: `You classify construction payment remarks into cost codes.\n\nRemark: "${text.trim()}"\n\nCost codes:\n${codeList}\n\nReturn ONLY the single best matching code (e.g. "WRK-07-02") or "NONE" if ambiguous or unclear. Nothing else.`,
+          }],
+        }),
+      });
+      const data = await res.json();
+      const result = (data.content?.[0]?.text || 'NONE').trim().replace(/["'.]/g, '').toUpperCase();
+      if (result === 'NONE' || !getCostCode(result)) {
+        setAiSuggestedCode(null);
+        setAiCodeState('none');
+      } else {
+        setAiSuggestedCode(result);
+        setAiCodeState('suggested');
+      }
+    } catch {
+      setAiCodeState('idle');
+    }
+  };
+
   const handleSave = async (saveMode: 'new' | 'exit') => {
     setSaveAttempted(true);
     if (txnType === 'client_receipt') {
@@ -542,7 +582,7 @@ export default function NewTransaction({ session: _session }: { session: Session
       createTxn.mutate({ saveMode });
       return;
     }
-    if (!stkId || !totalAmt || totalAmt <= 0 || !category || isOver) return;
+    if (!stkId || !totalAmt || totalAmt <= 0 || !remarks.trim() || isOver) return;
     if (effectiveAllocs.some((a) => !a.project_id)) return;
 
     // Budget check — only for single-allocation with a cost code
@@ -585,7 +625,7 @@ export default function NewTransaction({ session: _session }: { session: Session
 
   const missingPayee = saveAttempted && !stkId;
   const missingAmount = saveAttempted && totalAmt <= 0;
-  const missingCategory = saveAttempted && !category && txnType !== 'client_receipt';
+  const missingRemarks = saveAttempted && !remarks.trim() && txnType !== 'client_receipt';
   const missingProject = saveAttempted && effectiveAllocs.some((a) => !a.project_id);
 
   // ── Smart suggestion: completed phase linked ─────────────────────────────
@@ -872,25 +912,85 @@ export default function NewTransaction({ session: _session }: { session: Session
               <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm">
                 <div className="p-6 space-y-5">
 
-                  {/* Cost code picker */}
+                  {/* Cost code picker — optional, AI-assisted */}
                   <div>
                     <label className="block text-[11px] font-medium text-on-surface-variant/60 mb-2.5">
-                      Cost Code{missingCategory && <span className="text-error ml-1.5">required</span>}
+                      Cost Code <span className="text-on-surface-variant/35">(optional)</span>
                     </label>
                     <CostCodePicker
                       value={category}
-                      onChange={setCategory}
+                      onChange={(v) => { setCategory(v); setAiCodeState('idle'); setAiSuggestedCode(null); }}
                       defaultType={txnType ? COA_DEFAULTS[txnType]?.type : 'MAT'}
                       defaultDivision={txnType ? COA_DEFAULTS[txnType]?.division : undefined}
-                      error={missingCategory}
+                      error={false}
                     />
+
+                    {/* AI suggestion chip */}
+                    {!category && aiCodeState !== 'idle' && (
+                      <div className="mt-2.5">
+                        {aiCodeState === 'loading' && (
+                          <div className="flex items-center gap-2 text-[11px] text-on-surface-variant/40">
+                            <Loader2 className="animate-spin shrink-0" size={12} />
+                            Reading remarks…
+                          </div>
+                        )}
+                        {aiCodeState === 'suggested' && aiSuggestedCode && (
+                          <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-primary/[0.04] border border-primary/15">
+                            <span className="material-symbols-outlined text-[16px] text-primary shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>auto_awesome</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[10px] text-on-surface-variant/50 mb-0.5">AI suggests</p>
+                              <p className="text-[12px] font-medium text-on-surface">{costCodeLabel(aiSuggestedCode)}</p>
+                            </div>
+                            <div className="flex gap-1.5 shrink-0">
+                              <button type="button"
+                                onClick={() => { setCategory(aiSuggestedCode!); setAiCodeState('idle'); setAiSuggestedCode(null); }}
+                                className="px-3 py-1.5 rounded-lg bg-primary text-on-primary text-[12px] font-semibold hover:opacity-90 transition-opacity">
+                                Apply
+                              </button>
+                              <button type="button"
+                                onClick={() => { setAiCodeState('idle'); setAiSuggestedCode(null); }}
+                                className="px-2.5 py-1.5 rounded-lg text-[12px] text-on-surface-variant/50 hover:text-on-surface hover:bg-surface-container transition-colors">
+                                Dismiss
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        {aiCodeState === 'none' && (
+                          <div className="flex items-center gap-2 text-[11px] text-on-surface-variant/35">
+                            <span className="material-symbols-outlined text-[13px]">help_outline</span>
+                            Couldn't determine cost code from remarks — select manually if needed
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
-                  {/* Remarks */}
+                  {/* Remarks — required */}
                   <div>
-                    <label className="block text-[11px] font-medium text-on-surface-variant/60 mb-2">Remarks <span className="text-on-surface-variant/35">(optional)</span></label>
-                    <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)}
-                      className="bk-input w-full min-h-[72px] resize-none" placeholder="Notes, reference numbers, annotations…" rows={3} />
+                    <label className="block text-[11px] font-medium text-on-surface-variant/60 mb-2">
+                      Remarks
+                      {missingRemarks
+                        ? <span className="text-error ml-1.5">required</span>
+                        : <span className="text-on-surface-variant/35 ml-1">(what is this payment for?)</span>}
+                    </label>
+                    <textarea
+                      value={remarks}
+                      onChange={(e) => {
+                        setRemarks(e.target.value);
+                        if (category) return; // already has a code
+                        if (aiDebounceRef.current) clearTimeout(aiDebounceRef.current);
+                        if (e.target.value.trim().length >= 5) {
+                          setAiCodeState('idle');
+                          aiDebounceRef.current = setTimeout(() => suggestCostCode(e.target.value), 1000);
+                        } else {
+                          setAiCodeState('idle');
+                          setAiSuggestedCode(null);
+                        }
+                      }}
+                      className={`bk-input w-full min-h-[72px] resize-none ${missingRemarks ? 'border-error' : ''}`}
+                      placeholder="e.g. Payment for tile fixing in bathroom, 2nd floor…"
+                      rows={3}
+                    />
                   </div>
 
                   {/* TXN ID */}
