@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Fragment } from 'react';
 import { useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
@@ -63,6 +63,226 @@ function useCountUp(target: number, duration = 500): number {
   return value;
 }
 
+// ─── Obligation linking sub-components ───────────────────────────────────────
+
+interface SelectedObligation {
+  type: 'WO_PHASE' | 'WO' | 'PO';
+  wo_id?: string;
+  phase_id?: string;
+  po_id?: string;
+  label: string;
+  balance: number;
+}
+
+function getWOBalance(wo: any): number { return Number(wo.order_value || 0); }
+function getPhaseBalance(phase: any): number { return Number(phase.planned_amount || 0); }
+function getPOBalance(po: any): number { return Number(po.vendor_bill_amount || po.total_value || 0); }
+
+function WOObligationRow({ wo, selectedObligation, expanded, onToggleExpand, onSelect }: {
+  wo: any; selectedObligation: SelectedObligation | null;
+  expanded: boolean; onToggleExpand: () => void;
+  onSelect: (ob: SelectedObligation) => void;
+}) {
+  const hasPhases = (wo.wo_milestones?.length || 0) > 0;
+  const woBalance = getWOBalance(wo);
+  const isSelected = selectedObligation?.wo_id === wo.wo_id && !selectedObligation?.phase_id;
+  return (
+    <div className={isSelected ? 'bg-[rgba(200,96,58,0.04)]' : ''}>
+      <div
+        className="px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-black/[0.02] transition-colors"
+        onClick={hasPhases ? onToggleExpand : () => onSelect({ type: 'WO', wo_id: wo.wo_id, label: `${wo.wo_id} · ${wo.stakeholders?.name || ''}`, balance: woBalance })}
+      >
+        <div className="w-5 shrink-0 flex items-center justify-center">
+          {hasPhases ? (
+            <span className="material-symbols-outlined text-[16px] text-on-surface-variant/40">{expanded ? 'expand_more' : 'chevron_right'}</span>
+          ) : isSelected ? (
+            <div className="w-4 h-4 rounded-full bg-[#C8603A] flex items-center justify-center">
+              <span className="material-symbols-outlined text-white text-[10px]" style={{ fontVariationSettings: "'FILL' 1" }}>check</span>
+            </div>
+          ) : (
+            <div className="w-4 h-4 rounded-full border-2 border-outline-variant/40" />
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="text-[13px] font-medium text-on-surface truncate">{wo.stakeholders?.name || 'Unknown'}</p>
+            <span className="font-data-mono text-[10px] text-on-surface-variant/40 shrink-0">{wo.wo_id}</span>
+          </div>
+          {wo.scope_of_work && <p className="text-[11px] text-on-surface-variant/50 truncate mt-0.5">{(wo.scope_of_work as string).slice(0, 60)}</p>}
+        </div>
+        <div className="text-right shrink-0">
+          <p className={`text-[13px] font-medium font-data-mono ${woBalance > 0 ? 'text-on-surface' : 'text-on-surface-variant/40'}`}>
+            {woBalance > 0 ? `₹${woBalance.toLocaleString('en-IN')}` : 'Settled'}
+          </p>
+          {hasPhases && <p className="text-[10px] text-on-surface-variant/40">{wo.wo_milestones.length} phases</p>}
+        </div>
+      </div>
+      {hasPhases && expanded && (
+        <div className="border-t border-black/[0.04] bg-black/[0.01]">
+          {wo.wo_milestones.map((phase: any) => {
+            const balance = getPhaseBalance(phase);
+            const isPhaseSelected = selectedObligation?.phase_id === phase.milestone_id;
+            const settled = phase.status === 'PAID' || phase.status === 'Paid';
+            return (
+              <div key={phase.milestone_id}
+                className={`pl-9 pr-4 py-3 flex items-center gap-3 border-b border-black/[0.03] last:border-0 transition-colors
+                  ${settled ? 'opacity-50 cursor-not-allowed' : isPhaseSelected ? 'bg-[rgba(200,96,58,0.06)] cursor-pointer' : 'cursor-pointer hover:bg-black/[0.02]'}`}
+                onClick={() => { if (settled) return; onSelect({ type: 'WO_PHASE', wo_id: wo.wo_id, phase_id: phase.milestone_id, label: `${phase.name} · ${wo.wo_id}`, balance }); }}
+              >
+                <div className="w-4 shrink-0 flex items-center justify-center">
+                  {isPhaseSelected ? (
+                    <div className="w-4 h-4 rounded-full bg-[#C8603A] flex items-center justify-center">
+                      <span className="material-symbols-outlined text-white text-[10px]" style={{ fontVariationSettings: "'FILL' 1" }}>check</span>
+                    </div>
+                  ) : <div className="w-4 h-4 rounded-full border-2 border-outline-variant/40" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[13px] font-medium text-on-surface">{phase.name}</p>
+                  {phase.qty && phase.unit_type && (
+                    <p className="text-[10px] text-on-surface-variant/40 mt-0.5">{phase.qty} {phase.unit_type}{phase.rate ? ` × ₹${Number(phase.rate).toLocaleString('en-IN')}` : ''}</p>
+                  )}
+                </div>
+                <div className="text-right shrink-0 ml-3">
+                  <p className="text-[13px] font-medium font-data-mono text-on-surface">₹{balance.toLocaleString('en-IN')}</p>
+                  {settled ? <p className="text-[10px] text-[#16A34A] font-medium">Settled ✓</p> : <p className="text-[10px] text-[#C8603A] font-medium">due</p>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function POObligationRow({ po, selectedObligation, onSelect }: {
+  po: any; selectedObligation: SelectedObligation | null;
+  onSelect: (ob: SelectedObligation) => void;
+}) {
+  const balance = getPOBalance(po);
+  const isSelected = selectedObligation?.po_id === po.po_id;
+  return (
+    <div
+      className={`px-4 py-3 flex items-center gap-3 transition-colors
+        ${balance <= 0 ? 'opacity-50 cursor-not-allowed' : isSelected ? 'bg-[rgba(200,96,58,0.06)] cursor-pointer' : 'cursor-pointer hover:bg-black/[0.02]'}`}
+      onClick={() => { if (balance <= 0) return; onSelect({ type: 'PO', po_id: po.po_id, label: `${po.po_id} · ${po.stakeholders?.name || ''}`, balance }); }}
+    >
+      <div className="w-5 shrink-0 flex items-center justify-center">
+        {isSelected ? (
+          <div className="w-4 h-4 rounded-full bg-[#C8603A] flex items-center justify-center">
+            <span className="material-symbols-outlined text-white text-[10px]" style={{ fontVariationSettings: "'FILL' 1" }}>check</span>
+          </div>
+        ) : <div className="w-4 h-4 rounded-full border-2 border-outline-variant/40" />}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <p className="text-[13px] font-medium text-on-surface">{po.stakeholders?.name || 'Unknown'}</p>
+          <span className="font-data-mono text-[10px] text-on-surface-variant/40 shrink-0">{po.po_id}</span>
+        </div>
+        {po.po_line_items?.[0] && (
+          <p className="text-[11px] text-on-surface-variant/50 truncate mt-0.5">
+            {po.po_line_items[0].item_name || po.po_line_items[0].description || po.po_line_items[0].name || ''}
+            {po.po_line_items.length > 1 && ` +${po.po_line_items.length - 1} more`}
+          </p>
+        )}
+      </div>
+      <div className="text-right shrink-0 ml-3">
+        {balance > 0
+          ? <><p className="text-[13px] font-medium font-data-mono text-on-surface">₹{balance.toLocaleString('en-IN')}</p><p className="text-[10px] text-[#C8603A] font-medium">due</p></>
+          : <p className="text-[12px] text-[#16A34A] font-medium">Settled ✓</p>}
+      </div>
+    </div>
+  );
+}
+
+function DetailLinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip, onConfirm, isPending, projectId: _projectId }: {
+  wos: any[]; pos: any[]; loading: boolean;
+  selectedObligation: SelectedObligation | null;
+  onSelect: (ob: SelectedObligation) => void;
+  onSkip: () => void;
+  onConfirm: (ob: SelectedObligation) => void;
+  isPending: boolean;
+  projectId: string;
+}) {
+  const [expandedWOs, setExpandedWOs] = useState<string[]>([]);
+
+  if (loading) {
+    return (
+      <div className="rounded-xl border border-outline-variant/20 p-4 space-y-3">
+        <div className="h-3 w-36 bg-surface-container-highest rounded animate-pulse" />
+        <div className="h-12 bg-surface-container-highest rounded-lg animate-pulse" />
+        <div className="h-12 bg-surface-container-highest rounded-lg animate-pulse" />
+      </div>
+    );
+  }
+
+  if (wos.length === 0 && pos.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-outline-variant/30 p-5 text-center">
+        <span className="material-symbols-outlined text-[28px] text-on-surface-variant/20 mb-2 block">link_off</span>
+        <p className="text-[13px] font-medium text-on-surface mb-1">No open WOs or POs found</p>
+        <p className="text-[11px] text-on-surface-variant/50 mb-3">No active work orders or purchase orders for this stakeholder and project.</p>
+        <button type="button" onClick={onSkip} className="text-[12px] text-on-surface-variant/50 hover:text-on-surface transition-colors">
+          Keep unlinked
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
+      <div className="px-4 py-2.5 bg-black/[0.02] border-b border-outline-variant/[0.08]">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/50">Link to Work Order or Purchase Order</p>
+        <p className="text-[11px] text-on-surface-variant/40 mt-0.5">Select what this payment is for</p>
+      </div>
+      <div className="divide-y divide-outline-variant/[0.06]">
+        {wos.length > 0 && (
+          <div>
+            <div className="px-4 py-1.5 bg-black/[0.01]">
+              <p className="text-[9px] font-bold uppercase tracking-wide text-on-surface-variant/40">Work Orders ({wos.length})</p>
+            </div>
+            {wos.map((wo: any) => (
+              <WOObligationRow key={wo.wo_id} wo={wo} selectedObligation={selectedObligation}
+                expanded={expandedWOs.includes(wo.wo_id)}
+                onToggleExpand={() => setExpandedWOs(prev => prev.includes(wo.wo_id) ? prev.filter(id => id !== wo.wo_id) : [...prev, wo.wo_id])}
+                onSelect={onSelect} />
+            ))}
+          </div>
+        )}
+        {pos.length > 0 && (
+          <div>
+            <div className="px-4 py-1.5 bg-black/[0.01]">
+              <p className="text-[9px] font-bold uppercase tracking-wide text-on-surface-variant/40">Purchase Orders ({pos.length})</p>
+            </div>
+            {pos.map((po: any) => (
+              <POObligationRow key={po.po_id} po={po} selectedObligation={selectedObligation} onSelect={onSelect} />
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="px-4 py-2.5 border-t border-outline-variant/[0.08] bg-black/[0.01] flex items-center gap-3">
+        {selectedObligation ? (
+          <>
+            <div className="flex-1 min-w-0">
+              <p className="text-[11px] text-on-surface-variant/50">Selected</p>
+              <p className="text-[12px] font-semibold text-on-surface truncate">{selectedObligation.label}</p>
+            </div>
+            <button type="button" onClick={onSkip} className="text-[12px] text-on-surface-variant/40 hover:text-on-surface transition-colors">Cancel</button>
+            <button type="button" onClick={() => onConfirm(selectedObligation)} disabled={isPending}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#C8603A] text-white text-[12px] font-semibold hover:opacity-90 disabled:opacity-50 shrink-0">
+              {isPending ? <><Loader2 size={13} className="animate-spin" /> Linking…</> : <><span className="material-symbols-outlined text-[14px]">link</span> Link</>}
+            </button>
+          </>
+        ) : (
+          <button type="button" onClick={onSkip} className="text-[12px] text-on-surface-variant/40 hover:text-on-surface transition-colors hover:underline underline-offset-2">
+            Skip — keep unlinked
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function TransactionDetail({ session }: { session: Session }) {
@@ -77,13 +297,11 @@ export default function TransactionDetail({ session }: { session: Session }) {
   const { data: profile } = useUserProfile(session.user.id);
 
   // ─── Allocation mapping state ───────────────────────────────────────────────
-  const [mappingId, setMappingId] = useState<string | null>(null);
-  const [mapType, setMapType] = useState<'WO' | 'PO' | ''>('');
-  const [mapRef, setMapRef] = useState('');
-  const [showMapPanel, setShowMapPanel] = useState(false);
-  const [selectedWoId, setSelectedWoId] = useState('');
-  const [availablePhases, setAvailablePhases] = useState<any[]>([]);
-  const [phasesLoading, setPhasesLoading] = useState(false);
+  const [mappingAllocId, setMappingAllocId] = useState<string | null>(null);
+  const [selectedObligation, setSelectedObligation] = useState<SelectedObligation | null>(null);
+  const [projectWOs, setProjectWOs] = useState<any[]>([]);
+  const [projectPOs, setProjectPOs] = useState<any[]>([]);
+  const [loadingObligations, setLoadingObligations] = useState(false);
 
   // ─── Void state ─────────────────────────────────────────────────────────────
   const [voidConfirm, setVoidConfirm] = useState(false);
@@ -132,58 +350,47 @@ export default function TransactionDetail({ session }: { session: Session }) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('txn_allocations')
-        .select('*, projects(name)')
+        .select('*, projects(name), wo_milestones(name)')
         .eq('txn_id', txnId);
       if (error) throw error;
       return data;
     },
   });
 
-  const { data: milestones } = useQuery({
-    queryKey: ['milestones'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('wo_milestones')
-        .select('*, work_orders(project_id, stakeholder_id, scope_of_work)');
-      if (error) throw error;
-      return data as any[];
-    },
-  });
-
-  const { data: purchaseOrders } = useQuery({
-    queryKey: ['purchase_orders'],
-    queryFn: async () => {
-      const { data } = await supabase.from('purchase_orders').select('*');
-      return data as any[];
-    },
-  });
-
-  const { data: workerWOs } = useQuery({
-    queryKey: ['wo_for_stakeholder', txn?.stakeholder_id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('work_orders')
-        .select('wo_id, project_id')
-        .eq('stakeholder_id', txn!.stakeholder_id);
-      if (error) throw error;
-      return data as any[];
-    },
-    enabled: !!txn?.stakeholder_id && txn?.stakeholders?.type === 'Worker',
-  });
-
   useEffect(() => {
-    if (!selectedWoId) { setAvailablePhases([]); return; }
-    setPhasesLoading(true);
-    supabase
-      .from('wo_milestones')
-      .select('milestone_id, name, planned_amount, status')
-      .eq('wo_id', selectedWoId)
-      .order('seq_no', { ascending: true })
-      .then(({ data, error }) => {
-        setPhasesLoading(false);
-        setAvailablePhases(!error && data ? data : []);
-      });
-  }, [selectedWoId]);
+    if (!mappingAllocId || !txn?.stakeholder_id || !allocs) {
+      setProjectWOs([]); setProjectPOs([]); setSelectedObligation(null);
+      return;
+    }
+    const alloc = (allocs as any[]).find((a: any) => a.allocation_id === mappingAllocId);
+    if (!alloc) return;
+    let cancelled = false;
+    setLoadingObligations(true);
+    setSelectedObligation(null);
+    Promise.all([
+      supabase.from('work_orders')
+        .select('wo_id, scope_of_work, order_value, status, stakeholders(name, category), wo_milestones(*)')
+        .eq('project_id', alloc.project_id)
+        .eq('stakeholder_id', txn.stakeholder_id)
+        .in('status', ['Active', 'Issued', 'Assigned', 'ACTIVE', 'ISSUED', 'ASSIGNED'])
+        .order('date_issued', { ascending: false }),
+      supabase.from('purchase_orders')
+        .select('po_id, status, vendor_bill_amount, total_value, stakeholders(name, category), po_line_items(*)')
+        .eq('project_id', alloc.project_id)
+        .eq('stakeholder_id', txn.stakeholder_id)
+        .in('status', ['ORDERED', 'BILLED', 'PARTIAL'])
+        .order('created_at', { ascending: false }),
+    ]).then(([{ data: wos, error: woErr }, { data: pos, error: poErr }]) => {
+      if (woErr) console.error('[DetailLinkingPanel] WO fetch error:', woErr);
+      if (poErr) console.error('[DetailLinkingPanel] PO fetch error:', poErr);
+      if (!cancelled) {
+        setProjectWOs(wos || []);
+        setProjectPOs(pos || []);
+        setLoadingObligations(false);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [mappingAllocId, txn?.stakeholder_id, allocs]);
 
   // ─── Mutations ────────────────────────────────────────────────────────────────
 
@@ -210,9 +417,10 @@ export default function TransactionDetail({ session }: { session: Session }) {
       if (vars.order_type === 'WO' && vars.order_ref) {
         qc.invalidateQueries({ queryKey: ['wo_allocations', vars.order_ref] });
       }
-      setMappingId(null);
-      setMapType('');
-      setMapRef('');
+      setMappingAllocId(null);
+      setSelectedObligation(null);
+      setProjectWOs([]);
+      setProjectPOs([]);
     },
   });
 
@@ -489,13 +697,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
           <div className="space-y-3">
             {(primaryAlloc ? [primaryAlloc, ...secondaryAllocs] : allocs).map((a) => {
               const isUnlinked = !a.order_type;
-              const isMapping = mappingId === a.allocation_id;
-              const stkType = txn.stakeholders?.type;
-              const relWOs = stkType === 'Worker' ? (workerWOs?.filter((wo) => wo.project_id === a.project_id) ?? []) : [];
-              const relPOs = stkType === 'Vendor' ? purchaseOrders?.filter((p) => p.stakeholder_id === txn.stakeholder_id && p.project_id === a.project_id) : [];
-              const milestoneName = a.milestone_id
-                ? (milestones?.find((m: any) => m.milestone_id === a.milestone_id)?.name ?? null)
-                : null;
+              const milestoneName = (a as any).wo_milestones?.name ?? null;
               return (
                 <div key={a.allocation_id}>
                   <p className="text-[14px] text-on-surface font-medium">{a.projects?.name || a.project_id}</p>
@@ -518,68 +720,16 @@ export default function TransactionDetail({ session }: { session: Session }) {
                       <span className="ml-1 text-tertiary italic">Unlinked</span>
                     )}
                   </p>
-
-                  {/* Inline Map UI */}
-                  {isUnlinked && !isMapping && (
+                  {isUnlinked && (
                     <button
-                      onClick={() => setMappingId(a.allocation_id)}
+                      onClick={() => {
+                        setMappingAllocId(a.allocation_id);
+                        document.getElementById('alloc-table')?.scrollIntoView({ behavior: 'smooth' });
+                      }}
                       className="mt-1 flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold text-primary bg-primary/10 hover:bg-primary/15"
                     >
                       <span className="material-symbols-outlined text-[14px]">link</span> Map Now
                     </button>
-                  )}
-                  {isMapping && (
-                    <div className="mt-2 flex flex-col gap-2">
-                      <div className="flex items-center gap-2">
-                        <select value={mapType} onChange={(e) => { setMapType(e.target.value as any); setMapRef(''); setSelectedWoId(''); }} className="bk-input py-1.5 text-body-sm w-28">
-                          <option value="">Type...</option>
-                          {stkType === 'Worker' && <option value="WO">Work Order</option>}
-                          {stkType === 'Vendor' && <option value="PO">Purchase Order</option>}
-                        </select>
-                        {mapType === 'WO' && (
-                          <select value={selectedWoId} onChange={(e) => { setSelectedWoId(e.target.value); setMapRef(''); }} className="bk-input py-1.5 text-body-sm flex-1">
-                            <option value="">Select WO...</option>
-                            {relWOs.map((wo: any) => (
-                              <option key={wo.wo_id} value={wo.wo_id}>{wo.wo_id}</option>
-                            ))}
-                          </select>
-                        )}
-                        {mapType === 'WO' && selectedWoId && (
-                          <select value={mapRef} onChange={(e) => setMapRef(e.target.value)} className="bk-input py-1.5 text-body-sm flex-1" disabled={phasesLoading}>
-                            <option value="">{phasesLoading ? 'Loading...' : 'Select phase...'}</option>
-                            {availablePhases.map((m: any) => (
-                              <option key={m.milestone_id} value={m.milestone_id}>{m.name} (₹{Number(m.planned_amount).toLocaleString('en-IN')})</option>
-                            ))}
-                          </select>
-                        )}
-                        {mapType === 'PO' && (
-                          <select value={mapRef} onChange={(e) => setMapRef(e.target.value)} className="bk-input py-1.5 text-body-sm flex-1">
-                            <option value="">Select PO...</option>
-                            {relPOs?.map((p: any) => <option key={p.po_id} value={p.po_id}>{p.po_id} (₹{p.order_value})</option>)}
-                          </select>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => {
-                            if (!mapType) return;
-                            if (mapType === 'WO' && (!selectedWoId || !mapRef)) return;
-                            if (mapType === 'PO' && !mapRef) return;
-                            updateAlloc.mutate({
-                              allocId: a.allocation_id,
-                              order_type: mapType,
-                              order_ref: mapType === 'WO' ? selectedWoId : mapRef,
-                              milestone_id: mapType === 'WO' ? mapRef : undefined,
-                            });
-                          }}
-                          disabled={!mapType || (mapType === 'WO' ? (!selectedWoId || !mapRef) : !mapRef) || updateAlloc.isPending}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-secondary text-on-primary hover:opacity-80 disabled:opacity-40"
-                        >
-                          <span className="material-symbols-outlined text-[14px]">link</span> {updateAlloc.isPending ? 'Saving...' : 'Map'}
-                        </button>
-                        <button onClick={() => { setMappingId(null); setMapType(''); setMapRef(''); setSelectedWoId(''); }} className="text-[11px] font-bold text-on-surface-variant hover:text-on-surface">Cancel</button>
-                      </div>
-                    </div>
                   )}
                 </div>
               );
@@ -644,19 +794,20 @@ export default function TransactionDetail({ session }: { session: Session }) {
           )}
           {String(txn.ai_flag_data.reason || '').toLowerCase().includes('unmapped') && allocs && allocs.length > 0 && (() => {
             const stkType = txn.stakeholders?.type;
-            const unlinkedAllocs = allocs.filter((a) => !a.order_type);
-            const allRelMS = stkType === 'Worker' ? milestones?.filter((m) => m.work_orders?.stakeholder_id === txn.stakeholder_id) || [] : [];
-            const allRelPOs = stkType === 'Vendor' ? purchaseOrders?.filter((p) => p.stakeholder_id === txn.stakeholder_id) || [] : [];
-            return (
+            const unlinkedAlloc = allocs.find((a) => !a.order_type);
+            return unlinkedAlloc ? (
               <div className="mt-4 pt-4 border-t border-error-container/30">
                 <p className="text-[11px] text-on-surface-variant mb-3">Resolve this flag by mapping to an existing order or creating a new one:</p>
-                <div className="flex flex-wrap gap-2 mb-3">
+                <div className="flex flex-wrap gap-2">
                   <button
-                    onClick={() => setShowMapPanel(!showMapPanel)}
-                    className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-[12px] font-bold transition-colors border ${showMapPanel ? 'bg-primary text-on-primary border-primary' : 'bg-primary/10 text-primary border-primary/20 hover:bg-primary/20'}`}
+                    onClick={() => {
+                      setMappingAllocId(unlinkedAlloc.allocation_id);
+                      document.getElementById('alloc-table')?.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[12px] font-bold bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors"
                   >
-                    <span className="material-symbols-outlined text-[16px]">{showMapPanel ? 'expand_less' : 'link'}</span>
-                    {showMapPanel ? 'Close' : `Map to Existing ${stkType === 'Worker' ? 'Work Order' : 'Purchase Order'}`}
+                    <span className="material-symbols-outlined text-[16px]">link</span>
+                    Map to Existing {stkType === 'Worker' ? 'Work Order' : 'Purchase Order'}
                   </button>
                   <button
                     onClick={() => navigate(stkType === 'Worker' ? '/work-orders/new' : '/purchase-orders', { state: { projectId: allocs[0]?.project_id, stakeholderId: txn.stakeholder_id } })}
@@ -665,55 +816,8 @@ export default function TransactionDetail({ session }: { session: Session }) {
                     <span className="material-symbols-outlined text-[16px]">add</span> Create New {stkType === 'Worker' ? 'Work Order' : 'Purchase Order'}
                   </button>
                 </div>
-                {showMapPanel && (
-                  <div className="bg-surface-container-lowest rounded-xl border border-outline-variant/30 overflow-hidden">
-                    <div className="px-4 py-3 bg-surface-container-low border-b border-outline-variant/20">
-                      <p className="text-[11px] font-bold text-on-surface-variant">Select a {stkType === 'Worker' ? 'work order phase' : 'purchase order'} to map this transaction to:</p>
-                    </div>
-                    <div className="divide-y divide-outline-variant/10 max-h-64 overflow-y-auto">
-                      {stkType === 'Worker' && allRelMS.map((m: any) => (
-                        <button key={m.milestone_id}
-                          onClick={() => { const unlinked = unlinkedAllocs[0]; if (unlinked) updateAlloc.mutate({ allocId: unlinked.allocation_id, order_type: 'WO', order_ref: m.wo_id, milestone_id: m.milestone_id }); setShowMapPanel(false); }}
-                          className="w-full flex items-center gap-4 px-4 py-3 text-left hover:bg-primary/5 transition-colors group">
-                          <div className="w-9 h-9 rounded-full bg-secondary-container/30 flex items-center justify-center shrink-0 group-hover:bg-secondary-container/60 transition-colors">
-                            <span className="material-symbols-outlined text-[18px] text-secondary">assignment</span>
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-body-sm font-semibold text-on-surface truncate">{m.name}</p>
-                            <p className="text-[10px] text-on-surface-variant font-data-mono">{m.wo_id} · {m.work_orders?.scope_of_work?.substring(0, 40) || 'No scope'}</p>
-                          </div>
-                          <div className="text-right shrink-0">
-                            <p className="font-data-mono font-bold text-body-sm text-on-surface">₹{Number(m.planned_amount).toLocaleString()}</p>
-                            <p className={`text-[10px] font-bold ${m.status === 'Completed' ? 'text-secondary' : 'text-on-surface-variant'}`}>{m.status}</p>
-                          </div>
-                          <span className="material-symbols-outlined text-[18px] text-primary opacity-0 group-hover:opacity-100 transition-opacity">arrow_forward</span>
-                        </button>
-                      ))}
-                      {stkType === 'Vendor' && allRelPOs.map((p: any) => (
-                        <button key={p.po_id}
-                          onClick={() => { const unlinked = unlinkedAllocs[0]; if (unlinked) updateAlloc.mutate({ allocId: unlinked.allocation_id, order_type: 'PO', order_ref: p.po_id }); setShowMapPanel(false); }}
-                          className="w-full flex items-center gap-4 px-4 py-3 text-left hover:bg-primary/5 transition-colors group">
-                          <div className="w-9 h-9 rounded-full bg-tertiary-container/30 flex items-center justify-center shrink-0">
-                            <span className="material-symbols-outlined text-[18px] text-tertiary">shopping_cart</span>
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-body-sm font-semibold text-on-surface truncate">{p.po_id}</p>
-                            <p className="text-[10px] text-on-surface-variant">₹{Number(p.order_value).toLocaleString()}</p>
-                          </div>
-                          <span className="material-symbols-outlined text-[18px] text-primary opacity-0 group-hover:opacity-100 transition-opacity">arrow_forward</span>
-                        </button>
-                      ))}
-                      {((stkType === 'Worker' && allRelMS.length === 0) || (stkType === 'Vendor' && allRelPOs.length === 0)) && (
-                        <div className="px-4 py-6 text-center text-on-surface-variant">
-                          <span className="material-symbols-outlined text-[32px] opacity-20 mb-2 block">inbox</span>
-                          <p className="text-body-sm">No {stkType === 'Worker' ? 'work orders' : 'purchase orders'} found for this stakeholder.</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
               </div>
-            );
+            ) : null;
           })()}
         </div>
       )}
@@ -733,90 +837,57 @@ export default function TransactionDetail({ session }: { session: Session }) {
             <tbody>
               {allocs?.map((a) => {
                 const isUnlinked = !a.order_type;
-                const isMapping = mappingId === a.allocation_id;
-                const stkType = txn.stakeholders?.type;
-                const relWOs2 = stkType === 'Worker' ? (workerWOs?.filter((wo) => wo.project_id === a.project_id) ?? []) : [];
-                const relPOs = stkType === 'Vendor' ? purchaseOrders?.filter((p) => p.stakeholder_id === txn.stakeholder_id && p.project_id === a.project_id) : [];
-                const milestoneName = a.milestone_id
-                  ? (milestones?.find((m: any) => m.milestone_id === a.milestone_id)?.name ?? null)
-                  : null;
+                const isMapping = mappingAllocId === a.allocation_id;
+                const milestoneName = (a as any).wo_milestones?.name ?? null;
                 return (
-                  <tr key={a.allocation_id} className={`border-b border-outline-variant/10 transition-colors ${isUnlinked ? 'bg-tertiary-container/5' : 'hover:bg-surface-container-lowest'}`}>
-                    <td className="py-3 pr-4">
-                      <p className="font-semibold text-[13px] text-on-surface">{a.projects?.name || 'Unassigned'}</p>
-                      <p className="text-[10px] text-on-surface-variant font-data-mono">{a.project_id}</p>
-                    </td>
-                    <td className="py-3 pr-4">
-                      {a.order_type ? (
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-surface-container-high text-on-surface shrink-0">{a.order_type}</span>
-                          <button onClick={() => setPeek({ type: a.order_type as 'WO' | 'PO', id: a.order_ref })}
-                            className="text-[12px] font-data-mono text-primary hover:underline cursor-pointer">{a.order_ref} ↗</button>
-                          {milestoneName && <span className="text-on-surface-variant text-[11px]">· {milestoneName}</span>}
-                        </div>
-                      ) : isMapping ? (
-                        <div className="flex flex-col gap-2">
-                          <div className="flex items-center gap-2">
-                            <select value={mapType} onChange={(e) => { setMapType(e.target.value as any); setMapRef(''); setSelectedWoId(''); }} className="bk-input py-1.5 text-body-sm w-28">
-                              <option value="">Type...</option>
-                              {stkType === 'Worker' && <option value="WO">Work Order</option>}
-                              {stkType === 'Vendor' && <option value="PO">Purchase Order</option>}
-                            </select>
-                            {mapType === 'WO' && (
-                              <select value={selectedWoId} onChange={(e) => { setSelectedWoId(e.target.value); setMapRef(''); }} className="bk-input py-1.5 text-body-sm flex-1">
-                                <option value="">Select WO...</option>
-                                {relWOs2.map((wo: any) => (
-                                  <option key={wo.wo_id} value={wo.wo_id}>{wo.wo_id}</option>
-                                ))}
-                              </select>
-                            )}
-                            {mapType === 'WO' && selectedWoId && (
-                              <select value={mapRef} onChange={(e) => setMapRef(e.target.value)} className="bk-input py-1.5 text-body-sm flex-1" disabled={phasesLoading}>
-                                <option value="">{phasesLoading ? 'Loading...' : 'Select phase...'}</option>
-                                {availablePhases.map((m: any) => (
-                                  <option key={m.milestone_id} value={m.milestone_id}>{m.name} (₹{Number(m.planned_amount).toLocaleString('en-IN')})</option>
-                                ))}
-                              </select>
-                            )}
-                            {mapType === 'PO' && (
-                              <select value={mapRef} onChange={(e) => setMapRef(e.target.value)} className="bk-input py-1.5 text-body-sm flex-1">
-                                <option value="">Select PO...</option>
-                                {relPOs?.map((p: any) => <option key={p.po_id} value={p.po_id}>{p.po_id} (₹{p.order_value})</option>)}
-                              </select>
-                            )}
+                  <Fragment key={a.allocation_id}>
+                    <tr className={`border-b border-outline-variant/10 transition-colors ${isUnlinked && !isMapping ? 'bg-tertiary-container/5' : 'hover:bg-surface-container-lowest'}`}>
+                      <td className="py-3 pr-4">
+                        <p className="font-semibold text-[13px] text-on-surface">{a.projects?.name || 'Unassigned'}</p>
+                        <p className="text-[10px] text-on-surface-variant font-data-mono">{a.project_id}</p>
+                      </td>
+                      <td className="py-3 pr-4">
+                        {a.order_type ? (
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-surface-container-high text-on-surface shrink-0">{a.order_type}</span>
+                            <button onClick={() => setPeek({ type: a.order_type as 'WO' | 'PO', id: a.order_ref })}
+                              className="text-[12px] font-data-mono text-primary hover:underline cursor-pointer">{a.order_ref} ↗</button>
+                            {milestoneName && <span className="text-on-surface-variant text-[11px]">· {milestoneName}</span>}
                           </div>
+                        ) : (
                           <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => {
-                                if (!mapType) return;
-                                if (mapType === 'WO' && (!selectedWoId || !mapRef)) return;
-                                if (mapType === 'PO' && !mapRef) return;
-                                updateAlloc.mutate({
-                                  allocId: a.allocation_id,
-                                  order_type: mapType,
-                                  order_ref: mapType === 'WO' ? selectedWoId : mapRef,
-                                  milestone_id: mapType === 'WO' ? mapRef : undefined,
-                                });
-                              }}
-                              disabled={!mapType || (mapType === 'WO' ? (!selectedWoId || !mapRef) : !mapRef) || updateAlloc.isPending}
-                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-secondary text-on-primary hover:opacity-80 disabled:opacity-40"
-                            >
-                              <span className="material-symbols-outlined text-[14px]">link</span> {updateAlloc.isPending ? 'Saving...' : 'Map'}
+                            <span className="text-[12px] text-tertiary italic flex items-center gap-1"><span className="material-symbols-outlined text-[14px]">link_off</span> Unlinked</span>
+                            <button onClick={() => setMappingAllocId(a.allocation_id)} className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold text-primary bg-primary/10 hover:bg-primary/15">
+                              <span className="material-symbols-outlined text-[14px]">link</span> Map Now
                             </button>
-                            <button onClick={() => { setMappingId(null); setMapType(''); setMapRef(''); setSelectedWoId(''); }} className="text-[11px] font-bold text-on-surface-variant hover:text-on-surface">Cancel</button>
                           </div>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <span className="text-[12px] text-tertiary italic flex items-center gap-1"><span className="material-symbols-outlined text-[14px]">link_off</span> Unlinked</span>
-                          <button onClick={() => setMappingId(a.allocation_id)} className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold text-primary bg-primary/10 hover:bg-primary/15">
-                            <span className="material-symbols-outlined text-[14px]">link</span> Map Now
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                    <td className="py-3 text-right font-data-mono font-bold text-[13px]">₹{Number(a.allocated_amount).toLocaleString()}</td>
-                  </tr>
+                        )}
+                      </td>
+                      <td className="py-3 text-right font-data-mono font-bold text-[13px]">₹{Number(a.allocated_amount).toLocaleString()}</td>
+                    </tr>
+                    {isMapping && (
+                      <tr>
+                        <td colSpan={3} className="pb-4 pt-1">
+                          <DetailLinkingPanel
+                            wos={projectWOs}
+                            pos={projectPOs}
+                            loading={loadingObligations}
+                            selectedObligation={selectedObligation}
+                            onSelect={setSelectedObligation}
+                            onSkip={() => { setMappingAllocId(null); setSelectedObligation(null); }}
+                            onConfirm={(ob) => updateAlloc.mutate({
+                              allocId: a.allocation_id,
+                              order_type: ob.type === 'PO' ? 'PO' : 'WO',
+                              order_ref: ob.type === 'PO' ? ob.po_id! : ob.wo_id!,
+                              milestone_id: ob.type === 'WO_PHASE' ? ob.phase_id : undefined,
+                            })}
+                            isPending={updateAlloc.isPending}
+                            projectId={a.project_id}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 );
               })}
             </tbody>
