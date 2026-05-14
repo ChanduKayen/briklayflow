@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import confetti from 'canvas-confetti';
 import { supabase } from '../lib/supabase';
 import { LinearProgress } from '../components/LinearProgress';
 import type { Session } from '@supabase/supabase-js';
@@ -48,11 +49,11 @@ function fmtDate(d: string | null | undefined) {
   return p.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-function fmtLakh(n: number) {
-  if (n >= 10000000) return `${(n / 10000000).toFixed(1).replace(/\.0$/, '')}Cr`;
-  if (n >= 100000)   return `${(n / 100000).toFixed(1).replace(/\.0$/, '')}L`;
-  if (n >= 1000)     return `${(n / 1000).toFixed(1).replace(/\.0$/, '')}K`;
-  return n.toLocaleString('en-IN');
+function fmtShortDate(d: string | null | undefined) {
+  if (!d) return '';
+  const p = new Date(d);
+  if (isNaN(p.getTime())) return '';
+  return p.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 }
 
 function isOverdue(po: any): boolean {
@@ -164,11 +165,381 @@ function Dropdown({
   );
 }
 
+// ── VendorBillCell ────────────────────────────────────────────────────────────
+
+function VendorBillCell({
+  po, canManage, currentUserName, onUpdate, showSnackbar,
+}: {
+  po: any;
+  canManage: boolean;
+  currentUserName: string;
+  onUpdate: (poId: string, updates: any) => void;
+  showSnackbar: (msg: string, opts?: any) => void;
+}) {
+  const [editing, setEditing]   = useState(false);
+  const [amount, setAmount]     = useState('');
+  const [billNo, setBillNo]     = useState('');
+  const [saving, setSaving]     = useState(false);
+
+  const hasBill = Number(po.vendor_bill_amount) > 0;
+
+  const handleSave = async () => {
+    const parsed = parseFloat(amount);
+    if (!parsed || parsed <= 0) return;
+    setSaving(true);
+    const { error } = await supabase
+      .from('purchase_orders')
+      .update({
+        vendor_bill_amount:    parsed,
+        vendor_bill_number:    billNo.trim() || null,
+        vendor_bill_no:        billNo.trim() || null,
+        bill_recorded_at:      new Date().toISOString(),
+        bill_recorded_by_name: currentUserName,
+      })
+      .eq('po_id', po.po_id);
+    setSaving(false);
+    if (!error) {
+      setEditing(false);
+      onUpdate(po.po_id, {
+        vendor_bill_amount: parsed,
+        vendor_bill_number: billNo.trim() || null,
+        bill_recorded_at:   new Date().toISOString(),
+      });
+      confetti({ particleCount: 60, spread: 50, origin: { y: 0.6 }, colors: ['#16A34A', '#F59E0B', '#ffffff'] });
+      showSnackbar(`🎉 Bill recorded! ₹${parsed.toLocaleString('en-IN')} · Now mark as received at site`);
+    } else {
+      showSnackbar(error.message || 'Failed to save bill', { type: 'error' });
+    }
+  };
+
+  // Read-only: no canManage
+  if (!canManage) {
+    if (hasBill) {
+      return (
+        <td className="px-3 py-2 w-[200px]">
+          <div className="rounded-[10px] p-[10px_14px] bg-[#F0FDF4] border border-[#BBF7D0]">
+            <p className="text-[18px] font-bold text-[#16A34A] font-mono leading-none">
+              ₹{Number(po.vendor_bill_amount).toLocaleString('en-IN')}
+            </p>
+            {(po.vendor_bill_number || po.vendor_bill_no) && (
+              <p className="text-[10px] font-mono text-on-surface-variant/60 mt-1">
+                {po.vendor_bill_number || po.vendor_bill_no}
+              </p>
+            )}
+          </div>
+        </td>
+      );
+    }
+    return <td className="px-3 py-2 w-[200px]"><span className="text-on-surface-variant/30 text-[12px]">—</span></td>;
+  }
+
+  // STATE A — no bill, not editing
+  if (!hasBill && !editing) {
+    return (
+      <td className="px-3 py-2 w-[200px]" onClick={e => e.stopPropagation()}>
+        <div
+          onClick={() => { setAmount(''); setBillNo(po.vendor_bill_number || po.vendor_bill_no || ''); setEditing(true); }}
+          className="rounded-[10px] bg-[#FFFBEB] border border-dashed border-amber-400 cursor-pointer hover:bg-[#FEF3C7] hover:border-solid transition-all flex items-center gap-2.5 px-[14px] py-[10px]"
+        >
+          <span className="text-[18px] shrink-0">💰</span>
+          <div className="min-w-0">
+            <p className="text-[13px] font-semibold text-amber-700 leading-tight">Enter Vendor Bill</p>
+            <p className="text-[10px] text-amber-600">Tap to record bill amount</p>
+          </div>
+        </div>
+      </td>
+    );
+  }
+
+  // STATE B — editing
+  if (editing) {
+    return (
+      <td className="px-3 py-2 w-[200px]" onClick={e => e.stopPropagation()}>
+        <div className="rounded-[10px] p-3 bg-white border-2 border-amber-400 shadow-[0_4px_12px_rgba(245,158,11,0.2)] relative z-10">
+          <p className="text-[10px] font-semibold text-amber-700 uppercase tracking-wide mb-2">Vendor Bill Amount</p>
+          <div className="relative mb-2">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[18px] font-bold text-amber-600">₹</span>
+            <input
+              type="number"
+              placeholder="0"
+              value={amount}
+              onChange={e => setAmount(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') handleSave();
+                if (e.key === 'Escape') { setEditing(false); setAmount(''); }
+              }}
+              className="w-full h-11 text-[20px] font-bold pl-9 pr-3 border-2 border-amber-400 rounded-lg bg-amber-50 focus:outline-none focus:border-amber-600 focus:bg-white"
+              autoFocus
+            />
+          </div>
+          <input
+            type="text"
+            placeholder="Bill / Invoice No (optional)"
+            value={billNo}
+            onChange={e => setBillNo(e.target.value)}
+            className="w-full h-8 px-3 mb-2.5 text-[12px] border border-outline-variant/30 rounded-lg focus:outline-none focus:border-amber-400 bg-white"
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={handleSave}
+              disabled={!amount || parseFloat(amount) <= 0 || saving}
+              className={`flex-1 h-9 rounded-lg text-[13px] font-semibold transition-colors ${
+                amount && parseFloat(amount) > 0
+                  ? 'bg-amber-500 text-white hover:bg-amber-600'
+                  : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+              }`}
+            >
+              {saving ? 'Saving…' : 'Save Bill'}
+            </button>
+            <button
+              onClick={() => { setEditing(false); setAmount(''); }}
+              className="w-9 h-9 rounded-lg border border-outline-variant/30 text-on-surface-variant hover:bg-surface-container flex items-center justify-center text-[13px]"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      </td>
+    );
+  }
+
+  // STATE C — bill recorded
+  return (
+    <td className="px-3 py-2 w-[200px]" onClick={e => e.stopPropagation()}>
+      <div
+        onClick={() => { setAmount(String(po.vendor_bill_amount)); setBillNo(po.vendor_bill_number || po.vendor_bill_no || ''); setEditing(true); }}
+        className="rounded-[10px] px-[14px] py-[10px] bg-[#F0FDF4] border border-[#BBF7D0] cursor-pointer hover:border-green-400 transition-colors group"
+      >
+        <div className="flex items-start justify-between">
+          <p className="text-[18px] font-bold text-[#16A34A] font-mono leading-none">
+            ₹{Number(po.vendor_bill_amount).toLocaleString('en-IN')}
+          </p>
+          <span className="text-[14px] text-green-500">✓</span>
+        </div>
+        {(po.vendor_bill_number || po.vendor_bill_no) && (
+          <p className="text-[10px] font-mono text-on-surface-variant/60 mt-1">
+            {po.vendor_bill_number || po.vendor_bill_no}
+          </p>
+        )}
+        {po.bill_recorded_at && (
+          <p className="text-[10px] text-on-surface-variant/50">
+            Recorded {fmtShortDate(po.bill_recorded_at)}
+          </p>
+        )}
+        <p className="text-[9px] text-on-surface-variant/40 opacity-0 group-hover:opacity-100 transition-opacity mt-0.5">
+          Click to edit
+        </p>
+      </div>
+    </td>
+  );
+}
+
+// ── BillUploadCell ────────────────────────────────────────────────────────────
+
+function BillUploadCell({
+  po, canManage, onUpdate, showSnackbar,
+}: {
+  po: any;
+  canManage: boolean;
+  onUpdate: (poId: string, updates: any) => void;
+  showSnackbar: (msg: string, opts?: any) => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const billUrl = po.vendor_bill_url || po.vendor_bill_doc_url;
+
+  if (billUrl) {
+    return (
+      <td className="px-3 py-2 w-[140px]" onClick={e => e.stopPropagation()}>
+        <a
+          href={billUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 px-3 py-2 bg-green-50 text-green-700 border border-green-200 rounded-lg text-[12px] font-medium hover:bg-green-100 transition-colors w-full justify-center"
+        >
+          <span>📄</span>
+          View Bill
+        </a>
+      </td>
+    );
+  }
+
+  if (!canManage) {
+    return (
+      <td className="px-3 py-2 w-[140px]">
+        <span className="text-on-surface-variant/30 text-[12px]">—</span>
+      </td>
+    );
+  }
+
+  return (
+    <td className="px-3 py-2 w-[140px]" onClick={e => e.stopPropagation()}>
+      <label
+        className={`flex items-center gap-2 px-3 py-2 border border-dashed border-outline-variant/40 rounded-lg text-[12px] text-on-surface-variant w-full justify-center transition-colors ${
+          uploading
+            ? 'cursor-wait opacity-60'
+            : 'cursor-pointer hover:border-[#C8603A] hover:text-[#C8603A] hover:bg-orange-50'
+        }`}
+      >
+        <span>{uploading ? '⟳' : '📎'}</span>
+        {uploading ? 'Uploading…' : 'Upload Bill'}
+        <input
+          type="file"
+          accept=".pdf,.jpg,.jpeg,.png"
+          className="hidden"
+          disabled={uploading}
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            setUploading(true);
+            const ext = file.type === 'application/pdf' ? 'pdf' : 'jpg';
+            const path = `po-bills/${po.po_id}-${Date.now()}.${ext}`;
+            const { error: upErr } = await supabase.storage
+              .from('documents')
+              .upload(path, file, { contentType: file.type });
+            if (!upErr) {
+              const { data: pub } = supabase.storage.from('documents').getPublicUrl(path);
+              const url = pub.publicUrl;
+              await supabase
+                .from('purchase_orders')
+                .update({ vendor_bill_url: url, vendor_bill_doc_url: url })
+                .eq('po_id', po.po_id);
+              onUpdate(po.po_id, { vendor_bill_url: url });
+              showSnackbar('📎 Bill document uploaded!');
+            } else {
+              showSnackbar(upErr.message || 'Upload failed', { type: 'error' });
+            }
+            setUploading(false);
+            e.target.value = '';
+          }}
+        />
+      </label>
+    </td>
+  );
+}
+
+// ── SiteReceiptCell ───────────────────────────────────────────────────────────
+
+function SiteReceiptCell({
+  po, canManage, currentUserName, currentUserId, onUpdate, showSnackbar,
+}: {
+  po: any;
+  canManage: boolean;
+  currentUserName: string;
+  currentUserId: string;
+  onUpdate: (poId: string, updates: any) => void;
+  showSnackbar: (msg: string, opts?: any) => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [saving, setSaving]         = useState(false);
+
+  const hasBill    = Number(po.vendor_bill_amount) > 0;
+  const isReceived = !!po.received_at_site;
+
+  // RECEIVED
+  if (isReceived) {
+    return (
+      <td className="px-3 py-2 w-[130px]">
+        <div className="rounded-lg px-3 py-2 bg-purple-50 border border-purple-200">
+          <div className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-purple-500 shrink-0" />
+            <p className="text-[12px] font-semibold text-purple-700">At Site ✓</p>
+          </div>
+          <p className="text-[10px] text-on-surface-variant/60 mt-0.5">
+            {po.received_by_name?.split(' ')[0] ?? ''}
+            {po.received_at_site ? ` · ${fmtShortDate(po.received_at_site)}` : ''}
+          </p>
+        </div>
+      </td>
+    );
+  }
+
+  if (!canManage) {
+    return <td className="px-3 py-2 w-[130px]"><span className="text-on-surface-variant/30 text-[12px]">—</span></td>;
+  }
+
+  // LOCKED — no bill yet
+  if (!hasBill) {
+    return (
+      <td className="px-3 py-2 w-[130px]">
+        <div
+          className="rounded-lg px-3 py-2 bg-gray-50 border border-gray-200 opacity-60"
+          title="Enter vendor bill amount first"
+        >
+          <p className="text-[11px] text-on-surface-variant/60 text-center">🔒 Enter bill first</p>
+        </div>
+      </td>
+    );
+  }
+
+  // CONFIRMING
+  if (confirming) {
+    return (
+      <td className="px-3 py-2 w-[130px]" onClick={e => e.stopPropagation()}>
+        <div className="rounded-lg p-3 bg-white border-2 border-purple-400 shadow-lg relative z-10">
+          <p className="text-[11px] font-semibold text-purple-700 mb-2">Confirm site receipt?</p>
+          <div className="flex gap-1.5">
+            <button
+              onClick={async () => {
+                setSaving(true);
+                const now = new Date().toISOString();
+                const { error } = await supabase
+                  .from('purchase_orders')
+                  .update({
+                    received_at_site:    now,
+                    received_by_name:    currentUserName,
+                    received_by_user_id: currentUserId,
+                    status:              'BILLED',
+                  })
+                  .eq('po_id', po.po_id);
+                setSaving(false);
+                setConfirming(false);
+                if (!error) {
+                  onUpdate(po.po_id, {
+                    received_at_site: now,
+                    received_by_name: currentUserName,
+                    status:           'BILLED',
+                  });
+                  showSnackbar('📦 Receipt confirmed — status updated to Billed');
+                } else {
+                  showSnackbar(error.message || 'Failed to confirm receipt', { type: 'error' });
+                }
+              }}
+              disabled={saving}
+              className="flex-1 py-1.5 rounded-md bg-purple-600 text-white text-[11px] font-semibold hover:bg-purple-700 disabled:opacity-50"
+            >
+              {saving ? '…' : '✓ Confirm'}
+            </button>
+            <button
+              onClick={() => setConfirming(false)}
+              className="px-2 py-1.5 rounded-md border border-outline-variant/30 text-[11px] text-on-surface-variant hover:bg-surface-container"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      </td>
+    );
+  }
+
+  // READY — bill exists, not yet received
+  return (
+    <td className="px-3 py-2 w-[130px]" onClick={e => e.stopPropagation()}>
+      <button
+        onClick={() => setConfirming(true)}
+        className="flex items-center gap-2 px-3 py-2 w-full justify-center bg-purple-600 text-white rounded-lg text-[12px] font-medium hover:bg-purple-700 transition-colors shadow-sm shadow-purple-200"
+      >
+        <span>📦</span>
+        Mark at Site
+      </button>
+    </td>
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function PurchaseOrders({ session }: { session: Session }) {
-  const navigate = useNavigate();
-  const qc = useQueryClient();
+  const navigate    = useNavigate();
+  const qc          = useQueryClient();
   const { data: profile } = useUserProfile(session.user.id);
   const { show: showSnackbar } = useSnackbar();
 
@@ -180,79 +551,73 @@ export default function PurchaseOrders({ session }: { session: Session }) {
   const [searchOpen, setSearchOpen]       = useState(false);
   const [searchTerm, setSearchTerm]       = useState('');
 
-  // chip dropdown open state
   const [openChip, setOpenChip] = useState<'date' | 'status' | 'vendor' | 'project' | null>(null);
 
-  // chip anchor refs
   const dateRef    = useRef<HTMLDivElement>(null);
   const statusRef  = useRef<HTMLDivElement>(null);
   const vendorRef  = useRef<HTMLDivElement>(null);
   const projectRef = useRef<HTMLDivElement>(null);
+
+  // ── Local optimistic overrides ─────────────────────────────────────────────
+  const [poOverrides, setPoOverrides] = useState<Record<string, any>>({});
+
+  const handlePOUpdate = (poId: string, updates: any) => {
+    setPoOverrides(prev => ({ ...prev, [poId]: { ...(prev[poId] || {}), ...updates } }));
+    qc.setQueryData(['purchase_orders_enhanced'], (old: any[] | undefined) =>
+      old?.map(p => p.po_id === poId ? { ...p, ...updates } : p)
+    );
+  };
 
   const canManage =
     profile?.role === 'management' ||
     profile?.role === 'principal' ||
     profile?.role === 'accountant';
 
-  const { data: pos, isLoading } = useQuery({
+  const currentUserName: string = (profile as any)?.display_name || (profile as any)?.name || session.user.email || 'Unknown';
+  const currentUserId: string   = session.user.id;
+
+  // ── Data ───────────────────────────────────────────────────────────────────
+  const { data: rawPos, isLoading } = useQuery({
     queryKey: ['purchase_orders_enhanced'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('purchase_orders')
-        .select(`*, projects(name, site_location), stakeholders(name, category, gstin, is_approved), po_line_items(id, item_name)`)
+        .select(`
+          po_id, status, date_issued, created_at, ordered_by, expected_delivery,
+          total_value, order_value,
+          vendor_bill_amount, vendor_bill_number, vendor_bill_no,
+          vendor_bill_url, vendor_bill_doc_url, vendor_bill_date,
+          bill_recorded_at, bill_recorded_by_name,
+          received_at_site, received_by_name, received_by_user_id,
+          stakeholder_id, project_id,
+          projects(name, site_location),
+          stakeholders(name, category, gstin, is_approved),
+          po_line_items(id, item_name)
+        `)
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data as any[];
     },
   });
 
-  const { data: poPayments } = useQuery({
-    queryKey: ['po_payment_totals'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('txn_allocations')
-        .select('order_ref, allocated_amount')
-        .eq('order_type', 'PO');
-      if (error) throw error;
-      const totals: Record<string, number> = {};
-      for (const row of data ?? []) {
-        if (row.order_ref) totals[row.order_ref] = (totals[row.order_ref] || 0) + Number(row.allocated_amount);
-      }
-      return totals;
-    },
-  });
-
-  const recordSiteReceipt = useMutation({
-    mutationFn: async (po: any) => {
-      const { error } = await supabase.from('purchase_orders').update({
-        status:              'AT_SITE',
-        received_at_site:    new Date().toISOString(),
-        received_by_name:    session.user.email,
-        received_by_user_id: session.user.id,
-      }).eq('po_id', po.po_id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
-      showSnackbar('Site receipt recorded ✓');
-    },
-    onError: (err: any) => showSnackbar(err?.message || 'Failed to record receipt', { type: 'error' }),
-  });
+  // Merge server data with local optimistic overrides
+  const pos = (rawPos ?? []).map(p =>
+    poOverrides[p.po_id] ? { ...p, ...poOverrides[p.po_id] } : p
+  );
 
   // ── Derived filter options ─────────────────────────────────────────────────
-  const vendors  = [...new Set((pos ?? []).map(p => p.stakeholders?.name).filter(Boolean))].sort();
-  const projects = [...new Set((pos ?? []).map(p => p.projects?.name).filter(Boolean))].sort();
+  const vendors  = [...new Set(pos.map(p => p.stakeholders?.name).filter(Boolean))].sort() as string[];
+  const projects = [...new Set(pos.map(p => p.projects?.name).filter(Boolean))].sort() as string[];
 
   // ── KPIs ───────────────────────────────────────────────────────────────────
-  const totalCount      = pos?.length ?? 0;
-  const totalCommitted  = pos?.reduce((s, p) => s + (Number(p.total_value) || Number(p.order_value) || 0), 0) ?? 0;
-  const pendingDelivery = pos?.filter(p => p.status === 'ORDERED').length ?? 0;
-  const unbilled        = pos?.filter(p => p.status === 'AT_SITE').length ?? 0;
+  const totalCount      = pos.length;
+  const pendingDelivery = pos.filter(p => p.status === 'ORDERED').length;
+  const pendingBill     = pos.filter(p => p.status === 'ORDERED' && !Number(p.vendor_bill_amount)).length;
 
   // ── Filtering ──────────────────────────────────────────────────────────────
   const { from: dateFrom, to: dateTo } = dateRange(datePreset);
 
-  const filtered = (pos ?? []).filter(po => {
+  const filtered = pos.filter(po => {
     if (dateFrom && dateTo) {
       const d = new Date(po.date_issued || po.created_at);
       if (d < dateFrom || d > dateTo) return false;
@@ -272,7 +637,6 @@ export default function PurchaseOrders({ session }: { session: Session }) {
     return true;
   });
 
-  const filteredTotal = filtered.reduce((s, p) => s + (Number(p.total_value) || Number(p.order_value) || 0), 0);
   const hasFilters = datePreset !== 'all' || filterStatus.length || filterVendor.length || filterProject.length || !!searchTerm;
 
   function toggleChip(name: typeof openChip) {
@@ -309,7 +673,7 @@ export default function PurchaseOrders({ session }: { session: Session }) {
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-surface-container-low/30">
-      <div className="max-w-[1280px] mx-auto px-4 md:px-6 py-8">
+      <div className="max-w-[1400px] mx-auto px-4 md:px-6 py-8">
 
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 mb-6">
@@ -319,15 +683,14 @@ export default function PurchaseOrders({ session }: { session: Session }) {
               <span className="px-3 py-1 bg-surface-container text-[12px] rounded-full text-on-surface-variant">
                 <span className="font-bold text-on-surface">{totalCount}</span> orders
               </span>
-              <span className="px-3 py-1 bg-surface-container text-[12px] rounded-full text-on-surface-variant">
-                Committed: <span className="font-bold text-on-surface font-data-mono">₹{fmtLakh(totalCommitted)}</span>
-              </span>
               <span className="px-3 py-1 bg-amber-50 text-amber-700 text-[12px] rounded-full">
                 <span className="font-bold">{pendingDelivery}</span> pending delivery
               </span>
-              <span className="px-3 py-1 bg-violet-50 text-violet-700 text-[12px] rounded-full">
-                <span className="font-bold">{unbilled}</span> unbilled
-              </span>
+              {pendingBill > 0 && (
+                <span className="px-3 py-1 bg-orange-50 text-orange-700 text-[12px] rounded-full">
+                  <span className="font-bold">{pendingBill}</span> need bill entry
+                </span>
+              )}
             </div>
           </div>
           {canManage && (
@@ -341,10 +704,9 @@ export default function PurchaseOrders({ session }: { session: Session }) {
           )}
         </div>
 
-        {/* Filter bar — horizontal scroll on mobile, wraps on desktop */}
+        {/* Filter bar */}
         <div className="flex items-center gap-2 overflow-x-auto no-scrollbar md:flex-wrap flex-nowrap mb-4 pb-0.5">
 
-          {/* Date chip */}
           <div ref={dateRef} className="relative">
             <FilterChip
               label={datePreset === 'all' ? 'Date' : DATE_LABELS[datePreset]}
@@ -364,7 +726,6 @@ export default function PurchaseOrders({ session }: { session: Session }) {
             </Dropdown>
           </div>
 
-          {/* Status chip */}
           <div ref={statusRef} className="relative">
             <FilterChip
               label={filterStatus.length ? `Status (${filterStatus.length})` : 'Status'}
@@ -376,7 +737,6 @@ export default function PurchaseOrders({ session }: { session: Session }) {
             </Dropdown>
           </div>
 
-          {/* Vendor chip */}
           <div ref={vendorRef} className="relative">
             <FilterChip
               label={filterVendor.length ? `Vendor (${filterVendor.length})` : 'Vendor'}
@@ -388,7 +748,6 @@ export default function PurchaseOrders({ session }: { session: Session }) {
             </Dropdown>
           </div>
 
-          {/* Project chip */}
           <div ref={projectRef} className="relative">
             <FilterChip
               label={filterProject.length ? `Project (${filterProject.length})` : 'Project'}
@@ -400,7 +759,6 @@ export default function PurchaseOrders({ session }: { session: Session }) {
             </Dropdown>
           </div>
 
-          {/* Search */}
           {searchOpen ? (
             <div className="relative flex items-center">
               <span className="material-symbols-outlined absolute left-2.5 text-[16px] text-on-surface-variant/40 pointer-events-none">search</span>
@@ -426,7 +784,6 @@ export default function PurchaseOrders({ session }: { session: Session }) {
             </button>
           )}
 
-          {/* Clear all */}
           {hasFilters && (
             <button
               onClick={() => { setDatePreset('all'); setFilterStatus([]); setFilterVendor([]); setFilterProject([]); setSearchTerm(''); setSearchOpen(false); }}
@@ -439,8 +796,7 @@ export default function PurchaseOrders({ session }: { session: Session }) {
 
         {/* Result context */}
         <p className="text-[12px] text-on-surface-variant/50 mb-4">
-          Showing <span className="font-semibold text-on-surface">{filtered.length}</span> of {totalCount} ·
-          <span className="font-data-mono font-semibold text-on-surface ml-1">₹{fmtLakh(filteredTotal)}</span> total
+          Showing <span className="font-semibold text-on-surface">{filtered.length}</span> of {totalCount} orders
         </p>
 
         {isLoading && <LinearProgress className="mb-4" />}
@@ -472,142 +828,98 @@ export default function PurchaseOrders({ session }: { session: Session }) {
                   <th className="px-4 py-3 text-left">
                     <span className="text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-wider">Project</span>
                   </th>
-                  <th className="px-4 py-3 text-left hidden xl:table-cell">
-                    <span className="text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-wider">Items</span>
-                  </th>
-                  <th className="px-4 py-3 text-right">
-                    <span className="text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-wider">Amount</span>
-                  </th>
-                  <th className="px-4 py-3 text-right w-[120px]">
-                    <span className="text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-wider">Bill Amt</span>
-                  </th>
-                  <th className="px-4 py-3 text-center w-[90px]">
-                    <span className="text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-wider">At Site</span>
-                  </th>
-                  <th className="px-4 py-3 text-left">
+                  <th className="px-4 py-3 text-left w-[120px]">
                     <span className="text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-wider">Status</span>
                   </th>
+                  <th className="px-3 py-3 text-left w-[200px]">
+                    <span className="text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-wider">Vendor Bill</span>
+                  </th>
+                  <th className="px-3 py-3 text-left w-[140px]">
+                    <span className="text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-wider">Bill Doc</span>
+                  </th>
+                  <th className="px-3 py-3 text-left w-[130px]">
+                    <span className="text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-wider">At Site</span>
+                  </th>
+                  <th className="px-3 py-3 w-[44px]" />
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((po, idx) => {
-                  const billAmt = po.vendor_bill_amount ?? null;
-                  const hasBill = billAmt !== null && billAmt !== undefined;
-                  return (
-                    <tr
-                      key={po.po_id}
-                      className={`group cursor-pointer hover:bg-surface-container-low/40 transition-colors border-b border-outline-variant/[0.06] wo-row-animate ${STATUS_BORDER[po.status] ?? 'border-l-4 border-l-transparent'}`}
-                      style={{ animationDelay: `${Math.min(idx, 20) * 15}ms` }}
+                {filtered.map((po, idx) => (
+                  <tr
+                    key={po.po_id}
+                    className={`border-b border-outline-variant/[0.06] wo-row-animate ${STATUS_BORDER[po.status] ?? 'border-l-4 border-l-transparent'}`}
+                    style={{ animationDelay: `${Math.min(idx, 20) * 15}ms` }}
+                  >
+                    {/* PO No / Date */}
+                    <td
+                      className="px-4 py-3 cursor-pointer hover:bg-surface-container-low/40 transition-colors"
                       onClick={() => navigate(`/purchase-orders/${po.po_id}`)}
                     >
-                      {/* PO No / Date */}
-                      <td className="px-4 py-3">
-                        <p className="font-data-mono text-[13px] font-bold text-on-surface">{po.po_id}</p>
-                        <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{fmtDate(po.date_issued)}</p>
-                      </td>
+                      <p className="font-data-mono text-[13px] font-bold text-primary hover:underline">{po.po_id}</p>
+                      <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{fmtDate(po.date_issued)}</p>
+                    </td>
 
-                      {/* Vendor */}
-                      <td className="px-4 py-3">
-                        <p className="text-[13px] font-semibold text-on-surface">{po.stakeholders?.name ?? '—'}</p>
-                        <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{po.stakeholders?.category ?? ''}</p>
-                      </td>
+                    {/* Vendor */}
+                    <td className="px-4 py-3">
+                      <p className="text-[13px] font-semibold text-on-surface">{po.stakeholders?.name ?? '—'}</p>
+                      <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{po.stakeholders?.category ?? ''}</p>
+                    </td>
 
-                      {/* Project */}
-                      <td className="px-4 py-3">
-                        <p className="text-[13px] font-medium text-on-surface">{po.projects?.name ?? '—'}</p>
-                        <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{po.projects?.site_location ?? ''}</p>
-                      </td>
+                    {/* Project */}
+                    <td className="px-4 py-3">
+                      <p className="text-[13px] font-medium text-on-surface">{po.projects?.name ?? '—'}</p>
+                      <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{po.projects?.site_location ?? ''}</p>
+                    </td>
 
-                      {/* Items */}
-                      <td className="px-4 py-3 max-w-[180px] hidden xl:table-cell">
-                        <p className="text-[11px] text-on-surface-variant/60 line-clamp-2">{getItemsPreview(po)}</p>
-                      </td>
+                    {/* Status */}
+                    <td className="px-4 py-3 w-[120px]">
+                      <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${STATUS_CHIP[po.status] ?? 'bg-surface-container text-on-surface-variant'}`}>
+                        {STATUS_LABEL[po.status] ?? po.status}
+                      </span>
+                      {isOverdue(po) && (
+                        <p className="text-[10px] text-red-500 font-semibold mt-1">Overdue</p>
+                      )}
+                    </td>
 
-                      {/* Amount */}
-                      <td className="px-4 py-3 text-right">
-                        <p className="font-data-mono text-[13px] font-semibold text-on-surface">
-                          ₹{Number(po.total_value || po.order_value).toLocaleString('en-IN')}
-                        </p>
-                        {(() => {
-                          const paid = poPayments?.[po.po_id] ?? 0;
-                          if (paid > 0) {
-                            const total = Number(po.total_value || po.order_value) || 0;
-                            return (
-                              <p className={`text-[11px] mt-0.5 font-data-mono ${paid >= total ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                Paid ₹{paid.toLocaleString('en-IN')}
-                              </p>
-                            );
-                          }
-                          return null;
-                        })()}
-                      </td>
+                    {/* Vendor Bill */}
+                    <VendorBillCell
+                      po={po}
+                      canManage={canManage}
+                      currentUserName={currentUserName}
+                      onUpdate={handlePOUpdate}
+                      showSnackbar={showSnackbar}
+                    />
 
-                      {/* Bill Amount */}
-                      <td className="px-4 py-3 text-right w-[120px]" onClick={e => e.stopPropagation()}>
-                        {hasBill ? (
-                          <div>
-                            <p className="font-data-mono text-[13px] font-semibold text-on-surface">
-                              ₹{Number(billAmt).toLocaleString('en-IN')}
-                            </p>
-                            {(() => {
-                              const total = Number(po.total_value || po.order_value) || 0;
-                              const diff  = Number(billAmt) - total;
-                              const abs   = Math.abs(diff);
-                              const pct   = total > 0 ? abs / total : 0;
-                              if (abs < 100) return <p className="text-[10px] text-green-600 font-semibold">✓ Exact</p>;
-                              return (
-                                <p className={`text-[10px] font-data-mono font-semibold flex items-center gap-0.5 justify-end ${pct > 0.05 ? 'text-amber-600' : diff > 0 ? 'text-red-500' : 'text-green-600'}`}>
-                                  {pct > 0.05 && <span className="material-symbols-outlined text-[11px]">warning</span>}
-                                  {diff > 0 ? '+' : '-'}₹{abs.toLocaleString('en-IN')}
-                                </p>
-                              );
-                            })()}
-                          </div>
-                        ) : po.status === 'AT_SITE' && canManage ? (
-                          <button
-                            onClick={() => navigate(`/purchase-orders/${po.po_id}`)}
-                            className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 ml-auto text-[11px] font-semibold text-amber-600 hover:text-amber-700 bg-amber-50 hover:bg-amber-100 px-2 py-0.5 rounded-lg"
-                          >
-                            <span className="material-symbols-outlined text-[13px]">receipt</span>
-                            Add Bill
-                          </button>
-                        ) : (
-                          <span className="text-on-surface-variant/30 text-[12px]">—</span>
-                        )}
-                      </td>
+                    {/* Bill Doc */}
+                    <BillUploadCell
+                      po={po}
+                      canManage={canManage}
+                      onUpdate={handlePOUpdate}
+                      showSnackbar={showSnackbar}
+                    />
 
-                      {/* At Site */}
-                      <td className="px-4 py-3 text-center w-[90px]" onClick={e => e.stopPropagation()}>
-                        {po.received_at_site ? (
-                          <div>
-                            <p className="text-[10px] font-bold text-teal-600">✓ {po.received_by_name?.split(' ')[0] ?? 'Received'}</p>
-                            <p className="text-[10px] text-on-surface-variant/50 mt-0.5">{fmtDate(po.received_at_site)}</p>
-                          </div>
-                        ) : (po.status === 'ORDERED' && canManage) ? (
-                          <button
-                            onClick={() => recordSiteReceipt.mutate(po)}
-                            disabled={recordSiteReceipt.isPending}
-                            title="Mark received at site"
-                            className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 mx-auto text-[10px] text-on-surface-variant/40 hover:text-violet-600 disabled:opacity-50"
-                          >
-                            <span className="material-symbols-outlined text-[14px]">local_shipping</span>
-                            <span>At site?</span>
-                          </button>
-                        ) : null}
-                      </td>
+                    {/* At Site */}
+                    <SiteReceiptCell
+                      po={po}
+                      canManage={canManage}
+                      currentUserName={currentUserName}
+                      currentUserId={currentUserId}
+                      onUpdate={handlePOUpdate}
+                      showSnackbar={showSnackbar}
+                    />
 
-                      {/* Status */}
-                      <td className="px-4 py-3">
-                        <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${STATUS_CHIP[po.status] ?? 'bg-surface-container text-on-surface-variant'}`}>
-                          {STATUS_LABEL[po.status] ?? po.status}
-                        </span>
-                        {isOverdue(po) && (
-                          <p className="text-[10px] text-red-500 font-semibold mt-1">Overdue</p>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                    {/* Navigate → */}
+                    <td className="px-2 py-3 w-[44px]">
+                      <button
+                        onClick={() => navigate(`/purchase-orders/${po.po_id}`)}
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant/30 hover:bg-surface-container hover:text-on-surface transition-colors"
+                        title="Open detail"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+                      </button>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -616,48 +928,37 @@ export default function PurchaseOrders({ session }: { session: Session }) {
         {/* Mobile card list */}
         {filtered.length > 0 && (
           <div className="md:hidden space-y-3">
-            {filtered.map((po, idx) => {
-              return (
-                <div
-                  key={po.po_id}
-                  className={`bg-white rounded-2xl border border-black/[0.06] shadow-sm p-4 cursor-pointer active:scale-[0.99] transition-transform wo-row-animate ${STATUS_BORDER[po.status] ?? ''}`}
-                  style={{ animationDelay: `${Math.min(idx, 20) * 15}ms` }}
-                  onClick={() => navigate(`/purchase-orders/${po.po_id}`)}
-                >
-                  <div className="flex justify-between items-start mb-2">
-                    <div>
-                      <p className="font-data-mono text-[13px] font-bold text-on-surface">{po.po_id}</p>
-                      <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{fmtDate(po.date_issued)}</p>
-                    </div>
-                    <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${STATUS_CHIP[po.status] ?? 'bg-surface-container text-on-surface-variant'}`}>
-                      {STATUS_LABEL[po.status] ?? po.status}
-                    </span>
+            {filtered.map((po, idx) => (
+              <div
+                key={po.po_id}
+                className={`bg-white rounded-2xl border border-black/[0.06] shadow-sm p-4 cursor-pointer active:scale-[0.99] transition-transform wo-row-animate ${STATUS_BORDER[po.status] ?? ''}`}
+                style={{ animationDelay: `${Math.min(idx, 20) * 15}ms` }}
+                onClick={() => navigate(`/purchase-orders/${po.po_id}`)}
+              >
+                <div className="flex justify-between items-start mb-2">
+                  <div>
+                    <p className="font-data-mono text-[13px] font-bold text-on-surface">{po.po_id}</p>
+                    <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{fmtDate(po.date_issued)}</p>
                   </div>
-                  <p className="text-[13px] font-semibold text-on-surface">{po.stakeholders?.name ?? '—'}</p>
-                  <p className="text-[11px] text-on-surface-variant/60 mt-0.5 line-clamp-1">{getItemsPreview(po)}</p>
-                  <div className="flex justify-between items-center mt-3 pt-2.5 border-t border-outline-variant/10">
-                    <p className="text-[11px] text-on-surface-variant/60">{po.projects?.name ?? '—'}</p>
-                    <div className="text-right">
-                      <p className="font-data-mono text-[13px] font-bold text-on-surface">
-                        ₹{Number(po.total_value || po.order_value).toLocaleString('en-IN')}
-                      </p>
-                      {(() => {
-                        const paid = poPayments?.[po.po_id] ?? 0;
-                        if (paid > 0) {
-                          const total = Number(po.total_value || po.order_value) || 0;
-                          return (
-                            <p className={`text-[10px] font-data-mono ${paid >= total ? 'text-emerald-600' : 'text-amber-600'}`}>
-                              Paid ₹{paid.toLocaleString('en-IN')}
-                            </p>
-                          );
-                        }
-                        return null;
-                      })()}
-                    </div>
-                  </div>
+                  <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${STATUS_CHIP[po.status] ?? 'bg-surface-container text-on-surface-variant'}`}>
+                    {STATUS_LABEL[po.status] ?? po.status}
+                  </span>
                 </div>
-              );
-            })}
+                <p className="text-[13px] font-semibold text-on-surface">{po.stakeholders?.name ?? '—'}</p>
+                <p className="text-[11px] text-on-surface-variant/60 mt-0.5 line-clamp-1">{getItemsPreview(po)}</p>
+                <div className="flex justify-between items-center mt-3 pt-2.5 border-t border-outline-variant/10">
+                  <p className="text-[11px] text-on-surface-variant/60">{po.projects?.name ?? '—'}</p>
+                  {Number(po.vendor_bill_amount) > 0 ? (
+                    <p className="font-data-mono text-[13px] font-bold text-[#16A34A]">
+                      ₹{Number(po.vendor_bill_amount).toLocaleString('en-IN')}
+                      <span className="text-[10px] font-normal text-on-surface-variant/50 ml-1">bill</span>
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-amber-600 font-medium">No bill entered</p>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
@@ -672,7 +973,6 @@ export default function PurchaseOrders({ session }: { session: Session }) {
           </button>
         )}
       </div>
-
     </div>
   );
 }

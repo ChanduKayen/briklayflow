@@ -149,13 +149,12 @@ function fireCelebration() {
 // ── BillEntryForm ─────────────────────────────────────────────────────────────
 
 interface BillEntryFormProps {
-  po: any;
   poId: string;
   currentUserName: string;
   onBillSaved: (data: { billAmount: number; billNo: string; billUrl: string | null }) => void;
 }
 
-function BillEntryForm({ po, poId, currentUserName, onBillSaved }: BillEntryFormProps) {
+function BillEntryForm({ poId, currentUserName, onBillSaved }: BillEntryFormProps) {
   const [billNo, setBillNo]         = useState('');
   const [billAmount, setBillAmount] = useState('');
   const [billDate, setBillDate]     = useState(new Date().toISOString().split('T')[0]);
@@ -164,10 +163,7 @@ function BillEntryForm({ po, poId, currentUserName, onBillSaved }: BillEntryForm
   const [saving, setSaving]         = useState(false);
   const qc = useQueryClient();
 
-  const poValue = Number(po?.total_value || po?.order_value) || 0;
   const bill    = parseFloat(billAmount) || 0;
-  const diff    = bill - poValue;
-  const pct     = poValue > 0 ? Math.abs(diff / poValue) * 100 : 0;
   const canSave = bill > 0;
 
   const handleSave = async () => {
@@ -222,20 +218,12 @@ function BillEntryForm({ po, poId, currentUserName, onBillSaved }: BillEntryForm
       <div>
         <label className="text-[11px] font-bold uppercase tracking-wide text-amber-700 mb-1 block">
           Bill Amount *
-          <span className="text-[10px] font-normal ml-1 normal-case">(PO value: ₹{poValue.toLocaleString('en-IN')})</span>
         </label>
         <div className="relative">
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[14px] font-medium text-amber-700">₹</span>
           <input type="number" placeholder="0" value={billAmount} onChange={e => setBillAmount(e.target.value)} autoFocus
             className="w-full text-[16px] font-semibold pl-7 pr-4 py-3 border-2 border-amber-400 rounded-lg bg-white focus:outline-none focus:border-amber-600 focus:ring-2 focus:ring-amber-200" />
         </div>
-        {billAmount && Math.abs(diff) >= 1 && (
-          <p className={`text-[11px] mt-1 ${diff > 0 ? 'text-red-600' : 'text-green-600'}`}>
-            {diff > 0
-              ? `⚠ Bill is ₹${Math.abs(diff).toLocaleString('en-IN')} (${pct.toFixed(1)}%) above PO value`
-              : `✓ Bill is ₹${Math.abs(diff).toLocaleString('en-IN')} below PO value`}
-          </p>
-        )}
       </div>
       <div>
         <label className="text-[11px] font-bold uppercase tracking-wide text-amber-700 mb-1 block">
@@ -271,10 +259,8 @@ function BillEntryForm({ po, poId, currentUserName, onBillSaved }: BillEntryForm
 
 function BillSummaryCard({ po, activeTxns, onNavigate }: { po: any; activeTxns: any[]; onNavigate: (p: string) => void }) {
   const totalPaid = activeTxns.reduce((s: number, t: any) => s + (Number(t.allocated_amount) || 0), 0);
-  const billAmt   = Number(po.vendor_bill_amount) || Number(po.total_value || po.order_value) || 0;
-  const poVal     = Number(po.total_value || po.order_value) || 0;
+  const billAmt   = Number(po.vendor_bill_amount) || 0;
   const balance   = billAmt - totalPaid;
-  const variance  = billAmt - poVal;
   const billNo    = po.vendor_bill_number || po.vendor_bill_no || null;
   const billUrl   = po.vendor_bill_url || po.vendor_bill_doc_url || null;
 
@@ -295,23 +281,9 @@ function BillSummaryCard({ po, activeTxns, onNavigate }: { po: any; activeTxns: 
       </div>
       <div className="space-y-2">
         <div className="flex justify-between text-[12px]">
-          <span className="text-on-surface-variant/60">PO Value</span>
-          <span className="font-data-mono">₹{poVal.toLocaleString('en-IN')}</span>
-        </div>
-        <div className="flex justify-between text-[12px]">
           <span className="text-on-surface-variant/60">Bill Amount</span>
           <span className="font-data-mono font-medium text-[#16A34A]">₹{billAmt.toLocaleString('en-IN')}</span>
         </div>
-        {Math.abs(variance) > 1 && (
-          <div className="flex justify-between text-[11px]">
-            <span className={variance > 0 ? 'text-red-500' : 'text-green-600'}>
-              {variance > 0 ? '⚠ Bill exceeds PO' : '✓ Bill under PO'}
-            </span>
-            <span className={`font-data-mono ${variance > 0 ? 'text-red-500' : 'text-green-600'}`}>
-              {variance > 0 ? '+' : ''}₹{Math.abs(variance).toLocaleString('en-IN')}
-            </span>
-          </div>
-        )}
         <div className="h-px bg-outline-variant/15 my-1" />
         <div className="flex justify-between text-[12px]">
           <span className="text-on-surface-variant/60">Total Paid</span>
@@ -883,7 +855,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
 
   const activeTxns = (linkedTxns ?? []).filter((t: any) => t.transactions?.status !== 'Voided');
   const paidTotal = activeTxns.reduce((s: number, t: any) => s + (Number(t.allocated_amount) || 0), 0);
-  const billAmt   = Number(po.vendor_bill_amount) || totalValue;
+  const billAmt   = Number(po.vendor_bill_amount) || 0;
   const balance   = billAmt - paidTotal;
   const pct       = billAmt > 0 ? Math.min(100, (paidTotal / billAmt) * 100) : 0;
 
@@ -909,9 +881,11 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
           <p className="text-[12px] text-on-surface-variant">
             Ordered {fmtDate(po.date_issued)}{po.ordered_by ? ` by ${po.ordered_by}` : ''}
           </p>
-          <p className="text-[18px] font-bold font-data-mono text-on-surface mt-2">
-            <AmountDisplay amount={totalValue} />
-          </p>
+          {totalValue > 0 && (
+            <p className="text-[18px] font-bold font-data-mono text-on-surface mt-2">
+              <AmountDisplay amount={totalValue} />
+            </p>
+          )}
         </div>
 
         {/* STATUS + ACTIONS */}
@@ -990,7 +964,6 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
                     </div>
                   </div>
                   <BillEntryForm
-                    po={po}
                     poId={poId!}
                     currentUserName={currentUserName}
                     onBillSaved={(data) => {
@@ -1125,24 +1098,26 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
           </div>
 
           {/* Totals footer */}
-          <div className="flex justify-end mt-3 pt-2 border-t border-outline-variant/15">
-            <div className="space-y-1 text-[13px] min-w-[200px]">
-              <div className="flex justify-between text-on-surface-variant/60">
-                <span>Order Value</span>
-                <span className="font-data-mono">₹{Number(po.order_value).toLocaleString('en-IN')}</span>
-              </div>
-              {po.gst_value && Number(po.gst_value) > 0 && (
+          {totalValue > 0 && (
+            <div className="flex justify-end mt-3 pt-2 border-t border-outline-variant/15">
+              <div className="space-y-1 text-[13px] min-w-[200px]">
                 <div className="flex justify-between text-on-surface-variant/60">
-                  <span>GST</span>
-                  <span className="font-data-mono">₹{Number(po.gst_value).toLocaleString('en-IN')}</span>
+                  <span>Order Value</span>
+                  <span className="font-data-mono">₹{Number(po.order_value).toLocaleString('en-IN')}</span>
                 </div>
-              )}
-              <div className="flex justify-between font-bold text-[14px] border-t border-outline-variant/20 pt-1">
-                <span>Grand Total</span>
-                <span className="font-data-mono text-primary">₹{totalValue.toLocaleString('en-IN')}</span>
+                {po.gst_value && Number(po.gst_value) > 0 && (
+                  <div className="flex justify-between text-on-surface-variant/60">
+                    <span>GST</span>
+                    <span className="font-data-mono">₹{Number(po.gst_value).toLocaleString('en-IN')}</span>
+                  </div>
+                )}
+                <div className="flex justify-between font-bold text-[14px] border-t border-outline-variant/20 pt-1">
+                  <span>Grand Total</span>
+                  <span className="font-data-mono text-primary">₹{totalValue.toLocaleString('en-IN')}</span>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           {/* Notes */}
           {(po.vendor_notes || po.internal_notes) && (
@@ -1282,11 +1257,6 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
                   {reconResult.bill_total_extracted != null && (
                     <p className="text-[11px] mt-1 text-on-surface-variant/60">
                       Bill total: <span className="font-data-mono font-semibold text-on-surface">₹{reconResult.bill_total_extracted.toLocaleString('en-IN')}</span>
-                      {Math.abs(reconResult.bill_total_extracted - totalValue) > 100 && (
-                        <span className={`ml-2 font-semibold ${reconResult.bill_total_extracted > totalValue ? 'text-red-600' : 'text-green-600'}`}>
-                          ({reconResult.bill_total_extracted > totalValue ? '+' : ''}₹{Math.abs(reconResult.bill_total_extracted - totalValue).toLocaleString('en-IN')} vs PO)
-                        </span>
-                      )}
                     </p>
                   )}
                   {reconResult.overall_flags.length > 0 && (
@@ -1379,10 +1349,12 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
         <div className="detail-reveal mb-6" style={{ animationDelay: '180ms' }}>
           <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-3">FINANCIAL</p>
           <div className="space-y-1.5 text-[13px]">
-            <div className="flex justify-between">
-              <span className="text-on-surface-variant">PO Value</span>
-              <span className="font-data-mono font-semibold text-on-surface">₹{totalValue.toLocaleString('en-IN')}</span>
-            </div>
+            {totalValue > 0 && (
+              <div className="flex justify-between">
+                <span className="text-on-surface-variant">PO Value</span>
+                <span className="font-data-mono font-semibold text-on-surface">₹{totalValue.toLocaleString('en-IN')}</span>
+              </div>
+            )}
             <div className="flex justify-between">
               <span className="text-on-surface-variant">Total Paid</span>
               <span className="font-data-mono font-semibold text-on-surface">₹{paidTotal.toLocaleString('en-IN')}</span>
