@@ -181,7 +181,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('txn_allocations')
-        .select('*, transactions(txn_id, date, status, total_amount, payment_mode, category)')
+        .select('*, transactions(txn_id, date, status, total_amount, payment_mode, category, remarks)')
         .eq('order_type', 'WO')
         .eq('order_ref', woId);
       if (error) throw error;
@@ -1125,17 +1125,20 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                                       <div className="flex items-center gap-2 py-1.5 px-2 hover:bg-surface-container-low rounded-lg transition-colors">
                                         <button
                                           onClick={(e) => { e.stopPropagation(); openPeek('TRANSACTION', txn.txn_id); }}
-                                          className="text-[11px] text-primary hover:underline shrink-0"
+                                          className="min-w-0 flex-1 text-left"
                                         >
-                                          {txn.category || txn.payment_mode || 'Payment'}
-                                          <span className="text-[10px] font-mono text-primary/30 opacity-0 group-hover:opacity-100 transition-opacity ml-1">{txn.txn_id}</span>
+                                          <p className="text-[11px] font-[500] text-on-surface truncate">
+                                            {[wo?.stakeholders?.name, wo?.stakeholders?.category].filter(Boolean).join(' · ') || 'Payment'}
+                                          </p>
+                                          {(txn.remarks || txn.category) && (
+                                            <p className="text-[10px] text-on-surface-variant/60 truncate">{txn.remarks?.slice(0, 60) || txn.category}</p>
+                                          )}
+                                          <p className="text-[9px] font-mono text-on-surface-variant/25 opacity-0 group-hover:opacity-100 transition-opacity">{txn.txn_id}</p>
                                         </button>
-                                        <span className="text-[11px] text-on-surface-variant shrink-0">
-                                          {new Date(txn.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
-                                        </span>
-                                        {txn.category && <span className="text-[11px] text-on-surface-variant truncate">{txn.category}</span>}
                                         <span className="font-data-mono text-[12px] text-on-surface ml-auto shrink-0">₹{Number(alloc.allocated_amount).toLocaleString('en-IN')}</span>
-                                        <span className="text-[10px] text-on-surface-variant shrink-0">{txn.payment_mode}</span>
+                                        <span className="text-[10px] text-on-surface-variant shrink-0">
+                                          {new Date(txn.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}{txn.payment_mode ? ` · ${txn.payment_mode}` : ''}
+                                        </span>
                                         <span className="text-green-600 text-[11px] shrink-0">✓</span>
                                         {/* ··· shift button */}
                                         <button
@@ -1283,17 +1286,20 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                         <div className="flex items-center gap-2 py-1.5 px-2 hover:bg-surface-container-low rounded-lg transition-colors">
                           <button
                             onClick={() => openPeek('TRANSACTION', txn.txn_id)}
-                            className="text-[11px] text-primary hover:underline shrink-0"
+                            className="min-w-0 flex-1 text-left"
                           >
-                            {txn.category || txn.payment_mode || 'Payment'}
-                            <span className="text-[10px] font-mono text-primary/30 opacity-0 group-hover:opacity-100 transition-opacity ml-1">{txn.txn_id}</span>
+                            <p className="text-[11px] font-[500] text-on-surface truncate">
+                              {[wo?.stakeholders?.name, wo?.stakeholders?.category].filter(Boolean).join(' · ') || 'Payment'}
+                            </p>
+                            {(txn.remarks || txn.category) && (
+                              <p className="text-[10px] text-on-surface-variant/60 truncate">{txn.remarks?.slice(0, 60) || txn.category}</p>
+                            )}
+                            <p className="text-[9px] font-mono text-on-surface-variant/25 opacity-0 group-hover:opacity-100 transition-opacity">{txn.txn_id}</p>
                           </button>
-                          <span className="text-[11px] text-on-surface-variant shrink-0">
-                            {new Date(txn.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
-                          </span>
-                          {txn.category && <span className="text-[11px] text-on-surface-variant truncate">{txn.category}</span>}
                           <span className="font-data-mono text-[12px] text-on-surface ml-auto shrink-0">₹{Number(alloc.allocated_amount).toLocaleString('en-IN')}</span>
-                          <span className="text-[10px] text-on-surface-variant shrink-0">{txn.payment_mode}</span>
+                          <span className="text-[10px] text-on-surface-variant shrink-0">
+                            {new Date(txn.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}{txn.payment_mode ? ` · ${txn.payment_mode}` : ''}
+                          </span>
                           <span className="text-green-600 text-[11px] shrink-0">✓</span>
                           <button
                             onClick={(e) => {
@@ -1389,14 +1395,22 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                     onClick={() => openPeek('TRANSACTION', txn.txn_id)}
                     className="w-full flex items-center gap-3 py-2 text-left hover:bg-surface-container-low/50 transition-colors rounded-lg px-1 group"
                   >
-                    <span className="text-[12px] text-primary group-hover:underline">
-                      {txn.category || txn.payment_mode || 'Payment'}
-                      <span className="text-[10px] font-mono text-primary/30 opacity-0 group-hover:opacity-100 transition-opacity ml-1">{txn.txn_id}</span>
-                    </span>
-                    <span className="text-[12px] text-on-surface-variant">{new Date(txn.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</span>
-                    <span className="font-data-mono text-[12px] text-on-surface ml-auto">₹{Number(alloc.allocated_amount).toLocaleString('en-IN')}</span>
-                    <span className="text-[11px] text-on-surface-variant">{txn.payment_mode}</span>
-                    <span className="text-green-600 text-[12px]">✓</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[12px] font-[500] text-on-surface truncate">
+                        {[wo?.stakeholders?.name, wo?.stakeholders?.category].filter(Boolean).join(' · ') || 'Payment'}
+                      </p>
+                      {(txn.remarks || txn.category) && (
+                        <p className="text-[10px] text-on-surface-variant/60 truncate">{txn.remarks?.slice(0, 60) || txn.category}</p>
+                      )}
+                      <p className="text-[9px] font-mono text-on-surface-variant/25 opacity-0 group-hover:opacity-100 transition-opacity">{txn.txn_id}</p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="font-data-mono text-[12px] text-on-surface">₹{Number(alloc.allocated_amount).toLocaleString('en-IN')}</p>
+                      <p className="text-[10px] text-on-surface-variant">
+                        {new Date(txn.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}{txn.payment_mode ? ` · ${txn.payment_mode}` : ''}
+                      </p>
+                    </div>
+                    <span className="text-green-600 text-[12px] shrink-0">✓</span>
                   </button>
                 );
               })}

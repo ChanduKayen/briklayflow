@@ -226,7 +226,7 @@ export default function Dashboard({ session }: { session: Session }) {
     queryFn: async () => {
       const { data } = await supabase
         .from('transactions')
-        .select('*, stakeholders(name)')
+        .select('*, stakeholders(name, category)')
         .order('created_at', { ascending: false })
         .limit(5);
       return data || [];
@@ -460,15 +460,22 @@ export default function Dashboard({ session }: { session: Session }) {
                 width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left',
               }}
             >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ fontSize: 14, fontWeight: 500, color: '#0b1c30', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {txn.stakeholders?.name || txn.category || 'Payment'}
+              <div style={{ flex: 1, minWidth: 0, marginRight: 12 }}>
+                <p style={{ fontSize: 13, fontWeight: 500, color: '#0b1c30', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {[txn.stakeholders?.name, txn.stakeholders?.category].filter(Boolean).join(' · ') || txn.category || 'Payment'}
                 </p>
-                <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.4)', margin: '1px 0 0', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  {txn.category}
-                </p>
+                {(txn.remarks || txn.category) && (
+                  <p style={{ fontSize: 11, color: 'rgba(0,0,0,0.45)', margin: '1px 0 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {txn.remarks?.slice(0, 60) || txn.category}
+                  </p>
+                )}
+                {(txn.payment_mode || txn.date) && (
+                  <p style={{ fontSize: 11, color: 'rgba(0,0,0,0.28)', margin: '1px 0 0' }}>
+                    {[txn.payment_mode, txn.date ? new Date(txn.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : ''].filter(Boolean).join(' · ')}
+                  </p>
+                )}
               </div>
-              <p style={{ fontSize: 14, fontWeight: 500, fontVariantNumeric: 'tabular-nums', color: '#0b1c30', margin: 0, paddingLeft: 12, flexShrink: 0 }}>
+              <p style={{ fontSize: 14, fontWeight: 500, fontVariantNumeric: 'tabular-nums', color: '#0b1c30', margin: 0, flexShrink: 0 }}>
                 ₹{Number(txn.total_amount).toLocaleString('en-IN')}
               </p>
             </button>

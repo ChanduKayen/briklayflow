@@ -1,42 +1,40 @@
-export function formatTxn(txn: any) {
-  const who =
-    txn.stakeholders?.name ||
-    txn.payee_name ||
-    txn.payee_raw ||
-    txn.category ||
-    'Payment';
+export interface TxnDisplay {
+  line1: string; // Name · Trade
+  line2: string; // Project · Annotation
+  line3: string; // Mode · Date
+  id: string;
+  amount: number;
+}
 
-  const what =
-    txn.remarks?.slice(0, 40) ||
-    txn.category ||
-    '';
+export function formatTxn(txn: any): TxnDisplay {
+  const name  = txn.stakeholders?.name || '';
+  const trade = txn.stakeholders?.category || '';
+  const line1 = dot([name, trade]) || 'Payment';
 
-  const site = txn.projects?.name || null;
-  const mode = txn.payment_mode || null;
-  const date = txn.date ? formatShortDate(txn.date) : null;
+  const project    = txn.projects?.name || txn.txn_allocations?.[0]?.projects?.name || '';
+  const annotation = txn.remarks?.slice(0, 60) || txn.category || '';
+  const line2      = dot([project, annotation]);
 
-  const subParts = [site, mode, date].filter(Boolean);
+  const mode = txn.payment_mode || '';
+  const date = txn.date ? formatShortDate(txn.date) : '';
+  const line3 = dot([mode, date]);
 
-  return {
-    primary: what ? `${who} · ${what}` : who,
-    sub: subParts.join(' · '),
-    id: txn.txn_id || '',
-    amount: txn.total_amount || 0,
-  };
+  return { line1, line2, line3, id: txn.txn_id || '', amount: txn.total_amount || 0 };
+}
+
+function dot(parts: string[]): string {
+  return parts.filter(Boolean).join(' · ');
 }
 
 function formatShortDate(d: string): string {
-  const date = new Date(d);
-  const today = new Date();
+  const date      = new Date(d);
+  const today     = new Date();
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
-
-  if (date.toDateString() === today.toDateString()) return 'Today';
+  if (date.toDateString() === today.toDateString())     return 'Today';
   if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
-
   return date.toLocaleDateString('en-IN', {
-    day: 'numeric',
-    month: 'short',
+    day: 'numeric', month: 'short',
     ...(date.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}),
   });
 }

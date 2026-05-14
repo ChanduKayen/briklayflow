@@ -472,8 +472,13 @@ export default function ProjectDetail({ session }: { session: Session }) {
                         onClick={() => openPeek('TRANSACTION', txn.txn_id)}>
                       <td className="p-4 text-body-sm">{new Date(txn.date).toLocaleDateString()}</td>
                       <td className="p-4 text-body-sm">
-                        {txn.stakeholders?.name || txn.category || '—'}
-                        <span className="text-[10px] font-mono text-on-surface-variant/30 opacity-0 group-hover:opacity-100 transition-opacity block">{txn.txn_id}</span>
+                        <p className="font-[500] text-on-surface truncate">
+                          {[txn.stakeholders?.name, txn.stakeholders?.category].filter(Boolean).join(' · ') || txn.category || '—'}
+                        </p>
+                        {txn.category && txn.stakeholders?.name && (
+                          <p className="text-[11px] text-on-surface-variant/60 truncate">{txn.category}</p>
+                        )}
+                        <span className="text-[10px] font-mono text-on-surface-variant/25 opacity-0 group-hover:opacity-100 transition-opacity block">{txn.txn_id}</span>
                       </td>
                       <td className="p-4 text-body-sm font-semibold">{txn.stakeholders?.name || '-'}</td>
                       <td className="p-4 text-body-sm">

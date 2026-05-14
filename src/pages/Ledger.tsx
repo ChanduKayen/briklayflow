@@ -660,11 +660,8 @@ export default function Ledger({ session }: { session: Session }) {
                       <div className="flex items-start justify-between mb-1.5">
                         <div className="flex-1 min-w-0 mr-3">
                           <span className="text-[15px] font-[500] text-on-surface leading-tight line-clamp-1">
-                            {txn.stakeholders?.name || txn.category || 'Payment'}
+                            {[txn.stakeholders?.name, txn.stakeholders?.category].filter(Boolean).join(' · ') || txn.category || 'Payment'}
                           </span>
-                          {txn.stakeholders?.category && (
-                            <span className="text-[12px] text-on-surface-variant ml-1">· {txn.stakeholders.category}</span>
-                          )}
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
                           {getNeedsAction(txn) && (

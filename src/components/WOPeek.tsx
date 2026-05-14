@@ -82,7 +82,7 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('txn_allocations')
-        .select('*, transactions(txn_id, date, total_amount, payment_mode, category, status)')
+        .select('*, transactions(txn_id, date, total_amount, payment_mode, category, remarks, status)')
         .eq('order_type', 'WO')
         .eq('order_ref', woId);
       if (error) throw error;
@@ -270,24 +270,29 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
             <div>
               <p className="text-[10px] font-semibold tracking-wider text-on-surface-variant uppercase mb-2">Payments</p>
               <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
-                {allocations.map((a: any, i: number) => (
-                  <button
-                    key={a.allocation_id}
-                    onClick={() => a.transactions?.txn_id && openPeek('TRANSACTION', a.transactions.txn_id)}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-surface-container-low transition-colors group ${i > 0 ? 'border-t border-outline-variant/10' : ''}`}
-                  >
-                    <div>
-                      <p className="text-[13px] font-medium text-on-surface">
-                        {a.transactions?.payment_mode || a.transactions?.category || fmtDate(a.transactions?.date)}
-                      </p>
-                      <p className="text-on-surface-variant text-[10px]">{fmtDate(a.transactions?.date)}</p>
-                      <p className="text-[10px] font-mono text-on-surface-variant/30 opacity-0 group-hover:opacity-100 transition-opacity">
-                        {a.transactions?.txn_id}
-                      </p>
-                    </div>
-                    <span className="font-data-mono font-semibold text-on-surface">{fmtRupee(Number(a.allocated_amount) || 0)}</span>
-                  </button>
-                ))}
+                {allocations.map((a: any, i: number) => {
+                  const enriched = { ...a.transactions, stakeholders: wo?.stakeholders, projects: wo?.projects, total_amount: a.allocated_amount };
+                  const line1 = [wo?.stakeholders?.name, wo?.stakeholders?.category].filter(Boolean).join(' · ') || 'Payment';
+                  const line2 = [wo?.projects?.name, a.transactions?.remarks?.slice(0, 60) || a.transactions?.category].filter(Boolean).join(' · ');
+                  const line3 = [a.transactions?.payment_mode, a.transactions?.date ? new Date(a.transactions.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : ''].filter(Boolean).join(' · ');
+                  return (
+                    <button
+                      key={a.allocation_id}
+                      onClick={() => a.transactions?.txn_id && openPeek('TRANSACTION', a.transactions.txn_id)}
+                      className={`w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-surface-container-low transition-colors group ${i > 0 ? 'border-t border-outline-variant/10' : ''}`}
+                    >
+                      <div className="min-w-0 flex-1 pr-3">
+                        <p className="text-[13px] font-[500] text-on-surface truncate">{line1}</p>
+                        {line2 && <p className="text-[11px] text-on-surface-variant/70 mt-0.5 truncate">{line2}</p>}
+                        {line3 && <p className="text-[11px] text-on-surface-variant/40 mt-0.5 truncate">{line3}</p>}
+                        <p className="text-[10px] font-mono text-on-surface-variant/25 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {a.transactions?.txn_id}
+                        </p>
+                      </div>
+                      <span className="font-data-mono font-semibold text-on-surface shrink-0">{fmtRupee(Number(a.allocated_amount) || 0)}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
