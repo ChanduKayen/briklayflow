@@ -8,6 +8,13 @@ import type { Stakeholder, Project } from '../types';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
+import ShortcutTicker from '../components/ShortcutTicker';
+
+const LEDGER_HINTS = [
+  { key: 'T',     label: 'jump straight to transaction entry' },
+  { key: '/',     label: 'new entry — pick type after' },
+  { key: 'Space', label: 'open quick actions' },
+]
 import { LinearProgress } from '../components/LinearProgress';
 import { getCostCode } from '../lib/costCodes';
 import { formatTxn } from '../lib/formatTxn';
@@ -478,13 +485,16 @@ export default function Ledger({ session }: { session: Session }) {
               <span className="material-symbols-outlined text-[16px]">download</span>
               Export
             </button>
-            <CreateHint message="create a new transaction">
-              <button onClick={() => navigate('/ledger/new')}
-                className="bk-btn flex items-center gap-1.5 h-9 px-4 rounded-xl text-[13px] font-semibold">
-                <span className="material-symbols-outlined text-[16px]">add</span>
-                New Transaction
-              </button>
-            </CreateHint>
+            <div className="flex flex-col items-end gap-1.5">
+              <CreateHint message="create a new transaction">
+                <button onClick={() => navigate('/ledger/new')}
+                  className="bk-btn flex items-center gap-1.5 h-9 px-4 rounded-xl text-[13px] font-semibold">
+                  <span className="material-symbols-outlined text-[16px]">add</span>
+                  New Transaction
+                </button>
+              </CreateHint>
+              <ShortcutTicker hints={LEDGER_HINTS} />
+            </div>
           </div>
         </div>
 

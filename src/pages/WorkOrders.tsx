@@ -7,6 +7,13 @@ import type { WorkOrder } from '../types';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { LinearProgress } from '../components/LinearProgress';
+import ShortcutTicker from '../components/ShortcutTicker';
+
+const WO_HINTS = [
+  { key: 'W',     label: 'jump straight to work order' },
+  { key: '/',     label: 'new entry — pick type after' },
+  { key: 'Space', label: 'open quick actions' },
+]
 
 const PAGE_SIZE = 25;
 
@@ -343,15 +350,18 @@ export default function WorkOrders({ session }: { session: Session }) {
               Export
             </button>
             {canManage && (
-              <CreateHint message="create a new work order">
-                <button
-                  onClick={() => navigate('/work-orders/new')}
-                  className="bk-btn flex items-center gap-1.5 h-9 px-4 rounded-xl text-[13px] font-semibold"
-                >
-                  <span className="material-symbols-outlined text-[16px]">add</span>
-                  New Order
-                </button>
-              </CreateHint>
+              <div className="flex flex-col items-end gap-1.5">
+                <CreateHint message="create a new work order">
+                  <button
+                    onClick={() => navigate('/work-orders/new')}
+                    className="bk-btn flex items-center gap-1.5 h-9 px-4 rounded-xl text-[13px] font-semibold"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">add</span>
+                    New Order
+                  </button>
+                </CreateHint>
+                <ShortcutTicker hints={WO_HINTS} />
+              </div>
             )}
           </div>
         </div>

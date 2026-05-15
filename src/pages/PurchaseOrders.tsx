@@ -8,6 +8,13 @@ import { LinearProgress } from '../components/LinearProgress';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
+import ShortcutTicker from '../components/ShortcutTicker';
+
+const PO_HINTS = [
+  { key: 'P',     label: 'jump straight to purchase order' },
+  { key: '/',     label: 'new entry — pick type after' },
+  { key: 'Space', label: 'open quick actions' },
+]
 
 // ── Status config ─────────────────────────────────────────────────────────────
 
@@ -615,15 +622,18 @@ export default function PurchaseOrders({ session }: { session: Session }) {
             </p>
           </div>
           {canManage && (
-            <CreateHint message="create a new purchase order">
-            <button
-              className="hidden md:flex bk-btn items-center gap-2 h-9 px-4 rounded-xl text-[13px] shrink-0"
-              onClick={() => navigate('/purchase-orders/new')}
-            >
-              <span className="material-symbols-outlined text-[16px]">add</span>
-              New PO
-            </button>
-            </CreateHint>
+            <div className="hidden md:flex flex-col items-end gap-1.5">
+              <CreateHint message="create a new purchase order">
+                <button
+                  className="flex bk-btn items-center gap-2 h-9 px-4 rounded-xl text-[13px] shrink-0"
+                  onClick={() => navigate('/purchase-orders/new')}
+                >
+                  <span className="material-symbols-outlined text-[16px]">add</span>
+                  New PO
+                </button>
+              </CreateHint>
+              <ShortcutTicker hints={PO_HINTS} />
+            </div>
           )}
         </div>
 

@@ -8,6 +8,13 @@ import { usePeek } from '../context/PeekContext';
 import type { RoughEntry } from '../types';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
+import ShortcutTicker from '../components/ShortcutTicker';
+
+const LOGBOOK_HINTS = [
+  { key: 'L',     label: 'jump straight to logbook' },
+  { key: '/',     label: 'new entry — pick type after' },
+  { key: 'Space', label: 'open quick actions' },
+]
 import { ResolvePopup } from '../components/ResolvePopup';
 import { ImageLightbox } from '../components/ImageLightbox';
 
@@ -407,6 +414,7 @@ export default function Logbook({ session }: { session: Session }) {
         <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.45)', margin: '3px 0 0' }}>
           {pending.length} pending · {todayPostedCount} posted today
         </p>
+        <ShortcutTicker hints={LOGBOOK_HINTS} className="mt-1.5" />
       </div>
 
       {/* TABS — underline style */}
