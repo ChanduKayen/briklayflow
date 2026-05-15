@@ -19,7 +19,7 @@ import {
   IconSitemap, IconShieldLock, IconAdjustmentsHorizontal,
   IconLayoutSidebarLeftCollapse, IconLayoutSidebar,
   IconSettings, IconLogout, IconChevronDown, IconChevronLeft, IconDots,
-  IconDotsVertical,
+  // IconDotsVertical,
   IconRepeat, IconLayoutGrid, IconFiles, IconUsers,
 } from '@tabler/icons-react';
 
