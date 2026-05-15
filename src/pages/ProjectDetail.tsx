@@ -1211,12 +1211,12 @@ export default function ProjectDetail({ session }: { session: Session }) {
                     {woFilter.length > 0 && (
                       <button onClick={() => setWoFilter([])} className="text-[11px] text-on-surface-variant/35 hover:text-error transition-colors">Clear</button>
                     )}
-                    <SearchInput value={woSearch} onChange={setWoSearch} placeholder="Search contractor…" />
+                    <SearchInput value={woSearch} onChange={setWoSearch} placeholder="Search worker…" />
                   </div>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => {
-                        const headers = ['WO ID', 'Contractor', 'Trade', 'Scope of Work', 'Status', 'Order Value', 'Start Date', 'End Date'];
+                        const headers = ['WO ID', 'Worker', 'Trade', 'Scope of Work', 'Status', 'Order Value', 'Start Date', 'End Date'];
                         const rows = filteredWOs.map((wo: any) => [wo.wo_id, wo.stakeholders?.name, wo.stakeholders?.category, wo.scope_of_work, wo.status, wo.order_value, wo.start_date, wo.end_date]);
                         downloadCSV([headers, ...rows], `${project.name}-work-orders.csv`);
                       }}

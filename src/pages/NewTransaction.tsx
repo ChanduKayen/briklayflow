@@ -393,7 +393,7 @@ export default function NewTransaction({ session: _session }: { session: Session
     queryKey: ['projects'],
     queryFn: async () => { const { data } = await supabase.from('projects').select('*'); return data as Project[]; },
   });
-  // Fetch WOs + POs filtered by stakeholder + project
+  // Fetch WOs for workers, POs for vendors — scoped to the selected project + stakeholder
   const selectedProjectId = !splitMode ? (allocs[0]?.project_id || '') : '';
   useEffect(() => {
     if (!selectedProjectId || !stkId || txnType === 'expense' || txnType === 'client_receipt') {
@@ -403,26 +403,32 @@ export default function NewTransaction({ session: _session }: { session: Session
     let cancelled = false;
     setLoadingObligations(true);
     setSelectedObligation(null); setSkipped(false);
-    Promise.all([
+
+    if (txnType === 'worker') {
+      // Worker payment → show only their WOs for this project
       supabase
         .from('work_orders')
         .select('wo_id, scope_of_work, order_value, status, stakeholders(name, category), wo_milestones(*)')
         .eq('project_id', selectedProjectId)
         .eq('stakeholder_id', stkId)
-        .in('status', ['Active', 'Issued', 'Assigned', 'ACTIVE', 'ISSUED', 'ASSIGNED'])
-        .order('date_issued', { ascending: false }),
+        .order('created_at', { ascending: false })
+        .then(({ data: wos, error: woErr }) => {
+          if (woErr) console.error('[LinkingPanel] WO fetch error:', woErr);
+          if (!cancelled) { setProjectWOs(wos || []); setProjectPOs([]); setLoadingObligations(false); }
+        });
+    } else {
+      // Material payment → show only their POs for this project
       supabase
         .from('purchase_orders')
         .select('po_id, status, vendor_bill_amount, total_value, stakeholders(name, category), po_line_items(*)')
         .eq('project_id', selectedProjectId)
         .eq('stakeholder_id', stkId)
-        .in('status', ['ORDERED', 'BILLED', 'PARTIAL'])
-        .order('created_at', { ascending: false }),
-    ]).then(([{ data: wos, error: woErr }, { data: pos, error: poErr }]) => {
-      if (woErr) console.error('[LinkingPanel] WO fetch error:', woErr);
-      if (poErr) console.error('[LinkingPanel] PO fetch error:', poErr);
-      if (!cancelled) { setProjectWOs(wos || []); setProjectPOs(pos || []); setLoadingObligations(false); }
-    });
+        .order('created_at', { ascending: false })
+        .then(({ data: pos, error: poErr }) => {
+          if (poErr) console.error('[LinkingPanel] PO fetch error:', poErr);
+          if (!cancelled) { setProjectWOs([]); setProjectPOs(pos || []); setLoadingObligations(false); }
+        });
+    }
     return () => { cancelled = true; };
   }, [selectedProjectId, stkId, txnType]);
 

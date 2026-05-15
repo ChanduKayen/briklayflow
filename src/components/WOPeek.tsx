@@ -187,7 +187,7 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
           {/* Key fields */}
           <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-[13px]">
             <div>
-              <p className="text-[10px] font-semibold tracking-wider text-on-surface-variant uppercase mb-0.5">Contractor</p>
+              <p className="text-[10px] font-semibold tracking-wider text-on-surface-variant uppercase mb-0.5">Worker</p>
               <p className="text-on-surface font-medium">{wo.stakeholders?.name || '—'}</p>
               <p className="text-on-surface-variant text-[11px]">{wo.stakeholders?.category || ''}</p>
             </div>

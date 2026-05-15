@@ -76,7 +76,7 @@ export default function WorkOrders({ session }: { session: Session }) {
   const [sortAsc, setSortAsc]                       = useState(false);
   const [filterStatus, setFilterStatus]             = useState<string[]>([]);
   const [filterProject, setFilterProject]           = useState<string[]>([]);
-  const [filterContractor, setFilterContractor]     = useState<string[]>([]);
+  const [filterWorker, setFilterWorker]             = useState<string[]>([]);
   const [datePreset, setDatePreset]                 = useState<DatePreset>('all');
   const [customFrom, setCustomFrom]                 = useState('');
   const [customTo, setCustomTo]                     = useState('');
@@ -120,7 +120,7 @@ export default function WorkOrders({ session }: { session: Session }) {
   useEffect(() => {
     setSelectedIds(new Set());
     setVisibleCount(PAGE_SIZE);
-  }, [searchTerm, filterStatus, filterProject, filterContractor, datePreset, customFrom, customTo]);
+  }, [searchTerm, filterStatus, filterProject, filterWorker, datePreset, customFrom, customTo]);
 
   useEffect(() => {
     const handler = () => navigate('/work-orders/new');
@@ -143,7 +143,7 @@ export default function WorkOrders({ session }: { session: Session }) {
 
   // ── Derived filter options ────────────────────────────────────────────────
   const uniqueProjects    = Array.from(new Set((workOrders || []).map(w => w.projects?.name).filter(Boolean))) as string[];
-  const uniqueContractors = Array.from(new Set((workOrders || []).map(w => w.stakeholders?.name).filter(Boolean))) as string[];
+  const uniqueWorkers = Array.from(new Set((workOrders || []).map(w => w.stakeholders?.name).filter(Boolean))) as string[];
 
   // ── Filtering & sorting ───────────────────────────────────────────────────
   const { from: dateFrom, to: dateTo } = getDateRange(datePreset, customFrom, customTo);
@@ -156,7 +156,7 @@ export default function WorkOrders({ session }: { session: Session }) {
         !(wo.scope_of_work || '').toLowerCase().includes(term)) return false;
     if (filterStatus.length && !filterStatus.includes(wo.status)) return false;
     if (filterProject.length && !filterProject.includes(wo.projects?.name || '')) return false;
-    if (filterContractor.length && !filterContractor.includes(wo.stakeholders?.name || '')) return false;
+    if (filterWorker.length && !filterWorker.includes(wo.stakeholders?.name || '')) return false;
     if (dateFrom && dateTo) {
       const d = new Date(wo.date_issued); d.setHours(0, 0, 0, 0);
       if (d < dateFrom || d > dateTo) return false;
@@ -221,11 +221,11 @@ export default function WorkOrders({ session }: { session: Session }) {
 
   // ── Filter helpers ────────────────────────────────────────────────────────
   const hasAnyFilter = searchTerm !== '' || filterStatus.length > 0 || filterProject.length > 0
-    || filterContractor.length > 0 || datePreset !== 'all';
+    || filterWorker.length > 0 || datePreset !== 'all';
 
   const clearAllFilters = () => {
     setSearchTerm(''); setFilterStatus([]); setFilterProject([]);
-    setFilterContractor([]); setDatePreset('all'); setCustomFrom(''); setCustomTo('');
+    setFilterWorker([]); setDatePreset('all'); setCustomFrom(''); setCustomTo('');
   };
 
 
@@ -291,7 +291,7 @@ export default function WorkOrders({ session }: { session: Session }) {
   // ── Export CSV ────────────────────────────────────────────────────────────
   const exportCSV = () => {
     const rows = (selectedCount > 0 ? (workOrders || []).filter(w => selectedIds.has(w.wo_id)) : sorted);
-    const header = ['WO ID', 'Date Issued', 'Contractor', 'Project', 'Scope', 'Value (₹)', 'Status'];
+    const header = ['WO ID', 'Date Issued', 'Worker', 'Project', 'Scope', 'Value (₹)', 'Status'];
     const data = rows.map(w => [
       w.wo_id,
       new Date(w.date_issued).toLocaleDateString('en-IN'),
@@ -427,8 +427,8 @@ export default function WorkOrders({ session }: { session: Session }) {
           {/* Project chip */}
           {renderFilterChip('project', 'Project', uniqueProjects, filterProject, setFilterProject)}
 
-          {/* Contractor chip */}
-          {renderFilterChip('contractor', 'Contractor', uniqueContractors, filterContractor, setFilterContractor)}
+          {/* Worker chip */}
+          {renderFilterChip('worker', 'Worker', uniqueWorkers, filterWorker, setFilterWorker)}
 
           {/* Search */}
           <div className="relative">
@@ -496,7 +496,7 @@ export default function WorkOrders({ session }: { session: Session }) {
                           {wo.status}
                         </span>
                       </div>
-                      {/* Row 2: Contractor name */}
+                      {/* Row 2: Worker name */}
                       <p className="text-[15px] font-[500] text-on-surface mb-0.5">
                         {wo.stakeholders?.name || '—'}
                         {wo.stakeholders?.category && <span className="text-[13px] font-normal text-on-surface-variant/60 ml-1">· {wo.stakeholders.category}</span>}
@@ -573,7 +573,7 @@ export default function WorkOrders({ session }: { session: Session }) {
                       <div className="flex items-center gap-1">Date {sortIcon('date_issued')}</div>
                     </th>
                     <th className={thSort} onClick={() => toggleSort('stakeholder')}>
-                      <div className="flex items-center gap-1">Contractor {sortIcon('stakeholder')}</div>
+                      <div className="flex items-center gap-1">Worker {sortIcon('stakeholder')}</div>
                     </th>
                     <th className={thSort} onClick={() => toggleSort('project')}>
                       <div className="flex items-center gap-1">Project {sortIcon('project')}</div>
@@ -619,7 +619,7 @@ export default function WorkOrders({ session }: { session: Session }) {
                           <span className="text-[13px] text-on-surface/80 font-medium whitespace-nowrap">{dateStr}</span>
                         </td>
 
-                        {/* Contractor + WO ID */}
+                        {/* Worker + WO ID */}
                         <td className="px-4 align-middle">
                           <div className="min-w-0">
                             <p className="text-[13px] font-medium text-on-surface truncate leading-tight">{wo.stakeholders?.name || '—'}</p>

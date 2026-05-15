@@ -585,7 +585,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
     // ── Signatures ────────────────────────────────────────────────────────────
     drawRule(doc, y);
     y += 8;
-    drawSignatures(doc, y, 'Contractor Signature', wo.stakeholders?.name);
+    drawSignatures(doc, y, 'Worker Signature', wo.stakeholders?.name);
 
     // ── Footer ────────────────────────────────────────────────────────────────
     drawFooter(doc);
