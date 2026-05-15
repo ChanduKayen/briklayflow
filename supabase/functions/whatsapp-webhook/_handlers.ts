@@ -5,6 +5,7 @@ import { sendWA, downloadAndStoreImage } from './_wa.ts'
 import { saveSession, clearSession, type WaSession } from './_session.ts'
 import { extractEntities, extractPaymentFromImage, extractPaymentListFromImage } from './_extract.ts'
 import { classifyImage, classifyIntent } from './_classify.ts'
+import { logRoute } from './_router.ts'
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -65,6 +66,18 @@ function findTopMatches(raw: string, stakeholders: any[], limit: number): any[] 
 }
 
 // ── Message builders ──────────────────────────────────────────────────────────
+
+/** Short "what was parked" line shown when a topic switch happens mid-session. */
+function buildParkMessage(session: WaSession): string {
+  const ctx = session.context
+  const amount: number | null = ctx.extracted?.amount ?? ctx.amount ?? null
+  const payee: string | null  = ctx.extracted?.payee_raw ?? ctx.payee_name ?? null
+
+  if (amount && payee) return `_(Set aside: ${fmtAmount(amount)} to ${payee})_\n`
+  if (amount)          return `_(Set aside: ${fmtAmount(amount)} payment)_\n`
+  if (session.state === 'AWAIT_IMAGE_CONTEXT') return `_(Image entry set aside.)_\n`
+  return `_(Previous entry set aside.)_\n`
+}
 
 function buildConfirmMsg(payee: string, amount: number, mode: string | null, desc: string): string {
   return (
@@ -289,14 +302,25 @@ export async function handleSessionReply(
   const ctx   = session.context
 
   if (isCancelText(lower)) {
+    logRoute(supabase, {
+      wa_message_id: message.id ?? null,
+      phone_number: from,
+      had_session: true,
+      session_state: session.state,
+      session_score: 0,
+      new_intent_score: 95,
+      classified_intent: 'CANCEL',
+      selected_handler: 'cancel',
+      outcome: 'session_cleared',
+    })
     await clearSession(supabase, from)
     await sendWA(from, 'Cancelled. What else can I help with?')
     return
   }
 
-  // ── Intent scoring — detect topic changes before dispatching to state handler ─
+  // ── Intent arbitration — mandatory gate before state dispatch ─────────────
 
-  const { data: projects }    = await supabase.from('projects').select('name').eq('status', 'Active')
+  const { data: projects }     = await supabase.from('projects').select('name').eq('status', 'Active')
   const { data: stakeholders } = await supabase.from('stakeholders').select('name').limit(30)
 
   const intent = await classifyIntent(
@@ -306,18 +330,39 @@ export async function handleSessionReply(
     projects?.map((p: any) => p.name) || [],
     stakeholders?.map((s: any) => s.name) || [],
   )
-  console.log('[handlers] Session intent:', { text, state: session.state, action: intent.action, confidence: intent.confidence })
+  console.log('[handlers] Session arbitration:', { text, state: session.state, action: intent.action, confidence: intent.confidence, scores: intent.scores })
 
-  // AWAIT_IMAGE_CONTEXT: any text is always the annotation note, never a redirect.
-  if (session.state !== 'AWAIT_IMAGE_CONTEXT' &&
-      intent.action !== 'CONTINUE_SESSION' && intent.confidence === 'HIGH') {
+  // AWAIT_IMAGE_CONTEXT: text is always annotation — never redirect.
+  const isTopic = session.state !== 'AWAIT_IMAGE_CONTEXT' &&
+    intent.action !== 'CONTINUE_SESSION' &&
+    intent.confidence === 'HIGH'
+
+  logRoute(supabase, {
+    wa_message_id: message.id ?? null,
+    phone_number: from,
+    had_session: true,
+    session_state: session.state,
+    session_score: intent.scores.sessionScore,
+    new_intent_score: intent.scores.newIntentScore,
+    classified_intent: intent.action,
+    selected_handler: isTopic ? `reroute:${intent.action}` : `session:${session.state}`,
+    outcome: isTopic ? 'topic_switch' : 'continue_session',
+  })
+
+  if (isTopic) {
+    // Build a short "what was parked" note so the user knows we remembered.
+    const parked = buildParkMessage(session)
+    await sendWA(from, `${parked}Got it — handling that now. 👍`)
     await clearSession(supabase, from)
+
     if (intent.action === 'NEW_FINANCIAL') {
       await handleFinancial(supabase, text, from, senderName, null)
+    } else if (intent.action === 'NEW_SITE_UPDATE') {
+      await handleSiteTextUpdate(supabase, text, from, senderName)
     } else if (intent.action === 'NEW_QUERY') {
       await handleQuery(supabase, text, from, null)
     } else if (intent.action === 'CANCEL') {
-      await sendWA(from, `Cancelled. What else?`)
+      await sendWA(from, `Cancelled.`)
     } else {
       await handleGeneral(text, from, senderName)
     }
@@ -466,6 +511,27 @@ export async function handleSessionReply(
       await clearSession(supabase, from)
       await sendWA(from, 'Session expired. Please send your message again.')
   }
+}
+
+// ── Site text update handler ──────────────────────────────────────────────────
+
+export async function handleSiteTextUpdate(
+  supabase: any,
+  text: string,
+  from: string,
+  senderName: string,
+): Promise<void> {
+  await createRoughEntry(supabase, text, from, senderName, {
+    image_type: 'SITE_UPDATE',
+    user_note: text,
+    has_attachment: false,
+    wired_for_future: true,
+  }, 'WHATSAPP_TEXT')
+
+  const preview = text.length > 60 ? text.slice(0, 60) + '…' : text
+  await sendWA(from,
+    `📋 Site update noted!\n"${preview}"\n\n` +
+    `Review: briklayflow.vercel.app/logbook`)
 }
 
 // ── Query handler ─────────────────────────────────────────────────────────────
@@ -625,8 +691,10 @@ export async function handleImageMessage(
       `📷 Site photo received!\n\n` +
       `Send a note — which floor, what work, any issues?`,
     UNKNOWN:
-      `📎 Image received.\n\n` +
-      `Send a note to add context or it will be saved to logbook as-is.`,
+      `📎 Image received! What is this?\n\n` +
+      `1️⃣ Payment proof or receipt\n` +
+      `2️⃣ Site progress photo\n\n` +
+      `Reply 1 or 2 (or send a note describing it).`,
   }
   await sendWA(from, replies[imageClass.type] || replies.UNKNOWN)
 

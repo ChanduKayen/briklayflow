@@ -1,4 +1,4 @@
-// Message classification: FINANCIAL | QUERY | GENERAL
+// Message classification: FINANCIAL | QUERY | SITE_UPDATE | GENERAL
 // Fast rule-based first; AI fallback only for genuinely ambiguous messages.
 
 const FINANCIAL_PATTERNS = [
@@ -20,18 +20,29 @@ const QUERY_PATTERNS = [
   /\?/,
 ]
 
+// Only checked after FINANCIAL and QUERY fail — so these never overlap with money messages.
+const SITE_UPDATE_PATTERNS = [
+  /\b(site\s+update|site\s+report|progress\s+update|work\s+update|work\s+done)\b/i,
+  /\b(slab|casting|column|beam|foundation|shuttering|centering)\b.{0,20}\b(done|poured|cast|complete|started|ready|finished)\b/i,
+  /\b(roof|terrace|lintel)\b.{0,20}\b(slab|done|complete|ready)\b/i,
+  /\b(ground\s+floor|first\s+floor|second\s+floor|third\s+floor|gf|ff|sf)\b.{0,20}\b(done|complete|finished|ready)\b/i,
+  /\b(plastering|painting|tiling|waterproofing|flooring|wiring|plumbing)\b.{0,20}\b(done|complete|finished|started)\b/i,
+]
+
 export async function classifyMessage(
   text: string,
-): Promise<'FINANCIAL' | 'QUERY' | 'GENERAL'> {
+): Promise<'FINANCIAL' | 'QUERY' | 'SITE_UPDATE' | 'GENERAL'> {
   if (FINANCIAL_PATTERNS.some((p) => p.test(text))) return 'FINANCIAL'
   if (QUERY_PATTERNS.some((p) => p.test(text))) return 'QUERY'
+  if (SITE_UPDATE_PATTERNS.some((p) => p.test(text))) return 'SITE_UPDATE'
 
   // AI fallback — only reached for short/ambiguous messages
   const prompt =
     'Classify this construction-site WhatsApp message. ' +
-    'Reply ONE word only: FINANCIAL, QUERY, or GENERAL. ' +
+    'Reply ONE word only: FINANCIAL, QUERY, SITE_UPDATE, or GENERAL. ' +
     'FINANCIAL = any payment/expense/purchase. ' +
     'QUERY = question about data/balance/records. ' +
+    'SITE_UPDATE = site progress report, work completion, construction milestone, no money involved. ' +
     'GENERAL = greeting, help, or anything else.'
 
   const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')
@@ -39,12 +50,12 @@ export async function classifyMessage(
 
   if (anthropicKey) {
     const result = await callClaude(anthropicKey, prompt, text, 5)
-    if (isValidClass(result)) return result as 'FINANCIAL' | 'QUERY' | 'GENERAL'
+    if (isValidClass(result)) return result as 'FINANCIAL' | 'QUERY' | 'SITE_UPDATE' | 'GENERAL'
   }
 
   if (openaiKey) {
     const result = await callOpenAI(openaiKey, prompt, text, 5)
-    if (isValidClass(result)) return result as 'FINANCIAL' | 'QUERY' | 'GENERAL'
+    if (isValidClass(result)) return result as 'FINANCIAL' | 'QUERY' | 'SITE_UPDATE' | 'GENERAL'
   }
 
   return 'GENERAL'
@@ -53,7 +64,7 @@ export async function classifyMessage(
 // ── Private helpers ───────────────────────────────────────────────────────────
 
 function isValidClass(s: string): boolean {
-  return ['FINANCIAL', 'QUERY', 'GENERAL'].includes(s)
+  return ['FINANCIAL', 'QUERY', 'SITE_UPDATE', 'GENERAL'].includes(s)
 }
 
 async function callClaude(
@@ -274,6 +285,7 @@ async function classifyImageOpenAI(
 export type IntentAction =
   | 'CONTINUE_SESSION'
   | 'NEW_FINANCIAL'
+  | 'NEW_SITE_UPDATE'
   | 'NEW_QUERY'
   | 'CANCEL'
   | 'GENERAL'
@@ -285,15 +297,18 @@ export interface IntentResult {
     amount?: number
     project_hint?: string
   }
+  /** Raw arbitration scores, exposed for telemetry logging. */
+  scores: { sessionScore: number; newIntentScore: number }
 }
 
 const VALID_INTENT_ACTIONS: IntentAction[] = [
-  'CONTINUE_SESSION', 'NEW_FINANCIAL', 'NEW_QUERY', 'CANCEL', 'GENERAL',
+  'CONTINUE_SESSION', 'NEW_FINANCIAL', 'NEW_SITE_UPDATE', 'NEW_QUERY', 'CANCEL', 'GENERAL',
 ]
 
 /**
  * Decide what a user's reply means given the current session state.
  * Fast-path: hard rules + scoring. Slow-path: AI for genuinely ambiguous cases.
+ * Always returns `scores` for routing telemetry.
  */
 export async function classifyIntent(
   text: string,
@@ -308,18 +323,26 @@ export async function classifyIntent(
   // ── Hard rules — no AI needed ─────────────────────────────────────────────
 
   if (/^(cancel|stop|no|nope|wrong|nevermind|forget it|start over|bad|mistake)$/i.test(lower)) {
-    return { action: 'CANCEL', confidence: 'HIGH', salvageable: {} }
+    return { action: 'CANCEL', confidence: 'HIGH', salvageable: {}, scores: { sessionScore: 0, newIntentScore: 95 } }
   }
 
   if (/^(hi|hello|hey|hii|ok|okay|thanks|thank you|sari|accha|theek|np|k)$/i.test(lower)) {
-    return { action: 'GENERAL', confidence: 'HIGH', salvageable: {} }
+    return { action: 'GENERAL', confidence: 'HIGH', salvageable: {}, scores: { sessionScore: 10, newIntentScore: 90 } }
   }
 
   if (
     text.includes('?') ||
     /^(what|how|when|who|where|which|is |are |does |did |enta|ela|evaru|evariki|how much|balance|pending)/i.test(lower)
   ) {
-    return { action: 'NEW_QUERY', confidence: 'HIGH', salvageable: {} }
+    return { action: 'NEW_QUERY', confidence: 'HIGH', salvageable: {}, scores: { sessionScore: 10, newIntentScore: 90 } }
+  }
+
+  // ── Site update hard rule (no financial signals required) ─────────────────
+  // AWAIT_IMAGE_CONTEXT is excluded: any text there is an annotation note.
+  const SITE_STRONG = /\b(slab\s+done|casting\s+done|slab\s+poured|column\s+done|shuttering\s+done|site\s+update|progress\s+update|work\s+done|work\s+complete)\b/i
+  const hasFinancialSignal = /\d{3,}|[₹]|\b(paid|pay|cash|neft|upi|cheque)\b/i.test(lower)
+  if (sessionState !== 'AWAIT_IMAGE_CONTEXT' && SITE_STRONG.test(lower) && !hasFinancialSignal) {
+    return { action: 'NEW_SITE_UPDATE', confidence: 'HIGH', salvageable: {}, scores: { sessionScore: 15, newIntentScore: 85 } }
   }
 
   // ── Extract signals ───────────────────────────────────────────────────────
@@ -405,6 +428,7 @@ export async function classifyIntent(
       action: 'CONTINUE_SESSION',
       confidence: sessionScore > 75 ? 'HIGH' : 'LOW',
       salvageable,
+      scores: { sessionScore, newIntentScore: newTxnScore },
     }
   }
 
@@ -413,6 +437,7 @@ export async function classifyIntent(
       action: 'NEW_FINANCIAL',
       confidence: newTxnScore > 75 ? 'HIGH' : 'LOW',
       salvageable,
+      scores: { sessionScore, newIntentScore: newTxnScore },
     }
   }
 
@@ -428,14 +453,14 @@ export async function classifyIntent(
         ANTHROPIC_KEY || OPENAI_KEY!,
         !!ANTHROPIC_KEY,
       )
-      return { ...aiResult, salvageable }
+      return { ...aiResult, salvageable, scores: { sessionScore, newIntentScore: newTxnScore } }
     } catch (e) {
       console.error('[intent] AI error:', e)
     }
   }
 
   // Ambiguous with no AI — trust the session
-  return { action: 'CONTINUE_SESSION', confidence: 'LOW', salvageable }
+  return { action: 'CONTINUE_SESSION', confidence: 'LOW', salvageable, scores: { sessionScore, newIntentScore: newTxnScore } }
 }
 
 async function classifyIntentAI(
@@ -524,7 +549,7 @@ async function classifyIntentAI(
     if (!VALID_CONFIDENCE.includes(parsed.confidence)) parsed.confidence = 'LOW'
 
     console.log('[intent] classified (AI):', parsed)
-    return { ...parsed, salvageable: {} }
+    return { ...parsed, salvageable: {}, scores: { sessionScore: 0, newIntentScore: 0 } }
   } catch (e) {
     clearTimeout(timeout)
     throw e

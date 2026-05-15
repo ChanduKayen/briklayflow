@@ -3,10 +3,12 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { logMessage, sendWA } from './_wa.ts'
 import { getSession, clearSession } from './_session.ts'
 import { classifyMessage } from './_classify.ts'
+import { logRoute, classificationToIntent } from './_router.ts'
 import {
   handleFinancial,
   handleQuery,
   handleGeneral,
+  handleSiteTextUpdate,
   handleImageMessage,
   handleSessionReply,
   processExpiredImageEntries,
@@ -94,6 +96,17 @@ async function processMessage(body: unknown): Promise<void> {
   if (messageType === 'image') {
     const staleSession = await getSession(supabase, from)
     if (staleSession) await clearSession(supabase, from)
+    logRoute(supabase, {
+      wa_message_id: messageId,
+      phone_number: from,
+      had_session: !!staleSession,
+      session_state: staleSession?.state ?? null,
+      session_score: 0,
+      new_intent_score: 100,
+      classified_intent: 'IMAGE',
+      selected_handler: 'handleImageMessage',
+      outcome: staleSession ? 'session_cleared_for_image' : 'routed',
+    })
     await handleImageMessage(supabase, message, from, senderName, registered)
     return
   }
@@ -112,14 +125,29 @@ async function processMessage(body: unknown): Promise<void> {
     return
   }
 
-  // Text messages: classify then dispatch
+  // Text messages: classify → log → dispatch
   const text           = (message.text?.body ?? '') as string
   const classification = await classifyMessage(text)
+  const canonicalIntent = classificationToIntent(classification)
+
+  logRoute(supabase, {
+    wa_message_id: messageId,
+    phone_number: from,
+    had_session: false,
+    session_state: null,
+    session_score: 0,
+    new_intent_score: 100,
+    classified_intent: canonicalIntent,
+    selected_handler: canonicalIntent.toLowerCase(),
+    outcome: 'routed',
+  })
 
   if (classification === 'FINANCIAL') {
     await handleFinancial(supabase, text, from, senderName, registered)
   } else if (classification === 'QUERY') {
     await handleQuery(supabase, text, from, registered)
+  } else if (classification === 'SITE_UPDATE') {
+    await handleSiteTextUpdate(supabase, text, from, senderName)
   } else {
     await handleGeneral(text, from, senderName)
   }
