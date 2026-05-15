@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
 import { Routes, Route, Navigate, useNavigate, Link, useLocation } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 import { supabaseAdmin } from './lib/supabase-admin';
@@ -14,7 +15,7 @@ import { LinearProgress } from './components/LinearProgress';
 import {
   IconLayoutDashboard, IconArrowsExchange,
   IconNotebook, IconClipboardList, IconShoppingBag, IconCalendarCheck,
-  IconBuildingEstate, IconFileInvoice, IconUsersGroup, IconCash, IconChartBar,
+  IconBuildingEstate, IconFileInvoice, IconUsersGroup, IconChartBar,
   IconSitemap, IconShieldLock, IconAdjustmentsHorizontal,
   IconLayoutSidebarLeftCollapse, IconLayoutSidebar,
   IconSettings, IconLogout, IconChevronDown, IconChevronLeft, IconDots,
@@ -111,7 +112,8 @@ function App() {
         {/* Mobile topbar (phones only — replaces sidebar hamburger) */}
         <MobileTopbar session={session} />
         <Routes>
-          <Route path="/" element={<Dashboard session={session} />} />
+          <Route path="/" element={<Navigate to="/ledger" replace />} />
+          <Route path="/dashboard" element={<Dashboard session={session} />} />
           <Route path="/logbook" element={<Logbook session={session} />} />
           <Route path="/ledger" element={<Ledger session={session} />} />
           <Route path="/ledger/new" element={<NewTransaction session={session} />} />
@@ -154,11 +156,79 @@ function App() {
 
     {/* Command bar — rendered outside the scroll container, above everything */}
     <CommandBar />
-    <SpaceKeyListener />
+    <GlobalShortcuts />
 
     </CommandBarProvider>
     </PeekProvider>
     </SnackbarProvider>
+  );
+}
+
+// ── Nav shortcut helpers ───────────────────────────────────────────────────────
+
+const SHORTCUT_LETTERS: Record<string, string> = {
+  '/ledger':          'T',
+  '/work-orders':     'W',
+  '/purchase-orders': 'P',
+  '/logbook':         'L',
+};
+
+const NAV_TOOLTIPS: Record<string, { shortcut: string | null; description: string }> = {
+  '/ledger':          { shortcut: 'T', description: 'All payments made — workers, vendors, expenses' },
+  '/work-orders':     { shortcut: 'W', description: 'Labour contracts and milestone payments' },
+  '/purchase-orders': { shortcut: 'P', description: 'Material orders and vendor bills' },
+  '/logbook':         { shortcut: 'L', description: 'Raw entries from WhatsApp and field notes' },
+  '/stakeholders':    { shortcut: null, description: 'Workers, vendors and clients' },
+  '/dashboard':       { shortcut: null, description: 'Overview, risk flags and activity' },
+  '/financials':      { shortcut: null, description: 'Reports, ledgers and statements' },
+};
+
+function NavLabel({ label, href, isActive }: { label: string; href: string; isActive: boolean }) {
+  const shortcutLetter = SHORTCUT_LETTERS[href];
+  if (!shortcutLetter || isActive) return <span style={{ flex: 1, lineHeight: 1 }}>{label}</span>;
+  const letterIndex = label.toUpperCase().indexOf(shortcutLetter);
+  if (letterIndex === -1) return <span style={{ flex: 1, lineHeight: 1 }}>{label}</span>;
+  const before = label.slice(0, letterIndex);
+  const letter = label.slice(letterIndex, letterIndex + 1);
+  const after  = label.slice(letterIndex + 1);
+  return (
+    <span style={{ flex: 1, lineHeight: 1 }}>
+      {before}
+      <span style={{ textDecoration: 'underline', textUnderlineOffset: '2px', textDecorationStyle: 'dotted', textDecorationColor: 'rgba(0,0,0,0.2)' }}>
+        {letter}
+      </span>
+      {after}
+    </span>
+  );
+}
+
+function NavTooltip({ href, children }: { href: string; children: React.ReactNode }) {
+  const tip = NAV_TOOLTIPS[href];
+  const [show, setShow] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  if (!tip) return <>{children}</>;
+  return (
+    <div
+      style={{ position: 'relative' }}
+      onMouseEnter={() => { timer.current = setTimeout(() => setShow(true), 500); }}
+      onMouseLeave={() => { if (timer.current) clearTimeout(timer.current); setShow(false); }}
+    >
+      {children}
+      {show && (
+        <div style={{ position: 'absolute', left: '100%', top: '50%', transform: 'translateY(-50%)', marginLeft: 12, zIndex: 200, pointerEvents: 'none' }}>
+          <div style={{ width: 0, height: 0, position: 'absolute', right: '100%', top: '50%', transform: 'translateY(-50%)', borderTop: '6px solid transparent', borderBottom: '6px solid transparent', borderRight: '6px solid rgba(0,0,0,0.08)' }} />
+          <div style={{ background: 'white', border: '1px solid rgba(0,0,0,0.08)', borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.08)', padding: '10px 12px', width: 200 }}>
+            <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.65)', lineHeight: 1.5, margin: 0 }}>{tip.description}</p>
+            {tip.shortcut && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(0,0,0,0.06)' }}>
+                <span style={{ fontFamily: 'monospace', fontSize: 10, color: 'rgba(0,0,0,0.35)', border: '1px solid rgba(0,0,0,0.15)', borderRadius: 4, padding: '2px 6px', lineHeight: 1 }}>{tip.shortcut}</span>
+                <span style={{ fontSize: 10, color: 'rgba(0,0,0,0.35)' }}>press anywhere to open</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -245,34 +315,51 @@ function SidebarContent({
     staleTime: 30_000,
   });
 
-  type NavItem = { path: string; icon: React.ElementType; label: string; show: boolean; badge?: number };
+  const { data: sidebarProjects = [] } = useQuery({
+    queryKey: ['sidebar_projects'],
+    queryFn: async () => {
+      const { data } = await supabase.from('projects').select('project_id, name').eq('status', 'Active').order('name');
+      return (data ?? []) as { project_id: string; name: string }[];
+    },
+    staleTime: 60_000,
+  });
+
+  type NavItem = { path: string; icon: React.ElementType; label: string; show: boolean; badge?: number; accent?: boolean };
   type NavGroup = { label: string; show: boolean; items: NavItem[] };
 
   const navGroups: NavGroup[] = [
     {
-      label: 'WORK', show: true,
+      label: 'FIELD', show: true,
       items: [
-        { path: '/logbook',          icon: IconNotebook,         label: 'Logbook',         show: true,                                           badge: inboxBadgeCount },
-        { path: '/',                 icon: IconLayoutDashboard,  label: 'Dashboard',       show: true },
-        { path: '/ledger',           icon: IconArrowsExchange,   label: 'Transactions',    show: role !== 'supervisor' },
-        { path: '/work-orders',      icon: IconClipboardList,    label: 'Work Orders',     show: true,                                           badge: woPendingCount },
-        { path: '/purchase-orders',  icon: IconShoppingBag,      label: 'Purchase Orders', show: role !== 'supervisor' && role !== 'accountant', badge: poUntalliedCount },
-        { path: '/attendance',       icon: IconCalendarCheck,    label: 'Attendance',      show: true },
+        { path: '/ledger',  icon: IconArrowsExchange, label: 'Transactions', show: role !== 'supervisor', accent: true },
+        { path: '/logbook', icon: IconNotebook,       label: 'Logbook',      show: true,                 badge: inboxBadgeCount },
       ],
     },
     {
-      label: 'BUILD', show: true,
+      label: 'PEOPLE', show: true,
       items: [
-        { path: '/projects',     icon: IconBuildingEstate, label: 'Projects',     show: true },
-        { path: '/billing',      icon: IconFileInvoice,    label: 'Billing',      show: role !== 'supervisor',                         badge: billOverdueCount },
-        { path: '/stakeholders', icon: IconUsersGroup,     label: 'Parties',      show: role !== 'supervisor' && role !== 'accountant' },
+        { path: '/stakeholders', icon: IconUsersGroup,    label: 'Parties',    show: role !== 'supervisor' && role !== 'accountant' },
+        { path: '/attendance',   icon: IconCalendarCheck, label: 'Attendance', show: true },
       ],
     },
     {
-      label: 'FINANCE', show: role !== 'supervisor',
+      label: 'PROCUREMENT', show: true,
       items: [
-        { path: '/fund-register', icon: IconCash,     label: 'Fund Register', show: true },
-        { path: '/financials',    icon: IconChartBar, label: 'Financials',    show: showFinancials },
+        { path: '/work-orders',     icon: IconClipboardList, label: 'Work Orders',     show: true,                                           badge: woPendingCount },
+        { path: '/purchase-orders', icon: IconShoppingBag,   label: 'Purchase Orders', show: role !== 'supervisor' && role !== 'accountant', badge: poUntalliedCount },
+      ],
+    },
+    {
+      label: 'BILLING', show: role !== 'supervisor',
+      items: [
+        { path: '/billing', icon: IconFileInvoice, label: 'Client Billing', show: role !== 'supervisor', badge: billOverdueCount },
+      ],
+    },
+    {
+      label: 'INTELLIGENCE', show: true,
+      items: [
+        { path: '/financials', icon: IconChartBar,        label: 'Financials', show: showFinancials },
+        { path: '/dashboard',  icon: IconLayoutDashboard, label: 'Pulse',      show: true },
       ],
     },
     {
@@ -377,11 +464,45 @@ function SidebarContent({
 
       {/* ── Nav groups ───────────────────────────────────────────────────── */}
       <nav style={{ flex: 1, overflowY: 'auto', padding: '0 0 4px' }} className="no-scrollbar">
+
+        {/* ── Dashboard (standalone) ───────────────────────────────────── */}
+        <div style={{ padding: '8px 0 4px' }}>
+          <Link to="/dashboard" onClick={onNavigate} className="nav-item" data-active={location.pathname === '/dashboard'}>
+            <IconLayoutDashboard size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+            <span style={{ flex: 1, lineHeight: 1 }}>Dashboard</span>
+          </Link>
+        </div>
+        <div style={{ height: 1, background: 'var(--nav-border)', margin: '0 12px 4px' }} />
+
+        {/* ── PROJECTS section ─────────────────────────────────────────── */}
+        <div className="nav-group-animate">
+          <p style={{ padding: '16px 16px 4px', fontSize: 10, fontWeight: 500, color: 'var(--nav-text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase', userSelect: 'none' }}>
+            Projects
+          </p>
+          {sidebarProjects.map(proj => {
+            const path = `/projects/${proj.project_id}`;
+            const active = isActive(path);
+            return (
+              <Link key={proj.project_id} to={path} onClick={onNavigate} className="nav-item" data-active={active}>
+                <span style={{ width: 16, height: 16, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <span style={{ width: 5, height: 5, borderRadius: '50%', background: active ? 'var(--nav-accent)' : 'currentColor', opacity: active ? 1 : 0.4 }} />
+                </span>
+                <span style={{ flex: 1, lineHeight: 1 }}>{proj.name}</span>
+              </Link>
+            );
+          })}
+          <Link to="/projects" onClick={onNavigate} className="nav-item" data-active={location.pathname === '/projects'}>
+            <IconBuildingEstate size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+            <span style={{ flex: 1, lineHeight: 1 }}>+ Add Project</span>
+          </Link>
+        </div>
+
+        {/* ── Other nav groups ─────────────────────────────────────────── */}
         {navGroups.filter(g => g.show).map((group, gi) => {
           const visible = group.items.filter(i => i.show);
           if (visible.length === 0) return null;
           return (
-            <div key={group.label} className="nav-group-animate" style={{ animationDelay: `${gi * 40}ms` }}>
+            <div key={group.label} className="nav-group-animate" style={{ animationDelay: `${(gi + 1) * 40}ms` }}>
               <p style={{ padding: '16px 16px 4px', fontSize: 10, fontWeight: 500, color: 'var(--nav-text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase', userSelect: 'none' }}>
                 {group.label}
               </p>
@@ -389,21 +510,26 @@ function SidebarContent({
                 const Icon = item.icon;
                 const active = isActive(item.path);
                 return (
-                  <Link
-                    key={item.path}
-                    to={item.path}
-                    onClick={onNavigate}
-                    className="nav-item"
-                    data-active={active}
-                  >
-                    <Icon size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
-                    <span style={{ flex: 1, lineHeight: 1 }}>{item.label}</span>
-                    {(item.badge ?? 0) > 0 && (
-                      <span className="nav-badge-mono">
-                        {(item.badge ?? 0) > 9 ? '9+' : item.badge}
-                      </span>
-                    )}
-                  </Link>
+                  <NavTooltip key={item.path} href={item.path}>
+                    <Link
+                      to={item.path}
+                      onClick={onNavigate}
+                      className="nav-item"
+                      data-active={active}
+                    >
+                      <Icon
+                        size={16}
+                        strokeWidth={1.5}
+                        style={{ flexShrink: 0, ...(item.accent ? { color: 'var(--nav-accent)' } : {}) }}
+                      />
+                      <NavLabel label={item.label} href={item.path} isActive={active} />
+                      {(item.badge ?? 0) > 0 && (
+                        <span className="nav-badge-mono">
+                          {(item.badge ?? 0) > 9 ? '9+' : item.badge}
+                        </span>
+                      )}
+                    </Link>
+                  </NavTooltip>
                 );
               })}
             </div>
@@ -492,24 +618,11 @@ function SidebarContent({
   );
 }
 
-// ── Space key listener ─────────────────────────────────────────────────────────
+// ── Global keyboard shortcuts ──────────────────────────────────────────────────
 
-function SpaceKeyListener() {
-  const { isOpen, open } = useCommandBar();
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key !== ' ' && !(e.key === 'k' && (e.metaKey || e.ctrlKey))) return;
-      const target = e.target as HTMLElement;
-      const tag = target.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if (target.isContentEditable) return;
-      if (isOpen) return;
-      e.preventDefault();
-      open();
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [isOpen, open]);
+function GlobalShortcuts() {
+  const { open } = useCommandBar();
+  useGlobalShortcuts(open);
   return null;
 }
 
@@ -551,7 +664,8 @@ function Sidebar({
 
 function getMobileTitle(pathname: string): string {
   const routes: Record<string, string> = {
-    '/':                    'Dashboard',
+    '/':                    'Transactions',
+    '/dashboard':           'Dashboard',
     '/logbook':             'Logbook',
     '/ledger':              'Transactions',
     '/ledger/new':          'New Transaction',
@@ -648,7 +762,7 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
 
   type Tab = { path: string; icon: React.ElementType; label: string; show: boolean; badge?: number };
   const tabs: Tab[] = [
-    { path: '/',       icon: IconLayoutDashboard, label: 'Home',     show: true },
+    { path: '/ledger', icon: IconArrowsExchange,  label: 'Txns',     show: role !== 'supervisor' },
     { path: '/logbook', icon: IconNotebook,        label: 'Logbook',  show: true, badge: inboxBadge },
     { path: '/ledger', icon: IconArrowsExchange,  label: 'Txns',     show: role !== 'supervisor' },
     { path: '/projects', icon: IconBuildingEstate, label: 'Projects', show: true },

@@ -305,6 +305,12 @@ export default function Logbook({ session }: { session: Session }) {
     },
   });
 
+  useEffect(() => {
+    const handler = () => textareaRef.current?.focus();
+    window.addEventListener('shortcut:focus-logbook', handler);
+    return () => window.removeEventListener('shortcut:focus-logbook', handler);
+  }, []);
+
   // ── Realtime ───────────────────────────────────────────────────────────────
   useEffect(() => {
     const channel = supabase

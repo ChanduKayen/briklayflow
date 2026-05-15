@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -440,6 +440,29 @@ function SiteReceiptCell({
   );
 }
 
+function CreateHint({ message, children }: { message: string; children: ReactNode }) {
+  const [show, setShow] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  return (
+    <div
+      className="relative inline-block"
+      onMouseEnter={() => { timer.current = setTimeout(() => setShow(true), 300); }}
+      onMouseLeave={() => { if (timer.current) clearTimeout(timer.current); setShow(false); }}
+    >
+      {children}
+      {show && (
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 pointer-events-none whitespace-nowrap">
+          <div style={{ background: 'rgba(11,28,48,0.88)', color: 'white', fontSize: 11, padding: '6px 10px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+            <span style={{ fontFamily: 'monospace', fontSize: 10, border: '1px solid rgba(255,255,255,0.2)', borderRadius: 4, padding: '1px 5px', lineHeight: 1, color: 'rgba(255,255,255,0.6)' }}>/</span>
+            <span style={{ color: 'rgba(255,255,255,0.8)' }}>{message}</span>
+          </div>
+          <div style={{ position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)', width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: '5px solid rgba(11,28,48,0.88)' }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function PurchaseOrders({ session }: { session: Session }) {
@@ -541,6 +564,12 @@ export default function PurchaseOrders({ session }: { session: Session }) {
     setDatePreset('all'); setFilterStatus([]); setFilterVendor([]); setFilterProject([]); setSearchTerm(''); setSearchOpen(false);
   }
 
+  useEffect(() => {
+    const handler = () => navigate('/purchase-orders/new');
+    window.addEventListener('shortcut:new-po', handler);
+    return () => window.removeEventListener('shortcut:new-po', handler);
+  }, [navigate]);
+
   function toggleChip(name: typeof openChip) {
     setOpenChip(c => c === name ? null : name);
   }
@@ -586,6 +615,7 @@ export default function PurchaseOrders({ session }: { session: Session }) {
             </p>
           </div>
           {canManage && (
+            <CreateHint message="create a new purchase order">
             <button
               className="hidden md:flex bk-btn items-center gap-2 h-9 px-4 rounded-xl text-[13px] shrink-0"
               onClick={() => navigate('/purchase-orders/new')}
@@ -593,6 +623,7 @@ export default function PurchaseOrders({ session }: { session: Session }) {
               <span className="material-symbols-outlined text-[16px]">add</span>
               New PO
             </button>
+            </CreateHint>
           )}
         </div>
 

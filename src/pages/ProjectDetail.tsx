@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, X } from 'lucide-react';
+import { Loader2, X, Download } from 'lucide-react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import Breadcrumb from '../components/Breadcrumb';
@@ -9,6 +9,19 @@ import { TxnRow } from '../components/TxnRow';
 import { usePeek } from '../context/PeekContext';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
+
+// ── CSV download ──────────────────────────────────────────────────────────────
+
+function downloadCSV(rows: (string | number | null | undefined)[][], filename: string) {
+  const csv = rows
+    .map(r => r.map(cell => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(','))
+    .join('\n');
+  const blob = new Blob(['﻿' + csv, ''], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -593,9 +606,11 @@ export default function ProjectDetail({ session }: { session: Session }) {
   const [poSearch, setPoSearch]   = useState('');
 
   // Transaction filters
-  const [txnSearch,  setTxnSearch]  = useState('');
-  const [txnMode,    setTxnMode]    = useState('');
-  const [txnDate,    setTxnDate]    = useState('all');
+  const [txnSearch,   setTxnSearch]   = useState('');
+  const [txnMode,     setTxnMode]     = useState('');
+  const [txnDate,     setTxnDate]     = useState('all');
+  const [txnParty,    setTxnParty]    = useState(''); // '' | 'Worker' | 'Vendor' | 'CLIENT'
+  const [txnCategory, setTxnCategory] = useState(''); // '' or specific category string
 
   const isPrincipal = profile?.role === 'principal' || profile?.role === 'management';
   const canManage   = isPrincipal || profile?.role === 'accountant';
@@ -745,18 +760,43 @@ export default function ProjectDetail({ session }: { session: Session }) {
     new Date(b.transactions?.date ?? 0).getTime() - new Date(a.transactions?.date ?? 0).getTime()
   );
 
-  // FIX 4: filtered transactions
+  // Category options from stakeholder.category (Electrician, Plumber, Mason…)
+  const txnCategoryOptions = [...new Set(
+    allocations
+      .filter((a: any) => {
+        if (txnParty === 'CLIENT') return false;
+        if (txnParty === 'Worker') return a.transactions?.stakeholders?.type === 'Worker';
+        if (txnParty === 'Vendor') return a.transactions?.stakeholders?.type === 'Vendor';
+        return !isClientReceipt(a.transactions?.category ?? '');
+      })
+      .map((a: any) => a.transactions?.stakeholders?.category)
+      .filter(Boolean)
+  )].sort() as string[];
+
+  // Filtered transactions
   const filteredTxns = sortedAllocations.filter((a: any) => {
     const txn = a.transactions;
     if (!txn) return false;
+    // Party type
+    if (txnParty === 'CLIENT') {
+      if (!isClientReceipt(txn.category ?? '')) return false;
+    } else if (txnParty) {
+      if ((txn.stakeholders?.type ?? '') !== txnParty) return false;
+    }
+    // Stakeholder category (Electrician, Plumber, Mason…)
+    if (txnCategory && (txn.stakeholders?.category ?? '') !== txnCategory) return false;
+    // Payment mode
     if (txnMode && txn.payment_mode !== txnMode) return false;
+    // Date range
     if (!applyDateFilter(txn.date, txnDate)) return false;
+    // Full-text search: payee, note, ID, category
     if (txnSearch) {
       const q = txnSearch.toLowerCase();
       const nameMatch = (txn.stakeholders?.name ?? '').toLowerCase().includes(q);
       const noteMatch = (txn.remarks ?? '').toLowerCase().includes(q);
       const idMatch   = (txn.txn_id ?? '').toLowerCase().includes(q);
-      if (!nameMatch && !noteMatch && !idMatch) return false;
+      const catMatch  = (txn.category ?? '').toLowerCase().includes(q);
+      if (!nameMatch && !noteMatch && !idMatch && !catMatch) return false;
     }
     return true;
   });
@@ -1036,42 +1076,99 @@ export default function ProjectDetail({ session }: { session: Session }) {
             {/* ── TRANSACTIONS ───────────────────────────────────────────── */}
             {activeTab === 'transactions' && (
               <div>
-                {/* FIX 4: filter row */}
-                <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {/* Mode pills */}
-                    <FilterPill label="All modes" active={txnMode === ''} onClick={() => setTxnMode('')} />
-                    {['Cash', 'UPI', 'NEFT', 'Cheque'].map(m => (
-                      <FilterPill key={m} label={m} active={txnMode === m} onClick={() => setTxnMode(txnMode === m ? '' : m)} />
-                    ))}
-                    {/* Date select */}
-                    <select
-                      value={txnDate}
-                      onChange={e => setTxnDate(e.target.value)}
-                      className="h-7 pl-2 pr-6 rounded-full border border-outline-variant/25 text-[11px] text-on-surface-variant/60 bg-white outline-none focus:border-[#D97757]/40 appearance-none"
-                    >
-                      <option value="all">All time</option>
-                      <option value="week">This week</option>
-                      <option value="month">This month</option>
-                      <option value="last_month">Last month</option>
-                    </select>
-                    <SearchInput value={txnSearch} onChange={setTxnSearch} placeholder="Search payee…" />
-                  </div>
-                  <button
-                    onClick={() => setShowNewTxn(true)}
-                    className="h-8 px-3.5 rounded-xl bg-[#D97757] text-white text-[12px] font-semibold flex items-center gap-1 shrink-0"
+                {/* Filter row — all dropdowns */}
+                <div className="flex items-center gap-2 flex-wrap mb-3">
+                  <select
+                    value={txnParty}
+                    onChange={e => { setTxnParty(e.target.value); setTxnCategory(''); }}
+                    className="h-8 pl-3 pr-7 rounded-lg border border-outline-variant/25 bg-white text-[12px] text-on-surface-variant outline-none focus:border-[#D97757]/50 appearance-none"
                   >
-                    <span className="material-symbols-outlined text-[15px]">add</span>
-                    Add
-                  </button>
+                    <option value="">All parties</option>
+                    <option value="Worker">Workers</option>
+                    <option value="Vendor">Vendors</option>
+                    <option value="CLIENT">Client receipts</option>
+                  </select>
+
+                  {txnParty !== 'CLIENT' && txnCategoryOptions.length > 0 && (
+                    <select
+                      value={txnCategory}
+                      onChange={e => setTxnCategory(e.target.value)}
+                      className="h-8 pl-3 pr-7 rounded-lg border border-outline-variant/25 bg-white text-[12px] text-on-surface-variant outline-none focus:border-[#D97757]/50 appearance-none"
+                    >
+                      <option value="">All categories</option>
+                      {txnCategoryOptions.map((cat: string) => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  )}
+
+                  <select
+                    value={txnMode}
+                    onChange={e => setTxnMode(e.target.value)}
+                    className="h-8 pl-3 pr-7 rounded-lg border border-outline-variant/25 bg-white text-[12px] text-on-surface-variant outline-none focus:border-[#D97757]/50 appearance-none"
+                  >
+                    <option value="">All modes</option>
+                    <option value="Cash">Cash</option>
+                    <option value="UPI">UPI</option>
+                    <option value="NEFT">NEFT</option>
+                    <option value="Cheque">Cheque</option>
+                  </select>
+
+                  <select
+                    value={txnDate}
+                    onChange={e => setTxnDate(e.target.value)}
+                    className="h-8 pl-3 pr-7 rounded-lg border border-outline-variant/25 bg-white text-[12px] text-on-surface-variant outline-none focus:border-[#D97757]/50 appearance-none"
+                  >
+                    <option value="all">All time</option>
+                    <option value="week">This week</option>
+                    <option value="month">This month</option>
+                    <option value="last_month">Last month</option>
+                  </select>
+
+                  <SearchInput value={txnSearch} onChange={setTxnSearch} placeholder="Payee, note, ID…" />
                 </div>
 
-                {/* Count */}
-                {(txnSearch || txnMode || txnDate !== 'all') && (
-                  <p className="text-[11px] text-on-surface-variant/35 mb-3">
-                    {filteredTxns.length} of {allocations.length} transactions
-                  </p>
-                )}
+                {/* Summary row: count + clear + actions */}
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <p className="text-[11px] text-on-surface-variant/35">
+                      {(txnSearch || txnMode || txnDate !== 'all' || txnParty || txnCategory)
+                        ? `${filteredTxns.length} of ${allocations.length}`
+                        : `${allocations.length} transaction${allocations.length !== 1 ? 's' : ''}`}
+                    </p>
+                    {(txnSearch || txnMode || txnDate !== 'all' || txnParty || txnCategory) && (
+                      <button
+                        onClick={() => { setTxnSearch(''); setTxnMode(''); setTxnDate('all'); setTxnParty(''); setTxnCategory(''); }}
+                        className="text-[11px] text-on-surface-variant/35 hover:text-rose-500 transition-colors"
+                      >
+                        Clear all
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        const headers = ['Date', 'TXN ID', 'Payee', 'Type', 'Category', 'Mode', 'Amount', 'Remarks'];
+                        const rows = filteredTxns.map((a: any) => {
+                          const t = a.transactions;
+                          return [t?.date, t?.txn_id, t?.stakeholders?.name, t?.stakeholders?.type, t?.stakeholders?.category, t?.payment_mode, a.allocated_amount ?? t?.total_amount, t?.remarks];
+                        });
+                        downloadCSV([headers, ...rows], `${project.name}-transactions.csv`);
+                      }}
+                      title="Download CSV"
+                      className="h-8 w-8 rounded-xl border border-outline-variant/25 flex items-center justify-center text-on-surface-variant/50 hover:text-on-surface hover:border-outline-variant/50 transition-colors"
+                    >
+                      <Download size={14} />
+                    </button>
+                    <button
+                      onClick={() => setShowNewTxn(true)}
+                      className="h-8 px-3.5 rounded-xl bg-[#D97757] text-white text-[12px] font-semibold flex items-center gap-1 shrink-0"
+                    >
+                      <span className="material-symbols-outlined text-[15px]">add</span>
+                      Add
+                    </button>
+                  </div>
+                </div>
 
                 {loadingTxns ? (
                   <div className="py-10 flex justify-center"><Loader2 className="animate-spin text-primary/25" size={24} /></div>
@@ -1083,7 +1180,7 @@ export default function ProjectDetail({ session }: { session: Session }) {
                     </p>
                   </div>
                 ) : (
-                  <div className="bg-white rounded-xl border border-outline-variant/15 overflow-hidden shadow-sm">
+                  <div className="rounded-xl overflow-hidden">
                     {filteredTxns.map((alloc: any, idx: number) => (
                       <TxnRow
                         key={`${alloc.transactions?.txn_id}-${idx}`}
@@ -1116,15 +1213,28 @@ export default function ProjectDetail({ session }: { session: Session }) {
                     )}
                     <SearchInput value={woSearch} onChange={setWoSearch} placeholder="Search contractor…" />
                   </div>
-                  {canManage && (
+                  <div className="flex items-center gap-2">
                     <button
-                      onClick={() => navigate('/work-orders/new', { state: { projectId } })}
-                      className="h-8 px-3.5 rounded-xl bg-[#D97757] text-white text-[12px] font-semibold flex items-center gap-1 shrink-0"
+                      onClick={() => {
+                        const headers = ['WO ID', 'Contractor', 'Trade', 'Scope of Work', 'Status', 'Order Value', 'Start Date', 'End Date'];
+                        const rows = filteredWOs.map((wo: any) => [wo.wo_id, wo.stakeholders?.name, wo.stakeholders?.category, wo.scope_of_work, wo.status, wo.order_value, wo.start_date, wo.end_date]);
+                        downloadCSV([headers, ...rows], `${project.name}-work-orders.csv`);
+                      }}
+                      title="Download CSV"
+                      className="h-8 w-8 rounded-xl border border-outline-variant/25 flex items-center justify-center text-on-surface-variant/50 hover:text-on-surface hover:border-outline-variant/50 transition-colors"
                     >
-                      <span className="material-symbols-outlined text-[15px]">add</span>
-                      New WO
+                      <Download size={14} />
                     </button>
-                  )}
+                    {canManage && (
+                      <button
+                        onClick={() => navigate('/work-orders/new', { state: { projectId } })}
+                        className="h-8 px-3.5 rounded-xl bg-[#D97757] text-white text-[12px] font-semibold flex items-center gap-1 shrink-0"
+                      >
+                        <span className="material-symbols-outlined text-[15px]">add</span>
+                        New WO
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {(woSearch || woFilter.length > 0) && (
@@ -1173,15 +1283,31 @@ export default function ProjectDetail({ session }: { session: Session }) {
                     )}
                     <SearchInput value={poSearch} onChange={setPoSearch} placeholder="Search vendor…" />
                   </div>
-                  {canManage && (
+                  <div className="flex items-center gap-2">
                     <button
-                      onClick={() => navigate('/purchase-orders/new', { state: { projectId } })}
-                      className="h-8 px-3.5 rounded-xl bg-[#D97757] text-white text-[12px] font-semibold flex items-center gap-1 shrink-0"
+                      onClick={() => {
+                        const headers = ['PO ID', 'Vendor', 'Category', 'Status', 'Order Value', 'Billed Amount', 'Site Received', 'Items'];
+                        const rows = filteredPOs.map((po: any) => {
+                          const items = (po.po_line_items ?? []).map((li: any) => li.item_name || li.description).filter(Boolean).join('; ');
+                          return [po.po_id, po.stakeholders?.name, po.stakeholders?.category, po.status, po.total_value ?? po.order_value, po.vendor_bill_amount, po.received_at_site ?? '', items];
+                        });
+                        downloadCSV([headers, ...rows], `${project.name}-purchase-orders.csv`);
+                      }}
+                      title="Download CSV"
+                      className="h-8 w-8 rounded-xl border border-outline-variant/25 flex items-center justify-center text-on-surface-variant/50 hover:text-on-surface hover:border-outline-variant/50 transition-colors"
                     >
-                      <span className="material-symbols-outlined text-[15px]">add</span>
-                      New PO
+                      <Download size={14} />
                     </button>
-                  )}
+                    {canManage && (
+                      <button
+                        onClick={() => navigate('/purchase-orders/new', { state: { projectId } })}
+                        className="h-8 px-3.5 rounded-xl bg-[#D97757] text-white text-[12px] font-semibold flex items-center gap-1 shrink-0"
+                      >
+                        <span className="material-symbols-outlined text-[15px]">add</span>
+                        New PO
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {(poSearch || poFilter.length > 0) && (

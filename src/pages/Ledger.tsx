@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -15,6 +15,29 @@ import { IconPaperclip } from '@tabler/icons-react';
 import { ImageLightbox } from '../components/ImageLightbox';
 
 const PAGE_SIZE = 25;
+
+function CreateHint({ message, children }: { message: string; children: ReactNode }) {
+  const [show, setShow] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  return (
+    <div
+      className="relative inline-block"
+      onMouseEnter={() => { timer.current = setTimeout(() => setShow(true), 300); }}
+      onMouseLeave={() => { if (timer.current) clearTimeout(timer.current); setShow(false); }}
+    >
+      {children}
+      {show && (
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 pointer-events-none whitespace-nowrap">
+          <div style={{ background: 'rgba(11,28,48,0.88)', color: 'white', fontSize: 11, padding: '6px 10px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+            <span style={{ fontFamily: 'monospace', fontSize: 10, border: '1px solid rgba(255,255,255,0.2)', borderRadius: 4, padding: '1px 5px', lineHeight: 1, color: 'rgba(255,255,255,0.6)' }}>/</span>
+            <span style={{ color: 'rgba(255,255,255,0.8)' }}>{message}</span>
+          </div>
+          <div style={{ position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)', width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: '5px solid rgba(11,28,48,0.88)' }} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Ledger({ session }: { session: Session }) {
   const qc = useQueryClient();
@@ -138,6 +161,12 @@ export default function Ledger({ session }: { session: Session }) {
     setSelectedTxnIds(new Set());
     setVisibleCount(PAGE_SIZE);
   }, [searchTerm, filterStakeholder, filterCategory, filterStatus, filterProject, filterType, datePreset, customFrom, customTo, filterFlagged, filterNeedsAction]);
+
+  useEffect(() => {
+    const handler = () => navigate('/ledger/new');
+    window.addEventListener('shortcut:new-transaction', handler);
+    return () => window.removeEventListener('shortcut:new-transaction', handler);
+  }, [navigate]);
 
   const MATERIAL_CATEGORIES_LEGACY = ['Material Supply', 'PO Advance', 'PO Settlement', 'Transport & Handling'];
 
@@ -449,11 +478,13 @@ export default function Ledger({ session }: { session: Session }) {
               <span className="material-symbols-outlined text-[16px]">download</span>
               Export
             </button>
-            <button onClick={() => navigate('/ledger/new')}
-              className="bk-btn flex items-center gap-1.5 h-9 px-4 rounded-xl text-[13px] font-semibold">
-              <span className="material-symbols-outlined text-[16px]">add</span>
-              New Transaction
-            </button>
+            <CreateHint message="create a new transaction">
+              <button onClick={() => navigate('/ledger/new')}
+                className="bk-btn flex items-center gap-1.5 h-9 px-4 rounded-xl text-[13px] font-semibold">
+                <span className="material-symbols-outlined text-[16px]">add</span>
+                New Transaction
+              </button>
+            </CreateHint>
           </div>
         </div>
 
