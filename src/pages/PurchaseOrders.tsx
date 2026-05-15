@@ -12,25 +12,25 @@ import { useSnackbar } from '../components/Snackbar';
 // ── Status config ─────────────────────────────────────────────────────────────
 
 const STATUS_CHIP: Record<string, string> = {
-  'ORDERED':   'bg-[#EFF6FF] text-[#3B82F6] ring-1 ring-[#3B82F6]/20',
-  'BILLED':    'bg-[#FFFBEB] text-[#D97706] ring-1 ring-[#D97706]/20',
-  'PARTIAL':   'bg-[#FFF7ED] text-[#EA580C] ring-1 ring-[#EA580C]/20',
-  'PAID':      'bg-[#F0FDF4] text-[#16A34A] ring-1 ring-[#16A34A]/20',
-  'CANCELLED': 'bg-[#F9FAFB] text-[#6B7280] ring-1 ring-[#6B7280]/20',
+  'ORDERED':   'bg-blue-50 text-blue-600',
+  'BILLED':    'bg-amber-50 text-amber-700',
+  'PARTIAL':   'bg-orange-50 text-orange-600',
+  'PAID':      'bg-green-50 text-green-700',
+  'CANCELLED': 'bg-gray-100 text-gray-400',
 };
 
 const STATUS_BORDER: Record<string, string> = {
-  'ORDERED':   'border-l-4 border-l-[#3B82F6]',
-  'BILLED':    'border-l-4 border-l-[#D97706]',
-  'PARTIAL':   'border-l-4 border-l-[#EA580C]',
-  'PAID':      'border-l-4 border-l-[#16A34A]',
-  'CANCELLED': 'border-l-4 border-l-[#6B7280]',
+  'ORDERED':   'border-l-[3px] border-l-blue-400',
+  'BILLED':    'border-l-[3px] border-l-amber-400',
+  'PARTIAL':   'border-l-[3px] border-l-orange-400',
+  'PAID':      'border-l-[3px] border-l-green-400',
+  'CANCELLED': 'border-l-[3px] border-l-gray-200',
 };
 
 const STATUS_LABEL: Record<string, string> = {
   'ORDERED':   'Ordered',
   'BILLED':    'Billed',
-  'PARTIAL':   'Partially Paid',
+  'PARTIAL':   'Partial',
   'PAID':      'Paid',
   'CANCELLED': 'Cancelled',
 };
@@ -70,7 +70,7 @@ function getItemsPreview(po: any): string {
     return po.items.slice(0, 3).map((it: any) => it.description).join(', ')
       + (po.items.length > 3 ? ` +${po.items.length - 3} more` : '');
   }
-  return '—';
+  return '';
 }
 
 // ── Date preset helpers ───────────────────────────────────────────────────────
@@ -108,14 +108,14 @@ function FilterChip({
   return (
     <button
       onClick={onClick}
-      className={`bk-chip inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-[12px] font-semibold border transition-colors whitespace-nowrap ${
+      className={`bk-chip inline-flex items-center gap-1 px-3 h-7 rounded-full text-[12px] font-medium transition-colors whitespace-nowrap ${
         active
-          ? 'bg-primary/[0.08] border-primary/30 text-primary'
-          : 'bg-white border-outline-variant/40 text-on-surface-variant hover:bg-surface-container-low'
+          ? 'bg-primary/[0.08] text-primary'
+          : 'text-on-surface-variant/60 hover:bg-black/[0.04]'
       }`}
     >
       {label}
-      <span className="material-symbols-outlined text-[14px]">
+      <span className="material-symbols-outlined text-[13px]">
         {active ? 'expand_less' : 'expand_more'}
       </span>
     </button>
@@ -173,10 +173,10 @@ function VendorBillCell({
   onUpdate: (poId: string, updates: any) => void;
   showSnackbar: (msg: string, opts?: any) => void;
 }) {
-  const [editing, setEditing]   = useState(false);
-  const [amount, setAmount]     = useState('');
-  const [billNo, setBillNo]     = useState('');
-  const [saving, setSaving]     = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [amount, setAmount]   = useState('');
+  const [billNo, setBillNo]   = useState('');
+  const [saving, setSaving]   = useState(false);
 
   const hasBill = Number(po.vendor_bill_amount) > 0;
 
@@ -209,90 +209,46 @@ function VendorBillCell({
     }
   };
 
-  // Read-only: no canManage
+  // Read-only
   if (!canManage) {
-    if (hasBill) {
-      return (
-        <td className="px-3 py-2 w-[200px]">
-          <div className="rounded-[10px] p-[10px_14px] bg-[#F0FDF4] border border-[#BBF7D0]">
-            <p className="text-[18px] font-bold text-[#16A34A] font-mono leading-none">
-              ₹{Number(po.vendor_bill_amount).toLocaleString('en-IN')}
-            </p>
-            {(po.vendor_bill_number || po.vendor_bill_no) && (
-              <p className="text-[10px] font-mono text-on-surface-variant/60 mt-1">
-                {po.vendor_bill_number || po.vendor_bill_no}
-              </p>
-            )}
-          </div>
-        </td>
-      );
-    }
-    return <td className="px-3 py-2 w-[200px]"><span className="text-on-surface-variant/30 text-[12px]">—</span></td>;
-  }
-
-  // STATE A — no bill, not editing
-  if (!hasBill && !editing) {
     return (
-      <td className="px-3 py-2 w-[200px]" onClick={e => e.stopPropagation()}>
-        <div
-          onClick={() => { setAmount(''); setBillNo(po.vendor_bill_number || po.vendor_bill_no || ''); setEditing(true); }}
-          className="rounded-[10px] bg-[#FFFBEB] border border-dashed border-amber-400 cursor-pointer hover:bg-[#FEF3C7] hover:border-solid transition-all flex items-center gap-2.5 px-[14px] py-[10px]"
-        >
-          <span className="text-[18px] shrink-0">💰</span>
-          <div className="min-w-0">
-            <p className="text-[13px] font-semibold text-amber-700 leading-tight">Enter Vendor Bill</p>
-            <p className="text-[10px] text-amber-600">Tap to record bill amount</p>
-          </div>
-        </div>
+      <td className="px-4 py-4">
+        {hasBill
+          ? <p className="text-[13px] font-semibold font-mono text-green-700 tabular-nums">₹{Number(po.vendor_bill_amount).toLocaleString('en-IN')}</p>
+          : <span className="text-on-surface-variant/20 text-[12px]">—</span>
+        }
       </td>
     );
   }
 
-  // STATE B — editing
+  // Inline edit form
   if (editing) {
     return (
-      <td className="px-3 py-2 w-[200px]" onClick={e => e.stopPropagation()}>
-        <div className="rounded-[10px] p-3 bg-white border-2 border-amber-400 shadow-[0_4px_12px_rgba(245,158,11,0.2)] relative z-10">
-          <p className="text-[10px] font-semibold text-amber-700 uppercase tracking-wide mb-2">Vendor Bill Amount</p>
+      <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
+        <div className="rounded-xl p-3 bg-white border-2 border-amber-300 shadow-[0_4px_20px_rgba(245,158,11,0.12)] relative z-10 w-[180px]">
+          <p className="text-[10px] font-semibold text-amber-600 uppercase tracking-wide mb-2">Bill Amount</p>
           <div className="relative mb-2">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[18px] font-bold text-amber-600">₹</span>
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[14px] font-bold text-amber-400">₹</span>
             <input
-              type="number"
-              placeholder="0"
-              value={amount}
-              onChange={e => setAmount(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter') handleSave();
-                if (e.key === 'Escape') { setEditing(false); setAmount(''); }
-              }}
-              className="w-full h-11 text-[20px] font-bold pl-9 pr-3 border-2 border-amber-400 rounded-lg bg-amber-50 focus:outline-none focus:border-amber-600 focus:bg-white"
+              type="number" placeholder="0" value={amount} onChange={e => setAmount(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') { setEditing(false); setAmount(''); } }}
+              className="w-full h-9 text-[17px] font-bold pl-7 pr-2 border border-amber-200 rounded-lg bg-amber-50/50 focus:outline-none focus:border-amber-400 focus:bg-white"
               autoFocus
             />
           </div>
           <input
-            type="text"
-            placeholder="Bill / Invoice No (optional)"
-            value={billNo}
-            onChange={e => setBillNo(e.target.value)}
-            className="w-full h-8 px-3 mb-2.5 text-[12px] border border-outline-variant/30 rounded-lg focus:outline-none focus:border-amber-400 bg-white"
+            type="text" placeholder="Invoice no. (optional)" value={billNo} onChange={e => setBillNo(e.target.value)}
+            className="w-full h-7 px-2.5 mb-2 text-[11px] border border-outline-variant/20 rounded-lg focus:outline-none focus:border-amber-300 bg-white"
           />
-          <div className="flex gap-2">
+          <div className="flex gap-1.5">
             <button
-              onClick={handleSave}
-              disabled={!amount || parseFloat(amount) <= 0 || saving}
-              className={`flex-1 h-9 rounded-lg text-[13px] font-semibold transition-colors ${
-                amount && parseFloat(amount) > 0
-                  ? 'bg-amber-500 text-white hover:bg-amber-600'
-                  : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-              }`}
+              onClick={handleSave} disabled={!amount || parseFloat(amount) <= 0 || saving}
+              className={`flex-1 h-7 rounded-lg text-[12px] font-semibold transition-colors ${amount && parseFloat(amount) > 0 ? 'bg-amber-500 text-white hover:bg-amber-600' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
             >
-              {saving ? 'Saving…' : 'Save Bill'}
+              {saving ? '…' : 'Save'}
             </button>
-            <button
-              onClick={() => { setEditing(false); setAmount(''); }}
-              className="w-9 h-9 rounded-lg border border-outline-variant/30 text-on-surface-variant hover:bg-surface-container flex items-center justify-center text-[13px]"
-            >
-              ✕
+            <button onClick={() => { setEditing(false); setAmount(''); }} className="w-7 h-7 rounded-lg border border-outline-variant/15 text-on-surface-variant/40 hover:bg-surface-container flex items-center justify-center">
+              <span className="material-symbols-outlined text-[13px]">close</span>
             </button>
           </div>
         </div>
@@ -300,33 +256,35 @@ function VendorBillCell({
     );
   }
 
-  // STATE C — bill recorded
+  // No bill yet
+  if (!hasBill) {
+    return (
+      <td className="px-4 py-4" onClick={e => e.stopPropagation()}>
+        <button
+          onClick={() => { setAmount(''); setBillNo(po.vendor_bill_number || po.vendor_bill_no || ''); setEditing(true); }}
+          className="flex items-center gap-1 text-[12px] font-medium text-amber-500 hover:text-amber-700 transition-colors"
+        >
+          <span className="material-symbols-outlined text-[14px]">add</span>
+          Add bill
+        </button>
+      </td>
+    );
+  }
+
+  // Bill recorded
   return (
-    <td className="px-3 py-2 w-[200px]" onClick={e => e.stopPropagation()}>
-      <div
+    <td className="px-4 py-4" onClick={e => e.stopPropagation()}>
+      <button
         onClick={() => { setAmount(String(po.vendor_bill_amount)); setBillNo(po.vendor_bill_number || po.vendor_bill_no || ''); setEditing(true); }}
-        className="rounded-[10px] px-[14px] py-[10px] bg-[#F0FDF4] border border-[#BBF7D0] cursor-pointer hover:border-green-400 transition-colors group"
+        className="text-left group"
       >
-        <div className="flex items-start justify-between">
-          <p className="text-[18px] font-bold text-[#16A34A] font-mono leading-none">
-            ₹{Number(po.vendor_bill_amount).toLocaleString('en-IN')}
-          </p>
-          <span className="text-[14px] text-green-500">✓</span>
-        </div>
-        {(po.vendor_bill_number || po.vendor_bill_no) && (
-          <p className="text-[10px] font-mono text-on-surface-variant/60 mt-1">
-            {po.vendor_bill_number || po.vendor_bill_no}
-          </p>
-        )}
-        {po.bill_recorded_at && (
-          <p className="text-[10px] text-on-surface-variant/50">
-            Recorded {fmtShortDate(po.bill_recorded_at)}
-          </p>
-        )}
-        <p className="text-[9px] text-on-surface-variant/40 opacity-0 group-hover:opacity-100 transition-opacity mt-0.5">
-          Click to edit
+        <p className="text-[13px] font-semibold font-mono text-green-700 tabular-nums group-hover:underline">
+          ₹{Number(po.vendor_bill_amount).toLocaleString('en-IN')}
         </p>
-      </div>
+        <p className="text-[11px] text-on-surface-variant/40 mt-0.5">
+          {[po.vendor_bill_number || po.vendor_bill_no, po.bill_recorded_at && fmtShortDate(po.bill_recorded_at)].filter(Boolean).join(' · ') || 'Recorded'}
+        </p>
+      </button>
     </td>
   );
 }
@@ -346,60 +304,38 @@ function BillUploadCell({
 
   if (billUrl) {
     return (
-      <td className="px-3 py-2 w-[140px]" onClick={e => e.stopPropagation()}>
-        <a
-          href={billUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-2 px-3 py-2 bg-green-50 text-green-700 border border-green-200 rounded-lg text-[12px] font-medium hover:bg-green-100 transition-colors w-full justify-center"
+      <td className="px-4 py-4" onClick={e => e.stopPropagation()}>
+        <a href={billUrl} target="_blank" rel="noopener noreferrer"
+          className="flex items-center gap-1 text-[12px] font-medium text-green-700 hover:text-green-800 transition-colors"
         >
-          <span>📄</span>
-          View Bill
+          <span className="material-symbols-outlined text-[14px]">description</span>
+          View
         </a>
       </td>
     );
   }
 
   if (!canManage) {
-    return (
-      <td className="px-3 py-2 w-[140px]">
-        <span className="text-on-surface-variant/30 text-[12px]">—</span>
-      </td>
-    );
+    return <td className="px-4 py-4"><span className="text-on-surface-variant/20 text-[12px]">—</span></td>;
   }
 
   return (
-    <td className="px-3 py-2 w-[140px]" onClick={e => e.stopPropagation()}>
-      <label
-        className={`flex items-center gap-2 px-3 py-2 border border-dashed border-outline-variant/40 rounded-lg text-[12px] text-on-surface-variant w-full justify-center transition-colors ${
-          uploading
-            ? 'cursor-wait opacity-60'
-            : 'cursor-pointer hover:border-[#C8603A] hover:text-[#C8603A] hover:bg-orange-50'
-        }`}
-      >
-        <span>{uploading ? '⟳' : '📎'}</span>
-        {uploading ? 'Uploading…' : 'Upload Bill'}
-        <input
-          type="file"
-          accept=".pdf,.jpg,.jpeg,.png"
-          className="hidden"
-          disabled={uploading}
+    <td className="px-4 py-4" onClick={e => e.stopPropagation()}>
+      <label className={`flex items-center gap-1 text-[12px] font-medium transition-colors ${uploading ? 'text-on-surface-variant/30 cursor-wait' : 'text-on-surface-variant/35 hover:text-primary cursor-pointer'}`}>
+        <span className="material-symbols-outlined text-[14px]">{uploading ? 'hourglass_empty' : 'attach_file'}</span>
+        {uploading ? 'Uploading…' : 'Attach'}
+        <input type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" disabled={uploading}
           onChange={async (e) => {
             const file = e.target.files?.[0];
             if (!file) return;
             setUploading(true);
             const ext = file.type === 'application/pdf' ? 'pdf' : 'jpg';
             const path = `po-bills/${po.po_id}-${Date.now()}.${ext}`;
-            const { error: upErr } = await supabase.storage
-              .from('documents')
-              .upload(path, file, { contentType: file.type });
+            const { error: upErr } = await supabase.storage.from('documents').upload(path, file, { contentType: file.type });
             if (!upErr) {
               const { data: pub } = supabase.storage.from('documents').getPublicUrl(path);
               const url = pub.publicUrl;
-              await supabase
-                .from('purchase_orders')
-                .update({ vendor_bill_url: url, vendor_bill_doc_url: url })
-                .eq('po_id', po.po_id);
+              await supabase.from('purchase_orders').update({ vendor_bill_url: url, vendor_bill_doc_url: url }).eq('po_id', po.po_id);
               onUpdate(po.po_id, { vendor_bill_url: url });
               showSnackbar('📎 Bill document uploaded!');
             } else {
@@ -432,48 +368,33 @@ function SiteReceiptCell({
   const hasBill    = Number(po.vendor_bill_amount) > 0;
   const isReceived = !!po.received_at_site;
 
-  // RECEIVED
   if (isReceived) {
     return (
-      <td className="px-3 py-2 w-[130px]">
-        <div className="rounded-lg px-3 py-2 bg-purple-50 border border-purple-200">
-          <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-purple-500 shrink-0" />
-            <p className="text-[12px] font-semibold text-purple-700">At Site ✓</p>
-          </div>
-          <p className="text-[10px] text-on-surface-variant/60 mt-0.5">
-            {po.received_by_name?.split(' ')[0] ?? ''}
-            {po.received_at_site ? ` · ${fmtShortDate(po.received_at_site)}` : ''}
-          </p>
+      <td className="px-4 py-4">
+        <div className="flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
+          <p className="text-[12px] font-medium text-purple-700">At Site</p>
         </div>
+        <p className="text-[11px] text-on-surface-variant/40 mt-0.5 pl-3">
+          {[po.received_by_name?.split(' ')[0], po.received_at_site && fmtShortDate(po.received_at_site)].filter(Boolean).join(' · ')}
+        </p>
       </td>
     );
   }
 
   if (!canManage) {
-    return <td className="px-3 py-2 w-[130px]"><span className="text-on-surface-variant/30 text-[12px]">—</span></td>;
+    return <td className="px-4 py-4"><span className="text-on-surface-variant/20 text-[12px]">—</span></td>;
   }
 
-  // LOCKED — no bill yet
   if (!hasBill) {
-    return (
-      <td className="px-3 py-2 w-[130px]">
-        <div
-          className="rounded-lg px-3 py-2 bg-gray-50 border border-gray-200 opacity-60"
-          title="Enter vendor bill amount first"
-        >
-          <p className="text-[11px] text-on-surface-variant/60 text-center">🔒 Enter bill first</p>
-        </div>
-      </td>
-    );
+    return <td className="px-4 py-4"><span className="text-on-surface-variant/20 text-[12px]">—</span></td>;
   }
 
-  // CONFIRMING
   if (confirming) {
     return (
-      <td className="px-3 py-2 w-[130px]" onClick={e => e.stopPropagation()}>
-        <div className="rounded-lg p-3 bg-white border-2 border-purple-400 shadow-lg relative z-10">
-          <p className="text-[11px] font-semibold text-purple-700 mb-2">Confirm site receipt?</p>
+      <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
+        <div className="rounded-xl p-3 bg-white border-2 border-purple-200 shadow-lg relative z-10 w-[160px]">
+          <p className="text-[11px] font-medium text-purple-700 mb-2">Confirm site receipt?</p>
           <div className="flex gap-1.5">
             <button
               onClick={async () => {
@@ -481,36 +402,24 @@ function SiteReceiptCell({
                 const now = new Date().toISOString();
                 const { error } = await supabase
                   .from('purchase_orders')
-                  .update({
-                    received_at_site:    now,
-                    received_by_name:    currentUserName,
-                    received_by_user_id: currentUserId,
-                    status:              'BILLED',
-                  })
+                  .update({ received_at_site: now, received_by_name: currentUserName, received_by_user_id: currentUserId, status: 'BILLED' })
                   .eq('po_id', po.po_id);
                 setSaving(false);
                 setConfirming(false);
                 if (!error) {
-                  onUpdate(po.po_id, {
-                    received_at_site: now,
-                    received_by_name: currentUserName,
-                    status:           'BILLED',
-                  });
+                  onUpdate(po.po_id, { received_at_site: now, received_by_name: currentUserName, status: 'BILLED' });
                   showSnackbar('📦 Receipt confirmed — status updated to Billed');
                 } else {
                   showSnackbar(error.message || 'Failed to confirm receipt', { type: 'error' });
                 }
               }}
               disabled={saving}
-              className="flex-1 py-1.5 rounded-md bg-purple-600 text-white text-[11px] font-semibold hover:bg-purple-700 disabled:opacity-50"
+              className="flex-1 py-1.5 rounded-lg bg-purple-600 text-white text-[11px] font-semibold hover:bg-purple-700 disabled:opacity-50"
             >
-              {saving ? '…' : '✓ Confirm'}
+              {saving ? '…' : 'Confirm'}
             </button>
-            <button
-              onClick={() => setConfirming(false)}
-              className="px-2 py-1.5 rounded-md border border-outline-variant/30 text-[11px] text-on-surface-variant hover:bg-surface-container"
-            >
-              ✕
+            <button onClick={() => setConfirming(false)} className="px-2 py-1.5 rounded-lg border border-outline-variant/15 text-on-surface-variant/40 hover:bg-surface-container">
+              <span className="material-symbols-outlined text-[12px]">close</span>
             </button>
           </div>
         </div>
@@ -518,15 +427,14 @@ function SiteReceiptCell({
     );
   }
 
-  // READY — bill exists, not yet received
   return (
-    <td className="px-3 py-2 w-[130px]" onClick={e => e.stopPropagation()}>
+    <td className="px-4 py-4" onClick={e => e.stopPropagation()}>
       <button
         onClick={() => setConfirming(true)}
-        className="flex items-center gap-2 px-3 py-2 w-full justify-center bg-purple-600 text-white rounded-lg text-[12px] font-medium hover:bg-purple-700 transition-colors shadow-sm shadow-purple-200"
+        className="flex items-center gap-1 text-[12px] font-medium text-purple-600 hover:text-purple-800 border border-purple-200 rounded-lg px-2.5 py-1 hover:bg-purple-50 transition-colors"
       >
-        <span>📦</span>
-        Mark at Site
+        <span className="material-symbols-outlined text-[13px]">done_all</span>
+        Mark received
       </button>
     </td>
   );
@@ -540,22 +448,19 @@ export default function PurchaseOrders({ session }: { session: Session }) {
   const { data: profile } = useUserProfile(session.user.id);
   const { show: showSnackbar } = useSnackbar();
 
-  // ── Filter state ───────────────────────────────────────────────────────────
   const [datePreset, setDatePreset]       = useState<DatePreset>('all');
   const [filterStatus, setFilterStatus]   = useState<string[]>([]);
   const [filterVendor, setFilterVendor]   = useState<string[]>([]);
   const [filterProject, setFilterProject] = useState<string[]>([]);
   const [searchOpen, setSearchOpen]       = useState(false);
   const [searchTerm, setSearchTerm]       = useState('');
-
-  const [openChip, setOpenChip] = useState<'date' | 'status' | 'vendor' | 'project' | null>(null);
+  const [openChip, setOpenChip]           = useState<'date' | 'status' | 'vendor' | 'project' | null>(null);
 
   const dateRef    = useRef<HTMLDivElement>(null);
   const statusRef  = useRef<HTMLDivElement>(null);
   const vendorRef  = useRef<HTMLDivElement>(null);
   const projectRef = useRef<HTMLDivElement>(null);
 
-  // ── Local optimistic overrides ─────────────────────────────────────────────
   const [poOverrides, setPoOverrides] = useState<Record<string, any>>({});
 
   const handlePOUpdate = (poId: string, updates: any) => {
@@ -573,7 +478,6 @@ export default function PurchaseOrders({ session }: { session: Session }) {
   const currentUserName: string = (profile as any)?.display_name || (profile as any)?.name || session.user.email || 'Unknown';
   const currentUserId: string   = session.user.id;
 
-  // ── Data ───────────────────────────────────────────────────────────────────
   const { data: rawPos, isLoading } = useQuery({
     queryKey: ['purchase_orders_enhanced'],
     queryFn: async () => {
@@ -597,22 +501,18 @@ export default function PurchaseOrders({ session }: { session: Session }) {
     },
   });
 
-  // Merge server data with local optimistic overrides
   const pos = (rawPos ?? []).map(p =>
     poOverrides[p.po_id] ? { ...p, ...poOverrides[p.po_id] } : p
   );
 
-  // ── Derived filter options ─────────────────────────────────────────────────
   const vendors  = [...new Set(pos.map(p => p.stakeholders?.name).filter(Boolean))].sort() as string[];
   const projects = [...new Set(pos.map(p => p.projects?.name).filter(Boolean))].sort() as string[];
 
-  // ── KPIs ───────────────────────────────────────────────────────────────────
   const totalCount      = pos.length;
   const pendingDelivery = pos.filter(p => p.status === 'ORDERED').length;
   const pendingBill     = pos.filter(p => p.status === 'ORDERED' && !Number(p.vendor_bill_amount)).length;
   const totalOrderValue = pos.reduce((sum, p) => sum + (Number(p.total_value) || Number(p.order_value) || 0), 0);
 
-  // ── Filtering ──────────────────────────────────────────────────────────────
   const { from: dateFrom, to: dateTo } = dateRange(datePreset);
 
   const filtered = pos.filter(po => {
@@ -637,6 +537,10 @@ export default function PurchaseOrders({ session }: { session: Session }) {
 
   const hasFilters = datePreset !== 'all' || filterStatus.length || filterVendor.length || filterProject.length || !!searchTerm;
 
+  function clearFilters() {
+    setDatePreset('all'); setFilterStatus([]); setFilterVendor([]); setFilterProject([]); setSearchTerm(''); setSearchOpen(false);
+  }
+
   function toggleChip(name: typeof openChip) {
     setOpenChip(c => c === name ? null : name);
   }
@@ -644,21 +548,13 @@ export default function PurchaseOrders({ session }: { session: Session }) {
   function MultiCheckList({ options, selected, onChange }: { options: string[]; selected: string[]; onChange: (v: string[]) => void }) {
     return (
       <div className="py-1 max-h-64 overflow-y-auto">
-        <button
-          onClick={() => onChange([])}
-          className="w-full text-left px-4 py-2 text-[12px] text-on-surface-variant/60 hover:bg-surface-container-low"
-        >
+        <button onClick={() => onChange([])} className="w-full text-left px-4 py-2 text-[12px] text-on-surface-variant/60 hover:bg-surface-container-low">
           All
         </button>
         {options.map(o => (
           <label key={o} className="flex items-center gap-2.5 px-4 py-2 text-[13px] hover:bg-surface-container-low cursor-pointer">
-            <input
-              type="checkbox"
-              checked={selected.includes(o)}
-              onChange={() => {
-                if (selected.includes(o)) onChange(selected.filter(s => s !== o));
-                else onChange([...selected, o]);
-              }}
+            <input type="checkbox" checked={selected.includes(o)}
+              onChange={() => { if (selected.includes(o)) onChange(selected.filter(s => s !== o)); else onChange([...selected, o]); }}
               className="accent-primary w-3.5 h-3.5"
             />
             <span>{o}</span>
@@ -668,288 +564,183 @@ export default function PurchaseOrders({ session }: { session: Session }) {
     );
   }
 
-  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-surface-container-low/30">
       <div className="max-w-[1400px] mx-auto px-4 md:px-6 py-8">
 
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 mb-6">
-          <div className="flex-1">
-            <div className="flex items-center justify-between">
-              <h2 className="text-[24px] font-bold text-on-surface tracking-tight">Purchase Orders</h2>
-              {canManage && (
-                <button
-                  className="hidden md:flex bk-btn items-center gap-2 h-9 px-4 rounded-xl text-[13px] shrink-0"
-                  onClick={() => navigate('/purchase-orders/new')}
-                >
-                  <span className="material-symbols-outlined text-[16px]">add</span>
-                  New PO
-                </button>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-2.5 mt-3">
-              <div className="flex items-center gap-2.5 bg-white rounded-xl px-3 py-2 border border-outline-variant/15 shadow-sm">
-                <span className="text-[22px] font-bold text-on-surface tabular-nums leading-none">{totalCount}</span>
-                <span className="text-[11px] text-on-surface-variant/70 leading-tight">Total<br/>Orders</span>
-              </div>
+        <div className="flex items-start justify-between mb-5">
+          <div>
+            <h2 className="text-[22px] font-bold text-on-surface tracking-tight">Purchase Orders</h2>
+            <p className="text-[12px] text-on-surface-variant/45 mt-1 leading-relaxed">
+              {totalCount} orders
               {totalOrderValue > 0 && (
-                <div className="flex items-center gap-2.5 bg-white rounded-xl px-3 py-2 border border-outline-variant/15 shadow-sm">
-                  <span className="text-[22px] font-bold text-on-surface font-mono tabular-nums leading-none">₹{totalOrderValue >= 100000 ? `${(totalOrderValue/100000).toFixed(1)}L` : totalOrderValue.toLocaleString('en-IN')}</span>
-                  <span className="text-[11px] text-on-surface-variant/70 leading-tight">Total<br/>Value</span>
-                </div>
+                <> · <span className="font-mono">₹{totalOrderValue >= 100000 ? `${(totalOrderValue / 100000).toFixed(1)}L` : totalOrderValue.toLocaleString('en-IN')}</span></>
               )}
               {pendingDelivery > 0 && (
-                <div className="flex items-center gap-2.5 bg-amber-50 rounded-xl px-3 py-2 border border-amber-100">
-                  <span className="text-[22px] font-bold text-amber-700 tabular-nums leading-none">{pendingDelivery}</span>
-                  <span className="text-[11px] text-amber-600 leading-tight">Pending<br/>Delivery</span>
-                </div>
+                <> · <span className="text-amber-600">{pendingDelivery} pending delivery</span></>
               )}
               {pendingBill > 0 && (
-                <div className="flex items-center gap-2.5 bg-orange-50 rounded-xl px-3 py-2 border border-orange-100">
-                  <span className="text-[22px] font-bold text-orange-700 tabular-nums leading-none">{pendingBill}</span>
-                  <span className="text-[11px] text-orange-600 leading-tight">Need<br/>Bill Entry</span>
-                </div>
+                <> · <span className="text-orange-500">{pendingBill} need bill</span></>
               )}
-            </div>
+            </p>
           </div>
+          {canManage && (
+            <button
+              className="hidden md:flex bk-btn items-center gap-2 h-9 px-4 rounded-xl text-[13px] shrink-0"
+              onClick={() => navigate('/purchase-orders/new')}
+            >
+              <span className="material-symbols-outlined text-[16px]">add</span>
+              New PO
+            </button>
+          )}
         </div>
 
         {/* Filter bar */}
-        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar md:flex-wrap flex-nowrap mb-4 pb-0.5 bg-white rounded-2xl border border-outline-variant/10 px-4 py-3 shadow-sm">
-
+        <div className="flex items-center gap-0.5 overflow-x-auto no-scrollbar flex-nowrap md:flex-wrap border-b border-outline-variant/[0.08] pb-3 mb-4">
           <div ref={dateRef} className="relative">
-            <FilterChip
-              label={datePreset === 'all' ? 'Date' : DATE_LABELS[datePreset]}
-              active={datePreset !== 'all' || openChip === 'date'}
-              onClick={() => toggleChip('date')}
-            />
+            <FilterChip label={datePreset === 'all' ? 'Date' : DATE_LABELS[datePreset]} active={datePreset !== 'all' || openChip === 'date'} onClick={() => toggleChip('date')} />
             <Dropdown anchorRef={dateRef as React.RefObject<HTMLElement>} open={openChip === 'date'} onClose={() => setOpenChip(null)}>
               {(['all','today','week','month','quarter'] as DatePreset[]).map(p => (
-                <button
-                  key={p}
-                  onClick={() => { setDatePreset(p); setOpenChip(null); }}
+                <button key={p} onClick={() => { setDatePreset(p); setOpenChip(null); }}
                   className={`w-full text-left px-4 py-2 text-[13px] hover:bg-surface-container-low ${datePreset === p ? 'font-semibold text-primary' : 'text-on-surface'}`}
-                >
-                  {DATE_LABELS[p]}
-                </button>
+                >{DATE_LABELS[p]}</button>
               ))}
             </Dropdown>
           </div>
 
           <div ref={statusRef} className="relative">
-            <FilterChip
-              label={filterStatus.length ? `Status (${filterStatus.length})` : 'Status'}
-              active={filterStatus.length > 0 || openChip === 'status'}
-              onClick={() => toggleChip('status')}
-            />
+            <FilterChip label={filterStatus.length ? `Status (${filterStatus.length})` : 'Status'} active={filterStatus.length > 0 || openChip === 'status'} onClick={() => toggleChip('status')} />
             <Dropdown anchorRef={statusRef as React.RefObject<HTMLElement>} open={openChip === 'status'} onClose={() => setOpenChip(null)}>
               <MultiCheckList options={ALL_STATUSES} selected={filterStatus} onChange={setFilterStatus} />
             </Dropdown>
           </div>
 
           <div ref={vendorRef} className="relative">
-            <FilterChip
-              label={filterVendor.length ? `Vendor (${filterVendor.length})` : 'Vendor'}
-              active={filterVendor.length > 0 || openChip === 'vendor'}
-              onClick={() => toggleChip('vendor')}
-            />
+            <FilterChip label={filterVendor.length ? `Vendor (${filterVendor.length})` : 'Vendor'} active={filterVendor.length > 0 || openChip === 'vendor'} onClick={() => toggleChip('vendor')} />
             <Dropdown anchorRef={vendorRef as React.RefObject<HTMLElement>} open={openChip === 'vendor'} onClose={() => setOpenChip(null)}>
               <MultiCheckList options={vendors} selected={filterVendor} onChange={setFilterVendor} />
             </Dropdown>
           </div>
 
           <div ref={projectRef} className="relative">
-            <FilterChip
-              label={filterProject.length ? `Project (${filterProject.length})` : 'Project'}
-              active={filterProject.length > 0 || openChip === 'project'}
-              onClick={() => toggleChip('project')}
-            />
+            <FilterChip label={filterProject.length ? `Project (${filterProject.length})` : 'Project'} active={filterProject.length > 0 || openChip === 'project'} onClick={() => toggleChip('project')} />
             <Dropdown anchorRef={projectRef as React.RefObject<HTMLElement>} open={openChip === 'project'} onClose={() => setOpenChip(null)}>
               <MultiCheckList options={projects} selected={filterProject} onChange={setFilterProject} />
             </Dropdown>
           </div>
 
+          <div className="w-px h-4 bg-outline-variant/15 mx-1.5 shrink-0" />
+
           {searchOpen ? (
             <div className="relative flex items-center">
-              <span className="material-symbols-outlined absolute left-2.5 text-[16px] text-on-surface-variant/40 pointer-events-none">search</span>
-              <input
-                autoFocus
-                className="pl-8 pr-8 h-8 rounded-full text-[12px] border border-outline-variant/40 bg-white outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 w-44 transition-all"
-                placeholder="Search…"
-                value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
+              <span className="material-symbols-outlined absolute left-2.5 text-[14px] text-on-surface-variant/35 pointer-events-none">search</span>
+              <input autoFocus
+                className="pl-8 pr-7 h-7 rounded-full text-[12px] border border-outline-variant/25 bg-white outline-none focus:border-primary/40 w-36 transition-all"
+                placeholder="Search…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
               />
               {searchTerm && (
-                <button onClick={() => setSearchTerm('')} className="absolute right-2.5 text-on-surface-variant/40 hover:text-on-surface">
-                  <span className="material-symbols-outlined text-[14px]">close</span>
+                <button onClick={() => setSearchTerm('')} className="absolute right-2 text-on-surface-variant/30 hover:text-on-surface">
+                  <span className="material-symbols-outlined text-[12px]">close</span>
                 </button>
               )}
             </div>
           ) : (
-            <button
-              onClick={() => setSearchOpen(true)}
-              className="bk-chip inline-flex items-center justify-center w-8 h-8 rounded-full border border-outline-variant/40 bg-white text-on-surface-variant hover:bg-surface-container-low"
-            >
-              <span className="material-symbols-outlined text-[16px]">search</span>
+            <button onClick={() => setSearchOpen(true)} className="inline-flex items-center justify-center w-7 h-7 rounded-full text-on-surface-variant/40 hover:bg-black/[0.04] transition-colors">
+              <span className="material-symbols-outlined text-[15px]">search</span>
             </button>
           )}
 
           {hasFilters && (
-            <button
-              onClick={() => { setDatePreset('all'); setFilterStatus([]); setFilterVendor([]); setFilterProject([]); setSearchTerm(''); setSearchOpen(false); }}
-              className="text-[12px] font-semibold text-primary hover:underline ml-1"
-            >
-              Clear all
+            <button onClick={clearFilters} className="text-[11px] text-on-surface-variant/40 hover:text-primary ml-1 whitespace-nowrap transition-colors">
+              Clear
             </button>
           )}
         </div>
 
-        {/* Result context */}
-        <p className="text-[12px] text-on-surface-variant/50 mb-4">
-          Showing <span className="font-semibold text-on-surface">{filtered.length}</span> of {totalCount} orders
-        </p>
-
         {isLoading && <LinearProgress className="mb-4" />}
 
         {!isLoading && filtered.length === 0 && (
-          <div className="text-center py-20 text-on-surface-variant/50">
-            <span className="material-symbols-outlined text-[52px] block mb-3 text-on-surface-variant/20">receipt_long</span>
-            <p className="text-[15px] font-semibold text-on-surface/60">
+          <div className="text-center py-20">
+            <span className="material-symbols-outlined text-[44px] block mb-3 text-on-surface-variant/15">receipt_long</span>
+            <p className="text-[14px] font-medium text-on-surface/40">
               {hasFilters ? 'No orders match your filters' : 'No purchase orders yet'}
             </p>
-            <p className="text-[13px] mt-1 text-on-surface-variant/40">
-              {hasFilters ? 'Try adjusting or clearing the filters above' : 'Purchase orders will appear here once created'}
+            <p className="text-[12px] mt-1 text-on-surface-variant/30">
+              {hasFilters ? 'Try adjusting or clearing the filters' : 'Purchase orders will appear here once created'}
             </p>
-            {hasFilters && (
-              <button
-                onClick={() => { setDatePreset('all'); setFilterStatus([]); setFilterVendor([]); setFilterProject([]); setSearchTerm(''); setSearchOpen(false); }}
-                className="mt-4 bk-btn text-[13px]"
-              >
-                Clear filters
-              </button>
-            )}
-            {canManage && !hasFilters && (
-              <button onClick={() => navigate('/purchase-orders/new')} className="mt-4 bk-btn text-[13px]">
-                Create your first PO
-              </button>
-            )}
+            {hasFilters && <button onClick={clearFilters} className="mt-4 bk-btn text-[13px]">Clear filters</button>}
+            {canManage && !hasFilters && <button onClick={() => navigate('/purchase-orders/new')} className="mt-4 bk-btn text-[13px]">Create your first PO</button>}
           </div>
+        )}
+
+        {/* Result count — only when filtered */}
+        {!isLoading && filtered.length > 0 && hasFilters && (
+          <p className="text-[11px] text-on-surface-variant/35 mb-3">{filtered.length} of {totalCount}</p>
         )}
 
         {/* Desktop table */}
         {filtered.length > 0 && (
-          <div className="hidden md:block bg-white rounded-2xl border border-black/[0.06] shadow-sm overflow-hidden">
+          <div className="hidden md:block bg-white rounded-2xl border border-black/[0.05] shadow-sm overflow-hidden">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-outline-variant/10 bg-surface-container-low/40">
-                  <th className="px-4 py-3 text-left w-[130px]">
-                    <span className="text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-wider">PO No / Date</span>
-                  </th>
-                  <th className="px-4 py-3 text-left">
-                    <span className="text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-wider">Vendor</span>
-                  </th>
-                  <th className="px-4 py-3 text-left">
-                    <span className="text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-wider">Project</span>
-                  </th>
-                  <th className="px-4 py-3 text-left w-[120px]">
-                    <span className="text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-wider">Status</span>
-                  </th>
-                  <th className="px-3 py-3 text-left w-[200px]">
-                    <span className="text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-wider">Vendor Bill</span>
-                  </th>
-                  <th className="px-3 py-3 text-left w-[140px]">
-                    <span className="text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-wider">Bill Doc</span>
-                  </th>
-                  <th className="px-3 py-3 text-left w-[130px]">
-                    <span className="text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-wider">At Site</span>
-                  </th>
-                  <th className="px-3 py-3 w-[44px]" />
+                <tr className="border-b border-outline-variant/[0.07]">
+                  <th className="px-5 py-3 text-left"><span className="text-[11px] font-medium text-on-surface-variant/35">PO · Date</span></th>
+                  <th className="px-4 py-3 text-left"><span className="text-[11px] font-medium text-on-surface-variant/35">Vendor</span></th>
+                  <th className="px-4 py-3 text-left"><span className="text-[11px] font-medium text-on-surface-variant/35">Project</span></th>
+                  <th className="px-4 py-3 text-left w-[100px]"><span className="text-[11px] font-medium text-on-surface-variant/35">Status</span></th>
+                  <th className="px-4 py-3 text-left w-[160px]"><span className="text-[11px] font-medium text-on-surface-variant/35">Vendor Bill</span></th>
+                  <th className="px-4 py-3 text-left w-[90px]"><span className="text-[11px] font-medium text-on-surface-variant/35">Doc</span></th>
+                  <th className="px-4 py-3 text-left w-[150px]"><span className="text-[11px] font-medium text-on-surface-variant/35">At Site</span></th>
+                  <th className="px-3 py-3 w-[36px]" />
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((po, idx) => (
                   <tr
                     key={po.po_id}
-                    className={`group border-b border-outline-variant/[0.06] wo-row-animate hover:bg-surface-container-low/20 transition-colors ${STATUS_BORDER[po.status] ?? 'border-l-4 border-l-transparent'}`}
+                    className={`group border-b border-outline-variant/[0.05] last:border-0 wo-row-animate hover:bg-surface-container-low/25 transition-colors ${STATUS_BORDER[po.status] ?? 'border-l-[3px] border-l-transparent'}`}
                     style={{ animationDelay: `${Math.min(idx, 20) * 15}ms` }}
                   >
-                    {/* PO No / Date */}
-                    <td
-                      className="px-4 py-3 cursor-pointer"
-                      onClick={() => navigate(`/purchase-orders/${po.po_id}`)}
-                    >
-                      <p className="font-data-mono text-[13px] font-bold text-primary group-hover:underline">{po.po_id}</p>
-                      <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{fmtDate(po.date_issued)}</p>
-                      {(Number(po.total_value) > 0 || Number(po.order_value) > 0) && (
-                        <p className="text-[11px] font-mono font-semibold text-on-surface/70 mt-1 tabular-nums">
-                          ₹{(Number(po.total_value) || Number(po.order_value)).toLocaleString('en-IN')}
-                        </p>
-                      )}
+                    <td className="px-5 py-4 cursor-pointer" onClick={() => navigate(`/purchase-orders/${po.po_id}`)}>
+                      <p className="font-mono text-[13px] font-semibold text-primary group-hover:underline leading-none">{po.po_id}</p>
+                      <p className="text-[11px] text-on-surface-variant/35 mt-1">{fmtDate(po.date_issued)}</p>
                     </td>
 
-                    {/* Vendor */}
-                    <td className="px-4 py-3">
-                      <p className="text-[13px] font-semibold text-on-surface">{po.stakeholders?.name ?? '—'}</p>
+                    <td className="px-4 py-4">
+                      <p className="text-[13px] font-medium text-on-surface">{po.stakeholders?.name ?? '—'}</p>
                       {po.stakeholders?.category && (
-                        <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{po.stakeholders.category}</p>
+                        <p className="text-[11px] text-on-surface-variant/40 mt-0.5">{po.stakeholders.category}</p>
                       )}
-                      {getItemsPreview(po) !== '—' && (
-                        <p className="text-[11px] text-on-surface-variant/40 mt-0.5 truncate max-w-[220px]">{getItemsPreview(po)}</p>
+                      {getItemsPreview(po) && (
+                        <p className="text-[11px] text-on-surface-variant/25 mt-0.5 truncate max-w-[200px]">{getItemsPreview(po)}</p>
                       )}
                     </td>
 
-                    {/* Project */}
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-4">
                       <p className="text-[13px] font-medium text-on-surface">{po.projects?.name ?? '—'}</p>
-                      <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{po.projects?.site_location ?? ''}</p>
+                      {po.projects?.site_location && (
+                        <p className="text-[11px] text-on-surface-variant/40 mt-0.5">{po.projects.site_location}</p>
+                      )}
                     </td>
 
-                    {/* Status */}
-                    <td className="px-4 py-3 w-[120px]">
-                      <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${STATUS_CHIP[po.status] ?? 'bg-surface-container text-on-surface-variant'}`}>
+                    <td className="px-4 py-4 w-[100px]">
+                      <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-md ${STATUS_CHIP[po.status] ?? 'bg-surface-container text-on-surface-variant'}`}>
                         {STATUS_LABEL[po.status] ?? po.status}
                       </span>
-                      {isOverdue(po) && (
-                        <p className="text-[10px] text-red-500 font-semibold mt-1">Overdue</p>
-                      )}
+                      {isOverdue(po) && <p className="text-[10px] text-red-400 font-medium mt-1">Overdue</p>}
                     </td>
 
-                    {/* Vendor Bill */}
-                    <VendorBillCell
-                      po={po}
-                      canManage={canManage}
-                      currentUserName={currentUserName}
-                      onUpdate={handlePOUpdate}
-                      showSnackbar={showSnackbar}
-                    />
+                    <VendorBillCell po={po} canManage={canManage} currentUserName={currentUserName} onUpdate={handlePOUpdate} showSnackbar={showSnackbar} />
+                    <BillUploadCell po={po} canManage={canManage} onUpdate={handlePOUpdate} showSnackbar={showSnackbar} />
+                    <SiteReceiptCell po={po} canManage={canManage} currentUserName={currentUserName} currentUserId={currentUserId} onUpdate={handlePOUpdate} showSnackbar={showSnackbar} />
 
-                    {/* Bill Doc */}
-                    <BillUploadCell
-                      po={po}
-                      canManage={canManage}
-                      onUpdate={handlePOUpdate}
-                      showSnackbar={showSnackbar}
-                    />
-
-                    {/* At Site */}
-                    <SiteReceiptCell
-                      po={po}
-                      canManage={canManage}
-                      currentUserName={currentUserName}
-                      currentUserId={currentUserId}
-                      onUpdate={handlePOUpdate}
-                      showSnackbar={showSnackbar}
-                    />
-
-                    {/* Navigate → */}
-                    <td className="px-2 py-3 w-[44px]">
+                    <td className="px-2 py-4 w-[36px]">
                       <button
                         onClick={() => navigate(`/purchase-orders/${po.po_id}`)}
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant/10 group-hover:text-on-surface-variant/50 hover:bg-surface-container hover:text-on-surface transition-colors"
-                        title="Open detail"
+                        className="w-7 h-7 rounded-md flex items-center justify-center text-on-surface-variant/10 group-hover:text-on-surface-variant/35 hover:bg-surface-container transition-colors"
                       >
-                        <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+                        <span className="material-symbols-outlined text-[15px]">chevron_right</span>
                       </button>
                     </td>
                   </tr>
@@ -959,77 +750,65 @@ export default function PurchaseOrders({ session }: { session: Session }) {
           </div>
         )}
 
-        {/* Mobile card list */}
+        {/* Mobile cards */}
         {filtered.length > 0 && (
-          <div className="md:hidden space-y-3">
+          <div className="md:hidden space-y-2">
             {filtered.map((po, idx) => (
               <div
                 key={po.po_id}
-                className={`bg-white rounded-2xl border border-black/[0.06] shadow-sm overflow-hidden cursor-pointer active:scale-[0.99] transition-transform wo-row-animate ${STATUS_BORDER[po.status] ?? ''}`}
+                className={`bg-white rounded-2xl border border-black/[0.05] shadow-sm cursor-pointer active:scale-[0.99] transition-transform wo-row-animate ${STATUS_BORDER[po.status] ?? ''}`}
                 style={{ animationDelay: `${Math.min(idx, 20) * 15}ms` }}
                 onClick={() => navigate(`/purchase-orders/${po.po_id}`)}
               >
-                <div className="p-4">
-                  {/* Top row: PO ID + status chip */}
-                  <div className="flex justify-between items-center mb-2.5">
-                    <p className="font-data-mono text-[13px] font-bold text-primary">{po.po_id}</p>
-                    <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${STATUS_CHIP[po.status] ?? 'bg-surface-container text-on-surface-variant'}`}>
-                      {STATUS_LABEL[po.status] ?? po.status}
-                    </span>
+                <div className="px-4 pt-3.5 pb-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <p className="font-mono text-[11px] font-medium text-on-surface-variant/50">{po.po_id}</p>
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${STATUS_CHIP[po.status] ?? 'bg-surface-container text-on-surface-variant'}`}>
+                          {STATUS_LABEL[po.status] ?? po.status}
+                        </span>
+                        {isOverdue(po) && <span className="text-[10px] font-medium text-red-400">Overdue</span>}
+                      </div>
+                      <p className="text-[14px] font-semibold text-on-surface leading-snug">{po.stakeholders?.name ?? '—'}</p>
+                      {po.stakeholders?.category && (
+                        <p className="text-[11px] text-on-surface-variant/40 mt-0.5">{po.stakeholders.category}</p>
+                      )}
+                      {getItemsPreview(po) && (
+                        <p className="text-[11px] text-on-surface-variant/30 mt-1 line-clamp-1">{getItemsPreview(po)}</p>
+                      )}
+                    </div>
+                    <div className="text-right shrink-0 pt-0.5">
+                      {Number(po.vendor_bill_amount) > 0 ? (
+                        <>
+                          <p className="font-mono text-[14px] font-bold text-green-700 tabular-nums">₹{Number(po.vendor_bill_amount).toLocaleString('en-IN')}</p>
+                          <p className="text-[10px] text-on-surface-variant/35 mt-0.5">billed</p>
+                        </>
+                      ) : (Number(po.total_value) > 0 || Number(po.order_value) > 0) ? (
+                        <>
+                          <p className="font-mono text-[14px] font-semibold text-on-surface/60 tabular-nums">₹{(Number(po.total_value) || Number(po.order_value)).toLocaleString('en-IN')}</p>
+                          <p className="text-[10px] text-amber-500 mt-0.5">no bill</p>
+                        </>
+                      ) : null}
+                    </div>
                   </div>
-
-                  {/* Vendor + items */}
-                  <p className="text-[14px] font-semibold text-on-surface leading-snug">{po.stakeholders?.name ?? '—'}</p>
-                  {po.stakeholders?.category && (
-                    <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{po.stakeholders.category}</p>
-                  )}
-                  {getItemsPreview(po) !== '—' && (
-                    <p className="text-[11px] text-on-surface-variant/50 mt-1 line-clamp-1">{getItemsPreview(po)}</p>
-                  )}
                 </div>
-
-                {/* Footer row */}
-                <div className="flex items-center justify-between px-4 py-2.5 bg-surface-container-low/30 border-t border-outline-variant/[0.06]">
-                  <div>
-                    <p className="text-[11px] text-on-surface-variant/70 font-medium">{po.projects?.name ?? '—'}</p>
-                    {po.expected_delivery && (
-                      <p className={`text-[10px] mt-0.5 ${isOverdue(po) ? 'text-red-500 font-semibold' : 'text-on-surface-variant/40'}`}>
-                        {isOverdue(po) ? 'Overdue · ' : 'Due '}
-                        {fmtShortDate(po.expected_delivery)}
-                      </p>
-                    )}
-                    {!po.expected_delivery && (
-                      <p className="text-[10px] text-on-surface-variant/40 mt-0.5">{fmtShortDate(po.date_issued)}</p>
-                    )}
-                  </div>
-                  <div className="text-right">
-                    {Number(po.vendor_bill_amount) > 0 ? (
-                      <p className="font-mono text-[13px] font-bold text-[#16A34A] tabular-nums">
-                        ₹{Number(po.vendor_bill_amount).toLocaleString('en-IN')}
-                        <span className="text-[10px] font-normal text-on-surface-variant/50 ml-1">billed</span>
-                      </p>
-                    ) : (Number(po.total_value) > 0 || Number(po.order_value) > 0) ? (
-                      <p className="font-mono text-[13px] font-semibold text-on-surface/70 tabular-nums">
-                        ₹{(Number(po.total_value) || Number(po.order_value)).toLocaleString('en-IN')}
-                        <span className="text-[10px] font-normal text-amber-500 ml-1">no bill</span>
-                      </p>
-                    ) : (
-                      <p className="text-[11px] text-amber-600 font-medium">No bill entered</p>
-                    )}
-                  </div>
+                <div className="flex items-center justify-between px-4 py-2 border-t border-outline-variant/[0.05]">
+                  <p className="text-[11px] text-on-surface-variant/45 truncate flex-1">{po.projects?.name ?? '—'}</p>
+                  <p className="text-[11px] text-on-surface-variant/30 ml-3 shrink-0">
+                    {po.expected_delivery
+                      ? <span className={isOverdue(po) ? 'text-red-400' : ''}>{fmtShortDate(po.expected_delivery)}</span>
+                      : fmtShortDate(po.date_issued)
+                    }
+                  </p>
                 </div>
               </div>
             ))}
           </div>
         )}
 
-        {/* FAB */}
         {canManage && (
-          <button
-            className="bk-fab md:hidden"
-            onClick={() => navigate('/purchase-orders/new')}
-            title="New Purchase Order"
-          >
+          <button className="bk-fab md:hidden" onClick={() => navigate('/purchase-orders/new')} title="New Purchase Order">
             <span className="material-symbols-outlined text-[24px]">add</span>
           </button>
         )}
