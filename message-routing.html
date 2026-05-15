@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Briklay WA Message Routing</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f0; padding: 32px 24px; color: #1a1a1a; }
+  h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 4px; }
+  .subtitle { font-size: 12px; color: #888; margin-bottom: 32px; }
+
+  /* ── Layout ── */
+  .canvas { display: flex; flex-direction: column; align-items: center; gap: 0; }
+  .row { display: flex; align-items: flex-start; justify-content: center; gap: 0; }
+  .col { display: flex; flex-direction: column; align-items: center; gap: 0; }
+
+  /* ── Nodes ── */
+  .node {
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.4;
+    text-align: center;
+    padding: 10px 14px;
+    min-width: 140px;
+    max-width: 180px;
+    position: relative;
+  }
+  .node.entry    { background: #1a1a1a; color: #fff; border-radius: 24px; font-size: 11px; min-width: 120px; }
+  .node.check    { background: #fff; border: 1.5px solid #ddd; color: #444; }
+  .node.gate     { background: #fffbf0; border: 1.5px solid #f0c040; color: #7a5800; transform: rotate(0deg); min-width: 160px; }
+  .node.handler  { border-radius: 8px; font-size: 11px; min-width: 148px; }
+  .node.txn      { background: #eef7ee; border: 1.5px solid #5cad5c; color: #2a6b2a; }
+  .node.site     { background: #e8f4fd; border: 1.5px solid #4a9fd4; color: #1a5580; }
+  .node.query    { background: #f5eeff; border: 1.5px solid #9b6dd4; color: #4a1f80; }
+  .node.general  { background: #f5f5f5; border: 1.5px solid #bbb; color: #555; }
+  .node.session  { background: #fff8f0; border: 1.5px solid #e07830; color: #8a3800; }
+  .node.image    { background: #fdf0ff; border: 1.5px solid #c060d0; color: #5a0070; }
+  .node.db       { background: #fff; border: 1.5px dashed #bbb; color: #777; font-size: 10px; min-width: 120px; border-radius: 4px; }
+  .node.end      { background: #f0f0f0; border: 1px solid #ccc; color: #888; font-size: 10px; min-width: 100px; border-radius: 20px; }
+  .node.ack      { background: #fffce8; border: 1.5px solid #d4b800; color: #6b5c00; font-size: 11px; }
+
+  .node .sub { font-size: 10px; font-weight: 400; opacity: 0.7; margin-top: 3px; }
+  .node .file { font-size: 9px; font-weight: 400; opacity: 0.5; margin-top: 2px; font-style: italic; }
+
+  /* ── Arrows ── */
+  .arrow { display: flex; flex-direction: column; align-items: center; }
+  .arrow-h { display: flex; align-items: center; }
+  .vline { width: 2px; background: #ccc; flex-shrink: 0; }
+  .hline { height: 2px; background: #ccc; flex-shrink: 0; }
+  .arrowhead-d::after { content: '▼'; font-size: 10px; color: #aaa; margin-top: -4px; }
+  .arrowhead-r::after { content: '▶'; font-size: 10px; color: #aaa; margin-left: -4px; }
+  .label { font-size: 10px; color: #888; background: #f5f5f0; padding: 1px 5px; border-radius: 3px; white-space: nowrap; }
+  .label.yes { color: #3a8a3a; }
+  .label.no  { color: #c04040; }
+
+  /* ── Section dividers ── */
+  .section { font-size: 9px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #bbb; margin: 4px 0 2px; }
+
+  /* ── Multi-column handler grid ── */
+  .handlers { display: flex; gap: 12px; align-items: flex-start; }
+  .handler-col { display: flex; flex-direction: column; align-items: center; gap: 0; }
+
+  /* ── Session states box ── */
+  .states-box {
+    border: 1.5px solid #e07830;
+    border-radius: 8px;
+    padding: 12px 14px;
+    background: #fff8f0;
+    min-width: 200px;
+    margin-top: 4px;
+  }
+  .states-box .title { font-size: 10px; font-weight: 700; color: #e07830; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 8px; }
+  .state-row { font-size: 11px; color: #6a3800; padding: 3px 0; border-bottom: 1px solid #fce8d8; display: flex; align-items: center; gap: 6px; }
+  .state-row:last-child { border-bottom: none; }
+  .state-pill { font-size: 9px; font-weight: 600; background: #e07830; color: white; border-radius: 4px; padding: 1px 5px; white-space: nowrap; }
+
+  /* ── Arbitration box ── */
+  .arb-box {
+    border: 1.5px solid #f0c040;
+    border-radius: 8px;
+    padding: 12px 16px;
+    background: #fffbf0;
+    min-width: 240px;
+    margin-top: 4px;
+  }
+  .arb-box .title { font-size: 10px; font-weight: 700; color: #b08000; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 8px; }
+  .arb-rule { font-size: 11px; color: #7a5800; padding: 3px 0; display: flex; gap: 6px; align-items: flex-start; }
+  .arb-rule .bullet { color: #f0a000; font-weight: 700; flex-shrink: 0; }
+  .arb-outcome { display: inline-block; font-size: 9px; font-weight: 600; border-radius: 3px; padding: 1px 5px; margin-left: 4px; }
+  .arb-outcome.reroute { background: #fee; color: #b00; }
+  .arb-outcome.cont    { background: #efe; color: #060; }
+  .arb-outcome.amb     { background: #eef; color: #00b; }
+
+  /* ── Score table ── */
+  .score-table { font-size: 10px; border-collapse: collapse; margin-top: 6px; width: 100%; }
+  .score-table th { font-weight: 600; color: #888; text-align: left; padding: 2px 6px; border-bottom: 1px solid #eee; }
+  .score-table td { padding: 2px 6px; color: #555; }
+  .score-table tr:nth-child(even) td { background: #fafafa; }
+
+  /* ── Legend ── */
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 32px; padding: 16px; background: white; border-radius: 8px; border: 1px solid #eee; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #555; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+
+  /* ── telemetry panel ── */
+  .telem { background: white; border: 1px solid #eee; border-radius: 8px; padding: 16px; margin-top: 24px; font-size: 11px; }
+  .telem h3 { font-size: 12px; font-weight: 700; margin-bottom: 10px; color: #333; }
+  .telem-cols { display: flex; gap: 24px; flex-wrap: wrap; }
+  .telem-col { flex: 1; min-width: 160px; }
+  .telem-col h4 { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #aaa; margin-bottom: 6px; }
+  .telem-field { display: flex; gap: 8px; padding: 3px 0; border-bottom: 1px solid #f5f5f5; }
+  .telem-field .fname { color: #555; font-family: monospace; font-size: 10px; flex: 1; }
+  .telem-field .ftype { color: #aaa; font-size: 10px; }
+
+  /* SVG connector lines */
+  svg.connectors { position: absolute; pointer-events: none; overflow: visible; }
+</style>
+</head>
+<body>
+
+<h1>Briklay — WhatsApp Message Routing</h1>
+<p class="subtitle">Every inbound message flows through this decision graph. Source: <code>whatsapp-webhook/</code></p>
+
+<div style="display:flex; gap:32px; align-items:flex-start; flex-wrap:wrap;">
+
+<!-- ══════════════════════════════════════════════════════════
+     LEFT COLUMN: Main routing spine
+══════════════════════════════════════════════════════════════ -->
+<div style="display:flex; flex-direction:column; align-items:center; gap:0; min-width:220px;">
+
+  <!-- Entry -->
+  <div class="node entry">📱 Inbound WA message<div class="file">index.ts · processMessage()</div></div>
+  <div class="arrow"><div class="vline" style="height:16px;"></div><div class="arrowhead-d"></div></div>
+
+  <!-- Log -->
+  <div class="node db">wa_message_log INSERT<div class="sub">direction=IN, audit trail</div></div>
+  <div class="arrow"><div class="vline" style="height:16px;"></div><div class="arrowhead-d"></div></div>
+
+  <!-- Registration -->
+  <div class="node gate">Registered?<div class="sub">wa_registered_numbers</div></div>
+  <div style="display:flex; align-items:flex-start; gap:0;">
+    <div style="display:flex; flex-direction:column; align-items:flex-end;">
+      <div style="display:flex; align-items:center;">
+        <div class="hline" style="width:40px;"></div>
+        <span class="label no">NO</span>
+      </div>
+      <div class="node end" style="margin-right:-10px; margin-top:4px;">→ "Not registered" reply</div>
+    </div>
+    <div style="display:flex; flex-direction:column; align-items:center;">
+      <div class="arrow"><div class="vline" style="height:8px;"></div><span class="label yes">YES</span><div class="vline" style="height:8px;"></div><div class="arrowhead-d"></div></div>
+    </div>
+  </div>
+
+  <!-- Expired cleanup -->
+  <div class="node db" style="font-size:9px;">processExpiredImageEntries()<div class="sub">fix stuck AWAITING_CONTEXT rows</div></div>
+  <div class="arrow"><div class="vline" style="height:16px;"></div><div class="arrowhead-d"></div></div>
+
+  <!-- Message type -->
+  <div class="node gate">Message type?<div class="file">index.ts</div></div>
+  <div style="display:flex; gap:24px; align-items:flex-start; margin-top:0;">
+
+    <!-- IMAGE branch -->
+    <div style="display:flex; flex-direction:column; align-items:center; gap:0;">
+      <div style="display:flex; flex-direction:column; align-items:center;">
+        <div class="vline" style="height:8px;"></div>
+        <span class="label" style="color:#9030b0;">IMAGE</span>
+        <div class="vline" style="height:8px;"></div>
+        <div class="arrowhead-d"></div>
+      </div>
+      <div class="node check" style="font-size:10px; min-width:130px;">Stale session? → clear it<div class="sub">logRoute → IMAGE</div></div>
+      <div class="arrow"><div class="vline" style="height:12px;"></div><div class="arrowhead-d"></div></div>
+      <div class="node image">handleImageMessage()<div class="file">_handlers.ts</div></div>
+    </div>
+
+    <!-- AUDIO branch -->
+    <div style="display:flex; flex-direction:column; align-items:center; gap:0;">
+      <div style="display:flex; flex-direction:column; align-items:center;">
+        <div class="vline" style="height:8px;"></div>
+        <span class="label">AUDIO</span>
+        <div class="vline" style="height:8px;"></div>
+        <div class="arrowhead-d"></div>
+      </div>
+      <div class="node end" style="min-width:110px; font-size:10px;">"Coming soon" reply</div>
+    </div>
+
+    <!-- TEXT branch -->
+    <div style="display:flex; flex-direction:column; align-items:center; gap:0;">
+      <div style="display:flex; flex-direction:column; align-items:center;">
+        <div class="vline" style="height:8px;"></div>
+        <span class="label">TEXT</span>
+        <div class="vline" style="height:8px;"></div>
+        <div class="arrowhead-d"></div>
+      </div>
+      <div class="node gate">Active session?<div class="sub">wa_sessions, TTL 10 min</div></div>
+      <div style="display:flex; gap:16px; align-items:flex-start;">
+
+        <!-- Session YES → arbitration -->
+        <div style="display:flex; flex-direction:column; align-items:center;">
+          <div class="vline" style="height:8px;"></div>
+          <span class="label yes" style="font-size:10px;">YES</span>
+          <div class="vline" style="height:8px;"></div>
+          <div class="arrowhead-d"></div>
+          <div class="node session" style="font-size:11px; min-width:150px;">handleSessionReply()<div class="sub">intent arbitration gate</div><div class="file">_handlers.ts</div></div>
+        </div>
+
+        <!-- Session NO → fresh classify -->
+        <div style="display:flex; flex-direction:column; align-items:center;">
+          <div class="vline" style="height:8px;"></div>
+          <span class="label no" style="font-size:10px;">NO</span>
+          <div class="vline" style="height:8px;"></div>
+          <div class="arrowhead-d"></div>
+          <div class="node check" style="font-size:11px; min-width:140px;">classifyMessage()<div class="sub">rules → AI fallback</div><div class="file">_classify.ts</div></div>
+          <div class="arrow"><div class="vline" style="height:10px;"></div><div class="arrowhead-d"></div></div>
+          <div class="node db" style="font-size:9px;">logRoute()<div class="sub">had_session=false, score=100</div></div>
+          <div class="arrow"><div class="vline" style="height:10px;"></div><div class="arrowhead-d"></div></div>
+          <div style="display:flex; gap:8px;">
+            <div class="node txn" style="font-size:10px; min-width:80px; padding:8px;">FINANCIAL<br>→ handleFinancial</div>
+            <div class="node site" style="font-size:10px; min-width:80px; padding:8px;">SITE_UPDATE<br>→ handleSiteTextUpdate</div>
+            <div class="node query" style="font-size:10px; min-width:60px; padding:8px;">QUERY<br>→ handleQuery</div>
+            <div class="node general" style="font-size:10px; min-width:60px; padding:8px;">GENERAL<br>→ handleGeneral</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     RIGHT COLUMN: Session arbitration detail + Image detail
+══════════════════════════════════════════════════════════════ -->
+<div style="display:flex; flex-direction:column; gap:20px; max-width:580px;">
+
+  <!-- ARBITRATION BOX -->
+  <div class="arb-box">
+    <div class="title">⚖️ Intent Arbitration — handleSessionReply() · _handlers.ts</div>
+    <div style="font-size:10px; color:#aaa; margin-bottom:8px;">Mandatory gate before any session state is read. Runs classifyIntent() first.</div>
+
+    <div style="display:flex; gap:16px; flex-wrap:wrap;">
+
+      <div style="flex:1; min-width:200px;">
+        <div style="font-size:10px; font-weight:700; color:#b08000; margin-bottom:6px;">HARD RULES (instant, no AI)</div>
+        <div class="arb-rule"><span class="bullet">→</span><span>cancel / stop / nevermind <span class="arb-outcome reroute">CANCEL</span></span></div>
+        <div class="arb-rule"><span class="bullet">→</span><span>hi / ok / thanks <span class="arb-outcome cont">GENERAL</span></span></div>
+        <div class="arb-rule"><span class="bullet">→</span><span>ends with ? or what/how/balance <span class="arb-outcome cont">NEW_QUERY</span></span></div>
+        <div class="arb-rule"><span class="bullet">→</span><span>"slab done", "site update" + no ₹ <span class="arb-outcome reroute">NEW_SITE_UPDATE</span></span></div>
+        <div class="arb-rule"><span class="bullet">→</span><span>AWAIT_IMAGE_CONTEXT: always annotation, never redirect</span></div>
+      </div>
+
+      <div style="flex:1; min-width:200px;">
+        <div style="font-size:10px; font-weight:700; color:#b08000; margin-bottom:6px;">SCORE-BASED (per session state)</div>
+        <table class="score-table">
+          <tr><th>State</th><th>Session wins when…</th><th>New wins when…</th></tr>
+          <tr><td>AWAIT_AMOUNT</td><td>bare number only</td><td>number + verb + name</td></tr>
+          <tr><td>AWAIT_PAYEE</td><td>short name, no amount</td><td>amount present</td></tr>
+          <tr><td>AWAIT_PAYEE_CHOICE</td><td>1 / 2 / 3</td><td>amount or verb</td></tr>
+          <tr><td>AWAIT_PROJECT</td><td>digit or project name</td><td>new full payment</td></tr>
+        </table>
+        <div style="font-size:10px; color:#888; margin-top:6px;">
+          Gap policy: new ≥ 75 AND new ≥ session+20 → <span class="arb-outcome reroute">REROUTE</span><br>
+          session ≥ 75 AND session ≥ new+20 → <span class="arb-outcome cont">CONTINUE</span><br>
+          else → AI tiebreaker → <span class="arb-outcome amb">AMBIGUOUS</span> (keep session)
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:12px; padding-top:10px; border-top:1px solid #f0d880;">
+      <div style="font-size:10px; font-weight:700; color:#b08000; margin-bottom:6px;">TOPIC SWITCH OUTCOME (when reroute wins)</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <div class="node ack" style="font-size:10px; min-width:0; padding:8px 10px;">1. buildParkMessage()<br><span style="opacity:0.6; font-size:9px;">e.g. "_(₹5,000 to Ramu set aside)_"</span></div>
+        <div style="display:flex; align-items:center; font-size:16px; color:#ccc;">→</div>
+        <div class="node ack" style="font-size:10px; min-width:0; padding:8px 10px;">2. Send ack<br><span style="opacity:0.6; font-size:9px;">"Got it — handling that now. 👍"</span></div>
+        <div style="display:flex; align-items:center; font-size:16px; color:#ccc;">→</div>
+        <div class="node ack" style="font-size:10px; min-width:0; padding:8px 10px;">3. clearSession()</div>
+        <div style="display:flex; align-items:center; font-size:16px; color:#ccc;">→</div>
+        <div class="node ack" style="font-size:10px; min-width:0; padding:8px 10px;">4. Route to new handler<br><span style="opacity:0.6; font-size:9px;">TXN / SITE / QUERY / GENERAL</span></div>
+      </div>
+    </div>
+
+    <div style="margin-top:10px; padding-top:10px; border-top:1px solid #f0d880;">
+      <div style="font-size:10px; font-weight:700; color:#b08000; margin-bottom:6px;">ALL PATHS → logRoute() → wa_routing_log</div>
+      <div style="font-size:10px; color:#888;">had_session=true, session_state, session_score, new_intent_score, classified_intent, selected_handler=<em>reroute:NEW_FINANCIAL</em> or <em>session:AWAIT_AMOUNT</em></div>
+    </div>
+  </div>
+
+  <!-- SESSION STATE MACHINE -->
+  <div class="states-box">
+    <div class="title">🔄 Session State Machine (soft-lock) — _session.ts + _handlers.ts</div>
+    <div style="font-size:10px; color:#a06030; margin-bottom:8px;">Sessions have a 10-min TTL. Arbitration can break out of any state (except AWAIT_IMAGE_CONTEXT).</div>
+    <div class="state-row"><span class="state-pill">AWAIT_AMOUNT</span><span>Amount missing — "How much? e.g. 5000"</span></div>
+    <div style="font-size:10px; color:#aaa; padding:2px 0 2px 80px;">↓ user replies number → advance</div>
+    <div class="state-row"><span class="state-pill">AWAIT_PAYEE</span><span>Payee missing — "Who was paid?"</span></div>
+    <div style="font-size:10px; color:#aaa; padding:2px 0 2px 80px;">↓ user replies name → advance</div>
+    <div class="state-row"><span class="state-pill">AWAIT_PAYEE_CHOICE</span><span>Ambiguous payee — shows 1/2/3 options</span></div>
+    <div style="font-size:10px; color:#aaa; padding:2px 0 2px 80px;">↓ user replies digit → advance</div>
+    <div class="state-row"><span class="state-pill">AWAIT_PROJECT</span><span>Multiple active projects — "Which project?"</span></div>
+    <div style="font-size:10px; color:#aaa; padding:2px 0 2px 80px;">↓ user replies digit → POST entry + clearSession</div>
+    <div class="state-row"><span class="state-pill">AWAIT_IMAGE_CONTEXT</span><span>Image received — "Add a note" (45s window)</span></div>
+    <div style="font-size:10px; color:#aaa; padding:2px 0 2px 80px;">↓ user note → update entry → PENDING · background AI still running</div>
+  </div>
+
+  <!-- IMAGE ROUTING -->
+  <div style="background:white; border:1px solid #eee; border-radius:8px; padding:16px;">
+    <div style="font-size:10px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#aaa; margin-bottom:10px;">📸 Image Routing — handleImageMessage() · _handlers.ts</div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; font-size:11px;">
+
+      <div style="flex:1; min-width:110px; padding:10px; background:#eef7ee; border:1px solid #5cad5c; border-radius:6px;">
+        <div style="font-weight:700; color:#2a6b2a; margin-bottom:4px;">PAYMENT_PROOF</div>
+        <div style="color:#4a8a4a; font-size:10px;">UPI screenshot, receipt, bank transfer</div>
+        <div style="color:#aaa; font-size:9px; margin-top:4px;">→ extractPaymentFromImage() (vision AI)<br>→ AWAITING_CONTEXT 45s<br>→ PENDING with extracted fields</div>
+      </div>
+
+      <div style="flex:1; min-width:110px; padding:10px; background:#e8f4fd; border:1px solid #4a9fd4; border-radius:6px;">
+        <div style="font-weight:700; color:#1a5580; margin-bottom:4px;">PAYMENT_LIST</div>
+        <div style="color:#3a7aaa; font-size:10px;">Handwritten wage register, multi-row</div>
+        <div style="color:#aaa; font-size:9px; margin-top:4px;">→ extractPaymentListFromImage()<br>→ N child rough_entries<br>→ Parent marked POSTED</div>
+      </div>
+
+      <div style="flex:1; min-width:110px; padding:10px; background:#f5eeff; border:1px solid #9b6dd4; border-radius:6px;">
+        <div style="font-weight:700; color:#4a1f80; margin-bottom:4px;">SITE_UPDATE</div>
+        <div style="color:#7a4faa; font-size:10px;">Construction progress photo</div>
+        <div style="color:#aaa; font-size:9px; margin-top:4px;">→ AWAITING_CONTEXT 45s<br>→ Saved with user note<br>→ PENDING for review</div>
+      </div>
+
+      <div style="flex:1; min-width:110px; padding:10px; background:#fff8f0; border:1px solid #e07830; border-radius:6px;">
+        <div style="font-weight:700; color:#8a3800; margin-bottom:4px;">UNKNOWN</div>
+        <div style="color:#a05020; font-size:10px;">Unclear image</div>
+        <div style="color:#aaa; font-size:9px; margin-top:4px;">→ "Is this payment proof<br> or site photo? Reply 1 or 2"<br>→ Waits for annotation</div>
+      </div>
+
+    </div>
+
+    <div style="margin-top:10px; font-size:10px; color:#888; border-top:1px solid #f0f0f0; padding-top:8px;">
+      <strong>Image classification fast path:</strong> caption keywords → instant LOW confidence classification<br>
+      <strong>Slow path:</strong> Claude Haiku vision → OpenAI gpt-4o-mini (fallback) · 12s timeout<br>
+      <strong>Background processing:</strong> extractPaymentFromImage/List runs in background; user has 45s to annotate
+    </div>
+  </div>
+
+  <!-- FINANCIAL FLOW DETAIL -->
+  <div style="background:white; border:1px solid #eee; border-radius:8px; padding:16px;">
+    <div style="font-size:10px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#aaa; margin-bottom:10px;">💰 handleFinancial() Decision Chain — max 1 question per entry</div>
+    <div style="display:flex; flex-direction:column; gap:4px; font-size:11px;">
+      <div style="display:flex; align-items:center; gap:8px; padding:6px 8px; background:#eef7ee; border-left:3px solid #5cad5c; border-radius:0 4px 4px 0;">
+        <span style="background:#5cad5c; color:white; font-size:9px; font-weight:700; padding:1px 5px; border-radius:3px;">1</span>
+        <span style="font-weight:600;">Amount missing?</span>
+        <span style="color:#888; font-size:10px;">→ "How much? e.g. 5000" → AWAIT_AMOUNT</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; padding:6px 8px; background:#eef7ee; border-left:3px solid #5cad5c; border-radius:0 4px 4px 0;">
+        <span style="background:#5cad5c; color:white; font-size:9px; font-weight:700; padding:1px 5px; border-radius:3px;">2</span>
+        <span style="font-weight:600;">Payee absent?</span>
+        <span style="color:#888; font-size:10px;">→ "Who was paid?" → AWAIT_PAYEE</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; padding:6px 8px; background:#eef7ee; border-left:3px solid #5cad5c; border-radius:0 4px 4px 0;">
+        <span style="background:#5cad5c; color:white; font-size:9px; font-weight:700; padding:1px 5px; border-radius:3px;">3</span>
+        <span style="font-weight:600;">Payee LOW confidence + fuzzy matches?</span>
+        <span style="color:#888; font-size:10px;">→ numbered list → AWAIT_PAYEE_CHOICE</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; padding:6px 8px; background:#eef7ee; border-left:3px solid #5cad5c; border-radius:0 4px 4px 0;">
+        <span style="background:#5cad5c; color:white; font-size:9px; font-weight:700; padding:1px 5px; border-radius:3px;">4</span>
+        <span style="font-weight:600;">&gt;1 active projects, no project hint?</span>
+        <span style="color:#888; font-size:10px;">→ numbered list → AWAIT_PROJECT</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; padding:6px 8px; background:#f0faf0; border-left:3px solid #2a8a2a; border-radius:0 4px 4px 0;">
+        <span style="background:#2a8a2a; color:white; font-size:9px; font-weight:700; padding:1px 5px; border-radius:3px;">5</span>
+        <span style="font-weight:600;">All fields present</span>
+        <span style="color:#2a6a2a; font-size:10px; font-weight:600;">→ INSERT rough_entry + trigger ai-extract-entry + send "✅ Added" reply</span>
+      </div>
+    </div>
+  </div>
+
+</div><!-- end right column -->
+</div><!-- end flex -->
+
+<!-- TELEMETRY TABLE -->
+<div class="telem">
+  <h3>📊 wa_routing_log — Every message writes one row here</h3>
+  <div class="telem-cols">
+    <div class="telem-col">
+      <h4>Identity</h4>
+      <div class="telem-field"><span class="fname">wa_message_id</span><span class="ftype">text</span></div>
+      <div class="telem-field"><span class="fname">phone_number</span><span class="ftype">text</span></div>
+      <div class="telem-field"><span class="fname">created_at</span><span class="ftype">timestamptz</span></div>
+    </div>
+    <div class="telem-col">
+      <h4>Session context</h4>
+      <div class="telem-field"><span class="fname">had_session</span><span class="ftype">bool</span></div>
+      <div class="telem-field"><span class="fname">session_state</span><span class="ftype">text</span></div>
+    </div>
+    <div class="telem-col">
+      <h4>Arbitration scores</h4>
+      <div class="telem-field"><span class="fname">session_score</span><span class="ftype">int</span></div>
+      <div class="telem-field"><span class="fname">new_intent_score</span><span class="ftype">int</span></div>
+    </div>
+    <div class="telem-col">
+      <h4>Decision</h4>
+      <div class="telem-field"><span class="fname">classified_intent</span><span class="ftype">TXN_RECORD | SITE_UPDATE | QUERY | GENERAL | IMAGE</span></div>
+      <div class="telem-field"><span class="fname">selected_handler</span><span class="ftype">e.g. "reroute:NEW_FINANCIAL" or "session:AWAIT_AMOUNT"</span></div>
+      <div class="telem-field"><span class="fname">outcome</span><span class="ftype">routed | topic_switch | continue_session | session_cleared_for_image</span></div>
+    </div>
+  </div>
+  <div style="font-size:10px; color:#aaa; margin-top:10px; padding-top:8px; border-top:1px solid #f5f5f5;">
+    Use this table to tune thresholds: a high rate of <em>topic_switch</em> on AWAIT_AMOUNT sessions means session_score patterns are too weak. A high rate of <em>continue_session</em> when users were clearly changing topic means the gap-20 threshold is too high.
+  </div>
+</div>
+
+<!-- LEGEND -->
+<div class="legend">
+  <div style="font-size:11px; font-weight:700; color:#888; align-self:center;">Legend:</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#eef7ee; border:1.5px solid #5cad5c;"></div>Transaction / financial flow</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#e8f4fd; border:1.5px solid #4a9fd4;"></div>Site update flow</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#f5eeff; border:1.5px solid #9b6dd4;"></div>Query / answer flow</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#f5f5f5; border:1.5px solid #bbb;"></div>General assistant flow</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#fff8f0; border:1.5px solid #e07830;"></div>Session state machine</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#fdf0ff; border:1.5px solid #c060d0;"></div>Image handling path</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#fffbf0; border:1.5px solid #f0c040;"></div>Decision gate / arbitration</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#fff; border:1.5px dashed #bbb;"></div>Database write</div>
+</div>
+
+</body>
+</html>
