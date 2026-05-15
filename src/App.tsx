@@ -20,6 +20,7 @@ import {
   IconLayoutSidebarLeftCollapse, IconLayoutSidebar,
   IconSettings, IconLogout, IconChevronDown, IconChevronLeft, IconDots,
   IconDotsVertical,
+  IconRepeat, IconLayoutGrid, IconFiles, IconUsers,
 } from '@tabler/icons-react';
 
 import Stakeholders from './pages/Stakeholders';
@@ -46,6 +47,10 @@ import Billing from './pages/Billing';
 import NewBill from './pages/NewBill';
 import BillDetail from './pages/BillDetail';
 import Logbook from './pages/Logbook';
+import Orders from './pages/Orders';
+import { FloatingActionButton } from './components/FloatingActionButton';
+import { QuickActionsOverlay } from './components/QuickActionsOverlay';
+import { useLongPress } from './hooks/useLongPress';
 
 function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -53,6 +58,8 @@ function App() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showMoreSheet, setShowMoreSheet] = useState(false);
+  const [quickActionsOpen, setQuickActionsOpen] = useState(false);
+  const longPress = useLongPress(() => setQuickActionsOpen(true));
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -108,6 +115,7 @@ function App() {
       )}
       <main
         className={`min-h-screen mobile-main-pb transition-[margin-left] duration-[220ms] ease-[cubic-bezier(0.4,0,0.6,1)] ${sidebarOpen ? 'md:ml-[220px]' : 'md:ml-0'}`}
+        {...longPress}
       >
         {/* Mobile topbar (phones only — replaces sidebar hamburger) */}
         <MobileTopbar session={session} />
@@ -128,6 +136,7 @@ function App() {
           <Route path="/projects/:projectId" element={<ProjectDetail session={session} />} />
           <Route path="/stakeholders" element={<Stakeholders session={session} />} />
           <Route path="/stakeholders/:stakeholderId" element={<StakeholderDetail session={session} />} />
+          <Route path="/orders" element={<Orders session={session} />} />
           <Route path="/work-orders" element={<WorkOrders session={session} />} />
           <Route path="/work-orders/new" element={<NewWorkOrder session={session} />} />
           <Route path="/work-orders/:woId" element={<WorkOrderDetail session={session} />} />
@@ -152,6 +161,12 @@ function App() {
         isOpen={showMoreSheet}
         onClose={() => setShowMoreSheet(false)}
       />
+
+      {/* FAB — mobile only */}
+      <FloatingActionButton />
+
+      {/* Long-press quick actions overlay — mobile only */}
+      <QuickActionsOverlay isOpen={quickActionsOpen} onClose={() => setQuickActionsOpen(false)} />
     </div>
 
     {/* Command bar — rendered outside the scroll container, above everything */}
@@ -745,64 +760,49 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
   const isActive = (path: string) =>
     path === '/' ? location.pathname === '/' : location.pathname === path || location.pathname.startsWith(path + '/');
 
+  const isOrdersActive =
+    isActive('/orders') || isActive('/purchase-orders') || isActive('/work-orders');
+
   const moreActive = [
-    '/purchase-orders', '/billing', '/stakeholders', '/team', '/settings',
-    '/financials', '/invoices', '/fund-register', '/cost-codes', '/attendance',
-    '/work-orders',
+    '/billing', '/team', '/settings', '/financials',
+    '/invoices', '/fund-register', '/cost-codes', '/attendance',
   ].some(p => isActive(p));
 
-  const { data: inboxBadge = 0 } = useQuery({
-    queryKey: ['inbox_badge'],
-    queryFn: async () => {
-      const { count } = await supabase.from('rough_entries').select('*', { count: 'exact', head: true }).eq('status', 'PENDING');
-      return count ?? 0;
-    },
-    staleTime: 30_000,
-  });
-
-  type Tab = { path: string; icon: React.ElementType; label: string; show: boolean; badge?: number };
+  type Tab = { path: string; icon: React.ElementType; label: string; show: boolean };
   const tabs: Tab[] = [
-    { path: '/ledger', icon: IconArrowsExchange,  label: 'Txns',     show: role !== 'supervisor' },
-    { path: '/logbook', icon: IconNotebook,        label: 'Logbook',  show: true, badge: inboxBadge },
-    { path: '/ledger', icon: IconArrowsExchange,  label: 'Txns',     show: role !== 'supervisor' },
-    { path: '/projects', icon: IconBuildingEstate, label: 'Projects', show: true },
+    { path: '/ledger',       icon: IconRepeat,      label: 'Txns',     show: role !== 'supervisor' },
+    { path: '/projects',     icon: IconLayoutGrid,  label: 'Projects', show: true },
+    { path: '/orders',       icon: IconFiles,       label: 'Orders',   show: true },
+    { path: '/stakeholders', icon: IconUsers,       label: 'Parties',  show: role !== 'supervisor' && role !== 'accountant' },
   ].filter(t => t.show);
 
   return (
     <nav
       className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white"
-      style={{ borderTop: '1px solid var(--nav-border)' }}
+      style={{ borderTop: '0.5px solid var(--nav-border)', height: 60 }}
     >
-      <div className="flex items-stretch" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+      <div className="flex items-stretch h-full" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
         {tabs.map(tab => {
-          const active = isActive(tab.path);
+          const active = tab.path === '/orders' ? isOrdersActive : isActive(tab.path);
           const Icon = tab.icon;
           return (
             <Link
               key={tab.path}
               to={tab.path}
-              className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 relative"
-              style={{ minHeight: 56, color: active ? TERRACOTTA : 'var(--nav-text-muted)' }}
+              className="flex-1 flex flex-col items-center justify-center gap-0.5"
+              style={{ color: active ? '#000' : 'var(--nav-text-muted)' }}
             >
-              <div className="relative">
-                <Icon size={22} strokeWidth={active ? 2 : 1.5} />
-                {(tab.badge ?? 0) > 0 && (
-                  <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 flex items-center justify-center rounded-full text-[9px] font-bold px-1 leading-none"
-                    style={{ background: 'rgba(0,0,0,0.10)', color: 'var(--nav-text-default)' }}>
-                    {(tab.badge ?? 0) > 9 ? '9+' : tab.badge}
-                  </span>
-                )}
-              </div>
+              <Icon size={20} strokeWidth={active ? 2 : 1.5} />
               <span className="text-[10px] font-medium leading-none">{tab.label}</span>
             </Link>
           );
         })}
         <button
           onClick={onMoreTap}
-          className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2"
-          style={{ minHeight: 56, color: moreActive ? TERRACOTTA : 'var(--nav-text-muted)' }}
+          className="flex-1 flex flex-col items-center justify-center gap-0.5"
+          style={{ color: moreActive ? '#000' : 'var(--nav-text-muted)' }}
         >
-          <IconDotsVertical size={22} strokeWidth={moreActive ? 2 : 1.5} />
+          <IconDots size={20} strokeWidth={moreActive ? 2 : 1.5} />
           <span className="text-[10px] font-medium leading-none">More</span>
         </button>
       </div>
@@ -836,15 +836,13 @@ function MoreNavSheet({
   const go = (path: string) => { navigate(path); onClose(); };
 
   const items = [
-    { path: '/work-orders',     icon: IconClipboardList,        label: 'Work Orders',     show: true },
-    { path: '/purchase-orders', icon: IconShoppingBag,          label: 'Purchase Orders', show: role !== 'supervisor' && role !== 'accountant' },
-    { path: '/attendance',      icon: IconCalendarCheck,        label: 'Attendance',      show: true },
-    { path: '/billing',         icon: IconFileInvoice,          label: 'Billing',         show: role !== 'supervisor' },
-    { path: '/stakeholders',    icon: IconUsersGroup,           label: 'Parties',         show: role !== 'supervisor' && role !== 'accountant' },
-    { path: '/financials',      icon: IconChartBar,             label: 'Financials',      show: showFinancials },
-    { path: '/cost-codes',      icon: IconSitemap,              label: 'Cost Codes',      show: role === 'principal' || role === 'management' },
-    { path: '/team',            icon: IconShieldLock,           label: 'Team & Access',   show: role === 'principal' || role === 'management' },
-    { path: '/settings',        icon: IconAdjustmentsHorizontal, label: 'Settings',        show: true },
+    { path: '/logbook',     icon: IconNotebook,              label: 'Logbook',       show: true },
+    { path: '/attendance',  icon: IconCalendarCheck,         label: 'Attendance',    show: true },
+    { path: '/billing',     icon: IconFileInvoice,           label: 'Billing',       show: role !== 'supervisor' },
+    { path: '/financials',  icon: IconChartBar,              label: 'Financials',    show: showFinancials },
+    { path: '/cost-codes',  icon: IconSitemap,               label: 'Cost Codes',    show: role === 'principal' || role === 'management' },
+    { path: '/team',        icon: IconShieldLock,            label: 'Team & Access', show: role === 'principal' || role === 'management' },
+    { path: '/settings',    icon: IconAdjustmentsHorizontal, label: 'Settings',      show: true },
   ].filter(i => i.show);
 
   return (
@@ -1106,57 +1104,80 @@ function Projects({ session }: { session: Session }) {
 
 
   return (
-    <div className="px-margin-mobile md:px-margin-desktop pt-6">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-stack-lg">
+    <div className="px-4 md:px-margin-desktop pt-4 md:pt-6 pb-6">
+      <div className="flex items-center justify-between gap-3 mb-5">
         <div>
-          <h2 className="text-[24px] font-bold text-on-surface tracking-tight">Projects</h2>
-          <p className="text-[12px] text-on-surface-variant/50 mt-1">{projects?.length ?? 0} projects</p>
+          <h2 className="text-[22px] md:text-[24px] font-bold text-on-surface tracking-tight">Projects</h2>
+          <p className="text-[12px] text-on-surface-variant/50 mt-0.5">{projects?.length ?? 0} active</p>
         </div>
         {(profile?.role === 'management' || profile?.role === 'principal') && (
-          <button className="bk-btn hidden md:flex items-center gap-2 h-9 px-4 rounded-xl text-[13px]" onClick={() => setShowForm(!showForm)}>
-            <span className="material-symbols-outlined text-[16px]">{showForm ? 'close' : 'add'}</span>
+          <button
+            onClick={() => setShowForm(!showForm)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              height: 34, padding: '0 14px 0 10px',
+              borderRadius: 99, border: 'none',
+              background: showForm ? 'rgba(0,0,0,0.07)' : '#C8603A',
+              color: showForm ? '#000' : '#fff',
+              fontSize: 13, fontWeight: 500, cursor: 'pointer',
+              transition: 'background 150ms',
+            }}
+          >
+            <span style={{ fontSize: 18, fontWeight: 300, lineHeight: 1 }}>{showForm ? '×' : '+'}</span>
             {showForm ? 'Cancel' : 'New Project'}
           </button>
         )}
       </div>
 
       {showForm && (
-        <div className="bg-surface-container-lowest p-6 rounded-xl shadow-card border border-outline-variant/30 mb-stack-lg">
-          <h3 className="text-headline-md font-headline-md mb-4">Create New Project</h3>
-          <form onSubmit={handleCreate} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-stack-sm">
-              <label className="text-label-caps font-label-caps text-on-surface-variant">PROJECT ID</label>
-              <input name="project_id" className="bk-input" placeholder="e.g. BRK-PRJ-001" required />
+        <div className="bg-white rounded-2xl border border-black/[0.08] shadow-elevation-1 mb-5 overflow-hidden">
+          <div className="px-5 py-4 border-b border-black/[0.06]">
+            <p className="text-[15px] font-semibold text-on-surface">New Project</p>
+          </div>
+          <form onSubmit={handleCreate} className="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant/50">Project ID</label>
+              <input name="project_id" className="bk-input w-full" placeholder="BRK-PRJ-001" required />
             </div>
-            <div className="space-y-stack-sm">
-              <label className="text-label-caps font-label-caps text-on-surface-variant">PROJECT NAME</label>
-              <input name="name" className="bk-input" placeholder="e.g. Phase 1 Residential" required />
+            <div className="space-y-1">
+              <label className="text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant/50">Project Name</label>
+              <input name="name" className="bk-input w-full" placeholder="Phase 1 Residential" required />
             </div>
-            <div className="space-y-stack-sm">
-              <label className="text-label-caps font-label-caps text-on-surface-variant">SITE LOCATION</label>
-              <input name="site_location" className="bk-input" placeholder="City / Address" required />
+            <div className="space-y-1">
+              <label className="text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant/50">Site Location</label>
+              <input name="site_location" className="bk-input w-full" placeholder="City / Address" required />
             </div>
-            <div className="space-y-stack-sm">
-              <label className="text-label-caps font-label-caps text-on-surface-variant">START DATE</label>
-              <input name="start_date" type="date" className="bk-input" required />
+            <div className="space-y-1">
+              <label className="text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant/50">Start Date</label>
+              <input name="start_date" type="date" className="bk-input w-full" required />
             </div>
-            <div className="md:col-span-2 flex justify-end">
-              <button type="submit" className="bk-btn" disabled={createProject.isPending}>
-                {createProject.isPending ? 'Saving...' : 'Save Project'}
+            <div className="md:col-span-2 flex gap-3 pt-1">
+              <button type="button" onClick={() => setShowForm(false)}
+                className="flex-1 md:flex-none h-10 px-5 rounded-xl border border-outline-variant/30 text-[13px] font-medium text-on-surface-variant/60">
+                Cancel
+              </button>
+              <button type="submit" disabled={createProject.isPending}
+                className="flex-1 md:flex-none h-10 px-6 rounded-xl bg-primary text-white text-[13px] font-semibold disabled:opacity-40">
+                {createProject.isPending ? 'Saving…' : 'Save Project'}
               </button>
             </div>
           </form>
-          {createProject.isError && <p className="text-error mt-4 text-body-sm">Error: {createProject.error.message}</p>}
+          {createProject.isError && <p className="text-error px-5 pb-4 text-[13px]">{createProject.error.message}</p>}
         </div>
       )}
 
-      <div className="grid gap-gutter grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
         {isLoading && <LinearProgress className="col-span-full mb-4" />}
         {error && <p className="text-error col-span-full">Failed to load projects: {(error as Error).message}</p>}
-        {projects?.length === 0 && !isLoading && <p className="text-on-surface-variant col-span-full">No projects yet.</p>}
+        {projects?.length === 0 && !isLoading && (
+          <div className="col-span-full py-16 text-center">
+            <p className="text-[15px] font-medium text-on-surface-variant/50">No projects yet</p>
+            <p className="text-[13px] text-on-surface-variant/35 mt-1">Tap the button above to create one</p>
+          </div>
+        )}
         {projects?.map((p) => (
           <div key={p.project_id} className="contents">
-            <div className="bg-white p-4 rounded-xl shadow-elevation-1 border border-black/[0.06] hover:shadow-elevation-2 transition-shadow duration-200 relative group bk-row-ripple">
+            <div className="bg-white rounded-2xl shadow-elevation-1 border border-black/[0.06] hover:shadow-elevation-2 transition-shadow duration-150 relative group active:bg-surface-container-low/30">
               {editingProjectId === p.project_id ? (
                 <div className="space-y-3">
                   <div>
@@ -1267,12 +1288,6 @@ function Projects({ session }: { session: Session }) {
         ))}
       </div>
 
-      {/* FAB — mobile only */}
-      {(profile?.role === 'management' || profile?.role === 'principal') && (
-        <button className="bk-fab" onClick={() => setShowForm(true)} title="New Project">
-          <span className="material-symbols-outlined text-[24px]">add</span>
-        </button>
-      )}
     </div>
   );
 }

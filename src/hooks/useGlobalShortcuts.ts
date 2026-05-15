@@ -42,13 +42,6 @@ export function useGlobalShortcuts(openCommandBar: () => void) {
 
       const key = e.key.toLowerCase();
 
-      // Space → command bar
-      if (e.key === ' ') {
-        e.preventDefault();
-        openCommandBar();
-        return;
-      }
-
       // / → create shortcut for current page
       if (e.key === '/') {
         const eventName = CREATE_EVENTS[location.pathname];

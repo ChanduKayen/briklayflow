@@ -12,6 +12,7 @@ import { LinearProgress } from '../components/LinearProgress';
 import { getCostCode } from '../lib/costCodes';
 import { formatTxn } from '../lib/formatTxn';
 import { IconPaperclip } from '@tabler/icons-react';
+import { ShortcutTicker } from '../components/ShortcutTicker';
 import { ImageLightbox } from '../components/ImageLightbox';
 
 const PAGE_SIZE = 25;
@@ -472,19 +473,35 @@ export default function Ledger({ session }: { session: Session }) {
               {filteredTransactions.length} transaction{filteredTransactions.length !== 1 ? 's' : ''} · ₹{filteredTransactions.reduce((s, t) => s + Number(t.total_amount), 0).toLocaleString('en-IN')}
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <button onClick={exportCSV}
-              className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl border border-outline-variant/30 bg-white text-[13px] font-medium text-on-surface-variant/70 hover:border-outline-variant/60 hover:text-on-surface transition-colors">
-              <span className="material-symbols-outlined text-[16px]">download</span>
-              Export
-            </button>
-            <CreateHint message="create a new transaction">
-              <button onClick={() => navigate('/ledger/new')}
-                className="bk-btn flex items-center gap-1.5 h-9 px-4 rounded-xl text-[13px] font-semibold">
-                <span className="material-symbols-outlined text-[16px]">add</span>
+          <div className="hidden md:flex flex-col items-end gap-1">
+            <CreateHint message="press / to create a new transaction">
+              <button
+                onClick={() => navigate('/ledger/new')}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  height: 32, padding: '0 16px 0 12px',
+                  borderRadius: 99, border: 'none',
+                  background: '#C8603A', cursor: 'pointer', outline: 'none',
+                  fontSize: 13, fontWeight: 500, color: '#fff',
+                  letterSpacing: '-0.01em',
+                  boxShadow: '0 1px 2px rgba(200,96,58,0.25), 0 0 0 0 rgba(200,96,58,0)',
+                  transition: 'opacity 120ms, box-shadow 120ms',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.opacity = '0.88'; e.currentTarget.style.boxShadow = '0 3px 8px rgba(200,96,58,0.35)'; }}
+                onMouseLeave={e => { e.currentTarget.style.opacity = '1';    e.currentTarget.style.boxShadow = '0 1px 2px rgba(200,96,58,0.25)'; }}
+              >
+                <span style={{ fontSize: 17, fontWeight: 300, lineHeight: 1 }}>+</span>
                 New Transaction
               </button>
             </CreateHint>
+            <ShortcutTicker hints={[
+              { key: '/',       label: 'new transaction' },
+              { key: 'T',       label: 'view transactions' },
+              { key: 'P',       label: 'view purchase orders' },
+              { key: 'W',       label: 'view work orders' },
+              { key: 'L',       label: 'view logbook' },
+              { key: '⟵ hold', label: 'long press screen for quick actions' },
+            ]} className="w-full" />
           </div>
         </div>
 
@@ -637,6 +654,15 @@ export default function Ledger({ session }: { session: Session }) {
               className="h-8 pl-8 pr-3 w-32 focus:w-52 transition-[width] duration-200 rounded-full border border-outline-variant/25 bg-white text-[12px] text-on-surface outline-none focus:border-primary/30 focus:ring-1 focus:ring-primary/10"
             />
           </div>
+
+          {/* Export */}
+          <button
+            onClick={exportCSV}
+            className="hidden md:flex items-center gap-1.5 h-8 px-3 rounded-full border border-outline-variant/25 bg-white text-[12px] font-medium text-on-surface-variant/55 hover:border-outline-variant/50 hover:text-on-surface/75 transition-all shrink-0"
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: 14 }}>download</span>
+            Export
+          </button>
 
           {/* Clear all */}
           {hasAnyFilter && (
@@ -927,11 +953,6 @@ export default function Ledger({ session }: { session: Session }) {
       )}
 
       <ImageLightbox url={lightboxUrl} title="Payment Proof" onClose={() => setLightboxUrl(null)} />
-
-      {/* FAB — mobile only */}
-      <button className="bk-fab" onClick={() => navigate('/ledger/new')} title="New Transaction">
-        <span className="material-symbols-outlined text-[24px]">add</span>
-      </button>
 
       {/* Bulk action bar */}
       {selectedCount > 0 && (

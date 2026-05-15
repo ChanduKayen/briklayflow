@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { Loader2 } from 'lucide-react';
@@ -85,6 +86,14 @@ export default function Stakeholders({ session }: { session: Session }) {
   const { data: profile } = useUserProfile(session.user.id);
   const { openPeek } = usePeek();
   const [showForm, setShowForm] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  useEffect(() => {
+    if (searchParams.get('new') === '1') {
+      setShowForm(true);
+      setSearchParams({}, { replace: true });
+    }
+  }, []);
 
   // ── Filter state ──────────────────────────────────────────────────────────
   const [filterType, setFilterType] = useState<'all' | 'Worker' | 'Vendor' | 'Client'>('all');
@@ -225,7 +234,7 @@ export default function Stakeholders({ session }: { session: Session }) {
             }}
           >
             <span className="material-symbols-outlined" style={{ fontSize: 16 }}>{showForm ? 'close' : 'add'}</span>
-            {showForm ? 'Cancel' : 'Add Stakeholder'}
+            {showForm ? 'Cancel' : 'New Party'}
           </button>
         )}
       </div>

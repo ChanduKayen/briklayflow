@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import confetti from 'canvas-confetti';
 import { supabase } from '../lib/supabase';
 import { LinearProgress } from '../components/LinearProgress';
+import { ShortcutTicker } from '../components/ShortcutTicker';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
@@ -615,15 +616,36 @@ export default function PurchaseOrders({ session }: { session: Session }) {
             </p>
           </div>
           {canManage && (
-            <CreateHint message="create a new purchase order">
-            <button
-              className="hidden md:flex bk-btn items-center gap-2 h-9 px-4 rounded-xl text-[13px] shrink-0"
-              onClick={() => navigate('/purchase-orders/new')}
-            >
-              <span className="material-symbols-outlined text-[16px]">add</span>
-              New PO
-            </button>
-            </CreateHint>
+            <div className="hidden md:flex flex-col items-end gap-1">
+              <CreateHint message="press / to create a new purchase order">
+              <button
+                onClick={() => navigate('/purchase-orders/new')}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  height: 32, padding: '0 16px 0 12px',
+                  borderRadius: 99, border: 'none',
+                  background: '#C8603A', cursor: 'pointer', outline: 'none',
+                  fontSize: 13, fontWeight: 500, color: '#fff',
+                  letterSpacing: '-0.01em',
+                  boxShadow: '0 1px 2px rgba(200,96,58,0.25)',
+                  transition: 'opacity 120ms, box-shadow 120ms',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.opacity = '0.88'; e.currentTarget.style.boxShadow = '0 3px 8px rgba(200,96,58,0.35)'; }}
+                onMouseLeave={e => { e.currentTarget.style.opacity = '1';    e.currentTarget.style.boxShadow = '0 1px 2px rgba(200,96,58,0.25)'; }}
+              >
+                <span style={{ fontSize: 17, fontWeight: 300, lineHeight: 1 }}>+</span>
+                New Purchase Order
+              </button>
+              </CreateHint>
+              <ShortcutTicker hints={[
+                { key: '/',       label: 'new purchase order' },
+                { key: 'T',       label: 'view transactions' },
+                { key: 'P',       label: 'view purchase orders' },
+                { key: 'W',       label: 'view work orders' },
+                { key: 'L',       label: 'view logbook' },
+                { key: '⟵ hold', label: 'long press screen for quick actions' },
+              ]} className="w-full" />
+            </div>
           )}
         </div>
 

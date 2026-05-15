@@ -10,6 +10,7 @@ import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
 import { ResolvePopup } from '../components/ResolvePopup';
 import { ImageLightbox } from '../components/ImageLightbox';
+import { ShortcutTicker } from '../components/ShortcutTicker';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -407,6 +408,14 @@ export default function Logbook({ session }: { session: Session }) {
         <p style={{ fontSize: 12, color: 'rgba(0,0,0,0.45)', margin: '3px 0 0' }}>
           {pending.length} pending · {todayPostedCount} posted today
         </p>
+        <ShortcutTicker hints={[
+          { key: '/',       label: 'new logbook entry' },
+          { key: 'T',       label: 'view transactions' },
+          { key: 'P',       label: 'view purchase orders' },
+          { key: 'W',       label: 'view work orders' },
+          { key: 'L',       label: 'view logbook' },
+          { key: '⟵ hold', label: 'long press screen for quick actions' },
+        ]} className="mt-1.5" />
       </div>
 
       {/* TABS — underline style */}

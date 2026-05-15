@@ -249,15 +249,15 @@ function PORowCard({ po, onClick }: { po: any; onClick: () => void }) {
 // ── Financial Strip Cell ──────────────────────────────────────────────────────
 
 function FinCell({
-  label, amount, sub, subAccent = false, onClick,
+  label, amount, sub, subAccent = false, onClick, className = '',
 }: {
   label: string; amount: number | null; sub?: string;
-  subAccent?: boolean; onClick?: () => void;
+  subAccent?: boolean; onClick?: () => void; className?: string;
 }) {
   return (
     <div
       onClick={onClick}
-      className={`px-4 py-4 ${onClick ? 'cursor-pointer hover:bg-surface-container-low/50 transition-colors' : ''}`}
+      className={`px-3 py-3 md:px-4 md:py-4 ${onClick ? 'cursor-pointer hover:bg-surface-container-low/50 transition-colors' : ''} ${className}`}
     >
       <p className="text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant/40 mb-1.5 whitespace-nowrap">
         {label}
@@ -865,9 +865,9 @@ export default function ProjectDetail({ session }: { session: Session }) {
         {/* ── ZONE 1: HEADER ──────────────────────────────────────────────── */}
         <div className={`mt-5 transition-all duration-300 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'}`}>
 
-          <div className="flex items-start gap-3 flex-wrap mb-1.5">
-            <h1 className="text-[24px] font-bold tracking-[-0.03em] text-on-surface leading-tight">{project.name}</h1>
-            <span className={`mt-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full ${PROJECT_STATUS[project.status] || 'bg-surface-container-high text-on-surface-variant'}`}>
+          <div className="flex items-start gap-2.5 flex-wrap mb-1.5">
+            <h1 className="text-[20px] md:text-[24px] font-bold tracking-[-0.03em] text-on-surface leading-tight">{project.name}</h1>
+            <span className={`mt-0.5 text-[10px] font-semibold px-2 py-0.5 rounded-full ${PROJECT_STATUS[project.status] || 'bg-surface-container-high text-on-surface-variant'}`}>
               {project.status?.toUpperCase()}
             </span>
           </div>
@@ -887,17 +887,17 @@ export default function ProjectDetail({ session }: { session: Session }) {
           </p>
 
           {/* Actions */}
-          <div className="flex items-center gap-2 flex-wrap mb-5">
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 mb-5 no-scrollbar" style={{ WebkitOverflowScrolling: 'touch' }}>
             <button
               onClick={() => {}}
-              className="h-8 px-3 rounded-lg border border-outline-variant/30 text-[12px] font-medium text-on-surface-variant/65 hover:border-outline-variant/60 hover:text-on-surface transition-colors"
+              className="h-8 px-3 rounded-lg border border-outline-variant/30 text-[12px] font-medium text-on-surface-variant/65 hover:border-outline-variant/60 hover:text-on-surface transition-colors shrink-0"
             >
               Edit
             </button>
             {/* FIX 2: open drawer instead of navigate */}
             <button
               onClick={() => setShowNewTxn(true)}
-              className="h-8 px-3 rounded-lg border border-outline-variant/30 text-[12px] font-medium text-on-surface-variant/65 hover:border-outline-variant/60 hover:text-on-surface transition-colors"
+              className="h-8 px-3 rounded-lg bg-[#D97757] text-white text-[12px] font-semibold transition-colors shrink-0"
             >
               + Transaction
             </button>
@@ -905,13 +905,13 @@ export default function ProjectDetail({ session }: { session: Session }) {
               <>
                 <button
                   onClick={() => navigate('/work-orders/new', { state: { projectId } })}
-                  className="h-8 px-3 rounded-lg border border-outline-variant/30 text-[12px] font-medium text-on-surface-variant/65 hover:border-outline-variant/60 hover:text-on-surface transition-colors"
+                  className="h-8 px-3 rounded-lg border border-outline-variant/30 text-[12px] font-medium text-on-surface-variant/65 hover:border-outline-variant/60 hover:text-on-surface transition-colors shrink-0"
                 >
                   + WO
                 </button>
                 <button
                   onClick={() => navigate('/purchase-orders/new', { state: { projectId } })}
-                  className="h-8 px-3 rounded-lg border border-outline-variant/30 text-[12px] font-medium text-on-surface-variant/65 hover:border-outline-variant/60 hover:text-on-surface transition-colors"
+                  className="h-8 px-3 rounded-lg border border-outline-variant/30 text-[12px] font-medium text-on-surface-variant/65 hover:border-outline-variant/60 hover:text-on-surface transition-colors shrink-0"
                 >
                   + PO
                 </button>
@@ -925,8 +925,8 @@ export default function ProjectDetail({ session }: { session: Session }) {
         {/* ── ZONE 2: FINANCIAL STRIP ──────────────────────────────────────── */}
         <div className={`transition-all duration-300 delay-75 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'}`}>
 
-          <div className="border border-outline-variant/20 rounded-xl overflow-x-auto mb-3 bg-white shadow-sm">
-            <div className="grid grid-cols-5 divide-x divide-outline-variant/15 min-w-[520px]">
+          <div className="border border-outline-variant/20 rounded-xl mb-3 bg-white shadow-sm overflow-hidden">
+            <div className="grid grid-cols-2 md:grid-cols-5 divide-outline-variant/15" style={{ borderImage: 'none' }}>
               <FinCell
                 label="Budget"
                 amount={totalBudget > 0 ? totalBudget : null}

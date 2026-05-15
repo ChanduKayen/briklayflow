@@ -7,6 +7,7 @@ import type { WorkOrder } from '../types';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { LinearProgress } from '../components/LinearProgress';
+import { ShortcutTicker } from '../components/ShortcutTicker';
 
 const PAGE_SIZE = 25;
 
@@ -334,25 +335,39 @@ export default function WorkOrders({ session }: { session: Session }) {
               {activeCount > 0 && <> · <span className="text-amber-600 font-semibold">{activeCount} active</span></>}
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={exportCSV}
-              className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl border border-outline-variant/30 bg-white text-[13px] font-medium text-on-surface-variant/70 hover:border-outline-variant/60 hover:text-on-surface transition-colors"
-            >
-              <span className="material-symbols-outlined text-[16px]">download</span>
-              Export
-            </button>
-            {canManage && (
-              <CreateHint message="create a new work order">
-                <button
-                  onClick={() => navigate('/work-orders/new')}
-                  className="bk-btn flex items-center gap-1.5 h-9 px-4 rounded-xl text-[13px] font-semibold"
-                >
-                  <span className="material-symbols-outlined text-[16px]">add</span>
-                  New Order
-                </button>
-              </CreateHint>
-            )}
+          <div className="hidden md:flex flex-col items-end gap-1">
+            <div className="flex items-center gap-2">
+              {canManage && (
+                <CreateHint message="press / to create a new work order">
+                  <button
+                    onClick={() => navigate('/work-orders/new')}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      height: 32, padding: '0 16px 0 12px',
+                      borderRadius: 99, border: 'none',
+                      background: '#C8603A', cursor: 'pointer', outline: 'none',
+                      fontSize: 13, fontWeight: 500, color: '#fff',
+                      letterSpacing: '-0.01em',
+                      boxShadow: '0 1px 2px rgba(200,96,58,0.25)',
+                      transition: 'opacity 120ms, box-shadow 120ms',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.opacity = '0.88'; e.currentTarget.style.boxShadow = '0 3px 8px rgba(200,96,58,0.35)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.opacity = '1';    e.currentTarget.style.boxShadow = '0 1px 2px rgba(200,96,58,0.25)'; }}
+                  >
+                    <span style={{ fontSize: 17, fontWeight: 300, lineHeight: 1 }}>+</span>
+                    New Work Order
+                  </button>
+                </CreateHint>
+              )}
+            </div>
+            <ShortcutTicker hints={[
+              { key: '/',       label: 'new work order' },
+              { key: 'T',       label: 'view transactions' },
+              { key: 'P',       label: 'view purchase orders' },
+              { key: 'W',       label: 'view work orders' },
+              { key: 'L',       label: 'view logbook' },
+              { key: '⟵ hold', label: 'long press screen for quick actions' },
+            ]} className="w-full" />
           </div>
         </div>
 
@@ -442,6 +457,15 @@ export default function WorkOrders({ session }: { session: Session }) {
               className="h-8 pl-8 pr-3 w-32 focus:w-52 transition-[width] duration-200 rounded-full border border-outline-variant/25 bg-white text-[12px] text-on-surface outline-none focus:border-primary/30 focus:ring-1 focus:ring-primary/10"
             />
           </div>
+
+          {/* Export */}
+          <button
+            onClick={exportCSV}
+            className="hidden md:flex items-center gap-1.5 h-8 px-3 rounded-full border border-outline-variant/25 bg-white text-[12px] font-medium text-on-surface-variant/55 hover:border-outline-variant/50 hover:text-on-surface/75 transition-all shrink-0"
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: 14 }}>download</span>
+            Export
+          </button>
 
           {/* Clear all */}
           {hasAnyFilter && (

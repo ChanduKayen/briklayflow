@@ -92,8 +92,8 @@
     "hash": "5f021b0a6f84b87e9a6753114cc763f9"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\components\\WOPeek.tsx": {
-    "mtime": 1778781592.6276991,
-    "hash": "bbea8800be13694973dc9190b1d27ece"
+    "mtime": 1778819639.0016959,
+    "hash": "934f9f98e54f02c931de34c30648727d"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\context\\CommandBarContext.tsx": {
     "mtime": 1778776400.7202854,
@@ -188,16 +188,16 @@
     "hash": "80b1c73978f7912911aac467eef62fb0"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\NewTransaction.tsx": {
-    "mtime": 1778773302.3563685,
-    "hash": "03b73dff202106a2c79743559add822d"
+    "mtime": 1778819670.7286727,
+    "hash": "88386b60f11ec594a3f69e58fcae9b51"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\NewWorkOrder.tsx": {
     "mtime": 1778754625.4206543,
     "hash": "088e7ad899acca60e902160188a7053c"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\ProjectDetail.tsx": {
-    "mtime": 1778815432.858015,
-    "hash": "5f0431e7a95b982efa71c3c834e3f235"
+    "mtime": 1778819634.5768147,
+    "hash": "736a4fe3c89b80152ea0a79e4ebf52fc"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\PurchaseOrderDetail.tsx": {
     "mtime": 1778781754.1336665,
@@ -224,12 +224,12 @@
     "hash": "a39e9932152967ed41b4220cbe66b41e"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\WorkOrderDetail.tsx": {
-    "mtime": 1778781712.6113582,
-    "hash": "f5b6208c4e4a9a48807fc96fa36a4c90"
+    "mtime": 1778819654.8592231,
+    "hash": "f30e752f4fa6ad25c30b9635d299c94b"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\WorkOrders.tsx": {
-    "mtime": 1778818327.3495908,
-    "hash": "4edab96e8884cddc21e8aedacd5441d4"
+    "mtime": 1778819617.8355126,
+    "hash": "dca86397430e68c02f28582c6cf38bb4"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\ai-extract-entry\\index.ts": {
     "mtime": 1778660960.596839,
