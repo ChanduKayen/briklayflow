@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useAuth } from './lib/auth/AuthProvider';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
 import { Routes, Route, Navigate, useNavigate, Link, useLocation } from 'react-router-dom';
 import { supabase } from './lib/supabase';
@@ -21,6 +22,7 @@ import {
   IconSettings, IconLogout, IconChevronDown, IconChevronLeft, IconDots,
   // IconDotsVertical,
   IconRepeat, IconLayoutGrid, IconFiles, IconUsers,
+  IconMail, IconMailForward, IconCheck,
 } from '@tabler/icons-react';
 
 import Stakeholders from './pages/Stakeholders';
@@ -48,13 +50,17 @@ import NewBill from './pages/NewBill';
 import BillDetail from './pages/BillDetail';
 import Logbook from './pages/Logbook';
 import Orders from './pages/Orders';
+import InviteAccept from './pages/InviteAccept';
+import Pending from './pages/Pending';
+import CreateWorkspace from './pages/CreateWorkspace';
 import { FloatingActionButton } from './components/FloatingActionButton';
 import { QuickActionsOverlay } from './components/QuickActionsOverlay';
 import { useLongPress } from './hooks/useLongPress';
 
 function App() {
+  const { authState } = useAuth();
+  const location = useLocation();
   const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showMoreSheet, setShowMoreSheet] = useState(false);
@@ -64,7 +70,6 @@ function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      setLoading(false);
     });
 
     const {
@@ -76,17 +81,30 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  if (loading) {
+  if (authState.status === 'loading' || authState.status === 'resolving') {
     return (
-      <div className="min-h-screen bg-background">
-        <LinearProgress />
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="w-5 h-5 border-2 border-outline-variant border-t-primary rounded-full animate-spin" />
       </div>
     );
   }
 
-  if (!session) {
-    return <Login />;
+  if (location.pathname.startsWith('/invite/')) {
+    return <InviteAccept session={session} />;
   }
+
+  if (location.pathname === '/pending') {
+    if (!session) return <Navigate to="/login" replace />;
+    return <Pending session={session} />;
+  }
+
+  if (location.pathname === '/create-workspace') {
+    if (!session) return <Navigate to="/login" replace />;
+    return <CreateWorkspace session={session} />;
+  }
+
+  if (authState.status === 'unauthenticated') return <Login />;
+  if (!session) return null; // brief race — session loads from localStorage in next tick
 
   return (
     <SnackbarProvider>
@@ -266,6 +284,7 @@ function SidebarContent({
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [userRowHovered, setUserRowHovered] = useState(false);
+  const [orgName, setOrgName] = useState<string>('');
   const quickAddRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
@@ -277,6 +296,16 @@ function SidebarContent({
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
+
+  useEffect(() => {
+    if (!profile?.org_id) return;
+    supabase
+      .from('organizations')
+      .select('name')
+      .eq('org_id', profile.org_id)
+      .single()
+      .then(({ data }) => { if (data?.name) setOrgName(data.name); });
+  }, [profile?.org_id]);
 
   const { data: hasPrincipal } = useQuery({
     queryKey: ['has_principal'],
@@ -393,7 +422,7 @@ function SidebarContent({
   const initials = (name: string) =>
     name.split(' ').filter(Boolean).map(w => w[0]).join('').toUpperCase().slice(0, 2) || '?';
 
-  const handleLogout = async () => { await supabase.auth.signOut(); navigate('/'); };
+  const handleLogout = async () => { await supabase.auth.signOut(); };
   const go = (path: string) => { navigate(path); setShowQuickAdd(false); onNavigate(); };
 
   const quickCreateItems = [
@@ -413,7 +442,7 @@ function SidebarContent({
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
           <div style={{ width: 8, height: 8, background: 'var(--nav-accent)', transform: 'rotate(45deg)', flexShrink: 0 }} />
           <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--nav-text-active)' }}>
-            Briklay
+            {orgName || 'Briklay'}
           </span>
         </div>
       </div>
@@ -896,6 +925,10 @@ function MoreNavSheet({
 }
 
 function Login() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const redirectTo = new URLSearchParams(location.search).get('redirect');
+
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -911,8 +944,8 @@ function Login() {
     setSuccess(null);
 
     if (isSignUp) {
-      const { error } = await supabase.auth.signUp({ 
-        email, 
+      const { error } = await supabase.auth.signUp({
+        email,
         password,
         options: { data: { full_name: name } }
       });
@@ -920,7 +953,12 @@ function Login() {
       else setSuccess('Account created! You can now sign in.');
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) setError(error.message);
+      if (error) {
+        setError(error.message);
+      } else if (redirectTo) {
+        // Return user to the page that required auth (e.g. /invite/[token])
+        navigate(redirectTo, { replace: true });
+      }
     }
     setLoading(false);
   };
@@ -1098,6 +1136,7 @@ function Projects({ session }: { session: Session }) {
       name: formData.get('name') as string,
       site_location: formData.get('site_location') as string,
       start_date: formData.get('start_date') as string,
+      org_id: profile?.org_id,
     });
   };
 
@@ -1292,21 +1331,59 @@ function Projects({ session }: { session: Session }) {
   );
 }
 
+type PendingInvite = {
+  invite_id: string; email: string; role: string;
+  token: string; created_at: string; expires_at: string;
+};
+
+function timeLeft(expiresAt: string): { label: string; urgent: boolean } {
+  const hours = Math.floor((new Date(expiresAt).getTime() - Date.now()) / 3_600_000);
+  if (hours < 1)  return { label: 'Expires soon', urgent: true };
+  if (hours < 24) return { label: `${hours}h left`,              urgent: true };
+  return           { label: `${Math.floor(hours / 24)}d left`,   urgent: false };
+}
+
 function Team({ session }: { session: Session }) {
   const queryClient = useQueryClient();
   const { data: profile } = useUserProfile(session.user.id);
+  const { orgId } = useAuth();
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
+
+  // ── Invite form state ──────────────────────────────────────
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole]   = useState('supervisor');
+  const [inviteLink, setInviteLink]   = useState<string | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [copiedId, setCopiedId]       = useState<string | null>(null);
   
   const { data: team, isLoading: teamLoading } = useQuery({
-    queryKey: ['team'],
+    queryKey: ['team', profile?.org_id],
     queryFn: async () => {
-      const { data, error } = await supabase.from('user_profiles').select('*').order('created_at', { ascending: false });
+      const { data, error } = await supabase
+        .from('org_memberships')
+        .select(`
+          role,
+          status,
+          joined_at,
+          user_profiles (id, name, assigned_projects, created_at)
+        `)
+        .eq('org_id', profile!.org_id!)
+        .eq('status', 'active')
+        .order('joined_at', { ascending: false });
       if (error) throw error;
-      return data as UserProfile[];
+      return (data ?? [])
+        .filter(r => r.user_profiles !== null)
+        .map(r => ({
+          id:                (r.user_profiles as any).id as string,
+          name:              (r.user_profiles as any).name as string,
+          role:              r.role as UserProfile['role'],
+          assigned_projects: ((r.user_profiles as any).assigned_projects ?? []) as string[],
+          created_at:        (r.user_profiles as any).created_at as string,
+        } satisfies UserProfile));
     },
-    enabled: profile?.role === 'management' || profile?.role === 'principal',
+    enabled: (profile?.role === 'management' || profile?.role === 'principal') && !!profile?.org_id,
   });
 
   const { data: projects } = useQuery({
@@ -1319,7 +1396,66 @@ function Team({ session }: { session: Session }) {
     enabled: profile?.role === 'management' || profile?.role === 'principal',
   });
 
+  const isAdmin = profile?.role === 'management' || profile?.role === 'principal';
+
+  const { data: pendingInvites = [], refetch: refetchInvites } = useQuery({
+    queryKey: ['pending_invites', orgId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('org_invites')
+        .select('invite_id, email, role, token, created_at, expires_at')
+        .eq('org_id', orgId)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as PendingInvite[];
+    },
+    enabled: isAdmin && !!orgId,
+    staleTime: 30_000,
+  });
+
   const { show: showSnackbar } = useSnackbar();
+
+  const copyLink = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const sendInvite = useMutation({
+    mutationFn: async () => {
+      if (!orgId) throw new Error('Organisation not loaded — refresh and try again');
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inviteEmail))
+        throw new Error('Enter a valid email address');
+      const { data, error } = await supabase
+        .rpc('create_invite', {
+          p_org_id:     orgId,
+          p_email:      inviteEmail.trim().toLowerCase(),
+          p_role:       inviteRole,
+          p_invited_by: session.user.id,
+        })
+        .single();
+      if (error) throw error;
+      const row = data as { invite_id: string; token: string; success: boolean; error: string | null };
+      if (!row.success) throw new Error(row.error ?? 'Failed to create invite');
+      return row;
+    },
+    onSuccess: (data) => {
+      setInviteLink(`${window.location.origin}/invite/${data.token}`);
+      setInviteError(null);
+      refetchInvites();
+    },
+    onError: (err: any) => { setInviteError(err.message ?? 'Failed'); setInviteLink(null); },
+  });
+
+  const revokeInvite = useMutation({
+    mutationFn: async (inviteId: string) => {
+      const { error } = await supabase.from('org_invites').update({ status: 'revoked' }).eq('invite_id', inviteId);
+      if (error) throw error;
+    },
+    onSuccess: () => { refetchInvites(); showSnackbar('Invite revoked'); },
+    onError: (err: any) => showSnackbar(err.message ?? 'Failed to revoke', { type: 'error' }),
+  });
 
   const updateUser = useMutation({
     mutationFn: async ({ userId, updates }: { userId: string, updates: Partial<UserProfile> }) => {
@@ -1362,10 +1498,26 @@ function Team({ session }: { session: Session }) {
         email, password, email_confirm: true, user_metadata: { full_name: name }
       });
       if (authError) throw authError;
+
+      // Sync role to user_profiles — backward compat until T-14 migrates pages to org_memberships
       if (role !== 'supervisor') {
         const { error: updateError } = await supabase.from('user_profiles').update({ role: role as any }).eq('id', authData.user.id);
         if (updateError) throw updateError;
       }
+
+      // REPLACED: unsafe role-only path that left new users with no org_memberships entry.
+      // Previously: only user_profiles.role was set → T-05 resolver routed user to /pending on first login.
+      // Now: also insert into org_memberships so T-05 resolveAuthDestination() finds an active membership.
+      const orgId = profile?.org_id;
+      if (!orgId) throw new Error('Cannot determine organisation — refresh the page and try again.');
+      const { error: memError } = await supabaseAdmin
+        .from('org_memberships')
+        .upsert(
+          { org_id: orgId, user_id: authData.user.id, role, status: 'active', joined_at: new Date().toISOString() },
+          { onConflict: 'user_id,org_id' }
+        );
+      if (memError) throw memError;
+
       return authData;
     },
     onSuccess: () => {
@@ -1408,6 +1560,150 @@ function Team({ session }: { session: Session }) {
       {!supabaseAdmin && (
         <div className="mb-4 p-4 bg-tertiary-fixed text-on-tertiary-fixed rounded-xl border border-on-tertiary-container/20 text-body-sm">
           <strong>Missing Admin Key:</strong> Add <code className="font-data-mono">VITE_SUPABASE_SERVICE_ROLE_KEY</code> to <code className="font-data-mono">.env.local</code>.
+        </div>
+      )}
+
+      {/* ── A. Invite form ────────────────────────────────────────── */}
+      {isAdmin && (
+        <div className="mb-5 rounded-2xl overflow-hidden border border-black/[0.06]" style={{ background: 'white', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+          <div style={{ height: 3, background: 'linear-gradient(90deg,#C8603A 0%,#E8956D 100%)' }} />
+          <div className="p-5">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'rgba(200,96,58,0.1)' }}>
+                <IconMailForward size={17} style={{ color: '#C8603A' }} strokeWidth={1.8} />
+              </div>
+              <div>
+                <p className="text-[14px] font-semibold text-on-surface leading-tight">Invite a team member</p>
+                <p className="text-[12px] text-on-surface-variant/55 mt-0.5">Send a secure join link — no password needed</p>
+              </div>
+            </div>
+
+            {inviteLink ? (
+              <div className="rounded-xl p-4 transition-all" style={{ background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.18)' }}>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-5 h-5 rounded-full flex items-center justify-center" style={{ background: 'rgba(34,197,94,0.18)' }}>
+                    <IconCheck size={11} style={{ color: '#16a34a' }} strokeWidth={3} />
+                  </div>
+                  <span className="text-[13px] font-semibold" style={{ color: '#15803d' }}>Invite ready</span>
+                </div>
+                <p className="text-[12px] mb-2.5" style={{ color: 'rgba(0,0,0,0.5)' }}>
+                  Copy and share with <span className="font-medium text-on-surface">{inviteEmail}</span>
+                </p>
+                <div className="flex gap-2">
+                  <div className="flex-1 px-3 py-2 rounded-lg text-[11px] font-mono truncate" style={{ background: 'white', border: '1px solid rgba(0,0,0,0.09)', color: 'rgba(0,0,0,0.6)' }}>
+                    {inviteLink}
+                  </div>
+                  <button
+                    onClick={() => copyLink(inviteLink, 'new')}
+                    className="px-4 py-2 rounded-lg text-[12px] font-semibold transition-all"
+                    style={{ background: copiedId === 'new' ? '#16a34a' : '#C8603A', color: 'white', whiteSpace: 'nowrap', minWidth: 72 }}
+                  >
+                    {copiedId === 'new' ? 'Copied!' : 'Copy link'}
+                  </button>
+                </div>
+                <div className="mt-3 pt-3 flex items-center justify-between" style={{ borderTop: '1px solid rgba(0,0,0,0.07)' }}>
+                  <span className="text-[11px]" style={{ color: 'rgba(0,0,0,0.35)' }}>Expires in 7 days</span>
+                  <button
+                    onClick={() => { setInviteLink(null); setInviteEmail(''); setInviteError(null); }}
+                    className="text-[12px] font-semibold transition-colors hover:opacity-80"
+                    style={{ color: '#C8603A' }}
+                  >
+                    Invite another →
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="flex flex-col md:flex-row gap-2.5">
+                  <input
+                    type="email"
+                    value={inviteEmail}
+                    onChange={e => { setInviteEmail(e.target.value); setInviteError(null); }}
+                    placeholder="colleague@company.com"
+                    className="flex-1 px-4 rounded-xl text-[14px] outline-none transition-all"
+                    style={{ height: 44, border: `1.5px solid ${inviteError ? '#ef4444' : 'rgba(0,0,0,0.11)'}`, background: 'rgba(0,0,0,0.02)' }}
+                    onFocus={e => { e.currentTarget.style.borderColor = '#C8603A'; e.currentTarget.style.background = 'white'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(200,96,58,0.1)'; }}
+                    onBlur={e => { e.currentTarget.style.borderColor = inviteError ? '#ef4444' : 'rgba(0,0,0,0.11)'; e.currentTarget.style.background = 'rgba(0,0,0,0.02)'; e.currentTarget.style.boxShadow = 'none'; }}
+                    onKeyDown={e => { if (e.key === 'Enter') sendInvite.mutate(); }}
+                  />
+                  <select
+                    value={inviteRole}
+                    onChange={e => setInviteRole(e.target.value)}
+                    className="px-3 rounded-xl text-[14px] outline-none cursor-pointer"
+                    style={{ height: 44, minWidth: 148, border: '1.5px solid rgba(0,0,0,0.11)', background: 'rgba(0,0,0,0.02)' }}
+                  >
+                    <option value="supervisor">Supervisor</option>
+                    <option value="accountant">Accountant</option>
+                    <option value="management">Management</option>
+                  </select>
+                </div>
+                {inviteError && <p className="text-[12px] mt-1.5" style={{ color: '#ef4444' }}>{inviteError}</p>}
+                <button
+                  onClick={() => sendInvite.mutate()}
+                  disabled={sendInvite.isPending || !inviteEmail.trim()}
+                  className="mt-3 flex items-center gap-2 px-5 rounded-xl text-[13px] font-semibold transition-all disabled:opacity-40 hover:opacity-90 active:scale-[0.98]"
+                  style={{ height: 44, background: '#C8603A', color: 'white' }}
+                >
+                  {sendInvite.isPending
+                    ? <><div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />Sending…</>
+                    : <><IconMailForward size={15} strokeWidth={2} />Send invite</>}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── B. Pending invites ────────────────────────────────────── */}
+      {isAdmin && pendingInvites.length > 0 && (
+        <div className="mb-5">
+          <div className="flex items-center gap-2 mb-2.5">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.08em]" style={{ color: 'rgba(0,0,0,0.38)' }}>Pending invites</p>
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold text-white" style={{ background: '#C8603A' }}>{pendingInvites.length}</span>
+          </div>
+          <div className="space-y-2">
+            {pendingInvites.map(inv => {
+              const tl   = timeLeft(inv.expires_at);
+              const link = `${window.location.origin}/invite/${inv.token}`;
+              return (
+                <div
+                  key={inv.invite_id}
+                  className="flex items-center gap-3 px-4 py-3 rounded-xl transition-all"
+                  style={{ background: 'white', border: '1px solid rgba(0,0,0,0.06)', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}
+                >
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'rgba(200,96,58,0.08)' }}>
+                    <IconMail size={14} style={{ color: '#C8603A' }} strokeWidth={1.8} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] font-medium text-on-surface truncate">{inv.email}</p>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className="px-2 py-px rounded-full text-[10px] font-semibold capitalize" style={{ background: 'rgba(59,130,246,0.1)', color: '#1d4ed8' }}>
+                        {inv.role}
+                      </span>
+                      <span className="text-[11px]" style={{ color: tl.urgent ? '#f59e0b' : 'rgba(0,0,0,0.35)' }}>{tl.label}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => copyLink(link, inv.invite_id)}
+                      className="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all"
+                      style={{ background: copiedId === inv.invite_id ? 'rgba(34,197,94,0.1)' : 'rgba(0,0,0,0.04)', color: copiedId === inv.invite_id ? '#16a34a' : 'rgba(0,0,0,0.5)' }}
+                    >
+                      {copiedId === inv.invite_id ? 'Copied!' : 'Copy'}
+                    </button>
+                    <button
+                      onClick={() => { if (confirm(`Revoke invite for ${inv.email}?`)) revokeInvite.mutate(inv.invite_id); }}
+                      disabled={revokeInvite.isPending}
+                      className="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all hover:bg-red-50 disabled:opacity-40"
+                      style={{ color: '#ef4444' }}
+                    >
+                      Revoke
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 

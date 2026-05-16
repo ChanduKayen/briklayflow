@@ -7,6 +7,7 @@ export interface UserProfile {
   role: UserRole;
   assigned_projects: string[];
   created_at: string;
+  org_id?: string;
 }
 
 export interface Project {

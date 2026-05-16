@@ -7,8 +7,11 @@ import type { Stakeholder, Project } from '../types';
 import type { Session } from '@supabase/supabase-js';
 import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 import { useSnackbar } from '../components/Snackbar';
+import { useUserProfile } from '../App';
+import { useOrgId } from '../lib/auth/AuthProvider';
 import { CostCodePicker } from '../components/CostCodePicker';
 import { getCostCode, costCodeLabel, ALL_COST_CODES } from '../lib/costCodes';
+import { autoCloseWOIfFullyPaid } from '../lib/woAutoClose';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -82,10 +85,11 @@ function NoObligationsState({ projectId, onSkip }: { projectId: string; onSkip: 
 
 // ── WOObligationRow ───────────────────────────────────────────────────────────
 
-function WOObligationRow({ wo, selectedObligation, expanded, onToggleExpand, onSelect }: {
+function WOObligationRow({ wo, selectedObligation, expanded, onToggleExpand, onSelect, milestonePayments }: {
   wo: any; selectedObligation: SelectedObligation | null;
   expanded: boolean; onToggleExpand: () => void;
   onSelect: (ob: SelectedObligation) => void;
+  milestonePayments: Record<string, number>;
 }) {
   const hasPhases = (wo.wo_milestones?.length || 0) > 0;
   const woBalance = getWOBalance(wo);
@@ -137,6 +141,8 @@ function WOObligationRow({ wo, selectedObligation, expanded, onToggleExpand, onS
             const balance = getPhaseBalance(phase);
             const isPhaseSelected = selectedObligation?.phase_id === phase.milestone_id;
             const settled = phase.status === 'PAID' || phase.status === 'Paid';
+            const paid = milestonePayments[phase.milestone_id] || 0;
+            const due = balance - paid;
             return (
               <div key={phase.milestone_id}
                 className={`pl-9 pr-4 py-3 flex items-center gap-3 border-b border-black/[0.03] last:border-0 transition-colors
@@ -167,7 +173,11 @@ function WOObligationRow({ wo, selectedObligation, expanded, onToggleExpand, onS
                   <p className="text-[13px] font-medium font-data-mono text-on-surface">₹{balance.toLocaleString('en-IN')}</p>
                   {settled
                     ? <p className="text-[10px] text-[#16A34A] font-medium">Settled ✓</p>
-                    : <p className="text-[10px] text-[#C8603A] font-medium">due</p>}
+                    : due < 0
+                      ? <p className="text-[10px] text-rose-600 font-medium">Overpaid</p>
+                      : due === 0
+                        ? <p className="text-[10px] text-[#16A34A] font-medium">Fully Paid</p>
+                        : <p className="text-[10px] text-[#C8603A] font-medium">₹{due.toLocaleString('en-IN')} due</p>}
                 </div>
               </div>
             );
@@ -234,7 +244,25 @@ function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip,
   onSkip: () => void; projectId: string;
 }) {
   const [expandedWOs, setExpandedWOs] = useState<string[]>([]);
+  const [milestonePayments, setMilestonePayments] = useState<Record<string, number>>({});
   const hasData = wos.length > 0 || pos.length > 0;
+
+  useEffect(() => {
+    if (wos.length === 0) { setMilestonePayments({}); return; }
+    const woIds = wos.map((w: any) => w.wo_id);
+    supabase.from('txn_allocations')
+      .select('milestone_id, allocated_amount')
+      .in('order_ref', woIds)
+      .eq('order_type', 'WO')
+      .not('milestone_id', 'is', null)
+      .then(({ data }) => {
+        const map: Record<string, number> = {};
+        for (const row of (data || [])) {
+          map[row.milestone_id] = (map[row.milestone_id] || 0) + Number(row.allocated_amount);
+        }
+        setMilestonePayments(map);
+      });
+  }, [wos]);
 
   if (loading) {
     return (
@@ -271,7 +299,7 @@ function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip,
                 onToggleExpand={() => setExpandedWOs(prev =>
                   prev.includes(wo.wo_id) ? prev.filter(id => id !== wo.wo_id) : [...prev, wo.wo_id]
                 )}
-                onSelect={onSelect} />
+                onSelect={onSelect} milestonePayments={milestonePayments} />
             ))}
           </div>
         )}
@@ -361,6 +389,8 @@ export default function NewTransaction({ session: _session }: { session: Session
   const [recentPayees, setRecentPayees] = useState<{ id: string; name: string; type: string }[]>([]);
   const [saveAttempted, setSaveAttempted] = useState(false);
   const { show: showSnackbar } = useSnackbar();
+  const { data: profile } = useUserProfile(_session.user.id);
+  const orgId = useOrgId();
   const payeeRef = useRef<HTMLInputElement>(null);
   const stkDropRef = useRef<HTMLDivElement>(null);
 
@@ -411,6 +441,7 @@ export default function NewTransaction({ session: _session }: { session: Session
         .select('wo_id, scope_of_work, order_value, status, stakeholders(name, category), wo_milestones(*)')
         .eq('project_id', selectedProjectId)
         .eq('stakeholder_id', stkId)
+        .not('status', 'in', '("Closed","Cancelled")')
         .order('created_at', { ascending: false })
         .then(({ data: wos, error: woErr }) => {
           if (woErr) console.error('[LinkingPanel] WO fetch error:', woErr);
@@ -459,6 +490,7 @@ export default function NewTransaction({ session: _session }: { session: Session
         type,
         category: newStkTrade === OTHER_TRADE ? (newStkTradeOther.trim() || 'Other') : (newStkTrade || 'General'),
         contact: fd.get('contact') as string,
+        org_id: orgId,
       };
       const { data, error } = await supabase.from('stakeholders').insert([ns]).select().single();
       if (error) throw error;
@@ -496,6 +528,7 @@ export default function NewTransaction({ session: _session }: { session: Session
         remarks: effectiveRemarks, bill_doc_url,
         ai_flag_status: 'Clean',
         ai_flag_data: {},
+        org_id: orgId,
       };
       const mapped = effectiveAllocs.map((a) => {
         if (isClientReceipt) {
@@ -511,12 +544,15 @@ export default function NewTransaction({ session: _session }: { session: Session
       });
       const { error } = await supabase.rpc('insert_transaction_with_allocations', { p_txn: payload, p_allocations: mapped });
       if (error) throw error;
-      return { savedId: txnId, saveMode };
+      const autoCloseWoId = (selectedObligation?.type === 'WO' || selectedObligation?.type === 'WO_PHASE')
+        ? (selectedObligation.wo_id ?? null) : null;
+      return { savedId: txnId, saveMode, autoCloseWoId };
     },
-    onSuccess: ({ savedId, saveMode }) => {
+    onSuccess: ({ savedId, saveMode, autoCloseWoId }) => {
       qc.invalidateQueries({ queryKey: ['ledger'] });
       qc.invalidateQueries({ queryKey: ['po_payment_totals'] });
       qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
+      if (autoCloseWoId) autoCloseWOIfFullyPaid(autoCloseWoId, qc);
       const stk = stakeholders?.find((s) => s.stakeholder_id === stkId);
       if (stk) setRecentPayees((prev) => [{ id: stk.stakeholder_id, name: stk.name, type: stk.type }, ...prev.filter((p) => p.id !== stk.stakeholder_id)].slice(0, 5));
       if (saveMode === 'exit') {

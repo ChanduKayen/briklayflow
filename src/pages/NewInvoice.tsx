@@ -4,6 +4,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useSnackbar } from '../components/Snackbar';
+import { useUserProfile } from '../App';
+import { useOrgId } from '../lib/auth/AuthProvider';
 import type { Session } from '@supabase/supabase-js';
 import type { Stakeholder, Project, InvoiceType } from '../types';
 
@@ -49,6 +51,8 @@ export default function NewInvoice({ session }: { session: Session }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { show: showSnackbar } = useSnackbar();
+  const { data: profile } = useUserProfile(session.user.id);
+  const orgId = useOrgId();
 
   // ── Path selection ───────────────────────────────────────────────────────
   const [path, setPath] = useState<EntryPath | null>(null);
@@ -128,6 +132,7 @@ export default function NewInvoice({ session }: { session: Session }) {
         category: 'Client',
         contact: (fd.get('contact') as string) || undefined,
         gstin: (fd.get('gstin') as string) || undefined,
+        org_id: orgId,
       };
       const { data, error } = await supabase.from('stakeholders').insert([payload]).select().single();
       if (error) throw error;
@@ -184,6 +189,7 @@ export default function NewInvoice({ session }: { session: Session }) {
         doc_url,
         source: extractFile ? 'ai_extracted' : 'manual',
         created_by: session.user.id,
+        org_id: orgId,
       };
 
       const { error } = await supabase.from('client_invoices').insert([payload]);

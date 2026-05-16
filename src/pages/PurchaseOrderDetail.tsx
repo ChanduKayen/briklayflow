@@ -9,6 +9,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
+import { useOrgId } from '../lib/auth/AuthProvider';
 import { usePeek } from '../context/PeekContext';
 import type { POLineItem, POGRN, POApproval } from '../types';
 import {
@@ -329,6 +330,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const { show: showSnackbar } = useSnackbar();
   const { openPeek } = usePeek();
   const { data: profile } = useUserProfile(session.user.id);
+  const orgId = useOrgId();
 
   const canManage =
     profile?.role === 'management' ||
@@ -536,6 +538,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
         ai_flag_status: 'Clean',
         ai_flag_data:  null,
         entered_by:    session.user.id,
+        org_id:        orgId,
       });
       if (txnError) throw txnError;
 
@@ -546,6 +549,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
         order_type:        'PO',
         order_ref:         poId!,
         allocated_amount:  amount,
+        org_id:            orgId,
       });
       if (allocError) throw allocError;
 
@@ -583,6 +587,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
         ai_flag_status: 'Clean',
         ai_flag_data:   null,
         entered_by:     session.user.id,
+        org_id:         profile?.org_id,
       });
       if (txnErr) throw txnErr;
       const { error: allocErr } = await supabase.from('txn_allocations').insert({
@@ -591,6 +596,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
         order_type:       'PO',
         order_ref:        poId!,
         allocated_amount: amount,
+        org_id:           orgId,
       });
       if (allocErr) throw allocErr;
 

@@ -6,6 +6,7 @@ import { Loader2 } from 'lucide-react';
 import type { Stakeholder, GSTRegType } from '../types';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
+import { useAuth } from '../lib/auth/AuthProvider';
 import { usePeek } from '../context/PeekContext';
 import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 
@@ -84,6 +85,7 @@ function fmt(n: number) {
 export default function Stakeholders({ session }: { session: Session }) {
   const queryClient = useQueryClient();
   const { data: profile } = useUserProfile(session.user.id);
+  const { orgId } = useAuth();
   const { openPeek } = usePeek();
   const [showForm, setShowForm] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -125,12 +127,17 @@ export default function Stakeholders({ session }: { session: Session }) {
 
   // ── Queries ───────────────────────────────────────────────────────────────
   const { data: stakeholders, isLoading } = useQuery({
-    queryKey: ['stakeholders'],
+    queryKey: ['stakeholders', orgId],
     queryFn: async () => {
-      const { data, error } = await supabase.from('stakeholders').select('*').order('created_at', { ascending: false });
+      const { data, error } = await supabase
+        .from('stakeholders')
+        .select('*')
+        .eq('org_id', orgId!)
+        .order('created_at', { ascending: false });
       if (error) throw error;
       return data as Stakeholder[];
     },
+    enabled: !!orgId,
   });
 
   const { data: paidMap } = useQuery({
@@ -166,6 +173,7 @@ export default function Stakeholders({ session }: { session: Session }) {
         name: fullName, type: formType, category: resolvedCategory,
         contact: formData.get('contact') as string || null,
         bank_details: formData.get('bank_details') as string || null,
+        org_id: orgId,
       };
       if (formType === 'Vendor') {
         payload.gst_reg_type = gstRegType;

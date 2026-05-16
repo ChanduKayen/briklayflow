@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { useSnackbar } from '../components/Snackbar';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
+import { useOrgId } from '../lib/auth/AuthProvider';
 import { MAT_DIVISIONS } from '../lib/costCodes';
 import { VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 
@@ -20,21 +21,8 @@ function SectionLabel({ n, title }: { n: string; title: string }) {
   );
 }
 
-async function genPONumber(): Promise<string> {
-  const year = new Date().getFullYear();
-  const prefix = `PO-${year}-`;
-  const { data } = await supabase
-    .from('purchase_orders')
-    .select('po_id')
-    .like('po_id', `${prefix}%`)
-    .order('po_id', { ascending: false })
-    .limit(1);
-  let seq = 1;
-  if (data?.length) {
-    const num = parseInt(data[0].po_id.replace(prefix, ''), 10);
-    if (!isNaN(num)) seq = num + 1;
-  }
-  return `${prefix}${String(seq).padStart(4, '0')}`;
+function genPONumber(): string {
+  return `PO-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
 }
 
 
@@ -161,16 +149,13 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
   const qc         = useQueryClient();
   const { show: showSnackbar } = useSnackbar();
   const { data: profile } = useUserProfile(session.user.id);
+  const orgId = useOrgId();
   const vendorSearchRef = useRef<HTMLInputElement>(null);
 
   // ── PO Number ──────────────────────────────────────────────────────────────
-  const [poId, setPoId]               = useState('');
+  const [poId, setPoId]               = useState(genPONumber);
   const [autoPoId, setAutoPoId]       = useState(true);
   const [poIdCopied, setPoIdCopied]   = useState(false);
-
-  useEffect(() => {
-    genPONumber().then(setPoId);
-  }, []);
 
   // ── Section 01: Identity ──────────────────────────────────────────────────
   const [orderedDate, setOrderedDate]         = useState(new Date().toISOString().split('T')[0]);
@@ -309,6 +294,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
         vendor_notes:        vendorNotes || null,
         internal_notes:      internalNotes || null,
         created_by:          session.user.id,
+        org_id:              orgId,
       });
       if (poError) throw poError;
 
@@ -332,6 +318,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
           sgst:              li.sgst,
           igst:              0,
           total_amount:      li.total_amount,
+          org_id:            orgId,
         }));
 
       if (lineItemRows.length > 0) {
@@ -346,7 +333,10 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
       showSnackbar(`PO ${finalPoId} created`);
       navigate(`/purchase-orders/${finalPoId}`);
     },
-    onError: (err: any) => showSnackbar(err.message || 'Failed to save', { type: 'error' }),
+    onError: (err: any) => {
+      showSnackbar(err.message || 'Failed to save', { type: 'error' });
+      if (autoPoId) setPoId(genPONumber());
+    },
   });
 
   const createVendor = useMutation({
@@ -363,6 +353,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
         type:     'Vendor',
         category: resolvedCategory,
         gstin:    newVendorGstin.trim() || undefined,
+        org_id:   orgId,
       };
       const { data, error } = await supabase.from('stakeholders').insert([payload]).select().single();
       if (error) throw error;

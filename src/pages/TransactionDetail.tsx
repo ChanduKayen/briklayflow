@@ -8,6 +8,7 @@ import Breadcrumb from '../components/Breadcrumb';
 import { useUserProfile } from '../App';
 import { usePeek } from '../context/PeekContext';
 import { ImageLightbox } from '../components/ImageLightbox';
+import { autoCloseWOIfFullyPaid } from '../lib/woAutoClose';
 
 // ─── Amendment types ──────────────────────────────────────────────────────────
 // Requires: ALTER TABLE transactions ADD COLUMN amendments jsonb DEFAULT '[]'::jsonb;
@@ -77,10 +78,11 @@ function getWOBalance(wo: any): number { return Number(wo.order_value || 0); }
 function getPhaseBalance(phase: any): number { return Number(phase.planned_amount || 0); }
 function getPOBalance(po: any): number { return Number(po.vendor_bill_amount || po.total_value || 0); }
 
-function WOObligationRow({ wo, selectedObligation, expanded, onToggleExpand, onSelect }: {
+function WOObligationRow({ wo, selectedObligation, expanded, onToggleExpand, onSelect, milestonePayments }: {
   wo: any; selectedObligation: SelectedObligation | null;
   expanded: boolean; onToggleExpand: () => void;
   onSelect: (ob: SelectedObligation) => void;
+  milestonePayments: Record<string, number>;
 }) {
   const hasPhases = (wo.wo_milestones?.length || 0) > 0;
   const woBalance = getWOBalance(wo);
@@ -122,6 +124,8 @@ function WOObligationRow({ wo, selectedObligation, expanded, onToggleExpand, onS
             const balance = getPhaseBalance(phase);
             const isPhaseSelected = selectedObligation?.phase_id === phase.milestone_id;
             const settled = phase.status === 'PAID' || phase.status === 'Paid';
+            const paid = milestonePayments[phase.milestone_id] || 0;
+            const due = balance - paid;
             return (
               <div key={phase.milestone_id}
                 className={`pl-9 pr-4 py-3 flex items-center gap-3 border-b border-black/[0.03] last:border-0 transition-colors
@@ -143,7 +147,13 @@ function WOObligationRow({ wo, selectedObligation, expanded, onToggleExpand, onS
                 </div>
                 <div className="text-right shrink-0 ml-3">
                   <p className="text-[13px] font-medium font-data-mono text-on-surface">₹{balance.toLocaleString('en-IN')}</p>
-                  {settled ? <p className="text-[10px] text-[#16A34A] font-medium">Settled ✓</p> : <p className="text-[10px] text-[#C8603A] font-medium">due</p>}
+                  {settled
+                    ? <p className="text-[10px] text-[#16A34A] font-medium">Settled ✓</p>
+                    : due < 0
+                      ? <p className="text-[10px] text-rose-600 font-medium">Overpaid</p>
+                      : due === 0
+                        ? <p className="text-[10px] text-[#16A34A] font-medium">Fully Paid</p>
+                        : <p className="text-[10px] text-[#C8603A] font-medium">₹{due.toLocaleString('en-IN')} due</p>}
                 </div>
               </div>
             );
@@ -206,6 +216,24 @@ function DetailLinkingPanel({ wos, pos, loading, selectedObligation, onSelect, o
 }) {
   const nav = useNavigate();
   const [expandedWOs, setExpandedWOs] = useState<string[]>([]);
+  const [milestonePayments, setMilestonePayments] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    if (wos.length === 0) { setMilestonePayments({}); return; }
+    const woIds = wos.map((w: any) => w.wo_id);
+    supabase.from('txn_allocations')
+      .select('milestone_id, allocated_amount')
+      .in('order_ref', woIds)
+      .eq('order_type', 'WO')
+      .not('milestone_id', 'is', null)
+      .then(({ data }) => {
+        const map: Record<string, number> = {};
+        for (const row of (data || [])) {
+          map[row.milestone_id] = (map[row.milestone_id] || 0) + Number(row.allocated_amount);
+        }
+        setMilestonePayments(map);
+      });
+  }, [wos]);
   const isWorker = stkType === 'Worker';
   const isVendor = stkType === 'Vendor';
 
@@ -264,7 +292,7 @@ function DetailLinkingPanel({ wos, pos, loading, selectedObligation, onSelect, o
               <WOObligationRow key={wo.wo_id} wo={wo} selectedObligation={selectedObligation}
                 expanded={expandedWOs.includes(wo.wo_id)}
                 onToggleExpand={() => setExpandedWOs(prev => prev.includes(wo.wo_id) ? prev.filter(id => id !== wo.wo_id) : [...prev, wo.wo_id])}
-                onSelect={onSelect} />
+                onSelect={onSelect} milestonePayments={milestonePayments} />
             ))}
           </div>
         )}
@@ -401,12 +429,13 @@ export default function TransactionDetail({ session }: { session: Session }) {
     let cancelled = false;
     setLoadingObligations(true);
     setSelectedObligation(null);
+    console.log('[WO fetch] stakeholder_id:', txn.stakeholder_id, 'project_id:', alloc.project_id);
     Promise.all([
       supabase.from('work_orders')
         .select('wo_id, scope_of_work, order_value, status, stakeholders(name, category), wo_milestones(*)')
         .eq('project_id', alloc.project_id)
         .eq('stakeholder_id', txn.stakeholder_id)
-        .in('status', ['Active', 'Issued', 'Assigned', 'ACTIVE', 'ISSUED', 'ASSIGNED'])
+        .not('status', 'in', '("Closed","Cancelled")')
         .order('date_issued', { ascending: false }),
       supabase.from('purchase_orders')
         .select('po_id, status, vendor_bill_amount, total_value, stakeholders(name, category), po_line_items(*)')
@@ -450,6 +479,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
       }
       if (vars.order_type === 'WO' && vars.order_ref) {
         qc.invalidateQueries({ queryKey: ['wo_allocations', vars.order_ref] });
+        autoCloseWOIfFullyPaid(vars.order_ref, qc);
       }
       setMappingAllocId(null);
       setSelectedObligation(null);

@@ -7,6 +7,7 @@ import { Loader2 } from 'lucide-react';
 import type { Project, Stakeholder } from '../types';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
+import { useOrgId } from '../lib/auth/AuthProvider';
 
 // ─── Work Stage types ──────────────────────────────────────────────────────
 
@@ -129,6 +130,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
   const location = useLocation();
   const queryClient = useQueryClient();
   const { data: profile } = useUserProfile(session.user.id);
+  const orgId = useOrgId();
 
   const initState = (location.state as any) || {};
 
@@ -192,6 +194,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
         wo_id: woId, project_id: projectId, stakeholder_id: stakeholderId,
         scope_of_work: scope, order_value: orderValue, date_issued: dateIssued,
         source, status: 'Draft' as const,
+        org_id: orgId,
       }]).select().single();
       if (woError) throw woError;
       const milestoneRows = stages.length > 0
@@ -205,6 +208,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
               planned_amount: calcAmount(s),
               status: 'Pending' as const,
               ai_extracted: isAiExtracted,
+              org_id: orgId,
             };
           })
         : [{
@@ -213,6 +217,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
             planned_amount: orderValue,
             status: 'Pending' as const,
             ai_extracted: false,
+            org_id: orgId,
           }];
       const { error: mError } = await supabase.from('wo_milestones').insert(milestoneRows);
       if (mError) throw mError;

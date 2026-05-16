@@ -8,6 +8,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
+import { useOrgId } from '../lib/auth/AuthProvider';
 import { usePeek } from '../context/PeekContext';
 import type { StatusHistoryEntry, PaymentMode } from '../types';
 import {
@@ -18,7 +19,7 @@ import {
 } from '../lib/pdfHelpers';
 import { formatTxn } from '../lib/formatTxn';
 
-type ConfirmAction = 'approve' | 'issue' | 'activate' | 'close' | 'cancel';
+type ConfirmAction = 'approve' | 'issue' | 'activate' | 'close' | 'cancel' | 'settle';
 type MilestoneStatus = 'PENDING' | 'DUE' | 'PARTIALLY_PAID' | 'PAID' | 'OVERPAID';
 
 // ─── Status badge helpers ────────────────────────────────────────────────────
@@ -30,6 +31,7 @@ export function statusBadgeClass(status: string) {
     case 'Issued':    return 'bg-violet-100 text-violet-800';
     case 'Active':    return 'bg-amber-100 text-amber-800';
     case 'Closed':    return 'bg-green-100 text-green-800';
+    case 'Settled':   return 'bg-teal-50 text-teal-700';
     case 'Cancelled': return 'bg-rose-50 text-rose-700';
     default:          return 'bg-surface-container-high text-on-surface-variant';
   }
@@ -42,6 +44,7 @@ function statusDotColor(status: string) {
     case 'Issued':    return 'bg-violet-600';
     case 'Active':    return 'bg-amber-500';
     case 'Closed':    return 'bg-green-500';
+    case 'Settled':   return 'bg-teal-600';
     case 'Cancelled': return 'bg-rose-600';
     default:          return 'bg-on-surface-variant/30';
   }
@@ -61,10 +64,10 @@ function getMilestoneStatus(milestone: any, paid: number): MilestoneStatus {
 }
 
 const ACTION_TO_STATUS: Record<ConfirmAction, string> = {
-  approve: 'Assigned', issue: 'Issued', activate: 'Active', close: 'Closed', cancel: 'Cancelled',
+  approve: 'Assigned', issue: 'Issued', activate: 'Active', close: 'Closed', cancel: 'Cancelled', settle: 'Settled',
 };
 
-const FLOW_STATES = ['Draft', 'Assigned', 'Issued', 'Active', 'Closed'] as const;
+const FLOW_STATES = ['Draft', 'Assigned', 'Issued', 'Active', 'Closed', 'Settled'] as const;
 
 function fmtDate(d: string | null | undefined) {
   if (!d) return '—';
@@ -113,6 +116,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
   const navState = (location.state as { from?: string; projectId?: string; projectName?: string }) || {};
 
   const { data: profile } = useUserProfile(session.user.id);
+  const orgId = useOrgId();
 
   // Status transition state
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
@@ -262,6 +266,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
         ai_flag_status: 'Clean',
         ai_flag_data: null,
         entered_by: session.user.id,
+        org_id: orgId,
       }]);
       if (txnError) throw txnError;
 
@@ -273,6 +278,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
         order_ref: wo.wo_id,
         milestone_id: releaseModal.milestone.milestone_id,
         allocated_amount: amount,
+        org_id: orgId,
       }]);
       if (allocError) throw allocError;
     },
@@ -794,6 +800,14 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                 <span className="material-symbols-outlined text-[15px]">cancel</span> Cancel WO
               </button>
             </>
+          )}
+
+          {/* CLOSED → SETTLED */}
+          {wo.status === 'Closed' && canTransition && (
+            <button onClick={() => setConfirmAction('settle')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-teal-300/50 text-teal-700 text-[13px] font-semibold hover:bg-teal-50 transition-colors">
+              <span className="material-symbols-outlined text-[15px]">verified</span>
+              Mark Settled
+            </button>
           )}
 
           <button
@@ -1619,6 +1633,27 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                   <button onClick={() => transitionMutation.mutate(ACTION_TO_STATUS.close)} disabled={transitionMutation.isPending} className="bk-btn flex items-center gap-2">
                     {transitionMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <span className="material-symbols-outlined text-[16px]">check_circle</span>}
                     Close Anyway
+                  </button>
+                </div>
+              </>
+            )}
+            {confirmAction === 'settle' && (
+              <>
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-full bg-teal-100 flex items-center justify-center shrink-0">
+                    <span className="material-symbols-outlined text-[20px] text-teal-700">verified</span>
+                  </div>
+                  <h3 className="text-headline-sm font-headline-sm">Mark as Settled</h3>
+                </div>
+                <p className="text-body-sm text-on-surface-variant mb-4">
+                  Confirm all accounts for <strong className="font-data-mono">{wo.wo_id}</strong> are fully settled — paperwork, disputes, and retention complete.
+                </p>
+                {transitionError && <p className="text-error text-body-sm mb-4 p-3 bg-error-container/30 rounded-lg">{transitionError}</p>}
+                <div className="flex gap-3 justify-end">
+                  <button onClick={() => { setConfirmAction(null); setTransitionError(null); }} className="bk-btn-ghost px-5 py-2 text-body-sm border border-outline-variant/30">Cancel</button>
+                  <button onClick={() => transitionMutation.mutate(ACTION_TO_STATUS.settle)} disabled={transitionMutation.isPending} className="bk-btn flex items-center gap-2">
+                    {transitionMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <span className="material-symbols-outlined text-[16px]">verified</span>}
+                    Mark Settled
                   </button>
                 </div>
               </>

@@ -8,6 +8,7 @@ import Breadcrumb from '../components/Breadcrumb';
 import { TxnRow } from '../components/TxnRow';
 import { usePeek } from '../context/PeekContext';
 import { useUserProfile } from '../App';
+import { useOrgId } from '../lib/auth/AuthProvider';
 import { useSnackbar } from '../components/Snackbar';
 
 // ── CSV download ──────────────────────────────────────────────────────────────
@@ -325,6 +326,7 @@ function QuickTransactionDrawer({
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { show: showSnackbar } = useSnackbar();
+  const orgId = useOrgId();
 
   const [txnType, setTxnType]   = useState<'worker' | 'material' | 'expense'>('worker');
   const [stkId, setStkId]       = useState('');
@@ -383,6 +385,7 @@ function QuickTransactionDrawer({
       remarks: remarks.trim() || null,
       ai_flag_status: 'Clean',
       ai_flag_data: {},
+      org_id: orgId,
     });
     if (error) {
       showSnackbar(error.message || 'Failed to save', { type: 'error' });
@@ -393,6 +396,7 @@ function QuickTransactionDrawer({
       txn_id: txnId,
       project_id: projectId,
       allocated_amount: Number(amount),
+      org_id: orgId,
     });
     qc.invalidateQueries({ queryKey: ['project_allocs_v2', projectId] });
     showSnackbar(`Transaction saved — ${txnId}`);

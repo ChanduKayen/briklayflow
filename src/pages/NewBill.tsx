@@ -4,6 +4,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useSnackbar } from '../components/Snackbar';
+import { useUserProfile } from '../App';
+import { useOrgId } from '../lib/auth/AuthProvider';
 import type { Session } from '@supabase/supabase-js';
 import type { Stakeholder, Project } from '../types';
 
@@ -74,6 +76,8 @@ export default function NewBill({ session }: { session: Session }) {
   const location = useLocation();
   const qc = useQueryClient();
   const { show: showSnackbar } = useSnackbar();
+  const { data: profile } = useUserProfile(session.user.id);
+  const orgId = useOrgId();
 
   // Pre-fill from navigation state (e.g. from NewTransaction)
   const navState = (location.state as any) || {};
@@ -197,6 +201,7 @@ export default function NewBill({ session }: { session: Session }) {
         category: 'Client',
         contact: (fd.get('contact') as string) || undefined,
         gstin: (fd.get('gstin') as string) || undefined,
+        org_id: orgId,
       };
       const { data, error } = await supabase.from('stakeholders').insert([payload]).select().single();
       if (error) throw error;
@@ -245,6 +250,7 @@ export default function NewBill({ session }: { session: Session }) {
         doc_url,
         source: 'manual',
         created_by: session.user.id,
+        org_id: orgId,
         // Construction fields
         milestone_name: milestoneName.trim() || null,
         gross_amount: grossN,

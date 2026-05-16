@@ -4,6 +4,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useSnackbar } from '../components/Snackbar';
+import { useUserProfile } from '../App';
+import { useOrgId } from '../lib/auth/AuthProvider';
 import { LinearProgress } from '../components/LinearProgress';
 import { getBillingMode } from '../lib/billingMode';
 import type { Session } from '@supabase/supabase-js';
@@ -46,6 +48,8 @@ export default function InvoiceDetail({ session }: { session: Session }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { show: showSnackbar } = useSnackbar();
+  const { data: profile } = useUserProfile(session.user.id);
+  const orgId = useOrgId();
 
   // ── Record Receipt modal state ────────────────────────────────────────────
   const [showReceiptModal, setShowReceiptModal] = useState(false);
@@ -140,6 +144,7 @@ export default function InvoiceDetail({ session }: { session: Session }) {
         reference: receiptRef.trim() || null,
         notes: receiptNotes.trim() || null,
         created_by: session.user.id,
+        org_id: orgId,
       }]);
       if (payErr) throw payErr;
 
@@ -165,6 +170,7 @@ export default function InvoiceDetail({ session }: { session: Session }) {
           ai_flag_status: 'Clean',
           ai_flag_data: { type: 'client_receipt', invoice_id: invoiceId },
           entered_by: session.user.id,
+          org_id: orgId,
         };
         const { error: txnErr } = await supabase.from('transactions').insert([txnPayload]);
         if (!txnErr) {
@@ -175,6 +181,7 @@ export default function InvoiceDetail({ session }: { session: Session }) {
             order_type: null,
             order_ref: null,
             allocated_amount: amount,
+            org_id: orgId,
           }]);
           // Backlink txn_id onto the payment
           await supabase

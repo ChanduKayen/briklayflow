@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase';
 import type { RoughEntry } from '../types';
 import { useSnackbar } from './Snackbar';
 import { useUserProfile } from '../App';
+import { useOrgId } from '../lib/auth/AuthProvider';
 import { CostCodePicker } from './CostCodePicker';
 import { ImageLightbox } from './ImageLightbox';
 
@@ -121,6 +122,7 @@ function CreateStakeholderForm({
 }) {
   const qc = useQueryClient();
   const { show: showSnackbar } = useSnackbar();
+  const orgId = useOrgId();
   const [name, setName] = useState(defaultName);
   const [type, setType] = useState<'Worker' | 'Vendor' | 'Client'>('Worker');
   const [category, setCategory] = useState('');
@@ -138,6 +140,7 @@ function CreateStakeholderForm({
         type,
         category: category.trim() || type,
         contact: phone.trim() || null,
+        org_id: orgId,
       }]).select().single();
       if (error) throw error;
       qc.invalidateQueries({ queryKey: ['stakeholders'] });
@@ -214,7 +217,8 @@ export function ResolvePopup({ entry, onClose, onUpdated, session }: Props) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { show: showSnackbar } = useSnackbar();
-  useUserProfile(session.user.id);
+  const { data: profile } = useUserProfile(session.user.id);
+  const orgId = useOrgId();
 
   const ai = entry.ai_extracted;
 
@@ -353,6 +357,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, session }: Props) {
         proof_document_url: entry.raw_image_url || null,
         ai_flag_status: 'Clean',
         ai_flag_data: {},
+        org_id: orgId,
       };
       const allocations = [{ project_id: projectId, order_type: null, order_ref: null, milestone_id: null, allocated_amount: Number(amount) }];
 
