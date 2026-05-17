@@ -1,11 +1,11 @@
-# Graph Report - Briklay Fly  (2026-05-16)
+# Graph Report - Briklay Fly  (2026-05-17)
 
 ## Corpus Check
-- 112 files · ~277,233 words
+- 115 files · ~280,316 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 388 nodes · 465 edges · 16 communities detected
+- 393 nodes · 469 edges · 16 communities detected
 - Extraction: 87% EXTRACTED · 13% INFERRED · 0% AMBIGUOUS · INFERRED: 62 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
@@ -48,8 +48,8 @@
   src\lib\costCodes.ts → src\pages\Ledger.tsx
 - `getCostCode()` --calls--> `suggestCostCode()`  [INFERRED]
   src\lib\costCodes.ts → src\pages\NewTransaction.tsx
-- `WorkOrderDetail()` --calls--> `useOrgId()`  [INFERRED]
-  src\pages\WorkOrderDetail.tsx → src\lib\auth\AuthProvider.tsx
+- `useOrgId()` --calls--> `WorkOrderDetail()`  [INFERRED]
+  src\lib\auth\AuthProvider.tsx → src\pages\WorkOrderDetail.tsx
 
 ## Communities
 
@@ -135,7 +135,7 @@ _Questions this graph is uniquely positioned to answer:_
 - **Why does `SectionLabel()` connect `Community 3` to `Community 1`?**
   _High betweenness centrality (0.017) - this node is a cross-community bridge._
 - **Why does `handleDownloadPDF()` connect `Community 3` to `Community 8`?**
-  _High betweenness centrality (0.017) - this node is a cross-community bridge._
+  _High betweenness centrality (0.016) - this node is a cross-community bridge._
 - **Are the 5 inferred relationships involving `handleSessionReply()` (e.g. with `processMessage()` and `clearSession()`) actually correct?**
   _`handleSessionReply()` has 5 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 11 inferred relationships involving `processMessage()` (e.g. with `logMessage()` and `sendWA()`) actually correct?**

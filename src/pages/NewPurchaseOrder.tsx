@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { useSnackbar } from '../components/Snackbar';
@@ -146,6 +146,7 @@ async function fileToBase64(file: File): Promise<{ base64: string; mimeType: str
 
 export default function NewPurchaseOrder({ session }: { session: Session }) {
   const navigate   = useNavigate();
+  const location   = useLocation();
   const qc         = useQueryClient();
   const { show: showSnackbar } = useSnackbar();
   const { data: profile } = useUserProfile(session.user.id);
@@ -163,7 +164,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
   const orderedBy = profile?.name ?? '';
 
   // ── Section 02: Vendor & Project ─────────────────────────────────────────
-  const [projectId, setProjectId]               = useState('');
+  const [projectId, setProjectId]               = useState<string>((location.state as any)?.projectId || '');
   const [vendorId, setVendorId]                 = useState('');
   const [vendorSearch, setVendorSearch]         = useState('');
   const [showVendorSug, setShowVendorSug]       = useState(false);

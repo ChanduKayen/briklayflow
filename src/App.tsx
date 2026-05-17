@@ -7,7 +7,7 @@ import { supabaseAdmin } from './lib/supabase-admin';
 import type { Session } from '@supabase/supabase-js';
 import { Edit2, Trash2 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { Project, UserProfile } from './types';
+import type { UserProfile } from './types';
 import { SnackbarProvider, useSnackbar } from './components/Snackbar';
 import { PeekProvider } from './context/PeekContext';
 import { CommandBarProvider, useCommandBar } from './context/CommandBarContext';
@@ -30,6 +30,14 @@ import StakeholderDetail from './pages/StakeholderDetail';
 import WorkOrders from './pages/WorkOrders';
 import WorkOrderDetail from './pages/WorkOrderDetail';
 import ProjectDetail from './pages/ProjectDetail';
+import Projects from './pages/Projects';
+import ProjectTransactions from './pages/ProjectTransactions';
+import ProjectWorkOrders from './pages/ProjectWorkOrders';
+import ProjectPurchaseOrders from './pages/ProjectPurchaseOrders';
+import ProjectInventory from './pages/ProjectInventory';
+import ProjectBOQs from './pages/ProjectBOQs';
+import ProjectInward from './pages/ProjectInward';
+import NewProjectWizard from './components/NewProjectWizard';
 import TransactionDetail from './pages/TransactionDetail';
 import PurchaseOrders from './pages/PurchaseOrders';
 import NewPurchaseOrder from './pages/NewPurchaseOrder';
@@ -68,8 +76,9 @@ function App() {
   const [showMoreSheet, setShowMoreSheet] = useState(false);
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const longPress = useLongPress(() => setQuickActionsOpen(true));
+  const [routerReady, setRouterReady] = useState(false);
 
-  // Profile query — used for onboarding wizard guard (enabled only when session exists)
+  // Profile query â€" used for onboarding wizard guard (enabled only when session exists)
   const { data: appProfile } = useQuery({
     queryKey: ['profile', session?.user?.id ?? ''],
     queryFn: async () => {
@@ -98,10 +107,42 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  if (authState.status === 'loading' || authState.status === 'resolving') {
+  // Gate: hold rendering until auth is settled and session is available.
+  // Critically: distinguish "unauthenticated" (no session ever) from
+  // "authenticated but session hasn't arrived from getSession() yet".
+  // We do NOT wait for profileFetched â€" the onboarding check uses
+  // `if (appProfile && ...)` which is false-safe while loading, avoiding
+  // a network round-trip on every refresh just to show the app.
+  useEffect(() => {
+    if (authState.status === 'loading' || authState.status === 'resolving') return;
+    // Unauthenticated â€" no session is coming, nothing to wait for
+    if (authState.status === 'unauthenticated') { setRouterReady(true); return; }
+    // All other settled states (authenticated, pending, no-org) have a session.
+    // Wait for it to arrive from getSession() before unlocking the router.
+    if (!session) return;
+    setRouterReady(true);
+  }, [authState.status, session]);
+
+  if (!routerReady) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="w-5 h-5 border-2 border-outline-variant border-t-primary rounded-full animate-spin" />
+      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8f9ff' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="#0b1c30" strokeWidth="1.5" strokeLinejoin="round"/>
+            <path d="M2 17L12 22L22 17" stroke="#0b1c30" strokeWidth="1.5" strokeLinejoin="round"/>
+            <path d="M2 12L12 17L22 12" stroke="#0b1c30" strokeWidth="1.5" strokeLinejoin="round"/>
+          </svg>
+          <div style={{ width: '16px', height: '1.5px', background: 'rgba(0,0,0,0.10)', borderRadius: '1px', overflow: 'hidden' }}>
+            <div style={{ height: '100%', background: '#0b1c30', borderRadius: '1px', animation: 'bk-slide 1s ease-in-out infinite' }}/>
+          </div>
+        </div>
+        <style>{`
+          @keyframes bk-slide {
+            0%   { width: 0%;   margin-left: 0    }
+            50%  { width: 100%; margin-left: 0    }
+            100% { width: 0%;   margin-left: 100% }
+          }
+        `}</style>
       </div>
     );
   }
@@ -112,17 +153,19 @@ function App() {
   }
 
   if (location.pathname === '/pending') {
+    if (!routerReady) return null;
     if (!session) return <Navigate to="/login" replace />;
     return <Pending session={session} />;
   }
 
   if (location.pathname === '/create-workspace') {
+    if (!routerReady) return null;
     if (!session) return <Navigate to="/login" replace />;
     return <CreateWorkspace session={session} />;
   }
 
   if (authState.status === 'unauthenticated') return <Login />;
-  if (!session) return null; // brief race — session loads from localStorage in next tick
+  if (!session) return null;
 
   // First-run onboarding for principals
   if (appProfile && appProfile.role === 'principal' && !appProfile.onboarding_done) {
@@ -157,7 +200,7 @@ function App() {
         isOpen={sidebarOpen}
         onToggle={() => setSidebarOpen(o => !o)}
       />
-      {/* Desktop reopen button — only when sidebar is collapsed */}
+      {/* Desktop reopen button â€" only when sidebar is collapsed */}
       {!sidebarOpen && (
         <button
           onClick={() => setSidebarOpen(true)}
@@ -174,7 +217,7 @@ function App() {
         className={`min-h-screen mobile-main-pb transition-[margin-left] duration-[220ms] ease-[cubic-bezier(0.4,0,0.6,1)] ${sidebarOpen ? 'md:ml-[220px]' : 'md:ml-0'}`}
         {...longPress}
       >
-        {/* Mobile topbar (phones only — replaces sidebar hamburger) */}
+        {/* Mobile topbar (phones only â€" replaces sidebar hamburger) */}
         <MobileTopbar session={session} />
         <Routes>
           <Route path="/" element={<Navigate to="/ledger" replace />} />
@@ -190,7 +233,14 @@ function App() {
           <Route path="/billing/new" element={<NewBill session={session} />} />
           <Route path="/billing/:billId" element={<BillDetail session={session} />} />
           <Route path="/projects" element={<Projects session={session} />} />
+          <Route path="/projects/new" element={<NewProjectWizard session={session} />} />
           <Route path="/projects/:projectId" element={<ProjectDetail session={session} />} />
+          <Route path="/projects/:projectId/transactions" element={<ProjectTransactions session={session} />} />
+          <Route path="/projects/:projectId/work-orders" element={<ProjectWorkOrders session={session} />} />
+          <Route path="/projects/:projectId/purchase-orders" element={<ProjectPurchaseOrders session={session} />} />
+          <Route path="/projects/:projectId/inventory" element={<ProjectInventory session={session} />} />
+          <Route path="/projects/:projectId/boqs" element={<ProjectBOQs session={session} />} />
+          <Route path="/projects/:projectId/inward" element={<ProjectInward session={session} />} />
           <Route path="/stakeholders" element={<Stakeholders session={session} />} />
           <Route path="/stakeholders/:stakeholderId" element={<StakeholderDetail session={session} />} />
           <Route path="/orders" element={<Orders session={session} />} />
@@ -209,24 +259,24 @@ function App() {
         </Routes>
       </main>
 
-      {/* Bottom tab bar — mobile only */}
+      {/* Bottom tab bar â€" mobile only */}
       <BottomTabBar session={session} onMoreTap={() => setShowMoreSheet(true)} />
 
-      {/* More nav sheet — mobile only */}
+      {/* More nav sheet â€" mobile only */}
       <MoreNavSheet
         session={session}
         isOpen={showMoreSheet}
         onClose={() => setShowMoreSheet(false)}
       />
 
-      {/* FAB — mobile only */}
+      {/* FAB â€" mobile only */}
       <FloatingActionButton />
 
-      {/* Long-press quick actions overlay — mobile only */}
+      {/* Long-press quick actions overlay â€" mobile only */}
       <QuickActionsOverlay isOpen={quickActionsOpen} onClose={() => setQuickActionsOpen(false)} />
     </div>
 
-    {/* Command bar — rendered outside the scroll container, above everything */}
+    {/* Command bar â€" rendered outside the scroll container, above everything */}
     <CommandBar />
     <GlobalShortcuts />
 
@@ -236,7 +286,7 @@ function App() {
   );
 }
 
-// ── Nav shortcut helpers ───────────────────────────────────────────────────────
+// â"€â"€ Nav shortcut helpers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 const SHORTCUT_LETTERS: Record<string, string> = {
   '/ledger':          'T',
@@ -246,7 +296,7 @@ const SHORTCUT_LETTERS: Record<string, string> = {
 };
 
 const NAV_TOOLTIPS: Record<string, { shortcut: string | null; description: string }> = {
-  '/ledger':          { shortcut: 'T', description: 'All payments made — workers, vendors, expenses' },
+  '/ledger':          { shortcut: 'T', description: 'All payments made â€" workers, vendors, expenses' },
   '/work-orders':     { shortcut: 'W', description: 'Labour contracts and milestone payments' },
   '/purchase-orders': { shortcut: 'P', description: 'Material orders and vendor bills' },
   '/logbook':         { shortcut: 'L', description: 'Raw entries from WhatsApp and field notes' },
@@ -304,7 +354,7 @@ function NavTooltip({ href, children }: { href: string; children: React.ReactNod
   );
 }
 
-// ── Sidebar content ────────────────────────────────────────────────────────────
+// â"€â"€ Sidebar content â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 function SidebarContent({
   session,
@@ -323,6 +373,7 @@ function SidebarContent({
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [userRowHovered, setUserRowHovered] = useState(false);
+  const [projectsExpanded, setProjectsExpanded] = useState(true);
   const [orgName, setOrgName] = useState<string>('');
   const quickAddRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -412,45 +463,30 @@ function SidebarContent({
 
   const navGroups: NavGroup[] = [
     {
-      label: 'FIELD', show: true,
+      label: '',
+      show: true,
       items: [
-        { path: '/ledger',  icon: IconArrowsExchange, label: 'Transactions', show: role !== 'supervisor', accent: true },
-        { path: '/logbook', icon: IconNotebook,       label: 'Logbook',      show: true,                 badge: inboxBadgeCount },
+        { path: '/ledger',          icon: IconArrowsExchange, label: 'Transactions',    show: role !== 'supervisor',                          accent: true },
+        { path: '/work-orders',     icon: IconClipboardList,  label: 'Work Orders',     show: true,                                           badge: woPendingCount },
+        { path: '/purchase-orders', icon: IconShoppingBag,    label: 'Purchase Orders', show: role !== 'supervisor' && role !== 'accountant', badge: poUntalliedCount },
+        { path: '/logbook',         icon: IconNotebook,       label: 'Logbook',         show: true,                                           badge: inboxBadgeCount },
+        { path: '/stakeholders',    icon: IconUsersGroup,     label: 'Parties',         show: role !== 'supervisor' && role !== 'accountant' },
       ],
     },
     {
-      label: 'PEOPLE', show: true,
+      label: '',
+      show: role !== 'supervisor',
       items: [
-        { path: '/stakeholders', icon: IconUsersGroup,    label: 'Parties',    show: role !== 'supervisor' && role !== 'accountant' },
-        { path: '/attendance',   icon: IconCalendarCheck, label: 'Attendance', show: true },
+        { path: '/billing',    icon: IconFileInvoice,     label: 'Client Billing', show: role !== 'supervisor', badge: billOverdueCount },
+        { path: '/dashboard',  icon: IconLayoutDashboard, label: 'Dashboard',      show: true },
       ],
     },
     {
-      label: 'PROCUREMENT', show: true,
+      label: 'WORKSPACE',
+      show: role === 'principal' || role === 'management',
       items: [
-        { path: '/work-orders',     icon: IconClipboardList, label: 'Work Orders',     show: true,                                           badge: woPendingCount },
-        { path: '/purchase-orders', icon: IconShoppingBag,   label: 'Purchase Orders', show: role !== 'supervisor' && role !== 'accountant', badge: poUntalliedCount },
-      ],
-    },
-    {
-      label: 'BILLING', show: role !== 'supervisor',
-      items: [
-        { path: '/billing', icon: IconFileInvoice, label: 'Client Billing', show: role !== 'supervisor', badge: billOverdueCount },
-      ],
-    },
-    {
-      label: 'INTELLIGENCE', show: true,
-      items: [
-        { path: '/financials', icon: IconChartBar,        label: 'Financials', show: showFinancials },
-        { path: '/dashboard',  icon: IconLayoutDashboard, label: 'Pulse',      show: true },
-      ],
-    },
-    {
-      label: 'ADMIN', show: role === 'principal' || role === 'management',
-      items: [
-        { path: '/cost-codes', icon: IconSitemap,                label: 'Cost Codes',    show: true },
-        { path: '/team',       icon: IconShieldLock,             label: 'Team & Access', show: true },
-        { path: '/settings',   icon: IconAdjustmentsHorizontal, label: 'Settings',      show: true },
+        { path: '/team',     icon: IconShieldLock,             label: 'Team & Access', show: true },
+        { path: '/settings', icon: IconAdjustmentsHorizontal,  label: 'Settings',      show: true },
       ],
     },
   ];
@@ -469,14 +505,14 @@ function SidebarContent({
     { label: 'New Work Order',     path: '/work-orders/new',     icon: IconClipboardList },
     { label: 'New Purchase Order', path: '/purchase-orders/new', icon: IconShoppingBag },
     { label: 'Raise Bill',         path: '/billing/new',         icon: IconFileInvoice },
-    { label: 'New Project',        path: '/projects',            icon: IconBuildingEstate },
+    { label: 'New Project',        path: '/projects/new',        icon: IconBuildingEstate },
     { label: 'Add Stakeholder',    path: '/stakeholders',        icon: IconUsersGroup },
   ];
 
   return (
     <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--nav-bg)' }}>
 
-      {/* ── Company identity ─────────────────────────────────────────────── */}
+      {/* â"€â"€ Company identity â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
       <div style={{ height: 56, padding: '0 16px', display: 'flex', alignItems: 'center', borderBottom: '1px solid var(--nav-border)', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
           <div style={{ width: 8, height: 8, background: 'var(--nav-accent)', transform: 'rotate(45deg)', flexShrink: 0 }} />
@@ -486,7 +522,7 @@ function SidebarContent({
         </div>
       </div>
 
-      {/* ── + New button ─────────────────────────────────────────────────── */}
+      {/* â"€â"€ + New button â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
       <div style={{ margin: '12px 12px 4px', position: 'relative' }} ref={quickAddRef}>
         <button
           onClick={() => setShowQuickAdd(o => !o)}
@@ -545,82 +581,289 @@ function SidebarContent({
         )}
       </div>
 
-      {/* ── Nav groups ───────────────────────────────────────────────────── */}
+      {/* â"€â"€ Nav groups â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
       <nav style={{ flex: 1, overflowY: 'auto', padding: '0 0 4px' }} className="no-scrollbar">
 
-        {/* ── Dashboard (standalone) ───────────────────────────────────── */}
-        <div style={{ padding: '8px 0 4px' }}>
-          <Link to="/dashboard" onClick={onNavigate} className="nav-item" data-active={location.pathname === '/dashboard'}>
-            <IconLayoutDashboard size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
-            <span style={{ flex: 1, lineHeight: 1 }}>Dashboard</span>
-          </Link>
-        </div>
-        <div style={{ height: 1, background: 'var(--nav-border)', margin: '0 12px 4px' }} />
+        {/* â"€â"€ Context detection: project sub-nav vs global nav â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
+        {(() => {
+          const projMatch = location.pathname.match(/^\/projects\/([^/]+)/);
+          const activeProjectId = projMatch?.[1];
+          const isNewProject = activeProjectId === 'new';
 
-        {/* ── PROJECTS section ─────────────────────────────────────────── */}
-        <div className="nav-group-animate">
-          <p style={{ padding: '16px 16px 4px', fontSize: 10, fontWeight: 500, color: 'var(--nav-text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase', userSelect: 'none' }}>
-            Projects
-          </p>
-          {sidebarProjects.map(proj => {
-            const path = `/projects/${proj.project_id}`;
-            const active = isActive(path);
+          if (activeProjectId && !isNewProject) {
+            // â"€â"€ Project context nav â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+            const activeProj = sidebarProjects.find(p => p.project_id === activeProjectId);
+            const projName = activeProj?.name ?? 'â€¦';
+            const base = `/projects/${activeProjectId}`;
+
+            const projectNavItems = [
+              { path: base,                       icon: 'grid_view',             label: 'Overview' },
+              { path: `${base}/transactions`,     icon: 'swap_horiz',            label: 'Transactions' },
+              { path: `${base}/work-orders`,      icon: 'assignment',            label: 'Work Orders' },
+              { path: `${base}/purchase-orders`,  icon: 'shopping_bag',          label: 'Purchase Orders' },
+              { path: `${base}/inventory`,        icon: 'inventory_2',           label: 'Inventory' },
+              { path: `${base}/boqs`,             icon: 'format_list_numbered',  label: 'BOQs' },
+              { path: `${base}/inward`,           icon: 'local_shipping',        label: 'Inward Register' },
+            ];
+
             return (
-              <Link key={proj.project_id} to={path} onClick={onNavigate} className="nav-item" data-active={active}>
-                <span style={{ width: 16, height: 16, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <span style={{ width: 5, height: 5, borderRadius: '50%', background: active ? 'var(--nav-accent)' : 'currentColor', opacity: active ? 1 : 0.4 }} />
-                </span>
-                <span style={{ flex: 1, lineHeight: 1 }}>{proj.name}</span>
-              </Link>
-            );
-          })}
-          <Link to="/projects" onClick={onNavigate} className="nav-item" data-active={location.pathname === '/projects'}>
-            <IconBuildingEstate size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
-            <span style={{ flex: 1, lineHeight: 1 }}>+ Add Project</span>
-          </Link>
-        </div>
+              <>
+                {/* Back link */}
+                <div style={{ padding: '10px 12px 4px' }}>
+                  <Link to="/projects" onClick={onNavigate}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 8, fontSize: 12, color: 'var(--nav-text-muted)', textDecoration: 'none', transition: 'color 100ms' }}
+                    onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.color = 'var(--nav-text-active)'}
+                    onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.color = 'var(--nav-text-muted)'}>
+                    <IconChevronLeft size={13} strokeWidth={1.5} />
+                    All Projects
+                  </Link>
+                </div>
 
-        {/* ── Other nav groups ─────────────────────────────────────────── */}
-        {navGroups.filter(g => g.show).map((group, gi) => {
-          const visible = group.items.filter(i => i.show);
-          if (visible.length === 0) return null;
-          return (
-            <div key={group.label} className="nav-group-animate" style={{ animationDelay: `${(gi + 1) * 40}ms` }}>
-              <p style={{ padding: '16px 16px 4px', fontSize: 10, fontWeight: 500, color: 'var(--nav-text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase', userSelect: 'none' }}>
-                {group.label}
-              </p>
-              {visible.map(item => {
-                const Icon = item.icon;
-                const active = isActive(item.path);
-                return (
-                  <NavTooltip key={item.path} href={item.path}>
-                    <Link
-                      to={item.path}
-                      onClick={onNavigate}
-                      className="nav-item"
-                      data-active={active}
-                    >
-                      <Icon
-                        size={16}
-                        strokeWidth={1.5}
-                        style={{ flexShrink: 0, ...(item.accent ? { color: 'var(--nav-accent)' } : {}) }}
-                      />
-                      <NavLabel label={item.label} href={item.path} isActive={active} />
-                      {(item.badge ?? 0) > 0 && (
-                        <span className="nav-badge-mono">
-                          {(item.badge ?? 0) > 9 ? '9+' : item.badge}
-                        </span>
-                      )}
+                {/* Project title */}
+                <div style={{ padding: '6px 20px 14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--nav-accent)', flexShrink: 0 }} />
+                    <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--nav-text-active)', letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {projName}
+                    </p>
+                  </div>
+                </div>
+
+                <div style={{ height: 1, background: 'var(--nav-border)', margin: '0 12px 6px' }} />
+
+                {/* Project nav items */}
+                {projectNavItems.map(item => {
+                  const exact = item.path === base;
+                  const active = exact
+                    ? location.pathname === base
+                    : location.pathname.startsWith(item.path);
+                  return (
+                    <Link key={item.path} to={item.path} onClick={onNavigate} className="nav-item" data-active={active}>
+                      <span className="material-symbols-outlined" style={{ fontSize: 16, flexShrink: 0, color: active ? 'var(--nav-accent)' : 'inherit' }}>{item.icon}</span>
+                      <span style={{ flex: 1, lineHeight: 1 }}>{item.label}</span>
                     </Link>
-                  </NavTooltip>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </>
+            );
+          }
+
+          // ── Global nav ────────────────────────────────────────────────────
+
+          // Deterministic project avatar color from name
+          const PROJ_PALETTE = ['#B5601A','#2A7A6E','#4A6FA8','#7B4EA0','#8C7327','#B03060'];
+          const projColor = (name: string) => PROJ_PALETTE[name.charCodeAt(0) % PROJ_PALETTE.length];
+          const projInitials = (name: string) =>
+            name.trim().split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2);
+
+          const renderNavItem = (item: NavItem) => {
+            const Icon = item.icon;
+            const active = isActive(item.path);
+            return (
+              <NavTooltip key={item.path} href={item.path}>
+                <Link to={item.path} onClick={onNavigate} className="nav-item" data-active={active}>
+                  <Icon size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+                  <NavLabel label={item.label} href={item.path} isActive={active} />
+                  {(item.badge ?? 0) > 0 && (
+                    <span className="nav-badge-mono">{(item.badge ?? 0) > 9 ? '9+' : item.badge}</span>
+                  )}
+                </Link>
+              </NavTooltip>
+            );
+          };
+
+          const SHOW_LIMIT = 7;
+          const visibleProjects = sidebarProjects.slice(0, SHOW_LIMIT);
+          const hiddenCount = sidebarProjects.length - SHOW_LIMIT;
+
+          return (
+            <>
+              {/* ── PROJECTS section ────────────────────────────────── */}
+              <div style={{ padding: '10px 0 2px' }}>
+
+                {/* Section header row — click to collapse */}
+                <button
+                  onClick={() => setProjectsExpanded(o => !o)}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center', gap: 5,
+                    padding: '0 12px 0 10px', height: 26,
+                    background: 'transparent', border: 'none', cursor: 'pointer',
+                  }}
+                >
+                  <IconChevronDown
+                    size={11} strokeWidth={2.5}
+                    style={{
+                      color: 'var(--nav-text-muted)', flexShrink: 0,
+                      transition: 'transform 180ms cubic-bezier(0.4,0,0.6,1)',
+                      transform: projectsExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
+                    }}
+                  />
+                  <span style={{
+                    flex: 1, textAlign: 'left', fontSize: 10, fontWeight: 700,
+                    letterSpacing: '0.09em', textTransform: 'uppercase',
+                    color: 'var(--nav-text-muted)', userSelect: 'none',
+                  }}>
+                    Projects
+                  </span>
+                  {sidebarProjects.length > 0 && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 600, lineHeight: '15px',
+                      color: 'var(--nav-text-muted)',
+                      background: 'rgba(0,0,0,0.06)',
+                      borderRadius: 10, padding: '0 5px',
+                    }}>
+                      {sidebarProjects.length}
+                    </span>
+                  )}
+                  {/* + Add new project */}
+                  <Link
+                    to="/projects/new"
+                    onClick={e => { e.stopPropagation(); onNavigate(); }}
+                    style={{
+                      width: 20, height: 20,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      borderRadius: 5, color: 'var(--nav-text-muted)',
+                      fontSize: 17, fontWeight: 300, lineHeight: 1,
+                      textDecoration: 'none', transition: 'background 80ms, color 80ms',
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(0,0,0,0.07)'; (e.currentTarget as HTMLAnchorElement).style.color = 'var(--nav-accent)'; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.background = 'transparent'; (e.currentTarget as HTMLAnchorElement).style.color = 'var(--nav-text-muted)'; }}
+                  >
+                    +
+                  </Link>
+                </button>
+
+                {/* Collapsible project list */}
+                <div style={{
+                  overflow: 'hidden',
+                  maxHeight: projectsExpanded ? 600 : 0,
+                  transition: 'max-height 220ms cubic-bezier(0.4,0,0.6,1)',
+                }}>
+                  {sidebarProjects.length === 0 ? (
+                    <Link
+                      to="/projects/new"
+                      onClick={onNavigate}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 7,
+                        padding: '5px 12px 5px 28px',
+                        fontSize: 12, color: 'var(--nav-text-muted)',
+                        textDecoration: 'none', fontStyle: 'italic',
+                        transition: 'color 80ms',
+                      }}
+                    >
+                      + Create first project
+                    </Link>
+                  ) : (
+                    <>
+                      {visibleProjects.map(proj => {
+                        const path = `/projects/${proj.project_id}`;
+                        const active = isActive(path);
+                        const color = projColor(proj.name);
+                        const mono = projInitials(proj.name);
+                        return (
+                          <Link
+                            key={proj.project_id}
+                            to={path}
+                            onClick={onNavigate}
+                            className="nav-item"
+                            data-active={active}
+                          >
+                            {/* Monogram avatar */}
+                            <div style={{
+                              width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                              background: active ? color : `${color}22`,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              fontSize: 8, fontWeight: 800, letterSpacing: '-0.02em',
+                              color: active ? '#fff' : color,
+                              transition: 'background 100ms',
+                              userSelect: 'none',
+                            }}>
+                              {mono}
+                            </div>
+                            <span style={{ flex: 1, lineHeight: 1 }}>{proj.name}</span>
+                          </Link>
+                        );
+                      })}
+                      {hiddenCount > 0 && (
+                        <Link
+                          to="/projects"
+                          onClick={onNavigate}
+                          style={{
+                            display: 'block', padding: '4px 12px 4px 36px',
+                            fontSize: 11, color: 'var(--nav-text-muted)',
+                            textDecoration: 'none', transition: 'color 80ms',
+                          }}
+                          onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.color = 'var(--nav-text-default)'}
+                          onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.color = 'var(--nav-text-muted)'}
+                        >
+                          +{hiddenCount} more
+                        </Link>
+                      )}
+                    </>
+                  )}
+
+                  {/* All Projects footer link */}
+                  <Link
+                    to="/projects"
+                    onClick={onNavigate}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 7,
+                      padding: '4px 12px 8px 28px',
+                      fontSize: 11, color: 'var(--nav-text-muted)',
+                      textDecoration: 'none', transition: 'color 80ms',
+                    }}
+                    onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.color = 'var(--nav-text-default)'}
+                    onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.color = 'var(--nav-text-muted)'}
+                  >
+                    All Projects →
+                  </Link>
+                </div>
+              </div>
+
+              {/* ── Divider ── */}
+              <div style={{ height: 1, background: 'var(--nav-border)', margin: '2px 12px 4px' }} />
+
+              {/* ── Primary nav (Txns, WOs, POs, Parties, Logbook) ── */}
+              {navGroups[0].items.filter(i => i.show).map(renderNavItem)}
+
+              {/* ── Divider ── */}
+              {navGroups[1].show && navGroups[1].items.some(i => i.show) && (
+                <div style={{ height: 1, background: 'var(--nav-border)', margin: '4px 12px' }} />
+              )}
+
+              {/* ── Secondary nav (Billing, Dashboard) ── */}
+              {navGroups[1].show && navGroups[1].items.filter(i => i.show).map(renderNavItem)}
+
+              {/* ── WORKSPACE section ── */}
+              {(role === 'principal' || role === 'management') && (
+                <>
+                  <div style={{ height: 1, background: 'var(--nav-border)', margin: '4px 12px 2px' }} />
+                  <p style={{
+                    padding: '8px 16px 4px',
+                    fontSize: 10, fontWeight: 700, letterSpacing: '0.09em',
+                    textTransform: 'uppercase', color: 'var(--nav-text-muted)',
+                    userSelect: 'none',
+                  }}>
+                    Workspace
+                  </p>
+                  {navGroups[2].items.filter(i => i.show).map(item => {
+                    const Icon = item.icon;
+                    const active = isActive(item.path);
+                    return (
+                      <Link key={item.path} to={item.path} onClick={onNavigate} className="nav-item" data-active={active}>
+                        <Icon size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+                        <span style={{ flex: 1, lineHeight: 1 }}>{item.label}</span>
+                      </Link>
+                    );
+                  })}
+                </>
+              )}
+            </>
           );
-        })}
+        })()}
       </nav>
 
-      {/* ── Collapse trigger ─────────────────────────────────────────────── */}
+      {/* â"€â"€ Collapse trigger â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
       {onCollapse && (
         <button
           onClick={onCollapse}
@@ -640,7 +883,7 @@ function SidebarContent({
         </button>
       )}
 
-      {/* ── User identity ────────────────────────────────────────────────── */}
+      {/* â"€â"€ User identity â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
       <div
         style={{ borderTop: '1px solid var(--nav-border)', padding: '10px 12px', flexShrink: 0, position: 'relative' }}
         ref={userMenuRef}
@@ -701,7 +944,7 @@ function SidebarContent({
   );
 }
 
-// ── Global keyboard shortcuts ──────────────────────────────────────────────────
+// â"€â"€ Global keyboard shortcuts â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 function GlobalShortcuts() {
   const { open } = useCommandBar();
@@ -709,7 +952,7 @@ function GlobalShortcuts() {
   return null;
 }
 
-// ── Sidebar shell ──────────────────────────────────────────────────────────────
+// â"€â"€ Sidebar shell â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 function Sidebar({
   session,
@@ -726,7 +969,7 @@ function Sidebar({
 }) {
   return (
     <>
-      {/* Desktop — animated width (220px ↔ 0px) */}
+      {/* Desktop â€" animated width (220px â†" 0px) */}
       <aside
         style={{ width: isOpen ? 220 : 0, background: 'var(--nav-bg)' }}
         className="hidden md:block fixed left-0 top-0 h-full z-50 overflow-hidden transition-[width] duration-[220ms] ease-[cubic-bezier(0.4,0,0.6,1)]"
@@ -737,13 +980,13 @@ function Sidebar({
         </div>
       </aside>
 
-      {/* Mobile drawer — hidden on phones (bottom tab bar handles mobile nav) */}
+      {/* Mobile drawer â€" hidden on phones (bottom tab bar handles mobile nav) */}
       {/* Kept for tablet use if needed, but currently not triggered on mobile */}
     </>
   );
 }
 
-// ── Mobile helpers ────────────────────────────────────────────────────────────
+// â"€â"€ Mobile helpers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 function getMobileTitle(pathname: string): string {
   const routes: Record<string, string> = {
@@ -825,23 +1068,98 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
   const { data: profile } = useUserProfile(session.user.id);
   const role = profile?.role ?? '';
 
-  const isActive = (path: string) =>
+  const isActivePath = (path: string) =>
     path === '/' ? location.pathname === '/' : location.pathname === path || location.pathname.startsWith(path + '/');
 
-  const isOrdersActive =
-    isActive('/orders') || isActive('/purchase-orders') || isActive('/work-orders');
+  // Detect project context
+  const projMatch = location.pathname.match(/^\/projects\/([^/]+)/);
+  const activeProjectId = projMatch?.[1];
+  const isInProject = !!(activeProjectId && activeProjectId !== 'new');
 
-  const moreActive = [
-    '/billing', '/team', '/settings', '/financials',
-    '/invoices', '/fund-register', '/cost-codes', '/attendance',
-  ].some(p => isActive(p));
+  // ── Project context bottom bar ─────────────────────────────────────────
+  if (isInProject) {
+    const base = `/projects/${activeProjectId}`;
+    const isOverview  = location.pathname === base;
+    const isTxns      = location.pathname.startsWith(`${base}/transactions`);
+    const isWOs       = location.pathname.startsWith(`${base}/work-orders`);
+    const isPOs       = location.pathname.startsWith(`${base}/purchase-orders`);
+    const isOther     = !isOverview && !isTxns && !isWOs && !isPOs; // inventory, boqs, inward
+
+    return (
+      <nav
+        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white"
+        style={{ borderTop: '0.5px solid var(--nav-border)', height: 60 }}
+      >
+        <div className="flex items-stretch h-full" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+
+          {/* ← Back to all projects */}
+          <Link
+            to="/projects"
+            className="flex flex-col items-center justify-center gap-0.5"
+            style={{ color: 'var(--nav-text-muted)', minWidth: 52, paddingLeft: 4, paddingRight: 4 }}
+          >
+            <div className="flex items-center gap-0.5">
+              <IconChevronLeft size={16} strokeWidth={2} />
+            </div>
+            <span className="text-[9px] font-medium leading-none" style={{ letterSpacing: '0.02em' }}>Projects</span>
+          </Link>
+
+          {/* Thin separator */}
+          <div style={{ width: 1, background: 'var(--nav-border)', margin: '12px 0', flexShrink: 0 }} />
+
+          {/* Overview */}
+          <Link to={base} className="flex-1 flex flex-col items-center justify-center gap-0.5"
+            style={{ color: isOverview ? TERRACOTTA : 'var(--nav-text-muted)' }}>
+            <IconLayoutGrid size={20} strokeWidth={isOverview ? 2 : 1.5} />
+            <span className="text-[10px] font-medium leading-none">Overview</span>
+          </Link>
+
+          {/* Transactions */}
+          <Link to={`${base}/transactions`} className="flex-1 flex flex-col items-center justify-center gap-0.5"
+            style={{ color: isTxns ? TERRACOTTA : 'var(--nav-text-muted)' }}>
+            <IconArrowsExchange size={20} strokeWidth={isTxns ? 2 : 1.5} />
+            <span className="text-[10px] font-medium leading-none">Txns</span>
+          </Link>
+
+          {/* Work Orders */}
+          <Link to={`${base}/work-orders`} className="flex-1 flex flex-col items-center justify-center gap-0.5"
+            style={{ color: isWOs ? TERRACOTTA : 'var(--nav-text-muted)' }}>
+            <IconClipboardList size={20} strokeWidth={isWOs ? 2 : 1.5} />
+            <span className="text-[10px] font-medium leading-none">W.Orders</span>
+          </Link>
+
+          {/* Purchase Orders */}
+          <Link to={`${base}/purchase-orders`} className="flex-1 flex flex-col items-center justify-center gap-0.5"
+            style={{ color: isPOs ? TERRACOTTA : 'var(--nav-text-muted)' }}>
+            <IconShoppingBag size={20} strokeWidth={isPOs ? 2 : 1.5} />
+            <span className="text-[10px] font-medium leading-none">POs</span>
+          </Link>
+
+          {/* More — active when on Inventory / BOQs / Inward */}
+          <button
+            onClick={onMoreTap}
+            className="flex-1 flex flex-col items-center justify-center gap-0.5"
+            style={{ color: isOther ? TERRACOTTA : 'var(--nav-text-muted)' }}
+          >
+            <IconDots size={20} strokeWidth={isOther ? 2 : 1.5} />
+            <span className="text-[10px] font-medium leading-none">More</span>
+          </button>
+
+        </div>
+      </nav>
+    );
+  }
+
+  // ── Global context bottom bar ──────────────────────────────────────────
+  const isOrdersActive = isActivePath('/orders') || isActivePath('/purchase-orders') || isActivePath('/work-orders');
+  const moreActive = ['/billing', '/team', '/settings', '/logbook', '/invoices'].some(p => isActivePath(p));
 
   type Tab = { path: string; icon: React.ElementType; label: string; show: boolean };
   const tabs: Tab[] = [
-    { path: '/ledger',       icon: IconRepeat,      label: 'Txns',     show: role !== 'supervisor' },
-    { path: '/projects',     icon: IconLayoutGrid,  label: 'Projects', show: true },
-    { path: '/orders',       icon: IconFiles,       label: 'Orders',   show: true },
-    { path: '/stakeholders', icon: IconUsers,       label: 'Parties',  show: role !== 'supervisor' && role !== 'accountant' },
+    { path: '/ledger',       icon: IconRepeat,     label: 'Txns',     show: role !== 'supervisor' },
+    { path: '/projects',     icon: IconLayoutGrid, label: 'Projects', show: true },
+    { path: '/orders',       icon: IconFiles,      label: 'Orders',   show: true },
+    { path: '/stakeholders', icon: IconUsers,      label: 'Parties',  show: role !== 'supervisor' && role !== 'accountant' },
   ].filter(t => t.show);
 
   return (
@@ -851,7 +1169,7 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
     >
       <div className="flex items-stretch h-full" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
         {tabs.map(tab => {
-          const active = tab.path === '/orders' ? isOrdersActive : isActive(tab.path);
+          const active = tab.path === '/orders' ? isOrdersActive : isActivePath(tab.path);
           const Icon = tab.icon;
           return (
             <Link
@@ -886,32 +1204,37 @@ function MoreNavSheet({
   const { data: profile } = useUserProfile(session.user.id);
   const role = profile?.role ?? '';
 
-  const { data: hasPrincipal } = useQuery({
-    queryKey: ['has_principal'],
-    queryFn: async () => {
-      const { data } = await supabase.from('user_profiles').select('id').eq('role', 'principal').limit(1);
-      return (data?.length || 0) > 0;
-    },
-    staleTime: 5 * 60 * 1000,
-    enabled: role === 'principal' || role === 'management',
-  });
-
-  const showFinancials = role === 'principal' || (role === 'management' && !hasPrincipal);
-
-  const isActive = (path: string) =>
+  const isActivePath = (path: string) =>
     location.pathname === path || location.pathname.startsWith(path + '/');
 
   const go = (path: string) => { navigate(path); onClose(); };
 
-  const items = [
-    { path: '/logbook',     icon: IconNotebook,              label: 'Logbook',       show: true },
-    { path: '/attendance',  icon: IconCalendarCheck,         label: 'Attendance',    show: true },
-    { path: '/billing',     icon: IconFileInvoice,           label: 'Billing',       show: role !== 'supervisor' },
-    { path: '/financials',  icon: IconChartBar,              label: 'Financials',    show: showFinancials },
-    { path: '/cost-codes',  icon: IconSitemap,               label: 'Cost Codes',    show: role === 'principal' || role === 'management' },
-    { path: '/team',        icon: IconShieldLock,            label: 'Team & Access', show: role === 'principal' || role === 'management' },
-    { path: '/settings',    icon: IconAdjustmentsHorizontal, label: 'Settings',      show: true },
+  // Detect if we're in a project context — show project sub-pages in More sheet
+  const projMatch = location.pathname.match(/^\/projects\/([^/]+)/);
+  const activeProjectId = projMatch?.[1];
+  const isInProject = !!(activeProjectId && activeProjectId !== 'new');
+
+  // Project More items: the less-frequent project sub-pages
+  const base = activeProjectId ? `/projects/${activeProjectId}` : '';
+  const projectMoreItems = isInProject ? [
+    { path: base,                    icon: IconLayoutGrid,            label: 'Overview',        show: true },
+    { path: `${base}/inventory`,     icon: IconFiles,                 label: 'Inventory',       show: true },
+    { path: `${base}/boqs`,          icon: IconClipboardList,         label: 'BOQs',            show: true },
+    { path: `${base}/inward`,        icon: IconShoppingBag,           label: 'Inward Register', show: true },
+    { path: '/dashboard',            icon: IconLayoutDashboard,       label: 'Dashboard',       show: true },
+  ] : [];
+
+  // Global More items (used outside project context)
+  const globalItems = [
+    { path: '/logbook',  icon: IconNotebook,              label: 'Logbook',       show: true },
+    { path: '/billing',  icon: IconFileInvoice,           label: 'Client Billing', show: role !== 'supervisor' },
+    { path: '/dashboard',icon: IconLayoutDashboard,       label: 'Dashboard',     show: true },
+    { path: '/team',     icon: IconShieldLock,            label: 'Team & Access', show: role === 'principal' || role === 'management' },
+    { path: '/settings', icon: IconAdjustmentsHorizontal, label: 'Settings',      show: true },
   ].filter(i => i.show);
+
+  const items = isInProject ? projectMoreItems.filter(i => i.show) : globalItems;
+  const sheetTitle = isInProject ? 'Project' : 'More';
 
   return (
     <>
@@ -930,12 +1253,12 @@ function MoreNavSheet({
           <div className="w-8 h-1 rounded-full bg-black/15" />
         </div>
         <div className="px-4 pb-2">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-on-surface-variant/40">More</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-on-surface-variant/40">{sheetTitle}</p>
         </div>
         <div className="overflow-y-auto" style={{ maxHeight: '60vh' }}>
           {items.map(item => {
             const Icon = item.icon;
-            const active = isActive(item.path);
+            const active = isActivePath(item.path);
             return (
               <button
                 key={item.path}
@@ -1061,315 +1384,6 @@ export function useUserProfile(userId: string) {
 
 
 
-function Projects({ session }: { session: Session }) {
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const { data: profile } = useUserProfile(session.user.id);
-  const [showForm, setShowForm] = useState(false);
-  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
-  const [editFormData, setEditFormData] = useState<Partial<Project>>({});
-
-  const { data: projects, isLoading, error } = useQuery({
-    queryKey: ['projects'],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('projects').select('*').order('created_at', { ascending: false });
-      if (error) throw error;
-      return data as Project[];
-    },
-  });
-
-  // Financial summary data for cards
-  const { data: allocData, isLoading: allocLoading } = useQuery({
-    queryKey: ['project_card_allocs'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('txn_allocations')
-        .select('project_id, allocated_amount, transactions(txn_id, status)');
-      if (error) throw error;
-      return data as unknown as { project_id: string; allocated_amount: number; transactions: { txn_id: string; status: string } | null }[];
-    },
-  });
-
-  const { data: woData, isLoading: woLoading } = useQuery({
-    queryKey: ['project_card_wos'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('work_orders')
-        .select('project_id, status');
-      if (error) throw error;
-      return data as { project_id: string; status: string }[];
-    },
-  });
-
-  // Aggregate per project
-  const projectStats = (() => {
-    const stats: Record<string, { totalSpend: number; txnIds: Set<string> }> = {};
-    for (const a of allocData || []) {
-      if (a.transactions?.status !== 'Active') continue;
-      if (!stats[a.project_id]) stats[a.project_id] = { totalSpend: 0, txnIds: new Set() };
-      stats[a.project_id].totalSpend += Number(a.allocated_amount) || 0;
-      if (a.transactions?.txn_id) stats[a.project_id].txnIds.add(a.transactions.txn_id);
-    }
-    return stats;
-  })();
-
-  const openWOCounts = (woData || []).reduce((acc, wo) => {
-    if (['Draft', 'Issued', 'Active'].includes(wo.status)) {
-      acc[wo.project_id] = (acc[wo.project_id] || 0) + 1;
-    }
-    return acc;
-  }, {} as Record<string, number>);
-
-  const statsLoading = allocLoading || woLoading;
-
-  const fmtSpend = (n: number) =>
-    n >= 100000 ? `₹${(n / 100000).toFixed(1).replace(/\.0$/, '')}L` : `₹${n.toLocaleString()}`;
-
-  const { show: showSnackbar } = useSnackbar();
-
-  const createProject = useMutation({
-    mutationFn: async (newProject: Partial<Project>) => {
-      const { data, error } = await supabase.from('projects').insert([newProject]).select().single();
-      if (error) throw error;
-      return data;
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['projects'] });
-      setShowForm(false);
-      showSnackbar(`Project "${data.name}" created`);
-    },
-    onError: (err: any) => showSnackbar(err.message || 'Failed to create project', { type: 'error' }),
-  });
-
-  const updateProject = useMutation({
-    mutationFn: async ({ id, updates }: { id: string, updates: Partial<Project> }) => {
-      const { data, error } = await supabase.from('projects').update(updates).eq('project_id', id).select().single();
-      if (error) throw error;
-      return data;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['projects'] });
-      setEditingProjectId(null);
-      showSnackbar('Project updated');
-    },
-    onError: (err: any) => showSnackbar(err.message || 'Failed to update', { type: 'error' }),
-  });
-
-  const deleteProject = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from('projects').delete().eq('project_id', id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['projects'] });
-      showSnackbar('Project deleted');
-    },
-    onError: (err: any) => showSnackbar(err.message || 'Failed to delete — check for linked records', { type: 'error' }),
-  });
-
-  const handleCreate = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    createProject.mutate({
-      project_id: formData.get('project_id') as string,
-      name: formData.get('name') as string,
-      site_location: formData.get('site_location') as string,
-      start_date: formData.get('start_date') as string,
-      org_id: profile?.org_id,
-    });
-  };
-
-
-
-  return (
-    <div className="px-4 md:px-margin-desktop pt-4 md:pt-6 pb-6">
-      <div className="flex items-center justify-between gap-3 mb-5">
-        <div>
-          <h2 className="text-[22px] md:text-[24px] font-bold text-on-surface tracking-tight">Projects</h2>
-          <p className="text-[12px] text-on-surface-variant/50 mt-0.5">{projects?.length ?? 0} active</p>
-        </div>
-        {(profile?.role === 'management' || profile?.role === 'principal') && (
-          <button
-            onClick={() => setShowForm(!showForm)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              height: 34, padding: '0 14px 0 10px',
-              borderRadius: 99, border: 'none',
-              background: showForm ? 'rgba(0,0,0,0.07)' : '#C8603A',
-              color: showForm ? '#000' : '#fff',
-              fontSize: 13, fontWeight: 500, cursor: 'pointer',
-              transition: 'background 150ms',
-            }}
-          >
-            <span style={{ fontSize: 18, fontWeight: 300, lineHeight: 1 }}>{showForm ? '×' : '+'}</span>
-            {showForm ? 'Cancel' : 'New Project'}
-          </button>
-        )}
-      </div>
-
-      {showForm && (
-        <div className="bg-white rounded-2xl border border-black/[0.08] shadow-elevation-1 mb-5 overflow-hidden">
-          <div className="px-5 py-4 border-b border-black/[0.06]">
-            <p className="text-[15px] font-semibold text-on-surface">New Project</p>
-          </div>
-          <form onSubmit={handleCreate} className="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <label className="text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant/50">Project ID</label>
-              <input name="project_id" className="bk-input w-full" placeholder="BRK-PRJ-001" required />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant/50">Project Name</label>
-              <input name="name" className="bk-input w-full" placeholder="Phase 1 Residential" required />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant/50">Site Location</label>
-              <input name="site_location" className="bk-input w-full" placeholder="City / Address" required />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-semibold uppercase tracking-widest text-on-surface-variant/50">Start Date</label>
-              <input name="start_date" type="date" className="bk-input w-full" required />
-            </div>
-            <div className="md:col-span-2 flex gap-3 pt-1">
-              <button type="button" onClick={() => setShowForm(false)}
-                className="flex-1 md:flex-none h-10 px-5 rounded-xl border border-outline-variant/30 text-[13px] font-medium text-on-surface-variant/60">
-                Cancel
-              </button>
-              <button type="submit" disabled={createProject.isPending}
-                className="flex-1 md:flex-none h-10 px-6 rounded-xl bg-primary text-white text-[13px] font-semibold disabled:opacity-40">
-                {createProject.isPending ? 'Saving…' : 'Save Project'}
-              </button>
-            </div>
-          </form>
-          {createProject.isError && <p className="text-error px-5 pb-4 text-[13px]">{createProject.error.message}</p>}
-        </div>
-      )}
-
-      <div className="grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
-        {isLoading && <LinearProgress className="col-span-full mb-4" />}
-        {error && <p className="text-error col-span-full">Failed to load projects: {(error as Error).message}</p>}
-        {projects?.length === 0 && !isLoading && (
-          <div className="col-span-full py-16 text-center">
-            <p className="text-[15px] font-medium text-on-surface-variant/50">No projects yet</p>
-            <p className="text-[13px] text-on-surface-variant/35 mt-1">Tap the button above to create one</p>
-          </div>
-        )}
-        {projects?.map((p) => (
-          <div key={p.project_id} className="contents">
-            <div className="bg-white rounded-2xl shadow-elevation-1 border border-black/[0.06] hover:shadow-elevation-2 transition-shadow duration-150 relative group active:bg-surface-container-low/30">
-              {editingProjectId === p.project_id ? (
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-[10px] font-bold text-on-surface-variant">PROJECT NAME</label>
-                    <input className="bk-input w-full py-1.5" value={editFormData.name || ''} onChange={e => setEditFormData({...editFormData, name: e.target.value})} placeholder="Project Name" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-on-surface-variant">SITE LOCATION</label>
-                    <input className="bk-input w-full py-1.5" value={editFormData.site_location || ''} onChange={e => setEditFormData({...editFormData, site_location: e.target.value})} placeholder="Site Location" />
-                  </div>
-                  <div className="flex gap-2">
-                    <div className="flex-1">
-                      <label className="text-[10px] font-bold text-on-surface-variant">START DATE</label>
-                      <input type="date" className="bk-input w-full py-1.5" value={editFormData.start_date ? new Date(editFormData.start_date).toISOString().split('T')[0] : ''} onChange={e => setEditFormData({...editFormData, start_date: e.target.value})} />
-                    </div>
-                    <div className="flex-1">
-                      <label className="text-[10px] font-bold text-on-surface-variant">STATUS</label>
-                      <select className="bk-input w-full py-1.5" value={editFormData.status || 'Active'} onChange={e => setEditFormData({...editFormData, status: e.target.value as any})}>
-                        <option value="Active">Active</option>
-                        <option value="Completed">Completed</option>
-                        <option value="On Hold">On Hold</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div className="flex gap-2 justify-end pt-2">
-                    <button className="bk-btn-ghost text-body-sm py-1 px-3 border border-primary/20" onClick={() => setEditingProjectId(null)}>Cancel</button>
-                    <button className="bk-btn text-body-sm py-1 px-4" onClick={() => updateProject.mutate({ id: p.project_id, updates: editFormData })} disabled={updateProject.isPending}>Save</button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div className="cursor-pointer" onClick={() => navigate(`/projects/${p.project_id}`)}>
-                    <div className="flex justify-between items-start mb-4 pr-6">
-                      <div>
-                        <h3 className="font-body-lg font-bold text-on-surface">{p.name}</h3>
-                        <p className="text-body-sm text-on-surface-variant font-data-mono">{p.project_id}</p>
-                      </div>
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${p.status === 'Active' ? 'bg-secondary-container text-on-secondary-container' : 'bg-surface-container-highest text-on-surface-variant'}`}>
-                        {p.status?.toUpperCase()}
-                      </span>
-                    </div>
-                    <div className="text-body-sm text-on-surface-variant space-y-1">
-                      <p className="flex items-center gap-1"><span className="material-symbols-outlined text-[16px]">location_on</span>{p.site_location}</p>
-                      <p className="flex items-center gap-1"><span className="material-symbols-outlined text-[16px]">calendar_today</span>{new Date(p.start_date).toLocaleDateString()}</p>
-                    </div>
-
-                    {/* Financial summary strip */}
-                    <div className="mt-4 pt-3 border-t border-outline-variant/15">
-                      {statsLoading ? (
-                        <div className="grid grid-cols-3 gap-2">
-                          {[0,1,2].map(i => (
-                            <div key={i} className="text-center space-y-1">
-                              <div className="h-4 w-12 mx-auto bg-surface-container-highest rounded animate-pulse" />
-                              <div className="h-2.5 w-8 mx-auto bg-surface-container-highest rounded animate-pulse" />
-                            </div>
-                          ))}
-                        </div>
-                      ) : (() => {
-                        const s = projectStats[p.project_id];
-                        const spend = s?.totalSpend ?? 0;
-                        const txnCount = s?.txnIds.size ?? 0;
-                        const openWOs = openWOCounts[p.project_id] ?? 0;
-                        return (
-                          <div className="grid grid-cols-3 gap-2 text-center">
-                            <div>
-                              <p className={`text-body-sm font-bold font-data-mono ${spend === 0 ? 'text-on-surface-variant' : 'text-on-surface'}`}>
-                                {fmtSpend(spend)}
-                              </p>
-                              <p className="text-[10px] text-on-surface-variant mt-0.5">spent</p>
-                            </div>
-                            <div className="border-x border-outline-variant/15">
-                              <p className={`text-body-sm font-bold ${openWOs === 0 ? 'text-on-surface-variant' : 'text-on-surface'}`}>
-                                {openWOs === 0 ? 'No WOs' : openWOs}
-                              </p>
-                              <p className="text-[10px] text-on-surface-variant mt-0.5">open WOs</p>
-                            </div>
-                            <div>
-                              <p className={`text-body-sm font-bold ${txnCount === 0 ? 'text-on-surface-variant' : 'text-on-surface'}`}>
-                                {txnCount}
-                              </p>
-                              <p className="text-[10px] text-on-surface-variant mt-0.5">transactions</p>
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                  
-                  {(profile?.role === 'management' || profile?.role === 'principal') && (
-                    <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 bg-white/90 backdrop-blur rounded-lg p-1 shadow-sm border border-outline-variant/20">
-                      <button className="p-1.5 hover:bg-surface-container rounded-md text-on-surface-variant hover:text-primary transition-colors" onClick={(e) => { e.stopPropagation(); setEditingProjectId(p.project_id); setEditFormData(p); }} title="Edit Project">
-                        <Edit2 size={16} />
-                      </button>
-                      <button className="p-1.5 hover:bg-error-container rounded-md text-on-surface-variant hover:text-error transition-colors" onClick={(e) => {
-                        e.stopPropagation();
-                        if (window.confirm('Delete this project? This will fail if there are linked work orders or transactions.')) {
-                          deleteProject.mutate(p.project_id);
-                        }
-                      }} title="Delete Project">
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-
-    </div>
-  );
-}
-
 type PendingInvite = {
   invite_id: string; email: string; role: string;
   token: string; created_at: string; expires_at: string;
@@ -1390,7 +1404,7 @@ function Team({ session }: { session: Session }) {
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
 
-  // ── Invite form state ──────────────────────────────────────
+  // â"€â"€ Invite form state â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole]   = useState('supervisor');
   const [inviteLink, setInviteLink]   = useState<string | null>(null);
@@ -1463,7 +1477,7 @@ function Team({ session }: { session: Session }) {
 
   const sendInvite = useMutation({
     mutationFn: async () => {
-      if (!orgId) throw new Error('Organisation not loaded — refresh and try again');
+      if (!orgId) throw new Error('Organisation not loaded â€" refresh and try again');
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inviteEmail))
         throw new Error('Enter a valid email address');
       const { data, error } = await supabase
@@ -1538,17 +1552,17 @@ function Team({ session }: { session: Session }) {
       });
       if (authError) throw authError;
 
-      // Sync role to user_profiles — backward compat until T-14 migrates pages to org_memberships
+      // Sync role to user_profiles â€" backward compat until T-14 migrates pages to org_memberships
       if (role !== 'supervisor') {
         const { error: updateError } = await supabase.from('user_profiles').update({ role: role as any }).eq('id', authData.user.id);
         if (updateError) throw updateError;
       }
 
       // REPLACED: unsafe role-only path that left new users with no org_memberships entry.
-      // Previously: only user_profiles.role was set → T-05 resolver routed user to /pending on first login.
+      // Previously: only user_profiles.role was set â†’ T-05 resolver routed user to /pending on first login.
       // Now: also insert into org_memberships so T-05 resolveAuthDestination() finds an active membership.
       const orgId = profile?.org_id;
-      if (!orgId) throw new Error('Cannot determine organisation — refresh the page and try again.');
+      if (!orgId) throw new Error('Cannot determine organisation â€" refresh the page and try again.');
       const { error: memError } = await supabaseAdmin
         .from('org_memberships')
         .upsert(
@@ -1602,7 +1616,7 @@ function Team({ session }: { session: Session }) {
         </div>
       )}
 
-      {/* ── A. Invite form ────────────────────────────────────────── */}
+      {/* â"€â"€ A. Invite form â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
       {isAdmin && (
         <div className="mb-5 rounded-2xl overflow-hidden border border-black/[0.06]" style={{ background: 'white', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
           <div style={{ height: 3, background: 'linear-gradient(90deg,#C8603A 0%,#E8956D 100%)' }} />
@@ -1613,7 +1627,7 @@ function Team({ session }: { session: Session }) {
               </div>
               <div>
                 <p className="text-[14px] font-semibold text-on-surface leading-tight">Invite a team member</p>
-                <p className="text-[12px] text-on-surface-variant/55 mt-0.5">Send a secure join link — no password needed</p>
+                <p className="text-[12px] text-on-surface-variant/55 mt-0.5">Send a secure join link â€" no password needed</p>
               </div>
             </div>
 
@@ -1647,7 +1661,7 @@ function Team({ session }: { session: Session }) {
                     className="text-[12px] font-semibold transition-colors hover:opacity-80"
                     style={{ color: '#C8603A' }}
                   >
-                    Invite another →
+                    Invite another â†’
                   </button>
                 </div>
               </div>
@@ -1684,7 +1698,7 @@ function Team({ session }: { session: Session }) {
                   style={{ height: 44, background: '#C8603A', color: 'white' }}
                 >
                   {sendInvite.isPending
-                    ? <><div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />Sending…</>
+                    ? <><div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />Sendingâ€¦</>
                     : <><IconMailForward size={15} strokeWidth={2} />Send invite</>}
                 </button>
               </>
@@ -1693,7 +1707,7 @@ function Team({ session }: { session: Session }) {
         </div>
       )}
 
-      {/* ── B. Pending invites ────────────────────────────────────── */}
+      {/* â"€â"€ B. Pending invites â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
       {isAdmin && pendingInvites.length > 0 && (
         <div className="mb-5">
           <div className="flex items-center gap-2 mb-2.5">
