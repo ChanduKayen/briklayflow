@@ -160,7 +160,6 @@ export default function ProjectTransactions({ session }: { session: Session }) {
     txnGroupMap.get(txn.txn_id)!.push({ txn, alloc: a })
   }
 
-  const uniqueStakeholders = Array.from(new Set(allocData.map((a: any) => a.transactions?.stakeholders?.name).filter(Boolean))) as string[]
   const uniqueTypes = ['Worker Payment', 'Material Purchase', 'General Expense']
 
   const activeDateRange = getDateRange(datePreset, customFrom, customTo)

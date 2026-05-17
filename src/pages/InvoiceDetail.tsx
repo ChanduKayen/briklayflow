@@ -4,7 +4,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useSnackbar } from '../components/Snackbar';
-import { useUserProfile } from '../App';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import { LinearProgress } from '../components/LinearProgress';
 import { getBillingMode } from '../lib/billingMode';
@@ -48,7 +47,6 @@ export default function InvoiceDetail({ session }: { session: Session }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { show: showSnackbar } = useSnackbar();
-  const { data: profile } = useUserProfile(session.user.id);
   const orgId = useOrgId();
 
   // ── Record Receipt modal state ────────────────────────────────────────────
