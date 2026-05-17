@@ -51,6 +51,7 @@ import BillDetail from './pages/BillDetail';
 import Logbook from './pages/Logbook';
 import Orders from './pages/Orders';
 import InviteAccept from './pages/InviteAccept';
+import OnboardingWizard from './components/OnboardingWizard';
 import Pending from './pages/Pending';
 import CreateWorkspace from './pages/CreateWorkspace';
 import { FloatingActionButton } from './components/FloatingActionButton';
@@ -60,12 +61,28 @@ import { useLongPress } from './hooks/useLongPress';
 function App() {
   const { authState } = useAuth();
   const location = useLocation();
+  const queryClient = useQueryClient();
   const [session, setSession] = useState<Session | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showMoreSheet, setShowMoreSheet] = useState(false);
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const longPress = useLongPress(() => setQuickActionsOpen(true));
+
+  // Profile query — used for onboarding wizard guard (enabled only when session exists)
+  const { data: appProfile } = useQuery({
+    queryKey: ['profile', session?.user?.id ?? ''],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('id', session!.user.id)
+        .single();
+      if (error) throw error;
+      return data as UserProfile;
+    },
+    enabled: !!session?.user?.id,
+  });
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -90,7 +107,8 @@ function App() {
   }
 
   if (location.pathname.startsWith('/invite/')) {
-    return <InviteAccept session={session} />;
+    const token = location.pathname.replace('/invite/', '');
+    return <InviteAccept session={session} token={token} />;
   }
 
   if (location.pathname === '/pending') {
@@ -105,6 +123,27 @@ function App() {
 
   if (authState.status === 'unauthenticated') return <Login />;
   if (!session) return null; // brief race — session loads from localStorage in next tick
+
+  // First-run onboarding for principals
+  if (appProfile && appProfile.role === 'principal' && !appProfile.onboarding_done) {
+    const orgName = authState.status === 'authenticated' ? authState.context.orgName : undefined;
+    const orgId   = authState.status === 'authenticated' ? authState.context.orgId   : undefined;
+    return (
+      <OnboardingWizard
+        session={session}
+        profile={appProfile}
+        orgName={orgName}
+        orgId={orgId}
+        onComplete={() => {
+          queryClient.setQueryData(
+            ['profile', session.user.id],
+            (old: UserProfile | undefined) => old ? { ...old, onboarding_done: true } : old
+          );
+          queryClient.invalidateQueries({ queryKey: ['profile', session.user.id] });
+        }}
+      />
+    );
+  }
 
   return (
     <SnackbarProvider>

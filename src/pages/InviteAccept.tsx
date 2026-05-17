@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import type { Session } from '@supabase/supabase-js';
 import { IconAlertTriangle, IconCircleCheck, IconLoader2 } from '@tabler/icons-react';
 import { supabase } from '../lib/supabase';
@@ -51,12 +51,13 @@ function Validating() {
 }
 
 function ValidCard({
-  invite, session, onAccept, onSignOut, accepting,
+  invite, session, onAccept, onSignOut, onDecline, accepting,
 }: {
   invite:     InviteDetails;
   session:    Session | null;
   onAccept:   () => void;
   onSignOut:  () => void;
+  onDecline:  () => void;
   accepting?: boolean;
 }) {
   return (
@@ -95,16 +96,22 @@ function ValidCard({
         )}
       </button>
 
-      {session && (
-        <p className="text-center mt-4">
+      <div className="text-center mt-3 flex flex-col items-center gap-2">
+        <button
+          onClick={onDecline}
+          style={{ background: 'none', border: 'none', fontSize: 12, color: 'var(--color-text-tertiary, rgba(0,0,0,0.4))', cursor: 'pointer' }}
+        >
+          Decline invite
+        </button>
+        {session && (
           <button
             className="text-[11px] text-on-surface-variant hover:text-on-surface transition-colors"
             onClick={onSignOut}
           >
             Wrong account? Sign out
           </button>
-        </p>
-      )}
+        )}
+      </div>
     </div>
   );
 }
@@ -136,6 +143,9 @@ function SuccessCard({ orgName, role }: { orgName: string; role: string }) {
       <p className="text-[13px] text-on-surface-variant">
         Welcome to {orgName} as {capitalize(role)}
       </p>
+      <p className="text-[12px] text-on-surface-variant/50 mt-1">
+        Welcome to {orgName}. Your role is {capitalize(role)}.
+      </p>
       <p className="text-[12px] text-on-surface-variant mt-2">Redirecting to dashboard…</p>
     </div>
   );
@@ -159,8 +169,9 @@ function ErrorCard({ message, onRetry }: { message: string; onRetry: () => void 
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function InviteAccept({ session }: { session: Session | null }) {
-  const { token }  = useParams<{ token: string }>();
+type Props = { session: Session | null; token: string }
+
+export default function InviteAccept({ session, token }: Props) {
   const navigate   = useNavigate();
   const validated  = useRef(false);
   const [state, setState] = useState<PageState>({ phase: 'validating' });
@@ -229,6 +240,28 @@ export default function InviteAccept({ session }: { session: Session | null }) {
     setTimeout(() => navigate('/dashboard', { replace: true }), 2000);
   };
 
+  const handleDecline = async () => {
+    await supabase
+      .from('org_invites')
+      .update({ status: 'revoked' })
+      .eq('token', token);
+
+    if (!session) {
+      navigate('/login');
+      return;
+    }
+
+    const { count } = await supabase
+      .from('organizations')
+      .select('*', { count: 'exact', head: true });
+
+    if (!count || count === 0) {
+      navigate('/create-workspace', { replace: true });
+    } else {
+      navigate('/pending', { replace: true });
+    }
+  };
+
   const handleSignOut = () => supabase.auth.signOut();
 
   return (
@@ -247,6 +280,7 @@ export default function InviteAccept({ session }: { session: Session | null }) {
             session={session}
             onAccept={() => { if (state.phase === 'valid') handleAccept(state.invite); }}
             onSignOut={handleSignOut}
+            onDecline={handleDecline}
             accepting={state.phase === 'accepting'}
           />
         )}

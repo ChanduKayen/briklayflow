@@ -8,6 +8,7 @@ export interface UserProfile {
   assigned_projects: string[];
   created_at: string;
   org_id?: string;
+  onboarding_done?: boolean;
 }
 
 export interface Project {

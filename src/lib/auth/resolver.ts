@@ -45,6 +45,7 @@ export async function resolveAuthDestination(
       },
     }
   }
+  // pending: don't return yet — a pending invite takes priority
 
   // ── Step 2: pending invite for this email? ───────────────────────
   const { data: invite, error: inviteErr } = await supabase
@@ -60,6 +61,14 @@ export async function resolveAuthDestination(
       destination: 'accept-invite',
       token:       invite.token,
       orgName:     invite.org_name,
+    }
+  }
+
+  // No invite — honour existing pending membership if present
+  if (ctx && ctx.status === 'pending') {
+    return {
+      destination: 'pending',
+      orgName:     ctx.org_name,
     }
   }
 
