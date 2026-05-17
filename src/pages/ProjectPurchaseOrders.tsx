@@ -7,7 +7,7 @@ import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { useUserProfile } from '../App'
 import { useSnackbar } from '../components/Snackbar'
-import { LinearProgress } from '../components/LinearProgress'
+import { PageSkeleton } from '../components/SkeletonLoader'
 
 const STATUS_CHIP: Record<string, string> = {
   ORDERED:   'bg-blue-50 text-blue-600',
@@ -393,7 +393,7 @@ export default function ProjectPurchaseOrders({ session }: { session: Session })
           {hasFilters && <button onClick={clearFilters} className="text-[11px] text-on-surface-variant/40 hover:text-primary ml-1 whitespace-nowrap transition-colors">Clear</button>}
         </div>
 
-        {isLoading && <LinearProgress className="mb-4" />}
+        {isLoading && <div className="mb-4"><PageSkeleton /></div>}
 
         {!isLoading && isError && (
           <div className="text-center py-20">

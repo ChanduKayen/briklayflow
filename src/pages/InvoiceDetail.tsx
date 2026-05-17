@@ -5,7 +5,7 @@ import { Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useSnackbar } from '../components/Snackbar';
 import { useOrgId } from '../lib/auth/AuthProvider';
-import { LinearProgress } from '../components/LinearProgress';
+import { PageSkeleton } from '../components/SkeletonLoader';
 import { getBillingMode } from '../lib/billingMode';
 import type { Session } from '@supabase/supabase-js';
 import type { ClientInvoice, ClientPayment, InvoiceStatus, Stakeholder, Project } from '../types';
@@ -213,7 +213,7 @@ export default function InvoiceDetail({ session }: { session: Session }) {
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
-  if (isLoading) return <LinearProgress />;
+  if (isLoading) return <div className="p-4 md:p-8"><PageSkeleton /></div>;
   if (!invoice) return (
     <div className="px-margin-mobile md:px-margin-desktop pt-6">
       <p className="text-error">Invoice not found.</p>

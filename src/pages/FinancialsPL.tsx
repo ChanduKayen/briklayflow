@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { getCostCode, MAT_DIVISIONS, WRK_DIVISIONS } from '../lib/costCodes';
-import { LinearProgress } from '../components/LinearProgress';
+import { PageSkeleton } from '../components/SkeletonLoader';
 
 const fmt = (n: number) =>
   n === 0 ? '—' : `₹${n >= 100000 ? (n / 100000).toFixed(1).replace(/\.0$/, '') + 'L' : n.toLocaleString('en-IN')}`;
@@ -109,7 +109,7 @@ export default function FinancialsPL() {
         )}
       </div>
 
-      {isLoading && <LinearProgress className="mb-4" />}
+      {isLoading && <div className="mb-4"><PageSkeleton /></div>}
 
       {/* Summary row */}
       <div className="grid grid-cols-3 gap-gutter mb-stack-xl">

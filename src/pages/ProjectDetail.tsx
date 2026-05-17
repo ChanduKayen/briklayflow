@@ -7,7 +7,7 @@ import { usePeek } from '../context/PeekContext';
 import { useUserProfile } from '../App';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import { useSnackbar } from '../components/Snackbar';
-import { LinearProgress } from '../components/LinearProgress';
+import { DashboardSkeleton } from '../components/SkeletonLoader';
 import { TxnRow } from '../components/TxnRow';
 import { Edit2, X, ChevronRight } from 'lucide-react';
 
@@ -487,7 +487,7 @@ export default function ProjectDetail({ session }: { session: Session }) {
     onError: (e: any) => showSnackbar(e.message || 'Update failed', { type: 'error' }),
   });
 
-  if (loadingProject) return <LinearProgress />;
+  if (loadingProject) return <div className="p-4 md:p-8"><DashboardSkeleton /></div>;
   if (!project) return (
     <div style={{ padding: 40, textAlign: 'center' }}>
       <p style={{ color: 'rgba(0,0,0,0.40)', fontSize: 15 }}>Project not found.</p>
@@ -498,7 +498,7 @@ export default function ProjectDetail({ session }: { session: Session }) {
 
   return (
     <div style={{ padding: '28px 24px 80px', maxWidth: 1100, margin: '0 auto' }}>
-      {loadingTxns && <LinearProgress />}
+      {loadingTxns && <div className="mb-4"><DashboardSkeleton /></div>}
 
       {/* ── Project header ──────────────────────────────────────────────── */}
       <div style={{

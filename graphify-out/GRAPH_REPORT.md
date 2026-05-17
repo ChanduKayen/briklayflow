@@ -1,12 +1,12 @@
 # Graph Report - Briklay Fly  (2026-05-17)
 
 ## Corpus Check
-- 123 files · ~294,817 words
+- 124 files · ~295,530 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 432 nodes · 502 edges · 15 communities detected
-- Extraction: 87% EXTRACTED · 13% INFERRED · 0% AMBIGUOUS · INFERRED: 64 edges (avg confidence: 0.8)
+- 432 nodes · 500 edges · 15 communities detected
+- Extraction: 88% EXTRACTED · 12% INFERRED · 0% AMBIGUOUS · INFERRED: 62 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Community Hubs (Navigation)
@@ -24,7 +24,7 @@
 - [[_COMMUNITY_Community 17|Community 17]]
 - [[_COMMUNITY_Community 18|Community 18]]
 - [[_COMMUNITY_Community 19|Community 19]]
-- [[_COMMUNITY_Community 25|Community 25]]
+- [[_COMMUNITY_Community 24|Community 24]]
 
 ## God Nodes (most connected - your core abstractions)
 1. `handleSessionReply()` - 16 edges
@@ -47,8 +47,8 @@
   src\lib\costCodes.ts → src\pages\Ledger.tsx
 - `getCostCode()` --calls--> `suggestCostCode()`  [INFERRED]
   src\lib\costCodes.ts → src\pages\NewTransaction.tsx
-- `getTxnType()` --calls--> `getCostCode()`  [INFERRED]
-  src\pages\ProjectTransactions.tsx → src\lib\costCodes.ts
+- `getCostCode()` --calls--> `getTxnType()`  [INFERRED]
+  src\lib\costCodes.ts → src\pages\ProjectTransactions.tsx
 
 ## Communities
 
@@ -61,8 +61,8 @@ Cohesion: 0.15
 Nodes (28): buildConfirmMsg(), buildDescription(), createRoughEntry(), fetchImageAsBase64(), findTopMatches(), fmtAmount(), handleFinancial(), handleGeneral() (+20 more)
 
 ### Community 2 - "Community 2"
-Cohesion: 0.1
-Nodes (7): useAuth(), useCan(), useOrgId(), CreateStakeholderForm(), ResolvePopup(), useSnackbar(), NewInvoice()
+Cohesion: 0.09
+Nodes (8): useAuth(), useCan(), useOrgId(), CreateStakeholderForm(), genTxnId(), handlePost(), useSnackbar(), NewInvoice()
 
 ### Community 3 - "Community 3"
 Cohesion: 0.18
@@ -108,7 +108,7 @@ Nodes (4): getInitials(), levenshtein(), matchPayee(), matchProject()
 Cohesion: 0.43
 Nodes (5): TxnRow(), dot(), formatShortDate(), formatTxn(), isCostCode()
 
-### Community 25 - "Community 25"
+### Community 24 - "Community 24"
 Cohesion: 0.5
 Nodes (2): FinancialsCashflow(), lastNMonths()
 
@@ -119,7 +119,7 @@ Nodes (2): FinancialsCashflow(), lastNMonths()
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 17`** (8 nodes): `AmountDisplay()`, `fmtAmendVal()`, `getPhaseBalance()`, `getPOBalance()`, `getWOBalance()`, `openAmendModal()`, `useCountUp()`, `TransactionDetail.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 25`** (5 nodes): `FinancialsCashflow()`, `fmt()`, `lastNMonths()`, `monthLabel()`, `FinancialsCashflow.tsx`
+- **Thin community `Community 24`** (5 nodes): `FinancialsCashflow()`, `fmt()`, `lastNMonths()`, `monthLabel()`, `FinancialsCashflow.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 
 ## Suggested Questions

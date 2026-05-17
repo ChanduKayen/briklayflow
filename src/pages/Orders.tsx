@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
-import { LinearProgress } from '../components/LinearProgress';
+import { PageSkeleton } from '../components/SkeletonLoader';
 
 export default function Orders({ session: _ }: { session: Session }) {
   const [tab, setTab] = useState<'po' | 'wo'>('po');
@@ -70,7 +70,7 @@ export default function Orders({ session: _ }: { session: Session }) {
         ))}
       </div>
 
-      {loading && <LinearProgress />}
+      {loading && <div className="mb-4"><PageSkeleton /></div>}
 
       <div className="space-y-2">
         {list.map((row: any) => {

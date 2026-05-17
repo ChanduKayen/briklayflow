@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { LinearProgress } from '../components/LinearProgress';
+import { PageSkeleton } from '../components/SkeletonLoader';
 
 const MONTHS_BACK = 12;
 
@@ -124,7 +124,7 @@ export default function FinancialsCashflow() {
         ))}
       </div>
 
-      {isLoading && <LinearProgress className="mb-4" />}
+      {isLoading && <div className="mb-4"><PageSkeleton /></div>}
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-gutter mb-stack-xl">

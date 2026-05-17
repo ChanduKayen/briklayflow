@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { useUserProfile } from '../App'
-import { LinearProgress } from '../components/LinearProgress'
+import { PageSkeleton } from '../components/SkeletonLoader'
 
 const PAGE_SIZE = 25
 
@@ -322,7 +322,7 @@ export default function ProjectWorkOrders({ session }: { session: Session }) {
 
         {/* Mobile cards */}
         <div className="md:hidden">
-          {isLoading ? <div className="py-2"><LinearProgress /></div>
+          {isLoading ? <div className="py-2"><PageSkeleton /></div>
           : isError ? (
             <div className="py-20 text-center">
               <span className="material-symbols-outlined text-[56px] text-on-surface-variant/15 block mb-4">error_outline</span>
@@ -371,7 +371,7 @@ export default function ProjectWorkOrders({ session }: { session: Session }) {
 
         {/* Desktop table */}
         <div className="hidden md:block bg-white rounded-2xl border border-black/[0.06] shadow-sm overflow-hidden">
-          {isLoading ? <div className="py-2"><LinearProgress /></div>
+          {isLoading ? <div className="py-2"><PageSkeleton /></div>
           : isError ? (
             <div className="py-20 text-center">
               <span className="material-symbols-outlined text-[56px] text-on-surface-variant/15 block mb-4">error_outline</span>

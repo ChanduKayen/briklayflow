@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { LinearProgress } from '../components/LinearProgress';
+import { PageSkeleton } from '../components/SkeletonLoader';
 
 const fmt = (n: number) =>
   n >= 100000
@@ -102,7 +102,7 @@ export default function Financials() {
         <p className="text-[12px] text-on-surface-variant/50 mt-1">Company-wide financial summary</p>
       </div>
 
-      {isLoading && <LinearProgress className="mb-4" />}
+      {isLoading && <div className="mb-4"><PageSkeleton /></div>}
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-gutter mb-stack-xl">

@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import confetti from 'canvas-confetti';
 import { supabase } from '../lib/supabase';
 import { useSnackbar } from '../components/Snackbar';
-import { LinearProgress } from '../components/LinearProgress';
+import { PageSkeleton } from '../components/SkeletonLoader';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { Session } from '@supabase/supabase-js';
@@ -844,7 +844,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
 
   // ── Render ────────────────────────────────────────────────────────────────
 
-  if (isLoading) return <LinearProgress />;
+  if (isLoading) return <div className="p-4 md:p-8"><PageSkeleton /></div>;
 
   if (!po) {
     return (

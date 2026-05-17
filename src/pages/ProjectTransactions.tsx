@@ -7,7 +7,7 @@ import { supabase } from '../lib/supabase'
 import { usePeek } from '../context/PeekContext'
 import { useUserProfile } from '../App'
 import { useSnackbar } from '../components/Snackbar'
-import { LinearProgress } from '../components/LinearProgress'
+import { PageSkeleton } from '../components/SkeletonLoader'
 import { getCostCode } from '../lib/costCodes'
 import { formatTxn } from '../lib/formatTxn'
 import { IconPaperclip } from '@tabler/icons-react'
@@ -486,7 +486,7 @@ export default function ProjectTransactions({ session }: { session: Session }) {
 
         {/* Mobile cards */}
         <div className="md:hidden">
-          {isLoading ? <div className="py-2"><LinearProgress /></div>
+          {isLoading ? <div className="py-2"><PageSkeleton /></div>
           : isError ? (
             <div className="py-20 text-center">
               <span className="material-symbols-outlined text-[56px] text-on-surface-variant/15 block mb-4">error_outline</span>
@@ -538,7 +538,7 @@ export default function ProjectTransactions({ session }: { session: Session }) {
 
         {/* Desktop table */}
         <div className="hidden md:block bg-white rounded-2xl border border-black/[0.06] shadow-sm overflow-hidden">
-          {isLoading ? <div className="py-2"><LinearProgress /></div>
+          {isLoading ? <div className="py-2"><PageSkeleton /></div>
           : isError ? (
             <div className="py-20 text-center">
               <span className="material-symbols-outlined text-[56px] text-on-surface-variant/15 block mb-4">error_outline</span>

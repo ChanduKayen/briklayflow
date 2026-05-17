@@ -12,7 +12,7 @@ import { SnackbarProvider, useSnackbar } from './components/Snackbar';
 import { PeekProvider } from './context/PeekContext';
 import { CommandBarProvider, useCommandBar } from './context/CommandBarContext';
 import { CommandBar } from './components/CommandBar';
-import { LinearProgress } from './components/LinearProgress';
+import { PageSkeleton } from './components/SkeletonLoader';
 import {
   IconLayoutDashboard, IconArrowsExchange,
   IconNotebook, IconClipboardList, IconShoppingBag,
@@ -1805,7 +1805,7 @@ function Team({ session }: { session: Session }) {
       )}
 
       <div className="space-y-stack-md">
-        {teamLoading && <LinearProgress className="mb-4" />}
+        {teamLoading && <div className="mb-4"><PageSkeleton /></div>}
         {team?.map((user) => (
           <div key={user.id} className="bg-white p-6 rounded-2xl shadow-elevation-1 border border-black/[0.06] hover:shadow-elevation-2 transition-shadow duration-200 space-y-4">
             <div className="flex justify-between items-center">
@@ -1885,7 +1885,7 @@ function PrincipalGuard({ session, children }: { session: Session; children: Rea
     staleTime: 5 * 60 * 1000,
   });
 
-  if (isLoading || !profile) return <LinearProgress />;
+  if (isLoading || !profile) return <div className="p-4 md:p-8"><PageSkeleton /></div>;
 
   const canAccess =
     profile.role === 'principal' ||
