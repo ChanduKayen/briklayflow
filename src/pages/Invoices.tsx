@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { LinearProgress } from '../components/LinearProgress';
+import { ListSkeleton } from '../components/SkeletonLoader';
 import type { ClientInvoice, InvoiceStatus, Stakeholder, Project } from '../types';
 
 const STATUS_TABS: { label: string; value: InvoiceStatus | 'All' }[] = [
@@ -143,7 +143,7 @@ export default function Invoices() {
       </div>
 
       {/* List */}
-      {isLoading && <LinearProgress className="mb-4" />}
+      {isLoading && <div className="mb-4"><ListSkeleton /></div>}
 
       {!isLoading && filtered.length === 0 && (
         <div className="text-center py-24">

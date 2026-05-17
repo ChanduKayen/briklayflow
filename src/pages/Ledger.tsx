@@ -8,12 +8,12 @@ import type { Stakeholder, Project } from '../types';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
-import { LinearProgress } from '../components/LinearProgress';
 import { getCostCode } from '../lib/costCodes';
 import { formatTxn } from '../lib/formatTxn';
 import { IconPaperclip } from '@tabler/icons-react';
 import { ShortcutTicker } from '../components/ShortcutTicker';
 import { ImageLightbox } from '../components/ImageLightbox';
+import { PageSkeleton } from '../components/SkeletonLoader';
 
 const PAGE_SIZE = 25;
 
@@ -676,7 +676,7 @@ export default function Ledger({ session }: { session: Session }) {
         {/* ── Mobile card stack ─────────────────────────────────────────── */}
         <div className="md:hidden">
           {isLoading ? (
-            <div className="py-2"><LinearProgress /></div>
+            <div className="py-2"><PageSkeleton /></div>
           ) : filteredTransactions.length === 0 ? (
             <div className="py-20 text-center">
               <span className="material-symbols-outlined text-[56px] text-on-surface-variant/15 block mb-4">
@@ -764,8 +764,8 @@ export default function Ledger({ session }: { session: Session }) {
         {/* ── Desktop table card ─────────────────────────────────────────── */}
         <div className="hidden md:block bg-white rounded-2xl border border-black/[0.06] shadow-sm overflow-hidden">
           {isLoading ? (
-            <div className="py-2">
-              <LinearProgress />
+            <div className="p-4">
+              <PageSkeleton />
             </div>
           ) : visibleRows.length === 0 ? (
             <div className="py-20 text-center">

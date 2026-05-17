@@ -66,6 +66,30 @@ import { FloatingActionButton } from './components/FloatingActionButton';
 import { QuickActionsOverlay } from './components/QuickActionsOverlay';
 import { useLongPress } from './hooks/useLongPress';
 
+function SplashLoader() {
+  return (
+    <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8f9ff' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="#0b1c30" strokeWidth="1.5" strokeLinejoin="round"/>
+          <path d="M2 17L12 22L22 17" stroke="#0b1c30" strokeWidth="1.5" strokeLinejoin="round"/>
+          <path d="M2 12L12 17L22 12" stroke="#0b1c30" strokeWidth="1.5" strokeLinejoin="round"/>
+        </svg>
+        <div style={{ width: '16px', height: '1.5px', background: 'rgba(0,0,0,0.10)', borderRadius: '1px', overflow: 'hidden' }}>
+          <div style={{ height: '100%', background: '#0b1c30', borderRadius: '1px', animation: 'bk-slide 1s ease-in-out infinite' }}/>
+        </div>
+      </div>
+      <style>{`
+        @keyframes bk-slide {
+          0%   { width: 0%;   margin-left: 0    }
+          50%  { width: 100%; margin-left: 0    }
+          100% { width: 0%;   margin-left: 100% }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 function App() {
   const { authState } = useAuth();
   const location = useLocation();
@@ -78,8 +102,8 @@ function App() {
   const longPress = useLongPress(() => setQuickActionsOpen(true));
   const [routerReady, setRouterReady] = useState(false);
 
-  // Profile query â€" used for onboarding wizard guard (enabled only when session exists)
-  const { data: appProfile } = useQuery({
+  // Profile query — used for onboarding wizard guard (enabled only when session exists)
+  const { data: appProfile, isLoading: profileLoading } = useQuery({
     queryKey: ['profile', session?.user?.id ?? ''],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -123,28 +147,20 @@ function App() {
     setRouterReady(true);
   }, [authState.status, session]);
 
+  // Read local flag to instantly bypass the onboarding check for returning users
+  const hasLocalOnboardingFlag = session?.user?.id 
+    ? localStorage.getItem(`briklay_onboarding_${session.user.id}`) === 'true'
+    : false;
+
+  // Sync profile state to localStorage
+  useEffect(() => {
+    if (appProfile?.onboarding_done && session?.user?.id) {
+      localStorage.setItem(`briklay_onboarding_${session.user.id}`, 'true');
+    }
+  }, [appProfile?.onboarding_done, session?.user?.id]);
+
   if (!routerReady) {
-    return (
-      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8f9ff' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-            <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="#0b1c30" strokeWidth="1.5" strokeLinejoin="round"/>
-            <path d="M2 17L12 22L22 17" stroke="#0b1c30" strokeWidth="1.5" strokeLinejoin="round"/>
-            <path d="M2 12L12 17L22 12" stroke="#0b1c30" strokeWidth="1.5" strokeLinejoin="round"/>
-          </svg>
-          <div style={{ width: '16px', height: '1.5px', background: 'rgba(0,0,0,0.10)', borderRadius: '1px', overflow: 'hidden' }}>
-            <div style={{ height: '100%', background: '#0b1c30', borderRadius: '1px', animation: 'bk-slide 1s ease-in-out infinite' }}/>
-          </div>
-        </div>
-        <style>{`
-          @keyframes bk-slide {
-            0%   { width: 0%;   margin-left: 0    }
-            50%  { width: 100%; margin-left: 0    }
-            100% { width: 0%;   margin-left: 100% }
-          }
-        `}</style>
-      </div>
-    );
+    return <SplashLoader />;
   }
 
   if (location.pathname.startsWith('/invite/')) {
@@ -165,10 +181,23 @@ function App() {
   }
 
   if (authState.status === 'unauthenticated') return <Login />;
+  
+  // Guard against rendering the main app layout when we are supposed to redirect
+  // to create-workspace or pending, but the router hasn't updated the pathname yet.
+  if (authState.status === 'no-org') return null;
+  if (authState.status === 'pending') return null;
+
   if (!session) return null;
 
   // First-run onboarding for principals
-  if (appProfile && appProfile.role === 'principal' && !appProfile.onboarding_done) {
+  const isPrincipal = authState.status === 'authenticated' && authState.context.role === 'principal';
+  
+  // Only show SplashLoader if we MUST know their onboarding state and don't have it locally
+  if (isPrincipal && !hasLocalOnboardingFlag && profileLoading) {
+    return <SplashLoader />;
+  }
+
+  if (isPrincipal && !hasLocalOnboardingFlag && appProfile && !appProfile.onboarding_done) {
     const orgName = authState.status === 'authenticated' ? authState.context.orgName : undefined;
     const orgId   = authState.status === 'authenticated' ? authState.context.orgId   : undefined;
     return (
@@ -178,6 +207,7 @@ function App() {
         orgName={orgName}
         orgId={orgId}
         onComplete={() => {
+          localStorage.setItem(`briklay_onboarding_${session.user.id}`, 'true');
           queryClient.setQueryData(
             ['profile', session.user.id],
             (old: UserProfile | undefined) => old ? { ...old, onboarding_done: true } : old

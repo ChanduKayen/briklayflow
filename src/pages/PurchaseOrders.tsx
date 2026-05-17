@@ -4,8 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import confetti from 'canvas-confetti';
 import { supabase } from '../lib/supabase';
-import { LinearProgress } from '../components/LinearProgress';
 import { ShortcutTicker } from '../components/ShortcutTicker';
+import { PageSkeleton } from '../components/SkeletonLoader';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
@@ -711,7 +711,7 @@ export default function PurchaseOrders({ session }: { session: Session }) {
           )}
         </div>
 
-        {isLoading && <LinearProgress className="mb-4" />}
+        {isLoading && <div className="mb-4"><PageSkeleton /></div>}
 
         {!isLoading && filtered.length === 0 && (
           <div className="text-center py-20">

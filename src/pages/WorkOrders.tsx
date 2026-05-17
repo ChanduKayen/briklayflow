@@ -6,8 +6,8 @@ import { supabase } from '../lib/supabase';
 import type { WorkOrder } from '../types';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
-import { LinearProgress } from '../components/LinearProgress';
 import { ShortcutTicker } from '../components/ShortcutTicker';
+import { PageSkeleton } from '../components/SkeletonLoader';
 
 const PAGE_SIZE = 25;
 
@@ -479,7 +479,7 @@ export default function WorkOrders({ session }: { session: Session }) {
         {/* ── Mobile card stack ─────────────────────────────────────────── */}
         <div className="md:hidden">
           {isLoading ? (
-            <div className="py-2"><LinearProgress /></div>
+            <div className="py-2"><PageSkeleton /></div>
           ) : filtered.length === 0 ? (
             <div className="py-20 text-center">
               <span className="material-symbols-outlined text-[56px] text-on-surface-variant/15 block mb-4">
@@ -558,7 +558,7 @@ export default function WorkOrders({ session }: { session: Session }) {
         {/* ── Desktop table card ─────────────────────────────────────────── */}
         <div className="hidden md:block bg-white rounded-2xl border border-black/[0.06] shadow-sm overflow-hidden">
           {isLoading ? (
-            <div className="py-2"><LinearProgress /></div>
+            <div className="p-4"><PageSkeleton /></div>
           ) : visible.length === 0 ? (
             <div className="py-20 text-center">
               <span className="material-symbols-outlined text-[56px] text-on-surface-variant/15 block mb-4">

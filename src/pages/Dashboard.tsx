@@ -6,6 +6,7 @@ import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { usePeek } from '../context/PeekContext';
 import { formatTxn } from '../lib/formatTxn';
+import { DashboardSkeleton } from '../components/SkeletonLoader';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -114,7 +115,7 @@ export default function Dashboard({ session }: { session: Session }) {
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
-  const { data: spentData } = useQuery({
+  const { data: spentData, isLoading: isSpentLoading } = useQuery({
     queryKey: ['dash_spent'],
     queryFn: async () => {
       const { data } = await supabase
@@ -130,7 +131,7 @@ export default function Dashboard({ session }: { session: Session }) {
     },
   });
 
-  const { data: woData } = useQuery({
+  const { data: woData, isLoading: isWoLoading } = useQuery({
     queryKey: ['dash_wos'],
     queryFn: async () => {
       const { data } = await supabase
@@ -144,7 +145,7 @@ export default function Dashboard({ session }: { session: Session }) {
     },
   });
 
-  const { data: pendingCount } = useQuery({
+  const { data: pendingCount, isLoading: isPendingLoading } = useQuery({
     queryKey: ['dash_pending'],
     queryFn: async () => {
       const { count } = await supabase
@@ -222,7 +223,7 @@ export default function Dashboard({ session }: { session: Session }) {
     },
   });
 
-  const { data: recentTxns } = useQuery({
+  const { data: recentTxns, isLoading: isRecentLoading } = useQuery({
     queryKey: ['dash_recent_txns'],
     queryFn: async () => {
       const { data } = await supabase
@@ -332,6 +333,12 @@ export default function Dashboard({ session }: { session: Session }) {
   ].filter(Boolean) as ActionItem[];
 
   // ── Render ─────────────────────────────────────────────────────────────────
+
+  const isInitialLoading = isSpentLoading || isWoLoading || isPendingLoading || isRecentLoading;
+
+  if (isInitialLoading) {
+    return <DashboardSkeleton />;
+  }
 
   return (
     <div className="mobile-main-pb" style={{ padding: '24px 24px 0', maxWidth: 900 }}>

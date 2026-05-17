@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2 } from 'lucide-react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { usePeek } from '../context/PeekContext';
@@ -11,6 +10,7 @@ import { useSnackbar } from '../components/Snackbar';
 import { ResolvePopup } from '../components/ResolvePopup';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { ShortcutTicker } from '../components/ShortcutTicker';
+import { PageSkeleton } from '../components/SkeletonLoader';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -447,8 +447,8 @@ export default function Logbook({ session }: { session: Session }) {
 
       {/* CONTENT */}
       {isLoading ? (
-        <div className="flex justify-center py-16">
-          <Loader2 className="animate-spin text-secondary" size={32} />
+        <div className="py-2">
+          <PageSkeleton />
         </div>
       ) : activeEntries.length === 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '48px 0', textAlign: 'center' }}>

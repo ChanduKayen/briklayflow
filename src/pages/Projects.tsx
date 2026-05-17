@@ -6,7 +6,7 @@ import type { Project } from '../types'
 import { supabase } from '../lib/supabase'
 import { useUserProfile } from '../App'
 import { useSnackbar } from '../components/Snackbar'
-import { LinearProgress } from '../components/LinearProgress'
+import { CardsSkeleton } from '../components/SkeletonLoader'
 import { Edit2, Trash2 } from 'lucide-react'
 
 function fmtAmt(n: number) {
@@ -373,7 +373,7 @@ export default function Projects({ session }: { session: Session }) {
 
   return (
     <div style={{ padding: '32px 24px 64px', maxWidth: 1280, margin: '0 auto' }}>
-      {isLoading && <LinearProgress />}
+      {isLoading && <CardsSkeleton />}
 
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, marginBottom: 28 }}>
