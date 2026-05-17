@@ -4,6 +4,12 @@ import type { Session } from '@supabase/supabase-js';
 import { IconCircleCheck, IconCircleX, IconLoader2 } from '@tabler/icons-react';
 import { supabase } from '../lib/supabase';
 
+
+type CreateWorkspaceResult = {
+  success: boolean
+  error: string | null
+}
+
 function nameToSlug(n: string): string {
   return n
     .toLowerCase()
@@ -62,7 +68,7 @@ export default function CreateWorkspace({ session }: { session: Session }) {
         p_name:    name,
         p_slug:    slug,
       })
-      .single();
+      .single<CreateWorkspaceResult>();
 
     if (rpcError || !data?.success) {
       setError(data?.error ?? rpcError?.message ?? 'Something went wrong');

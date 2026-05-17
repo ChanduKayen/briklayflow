@@ -15,9 +15,9 @@ import { CommandBar } from './components/CommandBar';
 import { LinearProgress } from './components/LinearProgress';
 import {
   IconLayoutDashboard, IconArrowsExchange,
-  IconNotebook, IconClipboardList, IconShoppingBag, IconCalendarCheck,
-  IconBuildingEstate, IconFileInvoice, IconUsersGroup, IconChartBar,
-  IconSitemap, IconShieldLock, IconAdjustmentsHorizontal,
+  IconNotebook, IconClipboardList, IconShoppingBag,
+  IconBuildingEstate, IconFileInvoice, IconUsersGroup,
+  IconShieldLock, IconAdjustmentsHorizontal,
   IconLayoutSidebarLeftCollapse, IconLayoutSidebar,
   IconSettings, IconLogout, IconChevronDown, IconChevronLeft, IconDots,
   // IconDotsVertical,
@@ -397,17 +397,7 @@ function SidebarContent({
       .then(({ data }) => { if (data?.name) setOrgName(data.name); });
   }, [profile?.org_id]);
 
-  const { data: hasPrincipal } = useQuery({
-    queryKey: ['has_principal'],
-    queryFn: async () => {
-      const { data } = await supabase.from('user_profiles').select('id').eq('role', 'principal').limit(1);
-      return (data?.length || 0) > 0;
-    },
-    staleTime: 5 * 60 * 1000,
-    enabled: role === 'principal' || role === 'management',
-  });
 
-  const showFinancials = role === 'principal' || (role === 'management' && !hasPrincipal);
 
   const { data: woPendingCount = 0 } = useQuery({
     queryKey: ['nav_wo_pending'],

@@ -7,7 +7,6 @@ import type { Stakeholder, Project } from '../types';
 import type { Session } from '@supabase/supabase-js';
 import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 import { useSnackbar } from '../components/Snackbar';
-import { useUserProfile } from '../App';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import { CostCodePicker } from '../components/CostCodePicker';
 import { getCostCode, costCodeLabel, ALL_COST_CODES } from '../lib/costCodes';
@@ -389,7 +388,6 @@ export default function NewTransaction({ session: _session }: { session: Session
   const [recentPayees, setRecentPayees] = useState<{ id: string; name: string; type: string }[]>([]);
   const [saveAttempted, setSaveAttempted] = useState(false);
   const { show: showSnackbar } = useSnackbar();
-  const { data: profile } = useUserProfile(_session.user.id);
   const orgId = useOrgId();
   const payeeRef = useRef<HTMLInputElement>(null);
   const stkDropRef = useRef<HTMLDivElement>(null);

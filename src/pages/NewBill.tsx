@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useSnackbar } from '../components/Snackbar';
-import { useUserProfile } from '../App';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import type { Session } from '@supabase/supabase-js';
 import type { Stakeholder, Project } from '../types';
@@ -76,7 +75,6 @@ export default function NewBill({ session }: { session: Session }) {
   const location = useLocation();
   const qc = useQueryClient();
   const { show: showSnackbar } = useSnackbar();
-  const { data: profile } = useUserProfile(session.user.id);
   const orgId = useOrgId();
 
   // Pre-fill from navigation state (e.g. from NewTransaction)

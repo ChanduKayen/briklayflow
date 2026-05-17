@@ -5,7 +5,6 @@ import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import type { RoughEntry } from '../types';
 import { useSnackbar } from './Snackbar';
-import { useUserProfile } from '../App';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import { CostCodePicker } from './CostCodePicker';
 import { ImageLightbox } from './ImageLightbox';
@@ -213,11 +212,10 @@ interface Props {
   session: Session;
 }
 
-export function ResolvePopup({ entry, onClose, onUpdated, session }: Props) {
+export function ResolvePopup({ entry, onClose, onUpdated }: Props) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { show: showSnackbar } = useSnackbar();
-  const { data: profile } = useUserProfile(session.user.id);
   const orgId = useOrgId();
 
   const ai = entry.ai_extracted;

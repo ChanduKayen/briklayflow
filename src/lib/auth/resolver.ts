@@ -16,6 +16,18 @@ export type AuthRoute =
   | { destination: 'create-workspace' }
   | { destination: 'pending';          orgName: string }
 
+type MembershipContextRow = {
+  org_id: string
+  org_name: string
+  org_slug: string
+  membership_id: string
+  role: MembershipContext['role']
+  status: MembershipContext['status']
+  joined_at: string | null
+}
+
+type InviteRow = { token: string; org_name: string }
+
 export async function resolveAuthDestination(
   userId: string,
   email:  string,
@@ -24,7 +36,7 @@ export async function resolveAuthDestination(
   // ── Step 1: active membership? ──────────────────────────────────
   const { data: ctx, error: ctxErr } = await supabase
     .rpc('get_membership_context', { p_user_id: userId })
-    .single()
+    .single<MembershipContextRow>()
 
   if (ctxErr && ctxErr.code !== 'PGRST116') {
     // PGRST116 = no rows — not a real error
@@ -50,7 +62,7 @@ export async function resolveAuthDestination(
   // ── Step 2: pending invite for this email? ───────────────────────
   const { data: invite, error: inviteErr } = await supabase
     .rpc('find_invite_by_email', { p_email: email })
-    .single()
+    .single<InviteRow>()
 
   if (inviteErr && inviteErr.code !== 'PGRST116') {
     console.error('[resolver] invite check failed:', inviteErr)

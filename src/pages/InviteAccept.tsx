@@ -171,6 +171,23 @@ function ErrorCard({ message, onRetry }: { message: string; onRetry: () => void 
 
 type Props = { session: Session | null; token: string }
 
+type InviteValidationResult = {
+  is_valid: boolean
+  fail_reason: string | null
+  invite_id: string
+  org_id: string
+  org_name: string
+  org_slug: string
+  email: string
+  role: string
+  expires_at: string
+}
+
+type AcceptInviteResult = {
+  success: boolean
+  error: string | null
+}
+
 export default function InviteAccept({ session, token }: Props) {
   const navigate   = useNavigate();
   const validated  = useRef(false);
@@ -188,7 +205,7 @@ export default function InviteAccept({ session, token }: Props) {
 
     supabase
       .rpc('validate_invite_token', { p_token: token })
-      .single()
+      .single<InviteValidationResult>()
       .then(({ data, error }) => {
         if (error || !data) {
           setState({ phase: 'invalid', reason: 'Invite not found.' });
@@ -225,7 +242,7 @@ export default function InviteAccept({ session, token }: Props) {
 
     const { data, error } = await supabase
       .rpc('accept_invite', { p_token: token!, p_user_id: session.user.id })
-      .single();
+      .single<AcceptInviteResult>();
 
     if (error || !data) {
       setState({ phase: 'error', invite, message: error?.message ?? 'Unexpected error — please try again.' });
