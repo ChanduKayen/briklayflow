@@ -205,16 +205,22 @@ function QuickTransactionDrawer({ projectId, projectName, onClose, onSuccess }: 
     setSaving(true);
     try {
       const txnId = genTxnId();
-      const { error: txnErr } = await supabase.from('transactions').insert({
-        txn_id: txnId, org_id: orgId, date, category: category || TXN_CATEGORIES[txnType][0],
-        payment_mode: mode, total_amount: Number(amount), remarks,
-        stakeholder_id: stkId || null, status: 'Active',
+      const { error: rpcError } = await supabase.rpc('insert_transaction_with_allocations', {
+        p_txn: {
+          txn_id:         txnId,
+          org_id:         orgId,
+          date,
+          category:       category || TXN_CATEGORIES[txnType][0],
+          payment_mode:   mode,
+          total_amount:   Number(amount),
+          remarks,
+          stakeholder_id: stkId || null,
+          ai_flag_status: 'Clean',
+          ai_flag_data:   {},
+        },
+        p_allocations: [{ project_id: projectId, allocated_amount: Number(amount) }],
       });
-      if (txnErr) throw txnErr;
-      const { error: allocErr } = await supabase.from('txn_allocations').insert({
-        txn_id: txnId, project_id: projectId, allocated_amount: Number(amount),
-      });
-      if (allocErr) throw allocErr;
+      if (rpcError) throw rpcError;
       qc.invalidateQueries({ queryKey: ['project_allocs_v2', projectId] });
       showSnackbar('Transaction added');
       onSuccess();

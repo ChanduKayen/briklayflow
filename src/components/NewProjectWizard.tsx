@@ -52,6 +52,7 @@ export default function NewProjectWizard({ session }: { session: Session }) {
   const [step, setStep] = useState(0) // 0=name, 1=details, 2=celebrate
   const [name, setName] = useState('')
   const [projectId, setProjectId] = useState('')
+  const [projectCode, setProjectCode] = useState('')
   const [projType, setProjType] = useState('Residential')
   const [location, setLocation] = useState('')
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0])
@@ -69,6 +70,16 @@ export default function NewProjectWizard({ session }: { session: Session }) {
   }, [name])
 
   useEffect(() => {
+    if (!name) { setProjectCode(''); return }
+    const code = name
+      .replace(/\b(villa|flat|building|project|new|phase|the|and|of|for|at|in|a|an|dr|mr|mrs)\b/gi, '')
+      .replace(/[^a-zA-Z]/g, '')
+      .substring(0, 4)
+      .toUpperCase()
+    setProjectCode(code || name.replace(/[^a-zA-Z]/g, '').substring(0, 4).toUpperCase())
+  }, [name])
+
+  useEffect(() => {
     if (step === 1) setTimeout(() => locRef.current?.focus(), 320)
   }, [step])
 
@@ -79,6 +90,7 @@ export default function NewProjectWizard({ session }: { session: Session }) {
 
   async function handleCreate() {
     if (!name.trim() || !location.trim()) return
+    if (projectCode.length < 2) { setError('Site code must be at least 2 characters'); return }
     setSaving(true); setError('')
     try {
       const resolvedOrgId = profile?.org_id
@@ -88,6 +100,7 @@ export default function NewProjectWizard({ session }: { session: Session }) {
         project_id: pid,
         org_id: resolvedOrgId,
         name: name.trim(),
+        project_code: projectCode,
         site_location: location.trim(),
         status: 'Active',
         created_by: session.user.id,
@@ -243,6 +256,43 @@ export default function NewProjectWizard({ session }: { session: Session }) {
               )}
             </div>
 
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: 'block', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(0,0,0,0.35)', marginBottom: 8 }}>
+                Site Code
+                <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, marginLeft: 6, opacity: 0.6 }}>· 2–6 chars, used in WO &amp; PO IDs</span>
+              </label>
+              <input
+                value={projectCode}
+                onChange={e =>
+                  setProjectCode(
+                    e.target.value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().substring(0, 6)
+                  )
+                }
+                placeholder="e.g. MADU"
+                maxLength={6}
+                style={{
+                  width: '100%', height: 52, padding: '0 16px',
+                  borderRadius: 14, border: `1.5px solid ${projectCode.length > 0 && projectCode.length < 2 ? '#e53e3e' : 'rgba(0,0,0,0.10)'}`,
+                  fontSize: 16, color: '#0b1c30', outline: 'none',
+                  transition: 'border-color 200ms',
+                  fontFamily: 'Geist Mono, monospace',
+                  letterSpacing: '0.1em',
+                  boxSizing: 'border-box',
+                }}
+                onFocus={e => (e.target.style.borderColor = '#C8603A')}
+                onBlur={e => (e.target.style.borderColor = projectCode.length > 0 && projectCode.length < 2 ? '#e53e3e' : 'rgba(0,0,0,0.10)')}
+              />
+              {projectCode ? (
+                <p style={{ marginTop: 6, fontSize: 11, color: 'rgba(0,0,0,0.35)', fontFamily: 'Geist Mono, monospace' }}>
+                  WO-{projectCode}-YYMMDD-001 &nbsp;&middot;&nbsp; PO-{projectCode}-YYMMDD-001
+                </p>
+              ) : (
+                <p style={{ marginTop: 6, fontSize: 11, color: 'rgba(0,0,0,0.35)' }}>
+                  Auto-suggested from project name · edit freely
+                </p>
+              )}
+            </div>
+
             <div style={{ marginBottom: 36 }}>
               <label style={{ display: 'block', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(0,0,0,0.35)', marginBottom: 10 }}>
                 Project Type
@@ -273,13 +323,13 @@ export default function NewProjectWizard({ session }: { session: Session }) {
             </div>
 
             <button
-              onClick={() => name.trim() && goNext()}
-              disabled={!name.trim()}
+              onClick={() => name.trim() && projectCode.length >= 2 && goNext()}
+              disabled={!name.trim() || projectCode.length < 2}
               style={{
                 width: '100%', height: 52, borderRadius: 14,
-                background: name.trim() ? '#0b1c30' : 'rgba(0,0,0,0.06)',
-                color: name.trim() ? '#ffffff' : 'rgba(0,0,0,0.25)',
-                border: 'none', cursor: name.trim() ? 'pointer' : 'not-allowed',
+                background: name.trim() && projectCode.length >= 2 ? '#0b1c30' : 'rgba(0,0,0,0.06)',
+                color: name.trim() && projectCode.length >= 2 ? '#ffffff' : 'rgba(0,0,0,0.25)',
+                border: 'none', cursor: name.trim() && projectCode.length >= 2 ? 'pointer' : 'not-allowed',
                 fontSize: 15, fontWeight: 600,
                 transition: 'all 200ms',
                 letterSpacing: '-0.01em',

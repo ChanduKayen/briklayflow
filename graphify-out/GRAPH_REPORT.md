@@ -1,11 +1,11 @@
 # Graph Report - Briklay Fly  (2026-05-17)
 
 ## Corpus Check
-- 124 files · ~295,530 words
+- 124 files · ~295,542 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 432 nodes · 500 edges · 15 communities detected
+- 433 nodes · 502 edges · 15 communities detected
 - Extraction: 88% EXTRACTED · 12% INFERRED · 0% AMBIGUOUS · INFERRED: 62 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
@@ -18,13 +18,13 @@
 - [[_COMMUNITY_Community 5|Community 5]]
 - [[_COMMUNITY_Community 6|Community 6]]
 - [[_COMMUNITY_Community 7|Community 7]]
-- [[_COMMUNITY_Community 9|Community 9]]
+- [[_COMMUNITY_Community 10|Community 10]]
 - [[_COMMUNITY_Community 14|Community 14]]
-- [[_COMMUNITY_Community 15|Community 15]]
-- [[_COMMUNITY_Community 17|Community 17]]
+- [[_COMMUNITY_Community 16|Community 16]]
 - [[_COMMUNITY_Community 18|Community 18]]
 - [[_COMMUNITY_Community 19|Community 19]]
-- [[_COMMUNITY_Community 24|Community 24]]
+- [[_COMMUNITY_Community 20|Community 20]]
+- [[_COMMUNITY_Community 25|Community 25]]
 
 ## God Nodes (most connected - your core abstractions)
 1. `handleSessionReply()` - 16 edges
@@ -53,12 +53,12 @@
 ## Communities
 
 ### Community 0 - "Community 0"
-Cohesion: 0.05
-Nodes (7): costCodeLabel(), getCostCode(), getTxnType(), h(), handleSave(), suggestCostCode(), getTxnType()
-
-### Community 1 - "Community 1"
 Cohesion: 0.15
 Nodes (28): buildConfirmMsg(), buildDescription(), createRoughEntry(), fetchImageAsBase64(), findTopMatches(), fmtAmount(), handleFinancial(), handleGeneral() (+20 more)
+
+### Community 1 - "Community 1"
+Cohesion: 0.07
+Nodes (7): costCodeLabel(), getCostCode(), getTxnType(), h(), handleSave(), suggestCostCode(), getTxnType()
 
 ### Community 2 - "Community 2"
 Cohesion: 0.09
@@ -84,50 +84,48 @@ Nodes (4): SourceIcon(), if(), isClientReceipt(), isExcludedFromSpent()
 Cohesion: 0.17
 Nodes (2): extractFromDocument(), fileToBase64()
 
-### Community 9 - "Community 9"
+### Community 10 - "Community 10"
 Cohesion: 0.21
 Nodes (6): calcAmount(), fmtRupee(), getMode(), handleNameBlur(), suggestUnit(), updateStage()
 
 ### Community 14 - "Community 14"
+Cohesion: 0.24
+Nodes (4): AmountDisplay(), fileToBase64Str(), runReconciliation(), useCountUp()
+
+### Community 16 - "Community 16"
 Cohesion: 0.33
 Nodes (6): handler(), close(), go(), handleClose(), handleOpen(), toggle()
 
-### Community 15 - "Community 15"
-Cohesion: 0.25
-Nodes (2): fileToBase64Str(), runReconciliation()
-
-### Community 17 - "Community 17"
+### Community 18 - "Community 18"
 Cohesion: 0.29
 Nodes (2): AmountDisplay(), useCountUp()
 
-### Community 18 - "Community 18"
+### Community 19 - "Community 19"
 Cohesion: 0.36
 Nodes (4): getInitials(), levenshtein(), matchPayee(), matchProject()
 
-### Community 19 - "Community 19"
+### Community 20 - "Community 20"
 Cohesion: 0.43
 Nodes (5): TxnRow(), dot(), formatShortDate(), formatTxn(), isCostCode()
 
-### Community 24 - "Community 24"
+### Community 25 - "Community 25"
 Cohesion: 0.5
 Nodes (2): FinancialsCashflow(), lastNMonths()
 
 ## Knowledge Gaps
 - **Thin community `Community 7`** (13 nodes): `addLine()`, `applyExtractedItems()`, `computeLine()`, `extractFromDocument()`, `fileToBase64()`, `fmtDate()`, `genPONumber()`, `handleProjectChange()`, `newLine()`, `removeLine()`, `SectionLabel()`, `updateLine()`, `NewPurchaseOrder.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 15`** (9 nodes): `fileToBase64Str()`, `fireCelebration()`, `fmtDate()`, `genGRNNumber()`, `handleSave()`, `isOverdue()`, `runReconciliation()`, `useCountUp()`, `PurchaseOrderDetail.tsx`
+- **Thin community `Community 18`** (8 nodes): `AmountDisplay()`, `fmtAmendVal()`, `getPhaseBalance()`, `getPOBalance()`, `getWOBalance()`, `openAmendModal()`, `useCountUp()`, `TransactionDetail.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 17`** (8 nodes): `AmountDisplay()`, `fmtAmendVal()`, `getPhaseBalance()`, `getPOBalance()`, `getWOBalance()`, `openAmendModal()`, `useCountUp()`, `TransactionDetail.tsx`
-  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 24`** (5 nodes): `FinancialsCashflow()`, `fmt()`, `lastNMonths()`, `monthLabel()`, `FinancialsCashflow.tsx`
+- **Thin community `Community 25`** (5 nodes): `FinancialsCashflow()`, `fmt()`, `lastNMonths()`, `monthLabel()`, `FinancialsCashflow.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `SectionLabel()` connect `Community 3` to `Community 0`?**
-  _High betweenness centrality (0.020) - this node is a cross-community bridge._
-- **Why does `handleDownloadPDF()` connect `Community 3` to `Community 9`?**
+- **Why does `SectionLabel()` connect `Community 3` to `Community 1`?**
+  _High betweenness centrality (0.021) - this node is a cross-community bridge._
+- **Why does `handleDownloadPDF()` connect `Community 3` to `Community 10`?**
   _High betweenness centrality (0.017) - this node is a cross-community bridge._
 - **Are the 5 inferred relationships involving `handleSessionReply()` (e.g. with `processMessage()` and `clearSession()`) actually correct?**
   _`handleSessionReply()` has 5 INFERRED edges - model-reasoned connections that need verification._

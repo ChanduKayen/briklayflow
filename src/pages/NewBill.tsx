@@ -7,6 +7,7 @@ import { useSnackbar } from '../components/Snackbar';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import type { Session } from '@supabase/supabase-js';
 import type { Stakeholder, Project } from '../types';
+import { subtract, applyPercent, sum, parseAmount } from '../lib/money';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -176,18 +177,18 @@ export default function NewBill({ session }: { session: Session }) {
   const selectedClient = clients.find(s => s.stakeholder_id === clientId);
 
   // ── Computed amounts ─────────────────────────────────────────────────────
-  const grossN = parseFloat(grossAmount) || 0;
-  const prevN  = parseFloat(previousBills) || 0;
-  const retN   = parseFloat(retentionRate) || 0;
-  const cgstN  = parseFloat(cgstRate) || 0;
+  const grossN = parseAmount(grossAmount);
+  const prevN  = parseAmount(previousBills);
+  const retN   = parseAmount(retentionRate);
+  const cgstN  = parseAmount(cgstRate);
   const sgstN  = cgstN; // always equal to CGST for intra-state
 
-  const netBillAmount    = Math.max(0, grossN - prevN);
-  const retentionAmount  = netBillAmount * (retN / 100);
-  const netPayablePretax = netBillAmount - retentionAmount;
-  const cgstAmount       = gstApplicable ? netPayablePretax * (cgstN / 100) : 0;
-  const sgstAmount       = gstApplicable ? netPayablePretax * (sgstN / 100) : 0;
-  const grandTotal       = netPayablePretax + cgstAmount + sgstAmount;
+  const netBillAmount    = Math.max(0, subtract(grossN, prevN));
+  const retentionAmount  = applyPercent(netBillAmount, retN);
+  const netPayablePretax = subtract(netBillAmount, retentionAmount);
+  const cgstAmount       = gstApplicable ? applyPercent(netPayablePretax, cgstN) : 0;
+  const sgstAmount       = gstApplicable ? applyPercent(netPayablePretax, sgstN) : 0;
+  const grandTotal       = sum([netPayablePretax, cgstAmount, sgstAmount]);
 
   // ── Mutations ────────────────────────────────────────────────────────────
   const createClient = useMutation({

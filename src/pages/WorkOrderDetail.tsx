@@ -18,6 +18,7 @@ import {
   sectionLabel, valueText, drawHeader, drawFooter, drawSignatures,
 } from '../lib/pdfHelpers';
 import { formatTxn } from '../lib/formatTxn';
+import { parseAmount } from '../lib/money';
 
 type ConfirmAction = 'approve' | 'issue' | 'activate' | 'close' | 'cancel' | 'settle';
 type MilestoneStatus = 'PENDING' | 'DUE' | 'PARTIALLY_PAID' | 'PAID' | 'OVERPAID';
@@ -247,40 +248,33 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
   const releaseMutation = useMutation({
     mutationFn: async () => {
       if (!releaseModal || !wo) throw new Error('No milestone selected.');
-      const amount = parseFloat(releaseAmount);
+      const amount = parseAmount(releaseAmount);
       if (!amount || amount <= 0) throw new Error('Enter a valid amount.');
       if (!releaseDate) throw new Error('Select a payment date.');
 
       const txnId = `TXN-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
-
-      // 1. Create transaction
-      const { error: txnError } = await supabase.from('transactions').insert([{
-        txn_id: txnId,
-        stakeholder_id: wo.stakeholder_id,
-        date: releaseDate,
-        total_amount: amount,
-        payment_mode: releaseMode,
-        category: 'Running Bill',
-        remarks: releaseRemarks || `Payment for ${releaseModal.milestone.name}`,
-        status: 'Active',
-        ai_flag_status: 'Clean',
-        ai_flag_data: null,
-        entered_by: session.user.id,
-        org_id: orgId,
-      }]);
-      if (txnError) throw txnError;
-
-      // 2. Create allocation linked to this WO + milestone
-      const { error: allocError } = await supabase.from('txn_allocations').insert([{
-        txn_id: txnId,
-        project_id: wo.project_id,
-        order_type: 'WO',
-        order_ref: wo.wo_id,
-        milestone_id: releaseModal.milestone.milestone_id,
-        allocated_amount: amount,
-        org_id: orgId,
-      }]);
-      if (allocError) throw allocError;
+      const { error: rpcError } = await supabase.rpc('insert_transaction_with_allocations', {
+        p_txn: {
+          txn_id:         txnId,
+          org_id:         orgId,
+          stakeholder_id: wo.stakeholder_id,
+          date:           releaseDate,
+          total_amount:   amount,
+          payment_mode:   releaseMode,
+          category:       'Running Bill',
+          remarks:        releaseRemarks || `Payment for ${releaseModal.milestone.name}`,
+          ai_flag_status: 'Clean',
+          ai_flag_data:   {},
+        },
+        p_allocations: [{
+          project_id:       wo.project_id,
+          order_type:       'WO',
+          order_ref:        wo.wo_id,
+          milestone_id:     releaseModal.milestone.milestone_id,
+          allocated_amount: amount,
+        }],
+      });
+      if (rpcError) throw rpcError;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['wo_allocations', woId] });

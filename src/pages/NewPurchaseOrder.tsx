@@ -8,6 +8,7 @@ import { useUserProfile } from '../App';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import { MAT_DIVISIONS } from '../lib/costCodes';
 import { VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
+import { multiply, subtract, applyPercent, sum } from '../lib/money';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -19,10 +20,6 @@ function SectionLabel({ n, title }: { n: string; title: string }) {
       <span className="text-[10px] font-semibold text-on-surface-variant/50 uppercase tracking-[0.1em]">{title}</span>
     </div>
   );
-}
-
-function genPONumber(): string {
-  return `PO-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
 }
 
 
@@ -81,18 +78,18 @@ function newLine(lineNumber: number): DraftLineItem {
 }
 
 function computeLine(li: DraftLineItem): DraftLineItem {
-  const basic   = li.quantity_ordered * li.unit_rate;
-  const disc    = basic * (li.discount_percent / 100);
-  const taxable = basic - disc;
-  const cgst    = taxable * (li.gst_rate / 200);
-  const sgst    = taxable * (li.gst_rate / 200);
+  const basic   = multiply(li.quantity_ordered, li.unit_rate);
+  const disc    = applyPercent(basic, li.discount_percent);
+  const taxable = subtract(basic, disc);
+  const cgst    = applyPercent(taxable, li.gst_rate / 2);
+  const sgst    = applyPercent(taxable, li.gst_rate / 2);
   return {
     ...li,
-    basic_amount:   basic,
+    basic_amount:    basic,
     discount_amount: disc,
     cgst,
     sgst,
-    total_amount: taxable + cgst + sgst,
+    total_amount: sum([taxable, cgst, sgst]),
   };
 }
 
@@ -153,11 +150,6 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
   const orgId = useOrgId();
   const vendorSearchRef = useRef<HTMLInputElement>(null);
 
-  // ── PO Number ──────────────────────────────────────────────────────────────
-  const [poId, setPoId]               = useState(genPONumber);
-  const [autoPoId, setAutoPoId]       = useState(true);
-  const [poIdCopied, setPoIdCopied]   = useState(false);
-
   // ── Section 01: Identity ──────────────────────────────────────────────────
   const [orderedDate, setOrderedDate]         = useState(new Date().toISOString().split('T')[0]);
   const [expectedDelivery, setExpectedDelivery] = useState('');
@@ -198,9 +190,9 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
   const { data: projects } = useQuery({
     queryKey: ['projects'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('projects').select('project_id, name, site_location').order('name');
+      const { data, error } = await supabase.from('projects').select('project_id, name, site_location, project_code').order('name');
       if (error) throw error;
-      return data as { project_id: string; name: string; site_location: string }[];
+      return data as { project_id: string; name: string; site_location: string; project_code: string | null }[];
     },
   });
 
@@ -216,6 +208,8 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
       return data as any[];
     },
   });
+
+  const selectedProjectObj = projects?.find(p => p.project_id === projectId);
 
   // Vendor suggestions
   const vendorSuggestions = useMemo(() => {
@@ -243,10 +237,10 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
   }
 
   // ── Totals ────────────────────────────────────────────────────────────────
-  const subtotal      = lineItems.reduce((s, li) => s + li.basic_amount, 0);
-  const totalDiscount = lineItems.reduce((s, li) => s + li.discount_amount, 0);
-  const totalGST      = lineItems.reduce((s, li) => s + li.cgst + li.sgst, 0);
-  const grandTotal    = lineItems.reduce((s, li) => s + li.total_amount, 0);
+  const subtotal      = sum(lineItems.map(li => li.basic_amount));
+  const totalDiscount = sum(lineItems.map(li => li.discount_amount));
+  const totalGST      = sum(lineItems.map(li => li.cgst + li.sgst));
+  const grandTotal    = sum(lineItems.map(li => li.total_amount));
 
   // ── Project selection ─────────────────────────────────────────────────────
   function handleProjectChange(pid: string) {
@@ -257,15 +251,12 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
 
   // ── Save ──────────────────────────────────────────────────────────────────
   const saveMutation = useMutation({
-    mutationFn: async (status: string) => {
+    mutationFn: async (status: string): Promise<string> => {
       if (!vendorId)     throw new Error('Please select a vendor');
       if (!projectId)    throw new Error('Please select a project');
       if (!lineItems.length || !lineItems.some(li => li.item_name.trim())) {
         throw new Error('Please add at least one line item');
       }
-
-      const finalPoId = poId.trim();
-      if (!finalPoId) throw new Error('PO number is required');
 
       const terms = paymentTermsDays === -1 ? parseInt(customTerms) || 30 : paymentTermsDays;
 
@@ -278,8 +269,9 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
         amount: li.total_amount,
       }));
 
-      const { error: poError } = await supabase.from('purchase_orders').insert({
-        po_id:               finalPoId,
+      const poData = {
+        // po_id omitted — generated by create_purchase_order() via generate_document_id()
+        org_id:              orgId,
         project_id:          projectId,
         stakeholder_id:      vendorId,
         items:               legacyItems,
@@ -295,15 +287,11 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
         vendor_notes:        vendorNotes || null,
         internal_notes:      internalNotes || null,
         created_by:          session.user.id,
-        org_id:              orgId,
-      });
-      if (poError) throw poError;
+      };
 
-      // Insert line items
       const lineItemRows = lineItems
         .filter(li => li.item_name.trim())
         .map(li => ({
-          po_id:             finalPoId,
           line_number:       li.line_number,
           category_id:       li.category_id || null,
           item_name:         li.item_name,
@@ -319,24 +307,24 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
           sgst:              li.sgst,
           igst:              0,
           total_amount:      li.total_amount,
-          org_id:            orgId,
         }));
 
-      if (lineItemRows.length > 0) {
-        const { error: liError } = await supabase.from('po_line_items').insert(lineItemRows);
-        if (liError) throw liError;
-      }
+      const { data, error: rpcError } = await supabase.rpc('create_purchase_order', {
+        p_po_data:    poData,
+        p_line_items: lineItemRows,
+      });
+      if (rpcError) throw rpcError;
+      if (!data?.success) throw new Error(data?.error ?? 'Failed to create purchase order');
 
-      return finalPoId;
+      return data.po_id as string;
     },
-    onSuccess: (finalPoId) => {
+    onSuccess: (generatedPoId) => {
       qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
-      showSnackbar(`PO ${finalPoId} created`);
-      navigate(`/purchase-orders/${finalPoId}`);
+      showSnackbar(`PO ${generatedPoId} created`);
+      navigate(`/purchase-orders/${generatedPoId}`);
     },
     onError: (err: any) => {
       showSnackbar(err.message || 'Failed to save', { type: 'error' });
-      if (autoPoId) setPoId(genPONumber());
     },
   });
 
@@ -479,18 +467,11 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
         </div>
         {/* PO ID display */}
         <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-surface-container rounded-xl border border-outline-variant/20">
-          <span className="font-data-mono text-[13px] text-on-surface-variant">{poId || '—'}</span>
-          <button
-            onClick={() => {
-              navigator.clipboard.writeText(poId);
-              setPoIdCopied(true);
-              setTimeout(() => setPoIdCopied(false), 1500);
-            }}
-            className="text-on-surface-variant/50 hover:text-primary transition-colors"
-            title="Copy PO number"
-          >
-            <span className="material-symbols-outlined text-[14px]">{poIdCopied ? 'check' : 'content_copy'}</span>
-          </button>
+          <span className="font-data-mono text-[13px] text-on-surface-variant/40 italic">
+            {selectedProjectObj?.project_code
+              ? `PO-${selectedProjectObj.project_code}-…`
+              : 'Auto-generated'}
+          </span>
         </div>
       </div>
 
@@ -505,39 +486,13 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
               {/* PO Number */}
               <div>
                 <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1.5">PO Number</label>
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-container-low rounded-lg border border-outline-variant/20">
-                    <button
-                      onClick={() => setAutoPoId(true)}
-                      className={`text-[11px] font-semibold px-2 py-0.5 rounded transition-colors ${autoPoId ? 'bg-primary text-on-primary' : 'text-on-surface-variant'}`}
-                    >
-                      Auto
-                    </button>
-                    <button
-                      onClick={() => setAutoPoId(false)}
-                      className={`text-[11px] font-semibold px-2 py-0.5 rounded transition-colors ${!autoPoId ? 'bg-primary text-on-primary' : 'text-on-surface-variant'}`}
-                    >
-                      Manual
-                    </button>
-                  </div>
-                  {autoPoId ? (
-                    <div className="flex items-center gap-2 flex-1 px-3 py-2 bg-surface-container-low/50 rounded-xl border border-outline-variant/15">
-                      <span className="font-data-mono text-[14px] font-bold text-on-surface">{poId}</span>
-                      <button
-                        onClick={() => { navigator.clipboard.writeText(poId); setPoIdCopied(true); setTimeout(() => setPoIdCopied(false), 1500); }}
-                        className="ml-auto text-on-surface-variant/40 hover:text-primary transition-colors"
-                      >
-                        <span className="material-symbols-outlined text-[14px]">{poIdCopied ? 'check' : 'content_copy'}</span>
-                      </button>
-                    </div>
-                  ) : (
-                    <input
-                      className="bk-input flex-1 font-data-mono"
-                      value={poId}
-                      onChange={e => setPoId(e.target.value)}
-                      placeholder="Enter PO number"
-                    />
-                  )}
+                <div className="flex items-center gap-2 px-3 py-2 bg-surface-container-low/50 rounded-xl border border-outline-variant/15">
+                  <span className="font-data-mono text-[14px] text-on-surface-variant/40 italic">
+                    {selectedProjectObj?.project_code
+                      ? `PO-${selectedProjectObj.project_code}-YYMMDD-NNN`
+                      : 'Auto-generated on save'}
+                  </span>
+                  <span className="ml-auto text-[9px] px-1.5 py-0.5 bg-surface-container-highest text-on-surface-variant/50 rounded font-bold tracking-wider">AUTO</span>
                 </div>
               </div>
 
@@ -1133,7 +1088,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
                 </div>
                 <div className="text-right">
                   <p className="text-[10px] font-bold uppercase tracking-widest font-sans">Purchase Order</p>
-                  <p className="text-[10px] text-on-surface-variant/60 font-data-mono">{poId || '—'}</p>
+                  <p className="text-[10px] text-on-surface-variant/40 italic">Auto-generated</p>
                   <p className="text-[9px] text-on-surface-variant/40">{orderedDate ? fmtDate(orderedDate) : '—'}</p>
                 </div>
               </div>

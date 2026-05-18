@@ -7,6 +7,7 @@ import { useSnackbar } from '../components/Snackbar';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import type { Session } from '@supabase/supabase-js';
 import type { Stakeholder, Project, InvoiceType } from '../types';
+import { multiply, add, applyPercent, sum, parseAmount } from '../lib/money';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -89,14 +90,14 @@ export default function NewInvoice({ session }: { session: Session }) {
   // ── Computed ─────────────────────────────────────────────────────────────
   const computedItems = lineItems.map(li => ({
     ...li,
-    qtyN: parseFloat(li.qty) || 0,
-    rateN: parseFloat(li.rate) || 0,
-    amount: (parseFloat(li.qty) || 0) * (parseFloat(li.rate) || 0),
+    qtyN:   parseAmount(li.qty),
+    rateN:  parseAmount(li.rate),
+    amount: multiply(parseAmount(li.qty), parseAmount(li.rate)),
   }));
-  const subtotal = computedItems.reduce((s, li) => s + li.amount, 0);
-  const taxRateN = parseFloat(taxRate) || 0;
-  const taxAmount = subtotal * (taxRateN / 100);
-  const total = subtotal + taxAmount;
+  const subtotal  = sum(computedItems.map(li => li.amount));
+  const taxRateN  = parseAmount(taxRate);
+  const taxAmount = applyPercent(subtotal, taxRateN);
+  const total     = add(subtotal, taxAmount);
 
   // ── Queries ──────────────────────────────────────────────────────────────
   const { data: stakeholders } = useQuery({

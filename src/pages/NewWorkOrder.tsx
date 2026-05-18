@@ -8,6 +8,7 @@ import type { Project, Stakeholder } from '../types';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useOrgId } from '../lib/auth/AuthProvider';
+import { multiply, parseAmount } from '../lib/money';
 
 // ─── Work Stage types ──────────────────────────────────────────────────────
 
@@ -115,7 +116,7 @@ const QTY_LABELS: Record<string, string> = {
 
 function calcAmount(s: StageDraft): number {
   const mode = getMode(s);
-  if (mode === 'measured') return Math.round((s.quantity ?? 0) * (s.rate ?? 0) * 100) / 100;
+  if (mode === 'measured') return multiply(s.quantity ?? 0, s.rate ?? 0);
   if (mode === 'lumpsum')  return s.amount ?? 0;
   return 0;
 }
@@ -134,8 +135,6 @@ export default function NewWorkOrder({ session }: { session: Session }) {
 
   const initState = (location.state as any) || {};
 
-  const [woId] = useState(() => `WO-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`);
-  const [woIdCopied, setWoIdCopied] = useState(false);
   const [projectId, setProjectId] = useState<string>(initState.projectId || '');
   const [stakeholderId, setStakeholderId] = useState<string>(initState.stakeholderId || '');
   const [scope, setScope] = useState('');
@@ -161,9 +160,9 @@ export default function NewWorkOrder({ session }: { session: Session }) {
   const { data: projects } = useQuery({
     queryKey: ['projects'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('projects').select('project_id, name').eq('status', 'Active').order('name');
+      const { data, error } = await supabase.from('projects').select('project_id, name, project_code').eq('status', 'Active').order('name');
       if (error) throw error;
-      return data as Pick<Project, 'project_id' | 'name'>[];
+      return data as Array<{ project_id: string; name: string; project_code: string | null }>;
     },
   });
 
@@ -187,45 +186,44 @@ export default function NewWorkOrder({ session }: { session: Session }) {
   // ─── Save mutation ───────────────────────────────────────────────────────
 
   const createWO = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (): Promise<string> => {
       if (!projectId || !stakeholderId || !scope || !dateIssued)
         throw new Error('Please fill in all required fields.');
-      const { data: woData, error: woError } = await supabase.from('work_orders').insert([{
-        wo_id: woId, project_id: projectId, stakeholder_id: stakeholderId,
-        scope_of_work: scope, order_value: orderValue, date_issued: dateIssued,
-        source, status: 'Draft' as const,
-        org_id: orgId,
-      }]).select().single();
-      if (woError) throw woError;
-      const milestoneRows = stages.length > 0
+      const milestones = stages.length > 0
         ? stages.map((s, idx) => {
             const mode = getMode(s);
             return {
-              wo_id: woId, seq_no: idx + 1, name: s.name,
+              seq_no: idx + 1, name: s.name,
               unit_type: s.unit_type || null,
               quantity: mode === 'measured' ? s.quantity : (mode === 'lumpsum' ? 1 : null),
               rate: mode === 'measured' ? s.rate : null,
               planned_amount: calcAmount(s),
-              status: 'Pending' as const,
               ai_extracted: isAiExtracted,
-              org_id: orgId,
             };
           })
         : [{
-            wo_id: woId, seq_no: 1, name: 'Full Payment',
+            seq_no: 1, name: 'Full Payment',
             unit_type: 'LS', quantity: 1, rate: null,
             planned_amount: orderValue,
-            status: 'Pending' as const,
             ai_extracted: false,
-            org_id: orgId,
           }];
-      const { error: mError } = await supabase.from('wo_milestones').insert(milestoneRows);
-      if (mError) throw mError;
-      return woData;
+      const { data, error } = await supabase.rpc('create_work_order', {
+        p_org_id:         orgId,
+        p_project_id:     projectId,
+        p_stakeholder_id: stakeholderId,
+        p_scope:          scope,
+        p_order_value:    orderValue,
+        p_date_issued:    dateIssued,
+        p_source:         source,
+        p_milestones:     milestones,
+      });
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error ?? 'Failed to create work order');
+      return data.wo_id as string;
     },
-    onSuccess: () => {
+    onSuccess: (generatedId) => {
       queryClient.invalidateQueries({ queryKey: ['work_orders'] });
-      navigate('/work-orders');
+      navigate(`/work-orders/${generatedId}`);
     },
   });
 
@@ -480,16 +478,10 @@ Return ONLY this JSON object, no other text:
                   WO ID
                   <span className="px-1.5 py-0.5 bg-surface-container-highest text-on-surface-variant rounded text-[9px] font-bold tracking-wider">AUTO</span>
                 </label>
-                <div className="relative">
-                  <input value={woId} readOnly className="bk-input bg-surface-container text-on-surface-variant cursor-default font-data-mono pr-20" />
-                  <button type="button"
-                    onClick={() => { navigator.clipboard.writeText(woId); setWoIdCopied(true); setTimeout(() => setWoIdCopied(false), 2000); }}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1 px-2 py-1 rounded text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-colors"
-                    title="Copy WO ID">
-                    {woIdCopied
-                      ? <span className="text-[11px] font-bold text-secondary whitespace-nowrap">Copied!</span>
-                      : <span className="material-symbols-outlined text-[18px]">content_copy</span>}
-                  </button>
+                <div className="bk-input bg-surface-container cursor-default font-data-mono text-[13px] text-on-surface-variant/40 italic select-none">
+                  {selectedProject?.project_code
+                    ? `WO-${selectedProject.project_code}-YYMMDD-NNN`
+                    : 'Auto-generated on save'}
                 </div>
               </div>
 
@@ -553,7 +545,7 @@ Return ONLY this JSON object, no other text:
                   <input
                     type="number" step="0.01" min="0"
                     value={orderValue || ''}
-                    onChange={e => setOrderValue(parseFloat(e.target.value) || 0)}
+                    onChange={e => setOrderValue(parseAmount(e.target.value))}
                     className="bk-input pl-8 font-data-mono text-headline-sm font-bold"
                     placeholder="0.00"
                     required
@@ -837,7 +829,11 @@ Return ONLY this JSON object, no other text:
               <h3 className="text-label-caps font-label-caps text-on-surface-variant">Order Summary</h3>
             </div>
             <div className="p-5 space-y-4">
-              <SummaryRow icon="tag"         label="WO ID"        value={<span className="font-data-mono text-primary">{woId}</span>} />
+              <SummaryRow icon="tag"         label="WO ID"        value={
+                <span className="font-data-mono text-on-surface-variant/40 italic text-body-sm">
+                  {selectedProject?.project_code ? `WO-${selectedProject.project_code}-…` : 'Auto-generated'}
+                </span>
+              } />
               <SummaryRow icon="construction" label="Project"      value={selectedProject?.name ?? <span className="text-on-surface-variant italic text-body-sm">Not selected</span>} />
               <SummaryRow icon="person"       label="Worker"       value={selectedWorker?.name  ?? <span className="text-on-surface-variant italic text-body-sm">Not selected</span>} />
               <SummaryRow icon="payments"     label="Order Value"  value={<span className="font-data-mono font-bold">{fmtRupee(orderValue)}</span>} />
@@ -972,7 +968,7 @@ function ExtractedStageCard({
   const conf = CONFIDENCE_STYLE[stage.confidence];
   const calcAmt =
     stage.qty != null && stage.rate != null
-      ? Math.round(stage.qty * stage.rate * 100) / 100
+      ? multiply(stage.qty, stage.rate)
       : null;
 
   return (

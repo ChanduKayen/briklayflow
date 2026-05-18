@@ -8,6 +8,7 @@ import { supabase } from '../lib/supabase'
 import { useUserProfile } from '../App'
 import { useSnackbar } from '../components/Snackbar'
 import { PageSkeleton } from '../components/SkeletonLoader'
+import { parseAmount } from '../lib/money'
 
 const STATUS_CHIP: Record<string, string> = {
   ORDERED:   'bg-blue-50 text-blue-600',
@@ -112,7 +113,7 @@ function VendorBillCell({ po, canManage, currentUserName, onUpdate, showSnackbar
   const hasBill = Number(po.vendor_bill_amount) > 0
 
   const handleSave = async () => {
-    const parsed = parseFloat(amount)
+    const parsed = parseAmount(amount)
     if (!parsed || parsed <= 0) return
     setSaving(true)
     const { error } = await supabase.from('purchase_orders').update({ vendor_bill_amount: parsed, vendor_bill_number: billNo.trim() || null, vendor_bill_no: billNo.trim() || null, bill_recorded_at: new Date().toISOString(), bill_recorded_by_name: currentUserName }).eq('po_id', po.po_id)

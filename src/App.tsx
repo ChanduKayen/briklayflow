@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+﻿import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from './lib/auth/AuthProvider';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
 import { Routes, Route, Navigate, useNavigate, Link, useLocation } from 'react-router-dom';
@@ -1572,24 +1572,17 @@ function Team({ session }: { session: Session }) {
       });
       if (authError) throw authError;
 
-      // Sync role to user_profiles â€" backward compat until T-14 migrates pages to org_memberships
-      if (role !== 'supervisor') {
-        const { error: updateError } = await supabase.from('user_profiles').update({ role: role as any }).eq('id', authData.user.id);
-        if (updateError) throw updateError;
-      }
-
-      // REPLACED: unsafe role-only path that left new users with no org_memberships entry.
-      // Previously: only user_profiles.role was set â†’ T-05 resolver routed user to /pending on first login.
-      // Now: also insert into org_memberships so T-05 resolveAuthDestination() finds an active membership.
       const orgId = profile?.org_id;
-      if (!orgId) throw new Error('Cannot determine organisation â€" refresh the page and try again.');
-      const { error: memError } = await supabaseAdmin
-        .from('org_memberships')
-        .upsert(
-          { org_id: orgId, user_id: authData.user.id, role, status: 'active', joined_at: new Date().toISOString() },
-          { onConflict: 'user_id,org_id' }
-        );
-      if (memError) throw memError;
+      if (!orgId) throw new Error('Cannot determine organisation — refresh the page and try again.');
+
+      // Atomically: sync user_profiles.role + upsert org_memberships in one transaction.
+      const { data: finalizeData, error: finalizeError } = await supabase.rpc('finalize_new_member', {
+        p_user_id: authData.user.id,
+        p_org_id:  orgId,
+        p_role:    role,
+      });
+      if (finalizeError) throw finalizeError;
+      if (!finalizeData?.success) throw new Error(finalizeData?.error ?? 'Failed to set up user account');
 
       return authData;
     },
@@ -1681,7 +1674,7 @@ function Team({ session }: { session: Session }) {
                     className="text-[12px] font-semibold transition-colors hover:opacity-80"
                     style={{ color: '#C8603A' }}
                   >
-                    Invite another â†’
+                    Invite another â†'
                   </button>
                 </div>
               </div>

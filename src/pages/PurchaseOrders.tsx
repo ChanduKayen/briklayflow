@@ -9,6 +9,7 @@ import { PageSkeleton } from '../components/SkeletonLoader';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
+import { parseAmount } from '../lib/money';
 
 // ── Status config ─────────────────────────────────────────────────────────────
 
@@ -182,7 +183,7 @@ function VendorBillCell({
   const hasBill = Number(po.vendor_bill_amount) > 0;
 
   const handleSave = async () => {
-    const parsed = parseFloat(amount);
+    const parsed = parseAmount(amount);
     if (!parsed || parsed <= 0) return;
     setSaving(true);
     const { error } = await supabase

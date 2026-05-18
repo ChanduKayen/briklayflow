@@ -9,6 +9,7 @@ import { PageSkeleton } from '../components/SkeletonLoader';
 import { getBillingMode } from '../lib/billingMode';
 import type { Session } from '@supabase/supabase-js';
 import type { ClientInvoice, ClientPayment, InvoiceStatus, Stakeholder, Project } from '../types';
+import { parseAmount } from '../lib/money';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -126,71 +127,33 @@ export default function InvoiceDetail({ session }: { session: Session }) {
   const recordReceipt = useMutation({
     mutationFn: async () => {
       if (!invoice) throw new Error('Invoice not loaded');
-      const amount = parseFloat(receiptAmount);
+      const amount = parseAmount(receiptAmount);
       if (!amount || amount <= 0) throw new Error('Invalid amount');
 
       const newPaid = Number(invoice.paid_amount) + amount;
       const newStatus: InvoiceStatus =
         newPaid >= Number(invoice.total_amount) ? 'Paid' : 'Partial';
-
-      // Insert payment record
-      const { error: payErr } = await supabase.from('client_payments').insert([{
-        invoice_id: invoiceId,
-        amount,
-        payment_date: receiptDate,
-        payment_mode: receiptMode,
-        reference: receiptRef.trim() || null,
-        notes: receiptNotes.trim() || null,
-        created_by: session.user.id,
-        org_id: orgId,
-      }]);
-      if (payErr) throw payErr;
-
-      // Update invoice paid_amount + status
-      const { error: invErr } = await supabase
-        .from('client_invoices')
-        .update({ paid_amount: newPaid, status: newStatus })
-        .eq('invoice_id', invoiceId);
-      if (invErr) throw invErr;
-
-      // Integrated mode: also create a Transaction entry
       const billingMode = getBillingMode();
-      if (billingMode === 'integrated' && invoice.client_id && invoice.project_id) {
-        const txnId = genTxnId();
-        const txnPayload = {
-          txn_id: txnId,
-          stakeholder_id: invoice.client_id,
-          date: receiptDate,
-          total_amount: amount,
-          payment_mode: receiptMode,
-          category: 'CLIENT-RECEIPT',
-          remarks: `Receipt for ${invoiceId}${receiptRef ? ` · Ref: ${receiptRef}` : ''}`,
-          ai_flag_status: 'Clean',
-          ai_flag_data: { type: 'client_receipt', invoice_id: invoiceId },
-          entered_by: session.user.id,
-          org_id: orgId,
-        };
-        const { error: txnErr } = await supabase.from('transactions').insert([txnPayload]);
-        if (!txnErr) {
-          // Allocation row
-          await supabase.from('txn_allocations').insert([{
-            txn_id: txnId,
-            project_id: invoice.project_id,
-            order_type: null,
-            order_ref: null,
-            allocated_amount: amount,
-            org_id: orgId,
-          }]);
-          // Backlink txn_id onto the payment
-          await supabase
-            .from('client_payments')
-            .update({ txn_id: txnId })
-            .eq('invoice_id', invoiceId)
-            .is('txn_id', null)
-            .order('created_at', { ascending: false })
-            .limit(1);
-        }
-      }
+      const isIntegrated = billingMode === 'integrated' && !!invoice.client_id && !!invoice.project_id;
+
+      const { data, error: rpcError } = await supabase.rpc('record_invoice_receipt', {
+        p_invoice_id:    invoiceId,
+        p_org_id:        orgId,
+        p_amount:        amount,
+        p_payment_date:  receiptDate,
+        p_payment_mode:  receiptMode,
+        p_reference:     receiptRef.trim() || null,
+        p_notes:         receiptNotes.trim() || null,
+        p_new_paid:      newPaid,
+        p_new_status:    newStatus,
+        p_is_integrated: isIntegrated,
+        p_txn_id:        genTxnId(),
+        p_client_id:     invoice.client_id || null,
+        p_project_id:    invoice.project_id || null,
+        p_remarks:       `Receipt for ${invoiceId}${receiptRef ? ` · Ref: ${receiptRef}` : ''}`,
+      });
+      if (rpcError) throw rpcError;
+      if (!data?.success) throw new Error(data?.error ?? 'Failed to record payment');
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['client_invoice', invoiceId] });

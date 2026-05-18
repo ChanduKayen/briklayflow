@@ -18,6 +18,7 @@ import {
   setColor, drawRule, sectionLabel, valueText, drawHeader, drawFooter, drawSignatures,
 } from '../lib/pdfHelpers';
 import { formatTxn } from '../lib/formatTxn';
+import { parseAmount } from '../lib/money';
 
 // ── Status helpers ────────────────────────────────────────────────────────────
 
@@ -163,7 +164,7 @@ function BillEntryForm({ poId, currentUserName, onBillSaved }: BillEntryFormProp
   const [saving, setSaving]         = useState(false);
   const qc = useQueryClient();
 
-  const bill    = parseFloat(billAmount) || 0;
+  const bill    = parseAmount(billAmount);
   const canSave = bill > 0;
 
   const handleSave = async () => {
@@ -521,37 +522,31 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
 
   const settlePO = useMutation({
     mutationFn: async () => {
-      const amount = parseFloat(settleAmount) || Number(po?.total_value || po?.order_value) || 0;
+      const amount = parseAmount(settleAmount) || Number(po?.total_value || po?.order_value) || 0;
       if (!amount) throw new Error('Amount is required');
 
-      // Create transaction
       const txnId = `TXN-${Date.now()}`;
-      const { error: txnError } = await supabase.from('transactions').insert({
-        txn_id:        txnId,
-        stakeholder_id: po!.stakeholder_id,
-        date:          new Date().toISOString().split('T')[0],
-        total_amount:  amount,
-        payment_mode:  settlePayMode,
-        category:      'Purchase Payment',
-        remarks:       `Settlement for PO ${poId}${settleRef ? ` · Ref: ${settleRef}` : ''}`,
-        status:        'Active',
-        ai_flag_status: 'Clean',
-        ai_flag_data:  null,
-        entered_by:    session.user.id,
-        org_id:        orgId,
+      const { error: rpcError } = await supabase.rpc('insert_transaction_with_allocations', {
+        p_txn: {
+          txn_id:         txnId,
+          org_id:         orgId,
+          stakeholder_id: po!.stakeholder_id,
+          date:           new Date().toISOString().split('T')[0],
+          total_amount:   amount,
+          payment_mode:   settlePayMode,
+          category:       'Purchase Payment',
+          remarks:        `Settlement for PO ${poId}${settleRef ? ` · Ref: ${settleRef}` : ''}`,
+          ai_flag_status: 'Clean',
+          ai_flag_data:   {},
+        },
+        p_allocations: [{
+          project_id:       po!.project_id,
+          order_type:       'PO',
+          order_ref:        poId!,
+          allocated_amount: amount,
+        }],
       });
-      if (txnError) throw txnError;
-
-      // Create allocation
-      const { error: allocError } = await supabase.from('txn_allocations').insert({
-        txn_id:            txnId,
-        project_id:        po!.project_id,
-        order_type:        'PO',
-        order_ref:         poId!,
-        allocated_amount:  amount,
-        org_id:            orgId,
-      });
-      if (allocError) throw allocError;
+      if (rpcError) throw rpcError;
 
       // Mark PO as fully paid
       await supabase.from('purchase_orders').update({ status: 'PAID' }).eq('po_id', poId!);
@@ -572,33 +567,30 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   // Feature 3 — record payment against PO
   const recordPayment = useMutation({
     mutationFn: async () => {
-      const amount = parseFloat(payAmount) || 0;
+      const amount = parseAmount(payAmount);
       if (!amount) throw new Error('Amount is required');
       const txnId = `TXN-${Date.now()}`;
-      const { error: txnErr } = await supabase.from('transactions').insert({
-        txn_id:         txnId,
-        stakeholder_id: po!.stakeholder_id,
-        date:           new Date().toISOString().split('T')[0],
-        total_amount:   amount,
-        payment_mode:   payMode,
-        category:       'Purchase Payment',
-        remarks:        `Payment for PO ${poId}${payRef ? ` · Ref: ${payRef}` : ''}`,
-        status:         'Active',
-        ai_flag_status: 'Clean',
-        ai_flag_data:   null,
-        entered_by:     session.user.id,
-        org_id:         profile?.org_id,
+      const { error: rpcErr } = await supabase.rpc('insert_transaction_with_allocations', {
+        p_txn: {
+          txn_id:         txnId,
+          org_id:         orgId,
+          stakeholder_id: po!.stakeholder_id,
+          date:           new Date().toISOString().split('T')[0],
+          total_amount:   amount,
+          payment_mode:   payMode,
+          category:       'Purchase Payment',
+          remarks:        `Payment for PO ${poId}${payRef ? ` · Ref: ${payRef}` : ''}`,
+          ai_flag_status: 'Clean',
+          ai_flag_data:   {},
+        },
+        p_allocations: [{
+          project_id:       po!.project_id,
+          order_type:       'PO',
+          order_ref:        poId!,
+          allocated_amount: amount,
+        }],
       });
-      if (txnErr) throw txnErr;
-      const { error: allocErr } = await supabase.from('txn_allocations').insert({
-        txn_id:           txnId,
-        project_id:       po!.project_id,
-        order_type:       'PO',
-        order_ref:        poId!,
-        allocated_amount: amount,
-        org_id:           orgId,
-      });
-      if (allocErr) throw allocErr;
+      if (rpcErr) throw rpcErr;
 
       // Auto-advance PO status: compute total paid after this payment
       const prevPaid = (linkedTxns ?? [])
