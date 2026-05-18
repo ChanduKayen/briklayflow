@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import confetti from 'canvas-confetti';
-import { Mail, Lock, User, AlertCircle, CheckCircle2, ArrowRight, X, Sparkles, Building2, MousePointer2 } from 'lucide-react';
+import { Mail, Lock, User, AlertCircle, CheckCircle2, ArrowRight, Sparkles, Building2, MousePointer2, BrainCircuit, Layers } from 'lucide-react';
 import { IconBrandWhatsapp } from '@tabler/icons-react';
 
 export default function Login() {
@@ -14,7 +14,7 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
-  
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -22,6 +22,29 @@ export default function Login() {
   // WhatsApp Demo State
   const [showWaDemo, setShowWaDemo] = useState(false);
   const [waStep, setWaStep] = useState(0);
+
+  // Cyclic Text State
+  const [cyclicIndex, setCyclicIndex] = useState(0);
+  const [showResult, setShowResult] = useState(false);
+
+  const cyclicPhrases = [
+    { action: "Send a transaction from WhatsApp", result: "we instantly record it." },
+    { action: "Share site progress from WhatsApp", result: "we analyze and map it." },
+    { action: "Ask a question about your site", result: "we immediately answer it." }
+  ];
+
+  useEffect(() => {
+    if (!isSignUp) return;
+    
+    setShowResult(false);
+    const resultTimer = setTimeout(() => setShowResult(true), 1200);
+    const nextTimer = setTimeout(() => setCyclicIndex((prev) => (prev + 1) % cyclicPhrases.length), 4500);
+
+    return () => {
+      clearTimeout(resultTimer);
+      clearTimeout(nextTimer);
+    };
+  }, [isSignUp, cyclicIndex]);
 
   // Clear errors when toggling mode
   useEffect(() => {
@@ -57,7 +80,7 @@ export default function Login() {
 
     const randomInRange = (min: number, max: number) => Math.random() * (max - min) + min;
 
-    const interval: any = setInterval(function() {
+    const interval: any = setInterval(function () {
       const timeLeft = animationEnd - Date.now();
       if (timeLeft <= 0) return clearInterval(interval);
 
@@ -104,7 +127,7 @@ export default function Login() {
 
   return (
     <div className="min-h-[100dvh] w-full bg-[#fdfdfc] flex flex-col items-center overflow-x-hidden overflow-y-auto relative selection:bg-[#C8603A]/20 selection:text-[#C8603A] font-sans">
-      
+
       <style>{`
         @keyframes pastel-float-1 {
           0% { transform: translate(0, 0) scale(1); }
@@ -179,171 +202,266 @@ export default function Login() {
         <div className="absolute bottom-[0%] left-[30%] w-[500px] h-[500px] bg-[#dcfce7] rounded-full mix-blend-multiply opacity-50 blur-[100px]" style={{ animation: 'pastel-float-3 25s infinite ease-in-out' }} />
       </div>
 
-      {/* Top Navigation / Brand */}
-      <div className="w-full max-w-7xl px-6 lg:px-8 pt-6 lg:pt-10 pb-6 lg:pb-8 flex justify-between items-center relative z-10 shrink-0">
-        <div className="flex items-center">
-          <span className="text-2xl font-serif font-medium tracking-[0.15em] text-slate-900">BRIKLAY</span>
-        </div>
-      </div>
+      {/* Removed static top navigation logo to reposition it dynamically in the form container */}
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col items-center justify-center w-full px-4 pb-12 lg:pb-16 relative z-10 min-h-fit">
-        
-        {/* Typography Hero */}
-        <div className="mb-6 lg:mb-10 text-center max-w-2xl mx-auto animate-[popIn_0.8s_ease_forwards] relative shrink-0">
-          <h1 className="text-3xl sm:text-5xl lg:text-[56px] font-medium tracking-tight text-slate-900 mb-3 lg:mb-5 leading-[1.15]">
-            Construction{' '}
-            <button 
-              onClick={() => setShowWaDemo(true)}
-              className="relative inline-block cursor-pointer group ml-2 border-b-2 border-dashed border-[#C8603A]/40 hover:border-[#C8603A] transition-colors pb-1"
-            >
-              <span className="relative z-10 font-bold text-transparent bg-clip-text bg-gradient-to-r from-[#C8603A] to-[#eab308]">Magic.</span>
-              
-              {/* Subtle background glow */}
-              <div className="absolute inset-0 bg-[#C8603A]/10 rounded-xl blur-md scale-90 opacity-0 group-hover:opacity-100 group-hover:scale-100 transition-all duration-500"></div>
-              
-              {/* Animated Floating Cursor (Below pointing up) */}
-              <div className="absolute -bottom-10 right-0 lg:right-4 text-slate-800 animate-[bounce_2s_infinite] pointer-events-none drop-shadow-lg z-20">
-                <MousePointer2 size={24} className="fill-slate-800" />
-                <div className="absolute inset-0 bg-white/50 blur-md rounded-full -z-10 animate-pulse"></div>
-              </div>
-            </button>
-          </h1>
-          <div className="flex items-center justify-center gap-3 sm:gap-4 mt-5 lg:mt-8">
-            <span className="text-[10px] sm:text-[11px] tracking-[0.2em] sm:tracking-[0.3em] uppercase font-medium text-slate-400">Simple</span>
-            <span className="w-1 h-1 rounded-full bg-slate-300/60"></span>
-            <span className="text-[10px] sm:text-[11px] tracking-[0.2em] sm:tracking-[0.3em] uppercase font-medium text-slate-400">Reliable</span>
-            <span className="w-1 h-1 rounded-full bg-slate-300/60"></span>
-            <span className="text-[10px] sm:text-[11px] tracking-[0.2em] sm:tracking-[0.3em] uppercase font-medium text-slate-400">Powerful</span>
-          </div>
-        </div>
+      <div className="flex-1 flex flex-col items-center justify-center w-full px-4 pb-8 lg:pb-[4vh] relative z-10 min-h-fit overflow-x-hidden">
+        <div className="flex items-center justify-center w-full transition-all duration-[1000ms] ease-[cubic-bezier(0.16,1,0.3,1)] max-w-6xl">
 
-        {/* Form Card */}
-        <div className="w-full max-w-[420px] bg-white/70 backdrop-blur-2xl border border-white rounded-[24px] md:rounded-[28px] p-5 sm:p-6 md:p-8 shadow-[0_24px_48px_-12px_rgba(0,0,0,0.08)] animate-[popIn_0.8s_ease_0.1s_forwards] opacity-0 shrink-0">
-          
-          <div className="mb-4 md:mb-6 text-center">
-            <h2 className="text-2xl font-bold text-slate-900 mb-1">
-              {isSignUp ? 'Create account' : 'Welcome back'}
-            </h2>
-            <p className="text-[14px] text-slate-500">
-              {isSignUp 
-                ? 'Join the world\'s most advanced platform.' 
-                : 'Enter your credentials to access your workspace.'}
-            </p>
-          </div>
+          {/* LEFT COLUMN: Hero & Form */}
+          <div className={`flex flex-col items-center transition-all duration-[1000ms] w-full shrink-0 ${isSignUp ? 'md:w-1/2 md:items-end md:pr-10 lg:pr-16' : 'w-full md:w-[500px]'}`}>
+            <div className="w-full max-w-[420px] flex flex-col items-center md:items-stretch">
 
-          <form onSubmit={handleSubmit} className="space-y-3">
-            <div 
-              className="overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]"
-              style={{ maxHeight: isSignUp ? '80px' : '0px', opacity: isSignUp ? 1 : 0 }}
-            >
-              <div className="relative pb-3">
-                <input 
-                  type="text" 
-                  className="light-input peer" 
-                  placeholder="Full Name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required={isSignUp}
-                  disabled={loading}
-                />
-                <User size={18} strokeWidth={2} className="light-icon" />
-              </div>
-            </div>
-
-            <div className="relative">
-              <input 
-                type="email" 
-                className="light-input peer" 
-                placeholder="Email address"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                disabled={loading}
-              />
-              <Mail size={18} strokeWidth={2} className="light-icon" />
-            </div>
-
-            <div className="relative">
-              <input 
-                type="password" 
-                className="light-input peer" 
-                placeholder="Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                disabled={loading}
-                minLength={isSignUp ? 6 : undefined}
-              />
-              <Lock size={18} strokeWidth={2} className="light-icon" />
-            </div>
-
-            {/* Error & Success Messages */}
-            <div className="overflow-hidden transition-all duration-300" style={{ maxHeight: error || success ? '100px' : '0px', opacity: error || success ? 1 : 0 }}>
-              {error && (
-                <div className="flex items-center gap-3 p-3 rounded-2xl bg-red-50 border border-red-100 text-red-600 mt-2">
-                  <AlertCircle size={18} className="shrink-0" />
-                  <p className="text-[13px] font-medium leading-snug">{error}</p>
+              {/* Dynamic Brand Logo */}
+              <div className={`mb-6 lg:mb-[5vh] w-full transition-all duration-[1000ms] flex ${isSignUp ? 'md:justify-start justify-center' : 'justify-center'}`}>
+                <div className="flex items-center">
+                  <span className="text-3xl lg:text-[clamp(28px,4vh,32px)] font-black tracking-tighter text-slate-900">
+                    Briklay<span className="text-[#C8603A]">.</span>
+                  </span>
                 </div>
-              )}
-              {success && (
-                <div className="flex items-center gap-3 p-3 rounded-2xl bg-emerald-50 border border-emerald-100 text-emerald-600 mt-2">
-                  <CheckCircle2 size={18} className="shrink-0" />
-                  <p className="text-[13px] font-medium leading-snug">{success}</p>
+              </div>
+
+              {/* Typography Hero */}
+              <div className={`mb-4 lg:mb-[4vh] w-full transition-all duration-[1000ms] ${isSignUp ? 'md:text-left' : 'text-center'}`}>
+                <h1 className="text-3xl sm:text-5xl lg:text-[clamp(32px,6vh,56px)] font-medium tracking-tight text-slate-900 mb-2 lg:mb-[2vh] leading-[1.15]">
+                  Construction{' '}
+                  <button
+                    onClick={() => setShowWaDemo(true)}
+                    className="relative inline-block cursor-pointer group ml-2 border-b-2 border-dashed border-[#C8603A]/40 hover:border-[#C8603A] transition-colors pb-1"
+                  >
+                    <span className="relative z-10 font-bold text-transparent bg-clip-text bg-gradient-to-r from-[#C8603A] to-[#eab308]">Magic.</span>
+
+                    {/* Subtle background glow */}
+                    <div className="absolute inset-0 bg-[#C8603A]/10 rounded-xl blur-md scale-90 opacity-0 group-hover:opacity-100 group-hover:scale-100 transition-all duration-500"></div>
+
+                    {/* Animated Floating Cursor (Below pointing up) */}
+                    <div className="absolute -bottom-10 right-0 lg:right-4 text-slate-800 animate-[bounce_2s_infinite] pointer-events-none drop-shadow-lg z-20">
+                      <MousePointer2 size={24} className="fill-slate-800" />
+                      <div className="absolute inset-0 bg-white/50 blur-md rounded-full -z-10 animate-pulse"></div>
+                    </div>
+                  </button>
+                </h1>
+                <div className={`flex items-center gap-3 sm:gap-4 mt-3 lg:mt-[3vh] animate-[popIn_0.8s_ease_forwards] transition-all duration-[1000ms] ${isSignUp ? 'md:justify-start justify-center' : 'justify-center'}`}>
+                  <span className="text-[10px] sm:text-[11px] tracking-[0.2em] sm:tracking-[0.3em] uppercase font-medium text-slate-400">Simple</span>
+                  <span className="w-1 h-1 rounded-full bg-slate-300/60"></span>
+                  <span className="text-[10px] sm:text-[11px] tracking-[0.2em] sm:tracking-[0.3em] uppercase font-medium text-slate-400">Reliable</span>
+                  <span className="w-1 h-1 rounded-full bg-slate-300/60"></span>
+                  <span className="text-[10px] sm:text-[11px] tracking-[0.2em] sm:tracking-[0.3em] uppercase font-medium text-slate-400">Powerful</span>
                 </div>
-              )}
+              </div>
+
+              {/* Form Card */}
+              <div className="w-full bg-white/70 backdrop-blur-2xl border border-white rounded-[24px] md:rounded-[28px] p-5 sm:p-6 lg:p-[clamp(24px,4vh,32px)] shadow-[0_24px_48px_-12px_rgba(0,0,0,0.08)] animate-[popIn_0.8s_ease_0.1s_forwards] opacity-0 shrink-0">
+
+                <div className={`mb-4 lg:mb-[3vh] transition-all duration-[1000ms] ${isSignUp ? 'md:text-left text-center' : 'text-center'}`}>
+                  <h2 className="text-2xl lg:text-[clamp(20px,3vh,24px)] font-bold text-slate-900 mb-1">
+                    {isSignUp ? 'Create account' : 'Welcome back'}
+                  </h2>
+                  <p className="text-[14px] text-slate-500">
+                    {isSignUp
+                      ? 'Join the world\'s most advanced platform.'
+                      : 'Enter your credentials to access your workspace.'}
+                  </p>
+                </div>
+
+                <form onSubmit={handleSubmit} className="space-y-3">
+                  <div
+                    className="overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]"
+                    style={{ maxHeight: isSignUp ? '80px' : '0px', opacity: isSignUp ? 1 : 0 }}
+                  >
+                    <div className="relative pb-3">
+                      <input
+                        type="text"
+                        className="light-input peer"
+                        placeholder="Full Name"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        required={isSignUp}
+                        disabled={loading}
+                      />
+                      <User size={18} strokeWidth={2} className="light-icon" />
+                    </div>
+                  </div>
+
+                  <div className="relative">
+                    <input
+                      type="email"
+                      className="light-input peer"
+                      placeholder="Email address"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                      disabled={loading}
+                    />
+                    <Mail size={18} strokeWidth={2} className="light-icon" />
+                  </div>
+
+                  <div className="relative">
+                    <input
+                      type="password"
+                      className="light-input peer"
+                      placeholder="Password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                      disabled={loading}
+                      minLength={isSignUp ? 6 : undefined}
+                    />
+                    <Lock size={18} strokeWidth={2} className="light-icon" />
+                  </div>
+
+                  {/* Error & Success Messages */}
+                  <div className="overflow-hidden transition-all duration-300" style={{ maxHeight: error || success ? '100px' : '0px', opacity: error || success ? 1 : 0 }}>
+                    {error && (
+                      <div className="flex items-center gap-3 p-3 rounded-2xl bg-red-50 border border-red-100 text-red-600 mt-2">
+                        <AlertCircle size={18} className="shrink-0" />
+                        <p className="text-[13px] font-medium leading-snug">{error}</p>
+                      </div>
+                    )}
+                    {success && (
+                      <div className="flex items-center gap-3 p-3 rounded-2xl bg-emerald-50 border border-emerald-100 text-emerald-600 mt-2">
+                        <CheckCircle2 size={18} className="shrink-0" />
+                        <p className="text-[13px] font-medium leading-snug">{success}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Submit Button */}
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full h-[48px] mt-1 relative flex items-center justify-center gap-2 rounded-xl text-white font-semibold text-[15px] transition-all overflow-hidden group disabled:opacity-80 disabled:cursor-not-allowed shadow-[0_8px_20px_-4px_rgba(200,96,58,0.3)] hover:shadow-[0_12px_24px_-4px_rgba(200,96,58,0.4)] hover:-translate-y-0.5 active:translate-y-0"
+                    style={{ background: 'linear-gradient(135deg, #C8603A 0%, #da714b 100%)' }}
+                  >
+                    {loading ? (
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <span className="relative z-10">{isSignUp ? 'Create Account' : 'Sign In'}</span>
+                        <ArrowRight size={18} strokeWidth={2.5} className="relative z-10 transition-transform group-hover:translate-x-1" />
+                      </>
+                    )}
+                  </button>
+                </form>
+
+                {/* Toggle mode */}
+                <div className="mt-6 lg:mt-[3vh] text-center">
+                  <button
+                    type="button"
+                    className="text-[13px] font-medium text-slate-500 hover:text-slate-900 transition-colors inline-flex items-center gap-1.5"
+                    onClick={() => setIsSignUp(!isSignUp)}
+                  >
+                    {isSignUp ? 'Already have an account?' : "Don't have an account?"}
+                    <span className="text-slate-900 font-semibold underline decoration-slate-300 underline-offset-4">
+                      {isSignUp ? 'Sign in' : 'Sign up'}
+                    </span>
+                  </button>
+                </div>
+              </div>
             </div>
-
-            {/* Submit Button */}
-            <button 
-              type="submit" 
-              disabled={loading}
-              className="w-full h-[48px] mt-1 relative flex items-center justify-center gap-2 rounded-xl text-white font-semibold text-[15px] transition-all overflow-hidden group disabled:opacity-80 disabled:cursor-not-allowed shadow-[0_8px_20px_-4px_rgba(200,96,58,0.3)] hover:shadow-[0_12px_24px_-4px_rgba(200,96,58,0.4)] hover:-translate-y-0.5 active:translate-y-0"
-              style={{ background: 'linear-gradient(135deg, #C8603A 0%, #da714b 100%)' }}
-            >
-              {loading ? (
-                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : (
-                <>
-                  <span className="relative z-10">{isSignUp ? 'Create Account' : 'Sign In'}</span>
-                  <ArrowRight size={18} strokeWidth={2.5} className="relative z-10 transition-transform group-hover:translate-x-1" />
-                </>
-              )}
-            </button>
-          </form>
-
-          {/* Toggle mode */}
-          <div className="mt-8 text-center">
-            <button 
-              type="button" 
-              className="text-[13px] font-medium text-slate-500 hover:text-slate-900 transition-colors inline-flex items-center gap-1.5"
-              onClick={() => setIsSignUp(!isSignUp)}
-            >
-              {isSignUp ? 'Already have an account?' : "Don't have an account?"}
-              <span className="text-slate-900 font-semibold underline decoration-slate-300 underline-offset-4">
-                {isSignUp ? 'Sign in' : 'Sign up'}
-              </span>
-            </button>
           </div>
+
+          {/* RIGHT COLUMN: Sign Up Details Panel */}
+          <div
+            className={`hidden md:flex flex-col justify-center transition-all duration-[1000ms] ease-[cubic-bezier(0.16,1,0.3,1)] overflow-hidden ${isSignUp ? 'w-1/2 opacity-100 pl-10 lg:pl-16' : 'w-0 opacity-0'
+              }`}
+            style={{ maxHeight: isSignUp ? '1000px' : '0px' }}
+          >
+            <div className="w-full max-w-[440px] whitespace-nowrap">
+
+              <div className="mb-6 lg:mb-[6vh]">
+                <h3 className="text-3xl lg:text-[clamp(24px,5vh,30px)] font-medium tracking-tight text-slate-900 mb-2 lg:mb-[2vh]">Build faster, <br />together.</h3>
+                <p className="text-[14px] lg:text-[clamp(13px,2vh,15px)] text-slate-500 leading-relaxed whitespace-normal pr-10">
+                  Join the most advanced construction ecosystem. Synchronize your sites, vendors, and ledger in real-time.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-6 lg:gap-[4vh]">
+
+                <div className="flex items-start gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-white to-emerald-50/40 border border-white/80 shadow-[0_4px_16px_-4px_rgba(16,185,129,0.15),inset_0_2px_6px_-2px_rgba(255,255,255,1)] flex items-center justify-center shrink-0 backdrop-blur-xl relative overflow-hidden group">
+                    <div className="absolute inset-0 bg-gradient-to-tr from-emerald-100/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700"></div>
+                    <IconBrandWhatsapp size={24} strokeWidth={1.5} className="text-emerald-700 relative z-10" />
+                  </div>
+                  <div className="pt-1">
+                    <h4 className="font-semibold text-slate-900 text-[15px] tracking-tight">Conversational Intelligence</h4>
+                    <div className="text-[14px] text-slate-500 mt-1 whitespace-normal leading-relaxed relative">
+                      <span className="block mb-1">Work exactly how you communicate:</span>
+                      <div className="grid min-h-[44px]">
+                        {cyclicPhrases.map((phrase, idx) => (
+                          <span 
+                            key={idx}
+                            className={`col-start-1 row-start-1 transition-all duration-[1200ms] ease-[cubic-bezier(0.16,1,0.3,1)] flex flex-wrap gap-x-1 ${
+                              idx === cyclicIndex 
+                                ? 'opacity-100 translate-y-0 relative z-10' 
+                                : 'opacity-0 translate-y-2 pointer-events-none absolute'
+                            }`}
+                          >
+                            <span className="text-slate-600 font-medium">{phrase.action}</span>
+                            <span 
+                              className={`transition-all duration-[1200ms] ease-out text-emerald-700 font-medium ${
+                                idx === cyclicIndex && showResult 
+                                  ? 'opacity-100 blur-none translate-x-0' 
+                                  : 'opacity-0 blur-[4px] -translate-x-2'
+                              }`}
+                            >
+                              — {phrase.result}
+                            </span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-white to-blue-50/40 border border-white/80 shadow-[0_4px_16px_-4px_rgba(59,130,246,0.15),inset_0_2px_6px_-2px_rgba(255,255,255,1)] flex items-center justify-center shrink-0 backdrop-blur-xl relative overflow-hidden group">
+                    <div className="absolute inset-0 bg-gradient-to-tr from-blue-100/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700"></div>
+                    <Layers size={22} strokeWidth={1.5} className="text-blue-700 relative z-10" />
+                  </div>
+                  <div className="pt-1">
+                    <h4 className="font-semibold text-slate-900 text-[15px] tracking-tight">Multi-Project Tracking</h4>
+                    <p className="text-[14px] text-slate-500 mt-1 whitespace-normal leading-relaxed">
+                      Manage an unlimited number of active work sites with precise, real-time financial breakdowns at your fingertips.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-white to-amber-50/40 border border-white/80 shadow-[0_4px_16px_-4px_rgba(245,158,11,0.15),inset_0_2px_6px_-2px_rgba(255,255,255,1)] flex items-center justify-center shrink-0 backdrop-blur-xl relative overflow-hidden group">
+                    <div className="absolute inset-0 bg-gradient-to-tr from-amber-100/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700"></div>
+                    <BrainCircuit size={22} strokeWidth={1.5} className="text-amber-700 relative z-10" />
+                  </div>
+                  <div className="pt-1">
+                    <h4 className="font-semibold text-slate-900 text-[15px] tracking-tight">Proactive Intelligence</h4>
+                    <p className="text-[14px] text-slate-500 mt-1 whitespace-normal leading-relaxed">
+                      Briklay analyzes your transaction patterns and workflows, uniting orders and site data to deliver actionable, comprehensive insights.
+                    </p>
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
+          </div>
+
         </div>
-        
       </div>
 
       {/* WhatsApp Interactive Demo Modal */}
       {showWaDemo && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-[popIn_0.3s_ease] overflow-hidden">
           <div className="absolute inset-0" onClick={() => setShowWaDemo(false)} />
-          
+
           {/* Smooth Sliding Wrapper */}
-          <div 
-            className={`relative flex items-center justify-center transition-transform duration-[800ms] ease-[cubic-bezier(0.16,1,0.3,1)] ${
-              waStep >= 5 ? 'md:-translate-x-[200px] -translate-y-[80px] md:-translate-y-0' : 'translate-x-0 translate-y-0'
-            }`}
+          <div
+            className={`relative flex items-center justify-center transition-transform duration-[800ms] ease-[cubic-bezier(0.16,1,0.3,1)] ${waStep >= 5 ? 'md:-translate-x-[200px] -translate-y-[80px] md:-translate-y-0' : 'translate-x-0 translate-y-0'
+              }`}
           >
-            
+
             {/* The Phone */}
             <div className={`relative w-[340px] h-[640px] bg-[#ece5dd] rounded-[36px] shadow-2xl overflow-hidden border-[8px] border-slate-800 transition-all duration-[800ms] ease-[cubic-bezier(0.16,1,0.3,1)] z-20 flex flex-col ${waStep >= 5 ? 'opacity-20 blur-[4px] md:blur-none md:opacity-70 scale-[0.98]' : 'opacity-100 scale-100 blur-0'}`}>
-              
+
               {/* Phone Header */}
               <div className="bg-[#075e54] text-white px-4 py-3 flex items-center justify-between shadow-md relative z-10 pt-6">
                 <div className="absolute top-0 inset-x-0 h-6 bg-black flex justify-center rounded-t-[28px]">
@@ -365,7 +483,7 @@ export default function Login() {
 
               {/* Chat Body */}
               <div className="flex-1 p-4 overflow-y-auto flex flex-col gap-3 bg-[url('https://i.pinimg.com/736x/8c/98/99/8c98994518b575bfd8c949e91d20548b.jpg')] bg-cover bg-center">
-                
+
                 {waStep >= 1 && (
                   <div className="self-end max-w-[85%] bg-[#dcf8c6] rounded-xl rounded-tr-none p-3 shadow-sm chat-bubble-in">
                     <p className="text-[14px] text-slate-800 leading-snug">Record a cement purchase of ₹45,000 from UltraTech.</p>
@@ -425,10 +543,9 @@ export default function Login() {
             </div>
 
             {/* The ERP Dashboard Reveal (Responsive positioning) */}
-            <div 
-              className={`flex flex-col w-[340px] md:w-[640px] h-[340px] md:h-[580px] bg-white rounded-[24px] shadow-2xl overflow-hidden border border-slate-200 absolute md:left-[380px] left-0 top-[240px] md:top-auto transition-all duration-[800ms] ease-[cubic-bezier(0.16,1,0.3,1)] z-30 ${
-                waStep >= 5 ? 'opacity-100 translate-y-0 md:translate-x-0 scale-100 pointer-events-auto' : 'opacity-0 translate-y-10 md:translate-y-0 md:-translate-x-10 scale-[0.95] pointer-events-none'
-              }`}
+            <div
+              className={`flex flex-col w-[340px] md:w-[640px] h-[340px] md:h-[580px] bg-white rounded-[24px] shadow-2xl overflow-hidden border border-slate-200 absolute md:left-[380px] left-0 top-[240px] md:top-auto transition-all duration-[800ms] ease-[cubic-bezier(0.16,1,0.3,1)] z-30 ${waStep >= 5 ? 'opacity-100 translate-y-0 md:translate-x-0 scale-100 pointer-events-auto' : 'opacity-0 translate-y-10 md:translate-y-0 md:-translate-x-10 scale-[0.95] pointer-events-none'
+                }`}
             >
               {/* Header */}
               <div className="px-5 md:px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
@@ -482,7 +599,7 @@ export default function Login() {
           {waStep >= 6 && (
             <div className="absolute bottom-12 left-1/2 -translate-x-1/2 z-50">
               <div className="animate-[popIn_0.8s_ease]">
-                <button 
+                <button
                   onClick={() => {
                     setShowWaDemo(false);
                     setIsSignUp(true);
@@ -493,10 +610,10 @@ export default function Login() {
                   <div className="absolute inset-0 bg-gradient-to-b from-white/10 to-transparent opacity-50 rounded-full pointer-events-none" />
                   {/* Hover sheen */}
                   <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-[100%] group-hover:translate-x-[100%] transition-transform duration-1000 pointer-events-none" />
-                  
+
                   <span className="hidden sm:inline relative z-10 tracking-wide font-medium">Unlock your Workspace</span>
                   <span className="sm:hidden relative z-10 tracking-wide font-medium">Experience Briklay</span>
-                  
+
                   <div className="w-8 h-8 rounded-full bg-white/10 backdrop-blur-sm shadow-inner flex items-center justify-center group-hover:bg-[#C8603A] transition-colors relative z-10">
                     <ArrowRight size={16} className="text-white group-hover:translate-x-0.5 transition-transform" />
                   </div>
