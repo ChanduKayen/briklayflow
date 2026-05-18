@@ -11,7 +11,9 @@ import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import { usePeek } from '../context/PeekContext';
-import type { POLineItem, POGRN, POApproval } from '../types';
+import type { POLineItem, POApproval } from '../types';
+import ReceiveAtSiteDrawer from '../components/ReceiveAtSiteDrawer';
+import { downloadGRNChallan } from '../lib/grnChallan';
 import {
   fmtDate as pdfFmtDate, fmtRupee, amountInWords,
   MARGIN, CONTENT, RIGHT, C,
@@ -105,22 +107,6 @@ function fmtDate(d: string | null | undefined): string {
   return parsed.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-async function genGRNNumber(): Promise<string> {
-  const year = new Date().getFullYear();
-  const prefix = `GRN-${year}-`;
-  const { data } = await supabase
-    .from('po_grn')
-    .select('grn_number')
-    .like('grn_number', `${prefix}%`)
-    .order('grn_number', { ascending: false })
-    .limit(1);
-  let seq = 1;
-  if (data?.length) {
-    const num = parseInt(data[0].grn_number.replace(prefix, ''), 10);
-    if (!isNaN(num)) seq = num + 1;
-  }
-  return `${prefix}${String(seq).padStart(4, '0')}`;
-}
 
 // ── Count-up hook ─────────────────────────────────────────────────────────────
 
@@ -342,7 +328,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
 
   // ── UI state ───────────────────────────────────────────────────────────────
   const [showLog,              setShowLog]             = useState(false);
-  const [showGRNForm,          setShowGRNForm]         = useState(false);
+  const [showReceiveDrawer,    setShowReceiveDrawer]   = useState(false);
   const [showSettleModal,      setShowSettleModal]     = useState(false);
   const [showRecordPayment,    setShowRecordPayment]   = useState(false);
   const [showReceiveModal,     setShowReceiveModal]    = useState(false);
@@ -359,15 +345,6 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const [payMode,     setPayMode]     = useState<'NEFT' | 'UPI' | 'Cheque' | 'Cash'>('NEFT');
   const [payRef,      setPayRef]      = useState('');
 
-  // GRN form fields
-  const [grnNumber,         setGrnNumber]         = useState('');
-  const [grnDate,           setGrnDate]           = useState(new Date().toISOString().split('T')[0]);
-  const [grnReceivedBy,     setGrnReceivedBy]     = useState('');
-  const [grnChallanNo,      setGrnChallanNo]      = useState('');
-  const [grnVehicleNo,      setGrnVehicleNo]      = useState('');
-  const [grnEwaybill,       setGrnEwaybill]       = useState('');
-  const [grnCondition,      setGrnCondition]      = useState<'GOOD' | 'PARTIAL' | 'DAMAGED'>('GOOD');
-  const [grnNotes,          setGrnNotes]          = useState('');
 
   // Settle modal fields
   const [settleAmount,     setSettleAmount]     = useState('');
@@ -409,13 +386,28 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('po_grn')
-        .select('*')
+        .select('grn_id, receipt_date, dc_number, vehicle_number, driver_name, remarks, received_by, created_at')
         .eq('po_id', poId!)
         .order('created_at', { ascending: false });
       if (error) throw error;
-      return data as POGRN[];
+      return data as any[];
     },
     enabled: !!poId,
+  });
+
+  const { data: grnItems } = useQuery({
+    queryKey: ['po_grn_items', poId],
+    queryFn: async () => {
+      const grnIds = (grns ?? []).map((g: any) => g.grn_id);
+      if (!grnIds.length) return [];
+      const { data, error } = await supabase
+        .from('po_grn_items')
+        .select('grn_id, po_line_item_id, item_name, unit, qty_ordered, qty_received, unit_rate, condition, remarks')
+        .in('grn_id', grnIds);
+      if (error) throw error;
+      return data as any[];
+    },
+    enabled: (grns?.length ?? 0) > 0,
   });
 
   const { data: approvals } = useQuery({
@@ -462,44 +454,6 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     onError: (err: any) => showSnackbar(err.message || 'Failed to update status', { type: 'error' }),
   });
 
-  const saveGRN = useMutation({
-    mutationFn: async () => {
-      const num = grnNumber.trim() || await genGRNNumber();
-      const { error } = await supabase.from('po_grn').insert({
-        po_id:               poId!,
-        grn_number:          num,
-        receipt_date:        grnDate,
-        received_by_name:    grnReceivedBy || null,
-        delivery_challan_no: grnChallanNo || null,
-        ewaybill_number:     grnEwaybill || null,
-        vehicle_number:      grnVehicleNo || null,
-        condition:           grnCondition,
-        notes:               grnNotes || null,
-        created_by:          session.user.id,
-      });
-      if (error) throw error;
-
-      // Update PO status
-      await supabase.from('purchase_orders').update({ status: 'ORDERED' }).eq('po_id', poId!);
-
-      return num;
-    },
-    onSuccess: (num) => {
-      qc.invalidateQueries({ queryKey: ['po_grn', poId] });
-      qc.invalidateQueries({ queryKey: ['po_detail', poId] });
-      qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
-      setShowGRNForm(false);
-      setGrnNumber('');
-      setGrnReceivedBy('');
-      setGrnChallanNo('');
-      setGrnVehicleNo('');
-      setGrnEwaybill('');
-      setGrnNotes('');
-      setGrnCondition('GOOD');
-      showSnackbar(`GRN ${num} recorded`);
-    },
-    onError: (err: any) => showSnackbar(err.message || 'Failed to save GRN', { type: 'error' }),
-  });
 
   const markReceived = useMutation({
     mutationFn: async () => {
@@ -1424,46 +1378,106 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
           </div>
         )}
 
-        {/* GRNs */}
-        {grns && grns.length > 0 && (
-          <div className="detail-reveal mb-6" style={{ animationDelay: '280ms' }}>
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">GOODS RECEIPTS</p>
-              {canManage && po.status === 'ORDERED' && (
-                <button
-                  onClick={async () => { const n = await genGRNNumber(); setGrnNumber(n); setShowGRNForm(true); }}
-                  className="flex items-center gap-1 text-[11px] text-primary font-semibold hover:underline"
-                >
-                  <span className="material-symbols-outlined text-[13px]">add</span>
-                  Record GRN
-                </button>
+        {/* Receipts section */}
+        <div className="detail-reveal mb-6" style={{ animationDelay: '280ms' }}>
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
+              Receipts
+              {grns && grns.length > 0 && (
+                <span className="ml-2 text-[10px] font-semibold bg-surface-container text-on-surface-variant/60 px-1.5 py-0.5 rounded-md">{grns.length}</span>
               )}
-            </div>
-            <div className="space-y-3">
-              {grns.map(grn => (
-                <div key={grn.id} className="py-2 border-b border-outline-variant/10 last:border-0">
-                  <div className="flex items-center justify-between">
-                    <p className="font-data-mono font-bold text-[13px] text-on-surface">{grn.grn_number}</p>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                      grn.condition === 'GOOD'    ? 'bg-secondary-container text-on-secondary-container' :
-                      grn.condition === 'DAMAGED' ? 'bg-red-100 text-red-800' :
-                      'bg-amber-100 text-amber-800'
-                    }`}>
-                      {grn.condition}
-                    </span>
-                  </div>
-                  <p className="text-[12px] text-on-surface-variant/60 mt-0.5">
-                    {fmtDate(grn.receipt_date)}
-                    {grn.received_by_name && ` · ${grn.received_by_name}`}
-                    {grn.delivery_challan_no && ` · DC: ${grn.delivery_challan_no}`}
-                    {grn.vehicle_number && ` · ${grn.vehicle_number}`}
-                  </p>
-                  {grn.notes && <p className="text-[12px] text-on-surface-variant/50 mt-0.5">{grn.notes}</p>}
-                </div>
-              ))}
-            </div>
+            </p>
+            {canManage && (
+              <button
+                onClick={() => setShowReceiveDrawer(true)}
+                className="flex items-center gap-1 text-[11px] text-primary font-semibold hover:underline"
+              >
+                <span className="material-symbols-outlined text-[13px]">local_shipping</span>
+                Receive at site
+              </button>
+            )}
           </div>
-        )}
+
+          {(!grns || grns.length === 0) ? (
+            <p className="text-[12px] text-on-surface-variant/35 py-2">No receipts yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {grns.map((grn: any) => {
+                const items = (grnItems ?? []).filter((i: any) => i.grn_id === grn.grn_id);
+                const hasDamaged = items.some((i: any) => i.condition !== 'good');
+                return (
+                  <div key={grn.grn_id} className="rounded-xl border border-outline-variant/[0.10] bg-surface-container-low/30 p-3">
+                    <div className="flex items-start justify-between gap-2 mb-1.5">
+                      <p className="font-mono text-[12px] font-bold text-on-surface">{grn.grn_id}</p>
+                      <div className="flex items-center gap-1.5">
+                        {hasDamaged && (
+                          <span className="text-[10px] font-semibold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">
+                            Discrepancy
+                          </span>
+                        )}
+                        <span className="text-[11px] text-on-surface-variant/50">{fmtDate(grn.receipt_date)}</span>
+                        <button
+                          title="Download challan"
+                          onClick={() => downloadGRNChallan({
+                            grn_id:        grn.grn_id,
+                            po_id:         po.po_id,
+                            vendor_name:   vendor?.name ?? '—',
+                            project_name:  project?.name ?? '—',
+                            receipt_date:  grn.receipt_date,
+                            dc_number:     grn.dc_number,
+                            vehicle_number: grn.vehicle_number,
+                            driver_name:   grn.driver_name,
+                            remarks:       grn.remarks,
+                            items: items.map((i: any) => ({
+                              item_name:    i.item_name,
+                              unit:         i.unit,
+                              qty_ordered:  Number(i.qty_ordered),
+                              qty_received: Number(i.qty_received),
+                              unit_rate:    i.unit_rate != null ? Number(i.unit_rate) : null,
+                              condition:    i.condition,
+                              remarks:      i.remarks ?? null,
+                            })),
+                          })}
+                          style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            width: 26, height: 26, borderRadius: 8, border: 'none',
+                            background: 'rgba(11,28,48,0.06)', cursor: 'pointer',
+                            transition: 'background 0.15s',
+                          }}
+                          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(11,28,48,0.12)')}
+                          onMouseLeave={e => (e.currentTarget.style.background = 'rgba(11,28,48,0.06)')}
+                        >
+                          <span className="material-symbols-outlined text-[14px] text-on-surface/50">download</span>
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-on-surface-variant/50">
+                      {[grn.dc_number && `DC: ${grn.dc_number}`, grn.vehicle_number].filter(Boolean).join(' · ')}
+                    </p>
+                    {items.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {items.map((item: any) => (
+                          <div key={item.po_line_item_id ?? item.item_name} className="flex items-center justify-between text-[11px]">
+                            <span className="text-on-surface/70">{item.item_name}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-on-surface font-medium">{item.qty_received} {item.unit}</span>
+                              {item.condition !== 'good' && (
+                                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded capitalize ${
+                                  item.condition === 'damaged' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
+                                }`}>{item.condition}</span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {grn.remarks && <p className="text-[11px] text-on-surface-variant/50 mt-1.5 italic">{grn.remarks}</p>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
         {/* TRAIL */}
         <div className="detail-reveal" style={{ animationDelay: '330ms' }}>
@@ -1489,11 +1503,11 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
                   <span className="text-[12px] text-on-surface">Order placed</span>
                 </div>
               )}
-              {grns?.map(grn => (
-                <div key={grn.id} className="flex items-center gap-3">
+              {grns?.map((grn: any) => (
+                <div key={grn.grn_id} className="flex items-center gap-3">
                   <span className="w-1.5 h-1.5 rounded-full bg-teal-400 shrink-0" />
                   <span className="text-[12px] text-on-surface-variant/60">{fmtDate(grn.receipt_date)}</span>
-                  <span className="text-[12px] text-on-surface">GRN {grn.grn_number} recorded · {grn.condition}</span>
+                  <span className="text-[12px] text-on-surface">GRN {grn.grn_id} recorded</span>
                 </div>
               ))}
               {(po.vendor_bill_number || po.vendor_bill_no) && (
@@ -1516,86 +1530,37 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
 
       </div>{/* end max-w container */}
 
-      {/* ── GRN Form Modal ──────────────────────────────────────────────── */}
-      {showGRNForm && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-end md:items-center justify-center p-0 md:p-4">
-          <div className="bg-white w-full md:max-w-lg rounded-t-2xl md:rounded-2xl shadow-xl overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant/10">
-              <p className="text-[15px] font-bold text-on-surface">Record Goods Receipt Note</p>
-              <button onClick={() => setShowGRNForm(false)} className="text-on-surface-variant hover:text-on-surface p-1 rounded-lg">
-                <span className="material-symbols-outlined">close</span>
-              </button>
-            </div>
-            <div className="px-6 py-5 space-y-4 overflow-y-auto max-h-[70vh]">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1.5">GRN Number</label>
-                  <input className="bk-input font-data-mono" value={grnNumber} onChange={e => setGrnNumber(e.target.value)} />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1.5">Receipt Date</label>
-                  <input type="date" className="bk-input" value={grnDate} onChange={e => setGrnDate(e.target.value)} />
-                </div>
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1.5">Received By</label>
-                <input className="bk-input" placeholder="Name of person receiving" value={grnReceivedBy} onChange={e => setGrnReceivedBy(e.target.value)} />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1.5">Delivery Challan No</label>
-                  <input className="bk-input" placeholder="Optional" value={grnChallanNo} onChange={e => setGrnChallanNo(e.target.value)} />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1.5">Vehicle Number</label>
-                  <input className="bk-input" placeholder="Optional" value={grnVehicleNo} onChange={e => setGrnVehicleNo(e.target.value)} />
-                </div>
-              </div>
-              {totalValue > 50000 && (
-                <div>
-                  <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1.5">E-Way Bill No</label>
-                  <input className="bk-input" placeholder="Required for value > ₹50,000" value={grnEwaybill} onChange={e => setGrnEwaybill(e.target.value)} />
-                </div>
-              )}
-              <div>
-                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-2">Condition</label>
-                <div className="flex gap-2">
-                  {(['GOOD', 'PARTIAL', 'DAMAGED'] as const).map(c => (
-                    <button
-                      key={c}
-                      onClick={() => setGrnCondition(c)}
-                      className={`flex-1 py-2 text-[12px] font-semibold rounded-lg border transition-colors ${
-                        grnCondition === c
-                          ? c === 'GOOD'    ? 'bg-green-500 text-white border-green-500' :
-                            c === 'PARTIAL' ? 'bg-amber-500 text-white border-amber-500' :
-                                              'bg-red-500 text-white border-red-500'
-                          : 'border-outline-variant/30 text-on-surface-variant hover:bg-surface-container-low'
-                      }`}
-                    >
-                      {c}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1.5">Notes</label>
-                <textarea className="bk-input resize-none" rows={2} placeholder="Inspection notes, remarks…" value={grnNotes} onChange={e => setGrnNotes(e.target.value)} />
-              </div>
-            </div>
-            <div className="px-6 py-4 border-t border-outline-variant/10 flex gap-3 justify-end">
-              <button onClick={() => setShowGRNForm(false)} className="bk-btn-ghost border border-outline-variant/30 text-[13px] px-4 py-2 rounded-xl">
-                Cancel
-              </button>
-              <button
-                onClick={() => saveGRN.mutate()}
-                disabled={saveGRN.isPending}
-                className="bk-btn text-[13px] px-5 py-2 rounded-xl"
-              >
-                {saveGRN.isPending ? 'Saving…' : 'Save GRN'}
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* ── Receive at site drawer ──────────────────────────────────────── */}
+      {showReceiveDrawer && po && (
+        <ReceiveAtSiteDrawer
+          isOpen={showReceiveDrawer}
+          po={{
+            po_id:           po.po_id,
+            org_id:          po.org_id,
+            project_id:      po.project_id,
+            stakeholder_id:  po.stakeholder_id,
+            stakeholder_name: po.stakeholders?.name ?? '',
+            line_items:      (lineItems ?? []).map((li: any) => ({
+              id:                  li.id,
+              item_name:           li.item_name,
+              unit:                li.unit ?? 'Nos',
+              quantity_ordered:    Number(li.quantity_ordered ?? 0),
+              unit_rate:           Number(li.unit_rate ?? 0),
+              qty_received_so_far: Number(li.quantity_delivered ?? 0),
+            })),
+          }}
+          session={session}
+          onClose={() => setShowReceiveDrawer(false)}
+          onSuccess={(grnId) => {
+            setShowReceiveDrawer(false);
+            qc.invalidateQueries({ queryKey: ['po_grn', poId] });
+            qc.invalidateQueries({ queryKey: ['po_grn_items', poId] });
+            qc.invalidateQueries({ queryKey: ['po_detail', poId] });
+            qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
+            qc.invalidateQueries({ queryKey: ['po_receipt_summary'] });
+            showSnackbar(`GRN ${grnId} recorded`);
+          }}
+        />
       )}
 
       {/* ── Mark Received Confirmation Modal ──────────────────────────── */}

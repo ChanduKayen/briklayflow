@@ -10,6 +10,7 @@ import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
 import { parseAmount } from '../lib/money';
+import ReceiveAtSiteDrawer from '../components/ReceiveAtSiteDrawer';
 
 // ── Status config ─────────────────────────────────────────────────────────────
 
@@ -487,6 +488,7 @@ export default function PurchaseOrders({ session }: { session: Session }) {
   const projectRef = useRef<HTMLDivElement>(null);
 
   const [poOverrides, setPoOverrides] = useState<Record<string, any>>({});
+  const [drawerPO,    setDrawerPO]    = useState<any | null>(null);
 
   const handlePOUpdate = (poId: string, updates: any) => {
     setPoOverrides(prev => ({ ...prev, [poId]: { ...(prev[poId] || {}), ...updates } }));
@@ -509,7 +511,7 @@ export default function PurchaseOrders({ session }: { session: Session }) {
       const { data, error } = await supabase
         .from('purchase_orders')
         .select(`
-          po_id, status, date_issued, created_at, ordered_by, expected_delivery,
+          po_id, org_id, status, date_issued, created_at, ordered_by, expected_delivery,
           total_value, order_value,
           vendor_bill_amount, vendor_bill_number, vendor_bill_no,
           vendor_bill_url, vendor_bill_doc_url, vendor_bill_date,
@@ -518,7 +520,7 @@ export default function PurchaseOrders({ session }: { session: Session }) {
           stakeholder_id, project_id,
           projects(name, site_location),
           stakeholders(name, category, gstin, is_approved),
-          po_line_items(id, item_name)
+          po_line_items(id, item_name, unit, quantity_ordered, unit_rate)
         `)
         .order('created_at', { ascending: false });
       if (error) throw error;
@@ -529,6 +531,19 @@ export default function PurchaseOrders({ session }: { session: Session }) {
   const pos = (rawPos ?? []).map(p =>
     poOverrides[p.po_id] ? { ...p, ...poOverrides[p.po_id] } : p
   );
+
+  const { data: receiptSummaries } = useQuery({
+    queryKey: ['po_receipt_summary'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('po_receipt_summary')
+        .select('po_id, receipt_count, receipt_pct, last_receipt_date');
+      if (error) throw error;
+      const map: Record<string, any> = {};
+      (data ?? []).forEach((r: any) => { map[r.po_id] = r; });
+      return map;
+    },
+  });
 
   const vendors  = [...new Set(pos.map(p => p.stakeholders?.name).filter(Boolean))].sort() as string[];
   const projects = [...new Set(pos.map(p => p.projects?.name).filter(Boolean))].sort() as string[];
@@ -746,6 +761,7 @@ export default function PurchaseOrders({ session }: { session: Session }) {
                   <th className="px-4 py-3 text-left w-[160px]"><span className="text-[11px] font-medium text-on-surface-variant/35">Vendor Bill</span></th>
                   <th className="px-4 py-3 text-left w-[90px]"><span className="text-[11px] font-medium text-on-surface-variant/35">Doc</span></th>
                   <th className="px-4 py-3 text-left w-[150px]"><span className="text-[11px] font-medium text-on-surface-variant/35">At Site</span></th>
+                  <th className="px-4 py-3 text-left w-[140px]"><span className="text-[11px] font-medium text-on-surface-variant/35">Receipt</span></th>
                   <th className="px-3 py-3 w-[36px]" />
                 </tr>
               </thead>
@@ -788,6 +804,59 @@ export default function PurchaseOrders({ session }: { session: Session }) {
                     <VendorBillCell po={po} canManage={canManage} currentUserName={currentUserName} onUpdate={handlePOUpdate} showSnackbar={showSnackbar} />
                     <BillUploadCell po={po} canManage={canManage} onUpdate={handlePOUpdate} showSnackbar={showSnackbar} />
                     <SiteReceiptCell po={po} canManage={canManage} currentUserName={currentUserName} currentUserId={currentUserId} onUpdate={handlePOUpdate} showSnackbar={showSnackbar} />
+
+                    {/* Receipt column */}
+                    {(() => {
+                      const rs = receiptSummaries?.[po.po_id];
+                      const pct = Number(rs?.receipt_pct ?? 0);
+                      const done = pct >= 100;
+                      return (
+                        <td className="px-4 py-4 w-[140px]" onClick={e => e.stopPropagation()}>
+                          {done ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-700 bg-green-50 px-2 py-0.5 rounded-md">
+                              <span className="material-symbols-outlined text-[12px]">done_all</span>
+                              Received
+                            </span>
+                          ) : canManage ? (
+                            <div>
+                              {pct > 0 && (
+                                <div className="mb-1.5">
+                                  <div className="flex items-center justify-between mb-0.5">
+                                    <span className="text-[10px] text-amber-600 font-medium">{pct}%</span>
+                                  </div>
+                                  <div className="h-[3px] rounded-full bg-outline-variant/15 overflow-hidden">
+                                    <div className="h-full rounded-full bg-amber-400 transition-all" style={{ width: `${pct}%` }} />
+                                  </div>
+                                </div>
+                              )}
+                              <button
+                                onClick={() => setDrawerPO({
+                                  po_id:           po.po_id,
+                                  org_id:          po.org_id,
+                                  project_id:      po.project_id,
+                                  stakeholder_id:  po.stakeholder_id,
+                                  stakeholder_name: po.stakeholders?.name ?? '',
+                                  line_items:      (po.po_line_items ?? []).map((li: any) => ({
+                                    id:                  li.id,
+                                    item_name:           li.item_name,
+                                    unit:                li.unit ?? 'Nos',
+                                    quantity_ordered:    Number(li.quantity_ordered ?? 0),
+                                    unit_rate:           Number(li.unit_rate ?? 0),
+                                    qty_received_so_far: 0,
+                                  })),
+                                })}
+                                className="flex items-center gap-1 text-[11px] font-medium text-primary hover:text-primary/80 border border-primary/20 rounded-lg px-2 py-1 hover:bg-primary/[0.04] transition-colors"
+                              >
+                                <span className="material-symbols-outlined text-[12px]">local_shipping</span>
+                                Receive
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-on-surface-variant/20 text-[12px]">—</span>
+                          )}
+                        </td>
+                      );
+                    })()}
 
                     <td className="px-2 py-4 w-[36px]">
                       <button
@@ -856,6 +925,59 @@ export default function PurchaseOrders({ session }: { session: Session }) {
                     }
                   </p>
                 </div>
+
+                {/* Receipt progress bar + action (mobile) */}
+                {(() => {
+                  const rs  = receiptSummaries?.[po.po_id];
+                  const pct = Number(rs?.receipt_pct ?? 0);
+                  if (!canManage && pct === 0) return null;
+                  return (
+                    <div className="px-4 pb-3 pt-1" onClick={e => e.stopPropagation()}>
+                      {pct >= 100 ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-700 bg-green-50 px-2 py-0.5 rounded-md">
+                          <span className="material-symbols-outlined text-[12px]">done_all</span>
+                          Fully received
+                        </span>
+                      ) : (
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex-1">
+                            {pct > 0 && (
+                              <div className="flex items-center gap-2 mb-1">
+                                <div className="flex-1 h-[3px] rounded-full bg-outline-variant/15 overflow-hidden">
+                                  <div className="h-full rounded-full bg-amber-400" style={{ width: `${pct}%` }} />
+                                </div>
+                                <span className="text-[10px] text-amber-600">{pct}%</span>
+                              </div>
+                            )}
+                          </div>
+                          {canManage && (
+                            <button
+                              onClick={() => setDrawerPO({
+                                po_id:           po.po_id,
+                                org_id:          po.org_id,
+                                project_id:      po.project_id,
+                                stakeholder_id:  po.stakeholder_id,
+                                stakeholder_name: po.stakeholders?.name ?? '',
+                                line_items:      (po.po_line_items ?? []).map((li: any) => ({
+                                  id:                  li.id,
+                                  item_name:           li.item_name,
+                                  unit:                li.unit ?? 'Nos',
+                                  quantity_ordered:    Number(li.quantity_ordered ?? 0),
+                                  unit_rate:           Number(li.unit_rate ?? 0),
+                                  qty_received_so_far: 0,
+                                })),
+                              })}
+                              className="flex items-center gap-1 text-[11px] font-medium text-primary border border-primary/20 rounded-lg px-2.5 py-1.5 hover:bg-primary/[0.04] transition-colors shrink-0"
+                            >
+                              <span className="material-symbols-outlined text-[13px]">local_shipping</span>
+                              Receive at site
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             ))}
           </div>
@@ -867,6 +989,22 @@ export default function PurchaseOrders({ session }: { session: Session }) {
           </button>
         )}
       </div>
+
+      {/* Receive at site drawer */}
+      {drawerPO && (
+        <ReceiveAtSiteDrawer
+          isOpen={!!drawerPO}
+          po={drawerPO}
+          session={session}
+          onClose={() => setDrawerPO(null)}
+          onSuccess={(grnId) => {
+            setDrawerPO(null);
+            qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
+            qc.invalidateQueries({ queryKey: ['po_receipt_summary'] });
+            showSnackbar(`GRN ${grnId} recorded`);
+          }}
+        />
+      )}
     </div>
   );
 }

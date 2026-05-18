@@ -37,6 +37,7 @@ import ProjectPurchaseOrders from './pages/ProjectPurchaseOrders';
 import ProjectInventory from './pages/ProjectInventory';
 import ProjectBOQs from './pages/ProjectBOQs';
 import ProjectInward from './pages/ProjectInward';
+import InwardRegister from './pages/InwardRegister';
 import NewProjectWizard from './components/NewProjectWizard';
 import TransactionDetail from './pages/TransactionDetail';
 import PurchaseOrders from './pages/PurchaseOrders';
@@ -281,6 +282,7 @@ function App() {
           <Route path="/purchase-orders" element={<PurchaseOrders session={session} />} />
           <Route path="/purchase-orders/new" element={<NewPurchaseOrder session={session} />} />
           <Route path="/purchase-orders/:poId" element={<PurchaseOrderDetail session={session} />} />
+          <Route path="/inward-register" element={<InwardRegister session={session} />} />
           <Route path="/team" element={<Team session={session} />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/financials" element={<PrincipalGuard session={session}><Financials /></PrincipalGuard>} />
@@ -489,7 +491,8 @@ function SidebarContent({
       items: [
         { path: '/ledger',          icon: IconArrowsExchange, label: 'Transactions',    show: role !== 'supervisor',                          accent: true },
         { path: '/work-orders',     icon: IconClipboardList,  label: 'Work Orders',     show: true,                                           badge: woPendingCount },
-        { path: '/purchase-orders', icon: IconShoppingBag,    label: 'Purchase Orders', show: role !== 'supervisor' && role !== 'accountant', badge: poUntalliedCount },
+        { path: '/purchase-orders',  icon: IconShoppingBag,   label: 'Purchase Orders', show: role !== 'supervisor' && role !== 'accountant', badge: poUntalliedCount },
+        { path: '/inward-register', icon: IconLayoutGrid,    label: 'Inward Register', show: role !== 'supervisor' && role !== 'accountant' },
         { path: '/logbook',         icon: IconNotebook,       label: 'Logbook',         show: true,                                           badge: inboxBadgeCount },
         { path: '/stakeholders',    icon: IconUsersGroup,     label: 'Parties',         show: role !== 'supervisor' && role !== 'accountant' },
       ],
