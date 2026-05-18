@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from './lib/auth/AuthProvider';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
 import { Routes, Route, Navigate, useNavigate, Link, useLocation } from 'react-router-dom';
@@ -62,6 +62,7 @@ import InviteAccept from './pages/InviteAccept';
 import OnboardingWizard from './components/OnboardingWizard';
 import Pending from './pages/Pending';
 import CreateWorkspace from './pages/CreateWorkspace';
+import Login from './pages/Login';
 import { FloatingActionButton } from './components/FloatingActionButton';
 import { QuickActionsOverlay } from './components/QuickActionsOverlay';
 import { useLongPress } from './hooks/useLongPress';
@@ -1306,86 +1307,7 @@ function MoreNavSheet({
   );
 }
 
-function Login() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const redirectTo = new URLSearchParams(location.search).get('redirect');
 
-  const [isSignUp, setIsSignUp] = useState(false);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    setSuccess(null);
-
-    if (isSignUp) {
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: { data: { full_name: name } }
-      });
-      if (error) setError(error.message);
-      else setSuccess('Account created! You can now sign in.');
-    } else {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        setError(error.message);
-      } else if (redirectTo) {
-        // Return user to the page that required auth (e.g. /invite/[token])
-        navigate(redirectTo, { replace: true });
-      }
-    }
-    setLoading(false);
-  };
-
-  return (
-    <div className="flex items-center justify-center min-h-screen bg-background px-margin-mobile">
-      <div className="w-full max-w-md bg-surface-container-lowest p-8 rounded-2xl shadow-card-md border border-outline-variant/30">
-        <div className="text-center mb-8">
-          <h1 className="text-headline-lg font-headline-lg font-black text-primary mb-2">Briklay</h1>
-          <p className="text-body-sm text-on-surface-variant">{isSignUp ? 'Create your account' : 'Sign in to continue'}</p>
-        </div>
-        
-        {error && <div className="mb-4 p-3 bg-error-container text-on-error-container rounded-lg text-body-sm">{error}</div>}
-        {success && <div className="mb-4 p-3 bg-secondary-container text-on-secondary-container rounded-lg text-body-sm">{success}</div>}
-        
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {isSignUp && (
-            <div className="space-y-stack-sm">
-              <label className="text-label-caps font-label-caps text-on-surface-variant uppercase">Full Name</label>
-              <input type="text" className="bk-input" value={name} onChange={(e) => setName(e.target.value)} required />
-            </div>
-          )}
-          <div className="space-y-stack-sm">
-            <label className="text-label-caps font-label-caps text-on-surface-variant uppercase">Email</label>
-            <input type="email" className="bk-input" value={email} onChange={(e) => setEmail(e.target.value)} required />
-          </div>
-          <div className="space-y-stack-sm">
-            <label className="text-label-caps font-label-caps text-on-surface-variant uppercase">Password</label>
-            <input type="password" className="bk-input" value={password} onChange={(e) => setPassword(e.target.value)} required />
-          </div>
-          <button type="submit" className="bk-btn w-full mt-4 py-4 rounded-xl text-body-lg" disabled={loading}>
-            {loading ? (isSignUp ? 'Creating...' : 'Signing in...') : (isSignUp ? 'Create Account' : 'Sign In')}
-          </button>
-        </form>
-        
-        <div className="mt-6 text-center">
-          <button type="button" className="text-secondary text-body-sm font-semibold hover:underline"
-            onClick={() => { setIsSignUp(!isSignUp); setError(null); setSuccess(null); }}>
-            {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export function useUserProfile(userId: string) {
   return useQuery({

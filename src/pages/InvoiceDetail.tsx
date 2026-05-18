@@ -43,7 +43,7 @@ function genTxnId() {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function InvoiceDetail({ session }: { session: Session }) {
+export default function InvoiceDetail({ session: _session }: { session: Session }) {
   const { invoiceId } = useParams<{ invoiceId: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();

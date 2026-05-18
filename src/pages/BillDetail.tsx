@@ -68,7 +68,7 @@ function genTxnId() {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function BillDetail({ session }: { session: Session }) {
+export default function BillDetail({ session: _session }: { session: Session }) {
   const { billId } = useParams<{ billId: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();

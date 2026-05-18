@@ -4,7 +4,7 @@ import Breadcrumb from '../components/Breadcrumb';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { Loader2 } from 'lucide-react';
-import type { Project, Stakeholder } from '../types';
+import type { Stakeholder } from '../types';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useOrgId } from '../lib/auth/AuthProvider';
