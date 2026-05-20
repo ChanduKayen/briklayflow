@@ -1,4 +1,5 @@
 import { useState, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
@@ -6,9 +7,9 @@ import { useSnackbar } from '../components/Snackbar';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useOrgId } from '../lib/auth/AuthProvider';
-import { MAT_DIVISIONS } from '../lib/costCodes';
 import { VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 import { multiply, subtract, applyPercent, sum } from '../lib/money';
+import { matchSKUsFromFile, matchSKUsFromText } from '../lib/skuMatcher';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -27,6 +28,38 @@ const UNITS = ['Nos', 'Bags', 'MT', 'm³', 'm²', 'RFT', 'Ltr', 'kg', 'Set', 'LS
 const GST_RATES = [0, 5, 12, 18, 28];
 const PAYMENT_TERMS = [15, 30, 45, 60];
 
+const VENDOR_TO_SKU_CATEGORIES: Record<string, string[]> = {
+  'Cement Supplier':                    ['Cement'],
+  'Sand & Aggregate Supplier':          ['Sand', 'Aggregate'],
+  'Bricks / Blocks Supplier':           ['Brick', 'Block'],
+  'Steel / TMT Bar Supplier':           ['Steel'],
+  'Waterproofing Materials Supplier':   ['Waterproofing'],
+  'Admixture Supplier':                 ['Admixture', 'Chemical'],
+  'Tiles Supplier':                     ['Tile'],
+  'Marble / Granite Supplier':          ['Tile'],
+  'Paint Supplier':                     ['Paint'],
+  'Hardware & Fittings Supplier':       ['Hardware'],
+  'Glass & Aluminium Supplier':         ['Glass', 'Windows', 'Doors'],
+  'False Ceiling Materials Supplier':   ['Hardware', 'Plywood'],
+  'Flooring Materials Supplier':        ['Tile'],
+  'Electrical Materials Supplier':      ['Electrical'],
+  'Plumbing Materials Supplier':        ['Plumbing'],
+  'HVAC Materials Supplier':            ['Electrical', 'Plumbing'],
+  'Sanitary Ware Supplier':             ['Plumbing'],
+  'Lighting Supplier':                  ['Electrical'],
+  'Cables & Conduits Supplier':         ['Electrical'],
+  'Scaffolding Supplier':               ['Hardware'],
+  'Tools & Machinery Vendor':           ['Hardware'],
+  'Ready Mix Concrete (RMC) Plant':     ['Cement', 'Aggregate', 'Sand'],
+};
+
+type SKUResult = {
+  sku_id:     string
+  item_name:  string
+  unit:       string
+  similarity: number
+}
+
 interface DraftLineItem {
   id: string;
   line_number: number;
@@ -43,10 +76,21 @@ interface DraftLineItem {
   cgst: number;
   sgst: number;
   total_amount: number;
+  sku_id:        string | null;
+  searchResults: SKUResult[];
+  searching:     boolean;
+  showDropdown:  boolean;
+  confidence?:           number;
+  needs_review?:         boolean;
+  match_source?:         string;
+  ai_suggested_name?:    string;
+  extraction_confidence?: 'HIGH' | 'MEDIUM' | 'LOW';
+  sku_alternatives?:     SKUResult[];
 }
 
 interface ExtractedItem {
   _id: string;
+  item_raw: string;
   item_name: string;
   specification: string;
   unit: string;
@@ -54,6 +98,7 @@ interface ExtractedItem {
   unit_rate: number;
   gst_rate: number;
   amount: number;
+  has_price: boolean;
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
 }
 
@@ -74,6 +119,10 @@ function newLine(lineNumber: number): DraftLineItem {
     cgst: 0,
     sgst: 0,
     total_amount: 0,
+    sku_id:        null,
+    searchResults: [],
+    searching:     false,
+    showDropdown:  false,
   };
 }
 
@@ -100,30 +149,44 @@ function fmtDate(d: string | null | undefined) {
   return parsed.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-const EXTRACT_PROMPT = `You are a purchase-order line-item extractor specialising in Indian construction materials and vendor quotations.
+const EXTRACT_PROMPT = `You are a senior procurement manager for Indian construction projects with expertise in material trade names across AP, Telangana, and pan-India.
 
 Given an image of a quotation, proforma invoice, or price list, extract ALL line items.
+
+CRITICAL — item_name MUST be the standard industry name. NEVER copy the vendor's raw text verbatim.
+Translate regional/trade shorthand to proper construction terminology:
+- "jelly 20mm" / "metal" → "Coarse Aggregate 20mm"
+- "tmt 12mm fe500d" / "tor bar" → "TMT Bar Fe500D 12mm"
+- "opc 53" / "53 grade" / brand+"53" → "OPC 53 Cement"
+- "opc 43" / "43 grade" → "OPC 43 Cement"
+- "m-sand" / "robo sand" → "Manufactured Sand (M-Sand)"
+- "river sand" / "fine agg" → "River Sand"
+- "ita brick" / "mitti" / "country brick" → "Clay Brick"
+- "solid block 200" / "cc block" → "Concrete Solid Block 200mm"
+- "fly ash brick" / "fal-g" → "Fly Ash Brick"
+Apply your domain knowledge for any other regional or trade terms you recognise.
 
 Return ONLY valid JSON:
 {
   "vendor_name": "string or null",
   "items": [
     {
-      "item_name": "exact name from document",
-      "specification": "grade / brand / spec string, or null",
+      "item_raw": "verbatim text as it appears in the document",
+      "item_name": "standard Indian construction industry name — never vendor shorthand or brand",
+      "specification": "grade / size / variant string, or null",
       "unit": "one of: Nos Bags MT m³ m² RFT Ltr kg Set LS Pair Rmt Sqft",
-      "quantity": number,
-      "unit_rate": number (EXCLUSIVE of GST — if document shows inclusive price, divide by 1 + gst_rate/100),
-      "gst_rate": 5 or 12 or 18 or 28,
-      "amount": number (quantity × unit_rate before GST),
+      "quantity": number or null (null if not shown),
+      "unit_rate": number or null — CRITICAL: null if the rate is NOT clearly printed in the document. DO NOT estimate, assume, or guess a price. Only set a number when the price is unambiguously visible.,
+      "gst_rate": 5 or 12 or 18 or 28 or null (null if not shown — do not assume),
+      "amount": number or null (null if unit_rate is null),
       "confidence": "HIGH" | "MEDIUM" | "LOW"
     }
   ]
 }
 
 Confidence: HIGH = all fields clearly visible, MEDIUM = some fields inferred, LOW = heavy guessing.
-For lump-sum items use unit "LS", quantity 1, unit_rate = lump-sum value.
-Do not invent items not visible in the document.`;
+For lump-sum items use unit "LS", quantity 1, unit_rate = lump-sum value only if the value is explicitly stated.
+Do not invent items, prices, or quantities not visible in the document.`;
 
 async function fileToBase64(file: File): Promise<{ base64: string; mimeType: string }> {
   return new Promise((resolve, reject) => {
@@ -148,7 +211,13 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
   const { show: showSnackbar } = useSnackbar();
   const { data: profile } = useUserProfile(session.user.id);
   const orgId = useOrgId();
-  const vendorSearchRef = useRef<HTMLInputElement>(null);
+  const vendorSearchRef   = useRef<HTMLInputElement>(null);
+  const searchDebounceRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const aiMatchDebounceRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const fileInputRef      = useRef<HTMLInputElement>(null);
+  const itemRefs          = useRef<Map<string, HTMLDivElement>>(new Map());
+  // Always-current snapshot of lineItems for use inside async callbacks
+  const lineItemsRef      = useRef<DraftLineItem[]>([]);
 
   // ── Section 01: Identity ──────────────────────────────────────────────────
   const [orderedDate, setOrderedDate]         = useState(new Date().toISOString().split('T')[0]);
@@ -174,13 +243,24 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
 
   // ── Section 04: Line Items ────────────────────────────────────────────────
   const [lineItems, setLineItems] = useState<DraftLineItem[]>([newLine(1)]);
+  const [aiMatchingIds, setAIMatchingIds]   = useState<Set<string>>(new Set());
+  const [aiJustMatchedIds, setAIJustMatchedIds] = useState<Set<string>>(new Set());
+  const [addingToDict, setAddingToDict]     = useState(false);
+  const [dictAddResult, setDictAddResult]   = useState<{ added: number; items: string[] } | null>(null);
+  const [dictAddingIds, setDictAddingIds]   = useState<Set<string>>(new Set());
+  const [dictAddedIds, setDictAddedIds]     = useState<Set<string>>(new Set());
+
+  // Keep ref in sync so async callbacks always see the latest line items
+  lineItemsRef.current = lineItems;
 
   // ── Section 03: AI Extraction ─────────────────────────────────────────────
   const [extractFile, setExtractFile]   = useState<File | null>(null);
   const [extracting, setExtracting]     = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
-  const [pendingItems, setPendingItems] = useState<ExtractedItem[] | null>(null);
-  const [selectedIds, setSelectedIds]   = useState<Set<string>>(new Set());
+  const [pendingItems, setPendingItems]   = useState<ExtractedItem[] | null>(null);
+  const [selectedIds, setSelectedIds]     = useState<Set<string>>(new Set());
+  const [docExtracting, setDocExtracting] = useState(false);
+  const [docExtractError, setDocExtractError] = useState<string | null>(null);
 
   // ── Section 05: Terms ─────────────────────────────────────────────────────
   const [vendorNotes, setVendorNotes]   = useState('');
@@ -218,6 +298,12 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
     return vendors.filter(v => v.name.toLowerCase().includes(q) || v.category?.toLowerCase().includes(q)).slice(0, 8);
   }, [vendorSearch, vendors]);
 
+  // SKU categories inferred from selected vendor's trade type
+  const vendorSKUCategories = useMemo<string[] | null>(() => {
+    if (!selectedVendor?.category) return null;
+    return VENDOR_TO_SKU_CATEGORIES[selectedVendor.category] ?? null;
+  }, [selectedVendor]);
+
   // ── Line item helpers ─────────────────────────────────────────────────────
   function updateLine(id: string, patch: Partial<DraftLineItem>) {
     setLineItems(prev =>
@@ -234,6 +320,389 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
       const next = prev.filter(li => li.id !== id);
       return next.map((li, i) => ({ ...li, line_number: i + 1 }));
     });
+  }
+
+  // ── SKU search ────────────────────────────────────────────────────────────
+
+  async function searchSKUs(itemId: string, query: string) {
+    clearTimeout(searchDebounceRef.current[itemId]);
+    if (!query || query.trim().length < 2) {
+      updateLine(itemId, { searchResults: [], showDropdown: false, searching: false });
+      return;
+    }
+    // Show spinner immediately so the UI feels responsive before the fetch fires
+    updateLine(itemId, { searching: true });
+    searchDebounceRef.current[itemId] = setTimeout(async () => {
+      const cats = vendorSKUCategories;
+      const rpcParams: Record<string, unknown> = {
+        p_search_term: query.trim(),
+        p_limit:       8,
+        p_threshold:   0.10,
+      };
+      if (cats && cats.length === 1) {
+        rpcParams.p_category = cats[0];
+      } else if (cats && cats.length > 1) {
+        rpcParams.p_categories = cats;
+      }
+      const { data, error } = await supabase.rpc('trgm_match_sku', rpcParams as any);
+      if (error) {
+        console.error('SKU search error:', error);
+        updateLine(itemId, { searching: false });
+        return;
+      }
+      // Keep dropdown open if already open; open it only if results arrived
+      updateLine(itemId, {
+        searchResults: (data ?? []) as SKUResult[],
+        showDropdown:  (data ?? []).length > 0,
+        searching:     false,
+      });
+    }, 80);
+  }
+
+  function selectSKU(itemId: string, sku: SKUResult) {
+    updateLine(itemId, {
+      item_name:        sku.item_name,
+      sku_id:           sku.sku_id,
+      unit:             sku.unit,
+      searchResults:    [],
+      showDropdown:     false,
+      sku_alternatives: undefined,
+    });
+  }
+
+  function clearSKU(itemId: string) {
+    updateLine(itemId, { sku_id: null, searchResults: [], showDropdown: false, sku_alternatives: undefined });
+  }
+
+  // Auto-match: runs trgm search and commits the top result when similarity >= 0.65.
+  // Below that threshold the dropdown is shown so the user can pick manually.
+  async function autoMatchSKU(itemId: string, query: string) {
+    if (!query || query.trim().length < 2) return;
+    const cats = vendorSKUCategories;
+    const rpcParams: Record<string, unknown> = {
+      p_search_term: query.trim(),
+      p_limit:       8,
+      p_threshold:   0.10,
+    };
+    if (cats && cats.length === 1)  rpcParams.p_category   = cats[0];
+    else if (cats && cats.length > 1) rpcParams.p_categories = cats;
+
+    updateLine(itemId, { searching: true, showDropdown: false });
+    const { data, error } = await supabase.rpc('trgm_match_sku', rpcParams as any);
+    if (error || !data?.length) {
+      updateLine(itemId, { searching: false });
+      return;
+    }
+    const results = data as SKUResult[];
+    const top = results[0];
+    if (top.similarity >= 0.82) {
+      // Confident enough — auto-commit the SKU
+      updateLine(itemId, {
+        item_name:     top.item_name,
+        sku_id:        top.sku_id,
+        unit:          top.unit,
+        searchResults: [],
+        showDropdown:  false,
+        searching:     false,
+        confidence:    Math.round(top.similarity * 100),
+        needs_review:  top.similarity < 0.85,
+        match_source:  'trgm',
+      });
+    } else {
+      // Show "Did you mean?" alternatives for all unmatched items regardless of extraction confidence
+      updateLine(itemId, {
+        sku_alternatives: results.slice(0, 3),
+        searchResults:    [],
+        showDropdown:     false,
+        searching:        false,
+      });
+    }
+  }
+
+  // ── Feature 1: AI auto-match after the user stops typing / moves away ───────
+  // Fires 1.5 s after blur if the item still has no SKU.
+  // Pass 1: edge function (trgm → LLM re-rank) for SKU matching.
+  // Pass 2: direct GPT call for name standardisation if edge function returned the same name.
+  async function runAIAutoMatch(itemId: string) {
+    const li = lineItemsRef.current.find(l => l.id === itemId);
+    if (!li || li.sku_id || li.item_name.trim().length < 2) return;
+
+    setAIMatchingIds(prev => new Set([...prev, itemId]));
+    try {
+      const text = li.specification
+        ? `Material item for purchase order:\nName: ${li.item_name}\nSpec: ${li.specification}`
+        : `Material item for purchase order: ${li.item_name}`;
+      const result = await matchSKUsFromText(text, 'ai_auto_match', selectedVendor?.category);
+      const match  = result.items?.[0];
+
+      const still = lineItemsRef.current.find(l => l.id === itemId);
+      if (!still || still.sku_id) return;
+
+      if (match?.sku_id) {
+        // Show as "Did you mean?" so user confirms before committing
+        updateLine(itemId, {
+          sku_alternatives: [{
+            sku_id:     match.sku_id,
+            item_name:  match.sku_name ?? match.item_name,
+            unit:       match.unit ?? still.unit,
+            similarity: (match.confidence ?? 80) / 100,
+          }],
+          ai_suggested_name: undefined,
+          searchResults:     [],
+          showDropdown:      false,
+        });
+        return;
+      }
+
+      // Edge function found no SKU — check if it at least corrected the name
+      const edgeSuggested = match?.item_name;
+      if (edgeSuggested && edgeSuggested.toLowerCase().trim() !== still.item_name.toLowerCase().trim()) {
+        updateLine(itemId, { ai_suggested_name: edgeSuggested });
+        return;
+      }
+
+      // Edge function returned the same name (or nothing). Ask GPT directly for
+      // the correct standard Indian trade name — catches typos like "Health Facets".
+      const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+      if (!apiKey) return;
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model:       'gpt-4.1-mini',
+          max_tokens:  60,
+          temperature: 0,
+          messages: [{
+            role: 'user',
+            content: `You are a construction materials naming expert for Indian building projects (AP, Telangana, pan-India).
+Vendor type: ${selectedVendor?.category || 'general'}
+User typed: "${still.item_name}"
+
+Is this the correct standard Indian trade name for this material?
+If not (typo, wrong spelling, wrong word), return the correct standard name.
+If already correct, return null.
+
+Reply ONLY with valid JSON: {"correct_name": "corrected name or null"}`,
+          }],
+        }),
+      });
+      if (!res.ok) return;
+      const json    = await res.json();
+      const raw     = json.choices?.[0]?.message?.content?.trim() ?? '';
+      const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+      const parsed  = JSON.parse(cleaned);
+      const corrected = parsed?.correct_name;
+
+      const latest = lineItemsRef.current.find(l => l.id === itemId);
+      if (latest && !latest.sku_id && corrected && corrected.toLowerCase().trim() !== latest.item_name.toLowerCase().trim()) {
+        updateLine(itemId, { ai_suggested_name: corrected });
+      }
+    } catch (err) {
+      console.error('AI auto-match failed:', err);
+    } finally {
+      setAIMatchingIds(prev => { const n = new Set(prev); n.delete(itemId); return n; });
+    }
+  }
+
+  // Auto-analyses why an item is missing from the SKU dictionary, generates the
+  // correct record, inserts it, then re-runs trgm to link the row automatically.
+  async function autoAddItemToDictionary(itemId: string) {
+    const li = lineItemsRef.current.find(l => l.id === itemId);
+    if (!li || li.sku_id || li.item_name.trim().length < 2) return;
+    if (dictAddingIds.has(itemId)) return;
+
+    setDictAddingIds(prev => new Set([...prev, itemId]));
+    const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+    try {
+      const prompt = `You are a construction materials procurement expert for Indian building projects.
+
+An item was entered in a Purchase Order but could NOT be found in the SKU dictionary.
+Your task: generate a proper sku_directory record for it AND explain the gap.
+
+Item name   : "${li.item_name}"
+Specification: "${li.specification || 'none'}"
+Vendor type : "${selectedVendor?.category || 'unknown'}"
+
+Return ONLY valid JSON (no markdown):
+{
+  "sku_id": "CATEGORY-SHORT_SUBCAT-DIM-VARIANT-GRADE (uppercase, hyphens only, max 45 chars, e.g. STEEL-TMT-16MM-BAR-FE415)",
+  "category": "one of: Cement|Steel|Aggregate|Sand|Brick|Block|Paint|Tile|Plumbing|Electrical|Hardware|Plywood|Waterproofing|Admixture",
+  "sub_category": "full descriptive name e.g. TMT Bar, OPC 53 Cement",
+  "dimension": "size string e.g. 12mm or null",
+  "variant": "type variant e.g. Bar, Bag or null",
+  "grade": "grade/standard e.g. Fe500D, IS303 or null",
+  "aliases": ["regional", "trade", "shorthand", "names", "vendors", "commonly", "use"],
+  "standard_unit": "one of: Bags|MT|kg|Nos|Rmt|Sqft|Ltr|m³|m²|Set|LS|Pair",
+  "reason_missing": "one sentence: what gap in the dictionary caused this miss"
+}`;
+
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model:       'gpt-4.1-mini',
+          max_tokens:  500,
+          temperature: 0,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      });
+      if (!res.ok) return;
+
+      const json    = await res.json();
+      const raw     = json.choices?.[0]?.message?.content?.trim() ?? '';
+      const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+      const sku     = JSON.parse(cleaned);
+      if (!sku.sku_id || !sku.category || !sku.sub_category) return;
+
+      const { error } = await supabase.from('sku_directory').insert([{
+        sku_id:        sku.sku_id,
+        category:      sku.category,
+        sub_category:  sku.sub_category,
+        dimension:     sku.dimension    ?? null,
+        variant:       sku.variant      ?? null,
+        grade:         sku.grade        ?? null,
+        aliases:       sku.aliases      ?? [],
+        standard_unit: sku.standard_unit,
+        is_active:     true,
+      }]);
+      if (error && error.code !== '23505') { console.error('SKU insert error:', error); return; }
+
+      // Re-run trgm to link this row to the newly added (or already existing) SKU
+      const cats = vendorSKUCategories;
+      const params: Record<string, unknown> = { p_search_term: li.item_name.trim(), p_limit: 1, p_threshold: 0.10 };
+      if (cats?.length === 1) params.p_category   = cats[0];
+      else if (cats?.length)  params.p_categories = cats;
+      const { data: trgmData } = await supabase.rpc('trgm_match_sku', params as any);
+      const top = (trgmData as any[])?.[0];
+
+      const still = lineItemsRef.current.find(l => l.id === itemId);
+      if (top?.sku_id && still && !still.sku_id) {
+        updateLine(itemId, {
+          sku_id:            top.sku_id,
+          item_name:         top.item_name,
+          unit:              top.unit || still.unit,
+          confidence:        Math.round(top.similarity * 100),
+          needs_review:      true,
+          match_source:      'trgm',
+          ai_suggested_name: undefined,
+        });
+        setDictAddedIds(prev => new Set([...prev, itemId]));
+        setTimeout(() => setDictAddedIds(prev => { const n = new Set(prev); n.delete(itemId); return n; }), 4000);
+        showSnackbar(`✦ New SKU "${sku.sub_category}" created & assigned`);
+      }
+    } catch (err) {
+      console.error('Auto-add to dict failed for', li.item_name, err);
+    } finally {
+      setDictAddingIds(prev => { const n = new Set(prev); n.delete(itemId); return n; });
+    }
+  }
+
+  // ── Feature 2: Generate and add missing SKUs to the dictionary ───────────
+  // For every row that still has no SKU after all matching attempts, asks GPT to:
+  //  - understand what the item is in the context of the vendor trade
+  //  - produce a proper sku_directory record (category, sub_category, aliases…)
+  //  - explain why it was missing
+  // Inserts the generated records and then re-runs trgm to link the lines.
+  async function addMissingToDictionary() {
+    const missing = lineItemsRef.current.filter(li => !li.sku_id && li.item_name.trim().length >= 2);
+    if (!missing.length) return;
+
+    setAddingToDict(true);
+    setDictAddResult(null);
+    const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+    const addedNames: string[] = [];
+
+    for (const li of missing) {
+      try {
+        const prompt = `You are a construction materials procurement expert for Indian building projects.
+
+An item was entered in a Purchase Order but could NOT be found in the SKU dictionary.
+Your task: generate a proper sku_directory record for it AND explain the gap.
+
+Item name   : "${li.item_name}"
+Specification: "${li.specification || 'none'}"
+Vendor type : "${selectedVendor?.category || 'unknown'}"
+
+Return ONLY valid JSON (no markdown):
+{
+  "sku_id": "CATEGORY-SHORT_SUBCAT-DIM-VARIANT-GRADE (uppercase, hyphens only, max 45 chars, e.g. STEEL-TMT-16MM-BAR-FE415)",
+  "category": "one of: Cement|Steel|Aggregate|Sand|Brick|Block|Paint|Tile|Plumbing|Electrical|Hardware|Plywood|Waterproofing|Admixture",
+  "sub_category": "full descriptive name e.g. TMT Bar, OPC 53 Cement",
+  "dimension": "size string e.g. 12mm or null",
+  "variant": "type variant e.g. Bar, Bag or null",
+  "grade": "grade/standard e.g. Fe500D, IS303 or null",
+  "aliases": ["regional", "trade", "shorthand", "names", "vendors", "commonly", "use"],
+  "standard_unit": "one of: Bags|MT|kg|Nos|Rmt|Sqft|Ltr|m³|m²|Set|LS|Pair",
+  "reason_missing": "one sentence: what gap in the dictionary caused this miss"
+}`;
+
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+          body: JSON.stringify({
+            model:       'gpt-4.1-mini',
+            max_tokens:  500,
+            temperature: 0,
+            messages: [{ role: 'user', content: prompt }],
+          }),
+        });
+        if (!res.ok) continue;
+
+        const json = await res.json();
+        const raw  = json.choices?.[0]?.message?.content?.trim() ?? '';
+        const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+        const sku  = JSON.parse(cleaned);
+
+        // Safety: only insert if we have the required fields
+        if (!sku.sku_id || !sku.category || !sku.sub_category) continue;
+
+        const { error } = await supabase.from('sku_directory').insert([{
+          sku_id:        sku.sku_id,
+          category:      sku.category,
+          sub_category:  sku.sub_category,
+          dimension:     sku.dimension    ?? null,
+          variant:       sku.variant      ?? null,
+          grade:         sku.grade        ?? null,
+          aliases:       sku.aliases      ?? [],
+          standard_unit: sku.standard_unit,
+          is_active:     true,
+        }]);
+
+        if (error) {
+          // sku_id collision — skip silently (already in dict)
+          if (error.code !== '23505') console.error('SKU insert error:', error);
+          continue;
+        }
+
+        addedNames.push(sku.sub_category);
+
+        // Re-run trgm so this line picks up the newly added SKU
+        const cats = vendorSKUCategories;
+        const params: Record<string, unknown> = { p_search_term: li.item_name.trim(), p_limit: 1, p_threshold: 0.10 };
+        if (cats?.length === 1) params.p_category   = cats[0];
+        else if (cats?.length)  params.p_categories = cats;
+        const { data: trgmData } = await supabase.rpc('trgm_match_sku', params as any);
+        const top = (trgmData as any[])?.[0];
+        if (top?.sku_id) {
+          updateLine(li.id, {
+            sku_id:       top.sku_id,
+            item_name:    top.item_name,
+            unit:         top.unit || li.unit,
+            confidence:   Math.round(top.similarity * 100),
+            needs_review: true,
+            match_source: 'trgm',
+          });
+          setAIJustMatchedIds(prev => new Set([...prev, li.id]));
+          setTimeout(() => setAIJustMatchedIds(prev => { const n = new Set(prev); n.delete(li.id); return n; }), 4000);
+        }
+      } catch (err) {
+        console.error('SKU generation failed for', li.item_name, err);
+      }
+    }
+
+    setAddingToDict(false);
+    setDictAddResult({ added: addedNames.length, items: addedNames });
+    if (addedNames.length > 0) showSnackbar(`Added ${addedNames.length} new SKU${addedNames.length > 1 ? 's' : ''} to dictionary`);
   }
 
   // ── Totals ────────────────────────────────────────────────────────────────
@@ -379,7 +848,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
         body: JSON.stringify({
-          model: 'gpt-4o',
+          model: 'gpt-4.1',
           response_format: { type: 'json_object' },
           max_tokens: 2000,
           messages: [{
@@ -405,13 +874,15 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
       const items: ExtractedItem[] = ((parsed.items ?? []) as any[])
         .map(it => ({
           _id:           crypto.randomUUID(),
-          item_name:     String(it.item_name   || ''),
+          item_raw:      String(it.item_raw     || it.item_name || ''),
+          item_name:     String(it.item_name    || ''),
           specification: String(it.specification || ''),
-          unit:          String(it.unit         || 'Nos'),
-          quantity:      Number(it.quantity)    || 1,
-          unit_rate:     Number(it.unit_rate)   || 0,
-          gst_rate:      Number(it.gst_rate)    || 18,
-          amount:        Number(it.amount)      || 0,
+          unit:          String(it.unit          || 'Nos'),
+          quantity:      it.quantity  != null ? (Number(it.quantity)  || 1) : 1,
+          unit_rate:     it.unit_rate != null ? (Number(it.unit_rate) || 0) : 0,
+          gst_rate:      it.gst_rate  != null ? (Number(it.gst_rate)  || 18) : 18,
+          amount:        it.amount    != null ? (Number(it.amount)    || 0) : 0,
+          has_price:     it.unit_rate != null,
           confidence:    (['HIGH','MEDIUM','LOW'].includes(it.confidence) ? it.confidence : 'MEDIUM') as 'HIGH' | 'MEDIUM' | 'LOW',
         }))
         .filter((it: ExtractedItem) => it.item_name);
@@ -435,19 +906,84 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
     if (!pendingItems) return;
     const toApply = pendingItems.filter(it => selectedIds.has(it._id));
     if (!toApply.length) return;
-    setLineItems(toApply.map((it, i) => computeLine({
+    const newLines = toApply.map((it, i) => computeLine({
       ...newLine(i + 1),
-      item_name:        it.item_name,
-      specification:    it.specification,
-      unit:             it.unit,
-      quantity_ordered: it.quantity,
-      unit_rate:        it.unit_rate,
-      gst_rate:         it.gst_rate,
-    })));
+      item_name:             it.item_name,
+      specification:         it.specification,
+      unit:                  it.unit,
+      quantity_ordered:      it.quantity,
+      unit_rate:             it.unit_rate,
+      gst_rate:              it.gst_rate,
+      extraction_confidence: it.confidence,
+    }));
+    setLineItems(newLines);
     setPendingItems(null);
     setExtractFile(null);
     setSelectedIds(new Set());
-    showSnackbar(`${toApply.length} line item${toApply.length !== 1 ? 's' : ''} applied`);
+    showSnackbar(`${toApply.length} line item${toApply.length !== 1 ? 's' : ''} applied — matching SKUs…`);
+    // Auto-match each applied item against the SKU directory
+    newLines.forEach(li => {
+      if (li.item_name.trim().length >= 2) autoMatchSKU(li.id, li.item_name);
+    });
+    // After trgm matches settle, auto-add only items that have no SKU and no
+    // "Did you mean?" alternatives (those wait for the user to decide manually)
+    setTimeout(() => {
+      lineItemsRef.current
+        .filter(li => !li.sku_id && li.item_name.trim().length >= 2 && !li.sku_alternatives?.length && !li.searchResults?.length)
+        .forEach(li => autoAddItemToDictionary(li.id));
+    }, 3000);
+  }
+
+  // ── SKU document extraction (Feature 2) ──────────────────────────────────
+
+  async function handleDocumentUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setDocExtracting(true);
+    setDocExtractError(null);
+    try {
+      const result = await matchSKUsFromFile(file, 'po_creation', selectedVendor?.category);
+      if (result.error) {
+        setDocExtractError(result.error);
+        return;
+      }
+      const base = lineItems.filter(l => l.item_name.trim()).length;
+      const newItems = result.items.map((item, i) => computeLine({
+        ...newLine(base + i + 1),
+        item_name:        item.sku_name ?? item.item_name,
+        sku_id:           item.sku_id,
+        unit:             item.unit ?? 'Nos',
+        quantity_ordered: item.quantity ?? 1,
+        confidence:       item.confidence,
+        needs_review:     item.needs_review,
+        match_source:     item.match_source,
+      }));
+      setLineItems(prev => [...prev.filter(l => l.item_name.trim()), ...newItems]);
+      showSnackbar(`${newItems.length} item${newItems.length !== 1 ? 's' : ''} extracted`);
+      // Auto-add items the pipeline couldn't match to the SKU dictionary
+      newItems
+        .filter(li => !li.sku_id && li.item_name.trim().length >= 2)
+        .forEach(li => setTimeout(() => autoAddItemToDictionary(li.id), 500));
+    } catch (err: any) {
+      setDocExtractError('Failed to process document. Try again.');
+      console.error(err);
+    } finally {
+      setDocExtracting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }
+
+  function handleSubmit(status: string) {
+    const needsReview = lineItems.filter(li => li.item_name.trim() && li.needs_review);
+    if (needsReview.length > 0) {
+      showSnackbar(`${needsReview.length} item(s) need SKU review before submitting`, { type: 'error' });
+      return;
+    }
+    const unresolved = lineItems.filter(li => li.item_name.trim() && !li.sku_id);
+    if (unresolved.length > 0) {
+      if (!window.confirm(`${unresolved.length} item(s) have no SKU selected. Continue?`)) return;
+    }
+    saveMutation.mutate(status);
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -873,15 +1409,24 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
                             'bg-red-100 text-red-700'
                           }`}>{item.confidence}</span>
                         </div>
+                        {item.item_raw && item.item_raw !== item.item_name && (
+                          <p className="text-[10px] text-on-surface-variant/35 mt-0.5 truncate italic">"{item.item_raw}"</p>
+                        )}
                         {item.specification && (
                           <p className="text-[10px] text-on-surface-variant/50 mt-0.5 truncate">{item.specification}</p>
                         )}
                       </div>
                       <div className="text-right shrink-0">
                         <p className="font-data-mono text-[11px] text-on-surface">
-                          {item.quantity} {item.unit} × ₹{item.unit_rate.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                          {item.quantity} {item.unit}
+                          {item.has_price
+                            ? <> × ₹{item.unit_rate.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</>
+                            : <span className="text-on-surface-variant/40 not-italic font-sans text-[10px]"> · rate not found</span>
+                          }
                         </p>
-                        <p className="font-data-mono text-[10px] text-on-surface-variant/50">GST {item.gst_rate}%</p>
+                        {item.has_price && (
+                          <p className="font-data-mono text-[10px] text-on-surface-variant/50">GST {item.gst_rate}%</p>
+                        )}
                       </div>
                     </label>
                   ))}
@@ -894,115 +1439,395 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
           <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm p-6">
             <SectionLabel n="04" title="Line Items" />
 
+            {/* SKU document upload — Feature 2 */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,.pdf,.txt"
+              onChange={handleDocumentUpload}
+              style={{ display: 'none' }}
+            />
+            {!docExtracting && (
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                onDrop={e => {
+                  e.preventDefault();
+                  const file = e.dataTransfer.files[0];
+                  if (file) handleDocumentUpload({ target: { files: [file] } } as any);
+                }}
+                onDragOver={e => e.preventDefault()}
+                className="flex items-center gap-3 rounded-xl border border-dashed border-outline-variant/40 bg-surface-container-low/30 px-4 py-3 cursor-pointer mb-4 transition-colors hover:border-outline-variant/70 hover:bg-surface-container-low/50"
+              >
+                <span className="material-symbols-outlined text-[20px] text-on-surface-variant/30 shrink-0">cloud_upload</span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[13px] font-medium text-on-surface/80">Upload quotation or requirement list</div>
+                  <div className="text-[11px] text-on-surface-variant/40 mt-0.5">
+                    {vendorSKUCategories
+                      ? <>AI matches to <span className="font-semibold text-primary/70">{vendorSKUCategories.join(', ')}</span> SKUs</>
+                      : 'Photo, PDF or text — AI extracts and matches SKUs automatically'}
+                  </div>
+                </div>
+                <span className="text-[11px] px-3 py-1 rounded-full border border-outline-variant/20 text-on-surface-variant/40 shrink-0 hidden sm:block">
+                  or drag &amp; drop
+                </span>
+              </div>
+            )}
+            {docExtracting && (
+              <div className="flex items-center gap-3 rounded-xl border border-outline-variant/15 bg-surface-container-low/30 px-4 py-3 mb-4">
+                <span className="material-symbols-outlined text-[18px] text-on-surface-variant/40 animate-spin shrink-0">progress_activity</span>
+                <div>
+                  <div className="text-[13px] font-medium text-on-surface/80">Reading document...</div>
+                  <div className="text-[11px] text-on-surface-variant/40 mt-0.5">Extracting items and matching to SKU library</div>
+                </div>
+              </div>
+            )}
+            {docExtractError && (
+              <div className="flex items-center gap-2 rounded-lg bg-red-50 border border-red-100 px-3 py-2.5 text-[12px] text-red-700 mb-3">
+                <span className="material-symbols-outlined text-[14px]">error</span>
+                {docExtractError}
+              </div>
+            )}
+
             {/* Line items table */}
             <div className="overflow-x-auto -mx-2">
-              <table className="w-full min-w-[820px] text-[12px]">
+              <table className="w-full min-w-[680px] text-[12px] border-separate border-spacing-0">
                 <thead>
-                  <tr className="border-b border-outline-variant/15">
-                    <th className="px-2 py-2 text-left text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide w-6">#</th>
-                    <th className="px-2 py-2 text-left text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide w-36">Category</th>
-                    <th className="px-2 py-2 text-left text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Item</th>
-                    <th className="px-2 py-2 text-left text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide w-20">Unit</th>
-                    <th className="px-2 py-2 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide w-16">Qty</th>
-                    <th className="px-2 py-2 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide w-24">Rate ₹</th>
-                    <th className="px-2 py-2 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide w-16">Disc%</th>
-                    <th className="px-2 py-2 text-center text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide w-16">GST%</th>
-                    <th className="px-2 py-2 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide w-28">Total ₹</th>
-                    <th className="px-2 py-2 w-8"></th>
+                  <tr>
+                    <th className="px-2 pb-2 pt-0 text-left text-[9px] font-bold text-on-surface-variant/40 uppercase tracking-widest w-7 border-b border-outline-variant/15">#</th>
+                    <th className="px-2 pb-2 pt-0 text-left text-[9px] font-bold text-on-surface-variant/40 uppercase tracking-widest border-b border-outline-variant/15">Item &amp; Specification</th>
+                    <th className="px-2 pb-2 pt-0 text-left text-[9px] font-bold text-on-surface-variant/40 uppercase tracking-widest w-[72px] border-b border-outline-variant/15">Unit</th>
+                    <th className="px-2 pb-2 pt-0 text-right text-[9px] font-bold text-on-surface-variant/40 uppercase tracking-widest w-14 border-b border-outline-variant/15">Qty</th>
+                    <th className="px-2 pb-2 pt-0 text-right text-[9px] font-bold text-on-surface-variant/40 uppercase tracking-widest w-24 border-b border-outline-variant/15">Rate ₹</th>
+                    <th className="px-2 pb-2 pt-0 text-right text-[9px] font-bold text-on-surface-variant/40 uppercase tracking-widest w-12 border-b border-outline-variant/15">Disc%</th>
+                    <th className="px-2 pb-2 pt-0 text-center text-[9px] font-bold text-on-surface-variant/40 uppercase tracking-widest w-[52px] border-b border-outline-variant/15">GST</th>
+                    <th className="px-2 pb-2 pt-0 text-right text-[9px] font-bold text-on-surface-variant/40 uppercase tracking-widest w-24 border-b border-outline-variant/15">Total ₹</th>
+                    <th className="w-8 border-b border-outline-variant/15"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {lineItems.map(li => (
-                    <tr key={li.id} className="border-b border-outline-variant/[0.06] hover:bg-surface-container-low/20 transition-colors">
-                      <td className="px-2 py-2 text-on-surface-variant/40 font-bold text-[11px]">{li.line_number}</td>
-                      <td className="px-2 py-1.5">
-                        <select
-                          className="w-full text-[11px] bg-surface-container-low/40 border border-outline-variant/20 rounded-lg px-2 py-1.5 outline-none focus:border-primary/40 focus:bg-white transition-colors"
-                          value={li.category_id}
-                          onChange={e => updateLine(li.id, { category_id: e.target.value })}
+                  {lineItems.map((li, rowIdx) => (
+                    <tr
+                      key={li.id}
+                      className="group"
+                      style={{
+                        background: aiJustMatchedIds.has(li.id)
+                          ? 'rgba(250,240,180,0.35)'
+                          : rowIdx % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.012)',
+                        transition: 'background 1.2s ease',
+                      }}
+                    >
+                      {/* # */}
+                      <td className="px-2 py-2.5 text-center align-top border-b border-outline-variant/[0.05]">
+                        <span className="text-[10px] font-bold text-on-surface-variant/30 tabular-nums">{li.line_number}</span>
+                      </td>
+
+                      {/* Item + Spec + SKU status */}
+                      <td className="px-2 py-2 align-top border-b border-outline-variant/[0.05]">
+                        {/* name input with dropdown anchor */}
+                        <div
+                          ref={el => { if (el) itemRefs.current.set(li.id, el); else itemRefs.current.delete(li.id); }}
+                          style={{ position: 'relative' }}
                         >
-                          <option value="">—</option>
-                          {MAT_DIVISIONS.map(div => (
-                            <optgroup key={div.code} label={`${div.code} · ${div.name}`}>
-                              {div.items.map(item => (
-                                <option key={item.code} value={item.code}>{item.code}</option>
-                              ))}
-                            </optgroup>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-2 py-1.5">
+                          <input
+                            className="w-full text-[12px] font-medium bg-transparent border-0 border-b border-outline-variant/20 px-0.5 py-0.5 outline-none focus:border-primary/60 transition-colors placeholder:text-on-surface-variant/25"
+                            placeholder="Material name…"
+                            value={li.item_name}
+                            style={{ paddingRight: (li.searching || li.sku_id) ? '20px' : undefined }}
+                            onChange={e => {
+                              updateLine(li.id, { item_name: e.target.value, sku_id: null, ai_suggested_name: undefined, sku_alternatives: undefined });
+                              searchSKUs(li.id, e.target.value);
+                            }}
+                            onBlur={() => {
+                              setTimeout(() => updateLine(li.id, { showDropdown: false }), 200);
+                              // Schedule AI auto-match 1.5s after the user leaves the field
+                              clearTimeout(aiMatchDebounceRef.current[li.id]);
+                              if (!li.sku_id && li.item_name.trim().length >= 2) {
+                                aiMatchDebounceRef.current[li.id] = setTimeout(
+                                  () => runAIAutoMatch(li.id), 1500
+                                );
+                              }
+                            }}
+                            onFocus={() => {
+                              clearTimeout(aiMatchDebounceRef.current[li.id]);
+                              if (li.searchResults.length > 0) updateLine(li.id, { showDropdown: true });
+                            }}
+                          />
+                          {(li.searching || aiMatchingIds.has(li.id)) && (
+                            <span className="material-symbols-outlined animate-spin" aria-hidden="true"
+                              style={{ position: 'absolute', right: 2, top: '50%', transform: 'translateY(-50%)', fontSize: 12, color: aiMatchingIds.has(li.id) ? '#d97706' : '#9ca3af', pointerEvents: 'none' }}>
+                              progress_activity
+                            </span>
+                          )}
+                          {li.sku_id && !li.searching && !aiMatchingIds.has(li.id) && (
+                            <span className="material-symbols-outlined" aria-hidden="true"
+                              style={{ position: 'absolute', right: 2, top: '50%', transform: 'translateY(-50%)', fontSize: 12, color: '#16a34a', pointerEvents: 'none' }}>
+                              check_circle
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Inline AI name correction — appears between name input and spec line */}
+                        {li.ai_suggested_name && !li.sku_id && !dictAddingIds.has(li.id) && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2, padding: '2px 6px', background: '#eff6ff', border: '0.5px solid #bfdbfe', borderRadius: 4 }}>
+                            <span className="material-symbols-outlined" style={{ fontSize: 10, color: '#3b82f6', flexShrink: 0 }}>smart_toy</span>
+                            <span style={{ fontSize: 10, color: '#6b7280', flexShrink: 0 }}>Did you mean</span>
+                            <span style={{ fontSize: 11, fontWeight: 600, color: '#1d4ed8', flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{li.ai_suggested_name}</span>
+                            <button type="button"
+                              onClick={() => {
+                                const corrected = li.ai_suggested_name!;
+                                updateLine(li.id, { item_name: corrected, ai_suggested_name: undefined, sku_id: null });
+                                // Let React flush the updated item_name, then create SKU + assign
+                                setTimeout(() => autoAddItemToDictionary(li.id), 50);
+                              }}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px 3px', color: '#2563eb', lineHeight: 1, flexShrink: 0 }}
+                              title="Accept suggestion">
+                              <span className="material-symbols-outlined" style={{ fontSize: 13 }}>check</span>
+                            </button>
+                            <button type="button"
+                              onClick={() => updateLine(li.id, { ai_suggested_name: undefined })}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '1px 2px', color: '#93c5fd', lineHeight: 1, flexShrink: 0 }}
+                              title="Keep what I typed">
+                              <span className="material-symbols-outlined" style={{ fontSize: 13 }}>close</span>
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Spec line */}
                         <input
-                          className="w-full text-[12px] bg-surface-container-low/40 border border-outline-variant/20 rounded-lg px-2 py-1.5 outline-none focus:border-primary/40 focus:bg-white transition-colors"
-                          placeholder="Item name"
-                          value={li.item_name}
-                          onChange={e => updateLine(li.id, { item_name: e.target.value })}
+                          className="w-full text-[11px] italic text-on-surface-variant/45 bg-transparent border-0 px-0.5 py-0 mt-0.5 outline-none placeholder:text-on-surface-variant/20 focus:text-on-surface-variant/70 transition-colors"
+                          placeholder="grade / size / spec…"
+                          value={li.specification}
+                          onChange={e => updateLine(li.id, { specification: e.target.value })}
                         />
+
+                        {/* Did you mean? — shown for MEDIUM/LOW extraction confidence items */}
+                        {li.sku_alternatives && li.sku_alternatives.length > 0 && !li.sku_id && !dictAddingIds.has(li.id) && (
+                          <div style={{ marginTop: 5, padding: '6px 8px', background: '#f0f9ff', border: '0.5px solid #bae6fd', borderRadius: 6 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+                              <span className="material-symbols-outlined" style={{ fontSize: 11, color: '#0284c7', flexShrink: 0 }}>help</span>
+                              <span style={{ fontSize: 10, fontWeight: 700, color: '#0369a1' }}>Did you mean?</span>
+                              <span style={{ fontSize: 9, color: '#94a3b8', marginLeft: 'auto' }}>select or create new</span>
+                            </div>
+                            {li.sku_alternatives.map((alt, ai) => (
+                              <div key={alt.sku_id} style={{
+                                display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0',
+                                borderBottom: ai < li.sku_alternatives!.length - 1 ? '0.5px solid rgba(0,0,0,0.06)' : 'none',
+                              }}>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <span style={{ fontSize: 11, fontWeight: 500, color: '#111827' }}>{alt.item_name}</span>
+                                  <span style={{ fontSize: 9, color: '#9ca3af', marginLeft: 4, fontFamily: 'monospace' }}>{alt.sku_id} · {alt.unit}</span>
+                                </div>
+                                <span style={{
+                                  fontSize: 9, padding: '1px 4px', borderRadius: 10, fontWeight: 600, flexShrink: 0,
+                                  background: alt.similarity >= 0.65 ? '#dcfce7' : alt.similarity >= 0.4 ? '#fef9c3' : '#fee2e2',
+                                  color: alt.similarity >= 0.65 ? '#16a34a' : alt.similarity >= 0.4 ? '#a16207' : '#dc2626',
+                                }}>{Math.round(alt.similarity * 100)}%</span>
+                                <button type="button"
+                                  onClick={() => selectSKU(li.id, alt)}
+                                  style={{ background: 'none', border: '0.5px solid #7dd3fc', borderRadius: 4, cursor: 'pointer', padding: '2px 5px', color: '#0284c7', lineHeight: 1, flexShrink: 0 }}
+                                  title="Accept this SKU">
+                                  <span className="material-symbols-outlined" style={{ fontSize: 12 }}>check</span>
+                                </button>
+                              </div>
+                            ))}
+                            <button type="button"
+                              onClick={() => {
+                                updateLine(li.id, { sku_alternatives: undefined });
+                                autoAddItemToDictionary(li.id);
+                              }}
+                              style={{ marginTop: 5, display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, fontWeight: 600, color: '#7c3aed', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0' }}
+                              title="None match — insert this as a new SKU">
+                              <span className="material-symbols-outlined" style={{ fontSize: 11 }}>add_circle</span>
+                              Insert as new SKU
+                            </button>
+                          </div>
+                        )}
+
+                        {/* SKU dropdown portal */}
+                        {li.showDropdown && li.searchResults.length > 0 && (() => {
+                          const triggerEl = itemRefs.current.get(li.id);
+                          if (!triggerEl) return null;
+                          const rect = triggerEl.getBoundingClientRect();
+                          return createPortal(
+                            <div style={{
+                              position: 'fixed', top: rect.bottom + 6, left: rect.left,
+                              width: Math.max(rect.width, 280),
+                              background: 'white', border: '0.5px solid rgba(0,0,0,0.1)',
+                              borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.10)',
+                              zIndex: 9999, overflow: 'hidden', maxHeight: 220, overflowY: 'auto',
+                            }}>
+                              <div style={{ padding: '6px 10px 4px', fontSize: 9, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.08em', borderBottom: '0.5px solid rgba(0,0,0,0.06)' }}>
+                                SKU matches — click to select
+                              </div>
+                              {li.searchResults.map((sku, si) => (
+                                <div key={sku.sku_id} onMouseDown={() => selectSKU(li.id, sku)}
+                                  style={{
+                                    display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', cursor: 'pointer',
+                                    borderBottom: si < li.searchResults.length - 1 ? '0.5px solid rgba(0,0,0,0.05)' : 'none',
+                                    background: si === 0 ? 'rgba(22,163,74,0.03)' : 'transparent',
+                                  }}
+                                  onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = '#f3f4f6'; }}
+                                  onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = si === 0 ? 'rgba(22,163,74,0.03)' : 'transparent'; }}
+                                >
+                                  {si === 0 && (
+                                    <span className="material-symbols-outlined" style={{ fontSize: 13, color: '#16a34a', flexShrink: 0 }}>star</span>
+                                  )}
+                                  <div style={{ minWidth: 0, flex: 1 }}>
+                                    <div style={{ fontSize: 12, fontWeight: si === 0 ? 600 : 400, color: '#111827', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sku.item_name}</div>
+                                    <div style={{ fontSize: 9, color: '#9ca3af', marginTop: 1, fontFamily: 'monospace' }}>{sku.sku_id} · {sku.unit}</div>
+                                  </div>
+                                  <span style={{
+                                    fontSize: 10, padding: '1px 5px', borderRadius: 20, fontWeight: 600, flexShrink: 0,
+                                    background: sku.similarity >= 0.75 ? '#dcfce7' : sku.similarity >= 0.5 ? '#dbeafe' : '#fef9c3',
+                                    color: sku.similarity >= 0.75 ? '#16a34a' : sku.similarity >= 0.5 ? '#1d4ed8' : '#a16207',
+                                  }}>
+                                    {Math.round(sku.similarity * 100)}%
+                                  </span>
+                                </div>
+                              ))}
+                            </div>,
+                            document.body
+                          );
+                        })()}
+
+                        {/* SKU status chips */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 4, flexWrap: 'wrap' }}>
+                          {li.extraction_confidence && (
+                            <span style={{
+                              fontSize: 9, padding: '1px 5px', borderRadius: 4, fontWeight: 700, letterSpacing: '0.03em',
+                              background: li.extraction_confidence === 'HIGH' ? '#dcfce7' : li.extraction_confidence === 'MEDIUM' ? '#fef9c3' : '#fee2e2',
+                              color: li.extraction_confidence === 'HIGH' ? '#15803d' : li.extraction_confidence === 'MEDIUM' ? '#92400e' : '#b91c1c',
+                            }}>
+                              {li.extraction_confidence === 'HIGH' ? 'Good' : li.extraction_confidence === 'MEDIUM' ? 'Average' : 'Poor'}
+                            </span>
+                          )}
+                          {li.sku_id ? (
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#f0fdf4', border: '0.5px solid #bbf7d0', borderRadius: 4, padding: '1px 6px' }}>
+                              <span className="material-symbols-outlined" style={{ fontSize: 10, color: '#16a34a' }}>barcode_scanner</span>
+                              <span style={{ fontFamily: 'monospace', fontSize: 10, color: '#15803d', letterSpacing: '0.02em' }}>{li.sku_id}</span>
+                              {aiJustMatchedIds.has(li.id) && (
+                                <span style={{ fontSize: 9, fontWeight: 700, color: '#d97706', letterSpacing: '0.02em' }}>✦ AI</span>
+                              )}
+                              <button type="button" onClick={() => clearSKU(li.id)}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: '#86efac', lineHeight: 1, marginLeft: 1 }}
+                                title="Clear SKU match">
+                                <span className="material-symbols-outlined" style={{ fontSize: 10 }}>close</span>
+                              </button>
+                            </div>
+                          ) : (li.item_name.trim().length >= 2 && !li.searching && !dictAddingIds.has(li.id)) ? (
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 3, background: '#fffbeb', border: '0.5px solid #fde68a', borderRadius: 4, padding: '1px 6px' }}>
+                              <span className="material-symbols-outlined" style={{ fontSize: 10, color: '#d97706' }}>search_off</span>
+                              <span style={{ fontSize: 10, color: '#92400e' }}>No SKU matched</span>
+                            </div>
+                          ) : null}
+                          {/* Auto-adding to dictionary */}
+                          {dictAddingIds.has(li.id) && (
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#fef3c7', border: '0.5px solid #fde68a', borderRadius: 4, padding: '1px 6px' }}>
+                              <span className="material-symbols-outlined animate-spin" style={{ fontSize: 10, color: '#d97706' }}>progress_activity</span>
+                              <span style={{ fontSize: 10, color: '#92400e' }}>Creating SKU…</span>
+                            </div>
+                          )}
+                          {/* Just added to dictionary */}
+                          {dictAddedIds.has(li.id) && (
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#f0fdf4', border: '0.5px solid #bbf7d0', borderRadius: 4, padding: '1px 6px' }}>
+                              <span className="material-symbols-outlined" style={{ fontSize: 10, color: '#16a34a' }}>new_label</span>
+                              <span style={{ fontSize: 10, color: '#15803d' }}>New SKU created & linked</span>
+                            </div>
+                          )}
+                          {li.confidence !== undefined && (
+                            <span style={{
+                              fontSize: 9, padding: '1px 5px', borderRadius: 20, fontWeight: 600,
+                              background: li.confidence >= 70 ? '#dcfce7' : li.confidence >= 50 ? '#fef9c3' : '#fee2e2',
+                              color: li.confidence >= 70 ? '#16a34a' : li.confidence >= 50 ? '#a16207' : '#dc2626',
+                            }}>{li.confidence}%</span>
+                          )}
+                          {li.needs_review && (
+                            <span style={{ fontSize: 9, color: '#d97706', display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                              <span className="material-symbols-outlined" style={{ fontSize: 10 }}>warning</span>
+                              Review
+                            </span>
+                          )}
+                        </div>
                       </td>
-                      <td className="px-2 py-1.5">
+
+                      {/* Unit */}
+                      <td className="px-2 py-2 align-top border-b border-outline-variant/[0.05]">
                         <select
-                          className="w-full text-[11px] bg-surface-container-low/40 border border-outline-variant/20 rounded-lg px-2 py-1.5 outline-none focus:border-primary/40 focus:bg-white transition-colors"
+                          className="w-full text-[11px] bg-surface-container-low/40 border border-outline-variant/20 rounded-lg px-1.5 py-1.5 outline-none focus:border-primary/40 focus:bg-white transition-colors"
                           value={li.unit}
                           onChange={e => updateLine(li.id, { unit: e.target.value })}
                         >
                           {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
                         </select>
                       </td>
-                      <td className="px-2 py-1.5">
+
+                      {/* Qty */}
+                      <td className="px-2 py-2 align-top border-b border-outline-variant/[0.05]">
                         <input
                           type="number"
                           className="w-full text-[12px] text-right bg-surface-container-low/40 border border-outline-variant/20 rounded-lg px-2 py-1.5 outline-none focus:border-primary/40 focus:bg-white transition-colors font-data-mono"
                           value={li.quantity_ordered}
-                          min={0}
-                          step="any"
+                          min={0} step="any"
                           onChange={e => updateLine(li.id, { quantity_ordered: parseFloat(e.target.value) || 0 })}
                         />
                       </td>
-                      <td className="px-2 py-1.5">
+
+                      {/* Rate */}
+                      <td className="px-2 py-2 align-top border-b border-outline-variant/[0.05]">
                         <div className="relative">
-                          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-on-surface-variant/40">₹</span>
+                          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[9px] text-on-surface-variant/35">₹</span>
                           <input
                             type="number"
-                            className="w-full text-[12px] text-right bg-surface-container-low/40 border border-outline-variant/20 rounded-lg pl-5 pr-2 py-1.5 outline-none focus:border-primary/40 focus:bg-white transition-colors font-data-mono"
+                            className="w-full text-[12px] text-right bg-surface-container-low/40 border border-outline-variant/20 rounded-lg pl-4 pr-1.5 py-1.5 outline-none focus:border-primary/40 focus:bg-white transition-colors font-data-mono"
                             value={li.unit_rate}
-                            min={0}
-                            step="any"
+                            min={0} step="any"
                             onChange={e => updateLine(li.id, { unit_rate: parseFloat(e.target.value) || 0 })}
                           />
                         </div>
                       </td>
-                      <td className="px-2 py-1.5">
+
+                      {/* Disc% */}
+                      <td className="px-2 py-2 align-top border-b border-outline-variant/[0.05]">
                         <input
                           type="number"
-                          className="w-full text-[12px] text-right bg-surface-container-low/40 border border-outline-variant/20 rounded-lg px-2 py-1.5 outline-none focus:border-primary/40 focus:bg-white transition-colors font-data-mono"
+                          className="w-full text-[12px] text-right bg-surface-container-low/40 border border-outline-variant/20 rounded-lg px-1.5 py-1.5 outline-none focus:border-primary/40 focus:bg-white transition-colors font-data-mono"
                           value={li.discount_percent}
-                          min={0}
-                          max={100}
-                          step="any"
+                          min={0} max={100} step="any"
                           onChange={e => updateLine(li.id, { discount_percent: parseFloat(e.target.value) || 0 })}
                         />
                       </td>
-                      <td className="px-2 py-1.5">
+
+                      {/* GST% */}
+                      <td className="px-2 py-2 align-top border-b border-outline-variant/[0.05]">
                         <select
-                          className="w-full text-[11px] text-center bg-surface-container-low/40 border border-outline-variant/20 rounded-lg px-1 py-1.5 outline-none focus:border-primary/40 focus:bg-white transition-colors"
+                          className="w-full text-[11px] text-center bg-surface-container-low/40 border border-outline-variant/20 rounded-lg px-0.5 py-1.5 outline-none focus:border-primary/40 focus:bg-white transition-colors"
                           value={li.gst_rate}
                           onChange={e => updateLine(li.id, { gst_rate: parseFloat(e.target.value) })}
                         >
                           {GST_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
                         </select>
                       </td>
-                      <td className="px-2 py-1.5 text-right">
-                        <span className="font-data-mono text-[12px] font-semibold text-on-surface">
+
+                      {/* Total */}
+                      <td className="px-2 py-2 align-top border-b border-outline-variant/[0.05] text-right">
+                        <span className="font-data-mono text-[12px] font-semibold text-on-surface tabular-nums">
                           ₹{li.total_amount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                         </span>
+                        {li.discount_amount > 0 && (
+                          <div className="text-[9px] text-on-surface-variant/40 tabular-nums font-data-mono mt-0.5">
+                            −₹{li.discount_amount.toLocaleString('en-IN', { maximumFractionDigits: 0 })} disc
+                          </div>
+                        )}
                       </td>
-                      <td className="px-2 py-1.5">
+
+                      {/* Delete */}
+                      <td className="px-1 py-2 align-top border-b border-outline-variant/[0.05]">
                         <button
                           onClick={() => removeLine(li.id)}
-                          className="p-1 rounded-lg text-on-surface-variant/30 hover:text-red-500 hover:bg-red-50 transition-colors"
+                          className="p-1 rounded-lg text-on-surface-variant/20 hover:text-red-400 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100"
                           title="Remove row"
                         >
-                          <span className="material-symbols-outlined text-[16px]">close</span>
+                          <span className="material-symbols-outlined text-[15px]">close</span>
                         </button>
                       </td>
                     </tr>
@@ -1013,11 +1838,78 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
 
             <button
               onClick={addLine}
-              className="mt-3 flex items-center gap-2 text-[12px] text-primary font-semibold hover:bg-primary/5 px-3 py-2 rounded-lg transition-colors"
+              className="mt-3 flex items-center gap-1.5 text-[12px] text-primary/70 font-semibold hover:text-primary hover:bg-primary/5 px-3 py-2 rounded-lg transition-colors"
             >
-              <span className="material-symbols-outlined text-[16px]">add</span>
+              <span className="material-symbols-outlined text-[15px]">add</span>
               Add Row
             </button>
+
+            {/* ── SKU Dictionary gap-fill banner ─────────────────────────── */}
+            {(() => {
+              const autoRunning = dictAddingIds.size > 0;
+              const unmatched = lineItems.filter(li => !li.sku_id && li.item_name.trim().length >= 2 && !dictAddingIds.has(li.id));
+              if (unmatched.length === 0 && !dictAddResult && !autoRunning) return null;
+              return (
+                <div className="mt-3 rounded-xl border border-amber-200/80 bg-amber-50/60 px-4 py-3 flex items-start gap-3">
+                  <span className="material-symbols-outlined text-[18px] text-amber-500 shrink-0 mt-0.5">
+                    {autoRunning ? 'progress_activity' : 'auto_fix_high'}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    {dictAddResult ? (
+                      <>
+                        <p className="text-[12px] font-semibold text-amber-900">
+                          {dictAddResult.added > 0
+                            ? `Added ${dictAddResult.added} new SKU${dictAddResult.added > 1 ? 's' : ''} to the dictionary`
+                            : 'SKUs already exist — no new entries needed'}
+                        </p>
+                        {dictAddResult.items.length > 0 && (
+                          <p className="text-[11px] text-amber-700/70 mt-0.5 truncate">
+                            {dictAddResult.items.join(' · ')}
+                          </p>
+                        )}
+                      </>
+                    ) : autoRunning ? (
+                      <>
+                        <p className="text-[12px] font-semibold text-amber-900">
+                          AI is analysing {dictAddingIds.size} item{dictAddingIds.size > 1 ? 's' : ''} and adding to dictionary…
+                        </p>
+                        <p className="text-[11px] text-amber-700/60 mt-0.5">
+                          Each row will auto-link once its SKU is created.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-[12px] font-semibold text-amber-900">
+                          {unmatched.length} item{unmatched.length > 1 ? 's' : ''} not matched to any SKU
+                        </p>
+                        <p className="text-[11px] text-amber-700/60 mt-0.5">
+                          Click "Add to Dictionary" — AI will create & link SKU entries for these items.
+                        </p>
+                      </>
+                    )}
+                  </div>
+                  {!dictAddResult && !autoRunning && (
+                    <button
+                      onClick={addMissingToDictionary}
+                      disabled={addingToDict}
+                      className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 text-white text-[11px] font-semibold hover:bg-amber-600 disabled:opacity-60 transition-colors"
+                    >
+                      {addingToDict
+                        ? <><span className="material-symbols-outlined text-[13px] animate-spin">progress_activity</span> Working…</>
+                        : <><span className="material-symbols-outlined text-[13px]">add_circle</span> Add to Dictionary</>}
+                    </button>
+                  )}
+                  {dictAddResult && (
+                    <button
+                      onClick={() => setDictAddResult(null)}
+                      className="shrink-0 text-amber-400 hover:text-amber-600 transition-colors"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">close</span>
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Totals summary */}
             <div className="flex justify-end mt-4">
@@ -1189,14 +2081,14 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
         </button>
         <div className="flex-1" />
         <button
-          onClick={() => saveMutation.mutate('ORDERED')}
+          onClick={() => handleSubmit('DRAFT')}
           disabled={saveMutation.isPending}
           className="bk-btn-ghost border border-outline-variant/30 text-[13px] px-4 py-2.5 rounded-xl font-semibold"
         >
           {saveMutation.isPending ? 'Saving…' : 'Save as Draft'}
         </button>
         <button
-          onClick={() => saveMutation.mutate('ORDERED')}
+          onClick={() => handleSubmit('ORDERED')}
           disabled={saveMutation.isPending}
           className="bk-btn text-[13px] px-5 py-2.5 rounded-xl flex items-center gap-2 font-semibold"
         >

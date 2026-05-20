@@ -50,7 +50,8 @@ export default function CreateWorkspace({ session }: { session: Session }) {
       const { count } = await supabase
         .from('organizations')
         .select('*', { count: 'exact', head: true })
-        .eq('slug', slug);
+        .eq('slug', slug)
+        .eq('status', 'active');
       setSlugAvailable(count === 0);
       setCheckingSlug(false);
     }, 600);
@@ -76,7 +77,8 @@ export default function CreateWorkspace({ session }: { session: Session }) {
       return;
     }
 
-    navigate('/onboarding', { replace: true });
+    localStorage.removeItem('briklay_membership_ctx');
+    window.location.href = '/onboarding';
   };
 
   const canSubmit = name.trim().length >= 2 && slugAvailable === true && !submitting;

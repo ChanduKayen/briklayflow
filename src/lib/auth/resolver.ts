@@ -84,53 +84,6 @@ export async function resolveAuthDestination(
     }
   }
 
-  // ── Step 3: does any org exist? ──────────────────────────────────
-  const { count, error: orgErr } = await supabase
-    .from('organizations')
-    .select('*', { count: 'exact', head: true })
-
-  if (orgErr) {
-    console.error('[resolver] org count failed:', orgErr)
-  }
-
-  if (!count || count === 0) {
-    return { destination: 'create-workspace' }
-  }
-
-  // ── Step 4: org exists, no invite, no membership → pending ───────
-  const { data: org } = await supabase
-    .from('organizations')
-    .select('name')
-    .eq('status', 'active')
-    .single()
-
-  // create pending membership if one doesn't exist yet
-  const { data: existingPending } = await supabase
-    .from('org_memberships')
-    .select('membership_id')
-    .eq('user_id', userId)
-    .eq('status', 'pending')
-    .single()
-
-  if (!existingPending) {
-    const { data: orgRow } = await supabase
-      .from('organizations')
-      .select('org_id')
-      .eq('status', 'active')
-      .single()
-
-    if (orgRow) {
-      await supabase.from('org_memberships').insert({
-        org_id:  orgRow.org_id,
-        user_id: userId,
-        role:    'accountant', // lowest role — principal will change it
-        status:  'pending',
-      })
-    }
-  }
-
-  return {
-    destination: 'pending',
-    orgName:     org?.name ?? 'your organization',
-  }
+  // ── Step 3: no active/pending membership, no invite → create their own ──
+  return { destination: 'create-workspace' }
 }

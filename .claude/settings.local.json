@@ -21,7 +21,11 @@
       "PowerShell(npx supabase projects list 2>&1 | Select-Object -First 20)",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\koppi\\\\OneDrive\\\\Desktop\\\\Briklay Fly\\\\src\\\\pages\" -File)",
       "Bash(Select-Object Name)",
-      "mcp__ide__getDiagnostics"
+      "mcp__ide__getDiagnostics",
+      "Skill(supabase:supabase)",
+      "Bash(supabase --version)",
+      "Bash(supabase status *)",
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\koppi\\\\OneDrive\\\\Desktop\\\\Briklay Fly\\\\supabase\" -Recurse -File | ForEach-Object { $_.FullName })"
     ]
   }
 }

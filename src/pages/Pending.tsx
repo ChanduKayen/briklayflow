@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Session } from '@supabase/supabase-js';
-import { IconClockHour4 } from '@tabler/icons-react';
+import { IconClockHour4, IconBuildingEstate } from '@tabler/icons-react';
 import { supabase } from '../lib/supabase';
 
 function timeAgo(iso: string): string {
@@ -124,8 +124,7 @@ export default function Pending({ session }: { session: Session }) {
           <div className="text-center">
             <p className="text-[16px] font-medium text-on-surface mb-2">Awaiting approval</p>
             <p className="text-[13px] text-on-surface-variant text-center leading-[1.5]">
-              Your request to join {orgName} has been sent to the admin.
-              You'll get access once approved.
+              Your access to {orgName} is pending admin approval.
             </p>
           </div>
         </div>
@@ -166,6 +165,32 @@ export default function Pending({ session }: { session: Session }) {
         {refreshMsg && (
           <p className="text-[12px] text-on-surface-variant text-center mt-3">{refreshMsg}</p>
         )}
+
+        <div style={{ borderTop: '0.5px solid var(--color-outline-variant)', margin: '20px 0' }} />
+
+        <div className="flex flex-col items-center gap-2">
+          <IconBuildingEstate size={20} className="text-on-surface-variant" strokeWidth={1.5} />
+          <p className="text-[12px] text-on-surface-variant text-center">
+            Not looking to join this workspace?
+          </p>
+          <button
+            onClick={() => navigate('/create-workspace', { replace: true })}
+            style={{
+              width:        '100%',
+              height:       '40px',
+              border:       'none',
+              background:   'var(--color-primary)',
+              borderRadius: '8px',
+              fontSize:     '13px',
+              fontWeight:   600,
+              cursor:       'pointer',
+              color:        'var(--color-on-primary)',
+              marginTop:    '4px',
+            }}
+          >
+            Create your own workspace
+          </button>
+        </div>
 
         <p className="text-[11px] text-on-surface-variant text-center mt-6">
           Wrong account?{' '}

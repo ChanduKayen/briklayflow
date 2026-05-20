@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from './lib/auth/AuthProvider';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
 import { Routes, Route, Navigate, useNavigate, Link, useLocation } from 'react-router-dom';
@@ -22,7 +23,7 @@ import {
   IconSettings, IconLogout, IconChevronDown, IconChevronLeft, IconDots,
   // IconDotsVertical,
   IconRepeat, IconLayoutGrid, IconFiles, IconUsers,
-  IconMail, IconMailForward, IconCheck,
+  IconMail, IconMailForward, IconCheck, IconBarcode,
 } from '@tabler/icons-react';
 
 import Stakeholders from './pages/Stakeholders';
@@ -64,9 +65,116 @@ import OnboardingWizard from './components/OnboardingWizard';
 import Pending from './pages/Pending';
 import CreateWorkspace from './pages/CreateWorkspace';
 import Login from './pages/Login';
+import SKUDirectory from './pages/SKUDirectory';
 import { FloatingActionButton } from './components/FloatingActionButton';
 import { QuickActionsOverlay } from './components/QuickActionsOverlay';
 import { useLongPress } from './hooks/useLongPress';
+
+// ── Sign-out overlay: portal-based, self-contained, network-resilient ────────
+//
+// Design principle: the overlay owns its full visual lifecycle and calls
+// supabase.auth.signOut() itself at the right moment, completely decoupled
+// from React's render tree. A portal renders it into document.body so it
+// persists across auth state changes (authenticated → unauthenticated) without
+// being unmounted mid-animation.
+//
+// Timeline (total ~1 350 ms):
+//  0 ms  — mount; overlay invisible, app content begins receding
+//  40 ms — overlay fades in (500 ms ease)
+// 420 ms — center logo + "Signing out" fades in
+// 700 ms — supabase.auth.signOut() fires (network; non-blocking visually)
+// 900 ms — center content fades out, overlay starts fading out (380 ms ease)
+// 1 280 ms — onDismiss() called — signingOut=false, overlay unmounts (invisible)
+
+type SignOutCtx = { triggerSignOut: () => void };
+const SignOutContext = createContext<SignOutCtx>({ triggerSignOut: () => {} });
+export function useSignOut() { return useContext(SignOutContext); }
+
+function SignOutOverlay({ onDismiss }: { onDismiss: () => void }) {
+  const [fade, setFade]       = useState<'in' | 'visible' | 'out'>('in');
+  const [showMark, setShowMark] = useState(false);
+
+  useEffect(() => {
+    const ts = [
+      // Start fade-in on next paint
+      setTimeout(() => setFade('visible'),   40),
+      // Reveal center mark once overlay is mostly opaque
+      setTimeout(() => setShowMark(true),   420),
+      // Fire the actual sign-out (non-blocking; Login page mounts behind overlay)
+      setTimeout(() => { supabase.auth.signOut().catch(() => {}); }, 700),
+      // Begin dissolve
+      setTimeout(() => { setShowMark(false); setFade('out'); }, 900),
+      // Unmount after dissolve completes
+      setTimeout(() => onDismiss(), 1280),
+    ];
+    return () => ts.forEach(clearTimeout);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const opacity = fade === 'visible' ? 1 : 0;
+  const transition =
+    fade === 'in'  ? 'opacity 500ms cubic-bezier(0.4,0,0.2,1)'
+  : fade === 'out' ? 'opacity 380ms cubic-bezier(0.4,0,0.2,1)'
+  : 'none';
+
+  return createPortal(
+    <div
+      aria-hidden="true"
+      style={{
+        position: 'fixed', inset: 0, zIndex: 9999,
+        background: '#fdfdfc',
+        opacity, transition,
+        pointerEvents: 'all',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        // Soft ambient warmth — mirrors Login page
+        backgroundImage: [
+          'radial-gradient(ellipse 60% 50% at 25% 20%, rgba(255,238,217,0.55) 0%, transparent 70%)',
+          'radial-gradient(ellipse 55% 55% at 75% 80%, rgba(224,242,254,0.45) 0%, transparent 70%)',
+        ].join(', '),
+      }}
+    >
+      {/* Center mark */}
+      <div
+        style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18,
+          opacity: showMark ? 1 : 0,
+          transform: showMark ? 'translateY(0)' : 'translateY(6px)',
+          transition: 'opacity 380ms cubic-bezier(0.4,0,0.2,1), transform 380ms cubic-bezier(0.4,0,0.2,1)',
+          userSelect: 'none', pointerEvents: 'none',
+        }}
+      >
+        {/* Briklay diamond — breathing pulse */}
+        <svg
+          width="20" height="20" viewBox="0 0 24 24" fill="none"
+          style={{ animation: 'bk-so-pulse 1.8s ease-in-out infinite', opacity: 0.18 }}
+        >
+          <path d="M12 2L2 7L12 12L22 7L12 2Z"  stroke="#0b1c30" strokeWidth="1.5" strokeLinejoin="round"/>
+          <path d="M2 17L12 22L22 17"            stroke="#0b1c30" strokeWidth="1.5" strokeLinejoin="round"/>
+          <path d="M2 12L12 17L22 12"            stroke="#0b1c30" strokeWidth="1.5" strokeLinejoin="round"/>
+        </svg>
+        {/* Minimal progress bar */}
+        <div style={{ width: 32, height: 1.5, background: 'rgba(11,28,48,0.08)', borderRadius: 2, overflow: 'hidden' }}>
+          <div style={{
+            height: '100%', background: 'rgba(11,28,48,0.25)', borderRadius: 2,
+            animation: showMark ? 'bk-so-bar 900ms cubic-bezier(0.4,0,0.2,1) forwards' : 'none',
+          }} />
+        </div>
+      </div>
+
+      <style>{`
+        @keyframes bk-so-pulse {
+          0%, 100% { opacity: 0.12; transform: scale(1);    }
+          50%       { opacity: 0.22; transform: scale(1.08); }
+        }
+        @keyframes bk-so-bar {
+          0%   { width: 0%   }
+          100% { width: 100% }
+        }
+      `}</style>
+    </div>,
+    document.body
+  );
+}
 
 function SplashLoader() {
   return (
@@ -97,12 +205,15 @@ function App() {
   const location = useLocation();
   const queryClient = useQueryClient();
   const [session, setSession] = useState<Session | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showMoreSheet, setShowMoreSheet] = useState(false);
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const longPress = useLongPress(() => setQuickActionsOpen(true));
   const [routerReady, setRouterReady] = useState(false);
+  // Must be at top level — hooks cannot be called after conditional returns
+  const triggerSignOut = useCallback(() => setSigningOut(true), []);
 
   // Profile query — used for onboarding wizard guard (enabled only when session exists)
   const { data: appProfile, isLoading: profileLoading } = useQuery({
@@ -141,8 +252,14 @@ function App() {
   // a network round-trip on every refresh just to show the app.
   useEffect(() => {
     if (authState.status === 'loading' || authState.status === 'resolving') return;
-    // Unauthenticated â€" no session is coming, nothing to wait for
-    if (authState.status === 'unauthenticated') { setRouterReady(true); return; }
+    // Unauthenticated — no session is coming, nothing to wait for
+    if (authState.status === 'unauthenticated') {
+      setRouterReady(true);
+      // Always clear any lingering sign-out overlay so it doesn't
+      // survive a re-login and blank the screen.
+      setSigningOut(false);
+      return;
+    }
     // All other settled states (authenticated, pending, no-org) have a session.
     // Wait for it to arrive from getSession() before unlocking the router.
     if (!session) return;
@@ -182,14 +299,19 @@ function App() {
     return <CreateWorkspace session={session} />;
   }
 
+  // Never render the full app while auth is still resolving — orgId/userId are
+  // null during these states and page components calling useOrgId() will throw.
+  if (authState.status === 'loading' || authState.status === 'resolving') return <SplashLoader />;
+
   if (authState.status === 'unauthenticated') return <Login />;
   
   // Guard against rendering the main app layout when we are supposed to redirect
   // to create-workspace or pending, but the router hasn't updated the pathname yet.
-  if (authState.status === 'no-org') return null;
-  if (authState.status === 'pending') return null;
+  if (authState.status === 'no-org') return <SplashLoader />;
+  if (authState.status === 'pending') return <SplashLoader />;
 
-  if (!session) return null;
+  // Session not yet arrived from getSession() — show splash instead of blank
+  if (!session) return <SplashLoader />;
 
   // First-run onboarding for principals
   const isPrincipal = authState.status === 'authenticated' && authState.context.role === 'principal';
@@ -221,10 +343,23 @@ function App() {
   }
 
   return (
+    <SignOutContext.Provider value={{ triggerSignOut }}>
+    {/* Portal overlay — rendered outside the React tree so it persists
+         across auth state changes without interrupting its animation */}
+    {signingOut && <SignOutOverlay onDismiss={() => setSigningOut(false)} />}
     <SnackbarProvider>
     <PeekProvider>
     <CommandBarProvider>
-    <div className="bg-background text-on-surface min-h-screen">
+    {/* Subtle recede while signing out: app breathes back as the veil descends */}
+    <div
+      className="bg-background text-on-surface min-h-screen"
+      style={signingOut ? {
+        filter: 'blur(6px) saturate(0.4)',
+        transform: 'scale(0.985)',
+        transition: 'filter 480ms cubic-bezier(0.4,0,0.2,1), transform 480ms cubic-bezier(0.4,0,0.2,1)',
+        willChange: 'filter, transform',
+      } : { transition: 'filter 200ms, transform 200ms' }}
+    >
       <Sidebar
         session={session}
         mobileOpen={mobileOpen}
@@ -283,8 +418,9 @@ function App() {
           <Route path="/purchase-orders/new" element={<NewPurchaseOrder session={session} />} />
           <Route path="/purchase-orders/:poId" element={<PurchaseOrderDetail session={session} />} />
           <Route path="/inward-register" element={<InwardRegister session={session} />} />
+          <Route path="/sku-directory" element={<SKUDirectory session={session} />} />
           <Route path="/team" element={<Team session={session} />} />
-          <Route path="/settings" element={<Settings />} />
+          <Route path="/settings" element={<Settings session={session} />} />
           <Route path="/financials" element={<PrincipalGuard session={session}><Financials /></PrincipalGuard>} />
           <Route path="/financials/pl" element={<PrincipalGuard session={session}><FinancialsPL /></PrincipalGuard>} />
           <Route path="/financials/cashflow" element={<PrincipalGuard session={session}><FinancialsCashflow /></PrincipalGuard>} />
@@ -316,6 +452,7 @@ function App() {
     </CommandBarProvider>
     </PeekProvider>
     </SnackbarProvider>
+    </SignOutContext.Provider>
   );
 }
 
@@ -401,6 +538,7 @@ function SidebarContent({
   const navigate = useNavigate();
   const location = useLocation();
   const { data: profile } = useUserProfile(session.user.id);
+  const { orgId: authOrgId } = useAuth();
   const role = profile?.role ?? '';
 
   const [showQuickAdd, setShowQuickAdd] = useState(false);
@@ -421,14 +559,14 @@ function SidebarContent({
   }, []);
 
   useEffect(() => {
-    if (!profile?.org_id) return;
+    if (!authOrgId) return;
     supabase
       .from('organizations')
       .select('name')
-      .eq('org_id', profile.org_id)
+      .eq('org_id', authOrgId)
       .single()
       .then(({ data }) => { if (data?.name) setOrgName(data.name); });
-  }, [profile?.org_id]);
+  }, [authOrgId]);
 
 
 
@@ -509,8 +647,9 @@ function SidebarContent({
       label: 'WORKSPACE',
       show: role === 'principal' || role === 'management',
       items: [
-        { path: '/team',     icon: IconShieldLock,             label: 'Team & Access', show: true },
-        { path: '/settings', icon: IconAdjustmentsHorizontal,  label: 'Settings',      show: true },
+        { path: '/sku-directory', icon: IconBarcode,                 label: 'SKU Directory', show: true },
+        { path: '/team',          icon: IconShieldLock,              label: 'Team & Access', show: true },
+        { path: '/settings',      icon: IconAdjustmentsHorizontal,   label: 'Settings',      show: true },
       ],
     },
   ];
@@ -521,7 +660,8 @@ function SidebarContent({
   const initials = (name: string) =>
     name.split(' ').filter(Boolean).map(w => w[0]).join('').toUpperCase().slice(0, 2) || '?';
 
-  const handleLogout = async () => { await supabase.auth.signOut(); };
+  const { triggerSignOut } = useSignOut();
+  const handleLogout = () => { triggerSignOut(); };
   const go = (path: string) => { navigate(path); setShowQuickAdd(false); onNavigate(); };
 
   const quickCreateItems = [

@@ -22,6 +22,8 @@ type PageState =
   | { phase: 'invalid';   reason: string }
   | { phase: 'accepting'; invite: InviteDetails }
   | { phase: 'success';   orgName: string; role: string }
+  | { phase: 'declining'; invite: InviteDetails }
+  | { phase: 'declined';  orgName: string }
   | { phase: 'error';     invite: InviteDetails; message: string };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -51,7 +53,7 @@ function Validating() {
 }
 
 function ValidCard({
-  invite, session, onAccept, onSignOut, onDecline, accepting,
+  invite, session, onAccept, onSignOut, onDecline, accepting, declining,
 }: {
   invite:     InviteDetails;
   session:    Session | null;
@@ -59,6 +61,7 @@ function ValidCard({
   onSignOut:  () => void;
   onDecline:  () => void;
   accepting?: boolean;
+  declining?: boolean;
 }) {
   return (
     <div>
@@ -99,9 +102,10 @@ function ValidCard({
       <div className="text-center mt-3 flex flex-col items-center gap-2">
         <button
           onClick={onDecline}
-          style={{ background: 'none', border: 'none', fontSize: 12, color: 'var(--color-text-tertiary, rgba(0,0,0,0.4))', cursor: 'pointer' }}
+          disabled={accepting || declining}
+          style={{ background: 'none', border: 'none', fontSize: 12, color: 'var(--color-text-tertiary, rgba(0,0,0,0.4))', cursor: (accepting || declining) ? 'not-allowed' : 'pointer', opacity: (accepting || declining) ? 0.5 : 1 }}
         >
-          Decline invite
+          {declining ? 'Declining…' : 'Decline invite'}
         </button>
         {session && (
           <button
@@ -147,6 +151,31 @@ function SuccessCard({ orgName, role }: { orgName: string; role: string }) {
         Welcome to {orgName}. Your role is {capitalize(role)}.
       </p>
       <p className="text-[12px] text-on-surface-variant mt-2">Redirecting to dashboard…</p>
+    </div>
+  );
+}
+
+function DeclinedCard({ orgName, onSignOut }: { orgName: string; onSignOut: () => void }) {
+  return (
+    <div className="text-center py-4">
+      <div className="flex justify-center mb-3">
+        <div className="w-12 h-12 rounded-full bg-surface-container-high flex items-center justify-center">
+          <span className="material-symbols-outlined text-[26px] text-on-surface-variant">do_not_disturb_on</span>
+        </div>
+      </div>
+      <h2 className="text-[15px] font-semibold text-on-surface mb-1">Invite declined</h2>
+      <p className="text-[13px] text-on-surface-variant mb-6">
+        You've declined the invite to join <span className="font-medium text-on-surface">{orgName}</span>.
+      </p>
+      <button
+        className="bk-btn w-full mb-3"
+        onClick={onSignOut}
+      >
+        Back to sign in
+      </button>
+      <p className="text-[11px] text-on-surface-variant/60">
+        You'll be signed out so you can start fresh.
+      </p>
     </div>
   );
 }
@@ -257,26 +286,25 @@ export default function InviteAccept({ session, token }: Props) {
     setTimeout(() => navigate('/dashboard', { replace: true }), 2000);
   };
 
-  const handleDecline = async () => {
-    await supabase
-      .from('org_invites')
-      .update({ status: 'revoked' })
-      .eq('token', token);
+  const handleDecline = async (invite: InviteDetails) => {
+    setState({ phase: 'declining', invite });
 
-    if (!session) {
-      navigate('/login');
+    const { data, error } = await supabase
+      .rpc('decline_invite', { p_token: token })
+      .single<{ success: boolean; error: string | null }>();
+
+    if (error || !data?.success) {
+      // Decline RPC failed — fall back to showing the invite again with an error
+      setState({ phase: 'error', invite, message: data?.error ?? error?.message ?? 'Failed to decline invite.' });
       return;
     }
 
-    const { count } = await supabase
-      .from('organizations')
-      .select('*', { count: 'exact', head: true });
+    setState({ phase: 'declined', orgName: invite.orgName });
+  };
 
-    if (!count || count === 0) {
-      navigate('/create-workspace', { replace: true });
-    } else {
-      navigate('/pending', { replace: true });
-    }
+  const handleDeclinedSignOut = async () => {
+    await supabase.auth.signOut();
+    navigate('/login', { replace: true });
   };
 
   const handleSignOut = () => supabase.auth.signOut();
@@ -291,18 +319,23 @@ export default function InviteAccept({ session, token }: Props) {
 
         {state.phase === 'validating' && <Validating />}
 
-        {(state.phase === 'valid' || state.phase === 'accepting') && (
+        {(state.phase === 'valid' || state.phase === 'accepting' || state.phase === 'declining') && (
           <ValidCard
             invite={state.invite}
             session={session}
             onAccept={() => { if (state.phase === 'valid') handleAccept(state.invite); }}
             onSignOut={handleSignOut}
-            onDecline={handleDecline}
+            onDecline={() => handleDecline(state.invite)}
             accepting={state.phase === 'accepting'}
+            declining={state.phase === 'declining'}
           />
         )}
 
         {state.phase === 'invalid' && <InvalidCard reason={state.reason} />}
+
+        {state.phase === 'declined' && (
+          <DeclinedCard orgName={state.orgName} onSignOut={handleDeclinedSignOut} />
+        )}
 
         {state.phase === 'success' && (
           <SuccessCard orgName={state.orgName} role={state.role} />
