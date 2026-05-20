@@ -58,9 +58,7 @@ const CATEGORY_COLORS: Record<string, { bg: string; color: string }> = {
   Windows:        { bg: '#e3f2fd', color: '#0d47a1' },
 };
 
-function skuDisplayName(s: SKURow) {
-  return [s.sub_category, s.dimension, s.variant, s.grade].filter(Boolean).join(' ');
-}
+
 
 function CategoryBadge({ cat }: { cat: string }) {
   const c = CATEGORY_COLORS[cat] ?? { bg: '#f3f4f6', color: '#374151' };

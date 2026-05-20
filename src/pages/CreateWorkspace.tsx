@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import type { Session } from '@supabase/supabase-js';
 import { IconCircleCheck, IconCircleX, IconLoader2 } from '@tabler/icons-react';
 import { supabase } from '../lib/supabase';
@@ -21,7 +21,6 @@ function nameToSlug(n: string): string {
 }
 
 export default function CreateWorkspace({ session }: { session: Session }) {
-  const navigate = useNavigate();
 
   const [name,          setName]          = useState('');
   const [slug,          setSlug]          = useState('');
