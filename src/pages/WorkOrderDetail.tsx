@@ -11,6 +11,7 @@ import { useUserProfile } from '../App';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import { usePeek } from '../context/PeekContext';
 import type { StatusHistoryEntry, PaymentMode } from '../types';
+import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
 import {
   fmtDate as pdfFmtDate, fmtRupee,
   MARGIN, CONTENT, RIGHT, C,
@@ -106,6 +107,17 @@ function useCountUp(target: number, duration = 500): number {
   return value;
 }
 
+// ─── Section heading ──────────────────────────────────────────────────────────
+function SectionLabel({ icon, label }: { icon: string; label: string }) {
+  return (
+    <div className="flex items-center gap-2 mb-3">
+      <span className="material-symbols-outlined text-[15px] text-on-surface-variant/40">{icon}</span>
+      <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-on-surface-variant/50">{label}</span>
+      <div className="flex-1 h-px bg-outline-variant/15" />
+    </div>
+  );
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function WorkOrderDetail({ session }: { session: Session }) {
@@ -156,6 +168,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
 
   // Closed celebration state
   const [showClosedMsg, setShowClosedMsg] = useState(true);
+  const [showStakeholderDrawer, setShowStakeholderDrawer] = useState(false);
 
   const canApprove    = profile?.role === 'management' || profile?.role === 'principal';
   const canTransition = profile?.role === 'management' || profile?.role === 'accountant';
@@ -618,7 +631,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
       <div className="px-margin-mobile md:px-margin-desktop pt-6">
         <div className="bg-error-container text-on-error-container p-6 rounded-xl">
           <h3 className="text-headline-md font-headline-md">Work Order Not Found</h3>
-          <button onClick={() => navigate('/work-orders')} className="mt-4 flex items-center gap-2 hover:underline">
+          <button onClick={() => navigate(navState.from === 'project' && navState.projectId ? `/projects/${navState.projectId}/work-orders` : '/work-orders')} className="mt-4 flex items-center gap-2 hover:underline">
             <ArrowLeft size={16} /> Back to Work Orders
           </button>
         </div>
@@ -682,11 +695,11 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="px-margin-mobile md:px-margin-desktop pt-6 pb-12">
-      <div className="max-w-[680px] mx-auto">
+    <div className="min-h-screen bg-[#f7f6f4]">
+      <div className="max-w-[720px] mx-auto px-4 sm:px-6 pt-6 pb-20">
 
         {/* BREADCRUMB */}
-        <div className="detail-reveal" style={{ animationDelay: '0ms' }}>
+        <div className="detail-reveal mb-6" style={{ animationDelay: '0ms' }}>
           <Breadcrumb
             items={
               navState.from === 'project' && navState.projectName
@@ -694,7 +707,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                     { label: 'Dashboard', href: '/' },
                     { label: 'Projects', href: '/projects' },
                     { label: navState.projectName, href: `/projects/${navState.projectId}` },
-                    { label: 'Work Orders', href: `/projects/${navState.projectId}` },
+                    { label: 'Work Orders', href: `/projects/${navState.projectId}/work-orders` },
                     { label: woId! },
                   ]
                 : [
@@ -706,120 +719,162 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
           />
         </div>
 
-        {/* TOP STRIP */}
-        <div className="detail-reveal mt-4" style={{ animationDelay: '40ms' }}>
-          <p className="text-[14px] font-bold font-data-mono text-on-surface">{wo.wo_id}</p>
-          <p className="text-[14px] text-on-surface mt-0.5">{wo.projects?.name}</p>
-          {wo.projects?.site_location && (
-            <p className="text-[12px] text-on-surface-variant">{wo.projects.site_location}</p>
-          )}
-          <p className="text-[14px] text-on-surface mt-0.5">
-            {wo.stakeholders?.name}{wo.stakeholders?.category ? ` · ${wo.stakeholders.category}` : ''}
-          </p>
-          <p className="text-[12px] text-on-surface-variant">
-            Issued {fmtDate(wo.date_issued)}
-          </p>
-          <p className="text-[18px] font-bold font-data-mono text-on-surface mt-2">
-            <AmountDisplay amount={orderValue} />
-          </p>
-        </div>
+        {/* HERO CARD */}
+        <div className="detail-reveal" style={{ animationDelay: '40ms' }}>
+          <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm overflow-hidden mb-4">
+            
+            {/* Top gradient accent bar */}
+            <div className="h-1 w-full bg-gradient-to-r from-violet-500 via-indigo-500 to-blue-400" />
+            
+            <div className="p-6">
+              {/* Row 1: WO ID & Status badge */}
+              <div className="flex items-start justify-between gap-3 mb-5">
+                <div>
+                  <p className="font-mono text-[11px] text-on-surface-variant/50 mb-1 tracking-wide">{wo.wo_id}</p>
+                  <p className="text-[12px] text-on-surface-variant/60">Issued {fmtDate(wo.date_issued)}</p>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                  <span className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold ${statusBadgeClass(wo.status)}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${statusDotColor(wo.status)}`} />
+                    {wo.status?.toUpperCase()}
+                  </span>
+                  {wo.status === 'Closed' && showClosedMsg && (
+                    <span className="text-[11px] text-green-600 font-semibold flex items-center gap-0.5">
+                      <span className="material-symbols-outlined text-[14px]">check_circle</span> Complete
+                    </span>
+                  )}
+                </div>
+              </div>
 
-        {/* ACTION ROW */}
-        <div className="detail-reveal mt-3 flex items-center gap-2 flex-wrap" style={{ animationDelay: '80ms' }}>
-          <span className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${statusBadgeClass(wo.status)}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${statusDotColor(wo.status)}`} />
-            {wo.status?.toUpperCase()}
-          </span>
+              {/* Row 2: Order Value Hero */}
+              <div className="mb-5">
+                <p className="text-[11px] font-medium text-on-surface-variant/50 mb-1 uppercase tracking-wider">Order Value</p>
+                <p className="text-[38px] font-black text-on-surface tracking-tight leading-none font-data-mono">
+                  <AmountDisplay amount={orderValue} />
+                </p>
+              </div>
 
-          {wo.status === 'Closed' && showClosedMsg && (
-            <span className="text-[12px] text-green-600 font-medium transition-opacity duration-1000">
-              Work Order Complete
-            </span>
-          )}
+              {/* Row 3: Worker + Project */}
+              <div className="flex flex-wrap gap-4 mb-4">
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-bold text-on-surface-variant/40 uppercase tracking-wider mb-1">Worker</p>
+                  {wo.stakeholder_id ? (
+                    <button
+                      onClick={() => setShowStakeholderDrawer(true)}
+                      className="group inline-flex items-center gap-1 text-[15px] font-semibold text-primary text-left max-w-full"
+                    >
+                      <span className="border-b border-dashed border-primary/45 group-hover:border-solid group-hover:border-primary transition-all pb-[2px] truncate">
+                        {wo.stakeholders?.name || '—'}
+                      </span>
+                      <span className="material-symbols-outlined text-[13px] text-primary/50 group-hover:text-primary transition-colors shrink-0">
+                        chevron_right
+                      </span>
+                    </button>
+                  ) : (
+                    <p className="text-[15px] font-semibold text-on-surface">{wo.stakeholders?.name || '—'}</p>
+                  )}
+                  {wo.stakeholders?.category && (
+                    <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{wo.stakeholders.category}</p>
+                  )}
+                </div>
 
-          {/* DRAFT — approve (management/principal) or awaiting message */}
-          {wo.status === 'Draft' && (
-            canApprove ? (
-              <>
-                <button onClick={() => setConfirmAction('approve')} className="bk-btn flex items-center gap-1.5 py-1.5 px-3 text-[13px]">
-                  <span className="material-symbols-outlined text-[16px]">verified</span>
-                  Approve &amp; Assign
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-bold text-on-surface-variant/40 uppercase tracking-wider mb-1">Project</p>
+                  <p className="text-[15px] font-semibold text-on-surface truncate">{wo.projects?.name || '—'}</p>
+                  {wo.projects?.site_location && (
+                    <p className="text-[11px] text-on-surface-variant/50 mt-0.5 truncate">{wo.projects.site_location}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Action Bar */}
+            <div className="flex items-center gap-2 px-6 py-3 border-t border-outline-variant/10 bg-surface-container-low/30 flex-wrap">
+              {/* DRAFT — approve (management/principal) or awaiting message */}
+              {wo.status === 'Draft' && (
+                canApprove ? (
+                  <>
+                    <button onClick={() => setConfirmAction('approve')} className="bk-btn flex items-center gap-1.5 py-1.5 px-3 text-[12px]">
+                      <span className="material-symbols-outlined text-[15px]">verified</span>
+                      Approve &amp; Assign
+                    </button>
+                    <button onClick={() => setConfirmAction('cancel')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error/30 text-error text-[12px] font-semibold hover:bg-error-container/30 transition-colors">
+                      <span className="material-symbols-outlined text-[14px]">cancel</span> Cancel WO
+                    </button>
+                  </>
+                ) : (
+                  <span className="text-[12px] text-amber-600 flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[15px]">schedule</span>
+                    Pending management approval
+                  </span>
+                )
+              )}
+
+              {/* ASSIGNED → ISSUED */}
+              {wo.status === 'Assigned' && canTransition && (
+                <>
+                  <button onClick={() => setConfirmAction('issue')} className="bk-btn flex items-center gap-1.5 py-1.5 px-3 text-[12px]">
+                    <span className="material-symbols-outlined text-[15px]">send</span>
+                    Issue Work Order
+                  </button>
+                  <button onClick={() => setConfirmAction('cancel')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error/30 text-error text-[12px] font-semibold hover:bg-error-container/30 transition-colors">
+                    <span className="material-symbols-outlined text-[14px]">cancel</span> Cancel WO
+                  </button>
+                </>
+              )}
+
+              {/* ISSUED → ACTIVE */}
+              {wo.status === 'Issued' && canTransition && (
+                <>
+                  <button onClick={() => setConfirmAction('activate')} className="bk-btn flex items-center gap-1.5 py-1.5 px-3 text-[12px]">
+                    <span className="material-symbols-outlined text-[15px]">play_circle</span>
+                    Mark as Active
+                  </button>
+                  <button onClick={() => setConfirmAction('cancel')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error/30 text-error text-[12px] font-semibold hover:bg-error-container/30 transition-colors">
+                    <span className="material-symbols-outlined text-[14px]">cancel</span> Cancel WO
+                  </button>
+                </>
+              )}
+
+              {/* ACTIVE → CLOSED */}
+              {wo.status === 'Active' && canTransition && (
+                <>
+                  <button onClick={() => setConfirmAction('close')} className="bk-btn flex items-center gap-1.5 py-1.5 px-3 text-[12px]">
+                    <span className="material-symbols-outlined text-[15px]">check_circle</span>
+                    Close Work Order
+                  </button>
+                  <button onClick={() => setConfirmAction('cancel')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error/30 text-error text-[12px] font-semibold hover:bg-error-container/30 transition-colors">
+                    <span className="material-symbols-outlined text-[14px]">cancel</span> Cancel WO
+                  </button>
+                </>
+              )}
+
+              {/* CLOSED → SETTLED */}
+              {wo.status === 'Closed' && canTransition && (
+                <button onClick={() => setConfirmAction('settle')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-teal-300/50 text-teal-700 text-[12px] font-semibold hover:bg-teal-50 transition-colors">
+                  <span className="material-symbols-outlined text-[14px]">verified</span>
+                  Mark Settled
                 </button>
-                <button onClick={() => setConfirmAction('cancel')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error/30 text-error text-[13px] font-semibold hover:bg-error-container/30 transition-colors">
-                  <span className="material-symbols-outlined text-[15px]">cancel</span> Cancel WO
-                </button>
-              </>
-            ) : (
-              <span className="text-[12px] text-amber-600 flex items-center gap-1">
-                <span className="material-symbols-outlined text-[15px]">schedule</span>
-                Pending management approval
-              </span>
-            )
-          )}
+              )}
 
-          {/* ASSIGNED → ISSUED */}
-          {wo.status === 'Assigned' && canTransition && (
-            <>
-              <button onClick={() => setConfirmAction('issue')} className="bk-btn flex items-center gap-1.5 py-1.5 px-3 text-[13px]">
-                <span className="material-symbols-outlined text-[16px]">send</span>
-                Issue Work Order
+              {/* PDF Download */}
+              <button
+                onClick={handleDownloadPdf}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-on-surface text-surface-container-lowest text-[12px] font-semibold hover:opacity-90 transition-opacity"
+              >
+                <Download size={13} />
+                Download PDF
               </button>
-              <button onClick={() => setConfirmAction('cancel')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error/30 text-error text-[13px] font-semibold hover:bg-error-container/30 transition-colors">
-                <span className="material-symbols-outlined text-[15px]">cancel</span> Cancel WO
-              </button>
-            </>
-          )}
 
-          {/* ISSUED → ACTIVE */}
-          {wo.status === 'Issued' && canTransition && (
-            <>
-              <button onClick={() => setConfirmAction('activate')} className="bk-btn flex items-center gap-1.5 py-1.5 px-3 text-[13px]">
-                <span className="material-symbols-outlined text-[16px]">play_circle</span>
-                Mark as Active
+              <button
+                onClick={() => setShowLog((v) => !v)}
+                className="ml-auto flex items-center gap-1 text-[11px] text-on-surface-variant/50 hover:text-primary transition-colors"
+              >
+                <span className="material-symbols-outlined text-[13px]">history</span>
+                {showLog ? 'Hide log' : 'Activity Log'}
               </button>
-              <button onClick={() => setConfirmAction('cancel')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error/30 text-error text-[13px] font-semibold hover:bg-error-container/30 transition-colors">
-                <span className="material-symbols-outlined text-[15px]">cancel</span> Cancel WO
-              </button>
-            </>
-          )}
-
-          {/* ACTIVE → CLOSED */}
-          {wo.status === 'Active' && canTransition && (
-            <>
-              <button onClick={() => setConfirmAction('close')} className="bk-btn flex items-center gap-1.5 py-1.5 px-3 text-[13px]">
-                <span className="material-symbols-outlined text-[16px]">check_circle</span>
-                Close Work Order
-              </button>
-              <button onClick={() => setConfirmAction('cancel')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error/30 text-error text-[13px] font-semibold hover:bg-error-container/30 transition-colors">
-                <span className="material-symbols-outlined text-[15px]">cancel</span> Cancel WO
-              </button>
-            </>
-          )}
-
-          {/* CLOSED → SETTLED */}
-          {wo.status === 'Closed' && canTransition && (
-            <button onClick={() => setConfirmAction('settle')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-teal-300/50 text-teal-700 text-[13px] font-semibold hover:bg-teal-50 transition-colors">
-              <span className="material-symbols-outlined text-[15px]">verified</span>
-              Mark Settled
-            </button>
-          )}
-
-          <button
-            onClick={handleDownloadPdf}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-outline-variant/40 text-[12px] text-on-surface-variant hover:text-on-surface transition-colors"
-          >
-            <Download size={14} /> Export PDF
-          </button>
-
-          <button
-            onClick={() => setShowLog((v) => !v)}
-            className="ml-auto flex items-center gap-1 text-[12px] text-on-surface-variant hover:text-primary transition-colors"
-          >
-            View log
-            <span className="material-symbols-outlined text-[14px]">
-              {showLog ? 'expand_less' : 'chevron_right'}
-            </span>
-          </button>
+            </div>
+          </div>
         </div>
 
         {/* DIVIDER */}
@@ -827,109 +882,115 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
 
         {/* SCOPE OF WORK */}
         {wo.scope_of_work && (
-          <div className="detail-reveal mb-6" style={{ animationDelay: '120ms' }}>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-2">SCOPE</p>
-            <p className="text-[14px] text-on-surface whitespace-pre-wrap leading-relaxed">{wo.scope_of_work}</p>
+          <div className="detail-reveal mb-4" style={{ animationDelay: '120ms' }}>
+            <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm p-5">
+              <SectionLabel icon="notes" label="Scope of Work" />
+              <p className="text-[14px] text-on-surface whitespace-pre-wrap leading-relaxed">{wo.scope_of_work}</p>
+            </div>
           </div>
         )}
 
         {/* FINANCIAL */}
-        <div className="detail-reveal mb-6" style={{ animationDelay: '170ms' }}>
-          <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-3">FINANCIAL</p>
-          <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
-            {/* Credit — worker gave labour (certified milestones) */}
-            {orderValue > 0 && (
-              <div className="flex items-center justify-between px-4 py-3 bg-[rgba(22,163,74,0.03)] border-b border-outline-variant/10">
-                <div>
-                  <p className="text-[12px] font-medium text-[#16A34A]">Credit — By Work Done</p>
-                  <p className="text-[11px] text-on-surface-variant/60 mt-0.5">Work order value</p>
+        <div className="detail-reveal mb-4" style={{ animationDelay: '170ms' }}>
+          <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm p-5">
+            <SectionLabel icon="account_balance_wallet" label="Financial Summary" />
+            
+            <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
+              {/* Credit — worker gave labour (certified milestones) */}
+              {orderValue > 0 && (
+                <div className="flex items-center justify-between px-4 py-3 bg-[rgba(22,163,74,0.03)] border-b border-outline-variant/10">
+                  <div>
+                    <p className="text-[12px] font-medium text-[#16A34A]">Credit — By Work Done</p>
+                    <p className="text-[11px] text-on-surface-variant/60 mt-0.5">Work order value</p>
+                  </div>
+                  <span className="font-data-mono font-semibold text-[14px] text-[#16A34A]">
+                    ₹{orderValue.toLocaleString('en-IN')}
+                  </span>
                 </div>
-                <span className="font-data-mono font-semibold text-[14px] text-[#16A34A]">
-                  ₹{orderValue.toLocaleString('en-IN')}
+              )}
+              {/* Debit — payments made */}
+              {totalPaid > 0 && (
+                <div className="flex items-center justify-between px-4 py-3 border-b border-outline-variant/10">
+                  <div>
+                    <p className="text-[12px] font-medium text-on-surface">Debit — To Bank / Cash</p>
+                    <p className="text-[11px] text-on-surface-variant/60 mt-0.5">
+                      Payments made · as of {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </p>
+                  </div>
+                  <span className="font-data-mono font-semibold text-[14px] text-on-surface">
+                    <AmountDisplay amount={totalPaid} />
+                  </span>
+                </div>
+              )}
+              {/* Balance */}
+              <div className="flex items-center justify-between px-4 py-3">
+                <p className="text-[13px] font-bold text-on-surface">Balance</p>
+                <span className={`font-data-mono font-bold text-[15px] ${balance > 0 ? 'text-[#DC2626]' : balance < 0 ? 'text-[#D97706]' : 'text-[#16A34A]'}`}>
+                  {balance === 0
+                    ? 'Nil — Settled ✓'
+                    : balance > 0
+                    ? `₹${balance.toLocaleString('en-IN')} Cr`
+                    : `₹${Math.abs(balance).toLocaleString('en-IN')} Dr`}
                 </span>
               </div>
-            )}
-            {/* Debit — payments made */}
-            {totalPaid > 0 && (
-              <div className="flex items-center justify-between px-4 py-3 border-b border-outline-variant/10">
-                <div>
-                  <p className="text-[12px] font-medium text-on-surface">Debit — To Bank / Cash</p>
-                  <p className="text-[11px] text-on-surface-variant/60 mt-0.5">
-                    Payments made · as of {new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                  </p>
-                </div>
-                <span className="font-data-mono font-semibold text-[14px] text-on-surface">
-                  <AmountDisplay amount={totalPaid} />
-                </span>
+            </div>
+
+            {/* Overpaid phase warnings */}
+            {overpaidPhases.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {overpaidPhases.map((m: any) => {
+                  const planned = Number(m.planned_amount) || 0;
+                  const paid = milestonePayments[m.milestone_id] || 0;
+                  return (
+                    <p key={m.milestone_id} className="text-[12px] text-amber-700 flex items-center gap-1">
+                      <span className="material-symbols-outlined text-[14px]">warning</span>
+                      {m.name} overpaid by ₹{(paid - planned).toLocaleString('en-IN')}
+                    </p>
+                  );
+                })}
               </div>
             )}
-            {/* Balance */}
-            <div className="flex items-center justify-between px-4 py-3">
-              <p className="text-[13px] font-bold text-on-surface">Balance</p>
-              <span className={`font-data-mono font-bold text-[15px] ${balance > 0 ? 'text-[#DC2626]' : balance < 0 ? 'text-[#D97706]' : 'text-[#16A34A]'}`}>
-                {balance === 0
-                  ? 'Nil — Settled ✓'
-                  : balance > 0
-                  ? `₹${balance.toLocaleString('en-IN')} Cr`
-                  : `₹${Math.abs(balance).toLocaleString('en-IN')} Dr`}
-              </span>
-            </div>
-          </div>
 
-          {/* Overpaid phase warnings */}
-          {overpaidPhases.length > 0 && (
-            <div className="mt-2 space-y-1">
-              {overpaidPhases.map((m: any) => {
-                const planned = Number(m.planned_amount) || 0;
-                const paid = milestonePayments[m.milestone_id] || 0;
-                return (
-                  <p key={m.milestone_id} className="text-[12px] text-amber-700 flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[14px]">warning</span>
-                    {m.name} overpaid by ₹{(paid - planned).toLocaleString('en-IN')}
-                  </p>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Payment progress bar */}
-          <div className="mt-4">
-            <div className="flex justify-between items-center mb-1.5">
-              <span className="text-[11px] text-on-surface-variant">Payment</span>
-              <span className="text-[11px] font-semibold text-on-surface">{progressPercentage}%</span>
-            </div>
-            <div className="w-full h-2 bg-surface-container-high rounded-full overflow-hidden">
-              <div
-                className="h-full bg-primary rounded-full progress-bar-animate"
-                style={{ width: `${progressPercentage}%` }}
-              />
-            </div>
-          </div>
-
-          {/* Physical progress if available */}
-          {(wo as any).physical_progress != null && (
-            <div className="mt-3">
+            {/* Payment progress bar */}
+            <div className="mt-4">
               <div className="flex justify-between items-center mb-1.5">
-                <span className="text-[11px] text-on-surface-variant">Physical</span>
-                <span className="text-[11px] font-semibold text-on-surface">{(wo as any).physical_progress}%</span>
+                <span className="text-[11px] text-on-surface-variant">Payment</span>
+                <span className="text-[11px] font-semibold text-on-surface">{progressPercentage}%</span>
               </div>
               <div className="w-full h-2 bg-surface-container-high rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-secondary rounded-full progress-bar-animate"
-                  style={{ width: `${(wo as any).physical_progress}%` }}
+                  className="h-full bg-primary rounded-full progress-bar-animate"
+                  style={{ width: `${progressPercentage}%` }}
                 />
               </div>
             </div>
-          )}
+
+            {/* Physical progress if available */}
+            {(wo as any).physical_progress != null && (
+              <div className="mt-3">
+                <div className="flex justify-between items-center mb-1.5">
+                  <span className="text-[11px] text-on-surface-variant">Physical</span>
+                  <span className="text-[11px] font-semibold text-on-surface">{(wo as any).physical_progress}%</span>
+                </div>
+                <div className="w-full h-2 bg-surface-container-high rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-secondary rounded-full progress-bar-animate"
+                    style={{ width: `${(wo as any).physical_progress}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* WORK STAGES */}
-        <div className="detail-reveal mb-6" style={{ animationDelay: '220ms' }}>
-          <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-3">WORK STAGES</p>
-          {milestones.length === 0 && (
-            <p className="text-[13px] text-on-surface-variant italic">No work stages added to this order.</p>
-          )}
-          <div>
+        <div className="detail-reveal mb-4" style={{ animationDelay: '220ms' }}>
+          <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm p-5">
+            <SectionLabel icon="checklist" label="Work Stages" />
+            {milestones.length === 0 && (
+              <p className="text-[13px] text-on-surface-variant italic mb-2">No work stages added to this order.</p>
+            )}
+            <div>
             {(() => {
                 let cumPlanned = 0;
                 let cumPaid = 0;
@@ -1373,120 +1434,133 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
               </div>
             )}
           </div>
+        </div>
 
         {/* PAYMENTS MADE */}
         {allocations && allocations.length > 0 && (
-          <div className="detail-reveal mb-6" style={{ animationDelay: '270ms' }}>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-3">PAYMENTS</p>
-            <div className="space-y-1.5">
-              {allocations.map((alloc: any) => {
-                const txn = alloc.transactions;
-                if (!txn) return null;
-                return (
-                  <button
-                    key={alloc.allocation_id}
-                    onClick={() => openPeek('TRANSACTION', txn.txn_id)}
-                    className="w-full flex items-center gap-3 py-2 text-left hover:bg-surface-container-low/50 transition-colors rounded-lg px-1 group"
-                  >
-                    {(() => { const f = formatTxn({ ...txn, total_amount: alloc.allocated_amount }, 'wo'); return (<div className="min-w-0 flex-1"><p className="text-[12px] font-[500] text-on-surface truncate">{f.primary}</p>{f.secondary && <p className="text-[10px] text-on-surface-variant/60 truncate">{f.secondary}</p>}<p className="text-[9px] font-mono text-on-surface-variant/25 opacity-0 group-hover:opacity-100 transition-opacity">{txn.txn_id}</p></div>); })()}
-                    <span className="font-data-mono text-[12px] text-on-surface shrink-0 ml-auto">₹{Number(alloc.allocated_amount).toLocaleString('en-IN')}</span>
-                    <span className="text-green-600 text-[12px] shrink-0">✓</span>
-                  </button>
-                );
-              })}
+          <div className="detail-reveal mb-4" style={{ animationDelay: '270ms' }}>
+            <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm p-5">
+              <SectionLabel icon="payments" label="Payments" />
+              <div className="space-y-1.5">
+                {allocations.map((alloc: any) => {
+                  const txn = alloc.transactions;
+                  if (!txn) return null;
+                  return (
+                    <button
+                      key={alloc.allocation_id}
+                      onClick={() => openPeek('TRANSACTION', txn.txn_id)}
+                      className="w-full flex items-center gap-3 py-2 text-left hover:bg-surface-container-low/50 transition-colors rounded-lg px-1 group"
+                    >
+                      {(() => { const f = formatTxn({ ...txn, total_amount: alloc.allocated_amount }, 'wo'); return (<div className="min-w-0 flex-1"><p className="text-[12px] font-[500] text-on-surface truncate">{f.primary}</p>{f.secondary && <p className="text-[10px] text-on-surface-variant/60 truncate">{f.secondary}</p>}<p className="text-[9px] font-mono text-on-surface-variant/25 opacity-0 group-hover:opacity-100 transition-opacity">{txn.txn_id}</p></div>); })()}
+                      <span className="font-data-mono text-[12px] text-on-surface shrink-0 ml-auto">₹{Number(alloc.allocated_amount).toLocaleString('en-IN')}</span>
+                      <span className="text-green-600 text-[12px] shrink-0">✓</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
         )}
 
         {/* TRAIL / STATUS HISTORY */}
-        <div className="detail-reveal" style={{ animationDelay: '320ms' }}>
-          <button
-            onClick={() => setShowLog((v) => !v)}
-            className="flex items-center gap-1.5 text-[12px] text-on-surface-variant hover:text-primary transition-colors"
-          >
-            Status history · View log
-            <span className="material-symbols-outlined text-[14px]">
-              {showLog ? 'expand_less' : 'chevron_right'}
-            </span>
-          </button>
+        <div className="detail-reveal mb-4" style={{ animationDelay: '320ms' }}>
+          <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm p-5">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[15px] text-on-surface-variant/40">history</span>
+                <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-on-surface-variant/50">Activity Log</span>
+              </div>
+              <button
+                onClick={() => setShowLog((v) => !v)}
+                className="flex items-center gap-1 text-[11px] text-primary hover:underline font-semibold"
+              >
+                {showLog ? 'Hide history' : 'Show history'}
+                <span className="material-symbols-outlined text-[13px]">{showLog ? 'expand_less' : 'expand_more'}</span>
+              </button>
+            </div>
+            
+            <div className="flex-1 h-px bg-outline-variant/15 mb-4" />
 
-          {showLog && (
-            <div className="mt-3 pl-1">
-              <div className="flex flex-col gap-0">
-                {FLOW_STATES.map((state, idx) => {
-                  const entry = getHistoryEntry(state);
-                  const reached = isCancelled
-                    ? (state === 'Draft' || statusHistory.some((e) => e.status === state))
-                    : currentFlowIdx >= idx;
-                  return (
-                    <div key={state} className="flex items-start gap-3 relative">
-                      {idx < FLOW_STATES.length - 1 && (
-                        <div className={`absolute left-[7px] top-4 w-px h-full ${
-                          (!isCancelled && currentFlowIdx > idx) ? 'bg-primary/30' : 'bg-outline-variant/30'
+            {showLog ? (
+              <div className="pl-1">
+                <div className="flex flex-col gap-0">
+                  {FLOW_STATES.map((state, idx) => {
+                    const entry = getHistoryEntry(state);
+                    const reached = isCancelled
+                      ? (state === 'Draft' || statusHistory.some((e) => e.status === state))
+                      : currentFlowIdx >= idx;
+                    return (
+                      <div key={state} className="flex items-start gap-3 relative">
+                        {idx < FLOW_STATES.length - 1 && (
+                          <div className={`absolute left-[7px] top-4 w-px h-full ${
+                            (!isCancelled && currentFlowIdx > idx) ? 'bg-primary/30' : 'bg-outline-variant/30'
+                          }`} />
+                        )}
+                        <div className={`w-3.5 h-3.5 rounded-full shrink-0 mt-0.5 border-2 ${
+                          reached ? `${statusDotColor(state)} border-transparent` : 'bg-background border-outline-variant/40'
                         }`} />
-                      )}
-                      <div className={`w-3.5 h-3.5 rounded-full shrink-0 mt-0.5 border-2 ${
-                        reached ? `${statusDotColor(state)} border-transparent` : 'bg-background border-outline-variant/40'
-                      }`} />
-                      <div className="pb-3 min-w-0">
-                        <p className={`text-[12px] font-semibold ${reached ? 'text-on-surface' : 'text-on-surface-variant/50'}`}>
-                          {state}
-                          {state === 'Assigned' && (wo as any).approved_by_name && (
-                            <span className="ml-1 text-[10px] font-normal text-blue-600">· Approved by {(wo as any).approved_by_name}</span>
+                        <div className="pb-3 min-w-0">
+                          <p className={`text-[12px] font-semibold ${reached ? 'text-on-surface' : 'text-on-surface-variant/50'}`}>
+                            {state}
+                            {state === 'Assigned' && (wo as any).approved_by_name && (
+                              <span className="ml-1 text-[10px] font-normal text-blue-600">· Approved by {(wo as any).approved_by_name}</span>
+                            )}
+                          </p>
+                          {entry && (
+                            <p className="text-[11px] text-on-surface-variant">
+                              {fmtDate(entry.at)}
+                              {entry.by && entry.by !== '—' && <span className="ml-1 opacity-70">· {entry.by}</span>}
+                            </p>
                           )}
-                        </p>
-                        {entry && (
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {isCancelled && (
+                    <div className="flex items-start gap-3">
+                      <div className="w-3.5 h-3.5 rounded-full shrink-0 mt-0.5 bg-error border-2 border-transparent" />
+                      <div>
+                        <p className="text-[12px] font-semibold text-error">Cancelled</p>
+                        {cancelledEntry && (
                           <p className="text-[11px] text-on-surface-variant">
-                            {fmtDate(entry.at)}
-                            {entry.by && entry.by !== '—' && <span className="ml-1 opacity-70">· {entry.by}</span>}
+                            {fmtDate(cancelledEntry.at)}
+                            {cancelledEntry.by && <span className="ml-1 opacity-70">· {cancelledEntry.by}</span>}
                           </p>
                         )}
                       </div>
                     </div>
-                  );
-                })}
-                {isCancelled && (
-                  <div className="flex items-start gap-3">
-                    <div className="w-3.5 h-3.5 rounded-full shrink-0 mt-0.5 bg-error border-2 border-transparent" />
-                    <div>
-                      <p className="text-[12px] font-semibold text-error">Cancelled</p>
-                      {cancelledEntry && (
-                        <p className="text-[11px] text-on-surface-variant">
-                          {fmtDate(cancelledEntry.at)}
-                          {cancelledEntry.by && <span className="ml-1 opacity-70">· {cancelledEntry.by}</span>}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                )}
+                  )}
 
-                {/* Phase-move entries */}
-                {statusHistory
-                  .filter((e: any) => e.status === 'phase_move' || e.status === 'phase_move_undo')
-                  .map((e: any) => (
-                    <div key={`${e.at}-${e.txn_id}`} className="flex items-start gap-3">
-                      <div className="w-3.5 h-3.5 rounded shrink-0 mt-0.5 bg-primary/15 flex items-center justify-center">
-                        <span className="material-symbols-outlined text-[9px] text-primary">swap_horiz</span>
+                  {/* Phase-move entries */}
+                  {statusHistory
+                    .filter((e: any) => e.status === 'phase_move' || e.status === 'phase_move_undo')
+                    .map((e: any) => (
+                      <div key={`${e.at}-${e.txn_id}`} className="flex items-start gap-3 mt-2">
+                        <div className="w-3.5 h-3.5 rounded shrink-0 mt-0.5 bg-primary/15 flex items-center justify-center">
+                          <span className="material-symbols-outlined text-[9px] text-primary">swap_horiz</span>
+                        </div>
+                        <div className="pb-1 min-w-0">
+                          <p className="text-[12px] font-semibold text-on-surface">
+                            {e.status === 'phase_move_undo' ? 'Move undone' : 'Phase reassigned'}
+                            {' · '}
+                            <span className="font-data-mono text-primary">{e.txn_id}</span>
+                            {' '}₹{Number(e.amount).toLocaleString('en-IN')}
+                          </p>
+                          <p className="text-[11px] text-on-surface-variant">
+                            <span className="line-through opacity-60">{e.from}</span>
+                            {' → '}
+                            <span className="font-medium">{e.to}</span>
+                          </p>
+                          <p className="text-[11px] text-on-surface-variant opacity-70">{fmtDate(e.at)} · {e.by}</p>
+                        </div>
                       </div>
-                      <div className="pb-1 min-w-0">
-                        <p className="text-[12px] font-semibold text-on-surface">
-                          {e.status === 'phase_move_undo' ? 'Move undone' : 'Phase reassigned'}
-                          {' · '}
-                          <span className="font-data-mono text-primary">{e.txn_id}</span>
-                          {' '}₹{Number(e.amount).toLocaleString('en-IN')}
-                        </p>
-                        <p className="text-[11px] text-on-surface-variant">
-                          <span className="line-through opacity-60">{e.from}</span>
-                          {' → '}
-                          <span className="font-medium">{e.to}</span>
-                        </p>
-                        <p className="text-[11px] text-on-surface-variant opacity-70">{fmtDate(e.at)} · {e.by}</p>
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                </div>
               </div>
-            </div>
-          )}
+            ) : (
+              <p className="text-[12px] text-on-surface-variant/60 italic pl-1">Activity log is hidden. Click "Show history" to view status transitions and phase movements.</p>
+            )}
+          </div>
         </div>
 
       </div>{/* end printRef div */}
@@ -1775,6 +1849,15 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Stakeholder Ledger Drawer */}
+      {wo && wo.stakeholder_id && (
+        <StakeholderLedgerDrawer
+          isOpen={showStakeholderDrawer}
+          onClose={() => setShowStakeholderDrawer(false)}
+          stakeholderId={wo.stakeholder_id}
+        />
       )}
     </div>
   );

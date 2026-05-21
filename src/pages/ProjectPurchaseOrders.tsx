@@ -342,7 +342,7 @@ export default function ProjectPurchaseOrders({ session }: { session: Session })
             </p>
           </div>
           {canManage && (
-            <button onClick={() => navigate('/purchase-orders/new', { state: { projectId } })}
+            <button onClick={() => navigate('/purchase-orders/new', { state: { projectId, projectName: project?.name } })}
               style={{ display: 'flex', alignItems: 'center', gap: 6, height: 32, padding: '0 16px 0 12px', borderRadius: 99, border: 'none', background: '#C8603A', cursor: 'pointer', outline: 'none', fontSize: 13, fontWeight: 500, color: '#fff', boxShadow: '0 1px 2px rgba(200,96,58,0.25)', transition: 'opacity 120ms, box-shadow 120ms' }}
               onMouseEnter={e => { e.currentTarget.style.opacity = '0.88'; e.currentTarget.style.boxShadow = '0 3px 8px rgba(200,96,58,0.35)' }}
               onMouseLeave={e => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.boxShadow = '0 1px 2px rgba(200,96,58,0.25)' }}>
@@ -436,7 +436,7 @@ export default function ProjectPurchaseOrders({ session }: { session: Session })
               <tbody>
                 {filtered.map((po: any, idx: number) => (
                   <tr key={po.po_id} className={`group border-b border-outline-variant/[0.05] last:border-0 wo-row-animate hover:bg-surface-container-low/25 transition-colors ${STATUS_BORDER[po.status] ?? 'border-l-[3px] border-l-transparent'}`} style={{ animationDelay: `${Math.min(idx, 20) * 15}ms` }}>
-                    <td className="px-5 py-4 cursor-pointer" onClick={() => navigate(`/purchase-orders/${po.po_id}`)}>
+                    <td className="px-5 py-4 cursor-pointer" onClick={() => navigate(`/purchase-orders/${po.po_id}`, { state: { from: 'project', projectId, projectName: project?.name } })}>
                       <p className="font-mono text-[13px] font-semibold text-primary group-hover:underline leading-none">{po.po_id}</p>
                       <p className="text-[11px] text-on-surface-variant/35 mt-1">{fmtDate(po.date_issued)}</p>
                     </td>
@@ -453,7 +453,7 @@ export default function ProjectPurchaseOrders({ session }: { session: Session })
                     <BillUploadCell po={po} canManage={canManage} onUpdate={handlePOUpdate} showSnackbar={showSnackbar} />
                     <SiteReceiptCell po={po} canManage={canManage} currentUserName={currentUserName} currentUserId={currentUserId} onUpdate={handlePOUpdate} showSnackbar={showSnackbar} />
                     <td className="px-2 py-4 w-[36px]">
-                      <button onClick={() => navigate(`/purchase-orders/${po.po_id}`)} className="w-7 h-7 rounded-md flex items-center justify-center text-on-surface-variant/10 group-hover:text-on-surface-variant/35 hover:bg-surface-container transition-colors">
+                      <button onClick={() => navigate(`/purchase-orders/${po.po_id}`, { state: { from: 'project', projectId, projectName: project?.name } })} className="w-7 h-7 rounded-md flex items-center justify-center text-on-surface-variant/10 group-hover:text-on-surface-variant/35 hover:bg-surface-container transition-colors">
                         <span className="material-symbols-outlined text-[15px]">chevron_right</span>
                       </button>
                     </td>
@@ -468,7 +468,7 @@ export default function ProjectPurchaseOrders({ session }: { session: Session })
         {filtered.length > 0 && (
           <div className="md:hidden space-y-2">
             {filtered.map((po: any, idx: number) => (
-              <div key={po.po_id} className={`bg-white rounded-2xl border border-black/[0.05] shadow-sm cursor-pointer active:scale-[0.99] transition-transform wo-row-animate ${STATUS_BORDER[po.status] ?? ''}`} style={{ animationDelay: `${Math.min(idx, 20) * 15}ms` }} onClick={() => navigate(`/purchase-orders/${po.po_id}`)}>
+              <div key={po.po_id} className={`bg-white rounded-2xl border border-black/[0.05] shadow-sm cursor-pointer active:scale-[0.99] transition-transform wo-row-animate ${STATUS_BORDER[po.status] ?? ''}`} style={{ animationDelay: `${Math.min(idx, 20) * 15}ms` }} onClick={() => navigate(`/purchase-orders/${po.po_id}`, { state: { from: 'project', projectId, projectName: project?.name } })}>
                 <div className="px-4 pt-3.5 pb-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
@@ -500,7 +500,7 @@ export default function ProjectPurchaseOrders({ session }: { session: Session })
         )}
 
         {canManage && (
-          <button className="bk-fab md:hidden" onClick={() => navigate('/purchase-orders/new', { state: { projectId } })} title="New Purchase Order">
+          <button className="bk-fab md:hidden" onClick={() => navigate('/purchase-orders/new', { state: { projectId, projectName: project?.name } })} title="New Purchase Order">
             <span className="material-symbols-outlined text-[24px]">add</span>
           </button>
         )}

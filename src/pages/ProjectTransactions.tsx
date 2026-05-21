@@ -366,7 +366,7 @@ export default function ProjectTransactions({ session }: { session: Session }) {
               {filteredTransactions.length} transaction{filteredTransactions.length !== 1 ? 's' : ''} · ₹{filteredTransactions.reduce((s: number, t: any) => s + Number(t.total_amount), 0).toLocaleString('en-IN')}
             </p>
           </div>
-          <button onClick={() => navigate('/ledger/new', { state: { projectId } })}
+          <button onClick={() => navigate('/ledger/new', { state: { projectId, projectName: project?.name } })}
             style={{ display: 'flex', alignItems: 'center', gap: 6, height: 32, padding: '0 16px 0 12px', borderRadius: 99, border: 'none', background: '#C8603A', cursor: 'pointer', outline: 'none', fontSize: 13, fontWeight: 500, color: '#fff', boxShadow: '0 1px 2px rgba(200,96,58,0.25)', transition: 'opacity 120ms, box-shadow 120ms' }}
             onMouseEnter={e => { e.currentTarget.style.opacity = '0.88'; e.currentTarget.style.boxShadow = '0 3px 8px rgba(200,96,58,0.35)' }}
             onMouseLeave={e => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.boxShadow = '0 1px 2px rgba(200,96,58,0.25)' }}>
@@ -508,7 +508,7 @@ export default function ProjectTransactions({ session }: { session: Session }) {
                   const type = getTxnType(txn)
                   const typeColors: Record<string, string> = { 'Worker Payment': 'bg-blue-50 text-blue-600', 'Material Purchase': 'bg-amber-50 text-amber-600', 'General Expense': 'bg-slate-100 text-slate-500' }
                   return (
-                    <div key={txn.txn_id} className={`bg-white rounded-xl border border-black/[0.06] p-3 cursor-pointer bk-row-ripple ${txn.status === 'Voided' ? 'opacity-50' : ''}`} onClick={() => openPeek('TRANSACTION', txn.txn_id)}>
+                    <div key={txn.txn_id} className={`bg-white rounded-xl border border-black/[0.06] p-3 cursor-pointer bk-row-ripple ${txn.status === 'Voided' ? 'opacity-50' : ''}`} onClick={() => navigate(`/ledger/${txn.txn_id}`, { state: { from: 'project', projectId, projectName: project?.name } })}>
                       <div className="flex items-start justify-between mb-1.5">
                         <span className="text-[15px] font-[500] text-on-surface leading-tight line-clamp-1 flex-1 mr-3">{formatTxn(txn, 'global').primary}</span>
                         <div className="flex items-center gap-1 shrink-0">
@@ -571,7 +571,7 @@ export default function ProjectTransactions({ session }: { session: Session }) {
                     <th className={thSort} onClick={() => toggleSort('stakeholder')}><div className="flex items-center gap-1">Payee {renderSortIcon('stakeholder')}</div></th>
                     <th className={thCls}>Trade</th>
                     <th className={thSort} onClick={() => toggleSort('type')}><div className="flex items-center gap-1">Type {renderSortIcon('type')}</div></th>
-                    <th className={thCls}>Cost Code</th>
+                    <th className={thCls}>Remarks</th>
                     <th className={`${thSort} text-right`} onClick={() => toggleSort('total_amount')}><div className="flex items-center justify-end gap-1">Amount {renderSortIcon('total_amount')}</div></th>
                     <th className="w-12 px-3 py-3 text-center"><IconPaperclip size={13} className="opacity-35 mx-auto" /></th>
                     <th className={thSort} onClick={() => toggleSort('status')}><div className="flex items-center gap-1">Status {renderSortIcon('status')}</div></th>
@@ -588,14 +588,13 @@ export default function ProjectTransactions({ session }: { session: Session }) {
                     const isCurrentYear = txnDate.getFullYear() === new Date().getFullYear()
                     const dateStr = txnDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', ...(!isCurrentYear ? { year: 'numeric' } : {}) })
                     const tradeLabel = txn.stakeholders?.category || ''
-                    const costCodeName = (() => { if (!txn.category) return ''; const found = getCostCode(txn.category); return found ? found.item.name : txn.category })()
                     const proofUrl = txn.proof_document_url || txn.bill_doc_url || null
 
                     return (
                       <tr key={`${txn.txn_id}-${alloc?.allocation_id ?? 'none'}-${idx}`}
                         className={`border-b border-black/[0.04] last:border-0 hover:bg-surface-container-low/40 transition-colors cursor-pointer bk-row-ripple ${splitAccentCls} ${isChecked ? 'bg-primary/[0.02]' : ''} ${txn.status === 'Voided' ? 'opacity-40' : ''} ${!isFirstInGroup ? 'bg-surface-container-lowest/60' : ''}`}
                         style={{ height: '52px' }}
-                        onClick={() => openPeek('TRANSACTION', txn.txn_id)}>
+                        onClick={() => navigate(`/ledger/${txn.txn_id}`, { state: { from: 'project', projectId, projectName: project?.name } })}>
                         <td className="px-3 align-middle w-10" onClick={e => e.stopPropagation()}>
                           {isFirstInGroup && <input type="checkbox" checked={isChecked} onChange={() => toggleTxn(txn.txn_id)} className="w-3.5 h-3.5 rounded border-outline-variant/50 text-primary focus:ring-primary cursor-pointer" />}
                         </td>
@@ -620,8 +619,14 @@ export default function ProjectTransactions({ session }: { session: Session }) {
                         <td className="px-4 align-middle">
                           {isFirstInGroup && typeBadge(txn)}
                         </td>
-                        <td className="px-4 align-middle max-w-[200px]">
-                          {isFirstInGroup && costCodeName && <span className="text-[12px] text-on-surface-variant/55 leading-snug line-clamp-2">{costCodeName}</span>}
+                        <td className="px-4 align-middle max-w-[220px]">
+                          {isFirstInGroup && txn.remarks ? (
+                            <span className="text-[12px] text-on-surface-variant/55 leading-snug line-clamp-2" title={txn.remarks}>
+                              {txn.remarks}
+                            </span>
+                          ) : (
+                            isFirstInGroup && <span className="text-[12px] text-on-surface-variant/25">—</span>
+                          )}
                         </td>
                         <td data-cell-select="true"
                           className={`px-4 align-middle text-right cursor-cell select-none transition-colors ${selectedRows.has(idx) ? 'bg-primary/5 text-primary' : ''}`}

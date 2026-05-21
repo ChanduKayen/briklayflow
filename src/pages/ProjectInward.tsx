@@ -1,14 +1,9 @@
-import { useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import type { Session } from '@supabase/supabase-js'
+import InwardRegister from './InwardRegister'
 
-export default function ProjectInward({ session: _session }: { session: Session }) {
+export default function ProjectInward({ session }: { session: Session }) {
   const { projectId } = useParams<{ projectId: string }>()
-  const navigate = useNavigate()
-
-  useEffect(() => {
-    navigate('/inward-register', { replace: true })
-  }, [navigate, projectId])
-
-  return null
+  if (!projectId) return null
+  return <InwardRegister session={session} lockedProjectId={projectId} />
 }

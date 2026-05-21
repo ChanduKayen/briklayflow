@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
@@ -18,14 +18,18 @@ function fmtShortDate(d: string | null | undefined) {
   return p.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 }
 
-export default function InwardRegister({ session }: { session: Session }) {
+export default function InwardRegister({ session, lockedProjectId: propLockedProjectId }: { session: Session; lockedProjectId?: string }) {
   const navigate   = useNavigate();
+  const location   = useLocation();
   const qc         = useQueryClient();
   const orgId      = useOrgId();
   const { data: profile } = useUserProfile(session.user.id);
   const { show: showSnackbar } = useSnackbar();
 
-  const [filterProject,  setFilterProject]  = useState('');
+  // Prop (from ProjectInward) takes priority; state is the fallback (legacy redirect path)
+  const lockedProjectId = propLockedProjectId ?? ((location.state as any)?.projectId as string | undefined);
+
+  const [filterProject,  setFilterProject]  = useState(lockedProjectId ?? '');
   const [filterVendor,   setFilterVendor]   = useState('');
   const [dateFrom,       setDateFrom]        = useState('');
   const [dateTo,         setDateTo]          = useState('');
@@ -111,7 +115,7 @@ export default function InwardRegister({ session }: { session: Session }) {
       .map((g: any) => g.po_id)
   ).size;
 
-  const hasFilters = !!filterProject || !!filterVendor || !!dateFrom || !!dateTo;
+  const hasFilters = (!lockedProjectId && !!filterProject) || !!filterVendor || !!dateFrom || !!dateTo;
 
   return (
     <div className="min-h-screen bg-surface-container-low/30">
@@ -120,14 +124,28 @@ export default function InwardRegister({ session }: { session: Session }) {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
+            {lockedProjectId && (
+              <div className="flex items-center gap-1.5 mb-2">
+                <button
+                  onClick={() => navigate(`/projects/${lockedProjectId}`)}
+                  className="text-[12px] text-on-surface-variant/50 hover:text-primary transition-colors"
+                >
+                  {projects?.find((p: any) => p.project_id === lockedProjectId)?.name ?? 'Project'}
+                </button>
+                <span className="text-[12px] text-on-surface-variant/25">/</span>
+                <span className="text-[12px] text-on-surface font-semibold">Inward Register</span>
+              </div>
+            )}
             <h2 className="text-[22px] font-bold text-on-surface tracking-tight">Inward Register</h2>
             <p className="text-[12px] text-on-surface-variant/45 mt-1">
-              All material receipts at site
+              {lockedProjectId
+                ? `Material receipts for ${projects?.find((p: any) => p.project_id === lockedProjectId)?.name ?? 'this project'}`
+                : 'All material receipts at site'}
             </p>
           </div>
           {canManage && (
             <button
-              onClick={() => navigate('/purchase-orders')}
+              onClick={() => navigate(lockedProjectId ? `/projects/${lockedProjectId}/purchase-orders` : '/purchase-orders')}
               style={{
                 display: 'flex', alignItems: 'center', gap: 6,
                 height: 32, padding: '0 16px 0 12px',
@@ -168,16 +186,18 @@ export default function InwardRegister({ session }: { session: Session }) {
 
         {/* Filter bar */}
         <div className="flex flex-wrap items-center gap-2 mb-4">
-          <select
-            value={filterProject}
-            onChange={e => setFilterProject(e.target.value)}
-            className="h-8 px-3 rounded-full border border-outline-variant/20 text-[12px] bg-white focus:outline-none focus:border-primary/40"
-          >
-            <option value="">All projects</option>
-            {(projects ?? []).map((p: any) => (
-              <option key={p.project_id} value={p.project_id}>{p.name}</option>
-            ))}
-          </select>
+          {!lockedProjectId && (
+            <select
+              value={filterProject}
+              onChange={e => setFilterProject(e.target.value)}
+              className="h-8 px-3 rounded-full border border-outline-variant/20 text-[12px] bg-white focus:outline-none focus:border-primary/40"
+            >
+              <option value="">All projects</option>
+              {(projects ?? []).map((p: any) => (
+                <option key={p.project_id} value={p.project_id}>{p.name}</option>
+              ))}
+            </select>
+          )}
 
           <input
             type="text"
@@ -203,7 +223,7 @@ export default function InwardRegister({ session }: { session: Session }) {
 
           {hasFilters && (
             <button
-              onClick={() => { setFilterProject(''); setFilterVendor(''); setDateFrom(''); setDateTo(''); }}
+              onClick={() => { if (!lockedProjectId) setFilterProject(''); setFilterVendor(''); setDateFrom(''); setDateTo(''); }}
               className="text-[11px] text-on-surface-variant/40 hover:text-primary transition-colors"
             >
               Clear
@@ -224,7 +244,7 @@ export default function InwardRegister({ session }: { session: Session }) {
             </p>
             {hasFilters && (
               <button
-                onClick={() => { setFilterProject(''); setFilterVendor(''); setDateFrom(''); setDateTo(''); }}
+                onClick={() => { if (!lockedProjectId) setFilterProject(''); setFilterVendor(''); setDateFrom(''); setDateTo(''); }}
                 className="mt-4 text-[13px] font-medium text-primary hover:underline"
               >
                 Clear filters
@@ -342,7 +362,7 @@ export default function InwardRegister({ session }: { session: Session }) {
                       </div>
                       <div className="flex items-center gap-3 pt-2 border-t border-outline-variant/[0.06]">
                         <button
-                          onClick={() => navigate(`/purchase-orders/${grn.po_id}`)}
+                          onClick={() => navigate(`/purchase-orders/${grn.po_id}`, lockedProjectId ? { state: { from: 'project', projectId: lockedProjectId, projectName: projects?.find((p: any) => p.project_id === lockedProjectId)?.name } } : undefined)}
                           className="flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
                         >
                           <span className="material-symbols-outlined text-[13px]">receipt_long</span>

@@ -10,7 +10,7 @@ import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
 import { getCostCode } from '../lib/costCodes';
 import { formatTxn } from '../lib/formatTxn';
-import { IconPaperclip } from '@tabler/icons-react';
+import { IconPaperclip, IconPlus } from '@tabler/icons-react';
 import { ShortcutTicker } from '../components/ShortcutTicker';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { PageSkeleton } from '../components/SkeletonLoader';
@@ -478,20 +478,16 @@ export default function Ledger({ session }: { session: Session }) {
               <button
                 onClick={() => navigate('/ledger/new')}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  height: 32, padding: '0 16px 0 12px',
-                  borderRadius: 99, border: 'none',
-                  background: '#C8603A', cursor: 'pointer', outline: 'none',
-                  fontSize: 13, fontWeight: 500, color: '#fff',
-                  letterSpacing: '-0.01em',
-                  boxShadow: '0 1px 2px rgba(200,96,58,0.25), 0 0 0 0 rgba(200,96,58,0)',
-                  transition: 'opacity 120ms, box-shadow 120ms',
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  background: 'var(--color-text-primary)',
+                  color: 'var(--color-background-primary)',
+                  border: 'none', borderRadius: 8, padding: '9px 16px',
+                  fontSize: 12, fontWeight: 500, cursor: 'pointer',
+                  letterSpacing: '.01em', whiteSpace: 'nowrap',
                 }}
-                onMouseEnter={e => { e.currentTarget.style.opacity = '0.88'; e.currentTarget.style.boxShadow = '0 3px 8px rgba(200,96,58,0.35)'; }}
-                onMouseLeave={e => { e.currentTarget.style.opacity = '1';    e.currentTarget.style.boxShadow = '0 1px 2px rgba(200,96,58,0.25)'; }}
               >
-                <span style={{ fontSize: 17, fontWeight: 300, lineHeight: 1 }}>+</span>
-                New Transaction
+                <IconPlus size={14} />
+                New transaction
               </button>
             </CreateHint>
             <ShortcutTicker hints={[
@@ -802,7 +798,7 @@ export default function Ledger({ session }: { session: Session }) {
                     <th className={thCls}>Trade</th>
                     <th className={thSort} onClick={() => toggleSort('type')}><div className="flex items-center gap-1">Type {renderSortIcon('type')}</div></th>
                     <th className={thSort} onClick={() => toggleSort('project')}><div className="flex items-center gap-1">Project {renderSortIcon('project')}</div></th>
-                    <th className={thCls}>Cost Code</th>
+                    <th className={thCls}>Remarks</th>
                     <th className={`${thSort} text-right`} onClick={() => toggleSort('total_amount')}><div className="flex items-center justify-end gap-1">Amount {renderSortIcon('total_amount')}</div></th>
                     <th className="w-12 px-3 py-3 text-center">
                       <IconPaperclip size={13} className="opacity-35 mx-auto" />
@@ -833,11 +829,6 @@ export default function Ledger({ session }: { session: Session }) {
                     });
 
                     const tradeLabel = txn.stakeholders?.category || '';
-                    const costCodeName = (() => {
-                      if (!txn.category) return '';
-                      const found = getCostCode(txn.category);
-                      return found ? found.item.name : txn.category;
-                    })();
 
                     return (
                       <tr key={`${txn.txn_id}-${alloc?.allocation_id ?? 'none'}-${idx}`}
@@ -886,9 +877,13 @@ export default function Ledger({ session }: { session: Session }) {
                             <span className="text-[13px] text-on-surface/70 truncate block">{projectName}</span>
                           )}
                         </td>
-                        <td className="px-4 align-middle max-w-[200px]">
-                          {isFirstInGroup && costCodeName && (
-                            <span className="text-[12px] text-on-surface-variant/55 leading-snug line-clamp-2">{costCodeName}</span>
+                        <td className="px-4 align-middle max-w-[220px]">
+                          {isFirstInGroup && txn.remarks ? (
+                            <span className="text-[12px] text-on-surface-variant/55 leading-snug line-clamp-2" title={txn.remarks}>
+                              {txn.remarks}
+                            </span>
+                          ) : (
+                            isFirstInGroup && <span className="text-[12px] text-on-surface-variant/25">—</span>
                           )}
                         </td>
                         <td

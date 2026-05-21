@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import Breadcrumb from '../components/Breadcrumb';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import confetti from 'canvas-confetti';
 import { supabase } from '../lib/supabase';
@@ -13,6 +14,7 @@ import { useOrgId } from '../lib/auth/AuthProvider';
 import { usePeek } from '../context/PeekContext';
 import type { POLineItem, POApproval } from '../types';
 import ReceiveAtSiteDrawer from '../components/ReceiveAtSiteDrawer';
+import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
 import { downloadGRNChallan } from '../lib/grnChallan';
 import {
   fmtDate as pdfFmtDate, fmtRupee, amountInWords,
@@ -294,7 +296,14 @@ function BillSummaryCard({ po, activeTxns, onNavigate }: { po: any; activeTxns: 
               <div key={t.id} onClick={() => onNavigate(`/ledger/${t.transactions?.txn_id}`)}
                 className="flex justify-between py-1.5 cursor-pointer hover:bg-surface-container-low/30 rounded px-1 group">
                 <div className="min-w-0 flex-1 pr-2">
-                  <p className="text-[11px] font-[500] text-on-surface truncate">{f.primary}</p>
+                  <p className="text-[11px] font-[500] text-on-surface flex items-center gap-1.5 truncate">
+                    {f.primary}
+                    {t.transactions?.category === 'PO Advance' && (
+                      <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200/50 inline-flex items-center shrink-0">
+                        Advance
+                      </span>
+                    )}
+                  </p>
                   {f.secondary && <p className="text-[10px] text-on-surface-variant/60 truncate">{f.secondary}</p>}
                   <p className="text-[9px] font-mono text-on-surface-variant/25 opacity-0 group-hover:opacity-100 transition-opacity">{t.transactions?.txn_id}</p>
                 </div>
@@ -308,11 +317,25 @@ function BillSummaryCard({ po, activeTxns, onNavigate }: { po: any; activeTxns: 
   );
 }
 
+// ── SectionLabel ──────────────────────────────────────────────────────────────
+
+function SectionLabel({ icon, label }: { icon: string; label: string }) {
+  return (
+    <div className="flex items-center gap-2 mb-3">
+      <span className="material-symbols-outlined text-[15px] text-on-surface-variant/40">{icon}</span>
+      <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-on-surface-variant/50">{label}</span>
+      <div className="flex-1 h-px bg-outline-variant/15" />
+    </div>
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const { poId }   = useParams<{ poId: string }>();
   const navigate   = useNavigate();
+  const location   = useLocation();
+  const navState   = (location.state as { from?: string; projectId?: string; projectName?: string }) || {};
   const qc         = useQueryClient();
   const { show: showSnackbar } = useSnackbar();
   const { openPeek } = usePeek();
@@ -333,6 +356,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const [showRecordPayment,    setShowRecordPayment]   = useState(false);
   const [showReceiveModal,     setShowReceiveModal]    = useState(false);
   const [billCelebration,      setBillCelebration]     = useState<{ billAmount: number; billNo: string; vendorName: string } | null>(null);
+  const [showStakeholderDrawer, setShowStakeholderDrawer] = useState(false);
 
   // AI reconciliation state
   const [reconFile, setReconFile]     = useState<File | null>(null);
@@ -524,6 +548,11 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
       const amount = parseAmount(payAmount);
       if (!amount) throw new Error('Amount is required');
       const txnId = `TXN-${Date.now()}`;
+      const hasBill = po?.vendor_bill_amount && Number(po.vendor_bill_amount) > 0;
+      const category = hasBill ? 'Purchase Payment' : 'PO Advance';
+      const rawRemarks = `Payment for PO ${poId}${payRef ? ` · Ref: ${payRef}` : ''}`;
+      const remarks = hasBill ? rawRemarks : `[PO Advance] ${rawRemarks}`;
+
       const { error: rpcErr } = await supabase.rpc('insert_transaction_with_allocations', {
         p_txn: {
           txn_id:         txnId,
@@ -532,8 +561,8 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
           date:           new Date().toISOString().split('T')[0],
           total_amount:   amount,
           payment_mode:   payMode,
-          category:       'Purchase Payment',
-          remarks:        `Payment for PO ${poId}${payRef ? ` · Ref: ${payRef}` : ''}`,
+          category,
+          remarks,
           ai_flag_status: 'Clean',
           ai_flag_data:   {},
         },
@@ -796,7 +825,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     return (
       <div className="px-margin-mobile md:px-margin-desktop pt-6">
         <p className="text-on-surface-variant text-[14px]">Purchase Order not found.</p>
-        <button className="mt-4 bk-btn-ghost border border-outline-variant/30 text-[13px] px-4 py-2 rounded-xl" onClick={() => navigate('/purchase-orders')}>
+        <button className="mt-4 bk-btn-ghost border border-outline-variant/30 text-[13px] px-4 py-2 rounded-xl" onClick={() => navigate(navState.from === 'project' && navState.projectId ? `/projects/${navState.projectId}/purchase-orders` : '/purchase-orders')}>
           Back to list
         </button>
       </div>
@@ -820,712 +849,787 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   }
 
   return (
-    <div className="px-margin-mobile md:px-margin-desktop pt-6 pb-16">
-      <div className="max-w-[680px] mx-auto">
+    <div className="min-h-screen bg-[#f7f6f4] px-4 sm:px-6 pt-6 pb-20">
+      <div className="max-w-[720px] mx-auto">
 
-        {/* TOP STRIP */}
-        <div className="detail-reveal" style={{ animationDelay: '0ms' }}>
-          <p className="text-[14px] font-bold font-data-mono text-on-surface">{po.po_id}</p>
-          <p className="text-[14px] text-on-surface mt-0.5">{vendor?.name ?? '—'}</p>
-          <p className="text-[12px] text-on-surface-variant">
-            {vendor?.category ?? ''}
-            {vendor?.gstin ? ' · MSME' : ''}
-          </p>
-          <p className="text-[14px] text-on-surface mt-0.5">{project?.name ?? '—'}</p>
-          <p className="text-[12px] text-on-surface-variant">
-            Ordered {fmtDate(po.date_issued)}{po.ordered_by ? ` by ${po.ordered_by}` : ''}
-          </p>
-          {totalValue > 0 && (
-            <p className="text-[18px] font-bold font-data-mono text-on-surface mt-2">
-              <AmountDisplay amount={totalValue} />
-            </p>
-          )}
+        {/* BREADCRUMB */}
+        <div className="detail-reveal mb-6" style={{ animationDelay: '0ms' }}>
+          <Breadcrumb
+            items={
+              navState.from === 'project' && navState.projectName
+                ? [
+                    { label: 'Projects', href: '/projects' },
+                    { label: navState.projectName, href: `/projects/${navState.projectId}` },
+                    { label: 'Purchase Orders', href: `/projects/${navState.projectId}/purchase-orders` },
+                    { label: poId! },
+                  ]
+                : [
+                    { label: 'Dashboard', href: '/' },
+                    { label: 'Purchase Orders', href: '/purchase-orders' },
+                    { label: poId! },
+                  ]
+            }
+          />
         </div>
 
-        {/* STATUS + ACTIONS */}
-        <div className="detail-reveal mt-3" style={{ animationDelay: '40ms' }}>
-
-          {/* Status badge row */}
-          <div className="flex items-center gap-2 flex-wrap mb-3">
-            <span className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${STATUS_BADGE[po.status] ?? 'bg-surface-container-highest text-on-surface-variant'}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[po.status] ?? 'bg-on-surface-variant/30'}`} />
-              {STATUS_LABEL[po.status] ?? po.status}
-            </span>
-            {isOverdue(po) && (
-              <span className="text-[10px] font-bold text-red-500">Overdue</span>
-            )}
-            <div className="ml-auto flex items-center gap-2">
-              <button onClick={handleDownloadPDF}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-outline-variant/40 text-[12px] text-on-surface-variant hover:text-on-surface transition-colors">
-                <span className="material-symbols-outlined text-[14px]">download</span>
-                PDF
-              </button>
-              {['ORDERED', 'BILLED', 'PARTIAL'].includes(po.status) && canManage && (
-                <button onClick={() => { if (window.confirm('Cancel this PO?')) updateStatus.mutate('CANCELLED'); }}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-red-200 text-red-600 text-[12px] hover:bg-red-50 transition-colors">
-                  <span className="material-symbols-outlined text-[14px]">cancel</span>
-                  Cancel
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Status-driven primary action */}
-          {po.status === 'ORDERED' && canManage && (
-            <div className="mt-2 space-y-3">
-              {Number(po.vendor_bill_amount) > 0 ? (
-                /* Bill already entered — show summary */
-                <BillSummaryCard po={po} activeTxns={activeTxns} onNavigate={navigate} />
-              ) : billCelebration ? (
-                <div className="rounded-xl border-2 border-green-500 bg-[#F0FDF4] p-4">
-                  <div className="flex items-start gap-3">
-                    <span className="text-2xl">🎉</span>
-                    <div className="flex-1">
-                      <p className="text-[15px] font-bold text-green-800">Bill recorded!</p>
-                      <p className="text-[22px] font-bold text-green-700 leading-tight mt-1">
-                        ₹{billCelebration.billAmount.toLocaleString('en-IN')}
-                      </p>
-                      <p className="text-[12px] text-green-700 mt-0.5">credited to {billCelebration.vendorName}'s account</p>
-                      {billCelebration.billNo && (
-                        <p className="text-[11px] text-green-600 mt-0.5 font-data-mono">Bill No: {billCelebration.billNo}</p>
-                      )}
-                    </div>
-                  </div>
+        {/* HERO CARD */}
+        <div className="detail-reveal" style={{ animationDelay: '40ms' }}>
+          <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm overflow-hidden mb-4">
+            {/* Accent top bar */}
+            <div className={`h-1 w-full ${po.status === 'PAID' ? 'bg-gradient-to-r from-emerald-400 to-teal-400' : po.status === 'CANCELLED' ? 'bg-rose-300' : 'bg-gradient-to-r from-amber-400 via-orange-400 to-rose-400'}`} />
+            
+            <div className="p-6">
+              {/* Row 1: PO ID + date + status */}
+              <div className="flex items-start justify-between gap-3 mb-5">
+                <div>
+                  <p className="font-mono text-[11px] text-on-surface-variant/50 mb-1 tracking-wide">{po.po_id}</p>
+                  <p className="text-[12px] text-on-surface-variant/60">Ordered {fmtDate(po.date_issued)}{po.ordered_by ? ` by ${po.ordered_by}` : ''}</p>
                 </div>
-              ) : (
-                <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-4">
-                  <div className="flex items-start gap-3 mb-1">
-                    <span className="text-2xl">📄</span>
-                    <div className="flex-1">
-                      <p className="text-[14px] font-semibold text-amber-900">Enter vendor bill</p>
-                      <p className="text-[12px] text-amber-700 mt-0.5">Record the vendor's invoice amount before marking as received.</p>
-                    </div>
-                  </div>
-                  <BillEntryForm
-                    poId={poId!}
-                    currentUserName={currentUserName}
-                    onBillSaved={(data) => {
-                      fireCelebration();
-                      setBillCelebration({ billAmount: data.billAmount, billNo: data.billNo, vendorName: vendor?.name || 'vendor' });
-                      showSnackbar(`🎉 Bill recorded! ₹${data.billAmount.toLocaleString('en-IN')} credited to vendor account`);
-                      setTimeout(() => setBillCelebration(null), 4000);
-                    }}
-                  />
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                  {isOverdue(po) && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full border border-red-200/60 animate-pulse">Overdue</span>}
+                  <span className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold ${STATUS_BADGE[po.status] ?? 'bg-surface-container-highest text-on-surface-variant'}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[po.status] ?? 'bg-on-surface-variant/30'}`} />
+                    {STATUS_LABEL[po.status] ?? po.status}
+                  </span>
+                </div>
+              </div>
+
+              {/* Row 2: Amount */}
+              {totalValue > 0 && (
+                <div className="mb-5">
+                  <p className="text-[11px] font-medium text-on-surface-variant/50 mb-1 uppercase tracking-wider">Order Value</p>
+                  <p className="text-[38px] font-black text-on-surface tracking-tight leading-none font-data-mono"><AmountDisplay amount={totalValue} /></p>
                 </div>
               )}
-              <div>
-                <button onClick={() => setShowReceiveModal(true)}
-                  className="h-9 px-4 rounded-lg bg-[#7C3AED] text-white text-[13px] font-medium hover:opacity-90 flex items-center gap-2">
-                  <span className="material-symbols-outlined text-[16px]">inventory_2</span>
-                  Mark Received at Site
-                </button>
-                <p className="text-[11px] text-on-surface-variant/60 mt-1.5">Confirm material has arrived and been checked at site</p>
+
+              {/* Row 3: Vendor + Project */}
+              <div className="flex flex-wrap gap-3 mb-4">
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-bold text-on-surface-variant/40 uppercase tracking-wider mb-1">Vendor</p>
+                  <button
+                    onClick={() => setShowStakeholderDrawer(true)}
+                    className="group inline-flex items-center gap-1 text-[15px] font-semibold text-primary text-left max-w-full"
+                  >
+                    <span className="border-b border-dashed border-primary/45 group-hover:border-solid group-hover:border-primary transition-all pb-[2px] truncate">
+                      {vendor?.name || '—'}
+                    </span>
+                    <span className="material-symbols-outlined text-[13px] text-primary/50 group-hover:text-primary transition-colors shrink-0">
+                      chevron_right
+                    </span>
+                  </button>
+                  <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{vendor?.category || ''}{vendor?.gstin ? ' · GST Registered' : ''}</p>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-bold text-on-surface-variant/40 uppercase tracking-wider mb-1">Project</p>
+                  <p className="text-[15px] font-semibold text-on-surface">{project?.name || '—'}</p>
+                  {project?.site_location && <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{project.site_location}</p>}
+                </div>
               </div>
-            </div>
-          )}
 
-
-          {(po.status === 'BILLED' || po.status === 'PARTIAL') && canManage && (
-            <div className="mt-2 space-y-3">
-              <BillSummaryCard po={po} activeTxns={activeTxns} onNavigate={navigate} />
-              <button onClick={() => setShowRecordPayment(true)}
-                className="h-9 px-4 rounded-lg bg-[#C8603A] text-white text-[13px] font-medium hover:opacity-90 flex items-center gap-2">
-                <span className="material-symbols-outlined text-[16px]">add</span>
-                Record Payment
-              </button>
-            </div>
-          )}
-
-          {po.status === 'PAID' && (
-            <div className="mt-2">
-              <div className="flex items-center gap-2 text-green-600 mb-3">
-                <span className="material-symbols-outlined text-[20px]" style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>
-                <p className="text-[14px] font-medium">Fully paid and settled</p>
-              </div>
-              <BillSummaryCard po={po} activeTxns={activeTxns} onNavigate={navigate} />
-            </div>
-          )}
-
-          {po.status === 'CANCELLED' && (
-            <p className="text-[13px] text-on-surface-variant/60 mt-2">This PO has been cancelled.</p>
-          )}
-
-          <button onClick={() => setShowLog(v => !v)}
-            className="mt-3 flex items-center gap-1 text-[12px] text-on-surface-variant hover:text-on-surface transition-colors">
-            {showLog ? 'Hide log' : 'View log'}
-            <span className="material-symbols-outlined text-[14px]">{showLog ? 'expand_less' : 'chevron_right'}</span>
-          </button>
-        </div>
-
-        {/* DIVIDER */}
-        <hr className="border-outline-variant/15 my-5" />
-
-        {/* ITEMS ORDERED */}
-        <div className="detail-reveal mb-6" style={{ animationDelay: '80ms' }}>
-          <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-3">ITEMS ORDERED</p>
-          <div className="overflow-x-auto">
-            <table className="w-full text-[12px]">
-              <thead>
-                <tr className="border-b border-outline-variant/20">
-                  <th className="pb-2 text-left text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">#</th>
-                  <th className="pb-2 text-left text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Code</th>
-                  <th className="pb-2 text-left text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Item</th>
-                  <th className="pb-2 text-center text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Unit</th>
-                  <th className="pb-2 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Qty</th>
-                  {lineItems?.some(li => (li.quantity_delivered ?? 0) > 0) && (
-                    <th className="pb-2 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Del.</th>
-                  )}
-                  <th className="pb-2 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Rate</th>
-                  <th className="pb-2 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">GST</th>
-                  <th className="pb-2 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {lineItems && lineItems.length > 0 ? (
-                  lineItems.map((li, i) => (
-                    <tr key={li.id ?? i} className="border-b border-outline-variant/[0.06] hover:bg-surface-container-low/20 transition-colors">
-                      <td className="py-2.5 pr-2 text-on-surface-variant/40 font-bold">{li.line_number}</td>
-                      <td className="py-2.5 pr-2">
-                        {li.category_id ? (
-                          <span className="font-data-mono text-[10px] text-on-surface-variant/60">{li.category_id}</span>
-                        ) : (
-                          <span className="text-on-surface-variant/20">—</span>
-                        )}
-                      </td>
-                      <td className="py-2.5 pr-2">
-                        <div className="flex items-center gap-1.5">
-                          <div>
-                            <p className="text-[13px] font-medium text-on-surface">{li.item_name}</p>
-                            {li.specification && (
-                              <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{li.specification}</p>
-                            )}
-                          </div>
-                          {li.is_ai_extracted && (
-                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 shrink-0">AI</span>
+              {/* Status-driven primary action */}
+              {po.status === 'ORDERED' && canManage && (
+                <div className="mt-2 space-y-3">
+                  {Number(po.vendor_bill_amount) > 0 ? (
+                    /* Bill already entered — show summary */
+                    <BillSummaryCard po={po} activeTxns={activeTxns} onNavigate={navigate} />
+                  ) : billCelebration ? (
+                    <div className="rounded-xl border-2 border-green-500 bg-[#F0FDF4] p-4">
+                      <div className="flex items-start gap-3">
+                        <span className="text-2xl">🎉</span>
+                        <div className="flex-1">
+                          <p className="text-[15px] font-bold text-green-800">Bill recorded!</p>
+                          <p className="text-[22px] font-bold text-green-700 leading-tight mt-1">
+                            ₹{billCelebration.billAmount.toLocaleString('en-IN')}
+                          </p>
+                          <p className="text-[12px] text-green-700 mt-0.5">credited to {billCelebration.vendorName}'s account</p>
+                          {billCelebration.billNo && (
+                            <p className="text-[11px] text-green-600 mt-0.5 font-data-mono">Bill No: {billCelebration.billNo}</p>
                           )}
                         </div>
-                      </td>
-                      <td className="py-2.5 text-center text-on-surface-variant/70">{li.unit}</td>
-                      <td className="py-2.5 text-right font-data-mono">{li.quantity_ordered}</td>
-                      {lineItems.some(l => (l.quantity_delivered ?? 0) > 0) && (
-                        <td className="py-2.5 text-right font-data-mono text-teal-600">{li.quantity_delivered ?? 0}</td>
-                      )}
-                      <td className="py-2.5 text-right font-data-mono text-on-surface-variant/70">
-                        ₹{Number(li.unit_rate).toLocaleString('en-IN')}
-                      </td>
-                      <td className="py-2.5 text-right text-on-surface-variant/50">{li.gst_rate}%</td>
-                      <td className="py-2.5 text-right font-data-mono font-semibold text-on-surface">
-                        ₹{Number(li.total_amount).toLocaleString('en-IN')}
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  /* Legacy items fallback */
-                  (po.items || []).map((it: any, i: number) => (
-                    <tr key={i} className="border-b border-outline-variant/[0.06]">
-                      <td className="py-2.5 pr-2 text-on-surface-variant/40 font-bold">{i + 1}</td>
-                      <td className="py-2.5 pr-2" />
-                      <td className="py-2.5 pr-2">
-                        <p className="text-[13px] font-medium text-on-surface">{it.description}</p>
-                      </td>
-                      <td className="py-2.5 text-center text-on-surface-variant/70">{it.unit || 'LS'}</td>
-                      <td className="py-2.5 text-right font-data-mono">{it.qty}</td>
-                      <td className="py-2.5 text-right font-data-mono text-on-surface-variant/70">
-                        ₹{Number(it.rate).toLocaleString('en-IN')}
-                      </td>
-                      <td className="py-2.5 text-right text-on-surface-variant/50">—</td>
-                      <td className="py-2.5 text-right font-data-mono font-semibold text-on-surface">
-                        ₹{Number(it.amount).toLocaleString('en-IN')}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Totals footer */}
-          {totalValue > 0 && (
-            <div className="flex justify-end mt-3 pt-2 border-t border-outline-variant/15">
-              <div className="space-y-1 text-[13px] min-w-[200px]">
-                <div className="flex justify-between text-on-surface-variant/60">
-                  <span>Order Value</span>
-                  <span className="font-data-mono">₹{Number(po.order_value).toLocaleString('en-IN')}</span>
-                </div>
-                {po.gst_value && Number(po.gst_value) > 0 && (
-                  <div className="flex justify-between text-on-surface-variant/60">
-                    <span>GST</span>
-                    <span className="font-data-mono">₹{Number(po.gst_value).toLocaleString('en-IN')}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-4">
+                      <div className="flex items-start gap-3 mb-1">
+                        <span className="text-2xl">📄</span>
+                        <div className="flex-1">
+                          <p className="text-[14px] font-semibold text-amber-900">Enter vendor bill</p>
+                          <p className="text-[12px] text-amber-700 mt-0.5">Record the vendor's invoice amount before marking as received.</p>
+                        </div>
+                      </div>
+                      <BillEntryForm
+                        poId={poId!}
+                        currentUserName={currentUserName}
+                        onBillSaved={(data) => {
+                          fireCelebration();
+                          setBillCelebration({ billAmount: data.billAmount, billNo: data.billNo, vendorName: vendor?.name || 'vendor' });
+                          showSnackbar(`🎉 Bill recorded! ₹${data.billAmount.toLocaleString('en-IN')} credited to vendor account`);
+                          setTimeout(() => setBillCelebration(null), 4000);
+                        }}
+                      />
+                    </div>
+                  )}
+                  <div>
+                    <button onClick={() => setShowReceiveModal(true)}
+                      className="h-9 px-4 rounded-lg bg-[#7C3AED] text-white text-[13px] font-medium hover:opacity-90 flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[16px]">inventory_2</span>
+                      Mark Received at Site
+                    </button>
+                    <p className="text-[11px] text-on-surface-variant/60 mt-1.5">Confirm material has arrived and been checked at site</p>
                   </div>
-                )}
-                <div className="flex justify-between font-bold text-[14px] border-t border-outline-variant/20 pt-1">
-                  <span>Grand Total</span>
-                  <span className="font-data-mono text-primary">₹{totalValue.toLocaleString('en-IN')}</span>
                 </div>
-              </div>
-            </div>
-          )}
+              )}
 
-          {/* Notes */}
-          {(po.vendor_notes || po.internal_notes) && (
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-              {po.vendor_notes && (
-                <div>
-                  <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1.5">Vendor Terms</p>
-                  <p className="text-[12px] text-on-surface-variant/70 whitespace-pre-line">{po.vendor_notes}</p>
+              {(po.status === 'BILLED' || po.status === 'PARTIAL') && canManage && (
+                <div className="mt-2 space-y-3">
+                  <BillSummaryCard po={po} activeTxns={activeTxns} onNavigate={navigate} />
+                  <button onClick={() => setShowRecordPayment(true)}
+                    className="h-9 px-4 rounded-lg bg-[#C8603A] text-white text-[13px] font-medium hover:opacity-90 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[16px]">add</span>
+                    Record Payment
+                  </button>
                 </div>
               )}
-              {po.internal_notes && (
-                <div>
-                  <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1.5">Internal Notes</p>
-                  <p className="text-[12px] text-on-surface-variant/70 whitespace-pre-line">{po.internal_notes}</p>
+
+              {po.status === 'PAID' && (
+                <div className="mt-2">
+                  <div className="flex items-center gap-2 text-green-600 mb-3">
+                    <span className="material-symbols-outlined text-[20px]" style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>
+                    <p className="text-[14px] font-medium">Fully paid and settled</p>
+                  </div>
+                  <BillSummaryCard po={po} activeTxns={activeTxns} onNavigate={navigate} />
                 </div>
+              )}
+
+              {po.status === 'CANCELLED' && (
+                <p className="text-[13px] text-on-surface-variant/60 mt-2">This PO has been cancelled.</p>
               )}
             </div>
-          )}
+
+            {/* Action bar */}
+            <div className="flex items-center gap-2 px-6 py-3 border-t border-outline-variant/10 bg-surface-container-low/30 flex-wrap">
+              <button onClick={handleDownloadPDF} className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-on-surface text-surface-container-lowest text-[12px] font-semibold hover:opacity-90 transition-opacity">
+                <span className="material-symbols-outlined text-[14px]">download</span> Download PDF
+              </button>
+              {['ORDERED', 'BILLED', 'PARTIAL'].includes(po.status) && canManage && (
+                <button onClick={() => { if (window.confirm('Cancel this PO?')) updateStatus.mutate('CANCELLED'); }} className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-red-200 text-red-600 text-[12px] font-semibold hover:bg-red-50 transition-colors">
+                  <span className="material-symbols-outlined text-[14px]">cancel</span> Cancel PO
+                </button>
+              )}
+              <button onClick={() => setShowLog(v => !v)} className="ml-auto flex items-center gap-1 text-[11px] text-on-surface-variant/50 hover:text-primary transition-colors">
+                <span className="material-symbols-outlined text-[13px]">history</span>
+                {showLog ? 'Hide log' : 'Activity Log'}
+              </button>
+            </div>
+          </div>
         </div>
 
-        {/* BILL — shown when BILLED/PARTIAL/PAID (summary card already shown in action section above for those states; this is just a fallback for viewing bill details without the action) */}
+        {/* ITEMS ORDERED */}
+        <div className="detail-reveal" style={{ animationDelay: '80ms' }}>
+          <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm p-5 mb-4">
+            <SectionLabel icon="inventory_2" label="Items Ordered" />
+            <div className="overflow-x-auto mt-3">
+              <table className="w-full text-[12px]">
+                <thead>
+                  <tr className="border-b border-outline-variant/20">
+                    <th className="pb-2 text-left text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">#</th>
+                    <th className="pb-2 text-left text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Code</th>
+                    <th className="pb-2 text-left text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Item</th>
+                    <th className="pb-2 text-center text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Unit</th>
+                    <th className="pb-2 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Qty</th>
+                    {lineItems?.some(li => (li.quantity_delivered ?? 0) > 0) && (
+                      <th className="pb-2 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Del.</th>
+                    )}
+                    <th className="pb-2 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Rate</th>
+                    <th className="pb-2 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">GST</th>
+                    <th className="pb-2 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lineItems && lineItems.length > 0 ? (
+                    lineItems.map((li, i) => (
+                      <tr key={li.id ?? i} className="border-b border-outline-variant/[0.06] hover:bg-surface-container-low/20 transition-colors">
+                        <td className="py-2.5 pr-2 text-on-surface-variant/40 font-bold">{li.line_number}</td>
+                        <td className="py-2.5 pr-2">
+                          {li.category_id ? (
+                            <span className="font-data-mono text-[10px] text-on-surface-variant/60">{li.category_id}</span>
+                          ) : (
+                            <span className="text-on-surface-variant/20">—</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 pr-2">
+                          <div className="flex items-center gap-1.5">
+                            <div>
+                              <p className="text-[13px] font-medium text-on-surface">{li.item_name}</p>
+                              {li.specification && (
+                                <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{li.specification}</p>
+                              )}
+                            </div>
+                            {li.is_ai_extracted && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 shrink-0">AI</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-2.5 text-center text-on-surface-variant/70">{li.unit}</td>
+                        <td className="py-2.5 text-right font-data-mono">{li.quantity_ordered}</td>
+                        {lineItems.some(l => (l.quantity_delivered ?? 0) > 0) && (
+                          <td className="py-2.5 text-right font-data-mono text-teal-600">{li.quantity_delivered ?? 0}</td>
+                        )}
+                        <td className="py-2.5 text-right font-data-mono text-on-surface-variant/70">
+                          ₹{Number(li.unit_rate).toLocaleString('en-IN')}
+                        </td>
+                        <td className="py-2.5 text-right text-on-surface-variant/50">{li.gst_rate}%</td>
+                        <td className="py-2.5 text-right font-data-mono font-semibold text-on-surface">
+                          ₹{Number(li.total_amount).toLocaleString('en-IN')}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    /* Legacy items fallback */
+                    (po.items || []).map((it: any, i: number) => (
+                      <tr key={i} className="border-b border-outline-variant/[0.06]">
+                        <td className="py-2.5 pr-2 text-on-surface-variant/40 font-bold">{i + 1}</td>
+                        <td className="py-2.5 pr-2" />
+                        <td className="py-2.5 pr-2">
+                          <p className="text-[13px] font-medium text-on-surface">{it.description}</p>
+                        </td>
+                        <td className="py-2.5 text-center text-on-surface-variant/70">{it.unit || 'LS'}</td>
+                        <td className="py-2.5 text-right font-data-mono">{it.qty}</td>
+                        <td className="py-2.5 text-right font-data-mono text-on-surface-variant/70">
+                          ₹{Number(it.rate).toLocaleString('en-IN')}
+                        </td>
+                        <td className="py-2.5 text-right text-on-surface-variant/50">—</td>
+                        <td className="py-2.5 text-right font-data-mono font-semibold text-on-surface">
+                          ₹{Number(it.amount).toLocaleString('en-IN')}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Totals footer */}
+            {totalValue > 0 && (
+              <div className="flex justify-end mt-3 pt-2 border-t border-outline-variant/15">
+                <div className="space-y-1 text-[13px] min-w-[200px]">
+                  <div className="flex justify-between text-on-surface-variant/60">
+                    <span>Order Value</span>
+                    <span className="font-data-mono">₹{Number(po.order_value).toLocaleString('en-IN')}</span>
+                  </div>
+                  {po.gst_value && Number(po.gst_value) > 0 && (
+                    <div className="flex justify-between text-on-surface-variant/60">
+                      <span>GST</span>
+                      <span className="font-data-mono">₹{Number(po.gst_value).toLocaleString('en-IN')}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between font-bold text-[14px] border-t border-outline-variant/20 pt-1">
+                    <span>Grand Total</span>
+                    <span className="font-data-mono text-primary">₹{totalValue.toLocaleString('en-IN')}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Notes */}
+            {(po.vendor_notes || po.internal_notes) && (
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                {po.vendor_notes && (
+                  <div>
+                    <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1.5">Vendor Terms</p>
+                    <p className="text-[12px] text-on-surface-variant/70 whitespace-pre-line">{po.vendor_notes}</p>
+                  </div>
+                )}
+                {po.internal_notes && (
+                  <div>
+                    <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1.5">Internal Notes</p>
+                    <p className="text-[12px] text-on-surface-variant/70 whitespace-pre-line">{po.internal_notes}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* AI RECONCILIATION */}
         {lineItems && lineItems.length > 0 && (
-          <div className="detail-reveal mb-6" style={{ animationDelay: '155ms' }}>
-            <div className="flex items-center gap-2 mb-3">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">AI RECONCILIATION</p>
-              {reconResult && (
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                  reconResult.risk_level === 'HIGH'   ? 'bg-red-100 text-red-800' :
-                  reconResult.risk_level === 'MEDIUM' ? 'bg-amber-100 text-amber-800' :
-                  'bg-green-100 text-green-800'
-                }`}>{reconResult.risk_level} RISK</span>
-              )}
-            </div>
-
-            {/* Upload / run panel */}
-            {!reconResult && (
-              <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
-
-                {/* Quick-run from attached bill URL */}
-                {po.vendor_bill_doc_url && !reconFile && (
-                  <div className="px-4 py-3 bg-surface-container-low/40 flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-[12px] font-semibold text-on-surface">Use attached bill document</p>
-                      <p className="text-[11px] text-on-surface-variant/50">AI compares the uploaded bill against PO line items</p>
-                    </div>
-                    <button
-                      onClick={() => runReconciliation(null)}
-                      disabled={reconciling}
-                      className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold bg-primary text-on-primary rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                    >
-                      {reconciling ? (
-                        <><span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>Analyzing…</>
-                      ) : (
-                        <><span className="material-symbols-outlined text-[14px]">smart_toy</span>Run AI Check</>
-                      )}
-                    </button>
-                  </div>
+          <div className="detail-reveal" style={{ animationDelay: '155ms' }}>
+            <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm p-5 mb-4">
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <SectionLabel icon="smart_toy" label="AI Reconciliation" />
+                {reconResult && (
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                    reconResult.risk_level === 'HIGH'   ? 'bg-red-100 text-red-800' :
+                    reconResult.risk_level === 'MEDIUM' ? 'bg-amber-100 text-amber-800' :
+                    'bg-green-100 text-green-800'
+                  }`}>{reconResult.risk_level} RISK</span>
                 )}
+              </div>
 
-                {/* Upload zone */}
-                <div className={`px-4 py-3 ${po.vendor_bill_doc_url && !reconFile ? 'border-t border-outline-variant/10' : ''}`}>
-                  <label className="flex items-center gap-3 cursor-pointer group">
-                    <span className="material-symbols-outlined text-[20px] text-on-surface-variant/40 group-hover:text-primary transition-colors">upload_file</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[12px] text-on-surface-variant group-hover:text-on-surface transition-colors truncate">
-                        {reconFile
-                          ? reconFile.name
-                          : po.vendor_bill_doc_url
-                            ? 'Or upload a different bill image'
-                            : 'Upload vendor bill/invoice image'
-                        }
-                      </p>
-                      {reconFile && <p className="text-[10px] text-on-surface-variant/50">{(reconFile.size / 1024).toFixed(0)} KB</p>}
+              {/* Upload / run panel */}
+              {!reconResult && (
+                <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
+
+                  {/* Quick-run from attached bill URL */}
+                  {po.vendor_bill_doc_url && !reconFile && (
+                    <div className="px-4 py-3 bg-surface-container-low/40 flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[12px] font-semibold text-on-surface">Use attached bill document</p>
+                        <p className="text-[11px] text-on-surface-variant/50">AI compares the uploaded bill against PO line items</p>
+                      </div>
+                      <button
+                        onClick={() => runReconciliation(null)}
+                        disabled={reconciling}
+                        className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold bg-primary text-on-primary rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                      >
+                        {reconciling ? (
+                          <><span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>Analyzing…</>
+                        ) : (
+                          <><span className="material-symbols-outlined text-[14px]">smart_toy</span>Run AI Check</>
+                        )}
+                      </button>
                     </div>
+                  )}
+
+                  {/* Upload zone */}
+                  <div className={`px-4 py-3 ${po.vendor_bill_doc_url && !reconFile ? 'border-t border-outline-variant/10' : ''}`}>
+                    <label className="flex items-center gap-3 cursor-pointer group">
+                      <span className="material-symbols-outlined text-[20px] text-on-surface-variant/40 group-hover:text-primary transition-colors">upload_file</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[12px] text-on-surface-variant group-hover:text-on-surface transition-colors truncate">
+                          {reconFile
+                            ? reconFile.name
+                            : po.vendor_bill_doc_url
+                              ? 'Or upload a different bill image'
+                              : 'Upload vendor bill/invoice image'
+                          }
+                        </p>
+                        {reconFile && <p className="text-[10px] text-on-surface-variant/50">{(reconFile.size / 1024).toFixed(0)} KB</p>}
+                      </div>
+                      {reconFile && (
+                        <button
+                          onClick={e => { e.preventDefault(); setReconFile(null); setReconError(null); }}
+                          className="shrink-0 text-on-surface-variant/40 hover:text-red-500 transition-colors"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">close</span>
+                        </button>
+                      )}
+                      <input
+                        type="file"
+                        className="hidden"
+                        accept=".jpg,.jpeg,.png,.webp"
+                        onChange={e => { const f = e.target.files?.[0]; if (f) { setReconFile(f); setReconError(null); } e.target.value = ''; }}
+                      />
+                    </label>
+
                     {reconFile && (
                       <button
-                        onClick={e => { e.preventDefault(); setReconFile(null); setReconError(null); }}
-                        className="shrink-0 text-on-surface-variant/40 hover:text-red-500 transition-colors"
+                        onClick={() => runReconciliation(reconFile)}
+                        disabled={reconciling}
+                        className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-primary text-on-primary text-[12px] font-semibold hover:bg-primary/90 disabled:opacity-50 transition-colors"
                       >
-                        <span className="material-symbols-outlined text-[16px]">close</span>
+                        {reconciling ? (
+                          <><span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>Analyzing document…</>
+                        ) : (
+                          <><span className="material-symbols-outlined text-[14px]">smart_toy</span>Run AI Reconciliation</>
+                        )}
                       </button>
                     )}
-                    <input
-                      type="file"
-                      className="hidden"
-                      accept=".jpg,.jpeg,.png,.webp"
-                      onChange={e => { const f = e.target.files?.[0]; if (f) { setReconFile(f); setReconError(null); } e.target.value = ''; }}
-                    />
-                  </label>
-
-                  {reconFile && (
-                    <button
-                      onClick={() => runReconciliation(reconFile)}
-                      disabled={reconciling}
-                      className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-primary text-on-primary text-[12px] font-semibold hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                    >
-                      {reconciling ? (
-                        <><span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>Analyzing document…</>
-                      ) : (
-                        <><span className="material-symbols-outlined text-[14px]">smart_toy</span>Run AI Reconciliation</>
-                      )}
-                    </button>
-                  )}
-                </div>
-
-                {reconError && (
-                  <div className="px-4 py-2.5 bg-red-50 border-t border-red-100">
-                    <p className="text-[12px] text-red-700">{reconError}</p>
                   </div>
-                )}
 
-                <div className="px-4 py-2.5 border-t border-outline-variant/[0.06] bg-surface-container-low/20">
-                  <p className="text-[10px] text-on-surface-variant/40">
-                    Checks for grade downgrades, qty inflation, rate increases, ghost items &amp; arithmetic errors · JPG / PNG
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Results panel */}
-            {reconResult && (
-              <div className="space-y-3">
-
-                {/* Summary banner */}
-                <div className={`px-4 py-3 rounded-xl border ${
-                  reconResult.risk_level === 'HIGH'   ? 'bg-red-50 border-red-200/60' :
-                  reconResult.risk_level === 'MEDIUM' ? 'bg-amber-50 border-amber-200/60' :
-                  'bg-green-50 border-green-200/60'
-                }`}>
-                  <p className={`text-[13px] font-semibold ${
-                    reconResult.risk_level === 'HIGH'   ? 'text-red-800' :
-                    reconResult.risk_level === 'MEDIUM' ? 'text-amber-800' :
-                    'text-green-800'
-                  }`}>{reconResult.summary}</p>
-                  {reconResult.bill_total_extracted != null && (
-                    <p className="text-[11px] mt-1 text-on-surface-variant/60">
-                      Bill total: <span className="font-data-mono font-semibold text-on-surface">₹{reconResult.bill_total_extracted.toLocaleString('en-IN')}</span>
-                    </p>
-                  )}
-                  {reconResult.overall_flags.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mt-2">
-                      {reconResult.overall_flags.map(f => (
-                        <span key={f} className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
-                          reconResult.risk_level === 'HIGH' ? 'bg-red-200/60 text-red-900' : 'bg-amber-200/60 text-amber-900'
-                        }`}>{FLAG_LABEL[f] ?? f}</span>
-                      ))}
+                  {reconError && (
+                    <div className="px-4 py-2.5 bg-red-50 border-t border-red-100">
+                      <p className="text-[12px] text-red-700">{reconError}</p>
                     </div>
                   )}
-                </div>
 
-                {/* Line-by-line breakdown */}
-                {reconResult.line_matches.length > 0 && (
-                  <div className="rounded-xl border border-outline-variant/20 overflow-hidden divide-y divide-outline-variant/[0.08]">
-                    {reconResult.line_matches.map((m, i) => (
-                      <div key={i} className={`px-3 py-2.5 ${m.flags.length > 0 ? 'bg-amber-50/40' : ''}`}>
-                        <div className="flex items-start gap-2">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              {m.matched
-                                ? <span className="text-[9px] font-bold text-green-600">✓</span>
-                                : <span className="text-[9px] font-bold text-red-500">✕</span>
-                              }
-                              <p className="text-[12px] font-semibold text-on-surface">{m.po_line}</p>
-                              {m.flags.map(f => (
-                                <span key={f} className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800">
-                                  {FLAG_LABEL[f] ?? f}
-                                </span>
-                              ))}
-                            </div>
-                            {m.flag_details && m.flags.length > 0 && (
-                              <p className="text-[11px] text-amber-700 mt-0.5 leading-snug">{m.flag_details}</p>
-                            )}
-                            {m.bill_line && m.bill_line !== m.po_line && (
-                              <p className="text-[10px] text-on-surface-variant/50 mt-0.5">Bill: "{m.bill_line}"</p>
-                            )}
-                            {!m.matched && (
-                              <p className="text-[10px] text-red-500 font-semibold mt-0.5">Not found in bill</p>
-                            )}
-                          </div>
-                          <div className="text-right shrink-0 text-[11px] space-y-0.5">
-                            <p className="font-data-mono text-on-surface-variant/60">PO ₹{(m.po_amount ?? 0).toLocaleString('en-IN')}</p>
-                            {m.bill_amount != null && (
-                              <p className={`font-data-mono font-semibold ${
-                                m.bill_amount > m.po_amount * 1.02 ? 'text-red-600' :
-                                m.bill_amount < m.po_amount * 0.98 ? 'text-green-600' :
-                                'text-on-surface'
-                              }`}>Bill ₹{m.bill_amount.toLocaleString('en-IN')}</p>
-                            )}
-                          </div>
-                        </div>
+                  <div className="px-4 py-2.5 border-t border-outline-variant/[0.06] bg-surface-container-low/20">
+                    <p className="text-[10px] text-on-surface-variant/40">
+                      Checks for grade downgrades, qty inflation, rate increases, ghost items &amp; arithmetic errors · JPG / PNG
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Results panel */}
+              {reconResult && (
+                <div className="space-y-3">
+
+                  {/* Summary banner */}
+                  <div className={`px-4 py-3 rounded-xl border ${
+                    reconResult.risk_level === 'HIGH'   ? 'bg-red-50 border-red-200/60' :
+                    reconResult.risk_level === 'MEDIUM' ? 'bg-amber-50 border-amber-200/60' :
+                    'bg-green-50 border-green-200/60'
+                  }`}>
+                    <p className={`text-[13px] font-semibold ${
+                      reconResult.risk_level === 'HIGH'   ? 'text-red-800' :
+                      reconResult.risk_level === 'MEDIUM' ? 'text-amber-800' :
+                      'text-green-800'
+                    }`}>{reconResult.summary}</p>
+                    {reconResult.bill_total_extracted != null && (
+                      <p className="text-[11px] mt-1 text-on-surface-variant/60">
+                        Bill total: <span className="font-data-mono font-semibold text-on-surface">₹{reconResult.bill_total_extracted.toLocaleString('en-IN')}</span>
+                      </p>
+                    )}
+                    {reconResult.overall_flags.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {reconResult.overall_flags.map(f => (
+                          <span key={f} className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                            reconResult.risk_level === 'HIGH' ? 'bg-red-200/60 text-red-900' : 'bg-amber-200/60 text-amber-900'
+                          }`}>{FLAG_LABEL[f] ?? f}</span>
+                        ))}
                       </div>
-                    ))}
+                    )}
                   </div>
-                )}
 
-                {/* Ghost items */}
-                {reconResult.ghost_items.length > 0 && (
-                  <div className="rounded-xl border border-red-200/60 bg-red-50 px-3 py-3">
-                    <p className="text-[10px] font-bold text-red-700 uppercase tracking-wider mb-2">
-                      Ghost Items — billed but not in PO
-                    </p>
-                    <div className="space-y-1">
-                      {reconResult.ghost_items.map((g, i) => (
-                        <div key={i} className="flex items-center justify-between text-[12px]">
-                          <span className="text-red-800 font-medium">{g.item}</span>
-                          <span className="font-data-mono font-bold text-red-800">₹{(g.amount ?? 0).toLocaleString('en-IN')}</span>
+                  {/* Line-by-line breakdown */}
+                  {reconResult.line_matches.length > 0 && (
+                    <div className="rounded-xl border border-outline-variant/20 overflow-hidden divide-y divide-outline-variant/[0.08]">
+                      {reconResult.line_matches.map((m, i) => (
+                        <div key={i} className={`px-3 py-2.5 ${m.flags.length > 0 ? 'bg-amber-50/40' : ''}`}>
+                          <div className="flex items-start gap-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {m.matched
+                                  ? <span className="text-[9px] font-bold text-green-600">✓</span>
+                                  : <span className="text-[9px] font-bold text-red-500">✕</span>
+                                }
+                                <p className="text-[12px] font-semibold text-on-surface">{m.po_line}</p>
+                                {m.flags.map(f => (
+                                  <span key={f} className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                                    {FLAG_LABEL[f] ?? f}
+                                  </span>
+                                ))}
+                              </div>
+                              {m.flag_details && m.flags.length > 0 && (
+                                <p className="text-[11px] text-amber-700 mt-0.5 leading-snug">{m.flag_details}</p>
+                              )}
+                              {m.bill_line && m.bill_line !== m.po_line && (
+                                <p className="text-[10px] text-on-surface-variant/50 mt-0.5">Bill: "{m.bill_line}"</p>
+                              )}
+                              {!m.matched && (
+                                <p className="text-[10px] text-red-500 font-semibold mt-0.5">Not found in bill</p>
+                              )}
+                            </div>
+                            <div className="text-right shrink-0 text-[11px] space-y-0.5">
+                              <p className="font-data-mono text-on-surface-variant/60">PO ₹{(m.po_amount ?? 0).toLocaleString('en-IN')}</p>
+                              {m.bill_amount != null && (
+                                <p className={`font-data-mono font-semibold ${
+                                  m.bill_amount > m.po_amount * 1.02 ? 'text-red-600' :
+                                  m.bill_amount < m.po_amount * 0.98 ? 'text-green-600' :
+                                  'text-on-surface'
+                                }`}>Bill ₹{m.bill_amount.toLocaleString('en-IN')}</p>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       ))}
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {/* Re-run link */}
-                <button
-                  onClick={() => { setReconResult(null); setReconFile(null); setReconError(null); }}
-                  className="flex items-center gap-1 text-[11px] text-on-surface-variant hover:text-primary transition-colors"
-                >
-                  <span className="material-symbols-outlined text-[13px]">refresh</span>
-                  Run again with a different document
-                </button>
-              </div>
-            )}
+                  {/* Ghost items */}
+                  {reconResult.ghost_items.length > 0 && (
+                    <div className="rounded-xl border border-red-200/60 bg-red-50 px-3 py-3">
+                      <p className="text-[10px] font-bold text-red-700 uppercase tracking-wider mb-2">
+                        Ghost Items — billed but not in PO
+                      </p>
+                      <div className="space-y-1">
+                        {reconResult.ghost_items.map((g, i) => (
+                          <div key={i} className="flex items-center justify-between text-[12px]">
+                            <span className="text-red-800 font-medium">{g.item}</span>
+                            <span className="font-data-mono font-bold text-red-800">₹{(g.amount ?? 0).toLocaleString('en-IN')}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Re-run link */}
+                  <button
+                    onClick={() => { setReconResult(null); setReconFile(null); setReconError(null); }}
+                    className="flex items-center gap-1 text-[11px] text-on-surface-variant hover:text-primary transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[13px]">refresh</span>
+                    Run again with a different document
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
         {/* FINANCIAL */}
-        <div className="detail-reveal mb-6" style={{ animationDelay: '180ms' }}>
-          <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-3">FINANCIAL</p>
-          <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
-            {/* Credit row — vendor gave material */}
+        <div className="detail-reveal" style={{ animationDelay: '180ms' }}>
+          <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm p-5 mb-4">
+            <SectionLabel icon="account_balance_wallet" label="Financial Summary" />
+            <div className="rounded-xl border border-outline-variant/20 overflow-hidden mt-3">
+              {/* Credit row — vendor gave material */}
+              {billAmt > 0 ? (
+                <div className="flex items-center justify-between px-4 py-3 bg-[rgba(22,163,74,0.03)] border-b border-outline-variant/10">
+                  <div>
+                    <p className="text-[12px] font-medium text-[#16A34A]">Credit — By Purchase</p>
+                    <p className="text-[11px] text-on-surface-variant/60 mt-0.5">Vendor bill recorded</p>
+                  </div>
+                  <span className="font-data-mono font-semibold text-[14px] text-[#16A34A]">
+                    ₹{billAmt.toLocaleString('en-IN')}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between px-4 py-3 bg-amber-50/10 border-b border-outline-variant/10">
+                  <div>
+                    <p className="text-[12px] font-medium text-amber-700">Credit — Pending Bill</p>
+                    <p className="text-[11px] text-on-surface-variant/60 mt-0.5">
+                      No vendor bill recorded yet (Est. value: ₹{totalValue.toLocaleString('en-IN')})
+                    </p>
+                  </div>
+                  <span className="font-data-mono font-semibold text-[14px] text-on-surface-variant/40">
+                    —
+                  </span>
+                </div>
+              )}
+              {/* Debit row — payment made */}
+              {paidTotal > 0 && (
+                <div className="flex items-center justify-between px-4 py-3 border-b border-outline-variant/10">
+                  <div>
+                    <p className="text-[12px] font-medium text-on-surface">Debit — To Bank / Cash</p>
+                    <p className="text-[11px] text-on-surface-variant/60 mt-0.5">
+                      {billAmt === 0 ? 'PO Advance payment recorded' : 'Payment made'}
+                    </p>
+                  </div>
+                  <span className="font-data-mono font-semibold text-[14px] text-on-surface">
+                    ₹{paidTotal.toLocaleString('en-IN')}
+                  </span>
+                </div>
+              )}
+              {/* Balance */}
+              <div className="flex items-center justify-between px-4 py-3">
+                <p className="text-[13px] font-bold text-on-surface">Balance</p>
+                <span className={`font-data-mono font-bold text-[15px] ${balance > 0 ? 'text-[#DC2626]' : balance < 0 ? 'text-[#D97706]' : 'text-[#16A34A]'}`}>
+                  {balance === 0
+                    ? 'Nil — Settled ✓'
+                    : balance > 0
+                    ? `₹${balance.toLocaleString('en-IN')} Cr`
+                    : `₹${Math.abs(balance).toLocaleString('en-IN')} Dr`}
+                </span>
+              </div>
+            </div>
+
+            {/* Progress bar — only when bill amount is known */}
             {billAmt > 0 && (
-              <div className="flex items-center justify-between px-4 py-3 bg-[rgba(22,163,74,0.03)] border-b border-outline-variant/10">
-                <div>
-                  <p className="text-[12px] font-medium text-[#16A34A]">Credit — By Purchase</p>
-                  <p className="text-[11px] text-on-surface-variant/60 mt-0.5">Vendor bill recorded</p>
+              <div className="mt-4">
+                <div className="flex justify-between items-center mb-1.5">
+                  <span className="text-[11px] text-on-surface-variant">Payment progress</span>
+                  <span className="text-[11px] font-semibold text-on-surface">{pct.toFixed(0)}%</span>
                 </div>
-                <span className="font-data-mono font-semibold text-[14px] text-[#16A34A]">
-                  ₹{billAmt.toLocaleString('en-IN')}
-                </span>
+                <div className="h-2 rounded-full bg-surface-container overflow-hidden">
+                  <div
+                    className={`h-full rounded-full progress-bar-animate ${pct >= 100 ? 'bg-secondary' : 'bg-primary'}`}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
               </div>
             )}
-            {/* Debit row — payment made */}
-            {paidTotal > 0 && (
-              <div className="flex items-center justify-between px-4 py-3 border-b border-outline-variant/10">
-                <div>
-                  <p className="text-[12px] font-medium text-on-surface">Debit — To Bank / Cash</p>
-                  <p className="text-[11px] text-on-surface-variant/60 mt-0.5">Payment made</p>
-                </div>
-                <span className="font-data-mono font-semibold text-[14px] text-on-surface">
-                  ₹{paidTotal.toLocaleString('en-IN')}
-                </span>
-              </div>
+
+            {canManage && (
+              <button
+                onClick={() => setShowRecordPayment(true)}
+                className="mt-4 flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold bg-primary/10 text-primary rounded-lg hover:bg-primary/20 transition-colors"
+              >
+                <span className="material-symbols-outlined text-[14px]">add</span>
+                Record Payment
+              </button>
             )}
-            {/* Balance */}
-            <div className="flex items-center justify-between px-4 py-3">
-              <p className="text-[13px] font-bold text-on-surface">Balance</p>
-              <span className={`font-data-mono font-bold text-[15px] ${balance > 0 ? 'text-[#DC2626]' : balance < 0 ? 'text-[#D97706]' : 'text-[#16A34A]'}`}>
-                {balance === 0
-                  ? 'Nil — Settled ✓'
-                  : balance > 0
-                  ? `₹${balance.toLocaleString('en-IN')} Cr`
-                  : `₹${Math.abs(balance).toLocaleString('en-IN')} Dr`}
-              </span>
-            </div>
           </div>
-
-          {/* Progress bar — only when bill amount is known */}
-          {billAmt > 0 && (
-            <div className="mt-4">
-              <div className="flex justify-between items-center mb-1.5">
-                <span className="text-[11px] text-on-surface-variant">Payment progress</span>
-                <span className="text-[11px] font-semibold text-on-surface">{pct.toFixed(0)}%</span>
-              </div>
-              <div className="h-2 rounded-full bg-surface-container overflow-hidden">
-                <div
-                  className={`h-full rounded-full progress-bar-animate ${pct >= 100 ? 'bg-secondary' : 'bg-primary'}`}
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
-            </div>
-          )}
-
-          {canManage && (
-            <button
-              onClick={() => setShowRecordPayment(true)}
-              className="mt-3 flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold bg-primary/10 text-primary rounded-lg hover:bg-primary/20 transition-colors"
-            >
-              <span className="material-symbols-outlined text-[14px]">add</span>
-              Record Payment
-            </button>
-          )}
         </div>
 
         {/* PAYMENTS */}
         {activeTxns.length > 0 && (
-          <div className="detail-reveal mb-6" style={{ animationDelay: '230ms' }}>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant mb-3">PAYMENTS</p>
-            <div className="space-y-1.5">
-              {activeTxns.map((t: any) => (
-                <button
-                  key={t.id}
-                  className="w-full flex items-center gap-3 py-2 text-left hover:bg-surface-container-low/30 transition-colors rounded-lg px-1 group"
-                  onClick={() => openPeek('TRANSACTION', t.transactions?.txn_id)}
-                >
-                  {(() => { const f = formatTxn({ ...t.transactions, total_amount: t.allocated_amount }, 'po'); return (<><div className="min-w-0 flex-1"><p className="text-[12px] font-[500] text-on-surface truncate">{f.primary}</p>{f.secondary && <p className="text-[10px] text-on-surface-variant/60 truncate">{f.secondary}</p>}<p className="text-[9px] font-mono text-on-surface-variant/25 opacity-0 group-hover:opacity-100 transition-opacity">{t.transactions?.txn_id}</p></div><p className="font-data-mono font-semibold text-[12px] text-on-surface shrink-0">₹{Number(t.allocated_amount).toLocaleString('en-IN')}</p></>); })()}
-                </button>
-              ))}
+          <div className="detail-reveal" style={{ animationDelay: '230ms' }}>
+            <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm p-5 mb-4">
+              <SectionLabel icon="payments" label="Payments Made" />
+              <div className="space-y-1.5 mt-3">
+                {activeTxns.map((t: any) => (
+                  <button
+                    key={t.id}
+                    className="w-full flex items-center gap-3 py-2 text-left hover:bg-surface-container-low/30 transition-colors rounded-lg px-1 group"
+                    onClick={() => openPeek('TRANSACTION', t.transactions?.txn_id)}
+                  >
+                    {(() => {
+                      const f = formatTxn({ ...t.transactions, total_amount: t.allocated_amount }, 'po');
+                      return (
+                        <>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[12px] font-[500] text-on-surface flex items-center gap-1.5 truncate">
+                              {f.primary}
+                              {t.transactions?.category === 'PO Advance' && (
+                                <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200/50 inline-flex items-center shrink-0">
+                                  Advance
+                                </span>
+                              )}
+                            </p>
+                            {f.secondary && <p className="text-[10px] text-on-surface-variant/60 truncate">{f.secondary}</p>}
+                            <p className="text-[9px] font-mono text-on-surface-variant/25 opacity-0 group-hover:opacity-100 transition-opacity">{t.transactions?.txn_id}</p>
+                          </div>
+                          <p className="font-data-mono font-semibold text-[12px] text-on-surface shrink-0">₹{Number(t.allocated_amount).toLocaleString('en-IN')}</p>
+                        </>
+                      );
+                    })()}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}
 
         {/* Receipts section */}
-        <div className="detail-reveal mb-6" style={{ animationDelay: '280ms' }}>
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">
-              Receipts
-              {grns && grns.length > 0 && (
-                <span className="ml-2 text-[10px] font-semibold bg-surface-container text-on-surface-variant/60 px-1.5 py-0.5 rounded-md">{grns.length}</span>
+        <div className="detail-reveal" style={{ animationDelay: '280ms' }}>
+          <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm p-5 mb-4">
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <SectionLabel icon="local_shipping" label="Receipts" />
+              {canManage && (
+                <button
+                  onClick={() => setShowReceiveDrawer(true)}
+                  className="flex items-center gap-1 text-[11px] text-primary font-semibold hover:underline"
+                >
+                  <span className="material-symbols-outlined text-[13px]">local_shipping</span>
+                  Receive at site
+                </button>
               )}
-            </p>
-            {canManage && (
-              <button
-                onClick={() => setShowReceiveDrawer(true)}
-                className="flex items-center gap-1 text-[11px] text-primary font-semibold hover:underline"
-              >
-                <span className="material-symbols-outlined text-[13px]">local_shipping</span>
-                Receive at site
-              </button>
+            </div>
+
+            {(!grns || grns.length === 0) ? (
+              <p className="text-[12px] text-on-surface-variant/35 py-2">No receipts yet.</p>
+            ) : (
+              <div className="space-y-3 mt-3">
+                {grns.map((grn: any) => {
+                  const items = (grnItems ?? []).filter((i: any) => i.grn_id === grn.grn_id);
+                  const hasDamaged = items.some((i: any) => i.condition !== 'good');
+                  return (
+                    <div key={grn.grn_id} className="rounded-xl border border-outline-variant/[0.10] bg-surface-container-low/30 p-3">
+                      <div className="flex items-start justify-between gap-2 mb-1.5">
+                        <p className="font-mono text-[12px] font-bold text-on-surface">{grn.grn_id}</p>
+                        <div className="flex items-center gap-1.5">
+                          {hasDamaged && (
+                            <span className="text-[10px] font-semibold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">
+                              Discrepancy
+                            </span>
+                          )}
+                          <span className="text-[11px] text-on-surface-variant/50">{fmtDate(grn.receipt_date)}</span>
+                          <button
+                            title="Download challan"
+                            onClick={() => downloadGRNChallan({
+                              grn_id:        grn.grn_id,
+                              po_id:         po.po_id,
+                              vendor_name:   vendor?.name ?? '—',
+                              project_name:  project?.name ?? '—',
+                              receipt_date:  grn.receipt_date,
+                              dc_number:     grn.dc_number,
+                              vehicle_number: grn.vehicle_number,
+                              driver_name:   grn.driver_name,
+                              remarks:       grn.remarks,
+                              items: items.map((i: any) => ({
+                                item_name:    i.item_name,
+                                unit:         i.unit,
+                                qty_ordered:  Number(i.qty_ordered),
+                                qty_received: Number(i.qty_received),
+                                unit_rate:    i.unit_rate != null ? Number(i.unit_rate) : null,
+                                condition:    i.condition,
+                                remarks:      i.remarks ?? null,
+                              })),
+                            })}
+                            style={{
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              width: 26, height: 26, borderRadius: 8, border: 'none',
+                              background: 'rgba(11,28,48,0.06)', cursor: 'pointer',
+                              transition: 'background 0.15s',
+                            }}
+                            onMouseEnter={e => (e.currentTarget.style.background = 'rgba(11,28,48,0.12)')}
+                            onMouseLeave={e => (e.currentTarget.style.background = 'rgba(11,28,48,0.06)')}
+                          >
+                            <span className="material-symbols-outlined text-[14px] text-on-surface/50">download</span>
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-[11px] text-on-surface-variant/50">
+                        {[grn.dc_number && `DC: ${grn.dc_number}`, grn.vehicle_number].filter(Boolean).join(' · ')}
+                      </p>
+                      {items.length > 0 && (
+                        <div className="mt-2 space-y-1">
+                          {items.map((item: any) => (
+                            <div key={item.po_line_item_id ?? item.item_name} className="flex items-center justify-between text-[11px]">
+                              <span className="text-on-surface/70">{item.item_name}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-on-surface font-medium">{item.qty_received} {item.unit}</span>
+                                {item.condition !== 'good' && (
+                                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded capitalize ${
+                                    item.condition === 'damaged' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
+                                  }`}>{item.condition}</span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {grn.remarks && <p className="text-[11px] text-on-surface-variant/50 mt-1.5 italic">{grn.remarks}</p>}
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
-
-          {(!grns || grns.length === 0) ? (
-            <p className="text-[12px] text-on-surface-variant/35 py-2">No receipts yet.</p>
-          ) : (
-            <div className="space-y-3">
-              {grns.map((grn: any) => {
-                const items = (grnItems ?? []).filter((i: any) => i.grn_id === grn.grn_id);
-                const hasDamaged = items.some((i: any) => i.condition !== 'good');
-                return (
-                  <div key={grn.grn_id} className="rounded-xl border border-outline-variant/[0.10] bg-surface-container-low/30 p-3">
-                    <div className="flex items-start justify-between gap-2 mb-1.5">
-                      <p className="font-mono text-[12px] font-bold text-on-surface">{grn.grn_id}</p>
-                      <div className="flex items-center gap-1.5">
-                        {hasDamaged && (
-                          <span className="text-[10px] font-semibold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">
-                            Discrepancy
-                          </span>
-                        )}
-                        <span className="text-[11px] text-on-surface-variant/50">{fmtDate(grn.receipt_date)}</span>
-                        <button
-                          title="Download challan"
-                          onClick={() => downloadGRNChallan({
-                            grn_id:        grn.grn_id,
-                            po_id:         po.po_id,
-                            vendor_name:   vendor?.name ?? '—',
-                            project_name:  project?.name ?? '—',
-                            receipt_date:  grn.receipt_date,
-                            dc_number:     grn.dc_number,
-                            vehicle_number: grn.vehicle_number,
-                            driver_name:   grn.driver_name,
-                            remarks:       grn.remarks,
-                            items: items.map((i: any) => ({
-                              item_name:    i.item_name,
-                              unit:         i.unit,
-                              qty_ordered:  Number(i.qty_ordered),
-                              qty_received: Number(i.qty_received),
-                              unit_rate:    i.unit_rate != null ? Number(i.unit_rate) : null,
-                              condition:    i.condition,
-                              remarks:      i.remarks ?? null,
-                            })),
-                          })}
-                          style={{
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            width: 26, height: 26, borderRadius: 8, border: 'none',
-                            background: 'rgba(11,28,48,0.06)', cursor: 'pointer',
-                            transition: 'background 0.15s',
-                          }}
-                          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(11,28,48,0.12)')}
-                          onMouseLeave={e => (e.currentTarget.style.background = 'rgba(11,28,48,0.06)')}
-                        >
-                          <span className="material-symbols-outlined text-[14px] text-on-surface/50">download</span>
-                        </button>
-                      </div>
-                    </div>
-                    <p className="text-[11px] text-on-surface-variant/50">
-                      {[grn.dc_number && `DC: ${grn.dc_number}`, grn.vehicle_number].filter(Boolean).join(' · ')}
-                    </p>
-                    {items.length > 0 && (
-                      <div className="mt-2 space-y-1">
-                        {items.map((item: any) => (
-                          <div key={item.po_line_item_id ?? item.item_name} className="flex items-center justify-between text-[11px]">
-                            <span className="text-on-surface/70">{item.item_name}</span>
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono text-on-surface font-medium">{item.qty_received} {item.unit}</span>
-                              {item.condition !== 'good' && (
-                                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded capitalize ${
-                                  item.condition === 'damaged' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
-                                }`}>{item.condition}</span>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {grn.remarks && <p className="text-[11px] text-on-surface-variant/50 mt-1.5 italic">{grn.remarks}</p>}
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </div>
 
-        {/* TRAIL */}
+        {/* TRAIL / ACTIVITY LOG */}
         <div className="detail-reveal" style={{ animationDelay: '330ms' }}>
-          <button
-            onClick={() => setShowLog(v => !v)}
-            className="flex items-center gap-1.5 text-[12px] text-on-surface-variant hover:text-primary transition-colors"
-          >
-            GRN record · Status history · View log
-            <span className="material-symbols-outlined text-[14px]">{showLog ? 'expand_less' : 'chevron_right'}</span>
-          </button>
+          <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm p-5 mb-4">
+            <SectionLabel icon="history" label="Activity Log" />
+            
+            <button
+              onClick={() => setShowLog(v => !v)}
+              className="mt-3 flex items-center gap-1.5 text-[12px] text-on-surface-variant hover:text-primary transition-colors"
+            >
+              GRN record · Status history · View log
+              <span className="material-symbols-outlined text-[14px]">{showLog ? 'expand_less' : 'chevron_right'}</span>
+            </button>
 
-          {showLog && (
-            <div className="mt-3 space-y-2">
-              <div className="flex items-center gap-3">
-                <span className="w-1.5 h-1.5 rounded-full bg-on-surface-variant/30 shrink-0" />
-                <span className="text-[12px] text-on-surface-variant/60">{fmtDate(po.created_at)}</span>
-                <span className="text-[12px] text-on-surface">Draft created</span>
+            {showLog && (
+              <div className="mt-4 space-y-3 pl-1 border-l-2 border-outline-variant/10 ml-1">
+                <div className="flex items-center gap-3">
+                  <span className="w-2 h-2 rounded-full bg-on-surface-variant/30 shrink-0 -ml-[5px]" />
+                  <span className="text-[12px] text-on-surface-variant/60 w-24 shrink-0">{fmtDate(po.created_at)}</span>
+                  <span className="text-[12px] text-on-surface">Draft created</span>
+                </div>
+                {po.status !== 'Draft' && (
+                  <div className="flex items-center gap-3">
+                    <span className="w-2 h-2 rounded-full bg-blue-400 shrink-0 -ml-[5px]" />
+                    <span className="text-[12px] text-on-surface-variant/60 w-24 shrink-0">{fmtDate(po.date_issued)}</span>
+                    <span className="text-[12px] text-on-surface font-medium">Order placed</span>
+                  </div>
+                )}
+                {grns?.map((grn: any) => (
+                  <div key={grn.grn_id} className="flex items-center gap-3">
+                    <span className="w-2 h-2 rounded-full bg-teal-400 shrink-0 -ml-[5px]" />
+                    <span className="text-[12px] text-on-surface-variant/60 w-24 shrink-0">{fmtDate(grn.receipt_date)}</span>
+                    <span className="text-[12px] text-on-surface">GRN {grn.grn_id} recorded</span>
+                  </div>
+                ))}
+                {(po.vendor_bill_number || po.vendor_bill_no) && (
+                  <div className="flex items-center gap-3">
+                    <span className="w-2 h-2 rounded-full bg-purple-400 shrink-0 -ml-[5px]" />
+                    <span className="text-[12px] text-on-surface-variant/60 w-24 shrink-0">{fmtDate(po.vendor_bill_date)}</span>
+                    <span className="text-[12px] text-on-surface">Vendor bill {po.vendor_bill_number || po.vendor_bill_no} recorded{po.bill_recorded_by_name ? ` by ${po.bill_recorded_by_name}` : ''}</span>
+                  </div>
+                )}
+                {approvals?.map(ap => (
+                  <div key={ap.id} className="flex items-center gap-3">
+                    <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0 -ml-[5px]" />
+                    <span className="text-[12px] w-24 shrink-0 text-on-surface-variant/60">{fmtDate(ap.actioned_at)}</span>
+                    <span className="text-[12px] text-on-surface">{ap.action} {ap.remarks ? `· ${ap.remarks}` : ''}</span>
+                  </div>
+                ))}
               </div>
-              {po.status !== 'Draft' && (
-                <div className="flex items-center gap-3">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />
-                  <span className="text-[12px] text-on-surface-variant/60">{fmtDate(po.date_issued)}</span>
-                  <span className="text-[12px] text-on-surface">Order placed</span>
-                </div>
-              )}
-              {grns?.map((grn: any) => (
-                <div key={grn.grn_id} className="flex items-center gap-3">
-                  <span className="w-1.5 h-1.5 rounded-full bg-teal-400 shrink-0" />
-                  <span className="text-[12px] text-on-surface-variant/60">{fmtDate(grn.receipt_date)}</span>
-                  <span className="text-[12px] text-on-surface">GRN {grn.grn_id} recorded</span>
-                </div>
-              ))}
-              {(po.vendor_bill_number || po.vendor_bill_no) && (
-                <div className="flex items-center gap-3">
-                  <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
-                  <span className="text-[12px] text-on-surface-variant/60">{fmtDate(po.vendor_bill_date)}</span>
-                  <span className="text-[12px] text-on-surface">Vendor bill {po.vendor_bill_number || po.vendor_bill_no} recorded{po.bill_recorded_by_name ? ` by ${po.bill_recorded_by_name}` : ''}</span>
-                </div>
-              )}
-              {approvals?.map(ap => (
-                <div key={ap.id} className="flex items-center gap-3">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
-                  <span className="text-[12px] text-on-surface-variant/60">{fmtDate(ap.actioned_at)}</span>
-                  <span className="text-[12px] text-on-surface">{ap.action} {ap.remarks ? `· ${ap.remarks}` : ''}</span>
-                </div>
-              ))}
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
       </div>{/* end max-w container */}
@@ -1630,6 +1734,17 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
                   </p>
                 )}
               </div>
+              {(!po.vendor_bill_amount || Number(po.vendor_bill_amount) === 0) && (
+                <div className="p-3.5 rounded-xl border border-amber-200/50 bg-amber-50/50 text-amber-800 animate-fadeIn">
+                  <div className="flex items-start gap-2.5">
+                    <span className="material-symbols-outlined text-[18px] text-amber-600 mt-0.5" style={{ fontVariationSettings: "'FILL' 1" }}>warning</span>
+                    <div className="flex-1 text-[12px] leading-relaxed">
+                      <p className="font-semibold text-amber-900">No vendor bill recorded yet.</p>
+                      <p className="text-amber-800/80 mt-0.5">This transaction will be recorded as a <strong>PO Advance</strong> in the ledger and PO details.</p>
+                    </div>
+                  </div>
+                </div>
+              )}
               <div>
                 <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1.5">Amount (₹) *</label>
                 <input
@@ -1745,6 +1860,15 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Stakeholder Ledger Drawer ─────────────────────────────────── */}
+      {po && (
+        <StakeholderLedgerDrawer
+          isOpen={showStakeholderDrawer}
+          onClose={() => setShowStakeholderDrawer(false)}
+          stakeholderId={po.stakeholder_id}
+        />
       )}
     </div>
   );

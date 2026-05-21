@@ -342,7 +342,7 @@ export default function ProjectWorkOrders({ session }: { session: Session }) {
                   const isCurrentYear = issued.getFullYear() === new Date().getFullYear()
                   const dateStr = issued.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', ...(!isCurrentYear ? { year: 'numeric' } : {}) })
                   return (
-                    <div key={wo.wo_id} className={`bg-white rounded-xl border border-black/[0.06] p-3 cursor-pointer bk-row-ripple ${wo.status === 'Cancelled' ? 'opacity-50' : ''}`} onClick={() => navigate(`/work-orders/${wo.wo_id}`)}>
+                    <div key={wo.wo_id} className={`bg-white rounded-xl border border-black/[0.06] p-3 cursor-pointer bk-row-ripple ${wo.status === 'Cancelled' ? 'opacity-50' : ''}`} onClick={() => navigate(`/work-orders/${wo.wo_id}`, { state: { from: 'project', projectId, projectName: project?.name } })}>
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-[13px] font-data-mono text-on-surface-variant/60">{wo.wo_id}</span>
                         <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${STATUS_BADGE[wo.status] || 'bg-surface-container text-on-surface'}`}>{wo.status}</span>
@@ -417,7 +417,7 @@ export default function ProjectWorkOrders({ session }: { session: Session }) {
                       <tr key={wo.wo_id}
                         style={{ height: '52px', animationDelay: `${Math.min(idx, 20) * 18}ms` }}
                         className={`border-b border-black/[0.04] last:border-0 hover:bg-surface-container-low/40 transition-colors cursor-pointer bk-row-ripple wo-row-animate ${isChecked ? 'bg-primary/[0.02]' : ''} ${wo.status === 'Cancelled' ? 'opacity-50' : ''}`}
-                        onClick={() => navigate(`/work-orders/${wo.wo_id}`)}>
+                        onClick={() => navigate(`/work-orders/${wo.wo_id}`, { state: { from: 'project', projectId, projectName: project?.name } })}>
                         <td className="px-3 align-middle w-10" onClick={e => e.stopPropagation()}>
                           <input type="checkbox" checked={isChecked} onChange={() => toggleOne(wo.wo_id)} className="w-3.5 h-3.5 rounded border-outline-variant/50 text-primary focus:ring-primary cursor-pointer" />
                         </td>

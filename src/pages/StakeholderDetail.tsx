@@ -3,10 +3,17 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import type { Session } from '@supabase/supabase-js';
-import Breadcrumb from '../components/Breadcrumb';
 import { useUserProfile } from '../App';
 import { usePeek } from '../context/PeekContext';
 import { StarDisplay } from './Stakeholders';
+import { QuickTransactionSheet } from '../components/QuickTransactionSheet';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import {
+  fmtRupee, fmtDate as pdfFmtDate,
+  MARGIN, CONTENT, RIGHT, C,
+  setColor, setDraw, drawRule, sectionLabel, valueText, drawFooter, drawSignatures
+} from '../lib/pdfHelpers';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -44,15 +51,6 @@ function monthHeading(key: string) {
 
 type DateFilter = 'all' | 'month' | '3m' | 'fy';
 
-function woStatusClass(s: string) {
-  if (s === 'Active')    return 'bg-amber-100 text-amber-800';
-  if (s === 'Closed')    return 'bg-green-100 text-green-800';
-  if (s === 'Issued')    return 'bg-violet-100 text-violet-800';
-  if (s === 'Assigned')  return 'bg-blue-50 text-blue-700';
-  if (s === 'Cancelled') return 'bg-rose-50 text-rose-700';
-  return 'bg-surface-container-high text-on-surface-variant';
-}
-
 // ─── Star rating input ────────────────────────────────────────────────────────
 
 function StarRating({ value, onChange }: { value: number; onChange: (v: number) => void }) {
@@ -88,6 +86,7 @@ export default function StakeholderDetail({ session }: { session: Session }) {
   const [dateFilter, setDateFilter] = useState<DateFilter>('all');
   const [showWOs, setShowWOs] = useState(false);
   const [sortByDate, setSortByDate] = useState(false);
+  const [showTxnSheet, setShowTxnSheet] = useState(false);
   const { openPeek } = usePeek();
 
   // Rating modal
@@ -177,6 +176,139 @@ export default function StakeholderDetail({ session }: { session: Session }) {
 
   const stkType: string = stk?.type || 'Vendor'; // 'Vendor' | 'Worker' | 'Client'
   const activeTxns = (txns || []).filter((t: any) => t.status !== 'Voided');
+
+  const phones = (stk?.contact || '').split(/[,;/]/).map((s: string) => s.trim()).filter(Boolean);
+
+  const openRateModal = () => {
+    setRateOverall(stk?.rating || 0);
+    setRateDelivery(stk?.rating_delivery || 0);
+    setRateQuality(stk?.rating_quality || 0);
+    setRatePricing(stk?.rating_pricing || 0);
+    setShowRateSubcats(!!(stk?.rating_delivery || stk?.rating_quality || stk?.rating_pricing));
+    setShowRateModal(true);
+  };
+
+  const handleDownloadPDF = () => {
+    if (!stk) return;
+    const doc = new jsPDF('p', 'mm', 'a4');
+
+    // 1. Header with branding
+    let y = 16;
+    doc.setFontSize(11); doc.setFont('helvetica', 'bold'); setColor(doc, C.dark);
+    doc.text('BRIKLAY ENGINEERING', MARGIN, y);
+    doc.setFontSize(7.5); doc.setFont('helvetica', 'normal'); setColor(doc, C.muted);
+    doc.text('Kakinada, East Godavari, Andhra Pradesh — 533001', MARGIN, y + 4.5);
+    doc.text('GSTIN: XXXXXXXXXXXXXXXXX', MARGIN, y + 9);
+
+    // Right side: Document Title and date
+    doc.setFontSize(13); doc.setFont('helvetica', 'bold'); setColor(doc, C.dark);
+    doc.text('STATEMENT OF ACCOUNT', RIGHT, y, { align: 'right' });
+    doc.setFontSize(8); doc.setFont('courier', 'bold'); setColor(doc, C.accent);
+    doc.text(`UID: ${stk.stakeholder_id}`, RIGHT, y + 5, { align: 'right' });
+    doc.setFont('helvetica', 'normal'); setColor(doc, C.muted);
+    doc.text(`Generated: ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}`, RIGHT, y + 10, { align: 'right' });
+
+    y += 18;
+    setDraw(doc, C.dark);
+    doc.setLineWidth(0.5);
+    doc.line(MARGIN, y, RIGHT, y);
+    y += 8;
+
+    // 2. Party Details & Financial Summary side-by-side
+    const rx = MARGIN + CONTENT / 2;
+    sectionLabel(doc, 'PARTY DETAILS', MARGIN, y);
+    sectionLabel(doc, 'ACCOUNT SUMMARY', rx, y);
+    y += 4.5;
+
+    // Party info
+    valueText(doc, stk.name, MARGIN, y, { bold: true, size: 10 });
+    // Summary values
+    valueText(doc, `Type: ${stk.type}`, rx, y, { bold: true, size: 9 });
+    y += 5;
+
+    valueText(doc, `Trade/Cat: ${stk.category || '—'}`, MARGIN, y, { color: C.muted, size: 8.5 });
+    valueText(doc, `Total Billed/Cr: ${fmtRupee(totalCredit)}`, rx, y, { color: C.muted, size: 8.5 });
+    y += 5;
+
+    valueText(doc, `Contact: ${stk.contact || '—'}`, MARGIN, y, { color: C.muted, size: 8.5 });
+    valueText(doc, `Total Paid/Dr: ${fmtRupee(totalDebit)}`, rx, y, { color: C.muted, size: 8.5 });
+    y += 5;
+
+    if (stk.gstin) {
+      valueText(doc, `GSTIN: ${stk.gstin}`, MARGIN, y, { color: C.muted, size: 8.5 });
+    } else if (stk.bank_details) {
+      const bankVal = stk.bank_details.length > 30 ? stk.bank_details.slice(0, 30) + '...' : stk.bank_details;
+      valueText(doc, `Bank/UPI: ${bankVal}`, MARGIN, y, { color: C.muted, size: 8.5 });
+    } else {
+      valueText(doc, `GSTIN: —`, MARGIN, y, { color: C.muted, size: 8.5 });
+    }
+
+    const balText = finalBalance >= 0 ? `${fmtRupee(finalBalance)} (Payable)` : `${fmtRupee(Math.abs(finalBalance))} (Advance)`;
+    const balColor = finalBalance >= 0 ? C.accent : C.success;
+    valueText(doc, `Net Balance: ${balText}`, rx, y, { bold: true, size: 9.5, color: balColor });
+    y += 8;
+
+    drawRule(doc, y, true);
+    y += 6;
+
+    // 3. Transactions / Ledger Table
+    sectionLabel(doc, 'LEDGER TRANSACTIONS', MARGIN, y);
+    y += 6;
+
+    const tableHeaders = ['Date', 'Particulars & Details', 'Ref', 'Project', 'Debit (Dr)', 'Credit (Cr)', 'Balance'];
+    
+    const pdfRows = [...ledgerRows];
+    const tableData = pdfRows.map(row => {
+      const rowBalText = row.runningBalance >= 0 ? `${fmtRupee(row.runningBalance)} Cr` : `${fmtRupee(Math.abs(row.runningBalance))} Dr`;
+      return [
+        pdfFmtDate(row.date),
+        { content: `${row.particulars}\n${row.detail || ''}`, styles: { cellPadding: { top: 3, bottom: 3 } } },
+        row.ref_number || '—',
+        row.project || '—',
+        row.debit > 0 ? fmtRupee(row.debit) : '—',
+        row.credit > 0 ? fmtRupee(row.credit) : '—',
+        rowBalText
+      ];
+    });
+
+    autoTable(doc, {
+      startY: y,
+      head: [tableHeaders],
+      body: tableData,
+      theme: 'plain',
+      columnStyles: {
+        0: { cellWidth: 20, font: 'helvetica', fontSize: 8 },
+        1: { cellWidth: 54, font: 'helvetica', fontSize: 8 },
+        2: { cellWidth: 16, font: 'helvetica', fontSize: 8 },
+        3: { cellWidth: 28, font: 'helvetica', fontSize: 8 },
+        4: { cellWidth: 21, halign: 'right', font: 'courier', fontSize: 8 },
+        5: { cellWidth: 21, halign: 'right', font: 'courier', fontSize: 8 },
+        6: { cellWidth: 22, halign: 'right', font: 'courier', fontSize: 8, fontStyle: 'bold' }
+      },
+      headStyles: {
+        fillColor: C.bg, textColor: C.muted as any,
+        fontStyle: 'bold', fontSize: 7,
+        cellPadding: { top: 2.5, bottom: 2.5, left: 2, right: 2 },
+      },
+      bodyStyles: {
+        fontSize: 8, cellPadding: { top: 2.5, bottom: 2.5, left: 2, right: 2 },
+      },
+      alternateRowStyles: { fillColor: C.bg },
+      margin: { left: MARGIN, right: MARGIN },
+    });
+
+    let finalY = (doc as any).lastAutoTable.finalY + 12;
+
+    if (finalY > 230) {
+      doc.addPage();
+      finalY = 24;
+    }
+
+    drawSignatures(doc, finalY, 'Verified by Party', stk.name);
+    drawFooter(doc);
+
+    doc.save(`Statement_${stk.name.replace(/\s+/g, '_')}_${stk.stakeholder_id}.pdf`);
+  };
 
   // ── Build ledger rows ────────────────────────────────────────────────
 
@@ -401,569 +533,638 @@ export default function StakeholderDetail({ session }: { session: Session }) {
 
   // ─── Loading / not found ─────────────────────────────────────────────────
 
-  if (stkLoading) {
+  if (stkLoading || txnsLoading) {
     return (
-      <div className="px-margin-mobile md:px-margin-desktop pt-6 max-w-[900px] mx-auto">
-        <div className="h-8 w-48 bg-surface-container-highest rounded animate-pulse mb-4" />
-        <div className="h-64 bg-surface-container-lowest rounded-xl animate-pulse" />
+      <div className="min-h-screen bg-[#FAF9F6] flex items-center justify-center">
+        <div className="text-stone-450 font-bold uppercase tracking-widest text-[11px] animate-pulse">
+          Loading Statement…
+        </div>
       </div>
     );
   }
+
   if (!stk) {
     return (
-      <div className="px-margin-mobile md:px-margin-desktop pt-6">
-        <p className="text-error">Stakeholder not found.</p>
+      <div className="min-h-screen bg-[#FAF9F6] flex items-center justify-center">
+        <div className="text-stone-450 font-semibold text-[11px]">
+          Stakeholder not found
+        </div>
       </div>
     );
   }
 
-  const contactParts = (stk.contact || '').split(/[,;/]/).map((s: string) => s.trim()).filter(Boolean);
-  const phones = contactParts.filter((c: string) => !c.includes('@'));
-
-  const openRateModal = () => {
-    setRateOverall(stk.rating ?? 0);
-    setRateDelivery(stk.rating_delivery ?? 0);
-    setRateQuality(stk.rating_quality ?? 0);
-    setRatePricing(stk.rating_pricing ?? 0);
-    setShowRateSubcats(!!(stk.rating_delivery || stk.rating_quality || stk.rating_pricing));
-    setShowRateModal(true);
-  };
-
-  // ─── Render ──────────────────────────────────────────────────────────────
-
   return (
-    <div className="px-margin-mobile md:px-margin-desktop pt-6 pb-16 max-w-[900px] mx-auto">
-      <Breadcrumb items={[
-        { label: 'Dashboard', href: '/' },
-        { label: 'Parties', href: '/stakeholders' },
-        { label: stk.name },
-      ]} />
-
-      {/* ── ZONE 1: IDENTITY ─────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4 mt-4 mb-5">
-        <div className="flex items-center gap-3">
-          <div className={`w-11 h-11 rounded-full flex items-center justify-center text-[15px] font-bold shrink-0 ${
-            stk.type === 'Worker'
-              ? 'bg-primary-container text-on-primary'
-              : 'bg-tertiary-container text-on-tertiary-container'
-          }`}>
-            {getInitials(stk.name)}
-          </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-[20px] font-bold text-on-surface leading-tight">{stk.name}</h1>
-              <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${
-                stk.type === 'Worker'
-                  ? 'bg-secondary-container text-on-secondary-container'
-                  : 'bg-surface-container-high text-on-surface'
-              }`}>{stk.type?.toUpperCase()}</span>
-              {stk.type === 'Vendor' && stk.is_approved && (
-                <span className="flex items-center gap-1 px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-[10px] font-bold">
-                  <span className="material-symbols-outlined text-[11px]" style={{ fontVariationSettings: "'FILL' 1" }}>verified</span>
-                  Approved
-                </span>
-              )}
-            </div>
-            <p className="text-[12px] text-on-surface-variant mt-0.5">
-              {stk.category}
-              {phones[0] && <> · {phones[0]}</>}
-              <span className="font-data-mono text-[11px] opacity-50 ml-1">· {stk.stakeholder_id}</span>
-            </p>
-            {stk.type === 'Vendor' && stk.rating != null && (
-              <div className="mt-1">
-                <StarDisplay value={stk.rating} size={13} />
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 shrink-0">
-          {stk.type === 'Vendor' && canManage && (
-            <button onClick={openRateModal}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-outline-variant/40 text-[12px] font-medium text-on-surface-variant hover:bg-surface-container transition-colors">
-              <span className="material-symbols-outlined text-[15px]">star</span>
-              Rate
-            </button>
-          )}
-          <button
-            onClick={() => navigate('/ledger/new', {
-              state: { stakeholderId: stk.stakeholder_id, stakeholderName: stk.name }
-            })}
-            className="bk-btn flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold"
-          >
-            <span className="material-symbols-outlined text-[16px]">add</span>
-            Add Transaction
-          </button>
-        </div>
-      </div>
-
-      {/* ── ZONE 2: SUMMARY STRIP ────────────────────────────────────── */}
-      <div className="bg-surface-container-lowest rounded-xl border border-black/[0.06] overflow-hidden mb-6">
-        <div className="grid grid-cols-2 md:grid-cols-4 divide-y md:divide-y-0 divide-x divide-black/[0.06]">
-
-          {/* Col 1: Credit (for vendor/worker) or Debit (for client) */}
-          <div className="px-5 py-4">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant mb-1">
-              {stkType === 'Client' ? 'Total Invoiced' : 'Total Credit'}
-            </p>
-            <p className="text-[22px] font-semibold tabular-nums text-[#16A34A] leading-tight">
-              {txnsLoading ? '—' : `₹${fmt(stkType === 'Vendor' ? totalBilled : stkType === 'Worker' ? totalCredit : totalDebit)}`}
-            </p>
-            <p className="text-[11px] text-on-surface-variant mt-0.5">
-              {stkType === 'Client' ? 'invoices raised' : stkType === 'Vendor' ? 'bills recorded' : 'work certified'}
-            </p>
-          </div>
-
-          {/* Col 2: Debit (for vendor/worker) or Credit (for client) */}
-          <div className="px-5 py-4">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant mb-1">
-              {stkType === 'Client' ? 'Total Received' : 'Total Debit'}
-            </p>
-            <p className="text-[22px] font-semibold tabular-nums text-on-surface leading-tight">
-              {txnsLoading ? '—' : `₹${fmt(totalPaid)}`}
-            </p>
-            <p className="text-[11px] text-on-surface-variant mt-0.5">
-              {activeTxns.length} payments
-            </p>
-          </div>
-
-          {/* Col 3: Balance */}
-          <div className="px-5 py-4">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant mb-1">Balance</p>
-            {finalBalance > 0 ? (
-              <>
-                <p className="text-[22px] font-semibold tabular-nums text-[#DC2626] leading-tight">₹{fmt(finalBalance)}</p>
-                <p className="text-[11px] text-[#DC2626] mt-0.5 font-medium">
-                  {stkType === 'Client' ? 'Receivable Dr' : 'Payable Cr'}
-                </p>
-              </>
-            ) : finalBalance < 0 ? (
-              <>
-                <p className="text-[22px] font-semibold tabular-nums text-amber-600 leading-tight">₹{fmt(Math.abs(finalBalance))}</p>
-                <p className="text-[11px] text-amber-600 mt-0.5 font-medium">
-                  {stkType === 'Client' ? 'Advance Cr' : 'Advance Dr'}
-                </p>
-              </>
-            ) : (
-              <>
-                <p className="text-[22px] font-semibold tabular-nums text-green-600 leading-tight">Nil</p>
-                <p className="text-[11px] text-green-600 mt-0.5 font-medium">Settled ✓</p>
-              </>
-            )}
-          </div>
-
-          {/* Col 4: Orders count */}
-          <div className="px-5 py-4">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant mb-1">
-              {stkType === 'Client' ? 'Transactions' : stkType === 'Worker' ? 'Work Orders' : 'Orders'}
-            </p>
-            <p className="text-[22px] font-semibold tabular-nums text-on-surface leading-tight">
-              {stkType === 'Worker' ? (workOrders || []).length : activeTxns.length}
-            </p>
-            <p className="text-[11px] text-on-surface-variant mt-0.5">
-              {stkType === 'Vendor' ? `${(stakeholderPOs || []).length} POs with bills` : stkType === 'Worker' ? `₹${fmt(totalWOValue)} total value` : 'receipts'}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* ── ZONE 3: LEDGER ───────────────────────────────────────────── */}
-      <div className="mb-6">
-        {/* Label + date filter chips + view toggle */}
-        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant">Account Ledger</p>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {([
-              { key: 'all',   label: 'All' },
-              { key: 'month', label: 'This Month' },
-              { key: '3m',    label: 'Last 3M' },
-              { key: 'fy',    label: `FY ${fyY}–${String(fyY + 1).slice(2)}` },
-            ] as { key: DateFilter; label: string }[]).map(({ key, label }) => (
-              <button
-                key={key}
-                onClick={() => setDateFilter(key)}
-                className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors ${
-                  dateFilter === key
-                    ? 'bg-primary text-on-primary'
-                    : 'bg-surface-container text-on-surface-variant hover:bg-surface-container-high'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-            <span className="w-px h-3 bg-outline-variant/40 mx-0.5" />
-            <button
-              onClick={() => setSortByDate(v => !v)}
-              title={sortByDate ? 'Switch to group by PO' : 'Switch to sort by date'}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors ${
-                sortByDate
-                  ? 'bg-secondary-container text-on-secondary-container'
-                  : 'bg-surface-container text-on-surface-variant hover:bg-surface-container-high'
-              }`}
-            >
-              <span className="material-symbols-outlined text-[12px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                {sortByDate ? 'calendar_month' : 'folder_open'}
-              </span>
-              {sortByDate ? 'By Date' : 'By PO'}
-            </button>
-          </div>
-        </div>
-
-        {/* Table */}
-        {txnsLoading ? (
-          <div className="space-y-2">
-            {[0, 1, 2, 3].map(i => (
-              <div key={i} className="h-12 bg-surface-container-highest rounded animate-pulse" />
-            ))}
-          </div>
-        ) : displayRows.length === 0 ? (
-          <div className="bg-surface-container-lowest rounded-xl border border-outline-variant/30 p-10 text-center">
-            <span className="material-symbols-outlined text-[40px] text-on-surface-variant/30 mb-2 block">receipt_long</span>
-            <p className="text-[13px] text-on-surface-variant">No transactions for this period.</p>
-          </div>
-        ) : (
-          <div className="bg-surface-container-lowest rounded-xl border border-black/[0.06] overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-black/[0.06]">
-                    <th className="text-left pl-4 pr-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant w-[80px]">Date</th>
-                    <th className="text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Particulars</th>
-                    <th className="text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant hidden md:table-cell w-[110px]">Ref</th>
-                    <th className="text-right px-3 py-2.5 w-[110px] hidden md:table-cell">
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Debit</div>
-                      <div className="text-[9px] font-normal text-on-surface-variant/50 mt-0.5">
-                        {stkType === 'Client' ? '(Work Done)' : '(Payment Made)'}
-                      </div>
-                    </th>
-                    <th className="text-right px-3 py-2.5 w-[110px]">
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">Credit</div>
-                      <div className="text-[9px] font-normal text-on-surface-variant/50 mt-0.5">
-                        {stkType === 'Client' ? '(Payment Recd)' : '(Bill / Work)'}
-                      </div>
-                    </th>
-                    <th className="text-right pl-3 pr-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant w-[120px]">Balance</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortByDate
-                    /* ── DATE VIEW: group by month ─────────────────────── */
-                    ? Array.from(monthGroups.entries()).flatMap(([key, rows]) => {
-                        const monthDebits  = rows.reduce((s, r) => s + r.debit, 0);
-                        const monthCredits = rows.reduce((s, r) => s + r.credit, 0);
-                        return [
-                          <tr key={`mh-${key}`} className="bg-surface-container-low/60">
-                            <td colSpan={6} className="pl-4 pr-4 py-1.5">
-                              <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant/60">
-                                {monthHeading(key)}
-                              </span>
-                            </td>
-                          </tr>,
-                          ...rows.map(row => {
-                            const bal = row.runningBalance;
-                            const balLabel = bal > 0 ? `₹${fmt(bal)} Cr` : bal < 0 ? `₹${fmt(Math.abs(bal))} Dr` : 'Nil';
-                            const balColor = bal > 0 ? 'text-[#DC2626]' : bal < 0 ? 'text-[#D97706]' : 'text-[#16A34A]';
-                            const isCredit = row.entry_type === 'CREDIT';
-                            return (
-                              <tr key={row.id} onClick={() => row.txn_link && navigate(row.txn_link)}
-                                className={`border-b border-black/[0.04] transition-colors ${row.txn_link ? 'cursor-pointer hover:bg-black/[0.02]' : ''} ${isCredit ? 'bg-[rgba(22,163,74,0.02)]' : 'bg-white'}`}>
-                                <td className="pl-4 pr-3 py-3 align-top w-[80px]">
-                                  <p className={`text-[12px] font-medium whitespace-nowrap ${formatLedgerDate(row.date) === 'Today' ? 'text-[#C8603A]' : 'text-on-surface'}`}>{formatLedgerDate(row.date)}</p>
-                                </td>
-                                <td className="px-3 py-3 align-top">
-                                  <p className={`text-[13px] font-medium ${isCredit ? 'text-[#16A34A]' : 'text-on-surface'}`}>{row.particulars}</p>
-                                  {row.detail && <p className="text-[11px] text-on-surface-variant italic mt-0.5">{row.detail}</p>}
-                                  {row.project && <p className="text-[11px] text-on-surface-variant/60 mt-0.5">{row.project}</p>}
-                                  <span className={`inline-block mt-1 text-[9px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded-sm ${isCredit ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-                                    {row.source === 'VENDOR_BILL' ? 'Bill' : row.source === 'PAYMENT' ? 'Payment' : row.source === 'MILESTONE' ? 'Certified' : row.source === 'INVOICE' ? 'Invoice' : row.source === 'RECEIPT' ? 'Receipt' : row.source}
-                                  </span>
-                                </td>
-                                <td className="px-3 py-3 align-top hidden md:table-cell w-[110px]">
-                                  {row.ref_number ? (
-                                    <button type="button" onMouseDown={e => { e.stopPropagation(); openPeek(row.ref_type === 'WO' ? 'WO' : 'PO', row.ref_id!); }}
-                                      className="font-data-mono text-[11px] text-primary hover:underline text-left">{row.ref_number} ↗</button>
-                                  ) : <span className="text-on-surface-variant/40 text-[12px]">—</span>}
-                                  {row.txn_id && <p className="font-data-mono text-[10px] text-on-surface-variant/50 mt-0.5">{row.txn_id}</p>}
-                                </td>
-                                <td className="px-3 py-3 align-top text-right w-[110px] hidden md:table-cell">
-                                  {row.entry_type === 'DEBIT' ? <span className="text-[13px] font-semibold font-data-mono text-on-surface">{fmt(row.debit)}</span> : <span className="text-[12px] text-on-surface-variant/40">—</span>}
-                                </td>
-                                <td className="px-3 py-3 align-top text-right w-[110px]">
-                                  {row.entry_type === 'CREDIT' ? <span className="text-[13px] font-semibold font-data-mono text-[#16A34A]">{fmt(row.credit)}</span> : <span className="text-[12px] text-on-surface-variant/40">—</span>}
-                                </td>
-                                <td className={`pl-3 pr-4 py-3 align-top text-right w-[120px] ${balColor}`}>
-                                  <span className="text-[13px] font-semibold font-data-mono">{balLabel}</span>
-                                </td>
-                              </tr>
-                            );
-                          }),
-                          <tr key={`ms-${key}`} className="bg-[rgba(0,0,0,0.02)] border-b border-outline-variant/10">
-                            <td colSpan={3} className="py-2 pl-4 text-[11px] text-on-surface-variant/60 italic hidden md:table-cell">Month total</td>
-                            <td className="py-2 px-3 text-right text-[12px] font-data-mono font-medium hidden md:table-cell">{monthDebits > 0 ? fmt(monthDebits) : '—'}</td>
-                            <td className="py-2 px-3 text-right text-[12px] font-data-mono font-medium text-[#16A34A]">{monthCredits > 0 ? fmt(monthCredits) : '—'}</td>
-                            <td />
-                          </tr>,
-                        ];
-                      })
-
-                    /* ── PO GROUP VIEW: group by PO/WO ref ─────────────── */
-                    : orderedGroupKeys.flatMap(groupKey => {
-                        const rows = poGroupsMap.get(groupKey)!;
-                        const groupCr  = rows.reduce((s, r) => s + r.credit, 0);
-                        const groupDr  = rows.reduce((s, r) => s + r.debit, 0);
-                        const groupBal = groupCr - groupDr;
-                        const borderColor = groupBal > 0 ? '#DC2626' : groupBal < 0 ? '#D97706' : '#16A34A';
-                        const bgTint     = groupBal > 0 ? 'rgba(220,38,38,0.025)' : groupBal < 0 ? 'rgba(217,119,6,0.025)' : 'rgba(22,163,74,0.025)';
-                        const refType    = rows[0]?.ref_type;
-                        return [
-                          /* Group header row */
-                          <tr key={`gh-${groupKey}`}
-                            style={{ boxShadow: `inset 3px 0 0 ${borderColor}`, backgroundColor: 'rgba(0,0,0,0.02)' }}
-                            className="border-t border-black/[0.07]">
-                            <td colSpan={6} className="pl-4 pr-4 py-2.5">
-                              <div className="flex items-center justify-between gap-3 flex-wrap">
-                                <div className="flex items-center gap-2">
-                                  {groupKey !== 'unlinked' && (
-                                    <span className={`text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-sm ${
-                                      refType === 'WO' ? 'bg-secondary-container text-on-secondary-container' : 'bg-surface-container-high text-on-surface-variant'
-                                    }`}>{refType || 'PO'}</span>
-                                  )}
-                                  {groupKey !== 'unlinked' ? (
-                                    <button type="button"
-                                      onMouseDown={e => { e.stopPropagation(); openPeek(refType === 'WO' ? 'WO' : 'PO', groupKey); }}
-                                      className="font-data-mono text-[12px] font-semibold text-on-surface hover:text-primary hover:underline">
-                                      {groupKey} ↗
-                                    </button>
-                                  ) : (
-                                    <span className="text-[12px] text-on-surface-variant/60 italic">Other transactions</span>
-                                  )}
-                                  <span className="text-[10px] text-on-surface-variant/40">{rows.length} {rows.length === 1 ? 'entry' : 'entries'}</span>
-                                </div>
-                                <div className="flex items-center gap-4 text-[11px]">
-                                  {groupCr > 0 && (
-                                    <span className="text-on-surface-variant/60">Cr <span className="font-data-mono font-semibold text-[#16A34A]">₹{fmt(groupCr)}</span></span>
-                                  )}
-                                  {groupDr > 0 && (
-                                    <span className="text-on-surface-variant/60">Dr <span className="font-data-mono font-semibold text-on-surface">₹{fmt(groupDr)}</span></span>
-                                  )}
-                                  <span className="font-semibold font-data-mono text-[12px]" style={{ color: borderColor }}>
-                                    {groupBal > 0 ? `₹${fmt(groupBal)} due` : groupBal < 0 ? `₹${fmt(Math.abs(groupBal))} advance` : 'Settled ✓'}
-                                  </span>
-                                </div>
-                              </div>
-                            </td>
-                          </tr>,
-
-                          /* Data rows */
-                          ...rows.map(row => {
-                            const bal = row.runningBalance;
-                            const balLabel = bal > 0 ? `₹${fmt(bal)} Cr` : bal < 0 ? `₹${fmt(Math.abs(bal))} Dr` : 'Nil';
-                            const balColor = bal > 0 ? '#DC2626' : bal < 0 ? '#D97706' : '#16A34A';
-                            const isCredit = row.entry_type === 'CREDIT';
-                            return (
-                              <tr key={row.id}
-                                onClick={() => row.txn_link && navigate(row.txn_link)}
-                                style={{ boxShadow: `inset 3px 0 0 ${borderColor}`, backgroundColor: bgTint }}
-                                className={`border-b border-black/[0.04] transition-all ${row.txn_link ? 'cursor-pointer hover:brightness-95' : ''}`}>
-                                <td className="pl-4 pr-3 py-3 align-top w-[80px]">
-                                  <p className={`text-[12px] font-medium whitespace-nowrap ${formatLedgerDate(row.date) === 'Today' ? 'text-[#C8603A]' : 'text-on-surface'}`}>{formatLedgerDate(row.date)}</p>
-                                </td>
-                                <td className="px-3 py-3 align-top">
-                                  <p className={`text-[13px] font-medium ${isCredit ? 'text-[#16A34A]' : 'text-on-surface'}`}>{row.particulars}</p>
-                                  {row.detail && <p className="text-[11px] text-on-surface-variant italic mt-0.5">{row.detail}</p>}
-                                  {row.project && <p className="text-[11px] text-on-surface-variant/60 mt-0.5">{row.project}</p>}
-                                  <span className={`inline-block mt-1 text-[9px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded-sm ${isCredit ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-                                    {row.source === 'VENDOR_BILL' ? 'Bill' : row.source === 'PAYMENT' ? 'Payment' : row.source === 'MILESTONE' ? 'Certified' : row.source === 'INVOICE' ? 'Invoice' : row.source === 'RECEIPT' ? 'Receipt' : row.source}
-                                  </span>
-                                </td>
-                                <td className="px-3 py-3 align-top hidden md:table-cell w-[110px]">
-                                  {row.ref_number ? (
-                                    <button type="button" onMouseDown={e => { e.stopPropagation(); openPeek(row.ref_type === 'WO' ? 'WO' : 'PO', row.ref_id!); }}
-                                      className="font-data-mono text-[11px] text-primary hover:underline text-left">{row.ref_number} ↗</button>
-                                  ) : <span className="text-on-surface-variant/40 text-[12px]">—</span>}
-                                  {row.txn_id && <p className="font-data-mono text-[10px] text-on-surface-variant/50 mt-0.5">{row.txn_id}</p>}
-                                </td>
-                                <td className="px-3 py-3 align-top text-right w-[110px] hidden md:table-cell">
-                                  {row.entry_type === 'DEBIT' ? <span className="text-[13px] font-semibold font-data-mono text-on-surface">{fmt(row.debit)}</span> : <span className="text-[12px] text-on-surface-variant/40">—</span>}
-                                </td>
-                                <td className="px-3 py-3 align-top text-right w-[110px]">
-                                  {row.entry_type === 'CREDIT' ? <span className="text-[13px] font-semibold font-data-mono text-[#16A34A]">{fmt(row.credit)}</span> : <span className="text-[12px] text-on-surface-variant/40">—</span>}
-                                </td>
-                                <td className="pl-3 pr-4 py-3 align-top text-right w-[120px]">
-                                  <span className="text-[13px] font-semibold font-data-mono" style={{ color: balColor }}>{balLabel}</span>
-                                </td>
-                              </tr>
-                            );
-                          }),
-                        ];
-                      })
-                  }
-                </tbody>
-
-                {/* Footer totals */}
-                <tfoot>
-                  <tr className="border-t-2 border-on-surface/20 bg-[rgba(0,0,0,0.02)]">
-                    <td colSpan={3} className="py-3 pl-4 text-[12px] font-bold uppercase tracking-wide hidden md:table-cell">
-                      Total
-                    </td>
-                    <td className="py-3 px-3 text-right text-[14px] font-bold font-data-mono hidden md:table-cell">
-                      {fmt(totalDebit)}
-                    </td>
-                    <td className="py-3 px-3 text-right text-[14px] font-bold font-data-mono text-[#16A34A]">
-                      {fmt(totalCredit)}
-                    </td>
-                    <td className={`py-3 pl-3 pr-4 text-right text-[14px] font-bold font-data-mono ${finalBalance > 0 ? 'text-[#DC2626]' : finalBalance < 0 ? 'text-[#D97706]' : 'text-[#16A34A]'}`}>
-                      {finalBalance > 0 ? `${fmt(finalBalance)} Cr` : finalBalance < 0 ? `${fmt(Math.abs(finalBalance))} Dr` : 'Nil'}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-
-            {/* Balance statement below table */}
-            <div className="px-4 py-3 border-t border-black/[0.06] bg-surface-container-low/30">
-              {finalBalance > 0 ? (
-                <p className="text-[13px] font-medium text-[#DC2626]">
-                  Balance Payable: ₹{fmt(finalBalance)} Cr
-                  <span className="text-[11px] font-normal text-on-surface-variant ml-2">(payable to {stk.name})</span>
-                </p>
-              ) : finalBalance < 0 ? (
-                <p className="text-[13px] font-medium text-[#D97706]">
-                  Advance Balance: ₹{fmt(Math.abs(finalBalance))} Dr
-                  <span className="text-[11px] font-normal text-on-surface-variant ml-2">({stk.name} owes Briklay)</span>
-                </p>
-              ) : (
-                <p className="text-[13px] font-medium text-[#16A34A]">Account settled — Nil balance</p>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* ── ZONE 4: WORK ORDERS ──────────────────────────────────────── */}
-      <div className="mb-6">
+    <div className="min-h-screen bg-[#FAF9F6] px-4 sm:px-6 md:px-8 pt-6 pb-20">
+      <div className="max-w-[720px] mx-auto">
         <button
-          onClick={() => setShowWOs(v => !v)}
-          className="flex items-center gap-1.5 mb-3 text-[11px] font-bold uppercase tracking-wider text-on-surface-variant hover:text-on-surface transition-colors"
+          onClick={() => navigate(-1)}
+          className="flex items-center gap-1.5 text-[11px] font-semibold text-stone-400 hover:text-stone-700 transition-colors uppercase tracking-wider mb-6"
         >
-          <span className="material-symbols-outlined text-[16px]">
-            {showWOs ? 'expand_less' : 'expand_more'}
-          </span>
-          {(workOrders || []).length} Work Order{(workOrders || []).length !== 1 ? 's' : ''}
-          {!showWOs && (
-            <span className="normal-case font-normal tracking-normal text-on-surface-variant/50 ml-1">· View →</span>
-          )}
+          <span className="material-symbols-outlined text-[14px]">arrow_back</span>
+          Back
         </button>
 
-        {showWOs && (
-          <div className="space-y-2">
-            {wosLoading ? (
-              [0, 1, 2].map(i => (
-                <div key={i} className="h-16 bg-surface-container-highest rounded-lg animate-pulse" />
-              ))
-            ) : (workOrders || []).length === 0 ? (
-              <p className="text-[13px] text-on-surface-variant italic">No work orders found.</p>
-            ) : (
-              (workOrders || []).map((wo: any) => {
-                const paid  = woPayments[wo.wo_id] || 0;
-                const value = Number(wo.order_value || 0);
-                const pct   = value > 0 ? Math.min(100, Math.round((paid / value) * 100)) : 0;
-                const due   = Math.max(0, value - paid);
+        {/* ── ZONE 1: IDENTITY ─────────────────────────────────────────── */}
+        <div className="flex items-start justify-between gap-4 mt-6 mb-6 flex-wrap sm:flex-nowrap">
+          <div className="flex items-center gap-4">
+            {/* Premium Ultra-Elegant Monogram Avatar */}
+            <div className={`w-14 h-14 rounded-full flex items-center justify-center text-[16px] font-semibold tracking-wider shrink-0 shadow-xs border ${
+              stk.type === 'Worker'
+                ? 'bg-amber-50/70 text-amber-700 border-amber-250/30'
+                : stk.type === 'Client'
+                  ? 'bg-indigo-50/70 text-indigo-700 border-indigo-250/30'
+                  : 'bg-stone-100/80 text-stone-700 border-stone-200/50'
+            }`}>
+              {getInitials(stk.name)}
+            </div>
+
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-[22px] font-bold text-stone-800 leading-tight tracking-tight font-sans">
+                  {stk.name}
+                </h1>
+                <span className="px-2.5 py-0.5 text-[9.5px] font-semibold tracking-wide rounded-full bg-stone-50 border border-stone-200/40 text-stone-550">
+                  {stk.type}
+                </span>
+                {stk.type === 'Vendor' && stk.is_approved && (
+                  <span className="flex items-center gap-0.5 px-2 py-0.5 bg-emerald-50/80 border border-emerald-200/30 text-emerald-700 rounded-full text-[9.5px] font-semibold tracking-wide">
+                    <span className="material-symbols-outlined text-[10.5px] text-emerald-600" style={{ fontVariationSettings: "'FILL' 1" }}>verified</span>
+                    Verified
+                  </span>
+                )}
+              </div>
+              <p className="text-[12.5px] text-stone-500 mt-1 font-medium flex items-center gap-1.5 flex-wrap">
+                <span>{stk.category}</span>
+                {phones[0] && <span className="text-stone-300">·</span>}
+                {phones[0] && <span className="font-sans text-stone-600">{phones[0]}</span>}
+                <span className="text-stone-300">·</span>
+                <span className="font-sans text-[10.5px] text-stone-400 font-medium">
+                  UID: {stk.stakeholder_id.slice(0, 8)}
+                </span>
+              </p>
+              {stk.type === 'Vendor' && stk.rating != null && (
+                <div className="mt-1.5">
+                  <StarDisplay value={stk.rating} size={11} />
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {stk.type === 'Vendor' && canManage && (
+              <button onClick={openRateModal}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border border-stone-200/45 bg-white text-[12px] font-semibold text-stone-600 hover:bg-stone-50 hover:text-stone-850 hover:border-stone-350 transition-all shadow-xs">
+                <span className="material-symbols-outlined text-[14px]">star</span>
+                Rate
+              </button>
+            )}
+            <button onClick={handleDownloadPDF}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full border border-stone-200/45 bg-white text-[12px] font-semibold text-stone-600 hover:bg-stone-50 hover:text-stone-850 hover:border-stone-350 transition-all shadow-xs">
+              <span className="material-symbols-outlined text-[14px]">download</span>
+              Download Statement
+            </button>
+            <button
+              onClick={() => setShowTxnSheet(true)}
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-stone-850 text-white text-[11.5px] font-semibold tracking-wide hover:bg-stone-950 transition-all duration-150 shadow-xs"
+            >
+              <span className="material-symbols-outlined text-[13px] font-bold">add</span>
+              Record Transaction
+            </button>
+          </div>
+        </div>
+
+        {/* ── ZONE 2: EXECUTIVE STATEMENT GRID (Fintech Aesthetic) ── */}
+        <div className="bg-white rounded-2xl border border-stone-200/80 shadow-[0_2px_12px_rgba(28,25,23,0.01)] overflow-hidden shrink-0 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 divide-y md:divide-y-0 md:divide-x divide-stone-200/45">
+            {/* Col 1: Supplied / Invoiced */}
+            <div className="p-4 sm:p-5">
+              <p className="text-[10px] font-medium uppercase tracking-wider text-stone-400 mb-1.5">
+                {stkType === 'Client' ? 'Total Invoiced' : 'Total Supplied'}
+              </p>
+              <p className="text-[21px] font-semibold text-stone-800 tracking-tight leading-none font-sans">
+                ₹{fmt(stkType === 'Vendor' ? totalBilled : stkType === 'Worker' ? totalCredit : totalDebit)}
+              </p>
+              <p className="text-[10px] text-stone-450 mt-2 font-medium">
+                {stkType === 'Client' ? 'invoices raised' : stkType === 'Vendor' ? 'recorded bills' : 'certified milestones'}
+              </p>
+            </div>
+
+            {/* Col 2: Paid / Payouts */}
+            <div className="p-4 sm:p-5">
+              <p className="text-[10px] font-medium uppercase tracking-wider text-stone-400 mb-1.5">
+                {stkType === 'Client' ? 'Total Receipts' : 'Total Payouts'}
+              </p>
+              <p className="text-[21px] font-semibold text-stone-800 tracking-tight leading-none font-sans">
+                ₹{fmt(totalPaid)}
+              </p>
+              <p className="text-[10px] text-stone-450 mt-2 font-medium">
+                {activeTxns.length} payment{activeTxns.length !== 1 ? 's' : ''}
+              </p>
+            </div>
+
+            {/* Col 3: Balance status card (Fintech Elegant Badge) */}
+            <div className="p-4 sm:p-5 bg-stone-50/20 flex flex-col justify-between">
+              <div>
+                <p className="text-[10px] font-medium uppercase tracking-wider text-stone-400 mb-1.5">Net Balance</p>
+                {finalBalance > 0 ? (
+                  <p className="text-[21px] font-semibold text-stone-800 tracking-tight leading-none font-sans">
+                    ₹{fmt(finalBalance)}
+                  </p>
+                ) : finalBalance < 0 ? (
+                  <p className="text-[21px] font-semibold text-stone-800 tracking-tight leading-none font-sans">
+                    ₹{fmt(Math.abs(finalBalance))}
+                  </p>
+                ) : (
+                  <p className="text-[21px] font-semibold text-emerald-700 tracking-tight leading-none font-sans">
+                    Nil
+                  </p>
+                )}
+              </div>
+              
+              <div className="flex mt-2">
+                {finalBalance > 0 ? (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9.5px] font-semibold bg-rose-50/70 text-rose-700 border border-rose-100/50">
+                    {stkType === 'Client' ? 'Receivable' : 'Payable Cr'}
+                  </span>
+                ) : finalBalance < 0 ? (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9.5px] font-semibold bg-amber-50/70 text-amber-800 border border-amber-100/50">
+                    {stkType === 'Client' ? 'Advance Cr' : 'Advance Dr'}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9.5px] font-semibold bg-emerald-50/70 text-emerald-800 border border-emerald-100/50">
+                    Settled
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Col 4: Contract Count */}
+            <div className="p-4 sm:p-5">
+              <p className="text-[10px] font-medium uppercase tracking-wider text-stone-450 mb-1.5">
+                {stkType === 'Client' ? 'Transactions' : stkType === 'Worker' ? 'Contracts' : 'Active POs'}
+              </p>
+              <p className="text-[21px] font-semibold text-stone-800 tracking-tight leading-none font-sans">
+                {stkType === 'Worker' ? (workOrders || []).length : stkType === 'Vendor' ? (stakeholderPOs || []).length : activeTxns.length}
+              </p>
+              <p className="text-[10px] text-stone-450 mt-2 font-medium">
+                {stkType === 'Worker' ? `₹${fmt(totalWOValue)} certified` : stkType === 'Vendor' ? 'orders with bills' : 'payment records'}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* ── ZONE 3: Account Ledger Control Bar & Views ─────────────────── */}
+        <div className="mb-6">
+          <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-stone-450">Account Ledger</span>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Period Selector switch */}
+              <div className="flex bg-stone-100/80 p-0.5 rounded-full border border-stone-200/40 shadow-xs">
+                {([
+                  { key: 'all',   label: 'All' },
+                  { key: 'month', label: 'Month' },
+                  { key: '3m',    label: '3M' },
+                  { key: 'fy',    label: `FY${fyY % 100}` },
+                ] as { key: DateFilter; label: string }[]).map(({ key, label }) => (
+                  <button
+                    key={key}
+                    onClick={() => setDateFilter(key)}
+                    className={`px-3 py-1 rounded-full text-[10px] font-medium tracking-wide transition-all duration-150 ${
+                      dateFilter === key
+                        ? 'bg-white text-stone-850 shadow-xs border border-stone-200/20 font-semibold'
+                        : 'text-stone-500 hover:text-stone-750'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <span className="w-px h-3 bg-stone-200 mx-0.5" />
+
+              {/* Group toggle button */}
+              <button
+                onClick={() => setSortByDate(v => !v)}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-semibold tracking-wide transition-all duration-150 border ${
+                  sortByDate
+                    ? 'bg-white border-stone-200 text-stone-600 hover:text-stone-850 hover:bg-stone-50 hover:border-stone-300'
+                    : 'bg-stone-800 border-stone-800 text-white hover:bg-stone-900 shadow-xs'
+                }`}
+              >
+                <span className="material-symbols-outlined text-[13px] font-bold">
+                  {sortByDate ? 'calendar_month' : 'view_headline'}
+                </span>
+                {sortByDate ? 'By Date' : 'By Contract (PO/WO)'}
+              </button>
+            </div>
+          </div>
+
+          {/* Ledger Data Viewport */}
+          {txnsLoading ? (
+            <div className="space-y-3">
+              {[0, 1, 2, 3].map(i => (
+                <div key={i} className="h-16 bg-stone-100 rounded-2xl border border-stone-200/45 animate-pulse" />
+              ))}
+            </div>
+          ) : displayRows.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-[#EAE6DE]/75 p-10 text-center shadow-sm">
+              <span className="material-symbols-outlined text-[36px] text-stone-300 mb-2 block">receipt_long</span>
+              <p className="text-[12px] text-stone-500 font-semibold tracking-wide">No ledger records within this window.</p>
+            </div>
+          ) : sortByDate ? (
+            /* ── CHRONOLOGICAL DATE VIEW (World-Class Clean Table) ────── */
+            <div className="bg-white rounded-2xl border border-[#EAE6DE]/75 overflow-hidden shadow-[0_4px_24px_rgba(28,25,23,0.015)] mb-6">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-[#EAE6DE]/60 bg-stone-50/[0.45]">
+                    <th className="pl-4 pr-2 py-3 text-[9px] font-semibold uppercase tracking-wider text-stone-455 w-[70px]">Date</th>
+                    <th className="px-3 py-3 text-[9px] font-semibold uppercase tracking-wider text-stone-455">Particulars</th>
+                    <th className="px-3 py-3 text-[9px] font-semibold uppercase tracking-wider text-stone-455 hidden sm:table-cell w-[95px]">Contract</th>
+                    <th className="px-3 py-3 text-[9px] font-semibold uppercase tracking-wider text-stone-455 text-right w-[95px]">Debit (Dr)</th>
+                    <th className="px-3 py-3 text-[9px] font-semibold uppercase tracking-wider text-stone-455 text-right w-[95px]">Credit (Cr)</th>
+                    <th className="pl-3 pr-4 py-3 text-[9px] font-semibold uppercase tracking-wider text-stone-455 text-right w-[115px]">Balance</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-100">
+                  {Array.from(monthGroups.entries()).map(([monthKeyStr, rows]) => (
+                    <div key={monthKeyStr} className="contents">
+                      {/* Month Header Banner */}
+                      <tr className="bg-stone-50/[0.2] border-b border-[#EAE6DE]/40">
+                        <td colSpan={6} className="pl-4 py-2">
+                          <span className="text-[9px] font-semibold uppercase tracking-wider text-stone-400">
+                            {monthHeading(monthKeyStr)}
+                          </span>
+                        </td>
+                      </tr>
+                      {/* Rows */}
+                      {rows.map(row => {
+                        const bal = row.runningBalance;
+                        const balLabel = bal > 0 ? `₹${fmt(bal)} Cr` : bal < 0 ? `₹${fmt(Math.abs(bal))} Dr` : 'Nil';
+                        const balColor = bal > 0 ? 'text-rose-600' : bal < 0 ? 'text-amber-600' : 'text-emerald-700';
+                        const isCredit = row.entry_type === 'CREDIT';
+
+                        return (
+                          <tr
+                            key={row.id}
+                            onClick={() => row.txn_id && openPeek('TRANSACTION', row.txn_id)}
+                            className={`hover:bg-[#FAF9F6]/50 transition-colors group ${
+                              row.txn_id ? 'cursor-pointer' : ''
+                            } ${isCredit ? 'bg-emerald-50/[0.02]' : ''}`}
+                          >
+                            {/* Date Column */}
+                            <td className="pl-4 pr-2 py-3.5 align-top text-[10.5px] text-stone-450 tracking-tight whitespace-nowrap">
+                              {formatLedgerDate(row.date)}
+                            </td>
+                            
+                            {/* Particulars Column */}
+                            <td className="px-3 py-3.5 align-top">
+                              <p className={`text-[12.5px] font-medium tracking-tight ${isCredit ? 'text-emerald-800' : 'text-stone-850'}`}>
+                                {row.particulars}
+                              </p>
+                              {row.detail && <p className="text-[10px] text-stone-450 mt-0.5 font-medium leading-relaxed">{row.detail}</p>}
+                              {row.project && (
+                                <p className="text-[9.5px] text-stone-400 font-medium uppercase tracking-wider mt-1 flex items-center gap-1">
+                                  <span className="material-symbols-outlined text-[10px] text-stone-300">location_on</span>
+                                  {row.project}
+                                </p>
+                              )}
+                              <span className={`inline-flex items-center mt-2.5 text-[8.5px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full border ${
+                                isCredit 
+                                  ? 'bg-emerald-50/70 text-emerald-700 border-emerald-250/20' 
+                                  : 'bg-stone-50/70 text-stone-600 border-stone-200/40'
+                              }`}>
+                                {row.source === 'VENDOR_BILL' ? 'Bill' : row.source === 'PAYMENT' ? 'Payment' : row.source === 'MILESTONE' ? 'Certified' : row.source === 'INVOICE' ? 'Invoice' : row.source === 'RECEIPT' ? 'Receipt' : row.source}
+                              </span>
+                            </td>
+
+                            {/* Contract Reference Column */}
+                            <td className="px-3 py-3.5 align-top hidden sm:table-cell">
+                              {row.ref_number ? (
+                                <button
+                                  type="button"
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    openPeek(row.ref_type === 'WO' ? 'WO' : 'PO', row.ref_id!);
+                                  }}
+                                  className="font-sans text-[11px] font-semibold text-stone-600 hover:text-stone-900 hover:underline text-left flex items-center gap-0.5 group/link"
+                                >
+                                  {row.ref_number.slice(0, 8)}
+                                  <span className="material-symbols-outlined text-[9px] text-stone-400 group-hover/link:text-stone-900 transition-colors">arrow_outward</span>
+                                </button>
+                              ) : (
+                                <span className="text-stone-250 text-[11px]">—</span>
+                              )}
+                            </td>
+
+                            {/* Debit Column */}
+                            <td className="px-3 py-3.5 align-top text-right text-[12px] font-semibold font-sans text-stone-750 tracking-tight">
+                              {row.entry_type === 'DEBIT' ? fmt(row.debit) : <span className="text-stone-200 font-normal">—</span>}
+                            </td>
+
+                            {/* Credit Column */}
+                            <td className="px-3 py-3.5 align-top text-right text-[12px] font-semibold font-sans text-emerald-700 tracking-tight">
+                              {row.entry_type === 'CREDIT' ? fmt(row.credit) : <span className="text-stone-200 font-normal">—</span>}
+                            </td>
+
+                            {/* Running Balance Column */}
+                            <td className={`pl-3 pr-4 py-3.5 align-top text-right text-[12px] font-semibold font-sans tracking-tight ${balColor}`}>
+                              {balLabel}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            /* ── CONTRACT/PO CARD TIMELINE VIEW (Visual Masterpiece) ───── */
+            <div className="space-y-5 mb-6">
+              {orderedGroupKeys.map(groupKey => {
+                const rows = poGroupsMap.get(groupKey)!;
+                const groupCr = rows.reduce((s, r) => s + r.credit, 0);
+                const groupDr = rows.reduce((s, r) => s + r.debit, 0);
+                const groupBal = groupCr - groupDr;
+
+                const isWO = rows[0]?.ref_type === 'WO';
+                const badgeBg = isWO ? 'bg-amber-50/70 text-amber-700 border-amber-250/20' : 'bg-stone-50/70 text-stone-600 border-stone-200/40';
+
+                // Progress Calculations
+                const totalBilledVal = groupCr;
+                const totalPaidVal = groupDr;
+                const payPercent = totalBilledVal > 0 ? Math.min(100, Math.round((totalPaidVal / totalBilledVal) * 100)) : 0;
+
                 return (
                   <div
-                    key={wo.wo_id}
-                    onClick={() => navigate(`/work-orders/${wo.wo_id}`, {
-                      state: { from: 'stakeholder', stakeholderId: stk.stakeholder_id, stakeholderName: stk.name }
-                    })}
-                    className="bg-surface-container-lowest rounded-xl border border-outline-variant/30 p-4 cursor-pointer hover:border-primary/30 hover:shadow-sm transition-all"
+                    key={groupKey}
+                    className="bg-white rounded-2xl border border-[#EAE6DE]/80 shadow-[0_4px_20px_rgba(28,25,23,0.015)] overflow-hidden transition-all hover:shadow-[0_6px_28px_rgba(28,25,23,0.035)]"
                   >
-                    <div className="flex items-start justify-between gap-3 mb-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-data-mono text-[12px] text-primary font-semibold">{wo.wo_id}</span>
-                          <span className="text-[12px] text-on-surface-variant">{wo.projects?.name || '—'}</span>
-                        </div>
-                        <p className="text-[13px] text-on-surface font-medium mt-0.5 truncate">{wo.scope_of_work}</p>
+                    {/* Group Card Header */}
+                    <div className="px-5 py-4 bg-stone-50/[0.35] border-b border-[#EAE6DE]/50 flex flex-wrap items-center justify-between gap-4">
+                      <div className="flex items-center gap-2">
+                        {groupKey !== 'unlinked' ? (
+                          <>
+                            <span className={`text-[9px] font-semibold tracking-wider uppercase px-2 py-0.5 rounded-full border ${badgeBg}`}>
+                              {rows[0]?.ref_type || 'PO'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => openPeek(isWO ? 'WO' : 'PO', groupKey)}
+                              className="font-sans text-[11.5px] font-semibold text-stone-800 hover:underline flex items-center gap-1 group/peeklink"
+                            >
+                              {groupKey.slice(0, 10)}
+                              <span className="material-symbols-outlined text-[10px] text-stone-400 group-hover/peeklink:text-stone-900 transition-colors">open_in_new</span>
+                            </button>
+                          </>
+                        ) : (
+                          <span className="text-[11.5px] font-semibold text-stone-400 uppercase tracking-wider">Unassociated Ledger Entries</span>
+                        )}
+                        <span className="text-[10px] text-stone-400 font-medium">({rows.length} {rows.length === 1 ? 'entry' : 'entries'})</span>
                       </div>
-                      <span className={`shrink-0 px-2 py-0.5 rounded text-[10px] font-bold ${woStatusClass(wo.status)}`}>
-                        {wo.status}
-                      </span>
+
+                      <div className="flex items-center gap-4 text-[10.5px] font-medium">
+                        {groupCr > 0 && (
+                          <span className="text-stone-450">Billed <span className="font-sans font-semibold text-emerald-700">₹{fmt(groupCr)}</span></span>
+                        )}
+                        {groupDr > 0 && (
+                          <span className="text-stone-450">Paid <span className="font-sans font-semibold text-stone-850">₹{fmt(groupDr)}</span></span>
+                        )}
+                        <span className={`font-semibold font-sans text-[10.5px] px-2.5 py-0.5 rounded-full border ${
+                          groupBal > 0 
+                            ? 'bg-rose-50/60 text-rose-700 border-rose-200/25' 
+                            : groupBal < 0 
+                              ? 'bg-amber-50/60 text-amber-800 border-amber-200/25' 
+                              : 'bg-emerald-50/60 text-emerald-750 border-emerald-200/25'
+                        }`}>
+                          {groupBal > 0 ? `₹${fmt(groupBal)} due` : groupBal < 0 ? `₹${fmt(Math.abs(groupBal))} adv` : 'Settled ✓'}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2 text-[11px] text-on-surface-variant mb-2 flex-wrap">
-                      <span>₹{fmt(value)} value</span>
-                      <span>·</span>
-                      <span>₹{fmt(paid)} paid</span>
-                      {due > 0 && (
-                        <><span>·</span><span className="text-[#DC2626] font-medium">₹{fmt(due)} due</span></>
+
+                    {/* Dynamic Payment Progress Segment */}
+                    {totalBilledVal > 0 && (
+                      <div className="px-5 pb-3.5 pt-2 bg-stone-50/[0.2] border-b border-[#EAE6DE]/40">
+                        <div className="flex items-center justify-between text-[9.5px] font-semibold text-stone-400 mb-1.5 uppercase tracking-wider">
+                          <span>Disbursement Progress</span>
+                          <span className="font-sans font-medium text-stone-550">{payPercent}% Paid</span>
+                        </div>
+                        <div className="w-full h-1.5 bg-stone-150 rounded-full overflow-hidden flex shadow-inner">
+                          <div className="bg-gradient-to-r from-emerald-600 to-emerald-500 rounded-full shadow-[0_0_4px_rgba(16,185,129,0.2)]" style={{ width: `${payPercent}%` }} />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Group Timeline Rows with connectors */}
+                    <div className="divide-y divide-stone-100 relative">
+                      {/* Vertical Hairline Connector Line */}
+                      {rows.length > 1 && (
+                        <div className="absolute left-[21px] top-[24px] bottom-[24px] w-[1.5px] bg-stone-200/55" />
                       )}
+
+                      {rows.map(row => {
+                        const isCredit = row.entry_type === 'CREDIT';
+                        return (
+                          <div
+                            key={row.id}
+                            onClick={() => row.txn_id && openPeek('TRANSACTION', row.txn_id)}
+                            className={`pl-12 pr-5 py-4 flex items-start justify-between gap-4 transition-colors relative ${
+                              row.txn_id ? 'cursor-pointer hover:bg-[#FAF9F6]/40' : ''
+                            } ${isCredit ? 'bg-emerald-50/[0.01]' : ''}`}
+                          >
+                            {/* Custom Timeline Micro hollow Bullet */}
+                            <div className={`absolute left-[17px] top-[22px] w-2.5 h-2.5 rounded-full border-2 bg-white z-10 ${
+                              isCredit 
+                                ? 'border-emerald-500' 
+                                : 'border-stone-400'
+                            }`} />
+
+                            <div>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <p className={`text-[12.5px] font-medium tracking-tight ${isCredit ? 'text-emerald-800' : 'text-stone-850'}`}>
+                                  {row.particulars}
+                                </p>
+                                <span className="text-[10.5px] font-medium text-stone-400 tracking-tight">
+                                  ({formatLedgerDate(row.date)})
+                                </span>
+                              </div>
+                              {row.detail && <p className="text-[10px] text-stone-450 mt-0.5 leading-relaxed font-medium">{row.detail}</p>}
+                              {row.project && (
+                                <p className="text-[9.5px] text-stone-400 font-medium uppercase tracking-wider mt-1 flex items-center gap-0.5">
+                                  <span className="material-symbols-outlined text-[9.5px]">location_on</span>
+                                  {row.project}
+                                </p>
+                              )}
+                              <span className={`inline-flex items-center mt-2.5 text-[8.5px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full border ${
+                                isCredit 
+                                  ? 'bg-emerald-50/70 text-emerald-700 border-emerald-250/20' 
+                                  : 'bg-stone-50/70 text-stone-600 border-stone-200/40'
+                              }`}>
+                                {row.source === 'VENDOR_BILL' ? 'Bill' : row.source === 'PAYMENT' ? 'Payment' : row.source === 'MILESTONE' ? 'Certified' : row.source === 'INVOICE' ? 'Invoice' : row.source === 'RECEIPT' ? 'Receipt' : row.source}
+                              </span>
+                            </div>
+
+                            <div className="text-right shrink-0">
+                              <p className={`text-[12.5px] font-semibold tracking-tight ${isCredit ? 'text-emerald-750' : 'text-stone-750'}`}>
+                                {isCredit ? `+₹${fmt(row.credit)}` : `-₹${fmt(row.debit)}`}
+                              </p>
+                              <p className="text-[10.5px] text-stone-455 mt-1 font-medium">
+                                Bal: ₹{fmt(row.runningBalance)} {row.runningBalance > 0 ? 'Cr' : row.runningBalance < 0 ? 'Dr' : ''}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                    <div className="w-full h-1.5 bg-surface-container-high rounded-full overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all"
-                        style={{ width: `${pct}%`, backgroundColor: pct === 100 ? '#16a34a' : '#6366f1' }}
-                      />
-                    </div>
-                    <p className="text-[10px] text-on-surface-variant/50 mt-1">{pct}% paid</p>
                   </div>
                 );
-              })
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* ── ZONE 4: WORK ORDERS ──────────────────────────────────────── */}
+        <div className="mb-6">
+          <button
+            onClick={() => setShowWOs(v => !v)}
+            className="flex items-center gap-2 mb-4 text-[11px] font-semibold uppercase tracking-wider text-stone-455 hover:text-stone-850 transition-colors"
+          >
+            <span className="material-symbols-outlined text-[16px] text-stone-450">
+              {showWOs ? 'expand_less' : 'expand_more'}
+            </span>
+            <span>{(workOrders || []).length} Work Order{(workOrders || []).length !== 1 ? 's' : ''}</span>
+            {!showWOs && (
+              <span className="normal-case font-semibold text-stone-400 ml-1.5 hover:underline">View All →</span>
             )}
-          </div>
-        )}
+          </button>
+
+          {showWOs && (
+            <div className="space-y-4">
+              {wosLoading ? (
+                <div className="space-y-3">
+                  {[0, 1, 2].map(i => (
+                    <div key={i} className="h-20 bg-stone-100 rounded-2xl border border-stone-200/45 animate-pulse" />
+                  ))}
+                </div>
+              ) : (workOrders || []).length === 0 ? (
+                <div className="bg-white rounded-2xl border border-[#EAE6DE]/75 p-8 text-center text-stone-500 font-medium">
+                  No work orders registered for this stakeholder.
+                </div>
+              ) : (
+                (workOrders || []).map((wo: any) => {
+                  const paid  = woPayments[wo.wo_id] || 0;
+                  const value = Number(wo.order_value || 0);
+                  const pct   = value > 0 ? Math.min(100, Math.round((paid / value) * 100)) : 0;
+                  const due   = Math.max(0, value - paid);
+                  return (
+                    <div
+                      key={wo.wo_id}
+                      onClick={() => navigate(`/work-orders/${wo.wo_id}`, {
+                        state: { from: 'stakeholder', stakeholderId: stk.stakeholder_id, stakeholderName: stk.name }
+                      })}
+                      className="bg-white rounded-2xl border border-stone-200/80 p-5 cursor-pointer shadow-[0_2px_12px_rgba(28,25,23,0.01)] hover:border-stone-350 hover:shadow-md transition-all duration-200"
+                    >
+                      <div className="flex items-start justify-between gap-3 mb-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-sans text-[11px] font-semibold text-stone-700 bg-stone-50 border border-stone-200/40 px-2 py-0.5 rounded-md">{wo.wo_id}</span>
+                            <span className="text-[12px] text-stone-500 font-medium">{wo.projects?.name || '—'}</span>
+                          </div>
+                          <p className="text-[13.5px] text-stone-850 font-medium mt-1 truncate">{wo.scope_of_work}</p>
+                        </div>
+                        <span className={`shrink-0 px-2.5 py-0.5 rounded-full text-[9.5px] font-semibold tracking-wide border ${
+                          wo.status === 'Closed'
+                            ? 'bg-emerald-50/70 text-emerald-700 border-emerald-250/20'
+                            : wo.status === 'Active'
+                              ? 'bg-amber-50/70 text-amber-800 border-amber-250/20'
+                              : 'bg-stone-50/70 text-stone-600 border-stone-200/40'
+                        }`}>
+                          {wo.status}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2 text-[10.5px] font-medium text-stone-455 mb-3 flex-wrap">
+                        <span>Val: <span className="text-stone-850">₹{fmt(value)}</span></span>
+                        <span className="text-stone-300">·</span>
+                        <span>Paid: <span className="text-stone-850">₹{fmt(paid)}</span></span>
+                        {due > 0 && (
+                          <><span className="text-stone-300">·</span><span>Due: <span className="text-rose-600 font-semibold">₹{fmt(due)}</span></span></>
+                        )}
+                      </div>
+
+                      <div className="w-full h-1.5 bg-stone-100 border border-stone-200/20 rounded-full overflow-hidden flex shadow-xs">
+                        <div
+                          className={`h-full rounded-full transition-all bg-gradient-to-r ${
+                            pct === 100 
+                              ? 'from-emerald-500 to-teal-400' 
+                              : 'from-amber-400 to-amber-500'
+                          }`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <p className="text-[10.5px] font-medium text-stone-455 mt-1.5">{pct}% paid</p>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* ── RATING MODAL ─────────────────────────────────────────────── */}
+      {/* ── RATING MODAL (Premium Modern Style) ──────────────────────── */}
       {showRateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/30 backdrop-blur-[4px]"
           onClick={() => setShowRateModal(false)}>
-          <div className="bg-surface-container-lowest rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4"
+          <div className="bg-white rounded-[24px] border border-stone-200/60 shadow-xl p-6 w-full max-w-sm mx-4 transition-all"
             onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-5">
-              <h3 className="text-headline-sm font-bold">Rate {stk.name}</h3>
+            <div className="flex items-center justify-between mb-5 pb-3 border-b border-stone-100">
+              <h3 className="text-[15px] font-semibold text-stone-800 tracking-tight">Rate Vendor</h3>
               <button onClick={() => setShowRateModal(false)}
-                className="p-1.5 hover:bg-surface-container rounded-lg transition-colors">
-                <span className="material-symbols-outlined text-[20px]">close</span>
+                className="w-7 h-7 rounded-full border border-stone-200/80 flex items-center justify-center text-stone-400 hover:text-stone-700 hover:bg-stone-50 hover:border-stone-300 transition-all shrink-0">
+                <span className="material-symbols-outlined text-[15px]">close</span>
               </button>
             </div>
 
             <div className="space-y-4">
               <div>
-                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wide mb-2 block">
-                  Overall Rating
+                <label className="text-[11px] font-medium text-stone-500 tracking-wide mb-1.5 block">
+                  Overall Performance
                 </label>
                 <div className="flex items-center gap-3">
                   <StarRating value={rateOverall} onChange={setRateOverall} />
                   {rateOverall > 0
-                    ? <span className="text-body-sm font-semibold text-on-surface">{rateOverall}/5</span>
-                    : <span className="text-body-sm text-on-surface-variant italic">Not rated</span>}
+                    ? <span className="text-[12px] font-medium text-stone-700">{rateOverall} / 5</span>
+                    : <span className="text-[11px] text-stone-400 italic">Not rated</span>}
                 </div>
               </div>
 
               {rateOverall > 0 && (
                 <button type="button"
                   onClick={() => setShowRateSubcats(v => !v)}
-                  className="flex items-center gap-1.5 text-[12px] text-primary hover:underline">
-                  <span className="material-symbols-outlined text-[14px]">
+                  className="flex items-center gap-1 text-[11px] font-semibold text-stone-500 hover:text-stone-800 transition-colors">
+                  <span className="material-symbols-outlined text-[13px] font-bold">
                     {showRateSubcats ? 'expand_less' : 'expand_more'}
                   </span>
-                  {showRateSubcats ? 'Hide' : 'Add'} subcategory ratings
+                  {showRateSubcats ? 'Hide details' : 'Rate parameters'}
                 </button>
               )}
 
               {showRateSubcats && (
-                <div className="pl-4 border-l-2 border-outline-variant/30 space-y-3">
+                <div className="pl-3.5 border-l border-stone-200 space-y-4 pt-1">
                   {([
                     { label: 'Delivery', value: rateDelivery, onChange: setRateDelivery },
                     { label: 'Quality',  value: rateQuality,  onChange: setRateQuality  },
                     { label: 'Pricing',  value: ratePricing,  onChange: setRatePricing  },
                   ] as const).map(r => (
                     <div key={r.label}>
-                      <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wide mb-1.5 block">
+                      <label className="text-[10.5px] font-medium text-stone-500 mb-1.5 block">
                         {r.label}
                       </label>
                       <div className="flex items-center gap-3">
                         <StarRating value={r.value} onChange={r.onChange} />
-                        {r.value > 0 && <span className="text-body-sm text-on-surface-variant">{r.value}/5</span>}
+                        {r.value > 0 && <span className="text-[11px] font-medium text-stone-600">{r.value} / 5</span>}
                       </div>
                     </div>
                   ))}
@@ -971,19 +1172,31 @@ export default function StakeholderDetail({ session }: { session: Session }) {
               )}
             </div>
 
-            <div className="flex gap-3 justify-end mt-6 pt-4 border-t border-outline-variant/20">
+            <div className="flex gap-3 justify-end mt-6 pt-4 border-t border-stone-100">
               <button onClick={() => setShowRateModal(false)}
-                className="bk-btn-ghost px-4 py-2 rounded-xl text-body-sm">Cancel</button>
+                className="px-4 py-1.5 rounded-full text-[11.5px] font-medium text-stone-500 hover:text-stone-800 hover:bg-stone-50/80 transition-all">Cancel</button>
               <button
                 disabled={updateRating.isPending}
                 onClick={() => updateRating.mutate()}
-                className="bk-btn px-5 py-2 rounded-xl text-body-sm disabled:opacity-50"
+                className="px-5 py-1.5 rounded-full text-[11.5px] font-medium text-white bg-stone-850 hover:bg-stone-900 transition-all shadow-sm disabled:opacity-50"
               >
                 {updateRating.isPending ? 'Saving…' : 'Save Rating'}
               </button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Quick Transaction Sheet ─────────────────────────────────────── */}
+      {showTxnSheet && stk && (
+        <QuickTransactionSheet
+          stakeholder={{ stakeholder_id: stk.stakeholder_id, name: stk.name, type: stk.type }}
+          onClose={() => setShowTxnSheet(false)}
+          onSuccess={() => {
+            qc.invalidateQueries({ queryKey: ['stakeholder_txns', stakeholderId] });
+            qc.invalidateQueries({ queryKey: ['ledger'] });
+          }}
+        />
       )}
     </div>
   );

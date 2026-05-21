@@ -223,7 +223,11 @@ export default function NewWorkOrder({ session }: { session: Session }) {
     },
     onSuccess: (generatedId) => {
       queryClient.invalidateQueries({ queryKey: ['work_orders'] });
-      navigate(`/work-orders/${generatedId}`);
+      navigate(`/work-orders/${generatedId}`, {
+        state: initState.from === 'project'
+          ? { from: 'project', projectId: initState.projectId, projectName: initState.projectName }
+          : undefined,
+      });
     },
   });
 
@@ -432,7 +436,7 @@ Return ONLY this JSON object, no other text:
               { label: 'Dashboard', href: '/' },
               { label: 'Projects', href: '/projects' },
               { label: initState.projectName, href: `/projects/${initState.projectId}` },
-              { label: 'Work Orders', href: '/work-orders' },
+              { label: 'Work Orders', href: `/projects/${initState.projectId}/work-orders` },
               { label: 'New' },
             ]
           : [
@@ -872,7 +876,7 @@ Return ONLY this JSON object, no other text:
       <div className="fixed bottom-16 md:bottom-0 left-0 md:left-72 right-0 z-40 bg-surface/95 backdrop-blur-sm border-t border-outline-variant/20 px-margin-mobile md:px-margin-desktop py-3 flex items-center justify-between gap-4">
         <button
           type="button"
-          onClick={() => navigate('/work-orders')}
+          onClick={() => navigate(initState.from === 'project' && initState.projectId ? `/projects/${initState.projectId}/work-orders` : '/work-orders')}
           className="bk-btn-ghost border border-outline-variant/40 px-6 py-2.5 rounded-xl text-body-sm font-semibold"
         >
           Cancel

@@ -790,7 +790,7 @@ Return ONLY valid JSON (no markdown):
     onSuccess: (generatedPoId) => {
       qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
       showSnackbar(`PO ${generatedPoId} created`);
-      navigate(`/purchase-orders/${generatedPoId}`);
+      navigate(projectId ? `/projects/${projectId}/purchase-orders` : '/purchase-orders');
     },
     onError: (err: any) => {
       showSnackbar(err.message || 'Failed to save', { type: 'error' });
@@ -993,7 +993,7 @@ Return ONLY valid JSON (no markdown):
       {/* Page header */}
       <div className="flex items-center gap-3 mb-6">
         <button
-          onClick={() => navigate('/purchase-orders')}
+          onClick={() => navigate(projectId ? `/projects/${projectId}/purchase-orders` : '/purchase-orders')}
           className="p-2 rounded-xl hover:bg-surface-container-low transition-colors text-on-surface-variant"
         >
           <span className="material-symbols-outlined text-[22px]">arrow_back</span>
