@@ -66,6 +66,9 @@ import Pending from './pages/Pending';
 import CreateWorkspace from './pages/CreateWorkspace';
 import Login from './pages/Login';
 import SKUDirectory from './pages/SKUDirectory';
+import ProcurementRequests from './pages/ProcurementRequests';
+import ProcurementQuotes from './pages/ProcurementQuotes';
+import ProcurementOrders from './pages/ProcurementOrders';
 import { FloatingActionButton } from './components/FloatingActionButton';
 import { QuickActionsOverlay } from './components/QuickActionsOverlay';
 import { useLongPress } from './hooks/useLongPress';
@@ -424,6 +427,12 @@ function App() {
           <Route path="/financials" element={<PrincipalGuard session={session}><Financials /></PrincipalGuard>} />
           <Route path="/financials/pl" element={<PrincipalGuard session={session}><FinancialsPL /></PrincipalGuard>} />
           <Route path="/financials/cashflow" element={<PrincipalGuard session={session}><FinancialsCashflow /></PrincipalGuard>} />
+          {/* Procurement */}
+          <Route path="/procurement" element={<Navigate to="/procurement/requests" replace />} />
+          <Route path="/procurement/requests" element={<ProcurementRequests session={session} />} />
+          <Route path="/procurement/quotes" element={<ProcurementQuotes session={session} />} />
+          <Route path="/procurement/orders" element={<ProcurementOrders session={session} />} />
+          <Route path="/procurement/*" element={<Navigate to="/procurement/requests" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
@@ -466,13 +475,16 @@ const SHORTCUT_LETTERS: Record<string, string> = {
 };
 
 const NAV_TOOLTIPS: Record<string, { shortcut: string | null; description: string }> = {
-  '/ledger':          { shortcut: 'T', description: 'All payments made â€" workers, vendors, expenses' },
-  '/work-orders':     { shortcut: 'W', description: 'Labour contracts and milestone payments' },
-  '/purchase-orders': { shortcut: 'P', description: 'Material orders and vendor bills' },
-  '/logbook':         { shortcut: 'L', description: 'Raw entries from WhatsApp and field notes' },
-  '/stakeholders':    { shortcut: null, description: 'Workers, vendors and clients' },
-  '/dashboard':       { shortcut: null, description: 'Overview, risk flags and activity' },
-  '/financials':      { shortcut: null, description: 'Reports, ledgers and statements' },
+  '/ledger':                    { shortcut: 'T', description: 'All payments made â€" workers, vendors, expenses' },
+  '/work-orders':               { shortcut: 'W', description: 'Labour contracts and milestone payments' },
+  '/purchase-orders':           { shortcut: 'P', description: 'Material orders and vendor bills' },
+  '/logbook':                   { shortcut: 'L', description: 'Raw entries from WhatsApp and field notes' },
+  '/stakeholders':              { shortcut: null, description: 'Workers, vendors and clients' },
+  '/dashboard':                 { shortcut: null, description: 'Overview, risk flags and activity' },
+  '/financials':                { shortcut: null, description: 'Reports, ledgers and statements' },
+  '/procurement/requests':      { shortcut: null, description: 'Material needs raised by site teams. No prices yet — procurement decides whether to get quotes or order directly.' },
+  '/procurement/quotes':        { shortcut: null, description: 'Vendor responses to your RFQs. Compare rates, terms, and delivery side-by-side before committing.' },
+  '/procurement/orders':        { shortcut: null, description: 'Confirmed POs sent to vendors. Tracks commitment, delivery via GRN, and feeds invoicing.' },
 };
 
 function NavLabel({ label, href, isActive }: { label: string; href: string; isActive: boolean }) {
@@ -544,10 +556,52 @@ function SidebarContent({
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [userRowHovered, setUserRowHovered] = useState(false);
-  const [projectsExpanded, setProjectsExpanded] = useState(true);
   const [orgName, setOrgName] = useState<string>('');
   const quickAddRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
+
+  // ── New Premium Project Flyout Switcher States & Refs ──
+  const [showFlyout, setShowFlyout] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [flyoutTop, setFlyoutTop] = useState(0);
+  const selectorRef = useRef<HTMLDivElement>(null);
+  const flyoutRef = useRef<HTMLDivElement>(null);
+  const flyoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    return () => {
+      if (flyoutTimerRef.current) clearTimeout(flyoutTimerRef.current);
+    };
+  }, []);
+
+  const handleMouseEnter = () => {
+    if (flyoutTimerRef.current) clearTimeout(flyoutTimerRef.current);
+    if (selectorRef.current) {
+      const rect = selectorRef.current.getBoundingClientRect();
+      setFlyoutTop(rect.top);
+    }
+    setShowFlyout(true);
+  };
+
+  const handleMouseLeave = () => {
+    flyoutTimerRef.current = setTimeout(() => {
+      setShowFlyout(false);
+      setSearchQuery('');
+    }, 180);
+  };
+
+  useEffect(() => {
+    if (showFlyout && searchInputRef.current) {
+      const t = setTimeout(() => searchInputRef.current?.focus(), 80);
+      return () => clearTimeout(t);
+    }
+  }, [showFlyout]);
+
+  const getGradientIndex = (name: string) => {
+    if (!name) return 0;
+    return name.charCodeAt(0) % 8;
+  };
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -567,8 +621,6 @@ function SidebarContent({
       .single()
       .then(({ data }) => { if (data?.name) setOrgName(data.name); });
   }, [authOrgId]);
-
-
 
   const { data: woPendingCount = 0 } = useQuery({
     queryKey: ['nav_wo_pending'],
@@ -745,20 +797,41 @@ function SidebarContent({
         )}
       </div>
 
-      {/* â"€â"€ Nav groups â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
       <nav style={{ flex: 1, overflowY: 'auto', padding: '0 0 4px' }} className="no-scrollbar">
 
-        {/* â"€â"€ Context detection: project sub-nav vs global nav â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
+        {/* ── Context detection: project sub-nav vs global nav ── */}
         {(() => {
           const projMatch = location.pathname.match(/^\/projects\/([^/]+)/);
           const activeProjectId = projMatch?.[1];
           const isNewProject = activeProjectId === 'new';
 
+          // Helper definitions
+          const projInitials = (name: string) =>
+            name.trim().split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2) || '?';
+
+          const renderNavItem = (item: NavItem) => {
+            const Icon = item.icon;
+            const active = isActive(item.path);
+            return (
+              <NavTooltip key={item.path} href={item.path}>
+                <Link to={item.path} onClick={onNavigate} className="nav-item" data-active={active}>
+                  <Icon size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+                  <NavLabel label={item.label} href={item.path} isActive={active} />
+                  {(item.badge ?? 0) > 0 && (
+                    <span className="nav-badge-mono">{(item.badge ?? 0) > 9 ? '9+' : item.badge}</span>
+                  )}
+                </Link>
+              </NavTooltip>
+            );
+          };
+
+          // 1. If inside an active project context
           if (activeProjectId && !isNewProject) {
-            // â"€â"€ Project context nav â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
             const activeProj = sidebarProjects.find(p => p.project_id === activeProjectId);
-            const projName = activeProj?.name ?? 'â€¦';
+            const projName = activeProj?.name ?? '…';
             const base = `/projects/${activeProjectId}`;
+            const initials = projInitials(projName);
+            const gradClass = `project-monogram-glow gradient-${getGradientIndex(projName)}`;
 
             const projectNavItems = [
               { path: base,                       icon: 'grid_view',             label: 'Overview' },
@@ -773,27 +846,50 @@ function SidebarContent({
             return (
               <>
                 {/* Back link */}
-                <div style={{ padding: '10px 12px 4px' }}>
+                <div style={{ padding: '8px 12px 2px' }}>
                   <Link to="/projects" onClick={onNavigate}
-                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 8, fontSize: 12, color: 'var(--nav-text-muted)', textDecoration: 'none', transition: 'color 100ms' }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 6, fontSize: 11, color: 'var(--nav-text-muted)', textDecoration: 'none', transition: 'color 100ms' }}
                     onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.color = 'var(--nav-text-active)'}
                     onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.color = 'var(--nav-text-muted)'}>
-                    <IconChevronLeft size={13} strokeWidth={1.5} />
+                    <IconChevronLeft size={12} strokeWidth={1.5} />
                     All Projects
                   </Link>
                 </div>
 
-                {/* Project title */}
-                <div style={{ padding: '6px 20px 14px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--nav-accent)', flexShrink: 0 }} />
-                    <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--nav-text-active)', letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {projName}
-                    </p>
+                {/* Premium Project Selector Card — shows active project, hovers to switch if > 2 projects */}
+                {sidebarProjects.length <= 2 ? (
+                  <div className="project-selector-card-static">
+                    <div className={gradClass}>{initials}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--nav-text-active)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.2 }}>
+                        {projName}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--nav-text-muted)', fontWeight: 400, marginTop: 1 }}>
+                        Active Project
+                      </div>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div 
+                    ref={selectorRef}
+                    className="project-selector-card"
+                    onMouseEnter={handleMouseEnter}
+                    onMouseLeave={handleMouseLeave}
+                  >
+                    <div className={gradClass}>{initials}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--nav-text-active)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.2 }}>
+                        {projName}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--nav-text-muted)', fontWeight: 400, marginTop: 1 }}>
+                        Active Project
+                      </div>
+                    </div>
+                    <IconChevronDown size={12} strokeWidth={2} style={{ color: 'var(--nav-text-muted)', opacity: 0.6, flexShrink: 0 }} />
+                  </div>
+                )}
 
-                <div style={{ height: 1, background: 'var(--nav-border)', margin: '0 12px 6px' }} />
+                <div style={{ height: 1, background: 'var(--nav-border)', margin: '4px 12px 6px' }} />
 
                 {/* Project nav items */}
                 {projectNavItems.map(item => {
@@ -812,193 +908,79 @@ function SidebarContent({
             );
           }
 
-          // ── Global nav ────────────────────────────────────────────────────
-
-          // Deterministic project avatar color from name
-          const PROJ_PALETTE = ['#B5601A','#2A7A6E','#4A6FA8','#7B4EA0','#8C7327','#B03060'];
-          const projColor = (name: string) => PROJ_PALETTE[name.charCodeAt(0) % PROJ_PALETTE.length];
-          const projInitials = (name: string) =>
-            name.trim().split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2);
-
-          const renderNavItem = (item: NavItem) => {
-            const Icon = item.icon;
-            const active = isActive(item.path);
-            return (
-              <NavTooltip key={item.path} href={item.path}>
-                <Link to={item.path} onClick={onNavigate} className="nav-item" data-active={active}>
-                  <Icon size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
-                  <NavLabel label={item.label} href={item.path} isActive={active} />
-                  {(item.badge ?? 0) > 0 && (
-                    <span className="nav-badge-mono">{(item.badge ?? 0) > 9 ? '9+' : item.badge}</span>
-                  )}
-                </Link>
-              </NavTooltip>
-            );
-          };
-
-          const SHOW_LIMIT = 7;
-          const visibleProjects = sidebarProjects.slice(0, SHOW_LIMIT);
-          const hiddenCount = sidebarProjects.length - SHOW_LIMIT;
-
+          // 2. Global Context Nav
           return (
             <>
-              {/* ── PROJECTS section ────────────────────────────────── */}
-              <div style={{ padding: '10px 0 2px' }}>
-
-                {/* Section header row — click to collapse */}
-                <button
-                  onClick={() => setProjectsExpanded(o => !o)}
-                  style={{
-                    width: '100%', display: 'flex', alignItems: 'center', gap: 5,
-                    padding: '0 12px 0 10px', height: 26,
-                    background: 'transparent', border: 'none', cursor: 'pointer',
-                  }}
-                >
-                  <IconChevronDown
-                    size={11} strokeWidth={2.5}
-                    style={{
-                      color: 'var(--nav-text-muted)', flexShrink: 0,
-                      transition: 'transform 180ms cubic-bezier(0.4,0,0.6,1)',
-                      transform: projectsExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
-                    }}
-                  />
-                  <span style={{
-                    flex: 1, textAlign: 'left', fontSize: 10, fontWeight: 700,
-                    letterSpacing: '0.09em', textTransform: 'uppercase',
-                    color: 'var(--nav-text-muted)', userSelect: 'none',
-                  }}>
-                    Projects
-                  </span>
-                  {sidebarProjects.length > 0 && (
-                    <span style={{
-                      fontSize: 10, fontWeight: 600, lineHeight: '15px',
-                      color: 'var(--nav-text-muted)',
-                      background: 'rgba(0,0,0,0.06)',
-                      borderRadius: 10, padding: '0 5px',
-                    }}>
-                      {sidebarProjects.length}
-                    </span>
-                  )}
-                  {/* + Add new project */}
-                  <Link
-                    to="/projects/new"
-                    onClick={e => { e.stopPropagation(); onNavigate(); }}
-                    style={{
-                      width: 20, height: 20,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      borderRadius: 5, color: 'var(--nav-text-muted)',
-                      fontSize: 17, fontWeight: 300, lineHeight: 1,
-                      textDecoration: 'none', transition: 'background 80ms, color 80ms',
-                    }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(0,0,0,0.07)'; (e.currentTarget as HTMLAnchorElement).style.color = 'var(--nav-accent)'; }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.background = 'transparent'; (e.currentTarget as HTMLAnchorElement).style.color = 'var(--nav-text-muted)'; }}
+              {/* Premium Project Selector Card or list of projects directly if <= 2 projects */}
+              {sidebarProjects.length > 2 ? (
+                <>
+                  <div 
+                    ref={selectorRef}
+                    className="project-selector-card"
+                    onMouseEnter={handleMouseEnter}
+                    onMouseLeave={handleMouseLeave}
                   >
-                    +
-                  </Link>
-                </button>
+                    <div className="project-monogram-glow gradient-6">
+                      <IconBuildingEstate size={12} strokeWidth={2} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--nav-text-active)', lineHeight: 1.2 }}>
+                        Select Project...
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--nav-text-muted)', fontWeight: 400, marginTop: 1 }}>
+                        {sidebarProjects.length} active projects
+                      </div>
+                    </div>
+                    <IconChevronDown size={12} strokeWidth={2} style={{ color: 'var(--nav-text-muted)', opacity: 0.6, flexShrink: 0 }} />
+                  </div>
 
-                {/* Collapsible project list */}
-                <div style={{
-                  overflow: 'hidden',
-                  maxHeight: projectsExpanded ? 600 : 0,
-                  transition: 'max-height 220ms cubic-bezier(0.4,0,0.6,1)',
-                }}>
-                  {sidebarProjects.length === 0 ? (
-                    <Link
-                      to="/projects/new"
-                      onClick={onNavigate}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 7,
-                        padding: '5px 12px 5px 28px',
-                        fontSize: 12, color: 'var(--nav-text-muted)',
-                        textDecoration: 'none', fontStyle: 'italic',
-                        transition: 'color 80ms',
-                      }}
-                    >
-                      + Create first project
-                    </Link>
-                  ) : (
+                  <div style={{ height: 1, background: 'var(--nav-border)', margin: '4px 12px 6px' }} />
+                </>
+              ) : (
+                <>
+                  {sidebarProjects.length > 0 && (
                     <>
-                      {visibleProjects.map(proj => {
-                        const path = `/projects/${proj.project_id}`;
-                        const active = isActive(path);
-                        const color = projColor(proj.name);
-                        const mono = projInitials(proj.name);
+                      <p style={{
+                        padding: '8px 16px 4px',
+                        fontSize: 10, fontWeight: 700, letterSpacing: '0.09em',
+                        textTransform: 'uppercase', color: 'var(--nav-text-muted)',
+                        userSelect: 'none',
+                      }}>
+                        Projects
+                      </p>
+                      {sidebarProjects.map(proj => {
+                        const active = location.pathname.startsWith(`/projects/${proj.project_id}`);
+                        const monogramInitials = initials(proj.name);
+                        const gradClass = `project-monogram-glow gradient-${getGradientIndex(proj.name)}`;
                         return (
-                          <Link
-                            key={proj.project_id}
-                            to={path}
-                            onClick={onNavigate}
-                            className="nav-item"
-                            data-active={active}
-                          >
-                            {/* Monogram avatar */}
-                            <div style={{
-                              width: 18, height: 18, borderRadius: 4, flexShrink: 0,
-                              background: active ? color : `${color}22`,
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              fontSize: 8, fontWeight: 800, letterSpacing: '-0.02em',
-                              color: active ? '#fff' : color,
-                              transition: 'background 100ms',
-                              userSelect: 'none',
-                            }}>
-                              {mono}
+                          <Link key={proj.project_id} to={`/projects/${proj.project_id}`} onClick={onNavigate} className="nav-item" data-active={active}>
+                            <div className={gradClass} style={{ width: 18, height: 18, fontSize: 8, borderRadius: 5 }}>
+                              {monogramInitials}
                             </div>
-                            <span style={{ flex: 1, lineHeight: 1 }}>{proj.name}</span>
+                            <span style={{ flex: 1, lineHeight: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {proj.name}
+                            </span>
                           </Link>
                         );
                       })}
-                      {hiddenCount > 0 && (
-                        <Link
-                          to="/projects"
-                          onClick={onNavigate}
-                          style={{
-                            display: 'block', padding: '4px 12px 4px 36px',
-                            fontSize: 11, color: 'var(--nav-text-muted)',
-                            textDecoration: 'none', transition: 'color 80ms',
-                          }}
-                          onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.color = 'var(--nav-text-default)'}
-                          onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.color = 'var(--nav-text-muted)'}
-                        >
-                          +{hiddenCount} more
-                        </Link>
-                      )}
+                      <div style={{ height: 1, background: 'var(--nav-border)', margin: '4px 12px 6px' }} />
                     </>
                   )}
+                </>
+              )}
 
-                  {/* All Projects footer link */}
-                  <Link
-                    to="/projects"
-                    onClick={onNavigate}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 7,
-                      padding: '4px 12px 8px 28px',
-                      fontSize: 11, color: 'var(--nav-text-muted)',
-                      textDecoration: 'none', transition: 'color 80ms',
-                    }}
-                    onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.color = 'var(--nav-text-default)'}
-                    onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.color = 'var(--nav-text-muted)'}
-                  >
-                    All Projects →
-                  </Link>
-                </div>
-              </div>
-
-              {/* ── Divider ── */}
-              <div style={{ height: 1, background: 'var(--nav-border)', margin: '2px 12px 4px' }} />
-
-              {/* ── Primary nav (Txns, WOs, POs, Parties, Logbook) ── */}
+              {/* Primary nav (Txns, WOs, POs, Parties, Logbook) */}
               {navGroups[0].items.filter(i => i.show).map(renderNavItem)}
 
-              {/* ── Divider ── */}
+              {/* Divider */}
               {navGroups[1].show && navGroups[1].items.some(i => i.show) && (
                 <div style={{ height: 1, background: 'var(--nav-border)', margin: '4px 12px' }} />
               )}
 
-              {/* ── Secondary nav (Billing, Dashboard) ── */}
+              {/* Secondary nav (Billing, Dashboard) */}
               {navGroups[1].show && navGroups[1].items.filter(i => i.show).map(renderNavItem)}
 
-              {/* ── WORKSPACE section ── */}
+              {/* WORKSPACE section */}
               {(role === 'principal' || role === 'management') && (
                 <>
                   <div style={{ height: 1, background: 'var(--nav-border)', margin: '4px 12px 2px' }} />
@@ -1104,6 +1086,141 @@ function SidebarContent({
         )}
       </div>
 
+      {/* ── Glassmorphic Hover Flyout Switcher Portal ── */}
+      {showFlyout && createPortal(
+        (() => {
+          const projMatch = location.pathname.match(/^\/projects\/([^/]+)/);
+          const activeProjectId = projMatch?.[1];
+          const filteredProjects = sidebarProjects.filter(p =>
+            p.name.toLowerCase().includes(searchQuery.toLowerCase())
+          );
+
+          // Calculate ideal vertical alignment so it doesn't overflow screen bottom
+          const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 800;
+          const flyoutHeight = 330; // approximate height
+          const adjustedTop = Math.min(flyoutTop, viewportHeight - flyoutHeight - 16);
+          const finalTop = Math.max(16, adjustedTop);
+
+          return (
+            <div
+              ref={flyoutRef}
+              className="projects-hover-flyout"
+              style={{
+                top: finalTop,
+                left: 228, // 220px sidebar width + 8px spacing
+              }}
+              onMouseEnter={handleMouseEnter}
+              onMouseLeave={handleMouseLeave}
+            >
+              {/* Header */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px 8px', borderBottom: '1px solid rgba(0,0,0,0.04)' }}>
+                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--nav-text-muted)' }}>
+                  Projects
+                </span>
+                <Link
+                  to="/projects/new"
+                  onClick={() => {
+                    setShowFlyout(false);
+                    onNavigate();
+                  }}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    width: 18, height: 18, borderRadius: 4,
+                    background: 'rgba(0,0,0,0.03)', color: 'var(--nav-text-muted)',
+                    fontSize: 13, textDecoration: 'none', transition: 'all 100ms'
+                  }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(196, 91, 57, 0.08)'; (e.currentTarget as HTMLAnchorElement).style.color = 'var(--nav-accent)'; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.background = 'rgba(0,0,0,0.03)'; (e.currentTarget as HTMLAnchorElement).style.color = 'var(--nav-text-muted)'; }}
+                  title="Create new project"
+                >
+                  +
+                </Link>
+              </div>
+
+              {/* Search Bar */}
+              <div className="projects-flyout-search-container" style={{ position: 'relative' }}>
+                <span className="material-symbols-outlined" style={{ position: 'absolute', left: 20, top: '50%', transform: 'translateY(-50%)', fontSize: 15, color: 'var(--nav-text-muted)', pointerEvents: 'none' }}>
+                  search
+                </span>
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  className="projects-flyout-search"
+                  placeholder="Filter projects..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                />
+              </div>
+
+              {/* Scrollable list */}
+              <div style={{ flex: 1, overflowY: 'auto', padding: '6px 0' }} className="no-scrollbar">
+                {filteredProjects.length === 0 ? (
+                  <div style={{ padding: '20px 16px', fontSize: 11, color: 'var(--nav-text-muted)', fontStyle: 'italic', textAlign: 'center' }}>
+                    No matching projects
+                  </div>
+                ) : (
+                  filteredProjects.map(proj => {
+                    const active = proj.project_id === activeProjectId;
+                    const path = `/projects/${proj.project_id}`;
+                    const monogramInitials = initials(proj.name);
+                    const gradClass = `project-monogram-glow gradient-${getGradientIndex(proj.name)}`;
+
+                    return (
+                      <Link
+                        key={proj.project_id}
+                        to={path}
+                        onClick={() => {
+                          setShowFlyout(false);
+                          setSearchQuery('');
+                          onNavigate();
+                        }}
+                        className="projects-flyout-row"
+                        data-active={active}
+                      >
+                        <div className={gradClass}>
+                          {monogramInitials}
+                        </div>
+                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {proj.name}
+                        </span>
+                        {active && (
+                          <span className="material-symbols-outlined" style={{ fontSize: 14, color: 'var(--nav-accent)', fontWeight: 600 }}>
+                            check
+                          </span>
+                        )}
+                      </Link>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Footer */}
+              <Link
+                to="/projects"
+                onClick={() => {
+                  setShowFlyout(false);
+                  setSearchQuery('');
+                  onNavigate();
+                }}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '10px 14px', background: 'rgba(0,0,0,0.015)',
+                  borderTop: '1px solid rgba(0,0,0,0.04)', fontSize: 11,
+                  fontWeight: 500, color: 'var(--nav-text-muted)', textDecoration: 'none',
+                  transition: 'color 100ms'
+                }}
+                onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.color = 'var(--nav-text-active)'}
+                onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.color = 'var(--nav-text-muted)'}
+              >
+                <span>View All Projects</span>
+                <span style={{ fontSize: 12 }}>→</span>
+              </Link>
+            </div>
+          );
+        })(),
+        document.body
+      )}
+
     </div>
   );
 }
@@ -1174,14 +1291,18 @@ function getMobileTitle(pathname: string): string {
     '/financials/cashflow': 'Cashflow',
     '/invoices':            'Invoices',
     '/invoices/new':        'New Invoice',
-    '/attendance':          'Attendance',
-    '/cost-codes':          'Cost Codes',
+    '/attendance':               'Attendance',
+    '/cost-codes':               'Cost Codes',
+    '/procurement/requests':     'Requests',
+    '/procurement/quotes':       'Quotes',
+    '/procurement/orders':       'Orders',
   };
   if (routes[pathname]) return routes[pathname];
   const seg = pathname.split('/').filter(Boolean);
   const detailTitles: Record<string, string> = {
     'ledger': 'Transaction', 'projects': 'Project', 'work-orders': 'Work Order',
-    'purchase-orders': 'Purchase Order', 'billing': 'Bill', 'stakeholders': 'Stakeholder', 'invoices': 'Invoice',
+    'purchase-orders': 'Purchase Order', 'billing': 'Bill', 'stakeholders': 'Stakeholder',
+    'invoices': 'Invoice', 'procurement': 'Procurement',
   };
   return detailTitles[seg[0]] ?? 'Briklay';
 }
@@ -1392,9 +1513,9 @@ function MoreNavSheet({
   const globalItems = [
     { path: '/logbook',  icon: IconNotebook,              label: 'Logbook',       show: true },
     { path: '/billing',  icon: IconFileInvoice,           label: 'Client Billing', show: role !== 'supervisor' },
-    { path: '/dashboard',icon: IconLayoutDashboard,       label: 'Dashboard',     show: true },
-    { path: '/team',     icon: IconShieldLock,            label: 'Team & Access', show: role === 'principal' || role === 'management' },
-    { path: '/settings', icon: IconAdjustmentsHorizontal, label: 'Settings',      show: true },
+    { path: '/dashboard',              icon: IconLayoutDashboard,       label: 'Dashboard',     show: true },
+    { path: '/team',                   icon: IconShieldLock,            label: 'Team & Access', show: role === 'principal' || role === 'management' },
+    { path: '/settings',               icon: IconAdjustmentsHorizontal, label: 'Settings',      show: true },
   ].filter(i => i.show);
 
   const items = isInProject ? projectMoreItems.filter(i => i.show) : globalItems;

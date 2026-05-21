@@ -107,36 +107,206 @@ html, body {
   .no-scrollbar::-webkit-scrollbar { display: none; }
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-  /* ── Minimal nav item (redesign) ── */
+  /* ── Refined nav item (premium pill design) ── */
   .nav-item {
     display: flex;
     align-items: center;
-    gap: 8px;
-    height: 32px;
+    gap: 10px;
+    height: 34px;
     padding: 0 12px;
-    margin: 1px 6px;
-    border-radius: 6px;
+    margin: 2px 8px;
+    border-radius: 8px;
     font-size: 13px;
     font-weight: 400;
     color: var(--nav-text-default);
     text-decoration: none;
     cursor: pointer;
-    transition: background 80ms, color 80ms;
+    transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
     white-space: nowrap;
+    position: relative;
   }
   .nav-item:hover {
-    background: rgba(0, 0, 0, 0.04);
+    background: rgba(0, 0, 0, 0.035);
     color: var(--nav-text-active);
+    transform: translateX(1px);
   }
   .nav-item[data-active="true"] {
-    margin-left: 0;
-    border-left: 2px solid var(--nav-accent);
-    border-radius: 0 6px 6px 0;
-    padding-left: 16px; /* 6px margin equiv + 12px padding - 2px border */
-    background: rgba(200, 96, 58, 0.08);
+    background: rgba(196, 91, 57, 0.06);
     color: var(--nav-accent);
-    font-weight: 500;
+    font-weight: 600;
+    padding-left: 18px;
+    box-shadow: inset 0 0 0 1px rgba(196, 91, 57, 0.06);
   }
+  .nav-item[data-active="true"]::before {
+    content: '';
+    position: absolute;
+    left: 6px;
+    top: 8px;
+    bottom: 8px;
+    width: 3px;
+    background: var(--nav-accent);
+    border-radius: 99px;
+    animation: pill-expand 200ms ease-out both;
+  }
+
+  @keyframes pill-expand {
+    from { transform: scaleY(0.4); opacity: 0; }
+    to   { transform: scaleY(1); opacity: 1; }
+  }
+
+  /* ── Project Switcher Card ── */
+  .project-selector-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    margin: 4px 10px 10px;
+    background: #ffffff;
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    border-radius: 10px;
+    box-shadow: 
+      0 1px 2px rgba(0, 0, 0, 0.01),
+      0 4px 12px rgba(0, 0, 0, 0.02);
+    cursor: pointer;
+    text-align: left;
+    transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
+    user-select: none;
+    position: relative;
+  }
+  .project-selector-card:hover {
+    transform: translateY(-1px);
+    border-color: rgba(196, 91, 57, 0.15);
+    box-shadow: 
+      0 4px 12px rgba(196, 91, 57, 0.03),
+      0 8px 24px rgba(196, 91, 57, 0.05);
+  }
+  .project-selector-card:active {
+    transform: translateY(0);
+    background: #fafaf9;
+  }
+  .project-selector-card-static {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    margin: 4px 10px 10px;
+    background: #ffffff;
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    border-radius: 10px;
+    box-shadow: 
+      0 1px 2px rgba(0, 0, 0, 0.01),
+      0 4px 12px rgba(0, 0, 0, 0.02);
+    user-select: none;
+    position: relative;
+  }
+
+  /* ── Acrylic Glassmorphic Projects Flyout ── */
+  .projects-hover-flyout {
+    position: fixed;
+    z-index: 100;
+    width: 290px;
+    background: rgba(255, 255, 255, 0.88);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(0, 0, 0, 0.075);
+    border-radius: 14px;
+    box-shadow:
+      0 12px 36px rgba(0, 0, 0, 0.07),
+      0 4px 12px rgba(0, 0, 0, 0.03),
+      inset 0 1px 0 rgba(255, 255, 255, 0.4);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: flyout-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @keyframes flyout-in {
+    from { opacity: 0; transform: translateX(6px) scale(0.97); }
+    to   { opacity: 1; transform: translateX(0) scale(1); }
+  }
+
+  /* Flyout Search Bar */
+  .projects-flyout-search-container {
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.3);
+  }
+  .projects-flyout-search {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.03);
+    border: 1px solid rgba(0, 0, 0, 0.04);
+    border-radius: 6px;
+    padding: 5px 8px 5px 28px;
+    font-size: 12px;
+    color: var(--nav-text-active);
+    outline: none;
+    transition: all 150ms ease;
+  }
+  .projects-flyout-search:focus {
+    background: #ffffff;
+    border-color: rgba(196, 91, 57, 0.25);
+    box-shadow: 0 0 0 2px rgba(196, 91, 57, 0.08);
+  }
+
+  /* Flyout Rows */
+  .projects-flyout-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    margin: 1px 6px;
+    border-radius: 8px;
+    text-decoration: none;
+    color: var(--nav-text-default);
+    font-size: 13px;
+    font-weight: 400;
+    transition: all 120ms ease;
+    cursor: pointer;
+  }
+  .projects-flyout-row:hover {
+    background: rgba(196, 91, 57, 0.04);
+    color: var(--nav-text-active);
+    transform: translateX(2px);
+  }
+  .projects-flyout-row[data-active="true"] {
+    background: rgba(196, 91, 57, 0.07);
+    color: var(--nav-accent);
+    font-weight: 600;
+  }
+
+  /* Monogram Avatars with Glow */
+  .project-monogram-glow {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    color: #ffffff;
+    flex-shrink: 0;
+    user-select: none;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    transition: transform 150ms ease;
+  }
+  .projects-flyout-row:hover .project-monogram-glow {
+    transform: scale(1.05);
+  }
+
+  /* Preset Monogram Gradients */
+  .gradient-0 { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); } /* Rose Quartz */
+  .gradient-1 { background: linear-gradient(135deg, #5ee7df 0%, #b490ca 100%); } /* Teal Pastel */
+  .gradient-2 { background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%); color: #2d5b94 !important; } /* Sky Blue */
+  .gradient-3 { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); } /* Indigo */
+  .gradient-4 { background: linear-gradient(135deg, #f6d365 0%, #fda085 100%); } /* Amber Gold */
+  .gradient-5 { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); } /* Emerald */
+  .gradient-6 { background: linear-gradient(135deg, #FF5F6D 0%, #FFC371 100%); } /* Terracotta Sunset */
+  .gradient-7 { background: linear-gradient(135deg, #182848 0%, #4b6cb7 100%); } /* Deep Cobalt */
 
   /* Monochrome badge */
   .nav-badge-mono {
@@ -155,6 +325,7 @@ html, body {
     line-height: 1;
     flex-shrink: 0;
   }
+
 
   /* Legacy — kept for any fallback */
   .sidebar-link-v2 {
