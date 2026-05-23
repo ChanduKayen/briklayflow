@@ -59,6 +59,8 @@ interface SKUMatcherRequest {
   vendor_category?: string
   org_id?:          string
   caller?:          string
+  action?:          string
+  documentSiblingItems?: string[]
 }
 
 // ── Vendor trade → SKU category mapping ───────────────────────────────
@@ -89,6 +91,26 @@ const VENDOR_TO_SKU_CATEGORIES: Record<string, string[]> = {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
+
+async function generateVectorEmbedding(
+  openaiClient: any,
+  textToEmbed: string
+): Promise<number[]> {
+  try {
+    if (!textToEmbed) return [];
+    
+    // Ingest token configurations directly using the production hardened standard model
+    const response = await openaiClient.embeddings.create({
+      model: "text-embedding-3-small",
+      input: textToEmbed.toUpperCase().trim(),
+    });
+
+    return response.data[0].embedding;
+  } catch (err) {
+    console.error("Vector Extraction Failed inside OpenAI Pipeline:", err);
+    return [];
+  }
+}
 
 function skuDisplayName(s: SKURow): string {
   return [s.sub_category, s.dimension, s.variant, s.grade].filter(Boolean).join(' ').trim()
@@ -408,6 +430,159 @@ async function matchItems(
   return results
 }
 
+// ── Web-Inference & Sibling Ingestion (New Flow) ──────────────────────
+
+async function generateStructuredSkuWithContext(req: SKUMatcherRequest, skus: SKURow[]): Promise<any> {
+  const text = req.text || '';
+  const vendorCat = req.vendor_category || '';
+  const siblings = req.documentSiblingItems || [];
+  
+  // 1. Web-Inference Search via Serper
+  let webContext = '';
+  const serperKey = Deno.env.get('SERPER_API_KEY');
+  if (serperKey && text) {
+    try {
+      const searchRes = await fetch('https://google.serper.dev/search', {
+        method: 'POST',
+        headers: { 'X-API-KEY': serperKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q: `${text} ${vendorCat} construction material specifications india` })
+      });
+      if (searchRes.ok) {
+        const searchData = await searchRes.json();
+        const snippets = (searchData.organic || []).slice(0, 3).map((r: any) => r.snippet).join(' | ');
+        webContext = snippets ? `\nLIVE WEB INFERENCE CONTEXT:\n${snippets}` : '';
+      }
+    } catch (e) {
+      console.error('Serper search failed', e);
+    }
+  }
+
+  const siblingContextString = siblings.length > 0 ? `\nSIBLING CONTEXT:\n[${siblings.join(', ')}]` : '';
+  const fewShotFamilyContext = skus.length > 0 ? skus.slice(0, 5).map(s => `- ${s.sku_id}: ${s.sub_category} ${s.dimension || ''} ${s.variant || ''} ${s.grade || ''}`).join('\n') : '';
+
+  // 2. OpenAI Extraction using Context and Web data
+  const prompt = `You are a Principal Master Data Management (MDM) Ontological Engineer specializing in localized global supply chain procurement.
+Convert this raw, unstructured purchase order text into a highly precise, clean parametric SKU record.
+
+Item Typed: "${text}"
+VENDOR MASTER CATEGORY: ${vendorCat || 'Unknown'}${siblingContextString}${webContext}
+${fewShotFamilyContext ? `\nEXISTING DIRECTORY STYLE REFERENCE:\n${fewShotFamilyContext}` : ''}
+
+CRITICAL EXECUTION PROTOCOLS:
+
+1. TRANSLATE REGIONAL VERNACULAR & TRADE SLANG:
+   - Identify localized trade naming conventions, regional slang, or site-level shorthand (e.g., "Safeda" -> "Plumbing Putty / Joint Sealant", "Dhaga" -> "Threading Twine", "M-Seal" -> "Epoxy Compound").
+   - Translate the core item concept into its standard global commercial English industrial name *before* performing parametric splitting.
+
+2. DYNAMIC PARAMETRIC SPLITTING (THE 4-FACTOR MATRIX):
+   Map the translated item into these exact structural properties:
+   - "sub_category": The canonical product family node (e.g., "Pipe", "Ball Valve", "Plumbing Putty", "Thread Seal Tape").
+     *ANTI-POLLUTION GUARD:* If the item is a consumable, sealant, tape, or chemical, classify its sub_category precisely by its compound type. NEVER force consumables into structural hardware families (e.g., a sealant tape or putty is NEVER a "Pipe" or a "Fitting").
+   - "dimension": Size, diameter, rating, volume, or weight capacity (e.g., "2 INCH", "500 ML", "100 GRAM"). Maximize standardization based on sibling patterns.
+   - "variant": Brand, manufacturer, color, or material composition (e.g., "Supreme", "Astral", "White", "Teflon").
+   - "grade": Quality tier, pressure class, schedule rating, or execution path specification (e.g., "Class C", "Sch 40", "Heavy Duty", "1 Way").
+
+3. STRATEGIC ALIAS HARVESTING (3-4 TARGETED ELEMENTS):
+   Generate exactly 3 to 4 clean alternate search phrases. Include the original regional vernacular term, commercial trade shorthand, and common industry abbreviations.
+   - FORBIDDEN: Do not use generic noise words like "hardware", "material", "supply", "product".
+
+4. THE SHOP-FLOOR TEST:
+   Can a supplier fulfill this item instantly without asking follow-up questions? If an essential parameter (like brand or size) is absent from the input text, mark "passes_shop_floor_test" as false and list it in "missing_parameters".
+
+Return a valid JSON object matching this schema precisely without exception:
+{
+  "ai_suggested_name": "A perfectly standardized, clean, uppercase string: [Dimension/Volume] [Grade] [Sub-Category] ([Variant/Brand])",
+  "extracted_attributes": {
+    "sub_category": "The corrected English product family family string",
+    "dimension": "Size, rating, or capacity string, or null",
+    "variant": "Brand or material marker string, or null",
+    "grade": "Tier, class, or execution specification string, or null"
+  },
+  "aliases": ["Original Vernacular Term", "Alternate Trade Shorthand", "Industry Abbreviation Code"],
+  "validation_metrics": {
+    "passes_shop_floor_test": true,
+    "missing_parameters": []
+  }
+}`;
+
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4.1-mini', temperature: 0, max_tokens: 350,
+    messages: [{ role: 'user', content: prompt }]
+  });
+  
+  const raw = response.choices[0].message.content?.trim() ?? '{}';
+  const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+  let parsed: any;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (e) {
+    parsed = { ai_suggested_name: text, extracted_attributes: { sub_category: text, dimension: null, variant: null, grade: null }, aliases: [] };
+  }
+  
+  const attrs = parsed.extracted_attributes || {};
+  let suggestedName = parsed.ai_suggested_name || text;
+  const aliases = Array.isArray(parsed.aliases) ? parsed.aliases : [];
+
+  // 3. The 4-Factor Family Lookback Matrix
+  let missing = [];
+  if (!attrs.dimension) missing.push('dimension');
+  if (!attrs.variant) missing.push('variant');
+  if (!attrs.grade) missing.push('grade');
+
+  // Check aliases
+  const aliasMatch = skus.find(s => 
+    s.aliases && s.aliases.some(a => a.toLowerCase() === suggestedName.toLowerCase() || a.toLowerCase() === text.toLowerCase())
+  );
+  if (aliasMatch) {
+    suggestedName = skuDisplayName(aliasMatch);
+    // If it perfectly matches an alias, it's considered valid
+    missing = [];
+  } else {
+    // Check Dimensional Sibling
+    const hasSibling = skus.some(s => 
+      s.sub_category.toLowerCase() === (attrs.sub_category || '').toLowerCase() &&
+      (s.variant || '').toLowerCase() === (attrs.variant || '').toLowerCase() &&
+      (s.grade || '').toLowerCase() === (attrs.grade || '').toLowerCase() &&
+      s.dimension !== attrs.dimension
+    );
+    if (hasSibling && !attrs.dimension) {
+      // It belongs to a family that requires dimensions, but dimension is missing!
+      if (!missing.includes('dimension')) missing.push('dimension');
+    }
+  }
+
+  // Shop-Floor Test Rule: If any key 4-Factor property is absent, passes_shop_floor_test is false.
+  // We'll consider it failed if it lacks ANY parameter that its category usually requires, 
+  // but for a generic strict rule, if missing array is not empty, it fails.
+  const passesShopFloorTest = missing.length === 0 || !!aliasMatch;
+
+  // Generate the dense floating-point coordinate array directly from the standardized canonical name
+  const canonicalVector = await generateVectorEmbedding(openai, suggestedName);
+
+  // Update your type-safe return payload contract to pass the completed array block to the UI layer
+  return {
+    sku_id: null,
+    match_source: "ai_auto_match",
+    needs_review: true,
+    ai_suggested_name: suggestedName,
+    extracted_attributes: {
+      sub_category: parsed.extracted_attributes?.sub_category || "Unknown Items",
+      dimension:    parsed.extracted_attributes?.dimension    || null,
+      variant:      parsed.extracted_attributes?.variant      || null,
+      grade:        parsed.extracted_attributes?.grade        || null
+    },
+    aliases: Array.isArray(parsed.aliases) 
+             ? parsed.aliases.map((a: string) => String(a).toUpperCase().trim()).filter(Boolean).slice(0, 4) 
+             : [],
+    validation_metrics: {
+      passes_shop_floor_test: passesShopFloorTest,
+      missing_parameters:     passesShopFloorTest ? [] : missing
+    },
+    // SECURE HANDOFF: Pass the generated vector float array explicitly up to the client context
+    p_embedding: canonicalVector && canonicalVector.length > 0 ? canonicalVector : null
+  };
+}
+
 // ── Main handler ──────────────────────────────────────────────────────
 
 serve(async (req: Request) => {
@@ -426,6 +601,11 @@ serve(async (req: Request) => {
 
     // Fetch SKUs relevant to vendor category (or all if unknown)
     const skus = await fetchSKUs(body.vendor_category)
+
+    if (body.action === 'generateStructuredSkuWithContext') {
+      const payload = await generateStructuredSkuWithContext(body, skus)
+      return new Response(JSON.stringify(payload), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
 
     // Pass 1: Extract items from document (clean, no SKU list in context)
     const extractedItems = await extractItems(body)
