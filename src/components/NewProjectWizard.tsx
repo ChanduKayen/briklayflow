@@ -90,6 +90,7 @@ export default function NewProjectWizard({ session }: { session: Session }) {
 
   async function handleCreate() {
     if (!name.trim() || !location.trim()) return
+    if (name.trim().length < 4) { setError('Project name must be at least 4 characters'); return }
     if (projectCode.length < 2) { setError('Site code must be at least 2 characters'); return }
     setSaving(true); setError('')
     try {
@@ -236,7 +237,7 @@ export default function NewProjectWizard({ session }: { session: Session }) {
                 ref={nameRef}
                 value={name}
                 onChange={e => setName(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && name.trim() && goNext()}
+                onKeyDown={e => e.key === 'Enter' && name.trim().length >= 4 && goNext()}
                 placeholder="e.g. Sunrise Villa Phase 1"
                 style={{
                   width: '100%', height: 52, padding: '0 16px',
@@ -252,6 +253,11 @@ export default function NewProjectWizard({ session }: { session: Session }) {
               {projectId && (
                 <p style={{ marginTop: 6, fontSize: 11, color: 'rgba(0,0,0,0.35)', fontFamily: 'Geist Mono, monospace' }}>
                   ID: {projectId}
+                </p>
+              )}
+              {name.trim().length > 0 && name.trim().length < 4 && (
+                <p style={{ marginTop: 6, fontSize: 12, color: '#e53e3e' }}>
+                  Project name must be at least 4 characters
                 </p>
               )}
             </div>
@@ -323,13 +329,13 @@ export default function NewProjectWizard({ session }: { session: Session }) {
             </div>
 
             <button
-              onClick={() => name.trim() && projectCode.length >= 2 && goNext()}
-              disabled={!name.trim() || projectCode.length < 2}
+              onClick={() => name.trim().length >= 4 && projectCode.length >= 2 && goNext()}
+              disabled={name.trim().length < 4 || projectCode.length < 2}
               style={{
                 width: '100%', height: 52, borderRadius: 14,
-                background: name.trim() && projectCode.length >= 2 ? '#0b1c30' : 'rgba(0,0,0,0.06)',
-                color: name.trim() && projectCode.length >= 2 ? '#ffffff' : 'rgba(0,0,0,0.25)',
-                border: 'none', cursor: name.trim() && projectCode.length >= 2 ? 'pointer' : 'not-allowed',
+                background: name.trim().length >= 4 && projectCode.length >= 2 ? '#0b1c30' : 'rgba(0,0,0,0.06)',
+                color: name.trim().length >= 4 && projectCode.length >= 2 ? '#ffffff' : 'rgba(0,0,0,0.25)',
+                border: 'none', cursor: name.trim().length >= 4 && projectCode.length >= 2 ? 'pointer' : 'not-allowed',
                 fontSize: 15, fontWeight: 600,
                 transition: 'all 200ms',
                 letterSpacing: '-0.01em',

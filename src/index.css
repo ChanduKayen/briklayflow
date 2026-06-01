@@ -17,6 +17,10 @@
   -webkit-tap-highlight-color: transparent;
   -webkit-touch-callout: none;
 }
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
 html, body {
   overscroll-behavior: none;
   -webkit-overflow-scrolling: touch;
@@ -25,6 +29,31 @@ html, body {
 @media (max-width: 767px) {
   input, textarea, select {
     font-size: 16px !important;
+  }
+}
+
+/* ── Mobile utility primitives ── */
+.pb-safe {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+}
+.pt-safe {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 16px);
+}
+.scroll-container {
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+/* Active state for touch — replaces hover on touch devices */
+@media (hover: none) {
+  .touch-active:active {
+    transform: scale(0.97);
+    opacity: 0.85;
+    transition: transform 0.1s ease, opacity 0.1s ease;
+  }
+  .card-touch:active {
+    transform: scale(0.98);
+    transition: transform 0.1s ease;
   }
 }
 /* Main content — leave room for bottom tab bar on mobile */
@@ -1075,4 +1104,13 @@ html, body {
   .cmdbar-hint {
     bottom: calc(56px + env(safe-area-inset-bottom) + 72px);
   }
+}
+
+/* ── Inline search-progress dots (NewPurchaseOrder) ─────────────────── */
+@keyframes search-bounce {
+  0%, 100% { transform: translateY(0);   opacity: 0.5; }
+  50%      { transform: translateY(-3px); opacity: 1;   }
+}
+@media (prefers-reduced-motion: reduce) {
+  .search-dots > span { animation: none !important; opacity: 0.5 !important; transform: none !important; }
 }

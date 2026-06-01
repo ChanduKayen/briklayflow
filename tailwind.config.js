@@ -7,6 +7,9 @@ export default {
   darkMode: "class",
   theme: {
     extend: {
+      screens: {
+        xs: "375px",
+      },
       colors: {
         // Stitch Design System — Material You tokens
         "primary": "#000000",
@@ -72,6 +75,14 @@ export default {
         "stack-lg": "24px",
         "margin-mobile": "16px",
         "margin-desktop": "32px",
+        // Touch-friendly targets (WCAG)
+        "touch": "48px",
+        "touch-lg": "56px",
+        // Safe-area-inset shortcuts (mobile / notched phones)
+        "safe-t": "env(safe-area-inset-top)",
+        "safe-b": "env(safe-area-inset-bottom)",
+        "safe-l": "env(safe-area-inset-left)",
+        "safe-r": "env(safe-area-inset-right)",
       },
       borderRadius: {
         DEFAULT: "0.25rem",
@@ -96,6 +107,13 @@ export default {
         "body-sm": ["14px", { lineHeight: "20px", fontWeight: "400" }],
         "label-caps": ["12px", { lineHeight: "16px", letterSpacing: "0.05em", fontWeight: "600" }],
         "data-mono": ["14px", { lineHeight: "20px", fontWeight: "500" }],
+        // Mobile type scale (Part 7)
+        "mobile-xs":   ["11px", { lineHeight: "16px" }],
+        "mobile-sm":   ["13px", { lineHeight: "20px" }],
+        "mobile-base": ["15px", { lineHeight: "24px" }],
+        "mobile-lg":   ["17px", { lineHeight: "26px" }],
+        "mobile-xl":   ["20px", { lineHeight: "28px" }],
+        "mobile-2xl":  ["24px", { lineHeight: "32px" }],
       },
       boxShadow: {
         // Legacy
@@ -137,13 +155,51 @@ export default {
           "0%":   { transform: "translateY(24px) scale(0.97)", opacity: "0" },
           "100%": { transform: "translateY(0)    scale(1)",    opacity: "1" },
         },
+        "glass-breathe": {
+          "0%, 100%": { backgroundColor: "rgba(255,255,255,0.80)" },
+          "50%":       { backgroundColor: "rgba(255,255,255,0.92)" },
+        },
+        "explanation-lifecycle": {
+          "0%, 3.5%": { opacity: "0", transform: "translateY(4px)" },
+          "7%, 94%":  { opacity: "1", transform: "translateY(0)" },
+          "100%":     { opacity: "0", transform: "translateY(0)" },
+        },
+        // Mobile motion primitives (Part 1.1 / Part 6)
+        "slide-up": {
+          "0%":   { transform: "translateY(8px)",  opacity: "0" },
+          "100%": { transform: "translateY(0)",    opacity: "1" },
+        },
+        "slide-down": {
+          "0%":   { transform: "translateY(-8px)", opacity: "0" },
+          "100%": { transform: "translateY(0)",    opacity: "1" },
+        },
+        "fade-in": {
+          "0%":   { opacity: "0" },
+          "100%": { opacity: "1" },
+        },
+        "scale-in": {
+          "0%":   { transform: "scale(0.95)", opacity: "0" },
+          "100%": { transform: "scale(1)",    opacity: "1" },
+        },
+        "sheet-up": {
+          "0%":   { transform: "translateY(100%)" },
+          "100%": { transform: "translateY(0)"    },
+        },
       },
       animation: {
         "snackbar-in":  "snackbar-in  0.22s cubic-bezier(0.0,0,0.2,1) forwards",
         "snackbar-out": "snackbar-out 0.18s cubic-bezier(0.4,0,1,1) forwards",
         "fab-enter":    "fab-enter    0.28s cubic-bezier(0.0,0,0.2,1) both",
         "linear-progress": "linear-progress 1.5s infinite cubic-bezier(0.4,0,0.2,1)",
-        "peek-in":      "peek-in      0.22s cubic-bezier(0.0,0,0.2,1) both",
+        "peek-in":          "peek-in          0.22s cubic-bezier(0.0,0,0.2,1) both",
+        "glass-breathe":    "glass-breathe    2.5s ease-in-out infinite",
+        "explanation-lifecycle": "explanation-lifecycle 8.6s linear forwards",
+        // Mobile motion primitives
+        "slide-up":   "slide-up   0.3s  cubic-bezier(0.16,1,0.3,1) both",
+        "slide-down": "slide-down 0.3s  cubic-bezier(0.16,1,0.3,1) both",
+        "fade-in":    "fade-in    0.2s  ease-out both",
+        "scale-in":   "scale-in   0.2s  cubic-bezier(0.16,1,0.3,1) both",
+        "sheet-up":   "sheet-up   0.35s cubic-bezier(0.32,0.72,0,1) both",
       },
       transitionTimingFunction: {
         "material":       "cubic-bezier(0.4,0,0.2,1)",

@@ -19,6 +19,10 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  const [signupComplete, setSignupComplete] = useState(false);
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+
   // WhatsApp Demo State
   const [showWaDemo, setShowWaDemo] = useState(false);
   const [waStep, setWaStep] = useState(0);
@@ -50,6 +54,9 @@ export default function Login() {
   useEffect(() => {
     setError(null);
     setSuccess(null);
+    setSignupComplete(false);
+    setIsForgotPassword(false);
+    setResetSent(false);
     setTimeout(() => {
       setEmail('');
       setPassword('');
@@ -90,6 +97,26 @@ export default function Login() {
     }, 250);
   };
 
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    if (error) setError(error.message);
+    else setResetSent(true);
+    setLoading(false);
+  };
+
+  const handleResendConfirmation = async () => {
+    setLoading(true);
+    setError(null);
+    const { error } = await supabase.auth.resend({ type: 'signup', email });
+    if (error) setError(error.message);
+    setLoading(false);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -97,22 +124,19 @@ export default function Login() {
     setSuccess(null);
 
     if (isSignUp) {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: { data: { full_name: name } }
       });
       if (error) {
         setError(error.message);
+      } else if (data?.user?.identities?.length === 0) {
+        // Supabase returns an empty identities array for already-confirmed accounts
+        setError('exists');
       } else {
-        setSuccess("Account created successfully. Welcome to the future.");
         triggerCelebration();
-        setTimeout(() => {
-          setIsSignUp(false);
-          setEmail('');
-          setPassword('');
-          setName('');
-        }, 4000);
+        setSignupComplete(true);
       }
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -253,110 +277,244 @@ export default function Login() {
               {/* Form Card */}
               <div className="w-full bg-white/70 backdrop-blur-2xl border border-white rounded-[24px] md:rounded-[28px] p-5 sm:p-6 lg:p-[clamp(24px,4vh,32px)] shadow-[0_24px_48px_-12px_rgba(0,0,0,0.08)] animate-[popIn_0.8s_ease_0.1s_forwards] opacity-0 shrink-0">
 
-                <div className={`mb-4 lg:mb-[3vh] transition-all duration-[1000ms] ${isSignUp ? 'md:text-left text-center' : 'text-center'}`}>
-                  <h2 className="text-2xl lg:text-[clamp(20px,3vh,24px)] font-bold text-slate-900 mb-1">
-                    {isSignUp ? 'Create account' : 'Welcome back'}
-                  </h2>
-                  <p className="text-[14px] text-slate-500">
-                    {isSignUp
-                      ? 'Join the world\'s most advanced platform.'
-                      : 'Enter your credentials to access your workspace.'}
-                  </p>
-                </div>
-
-                <form onSubmit={handleSubmit} className="space-y-3">
-                  <div
-                    className="overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]"
-                    style={{ maxHeight: isSignUp ? '80px' : '0px', opacity: isSignUp ? 1 : 0 }}
-                  >
-                    <div className="relative pb-3">
-                      <input
-                        type="text"
-                        className="light-input peer"
-                        placeholder="Full Name"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        required={isSignUp}
-                        disabled={loading}
-                      />
-                      <User size={18} strokeWidth={2} className="light-icon" />
+                {signupComplete ? (
+                  /* Email confirmation screen — shown after successful signup */
+                  <div className="text-center py-2">
+                    <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
+                      <CheckCircle2 size={32} className="text-emerald-600" />
                     </div>
-                  </div>
-
-                  <div className="relative">
-                    <input
-                      type="email"
-                      className="light-input peer"
-                      placeholder="Email address"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      required
-                      disabled={loading}
-                    />
-                    <Mail size={18} strokeWidth={2} className="light-icon" />
-                  </div>
-
-                  <div className="relative">
-                    <input
-                      type="password"
-                      className="light-input peer"
-                      placeholder="Password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      required
-                      disabled={loading}
-                      minLength={isSignUp ? 6 : undefined}
-                    />
-                    <Lock size={18} strokeWidth={2} className="light-icon" />
-                  </div>
-
-                  {/* Error & Success Messages */}
-                  <div className="overflow-hidden transition-all duration-300" style={{ maxHeight: error || success ? '100px' : '0px', opacity: error || success ? 1 : 0 }}>
+                    <h2 className="text-2xl font-bold text-slate-900 mb-2">Check your email</h2>
+                    <p className="text-[14px] text-slate-500 leading-relaxed mb-1">We sent a confirmation link to</p>
+                    <p className="text-[14px] font-semibold text-slate-900 mb-6">{email}</p>
+                    <p className="text-[13px] text-slate-400 leading-relaxed mb-6">
+                      Click the link in your email to activate your account. Check your spam folder if you don't see it within a minute.
+                    </p>
                     {error && (
-                      <div className="flex items-center gap-3 p-3 rounded-2xl bg-red-50 border border-red-100 text-red-600 mt-2">
+                      <div className="flex items-center gap-3 p-3 rounded-2xl bg-red-50 border border-red-100 text-red-600 mb-4">
                         <AlertCircle size={18} className="shrink-0" />
                         <p className="text-[13px] font-medium leading-snug">{error}</p>
                       </div>
                     )}
-                    {success && (
-                      <div className="flex items-center gap-3 p-3 rounded-2xl bg-emerald-50 border border-emerald-100 text-emerald-600 mt-2">
-                        <CheckCircle2 size={18} className="shrink-0" />
-                        <p className="text-[13px] font-medium leading-snug">{success}</p>
-                      </div>
-                    )}
+                    <button
+                      type="button"
+                      onClick={handleResendConfirmation}
+                      disabled={loading}
+                      className="text-[13px] font-medium text-[#C8603A] hover:underline disabled:opacity-50 transition-opacity"
+                    >
+                      {loading ? 'Sending…' : 'Resend confirmation email'}
+                    </button>
+                    <div className="mt-6 text-center">
+                      <button
+                        type="button"
+                        className="text-[13px] font-medium text-slate-500 hover:text-slate-900 transition-colors"
+                        onClick={() => setIsSignUp(false)}
+                      >
+                        Back to{' '}
+                        <span className="text-slate-900 font-semibold underline decoration-slate-300 underline-offset-4">Sign in</span>
+                      </button>
+                    </div>
                   </div>
-
-                  {/* Submit Button */}
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="w-full h-[48px] mt-1 relative flex items-center justify-center gap-2 rounded-xl text-white font-semibold text-[15px] transition-all overflow-hidden group disabled:opacity-80 disabled:cursor-not-allowed shadow-[0_8px_20px_-4px_rgba(200,96,58,0.3)] hover:shadow-[0_12px_24px_-4px_rgba(200,96,58,0.4)] hover:-translate-y-0.5 active:translate-y-0"
-                    style={{ background: 'linear-gradient(135deg, #C8603A 0%, #da714b 100%)' }}
-                  >
-                    {loading ? (
-                      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : isForgotPassword ? (
+                  /* Forgot password form */
+                  <>
+                    <div className="mb-4 text-center">
+                      <h2 className="text-2xl lg:text-[clamp(20px,3vh,24px)] font-bold text-slate-900 mb-1">Reset password</h2>
+                      <p className="text-[14px] text-slate-500">Enter your email and we'll send you a reset link.</p>
+                    </div>
+                    {resetSent ? (
+                      <div className="text-center py-4">
+                        <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
+                          <CheckCircle2 size={28} className="text-emerald-600" />
+                        </div>
+                        <p className="text-[14px] text-slate-700 font-medium mb-1">Reset link sent!</p>
+                        <p className="text-[13px] text-slate-500 leading-relaxed">
+                          Check <span className="font-semibold text-slate-800">{email}</span> for a password reset link.
+                        </p>
+                      </div>
                     ) : (
-                      <>
-                        <span className="relative z-10">{isSignUp ? 'Create Account' : 'Sign In'}</span>
-                        <ArrowRight size={18} strokeWidth={2.5} className="relative z-10 transition-transform group-hover:translate-x-1" />
-                      </>
+                      <form onSubmit={handleForgotPassword} className="space-y-3">
+                        <div className="relative">
+                          <input
+                            type="email"
+                            className="light-input peer"
+                            placeholder="Email address"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            required
+                            disabled={loading}
+                          />
+                          <Mail size={18} strokeWidth={2} className="light-icon" />
+                        </div>
+                        {error && (
+                          <div className="flex items-center gap-3 p-3 rounded-2xl bg-red-50 border border-red-100 text-red-600">
+                            <AlertCircle size={18} className="shrink-0" />
+                            <p className="text-[13px] font-medium leading-snug">{error}</p>
+                          </div>
+                        )}
+                        <button
+                          type="submit"
+                          disabled={loading}
+                          className="w-full h-[48px] mt-1 relative flex items-center justify-center gap-2 rounded-xl text-white font-semibold text-[15px] transition-all overflow-hidden group disabled:opacity-80 disabled:cursor-not-allowed shadow-[0_8px_20px_-4px_rgba(200,96,58,0.3)] hover:shadow-[0_12px_24px_-4px_rgba(200,96,58,0.4)] hover:-translate-y-0.5 active:translate-y-0"
+                          style={{ background: 'linear-gradient(135deg, #C8603A 0%, #da714b 100%)' }}
+                        >
+                          {loading ? (
+                            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          ) : (
+                            <>
+                              <span className="relative z-10">Send Reset Link</span>
+                              <ArrowRight size={18} strokeWidth={2.5} className="relative z-10 transition-transform group-hover:translate-x-1" />
+                            </>
+                          )}
+                        </button>
+                      </form>
                     )}
-                  </button>
-                </form>
+                    <div className="mt-6 text-center">
+                      <button
+                        type="button"
+                        className="text-[13px] font-medium text-slate-500 hover:text-slate-900 transition-colors"
+                        onClick={() => { setIsForgotPassword(false); setResetSent(false); setError(null); }}
+                      >
+                        Back to{' '}
+                        <span className="text-slate-900 font-semibold underline decoration-slate-300 underline-offset-4">Sign in</span>
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  /* Normal login / signup form */
+                  <>
+                    <div className={`mb-4 lg:mb-[3vh] transition-all duration-[1000ms] ${isSignUp ? 'md:text-left text-center' : 'text-center'}`}>
+                      <h2 className="text-2xl lg:text-[clamp(20px,3vh,24px)] font-bold text-slate-900 mb-1">
+                        {isSignUp ? 'Create account' : 'Welcome back'}
+                      </h2>
+                      <p className="text-[14px] text-slate-500">
+                        {isSignUp
+                          ? "Join the world's most advanced platform."
+                          : 'Enter your credentials to access your workspace.'}
+                      </p>
+                    </div>
 
-                {/* Toggle mode */}
-                <div className="mt-6 lg:mt-[3vh] text-center">
-                  <button
-                    type="button"
-                    className="text-[13px] font-medium text-slate-500 hover:text-slate-900 transition-colors inline-flex items-center gap-1.5"
-                    onClick={() => setIsSignUp(!isSignUp)}
-                  >
-                    {isSignUp ? 'Already have an account?' : "Don't have an account?"}
-                    <span className="text-slate-900 font-semibold underline decoration-slate-300 underline-offset-4">
-                      {isSignUp ? 'Sign in' : 'Sign up'}
-                    </span>
-                  </button>
-                </div>
+                    <form onSubmit={handleSubmit} className="space-y-3">
+                      <div
+                        className="overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]"
+                        style={{ maxHeight: isSignUp ? '80px' : '0px', opacity: isSignUp ? 1 : 0 }}
+                      >
+                        <div className="relative pb-3">
+                          <input
+                            type="text"
+                            className="light-input peer"
+                            placeholder="Full Name"
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                            required={isSignUp}
+                            disabled={loading}
+                          />
+                          <User size={18} strokeWidth={2} className="light-icon" />
+                        </div>
+                      </div>
+
+                      <div className="relative">
+                        <input
+                          type="email"
+                          className="light-input peer"
+                          placeholder="Email address"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          required
+                          disabled={loading}
+                        />
+                        <Mail size={18} strokeWidth={2} className="light-icon" />
+                      </div>
+
+                      <div className="relative">
+                        <input
+                          type="password"
+                          className="light-input peer"
+                          placeholder="Password"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          required
+                          disabled={loading}
+                          minLength={isSignUp ? 6 : undefined}
+                        />
+                        <Lock size={18} strokeWidth={2} className="light-icon" />
+                      </div>
+
+                      {!isSignUp && (
+                        <div className="flex justify-end -mt-1">
+                          <button
+                            type="button"
+                            onClick={() => { setIsForgotPassword(true); setError(null); }}
+                            className="text-[12px] text-slate-400 hover:text-[#C8603A] transition-colors"
+                          >
+                            Forgot password?
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Error & Success Messages */}
+                      <div className="overflow-hidden transition-all duration-300" style={{ maxHeight: error || success ? '120px' : '0px', opacity: error || success ? 1 : 0 }}>
+                        {error && error !== 'exists' && (
+                          <div className="flex items-center gap-3 p-3 rounded-2xl bg-red-50 border border-red-100 text-red-600 mt-2">
+                            <AlertCircle size={18} className="shrink-0" />
+                            <p className="text-[13px] font-medium leading-snug">{error}</p>
+                          </div>
+                        )}
+                        {error === 'exists' && (
+                          <div className="flex items-start gap-3 p-3 rounded-2xl bg-amber-50 border border-amber-100 text-amber-700 mt-2">
+                            <AlertCircle size={18} className="shrink-0 mt-0.5" />
+                            <div>
+                              <p className="text-[13px] font-medium leading-snug">An account with this email already exists.</p>
+                              <button
+                                type="button"
+                                onClick={() => setIsSignUp(false)}
+                                className="text-[12px] text-amber-800 underline underline-offset-2 mt-0.5 hover:text-amber-900"
+                              >
+                                Log in instead?
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        {success && (
+                          <div className="flex items-center gap-3 p-3 rounded-2xl bg-emerald-50 border border-emerald-100 text-emerald-600 mt-2">
+                            <CheckCircle2 size={18} className="shrink-0" />
+                            <p className="text-[13px] font-medium leading-snug">{success}</p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Submit Button */}
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className="w-full h-[48px] mt-1 relative flex items-center justify-center gap-2 rounded-xl text-white font-semibold text-[15px] transition-all overflow-hidden group disabled:opacity-80 disabled:cursor-not-allowed shadow-[0_8px_20px_-4px_rgba(200,96,58,0.3)] hover:shadow-[0_12px_24px_-4px_rgba(200,96,58,0.4)] hover:-translate-y-0.5 active:translate-y-0"
+                        style={{ background: 'linear-gradient(135deg, #C8603A 0%, #da714b 100%)' }}
+                      >
+                        {loading ? (
+                          <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        ) : (
+                          <>
+                            <span className="relative z-10">{isSignUp ? 'Create Account' : 'Sign In'}</span>
+                            <ArrowRight size={18} strokeWidth={2.5} className="relative z-10 transition-transform group-hover:translate-x-1" />
+                          </>
+                        )}
+                      </button>
+                    </form>
+
+                    {/* Toggle mode */}
+                    <div className="mt-6 lg:mt-[3vh] text-center">
+                      <button
+                        type="button"
+                        className="text-[13px] font-medium text-slate-500 hover:text-slate-900 transition-colors inline-flex items-center gap-1.5"
+                        onClick={() => setIsSignUp(!isSignUp)}
+                      >
+                        {isSignUp ? 'Already have an account?' : "Don't have an account?"}
+                        <span className="text-slate-900 font-semibold underline decoration-slate-300 underline-offset-4">
+                          {isSignUp ? 'Sign in' : 'Sign up'}
+                        </span>
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>

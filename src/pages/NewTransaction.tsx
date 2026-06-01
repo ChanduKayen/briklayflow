@@ -57,27 +57,36 @@ function getPOBalance(po: any): number { return Number(po.vendor_bill_amount || 
 
 // ── NoObligationsState ────────────────────────────────────────────────────────
 
-function NoObligationsState({ onSkip, onOpenWO, onOpenPO }: {
+function NoObligationsState({ onSkip, onOpenWO, onOpenPO, txnType }: {
   onSkip: () => void;
   onOpenWO: () => void;
   onOpenPO: () => void;
+  txnType?: string | null;
 }) {
+  const showWO = txnType === 'worker' || (!txnType);
+  const showPO = txnType === 'material' || (!txnType);
   return (
     <div className="mt-3 rounded-xl border border-dashed border-outline-variant/30 p-6 text-center">
       <span className="material-symbols-outlined text-[32px] text-on-surface-variant/20 mb-2 block">link_off</span>
-      <p className="text-[14px] font-medium text-on-surface mb-1">No open WOs or POs</p>
+      <p className="text-[14px] font-medium text-on-surface mb-1">
+        {txnType === 'worker' ? 'No open Work Orders' : txnType === 'material' ? 'No open Purchase Orders' : 'No open WOs or POs'}
+      </p>
       <p className="text-[12px] text-on-surface-variant/50 mb-4">Create one to link this payment, or record without linking.</p>
       <div className="flex gap-2 justify-center flex-wrap">
-        <button type="button" onClick={onOpenWO}
-          className="px-4 py-2 rounded-lg border border-[#C8603A]/30 bg-[#C8603A]/[0.03] text-[13px] font-semibold text-[#C8603A] hover:bg-[#C8603A]/[0.07] transition-colors flex items-center gap-1.5">
-          <span className="material-symbols-outlined text-[15px]">engineering</span>
-          New Work Order
-        </button>
-        <button type="button" onClick={onOpenPO}
-          className="px-4 py-2 rounded-lg border border-[#006c49]/30 bg-[#006c49]/[0.03] text-[13px] font-semibold text-[#006c49] hover:bg-[#006c49]/[0.07] transition-colors flex items-center gap-1.5">
-          <span className="material-symbols-outlined text-[15px]">shopping_cart</span>
-          New Purchase Order
-        </button>
+        {showWO && (
+          <button type="button" onClick={onOpenWO}
+            className="px-4 py-2 rounded-lg border border-[#C8603A]/30 bg-[#C8603A]/[0.03] text-[13px] font-semibold text-[#C8603A] hover:bg-[#C8603A]/[0.07] transition-colors flex items-center gap-1.5">
+            <span className="material-symbols-outlined text-[15px]">engineering</span>
+            New Work Order
+          </button>
+        )}
+        {showPO && (
+          <button type="button" onClick={onOpenPO}
+            className="px-4 py-2 rounded-lg border border-[#006c49]/30 bg-[#006c49]/[0.03] text-[13px] font-semibold text-[#006c49] hover:bg-[#006c49]/[0.07] transition-colors flex items-center gap-1.5">
+            <span className="material-symbols-outlined text-[15px]">shopping_cart</span>
+            New Purchase Order
+          </button>
+        )}
         <button type="button" onClick={onSkip}
           className="px-4 py-2 rounded-lg text-[13px] text-on-surface-variant/50 hover:text-on-surface transition-colors">
           Record without linking
@@ -279,13 +288,14 @@ function POObligationRow({ po, selectedObligation, onSelect }: {
 
 // ── LinkingPanel ──────────────────────────────────────────────────────────────
 
-function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip, onOpenWO, onOpenPO }: {
+function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip, onOpenWO, onOpenPO, txnType }: {
   wos: any[]; pos: any[]; loading: boolean;
   selectedObligation: SelectedObligation | null;
   onSelect: (ob: SelectedObligation) => void;
   onSkip: () => void;
   onOpenWO: () => void;
   onOpenPO: () => void;
+  txnType?: string | null;
 }) {
   const [expandedWOs, setExpandedWOs] = useState<string[]>([]);
   const [milestonePayments, setMilestonePayments] = useState<Record<string, number>>({});
@@ -318,7 +328,7 @@ function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip,
     );
   }
 
-  if (!hasData) return <NoObligationsState onSkip={onSkip} onOpenWO={onOpenWO} onOpenPO={onOpenPO} />;
+  if (!hasData) return <NoObligationsState onSkip={onSkip} onOpenWO={onOpenWO} onOpenPO={onOpenPO} txnType={txnType} />;
 
   return (
     <div className="mt-4 rounded-2xl border border-black/[0.05] overflow-hidden bg-white shadow-[0_8px_30px_rgb(0,0,0,0.015)]">
@@ -864,24 +874,16 @@ export default function NewTransaction({ session: _session }: { session: Session
     if (!text || text.trim().length < 5) { setAiCodeState('idle'); return; }
     setAiCodeState('loading');
     setAiSuggestedCode(null);
-    const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-    if (!apiKey) { setAiCodeState('idle'); return; }
-    const codeList = ALL_COST_CODES.map(c => `${c.code}: ${c.name}`).join('\n');
     try {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          max_tokens: 15,
-          messages: [
-            { role: 'system', content: 'You classify Indian construction payment remarks into cost codes. Return ONLY the single best matching code (e.g. "WRK-07-02") or "NONE" if ambiguous. Nothing else.' },
-            { role: 'user', content: `Remark: "${text.trim()}"\n\nCost codes:\n${codeList}` },
-          ],
-        }),
+      const { data, error } = await supabase.functions.invoke('sku-matcher', {
+        body: {
+          action:     'suggestCostCode',
+          remark:     text.trim(),
+          cost_codes: ALL_COST_CODES.map(c => ({ code: c.code, name: c.name })),
+        },
       });
-      const data = await res.json();
-      const result = (data.choices?.[0]?.message?.content || 'NONE').trim().replace(/["'.]/g, '').toUpperCase();
+      if (error) throw error;
+      const result = String((data as any)?.code || 'NONE').toUpperCase();
       if (result === 'NONE' || !getCostCode(result)) {
         setAiSuggestedCode(null);
         setAiCodeState('none');
@@ -905,6 +907,12 @@ export default function NewTransaction({ session: _session }: { session: Session
     }
     if (!stkId || !totalAmt || totalAmt <= 0 || !remarks.trim() || isOver) return;
     if (effectiveAllocs.some((a) => !a.project_id)) return;
+
+    // Bug 6: WO linked at header level but has phases — user must select a specific phase
+    if (selectedObligation?.type === 'WO') {
+      const wo = projectWOs.find((w: any) => w.wo_id === selectedObligation.wo_id);
+      if ((wo?.wo_milestones?.length || 0) > 0) return;
+    }
 
     // Budget check — only for single-allocation with a cost code
     if (!splitMode && category && allocs[0]?.project_id) {
@@ -948,6 +956,10 @@ export default function NewTransaction({ session: _session }: { session: Session
   const missingAmount = saveAttempted && totalAmt <= 0;
   const missingRemarks = saveAttempted && !remarks.trim() && txnType !== 'client_receipt';
   const missingProject = saveAttempted && effectiveAllocs.some((a) => !a.project_id);
+  const needsPhaseSelection = !!(
+    selectedObligation?.type === 'WO' &&
+    (projectWOs.find((w: any) => w.wo_id === selectedObligation.wo_id)?.wo_milestones?.length || 0) > 0
+  );
 
   // ── Smart suggestion: completed phase linked ─────────────────────────────
   const completedMilestoneLinked = !dismissedMilestoneSuggestion &&
@@ -1527,7 +1539,19 @@ export default function NewTransaction({ session: _session }: { session: Session
                             onSkip={() => { setSelectedObligation(null); setSkipped(true); }}
                             onOpenWO={() => openDrawer('WO')}
                             onOpenPO={() => openDrawer('PO')}
+                            txnType={txnType}
                           />
+                          {needsPhaseSelection && (
+                            <div className="mt-3 p-4 rounded-xl border border-amber-200/50 bg-amber-50/50 text-amber-800 animate-fadeIn">
+                              <div className="flex items-start gap-2.5">
+                                <span className="material-symbols-outlined text-[18px] text-amber-600 mt-0.5" style={{ fontVariationSettings: "'FILL' 1" }}>warning</span>
+                                <div className="flex-1 text-[12px] leading-relaxed">
+                                  <p className="font-semibold text-amber-900">Select a phase or milestone to continue.</p>
+                                  <p className="mt-0.5 text-amber-800/80">This Work Order has phases. Expand it above and select the specific phase to link this payment to.</p>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                           {(() => {
                             if (selectedObligation?.type === 'PO') {
                               const selPO = projectPOs.find((p: any) => p.po_id === selectedObligation.po_id);

@@ -72,6 +72,10 @@ import ProcurementOrders from './pages/ProcurementOrders';
 import { FloatingActionButton } from './components/FloatingActionButton';
 import { QuickActionsOverlay } from './components/QuickActionsOverlay';
 import { useLongPress } from './hooks/useLongPress';
+import BottomSheet from './components/BottomSheet';
+import GlobalRefetchIndicator from './components/GlobalRefetchIndicator';
+import { clearPersistedCache } from './lib/queryClient';
+import { useBadgeRealtime } from './hooks/useBadgeRealtime';
 
 // ── Sign-out overlay: portal-based, self-contained, network-resilient ────────
 //
@@ -103,8 +107,13 @@ function SignOutOverlay({ onDismiss }: { onDismiss: () => void }) {
       setTimeout(() => setFade('visible'),   40),
       // Reveal center mark once overlay is mostly opaque
       setTimeout(() => setShowMark(true),   420),
-      // Fire the actual sign-out (non-blocking; Login page mounts behind overlay)
-      setTimeout(() => { supabase.auth.signOut().catch(() => {}); }, 700),
+      // Fire the actual sign-out (non-blocking; Login page mounts behind overlay).
+      // Clear persisted query cache so a different user on the same device
+      // doesn't hydrate the previous user's data.
+      setTimeout(() => {
+        clearPersistedCache();
+        supabase.auth.signOut().catch(() => {});
+      }, 700),
       // Begin dissolve
       setTimeout(() => { setShowMark(false); setFade('out'); }, 900),
       // Unmount after dissolve completes
@@ -217,6 +226,8 @@ function App() {
   const [routerReady, setRouterReady] = useState(false);
   // Must be at top level — hooks cannot be called after conditional returns
   const triggerSignOut = useCallback(() => setSigningOut(true), []);
+  // Real-time badge invalidation (cheap; one channel for the session)
+  useBadgeRealtime(!!session?.user?.id);
 
   // Profile query — used for onboarding wizard guard (enabled only when session exists)
   const { data: appProfile, isLoading: profileLoading } = useQuery({
@@ -454,6 +465,9 @@ function App() {
       <QuickActionsOverlay isOpen={quickActionsOpen} onClose={() => setQuickActionsOpen(false)} />
     </div>
 
+    {/* Background-refetch progress bar (cache-first signal) */}
+    <GlobalRefetchIndicator />
+
     {/* Command bar â€" rendered outside the scroll container, above everything */}
     <CommandBar />
     <GlobalShortcuts />
@@ -668,7 +682,7 @@ function SidebarContent({
       const { data } = await supabase.from('projects').select('project_id, name').eq('status', 'Active').order('name');
       return (data ?? []) as { project_id: string; name: string }[];
     },
-    staleTime: 60_000,
+    staleTime: 10 * 60 * 1000, // Projects change rarely; 10min cuts refetch noise.
   });
 
   type NavItem = { path: string; icon: React.ElementType; label: string; show: boolean; badge?: number; accent?: boolean };
@@ -1324,29 +1338,94 @@ function MobileTopbar({ session }: { session: Session }) {
     name.split(' ').filter(Boolean).map(w => w[0]).join('').toUpperCase().slice(0, 2) || '?';
 
   return (
-    <div
-      className="md:hidden sticky top-0 z-30 flex items-end gap-2 px-4 bg-white border-b border-black/[0.06]"
-      style={{ minHeight: 'calc(52px + env(safe-area-inset-top))', paddingTop: 'calc(env(safe-area-inset-top) + 8px)', paddingBottom: 8 }}
+    <header
+      className="md:hidden sticky top-0 z-30 bg-white/90 backdrop-blur-xl supports-[backdrop-filter]:bg-white/75"
+      style={{
+        paddingTop: 'env(safe-area-inset-top)',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.02)',
+      }}
     >
-      {isDetailPage && (
-        <button
-          onClick={() => navigate(-1)}
-          className="flex items-center justify-center w-9 h-9 -ml-2 rounded-xl text-on-surface-variant transition-colors hover:bg-surface-container"
+      <div className="flex items-center gap-2 px-4 h-12">
+        {isDetailPage && (
+          <button
+            onClick={() => navigate(-1)}
+            aria-label="Back"
+            className="flex items-center justify-center w-10 h-10 -ml-2 rounded-full text-on-surface-variant touch-active"
+          >
+            <IconChevronLeft size={24} strokeWidth={2} />
+          </button>
+        )}
+        <h1
+          className="flex-1 min-w-0 text-[17px] font-semibold text-on-surface leading-none truncate tracking-tight"
         >
-          <IconChevronLeft size={24} strokeWidth={2} />
-        </button>
-      )}
-      <span className="flex-1 text-[16px] font-[500] text-on-surface leading-none tracking-tight">{title}</span>
-      {profile && (
-        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 ${avatarColor[profile.role] ?? 'bg-surface-container-high text-on-surface'}`}>
-          {initials(profile.name ?? 'U')}
-        </div>
-      )}
-    </div>
+          {title}
+        </h1>
+        {profile && (
+          <div
+            className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 ${avatarColor[profile.role] ?? 'bg-surface-container-high text-on-surface'}`}
+          >
+            {initials(profile.name ?? 'U')}
+          </div>
+        )}
+      </div>
+    </header>
   );
 }
 
 const TERRACOTTA = '#C45B39';
+
+// ── Tab item ───────────────────────────────────────────────────────────────
+function TabItem({
+  Icon, label, active, badge, accentActive = true, onClick, to,
+}: {
+  Icon: React.ElementType;
+  label: string;
+  active: boolean;
+  badge?: number;
+  accentActive?: boolean;
+  onClick?: () => void;
+  to?: string;
+}) {
+  const activeColor = accentActive ? TERRACOTTA : '#0b1c30';
+  const content = (
+    <>
+      {/* Top indicator pill */}
+      <span
+        className="absolute top-0 h-[2px] rounded-full transition-all duration-200"
+        style={{
+          width: active ? 20 : 0,
+          opacity: active ? 1 : 0,
+          background: activeColor,
+        }}
+        aria-hidden
+      />
+      <div className="relative flex items-center justify-center">
+        <Icon size={22} strokeWidth={active ? 2 : 1.5} />
+        {(badge ?? 0) > 0 && (
+          <span
+            className="absolute -top-1 -right-2 min-w-[15px] h-[15px] px-1 rounded-full bg-error text-on-error text-[9px] font-bold leading-none flex items-center justify-center"
+            style={{ boxShadow: '0 0 0 1.5px rgba(255,255,255,0.95)' }}
+          >
+            {(badge ?? 0) > 9 ? '9+' : badge}
+          </span>
+        )}
+      </div>
+      <span
+        className="text-[10px] leading-none mt-0.5"
+        style={{ fontWeight: active ? 600 : 500, letterSpacing: '-0.005em' }}
+      >
+        {label}
+      </span>
+    </>
+  );
+  const cls = `flex-1 flex flex-col items-center justify-center gap-0.5 relative touch-active select-none transition-colors duration-150`;
+  const style = { color: active ? activeColor : 'var(--nav-text-muted)' };
+  return to ? (
+    <Link to={to} className={cls} style={style}>{content}</Link>
+  ) : (
+    <button onClick={onClick} className={cls} style={style} type="button">{content}</button>
+  );
+}
 
 function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () => void }) {
   const location = useLocation();
@@ -1361,75 +1440,66 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
   const activeProjectId = projMatch?.[1];
   const isInProject = !!(activeProjectId && activeProjectId !== 'new');
 
+  // ── Pending counts for badges (mirror sidebar queries; React Query dedupes) ──
+  const { data: woPendingCount = 0 } = useQuery({
+    queryKey: ['nav_wo_pending'],
+    queryFn: async () => {
+      const { count } = await supabase.from('work_orders').select('*', { count: 'exact', head: true }).eq('status', 'Draft');
+      return count ?? 0;
+    },
+    staleTime: 60_000,
+    enabled: role === 'management' || role === 'principal',
+  });
+
+  const { data: poUntalliedCount = 0 } = useQuery({
+    queryKey: ['nav_po_untallied'],
+    queryFn: async () => {
+      const { count } = await supabase.from('purchase_orders').select('*', { count: 'exact', head: true }).not('status', 'in', '("Tallied","Cancelled","Draft")');
+      return count ?? 0;
+    },
+    staleTime: 60_000,
+    enabled: role !== 'supervisor' && role !== 'accountant',
+  });
+
+  const ordersBadge = (woPendingCount ?? 0) + (poUntalliedCount ?? 0);
+
+  // Glass shell shared by both context tab bars
+  const shellClass =
+    "md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/90 backdrop-blur-xl supports-[backdrop-filter]:bg-white/75";
+  const shellStyle: React.CSSProperties = {
+    boxShadow: '0 -1px 3px rgba(0,0,0,0.04), 0 -8px 24px rgba(0,0,0,0.04)',
+    height: 'calc(56px + env(safe-area-inset-bottom))',
+  };
+  const innerStyle: React.CSSProperties = { paddingBottom: 'env(safe-area-inset-bottom)' };
+
   // ── Project context bottom bar ─────────────────────────────────────────
   if (isInProject) {
     const base = `/projects/${activeProjectId}`;
-    const isOverview  = location.pathname === base;
-    const isTxns      = location.pathname.startsWith(`${base}/transactions`);
-    const isWOs       = location.pathname.startsWith(`${base}/work-orders`);
-    const isPOs       = location.pathname.startsWith(`${base}/purchase-orders`);
-    const isOther     = !isOverview && !isTxns && !isWOs && !isPOs; // inventory, boqs, inward
+    const isOverview = location.pathname === base;
+    const isTxns     = location.pathname.startsWith(`${base}/transactions`);
+    const isWOs      = location.pathname.startsWith(`${base}/work-orders`);
+    const isPOs      = location.pathname.startsWith(`${base}/purchase-orders`);
+    const isOther    = !isOverview && !isTxns && !isWOs && !isPOs; // inventory, boqs, inward
 
     return (
-      <nav
-        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white"
-        style={{ borderTop: '0.5px solid var(--nav-border)', height: 60 }}
-      >
-        <div className="flex items-stretch h-full" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-
-          {/* ← Back to all projects */}
+      <nav className={shellClass} style={shellStyle}>
+        <div className="flex items-stretch h-[56px]" style={innerStyle}>
+          {/* ← Back to all projects (narrow, label-led) */}
           <Link
             to="/projects"
-            className="flex flex-col items-center justify-center gap-0.5"
-            style={{ color: 'var(--nav-text-muted)', minWidth: 52, paddingLeft: 4, paddingRight: 4 }}
+            className="flex flex-col items-center justify-center gap-0.5 touch-active select-none"
+            style={{ minWidth: 48, paddingLeft: 4, paddingRight: 4, color: 'var(--nav-text-muted)' }}
           >
-            <div className="flex items-center gap-0.5">
-              <IconChevronLeft size={16} strokeWidth={2} />
-            </div>
+            <IconChevronLeft size={18} strokeWidth={2} />
             <span className="text-[9px] font-medium leading-none" style={{ letterSpacing: '0.02em' }}>Projects</span>
           </Link>
-
-          {/* Thin separator */}
           <div style={{ width: 1, background: 'var(--nav-border)', margin: '12px 0', flexShrink: 0 }} />
 
-          {/* Overview */}
-          <Link to={base} className="flex-1 flex flex-col items-center justify-center gap-0.5"
-            style={{ color: isOverview ? TERRACOTTA : 'var(--nav-text-muted)' }}>
-            <IconLayoutGrid size={20} strokeWidth={isOverview ? 2 : 1.5} />
-            <span className="text-[10px] font-medium leading-none">Overview</span>
-          </Link>
-
-          {/* Transactions */}
-          <Link to={`${base}/transactions`} className="flex-1 flex flex-col items-center justify-center gap-0.5"
-            style={{ color: isTxns ? TERRACOTTA : 'var(--nav-text-muted)' }}>
-            <IconArrowsExchange size={20} strokeWidth={isTxns ? 2 : 1.5} />
-            <span className="text-[10px] font-medium leading-none">Txns</span>
-          </Link>
-
-          {/* Work Orders */}
-          <Link to={`${base}/work-orders`} className="flex-1 flex flex-col items-center justify-center gap-0.5"
-            style={{ color: isWOs ? TERRACOTTA : 'var(--nav-text-muted)' }}>
-            <IconClipboardList size={20} strokeWidth={isWOs ? 2 : 1.5} />
-            <span className="text-[10px] font-medium leading-none">W.Orders</span>
-          </Link>
-
-          {/* Purchase Orders */}
-          <Link to={`${base}/purchase-orders`} className="flex-1 flex flex-col items-center justify-center gap-0.5"
-            style={{ color: isPOs ? TERRACOTTA : 'var(--nav-text-muted)' }}>
-            <IconShoppingBag size={20} strokeWidth={isPOs ? 2 : 1.5} />
-            <span className="text-[10px] font-medium leading-none">POs</span>
-          </Link>
-
-          {/* More — active when on Inventory / BOQs / Inward */}
-          <button
-            onClick={onMoreTap}
-            className="flex-1 flex flex-col items-center justify-center gap-0.5"
-            style={{ color: isOther ? TERRACOTTA : 'var(--nav-text-muted)' }}
-          >
-            <IconDots size={20} strokeWidth={isOther ? 2 : 1.5} />
-            <span className="text-[10px] font-medium leading-none">More</span>
-          </button>
-
+          <TabItem to={base}                       Icon={IconLayoutGrid}      label="Overview" active={isOverview} />
+          <TabItem to={`${base}/transactions`}     Icon={IconArrowsExchange}  label="Txns"     active={isTxns} />
+          <TabItem to={`${base}/work-orders`}      Icon={IconClipboardList}   label="W.Orders" active={isWOs} />
+          <TabItem to={`${base}/purchase-orders`}  Icon={IconShoppingBag}     label="POs"      active={isPOs} />
+          <TabItem onClick={onMoreTap}             Icon={IconDots}            label="More"     active={isOther} />
         </div>
       </nav>
     );
@@ -1437,45 +1507,33 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
 
   // ── Global context bottom bar ──────────────────────────────────────────
   const isOrdersActive = isActivePath('/orders') || isActivePath('/purchase-orders') || isActivePath('/work-orders');
-  const moreActive = ['/billing', '/team', '/settings', '/logbook', '/invoices'].some(p => isActivePath(p));
+  const moreActive = ['/billing', '/team', '/settings', '/logbook', '/invoices', '/dashboard', '/sku-directory'].some(p => isActivePath(p));
 
-  type Tab = { path: string; icon: React.ElementType; label: string; show: boolean };
+  type Tab = { path: string; icon: React.ElementType; label: string; show: boolean; badge?: number };
   const tabs: Tab[] = [
     { path: '/ledger',       icon: IconRepeat,     label: 'Txns',     show: role !== 'supervisor' },
     { path: '/projects',     icon: IconLayoutGrid, label: 'Projects', show: true },
-    { path: '/orders',       icon: IconFiles,      label: 'Orders',   show: true },
+    { path: '/orders',       icon: IconFiles,      label: 'Orders',   show: true, badge: ordersBadge },
     { path: '/stakeholders', icon: IconUsers,      label: 'Parties',  show: role !== 'supervisor' && role !== 'accountant' },
   ].filter(t => t.show);
 
   return (
-    <nav
-      className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white"
-      style={{ borderTop: '0.5px solid var(--nav-border)', height: 60 }}
-    >
-      <div className="flex items-stretch h-full" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+    <nav className={shellClass} style={shellStyle}>
+      <div className="flex items-stretch h-[56px]" style={innerStyle}>
         {tabs.map(tab => {
           const active = tab.path === '/orders' ? isOrdersActive : isActivePath(tab.path);
-          const Icon = tab.icon;
           return (
-            <Link
+            <TabItem
               key={tab.path}
               to={tab.path}
-              className="flex-1 flex flex-col items-center justify-center gap-0.5"
-              style={{ color: active ? '#000' : 'var(--nav-text-muted)' }}
-            >
-              <Icon size={20} strokeWidth={active ? 2 : 1.5} />
-              <span className="text-[10px] font-medium leading-none">{tab.label}</span>
-            </Link>
+              Icon={tab.icon}
+              label={tab.label}
+              active={active}
+              badge={tab.badge}
+            />
           );
         })}
-        <button
-          onClick={onMoreTap}
-          className="flex-1 flex flex-col items-center justify-center gap-0.5"
-          style={{ color: moreActive ? '#000' : 'var(--nav-text-muted)' }}
-        >
-          <IconDots size={20} strokeWidth={moreActive ? 2 : 1.5} />
-          <span className="text-[10px] font-medium leading-none">More</span>
-        </button>
+        <TabItem onClick={onMoreTap} Icon={IconDots} label="More" active={moreActive} />
       </div>
     </nav>
   );
@@ -1499,75 +1557,83 @@ function MoreNavSheet({
   const activeProjectId = projMatch?.[1];
   const isInProject = !!(activeProjectId && activeProjectId !== 'new');
 
-  // Project More items: the less-frequent project sub-pages
   const base = activeProjectId ? `/projects/${activeProjectId}` : '';
   const projectMoreItems = isInProject ? [
-    { path: base,                    icon: IconLayoutGrid,            label: 'Overview',        show: true },
-    { path: `${base}/inventory`,     icon: IconFiles,                 label: 'Inventory',       show: true },
-    { path: `${base}/boqs`,          icon: IconClipboardList,         label: 'BOQs',            show: true },
-    { path: `${base}/inward`,        icon: IconShoppingBag,           label: 'Inward Register', show: true },
-    { path: '/dashboard',            icon: IconLayoutDashboard,       label: 'Dashboard',       show: true },
+    { path: base,                icon: IconLayoutGrid,      label: 'Overview',        show: true },
+    { path: `${base}/inventory`, icon: IconFiles,           label: 'Inventory',       show: true },
+    { path: `${base}/boqs`,      icon: IconClipboardList,   label: 'BOQs',            show: true },
+    { path: `${base}/inward`,    icon: IconShoppingBag,     label: 'Inward Register', show: true },
+    { path: '/dashboard',        icon: IconLayoutDashboard, label: 'Dashboard',       show: true },
   ] : [];
 
-  // Global More items (used outside project context)
   const globalItems = [
-    { path: '/logbook',  icon: IconNotebook,              label: 'Logbook',       show: true },
-    { path: '/billing',  icon: IconFileInvoice,           label: 'Client Billing', show: role !== 'supervisor' },
-    { path: '/dashboard',              icon: IconLayoutDashboard,       label: 'Dashboard',     show: true },
-    { path: '/team',                   icon: IconShieldLock,            label: 'Team & Access', show: role === 'principal' || role === 'management' },
-    { path: '/settings',               icon: IconAdjustmentsHorizontal, label: 'Settings',      show: true },
+    { path: '/logbook',       icon: IconNotebook,              label: 'Logbook',        show: true },
+    { path: '/inward-register', icon: IconLayoutGrid,          label: 'Inward Register', show: role !== 'supervisor' && role !== 'accountant' },
+    { path: '/billing',       icon: IconFileInvoice,           label: 'Client Billing', show: role !== 'supervisor' },
+    { path: '/dashboard',     icon: IconLayoutDashboard,       label: 'Dashboard',      show: true },
+    { path: '/sku-directory', icon: IconBarcode,               label: 'SKU Directory',  show: role === 'principal' || role === 'management' },
+    { path: '/team',          icon: IconShieldLock,            label: 'Team & Access',  show: role === 'principal' || role === 'management' },
+    { path: '/settings',      icon: IconAdjustmentsHorizontal, label: 'Settings',       show: true },
   ].filter(i => i.show);
 
   const items = isInProject ? projectMoreItems.filter(i => i.show) : globalItems;
   const sheetTitle = isInProject ? 'Project' : 'More';
 
+  const { triggerSignOut } = useSignOut();
+
   return (
-    <>
-      {/* Backdrop */}
-      <div
-        className={`md:hidden fixed inset-0 z-[45] bg-black/40 transition-opacity duration-300 ${isOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
-        onClick={onClose}
-      />
-      {/* Sheet */}
-      <div
-        className={`md:hidden fixed bottom-0 left-0 right-0 z-[50] bg-white rounded-t-[20px] shadow-2xl transition-transform duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${isOpen ? 'translate-y-0' : 'translate-y-full'}`}
-        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)' }}
-      >
-        {/* Drag handle */}
-        <div className="flex justify-center pt-3 pb-2">
-          <div className="w-8 h-1 rounded-full bg-black/15" />
-        </div>
-        <div className="px-4 pb-2">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-on-surface-variant/40">{sheetTitle}</p>
-        </div>
-        <div className="overflow-y-auto" style={{ maxHeight: '60vh' }}>
-          {items.map(item => {
-            const Icon = item.icon;
-            const active = isActivePath(item.path);
-            return (
-              <button
-                key={item.path}
-                onClick={() => go(item.path)}
-                className="w-full flex items-center gap-3 px-5"
-                style={{
-                  minHeight: 52,
-                  backgroundColor: active ? 'rgba(200,96,58,0.06)' : undefined,
-                }}
+    <BottomSheet open={isOpen} onClose={onClose} title={sheetTitle}>
+      <div className="pb-2">
+        {items.map(item => {
+          const Icon = item.icon;
+          const active = isActivePath(item.path);
+          return (
+            <button
+              key={item.path}
+              onClick={() => go(item.path)}
+              className="w-full flex items-center gap-3 px-5 touch-active"
+              style={{
+                minHeight: 52,
+                backgroundColor: active ? 'rgba(200,96,58,0.06)' : undefined,
+              }}
+            >
+              <Icon size={20} strokeWidth={1.5} style={{ color: active ? TERRACOTTA : 'var(--nav-text-muted)', flexShrink: 0 }} />
+              <span
+                className="flex-1 text-[15px] text-left"
+                style={{ fontWeight: active ? 600 : 400, color: active ? TERRACOTTA : 'var(--nav-text-default)' }}
               >
-                <Icon size={18} strokeWidth={1.5} style={{ color: active ? TERRACOTTA : 'var(--nav-text-muted)', flexShrink: 0 }} />
-                <span
-                  className="flex-1 text-[14px] text-left"
-                  style={{ fontWeight: active ? 600 : 400, color: active ? TERRACOTTA : 'var(--nav-text-default)' }}
-                >
-                  {item.label}
-                </span>
-                {active && <div style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: TERRACOTTA, flexShrink: 0 }} />}
-              </button>
-            );
-          })}
-        </div>
+                {item.label}
+              </span>
+              {active && <div style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: TERRACOTTA, flexShrink: 0 }} />}
+            </button>
+          );
+        })}
       </div>
-    </>
+
+      {/* User block + sign out (global context only) */}
+      {!isInProject && profile && (
+        <>
+          <div className="mx-5 my-2 border-t border-black/[0.06]" />
+          <div className="px-5 py-3 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-full bg-surface-container-high flex items-center justify-center text-[12px] font-bold text-on-surface flex-shrink-0">
+              {(profile.name ?? 'U').split(' ').filter(Boolean).map(w => w[0]).join('').toUpperCase().slice(0, 2) || '?'}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[14px] font-medium text-on-surface truncate">{profile.name ?? 'User'}</p>
+              <p className="text-[11px] text-on-surface-variant capitalize">{role}</p>
+            </div>
+            <button
+              onClick={() => { onClose(); triggerSignOut(); }}
+              className="flex items-center gap-1.5 px-3 h-9 rounded-lg text-[12px] font-medium text-on-surface-variant touch-active"
+              style={{ background: 'rgba(0,0,0,0.04)' }}
+            >
+              <IconLogout size={14} strokeWidth={1.8} />
+              Sign out
+            </button>
+          </div>
+        </>
+      )}
+    </BottomSheet>
   );
 }
 

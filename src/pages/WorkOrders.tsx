@@ -8,6 +8,7 @@ import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { ShortcutTicker } from '../components/ShortcutTicker';
 import { PageSkeleton } from '../components/SkeletonLoader';
+import { usePrefetchWO } from '../hooks/usePrefetch';
 
 const PAGE_SIZE = 25;
 
@@ -128,6 +129,8 @@ export default function WorkOrders({ session }: { session: Session }) {
     window.addEventListener('shortcut:new-wo', handler);
     return () => window.removeEventListener('shortcut:new-wo', handler);
   }, [navigate]);
+
+  const prefetchWO = usePrefetchWO();
 
   // ── Data ──────────────────────────────────────────────────────────────────
   const { data: workOrders, isLoading } = useQuery({
@@ -512,6 +515,7 @@ export default function WorkOrders({ session }: { session: Session }) {
                       key={wo.wo_id}
                       className={`bg-white rounded-xl border border-black/[0.06] p-3 cursor-pointer bk-row-ripple ${wo.status === 'Cancelled' ? 'opacity-50' : ''}`}
                       onClick={() => navigate(`/work-orders/${wo.wo_id}`)}
+                      {...prefetchWO(wo.wo_id)}
                     >
                       {/* Row 1: WO ID + Status */}
                       <div className="flex items-center justify-between mb-1">
@@ -627,6 +631,7 @@ export default function WorkOrders({ session }: { session: Session }) {
                         style={{ height: '52px', animationDelay: `${Math.min(idx, 20) * 18}ms` }}
                         className={`border-b border-black/[0.04] last:border-0 hover:bg-surface-container-low/40 transition-colors cursor-pointer bk-row-ripple wo-row-animate ${isChecked ? 'bg-primary/[0.02]' : ''} ${wo.status === 'Cancelled' ? 'opacity-50' : ''}`}
                         onClick={() => navigate(`/work-orders/${wo.wo_id}`)}
+                        {...prefetchWO(wo.wo_id)}
                       >
                         {/* Checkbox */}
                         <td className="px-3 align-middle w-10" onClick={e => e.stopPropagation()}>

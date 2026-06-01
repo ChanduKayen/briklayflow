@@ -111,6 +111,8 @@ export default function SKUDirectory({ session }: { session: Session }) {
       if (error) throw error;
       return (data ?? []) as SKURow[];
     },
+    // SKU catalogue rarely changes; cache for 15 minutes.
+    staleTime: 15 * 60 * 1000,
   });
 
   // Client-side text filter on top of the DB query

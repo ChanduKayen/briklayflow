@@ -25,7 +25,24 @@
       "Skill(supabase:supabase)",
       "Bash(supabase --version)",
       "Bash(supabase status *)",
-      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\koppi\\\\OneDrive\\\\Desktop\\\\Briklay Fly\\\\supabase\" -Recurse -File | ForEach-Object { $_.FullName })"
+      "PowerShell(Get-ChildItem -Path \"C:\\\\Users\\\\koppi\\\\OneDrive\\\\Desktop\\\\Briklay Fly\\\\supabase\" -Recurse -File | ForEach-Object { $_.FullName })",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\koppi\\\\OneDrive\\\\Desktop\\\\Briklay Fly\\\\src\" -Recurse -File)",
+      "Bash(Select-Object -First 50)",
+      "Bash(npm install *)",
+      "Bash(awk 'NR<1136 || NR>1427' src/pages/PurchaseOrders.tsx)",
+      "Bash(mv src/pages/PurchaseOrders.tsx.tmp src/pages/PurchaseOrders.tsx)",
+      "Bash(awk 'NR<72 || NR>496' src/pages/PurchaseOrders.tsx)",
+      "Bash(sed -n '1690,1694p' src/pages/NewPurchaseOrder.tsx)",
+      "Bash(sed -n '2110,2117p' src/pages/NewPurchaseOrder.tsx)",
+      "Bash(cp src/pages/NewPurchaseOrder.tsx src/pages/NewPurchaseOrder.tsx.bak)",
+      "Bash(awk 'NR<1690 || \\(NR>2113 && NR<2786\\) || NR>2946' src/pages/NewPurchaseOrder.tsx.bak)",
+      "Bash(awk 'NR<23 || NR>91' src/pages/NewPurchaseOrder.tsx)",
+      "Bash(mv src/pages/NewPurchaseOrder.tsx.tmp src/pages/NewPurchaseOrder.tsx)",
+      "Bash(awk 'NR<1566 || \\(NR>1925 && NR<2521\\) || NR>2739' src/pages/NewPurchaseOrder.tsx)",
+      "Bash(npx -y tsc --noEmit -p tsconfig.json)",
+      "Bash(git stash *)",
+      "Bash(sed -i '4079,4145d' src/pages/NewPurchaseOrder.tsx)",
+      "Bash(sed -n '4074,4082p' src/pages/NewPurchaseOrder.tsx)"
     ]
   }
 }

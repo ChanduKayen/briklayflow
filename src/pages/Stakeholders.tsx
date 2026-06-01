@@ -15,6 +15,7 @@ import {
   IconChevronLeft, IconChevronRight, IconTable,
 } from '@tabler/icons-react';
 import PartySpreadsheet from '../components/PartySpreadsheet';
+import { usePrefetchStakeholder } from '../hooks/usePrefetch';
 
 const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$/;
 function validateGSTIN(v: string) { return GSTIN_REGEX.test(v.trim().toUpperCase()); }
@@ -143,6 +144,8 @@ export default function Stakeholders({ session }: { session: Session }) {
   const resetForm = () => { setFormCategory(''); setFormCategoryOther(''); resetVendorFields(); };
 
   // ── Queries ───────────────────────────────────────────────────────────────
+  const prefetchStakeholder = usePrefetchStakeholder();
+
   const { data: stakeholders, isLoading } = useQuery({
     queryKey: ['stakeholders', orgId],
     queryFn: async () => {
@@ -155,6 +158,8 @@ export default function Stakeholders({ session }: { session: Session }) {
       return data as Stakeholder[];
     },
     enabled: !!orgId,
+    // Stakeholders change occasionally; 5min is plenty for the list view.
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: paidMap } = useQuery({
@@ -608,8 +613,11 @@ export default function Stakeholders({ session }: { session: Session }) {
                   <tr
                     key={party.stakeholder_id ?? pi}
                     onClick={() => navigate(`/stakeholders/${party.stakeholder_id}`)}
+                    onTouchStart={prefetchStakeholder(party.stakeholder_id ?? '').onTouchStart}
+                    onPointerDown={prefetchStakeholder(party.stakeholder_id ?? '').onPointerDown}
                     style={{ cursor: 'pointer' }}
                     onMouseEnter={e => {
+                      prefetchStakeholder(party.stakeholder_id ?? '').onMouseEnter();
                       (e.currentTarget as HTMLElement)
                         .querySelectorAll('td')
                         .forEach(td => (td as HTMLElement).style.background =

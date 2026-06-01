@@ -297,83 +297,17 @@ export default function NewWorkOrder({ session }: { session: Session }) {
       reader.readAsDataURL(file);
       reader.onload = async () => {
         const base64String = (reader.result as string).split(',')[1];
-        const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-        if (!apiKey) throw new Error('OpenAI API Key is not configured.');
-        const systemPrompt = `You are a construction BOQ (Bill of Quantities) extraction assistant for Indian construction work orders and quotations.
-
-Extract the document header fields AND each work stage/line item. Determine if each stage is MEASURED (qty × rate) or LUMP SUM.
-
-DETECTION RULES:
-
-MEASURED — all three present:
-  Unit of measurement (Sqft, Cum, Rmt etc.), Quantity (a number), Rate (price per unit).
-  Amount should equal qty × rate — verify.
-
-LUMP SUM — when:
-  Document says LS, L.S., Lump Sum, Lumpsum, Fixed, Package
-  OR only amount is given with no qty/rate
-  OR work described as 'complete job' or 'all inclusive'
-
-AMBIGUOUS — flag when:
-  Amount present but qty × rate doesn't match (arithmetic error?)
-  Unit present but qty OR rate missing
-
-INDIAN CONSTRUCTION UNITS to recognise:
-  Sqft, Sft, sq.ft → Sqft
-  Sqm, sq.m → Sqm
-  Cum, Cu.m, cmt → Cum
-  Cft, cu.ft → Cft
-  Rmt, RM, rft → Rmt
-  Nos, No., Nrs → Nos
-  Kg, KG → Kg
-  MT, M.T. → MT
-  Per point, point → Per Point
-  Per flat, flat → Per Flat
-  Per floor, floor → Per Floor
-  LS, L.S., lump → LS
-
-AMOUNT VERIFICATION:
-  If qty and rate both extracted, compute expected = qty × rate.
-  If Math.abs(extracted_amount - expected) / expected > 0.02: flag arithmetic_mismatch: true.
-
-Return ONLY this JSON object, no other text:
-{
-  "worker_name_fuzzy": "contractor name or null",
-  "scope_of_work": "overall scope or null",
-  "order_value": totalValueOrNull,
-  "date_issued": "YYYY-MM-DD or null",
-  "stages": [
-    {
-      "name": "string",
-      "mode": "measured | lumpsum | ambiguous",
-      "unit_type": "string or null",
-      "qty": "number or null",
-      "rate": "number or null",
-      "amount": "number",
-      "amount_verified": "boolean",
-      "arithmetic_mismatch": "boolean",
-      "mismatch_note": "string or null",
-      "confidence": "HIGH | MEDIUM | LOW",
-      "confidence_reason": "string"
-    }
-  ]
-}`;
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-          body: JSON.stringify({
-            model: 'gpt-4o',
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: [{ type: 'text', text: 'Extract all details from this construction document.' }, { type: 'image_url', image_url: { url: `data:${file.type};base64,${base64String}` } }] },
-            ],
-            temperature: 0.1,
-          }),
+        // Server-side BOQ extraction — no OpenAI key in the browser.
+        const { data: extracted, error: efError } = await supabase.functions.invoke('sku-matcher', {
+          body: {
+            action:       'extractWorkOrderBoQ',
+            image_base64: base64String,
+            image_mime:   file.type,
+          },
         });
-        if (!response.ok) throw new Error(`API Error: ${response.statusText}`);
-        const result = await response.json();
-        const jsonStr = result.choices[0].message.content.trim().replace(/^```json\n?/, '').replace(/\n?```$/, '');
-        const data = JSON.parse(jsonStr);
+        if (efError) throw new Error(efError.message || 'BOQ extraction failed');
+        if ((extracted as any)?.error) throw new Error((extracted as any).error);
+        const data = extracted as any;
 
         // Set header fields
         if (data.scope_of_work) setScope(data.scope_of_work);

@@ -130,23 +130,16 @@ export function QuickTransactionSheet({ stakeholder, onClose, onSuccess }: Quick
     if (!text || text.trim().length < 5) { setAiCodeState('idle'); return; }
     setAiCodeState('loading');
     setAiSuggestedCode(null);
-    const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-    if (!apiKey) { setAiCodeState('idle'); return; }
-    const codeList = ALL_COST_CODES.map(c => `${c.code}: ${c.name}`).join('\n');
     try {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini', max_tokens: 15,
-          messages: [
-            { role: 'system', content: 'You classify Indian construction payment remarks into cost codes. Return ONLY the single best matching code (e.g. "WRK-07-02") or "NONE" if ambiguous. Nothing else.' },
-            { role: 'user', content: `Remark: "${text.trim()}"\n\nCost codes:\n${codeList}` },
-          ],
-        }),
+      const { data, error } = await supabase.functions.invoke('sku-matcher', {
+        body: {
+          action:     'suggestCostCode',
+          remark:     text.trim(),
+          cost_codes: ALL_COST_CODES.map(c => ({ code: c.code, name: c.name })),
+        },
       });
-      const data = await res.json();
-      const result = (data.choices?.[0]?.message?.content || 'NONE').trim().replace(/[\"'.]/g, '').toUpperCase();
+      if (error) throw error;
+      const result = String((data as any)?.code || 'NONE').toUpperCase();
       if (result === 'NONE' || !getCostCode(result)) {
         setAiSuggestedCode(null); setAiCodeState('none');
       } else {
