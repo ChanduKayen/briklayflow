@@ -3925,9 +3925,16 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
                           // Merge typed attrs over the resolved pills so a typed size/variant/
                           // grade is never lost once a family resolves (even if that family's
                           // tree lacks the axis, or a builder left it blank).
-                          const displayPills = familyPills.length
+                          const basePills = familyPills.length
                             ? mergeTypedAttrsIntoPills(familyPills, li.typed_attrs)
                             : pillsFromTypedAttrs(li.typed_attrs);
+                          // Tag pills whose value is novel (matches no catalog member) so the
+                          // field shows a subtle "new" indicator even while OTHER facets are
+                          // still being resolved (partially_resolved). Additive, render-only.
+                          const novelSet = new Set(li.tree_resolution?.novelAttributes || []);
+                          const displayPills = novelSet.size
+                            ? basePills.map(p => (novelSet.has(p.attribute) ? { ...p, isNovel: true } : p))
+                            : basePills;
                           if (li.sku_id) console.log('[CHIP-RENDER]', li.item_name, 'sku_id=', li.sku_id, 'attribute_pills=', JSON.stringify(li.attribute_pills), 'displayPills=', JSON.stringify(displayPills)); // TEMP
                           // Brand is rendered as a 4th column INSIDE ItemAttributeFields via
                           // dedicated props (never a pill). brandTick re-reads localStorage

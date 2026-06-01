@@ -110,6 +110,12 @@ export function ItemAttributeFields({
               >
                 {config.label}
                 {isRequired && <span className="ml-1 text-amber-400 text-[8px]">●</span>}
+                {pill?.isNovel && (
+                  <span className="ml-2 text-[10px] font-medium px-1.5 py-0.5 rounded
+                                   bg-amber-500/10 text-amber-600/90 align-middle">
+                    new · not in catalog
+                  </span>
+                )}
               </label>
 
               <div className="relative">
@@ -257,6 +263,12 @@ export function ItemAttributeFields({
                       </button>
                     )}
                   </div>
+                )}
+
+                {pill?.isNovel && (
+                  <p className="mt-0.5 text-[10px] text-on-surface-variant/55 leading-snug">
+                    “{pill.value}” isn’t in this family yet — use “Add to catalog” below to save it.
+                  </p>
                 )}
               </div>
             </div>

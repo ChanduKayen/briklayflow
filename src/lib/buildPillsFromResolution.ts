@@ -21,6 +21,8 @@ export interface PillData {
   // Editable: tappable to reopen options for re-selection. Defaults to true
   // for non-sub_category satisfied pills.
   editable?:     boolean;
+  // Novel: the user's value for this axis matches no catalog member (additive, render-only).
+  isNovel?:      boolean;
 }
 
 export interface BuildPillsInput {

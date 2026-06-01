@@ -51,6 +51,7 @@ export interface TreeResolution {
   matchedMember:    FamilyMember | null;
   candidateMembers: FamilyMember[];
   hasNovelValue:    boolean;
+  novelAttributes?: string[];   // attributes whose typed value matches no member (additive, optional)
 }
 
 export interface WebVariantGroup {
@@ -97,11 +98,13 @@ export function resolveAgainstTree(
       matchedMember:    familyMembers.length === 1 ? familyMembers[0] : null,
       candidateMembers: familyMembers,
       hasNovelValue:    false,
+      novelAttributes:  [],
     };
   }
 
   const resolved: Record<string, string> = {};
   const missing:  TreeLevel[]            = [];
+  const novelAttributes: string[]        = [];
   let candidates               = [...familyMembers];
   let hasNovelValue            = false;
   let candidatePoolExhausted   = false;
@@ -123,6 +126,7 @@ export function resolveAgainstTree(
         // Novel value — no existing member has this; don't kill subsequent picker options
         resolved[level.attribute] = userValue;
         hasNovelValue            = true;
+        novelAttributes.push(level.attribute);   // additive — which axis is novel
         candidatePoolExhausted   = true;
       }
     } else {
@@ -154,5 +158,5 @@ export function resolveAgainstTree(
       ? candidates[0]
       : null;
 
-  return { status, resolved, missing, matchedMember, candidateMembers: candidates, hasNovelValue };
+  return { status, resolved, missing, matchedMember, candidateMembers: candidates, hasNovelValue, novelAttributes };
 }
