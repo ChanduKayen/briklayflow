@@ -12,6 +12,20 @@ import { CostCodePicker } from '../components/CostCodePicker';
 import { getCostCode, costCodeLabel, ALL_COST_CODES } from '../lib/costCodes';
 import { autoCloseWOIfFullyPaid } from '../lib/woAutoClose';
 
+// ── New Transaction UI redesign — four-voice + money-direction tokens ──────────
+// Visual only (NewTransaction_v1.jsx reference). Applied via inline styles; never
+// read by any handler/mutation/query. worker/material/expense = OUT, receipt = IN.
+const VOICE = {
+  user: '#1E1A15', userSoft: '#3D3830',
+  system: '#6B6258', systemFaint: '#9A9186',
+  ask: '#8A5A0B', askDeep: '#6B4407', askWash: '#FBF3E0', askLine: '#E5C98F',
+  confirm: '#2F5D34', confirmWash: '#E9F2E7',
+  out: '#9A3B1F', outWash: '#FAEFE9', outLine: '#E8C5B4',
+  inn: '#2F5D34', innWash: '#E9F2E7', innLine: '#BFD8BC',
+  page: '#FBFAF8', surface: '#FFFFFF', field: '#F4F2EE', line: '#E8E4DE',
+};
+const VNUMS = { fontVariantNumeric: 'tabular-nums' as const };
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 // Smart COA defaults by transaction type
@@ -33,9 +47,9 @@ function genTxnId() {
 function SectionLabel({ n, title }: { n: string; title: string }) {
   return (
     <div className="flex items-center gap-2.5 mb-3 ml-0.5">
-      <span className="text-[10px] font-bold text-on-surface-variant/40 tabular-nums">{n}</span>
-      <span className="h-px flex-1 bg-outline-variant/20" />
-      <span className="text-[10px] font-semibold text-on-surface-variant/50 uppercase tracking-[0.1em]">{title}</span>
+      <span className="text-[10px] font-bold tabular-nums" style={{ color: VOICE.systemFaint }}>{n}</span>
+      <span className="h-px flex-1" style={{ background: VOICE.line }} />
+      <span className="text-[10px] font-semibold uppercase tracking-[0.1em]" style={{ color: VOICE.system }}>{title}</span>
     </div>
   );
 }
@@ -985,67 +999,60 @@ export default function NewTransaction({ session: _session }: { session: Session
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-surface-container-low/50">
-      <div className="max-w-xl mx-auto px-4 pt-8 pb-36">
+    <div className="min-h-screen" style={{ background: VOICE.page }}>
+      <div className="mx-auto px-4 pt-8 pb-36" style={{ maxWidth: 720 }}>
 
-        {/* ── Header ──────────────────────────────────────────────────────── */}
-        <div className="flex items-start gap-3 mb-10">
+        {/* ── Header — voice restyle (back + copy handlers unchanged) ──────── */}
+        <div className="flex items-center gap-3 mb-8">
           <button
             onClick={() => navigate(initialProjectId ? `/projects/${initialProjectId}/transactions` : '/ledger')}
-            className="mt-0.5 p-2 hover:bg-white/80 rounded-xl transition-colors text-on-surface-variant shrink-0"
+            className="p-2 -ml-2 rounded-xl transition-colors shrink-0"
+            style={{ color: VOICE.user }}
+            aria-label="Back"
           >
             <span className="material-symbols-outlined">arrow_back</span>
           </button>
-          <div className="flex-1 min-w-0">
-            <h1 className="text-[22px] font-bold text-on-surface tracking-tight leading-tight">New Transaction</h1>
-            <div className="flex items-center gap-1.5 mt-1 animate-fadeIn">
-              <span className="text-[11px] text-on-surface-variant/40 font-data-mono">{txnId}</span>
-              <button
-                type="button"
-                onClick={() => {
-                  navigator.clipboard.writeText(txnId);
-                  setTxnIdCopied(true);
-                  setTimeout(() => setTxnIdCopied(false), 2000);
-                }}
-                className="p-1 hover:bg-black/[0.03] active:bg-black/[0.08] rounded transition-colors text-on-surface-variant/35 hover:text-primary flex items-center shrink-0"
-                title="Copy Transaction ID"
-              >
-                <span className="material-symbols-outlined text-[13px]">
-                  {txnIdCopied ? 'check' : 'content_copy'}
-                </span>
-              </button>
-              {txnIdCopied && (
-                <span className="text-[9px] font-bold uppercase tracking-wider text-secondary animate-fadeIn">Copied</span>
-              )}
-            </div>
-          </div>
+          <h1 className="text-xl font-medium flex-1 tracking-tight" style={{ color: VOICE.user }}>New transaction</h1>
+          <span className="text-xs px-2.5 py-1 rounded-full inline-flex items-center gap-1.5" style={{ background: VOICE.field, color: VOICE.system, ...VNUMS }}>
+            {txnId}
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard.writeText(txnId);
+                setTxnIdCopied(true);
+                setTimeout(() => setTxnIdCopied(false), 2000);
+              }}
+              className="flex items-center shrink-0"
+              style={{ color: VOICE.systemFaint }}
+              title="Copy Transaction ID"
+              aria-label="Copy transaction number"
+            >
+              <span className="material-symbols-outlined text-[13px]">
+                {txnIdCopied ? 'check' : 'content_copy'}
+              </span>
+            </button>
+            {txnIdCopied && (
+              <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: VOICE.confirm }}>Copied</span>
+            )}
+          </span>
         </div>
 
-        {/* ── Type selector ──────────────────────────────────────────────── */}
-        <div className="relative p-1.5 bg-black/[0.02] rounded-2xl border border-black/[0.04] grid grid-cols-4 gap-1 mb-10 overflow-hidden shadow-[inset_0_1px_2px_rgba(0,0,0,0.01)]">
-          {/* Sliding Pill */}
-          <div
-            className="absolute top-1.5 bottom-1.5 rounded-xl transition-all duration-300 ease-out shadow-sm bg-white border border-black/[0.04]"
-            style={{
-              width: 'calc(25% - 3px)',
-              left: txnType === 'worker' ? '1.5px' :
-                    txnType === 'material' ? 'calc(25% + 0.75px)' :
-                    txnType === 'expense' ? 'calc(50% + 0.75px)' :
-                    txnType === 'client_receipt' ? 'calc(75% + 0.75px)' : '1.5px',
-              opacity: txnType ? 1 : 0
-            }}
-          />
+        {/* ── Type selector — direction-encoded cards (visual redesign) ──── */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-10">
           {([
-            { key: 'worker'         as TxnType, icon: 'engineering',   label: 'Worker',   sub: 'Payment',  accentColor: '#C45B39' },
-            { key: 'material'       as TxnType, icon: 'shopping_cart', label: 'Material', sub: 'Purchase', accentColor: '#006C49' },
-            { key: 'expense'        as TxnType, icon: 'receipt_long',  label: 'General',  sub: 'Expense',  accentColor: '#6366F1' },
-            { key: 'client_receipt' as TxnType, icon: 'payments',      label: 'Client',   sub: 'Receipt',  accentColor: '#0EA5E9' },
+            { key: 'worker'         as TxnType, icon: 'engineering',   label: 'Worker payment',    dir: 'out' as const },
+            { key: 'material'       as TxnType, icon: 'shopping_cart', label: 'Material purchase', dir: 'out' as const },
+            { key: 'expense'        as TxnType, icon: 'receipt_long',  label: 'General expense',   dir: 'out' as const },
+            { key: 'client_receipt' as TxnType, icon: 'payments',      label: 'Client receipt',    dir: 'in'  as const },
           ]).map((t) => {
             const isSelected = txnType === t.key;
+            const c = t.dir === 'in' ? VOICE.inn : VOICE.out;
+            const wash = t.dir === 'in' ? VOICE.innWash : VOICE.outWash;
             return (
               <button
                 key={t.key}
                 type="button"
+                aria-pressed={isSelected}
                 onClick={() => {
                   if (txnType !== t.key) {
                     setTxnType(t.key); setStkId(''); setStkSearch('');
@@ -1055,21 +1062,22 @@ export default function NewTransaction({ session: _session }: { session: Session
                     setDismissedMilestoneSuggestion(false);
                   }
                 }}
-                className={`relative z-10 py-2.5 flex flex-col items-center justify-center rounded-xl transition-all duration-200 ${
-                  isSelected ? 'scale-100' : 'opacity-50 hover:opacity-80 scale-95'
-                }`}
+                className="rounded-xl px-3 py-3 text-left transition-transform active:scale-[0.98]"
+                style={isSelected
+                  ? { background: wash, border: `1.5px solid ${c}` }
+                  : { background: VOICE.surface, border: `1px solid ${VOICE.line}` }}
               >
                 <span
-                  className="material-symbols-outlined text-[20px] mb-1 transition-colors duration-200"
-                  style={{
-                    color: isSelected ? t.accentColor : 'inherit',
-                    fontVariationSettings: isSelected ? "'FILL' 1" : "'FILL' 0"
-                  }}
+                  className="material-symbols-outlined text-[18px]"
+                  style={{ color: isSelected ? c : VOICE.systemFaint, fontVariationSettings: isSelected ? "'FILL' 1" : "'FILL' 0" }}
                 >
                   {t.icon}
                 </span>
-                <span className="text-[11px] font-semibold tracking-tight leading-none text-on-surface">{t.label}</span>
-                <span className="text-[8px] mt-0.5 text-on-surface-variant/40 leading-none">{t.sub}</span>
+                <p className="text-sm font-medium mt-1.5" style={{ color: isSelected ? c : VOICE.user }}>{t.label}</p>
+                <p className="text-xs mt-0.5 inline-flex items-center gap-1" style={{ color: isSelected ? c : VOICE.systemFaint }}>
+                  <span className="material-symbols-outlined text-[12px]">{t.dir === 'in' ? 'south_west' : 'north_east'}</span>
+                  money {t.dir === 'in' ? 'in' : 'out'}
+                </p>
               </button>
             );
           })}
@@ -1091,7 +1099,8 @@ export default function NewTransaction({ session: _session }: { session: Session
             <div className="text-center py-6 mb-2 relative">
               <div className="inline-block relative">
                 <div className="flex items-baseline justify-center gap-1.5">
-                  <span className="text-4xl md:text-5xl font-light text-on-surface-variant/30 select-none font-sans">₹</span>
+                  <span className="text-3xl md:text-4xl font-light select-none" style={{ color: txnType === 'client_receipt' ? VOICE.inn : VOICE.out }}>{txnType === 'client_receipt' ? '+' : '−'}</span>
+                  <span className="text-4xl md:text-5xl font-light select-none font-sans" style={{ color: VOICE.systemFaint }}>₹</span>
                   <input
                     type="number"
                     inputMode="decimal"
@@ -1111,6 +1120,7 @@ export default function NewTransaction({ session: _session }: { session: Session
                 </div>
                 {/* Subtle custom bottom glow / elegant hairline divider */}
                 <div className="h-0.5 w-full bg-gradient-to-r from-transparent via-black/[0.06] to-transparent mt-2 rounded-full" />
+                <p className="text-xs mt-2" style={{ color: VOICE.systemFaint }}>{txnType === 'client_receipt' ? 'money coming in' : 'money going out'}</p>
                 {missingAmount && (
                   <span className="block mt-2 text-[10px] font-bold text-error uppercase tracking-wider animate-fadeIn">
                     Amount is required
@@ -2117,11 +2127,20 @@ export default function NewTransaction({ session: _session }: { session: Session
         </>
       )}
 
-      {/* ── Bottom Action Bar ───────────────────────────────────────────────── */}
-      <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/70 backdrop-blur-xl border-t border-black/[0.05] shadow-[0_-8px_30px_rgba(0,0,0,0.03)]">
-        <div className="max-w-xl mx-auto px-5 py-4 flex items-center gap-3">
+      {/* ── Bottom Action Bar — voice restyle (handlers unchanged) ──────────── */}
+      <div className="fixed bottom-0 left-0 right-0 z-40 backdrop-blur-xl" style={{ background: 'rgba(255,255,255,0.9)', borderTop: `1px solid ${VOICE.line}` }}>
+        <div className="mx-auto px-5 py-4 flex items-center gap-3" style={{ maxWidth: 720 }}>
+          {txnType && (
+            <div>
+              <p className="text-sm font-medium" style={{ color: txnType === 'client_receipt' ? VOICE.inn : VOICE.out, ...VNUMS }}>
+                {txnType === 'client_receipt' ? '+' : '−'} {totalAmt > 0 ? `₹${totalAmt.toLocaleString('en-IN')}` : '₹0'}
+              </p>
+              <p className="text-xs" style={{ color: VOICE.systemFaint }}>draft</p>
+            </div>
+          )}
           <button type="button" onClick={() => navigate('/ledger')}
-            className="text-[13px] font-bold text-on-surface-variant/50 hover:text-on-surface px-4 py-2.5 rounded-xl hover:bg-black/[0.03] transition-all duration-200 active:scale-95">
+            className="text-[13px] font-bold px-4 py-2.5 rounded-xl transition-all duration-200 active:scale-95"
+            style={{ color: VOICE.system }}>
             Cancel
           </button>
           <div className="flex-1" />
