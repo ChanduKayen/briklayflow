@@ -11,15 +11,16 @@ import { useOrgId } from '../lib/auth/AuthProvider';
 import { multiply, parseAmount } from '../lib/money';
 import { WORKER_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 import { useSnackbar } from '../components/Snackbar';
-
-// ── New Work Order UI redesign — four-voice tokens (follows New Transaction / New PO) ──
-const VOICE = {
-  user: '#1E1A15', system: '#6B6258', systemFaint: '#9A9186',
-  ask: '#8A5A0B', askDeep: '#6B4407', askWash: '#FBF3E0', askLine: '#E5C98F',
-  confirm: '#2F5D34', confirmWash: '#E9F2E7',
-  page: '#FBFAF8', surface: '#FFFFFF', field: '#F4F2EE', line: '#E8E4DE',
-};
-const VNUMS = { fontVariantNumeric: 'tabular-nums' as const };
+// ui/work-order-redesign — consolidated onto the shared po-new-ui voice tokens (ruling 7);
+// VOICE/VNUMS are aliases so the prior reskin's VOICE.x usages keep working unchanged.
+import { V as VOICE, nums as VNUMS } from '../components/po-new-ui/voiceTokens';
+import { SEG } from '../components/wo-new-ui/woTokens';
+import UiLivingSentence from '../components/wo-new-ui/UiLivingSentence';
+import UiAllocationBar from '../components/wo-new-ui/UiAllocationBar';
+import UiContractorCombobox from '../components/wo-new-ui/UiContractorCombobox';
+import UiWoCeremony from '../components/wo-new-ui/UiWoCeremony';
+import { UiTotalExclGst } from '../components/po-new-ui/UiMoney';
+import UiSaveHint from '../components/po-new-ui/UiSaveHint';
 
 // ─── Work Stage types ──────────────────────────────────────────────────────
 
@@ -117,14 +118,6 @@ function suggestUnit(name: string): string {
   return '';
 }
 
-const QTY_LABELS: Record<string, string> = {
-  Sqft: 'sq. feet',   Sqm: 'sq. metres',    Sqyd: 'sq. yards',
-  Cum: 'cu. metres',  Cft: 'cu. feet',       'Cu.yd': 'cu. yards',
-  Rmt: 'run. metres', Rft: 'run. feet',
-  Nos: 'count',       Kg: 'kilograms',        MT: 'metric tonnes',
-  Quintal: 'quintals',
-};
-
 function calcAmount(s: StageDraft): number {
   const mode = getMode(s);
   if (mode === 'measured') return multiply(s.quantity ?? 0, s.rate ?? 0);
@@ -197,10 +190,15 @@ export default function NewWorkOrder({ session }: { session: Session }) {
   const selectedProject = projects?.find(p => p.project_id === projectId);
   const selectedWorker  = workers?.find(w => w.stakeholder_id === stakeholderId);
   const stagesTotal = stages.reduce((sum, s) => sum + calcAmount(s), 0);
-  const pct     = orderValue > 0 ? Math.min((stagesTotal / orderValue) * 100, 100) : 0;
   const isOver  = orderValue > 0 && stagesTotal > orderValue + 0.01;
-  const isExact = orderValue > 0 && Math.abs(stagesTotal - orderValue) < 0.01;
-  const isUnder = orderValue > 0 && stagesTotal < orderValue - 0.01;
+  // ui/work-order-redesign — cosmetic, dead-ended (brief §1); read only by redesign JSX,
+  // never by any handler/mutation/payload.
+  const [uiCeremonyOpen, setUiCeremonyOpen] = useState(false);
+  const [uiActiveSeg, setUiActiveSeg] = useState<number | null>(null);
+  // Pure render-time derivations for the living sentence / allocation bar / recap.
+  const uiNamedStages = stages.filter(s => s.name.trim());
+  const uiSegments = uiNamedStages.map(s => calcAmount(s));
+  const uiAllocated = uiSegments.reduce((sum, a) => sum + a, 0);
 
   // ─── Save mutation ───────────────────────────────────────────────────────
 
@@ -240,13 +238,13 @@ export default function NewWorkOrder({ session }: { session: Session }) {
       if (!data?.success) throw new Error(data?.error ?? 'Failed to create work order');
       return data.wo_id as string;
     },
-    onSuccess: (generatedId) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['work_orders'] });
-      navigate(`/work-orders/${generatedId}`, {
-        state: initState.from === 'project'
-          ? { from: 'project', projectId: initState.projectId, projectName: initState.projectName }
-          : undefined,
-      });
+      // ui/work-order-redesign (B5): keep invalidation immediate; the ceremony now gates
+      // the redirect. The id is read from createWO.data (=== the mutationFn's returned
+      // wo_id) in UiWoCeremony.onLeave, which fires the identical navigate. Error path
+      // untouched (still surfaces via createWO.isError).
+      setUiCeremonyOpen(true);
     },
   });
 
@@ -413,7 +411,9 @@ export default function NewWorkOrder({ session }: { session: Session }) {
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="px-margin-mobile md:px-margin-desktop pt-6 pb-32">
+    <>
+    <div className="min-h-screen" style={{ background: VOICE.page }}>
+      <div className="mx-auto px-5 sm:px-6 pt-6 pb-40" style={{ maxWidth: 700 }}>
 
       <Breadcrumb items={
         initState.from === 'project' && initState.projectName
@@ -431,196 +431,163 @@ export default function NewWorkOrder({ session }: { session: Session }) {
             ]
       } />
 
-      <div className="mb-8">
-        <h1 className="text-2xl font-medium tracking-tight" style={{ color: VOICE.user }}>New work order</h1>
-        <p className="text-sm mt-1" style={{ color: VOICE.system }}>Fill in the details manually, or use AI extraction to auto-populate from a document.</p>
-      </div>
+      {/* Header — compact (back handler unchanged) */}
+      <header className="flex items-center gap-3 mb-2 mt-1">
+        <button
+          type="button"
+          onClick={() => navigate(initState.from === 'project' && initState.projectId ? `/projects/${initState.projectId}/work-orders` : '/work-orders')}
+          aria-label="Back to work orders"
+          style={{ color: VOICE.user }}
+        >
+          <span className="material-symbols-outlined">arrow_back</span>
+        </button>
+        <p className="text-sm flex-1" style={{ color: VOICE.system }}>New work order</p>
+        <span className="text-xs px-2.5 py-1 rounded-full" style={{ background: VOICE.field, color: VOICE.system, ...VNUMS }}>WO · auto</span>
+      </header>
 
       {aiError && (
-        <div className="mb-6 p-4 bg-error-container text-on-error-container rounded-xl text-body-sm flex items-center gap-2">
+        <div className="mb-4 p-4 bg-error-container text-on-error-container rounded-xl text-body-sm flex items-center gap-2">
           <span className="material-symbols-outlined shrink-0">error</span> {aiError}
         </div>
       )}
       {isAiExtracted && (
-        <div className="mb-6 p-4 bg-secondary-container text-on-secondary-container rounded-xl text-body-sm flex items-center gap-2">
+        <div className="mb-4 p-4 bg-secondary-container text-on-secondary-container rounded-xl text-body-sm flex items-center gap-2">
           <span className="material-symbols-outlined shrink-0">auto_awesome</span>
           Data extracted from document — please review all fields before saving.
         </div>
       )}
 
-      <div className="flex flex-col lg:flex-row gap-8 items-start">
+      {/* The living sentence */}
+      <div className="mt-7">
+        <UiLivingSentence
+          workerName={selectedWorker?.name}
+          projectName={selectedProject?.name}
+          contract={orderValue}
+          stageCount={uiNamedStages.length}
+        />
+      </div>
 
-        {/* ── Left: Form ─────────────────────────────────────────────── */}
-        <form
-          id="wo-new-form"
-          onSubmit={e => { e.preventDefault(); if (stages.length === 0) { setShowOneTimeDialog(true); } else { createWO.mutate(); } }}
-          className="flex-1 min-w-0 space-y-10"
-        >
+      {/* Entry mode — "extract from a document" (existing handleFileUpload, relocated) */}
+      <div className="flex gap-2 items-center mt-4 flex-wrap">
+        <p className="text-xs" style={{ color: VOICE.systemFaint }}>Fill it in below, or</p>
+        <label className="text-xs font-medium inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full cursor-pointer" style={{ border: `1px solid ${VOICE.line}`, color: VOICE.user }}>
+          {isExtracting ? <Loader2 className="animate-spin" size={12} /> : <span className="material-symbols-outlined text-[14px]">upload_file</span>}
+          {isExtracting ? 'Extracting…' : 'extract from a document'}
+          <input type="file" accept="image/*,application/pdf" className="hidden" onChange={handleFileUpload} disabled={isExtracting} />
+        </label>
+      </div>
 
-          {/* 01 Order Details */}
+      <hr className="border-0 mt-8 mb-2" style={{ height: 1, background: VOICE.line }} />
+
+      <form
+        id="wo-new-form"
+        onSubmit={e => { e.preventDefault(); if (stages.length === 0) { setShowOneTimeDialog(true); } else { createWO.mutate(); } }}
+        className="mt-2"
+      >
+
+          {/* 01 — Who's doing the work? */}
           <section>
-            <SectionLabel n="01" label="Order Details" />
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+            <Question n="01" hint="Search by name — if they're not in the list yet, add them right from the result.">Who's doing the work?</Question>
+            <UiContractorCombobox
+              workers={workers ?? []}
+              selectedId={stakeholderId}
+              selectedName={selectedWorker?.name ?? ''}
+              onSelect={(id) => setStakeholderId(id)}
+              onClear={() => setStakeholderId('')}
+              onAddNew={(name) => { setNewWorkerName(name); setShowAddWorker(true); }}
+            />
 
-              <div className="space-y-2">
-                <label className="text-label-caps font-label-caps text-on-surface-variant flex items-center gap-2">
-                  WO ID
-                  <span className="px-1.5 py-0.5 bg-surface-container-highest text-on-surface-variant rounded text-[9px] font-bold tracking-wider">AUTO</span>
-                </label>
-                <div className="bk-input bg-surface-container cursor-default font-data-mono text-[13px] text-on-surface-variant/40 italic select-none">
-                  {selectedProject?.project_code
-                    ? `WO-${selectedProject.project_code}-YYMMDD-NNN`
-                    : 'Auto-generated on save'}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-label-caps font-label-caps text-on-surface-variant">Date Issued</label>
-                <input type="date" value={dateIssued} onChange={e => setDateIssued(e.target.value)} className="bk-input" required />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-label-caps font-label-caps text-on-surface-variant">Project</label>
-                <select value={projectId} onChange={e => setProjectId(e.target.value)} className="bk-input" required>
-                  <option value="">Select project…</option>
-                  {projects?.map(p => <option key={p.project_id} value={p.project_id}>{p.name}</option>)}
+            {/* Existing inline add-worker form (createWorker) — opened by the combobox's "add as new" */}
+            {showAddWorker && (
+              <div className="mt-3 rounded-xl p-4 space-y-3" style={{ background: VOICE.askWash, border: `1px solid ${VOICE.askLine}`, maxWidth: 420 }}>
+                <p className="text-xs font-semibold" style={{ color: VOICE.askDeep }}>New worker</p>
+                <input value={newWorkerName} onChange={e => setNewWorkerName(e.target.value)} className="bk-input" placeholder="Worker name" autoFocus />
+                <select value={newWorkerTrade} onChange={e => { setNewWorkerTrade(e.target.value); setNewWorkerTradeOther(''); }} className="bk-input">
+                  <option value="" disabled>Select trade…</option>
+                  {WORKER_TRADE_GROUPS.map(g => (
+                    <optgroup key={g.group} label={g.group}>
+                      {g.trades.map(t => <option key={t} value={t}>{t}</option>)}
+                    </optgroup>
+                  ))}
                 </select>
-              </div>
-
-            </div>
-          </section>
-
-          {/* 02 Assigned Worker */}
-          <section>
-            <SectionLabel n="02" label="Assigned Worker" />
-            <div className="space-y-2 max-w-sm">
-              <label className="text-label-caps font-label-caps text-on-surface-variant">Worker</label>
-              <select value={stakeholderId} onChange={e => setStakeholderId(e.target.value)} className="bk-input" required>
-                <option value="">Select worker…</option>
-                {workers?.map(w => <option key={w.stakeholder_id} value={w.stakeholder_id}>{w.name}</option>)}
-              </select>
-
-              {/* Add new worker — inline quick-create */}
-              {!showAddWorker ? (
-                <button
-                  type="button"
-                  onClick={() => setShowAddWorker(true)}
-                  className="inline-flex items-center gap-1 text-xs font-medium mt-1"
-                  style={{ color: VOICE.ask }}
-                >
-                  <span className="material-symbols-outlined text-[15px]">person_add</span>
-                  Add new worker
-                </button>
-              ) : (
-                <div className="mt-2 rounded-xl p-4 space-y-3" style={{ background: VOICE.askWash, border: `1px solid ${VOICE.askLine}` }}>
-                  <p className="text-xs font-semibold" style={{ color: VOICE.askDeep }}>New worker</p>
-                  <input
-                    value={newWorkerName}
-                    onChange={e => setNewWorkerName(e.target.value)}
-                    className="bk-input"
-                    placeholder="Worker name"
-                    autoFocus
-                  />
-                  <select
-                    value={newWorkerTrade}
-                    onChange={e => { setNewWorkerTrade(e.target.value); setNewWorkerTradeOther(''); }}
-                    className="bk-input"
-                  >
-                    <option value="" disabled>Select trade…</option>
-                    {WORKER_TRADE_GROUPS.map(g => (
-                      <optgroup key={g.group} label={g.group}>
-                        {g.trades.map(t => <option key={t} value={t}>{t}</option>)}
-                      </optgroup>
-                    ))}
-                  </select>
-                  {newWorkerTrade === OTHER_TRADE && (
-                    <input
-                      value={newWorkerTradeOther}
-                      onChange={e => setNewWorkerTradeOther(e.target.value)}
-                      className="bk-input"
-                      placeholder="Specify trade…"
-                    />
-                  )}
-                  <input
-                    value={newWorkerContact}
-                    onChange={e => setNewWorkerContact(e.target.value)}
-                    className="bk-input"
-                    placeholder="Contact (optional)"
-                  />
-                  <div className="flex gap-2 justify-end">
-                    <button
-                      type="button"
-                      onClick={() => { setShowAddWorker(false); setNewWorkerName(''); setNewWorkerTrade(''); setNewWorkerTradeOther(''); setNewWorkerContact(''); }}
-                      className="px-3 py-1.5 rounded-lg text-xs font-medium"
-                      style={{ border: `1px solid ${VOICE.line}`, color: VOICE.system }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => createWorker.mutate()}
-                      disabled={!newWorkerName.trim() || !newWorkerTrade || (newWorkerTrade === OTHER_TRADE && !newWorkerTradeOther.trim()) || createWorker.isPending}
-                      className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white inline-flex items-center gap-1.5 disabled:opacity-50"
-                      style={{ background: VOICE.askDeep }}
-                    >
-                      {createWorker.isPending ? 'Saving…' : 'Save & select'}
-                    </button>
-                  </div>
+                {newWorkerTrade === OTHER_TRADE && (
+                  <input value={newWorkerTradeOther} onChange={e => setNewWorkerTradeOther(e.target.value)} className="bk-input" placeholder="Specify trade…" />
+                )}
+                <input value={newWorkerContact} onChange={e => setNewWorkerContact(e.target.value)} className="bk-input" placeholder="Contact (optional)" />
+                <div className="flex gap-2 justify-end">
+                  <button type="button" onClick={() => { setShowAddWorker(false); setNewWorkerName(''); setNewWorkerTrade(''); setNewWorkerTradeOther(''); setNewWorkerContact(''); }} className="px-3 py-1.5 rounded-lg text-xs font-medium" style={{ border: `1px solid ${VOICE.line}`, color: VOICE.system }}>Cancel</button>
+                  <button type="button" onClick={() => createWorker.mutate()} disabled={!newWorkerName.trim() || !newWorkerTrade || (newWorkerTrade === OTHER_TRADE && !newWorkerTradeOther.trim()) || createWorker.isPending} className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white inline-flex items-center gap-1.5 disabled:opacity-50" style={{ background: VOICE.askDeep }}>{createWorker.isPending ? 'Saving…' : 'Save & select'}</button>
                 </div>
-              )}
+              </div>
+            )}
+
+            {/* Project + date (functional, restyled) */}
+            <div className="flex gap-3 flex-wrap mt-4">
+              <select value={projectId} onChange={e => setProjectId(e.target.value)} required className="flex-1 min-w-44 px-3.5 py-2.5 rounded-xl text-sm" style={{ background: VOICE.surface, border: `1px solid ${VOICE.line}`, color: VOICE.user }}>
+                <option value="">Select project…</option>
+                {projects?.map(p => <option key={p.project_id} value={p.project_id}>{p.name}</option>)}
+              </select>
+              <input type="date" value={dateIssued} onChange={e => setDateIssued(e.target.value)} required className="flex-1 min-w-44 px-3.5 py-2.5 rounded-xl text-sm" style={{ background: VOICE.surface, border: `1px solid ${VOICE.line}`, color: VOICE.user, ...VNUMS }} />
             </div>
           </section>
 
-          {/* 03 Scope of Work */}
+          <hr className="border-0 my-9" style={{ height: 1, background: VOICE.line }} />
+
+          {/* 02 — What's the work? */}
           <section>
-            <SectionLabel n="03" label="Scope of Work" />
+            <div className="flex items-start justify-between gap-3">
+              <Question n="02" hint="Write it the way you'd say it.">What's the work?</Question>
+              {/* B4 — inert in this pass (separate ticket) */}
+              <button type="button" title="Coming soon" className="text-xs font-medium inline-flex items-center gap-1.5 mt-1 shrink-0 opacity-60 cursor-default" style={{ color: VOICE.askDeep }}>
+                <span className="material-symbols-outlined text-[14px]">auto_awesome</span> draft stages from this
+              </button>
+            </div>
             <textarea
               value={scope}
               onChange={e => setScope(e.target.value)}
-              rows={6}
-              className="bk-input w-full resize-y"
-              placeholder="Describe the work to be performed, materials to be used, and any specific requirements or exclusions…"
+              rows={2}
+              className="w-full px-4 py-3 rounded-xl text-sm outline-none resize-none"
+              style={{ background: VOICE.surface, border: `1px solid ${VOICE.line}`, color: VOICE.user }}
+              placeholder='"Foundation and plinth lump sum 1.8L, GF brickwork 1400 sft at 85, then plastering…"'
               required
             />
           </section>
 
-          {/* 04 Financial */}
-          <section>
-            <SectionLabel n="04" label="Financial" />
-            <div className="flex flex-col sm:flex-row gap-5 items-start">
-              <div className="space-y-2 w-full sm:max-w-xs">
-                <label className="text-label-caps font-label-caps text-on-surface-variant">Order Value</label>
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 font-data-mono font-bold text-on-surface">₹</span>
-                  <input
-                    type="number" step="0.01" min="0"
-                    value={orderValue || ''}
-                    onChange={e => setOrderValue(parseAmount(e.target.value))}
-                    className="bk-input pl-8 font-data-mono text-headline-sm font-bold"
-                    placeholder="0.00"
-                    required
-                  />
-                </div>
-              </div>
-              <div className="sm:pt-8">
-                <label className="bk-btn-ghost flex items-center gap-2 cursor-pointer border border-primary/20 px-4 py-2.5 rounded-xl">
-                  {isExtracting
-                    ? <Loader2 className="animate-spin text-primary" size={16} />
-                    : <span className="material-symbols-outlined text-primary text-[18px]">auto_awesome</span>}
-                  <span className="text-body-sm font-semibold">{isExtracting ? 'Extracting…' : 'AI Extract from Document'}</span>
-                  <input type="file" accept="image/*,application/pdf" className="hidden" onChange={handleFileUpload} disabled={isExtracting} />
-                </label>
-              </div>
-            </div>
-          </section>
+          <hr className="border-0 my-9" style={{ height: 1, background: VOICE.line }} />
 
-          {/* 05 Work Stages */}
+          {/* 03 — How is the money split? */}
           <section>
-            <div className="flex items-center justify-between mb-5">
-              <SectionLabel n="05" label="Work Stages" noMargin />
-              <button type="button" onClick={addStage}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-label-caps font-label-caps text-primary border border-primary/30 rounded-lg hover:bg-primary/5 transition-colors">
-                <span className="material-symbols-outlined text-[16px]">add</span> Add Row
+            <Question n="03" hint="Each stage becomes a payable milestone.">How is the money split?</Question>
+
+            <div className="flex items-baseline gap-2 flex-wrap">
+              <span className="text-sm" style={{ color: VOICE.system }}>Contract value</span>
+              <span className="text-lg" style={{ color: VOICE.systemFaint }}>₹</span>
+              <input
+                type="number" step="0.01" min="0"
+                value={orderValue || ''}
+                onChange={e => setOrderValue(parseAmount(e.target.value))}
+                placeholder="0"
+                required
+                aria-label="Contract value in rupees"
+                className="bg-transparent outline-none font-medium"
+                style={{ color: VOICE.user, fontSize: 28, width: 220, ...VNUMS }}
+              />
+              <span className="text-xs" style={{ color: VOICE.systemFaint }}>excl. GST</span>
+            </div>
+
+            <UiAllocationBar
+              contract={orderValue}
+              total={uiAllocated}
+              segments={uiSegments}
+              isOver={isOver}
+              activeSeg={uiActiveSeg}
+              onSegTap={(i) => setUiActiveSeg(uiActiveSeg === i ? null : i)}
+            />
+
+            <div className="flex items-center justify-between mt-6 mb-1">
+              <span className="text-xs font-semibold uppercase tracking-[0.1em]" style={{ color: VOICE.system }}>Stages</span>
+              <button type="button" onClick={addStage} className="flex items-center gap-1.5 text-xs font-medium" style={{ color: VOICE.user }}>
+                <span className="material-symbols-outlined text-[16px]">add</span> Add stage
               </button>
             </div>
 
@@ -662,53 +629,72 @@ export default function NewWorkOrder({ session }: { session: Session }) {
                 <p className="text-body-sm">No work stages yet — click to add the first row.</p>
               </button>
             ) : stages.length > 0 ? (
-              <div className="overflow-x-auto -mx-1 px-1">
-                {/* Column header */}
-                <div
-                  className="hidden sm:grid gap-x-2 pb-2 border-b border-black/[0.06] text-[10px] font-bold text-on-surface-variant tracking-[0.08em] uppercase"
-                  style={{ gridTemplateColumns: '1fr 130px 80px 100px 110px 120px 36px' }}
-                >
-                  <div className="pl-1">Work Stage</div>
-                  <div>Unit</div>
-                  <div>Qty</div>
-                  <div>Rate ₹</div>
-                  <div className="text-right pr-2">Amount</div>
-                  <div>Due</div>
-                  <div />
-                </div>
-
-                {/* Stage rows */}
+              <div className="space-y-1">
                 {stages.map((s) => {
                   const mode    = getMode(s);
                   const isLS    = s.unit_type === 'LS';
                   const amount  = calcAmount(s);
-                  const dimCell = 'h-9 flex items-center justify-center text-[13px] text-on-surface-variant/40 rounded-md border border-black/[0.04] bg-black/[0.015] select-none';
-                  const inputCls = 'h-9 w-full px-2.5 text-[13px] border border-black/10 rounded-md focus:outline-none focus:border-primary/40 bg-transparent placeholder:text-on-surface-variant/40';
+                  // ui/work-order-redesign — index among named stages, for the segment dot
+                  // colour + the allocation-bar row highlight (decorative; no logic change).
+                  const namedIdx = uiNamedStages.indexOf(s);
 
                   return (
                     <div
                       key={s.id}
-                      className={`sm:grid gap-x-2 items-start py-2 border-b border-black/[0.04] last:border-0 flex flex-col gap-2 ${s.ambiguous ? 'border-l-2 border-l-amber-400 pl-2' : ''}`}
-                      style={{ gridTemplateColumns: '1fr 130px 80px 100px 110px 120px 36px' }}
+                      className="rounded-xl px-4 py-4 transition-colors"
+                      style={{
+                        background: uiActiveSeg === namedIdx && namedIdx !== -1 ? VOICE.field : VOICE.surface,
+                        border: `1px solid ${VOICE.line}`,
+                        borderLeft: s.ambiguous ? '3px solid #E5A100' : `1px solid ${VOICE.line}`,
+                      }}
                       title={s.ambiguous ? 'Verify this stage — add qty & rate if measured' : undefined}
                     >
-                      {/* Work Stage name */}
-                      <div className="flex flex-col gap-0.5 w-full">
-                        <label className="sm:hidden text-[10px] font-bold text-on-surface-variant">WORK STAGE</label>
+                      {/* line 1 — segment dot + stage name + remove */}
+                      <div className="flex items-center gap-2.5">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full shrink-0"
+                          style={{ background: s.name.trim() && namedIdx !== -1 ? SEG[namedIdx % SEG.length] : VOICE.line }}
+                          aria-hidden="true"
+                        />
                         <input
                           data-stage-id={s.id}
                           value={s.name}
                           onChange={e => updateStage(s.id, 'name', e.target.value)}
                           onBlur={() => handleNameBlur(s)}
-                          className={inputCls}
-                          placeholder="e.g. Foundation slab, 2nd floor plastering"
+                          aria-label="Stage description"
+                          className="flex-1 min-w-0 bg-transparent text-[15px] font-medium outline-none"
+                          style={{ color: VOICE.user }}
+                          placeholder="e.g. Plastering — 2nd floor"
                         />
-                        <span className="h-3" />
+                        <button
+                          type="button"
+                          onClick={() => removeStage(s.id)}
+                          aria-label="Remove stage"
+                          className="shrink-0"
+                          style={{ color: VOICE.systemFaint }}
+                        >
+                          <span className="material-symbols-outlined text-[18px]">delete</span>
+                        </button>
                       </div>
 
-                      {/* Unit */}
-                      <div className="flex flex-col gap-0.5 w-full sm:w-auto">
-                        <label className="sm:hidden text-[10px] font-bold text-on-surface-variant">UNIT</label>
+                      {/* line 2 — qty · unit · rate … amount */}
+                      <div className="flex items-center gap-2.5 mt-3 ml-5 flex-wrap">
+                        {isLS ? (
+                          <span className="text-sm h-10 inline-flex items-center justify-end px-3.5 rounded-lg select-none" style={{ background: VOICE.field, border: `1px solid ${VOICE.line}`, color: VOICE.systemFaint, width: 96 }}>—</span>
+                        ) : (
+                          <input
+                            type="number" step="0.01" min="0"
+                            value={s.quantity ?? ''}
+                            onChange={e => {
+                              const v = parseFloat(e.target.value) || null;
+                              setStages(prev => prev.map(st => st.id !== s.id ? st : { ...st, quantity: v, amount: null }));
+                            }}
+                            aria-label="Stage quantity"
+                            className="h-10 px-3.5 rounded-lg text-sm text-right outline-none"
+                            style={{ background: VOICE.field, border: `1px solid ${VOICE.line}`, color: VOICE.user, width: 96, ...VNUMS }}
+                            placeholder="qty"
+                          />
+                        )}
                         <select
                           value={s.unit_type}
                           onChange={e => {
@@ -722,74 +708,40 @@ export default function NewWorkOrder({ session }: { session: Session }) {
                               amount:   u === 'LS' ? st.amount : null,
                             }));
                           }}
-                          className="h-9 w-full px-2 text-[13px] border border-black/10 rounded-md focus:outline-none focus:border-primary/40 bg-transparent"
+                          aria-label="Stage unit"
+                          className="h-10 px-3 rounded-lg text-sm outline-none"
+                          style={{ background: VOICE.field, border: `1px solid ${VOICE.line}`, color: VOICE.system, minWidth: 104 }}
                         >
-                          <option value="">Unit</option>
+                          <option value="">unit</option>
                           {UNIT_GROUPS.map(g => (
                             <optgroup key={g.group} label={`── ${g.group} ──`}>
                               {g.items.map(i => <option key={i.value} value={i.value}>{i.label}</option>)}
                             </optgroup>
                           ))}
                         </select>
-                        <span className="h-3" />
-                      </div>
-
-                      {/* Qty */}
-                      <div className="flex flex-col gap-0.5 w-full sm:w-auto">
-                        <label className="sm:hidden text-[10px] font-bold text-on-surface-variant">QTY</label>
+                        <span className="text-xs" style={{ color: VOICE.systemFaint }}>×</span>
                         {isLS ? (
-                          <div className={dimCell}>—</div>
-                        ) : (
-                          <input
-                            type="number" step="0.01" min="0"
-                            value={s.quantity ?? ''}
-                            onChange={e => {
-                              const v = parseFloat(e.target.value) || null;
-                              // typing qty clears any direct amount
-                              setStages(prev => prev.map(st => st.id !== s.id ? st : { ...st, quantity: v, amount: null }));
-                            }}
-                            className={inputCls}
-                            placeholder="0"
-                          />
-                        )}
-                        <span className="text-[10px] text-on-surface-variant h-3 leading-3">
-                          {s.unit_type && !isLS ? (QTY_LABELS[s.unit_type] ?? s.unit_type.toLowerCase()) : ''}
-                        </span>
-                      </div>
-
-                      {/* Rate */}
-                      <div className="flex flex-col gap-0.5 w-full sm:w-auto">
-                        <label className="sm:hidden text-[10px] font-bold text-on-surface-variant">RATE ₹</label>
-                        {isLS ? (
-                          <div className={dimCell}>—</div>
+                          <span className="text-sm h-10 inline-flex items-center justify-end px-3.5 rounded-lg select-none" style={{ background: VOICE.field, border: `1px solid ${VOICE.line}`, color: VOICE.systemFaint, width: 120 }}>—</span>
                         ) : (
                           <input
                             type="number" step="0.01" min="0"
                             value={s.rate ?? ''}
                             onChange={e => {
                               const v = parseFloat(e.target.value) || null;
-                              // typing rate clears any direct amount
                               setStages(prev => prev.map(st => st.id !== s.id ? st : { ...st, rate: v, amount: null }));
                             }}
-                            className={inputCls}
-                            placeholder="0"
+                            aria-label="Stage rate"
+                            className="h-10 px-3.5 rounded-lg text-sm text-right outline-none"
+                            style={{ background: VOICE.field, border: `1px solid ${VOICE.line}`, color: VOICE.user, width: 120, ...VNUMS }}
+                            placeholder="₹ rate"
                           />
                         )}
-                        <span className="text-[10px] text-on-surface-variant h-3 leading-3">
-                          {s.unit_type && !isLS ? `per ${s.unit_type}` : ''}
-                        </span>
-                      </div>
-
-                      {/* Amount — editable in lumpsum, read-only when measured */}
-                      <div className="flex flex-col gap-0.5 w-full sm:w-auto">
-                        <label className="sm:hidden text-[10px] font-bold text-on-surface-variant">AMOUNT</label>
+                        <span className="flex-1" />
                         {mode === 'measured' ? (
-                          // Computed — read-only tinted display
-                          <div className="h-9 flex items-center justify-end px-2.5 rounded-md bg-black/[0.025] font-data-mono text-[13px] text-primary font-semibold">
+                          <span className="text-[15px] font-semibold text-right" style={{ color: VOICE.user, minWidth: 128, ...VNUMS }}>
                             {fmtRupee(amount)}
-                          </div>
+                          </span>
                         ) : (
-                          // Editable — lumpsum path A (LS unit) or path B (direct entry)
                           <input
                             type="number" step="0.01" min="0"
                             value={s.amount ?? ''}
@@ -798,150 +750,63 @@ export default function NewWorkOrder({ session }: { session: Session }) {
                               // typing amount clears qty/rate to lock into lumpsum mode
                               setStages(prev => prev.map(st => st.id !== s.id ? st : { ...st, amount: v, quantity: null, rate: null }));
                             }}
-                            className={`${inputCls} font-data-mono text-right ${(s.amount ?? 0) > 0 ? 'text-primary font-semibold' : ''}`}
+                            aria-label="Stage amount"
+                            className="h-10 px-3.5 rounded-lg text-[15px] text-right font-semibold outline-none"
+                            style={{ background: VOICE.field, border: `1px solid ${VOICE.line}`, color: VOICE.user, width: 148, ...VNUMS }}
                             placeholder="₹ amount"
                           />
                         )}
-                        <span className="text-[10px] text-on-surface-variant h-3 leading-3">
-                          {mode === 'measured'
-                            ? `${(s.quantity ?? 0).toLocaleString('en-IN')} × ₹${(s.rate ?? 0).toLocaleString('en-IN')}`
-                            : mode === 'lumpsum' ? 'Lump sum stage' : ''}
-                        </span>
-                      </div>
-
-                      {/* Delete */}
-                      <div className="flex sm:flex-col items-start sm:items-center gap-0.5">
-                        <label className="sm:hidden text-[10px] font-bold text-on-surface-variant opacity-0 select-none">×</label>
-                        <button
-                          type="button"
-                          onClick={() => removeStage(s.id)}
-                          className="h-9 w-9 flex items-center justify-center rounded-lg text-on-surface-variant/50 hover:text-error hover:bg-error-container/20 transition-colors"
-                        >
-                          <span className="material-symbols-outlined text-[16px]">close</span>
-                        </button>
-                        <span className="h-3" />
                       </div>
                     </div>
                   );
                 })}
-
-                {/* Summary */}
-                <div className="mt-4 pt-4 border-t border-outline-variant/20">
-                  <div className="flex items-baseline justify-between gap-4 mb-3">
-                    <span className="text-[12px] text-on-surface-variant">
-                      {stages.length} work stage{stages.length !== 1 ? 's' : ''}
-                    </span>
-                    <div className="text-right">
-                      <div className="text-[10px] font-bold tracking-wider text-on-surface-variant uppercase mb-0.5">Stages Total</div>
-                      <div className="font-data-mono font-bold text-[18px] text-on-surface">{fmtRupee(stagesTotal)}</div>
-                    </div>
-                  </div>
-
-                  {orderValue > 0 && (
-                    <div>
-                      <div className="flex items-center justify-between text-[11px] mb-1.5">
-                        <span className="text-on-surface-variant">
-                          Order Value: <span className="font-data-mono text-on-surface font-medium">{fmtRupee(orderValue)}</span>
-                        </span>
-                        <span className={`font-medium ${isOver ? 'text-error' : isExact ? 'text-green-700' : 'text-amber-600'}`}>
-                          {isOver  && `⚠ Over by ${fmtRupee(stagesTotal - orderValue)}`}
-                          {isExact && '✓ Fully allocated'}
-                          {isUnder && `${fmtRupee(orderValue - stagesTotal)} unallocated`}
-                          {!isOver && !isExact && !isUnder && ''}
-                        </span>
-                      </div>
-                      <div className="h-2 rounded-full bg-surface-container-highest overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all duration-500 ${isOver ? 'bg-error' : 'bg-primary'}`}
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
               </div>
             ) : null}
           </section>
 
           {createWO.isError && (
-            <div className="p-4 bg-error-container text-on-error-container rounded-xl text-body-sm flex items-center gap-2">
+            <div className="mt-8 p-4 bg-error-container text-on-error-container rounded-xl text-body-sm flex items-center gap-2">
               <span className="material-symbols-outlined shrink-0">error</span>
               {(createWO.error as Error)?.message}
             </div>
           )}
         </form>
+      </div>
 
-        {/* ── Right: Summary sidebar ──────────────────────────────── */}
-        <aside className="w-full lg:w-80 xl:w-88 shrink-0 lg:sticky lg:top-8">
-          <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/30 shadow-card overflow-hidden">
-            <div className="px-5 py-4 bg-surface-container-low border-b border-outline-variant/20 flex items-center gap-2">
-              <span className="material-symbols-outlined text-[18px] text-primary">preview</span>
-              <h3 className="text-label-caps font-label-caps text-on-surface-variant">Order Summary</h3>
-              {/* Status shown subtly here instead of as a dedicated form field */}
-              <span className="ml-auto text-[10px] font-medium px-2 py-0.5 rounded-full" style={{ background: VOICE.field, color: VOICE.systemFaint }}>Draft</span>
-            </div>
-            <div className="p-5 space-y-4">
-              <SummaryRow icon="tag"         label="WO ID"        value={
-                <span className="font-data-mono text-on-surface-variant/40 italic text-body-sm">
-                  {selectedProject?.project_code ? `WO-${selectedProject.project_code}-…` : 'Auto-generated'}
-                </span>
-              } />
-              <SummaryRow icon="construction" label="Project"      value={selectedProject?.name ?? <span className="text-on-surface-variant italic text-body-sm">Not selected</span>} />
-              <SummaryRow icon="person"       label="Worker"       value={selectedWorker?.name  ?? <span className="text-on-surface-variant italic text-body-sm">Not selected</span>} />
-              <SummaryRow icon="payments"     label="Order Value"  value={<span className="font-data-mono font-bold">{fmtRupee(orderValue)}</span>} />
-              <div className="pt-4 border-t border-outline-variant/20">
-                <p className="text-[10px] font-bold text-on-surface-variant mb-2 flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-[14px]">description</span> SCOPE PREVIEW
-                </p>
-                <p className="text-body-sm text-on-surface leading-relaxed">
-                  {scope
-                    ? <>{scope.slice(0, 100)}{scope.length > 100 && <span className="text-on-surface-variant">…</span>}</>
-                    : <span className="text-on-surface-variant italic">No scope added yet</span>}
-                </p>
-              </div>
-              <div className="pt-4 border-t border-outline-variant/20 flex items-center justify-between">
-                <span className="text-[10px] font-bold text-on-surface-variant flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-[14px]">layers</span> WORK STAGES
-                </span>
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                  stages.length > 0 && isExact
-                    ? 'bg-secondary-container text-on-secondary-container'
-                    : stages.length > 0
-                      ? 'bg-tertiary-container text-on-tertiary-container'
-                      : 'bg-surface-container-high text-on-surface-variant'
-                }`}>
-                  {stages.length === 0
-                    ? 'None'
-                    : `${stages.length} stage${stages.length > 1 ? 's' : ''} · ${fmtRupee(stagesTotal)}`}
-                </span>
-              </div>
-            </div>
+      {/* Fixed bottom action bar — total + status + single primary (B1: disable on isOver only) */}
+      <footer className="fixed bottom-16 md:bottom-0 left-0 md:left-72 right-0 z-40 backdrop-blur-sm" style={{ background: VOICE.surface, borderTop: `1px solid ${VOICE.line}`, paddingBottom: 'env(safe-area-inset-bottom)' }}>
+        <div className="px-margin-mobile md:px-margin-desktop py-3 flex items-center gap-3 flex-wrap">
+          <div>
+            <UiTotalExclGst amountLabel={`₹${uiAllocated.toLocaleString('en-IN')}`} size={16} />
+            <p className="text-xs" style={{ color: VOICE.systemFaint, ...VNUMS }}>
+              {uiNamedStages.length > 0 ? `${uiNamedStages.length} stage${uiNamedStages.length > 1 ? 's' : ''}` : 'one full payment'} · draft
+            </p>
           </div>
-        </aside>
-      </div>
-
-      {/* Fixed bottom action bar */}
-      <div className="fixed bottom-16 md:bottom-0 left-0 md:left-72 right-0 z-40 backdrop-blur-sm px-margin-mobile md:px-margin-desktop py-3 flex items-center justify-between gap-4" style={{ background: 'rgba(255,255,255,0.95)', borderTop: `1px solid ${VOICE.line}` }}>
-        <button
-          type="button"
-          onClick={() => navigate(initState.from === 'project' && initState.projectId ? `/projects/${initState.projectId}/work-orders` : '/work-orders')}
-          className="px-6 py-2.5 rounded-xl text-body-sm font-semibold"
-          style={{ border: `1px solid ${VOICE.line}`, color: VOICE.system }}
-        >
-          Cancel
-        </button>
-        <button
-          type="submit"
-          form="wo-new-form"
-          className="flex items-center gap-2 px-8 py-2.5 rounded-xl text-body-sm font-semibold text-white disabled:opacity-50"
-          style={{ background: VOICE.user }}
-          disabled={createWO.isPending || isOver}
-        >
-          {createWO.isPending
-            ? <><Loader2 className="animate-spin" size={16} /> Saving…</>
-            : <><span className="material-symbols-outlined text-[18px]">save</span> Save as Draft</>}
-        </button>
-      </div>
+          <span className="flex-1" />
+          <button
+            type="button"
+            onClick={() => navigate(initState.from === 'project' && initState.projectId ? `/projects/${initState.projectId}/work-orders` : '/work-orders')}
+            className="text-sm font-medium"
+            style={{ color: VOICE.system }}
+          >
+            Cancel
+          </button>
+          <div className="text-right">
+            <button
+              type="submit"
+              form="wo-new-form"
+              className="text-sm font-medium px-6 py-3 rounded-xl inline-flex items-center gap-1.5 text-white disabled:opacity-50"
+              style={{ background: VOICE.user }}
+              disabled={createWO.isPending || isOver}
+            >
+              {createWO.isPending
+                ? <><Loader2 className="animate-spin" size={15} /> Saving…</>
+                : <><span className="material-symbols-outlined text-[18px]">check</span> Create work order</>}
+            </button>
+            <UiSaveHint text={isOver ? `stages exceed contract by ₹${(stagesTotal - orderValue).toLocaleString('en-IN')}` : null} />
+          </div>
+        </div>
+      </footer>
 
       {/* ── One-time job confirmation dialog ──────────────────────────── */}
       {showOneTimeDialog && (
@@ -979,26 +844,31 @@ export default function NewWorkOrder({ session }: { session: Session }) {
         </div>
       )}
     </div>
+
+    {/* ui/work-order-redesign — save ceremony (B5). onLeave fires the EXISTING navigate
+        with the id read from createWO.data; every exit (scrim/Done/View) calls it. */}
+    <UiWoCeremony
+      open={uiCeremonyOpen}
+      woId={createWO.data}
+      workerName={selectedWorker?.name}
+      projectName={selectedProject?.name}
+      total={uiAllocated}
+      contract={orderValue}
+      segments={uiSegments}
+      stageCount={uiNamedStages.length}
+      onLeave={() => navigate(`/work-orders/${createWO.data}`, { state: initState.from === 'project' ? { from: 'project', projectId: initState.projectId, projectName: initState.projectName } : undefined })}
+    />
+    </>
   );
 }
 
-function SectionLabel({ n, label, noMargin }: { n: string; label: string; noMargin?: boolean }) {
+function Question({ n, hint, children }: { n: string; hint?: string; children: React.ReactNode }) {
   return (
-    <div className={`flex items-center gap-3 ${noMargin ? '' : 'mb-5'}`}>
-      <span className="text-[10px] font-bold shrink-0 tabular-nums" style={{ color: VOICE.systemFaint }}>{n}</span>
-      <span className="text-[11px] font-semibold tracking-[0.1em] uppercase shrink-0" style={{ color: VOICE.system }}>{label}</span>
-      <div className="flex-1 h-px" style={{ background: VOICE.line }} />
-    </div>
-  );
-}
-
-function SummaryRow({ icon, label, value }: { icon: string; label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex items-start gap-3">
-      <span className="material-symbols-outlined text-[16px] text-on-surface-variant mt-0.5 shrink-0">{icon}</span>
-      <div className="min-w-0 flex-1">
-        <p className="text-[10px] font-bold text-on-surface-variant">{label.toUpperCase()}</p>
-        <div className="text-body-sm text-on-surface font-medium mt-0.5 truncate">{value}</div>
+    <div className="flex items-baseline gap-3 mb-4">
+      <span className="text-xs" style={{ color: VOICE.systemFaint, ...VNUMS }}>{n}</span>
+      <div>
+        <h2 className="text-base font-medium" style={{ color: VOICE.user }}>{children}</h2>
+        {hint && <p className="text-xs mt-0.5" style={{ color: VOICE.systemFaint }}>{hint}</p>}
       </div>
     </div>
   );
