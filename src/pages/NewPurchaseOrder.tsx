@@ -934,18 +934,6 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
     return VENDOR_TO_SKU_CATEGORIES[selectedVendor.category] ?? null;
   }, [selectedVendor]);
 
-  // Recent vendors — last-used IDs from localStorage, resolved against the live
-  // vendor list so renamed/deleted vendors drop off automatically. Surfaced as
-  // one-tap chips below the search input when nothing has been typed yet.
-  const recentVendors = useMemo<any[]>(() => {
-    if (!vendors) return [];
-    let ids: string[] = [];
-    try { ids = JSON.parse(localStorage.getItem('briklay_recent_vendors') || '[]'); } catch { /* ignore */ }
-    return ids
-      .map(id => (vendors as any[]).find(v => v.stakeholder_id === id))
-      .filter(Boolean)
-      .slice(0, 5);
-  }, [vendors]);
 
   // Single entry point for picking a vendor — sets state and records the choice
   // in the recent-vendors list so the next PO surfaces it as a one-tap chip.
@@ -3487,27 +3475,6 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
                 </span>
               </button>
             )}
-          </div>
-        )}
-        {/* Recent vendors — one-tap chips, shown only before a vendor is chosen */}
-        {!selectedVendor && !vendorSearch.trim() && recentVendors.length > 0 && (
-          <div className="mt-2.5">
-            <p className="text-[10px] text-on-surface-variant/30 mb-1.5 tracking-wide uppercase">Recent</p>
-            <div className="flex flex-wrap gap-2">
-              {recentVendors.map((v: any) => (
-                <button
-                  key={v.stakeholder_id}
-                  type="button"
-                  onClick={() => selectVendor(v)}
-                  className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full border border-outline-variant/20 bg-white text-on-surface-variant hover:border-primary/30 hover:text-primary active:scale-[0.97] transition-all"
-                >
-                  <span className="w-5 h-5 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center text-[9px] font-bold shrink-0">
-                    {getInitials(v.name)}
-                  </span>
-                  <span className="text-[13px] font-medium">{v.name}</span>
-                </button>
-              ))}
-            </div>
           </div>
         )}
       </div>
