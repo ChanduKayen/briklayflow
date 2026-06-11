@@ -112,14 +112,17 @@ function NoObligationsState({ onSkip, onOpenWO, onOpenPO, txnType }: {
 
 // ── WOObligationRow ───────────────────────────────────────────────────────────
 
-function WOObligationRow({ wo, selectedObligation, expanded, onToggleExpand, onSelect, milestonePayments }: {
+function WOObligationRow({ wo, selectedObligation, expanded, onToggleExpand, onSelect, milestonePayments, woPaid }: {
   wo: any; selectedObligation: SelectedObligation | null;
   expanded: boolean; onToggleExpand: () => void;
   onSelect: (ob: SelectedObligation) => void;
   milestonePayments: Record<string, number>;
+  woPaid: Record<string, number>;
 }) {
   const hasPhases = (wo.wo_milestones?.length || 0) > 0;
   const woBalance = getWOBalance(wo);
+  // Remaining = order value minus what's already been paid against this WO.
+  const woNet = Math.max(0, woBalance - (woPaid[wo.wo_id] || 0));
   const isSelected = selectedObligation?.wo_id === wo.wo_id && !selectedObligation?.phase_id;
 
   return (
@@ -129,7 +132,7 @@ function WOObligationRow({ wo, selectedObligation, expanded, onToggleExpand, onS
         onClick={hasPhases ? onToggleExpand : () => onSelect({
           type: 'WO', wo_id: wo.wo_id,
           label: `${wo.wo_id} · ${wo.stakeholders?.name || ''}`,
-          balance: woBalance,
+          balance: woNet,
         })}
       >
         <div className="w-5 shrink-0 flex items-center justify-center relative z-10">
@@ -155,8 +158,8 @@ function WOObligationRow({ wo, selectedObligation, expanded, onToggleExpand, onS
           )}
         </div>
         <div className="text-right shrink-0 ml-3">
-          <p className={`text-[13px] font-bold font-data-mono ${woBalance > 0 ? 'text-on-surface' : 'text-on-surface-variant/30'}`}>
-            {woBalance > 0 ? `₹${woBalance.toLocaleString('en-IN')}` : 'Settled'}
+          <p className={`text-[13px] font-bold font-data-mono ${woNet > 0 ? 'text-on-surface' : 'text-on-surface-variant/30'}`}>
+            {woNet > 0 ? `₹${woNet.toLocaleString('en-IN')}` : 'Settled'}
           </p>
           {hasPhases && (
             <span className="inline-block text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-black/[0.06] text-on-surface-variant/40 mt-1 bg-black/[0.01]">
@@ -183,7 +186,7 @@ function WOObligationRow({ wo, selectedObligation, expanded, onToggleExpand, onS
                   ${settled ? 'opacity-40 cursor-not-allowed bg-black/[0.01]' : isPhaseSelected ? 'bg-[#C8603A]/[0.04] cursor-pointer' : 'cursor-pointer hover:bg-black/[0.01]'}`}
                 onClick={() => {
                   if (settled) return;
-                  onSelect({ type: 'WO_PHASE', wo_id: wo.wo_id, phase_id: phase.milestone_id, label: `${phase.name} · ${wo.wo_id}`, balance });
+                  onSelect({ type: 'WO_PHASE', wo_id: wo.wo_id, phase_id: phase.milestone_id, label: `${phase.name} · ${wo.wo_id}`, balance: Math.max(0, due) });
                 }}
               >
                 {/* Horizontal branch point indicator */}
@@ -232,17 +235,20 @@ function WOObligationRow({ wo, selectedObligation, expanded, onToggleExpand, onS
 
 // ── POObligationRow ───────────────────────────────────────────────────────────
 
-function POObligationRow({ po, selectedObligation, onSelect }: {
+function POObligationRow({ po, selectedObligation, onSelect, poPaid }: {
   po: any; selectedObligation: SelectedObligation | null;
   onSelect: (ob: SelectedObligation) => void;
+  poPaid: Record<string, number>;
 }) {
   const isPaid = po.status === 'PAID';
   const isCancelled = po.status === 'CANCELLED';
   const hasBill = po.vendor_bill_amount && Number(po.vendor_bill_amount) > 0;
-  
-  // Use bill amount if present, otherwise estimated PO value
+
+  // Bill amount if present, otherwise estimated PO value; minus payments already made.
   const rawBalance = getPOBalance(po);
-  
+  const poNet = Math.max(0, rawBalance - (poPaid[po.po_id] || 0));
+  const fullyPaid = isPaid || (rawBalance > 0 && poNet <= 0);
+
   const isSelected = selectedObligation?.po_id === po.po_id;
   const isLinkable = !isPaid && !isCancelled;
 
@@ -252,7 +258,7 @@ function POObligationRow({ po, selectedObligation, onSelect }: {
         ${!isLinkable ? 'opacity-40 cursor-not-allowed bg-black/[0.01]' : isSelected ? 'bg-[#006c49]/[0.02] cursor-pointer' : 'cursor-pointer hover:bg-black/[0.01]'}`}
       onClick={() => {
         if (!isLinkable) return;
-        onSelect({ type: 'PO', po_id: po.po_id, label: `${po.po_id} · ${po.stakeholders?.name || ''}`, balance: rawBalance });
+        onSelect({ type: 'PO', po_id: po.po_id, label: `${po.po_id} · ${po.stakeholders?.name || ''}`, balance: poNet });
       }}
     >
       <div className="w-5 shrink-0 flex items-center justify-center relative z-10">
@@ -278,13 +284,13 @@ function POObligationRow({ po, selectedObligation, onSelect }: {
       </div>
       <div className="text-right shrink-0 ml-3 flex flex-col items-end">
         <p className="text-[13px] font-bold font-data-mono text-on-surface">
-          ₹{rawBalance.toLocaleString('en-IN')}
+          ₹{poNet.toLocaleString('en-IN')}
         </p>
         <div className="mt-1">
-          {isPaid ? (
-            <span className="px-1.5 py-0.5 rounded text-[8.5px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-600/10">Settled</span>
-          ) : isCancelled ? (
+          {isCancelled ? (
             <span className="px-1.5 py-0.5 rounded text-[8.5px] font-bold uppercase tracking-wider bg-red-50 text-red-700 border border-red-600/10">Cancelled</span>
+          ) : fullyPaid ? (
+            <span className="px-1.5 py-0.5 rounded text-[8.5px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-600/10">Settled</span>
           ) : (
             <span className={`px-1.5 py-0.5 rounded text-[8.5px] font-bold uppercase tracking-wider border ${
               hasBill 
@@ -313,24 +319,41 @@ function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip,
 }) {
   const [expandedWOs, setExpandedWOs] = useState<string[]>([]);
   const [milestonePayments, setMilestonePayments] = useState<Record<string, number>>({});
+  // Total paid (non-voided) per WO and per PO, so rows show the REMAINING balance
+  // — not the gross order/bill value — once a payment has already been recorded.
+  const [woPaid, setWoPaid] = useState<Record<string, number>>({});
+  const [poPaid, setPoPaid] = useState<Record<string, number>>({});
   const hasData = wos.length > 0 || pos.length > 0;
 
   useEffect(() => {
-    if (wos.length === 0) { setMilestonePayments({}); return; }
     const woIds = wos.map((w: any) => w.wo_id);
+    const poIds = pos.map((p: any) => p.po_id);
+    if (woIds.length === 0 && poIds.length === 0) {
+      setMilestonePayments({}); setWoPaid({}); setPoPaid({}); return;
+    }
+    let cancelled = false;
     supabase.from('txn_allocations')
-      .select('milestone_id, allocated_amount')
-      .in('order_ref', woIds)
-      .eq('order_type', 'WO')
-      .not('milestone_id', 'is', null)
+      .select('order_ref, order_type, milestone_id, allocated_amount, transactions!inner(status)')
+      .in('order_ref', [...woIds, ...poIds])
+      .neq('transactions.status', 'Voided')
       .then(({ data }) => {
-        const map: Record<string, number> = {};
-        for (const row of (data || [])) {
-          map[row.milestone_id] = (map[row.milestone_id] || 0) + Number(row.allocated_amount);
+        if (cancelled) return;
+        const ms: Record<string, number> = {};
+        const wo: Record<string, number> = {};
+        const po: Record<string, number> = {};
+        for (const row of (data || []) as any[]) {
+          const amt = Number(row.allocated_amount) || 0;
+          if (row.order_type === 'WO') {
+            wo[row.order_ref] = (wo[row.order_ref] || 0) + amt;
+            if (row.milestone_id) ms[row.milestone_id] = (ms[row.milestone_id] || 0) + amt;
+          } else if (row.order_type === 'PO') {
+            po[row.order_ref] = (po[row.order_ref] || 0) + amt;
+          }
         }
-        setMilestonePayments(map);
+        setMilestonePayments(ms); setWoPaid(wo); setPoPaid(po);
       });
-  }, [wos]);
+    return () => { cancelled = true; };
+  }, [wos, pos]);
 
   if (loading) {
     return (
@@ -373,7 +396,7 @@ function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip,
                   onToggleExpand={() => setExpandedWOs(prev =>
                     prev.includes(wo.wo_id) ? prev.filter(id => id !== wo.wo_id) : [...prev, wo.wo_id]
                   )}
-                  onSelect={onSelect} milestonePayments={milestonePayments} />
+                  onSelect={onSelect} milestonePayments={milestonePayments} woPaid={woPaid} />
               ))}
             </div>
           </div>
@@ -392,7 +415,7 @@ function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip,
             </div>
             <div className="divide-y divide-black/[0.03]">
               {pos.map((po: any) => (
-                <POObligationRow key={po.po_id} po={po} selectedObligation={selectedObligation} onSelect={onSelect} />
+                <POObligationRow key={po.po_id} po={po} selectedObligation={selectedObligation} onSelect={onSelect} poPaid={poPaid} />
               ))}
             </div>
           </div>
