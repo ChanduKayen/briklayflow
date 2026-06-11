@@ -3582,7 +3582,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
       ) : (
       <>
       {/* Items header + inline doc-upload trigger */}
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mt-5 mb-3">
         <h2 className="text-[13px] font-semibold text-on-surface-variant/40 uppercase tracking-wider">Items</h2>
         <div className="flex items-center gap-3">
           {lineItems.length > 0 && (
