@@ -28,6 +28,8 @@ import { detectAttributeConflicts } from '../lib/skuConflictDetector';
 import type { AttributeConflict } from '../lib/skuConflictDetector';
 import { buildInsertionReason } from '../lib/skuInsertionReason';
 import type { InsertionReason } from '../lib/skuInsertionReason';
+// ui/new-po-redesign — presentation-only sibling component (brief §0.2 / amendment A)
+import UiSaveCeremony from '../components/po-new-ui/UiSaveCeremony';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -955,6 +957,9 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
   const [showVendorResults, setShowVendorResults] = useState(false);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [isEditingDate, setIsEditingDate] = useState(false);
+  // ui/new-po-redesign — cosmetic, dead-ended (brief §3). Read ONLY by the save
+  // ceremony JSX; never by any pipeline path or payload-constructing handler.
+  const [uiCeremonyOpen, setUiCeremonyOpen] = useState(false);
 
   function getInitials(name: string): string {
     if (!name) return '?';
@@ -3157,7 +3162,11 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
     onSuccess: (generatedPoId) => {
       qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
       showSnackbar(`PO ${generatedPoId} created`);
-      navigate(projectId ? `/projects/${projectId}/purchase-orders` : '/purchase-orders');
+      // ui/new-po-redesign (decision 1): the ONE sanctioned behavior change.
+      // Was: navigate(...) immediately. Now the ceremony opens and the EXISTING
+      // navigate (identical args) fires from the ceremony's onLeave. Error path
+      // is completely unchanged.
+      setUiCeremonyOpen(true);
     },
     onError: (err: any) => {
       showSnackbar(err.message || 'Failed to save', { type: 'error' });
@@ -4540,6 +4549,19 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
         </div>
       </div>
     </div>
+
+    {/* ui/new-po-redesign — save ceremony. Opens via the sanctioned onSuccess
+        flag; every exit calls the EXISTING navigate with identical arguments
+        (decision 1). poId comes from the mutation result; the rest is derived
+        at render from existing state. */}
+    <UiSaveCeremony
+      open={uiCeremonyOpen}
+      poId={saveMutation.data}
+      vendorName={selectedVendor?.name}
+      projectName={selectedProjectObj?.name}
+      totalLabel={`₹${grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
+      onLeave={() => navigate(projectId ? `/projects/${projectId}/purchase-orders` : '/purchase-orders')}
+    />
     </>
   );
 }
