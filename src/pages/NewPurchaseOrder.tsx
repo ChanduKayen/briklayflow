@@ -1849,7 +1849,10 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
       let topMatch: any = aliasMatches[0] || null;
       let topProfile: any = null;
       if (aliasMatches.length > 1) {
-        const candidates = aliasMatches.slice(0, 3);
+        // F1: consider ALL returned families (p_limit caps this at 5), not just
+        // the top 3 — a 4-way tie like "sand" → M-Sand / Natural Sand / Plaster
+        // Sand / River Sand must keep every tied family in the picker set.
+        const candidates = aliasMatches.slice(0, 5);
         const scored = await Promise.all(
           candidates.map(c => scoreFamilyByAttributes(c, extracted)),
         );
@@ -1857,24 +1860,35 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
           (b.attributeScore - a.attributeScore) ||
           ((b.family.similarity ?? 0) - (a.family.similarity ?? 0))
         );
-        const winnerScore     = scored[0].attributeScore;
-        const runnerUpScore   = scored[1]?.attributeScore ?? 0;
-        const winnerSim       = scored[0].family.similarity;
-        const runnerUpSim     = scored[1]?.family.similarity ?? 0;
-        const spread          = winnerSim - runnerUpSim;
-        const attributesDisambiguate = winnerScore > runnerUpScore;
 
-        if (attributesDisambiguate) {
-          topMatch   = scored[0].family;
-          topProfile = scored[0].profile;
-        } else if (spread < 0.1 && winnerSim >= SKU_CHIP_DISPLAY) {
-          // Still ambiguous — show family selection.
-          const pills = buildFamilySelectionPills(candidates);
+        // F2: pick a winner ONLY on a decisive separation; otherwise show the
+        // picker. Ties go to the user, never to an arbitrary auto-pick among
+        // equals (the old `else` branch silently chose scored[0]).
+        const SIM_MARGIN  = 0.12;   // similarity gap that counts as a decisive winner
+        const ATTR_MARGIN = 1;      // attribute-score gap that counts as decisive
+
+        const w = scored[0], r = scored[1];
+        const simWinner  = (w.family.similarity - (r?.family.similarity ?? 0)) >= SIM_MARGIN;
+        const attrWinner = (w.attributeScore   - (r?.attributeScore   ?? 0)) >= ATTR_MARGIN;
+
+        // Families bunched near the top score (within a small band) — the picker set.
+        const topSim   = w.family.similarity;
+        const tieband  = scored.filter(s => (topSim - s.family.similarity) <= 0.1
+                                            && s.family.similarity >= SKU_CHIP_DISPLAY);
+
+        if (attrWinner || simWinner) {
+          // Decisive winner — proceed as today.
+          topMatch   = w.family;
+          topProfile = w.profile;
+        } else if (tieband.length > 1) {
+          // Genuine near-tie among >=2 valid families → ASK. Never auto-pick among equals.
+          const pickFamilies = tieband.map(s => s.family);
+          const pills = buildFamilySelectionPills(pickFamilies);
           setStatus(trace, 'needs_input');
           logTrace(query, trace);
           updateLine(itemId, {
             attribute_pills:     pills,
-            pending_families:    candidates,
+            pending_families:    pickFamilies,
             family_match:        undefined,
             family_profile:      undefined,
             family_members:      undefined,
@@ -1888,12 +1902,13 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
             isGeneratingAiChip:  false,
             show_custom_fallback: false,
             resolution_trace:    trace,
+            card_message:        { type: 'suggestion', text: 'Multiple matches — which one?' },
           });
           return;
         } else {
-          // No tie — pick the winner.
-          topMatch   = scored[0].family;
-          topProfile = scored[0].profile;
+          // Single candidate above band, or one clearly-best → proceed.
+          topMatch   = w.family;
+          topProfile = w.profile;
         }
       }
 
@@ -2294,7 +2309,16 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
     // single-family resolution pipeline so pills + checkmark behave the
     // same as the direct alias hit.
     if (attribute === 'family') {
-      const selected = (li.pending_families || []).find((f: any) => f.sub_category === value);
+      // F4: the value carries a stable `${category}::${sub_category}` key so two
+      // same-named families across different categories are distinguishable.
+      // Fall back to sub_category-only for any legacy caller that passes a bare name.
+      const [chosenCategory, chosenSub] = value.includes('::')
+        ? value.split('::')
+        : [undefined, value];
+      const selected =
+        (li.pending_families || []).find(
+          (f: any) => f.sub_category === chosenSub && (!chosenCategory || f.category === chosenCategory),
+        ) || (li.pending_families || []).find((f: any) => f.sub_category === chosenSub);
       if (!selected) return;
       const trace = createTrace();
       addStep(trace, { stage: 'alias_index', input: value, result: `user picked ${selected.sub_category}` });
@@ -3894,11 +3918,44 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
                                   const seed = extractAttrs(raw);
                                   startFreshResolution(li.id, dym, raw, seed);
                                 }}
-                                className="px-3 py-1 rounded-lg bg-primary/8 text-primary text-[13px] font-medium hover:bg-primary/12 active:scale-[0.97] transition-all"
+                                className="text-[13px] text-primary/90 underline underline-offset-2 decoration-primary/30 hover:decoration-primary/70 hover:text-primary cursor-pointer bg-transparent border-0 p-0 transition-colors"
                               >
                                 {dym}
                               </button>
                               <span className="text-[12px] text-on-surface-variant/30">?</span>
+                            </div>
+                          );
+                        })()}
+
+                        {/* ═══ Family disambiguation — tappable chips ═══
+                            When the alias index returns several families bunched at the top
+                            score (e.g. "sand" → M-Sand / Natural Sand / Plaster Sand / River
+                            Sand at ~1.0), searchSKUs stores the tied set in `pending_families`
+                            and asks the user to pick. The 'family' attribute is in SKIP_ATTRS
+                            for ItemAttributeFields / InlineAttributePills, so the pill renders
+                            NOWHERE — these chips are the render path. Reuses the DYM chip look.
+                            Tap value is `${category}::${sub_category}` so same-named families
+                            across categories resolve correctly (handlePillSelection F4). ═══ */}
+                        {(() => {
+                          const fams = li.pending_families;
+                          if (!fams?.length) return null;
+                          if (li.sku_id || li.skipped_linking || li.dismissed || li.sku_match_skipped) return null;
+                          return (
+                            <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                              <span className="text-[12px] text-on-surface-variant/40">Which one</span>
+                              {fams.map((fam: any) => (
+                                <button
+                                  key={`${fam.category}::${fam.sub_category}`}
+                                  type="button"
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    handlePillSelection(li.id, 'family', `${fam.category}::${fam.sub_category}`);
+                                  }}
+                                  className="px-3 py-1 rounded-lg bg-primary/8 text-primary text-[13px] font-medium hover:bg-primary/12 active:scale-[0.97] transition-all"
+                                >
+                                  {fam.sub_category}
+                                </button>
+                              ))}
                             </div>
                           );
                         })()}

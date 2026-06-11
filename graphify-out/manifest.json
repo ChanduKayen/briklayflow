@@ -68,8 +68,8 @@
     "hash": "2f393f6969b3f2c22424b79d74358820"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\components\\ItemAttributeFields.tsx": {
-    "mtime": 1780240194.6251059,
-    "hash": "286d6cb158dc76542573799ae3335737"
+    "mtime": 1780284122.5036542,
+    "hash": "fc452a57acaa7b0930e31d77192403fb"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\components\\LinearProgress.tsx": {
     "mtime": 1778500802.2384305,
@@ -220,8 +220,8 @@
     "hash": "f7d2f81ea3cc273ad49b07d0cec3101e"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\buildPillsFromResolution.ts": {
-    "mtime": 1780243142.4629745,
-    "hash": "0fb94438d22967cc73925c745a9d5c14"
+    "mtime": 1780284061.0178702,
+    "hash": "41bfab05ff35beb0a493f6cd1f14bfb8"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\costCodes.ts": {
     "mtime": 1778566764.3742404,
@@ -276,8 +276,8 @@
     "hash": "a6fed129ec58e6ec5ab406de4f28fac7"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\skuTreeResolver.ts": {
-    "mtime": 1780232088.7723987,
-    "hash": "cf55d1fd8578134f5dce49dcd6745587"
+    "mtime": 1780284143.1914234,
+    "hash": "73b6b52e38e4f359f967f6c5859a37c7"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\supabase-admin.ts": {
     "mtime": 1778300159.20164,
@@ -368,8 +368,8 @@
     "hash": "7018b360ba117414990bbed45c22f1c7"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\NewPurchaseOrder.tsx": {
-    "mtime": 1780282349.4573927,
-    "hash": "ffb57e7195977a3cf63266ac3bdeb936"
+    "mtime": 1780284084.8937776,
+    "hash": "eb118e6fb2a0ca18ea68c65d2548d5fb"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\NewTransaction.tsx": {
     "mtime": 1780023473.0125751,
@@ -790,6 +790,10 @@
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\migrations\\20260531000001_po_line_items_brand.sql": {
     "mtime": 1780239574.1392922,
     "hash": "0ade3b32e772c65d8830c930169173f0"
+  },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\migrations\\20260601000000_fix_search_alias_family_ranking.sql": {
+    "mtime": 1780285730.237926,
+    "hash": "3c8426bdf43e0b2afdb939cea38bf492"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\diff.txt": {
     "mtime": 1779510146.5580544,

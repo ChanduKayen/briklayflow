@@ -1,7 +1,7 @@
 # Graph Report - Briklay Fly  (2026-06-01)
 
 ## Corpus Check
-- 198 files · ~635,020 words
+- 199 files · ~635,526 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -50,8 +50,8 @@
 10. `extractAttrs()` - 10 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `buildPills()` --calls--> `isStopWord()`  [INFERRED]
-  src\lib\buildPillsFromResolution.ts → src\lib\brandFilter.ts
+- `isStopWord()` --calls--> `buildPills()`  [INFERRED]
+  src\lib\brandFilter.ts → src\lib\buildPillsFromResolution.ts
 - `handleDownloadPDF()` --calls--> `SectionLabel()`  [INFERRED]
   src\pages\BillDetail.tsx → src\pages\NewTransaction.tsx
 - `handleSave()` --calls--> `parseAmount()`  [INFERRED]
