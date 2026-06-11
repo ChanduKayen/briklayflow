@@ -9,6 +9,17 @@ import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import { multiply, parseAmount } from '../lib/money';
+import { WORKER_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
+import { useSnackbar } from '../components/Snackbar';
+
+// ── New Work Order UI redesign — four-voice tokens (follows New Transaction / New PO) ──
+const VOICE = {
+  user: '#1E1A15', system: '#6B6258', systemFaint: '#9A9186',
+  ask: '#8A5A0B', askDeep: '#6B4407', askWash: '#FBF3E0', askLine: '#E5C98F',
+  confirm: '#2F5D34', confirmWash: '#E9F2E7',
+  page: '#FBFAF8', surface: '#FFFFFF', field: '#F4F2EE', line: '#E8E4DE',
+};
+const VNUMS = { fontVariantNumeric: 'tabular-nums' as const };
 
 // ─── Work Stage types ──────────────────────────────────────────────────────
 
@@ -139,7 +150,15 @@ export default function NewWorkOrder({ session }: { session: Session }) {
   const [stakeholderId, setStakeholderId] = useState<string>(initState.stakeholderId || '');
   const [scope, setScope] = useState('');
   const [orderValue, setOrderValue] = useState<number>(0);
-  const [dateIssued, setDateIssued] = useState('');
+  // Date issued defaults to today, but stays editable.
+  const [dateIssued, setDateIssued] = useState(new Date().toISOString().split('T')[0]);
+  // Inline "add new worker" quick-create state.
+  const [showAddWorker, setShowAddWorker] = useState(false);
+  const [newWorkerName, setNewWorkerName] = useState('');
+  const [newWorkerTrade, setNewWorkerTrade] = useState('');
+  const [newWorkerTradeOther, setNewWorkerTradeOther] = useState('');
+  const [newWorkerContact, setNewWorkerContact] = useState('');
+  const { show: showSnackbar } = useSnackbar();
   const [stages, setStages] = useState<StageDraft[]>([]);
   const [newStageId, setNewStageId] = useState<string | null>(null);
   const [pendingStages, setPendingStages] = useState<ExtractedStage[]>([]);
@@ -229,6 +248,38 @@ export default function NewWorkOrder({ session }: { session: Session }) {
           : undefined,
       });
     },
+  });
+
+  // ─── Add-new-worker mutation ──────────────────────────────────────────────
+
+  const createWorker = useMutation({
+    mutationFn: async () => {
+      const name = newWorkerName.trim();
+      if (!name) throw new Error('Worker name is required');
+      const category = newWorkerTrade === OTHER_TRADE
+        ? (newWorkerTradeOther.trim() || 'Other')
+        : newWorkerTrade;
+      if (!category) throw new Error('Trade is required');
+      const ns = {
+        stakeholder_id: `STK-${Math.floor(1000 + Math.random() * 9000)}`,
+        name,
+        type: 'Worker',
+        category,
+        contact: newWorkerContact.trim() || null,
+        org_id: orgId,
+      };
+      const { data, error } = await supabase.from('stakeholders').insert([ns]).select().single();
+      if (error) throw error;
+      return data as Stakeholder;
+    },
+    onSuccess: (w) => {
+      queryClient.invalidateQueries({ queryKey: ['workers'] });
+      setStakeholderId(w.stakeholder_id);
+      setShowAddWorker(false);
+      setNewWorkerName(''); setNewWorkerTrade(''); setNewWorkerTradeOther(''); setNewWorkerContact('');
+      showSnackbar(`Worker "${w.name}" added`);
+    },
+    onError: (err: any) => showSnackbar(err.message || 'Failed to add worker', { type: 'error' }),
   });
 
   // ─── Stage helpers ────────────────────────────────────────────────────────
@@ -381,8 +432,8 @@ export default function NewWorkOrder({ session }: { session: Session }) {
       } />
 
       <div className="mb-8">
-        <h1 className="text-headline-lg font-headline-lg text-on-background">New Work Order</h1>
-        <p className="text-body-sm text-on-surface-variant mt-1">Fill in the details manually, or use AI extraction to auto-populate from a document.</p>
+        <h1 className="text-2xl font-medium tracking-tight" style={{ color: VOICE.user }}>New work order</h1>
+        <p className="text-sm mt-1" style={{ color: VOICE.system }}>Fill in the details manually, or use AI extraction to auto-populate from a document.</p>
       </div>
 
       {aiError && (
@@ -436,14 +487,6 @@ export default function NewWorkOrder({ session }: { session: Session }) {
                 </select>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-label-caps font-label-caps text-on-surface-variant">Status</label>
-                <div className="bk-input bg-surface-container cursor-default flex items-center gap-2.5">
-                  <span className="px-2 py-0.5 bg-tertiary-container text-on-tertiary-container rounded text-[10px] font-bold">DRAFT</span>
-                  <span className="text-body-sm text-on-surface-variant">Set automatically on creation</span>
-                </div>
-              </div>
-
             </div>
           </section>
 
@@ -456,6 +499,75 @@ export default function NewWorkOrder({ session }: { session: Session }) {
                 <option value="">Select worker…</option>
                 {workers?.map(w => <option key={w.stakeholder_id} value={w.stakeholder_id}>{w.name}</option>)}
               </select>
+
+              {/* Add new worker — inline quick-create */}
+              {!showAddWorker ? (
+                <button
+                  type="button"
+                  onClick={() => setShowAddWorker(true)}
+                  className="inline-flex items-center gap-1 text-xs font-medium mt-1"
+                  style={{ color: VOICE.ask }}
+                >
+                  <span className="material-symbols-outlined text-[15px]">person_add</span>
+                  Add new worker
+                </button>
+              ) : (
+                <div className="mt-2 rounded-xl p-4 space-y-3" style={{ background: VOICE.askWash, border: `1px solid ${VOICE.askLine}` }}>
+                  <p className="text-xs font-semibold" style={{ color: VOICE.askDeep }}>New worker</p>
+                  <input
+                    value={newWorkerName}
+                    onChange={e => setNewWorkerName(e.target.value)}
+                    className="bk-input"
+                    placeholder="Worker name"
+                    autoFocus
+                  />
+                  <select
+                    value={newWorkerTrade}
+                    onChange={e => { setNewWorkerTrade(e.target.value); setNewWorkerTradeOther(''); }}
+                    className="bk-input"
+                  >
+                    <option value="" disabled>Select trade…</option>
+                    {WORKER_TRADE_GROUPS.map(g => (
+                      <optgroup key={g.group} label={g.group}>
+                        {g.trades.map(t => <option key={t} value={t}>{t}</option>)}
+                      </optgroup>
+                    ))}
+                  </select>
+                  {newWorkerTrade === OTHER_TRADE && (
+                    <input
+                      value={newWorkerTradeOther}
+                      onChange={e => setNewWorkerTradeOther(e.target.value)}
+                      className="bk-input"
+                      placeholder="Specify trade…"
+                    />
+                  )}
+                  <input
+                    value={newWorkerContact}
+                    onChange={e => setNewWorkerContact(e.target.value)}
+                    className="bk-input"
+                    placeholder="Contact (optional)"
+                  />
+                  <div className="flex gap-2 justify-end">
+                    <button
+                      type="button"
+                      onClick={() => { setShowAddWorker(false); setNewWorkerName(''); setNewWorkerTrade(''); setNewWorkerTradeOther(''); setNewWorkerContact(''); }}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium"
+                      style={{ border: `1px solid ${VOICE.line}`, color: VOICE.system }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => createWorker.mutate()}
+                      disabled={!newWorkerName.trim() || !newWorkerTrade || (newWorkerTrade === OTHER_TRADE && !newWorkerTradeOther.trim()) || createWorker.isPending}
+                      className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white inline-flex items-center gap-1.5 disabled:opacity-50"
+                      style={{ background: VOICE.askDeep }}
+                    >
+                      {createWorker.isPending ? 'Saving…' : 'Save & select'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </section>
 
@@ -765,6 +877,8 @@ export default function NewWorkOrder({ session }: { session: Session }) {
             <div className="px-5 py-4 bg-surface-container-low border-b border-outline-variant/20 flex items-center gap-2">
               <span className="material-symbols-outlined text-[18px] text-primary">preview</span>
               <h3 className="text-label-caps font-label-caps text-on-surface-variant">Order Summary</h3>
+              {/* Status shown subtly here instead of as a dedicated form field */}
+              <span className="ml-auto text-[10px] font-medium px-2 py-0.5 rounded-full" style={{ background: VOICE.field, color: VOICE.systemFaint }}>Draft</span>
             </div>
             <div className="p-5 space-y-4">
               <SummaryRow icon="tag"         label="WO ID"        value={
@@ -807,18 +921,20 @@ export default function NewWorkOrder({ session }: { session: Session }) {
       </div>
 
       {/* Fixed bottom action bar */}
-      <div className="fixed bottom-16 md:bottom-0 left-0 md:left-72 right-0 z-40 bg-surface/95 backdrop-blur-sm border-t border-outline-variant/20 px-margin-mobile md:px-margin-desktop py-3 flex items-center justify-between gap-4">
+      <div className="fixed bottom-16 md:bottom-0 left-0 md:left-72 right-0 z-40 backdrop-blur-sm px-margin-mobile md:px-margin-desktop py-3 flex items-center justify-between gap-4" style={{ background: 'rgba(255,255,255,0.95)', borderTop: `1px solid ${VOICE.line}` }}>
         <button
           type="button"
           onClick={() => navigate(initState.from === 'project' && initState.projectId ? `/projects/${initState.projectId}/work-orders` : '/work-orders')}
-          className="bk-btn-ghost border border-outline-variant/40 px-6 py-2.5 rounded-xl text-body-sm font-semibold"
+          className="px-6 py-2.5 rounded-xl text-body-sm font-semibold"
+          style={{ border: `1px solid ${VOICE.line}`, color: VOICE.system }}
         >
           Cancel
         </button>
         <button
           type="submit"
           form="wo-new-form"
-          className="bk-btn flex items-center gap-2 px-8 py-2.5 rounded-xl"
+          className="flex items-center gap-2 px-8 py-2.5 rounded-xl text-body-sm font-semibold text-white disabled:opacity-50"
+          style={{ background: VOICE.user }}
           disabled={createWO.isPending || isOver}
         >
           {createWO.isPending
@@ -869,9 +985,9 @@ export default function NewWorkOrder({ session }: { session: Session }) {
 function SectionLabel({ n, label, noMargin }: { n: string; label: string; noMargin?: boolean }) {
   return (
     <div className={`flex items-center gap-3 ${noMargin ? '' : 'mb-5'}`}>
-      <span className="text-[10px] font-bold text-on-surface-variant/50 font-data-mono shrink-0">{n}</span>
-      <span className="text-[11px] font-bold text-on-surface-variant tracking-[0.1em] uppercase shrink-0">{label}</span>
-      <div className="flex-1 border-t border-outline-variant/30" />
+      <span className="text-[10px] font-bold shrink-0 tabular-nums" style={{ color: VOICE.systemFaint }}>{n}</span>
+      <span className="text-[11px] font-semibold tracking-[0.1em] uppercase shrink-0" style={{ color: VOICE.system }}>{label}</span>
+      <div className="flex-1 h-px" style={{ background: VOICE.line }} />
     </div>
   );
 }
