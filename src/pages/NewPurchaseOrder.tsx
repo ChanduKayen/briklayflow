@@ -858,6 +858,15 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
   const orderedBy = profile?.name ?? '';
 
   const [projectId, setProjectId]               = useState<string>((location.state as any)?.projectId || '');
+  // Where Save/Back return to: the page the user LAUNCHED from, captured ONCE at
+  // mount — not the currently-selected project. The project PO page opens New PO
+  // with state.projectId; the main PO page (and side nav / FAB) pass no state.
+  const returnToRef = useRef<string>(
+    (location.state as any)?.projectId
+      ? `/projects/${(location.state as any).projectId}/purchase-orders`
+      : '/purchase-orders',
+  );
+  const returnTo = returnToRef.current;
   const [vendorId, setVendorId]                 = useState('');
   const [vendorSearch, setVendorSearch]         = useState('');
   const [showVendorSug, setShowVendorSug]       = useState(false);
@@ -3361,7 +3370,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
       {/* Page header — ui/new-po-redesign voice restyle (back handler unchanged) */}
       <div className="flex items-center gap-3 mb-6">
         <button
-          onClick={() => navigate(projectId ? `/projects/${projectId}/purchase-orders` : '/purchase-orders')}
+          onClick={() => navigate(returnTo)}
           className="p-2 -ml-2 rounded-xl transition-colors"
           style={{ color: uiV.user }}
           aria-label="Back"
@@ -4563,7 +4572,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
       vendorName={selectedVendor?.name}
       projectName={selectedProjectObj?.name}
       totalLabel={`₹${grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
-      onLeave={() => navigate(projectId ? `/projects/${projectId}/purchase-orders` : '/purchase-orders')}
+      onLeave={() => navigate(returnTo)}
     />
     </>
   );
