@@ -28,6 +28,17 @@ import { detectAttributeConflicts } from '../lib/skuConflictDetector';
 import type { AttributeConflict } from '../lib/skuConflictDetector';
 import { buildInsertionReason } from '../lib/skuInsertionReason';
 import type { InsertionReason } from '../lib/skuInsertionReason';
+// ui/new-po-redesign — presentation-only sibling components (brief §0.2 / amendment A).
+// Aliased with a ui-prefix where needed to avoid shadowing any existing identifier (§2).
+import UiSaveCeremony from '../components/po-new-ui/UiSaveCeremony';
+import { V as uiV, nums as uiNums } from '../components/po-new-ui/voiceTokens';
+import UiContextRecap from '../components/po-new-ui/UiContextRecap';
+import UiProjectChips from '../components/po-new-ui/UiProjectChips';
+import UiLinkedBadge from '../components/po-new-ui/UiLinkedBadge';
+import { UiResolutionStrip, UiStripEscapes, UiDemotedSuggestion } from '../components/po-new-ui/UiResolutionStrip';
+import UiAttributeFieldsHost from '../components/po-new-ui/UiAttributeFieldsHost';
+import { UiMoney, UiTotalExclGst } from '../components/po-new-ui/UiMoney';
+import UiSaveHint from '../components/po-new-ui/UiSaveHint';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -847,6 +858,15 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
   const orderedBy = profile?.name ?? '';
 
   const [projectId, setProjectId]               = useState<string>((location.state as any)?.projectId || '');
+  // Where Save/Back return to: the page the user LAUNCHED from, captured ONCE at
+  // mount — not the currently-selected project. The project PO page opens New PO
+  // with state.projectId; the main PO page (and side nav / FAB) pass no state.
+  const returnToRef = useRef<string>(
+    (location.state as any)?.projectId
+      ? `/projects/${(location.state as any).projectId}/purchase-orders`
+      : '/purchase-orders',
+  );
+  const returnTo = returnToRef.current;
   const [vendorId, setVendorId]                 = useState('');
   const [vendorSearch, setVendorSearch]         = useState('');
   const [showVendorSug, setShowVendorSug]       = useState(false);
@@ -923,18 +943,6 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
     return VENDOR_TO_SKU_CATEGORIES[selectedVendor.category] ?? null;
   }, [selectedVendor]);
 
-  // Recent vendors — last-used IDs from localStorage, resolved against the live
-  // vendor list so renamed/deleted vendors drop off automatically. Surfaced as
-  // one-tap chips below the search input when nothing has been typed yet.
-  const recentVendors = useMemo<any[]>(() => {
-    if (!vendors) return [];
-    let ids: string[] = [];
-    try { ids = JSON.parse(localStorage.getItem('briklay_recent_vendors') || '[]'); } catch { /* ignore */ }
-    return ids
-      .map(id => (vendors as any[]).find(v => v.stakeholder_id === id))
-      .filter(Boolean)
-      .slice(0, 5);
-  }, [vendors]);
 
   // Single entry point for picking a vendor — sets state and records the choice
   // in the recent-vendors list so the next PO surfaces it as a one-tap chip.
@@ -955,6 +963,9 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
   const [showVendorResults, setShowVendorResults] = useState(false);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [isEditingDate, setIsEditingDate] = useState(false);
+  // ui/new-po-redesign — cosmetic, dead-ended (brief §3). Read ONLY by the save
+  // ceremony JSX; never by any pipeline path or payload-constructing handler.
+  const [uiCeremonyOpen, setUiCeremonyOpen] = useState(false);
 
   function getInitials(name: string): string {
     if (!name) return '?';
@@ -3157,7 +3168,11 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
     onSuccess: (generatedPoId) => {
       qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
       showSnackbar(`PO ${generatedPoId} created`);
-      navigate(projectId ? `/projects/${projectId}/purchase-orders` : '/purchase-orders');
+      // ui/new-po-redesign (decision 1): the ONE sanctioned behavior change.
+      // Was: navigate(...) immediately. Now the ceremony opens and the EXISTING
+      // navigate (identical args) fires from the ceremony's onLeave. Error path
+      // is completely unchanged.
+      setUiCeremonyOpen(true);
     },
     onError: (err: any) => {
       showSnackbar(err.message || 'Failed to save', { type: 'error' });
@@ -3341,7 +3356,8 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
       )}
 
       <div
-        className="px-margin-mobile md:px-margin-desktop pt-6 pb-32"
+        className="px-margin-mobile md:px-margin-desktop pt-6 pb-32 mx-auto"
+        style={{ maxWidth: 860, background: uiV.page }}
         onClick={(e) => {
           // Tapping outside any line-item card deactivates the active card.
           // The card's own onClick stops propagation by setting itself active,
@@ -3351,25 +3367,26 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
           }
         }}
       >
-      {/* Page header */}
+      {/* Page header — ui/new-po-redesign voice restyle (back handler unchanged) */}
       <div className="flex items-center gap-3 mb-6">
         <button
-          onClick={() => navigate(projectId ? `/projects/${projectId}/purchase-orders` : '/purchase-orders')}
-          className="p-2 rounded-xl hover:bg-surface-container-low transition-colors text-on-surface-variant"
+          onClick={() => navigate(returnTo)}
+          className="p-2 -ml-2 rounded-xl transition-colors"
+          style={{ color: uiV.user }}
+          aria-label="Back"
         >
           <span className="material-symbols-outlined text-[22px]">arrow_back</span>
         </button>
-        <div className="flex-1">
-          <h2 className="text-[22px] font-bold text-on-surface tracking-tight">New Purchase Order</h2>
-        </div>
+        <h2 className="text-xl font-medium flex-1 tracking-tight" style={{ color: uiV.user }}>New purchase order</h2>
         {/* PO ID display */}
-        <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-surface-container rounded-xl border border-outline-variant/20">
-          <span className="font-data-mono text-[13px] text-on-surface-variant/40 italic">
-            {selectedProjectObj?.project_code
-              ? `PO-${selectedProjectObj.project_code}-…`
-              : 'Auto-generated'}
-          </span>
-        </div>
+        <span
+          className="hidden md:inline-flex items-center px-2.5 py-1 rounded-full text-xs"
+          style={{ background: uiV.field, color: uiV.system, ...uiNums }}
+        >
+          {selectedProjectObj?.project_code
+            ? `PO-${selectedProjectObj.project_code}-…`
+            : 'Auto-generated'}
+        </span>
       </div>
 
       {/* ────────────────────────────────────────────────────────────── */}
@@ -3380,13 +3397,14 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
       <div className="relative mb-4">
         {selectedVendor && !showVendorResults && !vendorSearch ? (
           // Display mode — selected vendor as a static pill
-          <div className="flex items-center gap-2 w-full h-12 pl-3.5 pr-3 rounded-xl border border-outline-variant/20 bg-white">
-            <div className="w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[11px] font-bold shrink-0">
+          <div className="flex items-center gap-3 w-full rounded-2xl px-4 py-3.5" style={{ background: uiV.surface, border: `1px solid ${uiV.line}` }}>
+            <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-medium shrink-0" style={{ background: uiV.field, color: uiV.system }}>
               {getInitials(selectedVendor.name)}
             </div>
-            <div className="flex-1 min-w-0 flex items-baseline gap-2">
-              <span className="text-[15px] font-medium text-on-surface truncate">{selectedVendor.name}</span>
-              <span className="text-[12px] text-on-surface-variant/40 truncate">{selectedVendor.category}</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium truncate" style={{ color: uiV.user }}>{selectedVendor.name}</p>
+              <p className="text-xs truncate" style={{ color: uiV.system }}>{selectedVendor.category}</p>
+              {/* Vendor PO-history line intentionally omitted — no backing query (amendment D) */}
             </div>
             <button
               type="button"
@@ -3397,7 +3415,8 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
                 setShowVendorResults(true);
                 window.setTimeout(() => vendorSearchRef.current?.focus(), 0);
               }}
-              className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-on-surface-variant/30 hover:text-on-surface-variant hover:bg-surface-container"
+              className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center"
+              style={{ color: uiV.systemFaint }}
               aria-label="Clear vendor"
             >
               <span className="material-symbols-outlined text-[16px]">close</span>
@@ -3467,27 +3486,6 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
             )}
           </div>
         )}
-        {/* Recent vendors — one-tap chips, shown only before a vendor is chosen */}
-        {!selectedVendor && !vendorSearch.trim() && recentVendors.length > 0 && (
-          <div className="mt-2.5">
-            <p className="text-[10px] text-on-surface-variant/30 mb-1.5 tracking-wide uppercase">Recent</p>
-            <div className="flex flex-wrap gap-2">
-              {recentVendors.map((v: any) => (
-                <button
-                  key={v.stakeholder_id}
-                  type="button"
-                  onClick={() => selectVendor(v)}
-                  className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full border border-outline-variant/20 bg-white text-on-surface-variant hover:border-primary/30 hover:text-primary active:scale-[0.97] transition-all"
-                >
-                  <span className="w-5 h-5 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center text-[9px] font-bold shrink-0">
-                    {getInitials(v.name)}
-                  </span>
-                  <span className="text-[13px] font-medium">{v.name}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Inline new-vendor form (preserved) */}
@@ -3529,38 +3527,17 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
         </div>
       )}
 
-      {/* Project — chips when small, dropdown when many. Auto-select when only one. */}
+      {/* Project — ui/new-po-redesign chips (selected state + mobile horizontal scroll).
+          Existing handleProjectChange handler and the >1 guard are preserved exactly. */}
       {projects && projects.length > 1 && (
-        projects.length <= 6 ? (
-          <div className="flex flex-wrap gap-2 mb-4">
-            {projects.map((p: any) => {
-              const active = projectId === p.project_id;
-              return (
-                <button
-                  key={p.project_id}
-                  type="button"
-                  onClick={() => handleProjectChange(p.project_id)}
-                  className={`px-3.5 py-1.5 rounded-full text-[13px] font-medium transition-all ${
-                    active
-                      ? 'bg-primary text-on-primary shadow-sm'
-                      : 'bg-surface-container text-on-surface-variant/60 hover:bg-surface-container-high active:scale-[0.97]'
-                  }`}
-                >
-                  {p.name}
-                </button>
-              );
-            })}
-          </div>
-        ) : (
-          <select
-            value={projectId}
-            onChange={e => handleProjectChange(e.target.value)}
-            className="h-10 px-4 rounded-xl border border-outline-variant/20 text-[14px] text-on-surface bg-white focus:border-primary focus:ring-2 focus:ring-primary/10 focus:outline-none mb-4"
-          >
-            <option value="">Select project…</option>
-            {projects.map((p: any) => <option key={p.project_id} value={p.project_id}>{p.name}</option>)}
-          </select>
-        )
+        <div className="mt-4 mb-4">
+          <p className="text-xs mb-2" style={{ color: uiV.system }}>Project</p>
+          <UiProjectChips
+            projects={projects.map((p: any) => ({ id: p.project_id, name: p.name }))}
+            selectedId={projectId}
+            onSelect={handleProjectChange}
+          />
+        </div>
       )}
 
       {/* Date — text by default, picker on click */}
@@ -3592,6 +3569,18 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
       {/* Separator */}
       <div className="border-t border-outline-variant/10 my-5" />
 
+      {/* ui/new-po-redesign — sticky context recap (shown once a vendor is chosen).
+          Pure display of values the page already holds. */}
+      {selectedVendor && (
+        <UiContextRecap
+          initials={getInitials(selectedVendor.name)}
+          vendorName={selectedVendor.name}
+          projectName={selectedProjectObj?.name}
+          dateLabel={orderedDate ? new Date(orderedDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : undefined}
+          poLabel={selectedProjectObj?.project_code ? `PO-${selectedProjectObj.project_code}-…` : undefined}
+        />
+      )}
+
       {/* ═══ ITEMS SECTION — vendor-first gate: absent until a vendor is chosen ═══ */}
       {!selectedVendor ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -3602,11 +3591,13 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
       ) : (
       <>
       {/* Items header + inline doc-upload trigger */}
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mt-5 mb-3">
         <h2 className="text-[13px] font-semibold text-on-surface-variant/40 uppercase tracking-wider">Items</h2>
         <div className="flex items-center gap-3">
           {lineItems.length > 0 && (
-            <span className="text-[12px] text-on-surface-variant/30">{lineItems.length} item{lineItems.length !== 1 ? 's' : ''}</span>
+            // ui/new-po-redesign (decision 2): display-only — align header count to
+            // the footer's filtered (named-rows) computation. Same expression as :4505.
+            <span className="text-[12px] text-on-surface-variant/30">{lineItems.filter(li => li.item_name.trim()).length} item{lineItems.filter(li => li.item_name.trim()).length !== 1 ? 's' : ''}</span>
           )}
           <button
             type="button"
@@ -3615,7 +3606,8 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
             title="Upload a quotation or bill — AI extracts items"
           >
             <span className="material-symbols-outlined text-[16px]">upload_file</span>
-            <span className="hidden sm:inline">Upload bill</span>
+            {/* ui/new-po-redesign (amendment C): copy only — same position, same handler */}
+            <span className="hidden sm:inline">Scan bill / quote</span>
           </button>
         </div>
       </div>
@@ -3681,16 +3673,11 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
                           </span>
                           {/* Status pill — announced to screen readers when sku_id flips. */}
                           {li.sku_id ? (
-                            <div className="flex items-center gap-1.5 bg-green-50 text-green-700 px-2 py-[3px] rounded-full max-w-full">
+                            <span className="inline-flex items-center gap-1.5 max-w-full">
                               <span className="sr-only">{`Linked to ${li.item_name?.trim() || li.sku_id}`}</span>
-                              <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
-                              <span
-                                className="text-[11px] font-medium text-green-700 truncate"
-                                title={li.item_name ? `${li.item_name} · ${li.sku_id}` : li.sku_id}
-                              >
-                                {li.item_name?.trim() || 'Linked'}
-                              </span>
-                              {isSuccess && <span className="text-[9px] font-bold text-amber-600 ml-0.5 shrink-0">✦ AI</span>}
+                              {/* ui/new-po-redesign — CONFIRM-voice linked/auto chip; unlink/dismiss handlers below unchanged */}
+                              <UiLinkedBadge auto={!!li.auto_applied} />
+                              {isSuccess && <span className="text-[9px] font-bold ml-0.5 shrink-0" style={{ color: uiV.ask }}>✦ AI</span>}
                               {li.auto_applied ? (
                                 <button
                                   type="button"
@@ -3733,7 +3720,8 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
                                       card_message:       undefined,
                                     });
                                   }}
-                                  className="flex items-center justify-center w-8 h-8 -mr-1 rounded-full text-green-500/60 hover:text-red-500 hover:bg-red-50/60 active:scale-[0.95] transition-colors"
+                                  className="flex items-center justify-center w-7 h-7 -mr-1 rounded-full transition-colors"
+                                  style={{ color: uiV.systemFaint }}
                                   title="Dismiss auto-match — card stays quiet until you type"
                                   aria-label="Dismiss auto-applied SKU"
                                 >
@@ -3747,18 +3735,19 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
                                     user_selected: false,
                                     pre_auto_spec: undefined,
                                   })}
-                                  className="flex items-center justify-center w-8 h-8 -mr-1 rounded-full text-green-500/60 hover:text-green-700 hover:bg-green-50/60 active:scale-[0.95] transition-colors"
+                                  className="flex items-center justify-center w-7 h-7 -mr-1 rounded-full transition-colors"
+                                  style={{ color: uiV.systemFaint }}
                                   title="Unlink — keep current item name"
                                   aria-label="Unlink SKU"
                                 >
                                   <span className="material-symbols-outlined text-[16px]">close</span>
                                 </button>
                               )}
-                            </div>
+                            </span>
                           ) : (
-                            <span className="flex items-center gap-1.5 text-on-surface-variant/45 px-1 py-[3px] text-[11px] font-medium">
+                            <span className="flex items-center gap-1.5 px-1 py-[3px] text-[11px] font-medium" style={{ color: uiV.systemFaint }}>
                               <span className="sr-only">Unlinked — no SKU selected</span>
-                              <span aria-hidden="true" className="w-1.5 h-1.5 rounded-full bg-on-surface-variant/25" />
+                              <span aria-hidden="true" className="w-1.5 h-1.5 rounded-full" style={{ background: uiV.systemFaint }} />
                               <span aria-hidden="true">Unlinked</span>
                             </span>
                           )}
@@ -3904,6 +3893,21 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
                           if (!dym) return null;
                           if (dym.toLowerCase() === li.item_name.trim().toLowerCase()) return null;
 
+                          // ui/new-po-redesign precedence (amendment B): when a higher-priority
+                          // artifact (candidate chips / family picker) is showing, demote this to a
+                          // small secondary line. Same startFreshResolution handler; no state change.
+                          const uiHigher =
+                            (!!li.pending_families?.length && !li.sku_id && !li.skipped_linking && !li.dismissed && !li.sku_match_skipped)
+                            || (!li.sku_id && !dictAddingIds.has(li.id) && !anyPanel && (li.sku_alternatives?.length ?? 0) > 0);
+                          if (uiHigher) {
+                            return (
+                              <UiDemotedSuggestion
+                                name={dym}
+                                onPick={() => { const raw = li.item_name; startFreshResolution(li.id, dym, raw, extractAttrs(raw)); }}
+                              />
+                            );
+                          }
+
                           return (
                             <div className="mt-1.5 flex items-center gap-2 flex-wrap">
                               <span className="text-[12px] text-on-surface-variant/40">Did you mean</span>
@@ -3940,23 +3944,36 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
                           const fams = li.pending_families;
                           if (!fams?.length) return null;
                           if (li.sku_id || li.skipped_linking || li.dismissed || li.sku_match_skipped) return null;
+                          // ui/new-po-redesign — host the EXISTING family chips inside the ASK-voice
+                          // strip. Guard, key, and handlePillSelection are unchanged.
                           return (
-                            <div className="mt-1.5 flex items-center gap-2 flex-wrap">
-                              <span className="text-[12px] text-on-surface-variant/40">Which one</span>
-                              {fams.map((fam: any) => (
-                                <button
-                                  key={`${fam.category}::${fam.sub_category}`}
-                                  type="button"
-                                  onMouseDown={(e) => {
-                                    e.preventDefault();
-                                    handlePillSelection(li.id, 'family', `${fam.category}::${fam.sub_category}`);
-                                  }}
-                                  className="px-3 py-1 rounded-lg bg-primary/8 text-primary text-[13px] font-medium hover:bg-primary/12 active:scale-[0.97] transition-all"
-                                >
-                                  {fam.sub_category}
-                                </button>
-                              ))}
-                            </div>
+                            <>
+                              <UiResolutionStrip
+                                questionEn={<>“{li.item_name.trim()}” matches more than one catalog family — which one?</>}
+                              >
+                                <div className="flex gap-2.5 flex-wrap">
+                                  {fams.map((fam: any) => (
+                                    <button
+                                      key={`${fam.category}::${fam.sub_category}`}
+                                      type="button"
+                                      onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        handlePillSelection(li.id, 'family', `${fam.category}::${fam.sub_category}`);
+                                      }}
+                                      className="text-left rounded-xl px-3.5 py-2.5 transition-transform active:scale-[0.98]"
+                                      style={{ background: uiV.surface, border: `1px solid ${uiV.askLine}` }}
+                                    >
+                                      <span className="text-sm font-medium" style={{ color: uiV.askDeep }}>{fam.sub_category}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              </UiResolutionStrip>
+                              <UiStripEscapes
+                                term={li.item_name.trim()}
+                                onUseAsTyped={() => handleSkipWithoutLinking(li.id)}
+                                onAddNew={() => handleAddToCatalog(li.id)}
+                              />
+                            </>
                           );
                         })()}
 
@@ -4000,7 +4017,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
                           const brandCat     = lineBrandCategory(li);
                           const brandOptions = brandTick >= 0 ? brandsFor(brandCat) : [];
                           return (
-                            <ItemAttributeFields
+                            <UiAttributeFieldsHost
                               pills={displayPills}
                               onSelectOption={(attribute, value) => handlePillSelection(li.id, attribute, value)}
                               onCustomValue={(attribute, value) => handlePillSelection(li.id, attribute, value)}
@@ -4288,9 +4305,9 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
                             return (
                               <>
                                 {disc > 0 && <span className="text-[11px] text-green-600 font-medium tabular-nums">−{disc}%</span>}
-                                <span className="text-[18px] font-bold text-on-surface tabular-nums leading-none tracking-tight">
-                                  {total > 0 ? <>₹{total.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</> : <span className="text-on-surface-variant/25">₹0</span>}
-                                </span>
+                                <UiMoney size={18}>
+                                  {total > 0 ? <>₹{total.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</> : <span style={{ color: uiV.systemFaint }}>₹0</span>}
+                                </UiMoney>
                                 <button type="button" onClick={(e) => { e.stopPropagation(); removeLine(li.id); }} className="material-symbols-outlined text-[16px] text-on-surface-variant/25 hover:text-red-500 transition-colors -mr-1 p-0.5" title="Remove Line">
                                   delete
                                 </button>
@@ -4498,14 +4515,14 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
     >
       <div className="flex items-center justify-between gap-3 px-4 py-3 max-w-3xl mx-auto">
         <div>
-          <p className="text-[15px] font-bold text-on-surface tabular-nums leading-none">
-            ₹{grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-          </p>
+          {/* ui/new-po-redesign — grand total with "excl. GST" qualifier */}
+          <UiTotalExclGst amountLabel={`₹${grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`} size={15} />
           <p className="text-[11px] text-on-surface-variant/40 mt-1">
             {lineItems.filter(li => li.item_name.trim()).length} item{lineItems.filter(li => li.item_name.trim()).length !== 1 ? 's' : ''}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col items-end gap-1">
+          <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => handleSubmit('DRAFT')}
@@ -4537,9 +4554,26 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
               </>
             )}
           </button>
+          </div>
+          {/* ui/new-po-redesign — disabled-Save helper, derived from the SAME conditions
+              that gate canSubmit (vendor → project → at least one named item). */}
+          <UiSaveHint text={!canSubmit ? (!vendorId ? 'Select a vendor' : !projectId ? 'Select a project' : 'Add at least one item') : undefined} />
         </div>
       </div>
     </div>
+
+    {/* ui/new-po-redesign — save ceremony. Opens via the sanctioned onSuccess
+        flag; every exit calls the EXISTING navigate with identical arguments
+        (decision 1). poId comes from the mutation result; the rest is derived
+        at render from existing state. */}
+    <UiSaveCeremony
+      open={uiCeremonyOpen}
+      poId={saveMutation.data}
+      vendorName={selectedVendor?.name}
+      projectName={selectedProjectObj?.name}
+      totalLabel={`₹${grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
+      onLeave={() => navigate(returnTo)}
+    />
     </>
   );
 }

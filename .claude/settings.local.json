@@ -42,7 +42,8 @@
       "Bash(npx -y tsc --noEmit -p tsconfig.json)",
       "Bash(git stash *)",
       "Bash(sed -i '4079,4145d' src/pages/NewPurchaseOrder.tsx)",
-      "Bash(sed -n '4074,4082p' src/pages/NewPurchaseOrder.tsx)"
+      "Bash(sed -n '4074,4082p' src/pages/NewPurchaseOrder.tsx)",
+      "PowerShell(git commit *)"
     ]
   }
 }
