@@ -128,6 +128,16 @@ function calcAmount(s: StageDraft): number {
 const fmtRupee = (n: number) =>
   '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
 
+// ui/work-order-redesign (B4) — split `budget` across weighted stages by their
+// percentages, each rounded to ₹500, the remainder absorbed into the LAST stage
+// so the sum equals `budget` exactly (→ accept-all reconciles to the contract).
+function uiAllocateWeighted(pcts: number[], budget: number): number[] {
+  if (budget <= 0 || pcts.length === 0) return pcts.map(() => 0);
+  const out = pcts.map(p => Math.round(((p / 100) * budget) / 500) * 500);
+  out[out.length - 1] += budget - out.reduce((a, b) => a + b, 0);
+  return out;
+}
+
 // ─── Component ────────────────────────────────────────────────────────────
 
 export default function NewWorkOrder({ session }: { session: Session }) {
@@ -181,9 +191,10 @@ export default function NewWorkOrder({ session }: { session: Session }) {
   const { data: workers } = useQuery({
     queryKey: ['workers'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('stakeholders').select('stakeholder_id, name').eq('type', 'Worker').order('name');
+      // category = the worker's trade; needed by "Draft stages from scope" (B4) to pick a template.
+      const { data, error } = await supabase.from('stakeholders').select('stakeholder_id, name, category').eq('type', 'Worker').order('name');
       if (error) throw error;
-      return data as Pick<Stakeholder, 'stakeholder_id' | 'name'>[];
+      return data as Pick<Stakeholder, 'stakeholder_id' | 'name' | 'category'>[];
     },
   });
 
@@ -195,6 +206,9 @@ export default function NewWorkOrder({ session }: { session: Session }) {
   // never by any handler/mutation/payload.
   const [uiCeremonyOpen, setUiCeremonyOpen] = useState(false);
   const [uiActiveSeg, setUiActiveSeg] = useState<number | null>(null);
+  // B4 "Draft stages from scope" — separate from document extraction (both can be in flight).
+  const [uiDrafting, setUiDrafting] = useState(false);
+  const [uiDraftError, setUiDraftError] = useState<string | null>(null);
   // Pure render-time derivations for the living sentence / allocation bar / recap.
   const uiNamedStages = stages.filter(s => s.name.trim());
   const uiSegments = uiNamedStages.map(s => calcAmount(s));
@@ -395,6 +409,83 @@ export default function NewWorkOrder({ session }: { session: Session }) {
     }
   };
 
+  // ─── B4: Draft stages from scope ──────────────────────────────────────────
+  // Additive. Calls the NEW wo-stage-drafter edge function and feeds the EXISTING
+  // pendingStages → AI Review Panel → addPendingStage pipeline. Touches nothing
+  // existing (createWO, calcAmount, stage keys, save conditions all unchanged).
+  async function handleDraftStages() {
+    if (!scope.trim()) { setUiDraftError('Write the scope first.'); return; }
+    setUiDrafting(true);
+    setUiDraftError(null);
+    try {
+      const existing_stage_names = stages.filter(s => s.name.trim()).map(s => s.name.trim());
+      const { data, error } = await supabase.functions.invoke('wo-stage-drafter', {
+        body: {
+          scope_text: scope,
+          trade: selectedWorker?.category ?? null,
+          contract_value: orderValue > 0 ? orderValue : null,
+          existing_stage_names,
+        },
+      });
+      if (error) throw error;
+      const drafted = (data as any)?.stages as any[] | undefined;
+      if (!Array.isArray(drafted) || drafted.length === 0) {
+        setUiDraftError('No stages suggested — add more detail to the scope.');
+        return;
+      }
+      // Weighted budget = contract minus explicit measured totals, so accept-all
+      // reconciles to the contract exactly. Empty contract → amounts 0, pct shown.
+      const measuredTotal = drafted
+        .filter(s => s.mode === 'measured')
+        .reduce((sum, s) => sum + (Number(s.quantity) || 0) * (Number(s.rate) || 0), 0);
+      const priced = orderValue > 0;
+      const budget = priced ? Math.max(0, orderValue - measuredTotal) : 0;
+      const weightedPcts = drafted.filter(s => s.mode === 'weighted').map(s => Number(s.weight_pct) || 0);
+      const weightedAmts = uiAllocateWeighted(weightedPcts, budget);
+
+      let wi = 0;
+      const pending: ExtractedStage[] = drafted.map((s): ExtractedStage => {
+        if (s.mode === 'measured') {
+          const qty = Number(s.quantity) || 0;
+          const rate = Number(s.rate) || 0;
+          return {
+            _id: Math.random().toString(),
+            name: String(s.name || ''),
+            mode: 'measured',
+            unit_type: s.unit_type ?? null,
+            qty, rate,
+            amount: qty * rate,
+            amount_verified: true,
+            arithmetic_mismatch: false,
+            mismatch_note: null,
+            confidence: 'HIGH',
+            confidence_reason: '',
+          };
+        }
+        const pct = Number(s.weight_pct) || 0;
+        const amount = weightedAmts[wi++] || 0;
+        return {
+          _id: Math.random().toString(),
+          name: String(s.name || ''),
+          mode: 'lumpsum',
+          unit_type: 'LS',
+          qty: null, rate: null,
+          amount,
+          amount_verified: priced,
+          arithmetic_mismatch: false,
+          mismatch_note: null,
+          confidence: priced ? 'HIGH' : 'MEDIUM',
+          confidence_reason: priced ? '' : `${pct}% of contract — enter the contract value to price`,
+        };
+      });
+      setPendingStages(pending);
+    } catch (err: any) {
+      setUiDraftError(err?.message || 'Could not draft stages. Try again.');
+    } finally {
+      setUiDrafting(false);
+    }
+  }
+
   // ─── Access guard ─────────────────────────────────────────────────────────
 
   if (profile && profile.role !== 'management' && profile.role !== 'principal') {
@@ -537,11 +628,24 @@ export default function NewWorkOrder({ session }: { session: Session }) {
           <section>
             <div className="flex items-start justify-between gap-3">
               <Question n="02" hint="Write it the way you'd say it.">What's the work?</Question>
-              {/* B4 — inert in this pass (separate ticket) */}
-              <button type="button" title="Coming soon" className="text-xs font-medium inline-flex items-center gap-1.5 mt-1 shrink-0 opacity-60 cursor-default" style={{ color: VOICE.askDeep }}>
-                <span className="material-symbols-outlined text-[14px]">auto_awesome</span> draft stages from this
+              {/* B4 — draft stages from the scope (wo-stage-drafter) */}
+              <button
+                type="button"
+                onClick={handleDraftStages}
+                disabled={uiDrafting || !scope.trim()}
+                title={!scope.trim() ? 'Write the scope first' : 'Draft stages from the scope'}
+                className="text-xs font-medium inline-flex items-center gap-1.5 mt-1 shrink-0 disabled:opacity-40"
+                style={{ color: VOICE.askDeep }}
+              >
+                {uiDrafting
+                  ? <Loader2 className="animate-spin" size={12} />
+                  : <span className="material-symbols-outlined text-[14px]">auto_awesome</span>}
+                {uiDrafting ? 'Drafting…' : 'draft stages from this'}
               </button>
             </div>
+            {uiDraftError && (
+              <p className="text-xs mt-2" style={{ color: '#B91C1C' }}>{uiDraftError}</p>
+            )}
             <textarea
               value={scope}
               onChange={e => setScope(e.target.value)}

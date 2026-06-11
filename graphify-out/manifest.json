@@ -432,8 +432,8 @@
     "hash": "e5fb9b4ce06efab36def35c789e8bf12"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\NewWorkOrder.tsx": {
-    "mtime": 1781174901.3234622,
-    "hash": "52dae8a539d98b6f847ba57318044ab0"
+    "mtime": 1781180010.4731088,
+    "hash": "488e1147052cd8e8fe66891b694e5656"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\Orders.tsx": {
     "mtime": 1779038305.6693654,
@@ -566,6 +566,18 @@
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\_wa.ts": {
     "mtime": 1778667009.479766,
     "hash": "fd133cd461232f46c88066c2dd5370cd"
+  },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\wo-stage-drafter\\index.ts": {
+    "mtime": 1781179786.7709694,
+    "hash": "995da2a55faf7540cbab5bfca22ef775"
+  },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\wo-stage-drafter\\logic.test.ts": {
+    "mtime": 1781179804.652305,
+    "hash": "86d0dfe7fc88a4c0c717a286ea921c40"
+  },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\wo-stage-drafter\\logic.ts": {
+    "mtime": 1781179774.2165897,
+    "hash": "cd45b04cf0e39b9d392f2a49d780d2db"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\migrations\\20260509034505_initial_schema.sql": {
     "mtime": 1778298369.7956786,
