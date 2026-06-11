@@ -3615,7 +3615,9 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
         <h2 className="text-[13px] font-semibold text-on-surface-variant/40 uppercase tracking-wider">Items</h2>
         <div className="flex items-center gap-3">
           {lineItems.length > 0 && (
-            <span className="text-[12px] text-on-surface-variant/30">{lineItems.length} item{lineItems.length !== 1 ? 's' : ''}</span>
+            // ui/new-po-redesign (decision 2): display-only — align header count to
+            // the footer's filtered (named-rows) computation. Same expression as :4505.
+            <span className="text-[12px] text-on-surface-variant/30">{lineItems.filter(li => li.item_name.trim()).length} item{lineItems.filter(li => li.item_name.trim()).length !== 1 ? 's' : ''}</span>
           )}
           <button
             type="button"
@@ -3624,7 +3626,8 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
             title="Upload a quotation or bill — AI extracts items"
           >
             <span className="material-symbols-outlined text-[16px]">upload_file</span>
-            <span className="hidden sm:inline">Upload bill</span>
+            {/* ui/new-po-redesign (amendment C): copy only — same position, same handler */}
+            <span className="hidden sm:inline">Scan bill / quote</span>
           </button>
         </div>
       </div>
