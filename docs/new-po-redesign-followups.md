@@ -1,7 +1,7 @@
 # New PO redesign — follow-up tickets
 
 Spun out of the `ui/new-po-redesign` work. **None of the SQL below has been run.**
-Execute after review — by a human, per decision 3.
+Executed by a human after review, per decision 3.
 
 ---
 
@@ -16,7 +16,7 @@ display name** in different categories (read-only probe, anon key):
 | kankara | Aggregate | Coarse Aggregate | 24 |
 | kankara | **Sand** | Coarse Aggregate | **2** |
 
-The Sand-category family surfaces as a candidate reading **"Sand · sold by Nos"**.
+The Sand-category family surfaces in the picker as **"Sand · sold by Nos"**.
 Top offending SKU from `trgm_match_sku('kankara')`:
 
 ```
@@ -28,52 +28,71 @@ aliases:   kankara
 similarity: 1.0
 ```
 
-⚠️ **Data smell to confirm before acting:** "Coarse Aggregate **50**" with unit
-**Nos** is suspicious — real coarse aggregate is sized 12/20/40 mm and sold by
-**MT**. The `Sand::Coarse Aggregate` family reports `family_size 2`, so there is
-**one more member** I did not see in the top-8; inspect both before choosing
-path A or path B.
+⚠️ **Data smell:** "Coarse Aggregate **50**", unit **Nos**, is almost certainly
+junk/test data — real coarse aggregate is sized 12/20/40 mm and sold by **MT**.
+So **DELETE is the primary path**; reclassify/merge is the *fallback* used only
+if live `po_line_items` already reference these rows (we must not orphan them).
+The family reports `family_size 2`, so there is a second member; the snapshot in
+Step 1 captures both for inspection/rollback.
 
-### Step 0 — inspect (read-only, run first)
+### Run as ONE transaction (review inside the txn, COMMIT or ROLLBACK at the end)
+
 ```sql
+BEGIN;
+
+-- ── Step 1: inspect + snapshot (read + durable backup for rollback/audit) ──
 SELECT sku_id, item_name, category, sub_category, dimension, variant, grade, unit, aliases
 FROM sku_directory
 WHERE category = 'Sand' AND sub_category = 'Coarse Aggregate';
-```
 
-### Path A — reclassify/merge into Aggregate (preferred if the rows are real)
-`sku_id` is left unchanged on purpose — it is the stable key referenced by
-`po_line_items.sku_id`; updating the row in place keeps every existing PO line
-intact. (The literal "SAND-" prefix becomes cosmetically stale; a key rename is
-a separate, riskier migration and is explicitly **out of scope**.)
-
-```sql
-UPDATE sku_directory
-SET category  = 'Aggregate',
-    unit      = 'MT',
-    item_name = trim(item_name)      -- strip the trailing spaces in 'Coarse Aggregate 50  '
+CREATE TABLE IF NOT EXISTS backup_sand_coarse_aggregate_20260611 AS
+SELECT * FROM sku_directory
 WHERE category = 'Sand' AND sub_category = 'Coarse Aggregate';
-```
 
-### Path B — delete (only if Step 0 shows these are junk/test rows)
-Guard against orphaning live PO lines first:
-```sql
--- Must return 0 rows before deleting:
-SELECT li.*
+-- ── Step 2: FK check — does any live PO line reference these rows? ──
+-- Decides the path. Expected for junk data: 0.
+SELECT li.po_id, li.sku_id, li.item_name
 FROM po_line_items li
 JOIN sku_directory s ON s.sku_id = li.sku_id
 WHERE s.category = 'Sand' AND s.sub_category = 'Coarse Aggregate';
 
--- Then, only if the above is empty:
+-- ── Step 3a: PRIMARY PATH — DELETE (run ONLY if Step 2 returned 0 rows) ──
 DELETE FROM sku_directory
 WHERE category = 'Sand' AND sub_category = 'Coarse Aggregate';
+
+-- ── Step 3b: FALLBACK PATH — reclassify/merge (run INSTEAD of 3a iff Step 2
+--            returned rows; keep sku_id so the referencing PO lines stay valid) ──
+-- UPDATE sku_directory
+-- SET category = 'Aggregate', unit = 'MT', item_name = trim(item_name)
+-- WHERE category = 'Sand' AND sub_category = 'Coarse Aggregate';
+
+-- ── Step 4: alias survival check — 'kankara' must still resolve to coarse
+--            aggregate (it is also an alias on the AGG-COARSE-* SKUs, so DELETE
+--            must NOT lose coverage). Expect ≥1 row, all category 'Aggregate'. ──
+SELECT sku_id, category, sub_category, unit, aliases
+FROM sku_directory
+WHERE aliases ILIKE '%kankara%';
+
+COMMIT;   -- or ROLLBACK; if Step 4 / the path outcome looks wrong
 ```
 
-### Step 2 — refresh the alias index
-`search_alias_family` reads `sku_alias_family_index`. If that object is a
-materialized view / derived table (verify), refresh or rebuild it so the stale
-`Sand::Coarse Aggregate` family stops being returned. Re-run the Step-0 probe
-and `trgm_match_sku('kankara')` to confirm only the `Aggregate` family remains.
+### Step 5: refresh the alias index (after COMMIT)
+`search_alias_family` reads `sku_alias_family_index`. Verify its object type
+first, then refresh accordingly:
+```sql
+-- If it is a materialized view:
+REFRESH MATERIALIZED VIEW CONCURRENTLY sku_alias_family_index;
+-- If it is a trigger-maintained table, no action; if a plain view, no action.
+```
+
+### Step 6: verify (read-only, outside the transaction)
+Re-run the probes; expect only the `Aggregate` family for `kankara`, and no
+"Sand · Nos" candidate:
+```sql
+SELECT * FROM search_alias_family('kankara', 5);
+SELECT sku_id, item_name, category, unit, similarity
+FROM trgm_match_sku('kankara', 8, 0.10);
+```
 
 ---
 
