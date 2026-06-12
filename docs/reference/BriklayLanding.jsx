@@ -21,8 +21,8 @@
 
 import { useState, useEffect, useRef } from "react";
 import {
-  ArrowRight, ArrowUpRight, ArrowDownLeft, Check, X, Mail, Lock,
-  Truck, FileText, Camera, ChevronDown,
+  ArrowLeft, ArrowRight, ArrowUpRight, Check, X, Mail, Lock,
+  Truck, FileText, Camera, ChevronDown, Video, Phone, MoreVertical,
 } from "lucide-react";
 
 /* --------------------------------- tokens ----------------------------------- */
@@ -66,6 +66,32 @@ function Gate({ children, className = "", ...rest }) {
     </div>
   );
 }
+
+function AppWin({ title, children }) {
+  return (
+    <div className="rounded-xl overflow-hidden" style={{ background: "#FFFFFF", border: `1px solid ${V.line}`, boxShadow: "0 1px 2px rgba(30,26,21,0.05)" }}>
+      <div className="flex items-center gap-1.5 px-3.5 py-2" style={{ borderBottom: `1px solid ${V.line}`, background: "#FCFBF9" }}>
+        <span className="rounded-full shrink-0" style={{ width: 7, height: 7, background: V.line }} />
+        <span className="rounded-full shrink-0" style={{ width: 7, height: 7, background: V.line }} />
+        <span className="rounded-full shrink-0" style={{ width: 7, height: 7, background: V.line }} />
+        <span className="text-xs ml-2 truncate" style={{ color: V.faint, ...font }}>{title}</span>
+        <span className="flex-1" />
+        <span className="inline-flex items-center gap-1 shrink-0" style={{ fontSize: 10, color: V.faint, ...font }}>
+          <span className="pdot rounded-full" style={{ width: 6, height: 6, background: V.terra }} /> live
+        </span>
+      </div>
+      <div className="p-4">{children}</div>
+    </div>
+  );
+}
+
+const Bloom = () => (
+  <div
+    aria-hidden="true"
+    className="absolute inset-0 pointer-events-none"
+    style={{ background: "radial-gradient(420px circle at 10% 0%, rgba(188,75,39,0.05), transparent 60%), radial-gradient(380px circle at 100% 100%, rgba(160,130,109,0.08), transparent 60%)" }}
+  />
+);
 const font = { fontFamily: "'DM Sans', system-ui, sans-serif" };
 const serif = { fontFamily: "Georgia, 'Times New Roman', serif" };
 const nums = { fontVariantNumeric: "tabular-nums" };
@@ -125,7 +151,7 @@ const CSS = `
 .cursW { animation: cursW 26s ease-in-out infinite; }
 @keyframes digA { 0%,8% {opacity:0;} 9%,11.5% {opacity:1;} 12.5%,100% {opacity:0;} }
 .digA { animation: digA 26s ease-in-out infinite; }
-@keyframes digB { 0%,13% {opacity:0;} 14.5%,35% {opacity:1;} 37.5%,100% {opacity:0;} }
+@keyframes digB { 0%,13% {opacity:0;} 14.5%,96% {opacity:1;} 100% {opacity:0;} }
 .digB { animation: digB 26s ease-in-out infinite; }
 @keyframes pdot { 0%,100% {opacity:0.25; transform:scale(0.8);} 50% {opacity:1; transform:scale(1);} }
 .pdot { animation: pdot 1s ease-in-out infinite; }
@@ -179,6 +205,55 @@ const CSS = `
   52.1%,100% { left:80px; transform:scaleX(.6); }
 }
 .beamOut { animation: beamOut 26s ease-in-out infinite; }
+@keyframes bl1 { 0%,1% {opacity:0; transform:translateY(10px);} 9%,100% {opacity:1; transform:none;} }
+.bl1 { animation: bl1 6s cubic-bezier(.25,.7,.2,1) forwards; }
+@keyframes bfall {
+  0%,18% { opacity:1; transform:translate(-50%,-56px) rotate(-3deg); animation-timing-function: cubic-bezier(.5,0,.9,.4); }
+  26% { opacity:1; transform:translate(-50%,0) rotate(4deg); animation-timing-function: ease-out; }
+  28.5% { opacity:1; transform:translate(-50%,0) rotate(4deg) scale(1.16,.8); }
+  32% { opacity:1; transform:translate(-50%,0) scale(.96); }
+  36% { opacity:1; transform:translate(-50%,0) scale(1); }
+  48%,100% { opacity:0; transform:translate(-50%,0) scale(.7); }
+}
+.bfall { animation: bfall 6s ease-out forwards; }
+@keyframes bgap { 0%,26% {max-width:0;} 40%,100% {max-width:6ch;} }
+.bgap { animation: bgap 6s cubic-bezier(.25,.6,.2,1) forwards; }
+@keyframes bshk { 0%,26% {transform:none;} 28% {transform:translateY(2px) rotate(.3deg);} 31% {transform:translateY(-1.5px);} 34% {transform:translateY(0.5px);} 38%,100% {transform:none;} }
+.bshk { animation: bshk 6s ease forwards; }
+@keyframes bdw { 0%,30% {opacity:0; transform:translateY(2px) scale(.94);} 44%,100% {opacity:1; transform:none;} }
+.bdw { animation: bdw 6s cubic-bezier(.22,.8,.36,1) forwards; }
+@keyframes bl2 { 0%,56% {opacity:0; transform:translateY(12px);} 72%,100% {opacity:1; transform:none;} }
+.bl2 { animation: bl2 6s cubic-bezier(.25,.7,.2,1) forwards; }
+@keyframes bbody { 0%,76% {opacity:0; transform:translateY(8px);} 94%,100% {opacity:1; transform:none;} }
+.bbody { animation: bbody 6s cubic-bezier(.25,.7,.2,1) forwards; }
+@keyframes xch0 { 0%,2% {transform:scale(1); background:#F4F2EE;} 6% {transform:scale(1.07); background:#F6E5DB;} 12%,100% {transform:scale(1); background:#F4F2EE;} }
+@keyframes xch1 { 0%,8% {transform:scale(1); background:#F4F2EE;} 12% {transform:scale(1.07); background:#F6E5DB;} 18%,100% {transform:scale(1); background:#F4F2EE;} }
+@keyframes xch2 { 0%,14% {transform:scale(1); background:#F4F2EE;} 18% {transform:scale(1.07); background:#F6E5DB;} 24%,100% {transform:scale(1); background:#F4F2EE;} }
+.xch0 { animation: xch0 4.8s cubic-bezier(.3,.7,.2,1) forwards; }
+.xch1 { animation: xch1 4.8s cubic-bezier(.3,.7,.2,1) forwards; }
+.xch2 { animation: xch2 4.8s cubic-bezier(.3,.7,.2,1) forwards; }
+@keyframes xp0 { 0%,4% {stroke-dashoffset:100; opacity:0;} 5.5% {opacity:.75;} 16% {stroke-dashoffset:0; opacity:.75;} 40%,100% {stroke-dashoffset:0; opacity:.22;} }
+@keyframes xp1 { 0%,10% {stroke-dashoffset:100; opacity:0;} 11.5% {opacity:.75;} 22% {stroke-dashoffset:0; opacity:.75;} 44%,100% {stroke-dashoffset:0; opacity:.22;} }
+@keyframes xp2 { 0%,16% {stroke-dashoffset:100; opacity:0;} 17.5% {opacity:.75;} 28% {stroke-dashoffset:0; opacity:.75;} 48%,100% {stroke-dashoffset:0; opacity:.22;} }
+.xp0 { animation: xp0 4.8s cubic-bezier(.3,.7,.2,1) forwards; }
+.xp1 { animation: xp1 4.8s cubic-bezier(.3,.7,.2,1) forwards; }
+.xp2 { animation: xp2 4.8s cubic-bezier(.3,.7,.2,1) forwards; }
+@keyframes xnd { 0%,30% {transform:scale(0); opacity:0;} 36% {transform:scale(1.3); opacity:1;} 42%,100% {transform:scale(1); opacity:1;} }
+.xnd { animation: xnd 4.8s cubic-bezier(.3,.7,.2,1) forwards; }
+@keyframes xhl { 0%,33% {r:4; opacity:0;} 37% {opacity:.5;} 54%,100% {r:17; opacity:0;} }
+.xhl { animation: xhl 4.8s ease-out forwards; }
+@keyframes xcard { 0%,44% {opacity:0; transform:translateY(10px); filter:blur(4px);} 58%,100% {opacity:1; transform:none; filter:none;} }
+.xcard { animation: xcard 4.8s cubic-bezier(.3,.7,.2,1) forwards; }
+@keyframes xr1 { 0%,58% {opacity:0; transform:translateY(4px);} 64%,100% {opacity:1; transform:none;} }
+@keyframes xr2 { 0%,62% {opacity:0; transform:translateY(4px);} 68%,100% {opacity:1; transform:none;} }
+@keyframes xr3 { 0%,66% {opacity:0; transform:translateY(4px);} 72%,100% {opacity:1; transform:none;} }
+.xr1 { animation: xr1 4.8s ease forwards; }
+.xr2 { animation: xr2 4.8s ease forwards; }
+.xr3 { animation: xr3 4.8s ease forwards; }
+@keyframes xcl { 0%,74% {opacity:0; transform:scale(.985);} 81%,100% {opacity:1; transform:none;} }
+.xcl { animation: xcl 4.8s cubic-bezier(.3,.7,.2,1) forwards; }
+@keyframes xcp { 0%,85% {opacity:0;} 92%,100% {opacity:1;} }
+.xcp { animation: xcp 4.8s ease forwards; }
 @keyframes beamBack {
   0%,86% { left:80px; transform:scaleX(.4); animation-timing-function: cubic-bezier(.85,0,.2,1); }
   87.5% { transform:scaleX(2.8); }
@@ -199,6 +274,13 @@ const CSS = `
 .loop-ledger { animation: ledger 9s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
   .rise, .loop-rail, .loop-chip, .loop-alloc, .loop-amber, .loop-caption, .loop-ledger, .loop-ph12, .loop-ph3, .loop-ph4, .lab1, .lab2, .lab3, .lab4, .tk1, .tk2, .tk3, .tk4, .tk5, .tkC, .sk1, .sk2, .sk3, .sk4, .sk5, .shimmer, .typeP, .cursW, .digA, .digB, .pdot, .st1, .st2, .st3, .nar1, .nar2, .nar3, .pE, .pMsg1, .optSel, .pSel, .pMsg2, .pPhoto, .beamOut, .beamBack, .loop-txnA, .loop-txnB { animation: none !important; }
+  .bl1, .bshk, .bgap, .bdw, .bfall, .bl2, .bbody { animation: none !important; }
+  .bfall { display:none; } .bgap { max-width:none !important; }
+  .bl1, .bdw, .bl2, .bbody { opacity:1 !important; transform:none !important; }
+  .xch0, .xch1, .xch2, .xp0, .xp1, .xp2, .xnd, .xhl, .xcard, .xr1, .xr2, .xr3, .xcl, .xcp { animation: none !important; }
+  .xp0, .xp1, .xp2 { stroke-dashoffset:0 !important; opacity:.22; }
+  .xnd { transform:none; opacity:1; } .xhl { display:none; }
+  .xcard, .xr1, .xr2, .xr3, .xcl, .xcp { opacity:1 !important; transform:none !important; filter:none !important; }
   .loop-rail { transform:none; } .loop-alloc { width:var(--w) !important; }
   .loop-amber { opacity:0; } .loop-caption { opacity:1; } .loop-ledger { opacity:1; }
   .loop-ph12, .loop-ph3 { opacity:0; } .loop-ph4 { opacity:1; transform:none; }
@@ -249,6 +331,7 @@ html { scroll-behavior: smooth; }
 function VignetteCapture() {
   return (
     <div className="vcard rounded-2xl p-5 sm:p-6" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
+      <Bloom />
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full" style={{ background: V.field, color: V.sys, fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", ...font }}>
           <b style={{ color: V.terraDeep }}>01</b> Create order
@@ -264,7 +347,9 @@ function VignetteCapture() {
           <span className="lab4" style={{ color: V.faint }}>Awarded</span>
         </div>
       </div>
-      <div className="flex items-center gap-2 mt-3 mb-4">
+      <div className="mt-3" style={{ position: "relative" }}>
+      <AppWin title="New purchase order">
+      <div className="flex items-center gap-2 mb-4">
         <span className="text-xs font-medium uppercase" style={{ color: V.terraDeep, letterSpacing: "0.1em", ...font }}>
           Say it. It's filed.
         </span>
@@ -358,6 +443,8 @@ function VignetteCapture() {
         </div>
 
       </div>
+      </AppWin>
+      </div>
     </div>
   );
 }
@@ -368,6 +455,8 @@ function VignettePO() {
       <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full mb-3" style={{ background: V.field, color: V.sys, fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", ...font }}>
         <b style={{ color: V.terraDeep }}>02</b> Track order
       </span>
+      <Bloom />
+      <AppWin title="Purchase orders">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-medium" style={{ color: V.ink, ...font }}>Sri Surya Lorry Transport</p>
@@ -378,7 +467,7 @@ function VignettePO() {
       <div className="flex gap-1 my-3.5">
         {[0, 1, 2].map((i) => (
           <div key={i} className="flex-1 rounded-full overflow-hidden" style={{ height: 4, background: V.line }}>
-            <div className="h-full rounded-full loop-rail" style={{ background: V.userSoft, animationDelay: `${i * 1.1}s` }} />
+            <div className="h-full rounded-full loop-rail" style={{ background: V.inkSoft, animationDelay: `${i * 1.1}s` }} />
           </div>
         ))}
       </div>
@@ -397,7 +486,8 @@ function VignettePO() {
           </span>
         ))}
       </div>
-      <p className="text-xs mt-3.5" style={{ color: V.faint, ...font }}>
+      </AppWin>
+      <p className="text-xs mt-3" style={{ color: V.faint, ...font }}>
         the order knows its own next step
       </p>
     </div>
@@ -411,6 +501,8 @@ function VignetteWO() {
       <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full mb-3" style={{ background: V.field, color: V.sys, fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", ...font }}>
         <b style={{ color: V.terraDeep }}>04</b> Assign &amp; track work
       </span>
+      <Bloom />
+      <AppWin title="New work order">
       <p className="text-sm leading-relaxed" style={{ color: V.inkSoft, ...serif }}>
         Hiring <b>Harish K</b> for <b>The Pride</b>, worth{" "}
         <b style={nums}>₹5,00,000</b>, paid in <b>3 stages</b>.
@@ -433,6 +525,7 @@ function VignetteWO() {
         <p className="text-xs" style={{ color: V.inkSoft, ...font, ...nums }}>✓ stage 1 paid · ₹1,80,000</p>
         <p className="text-xs" style={{ color: V.sys, ...font, ...nums }}>stage 2 due 5 Jul</p>
       </div>
+      </AppWin>
       <p className="text-xs mt-3" style={{ color: V.faint, ...font }}>
         work is paid stage by stage, against the order. No loose payments
       </p>
@@ -446,6 +539,8 @@ function VignetteTxn() {
       <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full mb-3" style={{ background: V.field, color: V.sys, fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", ...font }}>
         <b style={{ color: V.terraDeep }}>03</b> Pay against it
       </span>
+      <Bloom />
+      <AppWin title="New payment">
       <div className="relative" style={{ minHeight: 150 }}>
 
         {/* phase 1 — you say the payment */}
@@ -484,6 +579,7 @@ function VignetteTxn() {
         </div>
 
       </div>
+      </AppWin>
     </div>
   );
 }
@@ -656,7 +752,7 @@ export default function BriklayLanding() {
           }}
         />
         <p className="rise text-xs font-medium uppercase" style={{ color: V.terraDeep, letterSpacing: "0.14em", animationDelay: ".05s" }}>
-          Built on real sites
+          India's human-first construction software
         </p>
         <h1
           className="rise mt-5 leading-tight"
@@ -692,22 +788,40 @@ export default function BriklayLanding() {
         </p>
       </section>
 
-      {/* manifesto */}
-      <section className="mx-auto px-5 sm:px-8 py-16 text-center" style={{ maxWidth: 680 }}>
-        <p className="text-2xl sm:text-3xl leading-snug" style={{ color: V.ink, ...serif }}>
-          You don't need great technology.
-        </p>
-        <p className="text-2xl sm:text-3xl leading-snug mt-1" style={{ color: V.terra, ...serif }}>
-          You need the right data.
-        </p>
-        <p className="text-sm sm:text-base mt-6 leading-relaxed" style={{ color: V.sys }}>
-          Briklay doesn't wait for your site to report. It chases your
-          supervisor on WhatsApp until the information actually arrives. Then
-          it cleans it, standardizes it, and files it so anything can be found
-          in one search. That's how the books stay true without anyone
-          learning software.
-        </p>
-      </section>
+      {/* manifesto — the brick corrects the industry's sentence */}
+      <Gate>
+        <section className="mx-auto px-5 sm:px-8 py-20 sm:py-28 text-center" style={{ maxWidth: 720 }}>
+          <p className="bl1 text-3xl sm:text-5xl leading-tight" style={{ color: V.ink, ...serif }}>
+            <span className="bshk inline-block">
+              You{" "}
+              <span className="inline-block align-bottom" style={{ position: "relative", whiteSpace: "pre" }}>
+                <span className="bgap inline-block align-bottom" style={{ overflow: "hidden" }}>
+                  <span className="bdw inline-block" style={{ color: V.terra }}>don't&nbsp;</span>
+                </span>
+                <span
+                  className="bfall"
+                  aria-hidden="true"
+                  style={{ position: "absolute", left: "50%", bottom: "0.16em", width: 17, height: 11, background: V.terra, borderRadius: 2 }}
+                />
+              </span>
+              need great technology.
+            </span>
+          </p>
+          <p className="bl2 text-3xl sm:text-5xl leading-tight mt-2" style={{ color: V.terra, ...serif }}>
+            You just need the right data from your site.
+          </p>
+          <p className="bbody text-sm sm:text-base mt-8 mx-auto leading-relaxed" style={{ color: V.sys, maxWidth: 560 }}>
+            Briklay doesn't wait for your site to report. It{" "}
+            <b style={{ color: V.inkSoft, fontWeight: 600 }}>chases</b> your
+            supervisor on WhatsApp until the information actually arrives. Then
+            it <b style={{ color: V.inkSoft, fontWeight: 600 }}>cleans</b> it,{" "}
+            <b style={{ color: V.inkSoft, fontWeight: 600 }}>standardizes</b> it,
+            and <b style={{ color: V.inkSoft, fontWeight: 600 }}>files</b> it so
+            anything can be found in one search. That's how the books stay true
+            without anyone learning software.
+          </p>
+        </section>
+      </Gate>
 
       {/* the magic — live vignettes */}
       <section id="magic" className="mx-auto px-5 sm:px-8 py-14" style={{ maxWidth: 1080 }}>
@@ -750,7 +864,7 @@ export default function BriklayLanding() {
           <Gate className="relative grid sm:grid-cols-2 gap-8 sm:gap-10 mt-12 mx-auto items-start" style={{ maxWidth: 920 }}>
 
             {/* the cause-and-effect wire between the two worlds */}
-            <div className="hidden sm:block absolute" aria-hidden="true" style={{ left: "50%", top: 260, width: 72, transform: "translateX(-50%)", zIndex: 1 }}>
+            <div className="hidden sm:block absolute" aria-hidden="true" style={{ left: "50%", top: 314, width: 72, transform: "translateX(-50%)", zIndex: 1 }}>
               <div className="relative overflow-hidden" style={{ height: 14 }}>
                 <span className="beamOut absolute" style={{ left: -52, top: 5.5, width: 48, height: 3, borderRadius: 3, background: "linear-gradient(90deg, transparent, rgba(188,75,39,0.55) 40%, rgba(199,85,48,0.95) 62%, rgba(255,224,205,0.95) 74%, rgba(188,75,39,0.9) 84%, transparent)", boxShadow: "0 0 7px rgba(188,75,39,0.45)" }} />
                 <span className="beamBack absolute" style={{ left: 80, top: 5.5, width: 48, height: 3, borderRadius: 3, background: "linear-gradient(270deg, transparent, rgba(47,93,52,0.55) 40%, rgba(63,115,69,0.95) 62%, rgba(214,238,216,0.95) 74%, rgba(47,93,52,0.9) 84%, transparent)", boxShadow: "0 0 7px rgba(47,93,52,0.45)" }} />
@@ -759,10 +873,14 @@ export default function BriklayLanding() {
 
             {/* demo 1 — the Briklay board */}
             <div>
-              <p className="text-center text-xs font-medium uppercase mb-3" style={{ color: V.faint, letterSpacing: "0.12em", ...font }}>
-                in Briklay · your task board
-              </p>
+              <div className="flex justify-center mb-3">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full" style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.sys, fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", ...font }}>
+                  <b style={{ color: V.terraDeep }}>You see</b>&nbsp;· the project, live in Briklay
+                </span>
+              </div>
               <div className="vcard rounded-2xl p-5 sm:p-6" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
+                <Bloom />
+                <AppWin title="Project tasks">
                 <p className="text-xs" style={{ color: V.faint, ...font }}>Describe your project</p>
                 <p className="text-sm font-medium mt-1.5" style={{ color: V.ink, ...font }}>
                   <span className="typeP">G+2 residence, 1550 sft each floor</span><span className="cursW"><span className="blinkc" style={{ color: V.terra }}>|</span></span>
@@ -779,15 +897,6 @@ export default function BriklayLanding() {
                       &#10003; understood · 3 floors · 1,550 sft each · structure &amp; finishing
                     </p>
                   </div>
-                  <p className="nar1 absolute inset-0 text-xs font-medium leading-snug" style={{ color: V.terraDeep, ...font }}>
-                    Tasks and quality checks created automatically.
-                  </p>
-                  <p className="nar2 absolute inset-0 text-xs font-medium leading-snug" style={{ color: V.terraDeep, ...font }}>
-                    It asks your supervisor when information is missing.
-                  </p>
-                  <p className="nar3 absolute inset-0 text-xs font-medium leading-snug" style={{ color: V.terraDeep, ...font }}>
-                    Every reply gets saved against the right task.
-                  </p>
                 </div>
                 <div className="space-y-3.5">
                   <div className="relative" style={{ height: 38 }}>
@@ -894,14 +1003,30 @@ export default function BriklayLanding() {
                     &#10003; 5 tasks · 13 quality checks created from one line
                   </p>
                 </div>
+                </AppWin>
+                <div className="relative mt-3" style={{ height: 18, overflow: "hidden" }}>
+                  <p className="nar1 absolute inset-0 text-xs font-medium leading-snug" style={{ color: V.terraDeep, ...font }}>
+                    Tasks and quality checks created automatically.
+                  </p>
+                  <p className="nar2 absolute inset-0 text-xs font-medium leading-snug" style={{ color: V.terraDeep, ...font }}>
+                    It asks your supervisor when information is missing.
+                  </p>
+                  <p className="nar3 absolute inset-0 text-xs font-medium leading-snug" style={{ color: V.terraDeep, ...font }}>
+                    Every reply gets saved against the right task.
+                  </p>
+                </div>
               </div>
             </div>
 
             {/* demo 2 — the supervisor's WhatsApp */}
             <div>
-              <p className="text-center text-xs font-medium uppercase mb-3" style={{ color: V.faint, letterSpacing: "0.12em", ...font }}>
-                on WhatsApp · no app for him to learn
-              </p>
+              <div className="flex justify-center mb-3">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full" style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.sys, fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", ...font }}>
+                  <b style={{ color: V.terraDeep }}>Your supervisor sees</b>&nbsp;· just a WhatsApp chat
+                </span>
+              </div>
+              <div className="vcard rounded-2xl p-5 sm:p-6" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
+                <Bloom />
               <div
                 className="mx-auto rounded-2xl overflow-hidden"
                 style={{
@@ -913,6 +1038,25 @@ export default function BriklayLanding() {
                   boxShadow: "0 6px 20px rgba(30,26,21,0.08)",
                 }}
               >
+                {/* WhatsApp header — the supervisor is chatting with verified Briklay */}
+                <div className="flex items-center gap-2 px-2.5 py-2" style={{ background: "#008069" }}>
+                  <ArrowLeft size={16} color="#FFFFFF" />
+                  <span className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: V.terra }}>
+                    <span style={{ color: "#FFFFFF", fontSize: 15, fontWeight: 700, ...serif }}>B</span>
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="flex items-center gap-1 text-xs font-medium truncate" style={{ color: "#FFFFFF", ...font }}>
+                      Briklay
+                      <span className="inline-flex items-center justify-center rounded-full shrink-0" style={{ width: 13, height: 13, background: "#1B9DE2" }}>
+                        <Check size={9} color="#FFFFFF" strokeWidth={3.5} />
+                      </span>
+                    </p>
+                    <p style={{ color: "#C7E9E2", fontSize: 10, ...font }}>online</p>
+                  </div>
+                  <Video size={15} color="#FFFFFF" />
+                  <Phone size={13} color="#FFFFFF" />
+                  <MoreVertical size={15} color="#FFFFFF" />
+                </div>
                 <div className="relative px-3 py-3" style={{ minHeight: 332 }}>
                   {/* date chip — mid-chat crop */}
                   <div className="flex justify-center mb-3">
@@ -990,6 +1134,7 @@ export default function BriklayLanding() {
                   </div>
                 </div>
               </div>
+              </div>
             </div>
 
           </Gate>
@@ -998,6 +1143,74 @@ export default function BriklayLanding() {
             You set up nothing. You get the honest picture.
           </p>
         </div>
+      </section>
+
+      {/* the whole picture — cross-checked into one actionable call */}
+      <section className="mx-auto px-5 sm:px-8 py-16" style={{ maxWidth: 760 }}>
+        <p className="text-center text-xs font-medium uppercase" style={{ color: V.faint, letterSpacing: "0.14em" }}>
+          The whole picture
+        </p>
+        <h2 className="text-center text-2xl sm:text-3xl mt-4 leading-snug" style={{ color: V.ink, ...serif }}>
+          Everything cross-checks everything.
+        </h2>
+        <p className="text-center text-sm sm:text-base mt-5 mx-auto leading-relaxed" style={{ color: V.sys, maxWidth: 600 }}>
+          Purchase orders, work orders, and tasks aren't three separate
+          registers. Briklay reads them together, the way an experienced
+          auditor and a site engineer would, and tells you what they'd catch.
+        </p>
+
+        <Gate className="mt-10">
+          <div className="vcard rounded-2xl p-5 sm:p-6" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
+            <Bloom />
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              {["Purchase orders", "Work orders", "Tasks"].map((t, i) => (
+                <span key={t} className={`xch${i} text-xs px-2.5 py-1 rounded-full`} style={{ background: V.field, color: V.inkSoft, ...font }}>{t}</span>
+              ))}
+            </div>
+            <div className="mx-auto my-1" style={{ maxWidth: 320 }}>
+              <svg viewBox="0 0 300 58" width="100%" height="58" fill="none" aria-hidden="true" style={{ display: "block" }}>
+                <path className="xp0" d="M45 4 C45 34 150 26 150 52" stroke={V.terra} strokeWidth="1.5" strokeLinecap="round" pathLength="100" strokeDasharray="100" />
+                <path className="xp1" d="M150 4 L150 52" stroke={V.terra} strokeWidth="1.5" strokeLinecap="round" pathLength="100" strokeDasharray="100" />
+                <path className="xp2" d="M255 4 C255 34 150 26 150 52" stroke={V.terra} strokeWidth="1.5" strokeLinecap="round" pathLength="100" strokeDasharray="100" />
+                <circle className="xhl" cx="150" cy="52" r="4" stroke={V.terra} strokeWidth="1.5" />
+                <circle className="xnd" cx="150" cy="52" r="3.5" fill={V.terra} style={{ transformBox: "fill-box", transformOrigin: "center" }} />
+              </svg>
+            </div>
+            <div className="xcard">
+            <AppWin title="Site review · The Pride">
+              <p className="text-sm font-medium" style={{ color: V.ink, ...font }}>
+                Cement is over-ordered for the work that's left.
+              </p>
+              <div className="space-y-1.5 mt-3">
+                <div className="xr1 flex items-start gap-2">
+                  <span className="shrink-0 rounded px-1.5 py-0.5" style={{ background: V.field, color: V.faint, fontSize: 10, letterSpacing: "0.06em", ...font }}>PO</span>
+                  <p className="text-xs" style={{ color: V.inkSoft, ...font, ...nums }}>240 bags OPC 53 received across PO-0141 and PO-0152</p>
+                </div>
+                <div className="xr2 flex items-start gap-2">
+                  <span className="shrink-0 rounded px-1.5 py-0.5" style={{ background: V.field, color: V.faint, fontSize: 10, letterSpacing: "0.06em", ...font }}>Tasks</span>
+                  <p className="text-xs" style={{ color: V.inkSoft, ...font, ...nums }}>plastering 60% complete, verified by site photos</p>
+                </div>
+                <div className="xr3 flex items-start gap-2">
+                  <span className="shrink-0 rounded px-1.5 py-0.5" style={{ background: V.field, color: V.faint, fontSize: 10, letterSpacing: "0.06em", ...font }}>WO</span>
+                  <p className="text-xs" style={{ color: V.inkSoft, ...font, ...nums }}>remaining stages need about 90 bags</p>
+                </div>
+              </div>
+              <div className="xcl rounded-xl px-3.5 py-3 mt-3.5" style={{ background: V.field }}>
+                <p className="text-xs leading-relaxed" style={{ color: V.ink, ...font, ...nums }}>
+                  You're carrying roughly 70 bags more than the remaining work
+                  needs. Cement older than 3 months loses strength.
+                </p>
+                <p className="text-xs mt-1.5 font-medium" style={{ color: V.terraDeep, ...font }}>
+                  Worth doing: hold the next cement order &#8594;
+                </p>
+              </div>
+            </AppWin>
+            </div>
+            <p className="xcp text-xs mt-3" style={{ color: V.faint, ...font }}>
+              the evidence first, then the call. Never a number without its reason
+            </p>
+          </div>
+        </Gate>
       </section>
 
       {/* why — questions */}
