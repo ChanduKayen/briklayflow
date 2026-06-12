@@ -65,6 +65,7 @@ import OnboardingWizard from './components/OnboardingWizard';
 import Pending from './pages/Pending';
 import CreateWorkspace from './pages/CreateWorkspace';
 import Login from './pages/Login';
+import Landing from './pages/Landing';
 import SKUDirectory from './pages/SKUDirectory';
 import ProcurementRequests from './pages/ProcurementRequests';
 import ProcurementQuotes from './pages/ProcurementQuotes';
@@ -317,7 +318,11 @@ function App() {
   // null during these states and page components calling useOrgId() will throw.
   if (authState.status === 'loading' || authState.status === 'resolving') return <SplashLoader />;
 
-  if (authState.status === 'unauthenticated') return <Login />;
+  if (authState.status === 'unauthenticated') {
+    const p = location.pathname;
+    if (p === '/' || p === '/login') return <Landing />;
+    return <Login />;
+  }
   
   // Guard against rendering the main app layout when we are supposed to redirect
   // to create-workspace or pending, but the router hasn't updated the pathname yet.
