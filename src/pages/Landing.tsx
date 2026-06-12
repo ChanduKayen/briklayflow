@@ -6,7 +6,7 @@
 import { useState, useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import { ArrowRight, ChevronDown } from 'lucide-react';
-import { V, SEG, CSS, font, serif, nums, terraGrad, inkGrad } from '../components/landing/landingTokens';
+import { V, SEG, CSS, font, serif, nums, terraGrad, inkGrad, bandGrad } from '../components/landing/landingTokens';
 import Gate from '../components/landing/Gate';
 import { VignetteCapture, VignettePO, VignetteWO, VignetteTxn } from '../components/landing/Vignettes';
 
@@ -473,6 +473,144 @@ export default function Landing() {
           </p>
         </div>
       </section>
+
+      {/* why — questions */}
+      <section id="why" className="py-16" style={{ background: V.surface, borderTop: `1px solid ${V.line}`, borderBottom: `1px solid ${V.line}` }}>
+        <div className="mx-auto px-5 sm:px-8 grid sm:grid-cols-3 gap-10" style={{ maxWidth: 1080 }}>
+          {[
+            ['Where did the money go?', "Every payment answers a question before it settles: against which purchase order, which work order, which stage? A rupee with no parent gets flagged, never quietly filed. That's where leaks used to live."],
+            ["What's pending on site?", "Every purchase order shows its own next step: goods, bill, photo. Nothing waits in someone's memory."],
+            ['Will my site team actually use it?', "They won't be typing. The AI is. Pages read like sentences, questions come in plain Telugu and English, and a bill photo files itself."],
+          ].map(([q, a]) => (
+            <div key={q}>
+              <h3 className="text-lg" style={{ color: V.ink, ...serif }}>{q}</h3>
+              <p className="text-sm mt-2.5 leading-relaxed" style={{ color: V.sys }}>{a}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* the colleague — vision, honestly marked */}
+      <section className="mx-auto px-5 sm:px-8 py-20" style={{ maxWidth: 1080 }}>
+        <div className="grid sm:grid-cols-2 gap-10 items-center">
+          <div>
+            <p className="text-xs font-medium uppercase" style={{ color: V.faint, letterSpacing: '0.14em' }}>
+              Coming next
+            </p>
+            <h2 className="text-2xl sm:text-3xl mt-4 leading-snug" style={{ color: V.ink, ...serif }}>
+              You don't change where you work.
+              <br />
+              We come to where you work.
+            </h2>
+            <p className="text-sm mt-4 leading-relaxed" style={{ color: V.sys }}>
+              Say it on WhatsApp. You stay there. Briklay runs the complete
+              back office behind it: files it, checks the rate against what
+              you last paid, chases the supervisor for photos, flags what
+              doesn't add up. Then it brings you the site's honest story, the
+              way a good site engineer would.
+            </p>
+            <p className="text-base mt-5" style={{ color: V.inkSoft, ...serif }}>
+              A site engineer + an assistant = <b>Briklay</b>.
+            </p>
+            <button
+              onClick={() => open('signup')}
+              className="btnp mt-6 text-sm font-medium px-5 py-3 rounded-xl inline-flex items-center gap-2"
+              style={{ border: `1px solid ${V.line}`, color: V.ink, background: V.surface }}
+            >
+              Join the early list <ArrowRight size={14} className="arr" />
+            </button>
+          </div>
+
+          {/* chat mock */}
+          <div className="vcard rounded-3xl p-4 sm:p-5" style={{ background: V.field, border: `1px solid ${V.line}` }}>
+            <div className="space-y-2.5">
+              <div className="ml-auto max-w-xs rounded-2xl rounded-br-md px-3.5 py-2.5" style={{ background: V.sageWash }}>
+                <p className="text-sm" style={{ color: V.ink }}>paid 20,000 to A Raju for Sunshine Residence</p>
+              </div>
+              <div className="mr-auto max-w-xs rounded-2xl rounded-bl-md px-3.5 py-2.5" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
+                <p className="text-sm" style={{ color: V.ink }}>
+                  Recorded. <b style={nums}>− ₹20,000</b> to A Raju · Sunshine
+                  Residence. He has an open work order here: brickwork, stage
+                  2 of 4 (<span style={nums}>₹65,000</span> milestone). Link
+                  this payment there, or is it separate?
+                </p>
+              </div>
+              <div className="ml-auto max-w-xs rounded-2xl rounded-br-md px-3.5 py-2.5" style={{ background: V.sageWash }}>
+                <p className="text-sm" style={{ color: V.ink }}>need kankara 20mm, 2 lorry</p>
+              </div>
+              <div className="mr-auto max-w-xs rounded-2xl rounded-bl-md px-3.5 py-2.5" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
+                <p className="text-sm" style={{ color: V.ink }}>
+                  Drafted PO: coarse aggregate · 20mm · 14 MT. Want me to get
+                  quotes from your 3 aggregate vendors first?
+                </p>
+              </div>
+              <div className="ml-auto max-w-xs rounded-2xl rounded-br-md px-3.5 py-2.5" style={{ background: V.sageWash }}>
+                <p className="text-sm" style={{ color: V.ink }}>how's quality at The Pride?</p>
+              </div>
+              <div className="mr-auto max-w-xs rounded-2xl rounded-bl-md px-3.5 py-2.5" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
+                <p className="text-sm" style={{ color: V.ink }}>
+                  2nd-floor plastering passed QC yesterday (photos on file).
+                  One flag: bathroom waterproofing. Supervisor's photos show
+                  curing started a day early. I've asked him about it.
+                </p>
+              </div>
+            </div>
+            <p className="text-xs mt-4 text-center" style={{ color: V.faint }}>
+              in development · shown as designed
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* the builder */}
+      <section id="builder" className="mx-auto px-5 sm:px-8 py-20 text-center" style={{ maxWidth: 760 }}>
+        <p className="text-xs font-medium uppercase" style={{ color: V.faint, letterSpacing: '0.14em' }}>
+          The Briklay story
+        </p>
+        <p className="text-2xl sm:text-3xl mt-5" style={{ color: V.ink, ...serif }}>
+          Built by builders, for builders.
+        </p>
+        <p className="text-lg sm:text-xl mt-5 leading-relaxed" style={{ color: V.inkSoft, ...serif }}>
+          “Briklay wasn't designed in a boardroom. It comes from 200,000+ sq ft
+          of delivered work, turned into software by a passionate group of
+          engineers who know exactly where money and time leak on a site.”
+        </p>
+        <p className="text-sm mt-5" style={{ color: V.sys }}>
+          Briklay Engineering
+        </p>
+      </section>
+
+      {/* final CTA */}
+      <section className="mx-auto px-5 sm:px-8 pb-24 text-center" style={{ maxWidth: 760 }}>
+        <div className="rounded-3xl px-6 py-12" style={{ background: bandGrad }}>
+          <p className="text-2xl sm:text-3xl" style={{ color: '#fff', ...serif }}>
+            Run your next project on Briklay.
+          </p>
+          <p className="text-sm mt-3" style={{ color: 'rgba(255,255,255,0.65)' }}>
+            Free to start. Honest pricing when you grow. Your data stays yours.
+          </p>
+          <button
+            onClick={() => open('signup')}
+            className="btnp mt-7 text-sm font-medium px-7 py-3.5 rounded-xl inline-flex items-center gap-2"
+            style={{ background: terraGrad, color: '#fff' }}
+          >
+            Start free <ArrowRight size={15} className="arr" />
+          </button>
+        </div>
+      </section>
+
+      {/* footer */}
+      <footer style={{ borderTop: `1px solid ${V.line}` }}>
+        <div className="mx-auto px-5 sm:px-8 py-8 flex items-center gap-3 flex-wrap text-xs" style={{ maxWidth: 1080, color: V.faint }}>
+          <p className="font-semibold text-sm" style={{ color: V.ink }}>
+            Briklay<span style={{ color: V.terra }}>.</span>
+          </p>
+          <span>· built by builders, for builders</span>
+          <span className="flex-1" />
+          <span>© 2026 Briklay Engineering</span>
+          <button onClick={() => open('signin')} className="tlink" style={{ color: V.sys }}>Sign in</button>
+        </div>
+      </footer>
     </div>
   );
 }
