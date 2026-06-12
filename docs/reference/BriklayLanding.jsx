@@ -69,7 +69,7 @@ function Gate({ children, className = "", ...rest }) {
 
 function AppWin({ title, children }) {
   return (
-    <div className="rounded-xl overflow-hidden" style={{ background: "#FFFFFF", border: `1px solid ${V.line}`, boxShadow: "0 1px 2px rgba(30,26,21,0.05)" }}>
+    <div className="rounded-xl overflow-hidden" style={{ position: "relative", zIndex: 1, background: "#FFFFFF", border: `1px solid ${V.line}`, boxShadow: "0 1px 2px rgba(30,26,21,0.05)" }}>
       <div className="flex items-center gap-1.5 px-3.5 py-2" style={{ borderBottom: `1px solid ${V.line}`, background: "#FCFBF9" }}>
         <span className="rounded-full shrink-0" style={{ width: 7, height: 7, background: V.line }} />
         <span className="rounded-full shrink-0" style={{ width: 7, height: 7, background: V.line }} />
@@ -85,11 +85,22 @@ function AppWin({ title, children }) {
   );
 }
 
+function ChapterTag({ n, label }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 px-2.5 py-1"
+      style={{ position: "relative", zIndex: 2, background: "#463B2F", color: "#F6F1EA", fontSize: 10, fontWeight: 500, letterSpacing: "0.1em", textTransform: "uppercase", borderRadius: 6, boxShadow: "0 2px 7px rgba(30,26,21,0.18), 0 1px 2px rgba(30,26,21,0.12)", ...font }}
+    >
+      <b style={{ color: "#D96A43" }}>{n}</b> {label}
+    </span>
+  );
+}
+
 const Bloom = () => (
   <div
     aria-hidden="true"
     className="absolute inset-0 pointer-events-none"
-    style={{ background: "radial-gradient(420px circle at 10% 0%, rgba(188,75,39,0.05), transparent 60%), radial-gradient(380px circle at 100% 100%, rgba(160,130,109,0.08), transparent 60%)" }}
+    style={{ background: "radial-gradient(420px circle at 10% 0%, rgba(188,75,39,0.09), transparent 62%), radial-gradient(380px circle at 100% 100%, rgba(160,130,109,0.13), transparent 62%)" }}
   />
 );
 const font = { fontFamily: "'DM Sans', system-ui, sans-serif" };
@@ -330,12 +341,10 @@ html { scroll-behavior: smooth; }
 
 function VignetteCapture() {
   return (
-    <div className="vcard rounded-2xl p-5 sm:p-6" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
+    <div className="vcard rounded-2xl p-5 sm:p-6" style={{ background: V.surface, border: "1px solid #E3DDD4" }}>
       <Bloom />
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full" style={{ background: V.field, color: V.sys, fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", ...font }}>
-          <b style={{ color: V.terraDeep }}>01</b> Create order
-        </span>
+        <ChapterTag n="01" label="Create order" />
         {/* synced stepper — the map for the loop */}
         <div className="flex items-center gap-2 flex-wrap" style={{ fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase", ...font }}>
           <span className="lab1" style={{ color: V.faint }}>Said</span>
@@ -451,10 +460,8 @@ function VignetteCapture() {
 
 function VignettePO() {
   return (
-    <div className="vcard rounded-2xl p-5" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full mb-3" style={{ background: V.field, color: V.sys, fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", ...font }}>
-        <b style={{ color: V.terraDeep }}>02</b> Track order
-      </span>
+    <div className="vcard h-full flex flex-col rounded-2xl p-5" style={{ background: V.surface, border: "1px solid #E3DDD4" }}>
+      <div className="mb-3"><ChapterTag n="02" label="Track order" /></div>
       <Bloom />
       <AppWin title="Purchase orders">
       <div className="flex items-start justify-between gap-3">
@@ -466,7 +473,7 @@ function VignettePO() {
       </div>
       <div className="flex gap-1 my-3.5">
         {[0, 1, 2].map((i) => (
-          <div key={i} className="flex-1 rounded-full overflow-hidden" style={{ height: 4, background: V.line }}>
+          <div key={i} className="flex-1 rounded-full overflow-hidden" style={{ height: 4, background: "#DED7CC" }}>
             <div className="h-full rounded-full loop-rail" style={{ background: V.inkSoft, animationDelay: `${i * 1.1}s` }} />
           </div>
         ))}
@@ -480,14 +487,14 @@ function VignettePO() {
           <span
             key={label}
             className="loop-chip inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full"
-            style={{ background: V.field, color: V.inkSoft, animationDelay: d, ...font }}
+            style={{ background: "#EFE9E0", color: V.ink, animationDelay: d, ...font }}
           >
             <Check size={11} strokeWidth={3} /> {label}
           </span>
         ))}
       </div>
       </AppWin>
-      <p className="text-xs mt-3" style={{ color: V.faint, ...font }}>
+      <p className="text-xs mt-auto pt-3" style={{ color: V.faint, ...font }}>
         the order knows its own next step
       </p>
     </div>
@@ -497,10 +504,8 @@ function VignettePO() {
 function VignetteWO() {
   const widths = [36, 28, 36];
   return (
-    <div className="vcard rounded-2xl p-5" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full mb-3" style={{ background: V.field, color: V.sys, fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", ...font }}>
-        <b style={{ color: V.terraDeep }}>04</b> Assign &amp; track work
-      </span>
+    <div className="vcard h-full flex flex-col rounded-2xl p-5" style={{ background: V.surface, border: "1px solid #E3DDD4" }}>
+      <div className="mb-3"><ChapterTag n="04" label="Assign & track work" /></div>
       <Bloom />
       <AppWin title="New work order">
       <p className="text-sm leading-relaxed" style={{ color: V.inkSoft, ...serif }}>
@@ -526,7 +531,7 @@ function VignetteWO() {
         <p className="text-xs" style={{ color: V.sys, ...font, ...nums }}>stage 2 due 5 Jul</p>
       </div>
       </AppWin>
-      <p className="text-xs mt-3" style={{ color: V.faint, ...font }}>
+      <p className="text-xs mt-auto pt-3" style={{ color: V.faint, ...font }}>
         work is paid stage by stage, against the order. No loose payments
       </p>
     </div>
@@ -535,10 +540,8 @@ function VignetteWO() {
 
 function VignetteTxn() {
   return (
-    <div className="vcard rounded-2xl p-5" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full mb-3" style={{ background: V.field, color: V.sys, fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", ...font }}>
-        <b style={{ color: V.terraDeep }}>03</b> Pay against it
-      </span>
+    <div className="vcard h-full flex flex-col rounded-2xl p-5" style={{ background: V.surface, border: "1px solid #E3DDD4" }}>
+      <div className="mb-3"><ChapterTag n="03" label="Pay against it" /></div>
       <Bloom />
       <AppWin title="New payment">
       <div className="relative" style={{ minHeight: 150 }}>
@@ -573,13 +576,13 @@ function VignetteTxn() {
               PO-0152: ₹14,000 paid · ₹16,400 remaining
             </p>
           </div>
-          <p className="text-xs mt-2.5" style={{ color: V.faint, ...font }}>
-            a payment above the order's balance gets flagged, not filed
-          </p>
         </div>
 
       </div>
       </AppWin>
+      <p className="text-xs mt-auto pt-3" style={{ color: V.faint, ...font }}>
+        a payment above the order's balance gets flagged, not filed
+      </p>
     </div>
   );
 }
@@ -615,7 +618,26 @@ function AuthPanel({ open, mode, setMode, onClose }) {
           </p>
         </div>
 
-        <div className="mt-8 space-y-3">
+        <button
+          className="btnp mt-8 w-full py-3 rounded-xl text-sm font-medium inline-flex items-center justify-center gap-2.5"
+          style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.ink }}
+        >
+          <svg width="17" height="17" viewBox="0 0 48 48" aria-hidden="true">
+            <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+            <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+            <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+            <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+          </svg>
+          Continue with Google
+        </button>
+
+        <div className="flex items-center gap-3 mt-5">
+          <span className="flex-1" style={{ borderTop: `1px solid ${V.line}` }} />
+          <span className="text-xs" style={{ color: V.faint }}>or with email</span>
+          <span className="flex-1" style={{ borderTop: `1px solid ${V.line}` }} />
+        </div>
+
+        <div className="mt-5 space-y-3">
           {!signin && (
             <div className="flex items-center gap-2.5 px-4 rounded-xl" style={{ background: V.surface, border: `1px solid ${V.line}`, height: 50 }}>
               <span className="text-xs" style={{ color: V.faint }}>Aa</span>
@@ -630,11 +652,6 @@ function AuthPanel({ open, mode, setMode, onClose }) {
             <Lock size={15} style={{ color: V.faint }} />
             <input placeholder="Password" type="password" aria-label="Password" className="flex-1 bg-transparent text-sm outline-none" style={{ color: V.ink }} />
           </div>
-          {signin && (
-            <div className="text-right">
-              <button className="text-xs" style={{ color: V.sys }}>Forgot password?</button>
-            </div>
-          )}
         </div>
 
         <button
@@ -762,10 +779,10 @@ export default function BriklayLanding() {
           <br />
           supervisor will actually use.
         </h1>
-        <p className="rise text-base sm:text-lg mt-6 mx-auto leading-relaxed" style={{ color: V.sys, maxWidth: 560, animationDelay: ".3s" }}>
-          No forms to learn. No evening data entry. Your team says it the way
-          they'd say it on site. A payment, a material need, a work order.
-          Briklay files it as clean, verifiable records.
+        <p className="rise text-base sm:text-lg mt-6 mx-auto leading-relaxed" style={{ color: V.sys, maxWidth: 580, animationDelay: ".3s" }}>
+          Briklay asks the right questions on WhatsApp, and your team replies
+          the way they already talk. What your site says becomes what your app
+          shows. Verified.
         </p>
         <div className="rise mt-8 flex items-center justify-center gap-3 flex-wrap" style={{ animationDelay: ".45s" }}>
           <button
@@ -813,12 +830,14 @@ export default function BriklayLanding() {
           <p className="bbody text-sm sm:text-base mt-8 mx-auto leading-relaxed" style={{ color: V.sys, maxWidth: 560 }}>
             Briklay doesn't wait for your site to report. It{" "}
             <b style={{ color: V.inkSoft, fontWeight: 600 }}>chases</b> your
-            supervisor on WhatsApp until the information actually arrives. Then
-            it <b style={{ color: V.inkSoft, fontWeight: 600 }}>cleans</b> it,{" "}
+            data on WhatsApp, <b style={{ color: V.inkSoft, fontWeight: 600 }}>cleans</b> it,{" "}
             <b style={{ color: V.inkSoft, fontWeight: 600 }}>standardizes</b> it,
-            and <b style={{ color: V.inkSoft, fontWeight: 600 }}>files</b> it so
-            anything can be found in one search. That's how the books stay true
-            without anyone learning software.
+            and <b style={{ color: V.inkSoft, fontWeight: 600 }}>files</b> it.
+            The books stay true without anyone learning software.
+          </p>
+          <p className="bbody mt-7 text-base sm:text-lg" style={{ color: V.inkSoft, ...serif, fontStyle: "italic" }}>
+            There's serious AI under Briklay. You'll never have to see
+            it. You'll just see the right data, arriving.
           </p>
         </section>
       </Gate>
@@ -846,20 +865,35 @@ export default function BriklayLanding() {
       {/* site management — the star chapter: board and WhatsApp, side by side */}
       <section style={{ background: V.field }}>
         <div className="mx-auto px-5 sm:px-8 py-20" style={{ maxWidth: 1080 }}>
-          <p className="text-center text-xs font-medium uppercase" style={{ color: V.terraDeep, letterSpacing: "0.14em" }}>
-            Site management
-          </p>
+          <div className="text-center">
+            <ChapterTag n="05" label="Site management" />
+          </div>
           <h2 className="text-center text-3xl sm:text-4xl mt-4 leading-snug" style={{ color: V.ink, ...serif }}>
-            We don't rely on what's provided.
+            Describe your project in one line.
             <br />
-            We ask for what's needed.
+            Briklay sets it up, and runs it.
           </h2>
           <p className="text-center text-sm sm:text-base mt-5 mx-auto leading-relaxed" style={{ color: V.sys, maxWidth: 620 }}>
-            Tell Briklay the scope. It sets up the project itself: the tasks,
-            and the quality checks under each one. Then it doesn't wait for
-            reports. It asks your supervisor on WhatsApp, and keeps asking,
-            until the data is whole.
+            Type the scope the way you'd say it. Briklay creates the tasks and
+            the quality checks itself, then asks your supervisor on WhatsApp
+            for whatever is missing, and keeps asking until the data is whole.
           </p>
+          <p className="text-center text-base sm:text-lg mt-5" style={{ color: V.inkSoft, ...serif, fontStyle: "italic" }}>
+            We don't rely on what's provided. We ask for what's needed.
+          </p>
+
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-8 mt-9">
+            {[
+              ["1", "You describe the project, in one line."],
+              ["2", "Briklay creates the tasks and quality checks."],
+              ["3", "It asks your site on WhatsApp, and files every answer."],
+            ].map(([n, t]) => (
+              <p key={n} className="text-sm" style={{ color: V.sys, ...font }}>
+                <b className="mr-1.5" style={{ color: V.terraDeep, ...serif, fontSize: 16 }}>{n}</b>
+                {t}
+              </p>
+            ))}
+          </div>
 
           <Gate className="relative grid sm:grid-cols-2 gap-8 sm:gap-10 mt-12 mx-auto items-start" style={{ maxWidth: 920 }}>
 
@@ -875,10 +909,10 @@ export default function BriklayLanding() {
             <div>
               <div className="flex justify-center mb-3">
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full" style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.sys, fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", ...font }}>
-                  <b style={{ color: V.terraDeep }}>You see</b>&nbsp;· the project, live in Briklay
+                  <b style={{ color: V.terraDeep }}>You see</b>&nbsp;· the project building itself
                 </span>
               </div>
-              <div className="vcard rounded-2xl p-5 sm:p-6" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
+              <div className="vcard rounded-2xl p-5 sm:p-6" style={{ background: V.surface, border: "1px solid #E3DDD4" }}>
                 <Bloom />
                 <AppWin title="Project tasks">
                 <p className="text-xs" style={{ color: V.faint, ...font }}>Describe your project</p>
@@ -1025,11 +1059,12 @@ export default function BriklayLanding() {
                   <b style={{ color: V.terraDeep }}>Your supervisor sees</b>&nbsp;· just a WhatsApp chat
                 </span>
               </div>
-              <div className="vcard rounded-2xl p-5 sm:p-6" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
+              <div className="vcard rounded-2xl p-5 sm:p-6" style={{ background: V.surface, border: "1px solid #E3DDD4" }}>
                 <Bloom />
               <div
-                className="mx-auto rounded-2xl overflow-hidden"
+                className="relative mx-auto rounded-2xl overflow-hidden"
                 style={{
+                  zIndex: 1,
                   maxWidth: 300,
                   background: "#ECE5DD",
                   backgroundImage: "radial-gradient(circle at 8px 8px, rgba(69,57,42,0.05) 1.3px, transparent 1.6px), radial-gradient(circle at 21px 22px, rgba(69,57,42,0.04) 1px, transparent 1.3px)",
@@ -1160,7 +1195,7 @@ export default function BriklayLanding() {
         </p>
 
         <Gate className="mt-10">
-          <div className="vcard rounded-2xl p-5 sm:p-6" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
+          <div className="vcard rounded-2xl p-5 sm:p-6" style={{ background: V.surface, border: "1px solid #E3DDD4" }}>
             <Bloom />
             <div className="flex items-center justify-center gap-2 flex-wrap">
               {["Purchase orders", "Work orders", "Tasks"].map((t, i) => (
