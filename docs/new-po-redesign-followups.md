@@ -109,3 +109,18 @@ Dead component:
 - `src/components/InlineAttributePills.tsx` is imported nowhere (only referenced
   in a code comment at `NewPurchaseOrder.tsx:3935`). Safe to delete in a cleanup
   pass. **Not deleted in this branch** by instruction.
+
+---
+
+## TICKET 3 — Landing AuthPanel / Login.tsx auth duplication (from `ui/landing-page`)
+
+The landing page's `AuthPanel` (`src/components/landing/AuthPanel.tsx`) replicates
+`Login.tsx`'s Supabase calls (`signUp` with `options.data.full_name`, the
+empty-`identities` "already exists" check, `signInWithPassword`, and the
+`resend({ type: 'signup' })` confirmation flow). This is intentional duplication
+for launch.
+- **Unify both into a shared `useAuth` hook** so the panel and the login page
+  call one implementation. The mirror comment in `AuthPanel.tsx` marks the call site.
+- **Password reset flow + restore the "Forgot password?" link on the landing.**
+  The link was removed from `AuthPanel` for launch (no reset flow exists yet);
+  restore it once the reset flow ships.

@@ -9,12 +9,12 @@ import { ArrowRight, ChevronDown } from 'lucide-react';
 import { V, SEG, CSS, font, serif, nums, terraGrad, inkGrad, bandGrad } from '../components/landing/landingTokens';
 import Gate from '../components/landing/Gate';
 import { VignetteCapture, VignettePO, VignetteWO, VignetteTxn } from '../components/landing/Vignettes';
+import AuthPanel from '../components/landing/AuthPanel';
 
 export default function Landing() {
   const [auth, setAuth] = useState(false);
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const open = (m: 'signin' | 'signup') => { setMode(m); setAuth(true); };
-  void auth; void mode; // consumed by AuthPanel in a later commit
 
   // Brick-grid hero hover: rAF lerp toward the pointer, written to CSS vars.
   const heroRef = useRef<HTMLElement>(null);
@@ -611,6 +611,8 @@ export default function Landing() {
           <button onClick={() => open('signin')} className="tlink" style={{ color: V.sys }}>Sign in</button>
         </div>
       </footer>
+
+      <AuthPanel open={auth} mode={mode} setMode={setMode} onClose={() => setAuth(false)} />
     </div>
   );
 }
