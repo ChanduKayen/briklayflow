@@ -202,6 +202,10 @@ export default function Landing() {
             anything can be found in one search. That's how the books stay true
             without anyone learning software.
           </p>
+          <p className="bbody italic text-sm sm:text-base mt-6 mx-auto leading-relaxed" style={{ color: V.sys, maxWidth: 560, ...serif }}>
+            There's serious AI under Briklay. You'll never have to see it. You'll
+            just see the right data, arriving.
+          </p>
         </section>
       </Gate>
 

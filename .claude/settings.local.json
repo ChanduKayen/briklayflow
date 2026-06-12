@@ -43,7 +43,10 @@
       "Bash(git stash *)",
       "Bash(sed -i '4079,4145d' src/pages/NewPurchaseOrder.tsx)",
       "Bash(sed -n '4074,4082p' src/pages/NewPurchaseOrder.tsx)",
-      "PowerShell(git commit *)"
+      "PowerShell(git commit *)",
+      "Bash(git checkout *)",
+      "Bash(git clean *)",
+      "Bash(git commit -q -m 'fix\\(landing\\): stop manifesto layout shift during brick wipe *)"
     ]
   }
 }
