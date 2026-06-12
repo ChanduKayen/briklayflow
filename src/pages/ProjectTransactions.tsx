@@ -12,6 +12,7 @@ import { getCostCode } from '../lib/costCodes'
 import { formatTxn } from '../lib/formatTxn'
 import { IconPaperclip } from '@tabler/icons-react'
 import { ImageLightbox } from '../components/ImageLightbox'
+import { deriveDirection } from '../lib/transactions'
 
 const PAGE_SIZE = 25
 
@@ -20,6 +21,8 @@ type DatePreset = 'today' | 'week' | 'month' | 'last_month' | 'quarter' | 'fy' |
 const MATERIAL_CATEGORIES_LEGACY = ['Material Supply', 'PO Advance', 'PO Settlement', 'Transport & Handling']
 
 function getTxnType(txn: any): string {
+  // Money in: a client receipt is NOT an expense (shared direction rule).
+  if (deriveDirection(txn) === 'in') return 'Client Receipt'
   if (txn.stakeholders?.type === 'Worker') return 'Worker Payment'
   if (txn.stakeholders?.type === 'Vendor') {
     const cc = getCostCode(txn.category)
@@ -308,6 +311,7 @@ export default function ProjectTransactions({ session }: { session: Session }) {
       'Worker Payment':    { short: 'Worker',   cls: 'bg-blue-50 text-blue-600' },
       'Material Purchase': { short: 'Material', cls: 'bg-amber-50 text-amber-600' },
       'General Expense':   { short: 'Expense',  cls: 'bg-slate-100 text-slate-500' },
+      'Client Receipt':    { short: 'Receipt',  cls: 'bg-emerald-50 text-emerald-700' },
     }
     const { short, cls } = meta[type] || { short: type, cls: 'bg-surface-container-high text-on-surface' }
     return <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap ${cls}`}>{short}</span>
@@ -363,7 +367,21 @@ export default function ProjectTransactions({ session }: { session: Session }) {
             </div>
             <h1 className="text-[24px] font-bold text-on-surface tracking-tight leading-none">Transactions</h1>
             <p className="text-[12px] text-on-surface-variant/50 mt-1.5 font-medium">
-              {filteredTransactions.length} transaction{filteredTransactions.length !== 1 ? 's' : ''} · ₹{filteredTransactions.reduce((s: number, t: any) => s + Number(t.total_amount), 0).toLocaleString('en-IN')}
+              {filteredTransactions.length} transaction{filteredTransactions.length !== 1 ? 's' : ''}
+              {(() => {
+                // Never sum receipts and payments together (the dead number).
+                let outSum = 0, inSum = 0
+                for (const t of filteredTransactions as any[]) {
+                  if (deriveDirection(t) === 'in') inSum += Number(t.total_amount)
+                  else outSum += Number(t.total_amount)
+                }
+                return (
+                  <>
+                    {' · '}− ₹{outSum.toLocaleString('en-IN')} out
+                    {inSum > 0 && <span className="text-emerald-600"> · + ₹{inSum.toLocaleString('en-IN')} in</span>}
+                  </>
+                )
+              })()}
             </p>
           </div>
           <button onClick={() => navigate('/ledger/new', { state: { projectId, projectName: project?.name } })}
