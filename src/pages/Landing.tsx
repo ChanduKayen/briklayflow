@@ -6,7 +6,7 @@
 import { useState, useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import { ArrowRight, ChevronDown } from 'lucide-react';
-import { V, CSS, font, serif, terraGrad, inkGrad } from '../components/landing/landingTokens';
+import { V, SEG, CSS, font, serif, nums, terraGrad, inkGrad } from '../components/landing/landingTokens';
 import Gate from '../components/landing/Gate';
 import { VignetteCapture, VignettePO, VignetteWO, VignetteTxn } from '../components/landing/Vignettes';
 
@@ -200,6 +200,277 @@ export default function Landing() {
           <Gate><VignettePO /></Gate>
           <Gate><VignetteTxn /></Gate>
           <Gate><VignetteWO /></Gate>
+        </div>
+      </section>
+
+      {/* site management — the star chapter: board and WhatsApp, side by side */}
+      <section style={{ background: V.field }}>
+        <div className="mx-auto px-5 sm:px-8 py-20" style={{ maxWidth: 1080 }}>
+          <p className="text-center text-xs font-medium uppercase" style={{ color: V.terraDeep, letterSpacing: '0.14em' }}>
+            Site management
+          </p>
+          <h2 className="text-center text-3xl sm:text-4xl mt-4 leading-snug" style={{ color: V.ink, ...serif }}>
+            We don't rely on what's provided.
+            <br />
+            We ask for what's needed.
+          </h2>
+          <p className="text-center text-sm sm:text-base mt-5 mx-auto leading-relaxed" style={{ color: V.sys, maxWidth: 620 }}>
+            Tell Briklay the scope. It sets up the project itself: the tasks,
+            and the quality checks under each one. Then it doesn't wait for
+            reports. It asks your supervisor on WhatsApp, and keeps asking,
+            until the data is whole.
+          </p>
+
+          <Gate className="relative grid sm:grid-cols-2 gap-8 sm:gap-10 mt-12 mx-auto items-start" style={{ maxWidth: 920 }}>
+
+            {/* the cause-and-effect wire between the two worlds */}
+            <div className="hidden sm:block absolute" aria-hidden="true" style={{ left: '50%', top: 260, width: 72, transform: 'translateX(-50%)', zIndex: 1 }}>
+              <div className="relative overflow-hidden" style={{ height: 14 }}>
+                <span className="beamOut absolute" style={{ left: -52, top: 5.5, width: 48, height: 3, borderRadius: 3, background: 'linear-gradient(90deg, transparent, rgba(188,75,39,0.55) 40%, rgba(199,85,48,0.95) 62%, rgba(255,224,205,0.95) 74%, rgba(188,75,39,0.9) 84%, transparent)', boxShadow: '0 0 7px rgba(188,75,39,0.45)' }} />
+                <span className="beamBack absolute" style={{ left: 80, top: 5.5, width: 48, height: 3, borderRadius: 3, background: 'linear-gradient(270deg, transparent, rgba(47,93,52,0.55) 40%, rgba(63,115,69,0.95) 62%, rgba(214,238,216,0.95) 74%, rgba(47,93,52,0.9) 84%, transparent)', boxShadow: '0 0 7px rgba(47,93,52,0.45)' }} />
+              </div>
+            </div>
+
+            {/* demo 1 — the Briklay board */}
+            <div>
+              <p className="text-center text-xs font-medium uppercase mb-3" style={{ color: V.faint, letterSpacing: '0.12em', ...font }}>
+                in Briklay · your task board
+              </p>
+              <div className="vcard rounded-2xl p-5 sm:p-6" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
+                <p className="text-xs" style={{ color: V.faint, ...font }}>Describe your project</p>
+                <p className="text-sm font-medium mt-1.5" style={{ color: V.ink, ...font }}>
+                  <span className="typeP">G+2 residence, 1550 sft each floor</span><span className="cursW"><span className="blinkc" style={{ color: V.terra }}>|</span></span>
+                </p>
+                <div className="relative mt-2 mb-4" style={{ height: 18, overflow: 'hidden' }}>
+                  <div className="digA absolute inset-0 flex items-center gap-1.5">
+                    <span className="pdot w-1.5 h-1.5 rounded-full" style={{ background: V.terra }} />
+                    <span className="pdot w-1.5 h-1.5 rounded-full" style={{ background: V.terra, animationDelay: '.18s' }} />
+                    <span className="pdot w-1.5 h-1.5 rounded-full" style={{ background: V.terra, animationDelay: '.36s' }} />
+                    <span className="text-xs ml-1" style={{ color: V.faint, fontStyle: 'italic', ...font }}>reading your project&#8230;</span>
+                  </div>
+                  <div className="digB absolute inset-0">
+                    <p className="text-xs" style={{ color: V.inkSoft, ...font, ...nums }}>
+                      &#10003; understood · 3 floors · 1,550 sft each · structure &amp; finishing
+                    </p>
+                  </div>
+                  <p className="nar1 absolute inset-0 text-xs font-medium leading-snug" style={{ color: V.terraDeep, ...font }}>
+                    Tasks and quality checks created automatically.
+                  </p>
+                  <p className="nar2 absolute inset-0 text-xs font-medium leading-snug" style={{ color: V.terraDeep, ...font }}>
+                    It asks your supervisor when information is missing.
+                  </p>
+                  <p className="nar3 absolute inset-0 text-xs font-medium leading-snug" style={{ color: V.terraDeep, ...font }}>
+                    Every reply gets saved against the right task.
+                  </p>
+                </div>
+                <div className="space-y-3.5">
+                  <div className="relative" style={{ height: 38 }}>
+                    <div className="sk1 absolute inset-x-0 top-0">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: V.line }} />
+                        <span className="shimmer rounded flex-1" style={{ height: 11, maxWidth: '58%' }} />
+                        <span className="text-xs" style={{ color: V.faint, fontStyle: 'italic', ...font }}>creating&#8230;</span>
+                      </div>
+                      <span className="shimmer rounded block ml-5 mt-2" style={{ height: 8, width: '72%' }} />
+                    </div>
+                    <div className="tk1 absolute inset-x-0 top-0">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: SEG[0] }} />
+                        <p className="text-sm font-medium flex-1" style={{ color: V.ink, ...font }}>Footings &amp; plinth</p>
+                        <span className="text-xs" style={{ color: V.faint, ...font }}>created</span>
+                      </div>
+                      <p className="text-xs ml-5 mt-0.5" style={{ color: V.faint, ...font }}>QC: rebar cover · pour photos · level check</p>
+                    </div>
+                  </div>
+                  <div className="relative" style={{ height: 38 }}>
+                    <div className="sk2 absolute inset-x-0 top-0">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: V.line }} />
+                        <span className="shimmer rounded flex-1" style={{ height: 11, maxWidth: '58%' }} />
+                        <span className="text-xs" style={{ color: V.faint, fontStyle: 'italic', ...font }}>creating&#8230;</span>
+                      </div>
+                      <span className="shimmer rounded block ml-5 mt-2" style={{ height: 8, width: '72%' }} />
+                    </div>
+                    <div className="tk2 absolute inset-x-0 top-0">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: SEG[1] }} />
+                        <p className="text-sm font-medium flex-1" style={{ color: V.ink, ...font }}>GF brickwork</p>
+                        <span className="text-xs" style={{ color: V.faint, ...font }}>created</span>
+                      </div>
+                      <p className="text-xs ml-5 mt-0.5" style={{ color: V.faint, ...font }}>QC: line &amp; level · joint thickness</p>
+                    </div>
+                  </div>
+                  <div className="relative" style={{ height: 38 }}>
+                    <div className="sk3 absolute inset-x-0 top-0">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: V.line }} />
+                        <span className="shimmer rounded flex-1" style={{ height: 11, maxWidth: '58%' }} />
+                        <span className="text-xs" style={{ color: V.faint, fontStyle: 'italic', ...font }}>creating&#8230;</span>
+                      </div>
+                      <span className="shimmer rounded block ml-5 mt-2" style={{ height: 8, width: '72%' }} />
+                    </div>
+                    <div className="tk3 absolute inset-x-0 top-0">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: SEG[2] }} />
+                        <p className="text-sm font-medium flex-1" style={{ color: V.ink, ...font }}>2nd floor slab · curing</p>
+                        <span className="relative shrink-0" style={{ width: 104, height: 16 }}>
+                          <span className="st1 absolute inset-0 text-xs text-right" style={{ color: V.faint, ...font }}>created</span>
+                          <span className="st2 absolute inset-0 text-xs text-right" style={{ color: '#6B4407', ...font }}>follow-up sent</span>
+                          <span className="st3 absolute inset-0 text-xs text-right" style={{ color: V.sage, ...font }}>&#10003; QC passed</span>
+                        </span>
+                      </div>
+                      <div className="relative ml-5 mt-0.5" style={{ height: 16 }}>
+                        <p className="st1 absolute inset-0 text-xs" style={{ color: V.faint, ...font }}>QC: day-3 photos · surface check</p>
+                        <p className="st2 absolute inset-0 text-xs" style={{ color: '#854F0B', ...font }}>asked the supervisor for photos · just now</p>
+                        <p className="st3 absolute inset-0 text-xs" style={{ color: V.sage, ...font }}>2 photos verified · answered in 40 min</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="relative" style={{ height: 38 }}>
+                    <div className="sk4 absolute inset-x-0 top-0">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: V.line }} />
+                        <span className="shimmer rounded flex-1" style={{ height: 11, maxWidth: '58%' }} />
+                        <span className="text-xs" style={{ color: V.faint, fontStyle: 'italic', ...font }}>creating&#8230;</span>
+                      </div>
+                      <span className="shimmer rounded block ml-5 mt-2" style={{ height: 8, width: '72%' }} />
+                    </div>
+                    <div className="tk4 absolute inset-x-0 top-0">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: SEG[0] }} />
+                        <p className="text-sm font-medium flex-1" style={{ color: V.ink, ...font }}>1st floor columns</p>
+                        <span className="text-xs" style={{ color: V.faint, ...font }}>created</span>
+                      </div>
+                      <p className="text-xs ml-5 mt-0.5" style={{ color: V.faint, ...font }}>QC: verticality · cover blocks · pour photos</p>
+                    </div>
+                  </div>
+                  <div className="relative" style={{ height: 38 }}>
+                    <div className="sk5 absolute inset-x-0 top-0">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: V.line }} />
+                        <span className="shimmer rounded flex-1" style={{ height: 11, maxWidth: '58%' }} />
+                        <span className="text-xs" style={{ color: V.faint, fontStyle: 'italic', ...font }}>creating&#8230;</span>
+                      </div>
+                      <span className="shimmer rounded block ml-5 mt-2" style={{ height: 8, width: '72%' }} />
+                    </div>
+                    <div className="tk5 absolute inset-x-0 top-0">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: SEG[1] }} />
+                        <p className="text-sm font-medium flex-1" style={{ color: V.ink, ...font }}>Bathroom waterproofing</p>
+                        <span className="text-xs" style={{ color: V.faint, ...font }}>created</span>
+                      </div>
+                      <p className="text-xs ml-5 mt-0.5" style={{ color: V.faint, ...font }}>QC: slope check · pond test photos</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="tkC rounded-xl px-3.5 py-2.5 mt-4" style={{ background: V.field }}>
+                  <p className="text-xs" style={{ color: V.inkSoft, ...font, ...nums }}>
+                    &#10003; 5 tasks · 13 quality checks created from one line
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* demo 2 — the supervisor's WhatsApp */}
+            <div>
+              <p className="text-center text-xs font-medium uppercase mb-3" style={{ color: V.faint, letterSpacing: '0.12em', ...font }}>
+                on WhatsApp · no app for him to learn
+              </p>
+              <div
+                className="mx-auto rounded-2xl overflow-hidden"
+                style={{
+                  maxWidth: 300,
+                  background: '#ECE5DD',
+                  backgroundImage: 'radial-gradient(circle at 8px 8px, rgba(69,57,42,0.05) 1.3px, transparent 1.6px), radial-gradient(circle at 21px 22px, rgba(69,57,42,0.04) 1px, transparent 1.3px)',
+                  backgroundSize: '28px 28px',
+                  border: `1px solid ${V.line}`,
+                  boxShadow: '0 6px 20px rgba(30,26,21,0.08)',
+                }}
+              >
+                <div className="relative px-3 py-3" style={{ minHeight: 332 }}>
+                  {/* date chip — mid-chat crop */}
+                  <div className="flex justify-center mb-3">
+                    <span className="rounded-lg px-2 py-1" style={{ background: 'rgba(255,255,255,0.92)', color: '#54656F', fontSize: 10, boxShadow: '0 1px 0.5px rgba(11,20,26,0.13)', ...font }}>TODAY</span>
+                  </div>
+                  <p className="pE absolute inset-x-0 text-center text-xs" style={{ color: '#8696A0', top: 156, ...font }}>
+                    nothing pending today
+                  </p>
+
+                  {/* Briklay asks — incoming, left, with reply buttons */}
+                  <div className="pMsg1">
+                    <div className="mr-auto relative rounded-lg px-2 py-1.5" style={{ background: '#FFFFFF', maxWidth: 228, borderTopLeftRadius: 0, boxShadow: '0 1px 0.5px rgba(11,20,26,0.13)' }}>
+                      <span aria-hidden="true" style={{ position: 'absolute', top: 0, left: -7, width: 0, height: 0, borderTop: '0 solid transparent', borderBottom: '10px solid transparent', borderRight: '8px solid #FFFFFF' }} />
+                      <p className="text-xs leading-snug" style={{ color: '#111B21', ...font }}>
+                        Suresh garu, 2nd floor slab &#183; day-3 curing. Status?
+                      </p>
+                      <p className="text-right" style={{ color: '#667781', fontSize: 10, marginTop: 2, ...font }}>9:02 am</p>
+                    </div>
+                    <div className="mr-auto mt-1 space-y-1" style={{ maxWidth: 228 }}>
+                      <div className="optSel text-center py-1.5 rounded-lg" style={{ color: '#00A5F4', fontSize: 12, fontWeight: 500, boxShadow: '0 1px 0.5px rgba(11,20,26,0.13)', ...font }}>
+                        Curing done
+                      </div>
+                      <div className="text-center py-1.5 rounded-lg" style={{ background: '#FFFFFF', color: '#00A5F4', fontSize: 12, fontWeight: 500, boxShadow: '0 1px 0.5px rgba(11,20,26,0.13)', ...font }}>
+                        Still in progress
+                      </div>
+                      <div className="text-center py-1.5 rounded-lg" style={{ background: '#FFFFFF', color: '#00A5F4', fontSize: 12, fontWeight: 500, boxShadow: '0 1px 0.5px rgba(11,20,26,0.13)', ...font }}>
+                        Issue on site
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Suresh selects — outgoing, right */}
+                  <div className="pSel mt-2.5">
+                    <div className="ml-auto relative rounded-lg px-2 py-1.5" style={{ background: '#D9FDD3', maxWidth: 160, borderTopRightRadius: 0, boxShadow: '0 1px 0.5px rgba(11,20,26,0.13)' }}>
+                      <span aria-hidden="true" style={{ position: 'absolute', top: 0, right: -7, width: 0, height: 0, borderBottom: '10px solid transparent', borderLeft: '8px solid #D9FDD3' }} />
+                      <p className="text-xs leading-snug" style={{ color: '#111B21', ...font }}>
+                        Curing done
+                        <span style={{ color: '#667781', fontSize: 10, marginLeft: 8 }}>9:38 am <span style={{ color: '#53BDEB' }}>&#10003;&#10003;</span></span>
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Briklay asks for proof — incoming, left */}
+                  <div className="pMsg2 mt-2.5">
+                    <div className="mr-auto relative rounded-lg px-2 py-1.5" style={{ background: '#FFFFFF', maxWidth: 228, borderTopLeftRadius: 0, boxShadow: '0 1px 0.5px rgba(11,20,26,0.13)' }}>
+                      <span aria-hidden="true" style={{ position: 'absolute', top: 0, left: -7, width: 0, height: 0, borderBottom: '10px solid transparent', borderRight: '8px solid #FFFFFF' }} />
+                      <p className="text-xs leading-snug" style={{ color: '#111B21', ...font }}>
+                        Super. 2 photos of the slab surface please?
+                        <span style={{ color: '#667781', fontSize: 10, marginLeft: 8 }}>9:38 am</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Suresh sends the site photo — outgoing, right, time on image */}
+                  <div className="pPhoto mt-2.5">
+                    <div className="ml-auto relative rounded-lg" style={{ background: '#D9FDD3', maxWidth: 178, padding: 3, borderTopRightRadius: 0, boxShadow: '0 1px 0.5px rgba(11,20,26,0.13)' }}>
+                      <span aria-hidden="true" style={{ position: 'absolute', top: 0, right: -7, width: 0, height: 0, borderBottom: '10px solid transparent', borderLeft: '8px solid #D9FDD3' }} />
+                      <div className="relative rounded-md overflow-hidden">
+                        <svg viewBox="0 0 172 96" width="100%" height="92" preserveAspectRatio="none" aria-hidden="true">
+                          <rect width="172" height="96" fill="#A8A296" />
+                          <rect y="62" width="172" height="34" fill="#98917f" />
+                          <ellipse cx="66" cy="47" rx="50" ry="17" fill="#7E7869" opacity="0.85" />
+                          <ellipse cx="58" cy="42" rx="24" ry="7" fill="#C9C4B6" opacity="0.5" />
+                          <rect y="80" width="172" height="16" fill="#8A6B49" />
+                          <rect y="80" width="172" height="2.5" fill="#6E5439" />
+                          <line x1="0" y1="62" x2="172" y2="62" stroke="#6F6A5D" strokeWidth="1" opacity="0.6" />
+                          <circle cx="126" cy="32" r="2" fill="#6F6A5D" /><circle cx="142" cy="52" r="1.6" fill="#6F6A5D" /><circle cx="26" cy="24" r="1.8" fill="#6F6A5D" /><circle cx="102" cy="68" r="1.5" fill="#7E7869" />
+                        </svg>
+                        <span className="absolute top-1 left-1 rounded px-1" style={{ background: 'rgba(17,27,33,0.5)', color: '#fff', fontSize: 9, ...font }}>1 of 2</span>
+                        <span className="absolute bottom-1 right-1.5" style={{ color: '#fff', fontSize: 10, textShadow: '0 1px 2px rgba(0,0,0,0.6)', ...font }}>
+                          9:41 am <span style={{ color: '#53BDEB' }}>&#10003;&#10003;</span>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </Gate>
+
+          <p className="text-center text-lg sm:text-xl mt-10" style={{ color: V.inkSoft, ...serif }}>
+            You set up nothing. You get the honest picture.
+          </p>
         </div>
       </section>
     </div>
