@@ -55,7 +55,7 @@ export default function Landing() {
     }
     meta.setAttribute(
       'content',
-      "Construction software built for the supervisor, with every report verified. Your team says it, Briklay checks it, and the record is filed."
+      "Briklay asks the right questions on WhatsApp; your team replies the way they already talk. What your site says becomes what your app shows. Verified."
     );
     return () => {
       document.title = prevTitle;
@@ -142,10 +142,9 @@ export default function Landing() {
           supervisor will actually use.
         </h1>
         <p className="rise text-base sm:text-lg mt-6 mx-auto leading-relaxed" style={{ color: V.sys, maxWidth: 560, animationDelay: '.3s' }}>
-          One in three construction professionals says software failed because
-          it never fit the site. It wasn't built for the supervisor, and
-          nothing verified what he reported. Briklay fixes both. Your team says
-          it, Briklay checks it, and the record is filed.
+          Briklay asks the right questions on WhatsApp, and your team replies
+          the way they already talk. What your site says becomes what your app
+          shows. Verified.
         </p>
         <div className="rise mt-8 flex items-center justify-center gap-3 flex-wrap" style={{ animationDelay: '.45s' }}>
           <button
