@@ -55,7 +55,7 @@ export default function Landing() {
     }
     meta.setAttribute(
       'content',
-      "No forms to learn, no evening data entry. Your team says it the way they'd say it on site, and Briklay files it as clean, verifiable records."
+      "Construction software built for the supervisor, with every report verified. Your team says it, Briklay checks it, and the record is filed."
     );
     return () => {
       document.title = prevTitle;
@@ -142,9 +142,10 @@ export default function Landing() {
           supervisor will actually use.
         </h1>
         <p className="rise text-base sm:text-lg mt-6 mx-auto leading-relaxed" style={{ color: V.sys, maxWidth: 560, animationDelay: '.3s' }}>
-          No forms to learn. No evening data entry. Your team says it the way
-          they'd say it on site. A payment, a material need, a work order.
-          Briklay files it as clean, verifiable records.
+          One in three construction professionals says software failed because
+          it never fit the site. It wasn't built for the supervisor, and
+          nothing verified what he reported. Briklay fixes both. Your team says
+          it, Briklay checks it, and the record is filed.
         </p>
         <div className="rise mt-8 flex items-center justify-center gap-3 flex-wrap" style={{ animationDelay: '.45s' }}>
           <button
@@ -170,9 +171,9 @@ export default function Landing() {
       {/* manifesto — the brick corrects the industry's sentence */}
       <Gate>
         <section className="mx-auto px-5 sm:px-8 py-20 sm:py-28 text-center" style={{ maxWidth: 720 }}>
-          {/* minHeight reserves the 2-line end state (2 lines x 1.25 leading = 2.5em),
-              so the gap-wipe parting "don't" in never reflows the lines below mid-run. */}
-          <p className="bl1 text-3xl sm:text-5xl leading-tight" style={{ color: V.ink, minHeight: '2.5em', ...serif }}>
+          {/* Fluid size + nowrap keeps line 1 on ONE line at every width, so the gap
+              parting "don't" in never wraps to a 2nd line (that wrap caused the jump). */}
+          <p className="bl1 leading-tight whitespace-nowrap" style={{ color: V.ink, fontSize: 'clamp(1rem, 5vw, 2.5rem)', ...serif }}>
             <span className="bshk inline-block">
               You{' '}
               <span className="inline-block align-bottom" style={{ position: 'relative', whiteSpace: 'pre' }}>
