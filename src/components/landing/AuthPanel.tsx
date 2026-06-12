@@ -14,6 +14,16 @@ import { V, font, serif, terraGrad } from './landingTokens';
 
 type Mode = 'signin' | 'signup';
 
+// Official Google "G" mark (lucide has no brand icons).
+const GoogleG = () => (
+  <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+    <path fill="#4285F4" d="M17.64 9.205c0-.639-.057-1.252-.164-1.841H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" />
+    <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" />
+    <path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" />
+    <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" />
+  </svg>
+);
+
 export default function AuthPanel({
   open,
   mode,
@@ -41,6 +51,21 @@ export default function AuthPanel({
   // Clear transient state when the mode flips or the panel (re)opens.
   useEffect(() => { setError(null); setSignupComplete(false); }, [mode]);
   useEffect(() => { if (open) { setError(null); setSignupComplete(false); setLoading(false); } }, [open]);
+
+  // Google OAuth. Redirects the whole page to Google, then back to the app
+  // root, where supabase-js (detectSessionInUrl) exchanges the code and the
+  // app's auth listener flips to logged-in. Requires the Google provider to be
+  // ENABLED in the Supabase project (dashboard + Google Cloud OAuth client).
+  const handleGoogle = async () => {
+    setLoading(true);
+    setError(null);
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: window.location.origin },
+    });
+    // On success the browser navigates away to Google; nothing else runs here.
+    if (error) { setError(error.message); setLoading(false); }
+  };
 
   const handleResend = async () => {
     setLoading(true);
@@ -140,8 +165,24 @@ export default function AuthPanel({
               </p>
             </div>
 
+            <button
+              type="button"
+              onClick={handleGoogle}
+              disabled={loading}
+              className="btng mt-8 w-full py-3.5 rounded-xl text-sm font-medium inline-flex items-center justify-center gap-2.5"
+              style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.ink }}
+            >
+              <GoogleG /> Continue with Google
+            </button>
+
+            <div className="flex items-center gap-3 my-5">
+              <span className="flex-1" style={{ height: 1, background: V.line }} />
+              <span className="text-xs whitespace-nowrap" style={{ color: V.faint }}>or with email</span>
+              <span className="flex-1" style={{ height: 1, background: V.line }} />
+            </div>
+
             <form onSubmit={handleSubmit}>
-              <div className="mt-8 space-y-3">
+              <div className="space-y-3">
                 {!signin && (
                   <div className="flex items-center gap-2.5 px-4 rounded-xl" style={{ background: V.surface, border: `1px solid ${V.line}`, height: 50 }}>
                     <span className="text-xs" style={{ color: V.faint }}>Aa</span>
