@@ -124,3 +124,28 @@ for launch.
 - **Password reset flow + restore the "Forgot password?" link on the landing.**
   The link was removed from `AuthPanel` for launch (no reset flow exists yet);
   restore it once the reset flow ships.
+
+---
+
+## TICKET 4 — Transactions ledger redesign follow-ups (from `ui/transactions-ledger`)
+
+The `/ledger` page was redesigned into the day-book ledger. Spun-out items:
+
+- **ProjectTransactions adopts the ledger layout.** `ProjectTransactions.tsx`
+  (`/projects/:id/transactions`) got the correctness fix only (shared
+  `deriveDirection` — client receipts badge "Receipt", header splits out/in)
+  but keeps the old table layout. Port it to the `src/components/txn-ledger/*`
+  components + the day-book layout now that they exist (cheap reuse).
+- **Backend: make WO/PO stage labels and the client-billing link real
+  references.** Two parts:
+  1. Add a `stage_label` (phase/milestone) column to `txn_allocations` so the
+     AnchorChip label no longer relies on `parseStageLabel` scraping the
+     `remarks` prefix (`[WO-… - Full payment]`). Retire the parse once it lands.
+  2. Give client receipts a real billing reference (today the only link is
+     `ai_flag_data.invoice_id`); expose it as a column / FK so the CLIENT anchor
+     ("Client billing · Stage N") resolves from structured data, not `ai_flag_data`.
+  Also stop NewTransaction.tsx echoing the ref into `remarks` once the structured
+  fields are authoritative (the "PO PO-" duplication source).
+- **AnchorChip deep-link.** Linked WO/PO/client chips currently open the txn peek
+  on click; once order-entity routes are confirmed, navigate the chip straight to
+  the WO/PO/billing entity instead.
