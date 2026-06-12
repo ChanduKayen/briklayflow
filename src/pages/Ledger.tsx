@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type ReactNode } from 'react';
+import { useState, useRef, useEffect, type ReactNode, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -9,13 +9,16 @@ import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
 import { getCostCode } from '../lib/costCodes';
-import { formatTxn } from '../lib/formatTxn';
-import { IconPaperclip, IconPlus } from '@tabler/icons-react';
+import { Plus, Search, Download, Paperclip } from 'lucide-react';
 import { ShortcutTicker } from '../components/ShortcutTicker';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { PageSkeleton } from '../components/SkeletonLoader';
+import { deriveDirection, isNotLinked, resolveAnchor, type TxnAnchor, type TxnDirection } from '../lib/transactions';
+import { V, font, serif, nums, terraGrad } from '../components/txn-ledger/ledgerTokens';
+import { DirMedallion, Amount, AnchorChip, FilterChip, FlowBar } from '../components/txn-ledger/LedgerAtoms';
 
 const PAGE_SIZE = 25;
+const inr = (n: number) => Math.round(n).toLocaleString('en-IN');
 
 function CreateHint({ message, children }: { message: string; children: ReactNode }) {
   const [show, setShow] = useState(false);
@@ -40,6 +43,100 @@ function CreateHint({ message, children }: { message: string; children: ReactNod
   );
 }
 
+/* ---------- the entry: machine-set, threaded on the spine ---------- */
+
+type EntryProps = {
+  dir: TxnDirection;
+  payee: string;
+  context: string;
+  anchor: TxnAnchor;
+  remark: string | null;
+  amount: string;
+  attach: boolean;
+  voided: boolean;
+  flagged: boolean;
+  selected: boolean;
+  selectionMode: boolean;
+  sumSelected: boolean;
+  onRowClick: () => void;
+  onToggleSelect: (e: MouseEvent) => void;
+  onAnchorClick: (e: MouseEvent) => void;
+  onAmountDown: (e: MouseEvent) => void;
+  onAmountEnter: () => void;
+  onAttach?: (e: MouseEvent) => void;
+};
+
+function EntryRow(p: EntryProps) {
+  const [hover, setHover] = useState(false);
+  const showCheck = p.selectionMode || hover;
+  return (
+    <div
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onClick={p.onRowClick}
+      className="grid items-center gap-3 px-4 rounded-xl relative cursor-pointer"
+      style={{
+        gridTemplateColumns: '28px minmax(0,1.4fr) minmax(0,1.6fr) 24px 130px',
+        height: 56,
+        background: p.sumSelected ? V.terraWash : hover ? V.field : 'transparent',
+        opacity: p.voided ? 0.45 : 1,
+        transition: 'background .15s',
+      }}
+    >
+      {/* hover-revealed bulk checkbox in the left gutter */}
+      <button
+        type="button"
+        onClick={p.onToggleSelect}
+        aria-label={p.selected ? 'Deselect' : 'Select'}
+        className="absolute flex items-center justify-center rounded"
+        style={{
+          left: 1, top: '50%', transform: 'translateY(-50%)', width: 14, height: 14,
+          border: `1.5px solid ${p.selected ? V.terra : V.line}`,
+          background: p.selected ? V.terra : V.surface,
+          opacity: showCheck ? 1 : 0, transition: 'opacity .15s', zIndex: 2,
+        }}
+      >
+        {p.selected && <span style={{ color: '#fff', fontSize: 9, lineHeight: 1 }}>✓</span>}
+      </button>
+
+      <DirMedallion dir={p.dir} />
+
+      <div className="min-w-0">
+        <p className="text-sm font-medium truncate" style={{ color: V.ink, ...font }}>
+          {p.payee}
+          {p.voided && <span className="ml-1.5 text-xs" style={{ color: V.faint, ...font }}>· voided</span>}
+        </p>
+        <p className="text-xs truncate" style={{ color: V.faint, ...font }}>{p.context}</p>
+      </div>
+
+      <div className="min-w-0 flex items-center gap-2">
+        <AnchorChip anchor={p.anchor} onClick={(e) => { e.stopPropagation(); p.onAnchorClick(e); }} />
+        {p.flagged && (
+          <span className="text-xs px-1.5 py-0.5 rounded shrink-0" style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font }}>flagged</span>
+        )}
+        {p.remark && <span className="text-xs truncate" style={{ color: V.sys, ...font }}>{p.remark}</span>}
+      </div>
+
+      <span className="flex justify-center">
+        {p.attach && (
+          <button type="button" onClick={(e) => { e.stopPropagation(); p.onAttach?.(e); }} aria-label="Attachment">
+            <Paperclip size={13} style={{ color: V.faint }} />
+          </button>
+        )}
+      </span>
+
+      <div
+        data-cell-select
+        onMouseDown={(e) => { e.stopPropagation(); p.onAmountDown(e); }}
+        onMouseEnter={p.onAmountEnter}
+        style={{ userSelect: 'none' }}
+      >
+        <Amount dir={p.dir} value={p.amount} />
+      </div>
+    </div>
+  );
+}
+
 export default function Ledger({ session }: { session: Session }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -48,27 +145,21 @@ export default function Ledger({ session }: { session: Session }) {
   const { data: profile } = useUserProfile(session.user.id);
 
   type DatePreset = 'today' | 'week' | 'month' | 'last_month' | 'quarter' | 'fy' | 'all' | 'custom';
-  const [filterFlagged, setFilterFlagged] = useState(() => searchParams.get('flagged') === 'true');
-  const [filterNeedsAction, setFilterNeedsAction] = useState(() => searchParams.get('needs_action') === 'true');
+  const [filterFlagged] = useState(() => searchParams.get('flagged') === 'true');
+  const [filterNeedsAction] = useState(() => searchParams.get('needs_action') === 'true');
+  const [filterUnlinked, setFilterUnlinked] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortKey, setSortKey] = useState<'txn_id' | 'date' | 'type' | 'stakeholder' | 'project' | 'category' | 'payment_mode' | 'total_amount' | 'status'>('date');
-  const [sortAsc, setSortAsc] = useState<boolean>(false);
-  const [filterStakeholder, setFilterStakeholder] = useState<string[]>([]);
-  const [filterCategory, setFilterCategory] = useState<string[]>([]);
-  const [filterStatus, setFilterStatus] = useState<string[]>([]);
   const [filterProject, setFilterProject] = useState<string[]>([]);
   const [filterType, setFilterType] = useState<string[]>([]);
   const [activeFilterDropdown, setActiveFilterDropdown] = useState<string | null>(null);
   const [chipDropPos, setChipDropPos] = useState<{ top: number; left: number } | null>(null);
   const [datePreset, setDatePreset] = useState<DatePreset>('month');
-  const [customFrom, setCustomFrom] = useState('');
-  const [customTo, setCustomTo] = useState('');
-  const [showDateDropdown, setShowDateDropdown] = useState(false);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
-  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
+  // Direction-aware drag-to-sum: a Set of txn_ids the accountant rubber-bands.
+  const [sumSel, setSumSel] = useState<Set<string>>(new Set());
   const [isDragging, setIsDragging] = useState(false);
 
   const [selectedTxnIds, setSelectedTxnIds] = useState<Set<string>>(new Set());
@@ -96,7 +187,6 @@ export default function Ledger({ session }: { session: Session }) {
 
   const { show: showSnackbar } = useSnackbar();
 
-
   const voidAllMutation = useMutation({
     mutationFn: async (ids: string[]) => {
       const { error } = await supabase.from('transactions').update({ status: 'Voided', voided_by: session.user.id, voided_at: new Date().toISOString() }).in('txn_id', ids);
@@ -119,10 +209,10 @@ export default function Ledger({ session }: { session: Session }) {
   });
 
   const filterBarRef = useRef<HTMLDivElement>(null);
-  const chipDropRef  = useRef<HTMLDivElement>(null);
+  const chipDropRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const h = (e: MouseEvent) => {
+    const h = (e: globalThis.MouseEvent) => {
       const t = e.target as Node;
       if (
         (filterBarRef.current && !filterBarRef.current.contains(t)) &&
@@ -139,19 +229,11 @@ export default function Ledger({ session }: { session: Session }) {
     return () => window.removeEventListener('scroll', h, true);
   }, []);
 
-  const dateDropdownRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const h = (e: MouseEvent) => {
-      if (dateDropdownRef.current && !dateDropdownRef.current.contains(e.target as Node)) setShowDateDropdown(false);
-    };
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
-  }, []);
-
+  // drag-to-sum: end on mouseup, clear when clicking away from an amount cell
   useEffect(() => {
     const handleMouseUp = () => setIsDragging(false);
-    const handleClickOutside = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement).closest('[data-cell-select]')) setSelectedRows(new Set());
+    const handleClickOutside = (e: globalThis.MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('[data-cell-select]')) setSumSel(new Set());
     };
     window.addEventListener('mouseup', handleMouseUp);
     window.addEventListener('mousedown', handleClickOutside);
@@ -161,7 +243,7 @@ export default function Ledger({ session }: { session: Session }) {
   useEffect(() => {
     setSelectedTxnIds(new Set());
     setVisibleCount(PAGE_SIZE);
-  }, [searchTerm, filterStakeholder, filterCategory, filterStatus, filterProject, filterType, datePreset, customFrom, customTo, filterFlagged, filterNeedsAction]);
+  }, [searchTerm, filterProject, filterType, datePreset, filterFlagged, filterNeedsAction, filterUnlinked]);
 
   useEffect(() => {
     const handler = () => navigate('/ledger/new');
@@ -183,12 +265,11 @@ export default function Ledger({ session }: { session: Session }) {
   };
 
   const getTxnType = (txn: any): string => {
+    if (deriveDirection(txn) === 'in') return 'Client Receipt';
     if (txn.stakeholders?.type === 'Worker') return 'Worker Payment';
     if (txn.stakeholders?.type === 'Vendor') {
-      // Structured cost code: MAT-XX-XX → Material Purchase
       const cc = getCostCode(txn.category);
       if (cc?.division.type === 'MAT') return 'Material Purchase';
-      // Legacy text category fallback
       if (MATERIAL_CATEGORIES_LEGACY.includes(txn.category)) return 'Material Purchase';
     }
     return 'General Expense';
@@ -203,193 +284,79 @@ export default function Ledger({ session }: { session: Session }) {
       case 'last_month': return { from: new Date(today.getFullYear(), today.getMonth() - 1, 1), to: new Date(today.getFullYear(), today.getMonth(), 0) };
       case 'quarter': { const qm = Math.floor(today.getMonth() / 3) * 3; return { from: new Date(today.getFullYear(), qm, 1), to: new Date(today.getFullYear(), qm + 3, 0) }; }
       case 'fy': { const fyY = today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1; return { from: new Date(fyY, 3, 1), to: new Date(fyY + 1, 2, 31) }; }
-      case 'custom': return { from: customFrom ? new Date(customFrom) : null, to: customTo ? new Date(customTo) : null };
+      case 'custom': return { from: null, to: null };
       default: return { from: null, to: null };
     }
   };
 
-  const fmtDShort = (d: Date) => d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
   const activeDateRange = getDateRange(datePreset);
 
-  const dateShortLabel = (() => {
-    if (datePreset === 'all') return null;
-    if (datePreset === 'custom') {
-      if (activeDateRange.from && activeDateRange.to) return `${fmtDShort(activeDateRange.from)} – ${fmtDShort(activeDateRange.to)}`;
-      return null;
-    }
+  const periodLabel = (() => {
     const now = new Date();
+    if (datePreset === 'all') return 'All time';
     if (datePreset === 'today') return 'Today';
-    if (datePreset === 'week') return 'This Week';
-    if (datePreset === 'month') return now.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
-    if (datePreset === 'last_month') { const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1); return lm.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }); }
-    if (datePreset === 'quarter') return 'This Quarter';
-    if (datePreset === 'fy') { const fyY = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1; return `FY ${fyY}–${String(fyY + 1).slice(2)}`; }
-    return null;
+    if (datePreset === 'week') return 'This week';
+    if (datePreset === 'month') return now.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+    if (datePreset === 'last_month') { const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1); return lm.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }); }
+    if (datePreset === 'quarter') return 'This quarter';
+    if (datePreset === 'fy') { const fyY = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1; return `FY ${fyY}-${String(fyY + 1).slice(2)}`; }
+    return 'Custom';
   })();
 
-  type ExpandedRow = { txn: any; alloc: any | null; isFirstInGroup: boolean; groupSize: number; };
-
-  const filteredTransactions = (ledger || []).filter(txn => {
+  // ── Filtering (per transaction; project filter matches any allocation) ───────
+  const passesBase = (txn: any): boolean => {
     const term = searchTerm.toLowerCase();
-    const matchesSearch = txn.txn_id.toLowerCase().includes(term) || txn.stakeholders?.name?.toLowerCase().includes(term) || txn.category?.toLowerCase().includes(term);
-    const matchesStakeholder = filterStakeholder.length ? filterStakeholder.includes(txn.stakeholders?.name || '') : true;
-    const matchesCategory = filterCategory.length ? filterCategory.includes(txn.category || '') : true;
-    const matchesStatus = filterStatus.length ? filterStatus.includes(txn.status || '') : true;
+    const matchesSearch = !term || txn.txn_id.toLowerCase().includes(term) || txn.stakeholders?.name?.toLowerCase().includes(term) || txn.category?.toLowerCase().includes(term) || (txn.remarks || '').toLowerCase().includes(term);
     const matchesFlagged = filterFlagged ? txn.ai_flag_status === 'Flagged' : true;
     const matchesNeedsAction = filterNeedsAction ? !!getNeedsAction(txn) : true;
     const matchesType = filterType.length ? filterType.includes(getTxnType(txn)) : true;
+    const matchesProject = filterProject.length ? (txn.txn_allocations || []).some((a: any) => filterProject.includes(a.projects?.name || '')) : true;
     const matchesDate = (() => {
       const { from, to } = activeDateRange;
       if (!from || !to) return true;
       const d = new Date(txn.date); d.setHours(0, 0, 0, 0);
       return d >= from && d <= to;
     })();
-    return matchesSearch && matchesStakeholder && matchesCategory && matchesStatus && matchesFlagged && matchesNeedsAction && matchesType && matchesDate;
+    return matchesSearch && matchesFlagged && matchesNeedsAction && matchesType && matchesProject && matchesDate;
+  };
+
+  const baseRows = (ledger || []).filter(passesBase);
+  const unlinkedCount = baseRows.filter(isNotLinked).length;
+  const filteredTransactions = filterUnlinked ? baseRows.filter(isNotLinked) : baseRows;
+
+  // ── Aggregations over the FULL filtered set (never the visible slice) ────────
+  let monthOut = 0, monthIn = 0;
+  for (const t of filteredTransactions) {
+    if (deriveDirection(t) === 'in') monthIn += Number(t.total_amount); else monthOut += Number(t.total_amount);
+  }
+  const monthTotal = monthIn + monthOut;
+  const outPct = monthTotal > 0 ? (monthOut / monthTotal) * 100 : 0;
+  const monthNet = monthIn - monthOut;
+  const netLabel = `${monthNet < 0 ? '−' : '+'} ₹${inr(Math.abs(monthNet))}`;
+
+  const sortedTxns = [...filteredTransactions].sort((a, b) => {
+    if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+    return (a.created_at || '') < (b.created_at || '') ? 1 : -1;
   });
 
-  const expandedRows: ExpandedRow[] = filteredTransactions.flatMap(txn => {
-    const allocs = txn.txn_allocations || [];
-    if (allocs.length === 0) return [{ txn, alloc: null, isFirstInGroup: true, groupSize: 1 }];
-    return allocs.map((alloc: any, i: number) => ({ txn, alloc, isFirstInGroup: i === 0, groupSize: allocs.length }));
-  });
+  const dayTotals = new Map<string, { out: number; in: number }>();
+  for (const t of sortedTxns) {
+    const cur = dayTotals.get(t.date) ?? { out: 0, in: 0 };
+    if (deriveDirection(t) === 'in') cur.in += Number(t.total_amount); else cur.out += Number(t.total_amount);
+    dayTotals.set(t.date, cur);
+  }
 
-  const projectFilteredRows = filterProject.length
-    ? expandedRows.filter(row => row.alloc ? filterProject.includes(row.alloc.projects?.name || '') : false)
-    : expandedRows;
+  const visibleTxns = sortedTxns.slice(0, visibleCount);
+  const visibleDays: { date: string; rows: any[] }[] = [];
+  for (const t of visibleTxns) {
+    const last = visibleDays[visibleDays.length - 1];
+    if (!last || last.date !== t.date) visibleDays.push({ date: t.date, rows: [t] });
+    else last.rows.push(t);
+  }
 
-  const sortedRows: ExpandedRow[] = (() => {
-    const groupMap = new Map<string, ExpandedRow[]>();
-    for (const row of projectFilteredRows) {
-      const key = row.txn.txn_id;
-      if (!groupMap.has(key)) groupMap.set(key, []);
-      groupMap.get(key)!.push(row);
-    }
-    const groups = Array.from(groupMap.values());
-    groups.sort((ga, gb) => {
-      const a = ga[0], b = gb[0];
-      let aVal: any, bVal: any;
-      if (sortKey === 'stakeholder') { aVal = a.txn.stakeholders?.name || ''; bVal = b.txn.stakeholders?.name || ''; }
-      else if (sortKey === 'type') { aVal = getTxnType(a.txn); bVal = getTxnType(b.txn); }
-      else if (sortKey === 'project') { aVal = a.alloc?.projects?.name || ''; bVal = b.alloc?.projects?.name || ''; }
-      else if (sortKey === 'total_amount') { aVal = Number(a.txn.total_amount); bVal = Number(b.txn.total_amount); }
-      else { aVal = a.txn[sortKey]; bVal = b.txn[sortKey]; }
-      if (aVal < bVal) return sortAsc ? -1 : 1;
-      if (aVal > bVal) return sortAsc ? 1 : -1;
-      return 0;
-    });
-    return groups.flat().map(row => ({
-      ...row,
-      isFirstInGroup: groupMap.get(row.txn.txn_id)?.[0] === row,
-      groupSize: groupMap.get(row.txn.txn_id)?.length ?? 1,
-    }));
-  })();
-
-  const visibleRows = sortedRows.slice(0, visibleCount);
-
-  const toggleSort = (key: typeof sortKey) => {
-    if (sortKey === key) setSortAsc(!sortAsc);
-    else { setSortKey(key); setSortAsc(true); }
-  };
-
-  const renderSortIcon = (key: string) => {
-    if (sortKey !== key) return <span className="material-symbols-outlined text-[13px] opacity-25">unfold_more</span>;
-    return <span className="material-symbols-outlined text-[13px] text-primary">{sortAsc ? 'arrow_upward' : 'arrow_downward'}</span>;
-  };
-
-  const uniqueProjects = Array.from(new Set((ledger || []).flatMap((t: any) => (t.txn_allocations || []).map((a: any) => a.projects?.name).filter(Boolean)))) as string[];
-  const uniqueTypes = ['Worker Payment', 'Material Purchase', 'General Expense'];
-
-
-  const hasAnyFilter = filterFlagged || filterNeedsAction || filterStakeholder.length > 0 || filterCategory.length > 0
-    || filterStatus.length > 0 || filterProject.length > 0 || filterType.length > 0
-    || datePreset !== 'month' || searchTerm !== '';
-
-  const clearAllFilters = () => {
-    setDatePreset('month'); setCustomFrom(''); setCustomTo('');
-    setFilterFlagged(false); setFilterNeedsAction(false); setFilterStakeholder([]); setFilterCategory([]);
-    setFilterStatus([]); setFilterProject([]); setFilterType([]); setSearchTerm('');
-  };
-
-  const renderFilterChip = (
-    filterKey: string,
-    label: string,
-    options: string[],
-    currentFilter: string[],
-    setFilter: (f: string[]) => void
-  ) => {
-    const isActive = currentFilter.length > 0;
-    const isOpen = activeFilterDropdown === filterKey;
-    const displayLabel = currentFilter.length === 1 ? currentFilter[0]
-      : currentFilter.length > 1 ? `${label}: ${currentFilter.length}`
-      : label;
-    return (
-      <div>
-        <button
-          onClick={(e) => {
-            if (!isOpen) {
-              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-              setChipDropPos({ top: rect.bottom + 6, left: rect.left });
-            }
-            setActiveFilterDropdown(isOpen ? null : filterKey);
-          }}
-          className={`flex items-center gap-1 h-8 px-3 rounded-full text-[12px] font-medium border transition-all whitespace-nowrap ${
-            isActive ? 'border-primary/30 bg-primary/5 text-primary' : 'border-outline-variant/25 bg-white text-on-surface-variant/70 hover:border-outline-variant/50'
-          }`}
-        >
-          <span className="truncate max-w-[140px]">{displayLabel}</span>
-          {isActive ? (
-            <span className="hover:opacity-60 flex items-center ml-0.5" onClick={(e) => { e.stopPropagation(); setFilter([]); }}>
-              <span className="material-symbols-outlined text-[13px]">close</span>
-            </span>
-          ) : (
-            <span className="material-symbols-outlined text-[13px]">expand_more</span>
-          )}
-        </button>
-        {isOpen && chipDropPos && createPortal(
-          <div
-            ref={chipDropRef}
-            className="w-52 bg-white border border-black/[0.08] rounded-xl shadow-lg overflow-hidden"
-            style={{ position: 'fixed', top: chipDropPos.top, left: chipDropPos.left, zIndex: 9999 }}
-          >
-            <div className="px-3 py-2 border-b border-black/[0.05] flex gap-3">
-              <button className="text-[11px] font-semibold text-primary" onClick={() => setFilter([...options])}>Select all</button>
-              <button className="text-[11px] font-semibold text-on-surface-variant/50" onClick={() => setFilter([])}>Clear</button>
-            </div>
-            <div className="py-1 max-h-52 overflow-y-auto">
-              {options.map(opt => (
-                <label key={opt} className="flex items-center gap-2.5 px-3 py-2 hover:bg-surface-container-low/50 cursor-pointer"
-                  onClick={() => setFilter(currentFilter.includes(opt) ? currentFilter.filter(v => v !== opt) : [...currentFilter, opt])}>
-                  <div className={`w-4 h-4 rounded-[4px] border-2 flex items-center justify-center transition-colors flex-shrink-0 ${currentFilter.includes(opt) ? 'bg-primary border-primary' : 'border-outline-variant/40'}`}>
-                    {currentFilter.includes(opt) && <span className="material-symbols-outlined text-[10px] text-on-primary" style={{ fontVariationSettings: "'FILL' 1, 'wght' 700" }}>check</span>}
-                  </div>
-                  <span className="text-[13px] text-on-surface select-none truncate">{opt}</span>
-                </label>
-              ))}
-            </div>
-          </div>,
-          document.body
-        )}
-      </div>
-    );
-  };
-
-  const selectedAmounts = Array.from(selectedRows).map(idx => {
-    const row = sortedRows[idx];
-    if (!row) return 0;
-    return row.alloc ? Number(row.alloc.allocated_amount) : Number(row.txn.total_amount);
-  });
-  const sum = selectedAmounts.reduce((a, b) => a + b, 0);
-  const avg = selectedAmounts.length ? sum / selectedAmounts.length : 0;
-
-  const visibleTxnIds = Array.from(new Set(sortedRows.map(r => r.txn.txn_id)));
-  const allVisibleSelected = visibleTxnIds.length > 0 && visibleTxnIds.every(id => selectedTxnIds.has(id));
-  const someVisibleSelected = visibleTxnIds.some(id => selectedTxnIds.has(id));
+  // ── Selection / bulk ─────────────────────────────────────────────────────────
   const selectedCount = selectedTxnIds.size;
 
-  const toggleAllVisible = () => {
-    if (allVisibleSelected) setSelectedTxnIds(new Set());
-    else setSelectedTxnIds(new Set(visibleTxnIds));
-  };
   const toggleTxn = (id: string) => {
     setSelectedTxnIds(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   };
@@ -399,14 +366,21 @@ export default function Ledger({ session }: { session: Session }) {
   const hasAmendedSelected = selectedTxns.some((t: any) => (t as any).amendments?.length > 0);
   const voidableSelected = selectedTxns.filter((t: any) => t.status !== 'Voided');
 
+  // ── Drag-to-sum, direction-aware ────────────────────────────────────────────
+  const sumRows = (ledger || []).filter((t: any) => sumSel.has(t.txn_id));
+  let sumOut = 0, sumIn = 0;
+  for (const t of sumRows) { if (deriveDirection(t) === 'in') sumIn += Number(t.total_amount); else sumOut += Number(t.total_amount); }
+  const sumNet = sumIn - sumOut;
+
   const exportCSV = () => {
-    const txnsToExport = selectedCount > 0 ? selectedTxns : (ledger || []);
+    const txnsToExport = selectedCount > 0 ? selectedTxns : filteredTransactions;
     const rows = txnsToExport.flatMap((t: any) => {
       const allocs: any[] = t.txn_allocations || [];
-      if (allocs.length === 0) return [[t.txn_id, t.date, t.stakeholders?.name || '', getTxnType(t), t.category || '', t.payment_mode || '', t.total_amount, '', t.status]];
-      return allocs.map((a: any) => [t.txn_id, t.date, t.stakeholders?.name || '', getTxnType(t), t.category || '', t.payment_mode || '', t.total_amount, a.projects?.name || '', t.status]);
+      const dir = deriveDirection(t);
+      if (allocs.length === 0) return [[t.txn_id, t.date, t.stakeholders?.name || '', getTxnType(t), dir, t.category || '', t.payment_mode || '', t.total_amount, '', t.status]];
+      return allocs.map((a: any) => [t.txn_id, t.date, t.stakeholders?.name || '', getTxnType(t), dir, t.category || '', t.payment_mode || '', t.total_amount, a.projects?.name || '', t.status]);
     });
-    const header = ['TXN ID', 'Date', 'Payee', 'Type', 'Category', 'Mode', 'Amount', 'Project', 'Status'];
+    const header = ['TXN ID', 'Date', 'Payee', 'Type', 'Direction', 'Category', 'Mode', 'Amount', 'Project', 'Status'];
     const csv = [header, ...rows].map(r => r.map((v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -415,541 +389,226 @@ export default function Ledger({ session }: { session: Session }) {
     a.click(); URL.revokeObjectURL(url);
   };
 
-  // ── Badge helpers ──────────────────────────────────────────────────────────
-  const typeBadge = (txn: any) => {
-    const type = getTxnType(txn);
-    const meta: Record<string, { short: string; cls: string }> = {
-      'Worker Payment':    { short: 'Worker',   cls: 'bg-blue-50 text-blue-600' },
-      'Material Purchase': { short: 'Material', cls: 'bg-amber-50 text-amber-600' },
-      'General Expense':   { short: 'Expense',  cls: 'bg-slate-100 text-slate-500' },
-    };
-    const { short, cls } = meta[type] || { short: type, cls: 'bg-surface-container-high text-on-surface' };
-    return <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap ${cls}`}>{short}</span>;
+  const uniqueProjects = Array.from(new Set((ledger || []).flatMap((t: any) => (t.txn_allocations || []).map((a: any) => a.projects?.name).filter(Boolean)))) as string[];
+  const uniqueTypes = ['Worker Payment', 'Material Purchase', 'General Expense', 'Client Receipt'];
+
+  // ── Filter chip + dropdown (reference look, multi-select body) ───────────────
+  const openDrop = (key: string, e: MouseEvent) => {
+    if (activeFilterDropdown === key) { setActiveFilterDropdown(null); return; }
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setChipDropPos({ top: rect.bottom + 6, left: rect.left });
+    setActiveFilterDropdown(key);
   };
 
-  const statusBadge = (txn: any) => {
-    const s = txn.status;
-    const cls: Record<string, string> = {
-      'Active':  'bg-emerald-50 text-emerald-600',
-      'Voided':  'bg-slate-100 text-slate-400',
-      'Amended': 'bg-purple-50 text-purple-600',
-    };
-    const needsAction = getNeedsAction(txn);
-    const isManualFlagged = txn.ai_flag_status === 'Flagged' && s !== 'Voided';
-    return (
-      <div className="flex items-center gap-1">
-        {needsAction && (
-          <span
-            className="material-symbols-outlined text-[13px] text-amber-400 cursor-pointer hover:text-amber-600 transition-colors shrink-0"
-            title={needsAction === 'link_wo' ? 'Unlinked — tap to map' : 'Unlinked — tap to map'}
-            onClick={e => { e.stopPropagation(); openPeek('TRANSACTION', txn.txn_id); }}
-          >link_off</span>
-        )}
-        {isManualFlagged && (
-          <span
-            className="material-symbols-outlined text-[12px] text-red-400 shrink-0"
-            title="Flagged for review"
-            style={{ fontVariationSettings: "'FILL' 1" }}
-          >flag</span>
-        )}
-        <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap ${cls[s] || 'bg-surface-container-high text-on-surface'}`}>{s}</span>
-      </div>
+  const multiDropdown = (options: string[], current: string[], setFilter: (f: string[]) => void) =>
+    chipDropPos && createPortal(
+      <div ref={chipDropRef} className="rounded-xl overflow-hidden" style={{ position: 'fixed', top: chipDropPos.top, left: chipDropPos.left, zIndex: 9999, width: 220, background: V.surface, border: `1px solid ${V.line}`, boxShadow: '0 10px 30px rgba(30,26,21,0.12)' }}>
+        <div className="px-3 py-2 flex gap-4" style={{ borderBottom: `1px solid ${V.line}` }}>
+          <button className="text-xs font-semibold" style={{ color: V.terraDeep, ...font }} onClick={() => setFilter([...options])}>Select all</button>
+          <button className="text-xs font-semibold" style={{ color: V.faint, ...font }} onClick={() => setFilter([])}>Clear</button>
+        </div>
+        <div className="py-1 max-h-60 overflow-y-auto">
+          {options.length === 0 && <p className="px-3 py-2 text-xs" style={{ color: V.faint, ...font }}>None</p>}
+          {options.map(opt => (
+            <button key={opt} type="button" className="w-full flex items-center gap-2.5 px-3 py-2 text-left" style={{ ...font }}
+              onClick={() => setFilter(current.includes(opt) ? current.filter(v => v !== opt) : [...current, opt])}>
+              <span className="flex items-center justify-center rounded shrink-0" style={{ width: 16, height: 16, border: `1.5px solid ${current.includes(opt) ? V.terra : V.line}`, background: current.includes(opt) ? V.terra : 'transparent' }}>
+                {current.includes(opt) && <span style={{ color: '#fff', fontSize: 10 }}>✓</span>}
+              </span>
+              <span className="text-sm truncate" style={{ color: V.ink }}>{opt}</span>
+            </button>
+          ))}
+        </div>
+      </div>,
+      document.body,
     );
-  };
 
-  const thCls = 'px-4 py-3 text-left text-[11px] font-semibold text-on-surface-variant/45 uppercase tracking-[0.07em]';
-  const thSort = `${thCls} cursor-pointer hover:text-primary transition-colors`;
+  const datePresets: { k: DatePreset; label: string }[] = [
+    { k: 'today', label: 'Today' }, { k: 'week', label: 'This week' }, { k: 'month', label: 'This month' },
+    { k: 'last_month', label: 'Last month' }, { k: 'quarter', label: 'This quarter' }, { k: 'fy', label: 'Financial year' }, { k: 'all', label: 'All time' },
+  ];
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  // ── Render ───────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-surface-container-low/30">
-      <div className="max-w-[1280px] mx-auto px-4 md:px-6 py-8">
+    <div className="min-h-screen" style={{ background: V.page, ...font }}>
+      <div className="mx-auto px-5 sm:px-8 py-8" style={{ maxWidth: 880 }}>
 
-        {/* Header */}
-        <div className="flex items-start justify-between mb-7">
+        {/* header */}
+        <div className="flex items-end justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-[24px] font-bold text-on-surface tracking-tight leading-none">Transactions</h1>
-            <p className="text-[12px] text-on-surface-variant/50 mt-1.5 font-medium">
-              {filteredTransactions.length} transaction{filteredTransactions.length !== 1 ? 's' : ''} · ₹{filteredTransactions.reduce((s, t) => s + Number(t.total_amount), 0).toLocaleString('en-IN')}
+            <h1 className="text-3xl" style={{ color: V.ink, ...serif }}>Transactions</h1>
+            <p className="text-sm mt-2" style={{ color: V.sys, ...font, ...nums }}>
+              {periodLabel} · {filteredTransactions.length} {filteredTransactions.length === 1 ? 'entry' : 'entries'}
             </p>
+            <FlowBar inLabel={inr(monthIn)} outLabel={inr(monthOut)} net={netLabel} outPct={outPct} />
           </div>
-          <div className="hidden md:flex flex-col items-end gap-1">
+          <div className="flex flex-col items-end gap-1">
             <CreateHint message="press / to create a new transaction">
               <button
                 onClick={() => navigate('/ledger/new')}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 6,
-                  background: 'var(--color-text-primary)',
-                  color: 'var(--color-background-primary)',
-                  border: 'none', borderRadius: 8, padding: '9px 16px',
-                  fontSize: 12, fontWeight: 500, cursor: 'pointer',
-                  letterSpacing: '.01em', whiteSpace: 'nowrap',
-                }}
+                className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl"
+                style={{ background: terraGrad, color: '#fff', ...font }}
               >
-                <IconPlus size={14} />
-                New transaction
+                <Plus size={15} /> New transaction
               </button>
             </CreateHint>
-            <ShortcutTicker hints={[
-              { key: '/',       label: 'new transaction' },
-              { key: 'T',       label: 'view transactions' },
-              { key: 'P',       label: 'view purchase orders' },
-              { key: 'W',       label: 'view work orders' },
-              { key: 'L',       label: 'view logbook' },
-              { key: '⟵ hold', label: 'long press screen for quick actions' },
-            ]} className="w-full" />
+            <div className="hidden md:block">
+              <ShortcutTicker hints={[
+                { key: '/', label: 'new transaction' },
+                { key: 'T', label: 'view transactions' },
+                { key: 'P', label: 'view purchase orders' },
+                { key: 'W', label: 'view work orders' },
+                { key: 'L', label: 'view logbook' },
+                { key: '⟵ hold', label: 'long press screen for quick actions' },
+              ]} className="w-full" />
+            </div>
           </div>
         </div>
 
-        {/* Filter bar — horizontal scroll on mobile, wraps on desktop */}
-        <div ref={filterBarRef} className="flex items-center gap-2 mb-5 overflow-x-auto no-scrollbar md:flex-wrap flex-nowrap pb-0.5">
-
-          {/* Date chip */}
-          <div className="relative" ref={dateDropdownRef}>
-            <button onClick={() => setShowDateDropdown(d => !d)}
-              className={`flex items-center gap-1 h-8 px-3 rounded-full text-[12px] font-medium border transition-all whitespace-nowrap ${
-                datePreset !== 'all' ? 'border-primary/30 bg-primary/5 text-primary' : 'border-outline-variant/25 bg-white text-on-surface-variant/70 hover:border-outline-variant/50'
-              }`}>
-              <span className="material-symbols-outlined text-[14px]">calendar_month</span>
-              {dateShortLabel || 'All time'}
-              {datePreset !== 'all' ? (
-                <span className="hover:opacity-60 flex items-center ml-0.5" onClick={(e) => { e.stopPropagation(); setDatePreset('all'); setCustomFrom(''); setCustomTo(''); }}>
-                  <span className="material-symbols-outlined text-[13px]">close</span>
-                </span>
-              ) : (
-                <span className="material-symbols-outlined text-[13px]">expand_more</span>
-              )}
-            </button>
-            {showDateDropdown && (
-              <div className="absolute top-full left-0 mt-1.5 w-52 bg-white border border-black/[0.08] rounded-xl shadow-lg z-50 overflow-hidden">
-                {([
-                  { id: 'today' as DatePreset, label: 'Today' },
-                  { id: 'week' as DatePreset, label: 'This Week' },
-                  { id: 'month' as DatePreset, label: 'This Month' },
-                  { id: 'last_month' as DatePreset, label: 'Last Month' },
-                  { id: 'quarter' as DatePreset, label: 'This Quarter' },
-                  { id: 'fy' as DatePreset, label: 'This FY' },
-                  { id: 'all' as DatePreset, label: 'All Time' },
-                ]).map(p => (
-                  <button key={p.id} onClick={() => { setDatePreset(p.id); setShowDateDropdown(false); }}
-                    className="w-full flex items-center justify-between px-4 py-2 text-[13px] text-left hover:bg-surface-container-low/60 transition-colors">
-                    <span className={datePreset === p.id ? 'text-primary font-semibold' : 'text-on-surface'}>{p.label}</span>
-                    {datePreset === p.id && <span className="material-symbols-outlined text-[15px] text-primary">check</span>}
-                  </button>
-                ))}
-                <div className="border-t border-black/[0.05]" />
-                <button onClick={() => setDatePreset('custom')}
-                  className="w-full flex items-center justify-between px-4 py-2 text-[13px] text-left hover:bg-surface-container-low/60 transition-colors">
-                  <span className={datePreset === 'custom' ? 'text-primary font-semibold' : 'text-on-surface'}>Custom Range</span>
-                  {datePreset === 'custom'
-                    ? <span className="material-symbols-outlined text-[15px] text-primary">check</span>
-                    : <span className="material-symbols-outlined text-[15px] text-on-surface-variant/30">chevron_right</span>}
+        {/* filters */}
+        <div ref={filterBarRef} className="flex items-center gap-2 flex-wrap mt-7">
+          <FilterChip active onClick={(e: any) => openDrop('date', e)}>{periodLabel}</FilterChip>
+          {activeFilterDropdown === 'date' && chipDropPos && createPortal(
+            <div ref={chipDropRef} className="rounded-xl overflow-hidden py-1" style={{ position: 'fixed', top: chipDropPos.top, left: chipDropPos.left, zIndex: 9999, width: 200, background: V.surface, border: `1px solid ${V.line}`, boxShadow: '0 10px 30px rgba(30,26,21,0.12)' }}>
+              {datePresets.map(d => (
+                <button key={d.k} type="button" className="w-full text-left px-3 py-2 text-sm" style={{ color: datePreset === d.k ? V.terraDeep : V.ink, background: datePreset === d.k ? V.terraWash : 'transparent', ...font }}
+                  onClick={() => { setDatePreset(d.k); setActiveFilterDropdown(null); }}>
+                  {d.label}
                 </button>
-                {datePreset === 'custom' && (
-                  <div className="px-3 pb-3 pt-1 space-y-2 border-t border-black/[0.05] bg-surface-container-low/40">
-                    <div className="flex items-center gap-2">
-                      <label className="text-[10px] font-bold text-on-surface-variant/50 w-7 shrink-0">FROM</label>
-                      <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)} className="bk-input py-1 text-[12px] flex-1" />
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <label className="text-[10px] font-bold text-on-surface-variant/50 w-7 shrink-0">TO</label>
-                      <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)} className="bk-input py-1 text-[12px] flex-1" />
-                    </div>
-                    {customFrom && customTo && (
-                      <button onClick={() => setShowDateDropdown(false)} className="w-full py-1.5 bk-btn text-[12px] rounded-lg">Apply</button>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
+              ))}
+            </div>,
+            document.body,
+          )}
+
+          <FilterChip active={filterType.length > 0} onClick={(e: any) => openDrop('type', e)}>
+            {filterType.length === 1 ? filterType[0] : filterType.length > 1 ? `Type: ${filterType.length}` : 'Type'}
+          </FilterChip>
+          {activeFilterDropdown === 'type' && multiDropdown(uniqueTypes, filterType, setFilterType)}
+
+          <FilterChip active={filterProject.length > 0} onClick={(e: any) => openDrop('project', e)}>
+            {filterProject.length === 1 ? filterProject[0] : filterProject.length > 1 ? `Project: ${filterProject.length}` : 'Project'}
+          </FilterChip>
+          {activeFilterDropdown === 'project' && multiDropdown(uniqueProjects, filterProject, setFilterProject)}
+
+          {unlinkedCount > 0 && (
+            <FilterChip tone="ask" active={filterUnlinked} onClick={() => setFilterUnlinked(v => !v)}>
+              {unlinkedCount} not linked
+            </FilterChip>
+          )}
+
+          <span className="flex-1" />
+
+          <div className="inline-flex items-center gap-2 px-3 rounded-full" style={{ background: V.surface, border: `1px solid ${V.line}`, height: 36, minWidth: 200 }}>
+            <Search size={14} style={{ color: V.faint }} />
+            <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search payee, order, remark" className="bg-transparent text-sm outline-none flex-1" style={{ color: V.ink, ...font }} />
           </div>
-
-          {/* Type chip */}
-          {renderFilterChip('type', 'Type', uniqueTypes, filterType, setFilterType)}
-
-          {/* Project chip */}
-          {renderFilterChip('project', 'Project', uniqueProjects, filterProject, setFilterProject)}
-
-          {/* Status chip — merges filterStatus + filterFlagged + filterNeedsAction */}
-          {(() => {
-            const isStatusActive = filterStatus.length > 0 || filterFlagged || filterNeedsAction;
-            const isOpen = activeFilterDropdown === 'status';
-            const activeCount = filterStatus.length + (filterFlagged ? 1 : 0) + (filterNeedsAction ? 1 : 0);
-            const displayLabel = activeCount === 0 ? 'Status'
-              : activeCount === 1
-                ? (filterNeedsAction && !filterFlagged && filterStatus.length === 0 ? 'Needs Action'
-                  : filterFlagged && !filterNeedsAction && filterStatus.length === 0 ? 'Flagged'
-                  : filterStatus[0])
-              : `Status: ${activeCount}`;
-            return (
-              <div>
-                <button
-                  onClick={(e) => {
-                    if (!isOpen) {
-                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                      setChipDropPos({ top: rect.bottom + 6, left: rect.left });
-                    }
-                    setActiveFilterDropdown(isOpen ? null : 'status');
-                  }}
-                  className={`flex items-center gap-1 h-8 px-3 rounded-full text-[12px] font-medium border transition-all whitespace-nowrap ${
-                    isStatusActive ? 'border-primary/30 bg-primary/5 text-primary' : 'border-outline-variant/25 bg-white text-on-surface-variant/70 hover:border-outline-variant/50'
-                  }`}>
-                  <span className="truncate max-w-[140px]">{displayLabel}</span>
-                  {isStatusActive ? (
-                    <span className="hover:opacity-60 flex items-center ml-0.5" onClick={(e) => { e.stopPropagation(); setFilterStatus([]); setFilterFlagged(false); setFilterNeedsAction(false); }}>
-                      <span className="material-symbols-outlined text-[13px]">close</span>
-                    </span>
-                  ) : (
-                    <span className="material-symbols-outlined text-[13px]">expand_more</span>
-                  )}
-                </button>
-                {isOpen && chipDropPos && createPortal(
-                  <div
-                    ref={chipDropRef}
-                    className="w-48 bg-white border border-black/[0.08] rounded-xl shadow-lg overflow-hidden"
-                    style={{ position: 'fixed', top: chipDropPos.top, left: chipDropPos.left, zIndex: 9999 }}
-                  >
-                    <div className="px-3 py-2 border-b border-black/[0.05] flex gap-3">
-                      <button className="text-[11px] font-semibold text-primary" onClick={() => { setFilterStatus(['Active', 'Voided', 'Amended']); setFilterFlagged(true); setFilterNeedsAction(true); }}>All</button>
-                      <button className="text-[11px] font-semibold text-on-surface-variant/50" onClick={() => { setFilterStatus([]); setFilterFlagged(false); setFilterNeedsAction(false); }}>Clear</button>
-                    </div>
-                    <div className="py-1">
-                      {(['Active', 'Needs Action', 'Flagged', 'Amended', 'Voided'] as string[]).map(opt => {
-                        const isChecked = opt === 'Flagged' ? filterFlagged : opt === 'Needs Action' ? filterNeedsAction : filterStatus.includes(opt);
-                        return (
-                          <label key={opt} className="flex items-center gap-2.5 px-3 py-2 hover:bg-surface-container-low/50 cursor-pointer"
-                            onClick={() => {
-                              if (opt === 'Flagged') { setFilterFlagged(!filterFlagged); }
-                              else if (opt === 'Needs Action') { setFilterNeedsAction(!filterNeedsAction); }
-                              else { setFilterStatus(filterStatus.includes(opt) ? filterStatus.filter(s => s !== opt) : [...filterStatus, opt]); }
-                            }}>
-                            <div className={`w-4 h-4 rounded-[4px] border-2 flex items-center justify-center transition-colors flex-shrink-0 ${isChecked ? 'bg-primary border-primary' : 'border-outline-variant/40'}`}>
-                              {isChecked && <span className="material-symbols-outlined text-[10px] text-on-primary" style={{ fontVariationSettings: "'FILL' 1, 'wght' 700" }}>check</span>}
-                            </div>
-                            <span className={`text-[13px] select-none ${opt === 'Needs Action' ? 'text-amber-600' : opt === 'Flagged' ? 'text-red-600' : 'text-on-surface'}`}>{opt}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>,
-                  document.body
-                )}
-              </div>
-            );
-          })()}
-
-          {/* Search */}
-          <div className="relative">
-            <span className="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-[15px] text-on-surface-variant/40 pointer-events-none">search</span>
-            <input
-              type="text"
-              placeholder="Search…"
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              autoComplete="new-password"
-              className="h-8 pl-8 pr-3 w-32 focus:w-52 transition-[width] duration-200 rounded-full border border-outline-variant/25 bg-white text-[12px] text-on-surface outline-none focus:border-primary/30 focus:ring-1 focus:ring-primary/10"
-            />
-          </div>
-
-          {/* Export */}
-          <button
-            onClick={exportCSV}
-            className="hidden md:flex items-center gap-1.5 h-8 px-3 rounded-full border border-outline-variant/25 bg-white text-[12px] font-medium text-on-surface-variant/55 hover:border-outline-variant/50 hover:text-on-surface/75 transition-all shrink-0"
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: 14 }}>download</span>
-            Export
+          <button onClick={exportCSV} className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full" style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.inkSoft, ...font }}>
+            <Download size={13} style={{ color: V.faint }} /> Export
           </button>
-
-          {/* Clear all */}
-          {hasAnyFilter && (
-            <button onClick={clearAllFilters}
-              className="ml-auto text-[12px] font-medium text-on-surface-variant/45 hover:text-error transition-colors whitespace-nowrap">
-              Clear all
-            </button>
-          )}
         </div>
 
-        {/* ── Mobile card stack ─────────────────────────────────────────── */}
-        <div className="md:hidden">
-          {isLoading ? (
-            <div className="py-2"><PageSkeleton /></div>
-          ) : filteredTransactions.length === 0 ? (
-            <div className="py-20 text-center">
-              <span className="material-symbols-outlined text-[56px] text-on-surface-variant/15 block mb-4">
-                {hasAnyFilter ? 'search_off' : 'receipt_long'}
-              </span>
-              <p className="text-[15px] font-medium text-on-surface/50">No transactions found</p>
-              {hasAnyFilter && (
-                <button onClick={clearAllFilters} className="mt-5 h-11 px-5 rounded-full border border-outline-variant/30 text-[13px] font-medium text-on-surface-variant/60">
-                  Clear filters
-                </button>
-              )}
-            </div>
-          ) : (
-            <>
-              <div className="space-y-2">
-                {filteredTransactions.slice(0, visibleCount).map((txn: any) => {
-                  const txnDate = new Date(txn.date);
-                  const isCurrentYear = txnDate.getFullYear() === new Date().getFullYear();
-                  const dateStr = txnDate.toLocaleDateString('en-IN', {
-                    day: 'numeric', month: 'short',
-                    ...(!isCurrentYear ? { year: 'numeric' } : {}),
-                  });
-                  const projectNames = (txn.txn_allocations || [])
-                    .map((a: any) => a.projects?.name).filter(Boolean).join(', ') || null;
-                  const type = getTxnType(txn);
-                  const typeColors: Record<string, string> = {
-                    'Worker Payment': 'bg-blue-50 text-blue-600',
-                    'Material Purchase': 'bg-amber-50 text-amber-600',
-                    'General Expense': 'bg-slate-100 text-slate-500',
-                  };
+        {/* the day-book */}
+        {isLoading ? (
+          <div className="mt-7"><PageSkeleton /></div>
+        ) : visibleDays.length === 0 ? (
+          <p className="text-sm text-center mt-16" style={{ color: V.faint, ...font }}>No transactions for this period.</p>
+        ) : (
+          visibleDays.map(day => {
+            const tot = dayTotals.get(day.date) ?? { out: 0, in: 0 };
+            const weekday = new Date(day.date).toLocaleDateString('en-IN', { weekday: 'long' });
+            const dshort = new Date(day.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+            return (
+              <section className="mt-7" key={day.date}>
+                <p className="px-4 py-2 text-sm sticky top-0" style={{ background: V.page, color: V.ink, zIndex: 2, ...serif }}>
+                  {dshort} <span className="text-xs" style={{ color: V.faint, ...font }}>· {weekday}</span>
+                </p>
+                <div className="rounded-2xl pt-1 overflow-hidden relative" style={{ background: V.surface, border: '1px solid #E3DDD4' }}>
+                  {/* the spine: one thread of money through the day */}
+                  <div aria-hidden="true" className="absolute" style={{ left: 29, top: 16, bottom: 64, width: 1, background: V.line }} />
 
-                  return (
-                    <div
-                      key={txn.txn_id}
-                      className={`bg-white rounded-xl border border-black/[0.06] p-3 cursor-pointer bk-row-ripple ${txn.status === 'Voided' ? 'opacity-50' : ''}`}
-                      onClick={() => openPeek('TRANSACTION', txn.txn_id)}
-                    >
-                      {/* Row 1: Payee + Amount */}
-                      <div className="flex items-start justify-between mb-1.5">
-                        <div className="flex-1 min-w-0 mr-3">
-                          <span className="text-[15px] font-[500] text-on-surface leading-tight line-clamp-1">
-                            {formatTxn(txn, 'global').primary}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          {getNeedsAction(txn) && (
-                            <span className="material-symbols-outlined text-amber-400 text-[13px]">link_off</span>
-                          )}
-                          {txn.ai_flag_status === 'Flagged' && (
-                            <span className="material-symbols-outlined text-red-400 text-[13px]" style={{ fontVariationSettings: "'FILL' 1" }}>flag</span>
-                          )}
-                          <span className="text-[15px] font-bold font-data-mono text-on-surface">
-                            ₹{Number(txn.total_amount).toLocaleString('en-IN')}
-                          </span>
-                        </div>
-                      </div>
-                      {/* Row 2: Type + Project */}
-                      <div className="flex items-center gap-1.5 mb-1.5">
-                        <span className={`text-[11px] font-semibold px-1.5 py-0.5 rounded-full ${typeColors[type] ?? 'bg-surface-container text-on-surface'}`}>{type}</span>
-                        {projectNames && (
-                          <span className="text-[13px] text-on-surface-variant truncate">· {projectNames}</span>
-                        )}
-                      </div>
-                      {/* Row 3: Date + Mode + Status */}
-                      <div className="flex items-center justify-between">
-                        <span className="text-[13px] text-on-surface-variant">
-                          {dateStr}{txn.payment_mode ? ` · ${txn.payment_mode}` : ''}
-                        </span>
-                        {statusBadge(txn)}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              {filteredTransactions.length > visibleCount && (
-                <button onClick={() => setVisibleCount(c => c + PAGE_SIZE)}
-                  className="w-full mt-3 py-3 rounded-xl border border-outline-variant/30 text-[13px] font-semibold text-primary">
-                  Load more ({filteredTransactions.length - visibleCount} remaining)
-                </button>
-              )}
-            </>
-          )}
-        </div>
-
-        {/* ── Desktop table card ─────────────────────────────────────────── */}
-        <div className="hidden md:block bg-white rounded-2xl border border-black/[0.06] shadow-sm overflow-hidden">
-          {isLoading ? (
-            <div className="p-4">
-              <PageSkeleton />
-            </div>
-          ) : visibleRows.length === 0 ? (
-            <div className="py-20 text-center">
-              <span className="material-symbols-outlined text-[56px] text-on-surface-variant/15 block mb-4">
-                {hasAnyFilter ? 'search_off' : 'receipt_long'}
-              </span>
-              <p className="text-[15px] font-medium text-on-surface/50">No transactions found</p>
-              {hasAnyFilter && (
-                <>
-                  <p className="text-[12px] text-on-surface-variant/35 mt-1.5">Try adjusting your filters</p>
-                  <button onClick={clearAllFilters}
-                    className="mt-5 h-8 px-4 rounded-full border border-outline-variant/30 text-[12px] font-medium text-on-surface-variant/60 hover:border-primary/30 hover:text-primary transition-colors">
-                    Clear filters
-                  </button>
-                </>
-              )}
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse min-w-[780px]">
-                <thead>
-                  <tr className="border-b border-black/[0.06] bg-surface-container-low/30">
-                    <th className="w-10 px-3 py-3 align-middle">
-                      <div className="flex flex-col items-center gap-1">
-                        <input type="checkbox" checked={allVisibleSelected}
-                          ref={el => { if (el) el.indeterminate = someVisibleSelected && !allVisibleSelected; }}
-                          onChange={toggleAllVisible}
-                          className="w-3.5 h-3.5 rounded border-outline-variant/50 text-primary focus:ring-primary cursor-pointer" />
-                        {selectedCount > 0 && <span className="text-[9px] font-bold text-primary">{selectedCount}</span>}
-                      </div>
-                    </th>
-                    <th className={thSort} onClick={() => toggleSort('date')}><div className="flex items-center gap-1">Date {renderSortIcon('date')}</div></th>
-                    <th className={thSort} onClick={() => toggleSort('stakeholder')}><div className="flex items-center gap-1">Payee {renderSortIcon('stakeholder')}</div></th>
-                    <th className={thCls}>Trade</th>
-                    <th className={thSort} onClick={() => toggleSort('type')}><div className="flex items-center gap-1">Type {renderSortIcon('type')}</div></th>
-                    <th className={thSort} onClick={() => toggleSort('project')}><div className="flex items-center gap-1">Project {renderSortIcon('project')}</div></th>
-                    <th className={thCls}>Remarks</th>
-                    <th className={`${thSort} text-right`} onClick={() => toggleSort('total_amount')}><div className="flex items-center justify-end gap-1">Amount {renderSortIcon('total_amount')}</div></th>
-                    <th className="w-12 px-3 py-3 text-center">
-                      <IconPaperclip size={13} className="opacity-35 mx-auto" />
-                    </th>
-                    <th className={thSort} onClick={() => toggleSort('status')}><div className="flex items-center gap-1">Status {renderSortIcon('status')}</div></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleRows.map(({ txn, alloc, isFirstInGroup, groupSize }, idx) => {
-                    const isSplit = groupSize > 1;
-                    const rowAmount = alloc ? Number(alloc.allocated_amount) : Number(txn.total_amount);
-                    const navTarget = `/ledger/${txn.txn_id}${alloc?.project_id ? `?project=${alloc.project_id}` : ''}`;
-                    const isChecked = selectedTxnIds.has(txn.txn_id);
-                    const projectName = alloc?.projects?.name || (alloc ? 'Unmapped' : '—');
-
-                    const txnType = getTxnType(txn);
-                    const splitAccentCls = isSplit
-                      ? txnType === 'Worker Payment' ? 'border-l-2 border-l-blue-200'
-                      : txnType === 'Material Purchase' ? 'border-l-2 border-l-amber-200'
-                      : 'border-l-2 border-l-slate-200'
-                      : '';
-
-                    const txnDate = new Date(txn.date);
-                    const isCurrentYear = txnDate.getFullYear() === new Date().getFullYear();
-                    const dateStr = txnDate.toLocaleDateString('en-IN', {
-                      day: 'numeric', month: 'short',
-                      ...(!isCurrentYear ? { year: 'numeric' } : {}),
-                    });
-
-                    const tradeLabel = txn.stakeholders?.category || '';
-
+                  {day.rows.map((txn: any) => {
+                    const dir = deriveDirection(txn);
+                    const primaryAlloc = (txn.txn_allocations || []).find((a: any) => a.order_type) ?? null;
+                    const anchor: TxnAnchor = dir === 'in'
+                      ? resolveAnchor(txn, null)
+                      : isNotLinked(txn) ? null : resolveAnchor(txn, primaryAlloc);
+                    const projName = (txn.txn_allocations || [])[0]?.projects?.name || null;
+                    const trade = txn.stakeholders?.category || null;
+                    const party = txn.stakeholders?.type || null;
+                    const ctxParts = [party, trade];
+                    if (!(filterProject.length === 1) && projName) ctxParts.push(projName);
+                    const context = ctxParts.filter(Boolean).join(' · ');
+                    const proofUrl = txn.bill_doc_url || (txn as any).proof_document_url || null;
                     return (
-                      <tr key={`${txn.txn_id}-${alloc?.allocation_id ?? 'none'}-${idx}`}
-                        className={`border-b border-black/[0.04] last:border-0 hover:bg-surface-container-low/40 transition-colors cursor-pointer bk-row-ripple ${splitAccentCls} ${isChecked ? 'bg-primary/[0.02]' : ''} ${txn.status === 'Voided' ? 'opacity-40' : ''} ${!isFirstInGroup ? 'bg-surface-container-lowest/60' : ''}`}
-                        style={{ height: '52px' }}
-                        onClick={() => navigate(navTarget)}
-                      >
-                        <td className="px-3 align-middle w-10" onClick={e => e.stopPropagation()}>
-                          {isFirstInGroup && (
-                            <input type="checkbox" checked={isChecked} onChange={() => toggleTxn(txn.txn_id)}
-                              className="w-3.5 h-3.5 rounded border-outline-variant/50 text-primary focus:ring-primary cursor-pointer" />
-                          )}
-                        </td>
-                        <td className="px-4 align-middle">
-                          {isFirstInGroup && (
-                            <span className="text-[13px] text-on-surface/80 font-medium whitespace-nowrap">{dateStr}</span>
-                          )}
-                        </td>
-                        <td className="px-4 align-middle">
-                          {isFirstInGroup && (
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-[13px] font-medium text-on-surface truncate">{txn.stakeholders?.name || '—'}</span>
-                              <div className="flex items-center gap-1 shrink-0">
-                                {txn.bill_doc_url && <span className="material-symbols-outlined text-[12px] text-on-surface-variant/30" title="Attachment">attachment</span>}
-                                {txn.remarks && <span className="material-symbols-outlined text-[12px] text-on-surface-variant/30" title="Has remarks">notes</span>}
-                                {isSplit && <span className="text-[10px] font-bold text-primary/50 bg-primary/5 px-1.5 py-0.5 rounded-full leading-none">SPLIT</span>}
-                              </div>
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-4 align-middle">
-                          {isFirstInGroup && tradeLabel && (
-                            <span className="text-[12px] text-on-surface-variant/55 whitespace-nowrap">{tradeLabel}</span>
-                          )}
-                        </td>
-                        <td className="px-4 align-middle">
-                          {isFirstInGroup && typeBadge(txn)}
-                        </td>
-                        <td className="px-4 align-middle max-w-[140px]">
-                          {!isFirstInGroup ? (
-                            <div className="flex items-center gap-1 pl-3">
-                              <span className="material-symbols-outlined text-[12px] text-on-surface-variant/25 shrink-0">subdirectory_arrow_right</span>
-                              <span className="text-[12px] text-on-surface-variant/60 truncate">{projectName}</span>
-                            </div>
-                          ) : (
-                            <span className="text-[13px] text-on-surface/70 truncate block">{projectName}</span>
-                          )}
-                        </td>
-                        <td className="px-4 align-middle max-w-[220px]">
-                          {isFirstInGroup && txn.remarks ? (
-                            <span className="text-[12px] text-on-surface-variant/55 leading-snug line-clamp-2" title={txn.remarks}>
-                              {txn.remarks}
-                            </span>
-                          ) : (
-                            isFirstInGroup && <span className="text-[12px] text-on-surface-variant/25">—</span>
-                          )}
-                        </td>
-                        <td
-                          data-cell-select="true"
-                          className={`px-4 align-middle text-right cursor-cell select-none transition-colors ${selectedRows.has(idx) ? 'bg-primary/5 text-primary' : ''}`}
-                          onMouseDown={(e) => { e.stopPropagation(); setIsDragging(true); setSelectedRows(new Set([idx])); }}
-                          onMouseEnter={() => { if (isDragging) setSelectedRows(prev => new Set(prev).add(idx)); }}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <span className="text-[14px] font-bold font-data-mono text-on-surface">
-                            ₹{rowAmount.toLocaleString('en-IN')}
-                          </span>
-                        </td>
-                        <td className="px-3 align-middle w-12 text-center" onClick={(e) => e.stopPropagation()}>
-                          {isFirstInGroup && (() => {
-                            const proofUrl = (txn as any).proof_document_url || txn.bill_doc_url || null;
-                            if (!proofUrl) return null;
-                            return (
-                              <img
-                                src={proofUrl}
-                                alt="proof"
-                                className="w-8 h-8 rounded-md object-cover cursor-pointer border border-black/[0.08] hover:opacity-80 transition-opacity mx-auto"
-                                onClick={(e) => { e.stopPropagation(); setLightboxUrl(proofUrl); }}
-                              />
-                            );
-                          })()}
-                        </td>
-                        <td className="px-4 align-middle">
-                          {isFirstInGroup && statusBadge(txn)}
-                        </td>
-                      </tr>
+                      <EntryRow
+                        key={txn.txn_id}
+                        dir={dir}
+                        payee={txn.stakeholders?.name || 'Unknown'}
+                        context={context}
+                        anchor={anchor}
+                        remark={null}
+                        amount={inr(Number(txn.total_amount))}
+                        attach={!!proofUrl}
+                        voided={txn.status === 'Voided'}
+                        flagged={txn.ai_flag_status === 'Flagged' && txn.status !== 'Voided'}
+                        selected={selectedTxnIds.has(txn.txn_id)}
+                        selectionMode={selectedCount > 0}
+                        sumSelected={sumSel.has(txn.txn_id)}
+                        onRowClick={() => navigate(`/ledger/${txn.txn_id}`)}
+                        onToggleSelect={(e) => { e.stopPropagation(); toggleTxn(txn.txn_id); }}
+                        onAnchorClick={() => openPeek('TRANSACTION', txn.txn_id)}
+                        onAttach={() => proofUrl && setLightboxUrl(proofUrl)}
+                        onAmountDown={() => { setIsDragging(true); setSumSel(new Set([txn.txn_id])); }}
+                        onAmountEnter={() => { if (isDragging) setSumSel(prev => new Set(prev).add(txn.txn_id)); }}
+                      />
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
-          )}
 
-          {/* Load more footer */}
-          {!isLoading && sortedRows.length > visibleCount && (
-            <div className="px-6 py-4 border-t border-black/[0.04] flex items-center justify-between bg-surface-container-lowest/30">
-              <span className="text-[12px] text-on-surface-variant/40">
-                Showing {Math.min(visibleCount, sortedRows.length)} of {sortedRows.length}
-              </span>
-              <button onClick={() => setVisibleCount(c => c + PAGE_SIZE)}
-                className="text-[12px] font-semibold text-primary hover:underline">
-                Load more
-              </button>
-            </div>
-          )}
-        </div>
+                  {/* ruling off: the bookkeeper closes the day */}
+                  <div className="flex items-baseline justify-between px-4 py-3 mt-1" style={{ borderTop: `1px solid ${V.line}` }}>
+                    <p className="text-sm" style={{ color: V.inkSoft, ...serif, fontStyle: 'italic' }}>Day closed</p>
+                    <div className="text-right">
+                      <p className="text-sm" style={{ color: V.inkSoft, ...serif, ...nums }}>
+                        <span style={{ color: V.terraDeep }}>− ₹{inr(tot.out)}</span>
+                        <span className="mx-2" style={{ color: V.faint }}>·</span>
+                        <span style={{ color: V.sage }}>+ ₹{inr(tot.in)}</span>
+                      </p>
+                      <div className="mt-1.5 ml-auto" style={{ width: 148, borderTop: `1px solid ${V.inkSoft}`, borderBottom: `1px solid ${V.inkSoft}`, height: 4 }} />
+                    </div>
+                  </div>
+                </div>
+              </section>
+            );
+          })
+        )}
 
+        {/* load more */}
+        {!isLoading && sortedTxns.length > visibleCount && (
+          <div className="flex items-center justify-between mt-6 px-1">
+            <span className="text-xs" style={{ color: V.faint, ...font }}>Showing {visibleTxns.length} of {sortedTxns.length}</span>
+            <button onClick={() => setVisibleCount(c => c + PAGE_SIZE)} className="text-sm font-semibold" style={{ color: V.terraDeep, ...font }}>Load more</button>
+          </div>
+        )}
       </div>
 
-      {/* Amount drag selection stats */}
-      {selectedRows.size > 1 && selectedCount === 0 && (
-        <div className="fixed bottom-4 right-4 bg-white/95 backdrop-blur-sm border border-outline-variant/20 rounded-xl shadow-lg p-3 flex gap-6 z-50 animate-in slide-in-from-bottom-4">
-          <div className="flex flex-col"><span className="text-[10px] font-bold text-on-surface-variant/50 uppercase">Count</span><span className="font-data-mono font-bold text-[15px]">{selectedRows.size}</span></div>
-          <div className="flex flex-col"><span className="text-[10px] font-bold text-on-surface-variant/50 uppercase">Avg</span><span className="font-data-mono font-bold text-[15px]">₹{avg.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span></div>
-          <div className="flex flex-col"><span className="text-[10px] font-bold text-on-surface-variant/50 uppercase">Sum</span><span className="font-data-mono font-bold text-[15px] text-primary">₹{sum.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span></div>
+      {/* direction-aware drag-to-sum panel */}
+      {sumSel.size > 1 && selectedCount === 0 && (
+        <div className="fixed bottom-4 right-4 rounded-xl shadow-lg p-3 z-50" style={{ background: 'rgba(255,255,255,0.97)', border: `1px solid ${V.line}`, ...font }}>
+          <p className="text-xs" style={{ color: V.faint }}>{sumSel.size} selected</p>
+          <p className="text-[15px] font-medium mt-0.5" style={{ ...nums, color: sumNet < 0 ? V.terraDeep : V.sage }}>
+            net {sumNet < 0 ? '−' : '+'} ₹{inr(Math.abs(sumNet))}
+          </p>
+          <p className="text-xs mt-0.5" style={{ ...nums }}>
+            <span style={{ color: V.terraDeep }}>− ₹{inr(sumOut)}</span>
+            <span className="mx-1.5" style={{ color: V.line }}>·</span>
+            <span style={{ color: V.sage }}>+ ₹{inr(sumIn)}</span>
+          </p>
         </div>
       )}
 
       <ImageLightbox url={lightboxUrl} title="Payment Proof" onClose={() => setLightboxUrl(null)} />
 
-      {/* Bulk action bar */}
+      {/* bulk action bar */}
       {selectedCount > 0 && (
         <div className="fixed bottom-0 left-0 right-0 z-50 flex justify-center pb-4 px-4 pointer-events-none">
           <div className="pointer-events-auto bg-on-surface/95 backdrop-blur-sm text-surface rounded-2xl shadow-2xl px-5 py-3 flex items-center gap-3 flex-wrap animate-in slide-in-from-bottom-4 duration-200">
