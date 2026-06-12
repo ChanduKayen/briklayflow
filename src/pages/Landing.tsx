@@ -7,6 +7,8 @@ import { useState, useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import { ArrowRight, ChevronDown } from 'lucide-react';
 import { V, CSS, font, serif, terraGrad, inkGrad } from '../components/landing/landingTokens';
+import Gate from '../components/landing/Gate';
+import { VignetteCapture, VignettePO, VignetteWO, VignetteTxn } from '../components/landing/Vignettes';
 
 export default function Landing() {
   const [auth, setAuth] = useState(false);
@@ -162,6 +164,43 @@ export default function Landing() {
         <p className="rise text-xs mt-5" style={{ color: V.faint, animationDelay: '.55s' }}>
           no card needed · works in Telugu and English
         </p>
+      </section>
+
+      {/* manifesto */}
+      <section className="mx-auto px-5 sm:px-8 py-16 text-center" style={{ maxWidth: 680 }}>
+        <p className="text-2xl sm:text-3xl leading-snug" style={{ color: V.ink, ...serif }}>
+          You don't need great technology.
+        </p>
+        <p className="text-2xl sm:text-3xl leading-snug mt-1" style={{ color: V.terra, ...serif }}>
+          You need the right data.
+        </p>
+        <p className="text-sm sm:text-base mt-6 leading-relaxed" style={{ color: V.sys }}>
+          Briklay doesn't wait for your site to report. It chases your
+          supervisor on WhatsApp until the information actually arrives. Then
+          it cleans it, standardizes it, and files it so anything can be found
+          in one search. That's how the books stay true without anyone
+          learning software.
+        </p>
+      </section>
+
+      {/* the magic — live vignettes */}
+      <section id="magic" className="mx-auto px-5 sm:px-8 py-14" style={{ maxWidth: 1080 }}>
+        <p className="text-center text-2xl sm:text-3xl" style={{ color: V.ink, ...serif }}>
+          Construction <span style={{ color: V.terra, borderBottom: `2px dashed ${V.askLine}` }}>Magic</span>, shown, not told.
+        </p>
+        <p className="text-center text-sm mt-3" style={{ color: V.sys }}>
+          These aren't screenshots. This is the product, running. Watch one
+          order travel: created, tracked, paid. Then the same discipline for
+          assigned work.
+        </p>
+        <Gate className="mt-10">
+          <VignetteCapture />
+        </Gate>
+        <div className="grid sm:grid-cols-3 gap-4 mt-4">
+          <Gate><VignettePO /></Gate>
+          <Gate><VignetteTxn /></Gate>
+          <Gate><VignetteWO /></Gate>
+        </div>
       </section>
     </div>
   );
