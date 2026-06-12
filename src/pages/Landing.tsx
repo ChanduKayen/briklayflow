@@ -73,7 +73,7 @@ export default function Landing() {
 
       {/* nav */}
       <nav className="sticky top-0 z-40" style={{ background: 'rgba(251,249,246,0.85)', backdropFilter: 'blur(8px)', borderBottom: `1px solid ${V.line}` }}>
-        <div className="mx-auto px-5 sm:px-8 h-16 flex items-center gap-6" style={{ maxWidth: 1080 }}>
+        <div className="mx-auto px-5 sm:px-8 h-16 flex items-center gap-6" style={{ maxWidth: 1280 }}>
           <p className="text-lg font-semibold" style={{ color: V.ink }}>
             Briklay<span style={{ color: V.terra }}>.</span>
           </p>
@@ -184,7 +184,7 @@ export default function Landing() {
       </section>
 
       {/* the magic — live vignettes */}
-      <section id="magic" className="mx-auto px-5 sm:px-8 py-14" style={{ maxWidth: 1080 }}>
+      <section id="magic" className="mx-auto px-5 sm:px-8 py-14" style={{ maxWidth: 1280 }}>
         <p className="text-center text-2xl sm:text-3xl" style={{ color: V.ink, ...serif }}>
           Construction <span style={{ color: V.terra, borderBottom: `2px dashed ${V.askLine}` }}>Magic</span>, shown, not told.
         </p>
@@ -205,7 +205,7 @@ export default function Landing() {
 
       {/* site management — the star chapter: board and WhatsApp, side by side */}
       <section style={{ background: V.field }}>
-        <div className="mx-auto px-5 sm:px-8 py-20" style={{ maxWidth: 1080 }}>
+        <div className="mx-auto px-5 sm:px-8 py-20" style={{ maxWidth: 1280 }}>
           <p className="text-center text-xs font-medium uppercase" style={{ color: V.terraDeep, letterSpacing: '0.14em' }}>
             Site management
           </p>
@@ -476,7 +476,7 @@ export default function Landing() {
 
       {/* why — questions */}
       <section id="why" className="py-16" style={{ background: V.surface, borderTop: `1px solid ${V.line}`, borderBottom: `1px solid ${V.line}` }}>
-        <div className="mx-auto px-5 sm:px-8 grid sm:grid-cols-3 gap-10" style={{ maxWidth: 1080 }}>
+        <div className="mx-auto px-5 sm:px-8 grid sm:grid-cols-3 gap-10" style={{ maxWidth: 1280 }}>
           {[
             ['Where did the money go?', "Every payment answers a question before it settles: against which purchase order, which work order, which stage? A rupee with no parent gets flagged, never quietly filed. That's where leaks used to live."],
             ["What's pending on site?", "Every purchase order shows its own next step: goods, bill, photo. Nothing waits in someone's memory."],
@@ -491,7 +491,7 @@ export default function Landing() {
       </section>
 
       {/* the colleague — vision, honestly marked */}
-      <section className="mx-auto px-5 sm:px-8 py-20" style={{ maxWidth: 1080 }}>
+      <section className="mx-auto px-5 sm:px-8 py-20" style={{ maxWidth: 1280 }}>
         <div className="grid sm:grid-cols-2 gap-10 items-center">
           <div>
             <p className="text-xs font-medium uppercase" style={{ color: V.faint, letterSpacing: '0.14em' }}>
@@ -601,7 +601,7 @@ export default function Landing() {
 
       {/* footer */}
       <footer style={{ borderTop: `1px solid ${V.line}` }}>
-        <div className="mx-auto px-5 sm:px-8 py-8 flex items-center gap-3 flex-wrap text-xs" style={{ maxWidth: 1080, color: V.faint }}>
+        <div className="mx-auto px-5 sm:px-8 py-8 flex items-center gap-3 flex-wrap text-xs" style={{ maxWidth: 1280, color: V.faint }}>
           <p className="font-semibold text-sm" style={{ color: V.ink }}>
             Briklay<span style={{ color: V.terra }}>.</span>
           </p>
