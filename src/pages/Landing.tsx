@@ -170,7 +170,9 @@ export default function Landing() {
       {/* manifesto — the brick corrects the industry's sentence */}
       <Gate>
         <section className="mx-auto px-5 sm:px-8 py-20 sm:py-28 text-center" style={{ maxWidth: 720 }}>
-          <p className="bl1 text-3xl sm:text-5xl leading-tight" style={{ color: V.ink, ...serif }}>
+          {/* minHeight reserves the 2-line end state (2 lines x 1.25 leading = 2.5em),
+              so the gap-wipe parting "don't" in never reflows the lines below mid-run. */}
+          <p className="bl1 text-3xl sm:text-5xl leading-tight" style={{ color: V.ink, minHeight: '2.5em', ...serif }}>
             <span className="bshk inline-block">
               You{' '}
               <span className="inline-block align-bottom" style={{ position: 'relative', whiteSpace: 'pre' }}>
