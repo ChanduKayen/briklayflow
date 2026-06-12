@@ -7,10 +7,12 @@
 import type { CSSProperties } from 'react';
 import { Check, ArrowRight, Truck, FileText, Camera, ArrowUpRight } from 'lucide-react';
 import { V, SEG, font, serif, nums } from './landingTokens';
+import { AppWin, Bloom } from './AppShell';
 
 export function VignetteCapture() {
   return (
     <div className="vcard rounded-2xl p-5 sm:p-6" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
+      <Bloom />
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full" style={{ background: V.field, color: V.sys, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', ...font }}>
           <b style={{ color: V.terraDeep }}>01</b> Create order
@@ -26,7 +28,9 @@ export function VignetteCapture() {
           <span className="lab4" style={{ color: V.faint }}>Awarded</span>
         </div>
       </div>
-      <div className="flex items-center gap-2 mt-3 mb-4">
+      <div className="mt-3" style={{ position: 'relative' }}>
+      <AppWin title="New purchase order">
+      <div className="flex items-center gap-2 mb-4">
         <span className="text-xs font-medium uppercase" style={{ color: V.terraDeep, letterSpacing: '0.1em', ...font }}>
           Say it. It's filed.
         </span>
@@ -120,6 +124,8 @@ export function VignetteCapture() {
         </div>
 
       </div>
+      </AppWin>
+      </div>
     </div>
   );
 }
@@ -130,6 +136,8 @@ export function VignettePO() {
       <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full mb-3" style={{ background: V.field, color: V.sys, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', ...font }}>
         <b style={{ color: V.terraDeep }}>02</b> Track order
       </span>
+      <Bloom />
+      <AppWin title="Purchase orders">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-medium" style={{ color: V.ink, ...font }}>Sri Surya Lorry Transport</p>
@@ -159,7 +167,8 @@ export function VignettePO() {
           </span>
         ))}
       </div>
-      <p className="text-xs mt-3.5" style={{ color: V.faint, ...font }}>
+      </AppWin>
+      <p className="text-xs mt-3" style={{ color: V.faint, ...font }}>
         the order knows its own next step
       </p>
     </div>
@@ -173,6 +182,8 @@ export function VignetteWO() {
       <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full mb-3" style={{ background: V.field, color: V.sys, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', ...font }}>
         <b style={{ color: V.terraDeep }}>04</b> Assign &amp; track work
       </span>
+      <Bloom />
+      <AppWin title="New work order">
       <p className="text-sm leading-relaxed" style={{ color: V.inkSoft, ...serif }}>
         Hiring <b>Harish K</b> for <b>The Pride</b>, worth{' '}
         <b style={nums}>₹5,00,000</b>, paid in <b>3 stages</b>.
@@ -195,6 +206,7 @@ export function VignetteWO() {
         <p className="text-xs" style={{ color: V.inkSoft, ...font, ...nums }}>✓ stage 1 paid · ₹1,80,000</p>
         <p className="text-xs" style={{ color: V.sys, ...font, ...nums }}>stage 2 due 5 Jul</p>
       </div>
+      </AppWin>
       <p className="text-xs mt-3" style={{ color: V.faint, ...font }}>
         work is paid stage by stage, against the order. No loose payments
       </p>
@@ -208,6 +220,8 @@ export function VignetteTxn() {
       <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full mb-3" style={{ background: V.field, color: V.sys, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', ...font }}>
         <b style={{ color: V.terraDeep }}>03</b> Pay against it
       </span>
+      <Bloom />
+      <AppWin title="New payment">
       <div className="relative" style={{ minHeight: 150 }}>
 
         {/* phase 1 — you say the payment */}
@@ -246,6 +260,7 @@ export function VignetteTxn() {
         </div>
 
       </div>
+      </AppWin>
     </div>
   );
 }

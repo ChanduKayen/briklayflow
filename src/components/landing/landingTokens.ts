@@ -76,7 +76,7 @@ export const CSS = `
 .cursW { animation: cursW 26s ease-in-out infinite; }
 @keyframes digA { 0%,8% {opacity:0;} 9%,11.5% {opacity:1;} 12.5%,100% {opacity:0;} }
 .digA { animation: digA 26s ease-in-out infinite; }
-@keyframes digB { 0%,13% {opacity:0;} 14.5%,35% {opacity:1;} 37.5%,100% {opacity:0;} }
+@keyframes digB { 0%,13% {opacity:0;} 14.5%,96% {opacity:1;} 100% {opacity:0;} }
 .digB { animation: digB 26s ease-in-out infinite; }
 @keyframes pdot { 0%,100% {opacity:0.25; transform:scale(0.8);} 50% {opacity:1; transform:scale(1);} }
 .pdot { animation: pdot 1s ease-in-out infinite; }
@@ -130,6 +130,55 @@ export const CSS = `
   52.1%,100% { left:80px; transform:scaleX(.6); }
 }
 .beamOut { animation: beamOut 26s ease-in-out infinite; }
+@keyframes bl1 { 0%,1% {opacity:0; transform:translateY(10px);} 9%,100% {opacity:1; transform:none;} }
+.bl1 { animation: bl1 6s cubic-bezier(.25,.7,.2,1) forwards; }
+@keyframes bfall {
+  0%,18% { opacity:1; transform:translate(-50%,-56px) rotate(-3deg); animation-timing-function: cubic-bezier(.5,0,.9,.4); }
+  26% { opacity:1; transform:translate(-50%,0) rotate(4deg); animation-timing-function: ease-out; }
+  28.5% { opacity:1; transform:translate(-50%,0) rotate(4deg) scale(1.16,.8); }
+  32% { opacity:1; transform:translate(-50%,0) scale(.96); }
+  36% { opacity:1; transform:translate(-50%,0) scale(1); }
+  48%,100% { opacity:0; transform:translate(-50%,0) scale(.7); }
+}
+.bfall { animation: bfall 6s ease-out forwards; }
+@keyframes bgap { 0%,26% {max-width:0;} 40%,100% {max-width:6ch;} }
+.bgap { animation: bgap 6s cubic-bezier(.25,.6,.2,1) forwards; }
+@keyframes bshk { 0%,26% {transform:none;} 28% {transform:translateY(2px) rotate(.3deg);} 31% {transform:translateY(-1.5px);} 34% {transform:translateY(0.5px);} 38%,100% {transform:none;} }
+.bshk { animation: bshk 6s ease forwards; }
+@keyframes bdw { 0%,30% {opacity:0; transform:translateY(2px) scale(.94);} 44%,100% {opacity:1; transform:none;} }
+.bdw { animation: bdw 6s cubic-bezier(.22,.8,.36,1) forwards; }
+@keyframes bl2 { 0%,56% {opacity:0; transform:translateY(12px);} 72%,100% {opacity:1; transform:none;} }
+.bl2 { animation: bl2 6s cubic-bezier(.25,.7,.2,1) forwards; }
+@keyframes bbody { 0%,76% {opacity:0; transform:translateY(8px);} 94%,100% {opacity:1; transform:none;} }
+.bbody { animation: bbody 6s cubic-bezier(.25,.7,.2,1) forwards; }
+@keyframes xch0 { 0%,2% {transform:scale(1); background:#F4F2EE;} 6% {transform:scale(1.07); background:#F6E5DB;} 12%,100% {transform:scale(1); background:#F4F2EE;} }
+@keyframes xch1 { 0%,8% {transform:scale(1); background:#F4F2EE;} 12% {transform:scale(1.07); background:#F6E5DB;} 18%,100% {transform:scale(1); background:#F4F2EE;} }
+@keyframes xch2 { 0%,14% {transform:scale(1); background:#F4F2EE;} 18% {transform:scale(1.07); background:#F6E5DB;} 24%,100% {transform:scale(1); background:#F4F2EE;} }
+.xch0 { animation: xch0 4.8s cubic-bezier(.3,.7,.2,1) forwards; }
+.xch1 { animation: xch1 4.8s cubic-bezier(.3,.7,.2,1) forwards; }
+.xch2 { animation: xch2 4.8s cubic-bezier(.3,.7,.2,1) forwards; }
+@keyframes xp0 { 0%,4% {stroke-dashoffset:100; opacity:0;} 5.5% {opacity:.75;} 16% {stroke-dashoffset:0; opacity:.75;} 40%,100% {stroke-dashoffset:0; opacity:.22;} }
+@keyframes xp1 { 0%,10% {stroke-dashoffset:100; opacity:0;} 11.5% {opacity:.75;} 22% {stroke-dashoffset:0; opacity:.75;} 44%,100% {stroke-dashoffset:0; opacity:.22;} }
+@keyframes xp2 { 0%,16% {stroke-dashoffset:100; opacity:0;} 17.5% {opacity:.75;} 28% {stroke-dashoffset:0; opacity:.75;} 48%,100% {stroke-dashoffset:0; opacity:.22;} }
+.xp0 { animation: xp0 4.8s cubic-bezier(.3,.7,.2,1) forwards; }
+.xp1 { animation: xp1 4.8s cubic-bezier(.3,.7,.2,1) forwards; }
+.xp2 { animation: xp2 4.8s cubic-bezier(.3,.7,.2,1) forwards; }
+@keyframes xnd { 0%,30% {transform:scale(0); opacity:0;} 36% {transform:scale(1.3); opacity:1;} 42%,100% {transform:scale(1); opacity:1;} }
+.xnd { animation: xnd 4.8s cubic-bezier(.3,.7,.2,1) forwards; }
+@keyframes xhl { 0%,33% {r:4; opacity:0;} 37% {opacity:.5;} 54%,100% {r:17; opacity:0;} }
+.xhl { animation: xhl 4.8s ease-out forwards; }
+@keyframes xcard { 0%,44% {opacity:0; transform:translateY(10px); filter:blur(4px);} 58%,100% {opacity:1; transform:none; filter:none;} }
+.xcard { animation: xcard 4.8s cubic-bezier(.3,.7,.2,1) forwards; }
+@keyframes xr1 { 0%,58% {opacity:0; transform:translateY(4px);} 64%,100% {opacity:1; transform:none;} }
+@keyframes xr2 { 0%,62% {opacity:0; transform:translateY(4px);} 68%,100% {opacity:1; transform:none;} }
+@keyframes xr3 { 0%,66% {opacity:0; transform:translateY(4px);} 72%,100% {opacity:1; transform:none;} }
+.xr1 { animation: xr1 4.8s ease forwards; }
+.xr2 { animation: xr2 4.8s ease forwards; }
+.xr3 { animation: xr3 4.8s ease forwards; }
+@keyframes xcl { 0%,74% {opacity:0; transform:scale(.985);} 81%,100% {opacity:1; transform:none;} }
+.xcl { animation: xcl 4.8s cubic-bezier(.3,.7,.2,1) forwards; }
+@keyframes xcp { 0%,85% {opacity:0;} 92%,100% {opacity:1;} }
+.xcp { animation: xcp 4.8s ease forwards; }
 @keyframes beamBack {
   0%,86% { left:80px; transform:scaleX(.4); animation-timing-function: cubic-bezier(.85,0,.2,1); }
   87.5% { transform:scaleX(2.8); }
@@ -150,6 +199,13 @@ export const CSS = `
 .loop-ledger { animation: ledger 9s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
   .rise, .loop-rail, .loop-chip, .loop-alloc, .loop-amber, .loop-caption, .loop-ledger, .loop-ph12, .loop-ph3, .loop-ph4, .lab1, .lab2, .lab3, .lab4, .tk1, .tk2, .tk3, .tk4, .tk5, .tkC, .sk1, .sk2, .sk3, .sk4, .sk5, .shimmer, .typeP, .cursW, .digA, .digB, .pdot, .st1, .st2, .st3, .nar1, .nar2, .nar3, .pE, .pMsg1, .optSel, .pSel, .pMsg2, .pPhoto, .beamOut, .beamBack, .loop-txnA, .loop-txnB { animation: none !important; }
+  .bl1, .bshk, .bgap, .bdw, .bfall, .bl2, .bbody { animation: none !important; }
+  .bfall { display:none; } .bgap { max-width:none !important; }
+  .bl1, .bdw, .bl2, .bbody { opacity:1 !important; transform:none !important; }
+  .xch0, .xch1, .xch2, .xp0, .xp1, .xp2, .xnd, .xhl, .xcard, .xr1, .xr2, .xr3, .xcl, .xcp { animation: none !important; }
+  .xp0, .xp1, .xp2 { stroke-dashoffset:0 !important; opacity:.22; }
+  .xnd { transform:none; opacity:1; } .xhl { display:none; }
+  .xcard, .xr1, .xr2, .xr3, .xcl, .xcp { opacity:1 !important; transform:none !important; filter:none !important; }
   .loop-rail { transform:none; } .loop-alloc { width:var(--w) !important; }
   .loop-amber { opacity:0; } .loop-caption { opacity:1; } .loop-ledger { opacity:1; }
   .loop-ph12, .loop-ph3 { opacity:0; } .loop-ph4 { opacity:1; transform:none; }

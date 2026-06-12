@@ -5,9 +5,10 @@
  */
 import { useState, useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
-import { ArrowRight, ChevronDown } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ChevronDown, Check, Video, Phone, MoreVertical } from 'lucide-react';
 import { V, SEG, CSS, font, serif, nums, terraGrad, inkGrad, bandGrad } from '../components/landing/landingTokens';
 import Gate from '../components/landing/Gate';
+import { AppWin, Bloom } from '../components/landing/AppShell';
 import { VignetteCapture, VignettePO, VignetteWO, VignetteTxn } from '../components/landing/Vignettes';
 import AuthPanel from '../components/landing/AuthPanel';
 
@@ -130,7 +131,7 @@ export default function Landing() {
           } as CSSProperties}
         />
         <p className="rise text-xs font-medium uppercase" style={{ color: V.terraDeep, letterSpacing: '0.14em', animationDelay: '.05s' }}>
-          Built on real sites
+          India's human-first construction software
         </p>
         <h1
           className="rise mt-5 leading-tight"
@@ -166,22 +167,40 @@ export default function Landing() {
         </p>
       </section>
 
-      {/* manifesto */}
-      <section className="mx-auto px-5 sm:px-8 py-16 text-center" style={{ maxWidth: 680 }}>
-        <p className="text-2xl sm:text-3xl leading-snug" style={{ color: V.ink, ...serif }}>
-          You don't need great technology.
-        </p>
-        <p className="text-2xl sm:text-3xl leading-snug mt-1" style={{ color: V.terra, ...serif }}>
-          You need the right data.
-        </p>
-        <p className="text-sm sm:text-base mt-6 leading-relaxed" style={{ color: V.sys }}>
-          Briklay doesn't wait for your site to report. It chases your
-          supervisor on WhatsApp until the information actually arrives. Then
-          it cleans it, standardizes it, and files it so anything can be found
-          in one search. That's how the books stay true without anyone
-          learning software.
-        </p>
-      </section>
+      {/* manifesto — the brick corrects the industry's sentence */}
+      <Gate>
+        <section className="mx-auto px-5 sm:px-8 py-20 sm:py-28 text-center" style={{ maxWidth: 720 }}>
+          <p className="bl1 text-3xl sm:text-5xl leading-tight" style={{ color: V.ink, ...serif }}>
+            <span className="bshk inline-block">
+              You{' '}
+              <span className="inline-block align-bottom" style={{ position: 'relative', whiteSpace: 'pre' }}>
+                <span className="bgap inline-block align-bottom" style={{ overflow: 'hidden' }}>
+                  <span className="bdw inline-block" style={{ color: V.terra }}>don't&nbsp;</span>
+                </span>
+                <span
+                  className="bfall"
+                  aria-hidden="true"
+                  style={{ position: 'absolute', left: '50%', bottom: '0.16em', width: 17, height: 11, background: V.terra, borderRadius: 2 }}
+                />
+              </span>
+              need great technology.
+            </span>
+          </p>
+          <p className="bl2 text-3xl sm:text-5xl leading-tight mt-2" style={{ color: V.terra, ...serif }}>
+            You just need the right data from your site.
+          </p>
+          <p className="bbody text-sm sm:text-base mt-8 mx-auto leading-relaxed" style={{ color: V.sys, maxWidth: 560 }}>
+            Briklay doesn't wait for your site to report. It{' '}
+            <b style={{ color: V.inkSoft, fontWeight: 600 }}>chases</b> your
+            supervisor on WhatsApp until the information actually arrives. Then
+            it <b style={{ color: V.inkSoft, fontWeight: 600 }}>cleans</b> it,{' '}
+            <b style={{ color: V.inkSoft, fontWeight: 600 }}>standardizes</b> it,
+            and <b style={{ color: V.inkSoft, fontWeight: 600 }}>files</b> it so
+            anything can be found in one search. That's how the books stay true
+            without anyone learning software.
+          </p>
+        </section>
+      </Gate>
 
       {/* the magic — live vignettes */}
       <section id="magic" className="mx-auto px-5 sm:px-8 py-14" style={{ maxWidth: 1280 }}>
@@ -224,7 +243,7 @@ export default function Landing() {
           <Gate className="relative grid sm:grid-cols-2 gap-8 sm:gap-10 mt-12 mx-auto items-start" style={{ maxWidth: 920 }}>
 
             {/* the cause-and-effect wire between the two worlds */}
-            <div className="hidden sm:block absolute" aria-hidden="true" style={{ left: '50%', top: 260, width: 72, transform: 'translateX(-50%)', zIndex: 1 }}>
+            <div className="hidden sm:block absolute" aria-hidden="true" style={{ left: '50%', top: 314, width: 72, transform: 'translateX(-50%)', zIndex: 1 }}>
               <div className="relative overflow-hidden" style={{ height: 14 }}>
                 <span className="beamOut absolute" style={{ left: -52, top: 5.5, width: 48, height: 3, borderRadius: 3, background: 'linear-gradient(90deg, transparent, rgba(188,75,39,0.55) 40%, rgba(199,85,48,0.95) 62%, rgba(255,224,205,0.95) 74%, rgba(188,75,39,0.9) 84%, transparent)', boxShadow: '0 0 7px rgba(188,75,39,0.45)' }} />
                 <span className="beamBack absolute" style={{ left: 80, top: 5.5, width: 48, height: 3, borderRadius: 3, background: 'linear-gradient(270deg, transparent, rgba(47,93,52,0.55) 40%, rgba(63,115,69,0.95) 62%, rgba(214,238,216,0.95) 74%, rgba(47,93,52,0.9) 84%, transparent)', boxShadow: '0 0 7px rgba(47,93,52,0.45)' }} />
@@ -233,10 +252,14 @@ export default function Landing() {
 
             {/* demo 1 — the Briklay board */}
             <div>
-              <p className="text-center text-xs font-medium uppercase mb-3" style={{ color: V.faint, letterSpacing: '0.12em', ...font }}>
-                in Briklay · your task board
-              </p>
+              <div className="flex justify-center mb-3">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full" style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.sys, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', ...font }}>
+                  <b style={{ color: V.terraDeep }}>You see</b>&nbsp;· the project, live in Briklay
+                </span>
+              </div>
               <div className="vcard rounded-2xl p-5 sm:p-6" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
+                <Bloom />
+                <AppWin title="Project tasks">
                 <p className="text-xs" style={{ color: V.faint, ...font }}>Describe your project</p>
                 <p className="text-sm font-medium mt-1.5" style={{ color: V.ink, ...font }}>
                   <span className="typeP">G+2 residence, 1550 sft each floor</span><span className="cursW"><span className="blinkc" style={{ color: V.terra }}>|</span></span>
@@ -253,15 +276,6 @@ export default function Landing() {
                       &#10003; understood · 3 floors · 1,550 sft each · structure &amp; finishing
                     </p>
                   </div>
-                  <p className="nar1 absolute inset-0 text-xs font-medium leading-snug" style={{ color: V.terraDeep, ...font }}>
-                    Tasks and quality checks created automatically.
-                  </p>
-                  <p className="nar2 absolute inset-0 text-xs font-medium leading-snug" style={{ color: V.terraDeep, ...font }}>
-                    It asks your supervisor when information is missing.
-                  </p>
-                  <p className="nar3 absolute inset-0 text-xs font-medium leading-snug" style={{ color: V.terraDeep, ...font }}>
-                    Every reply gets saved against the right task.
-                  </p>
                 </div>
                 <div className="space-y-3.5">
                   <div className="relative" style={{ height: 38 }}>
@@ -368,14 +382,30 @@ export default function Landing() {
                     &#10003; 5 tasks · 13 quality checks created from one line
                   </p>
                 </div>
+                </AppWin>
+                <div className="relative mt-3" style={{ height: 18, overflow: 'hidden' }}>
+                  <p className="nar1 absolute inset-0 text-xs font-medium leading-snug" style={{ color: V.terraDeep, ...font }}>
+                    Tasks and quality checks created automatically.
+                  </p>
+                  <p className="nar2 absolute inset-0 text-xs font-medium leading-snug" style={{ color: V.terraDeep, ...font }}>
+                    It asks your supervisor when information is missing.
+                  </p>
+                  <p className="nar3 absolute inset-0 text-xs font-medium leading-snug" style={{ color: V.terraDeep, ...font }}>
+                    Every reply gets saved against the right task.
+                  </p>
+                </div>
               </div>
             </div>
 
             {/* demo 2 — the supervisor's WhatsApp */}
             <div>
-              <p className="text-center text-xs font-medium uppercase mb-3" style={{ color: V.faint, letterSpacing: '0.12em', ...font }}>
-                on WhatsApp · no app for him to learn
-              </p>
+              <div className="flex justify-center mb-3">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full" style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.sys, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', ...font }}>
+                  <b style={{ color: V.terraDeep }}>Your supervisor sees</b>&nbsp;· just a WhatsApp chat
+                </span>
+              </div>
+              <div className="vcard rounded-2xl p-5 sm:p-6" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
+                <Bloom />
               <div
                 className="mx-auto rounded-2xl overflow-hidden"
                 style={{
@@ -387,6 +417,25 @@ export default function Landing() {
                   boxShadow: '0 6px 20px rgba(30,26,21,0.08)',
                 }}
               >
+                {/* WhatsApp header — the supervisor is chatting with verified Briklay */}
+                <div className="flex items-center gap-2 px-2.5 py-2" style={{ background: '#008069' }}>
+                  <ArrowLeft size={16} color="#FFFFFF" />
+                  <span className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: V.terra }}>
+                    <span style={{ color: '#FFFFFF', fontSize: 15, fontWeight: 700, ...serif }}>B</span>
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="flex items-center gap-1 text-xs font-medium truncate" style={{ color: '#FFFFFF', ...font }}>
+                      Briklay
+                      <span className="inline-flex items-center justify-center rounded-full shrink-0" style={{ width: 13, height: 13, background: '#1B9DE2' }}>
+                        <Check size={9} color="#FFFFFF" strokeWidth={3.5} />
+                      </span>
+                    </p>
+                    <p style={{ color: '#C7E9E2', fontSize: 10, ...font }}>online</p>
+                  </div>
+                  <Video size={15} color="#FFFFFF" />
+                  <Phone size={13} color="#FFFFFF" />
+                  <MoreVertical size={15} color="#FFFFFF" />
+                </div>
                 <div className="relative px-3 py-3" style={{ minHeight: 332 }}>
                   {/* date chip — mid-chat crop */}
                   <div className="flex justify-center mb-3">
@@ -464,6 +513,7 @@ export default function Landing() {
                   </div>
                 </div>
               </div>
+              </div>
             </div>
 
           </Gate>
@@ -472,6 +522,74 @@ export default function Landing() {
             You set up nothing. You get the honest picture.
           </p>
         </div>
+      </section>
+
+      {/* the whole picture — cross-checked into one actionable call */}
+      <section className="mx-auto px-5 sm:px-8 py-16" style={{ maxWidth: 760 }}>
+        <p className="text-center text-xs font-medium uppercase" style={{ color: V.faint, letterSpacing: '0.14em' }}>
+          The whole picture
+        </p>
+        <h2 className="text-center text-2xl sm:text-3xl mt-4 leading-snug" style={{ color: V.ink, ...serif }}>
+          Everything cross-checks everything.
+        </h2>
+        <p className="text-center text-sm sm:text-base mt-5 mx-auto leading-relaxed" style={{ color: V.sys, maxWidth: 600 }}>
+          Purchase orders, work orders, and tasks aren't three separate
+          registers. Briklay reads them together, the way an experienced
+          auditor and a site engineer would, and tells you what they'd catch.
+        </p>
+
+        <Gate className="mt-10">
+          <div className="vcard rounded-2xl p-5 sm:p-6" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
+            <Bloom />
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              {['Purchase orders', 'Work orders', 'Tasks'].map((t, i) => (
+                <span key={t} className={`xch${i} text-xs px-2.5 py-1 rounded-full`} style={{ background: V.field, color: V.inkSoft, ...font }}>{t}</span>
+              ))}
+            </div>
+            <div className="mx-auto my-1" style={{ maxWidth: 320 }}>
+              <svg viewBox="0 0 300 58" width="100%" height="58" fill="none" aria-hidden="true" style={{ display: 'block' }}>
+                <path className="xp0" d="M45 4 C45 34 150 26 150 52" stroke={V.terra} strokeWidth="1.5" strokeLinecap="round" pathLength="100" strokeDasharray="100" />
+                <path className="xp1" d="M150 4 L150 52" stroke={V.terra} strokeWidth="1.5" strokeLinecap="round" pathLength="100" strokeDasharray="100" />
+                <path className="xp2" d="M255 4 C255 34 150 26 150 52" stroke={V.terra} strokeWidth="1.5" strokeLinecap="round" pathLength="100" strokeDasharray="100" />
+                <circle className="xhl" cx="150" cy="52" r="4" stroke={V.terra} strokeWidth="1.5" />
+                <circle className="xnd" cx="150" cy="52" r="3.5" fill={V.terra} style={{ transformBox: 'fill-box', transformOrigin: 'center' }} />
+              </svg>
+            </div>
+            <div className="xcard">
+            <AppWin title="Site review · The Pride">
+              <p className="text-sm font-medium" style={{ color: V.ink, ...font }}>
+                Cement is over-ordered for the work that's left.
+              </p>
+              <div className="space-y-1.5 mt-3">
+                <div className="xr1 flex items-start gap-2">
+                  <span className="shrink-0 rounded px-1.5 py-0.5" style={{ background: V.field, color: V.faint, fontSize: 10, letterSpacing: '0.06em', ...font }}>PO</span>
+                  <p className="text-xs" style={{ color: V.inkSoft, ...font, ...nums }}>240 bags OPC 53 received across PO-0141 and PO-0152</p>
+                </div>
+                <div className="xr2 flex items-start gap-2">
+                  <span className="shrink-0 rounded px-1.5 py-0.5" style={{ background: V.field, color: V.faint, fontSize: 10, letterSpacing: '0.06em', ...font }}>Tasks</span>
+                  <p className="text-xs" style={{ color: V.inkSoft, ...font, ...nums }}>plastering 60% complete, verified by site photos</p>
+                </div>
+                <div className="xr3 flex items-start gap-2">
+                  <span className="shrink-0 rounded px-1.5 py-0.5" style={{ background: V.field, color: V.faint, fontSize: 10, letterSpacing: '0.06em', ...font }}>WO</span>
+                  <p className="text-xs" style={{ color: V.inkSoft, ...font, ...nums }}>remaining stages need about 90 bags</p>
+                </div>
+              </div>
+              <div className="xcl rounded-xl px-3.5 py-3 mt-3.5" style={{ background: V.field }}>
+                <p className="text-xs leading-relaxed" style={{ color: V.ink, ...font, ...nums }}>
+                  You're carrying roughly 70 bags more than the remaining work
+                  needs. Cement older than 3 months loses strength.
+                </p>
+                <p className="text-xs mt-1.5 font-medium" style={{ color: V.terraDeep, ...font }}>
+                  Worth doing: hold the next cement order &#8594;
+                </p>
+              </div>
+            </AppWin>
+            </div>
+            <p className="xcp text-xs mt-3" style={{ color: V.faint, ...font }}>
+              the evidence first, then the call. Never a number without its reason
+            </p>
+          </div>
+        </Gate>
       </section>
 
       {/* why — questions */}
