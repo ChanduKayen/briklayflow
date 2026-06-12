@@ -137,7 +137,7 @@ export default function Landing() {
           className="rise mt-5 leading-tight"
           style={{ color: V.ink, fontSize: 'clamp(2.2rem, 5.5vw, 4rem)', animationDelay: '.15s', ...serif }}
         >
-          Construction software your
+           Construction software your
           <br />
           supervisor will actually use.
         </h1>
@@ -193,13 +193,11 @@ export default function Landing() {
           </p>
           <p className="bbody text-sm sm:text-base mt-8 mx-auto leading-relaxed" style={{ color: V.sys, maxWidth: 560 }}>
             Briklay doesn't wait for your site to report. It{' '}
-            <b style={{ color: V.inkSoft, fontWeight: 600 }}>chases</b> your
-            supervisor on WhatsApp until the information actually arrives. Then
-            it <b style={{ color: V.inkSoft, fontWeight: 600 }}>cleans</b> it,{' '}
+            <b style={{ color: V.inkSoft, fontWeight: 600 }}>chases</b> your data
+            on WhatsApp, <b style={{ color: V.inkSoft, fontWeight: 600 }}>cleans</b> it,{' '}
             <b style={{ color: V.inkSoft, fontWeight: 600 }}>standardizes</b> it,
-            and <b style={{ color: V.inkSoft, fontWeight: 600 }}>files</b> it so
-            anything can be found in one search. That's how the books stay true
-            without anyone learning software.
+            and <b style={{ color: V.inkSoft, fontWeight: 600 }}>files</b> it.
+            The books stay true without anyone learning software.
           </p>
           <p className="bbody italic text-sm sm:text-base mt-6 mx-auto leading-relaxed" style={{ color: V.sys, maxWidth: 560, ...serif }}>
             There's serious AI under Briklay. You'll never have to see it. You'll
