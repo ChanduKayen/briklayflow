@@ -188,7 +188,7 @@ export default function Landing() {
               need great technology.
             </span>
           </p>
-          <p className="bl2 text-3xl sm:text-5xl leading-tight mt-2" style={{ color: V.terra, ...serif }}>
+          <p className="bl2 text-lg sm:text-2xl leading-snug mt-3" style={{ color: V.terra, ...serif }}>
             You just need the right data from your site.
           </p>
           <p className="bbody text-sm sm:text-base mt-8 mx-auto leading-relaxed" style={{ color: V.sys, maxWidth: 560 }}>
