@@ -223,12 +223,12 @@ export function ReviewCard({
 
       {/* the card */}
       <div
-        className={offClass}
+        className={`db-card ${offClass}`}
         {...swipe.bind}
         style={{
           transform: leaving ? undefined : `translateX(${dx}px) rotate(${dx * 0.02}deg)`,
-          transition: !swipe.dragging && !leaving ? 'transform .25s cubic-bezier(.3,.7,.2,1)' : 'none',
-          background: V.surface, border: '1px solid #E3DDD4', borderRadius: 16,
+          transition: !swipe.dragging && !leaving ? 'transform .25s cubic-bezier(.3,.7,.2,1), box-shadow .2s ease, border-color .2s ease' : 'none',
+          background: V.surface, borderRadius: 16,
           cursor: swipe.dragging ? 'grabbing' : 'grab', touchAction: 'pan-y',
         }}
       >
@@ -250,7 +250,11 @@ export function ReviewCard({
             </div>
           </div>
 
-          <div className="mt-3 inline-block rounded-xl rounded-tl-sm px-3 py-2" style={{ background: V.field, maxWidth: '100%' }}>
+          <p className="uppercase font-medium mt-3" style={{ color: V.faint, letterSpacing: '0.1em', ...font, ...T.xs }}>
+            {entry.source.startsWith('WHATSAPP') ? 'You sent this from WhatsApp' : 'You added this here'}
+          </p>
+
+          <div className="mt-1.5 inline-block rounded-xl rounded-tl-sm px-3 py-2" style={{ background: V.field, maxWidth: '100%' }}>
             {entry.source === 'WHATSAPP_VOICE' && <p className="italic mb-1" style={{ color: V.faint, ...font, ...T.xs }}>voice note, transcribed</p>}
             {said && <p className={reveal ? 'tf-raw' : ''} style={{ color: V.inkSoft, ...font, ...T.sm }}>{said}</p>}
             {entry.raw_image_url && (
