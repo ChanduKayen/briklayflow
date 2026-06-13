@@ -116,21 +116,7 @@ GRANT EXECUTE ON FUNCTION public.outbox_claim(int)               TO service_role
 GRANT EXECUTE ON FUNCTION public.wa_watchdog(int)                TO service_role, postgres;
 GRANT EXECUTE ON FUNCTION public.purge_wa_conversations()        TO service_role, postgres;
 
--- -- pg_cron schedules (pure-SQL sweeps) ----------------------------------------
--- Watchdog every 30s (matches the 30s timeout) and purge every 2 min. The OUTBOX
--- DRAINER cron lives in docs/wa_outbox_drainer_cron.sql (it needs pg_net + the
--- function URL + a Vault-stored key). Guarded so it no-ops if pg_cron is absent.
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
-    RAISE NOTICE 'pg_cron not installed -- skipping schedule. Functions still callable manually.';
-    RETURN;
-  END IF;
-
-  PERFORM cron.unschedule('wa-watchdog')             WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname='wa-watchdog');
-  PERFORM cron.unschedule('wa-purge-conversations')  WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname='wa-purge-conversations');
-
-  PERFORM cron.schedule('wa-watchdog', '30 seconds', $cron$ SELECT public.wa_watchdog(30); $cron$);
-  PERFORM cron.schedule('wa-purge-conversations', '*/2 * * * *', $cron$ SELECT public.purge_wa_conversations(); $cron$);
-  RAISE NOTICE 'Scheduled wa-watchdog (30s) and wa-purge-conversations (2m).';
-END $$;
+-- pg_cron scheduling is intentionally NOT in this migration: a cron error (e.g. an
+-- older pg_cron rejecting sub-minute schedules) would roll back the whole file in
+-- the SQL editor and the functions above would never be created. Schedule the
+-- sweeps separately with docs/wa_spine_cron.sql (resilient, with fallbacks).

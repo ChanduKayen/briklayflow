@@ -22,16 +22,22 @@ harness). Org-scope them with the foundation helpers if ever surfaced to the cli
 ## Functions + sweeps (migration `…0010`)
 - `wa_try_lock` / `wa_release_lock` — atomic acquire (insert-or-reclaim-expired) / own-lock release.
 - `outbox_claim(limit)` — atomically flips due PENDING→SENDING (FOR UPDATE SKIP LOCKED) so concurrent drainers never double-claim.
-- `wa_watchdog(timeout=30)` — flips `PROCESSING` past timeout → `FAILED` + enqueues **one** outbox failure (guarded by `failure_notified` + `dedup_key`; only touches PROCESSING). **pg_cron: every 30s.**
-- `purge_wa_conversations()` — deletes past `purge_at`. **pg_cron: every 2 min.**
+- `wa_watchdog(timeout=30)` — flips `PROCESSING` past timeout → `FAILED` + enqueues **one** outbox failure (guarded by `failure_notified` + `dedup_key`; only touches PROCESSING).
+- `purge_wa_conversations()` — deletes past `purge_at`.
 - All SECURITY DEFINER + locked `search_path`; EXECUTE granted only to `service_role`/`postgres`.
+
+**Cron scheduling is separate** (`docs/wa_spine_cron.sql`): watchdog every 30s
+(falls back to 1 min if this pg_cron rejects sub-minute), purge every 2 min. It's
+kept out of the migration so a cron quirk can't roll back the function DDL (the SQL
+editor runs a file as one transaction).
 
 ## Drainer (edge function `wa-outbox-drainer`)
 Reads claimed outbox rows, sends via the WhatsApp Cloud API, marks `SENT`, or
 reschedules with exponential backoff (30s·2^(attempts-1), capped 1h; `FAILED` after
-`max_attempts`). Service-role-bearer gated. Scheduled via pg_cron + pg_net —
-**run `docs/wa_outbox_drainer_cron.sql` once** (stores the key in Vault; project URL
-prefilled). The atomic claim + dedup_key make it idempotent / no double-send.
+`max_attempts`). Gated by a **dedicated `WA_DRAINER_SECRET`** (not the service-role
+key — generate with `openssl rand -hex 32`, set as a function secret AND in Vault).
+Scheduled via pg_cron + pg_net — **run `docs/wa_outbox_drainer_cron.sql` once**
+(project URL prefilled). The atomic claim + dedup_key make it idempotent / no double-send.
 
 ## org_id threading (migration `…0009`, T1.6)
 - `org_id` added to `wa_registered_numbers` (backfilled → active org) and `rough_entries`

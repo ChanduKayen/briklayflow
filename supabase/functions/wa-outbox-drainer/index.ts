@@ -8,7 +8,8 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const SUPABASE_URL         = Deno.env.get('SUPABASE_URL')!
-const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!  // DB access only
+const WA_DRAINER_SECRET    = Deno.env.get('WA_DRAINER_SECRET')           // cron->drainer auth
 const WA_ACCESS_TOKEN      = Deno.env.get('WA_ACCESS_TOKEN')!
 const WA_PHONE_NUMBER_ID   = Deno.env.get('WA_PHONE_NUMBER_ID')!
 
@@ -41,9 +42,10 @@ function backoffSeconds(attempts: number): number {
 }
 
 serve(async (req) => {
-  // Only the cron caller (service-role bearer) may invoke this.
+  // Only the cron caller (shared WA_DRAINER_SECRET bearer) may invoke this.
+  // Fail closed if the secret isn't configured.
   const auth = req.headers.get('Authorization') ?? ''
-  if (auth !== `Bearer ${SUPABASE_SERVICE_KEY}`) {
+  if (!WA_DRAINER_SECRET || auth !== `Bearer ${WA_DRAINER_SECRET}`) {
     return new Response('Forbidden', { status: 403 })
   }
 

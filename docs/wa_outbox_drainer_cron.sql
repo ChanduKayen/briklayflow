@@ -6,16 +6,20 @@
 -- POST to the function on a schedule. Run this ONCE in the SQL editor after
 -- deploying the function. Requires pg_cron + pg_net (you confirmed both enabled).
 --
--- Why Vault: the call needs the service-role key as a bearer; we read it from
--- Supabase Vault instead of hardcoding it (and it's being rotated).
+-- Auth: the drainer checks a DEDICATED shared secret (WA_DRAINER_SECRET), NOT the
+-- service-role key. Generate it yourself so it's never "lost":
+--     openssl rand -hex 32
+-- then set the SAME value in two places:
+--   (a) function secret:  supabase secrets set WA_DRAINER_SECRET=<value>
+--   (b) Vault below (so cron can send it as the bearer).
 -- ===========================================================================
 
--- 1) Store the service-role key in Vault ONCE (replace the placeholder; re-run
---    after each rotation). Safe to run repeatedly -- updates if it exists.
-SELECT vault.create_secret('REPLACE_WITH_SERVICE_ROLE_KEY', 'wa_service_role_key')
-WHERE NOT EXISTS (SELECT 1 FROM vault.secrets WHERE name = 'wa_service_role_key');
--- To rotate later:
---   SELECT vault.update_secret((SELECT id FROM vault.secrets WHERE name='wa_service_role_key'), 'NEW_KEY');
+-- 1) Store the drainer secret in Vault ONCE (replace the placeholder with the
+--    SAME value you set as the WA_DRAINER_SECRET function secret).
+SELECT vault.create_secret('REPLACE_WITH_WA_DRAINER_SECRET', 'wa_drainer_secret')
+WHERE NOT EXISTS (SELECT 1 FROM vault.secrets WHERE name = 'wa_drainer_secret');
+-- To rotate later (update both the function secret AND this):
+--   SELECT vault.update_secret((SELECT id FROM vault.secrets WHERE name='wa_drainer_secret'), 'NEW_VALUE');
 
 -- 2) Schedule the drainer every 10 seconds.
 DO $$
@@ -32,7 +36,7 @@ BEGIN
       url     := 'https://momzyincivvpngazvfgq.functions.supabase.co/wa-outbox-drainer',
       headers := jsonb_build_object(
         'Content-Type', 'application/json',
-        'Authorization', 'Bearer ' || (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name='wa_service_role_key')
+        'Authorization', 'Bearer ' || (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name='wa_drainer_secret')
       ),
       body    := '{}'::jsonb
     );
