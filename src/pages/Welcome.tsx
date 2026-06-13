@@ -13,9 +13,11 @@
  *   no session       -> the link was invalid/expired/used -> back to sign in,
  *                       where the existing resend flow lives (we do not rebuild it).
  *
- * A freshly confirmed signup has no workspace yet, so the first step is
- * /create-workspace (which flows into onboarding + the first project). The
- * day-book path is deferred until a workspace exists.
+ * The CTA does NOT jump straight to /create-workspace: that path never checks for
+ * a pending invite, so a confirmed-but-invited user could wrongly create a second
+ * workspace. Continue runs find_invite_by_email (the same route the auth resolver
+ * uses) and sends an invitee to /invite/{token}; only a genuinely invite-free user
+ * reaches workspace creation.
  */
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -68,6 +70,30 @@ export default function Welcome() {
   const { authState } = useAuth();
   const [ready, setReady] = useState(false);
   const [firstName, setFirstName] = useState<string | null>(null);
+  const [continuing, setContinuing] = useState(false);
+
+  // The handoff. create-workspace does NOT check for a pending invite, so an
+  // invited user who confirmed via a plain signup could wrongly spin up a second
+  // workspace. Check the invite here (the same route the auth resolver uses) and
+  // send them to accept it; only a genuinely invite-free user reaches workspace
+  // creation.
+  const onContinue = async () => {
+    if (continuing) return;
+    setContinuing(true);
+    try {
+      const { data: u } = await supabase.auth.getUser();
+      const email = u.user?.email ?? '';
+      const { data: invites } = await supabase.rpc('find_invite_by_email', { p_email: email });
+      const invite = Array.isArray(invites) ? invites[0] : invites;
+      if (invite?.token) {
+        navigate(`/invite/${invite.token}`, { replace: true });
+        return;
+      }
+    } catch {
+      /* invite lookup failed — fall through to workspace creation */
+    }
+    navigate('/create-workspace', { replace: true });
+  };
 
   // Read the confirmed user's first name from the session metadata (works even
   // before a workspace exists). getUser is local + fast; we hold the render until
@@ -148,11 +174,12 @@ export default function Welcome() {
         </p>
 
         <button
-          onClick={() => navigate('/create-workspace')}
+          onClick={onContinue}
+          disabled={continuing}
           className="cf-r2 inline-flex items-center justify-center gap-2 mt-8 w-full py-3 rounded-xl font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#BC4B27]"
-          style={{ background: terraGrad, color: '#fff', fontSize: 'clamp(0.9rem, 0.85rem + 0.3vw, 1rem)' }}
+          style={{ background: terraGrad, color: '#fff', fontSize: 'clamp(0.9rem, 0.85rem + 0.3vw, 1rem)', opacity: continuing ? 0.7 : 1 }}
         >
-          Set up your workspace <ArrowRight size={16} />
+          {continuing ? 'One moment…' : <>Continue <ArrowRight size={16} /></>}
         </button>
       </div>
     </div>
