@@ -72,6 +72,44 @@ html, body {
   }
 }
 
+/* ── Transactions day-book row (responsive) ──
+   Desktop: a single line — medallion · payee · anchor · amount.
+   Mobile : two tidy rows — payee + amount on top, anchor/flags below;
+            the medallion spans both so the day's "spine" stays unbroken. */
+.bk-ledger-row {
+  display: grid;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 2px;
+  grid-template-columns: 28px minmax(0, 1.4fr) minmax(0, 1.6fr) minmax(120px, auto);
+  grid-template-areas: "med main anchor amount";
+  min-height: 56px;
+  padding-left: 16px;
+  padding-right: 16px;
+}
+.bk-ledger-med    { grid-area: med; display: flex; align-items: center; }
+.bk-ledger-main   { grid-area: main; min-width: 0; }
+.bk-ledger-anchor { grid-area: anchor; min-width: 0; }
+.bk-ledger-amount { grid-area: amount; }
+
+@media (max-width: 639px) {
+  .bk-ledger-row {
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    grid-template-areas:
+      "med main   amount"
+      "med anchor anchor";
+    column-gap: 10px;
+    row-gap: 6px;
+    align-items: start;
+    min-height: 64px;
+    padding: 10px 12px 10px 16px;
+  }
+  .bk-ledger-med    { align-self: center; }
+  .bk-ledger-amount { align-self: start; padding-top: 1px; }
+  /* On mobile the anchor row carries nothing? keep it collapsible */
+  .bk-ledger-anchor:empty { display: none; }
+}
+
 /* ── Inbox entry bar positioning ── */
 /* Mobile: entry bar sits above the bottom tab bar (56px) */
 @media (max-width: 767px) {

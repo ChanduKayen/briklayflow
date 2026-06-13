@@ -46,7 +46,7 @@ const TYPE_CFG: Record<ResultType, { Icon: React.ElementType; bg: string; color:
 const RESULT_ORDER: ResultType[] = ['project', 'person', 'work_order', 'purchase_order', 'transaction'];
 
 function getContextAction(path: string) {
-  if (path === '/')                         return { label: 'Logbook Inbox',  Icon: IconNotebook,        href: '/logbook' };
+  if (path === '/')                         return { label: 'Day book',       Icon: IconNotebook,        href: '/logbook' };
   if (path.startsWith('/logbook'))          return { label: 'Go to Ledger',   Icon: IconArrowsExchange,  href: '/ledger' };
   if (path.startsWith('/ledger'))           return { label: 'Add New Party',   Icon: IconUsersGroup,      href: '/stakeholders' };
   if (path.startsWith('/work-orders'))      return { label: 'New Project',     Icon: IconBuildingEstate,  href: '/projects' };

@@ -368,7 +368,7 @@ export default function WorkOrders({ session }: { session: Session }) {
               { key: 'T',       label: 'view transactions' },
               { key: 'P',       label: 'view purchase orders' },
               { key: 'W',       label: 'view work orders' },
-              { key: 'L',       label: 'view logbook' },
+              { key: 'L',       label: 'view day book' },
               { key: '⟵ hold', label: 'long press screen for quick actions' },
             ]} className="w-full" />
           </div>

@@ -7,7 +7,7 @@ const ACTIONS = [
   { icon: IconFileInvoice, label: 'New Purchase Order', path: '/purchase-orders/new' },
   { icon: IconHammer,      label: 'New Work Order',     path: '/work-orders/new' },
   { icon: IconUserPlus,    label: 'New Party',          path: '/stakeholders?new=1' },
-  { icon: IconBook,        label: 'Logbook',            path: '/logbook' },
+  { icon: IconBook,        label: 'Day book',           path: '/logbook' },
 ];
 
 export function QuickActionsOverlay({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {

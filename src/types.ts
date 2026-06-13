@@ -272,7 +272,10 @@ export type RoughEntrySource =
   | 'WHATSAPP_TEXT' | 'WHATSAPP_IMAGE' | 'WHATSAPP_VOICE'
   | 'UI_TEXT' | 'UI_IMAGE';
 
-export type RoughEntryStatus = 'PENDING' | 'POSTED' | 'DISMISSED';
+// AWAITING_CONTEXT: an image landed without a description and is waiting for the
+// sender to add one (webhook flips it to PENDING on arrival, or expires it). In
+// the Day Book it shows under "To review" wearing the amber "needs your eye" state.
+export type RoughEntryStatus = 'PENDING' | 'POSTED' | 'DISMISSED' | 'AWAITING_CONTEXT';
 
 export type ConfidenceLevel = 'HIGH' | 'MEDIUM' | 'LOW';
 

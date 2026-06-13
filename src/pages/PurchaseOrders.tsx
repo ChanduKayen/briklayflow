@@ -808,7 +808,10 @@ export default function PurchaseOrders({ session }: { session: Session }) {
 
   return (
     <div className="min-h-screen" style={{ background: C.paper }}>
-      <div className="max-w-2xl mx-auto px-4 sm:px-6 pb-28">
+      <div className="max-w-2xl lg:max-w-[1040px] xl:max-w-[1200px] min-[1700px]:max-w-[1640px] mx-auto px-4 sm:px-6 pb-28 min-[1700px]:grid min-[1700px]:grid-cols-[minmax(0,1fr)_340px] min-[1700px]:gap-12 min-[1700px]:items-start">
+
+        {/* ── main column ── */}
+        <div className="min-w-0">
 
         {/* Header */}
         <header className="pt-8 pb-5 flex items-end justify-between gap-3">
@@ -829,15 +832,15 @@ export default function PurchaseOrders({ session }: { session: Session }) {
           )}
         </header>
 
-        {/* Summary strip */}
-        <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-5">
+        {/* Summary strip (relocates to the side rail on extra-wide screens) */}
+        <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-5 min-[1700px]:hidden">
           <Metric label="Open value" value={inr(openValue)} />
           <Metric label="Your move" value={yourCount} accent={yourCount > 0} />
           <Metric label="Awaiting delivery" value={awaitingGrn} />
         </div>
 
         {/* Search + filters (sticky) */}
-        <div className="sticky top-0 z-10 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3" style={{ background: C.paper }}>
+        <div className="sticky top-0 z-10 -mx-4 sm:-mx-6 px-4 sm:px-6 min-[1700px]:mx-0 min-[1700px]:px-0 py-3" style={{ background: C.paper }}>
           <div className="flex items-center gap-2 px-3.5 rounded-xl" style={{ background: C.surface, border: `1px solid ${C.line}`, height: 42 }}>
             <span className="material-symbols-outlined text-[18px]" style={{ color: C.inkFaint }}>search</span>
             <input
@@ -921,7 +924,8 @@ export default function PurchaseOrders({ session }: { session: Session }) {
           </div>
         )}
 
-        {/* Chronological list — newest first; filter via the tabs above */}
+        {/* Chronological list — newest first; filter via the tabs above.
+            One card per row; each row widens with the container on larger screens. */}
         <div className="space-y-3 mt-2">
           {!isLoading && visibleSorted.map(({ po, d }, i) => (
             <div key={po.po_id} className="wo-row-animate" style={{ animationDelay: `${Math.min(i, 6) * 30}ms` }}>
@@ -941,6 +945,17 @@ export default function PurchaseOrders({ session }: { session: Session }) {
             </div>
           ))}
         </div>
+        </div>{/* /main column */}
+
+        {/* ── summary rail: only on extra-wide (≥1700px) screens; below that the
+              metrics sit up top and the cards widen into a multi-column grid ── */}
+        <aside className="hidden min-[1700px]:block">
+          <div className="sticky top-8 space-y-3">
+            <Metric label="Open value" value={inr(openValue)} />
+            <Metric label="Your move" value={yourCount} accent={yourCount > 0} />
+            <Metric label="Awaiting delivery" value={awaitingGrn} />
+          </div>
+        </aside>
       </div>
 
       {/* Mobile FAB */}

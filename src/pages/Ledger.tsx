@@ -9,7 +9,9 @@ import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
 import { getCostCode } from '../lib/costCodes';
-import { Plus, Search, Download, Paperclip } from 'lucide-react';
+import { Plus, Search, Download, Paperclip, Check, ArrowRight, X } from 'lucide-react';
+import { WhatsAppGlyph } from '../components/day-book/atoms';
+import { StartOnWhatsApp } from '../components/day-book/StartOnWhatsApp';
 import { ShortcutTicker } from '../components/ShortcutTicker';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { PageSkeleton } from '../components/SkeletonLoader';
@@ -74,10 +76,8 @@ function EntryRow(p: EntryProps) {
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       onClick={p.onRowClick}
-      className="grid items-center gap-3 px-4 rounded-xl relative cursor-pointer"
+      className="bk-ledger-row rounded-xl relative cursor-pointer"
       style={{
-        gridTemplateColumns: '28px minmax(0,1.4fr) minmax(0,1.6fr) 24px 130px',
-        height: 56,
         background: p.sumSelected ? V.terraWash : hover ? V.field : 'transparent',
         opacity: p.voided ? 0.45 : 1,
         transition: 'background .15s',
@@ -99,9 +99,9 @@ function EntryRow(p: EntryProps) {
         {p.selected && <span style={{ color: '#fff', fontSize: 9, lineHeight: 1 }}>✓</span>}
       </button>
 
-      <DirMedallion dir={p.dir} />
+      <div className="bk-ledger-med"><DirMedallion dir={p.dir} /></div>
 
-      <div className="min-w-0">
+      <div className="bk-ledger-main">
         <p className="text-sm font-medium truncate" style={{ color: V.ink, ...font }}>
           {p.payee}
           {p.voided && <span className="ml-1.5 text-xs" style={{ color: V.faint, ...font }}>· voided</span>}
@@ -109,7 +109,7 @@ function EntryRow(p: EntryProps) {
         <p className="text-xs truncate" style={{ color: V.faint, ...font }}>{p.context}</p>
       </div>
 
-      <div className="min-w-0 flex items-center gap-2">
+      <div className="bk-ledger-anchor flex items-center gap-2">
         <AnchorChip anchor={p.anchor} onClick={(e) => { e.stopPropagation(); p.onAnchorClick(e); }} />
         {p.flagged && (
           <span className="text-xs px-1.5 py-0.5 rounded shrink-0" style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font }}>flagged</span>
@@ -117,21 +117,93 @@ function EntryRow(p: EntryProps) {
         {p.remark && <span className="text-xs truncate" style={{ color: V.sys, ...font }}>{p.remark}</span>}
       </div>
 
-      <span className="flex justify-center">
+      <div className="bk-ledger-amount flex items-center justify-end gap-2">
         {p.attach && (
-          <button type="button" onClick={(e) => { e.stopPropagation(); p.onAttach?.(e); }} aria-label="Attachment">
+          <button type="button" onClick={(e) => { e.stopPropagation(); p.onAttach?.(e); }} aria-label="Attachment" className="shrink-0 flex items-center">
             <Paperclip size={13} style={{ color: V.faint }} />
           </button>
         )}
-      </span>
+        <div
+          data-cell-select
+          onMouseDown={(e) => { e.stopPropagation(); p.onAmountDown(e); }}
+          onMouseEnter={p.onAmountEnter}
+          style={{ userSelect: 'none' }}
+        >
+          <Amount dir={p.dir} value={p.amount} />
+        </div>
+      </div>
+    </div>
+  );
+}
 
-      <div
-        data-cell-select
-        onMouseDown={(e) => { e.stopPropagation(); p.onAmountDown(e); }}
-        onMouseEnter={p.onAmountEnter}
-        style={{ userSelect: 'none' }}
+/* ---------- empty ledger: teach how it fills, using the day's own spine ---------- */
+
+function JourneyStop({ wash, accent, icon, title, body }: { wash: string; accent: string; icon: ReactNode; title: string; body: string }) {
+  return (
+    <div className="relative flex items-start gap-4 py-3">
+      <span
+        className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 relative"
+        style={{ background: wash, color: accent, boxShadow: `0 0 0 4px ${V.page}`, zIndex: 1 }}
       >
-        <Amount dir={p.dir} value={p.amount} />
+        {icon}
+      </span>
+      <div className="min-w-0 pt-0.5">
+        <p className="text-sm font-medium" style={{ color: V.ink, ...font }}>{title}</p>
+        <p className="text-xs mt-0.5 leading-relaxed" style={{ color: V.faint, ...font }}>{body}</p>
+      </div>
+    </div>
+  );
+}
+
+function LedgerEmpty({ reviewCount, onReview, onTeam, onNew }: { reviewCount: number; onReview: () => void; onTeam: () => void; onNew: () => void }) {
+  const waiting = reviewCount > 0;
+  return (
+    <div className="mx-auto mt-12 mb-8" style={{ maxWidth: 480 }}>
+      <h2 className="text-2xl" style={{ color: V.ink, ...serif }}>
+        {waiting ? 'Your first entries are waiting' : 'Your ledger fills itself'}
+      </h2>
+      <p className="text-sm mt-2 leading-relaxed" style={{ color: V.sys, ...font }}>
+        {waiting
+          ? `${reviewCount} ${reviewCount === 1 ? 'entry' : 'entries'} from WhatsApp ${reviewCount === 1 ? 'is' : 'are'} ready to review. File ${reviewCount === 1 ? 'it' : 'them'}, and your ledger begins.`
+          : 'Money reaches your books the moment your site reports it. Here is the path every entry takes.'}
+      </p>
+
+      {/* the journey, threaded on the same spine that runs through every day */}
+      <div className="relative mt-7">
+        <div aria-hidden="true" className="absolute" style={{ left: 15.5, top: 28, bottom: 28, width: 1, background: V.line }} />
+        <JourneyStop
+          wash={V.field} accent="#1FA855"
+          icon={<WhatsAppGlyph size={15} color="#1FA855" />}
+          title="Your team sends it"
+          body="a payment, a bill photo, or a voice note to Briklay on WhatsApp"
+        />
+        <JourneyStop
+          wash={V.terraWash} accent={V.terraDeep}
+          icon={<Check size={15} strokeWidth={2.5} />}
+          title="It lands in your Day book"
+          body="checked once, by you, whenever it suits you"
+        />
+        <JourneyStop
+          wash={V.sageWash} accent={V.sage}
+          icon={<span style={{ fontSize: 14, fontWeight: 600, ...nums }}>₹</span>}
+          title="It settles into your books"
+          body="and appears here, in this ledger"
+        />
+      </div>
+
+      <div className="flex items-center gap-3 flex-wrap mt-7">
+        {waiting ? (
+          <button onClick={onReview} className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl" style={{ background: terraGrad, color: '#fff', ...font }}>
+            Review {reviewCount} in Day book <ArrowRight size={15} />
+          </button>
+        ) : (
+          <button onClick={onTeam} className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl" style={{ background: terraGrad, color: '#fff', ...font }}>
+            <WhatsAppGlyph size={14} color="#fff" /> Start on WhatsApp
+          </button>
+        )}
+        <button onClick={onNew} className="text-sm font-medium px-4 py-2.5 rounded-xl" style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.inkSoft, ...font }}>
+          Add a transaction
+        </button>
       </div>
     </div>
   );
@@ -182,6 +254,61 @@ export default function Ledger({ session }: { session: Session }) {
       return data;
     },
   });
+  // Captures from WhatsApp still waiting in the Day book (same review bucket the
+  // Day book uses: PENDING + AWAITING_CONTEXT). Drives the nudge strip below.
+  const { data: dayBookReviewCount = 0 } = useQuery({
+    queryKey: ['daybook_review_count'],
+    queryFn: async () => {
+      const { count } = await supabase
+        .from('rough_entries')
+        .select('id', { count: 'exact', head: true })
+        .in('status', ['PENDING', 'AWAITING_CONTEXT']);
+      return count ?? 0;
+    },
+  });
+  // Has the builder set up WhatsApp capture at all? (active authorised senders).
+  // Only managers can read wa_registered_numbers, and only they can act on the hint.
+  const canManageTeam = profile?.role === 'management' || profile?.role === 'principal';
+  const { data: activeSenders = 0 } = useQuery({
+    queryKey: ['wa_active_senders'],
+    enabled: canManageTeam,
+    queryFn: async () => {
+      const { count } = await supabase
+        .from('wa_registered_numbers')
+        .select('id', { count: 'exact', head: true })
+        .eq('is_active', true);
+      return count ?? 0;
+    },
+  });
+  const [waHintDismissed, setWaHintDismissed] = useState(() => {
+    try { return localStorage.getItem('ledger_wa_setup_hint') === '1'; } catch { return false; }
+  });
+  const dismissWaHint = () => {
+    try { localStorage.setItem('ledger_wa_setup_hint', '1'); } catch { /* private mode */ }
+    setWaHintDismissed(true);
+  };
+
+  // Set up, but has anyone actually sent anything yet? (any capture ever).
+  const { data: totalCaptures = 0 } = useQuery({
+    queryKey: ['rough_entries_total'],
+    enabled: canManageTeam,
+    queryFn: async () => {
+      const { count } = await supabase.from('rough_entries').select('id', { count: 'exact', head: true });
+      return count ?? 0;
+    },
+  });
+  const [waIdleDismissed, setWaIdleDismissed] = useState(() => {
+    try { return localStorage.getItem('ledger_wa_idle_hint') === '1'; } catch { return false; }
+  });
+  const dismissWaIdle = () => {
+    try { localStorage.setItem('ledger_wa_idle_hint', '1'); } catch { /* private mode */ }
+    setWaIdleDismissed(true);
+  };
+  // "Start on WhatsApp": a QR to scan + the number to message Briklay. The person
+  // sends the first hello and the auto-responder greets them back (the honest
+  // direction — a business cannot message a user unprompted without a template).
+  const [waSheetOpen, setWaSheetOpen] = useState(false);
+
   const { data: _stakeholders } = useQuery({ queryKey: ['stakeholders'], queryFn: async () => { const { data } = await supabase.from('stakeholders').select('*'); return data as Stakeholder[]; } });
   const { data: _projects } = useQuery({ queryKey: ['projects'], queryFn: async () => { const { data } = await supabase.from('projects').select('*'); return data as Project[]; } });
 
@@ -431,7 +558,10 @@ export default function Ledger({ session }: { session: Session }) {
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen" style={{ background: V.page, ...font }}>
-      <div className="mx-auto px-5 sm:px-8 py-8" style={{ maxWidth: 880 }}>
+      <div className="mx-auto px-5 sm:px-8 py-8 max-w-[880px] lg:max-w-[1040px] xl:max-w-[1200px] min-[1700px]:max-w-[1640px] min-[1700px]:grid min-[1700px]:grid-cols-[minmax(0,1fr)_340px] min-[1700px]:gap-12 min-[1700px]:items-start">
+
+        {/* ── main column: the day-book ── */}
+        <div className="min-w-0">
 
         {/* header */}
         <div className="flex items-end justify-between gap-4 flex-wrap">
@@ -440,7 +570,9 @@ export default function Ledger({ session }: { session: Session }) {
             <p className="text-sm mt-2" style={{ color: V.sys, ...font, ...nums }}>
               {periodLabel} · {filteredTransactions.length} {filteredTransactions.length === 1 ? 'entry' : 'entries'}
             </p>
-            <FlowBar inLabel={inr(monthIn)} outLabel={inr(monthOut)} net={netLabel} outPct={outPct} />
+            <div className="min-[1700px]:hidden">
+              <FlowBar inLabel={inr(monthIn)} outLabel={inr(monthOut)} net={netLabel} outPct={outPct} />
+            </div>
           </div>
           <div className="flex flex-col items-end gap-1">
             <CreateHint message="press / to create a new transaction">
@@ -458,12 +590,67 @@ export default function Ledger({ session }: { session: Session }) {
                 { key: 'T', label: 'view transactions' },
                 { key: 'P', label: 'view purchase orders' },
                 { key: 'W', label: 'view work orders' },
-                { key: 'L', label: 'view logbook' },
+                { key: 'L', label: 'view day book' },
                 { key: '⟵ hold', label: 'long press screen for quick actions' },
               ]} className="w-full" />
             </div>
           </div>
         </div>
+
+        {/* nudge: WhatsApp captures waiting in the Day book (when the ledger has
+            entries; an empty ledger makes the case more fully in its empty state) */}
+        {dayBookReviewCount > 0 && (ledger?.length ?? 0) > 0 && (
+          <button
+            onClick={() => navigate('/logbook')}
+            className="flex items-center gap-2 w-full text-left mt-6 px-3.5 py-2.5 rounded-xl"
+            style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font }}
+          >
+            <span className="text-sm font-medium" style={{ ...nums }}>{dayBookReviewCount}</span>
+            <span className="text-sm">
+              {dayBookReviewCount === 1 ? 'entry' : 'entries'} from WhatsApp {dayBookReviewCount === 1 ? 'is' : 'are'} waiting to be reviewed
+            </span>
+            <span className="ml-auto text-sm font-medium whitespace-nowrap">Review in Day book →</span>
+          </button>
+        )}
+
+        {/* subtle invite: has entries, but never set up WhatsApp capture. Quiet,
+            dismissible, manager-only — a builder typing every entry by hand may
+            not know the site can send them in. */}
+        {canManageTeam && (ledger?.length ?? 0) > 0 && dayBookReviewCount === 0 && activeSenders === 0 && !waHintDismissed && (
+          <div className="flex items-center gap-3 mt-6 px-3.5 py-2.5 rounded-xl" style={{ background: V.surface, border: `1px solid ${V.line}`, ...font }}>
+            <span className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: V.field }}>
+              <WhatsAppGlyph size={14} color="#1FA855" />
+            </span>
+            <p className="text-sm min-w-0 flex-1" style={{ color: V.sys }}>
+              Let your site send payments and bills on WhatsApp. You just check them, and they land here.
+            </p>
+            <button onClick={() => navigate('/logbook')} className="text-sm font-medium whitespace-nowrap shrink-0" style={{ color: V.terraDeep }}>
+              Set up WhatsApp →
+            </button>
+            <button onClick={dismissWaHint} aria-label="Dismiss" className="shrink-0">
+              <X size={15} style={{ color: V.faint }} />
+            </button>
+          </div>
+        )}
+
+        {/* subtle reassurance: set up, but no one has sent anything yet. Nudges the
+            team to start, and tells the builder where it will land. */}
+        {canManageTeam && (ledger?.length ?? 0) > 0 && dayBookReviewCount === 0 && activeSenders > 0 && totalCaptures === 0 && !waIdleDismissed && (
+          <div className="flex items-center gap-3 mt-6 px-3.5 py-2.5 rounded-xl" style={{ background: V.surface, border: `1px solid ${V.line}`, ...font }}>
+            <span className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: V.field }}>
+              <WhatsAppGlyph size={14} color="#1FA855" />
+            </span>
+            <p className="text-sm min-w-0 flex-1" style={{ color: V.sys }}>
+              You or your team can now message Briklay on WhatsApp. Each one waits in your Day book, and once you approve it, it lands here.
+            </p>
+            <button onClick={() => setWaSheetOpen(true)} className="text-sm font-medium whitespace-nowrap shrink-0" style={{ color: V.terraDeep }}>
+              Start sending →
+            </button>
+            <button onClick={dismissWaIdle} aria-label="Dismiss" className="shrink-0">
+              <X size={15} style={{ color: V.faint }} />
+            </button>
+          </div>
+        )}
 
         {/* filters */}
         <div ref={filterBarRef} className="flex items-center gap-2 flex-wrap mt-7">
@@ -496,11 +683,11 @@ export default function Ledger({ session }: { session: Session }) {
             </FilterChip>
           )}
 
-          <span className="flex-1" />
+          <span className="hidden sm:block flex-1" />
 
-          <div className="inline-flex items-center gap-2 px-3 rounded-full" style={{ background: V.surface, border: `1px solid ${V.line}`, height: 36, minWidth: 200 }}>
+          <div className="inline-flex items-center gap-2 px-3 rounded-full flex-1 sm:flex-initial" style={{ background: V.surface, border: `1px solid ${V.line}`, height: 36, minWidth: 180 }}>
             <Search size={14} style={{ color: V.faint }} />
-            <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search payee, order, remark" className="bg-transparent text-sm outline-none flex-1" style={{ color: V.ink, ...font }} />
+            <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search payee, order, remark" className="bg-transparent text-sm outline-none flex-1 min-w-0" style={{ color: V.ink, ...font }} />
           </div>
           <button onClick={exportCSV} className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full" style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.inkSoft, ...font }}>
             <Download size={13} style={{ color: V.faint }} /> Export
@@ -511,7 +698,25 @@ export default function Ledger({ session }: { session: Session }) {
         {isLoading ? (
           <div className="mt-7"><PageSkeleton /></div>
         ) : visibleDays.length === 0 ? (
-          <p className="text-sm text-center mt-16" style={{ color: V.faint, ...font }}>No transactions for this period.</p>
+          (ledger?.length ?? 0) === 0 ? (
+            // nothing filed yet anywhere — teach how the ledger fills itself
+            <LedgerEmpty
+              reviewCount={dayBookReviewCount}
+              onReview={() => navigate('/logbook')}
+              onTeam={() => setWaSheetOpen(true)}
+              onNew={() => navigate('/ledger/new')}
+            />
+          ) : (
+            // there are entries, just not in this slice — stay quiet, offer a wider lens
+            <div className="text-center mt-16">
+              <p className="text-sm" style={{ color: V.faint, ...font }}>Nothing in {periodLabel}.</p>
+              {datePreset !== 'all' && (
+                <button onClick={() => setDatePreset('all')} className="text-sm font-semibold mt-2" style={{ color: V.terraDeep, ...font }}>
+                  View all time →
+                </button>
+              )}
+            </div>
+          )
         ) : (
           visibleDays.map(day => {
             const tot = dayTotals.get(day.date) ?? { out: 0, in: 0 };
@@ -589,6 +794,62 @@ export default function Ledger({ session }: { session: Session }) {
             <button onClick={() => setVisibleCount(c => c + PAGE_SIZE)} className="text-sm font-semibold" style={{ color: V.terraDeep, ...font }}>Load more</button>
           </div>
         )}
+        </div>{/* /main column */}
+
+        {/* ── summary rail: only on extra-wide (≥1700px) screens; below that the book itself widens ── */}
+        <aside className="hidden min-[1700px]:block">
+          <div className="sticky top-8 rounded-2xl p-5" style={{ background: V.surface, border: '1px solid #E3DDD4' }}>
+            <p className="text-[11px] uppercase" style={{ color: V.faint, letterSpacing: '0.07em', ...font }}>Period</p>
+            <p className="text-xl mt-1" style={{ color: V.ink, ...serif }}>{periodLabel}</p>
+            <p className="text-xs mt-1" style={{ color: V.sys, ...font, ...nums }}>
+              {filteredTransactions.length} {filteredTransactions.length === 1 ? 'entry' : 'entries'}
+            </p>
+
+            <div className="mt-4 flex h-2 rounded-full overflow-hidden" style={{ background: V.field }}>
+              <div style={{ width: `${100 - outPct}%`, background: V.sage, opacity: 0.85 }} />
+              <div style={{ width: `${outPct}%`, background: V.terra, opacity: 0.8 }} />
+            </div>
+
+            <div className="mt-5">
+              <p className="text-xs" style={{ color: V.faint, ...font }}>Net flow</p>
+              <p className="text-2xl mt-0.5" style={{ color: monthNet < 0 ? V.terraDeep : V.sage, ...serif, ...nums }}>{netLabel}</p>
+            </div>
+
+            <div className="mt-4 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="inline-flex items-center gap-2 text-sm" style={{ color: V.inkSoft, ...font }}>
+                  <span className="w-2 h-2 rounded-full" style={{ background: V.sage }} /> Money in
+                </span>
+                <span className="text-sm" style={{ color: V.sage, ...font, ...nums }}>+ ₹{inr(monthIn)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="inline-flex items-center gap-2 text-sm" style={{ color: V.inkSoft, ...font }}>
+                  <span className="w-2 h-2 rounded-full" style={{ background: V.terra }} /> Money out
+                </span>
+                <span className="text-sm" style={{ color: V.terraDeep, ...font, ...nums }}>− ₹{inr(monthOut)}</span>
+              </div>
+            </div>
+
+            {unlinkedCount > 0 && (
+              <button
+                onClick={() => setFilterUnlinked(v => !v)}
+                className="mt-4 w-full text-left text-xs px-3 py-2 rounded-xl"
+                style={{ background: filterUnlinked ? V.askWash : V.field, border: `1px solid ${filterUnlinked ? V.askLine : 'transparent'}`, color: V.ask, ...font }}
+              >
+                {unlinkedCount} not linked yet · {filterUnlinked ? 'showing' : 'review'}
+              </button>
+            )}
+
+            <button
+              onClick={exportCSV}
+              className="mt-4 w-full inline-flex items-center justify-center gap-1.5 text-sm py-2 rounded-xl"
+              style={{ border: `1px solid ${V.line}`, color: V.inkSoft, ...font }}
+            >
+              <Download size={13} style={{ color: V.faint }} /> Export period
+            </button>
+          </div>
+        </aside>
+
       </div>
 
       {/* direction-aware drag-to-sum panel */}
@@ -607,6 +868,13 @@ export default function Ledger({ session }: { session: Session }) {
       )}
 
       <ImageLightbox url={lightboxUrl} title="Payment Proof" onClose={() => setLightboxUrl(null)} />
+
+      {waSheetOpen && (
+        <StartOnWhatsApp
+          onClose={() => setWaSheetOpen(false)}
+          onManageTeam={() => { setWaSheetOpen(false); navigate('/logbook'); }}
+        />
+      )}
 
       {/* bulk action bar */}
       {selectedCount > 0 && (

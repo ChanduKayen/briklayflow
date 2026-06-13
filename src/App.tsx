@@ -497,7 +497,7 @@ const NAV_TOOLTIPS: Record<string, { shortcut: string | null; description: strin
   '/ledger':                    { shortcut: 'T', description: 'All payments made â€" workers, vendors, expenses' },
   '/work-orders':               { shortcut: 'W', description: 'Labour contracts and milestone payments' },
   '/purchase-orders':           { shortcut: 'P', description: 'Material orders and vendor bills' },
-  '/logbook':                   { shortcut: 'L', description: 'Raw entries from WhatsApp and field notes' },
+  '/logbook':                   { shortcut: 'L', description: 'Captures from WhatsApp waiting to be reviewed and filed' },
   '/stakeholders':              { shortcut: null, description: 'Workers, vendors and clients' },
   '/dashboard':                 { shortcut: null, description: 'Overview, risk flags and activity' },
   '/financials':                { shortcut: null, description: 'Reports, ledgers and statements' },
@@ -702,7 +702,7 @@ function SidebarContent({
         { path: '/work-orders',     icon: IconClipboardList,  label: 'Work Orders',     show: true,                                           badge: woPendingCount },
         { path: '/purchase-orders',  icon: IconShoppingBag,   label: 'Purchase Orders', show: role !== 'supervisor' && role !== 'accountant', badge: poUntalliedCount },
         { path: '/inward-register', icon: IconLayoutGrid,    label: 'Inward Register', show: role !== 'supervisor' && role !== 'accountant' },
-        { path: '/logbook',         icon: IconNotebook,       label: 'Logbook',         show: true,                                           badge: inboxBadgeCount },
+        { path: '/logbook',         icon: IconNotebook,       label: 'Day book',        show: true,                                           badge: inboxBadgeCount },
         { path: '/stakeholders',    icon: IconUsersGroup,     label: 'Parties',         show: role !== 'supervisor' && role !== 'accountant' },
       ],
     },
@@ -1292,7 +1292,7 @@ function getMobileTitle(pathname: string): string {
   const routes: Record<string, string> = {
     '/':                    'Transactions',
     '/dashboard':           'Dashboard',
-    '/logbook':             'Logbook',
+    '/logbook':             'Day book',
     '/ledger':              'Transactions',
     '/ledger/new':          'New Transaction',
     '/projects':            'Projects',
@@ -1572,7 +1572,7 @@ function MoreNavSheet({
   ] : [];
 
   const globalItems = [
-    { path: '/logbook',       icon: IconNotebook,              label: 'Logbook',        show: true },
+    { path: '/logbook',       icon: IconNotebook,              label: 'Day book',       show: true },
     { path: '/inward-register', icon: IconLayoutGrid,          label: 'Inward Register', show: role !== 'supervisor' && role !== 'accountant' },
     { path: '/billing',       icon: IconFileInvoice,           label: 'Client Billing', show: role !== 'supervisor' },
     { path: '/dashboard',     icon: IconLayoutDashboard,       label: 'Dashboard',      show: true },

@@ -67,7 +67,7 @@ export function FilterChip({
   children: ReactNode;
   active?: boolean;
   tone?: 'ask';
-  onClick?: () => void;
+  onClick?: (e: MouseEvent) => void;
   hasDropdown?: boolean;
   style?: CSSProperties;
 }) {
