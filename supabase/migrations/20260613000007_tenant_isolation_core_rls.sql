@@ -41,42 +41,24 @@ $$;
 REVOKE ALL     ON FUNCTION public.has_role_in_org(uuid, text[]) FROM public;
 GRANT  EXECUTE ON FUNCTION public.has_role_in_org(uuid, text[]) TO authenticated, anon, service_role;
 
--- -- T1.0-B (1): scoped sweep - drop every role-without-org policy ---------------
--- Drops, on the in-scope core tables only, any policy whose USING/CHECK references
--- current_user_role() plus the global "Principal full access" policy. Programmatic
--- so it catches policies regardless of name; scoped so it never touches out-of-scope
--- tables (sku_directory, rough_entries, wa_*, procurement, etc.).
-DO $$
-DECLARE
-  core_tables text[] := ARRAY[
-    'user_profiles','projects','stakeholders','transactions','txn_allocations',
-    'work_orders','wo_milestones','purchase_orders','project_budgets',
-    'client_invoices','client_payments','po_line_items','cost_codes'
-  ];
-  r record;
-BEGIN
-  FOR r IN
-    SELECT p.tablename, p.policyname
-    FROM pg_policies p
-    WHERE p.schemaname = 'public'
-      AND p.tablename = ANY(core_tables)
-      AND ( COALESCE(p.qual, '')       ILIKE '%current_user_role%'
-         OR COALESCE(p.with_check, '') ILIKE '%current_user_role%'
-         OR p.policyname = 'Principal full access' )
-  LOOP
-    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', r.policyname, r.tablename);
-    RAISE NOTICE 'Dropped offending policy "%" on %', r.policyname, r.tablename;
-  END LOOP;
-END $$;
-
--- -- T1.0-B (2): re-assert one clean org-scoped policy per org table -------------
--- Principals/management are org_memberships members too, so "org member access"
--- (FOR ALL within their org set) already grants them full SAME-org CRUD. This is the
--- existing, correct regular-member policy - re-created uniformly with get_my_org_ids()
--- (standardizing the few that used a raw org_memberships subquery). No cross-org grant.
+-- -- T1.0-B (1+2): org tables - DROP EVERY existing policy, then create exactly one
+-- org-scoped "org member access" policy.
+--
+-- Drop-ALL (not a targeted sweep): because migrations have been applied unevenly to
+-- this DB, leftover permissive policies survive that a name/current_user_role-based
+-- sweep would miss - e.g. wo_milestones still carried "Authenticated users can view"
+-- with USING(true) (the Sprint 0.5 hardening was never applied here). RLS policies
+-- are OR-combined, so ONE such policy defeats isolation. Dropping everything and
+-- recreating the single correct policy is the only drift-proof guarantee.
+--
+-- Safe: "org member access" (FOR ALL within the caller's org set) is the maximal
+-- SAME-org grant - every active member (incl. principal/management) keeps full CRUD
+-- in their org. It can only remove cross-org leaks, never break same-org access.
+-- (SECURITY DEFINER RPCs / service role bypass RLS and are unaffected.)
 DO $$
 DECLARE
   t text;
+  pol record;
   org_tables text[] := ARRAY[
     'projects','stakeholders','transactions','txn_allocations','work_orders',
     'wo_milestones','purchase_orders','project_budgets','client_invoices',
@@ -88,15 +70,20 @@ BEGIN
       RAISE NOTICE 'skip % (table absent in this DB)', t;
       CONTINUE;
     END IF;
+    FOR pol IN
+      SELECT policyname FROM pg_policies WHERE schemaname='public' AND tablename = t
+    LOOP
+      EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', pol.policyname, t);
+      RAISE NOTICE 'dropped policy "%" on %', pol.policyname, t;
+    END LOOP;
     EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
-    EXECUTE format('DROP POLICY IF EXISTS "org member access" ON public.%I', t);
     EXECUTE format($f$
       CREATE POLICY "org member access" ON public.%I
         FOR ALL
         USING      (org_id IN (SELECT public.get_my_org_ids()))
         WITH CHECK (org_id IN (SELECT public.get_my_org_ids()))
     $f$, t);
-    RAISE NOTICE 'Re-asserted org member access on %', t;
+    RAISE NOTICE 'org member access set on %', t;
   END LOOP;
 END $$;
 
@@ -105,6 +92,7 @@ END $$;
 -- during onboarding); members can read profiles in their org(s) (team lists); org
 -- admins manage profiles in their org via the new org-aware helper. No global role.
 DO $$
+DECLARE pol record;
 BEGIN
   IF to_regclass('public.user_profiles') IS NULL THEN
     RAISE NOTICE 'skip user_profiles (table absent in this DB)';
@@ -112,12 +100,10 @@ BEGIN
   END IF;
 
   ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
-  DROP POLICY IF EXISTS "Users can read own profile"  ON public.user_profiles;
-  DROP POLICY IF EXISTS "profile self access"         ON public.user_profiles;
-  DROP POLICY IF EXISTS "user_profiles self read"     ON public.user_profiles;
-  DROP POLICY IF EXISTS "user_profiles org read"      ON public.user_profiles;
-  DROP POLICY IF EXISTS "user_profiles self update"   ON public.user_profiles;
-  DROP POLICY IF EXISTS "user_profiles admin manage"  ON public.user_profiles;
+  FOR pol IN SELECT policyname FROM pg_policies WHERE schemaname='public' AND tablename='user_profiles' LOOP
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.user_profiles', pol.policyname);
+    RAISE NOTICE 'dropped policy "%" on user_profiles', pol.policyname;
+  END LOOP;
 
   CREATE POLICY "user_profiles self read" ON public.user_profiles
     FOR SELECT USING (id = auth.uid());
@@ -136,13 +122,17 @@ END $$;
 -- The dropped "Principal full access" wrongly restricted the shared catalog to
 -- principals. Replace with authenticated read; writes happen only via migrations/seed.
 DO $$
+DECLARE pol record;
 BEGIN
   IF to_regclass('public.cost_codes') IS NULL THEN
     RAISE NOTICE 'skip cost_codes (table absent in this DB)';
     RETURN;
   END IF;
   ALTER TABLE public.cost_codes ENABLE ROW LEVEL SECURITY;
-  DROP POLICY IF EXISTS "cost_codes authenticated read" ON public.cost_codes;
+  FOR pol IN SELECT policyname FROM pg_policies WHERE schemaname='public' AND tablename='cost_codes' LOOP
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.cost_codes', pol.policyname);
+    RAISE NOTICE 'dropped policy "%" on cost_codes', pol.policyname;
+  END LOOP;
   CREATE POLICY "cost_codes authenticated read" ON public.cost_codes
     FOR SELECT TO authenticated USING (true);
 END $$;

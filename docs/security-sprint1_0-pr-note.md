@@ -36,11 +36,19 @@ for `auth.uid()` + `target_org` (mirrors `get_my_org_ids()` to avoid RLS recursi
 | cost_codes | "Principal full access" | **authenticated read** (global catalog, no org_id — documented) |
 
 `org member access` = `FOR ALL USING/CHECK (org_id IN (SELECT get_my_org_ids()))`.
-Principals/management are members, so they keep full **same-org** CRUD; the regular-
-member policy is preserved; **no policy grants cross-org access**. The drop step is a
-*programmatic sweep* (any policy referencing `current_user_role` or named "Principal
-full access") scoped to the in-scope tables — robust to naming, never touches
-out-of-scope tables.
+Principals/management are members, so they keep full **same-org** CRUD; **no policy
+grants cross-org access**.
+
+**Drop strategy = drop ALL, not a targeted sweep.** For each in-scope table the
+migration drops *every* existing policy (looping `pg_policies`) then creates exactly
+the intended org-scoped set. This is required because migrations have been applied
+unevenly to the cloud DB, leaving permissive policies a name/`current_user_role`-based
+sweep would miss — e.g. `wo_milestones` still carried an `"Authenticated users can
+view…"` `USING(true)` policy (the Sprint 0.5 hardening was never applied), which the
+harness caught as a live cross-org read leak. Since RLS policies OR-combine, one such
+policy defeats isolation; dropping everything and recreating is the only drift-proof
+guarantee. Out-of-scope tables (sku_directory, rough_entries, wa_*, procurement) are
+never touched.
 
 ## Already correct — left as-is (verified by harness)
 `po_approvals` (Sprint 0.5), `po_grn`, `po_grn_items` (org_id + `org member access`),
