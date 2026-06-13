@@ -192,7 +192,7 @@ export interface Transaction {
   date: string;
   total_amount: number;
   payment_mode: PaymentMode;
-  category: string;
+  category: string | null;
   remarks?: string;
   status: TxnStatus;
   bill_doc_url?: string;

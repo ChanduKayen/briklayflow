@@ -63,6 +63,7 @@ import Orders from './pages/Orders';
 import InviteAccept from './pages/InviteAccept';
 import OnboardingWizard from './components/OnboardingWizard';
 import Pending from './pages/Pending';
+import Welcome from './pages/Welcome';
 import CreateWorkspace from './pages/CreateWorkspace';
 import Login from './pages/Login';
 import Landing from './pages/Landing';
@@ -312,6 +313,16 @@ function App() {
     if (!routerReady) return null;
     if (!session) return <Navigate to="/login" replace />;
     return <CreateWorkspace session={session} />;
+  }
+
+  // Account-confirmed celebration — the success destination of the email link.
+  // Welcome owns its own loading/success/expired states off the resolved auth
+  // state, so it renders before the auth-status gates below. We also catch the
+  // failure landing: a dead/expired link drops the user at the Site URL root with
+  // an `#error=access_denied&error_code=otp_expired` hash, so route that to
+  // Welcome's "link expired" state instead of a blank root.
+  if (location.pathname === '/welcome' || /error=access_denied|otp_expired/.test(location.hash)) {
+    return <Welcome />;
   }
 
   // Never render the full app while auth is still resolving — orgId/userId are
@@ -1691,27 +1702,36 @@ function Team({ session }: { session: Session }) {
   const { data: team, isLoading: teamLoading } = useQuery({
     queryKey: ['team', profile?.org_id],
     queryFn: async () => {
-      const { data, error } = await supabase
+      // Two steps on purpose: embedding user_profiles joins two tables that both
+      // carry org_id, so `.eq('org_id', …)` compiles to an ambiguous
+      // `where org_id = …`. Fetch memberships, then their profiles by id.
+      const { data: rows, error } = await supabase
         .from('org_memberships')
-        .select(`
-          role,
-          status,
-          joined_at,
-          user_profiles (id, name, assigned_projects, created_at)
-        `)
+        .select('role, status, joined_at, user_id')
         .eq('org_id', profile!.org_id!)
         .eq('status', 'active')
         .order('joined_at', { ascending: false });
       if (error) throw error;
-      return (data ?? [])
-        .filter(r => r.user_profiles !== null)
-        .map(r => ({
-          id:                (r.user_profiles as any).id as string,
-          name:              (r.user_profiles as any).name as string,
-          role:              r.role as UserProfile['role'],
-          assigned_projects: ((r.user_profiles as any).assigned_projects ?? []) as string[],
-          created_at:        (r.user_profiles as any).created_at as string,
-        } satisfies UserProfile));
+      const ids = (rows ?? []).map(r => (r as any).user_id as string).filter(Boolean);
+      if (ids.length === 0) return [] as UserProfile[];
+      const { data: profiles, error: pErr } = await supabase
+        .from('user_profiles')
+        .select('id, name, assigned_projects, created_at')
+        .in('id', ids);
+      if (pErr) throw pErr;
+      const byId = new Map((profiles ?? []).map(p => [(p as any).id as string, p as any]));
+      return (rows ?? [])
+        .filter(r => byId.has((r as any).user_id))
+        .map(r => {
+          const p = byId.get((r as any).user_id);
+          return {
+            id:                p.id as string,
+            name:              p.name as string,
+            role:              r.role as UserProfile['role'],
+            assigned_projects: (p.assigned_projects ?? []) as string[],
+            created_at:        p.created_at as string,
+          } satisfies UserProfile;
+        });
     },
     enabled: (profile?.role === 'management' || profile?.role === 'principal') && !!profile?.org_id,
   });

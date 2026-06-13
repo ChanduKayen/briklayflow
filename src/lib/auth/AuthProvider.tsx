@@ -195,7 +195,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // 'unauthenticated' removed — handled directly in SIGNED_OUT above
 
       case 'no-org':
-        navigate('/create-workspace', { replace: true })
+        // /welcome owns the just-confirmed moment and links onward to
+        // create-workspace itself — don't yank the celebration out from under it.
+        if (location.pathname !== '/welcome') {
+          navigate('/create-workspace', { replace: true })
+        }
         break
 
       case 'pending':

@@ -28,7 +28,7 @@ export default function FinancialsPL() {
         txn_id: string;
         total_amount: number;
         date: string;
-        category: string;
+        category: string | null;
         status: string;
         stakeholders: { type: string } | null;
       }[];
@@ -39,6 +39,7 @@ export default function FinancialsPL() {
   const spendByCode: Record<string, number> = {};
   for (const t of txns || []) {
     const amt = Number(t.total_amount);
+    if (!t.category) continue; // uncategorised entries don't belong to a cost code
     spendByCode[t.category] = (spendByCode[t.category] || 0) + amt;
   }
 

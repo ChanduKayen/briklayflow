@@ -127,7 +127,7 @@ export default function Login() {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        options: { data: { full_name: name } }
+        options: { data: { full_name: name }, emailRedirectTo: `${window.location.origin}/welcome` }
       });
       if (error) {
         setError(error.message);

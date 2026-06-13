@@ -38,9 +38,9 @@ const TABS: { key: TabKey; label: string }[] = [
 ];
 
 const STEPS = [
-  { n: '1', t: 'You or your team send to Briklay on WhatsApp', s: 'a payment, a bill photo, or a voice note' },
-  { n: '2', t: 'It gets recorded here, as it comes', s: 'every message lands in your day book automatically' },
-  { n: '3', t: 'You review and file, at your convenience', s: "check it reads right, one tap, into your books" },
+  { n: '1', t: 'Send it on WhatsApp', s: 'a payment, a bill photo, a voice note' },
+  { n: '2', t: 'It lands here', s: 'recorded as it comes, on its own' },
+  { n: '3', t: 'Review and file', s: 'file it, and it appears in your ledger' },
 ];
 
 export default function Logbook({ session }: { session: Session }) {
@@ -152,7 +152,7 @@ export default function Logbook({ session }: { session: Session }) {
         <div className="mt-4 grid gap-3 sm:gap-5" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))' }}>
           {STEPS.map((step) => (
             <div key={step.n} className="flex items-start gap-3">
-              <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5" style={{ background: V.ink, color: '#F6F1EA', fontWeight: 500, ...font, ...nums, ...T.xs }}>{step.n}</span>
+              <span className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 mt-0.5" style={{ background: V.line, color: V.sys, border: `1px solid ${V.line}`, fontWeight: 500, ...font, ...nums, ...T.xs }}>{step.n}</span>
               <span>
                 <span className="block leading-snug" style={{ color: V.inkSoft, ...font, ...T.sm }}>{step.t}</span>
                 <span className="block leading-snug mt-0.5" style={{ color: V.faint, ...font, ...T.xs }}>{step.s}</span>

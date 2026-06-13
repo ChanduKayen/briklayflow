@@ -12,6 +12,21 @@ function genTxnId() {
   return `TXN-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
 }
 
+/**
+ * Best-effort human message from any thrown value. Supabase's PostgrestError is a
+ * plain object (NOT an Error), so `instanceof Error` misses it and the real reason
+ * gets swallowed behind a generic fallback. Surface message/details/hint/code.
+ */
+export function errMessage(err: unknown, fallback: string): string {
+  if (err instanceof Error && err.message) return err.message;
+  if (err && typeof err === 'object') {
+    const e = err as { message?: string; details?: string; hint?: string; code?: string };
+    const parts = [e.message, e.details, e.hint].filter(Boolean);
+    if (parts.length) return parts.join(' — ') + (e.code ? ` (${e.code})` : '');
+  }
+  return fallback;
+}
+
 /** The mandatory fields, resolved — either by the AI or by the owner inline. */
 export interface ResolvedFields {
   payeeId: string;
@@ -32,16 +47,25 @@ export function isResolved(r: ResolvedFields): boolean {
  * `resolved` carries the final mandatory fields (AI read merged with any inline
  * edits the owner made on the card). Returns the new txn_id on success.
  */
+/** The DB enum public.payment_mode — the RPC casts to it, so anything else throws. */
+const PAYMENT_MODES = ['Cash', 'NEFT', 'UPI', 'Cheque'] as const;
+
 export async function fileRoughEntry(entry: RoughEntry, orgId: string, resolved: ResolvedFields): Promise<string> {
   const ai = entry.ai_extracted || {};
   const newTxnId = genTxnId();
 
+  // The AI read is free-form; the RPC casts payment_mode + date to strict pg types.
+  // ResolvePopup launders these through validated UI state — quick-file must do the
+  // same here, or a stray mode ("Bank Transfer") / date format trips the enum/date cast.
+  const mode = PAYMENT_MODES.includes(ai.mode as typeof PAYMENT_MODES[number]) ? ai.mode! : 'Cash';
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(ai.date || '') ? ai.date! : new Date().toISOString().slice(0, 10);
+
   const payload = {
     txn_id: newTxnId,
     stakeholder_id: resolved.payeeId,
-    date: ai.date || new Date().toISOString().slice(0, 10),
+    date,
     total_amount: resolved.amount,
-    payment_mode: ai.mode || 'Cash',
+    payment_mode: mode,
     category: ai.category_code || null,
     remarks: resolved.description,
     bill_doc_url: null,

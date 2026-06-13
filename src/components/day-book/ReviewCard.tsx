@@ -24,10 +24,10 @@ import {
   Image as ImageIcon, Search, UserPlus,
 } from 'lucide-react';
 import type { RoughEntry } from '../../types';
-import { V, font, nums, terraGrad, T } from './tokens';
-import { ChannelBadge } from './atoms';
+import { V, WA, font, nums, terraGrad, T } from './tokens';
+import { WhatsAppGlyph } from './atoms';
 import {
-  fileRoughEntry, rejectRoughEntry, createParty, isResolved, type ResolvedFields,
+  fileRoughEntry, rejectRoughEntry, createParty, isResolved, errMessage, type ResolvedFields,
 } from './fileEntry';
 import { useSwipeTriage } from './useSwipeTriage';
 import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../../lib/trades';
@@ -110,7 +110,7 @@ export function ReviewCard({
       qc.invalidateQueries({ queryKey: ['stakeholders'] });
       setPayeeId(party.id); setPayeeName(party.name); mark('payee'); setEditing(null); setNewCategory(''); setNewCategoryOther('');
     } catch (err: unknown) {
-      onError(err instanceof Error ? err.message : "Couldn't add the party");
+      onError(errMessage(err, "Couldn't add the party"));
     } finally {
       setCreating(false);
     }
@@ -130,7 +130,7 @@ export function ReviewCard({
       setTimeout(() => onFiled(txnId), reduced ? 0 : 700);
     } catch (err: unknown) {
       setLeaving(null); setPhase(null);
-      onError(err instanceof Error ? err.message : "Couldn't file, try again");
+      onError(errMessage(err, "Couldn't file, try again"));
     }
   };
   const runReject = async () => {
@@ -141,7 +141,7 @@ export function ReviewCard({
       setTimeout(onRejected, swipe.reducedMotion ? 0 : 380);
     } catch (err: unknown) {
       setLeaving(null);
-      onError(err instanceof Error ? err.message : "Couldn't reject, try again");
+      onError(errMessage(err, "Couldn't reject, try again"));
     }
   };
 
@@ -178,6 +178,16 @@ export function ReviewCard({
   const rejectShown = dx < -24;
   const offClass = leaving === 'file' ? 'db-file-off' : leaving === 'reject' ? 'db-reject-off' : '';
   const said = entry.raw_text || entry.transcribed_text || (entry.raw_image_url ? '' : '—');
+
+  // tier-1 provenance, written as a sentence: "<sender> sent a photo · from WhatsApp"
+  const fromWa = entry.source.startsWith('WHATSAPP');
+  const senderName = entry.sender_name || 'Unknown sender';
+  const sentVerb =
+    entry.source === 'WHATSAPP_VOICE' ? 'sent a voice note' :
+    entry.source === 'WHATSAPP_IMAGE' ? 'sent a photo' :
+    entry.source === 'UI_IMAGE' ? 'added a photo' :
+    fromWa ? 'sent this' : 'added this';
+  const sentTime = new Date(entry.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 
   const amberChip = (label: string, onClick: () => void) => (
     <button onClick={(e) => { e.stopPropagation(); if (canManage) onClick(); }} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md" style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font, ...T.xs }}>
@@ -234,27 +244,34 @@ export function ReviewCard({
       >
         {/* tier 1 — the site */}
         <div className="px-5 pt-4 pb-4">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
-              <span className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 font-medium" style={{ background: V.terraWash, color: V.terraDeep, ...font, ...T.xs }}>
+              <span className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 font-medium" style={{ background: V.terraWash, color: V.terraDeep, ...font, ...T.sm }}>
                 {(entry.sender_name || '?').split(' ')[0].slice(0, 2).toUpperCase()}
               </span>
               <div className="min-w-0">
-                <p className="font-medium truncate" style={{ color: V.ink, ...font, ...T.sm }}>{entry.sender_name || 'Unknown sender'}</p>
-                {entry.sender_number && <p className="truncate" style={{ color: V.faint, ...font, ...nums, ...T.xs }}>+91 {entry.sender_number}</p>}
+                <p className="flex items-center gap-1 min-w-0" style={{ ...font, ...T.sm }}>
+                  <span className="font-medium truncate" style={{ color: V.ink }}>{senderName}</span>
+                  <span className="shrink-0" style={{ color: V.faint }}>{sentVerb}</span>
+                  {fromWa ? (
+                    <span className="shrink-0 inline-flex items-center gap-1">
+                      <span style={{ color: V.faint }}>from</span>
+                      <WhatsAppGlyph size={12} color={WA} />
+                      <span style={{ color: WA }}>WhatsApp</span>
+                    </span>
+                  ) : (
+                    <span className="shrink-0" style={{ color: V.faint }}>here</span>
+                  )}
+                </p>
+                {fromWa && entry.sender_number && (
+                  <p className="truncate mt-0.5" style={{ color: V.faint, ...font, ...nums, ...T.xs }}>+91 {entry.sender_number}</p>
+                )}
               </div>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <ChannelBadge source={entry.source} />
-              <span style={{ color: V.faint, ...font, ...nums, ...T.xs }}>{new Date(entry.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
-            </div>
+            <span className="shrink-0 mt-0.5" style={{ color: V.faint, ...font, ...nums, ...T.xs }}>{sentTime}</span>
           </div>
 
-          <p className="uppercase font-medium mt-3" style={{ color: V.faint, letterSpacing: '0.1em', ...font, ...T.xs }}>
-            {entry.source.startsWith('WHATSAPP') ? 'You sent this from WhatsApp' : 'You added this here'}
-          </p>
-
-          <div className="mt-1.5 inline-block rounded-xl rounded-tl-sm px-3 py-2" style={{ background: V.field, maxWidth: '100%' }}>
+          <div className="mt-3 inline-block rounded-xl rounded-tl-sm px-3 py-2" style={{ background: V.field, maxWidth: '100%' }}>
             {entry.source === 'WHATSAPP_VOICE' && <p className="italic mb-1" style={{ color: V.faint, ...font, ...T.xs }}>voice note, transcribed</p>}
             {said && <p className={reveal ? 'tf-raw' : ''} style={{ color: V.inkSoft, ...font, ...T.sm }}>{said}</p>}
             {entry.raw_image_url && (

@@ -395,9 +395,9 @@ export default function Ledger({ session }: { session: Session }) {
     if (deriveDirection(txn) === 'in') return 'Client Receipt';
     if (txn.stakeholders?.type === 'Worker') return 'Worker Payment';
     if (txn.stakeholders?.type === 'Vendor') {
-      const cc = getCostCode(txn.category);
+      const cc = getCostCode(txn.category || '');
       if (cc?.division.type === 'MAT') return 'Material Purchase';
-      if (MATERIAL_CATEGORIES_LEGACY.includes(txn.category)) return 'Material Purchase';
+      if (txn.category && MATERIAL_CATEGORIES_LEGACY.includes(txn.category)) return 'Material Purchase';
     }
     return 'General Expense';
   };
