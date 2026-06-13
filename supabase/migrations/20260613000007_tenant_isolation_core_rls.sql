@@ -84,6 +84,10 @@ DECLARE
   ];
 BEGIN
   FOREACH t IN ARRAY org_tables LOOP
+    IF to_regclass('public.' || t) IS NULL THEN
+      RAISE NOTICE 'skip % (table absent in this DB)', t;
+      CONTINUE;
+    END IF;
     EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
     EXECUTE format('DROP POLICY IF EXISTS "org member access" ON public.%I', t);
     EXECUTE format($f$
@@ -100,32 +104,48 @@ END $$;
 -- Rebuilt explicitly: self can always read/update own profile (needed pre-membership
 -- during onboarding); members can read profiles in their org(s) (team lists); org
 -- admins manage profiles in their org via the new org-aware helper. No global role.
-ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "Users can read own profile" ON public.user_profiles;
-DROP POLICY IF EXISTS "profile self access"        ON public.user_profiles;
+DO $$
+BEGIN
+  IF to_regclass('public.user_profiles') IS NULL THEN
+    RAISE NOTICE 'skip user_profiles (table absent in this DB)';
+    RETURN;
+  END IF;
 
-CREATE POLICY "user_profiles self read" ON public.user_profiles
-  FOR SELECT USING (id = auth.uid());
+  ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
+  DROP POLICY IF EXISTS "Users can read own profile"  ON public.user_profiles;
+  DROP POLICY IF EXISTS "profile self access"         ON public.user_profiles;
+  DROP POLICY IF EXISTS "user_profiles self read"     ON public.user_profiles;
+  DROP POLICY IF EXISTS "user_profiles org read"      ON public.user_profiles;
+  DROP POLICY IF EXISTS "user_profiles self update"   ON public.user_profiles;
+  DROP POLICY IF EXISTS "user_profiles admin manage"  ON public.user_profiles;
 
-CREATE POLICY "user_profiles org read" ON public.user_profiles
-  FOR SELECT USING (org_id IN (SELECT public.get_my_org_ids()));
-
-CREATE POLICY "user_profiles self update" ON public.user_profiles
-  FOR UPDATE USING (id = auth.uid()) WITH CHECK (id = auth.uid());
-
-CREATE POLICY "user_profiles admin manage" ON public.user_profiles
-  FOR ALL
-  USING      (public.has_role_in_org(org_id, 'principal', 'management'))
-  WITH CHECK (public.has_role_in_org(org_id, 'principal', 'management'));
+  CREATE POLICY "user_profiles self read" ON public.user_profiles
+    FOR SELECT USING (id = auth.uid());
+  CREATE POLICY "user_profiles org read" ON public.user_profiles
+    FOR SELECT USING (org_id IN (SELECT public.get_my_org_ids()));
+  CREATE POLICY "user_profiles self update" ON public.user_profiles
+    FOR UPDATE USING (id = auth.uid()) WITH CHECK (id = auth.uid());
+  CREATE POLICY "user_profiles admin manage" ON public.user_profiles
+    FOR ALL
+    USING      (public.has_role_in_org(org_id, 'principal', 'management'))
+    WITH CHECK (public.has_role_in_org(org_id, 'principal', 'management'));
+END $$;
 
 -- ── T1.0-B (4): cost_codes — global catalog, not tenant data ───────────────────
 -- cost_codes has no org_id (a shared, seed-loaded taxonomy identical for every org).
 -- The dropped "Principal full access" wrongly restricted the shared catalog to
 -- principals. Replace with authenticated read; writes happen only via migrations/seed.
-ALTER TABLE public.cost_codes ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "cost_codes authenticated read" ON public.cost_codes;
-CREATE POLICY "cost_codes authenticated read" ON public.cost_codes
-  FOR SELECT TO authenticated USING (true);
+DO $$
+BEGIN
+  IF to_regclass('public.cost_codes') IS NULL THEN
+    RAISE NOTICE 'skip cost_codes (table absent in this DB)';
+    RETURN;
+  END IF;
+  ALTER TABLE public.cost_codes ENABLE ROW LEVEL SECURITY;
+  DROP POLICY IF EXISTS "cost_codes authenticated read" ON public.cost_codes;
+  CREATE POLICY "cost_codes authenticated read" ON public.cost_codes
+    FOR SELECT TO authenticated USING (true);
+END $$;
 
 -- ── T1.0-C: po_line_items — auto-fill org_id from parent PO ─────────────────────
 -- org_id already exists (backfilled, NOT NULL, indexed). Add a BEFORE INSERT trigger
@@ -144,7 +164,14 @@ BEGIN
   RETURN NEW;
 END $$;
 
-DROP TRIGGER IF EXISTS po_line_items_set_org_id ON public.po_line_items;
-CREATE TRIGGER po_line_items_set_org_id
-  BEFORE INSERT ON public.po_line_items
-  FOR EACH ROW EXECUTE FUNCTION public.po_line_items_set_org_id();
+DO $$
+BEGIN
+  IF to_regclass('public.po_line_items') IS NULL THEN
+    RAISE NOTICE 'skip po_line_items trigger (table absent in this DB)';
+    RETURN;
+  END IF;
+  DROP TRIGGER IF EXISTS po_line_items_set_org_id ON public.po_line_items;
+  CREATE TRIGGER po_line_items_set_org_id
+    BEFORE INSERT ON public.po_line_items
+    FOR EACH ROW EXECUTE FUNCTION public.po_line_items_set_org_id();
+END $$;
