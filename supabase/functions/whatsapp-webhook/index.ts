@@ -11,6 +11,13 @@ import {
   handleSessionReply,
   processExpiredImageEntries,
 } from './_handlers.ts'
+import {
+  createJob,
+  markJob,
+  enqueueJobFailure,
+  acquireSenderLock,
+  releaseSenderLock,
+} from './_spine.ts'
 
 const WA_VERIFY_TOKEN      = Deno.env.get('WA_VERIFY_TOKEN')!
 const WA_APP_SECRET        = Deno.env.get('WA_APP_SECRET')        // Meta App → Settings → Basic → App Secret
@@ -118,10 +125,9 @@ async function processMessage(body: unknown): Promise<void> {
   const messageId   = message.id          as string
   const messageType = message.type        as string
 
-  // ── Idempotency gate ─────────────────────────────────────────────────────────
-  // Meta retries on timeout/non-200, so the same wamid can arrive twice. Gate as
-  // early as wamid is readable, before logging/dispatch. The unique-violation on
-  // insert IS the dedup signal — no read-then-write race.
+  // ── Idempotency gate (Sprint 0) ──────────────────────────────────────────────
+  // Meta retries on timeout/non-200, so the same wamid can arrive twice. The
+  // unique-violation on insert IS the dedup signal — no read-then-write race.
   if (messageId) {
     const { error } = await supabase
       .from('wa_inbound_dedup')
@@ -146,7 +152,7 @@ async function processMessage(body: unknown): Promise<void> {
     wa_message_id: messageId,
   })
 
-  // ── Registration check ───────────────────────────────────────────────────────
+  // ── Registration + org resolution (T1.6) ─────────────────────────────────────
   const { data: registered } = await supabase
     .from('wa_registered_numbers')
     .select('*')
@@ -160,13 +166,71 @@ async function processMessage(body: unknown): Promise<void> {
     return
   }
 
+  // Resolve the org from the sender's registered number. Never write an un-orged
+  // row: a registered number with no resolvable org is quarantined with a reply.
+  const orgId: string | null = (registered as any).org_id ?? null
+  if (!orgId) {
+    console.error('[wa-webhook] registered number has no org_id; quarantining:', from)
+    await sendWA(from, "Your account isn't fully set up yet. Please contact your manager.")
+    return
+  }
+
   const senderName: string = registered.name
 
-  // ── Cleanup: process any entries stuck in AWAITING_CONTEXT past their deadline ─
+  // ── processing_job: the promise-to-respond (T1.2) ────────────────────────────
+  // Created PROCESSING and keyed by wamid (idempotent alongside the dedup gate).
+  let jobId: string | null = null
+  if (messageId) {
+    try {
+      const r = await createJob(supabase, {
+        wamid: messageId, org_id: orgId, sender_number: from, message_type: messageType,
+      })
+      if (r.duplicate) {
+        console.log('[wa-webhook] job already exists for wamid, skipping:', messageId)
+        return
+      }
+      jobId = r.jobId
+    } catch (e) {
+      // Don't drop a real message if job bookkeeping fails; process anyway.
+      console.error('[wa-webhook] createJob error (continuing without job):', e)
+    }
+  }
+
+  // ── Per-sender lock (T1.5) → process → terminal state (T1.7) ─────────────────
+  const lockKey = messageId || from
+  await acquireSenderLock(supabase, from, lockKey)
+  try {
+    await runLegacyProcessing(supabase, message, from, senderName, registered, messageType)
+    if (jobId) await markJob(supabase, jobId, 'WRITTEN')
+  } catch (e) {
+    console.error('[wa-webhook] processing error:', e)
+    if (jobId) {
+      await markJob(supabase, jobId, 'FAILED', (e as Error)?.message ?? String(e))
+      // Failure reply goes through the outbox (same dedup_key the watchdog uses,
+      // so a crash-then-watchdog never double-sends).
+      await enqueueJobFailure(supabase, jobId, orgId, from, messageId)
+    }
+  } finally {
+    await releaseSenderLock(supabase, from, lockKey)
+  }
+}
+
+// ── Legacy processor (unchanged logic) — wrapped, not replaced ──────────────────
+// This is the existing _session/_classify/_handlers routing path. Sprint 1 wraps
+// it with job state + per-sender lock; the later cutover replaces it.
+async function runLegacyProcessing(
+  supabase: ReturnType<typeof createClient>,
+  message: any,
+  from: string,
+  senderName: string,
+  registered: any,
+  messageType: string,
+): Promise<void> {
+  // Cleanup: process any entries stuck in AWAITING_CONTEXT past their deadline.
   await processExpiredImageEntries(supabase, from, senderName)
     .catch((e) => console.error('[wa-webhook] processExpiredImageEntries error:', e))
 
-  // ── Image always wins — clear any stale session and route to image handler ────
+  // Image always wins — clear any stale session and route to image handler.
   if (messageType === 'image') {
     const staleSession = await getSession(supabase, from)
     if (staleSession) await clearSession(supabase, from)
@@ -174,21 +238,19 @@ async function processMessage(body: unknown): Promise<void> {
     return
   }
 
-  // ── Session check (multi-turn conversation) ──────────────────────────────────
+  // Session check (multi-turn conversation).
   const session = await getSession(supabase, from)
   if (session) {
     await handleSessionReply(supabase, session, message, from, senderName)
     return
   }
 
-  // ── Fresh message: type-specific routing ─────────────────────────────────────
-
   if (messageType === 'audio') {
     await sendWA(from, '🎤 Voice notes coming soon! Please type your message for now.')
     return
   }
 
-  // Text messages: classify then dispatch
+  // Text messages: classify then dispatch.
   const text           = (message.text?.body ?? '') as string
   const classification = await classifyMessage(text)
 
