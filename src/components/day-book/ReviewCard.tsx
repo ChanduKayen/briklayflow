@@ -30,6 +30,7 @@ import {
   fileRoughEntry, rejectRoughEntry, createParty, isResolved, type ResolvedFields,
 } from './fileEntry';
 import { useSwipeTriage } from './useSwipeTriage';
+import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../../lib/trades';
 
 type PartyType = 'Worker' | 'Vendor' | 'Client';
 
@@ -92,6 +93,8 @@ export function ReviewCard({
   const [editing, setEditing] = useState<Field>(null);
   const [q, setQ] = useState('');
   const [newType, setNewType] = useState<PartyType>('Vendor');
+  const [newCategory, setNewCategory] = useState('');
+  const [newCategoryOther, setNewCategoryOther] = useState('');
   const [creating, setCreating] = useState(false);
   const openEditor = (f: Field, seed = '') => { setQ(seed); setEditing(f); };
   const mark = (f: string) => touched.current.add(f);
@@ -101,10 +104,11 @@ export function ReviewCard({
     if (!nm || creating) return;
     setCreating(true);
     try {
-      const party = await createParty(nm, newType, orgId);
+      const category = newCategory === OTHER_TRADE ? newCategoryOther : newCategory;
+      const party = await createParty(nm, newType, orgId, category);
       qc.invalidateQueries({ queryKey: ['daybook_stakeholders'] });
       qc.invalidateQueries({ queryKey: ['stakeholders'] });
-      setPayeeId(party.id); setPayeeName(party.name); mark('payee'); setEditing(null);
+      setPayeeId(party.id); setPayeeName(party.name); mark('payee'); setEditing(null); setNewCategory(''); setNewCategoryOther('');
     } catch (err: unknown) {
       onError(err instanceof Error ? err.message : "Couldn't add the party");
     } finally {
@@ -361,18 +365,31 @@ export function ReviewCard({
                       <p className="mb-2 inline-flex items-center gap-1.5" style={{ color: V.sys, ...font, ...T.xs }}>
                         <UserPlus size={12} style={{ color: V.faint }} /> Add "{q.trim()}" as a new party
                       </p>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <div className="flex gap-1">
-                          {(['Worker', 'Vendor', 'Client'] as PartyType[]).map(t => (
-                            <button key={t} onClick={() => setNewType(t)} className="px-2.5 py-1 rounded-full font-medium" style={newType === t ? { background: V.terraWash, border: `1px solid ${V.askLine}`, color: V.terraDeep, ...font, ...T.xs } : { background: V.field, color: V.sys, ...font, ...T.xs }}>
-                              {t}
-                            </button>
-                          ))}
-                        </div>
-                        <button onClick={addParty} disabled={creating} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium ml-auto" style={{ background: terraGrad, color: '#fff', ...font, ...T.xs }}>
+                      <div className="flex gap-1 flex-wrap">
+                        {(['Worker', 'Vendor', 'Client'] as PartyType[]).map(t => (
+                          <button key={t} onClick={() => { setNewType(t); setNewCategory(''); setNewCategoryOther(''); }} className="px-2.5 py-1 rounded-full font-medium" style={newType === t ? { background: V.terraWash, border: `1px solid ${V.askLine}`, color: V.terraDeep, ...font, ...T.xs } : { background: V.field, color: V.sys, ...font, ...T.xs }}>
+                            {t}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-2 mt-2">
+                        {newType !== 'Client' ? (
+                          <select value={newCategory} onChange={(e) => { setNewCategory(e.target.value); setNewCategoryOther(''); }} className="px-2.5 rounded-lg flex-1 outline-none appearance-none" style={{ background: V.field, color: newCategory ? V.ink : V.faint, height: 34, ...font, ...T.xs }}>
+                            <option value="">Trade / category…</option>
+                            {(newType === 'Worker' ? WORKER_TRADE_GROUPS : VENDOR_TRADE_GROUPS).map(g => (
+                              <optgroup key={g.group} label={g.group}>
+                                {g.trades.map(t => <option key={t} value={t}>{t}</option>)}
+                              </optgroup>
+                            ))}
+                          </select>
+                        ) : <span className="flex-1" />}
+                        <button onClick={addParty} disabled={creating} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium shrink-0" style={{ background: terraGrad, color: '#fff', ...font, ...T.xs }}>
                           {creating ? 'Adding…' : <>Add &amp; link</>}
                         </button>
                       </div>
+                      {newType !== 'Client' && newCategory === OTHER_TRADE && (
+                        <input value={newCategoryOther} onChange={(e) => setNewCategoryOther(e.target.value)} autoFocus placeholder="Specify trade…" className="px-2.5 rounded-lg w-full outline-none mt-2" style={{ background: V.field, color: V.ink, height: 34, ...font, ...T.xs }} />
+                      )}
                     </div>
                   )}
                 </>

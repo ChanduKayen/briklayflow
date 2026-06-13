@@ -46,7 +46,8 @@
       "PowerShell(git commit *)",
       "Bash(git checkout *)",
       "Bash(git clean *)",
-      "Bash(git commit -q -m 'fix\\(landing\\): stop manifesto layout shift during brick wipe *)"
+      "Bash(git commit -q -m 'fix\\(landing\\): stop manifesto layout shift during brick wipe *)",
+      "Bash(grep -r \"CREATE TABLE.*transaction\\\\|CREATE TABLE public\\\\\\\\.transaction\" . --include=\"*.sql\")"
     ]
   }
 }

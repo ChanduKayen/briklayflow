@@ -83,13 +83,14 @@ export async function createParty(
   name: string,
   type: 'Worker' | 'Vendor' | 'Client',
   orgId: string,
+  category?: string,
 ): Promise<{ id: string; name: string }> {
   const newId = `STK-${Math.floor(1000 + Math.random() * 9000)}`;
   const { data, error } = await supabase.from('stakeholders').insert([{
     stakeholder_id: newId,
     name: name.trim(),
     type,
-    category: type,
+    category: category?.trim() || type,
     contact: null,
     org_id: orgId,
   }]).select().single();
