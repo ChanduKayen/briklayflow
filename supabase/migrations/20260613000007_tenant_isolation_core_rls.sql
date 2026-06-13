@@ -1,10 +1,10 @@
--- ═══════════════════════════════════════════════════════════════════════════
--- Sprint 1.0 — Systemic tenant isolation on core-table RLS
+-- ===========================================================================
+-- Sprint 1.0 - Systemic tenant isolation on core-table RLS
 --
 -- Problem: the global "Principal full access" policy (current_user_role()='principal')
 -- and other current_user_role()-based role policies grant access by GLOBAL role with
 -- NO org check. Because RLS policies for a command are OR-combined, these override the
--- correct org-scoped "org member access" policies — a principal/admin of org A could
+-- correct org-scoped "org member access" policies - a principal/admin of org A could
 -- read AND write org B's rows. current_user_role() reads the single global
 -- user_profiles.role; the real per-org role lives on org_memberships.
 --
@@ -15,9 +15,9 @@
 -- Scope: core financial/tenant tables only. NOT touched: sku_directory (global
 -- catalog), rough_entries / wa_* (WhatsApp), storage buckets. Already-clean tables
 -- (po_approvals, po_grn, po_grn_items, procurement) are left as-is.
--- ═══════════════════════════════════════════════════════════════════════════
+-- ===========================================================================
 
--- ── T1.0-A: org-aware role helper ──────────────────────────────────────────────
+-- -- T1.0-A: org-aware role helper ----------------------------------------------
 -- "Is the caller an active member of THIS org with one of these roles?"
 -- SECURITY DEFINER + locked search_path so reading org_memberships does not recurse
 -- into org_memberships' own RLS (mirrors get_my_org_ids()).
@@ -41,7 +41,7 @@ $$;
 REVOKE ALL     ON FUNCTION public.has_role_in_org(uuid, text[]) FROM public;
 GRANT  EXECUTE ON FUNCTION public.has_role_in_org(uuid, text[]) TO authenticated, anon, service_role;
 
--- ── T1.0-B (1): scoped sweep — drop every role-without-org policy ───────────────
+-- -- T1.0-B (1): scoped sweep - drop every role-without-org policy ---------------
 -- Drops, on the in-scope core tables only, any policy whose USING/CHECK references
 -- current_user_role() plus the global "Principal full access" policy. Programmatic
 -- so it catches policies regardless of name; scoped so it never touches out-of-scope
@@ -69,10 +69,10 @@ BEGIN
   END LOOP;
 END $$;
 
--- ── T1.0-B (2): re-assert one clean org-scoped policy per org table ─────────────
+-- -- T1.0-B (2): re-assert one clean org-scoped policy per org table -------------
 -- Principals/management are org_memberships members too, so "org member access"
 -- (FOR ALL within their org set) already grants them full SAME-org CRUD. This is the
--- existing, correct regular-member policy — re-created uniformly with get_my_org_ids()
+-- existing, correct regular-member policy - re-created uniformly with get_my_org_ids()
 -- (standardizing the few that used a raw org_memberships subquery). No cross-org grant.
 DO $$
 DECLARE
@@ -100,7 +100,7 @@ BEGIN
   END LOOP;
 END $$;
 
--- ── T1.0-B (3): user_profiles — org-scoped, self-aware ─────────────────────────
+-- -- T1.0-B (3): user_profiles - org-scoped, self-aware -------------------------
 -- Rebuilt explicitly: self can always read/update own profile (needed pre-membership
 -- during onboarding); members can read profiles in their org(s) (team lists); org
 -- admins manage profiles in their org via the new org-aware helper. No global role.
@@ -131,7 +131,7 @@ BEGIN
     WITH CHECK (public.has_role_in_org(org_id, 'principal', 'management'));
 END $$;
 
--- ── T1.0-B (4): cost_codes — global catalog, not tenant data ───────────────────
+-- -- T1.0-B (4): cost_codes - global catalog, not tenant data -------------------
 -- cost_codes has no org_id (a shared, seed-loaded taxonomy identical for every org).
 -- The dropped "Principal full access" wrongly restricted the shared catalog to
 -- principals. Replace with authenticated read; writes happen only via migrations/seed.
@@ -147,9 +147,9 @@ BEGIN
     FOR SELECT TO authenticated USING (true);
 END $$;
 
--- ── T1.0-C: po_line_items — auto-fill org_id from parent PO ─────────────────────
+-- -- T1.0-C: po_line_items - auto-fill org_id from parent PO ---------------------
 -- org_id already exists (backfilled, NOT NULL, indexed). Add a BEFORE INSERT trigger
--- so direct/RPC inserts that omit org_id still get it from the parent PO — consistent
+-- so direct/RPC inserts that omit org_id still get it from the parent PO - consistent
 -- with the po_approvals fix.
 CREATE OR REPLACE FUNCTION public.po_line_items_set_org_id()
 RETURNS trigger

@@ -1,10 +1,10 @@
--- ═══════════════════════════════════════════════════════════════════════════
+-- ===========================================================================
 -- ROLLBACK for 20260613000007_tenant_isolation_core_rls.sql
 --
--- ⚠️  WARNING: running this RE-OPENS the systemic tenant-isolation hole (global
+-- !! WARNING: running this RE-OPENS the systemic tenant-isolation hole (global
 --     "Principal full access" / current_user_role() policies). Only use to revert.
 --     Run manually in the SQL editor; it is intentionally NOT in supabase/migrations.
--- ═══════════════════════════════════════════════════════════════════════════
+-- ===========================================================================
 
 -- Undo T1.0-C trigger + helper
 DROP TRIGGER  IF EXISTS po_line_items_set_org_id ON public.po_line_items;

@@ -1,22 +1,22 @@
--- ═══════════════════════════════════════════════════════════════════════════
--- T1.0-D — Tenant isolation verification harness
+-- ===========================================================================
+-- T1.0-D - Tenant isolation verification harness
 --
 -- Proves cross-org isolation on every core table that has a direct org_id, using
--- ONLY the org_id column (schema-agnostic — the core tables' full schemas don't
+-- ONLY the org_id column (schema-agnostic - the core tables' full schemas don't
 -- live in the repo). Strategy: take the existing test data (all in the one active
 -- org = "A"), temporarily relabel ONE row per table into a synthetic org "B", then
 -- assert, simulating each user via JWT claims:
---   • principal A: sees 0 of B's rows, and cannot UPDATE/DELETE them; same-org count
+--   * principal A: sees 0 of B's rows, and cannot UPDATE/DELETE them; same-org count
 --     drops by exactly 1 (same-org access intact);
---   • principal B and a dual-A+B member: DO see B's row;
---   • principal C (third org): sees 0.
+--   * principal B and a dual-A+B member: DO see B's row;
+--   * principal C (third org): sees 0.
 --
--- Runs in ONE transaction and ROLLBACKs at the end — no test data persists.
+-- Runs in ONE transaction and ROLLBACKs at the end - no test data persists.
 -- A failed assertion RAISEs (aborting the tx). Success prints a PASSED notice.
 --
 -- Run in the Supabase SQL editor. Requires the role to switch into 'authenticated'
 -- (the SQL editor's postgres role can). Read the Messages/Notices for results.
--- ═══════════════════════════════════════════════════════════════════════════
+-- ===========================================================================
 
 BEGIN;
 
@@ -37,7 +37,7 @@ DECLARE
     'wo_milestones','purchase_orders','project_budgets','client_invoices',
     'client_payments','po_line_items','po_approvals','po_grn','po_grn_items',
     'user_profiles','material_requests','rfqs','goods_receipts','vendor_invoices',
-    -- parent-scoped children (no direct org_id) — auto-skipped, listed for the record:
+    -- parent-scoped children (no direct org_id) - auto-skipped, listed for the record:
     'mr_items','rfq_items','rfq_quotes','po_items','grn_items','invoice_items'
   ];
   total int; a_before int; a_after int; a_sees_b int; a_upd int; a_del int;
@@ -75,7 +75,7 @@ BEGIN
     SELECT EXISTS (SELECT 1 FROM information_schema.columns
                    WHERE table_schema='public' AND table_name=tbl AND column_name='org_id')
       INTO has_orgid;
-    IF NOT has_orgid THEN skipped:=skipped+1; RAISE NOTICE 'SKIP %  (no direct org_id — parent-scoped or absent)', tbl; CONTINUE; END IF;
+    IF NOT has_orgid THEN skipped:=skipped+1; RAISE NOTICE 'SKIP %  (no direct org_id - parent-scoped or absent)', tbl; CONTINUE; END IF;
 
     EXECUTE format('SELECT count(*) FROM public.%I WHERE org_id=$1', tbl) INTO total USING a_org;
     IF total = 0 THEN skipped:=skipped+1; RAISE NOTICE 'SKIP %  (no org-A rows to relabel)', tbl; CONTINUE; END IF;
@@ -135,10 +135,10 @@ BEGIN
   EXECUTE 'SELECT count(*) FROM public.cost_codes' INTO total;
   RESET ROLE;
 
-  RAISE NOTICE '──────────────────────────────────────────────────────────';
-  RAISE NOTICE 'TENANT ISOLATION HARNESS PASSED — % table(s) verified, % skipped.', tested, skipped;
+  RAISE NOTICE '----------------------------------------------------------';
+  RAISE NOTICE 'TENANT ISOLATION HARNESS PASSED - % table(s) verified, % skipped.', tested, skipped;
   RAISE NOTICE 'cost_codes rows visible to authenticated: %', total;
-  IF total = 0 THEN RAISE WARNING 'cost_codes empty or unreadable to authenticated — check catalog/policy'; END IF;
+  IF total = 0 THEN RAISE WARNING 'cost_codes empty or unreadable to authenticated - check catalog/policy'; END IF;
 END $$;
 
 ROLLBACK;
