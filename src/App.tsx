@@ -4,7 +4,6 @@ import { useAuth } from './lib/auth/AuthProvider';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
 import { Routes, Route, Navigate, useNavigate, Link, useLocation } from 'react-router-dom';
 import { supabase } from './lib/supabase';
-import { supabaseAdmin } from './lib/supabase-admin';
 import type { Session } from '@supabase/supabase-js';
 import { Edit2, Trash2 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -94,6 +93,24 @@ import { useBadgeRealtime } from './hooks/useBadgeRealtime';
 // 700 ms — supabase.auth.signOut() fires (network; non-blocking visually)
 // 900 ms — center content fades out, overlay starts fading out (380 ms ease)
 // 1 280 ms — onDismiss() called — signingOut=false, overlay unmounts (invisible)
+
+// Calls the admin-users edge function (privileged auth.admin ops run server-side
+// with the service-role key in function secrets — never in the browser). Surfaces
+// the function's error message whether it arrives as a 2xx body or an HTTP error.
+async function invokeAdminUsers(body: Record<string, unknown>) {
+  const { data, error } = await supabase.functions.invoke('admin-users', { body });
+  if (error) {
+    let message = error.message;
+    try {
+      const ctx = (error as any).context;
+      const parsed = ctx && typeof ctx.json === 'function' ? await ctx.json() : null;
+      if (parsed?.error) message = parsed.error;
+    } catch { /* fall back to error.message */ }
+    throw new Error(message);
+  }
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
 
 type SignOutCtx = { triggerSignOut: () => void };
 const SignOutContext = createContext<SignOutCtx>({ triggerSignOut: () => {} });
@@ -1823,9 +1840,7 @@ function Team({ session }: { session: Session }) {
 
   const deleteUser = useMutation({
     mutationFn: async (userId: string) => {
-      if (!supabaseAdmin) throw new Error("Service Role Key is missing. Cannot delete users.");
-      const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
-      if (error) throw error;
+      await invokeAdminUsers({ action: 'delete', userId });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['team'] });
@@ -1836,7 +1851,6 @@ function Team({ session }: { session: Session }) {
 
   const createUser = useMutation({
     mutationFn: async (formData: FormData) => {
-      if (!supabaseAdmin) throw new Error("Service Role Key is missing. Cannot add users.");
       const email = formData.get('email') as string;
       const password = formData.get('password') as string;
       const name = formData.get('name') as string;
@@ -1844,24 +1858,9 @@ function Team({ session }: { session: Session }) {
       if (role === 'principal' && team?.some(u => u.role === 'principal')) {
         throw new Error('Only one Principal is allowed per organisation. Update the existing Principal first.');
       }
-      const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-        email, password, email_confirm: true, user_metadata: { full_name: name }
-      });
-      if (authError) throw authError;
-
-      const orgId = profile?.org_id;
-      if (!orgId) throw new Error('Cannot determine organisation — refresh the page and try again.');
-
-      // Atomically: sync user_profiles.role + upsert org_memberships in one transaction.
-      const { data: finalizeData, error: finalizeError } = await supabase.rpc('finalize_new_member', {
-        p_user_id: authData.user.id,
-        p_org_id:  orgId,
-        p_role:    role,
-      });
-      if (finalizeError) throw finalizeError;
-      if (!finalizeData?.success) throw new Error(finalizeData?.error ?? 'Failed to set up user account');
-
-      return authData;
+      // Auth user creation + membership setup run server-side in the admin-users
+      // edge function (service-role key stays in function secrets, never the client).
+      return await invokeAdminUsers({ action: 'create', email, password, name, role });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['team'] });
@@ -1899,12 +1898,6 @@ function Team({ session }: { session: Session }) {
           {showAddForm ? 'Cancel' : 'Add User'}
         </button>
       </div>
-
-      {!supabaseAdmin && (
-        <div className="mb-4 p-4 bg-tertiary-fixed text-on-tertiary-fixed rounded-xl border border-on-tertiary-container/20 text-body-sm">
-          <strong>Missing Admin Key:</strong> Add <code className="font-data-mono">VITE_SUPABASE_SERVICE_ROLE_KEY</code> to <code className="font-data-mono">.env.local</code>.
-        </div>
-      )}
 
       {/* â"€â"€ A. Invite form â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
       {isAdmin && (
@@ -2068,7 +2061,7 @@ function Team({ session }: { session: Session }) {
                 </option>
               </select>
             </div>
-            <div className="md:col-span-2 flex justify-end"><button type="submit" className="bk-btn" disabled={createUser.isPending || !supabaseAdmin}>{createUser.isPending ? 'Saving...' : 'Create User'}</button></div>
+            <div className="md:col-span-2 flex justify-end"><button type="submit" className="bk-btn" disabled={createUser.isPending}>{createUser.isPending ? 'Saving...' : 'Create User'}</button></div>
           </form>
           {createUser.isError && <p className="text-error mt-4 text-body-sm">Error: {createUser.error.message}</p>}
         </div>
@@ -2113,7 +2106,7 @@ function Team({ session }: { session: Session }) {
                   <option value="management">Management</option>
                   <option value="principal">Principal</option>
                 </select>
-                <button className="p-2 text-error hover:bg-error-container/20 rounded-lg" onClick={() => { if (confirm('Delete this user?')) deleteUser.mutate(user.id); }} disabled={deleteUser.isPending || !supabaseAdmin} title={!supabaseAdmin ? "Requires Service Role Key" : "Delete"}>
+                <button className="p-2 text-error hover:bg-error-container/20 rounded-lg" onClick={() => { if (confirm('Delete this user?')) deleteUser.mutate(user.id); }} disabled={deleteUser.isPending} title="Delete">
                   <Trash2 size={18} />
                 </button>
               </div>
