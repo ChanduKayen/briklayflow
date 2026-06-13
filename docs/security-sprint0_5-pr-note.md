@@ -61,19 +61,30 @@ fixes two clear holes (safe — a correct alternative policy already exists):
 
 Deploy: `supabase functions deploy admin-users && supabase functions deploy ai-briefing`
 
-## ⚠️ Flagged for human decision (NOT changed — risk/ambiguity)
-- **`org_invites` `"public read invite by token"` `USING (true)`** exposes every
-  pending invite (email, role, **token**, org) to anyone with the anon key — a
-  token-harvesting hole. Recommended: restrict SELECT to org admins and serve the
-  public accept page via the existing `validate_invite_token()` SECURITY DEFINER
-  RPC. Held back because it could break the invite-accept flow if that page does a
-  direct token `select` — needs confirmation first.
-- **`po_approvals`** is role-based only (no `org_id`) — not org-scoped. Fine for a
-  single org; needs a schema decision before multi-org.
-- **`documents` storage bucket is public-read** — uploaded bills/invoices are world-
-  readable by URL. Pre-existing; consider a private bucket + signed URLs.
-- **`organizations` UPDATE** is restricted to `owner_id` only; non-owner management
-  can't edit org settings (`Settings.tsx`). Confirm intended.
+## ✅ Follow-up findings — now resolved (P1–P4)
+- **P1 — `org_invites` public read (FIXED, `20260613000004`).** Dropped the
+  `USING(true)` SELECT policy. Confirmed the public/unauthenticated accept page
+  (`InviteAccept.tsx`) and auth resolver read invites only via SECURITY DEFINER
+  RPCs; all direct selects are admin-only. Added explicit anon/authenticated
+  EXECUTE grants on the accept-flow RPCs.
+- **P3 — `po_approvals` org-scoping (FIXED, `20260613000005`).** Decision:
+  multi-tenant. Added `org_id` (backfilled from parent PO, NOT NULL, indexed) +
+  auto-fill trigger; replaced role-only policies with `org member access`.
+- **P2 — `documents` bucket public-read (FIXED, `20260613000006`).** Bucket set
+  private + authenticated-read; client serves docs via signed URLs
+  (`src/lib/storage.ts`); reconcile flow sends a signed URL.
+- **P4 — `organizations` UPDATE owner-only (CONFIRMED, no change).** The only org
+  UPDATE is the workspace soft-delete; owner-only is intended.
+
+## ⚠️ Still flagged for Sprint 1 (systemic multi-tenancy)
+- **Non-org-aware `current_user_role()` policies + the global `"Principal full
+  access"` policy** on `po_line_items`, `po_grn`, the procurement tables
+  (`rfqs`/`rfq_items`/`rfq_quotes`/`material_requests`/…), and all core tables are
+  the *same* cross-tenant hole P3 fixed on `po_approvals`. A principal/admin of one
+  org can reach another org's rows. Needs the same org-scoping pass in Sprint 1.
+- **`rough-entry-media` bucket is public-read** (WhatsApp proof images). Left public
+  because the AI vision edge functions fetch those URLs directly; privatizing needs
+  those functions to download via service-role/signed URLs first.
 
 ## 🔑 Rotation required before/at merge (human dashboard action — not done here)
 The exposed keys were live in the bundle and must be rotated:
