@@ -13,8 +13,50 @@ import {
 } from './_handlers.ts'
 
 const WA_VERIFY_TOKEN      = Deno.env.get('WA_VERIFY_TOKEN')!
+const WA_APP_SECRET        = Deno.env.get('WA_APP_SECRET')        // Meta App → Settings → Basic → App Secret
 const SUPABASE_URL         = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+
+/**
+ * Verify the X-Hub-Signature-256 header against the raw request body.
+ * Header format: `sha256=<hex>`, where <hex> is HMAC-SHA256(rawBody) keyed by
+ * the Meta App Secret. The HMAC must be computed over the bytes exactly as
+ * received — never over a re-serialized object.
+ *
+ * Fails closed: a missing secret or missing/malformed signature returns false.
+ */
+async function verifyMetaSignature(rawBody: string, header: string | null): Promise<boolean> {
+  if (!WA_APP_SECRET) {
+    console.error('[wa-webhook] WA_APP_SECRET not configured — rejecting (fail closed)')
+    return false
+  }
+  if (!header?.startsWith('sha256=')) return false
+  const theirHex = header.slice('sha256='.length).trim()
+
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(WA_APP_SECRET),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  )
+  const sigBuf = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(rawBody))
+  const ourHex = Array.from(new Uint8Array(sigBuf))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+
+  return constantTimeEqual(ourHex, theirHex)
+}
+
+/** Length-safe, constant-time string comparison — no early return on mismatch. */
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  }
+  return diff === 0
+}
 
 serve(async (req) => {
   // ── GET: Meta webhook verification ──────────────────────────────────────────
@@ -33,7 +75,23 @@ serve(async (req) => {
 
   // ── POST: Incoming messages ──────────────────────────────────────────────────
   if (req.method === 'POST') {
-    const body = await req.json()
+    // Read the raw body ONCE: the signature is an HMAC over these exact bytes.
+    // Re-serializing (JSON.stringify of a parsed object) would change whitespace
+    // / key order and never match.
+    const rawBody = await req.text()
+
+    const valid = await verifyMetaSignature(rawBody, req.headers.get('x-hub-signature-256'))
+    if (!valid) {
+      console.warn('[wa-webhook] rejected POST with missing/invalid signature')
+      return new Response('Forbidden', { status: 403 })
+    }
+
+    let body: unknown
+    try {
+      body = JSON.parse(rawBody)
+    } catch {
+      return new Response('Bad Request', { status: 400 })
+    }
 
     // Respond 200 to Meta immediately (< 5 s requirement).
     // Deno keeps the event loop alive until the background promise settles.
@@ -59,6 +117,24 @@ async function processMessage(body: unknown): Promise<void> {
   const from        = message.from        as string
   const messageId   = message.id          as string
   const messageType = message.type        as string
+
+  // ── Idempotency gate ─────────────────────────────────────────────────────────
+  // Meta retries on timeout/non-200, so the same wamid can arrive twice. Gate as
+  // early as wamid is readable, before logging/dispatch. The unique-violation on
+  // insert IS the dedup signal — no read-then-write race.
+  if (messageId) {
+    const { error } = await supabase
+      .from('wa_inbound_dedup')
+      .insert({ wamid: messageId })
+    if (error) {
+      if (error.code === '23505') {
+        console.log('[wa-webhook] duplicate wamid, skipping:', messageId)
+        return // already processed; already acked 200
+      }
+      // Non-duplicate DB error: log but don't drop a real message.
+      console.error('[wa-webhook] dedup insert error (continuing):', error)
+    }
+  }
 
   // Log every inbound message for audit
   await logMessage(supabase, {
