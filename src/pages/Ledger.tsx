@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { resolveDocUrl } from '../lib/storage';
 import { usePeek } from '../context/PeekContext';
 import type { Stakeholder, Project } from '../types';
 import type { Session } from '@supabase/supabase-js';
@@ -762,7 +763,7 @@ export default function Ledger({ session }: { session: Session }) {
                         onRowClick={() => navigate(`/ledger/${txn.txn_id}`)}
                         onToggleSelect={(e) => { e.stopPropagation(); toggleTxn(txn.txn_id); }}
                         onAnchorClick={() => openPeek('TRANSACTION', txn.txn_id)}
-                        onAttach={() => proofUrl && setLightboxUrl(proofUrl)}
+                        onAttach={async () => { const u = await resolveDocUrl(proofUrl); if (u) setLightboxUrl(u); }}
                         onAmountDown={() => { setIsDragging(true); setSumSel(new Set([txn.txn_id])); }}
                         onAmountEnter={() => { if (isDragging) setSumSel(prev => new Set(prev).add(txn.txn_id)); }}
                       />

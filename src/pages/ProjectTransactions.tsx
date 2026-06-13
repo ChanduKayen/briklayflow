@@ -4,6 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
+import { useSignedDocUrl } from '../lib/storage'
 import { usePeek } from '../context/PeekContext'
 import { useUserProfile } from '../App'
 import { useSnackbar } from '../components/Snackbar'
@@ -15,6 +16,14 @@ import { ImageLightbox } from '../components/ImageLightbox'
 import { deriveDirection } from '../lib/transactions'
 
 const PAGE_SIZE = 25
+
+/** Row proof thumbnail — resolves the stored (private-bucket) URL to a signed
+ *  URL for display, and opens the lightbox with the signed URL on click. */
+function ProofThumb({ stored, onOpen }: { stored: string; onOpen: (signed: string) => void }) {
+  const signed = useSignedDocUrl(stored)
+  if (!signed) return null
+  return <img src={signed} alt="proof" className="w-8 h-8 rounded-md object-cover cursor-pointer border border-black/[0.08] hover:opacity-80 transition-opacity mx-auto" onClick={(e) => { e.stopPropagation(); onOpen(signed) }} />
+}
 
 type DatePreset = 'today' | 'week' | 'month' | 'last_month' | 'quarter' | 'fy' | 'all' | 'custom'
 
@@ -655,7 +664,7 @@ export default function ProjectTransactions({ session }: { session: Session }) {
                         </td>
                         <td className="px-3 align-middle w-12 text-center" onClick={(e) => e.stopPropagation()}>
                           {isFirstInGroup && proofUrl && (
-                            <img src={proofUrl} alt="proof" className="w-8 h-8 rounded-md object-cover cursor-pointer border border-black/[0.08] hover:opacity-80 transition-opacity mx-auto" onClick={(e) => { e.stopPropagation(); setLightboxUrl(proofUrl) }} />
+                            <ProofThumb stored={proofUrl} onOpen={setLightboxUrl} />
                           )}
                         </td>
                         <td className="px-4 align-middle">

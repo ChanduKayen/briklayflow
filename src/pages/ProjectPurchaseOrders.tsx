@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import confetti from 'canvas-confetti'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
+import { openDoc } from '../lib/storage'
 import { useUserProfile } from '../App'
 import { useSnackbar } from '../components/Snackbar'
 import { PageSkeleton } from '../components/SkeletonLoader'
@@ -167,7 +168,7 @@ function BillUploadCell({ po, canManage, onUpdate, showSnackbar }: { po: any; ca
   const [uploading, setUploading] = useState(false)
   const billUrl = po.vendor_bill_url || po.vendor_bill_doc_url
 
-  if (billUrl) return <td className="px-4 py-4" onClick={e => e.stopPropagation()}><a href={billUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-[12px] font-medium text-green-700 hover:text-green-800 transition-colors"><span className="material-symbols-outlined text-[14px]">description</span>View</a></td>
+  if (billUrl) return <td className="px-4 py-4" onClick={e => e.stopPropagation()}><button type="button" onClick={() => openDoc(billUrl)} className="flex items-center gap-1 text-[12px] font-medium text-green-700 hover:text-green-800 transition-colors"><span className="material-symbols-outlined text-[14px]">description</span>View</button></td>
   if (!canManage) return <td className="px-4 py-4"><span className="text-on-surface-variant/20 text-[12px]">—</span></td>
 
   return (

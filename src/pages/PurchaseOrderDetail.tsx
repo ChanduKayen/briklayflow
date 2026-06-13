@@ -4,6 +4,7 @@ import Breadcrumb from '../components/Breadcrumb';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import confetti from 'canvas-confetti';
 import { supabase } from '../lib/supabase';
+import { openDoc, resolveDocUrl } from '../lib/storage';
 import { useSnackbar } from '../components/Snackbar';
 import { PageSkeleton } from '../components/SkeletonLoader';
 import { jsPDF } from 'jspdf';
@@ -262,10 +263,10 @@ function BillSummaryCard({ po, activeTxns, onNavigate }: { po: any; activeTxns: 
           {po.vendor_bill_date && <p className="text-[11px] text-on-surface-variant/50">{fmtDate(po.vendor_bill_date)}</p>}
         </div>
         {billUrl && (
-          <a href={billUrl} target="_blank" rel="noopener noreferrer"
+          <button type="button" onClick={() => openDoc(billUrl)}
             className="text-[12px] text-[#C8603A] hover:underline flex items-center gap-1">
             View bill <span className="material-symbols-outlined text-[13px]">open_in_new</span>
-          </a>
+          </button>
         )}
       </div>
       <div className="space-y-2">
@@ -637,7 +638,10 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
         body.bill_base64   = await fileToBase64Str(file);
         body.bill_mime_type = file.type || 'image/jpeg';
       } else if (po?.vendor_bill_doc_url) {
-        body.bill_url = po.vendor_bill_doc_url;
+        // documents bucket is private — send a short-lived signed URL the
+        // reconcile function can fetch (it does a plain fetch(bill_url)).
+        body.bill_url = await resolveDocUrl(po.vendor_bill_doc_url);
+        if (!body.bill_url) throw new Error('Could not access the attached bill document');
       } else {
         throw new Error('No bill document available — upload the vendor bill image first');
       }
