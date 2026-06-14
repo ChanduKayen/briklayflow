@@ -3,13 +3,16 @@
 // bundles each function separately, so cross-function import isn't practical --
 // this is the same logic, co-located, not a new approach).
 //
-// Bands (mirror the SKU_* thresholds, configurable as TXN_*):
-//   auto    (>= TXN_AUTO_THRESHOLD, default 0.82)  -> use silently, don't ask
-//   confirm (>= TXN_CONFIRM_THRESHOLD, default 0.60) -> use but surface ("-> The Pride?")
-//   open    (below, or no match)                    -> keep raw, ask only if core
+// Bands (configurable as TXN_*). Sprint 5 A2: PAYEE and PROJECT have SEPARATE auto
+// thresholds -- attributing a payment to the wrong PERSON is worse than the wrong
+// project, so payee needs near-exact for auto; anything fuzzy -> confirm (buttons).
+//   auto    (>= the kind's auto threshold) -> use silently, don't ask
+//   confirm (>= TXN_CONFIRM)               -> use but surface (reply buttons)
+//   open    (below, or no match)           -> keep raw, ask only if core
 
-const TXN_AUTO    = Number(Deno.env.get('TXN_AUTO_THRESHOLD')    ?? '0.82')
-const TXN_CONFIRM = Number(Deno.env.get('TXN_CONFIRM_THRESHOLD') ?? '0.60')
+const TXN_PAYEE_AUTO   = Number(Deno.env.get('TXN_PAYEE_AUTO_THRESHOLD')   ?? '0.95') // near-exact
+const TXN_PROJECT_AUTO = Number(Deno.env.get('TXN_PROJECT_AUTO_THRESHOLD') ?? Deno.env.get('TXN_AUTO_THRESHOLD') ?? '0.82')
+const TXN_CONFIRM      = Number(Deno.env.get('TXN_CONFIRM_THRESHOLD')      ?? '0.60')
 
 export type Band = 'auto' | 'confirm' | 'open'
 export type Match = { band: Band; id: string | null; name: string | null; score: number; closest: { id: string; name: string }[] }
@@ -27,8 +30,8 @@ function levenshtein(a: string, b: string): number {
 function initials(name: string): string {
   return name.split(/[\s'-]+/).map((w) => w[0] || '').join('').toUpperCase()
 }
-function bandOf(score: number): Band {
-  return score >= TXN_AUTO ? 'auto' : score >= TXN_CONFIRM ? 'confirm' : 'open'
+function bandOf(score: number, autoThreshold: number): Band {
+  return score >= autoThreshold ? 'auto' : score >= TXN_CONFIRM ? 'confirm' : 'open'
 }
 
 /** Score one candidate name against the query in 0..1 (1 = exact). */
@@ -46,23 +49,23 @@ function scoreName(q: string, name: string): number {
   return Math.max(0, 1 - rel)
 }
 
-function match(raw: string | null, rows: { id: string; name: string }[]): Match {
+function match(raw: string | null, rows: { id: string; name: string }[], autoThreshold: number): Match {
   const empty: Match = { band: 'open', id: null, name: null, score: 0, closest: [] }
   if (!raw?.trim() || !rows.length) return empty
   const q = raw.toLowerCase().trim()
   const scored = rows.map((r) => ({ ...r, s: scoreName(q, r.name) })).sort((a, b) => b.s - a.s)
   const top = scored[0]
   const closest = scored.slice(0, 3).map((r) => ({ id: r.id, name: r.name }))
-  const band = bandOf(top.s)
+  const band = bandOf(top.s, autoThreshold)
   return band === 'open'
     ? { band: 'open', id: null, name: null, score: top.s, closest }
     : { band, id: top.id, name: top.name, score: top.s, closest }
 }
 
 export function matchPayee(raw: string | null, stakeholders: { stakeholder_id: string; name: string }[]): Match {
-  return match(raw, stakeholders.map((s) => ({ id: s.stakeholder_id, name: s.name })))
+  return match(raw, stakeholders.map((s) => ({ id: s.stakeholder_id, name: s.name })), TXN_PAYEE_AUTO)
 }
 
 export function matchProject(raw: string | null, projects: { project_id: string; name: string }[]): Match {
-  return match(raw, projects.map((p) => ({ id: p.project_id, name: p.name })))
+  return match(raw, projects.map((p) => ({ id: p.project_id, name: p.name })), TXN_PROJECT_AUTO)
 }

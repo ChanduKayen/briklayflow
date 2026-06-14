@@ -11,6 +11,8 @@ import {
 import { send, sendTypingIndicator } from './_format.ts'
 import { normalize } from './_normalize.ts'
 import { dispatch } from './_dispatch.ts'
+import * as M from './_messages.ts'
+// Pre-dispatch edge replies have no router language yet -> default 'en' templates.
 // Sprint 3: the 4-way router + dispatcher supersede _classify.ts (no longer in the
 // live path). Legacy _handlers/_session are reached only via the dispatcher's bridge.
 
@@ -128,13 +130,9 @@ serve(async (req) => {
       )
     } else if (inbound.kind === 'unregistered') {
       // Durable reply via the outbox (enqueued before the 200).
-      await send(supabase, inbound.from, {
-        kind: 'text', body: "You're not registered on Briklay. Contact your manager to get access.",
-      })
+      await send(supabase, inbound.from, M.mNotRegistered('en'))
     } else if (inbound.kind === 'no_org') {
-      await send(supabase, inbound.from, {
-        kind: 'text', body: "Your account isn't fully set up yet. Please contact your manager.",
-      })
+      await send(supabase, inbound.from, M.mNoOrg('en'))
     }
     // 'duplicate' / 'ignore' → nothing more to do.
 
@@ -268,21 +266,25 @@ async function processJob(
 
   // Graceful terminal replies that don't enter the legacy dispatch (still terminal + reply).
   if (norm.source_type === 'unsupported') {
-    await send(supabase, from, { kind: 'text', body: 'Sorry, I can only handle text, images, and (soon) voice notes right now.' }, { org_id: orgId, wamid: messageId })
+    await send(supabase, from, M.mUnsupported('en'), { org_id: orgId, wamid: messageId })
     if (jobId) await markJob(supabase, jobId, 'WRITTEN')
     return
   }
   if (norm.source_type === 'voice' && !norm.text.trim()) {
-    await send(supabase, from, { kind: 'text', body: 'Voice notes coming soon! For now, please type your message.' }, { org_id: orgId, wamid: messageId })
+    await send(supabase, from, M.mVoiceComingSoon('en'), { org_id: orgId, wamid: messageId })
     if (jobId) await markJob(supabase, jobId, 'WRITTEN')
     return
   }
 
-  // Feed the normalized text into the legacy path, serialized per sender.
+  // Id of a tapped LIST row / reply button, so the agent resolves by id (Sprint 5).
+  const interactiveId: string | null =
+    message?.interactive?.list_reply?.id ?? message?.interactive?.button_reply?.id ?? null
+
+  // Feed the normalized text into the dispatcher, serialized per sender.
   const lockKey = messageId || from
   await acquireSenderLock(supabase, from, lockKey)
   try {
-    await dispatch({ supabase, from, senderName, registered, wamid: messageId, orgId }, norm.text)
+    await dispatch({ supabase, from, senderName, registered, wamid: messageId, orgId, interactiveId }, norm.text)
     if (jobId) await markJob(supabase, jobId, 'WRITTEN')
   } catch (e) {
     console.error('[wa-webhook] processing error:', e)

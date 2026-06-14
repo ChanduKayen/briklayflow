@@ -9,9 +9,10 @@ import {
 } from './_conversation.ts'
 import { runConcierge } from './_agents/concierge.ts'
 import {
-  runTransaction, answerTransaction, commitInterrupted, cancelTransaction, type TxnCtx,
+  runTransaction, answerTransaction, commitInterrupted, type TxnCtx,
 } from './_agents/transaction.ts'
 import { send } from './_format.ts'
+import * as M from './_messages.ts'
 import { handleQuery } from './_handlers.ts'   // reporting/query bridge only
 
 export type DispatchCtx = {
@@ -21,21 +22,14 @@ export type DispatchCtx = {
   registered: any
   wamid: string
   orgId: string
+  interactiveId: string | null   // Sprint 5: id of a tapped LIST row / reply button
 }
 
 // Reporting/data query the router doesn't model yet -> legacy handleQuery bridge.
 const QUERY_RE = /how\s*much|how much|balance|pending|due|outstanding|ledger|total|statement|enta|entha|evariki|\?$/i
 
-// Explicit cancel/negation (distinct from interrupt). The router returns
-// ANSWERS_PENDING for any bare yes/no with pending; we split cancel here.
-const CANCEL = new Set(['no', 'nope', 'nah', 'cancel', 'stop', 'wrong', 'vaddu', 'వద్దు', 'kaadu', 'kadu', 'nahi', 'nahin', 'cheyyaddu'])
-function isCancel(t: string): boolean {
-  return CANCEL.has(t.trim().toLowerCase().replace(/[!.?]+$/, ''))
-}
-
 export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
   const { supabase, from, registered, wamid, orgId } = ctx
-  const txnCtx: TxnCtx = { supabase, from, senderName: ctx.senderName, orgId, wamid }
 
   // ── Three-tier read: OPEN -> lingering CLOSED -> fresh ──────────────────────
   const view = await getRouterView(supabase, orgId, from)
@@ -46,6 +40,8 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
 
   const d = await routeMessage({ text, pending, lingering })
   const lang = d.reply_language
+  // Agent context carries language + the tapped interactive id (resolve by id).
+  const txnCtx: TxnCtx = { supabase, from, senderName: ctx.senderName, orgId, wamid, lang, interactiveId: ctx.interactiveId }
   const chosenAgent =
     d.decision === 'ANSWERS_PENDING' ? (pending?.agent ?? 'CONCIERGE')
     : d.decision === 'NEW_INTENT' ? (d.intent_agent ?? 'CONCIERGE')
@@ -60,8 +56,9 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
   // ── ANSWERS_PENDING: route by the DB's owning agent (never the LLM's) ────────
   if (d.decision === 'ANSWERS_PENDING') {
     if (pending?.agent === 'TRANSACTION' && view.open) {
-      if (isCancel(text)) await cancelTransaction(txnCtx, view.open as ConvoRow)
-      else await answerTransaction(txnCtx, text, view.open as ConvoRow)
+      // The agent owns cancel-vs-answer (a bare "no" means "someone else" at a
+      // confirm prompt, but "discard" at an amount prompt) -- see answerTransaction.
+      await answerTransaction(txnCtx, text, view.open as ConvoRow)
     } else {
       await runConcierge(supabase, { from, orgId, wamid, text, language: lang, lingering })
       await abandonOpenConcierge(supabase, orgId, from)
@@ -100,14 +97,7 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
       return
     }
     case 'AMBIGUOUS': {
-      await send(supabase, from, {
-        kind: 'buttons',
-        body: (prefix ? prefix + '\n\n' : '') + "I didn't quite catch that -- what would you like to do?",
-        buttons: [
-          { id: 'disamb_log', title: 'Log a payment' },
-          { id: 'disamb_ask', title: 'Ask a question' },
-        ],
-      }, { org_id: orgId, wamid })
+      await send(supabase, from, M.mDisambiguate(lang, prefix), { org_id: orgId, wamid })
       await openConversation(supabase, {
         orgId, sender: from, owningAgent: 'CONCIERGE',
         pendingQuestion: 'disambiguation: log a payment or ask a question?', lastMessageId: wamid,
