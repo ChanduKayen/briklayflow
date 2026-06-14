@@ -124,6 +124,9 @@ for launch.
 - **Password reset flow + restore the "Forgot password?" link on the landing.**
   The link was removed from `AuthPanel` for launch (no reset flow exists yet);
   restore it once the reset flow ships.
+- **Add Google OAuth to Login.tsx when unifying into the `useAuth` hook.** The
+  landing `AuthPanel` has "Continue with Google" (`signInWithOAuth`); `Login.tsx`
+  does not yet — fold it into the shared hook so both entry points match.
 
 ---
 

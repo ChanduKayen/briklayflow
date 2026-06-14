@@ -8,7 +8,7 @@ import type { CSSProperties } from 'react';
 import { ArrowLeft, ArrowRight, ChevronDown, Check, Video, Phone, MoreVertical } from 'lucide-react';
 import { V, SEG, CSS, font, serif, nums, terraGrad, inkGrad, bandGrad } from '../components/landing/landingTokens';
 import Gate from '../components/landing/Gate';
-import { AppWin, Bloom } from '../components/landing/AppShell';
+import { AppWin, Bloom, ChapterTag } from '../components/landing/AppShell';
 import { VignetteCapture, VignettePO, VignetteWO, VignetteTxn } from '../components/landing/Vignettes';
 import AuthPanel from '../components/landing/AuthPanel';
 
@@ -141,7 +141,7 @@ export default function Landing() {
           <br />
           supervisor will actually use.
         </h1>
-        <p className="rise text-base sm:text-lg mt-6 mx-auto leading-relaxed" style={{ color: V.sys, maxWidth: 560, animationDelay: '.3s' }}>
+        <p className="rise text-base sm:text-lg mt-6 mx-auto leading-relaxed" style={{ color: V.sys, maxWidth: 580, animationDelay: '.3s' }}>
           Briklay asks the right questions on WhatsApp, and your team replies
           the way they already talk. What your site says becomes what your app
           shows. Verified.
@@ -199,9 +199,9 @@ export default function Landing() {
             and <b style={{ color: V.inkSoft, fontWeight: 600 }}>files</b> it.
             The books stay true without anyone learning software.
           </p>
-          <p className="bbody italic text-sm sm:text-base mt-6 mx-auto leading-relaxed" style={{ color: V.sys, maxWidth: 560, ...serif }}>
-            There's serious AI under Briklay. You'll never have to see it. You'll
-            just see the right data, arriving.
+          <p className="bbody mt-7 text-base sm:text-lg" style={{ color: V.inkSoft, ...serif, fontStyle: 'italic' }}>
+            There's serious AI under Briklay. You'll never have to see
+            it. You'll just see the right data, arriving.
           </p>
         </section>
       </Gate>
@@ -229,20 +229,35 @@ export default function Landing() {
       {/* site management — the star chapter: board and WhatsApp, side by side */}
       <section style={{ background: V.field }}>
         <div className="mx-auto px-5 sm:px-8 py-20" style={{ maxWidth: 1280 }}>
-          <p className="text-center text-xs font-medium uppercase" style={{ color: V.terraDeep, letterSpacing: '0.14em' }}>
-            Site management
-          </p>
+          <div className="text-center">
+            <ChapterTag n="05" label="Site management" />
+          </div>
           <h2 className="text-center text-3xl sm:text-4xl mt-4 leading-snug" style={{ color: V.ink, ...serif }}>
-            We don't rely on what's provided.
+            Describe your project in one line.
             <br />
-            We ask for what's needed.
+            Briklay sets it up, and runs it.
           </h2>
           <p className="text-center text-sm sm:text-base mt-5 mx-auto leading-relaxed" style={{ color: V.sys, maxWidth: 620 }}>
-            Tell Briklay the scope. It sets up the project itself: the tasks,
-            and the quality checks under each one. Then it doesn't wait for
-            reports. It asks your supervisor on WhatsApp, and keeps asking,
-            until the data is whole.
+            Type the scope the way you'd say it. Briklay creates the tasks and
+            the quality checks itself, then asks your supervisor on WhatsApp
+            for whatever is missing, and keeps asking until the data is whole.
           </p>
+          <p className="text-center text-base sm:text-lg mt-5" style={{ color: V.inkSoft, ...serif, fontStyle: 'italic' }}>
+            We don't rely on what's provided. We ask for what's needed.
+          </p>
+
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-8 mt-9">
+            {[
+              ['1', 'You describe the project, in one line.'],
+              ['2', 'Briklay creates the tasks and quality checks.'],
+              ['3', 'It asks your site on WhatsApp, and files every answer.'],
+            ].map(([n, t]) => (
+              <p key={n} className="text-sm" style={{ color: V.sys, ...font }}>
+                <b className="mr-1.5" style={{ color: V.terraDeep, ...serif, fontSize: 16 }}>{n}</b>
+                {t}
+              </p>
+            ))}
+          </div>
 
           <Gate className="relative grid sm:grid-cols-2 gap-8 sm:gap-10 mt-12 mx-auto items-start" style={{ maxWidth: 920 }}>
 
@@ -258,10 +273,10 @@ export default function Landing() {
             <div>
               <div className="flex justify-center mb-3">
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full" style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.sys, fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', ...font }}>
-                  <b style={{ color: V.terraDeep }}>You see</b>&nbsp;· the project, live in Briklay
+                  <b style={{ color: V.terraDeep }}>You see</b>&nbsp;· the project building itself
                 </span>
               </div>
-              <div className="vcard rounded-2xl p-5 sm:p-6" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
+              <div className="vcard rounded-2xl p-5 sm:p-6" style={{ background: V.surface, border: '1px solid #E3DDD4' }}>
                 <Bloom />
                 <AppWin title="Project tasks">
                 <p className="text-xs" style={{ color: V.faint, ...font }}>Describe your project</p>
@@ -408,11 +423,12 @@ export default function Landing() {
                   <b style={{ color: V.terraDeep }}>Your supervisor sees</b>&nbsp;· just a WhatsApp chat
                 </span>
               </div>
-              <div className="vcard rounded-2xl p-5 sm:p-6" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
+              <div className="vcard rounded-2xl p-5 sm:p-6" style={{ background: V.surface, border: '1px solid #E3DDD4' }}>
                 <Bloom />
               <div
-                className="mx-auto rounded-2xl overflow-hidden"
+                className="relative mx-auto rounded-2xl overflow-hidden"
                 style={{
+                  zIndex: 1,
                   maxWidth: 300,
                   background: '#ECE5DD',
                   backgroundImage: 'radial-gradient(circle at 8px 8px, rgba(69,57,42,0.05) 1.3px, transparent 1.6px), radial-gradient(circle at 21px 22px, rgba(69,57,42,0.04) 1px, transparent 1.3px)',
@@ -543,7 +559,7 @@ export default function Landing() {
         </p>
 
         <Gate className="mt-10">
-          <div className="vcard rounded-2xl p-5 sm:p-6" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
+          <div className="vcard rounded-2xl p-5 sm:p-6" style={{ background: V.surface, border: '1px solid #E3DDD4' }}>
             <Bloom />
             <div className="flex items-center justify-center gap-2 flex-wrap">
               {['Purchase orders', 'Work orders', 'Tasks'].map((t, i) => (
