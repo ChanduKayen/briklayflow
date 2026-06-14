@@ -15,20 +15,20 @@ const WA_PHONE_NUMBER_ID   = Deno.env.get('WA_PHONE_NUMBER_ID')!
 
 const BATCH = 20
 
-/** Send one WhatsApp text message. Returns {ok, error}. */
-async function sendText(to: string, text: string): Promise<{ ok: boolean; error?: string }> {
+/** POST a pre-rendered WhatsApp Cloud API body as-is. Returns {ok, error}. */
+async function postToMeta(body: unknown): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await fetch(
       `https://graph.facebook.com/v18.0/${WA_PHONE_NUMBER_ID}/messages`,
       {
         method: 'POST',
         headers: { Authorization: `Bearer ${WA_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body: text } }),
+        body: JSON.stringify(body),
       },
     )
     if (!res.ok) {
-      const body = await res.text().catch(() => '')
-      return { ok: false, error: `meta ${res.status}: ${body.slice(0, 300)}` }
+      const errBody = await res.text().catch(() => '')
+      return { ok: false, error: `meta ${res.status}: ${errBody.slice(0, 300)}` }
     }
     return { ok: true }
   } catch (e) {
@@ -67,10 +67,17 @@ serve(async (req) => {
 
   let sent = 0, failed = 0, retried = 0
   for (const row of (rows ?? []) as any[]) {
-    const text: string = row.payload?.text ?? ''
-    const result = text
-      ? await sendText(row.target, text)
-      : { ok: false, error: 'unsupported payload (no text)' }
+    // Prefer the pre-rendered body (any message type, from send()); fall back to
+    // the legacy text-render path for rows that only carry { type:'text', text }
+    // (watchdog / job-failure enqueues).
+    let result: { ok: boolean; error?: string }
+    if (row.rendered) {
+      result = await postToMeta(row.rendered)
+    } else if (row.payload?.text) {
+      result = await postToMeta({ messaging_product: 'whatsapp', to: row.target, type: 'text', text: { body: row.payload.text } })
+    } else {
+      result = { ok: false, error: 'unsupported payload (no rendered body / no text)' }
+    }
 
     if (result.ok) {
       await supabase.from('outbox')

@@ -18,6 +18,8 @@ import {
   acquireSenderLock,
   releaseSenderLock,
 } from './_spine.ts'
+import { send, sendTypingIndicator } from './_format.ts'
+import { normalize } from './_normalize.ts'
 
 // Supabase Edge Runtime global: keeps the worker alive until the promise settles,
 // so background work isn't a bare floating promise the runtime can kill post-200.
@@ -132,15 +134,14 @@ serve(async (req) => {
         ),
       )
     } else if (inbound.kind === 'unregistered') {
-      EdgeRuntime.waitUntil(
-        sendWA(inbound.from, "You're not registered on Briklay. Contact your manager to get access.")
-          .catch((e) => console.error('[wa-webhook] unregistered reply failed:', e)),
-      )
+      // Durable reply via the outbox (enqueued before the 200).
+      await send(supabase, inbound.from, {
+        kind: 'text', body: "You're not registered on Briklay. Contact your manager to get access.",
+      })
     } else if (inbound.kind === 'no_org') {
-      EdgeRuntime.waitUntil(
-        sendWA(inbound.from, "Your account isn't fully set up yet. Please contact your manager.")
-          .catch((e) => console.error('[wa-webhook] quarantine reply failed:', e)),
-      )
+      await send(supabase, inbound.from, {
+        kind: 'text', body: "Your account isn't fully set up yet. Please contact your manager.",
+      })
     }
     // 'duplicate' / 'ignore' → nothing more to do.
 
@@ -254,18 +255,48 @@ async function processJob(
   supabase: ReturnType<typeof createClient>,
   inbound: Extract<Inbound, { kind: 'ready' }>,
 ): Promise<void> {
-  const { message, from, senderName, registered, messageType, messageId, jobId, orgId } = inbound
+  const { message, from, senderName, registered, messageId, jobId, orgId } = inbound
+
+  // Typing indicator: inline, best-effort, fire-and-forget. Never affects the job.
+  if (messageId) sendTypingIndicator(messageId).catch(() => {})
+
+  // Normalize every inbound type to the common envelope (image->vision now,
+  // voice->transcribe behind WA_VOICE_ENABLED). Failure -> treat as unsupported.
+  let norm
+  try {
+    norm = await normalize(supabase, message, { orgId, from, wamid: messageId })
+  } catch (e) {
+    console.error('[wa-webhook] normalize error:', e)
+    norm = {
+      org_id: orgId, sender: from, wamid: messageId, text: '',
+      source_type: 'unsupported' as const, attachments: [], timestamp: new Date().toISOString(),
+    }
+  }
+
+  // Graceful terminal replies that don't enter the legacy dispatch (still terminal + reply).
+  if (norm.source_type === 'unsupported') {
+    await send(supabase, from, { kind: 'text', body: 'Sorry, I can only handle text, images, and (soon) voice notes right now.' }, { org_id: orgId, wamid: messageId })
+    if (jobId) await markJob(supabase, jobId, 'WRITTEN')
+    return
+  }
+  if (norm.source_type === 'voice' && !norm.text.trim()) {
+    await send(supabase, from, { kind: 'text', body: 'Voice notes coming soon! For now, please type your message.' }, { org_id: orgId, wamid: messageId })
+    if (jobId) await markJob(supabase, jobId, 'WRITTEN')
+    return
+  }
+
+  // Feed the normalized text into the legacy path, serialized per sender.
   const lockKey = messageId || from
   await acquireSenderLock(supabase, from, lockKey)
   try {
-    await runLegacyProcessing(supabase, message, from, senderName, registered, messageType)
+    await dispatchNormalized(supabase, message, from, senderName, registered, norm.text)
     if (jobId) await markJob(supabase, jobId, 'WRITTEN')
   } catch (e) {
     console.error('[wa-webhook] processing error:', e)
     if (jobId) {
       await markJob(supabase, jobId, 'FAILED', (e as Error)?.message ?? String(e))
-      // Failure reply goes through the outbox (same dedup_key the watchdog uses,
-      // so a crash-then-watchdog never double-sends).
+      // Failure reply via the outbox (same dedup_key the watchdog uses, so a
+      // crash-then-watchdog never double-sends).
       await enqueueJobFailure(supabase, jobId, orgId, from, messageId)
     }
   } finally {
@@ -273,45 +304,33 @@ async function processJob(
   }
 }
 
-// ── Legacy processor (unchanged logic) — wrapped, not replaced ──────────────────
-// This is the existing _session/_classify/_handlers routing path. Sprint 1 wraps
-// it with job state + per-sender lock; the later cutover replaces it.
-async function runLegacyProcessing(
+// ── Dispatch the normalized text into the legacy handlers ───────────────────────
+// Sprint 2: normalize owns image->vision and voice->transcribe upstream, so EVERY
+// type arrives here as routable text. We keep the legacy session + classify routing
+// (the transaction flow); the legacy image/audio branches are now handled by
+// normalize and intentionally bypassed (handleImageMessage kept for the cutover).
+async function dispatchNormalized(
   supabase: ReturnType<typeof createClient>,
   message: any,
   from: string,
   senderName: string,
   registered: any,
-  messageType: string,
+  text: string,
 ): Promise<void> {
   // Cleanup: process any entries stuck in AWAITING_CONTEXT past their deadline.
   await processExpiredImageEntries(supabase, from, senderName)
     .catch((e) => console.error('[wa-webhook] processExpiredImageEntries error:', e))
 
-  // Image always wins — clear any stale session and route to image handler.
-  if (messageType === 'image') {
-    const staleSession = await getSession(supabase, from)
-    if (staleSession) await clearSession(supabase, from)
-    await handleImageMessage(supabase, message, from, senderName, registered)
-    return
-  }
-
-  // Session check (multi-turn conversation).
+  // Active multi-turn session? Feed the normalized text in as the reply.
   const session = await getSession(supabase, from)
   if (session) {
-    await handleSessionReply(supabase, session, message, from, senderName)
+    const asText = { ...message, type: 'text', text: { body: text } }
+    await handleSessionReply(supabase, session, asText, from, senderName)
     return
   }
 
-  if (messageType === 'audio') {
-    await sendWA(from, '🎤 Voice notes coming soon! Please type your message for now.')
-    return
-  }
-
-  // Text messages: classify then dispatch.
-  const text           = (message.text?.body ?? '') as string
+  // Fresh message: classify the normalized text and dispatch.
   const classification = await classifyMessage(text)
-
   if (classification === 'FINANCIAL') {
     await handleFinancial(supabase, text, from, senderName, registered)
   } else if (classification === 'QUERY') {
