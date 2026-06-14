@@ -1,16 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { logMessage, sendWA } from './_wa.ts'
-import { getSession, clearSession } from './_session.ts'
-import { classifyMessage } from './_classify.ts'
-import {
-  handleFinancial,
-  handleQuery,
-  handleGeneral,
-  handleImageMessage,
-  handleSessionReply,
-  processExpiredImageEntries,
-} from './_handlers.ts'
+import { logMessage } from './_wa.ts'
 import {
   createJob,
   markJob,
@@ -20,6 +10,9 @@ import {
 } from './_spine.ts'
 import { send, sendTypingIndicator } from './_format.ts'
 import { normalize } from './_normalize.ts'
+import { dispatch } from './_dispatch.ts'
+// Sprint 3: the 4-way router + dispatcher supersede _classify.ts (no longer in the
+// live path). Legacy _handlers/_session are reached only via the dispatcher's bridge.
 
 // Supabase Edge Runtime global: keeps the worker alive until the promise settles,
 // so background work isn't a bare floating promise the runtime can kill post-200.
@@ -289,7 +282,7 @@ async function processJob(
   const lockKey = messageId || from
   await acquireSenderLock(supabase, from, lockKey)
   try {
-    await dispatchNormalized(supabase, message, from, senderName, registered, norm.text)
+    await dispatch({ supabase, from, senderName, registered, wamid: messageId, orgId }, norm.text)
     if (jobId) await markJob(supabase, jobId, 'WRITTEN')
   } catch (e) {
     console.error('[wa-webhook] processing error:', e)
@@ -304,38 +297,6 @@ async function processJob(
   }
 }
 
-// ── Dispatch the normalized text into the legacy handlers ───────────────────────
-// Sprint 2: normalize owns image->vision and voice->transcribe upstream, so EVERY
-// type arrives here as routable text. We keep the legacy session + classify routing
-// (the transaction flow); the legacy image/audio branches are now handled by
-// normalize and intentionally bypassed (handleImageMessage kept for the cutover).
-async function dispatchNormalized(
-  supabase: ReturnType<typeof createClient>,
-  message: any,
-  from: string,
-  senderName: string,
-  registered: any,
-  text: string,
-): Promise<void> {
-  // Cleanup: process any entries stuck in AWAITING_CONTEXT past their deadline.
-  await processExpiredImageEntries(supabase, from, senderName)
-    .catch((e) => console.error('[wa-webhook] processExpiredImageEntries error:', e))
-
-  // Active multi-turn session? Feed the normalized text in as the reply.
-  const session = await getSession(supabase, from)
-  if (session) {
-    const asText = { ...message, type: 'text', text: { body: text } }
-    await handleSessionReply(supabase, session, asText, from, senderName)
-    return
-  }
-
-  // Fresh message: classify the normalized text and dispatch.
-  const classification = await classifyMessage(text)
-  if (classification === 'FINANCIAL') {
-    await handleFinancial(supabase, text, from, senderName, registered)
-  } else if (classification === 'QUERY') {
-    await handleQuery(supabase, text, from, registered)
-  } else {
-    await handleGeneral(text, from, senderName)
-  }
-}
+// (Routing + dispatch now live in _dispatch.ts: the 4-way router decides, the
+//  dispatcher owns wa_conversations state and bridges to the legacy transaction
+//  handlers / concierge.)
