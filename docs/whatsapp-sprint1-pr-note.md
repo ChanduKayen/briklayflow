@@ -72,6 +72,19 @@ DoD demonstrations:
 - **Replayed `wamid` → one job, once:** `wa_inbound_dedup` (Sprint 0) + `processing_job.wamid` UNIQUE both gate; `createJob` returns `{duplicate:true}` → stop.
 - **Every WA row carries `org_id`:** triggers + ingest resolution; un-orged sender quarantined.
 
+## Durability fix — record before ack, keep background alive
+The POST path was the unhealthy fire-and-ack shape: `processMessage(body).catch()` was
+a **bare floating promise** (no `EdgeRuntime.waitUntil`) the runtime could kill right
+after the 200, and the dedup + `createJob` writes happened **inside** that backgrounded
+function — *after* the ack. An isolate kill post-200 = a message acked to Meta with **no
+DB row** (silent loss). Restructured to the healthy shape:
+- `recordInbound()` — dedup + audit + org resolve + `createJob` — is **awaited and
+  committed before** `return 200`.
+- The heavy `processJob()` (lock → legacy routing → terminal state) runs under
+  **`EdgeRuntime.waitUntil()`** so it isn't killed; a crash there is recovered by the
+  watchdog/outbox.
+- Terminal replies for `unregistered`/`no_org` also go through `waitUntil`.
+
 ## Retry-storm hardening (post-deploy)
 - **Always 200 after a valid signature** (`index.ts`): the only non-2xx is a
   failed/missing signature (correct — reject junk). A *signed* but unparseable body

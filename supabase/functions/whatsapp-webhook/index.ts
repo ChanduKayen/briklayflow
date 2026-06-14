@@ -19,6 +19,10 @@ import {
   releaseSenderLock,
 } from './_spine.ts'
 
+// Supabase Edge Runtime global: keeps the worker alive until the promise settles,
+// so background work isn't a bare floating promise the runtime can kill post-200.
+declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void }
+
 const WA_VERIFY_TOKEN      = Deno.env.get('WA_VERIFY_TOKEN')!
 const WA_APP_SECRET        = Deno.env.get('WA_APP_SECRET')        // Meta App → Settings → Basic → App Secret
 const SUPABASE_URL         = Deno.env.get('SUPABASE_URL')!
@@ -113,49 +117,86 @@ serve(async (req) => {
       return new Response('OK', { status: 200 })
     }
 
-    // Fire-and-ack: process in the background (Deno keeps the event loop alive
-    // until it settles); errors are swallowed here and recovered by the spine.
-    processMessage(body).catch((err) =>
-      console.error('[wa-webhook] background processing error (recovered by watchdog/outbox):', err),
-    )
+    // Durably RECORD the inbound BEFORE acking (awaited, committed): dedup gate +
+    // org resolve + processing_job. An isolate kill after the 200 must never leave
+    // a message acked to Meta with no DB row (silent loss).
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    const inbound = await recordInbound(supabase, body)
+
+    // Heavy processing runs AFTER the record, in the background, kept alive by
+    // waitUntil (a bare floating promise can be killed right after the 200).
+    if (inbound.kind === 'ready') {
+      EdgeRuntime.waitUntil(
+        processJob(supabase, inbound).catch((err) =>
+          console.error('[wa-webhook] background processing error (recovered by watchdog/outbox):', err),
+        ),
+      )
+    } else if (inbound.kind === 'unregistered') {
+      EdgeRuntime.waitUntil(
+        sendWA(inbound.from, "You're not registered on Briklay. Contact your manager to get access.")
+          .catch((e) => console.error('[wa-webhook] unregistered reply failed:', e)),
+      )
+    } else if (inbound.kind === 'no_org') {
+      EdgeRuntime.waitUntil(
+        sendWA(inbound.from, "Your account isn't fully set up yet. Please contact your manager.")
+          .catch((e) => console.error('[wa-webhook] quarantine reply failed:', e)),
+      )
+    }
+    // 'duplicate' / 'ignore' → nothing more to do.
+
+    // Ack ONLY after the durable record is committed.
     return new Response('OK', { status: 200 })
   }
 
   return new Response('Method Not Allowed', { status: 405 })
 })
 
-// ── Main processor ────────────────────────────────────────────────────────────
+// ── Inbound recording (DURABLE — awaited before the 200) ────────────────────────
+// dedup gate + audit log + registration/org resolution + processing_job creation.
+// Everything here is committed before Meta is acked, so an isolate kill can never
+// drop a recorded message. Returns a descriptor telling the handler what to do next.
+type Inbound =
+  | { kind: 'ignore' }
+  | { kind: 'duplicate' }
+  | { kind: 'unregistered'; from: string }
+  | { kind: 'no_org'; from: string }
+  | {
+      kind: 'ready'
+      message: any
+      from: string
+      senderName: string
+      registered: any
+      messageType: string
+      messageId: string
+      jobId: string | null
+      orgId: string
+    }
 
-async function processMessage(body: unknown): Promise<void> {
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
-
-  // Parse Meta webhook payload
+async function recordInbound(
+  supabase: ReturnType<typeof createClient>,
+  body: unknown,
+): Promise<Inbound> {
   const messages = (body as any)?.entry?.[0]?.changes?.[0]?.value?.messages
-  if (!messages?.length) return
+  if (!messages?.length) return { kind: 'ignore' }
 
   const message     = messages[0]
   const from        = message.from        as string
   const messageId   = message.id          as string
   const messageType = message.type        as string
 
-  // ── Idempotency gate (Sprint 0) ──────────────────────────────────────────────
-  // Meta retries on timeout/non-200, so the same wamid can arrive twice. The
-  // unique-violation on insert IS the dedup signal — no read-then-write race.
+  // Idempotency gate (Sprint 0): the unique-violation on insert IS the dedup signal.
   if (messageId) {
-    const { error } = await supabase
-      .from('wa_inbound_dedup')
-      .insert({ wamid: messageId })
+    const { error } = await supabase.from('wa_inbound_dedup').insert({ wamid: messageId })
     if (error) {
       if (error.code === '23505') {
         console.log('[wa-webhook] duplicate wamid, skipping:', messageId)
-        return // already processed; already acked 200
+        return { kind: 'duplicate' }
       }
-      // Non-duplicate DB error: log but don't drop a real message.
       console.error('[wa-webhook] dedup insert error (continuing):', error)
     }
   }
 
-  // Log every inbound message for audit
+  // Audit log.
   await logMessage(supabase, {
     phone_number: from,
     direction: 'IN',
@@ -165,33 +206,23 @@ async function processMessage(body: unknown): Promise<void> {
     wa_message_id: messageId,
   })
 
-  // ── Registration + org resolution (T1.6) ─────────────────────────────────────
+  // Registration + org resolution (T1.6).
   const { data: registered } = await supabase
     .from('wa_registered_numbers')
     .select('*')
     .eq('phone_number', from)
     .eq('is_active', true)
     .maybeSingle()
+  if (!registered) return { kind: 'unregistered', from }
 
-  if (!registered) {
-    await sendWA(from,
-      "You're not registered on Briklay. Contact your manager to get access.")
-    return
-  }
-
-  // Resolve the org from the sender's registered number. Never write an un-orged
-  // row: a registered number with no resolvable org is quarantined with a reply.
+  // Never write an un-orged row: a registered number with no resolvable org is quarantined.
   const orgId: string | null = (registered as any).org_id ?? null
   if (!orgId) {
     console.error('[wa-webhook] registered number has no org_id; quarantining:', from)
-    await sendWA(from, "Your account isn't fully set up yet. Please contact your manager.")
-    return
+    return { kind: 'no_org', from }
   }
 
-  const senderName: string = registered.name
-
-  // ── processing_job: the promise-to-respond (T1.2) ────────────────────────────
-  // Created PROCESSING and keyed by wamid (idempotent alongside the dedup gate).
+  // processing_job (T1.2): created PROCESSING, wamid-unique (idempotent alongside dedup).
   let jobId: string | null = null
   if (messageId) {
     try {
@@ -200,7 +231,7 @@ async function processMessage(body: unknown): Promise<void> {
       })
       if (r.duplicate) {
         console.log('[wa-webhook] job already exists for wamid, skipping:', messageId)
-        return
+        return { kind: 'duplicate' }
       }
       jobId = r.jobId
     } catch (e) {
@@ -209,7 +240,21 @@ async function processMessage(body: unknown): Promise<void> {
     }
   }
 
-  // ── Per-sender lock (T1.5) → process → terminal state (T1.7) ─────────────────
+  return {
+    kind: 'ready',
+    message, from, senderName: registered.name as string, registered,
+    messageType, messageId, jobId, orgId,
+  }
+}
+
+// ── Background processing (kept alive by EdgeRuntime.waitUntil) ──────────────────
+// Per-sender lock → legacy routing → terminal job state. Runs AFTER the durable
+// record + the 200, so a crash here is recovered by the watchdog/outbox, never lost.
+async function processJob(
+  supabase: ReturnType<typeof createClient>,
+  inbound: Extract<Inbound, { kind: 'ready' }>,
+): Promise<void> {
+  const { message, from, senderName, registered, messageType, messageId, jobId, orgId } = inbound
   const lockKey = messageId || from
   await acquireSenderLock(supabase, from, lockKey)
   try {
