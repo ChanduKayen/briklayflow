@@ -49,6 +49,25 @@ BEGIN
   IF job_status <> 'PROCESSING' THEN RAISE EXCEPTION 'watchdog false-positived a healthy job (% )', job_status; END IF;
   RAISE NOTICE 'watchdog correctly left a fresh in-flight job alone.';
 
+  -- -- Outbox TTL: a reply whose inbound is too old is EXPIRED, not sent --
+  DECLARE old_id uuid; new_id uuid; st_old text; st_new text;
+  BEGIN
+    INSERT INTO public.outbox (org_id, target, payload, created_at)
+    VALUES (a_org, '910000000002', jsonb_build_object('type','text','text','stale hi'), now() - interval '20 minutes')
+    RETURNING id INTO old_id;
+    INSERT INTO public.outbox (org_id, target, payload)
+    VALUES (a_org, '910000000003', jsonb_build_object('type','text','text','fresh hi'))
+    RETURNING id INTO new_id;
+
+    PERFORM public.outbox_expire(15);
+
+    SELECT status INTO st_old FROM public.outbox WHERE id = old_id;
+    SELECT status INTO st_new FROM public.outbox WHERE id = new_id;
+    IF st_old <> 'EXPIRED' THEN RAISE EXCEPTION 'TTL: stale reply not expired (got %)', st_old; END IF;
+    IF st_new <> 'PENDING' THEN RAISE EXCEPTION 'TTL: fresh reply wrongly expired (got %)', st_new; END IF;
+    RAISE NOTICE 'outbox TTL OK: 20-min-old reply -> EXPIRED, fresh reply -> PENDING.';
+  END;
+
   -- -- RLS: client (authenticated) must NOT read the server-internal tables --
   PERFORM set_config('request.jwt.claims', json_build_object('sub', u_test::text, 'role','authenticated')::text, true);
   SET LOCAL ROLE authenticated;

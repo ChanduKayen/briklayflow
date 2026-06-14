@@ -53,6 +53,10 @@ serve(async (req) => {
     auth: { autoRefreshToken: false, persistSession: false },
   })
 
+  // Expire stale replies first (inbound too old) so they're never sent.
+  const { data: expired, error: expErr } = await supabase.rpc('outbox_expire', { p_ttl_minutes: 15 })
+  if (expErr) console.error('[drainer] outbox_expire error:', expErr)
+
   const { data: rows, error } = await supabase.rpc('outbox_claim', { p_limit: BATCH })
   if (error) {
     console.error('[drainer] outbox_claim error:', error)
@@ -88,7 +92,7 @@ serve(async (req) => {
     }
   }
 
-  return new Response(JSON.stringify({ claimed: rows?.length ?? 0, sent, retried, failed }), {
+  return new Response(JSON.stringify({ expired: expired ?? 0, claimed: rows?.length ?? 0, sent, retried, failed }), {
     status: 200, headers: { 'Content-Type': 'application/json' },
   })
 })

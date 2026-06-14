@@ -72,6 +72,20 @@ DoD demonstrations:
 - **Replayed `wamid` → one job, once:** `wa_inbound_dedup` (Sprint 0) + `processing_job.wamid` UNIQUE both gate; `createJob` returns `{duplicate:true}` → stop.
 - **Every WA row carries `org_id`:** triggers + ingest resolution; un-orged sender quarantined.
 
+## Retry-storm hardening (post-deploy)
+- **Always 200 after a valid signature** (`index.ts`): the only non-2xx is a
+  failed/missing signature (correct — reject junk). A *signed* but unparseable body
+  acks 200 (retrying can't fix it); verification can't throw into a 500 (fail-closed
+  to 403). All downstream processing is fire-and-ack, so processing failures never
+  surface as non-2xx — Meta never retries and multiplies the storm; failures are
+  recovered by the watchdog/outbox.
+- **`createJob` idempotent on `wamid`**: a duplicate/retried delivery hits the
+  `wa_inbound_dedup` gate or `processing_job.wamid` UNIQUE → clean skip, no second
+  reply, 200 (already-acked). A retry is a cheap no-op.
+- **Outbox TTL** (`20260613000011` + drainer): `outbox_expire(15)` marks any PENDING
+  reply whose inbound is older than ~15 min as `EXPIRED` instead of sending — no
+  answering a 22:38 "Hi" at 07:14. The drainer expires before claiming each tick.
+
 ## Flagged (follow-ups, not done here)
 - `rough_entries.org_id` left **NULLABLE** and its RLS still **role-based** (not
   org-scoped) to avoid breaking day-book UI inserts/reads. Make NOT NULL + org-scope

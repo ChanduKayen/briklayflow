@@ -87,23 +87,36 @@ serve(async (req) => {
     // / key order and never match.
     const rawBody = await req.text()
 
-    const valid = await verifyMetaSignature(rawBody, req.headers.get('x-hub-signature-256'))
+    // Auth gate: only genuine Meta traffic proceeds. A failure here is the ONLY
+    // case that returns non-2xx (correct — we want unsigned junk rejected). Fail
+    // closed if verification throws.
+    let valid = false
+    try {
+      valid = await verifyMetaSignature(rawBody, req.headers.get('x-hub-signature-256'))
+    } catch (e) {
+      console.error('[wa-webhook] signature verification threw; rejecting (fail closed):', e)
+    }
     if (!valid) {
       console.warn('[wa-webhook] rejected POST with missing/invalid signature')
       return new Response('Forbidden', { status: 403 })
     }
 
+    // From here the request is SIGNED genuine Meta traffic. Always 200 from now on:
+    // a non-2xx makes Meta retry and multiply the storm. Any processing failure is
+    // handled internally (watchdog/outbox), never surfaced as a non-2xx.
     let body: unknown
     try {
       body = JSON.parse(rawBody)
     } catch {
-      return new Response('Bad Request', { status: 400 })
+      // Signed but unparseable — retrying can't fix it. Ack so Meta stops retrying.
+      console.error('[wa-webhook] signed POST with unparseable body; acking 200 to stop retries')
+      return new Response('OK', { status: 200 })
     }
 
-    // Respond 200 to Meta immediately (< 5 s requirement).
-    // Deno keeps the event loop alive until the background promise settles.
+    // Fire-and-ack: process in the background (Deno keeps the event loop alive
+    // until it settles); errors are swallowed here and recovered by the spine.
     processMessage(body).catch((err) =>
-      console.error('[wa-webhook] unhandled error:', err),
+      console.error('[wa-webhook] background processing error (recovered by watchdog/outbox):', err),
     )
     return new Response('OK', { status: 200 })
   }
