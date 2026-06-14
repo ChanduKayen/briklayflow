@@ -70,6 +70,15 @@ export default function Logbook({ session }: { session: Session }) {
     },
   });
 
+  // Deep-link focus: WhatsApp "[edit]" links to /logbook?entry=<id>. Scroll to and
+  // highlight that entry's card once entries have loaded.
+  const focusId = useMemo(() => new URLSearchParams(window.location.search).get('entry'), []);
+  useEffect(() => {
+    if (!focusId || isLoading) return;
+    const el = document.getElementById(`db-entry-${focusId}`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [focusId, isLoading, entries]);
+
   // Lists that power the inline gap editors (match payee / pick project).
   const { data: stakeholders = [] } = useQuery({
     queryKey: ['daybook_stakeholders'],
@@ -215,8 +224,12 @@ export default function Logbook({ session }: { session: Session }) {
               )
             )}
             {shown.map((r, idx) => (
-              <ReviewCard
+              <div
                 key={r.id}
+                id={`db-entry-${r.id}`}
+                style={focusId === r.id ? { borderRadius: 18, boxShadow: '0 0 0 2px #C8603A', transition: 'box-shadow .3s' } : undefined}
+              >
+              <ReviewCard
                 entry={r}
                 orgId={orgId}
                 canManage={canManage}
@@ -230,6 +243,7 @@ export default function Logbook({ session }: { session: Session }) {
                 onLightbox={setLightboxUrl}
                 onError={(m) => showSnackbar(m, { type: 'error' })}
               />
+              </div>
             ))}
           </div>
         )}

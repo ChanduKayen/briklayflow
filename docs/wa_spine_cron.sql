@@ -34,6 +34,14 @@ BEGIN
   -- Purge closed conversations every 2 minutes.
   PERFORM cron.schedule('wa-purge-conversations', '*/2 * * * *', $cron$ SELECT public.purge_wa_conversations(); $cron$);
   RAISE NOTICE 'Scheduled wa-purge-conversations every 2 min.';
+
+  -- Sprint 4: commit/close abandoned OPEN transaction conversations (timeout
+  -- trigger) every 1 minute; default TTL 5 min (see wa_commit_abandoned_conversations).
+  IF EXISTS (SELECT 1 FROM cron.job WHERE jobname='wa-commit-abandoned') THEN
+    PERFORM cron.unschedule('wa-commit-abandoned');
+  END IF;
+  PERFORM cron.schedule('wa-commit-abandoned', '* * * * *', $cron$ SELECT public.wa_commit_abandoned_conversations(5); $cron$);
+  RAISE NOTICE 'Scheduled wa-commit-abandoned every 1 min (TTL 5 min).';
 END $$;
 
 -- Verify:  SELECT jobname, schedule, active FROM cron.job WHERE jobname LIKE 'wa-%';

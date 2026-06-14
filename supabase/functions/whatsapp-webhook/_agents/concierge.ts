@@ -14,11 +14,13 @@ export type ConciergeCtx = {
   text: string
   language: 'en' | 'te' | 'te-en' | 'hi'
   lingering?: { last_action_summary: string } | null
+  prefix?: string   // consolidated-interrupt: acknowledgment of a just-committed A
 }
 
 /** Produce and send (via the outbox) one warm concierge reply. */
 export async function runConcierge(supabase: any, ctx: ConciergeCtx): Promise<void> {
-  const body = (await composeLLM(ctx)) || fallbackReply(ctx)
+  const reply = (await composeLLM(ctx)) || fallbackReply(ctx)
+  const body = ctx.prefix ? `${ctx.prefix}\n\n${reply}` : reply
   await send(supabase, ctx.from, { kind: 'text', body }, { org_id: ctx.orgId, wamid: ctx.wamid })
 }
 
