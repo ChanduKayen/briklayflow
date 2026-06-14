@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, Fragment } from 'react';
 import { useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { useSignedDocUrl } from '../lib/storage';
 import { Loader2 } from 'lucide-react';
 import type { Session } from '@supabase/supabase-js';
 import Breadcrumb from '../components/Breadcrumb';
@@ -703,6 +704,8 @@ export default function TransactionDetail({ session }: { session: Session }) {
 
   const proofUrl = (txn as any).proof_document_url || txn.bill_doc_url || null;
   const isImage = proofUrl?.match(/\.(jpeg|jpg|gif|png|webp)(\?.*)?$/i);
+  // documents bucket is private — resolve the stored URL to a signed URL for display.
+  const proofSigned = useSignedDocUrl(proofUrl);
 
   const needsActionType = (() => {
     if (txn.status === 'Voided') return false;
@@ -931,10 +934,10 @@ export default function TransactionDetail({ session }: { session: Session }) {
                 <div>
                   <div
                     className="relative inline-block cursor-pointer group"
-                    onClick={() => setLightboxUrl(proofUrl)}
+                    onClick={() => proofSigned && setLightboxUrl(proofSigned)}
                   >
                     <img
-                      src={proofUrl}
+                      src={proofSigned ?? undefined}
                       alt="Payment proof"
                       className="h-32 w-auto rounded-xl object-cover border border-outline-variant/20 group-hover:opacity-90 transition-opacity"
                     />
@@ -949,7 +952,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
                   </p>
                 </div>
               ) : (
-                <a href={proofUrl} target="_blank" rel="noopener noreferrer"
+                <a href={proofSigned ?? undefined} target="_blank" rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-surface-container-low border border-outline-variant/20 text-[13px] text-primary font-semibold hover:bg-surface-container transition-colors">
                   <span className="material-symbols-outlined text-[16px]">open_in_new</span> View Document
                 </a>

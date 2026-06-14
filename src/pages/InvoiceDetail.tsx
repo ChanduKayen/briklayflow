@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { openDoc } from '../lib/storage';
 import { useSnackbar } from '../components/Snackbar';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import { PageSkeleton } from '../components/SkeletonLoader';
@@ -244,15 +245,14 @@ export default function InvoiceDetail({ session: _session }: { session: Session 
               </button>
             )}
             {invoice.doc_url && (
-              <a
-                href={invoice.doc_url}
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                type="button"
+                onClick={() => openDoc(invoice.doc_url)}
                 className="p-2.5 rounded-xl border border-outline-variant/25 text-on-surface-variant/50 hover:text-primary transition-colors"
                 title="View document"
               >
                 <span className="material-symbols-outlined text-[18px]">attach_file</span>
-              </a>
+              </button>
             )}
           </div>
         </div>

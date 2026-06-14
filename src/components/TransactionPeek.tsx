@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { useSignedDocUrl } from '../lib/storage';
 import { PeekModal } from './PeekModal';
 import { PeekSkeleton, DataField } from './PeekSkeleton';
 import { usePeek } from '../context/PeekContext';
@@ -9,6 +10,23 @@ function fmtDate(d: string | null | undefined) {
   const p = new Date(d);
   if (isNaN(p.getTime())) return d;
   return p.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+/** Proof image/link — resolves the stored (private-bucket) URL to a signed URL. */
+function ProofView({ stored }: { stored: string }) {
+  const signed = useSignedDocUrl(stored);
+  const isImg = /\.(jpeg|jpg|gif|png|webp)(\?.*)?$/i.test(stored);
+  if (!signed) return null;
+  return (
+    <div>
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant mb-2">Proof</p>
+      {isImg
+        ? <img src={signed} alt="proof" className="h-24 rounded-xl object-cover cursor-pointer" onClick={() => window.open(signed, '_blank')} />
+        : <a href={signed} target="_blank" rel="noopener noreferrer" className="text-[13px] text-primary hover:underline flex items-center gap-1">
+            <span className="material-symbols-outlined text-[14px]">open_in_new</span> View Document
+          </a>}
+    </div>
+  );
 }
 
 interface TransactionPeekProps { txnId: string; onClose: () => void; }
@@ -123,20 +141,9 @@ export function TransactionPeek({ txnId, onClose }: TransactionPeekProps) {
           )}
 
           {/* Proof */}
-          {(txn.proof_document_url || txn.bill_doc_url) && (() => {
-            const url = txn.proof_document_url || txn.bill_doc_url;
-            const isImg = /\.(jpeg|jpg|gif|png|webp)(\?.*)?$/i.test(url);
-            return (
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant mb-2">Proof</p>
-                {isImg
-                  ? <img src={url} alt="proof" className="h-24 rounded-xl object-cover cursor-pointer" onClick={() => window.open(url, '_blank')} />
-                  : <a href={url} target="_blank" rel="noopener noreferrer" className="text-[13px] text-primary hover:underline flex items-center gap-1">
-                      <span className="material-symbols-outlined text-[14px]">open_in_new</span> View Document
-                    </a>}
-              </div>
-            );
-          })()}
+          {(txn.proof_document_url || txn.bill_doc_url) && (
+            <ProofView stored={(txn.proof_document_url || txn.bill_doc_url) as string} />
+          )}
         </div>
       )}
     </PeekModal>

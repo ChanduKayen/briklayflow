@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { openDoc } from '../lib/storage';
 import { PageSkeleton } from '../components/SkeletonLoader';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
@@ -524,15 +525,14 @@ function MilestoneSheet({
           )}
 
           {state.done && (step.key === 'photo' && docUrl ? (
-            <a
-              href={docUrl}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              type="button"
+              onClick={() => openDoc(docUrl)}
               className="w-full mt-4 py-3 rounded-xl text-sm font-medium flex items-center justify-center gap-1.5"
               style={{ background: 'transparent', color: C.ink, border: `1px solid ${C.line}` }}
             >
               View document <span className="material-symbols-outlined text-[16px]">chevron_right</span>
-            </a>
+            </button>
           ) : (
             <button
               className="w-full mt-4 py-3 rounded-xl text-sm font-medium flex items-center justify-center gap-1.5"

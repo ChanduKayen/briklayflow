@@ -240,13 +240,6 @@ export default function Dashboard({ session }: { session: Session }) {
   const fetchBriefing = useCallback(async () => {
     setBriefingLoading(true);
     try {
-      const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
-      if (!apiKey) {
-        setBriefing('Open items need your attention. Check the action items below.');
-        setBriefingTime(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }));
-        return;
-      }
-
       const [txnsRes, wosRes, pendingRes, milestonesRes] = await Promise.all([
         supabase.from('transactions').select('total_amount, status, created_at').order('created_at', { ascending: false }).limit(20),
         supabase.from('work_orders').select('wo_number, status, order_value').in('status', ['Active', 'Issued']),
@@ -261,24 +254,11 @@ export default function Dashboard({ session }: { session: Session }) {
         recentSpend: (txnsRes.data || []).reduce((s: number, t: any) => s + (t.total_amount || 0), 0),
       };
 
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 120,
-          messages: [{
-            role: 'user',
-            content: `You are a construction finance assistant for Briklay Engineering. Write a 2-3 line daily briefing based on this data. Be specific, actionable, and concise. No greetings. Just facts + actions. Data: ${JSON.stringify(context)}`,
-          }],
-        }),
-      });
-      const data = await res.json();
-      setBriefing(data.content?.[0]?.text || 'Everything looks on track today.');
+      // The Anthropic key lives in function secrets — the briefing is generated
+      // server-side by the ai-briefing edge function, never in the browser.
+      const { data, error } = await supabase.functions.invoke('ai-briefing', { body: { context } });
+      if (error) throw error;
+      setBriefing(data?.briefing || 'Everything looks on track today.');
       setBriefingTime(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }));
     } catch {
       setBriefing('Open items need your attention. Check the action items below.');
