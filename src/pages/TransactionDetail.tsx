@@ -820,14 +820,14 @@ export default function TransactionDetail({ session }: { session: Session }) {
                     </button>
                   ) : isGeneralExpense(txn) ? (
                     <p className="inline-flex items-center gap-1.5 text-[15px] font-semibold text-on-surface">
-                      <Wallet size={15} className="text-on-surface-variant/55" /> General expense
+                      <Wallet size={15} className="text-on-surface-variant/55" /> {(txn as any).ai_flag_data?.general_payee || 'General expense'}
                     </p>
                   ) : (
                     <p className="text-[15px] font-semibold text-on-surface">{txn.stakeholders?.name || '—'}</p>
                   )}
                   <p className="text-[11px] text-on-surface-variant/50 mt-0.5">
                     {isGeneralExpense(txn)
-                      ? 'no linked party'
+                      ? ((txn as any).ai_flag_data?.general_payee ? 'General expense · no linked party' : 'no linked party')
                       : `${txn.stakeholders?.type || ''}${txn.stakeholders?.category ? ` · ${txn.stakeholders.category}` : ''}`}
                   </p>
                 </div>

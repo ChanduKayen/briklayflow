@@ -67,6 +67,9 @@ export async function fileRoughEntry(entry: RoughEntry, orgId: string, resolved:
   // A general expense is recorded with NO party (stakeholder_id null) under the
   // general-expense category; everything else keeps its linked payee + inferred category.
   const isGeneral = !!resolved.generalExpense;
+  // A general expense has no party, but it may still have a heard name ("labours",
+  // "auto driver"). Preserve it so the detail page can show who it was for.
+  const genName = isGeneral ? String(ai.payee_name || ai.payee_raw || '').trim() : '';
 
   const payload = {
     txn_id: newTxnId,
@@ -79,7 +82,7 @@ export async function fileRoughEntry(entry: RoughEntry, orgId: string, resolved:
     bill_doc_url: null,
     proof_document_url: entry.raw_image_url || null,
     ai_flag_status: 'Clean',
-    ai_flag_data: {},
+    ai_flag_data: genName ? { general_payee: genName } : {},
     org_id: orgId,
   };
   const allocations = [{

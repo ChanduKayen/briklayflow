@@ -27,7 +27,7 @@ import type { RoughEntry } from '../../types';
 import { V, WA, font, nums, terraGrad, T } from './tokens';
 import { WhatsAppGlyph } from './atoms';
 import {
-  fileRoughEntry, rejectRoughEntry, createParty, isResolved, errMessage, type ResolvedFields,
+  fileRoughEntry, rejectRoughEntry, restoreRoughEntry, createParty, isResolved, errMessage, type ResolvedFields,
 } from './fileEntry';
 import { useSwipeTriage } from './useSwipeTriage';
 import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../../lib/trades';
@@ -37,7 +37,7 @@ type PartyType = 'Worker' | 'Vendor' | 'Client';
 export interface StakeholderLite { stakeholder_id: string; name: string; type?: string; category?: string }
 export interface ProjectLite { project_id: string; name: string }
 
-type Phase = null | 'filing' | 'filed' | 'collapsed';
+type Phase = null | 'filing' | 'filed' | 'collapsed' | 'rejected';
 type Leaving = null | 'file' | 'reject';
 type Field = null | 'payee' | 'amount' | 'project' | 'description';
 
@@ -45,7 +45,7 @@ const inr = (n: number) => Number(n).toLocaleString('en-IN', { maximumFractionDi
 
 export function ReviewCard({
   entry, orgId, reveal, canManage, stakeholders, projects,
-  onFiled, onView, onDismissFiled, onRejected, onRestore, onFix, onLightbox, onError,
+  onFiled, onView, onDismiss, onRejected, onRestore, onFix, onLightbox, onError,
 }: {
   entry: RoughEntry;
   orgId: string;
@@ -54,8 +54,8 @@ export function ReviewCard({
   stakeholders: StakeholderLite[];
   projects: ProjectLite[];
   onFiled: (txnId: string) => void;
-  onView: (txnId: string) => void;        // open the just-filed txn in the ledger (highlighted)
-  onDismissFiled: () => void;             // clear the lingering "filed" strip
+  onView: (txnId: string) => void;        // open the txn in the ledger (highlighted)
+  onDismiss: () => void;                  // settle the lingering filed/rejected strip
   onRejected: () => void;
   onRestore: () => void;
   onFix: () => void;
@@ -146,11 +146,32 @@ export function ReviewCard({
     if (leaving) return;
     setLeaving('reject');
     try {
-      await rejectRoughEntry(entry);
-      setTimeout(onRejected, swipe.reducedMotion ? 0 : 380);
+      await rejectRoughEntry(entry);   // -> DISMISSED; the card collapses to an "undo" strip in place
+      setPhase('rejected');
+      onRejected();
     } catch (err: unknown) {
       setLeaving(null);
       onError(errMessage(err, "Couldn't reject, try again"));
+    }
+  };
+  // Undo a reject from the strip: restore to the review queue.
+  const runUndo = async () => {
+    try {
+      await restoreRoughEntry(entry);
+      setPhase(null); setLeaving(null);
+      onRestore();
+    } catch (err: unknown) {
+      onError(errMessage(err, "Couldn't undo, try again"));
+    }
+  };
+  // Move a binned (Not-a-transaction) entry back to review — the actual restore the
+  // old "move back" never performed (it only refetched).
+  const runRestore = async () => {
+    try {
+      await restoreRoughEntry(entry);
+      onRestore();
+    } catch (err: unknown) {
+      onError(errMessage(err, "Couldn't move it back, try again"));
     }
   };
 
@@ -161,12 +182,13 @@ export function ReviewCard({
     onRejectLeft: runReject,
   });
 
-  // The lingering "filed" strip is a confirmation, not a permanent row — it clears itself.
+  // The lingering filed/rejected strip is a confirmation, not a permanent row — it
+  // settles itself (into Filed / the Not-a-transaction bin) after a beat.
   useEffect(() => {
-    if (phase !== 'collapsed') return;
-    const t = setTimeout(onDismissFiled, 7000);
+    if (phase !== 'collapsed' && phase !== 'rejected') return;
+    const t = setTimeout(onDismiss, 7000);
     return () => clearTimeout(t);
-  }, [phase, onDismissFiled]);
+  }, [phase, onDismiss]);
 
   // ── filed journey: filing → "Filed ✓" beat → a quiet one-line strip (in place) ──
   if (phase === 'filing' || phase === 'filed') {
@@ -204,6 +226,20 @@ export function ReviewCard({
       </div>
     );
   }
+  if (phase === 'rejected') {
+    return (
+      <div className="db-confirm rounded-2xl px-4 sm:px-5 py-2.5 flex items-center gap-2.5" style={{ background: V.field, border: `1px solid ${V.line}` }}>
+        <span className="inline-flex items-center justify-center w-5 h-5 rounded-full shrink-0" style={{ background: V.line }}>
+          <X size={11} color={V.sys} strokeWidth={2.5} />
+        </span>
+        <span className="font-medium" style={{ color: V.sys, ...font, ...T.sm }}>Moved to &ldquo;Not a transaction&rdquo;</span>
+        <span className="flex-1" />
+        <button onClick={(e) => { e.stopPropagation(); runUndo(); }} className="font-medium" style={{ color: V.inkSoft, ...font, ...T.sm }}>
+          Undo
+        </button>
+      </div>
+    );
+  }
 
   // ── archived compact row ──────────────────────────────────────────────────
   if (archived) {
@@ -221,7 +257,13 @@ export function ReviewCard({
             {filed ? 'in your books' : 'not a transaction'}{entry.sender_name ? ` · from ${entry.sender_name}` : ''}
           </p>
         </div>
-        {!filed && <button onClick={onRestore} className="shrink-0" style={{ color: V.faint, ...font, ...T.xs }}>move back</button>}
+        {filed
+          ? entry.resolved_txn_id && (
+              <button onClick={(e) => { e.stopPropagation(); onView(entry.resolved_txn_id!); }} className="shrink-0 inline-flex items-center gap-1" style={{ color: V.sage, ...font, ...T.xs }}>
+                View transaction <ArrowRight size={12} />
+              </button>
+            )
+          : <button onClick={(e) => { e.stopPropagation(); runRestore(); }} className="shrink-0" style={{ color: V.faint, ...font, ...T.xs }}>Move back</button>}
       </div>
     );
   }

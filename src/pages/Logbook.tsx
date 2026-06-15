@@ -125,15 +125,20 @@ export default function Logbook({ session }: { session: Session }) {
     return () => { supabase.removeChannel(channel); };
   }, [qc]);
 
-  // Just-filed entries: kept in the review list so their in-card "filed" strip survives
-  // the realtime refetch (which flips them POSTED and would otherwise yank the card).
-  const [justFiled, setJustFiled] = useState<Set<string>>(new Set());
+  // Just-filed / just-rejected entries: kept in the review list so their in-card
+  // confirmation strip (Filed · View / Moved to bin · Undo) survives the realtime
+  // refetch, which flips them POSTED/DISMISSED and would otherwise yank the card.
+  const [lingering, setLingering] = useState<Set<string>>(new Set());
 
   // ── Buckets ──────────────────────────────────────────────────────────────
   // AWAITING_CONTEXT is pending-but-incomplete -> shows under "To review".
-  const review   = useMemo(() => entries.filter(e => e.status === 'PENDING' || e.status === 'AWAITING_CONTEXT' || justFiled.has(e.id)), [entries, justFiled]);
-  const filed     = useMemo(() => entries.filter(e => e.status === 'POSTED'), [entries]);
-  const rejected  = useMemo(() => entries.filter(e => e.status === 'DISMISSED'), [entries]);
+  // Filed / binned tabs sort by WHEN they were filed/binned (updated_at), latest first —
+  // not by message arrival. Falls back to created_at until the column is populated.
+  const byRecent = (a: RoughEntry, b: RoughEntry) =>
+    +new Date(b.updated_at || b.created_at) - +new Date(a.updated_at || a.created_at);
+  const review   = useMemo(() => entries.filter(e => e.status === 'PENDING' || e.status === 'AWAITING_CONTEXT' || lingering.has(e.id)), [entries, lingering]);
+  const filed     = useMemo(() => entries.filter(e => e.status === 'POSTED').sort(byRecent), [entries]);
+  const rejected  = useMemo(() => entries.filter(e => e.status === 'DISMISSED').sort(byRecent), [entries]);
   const shown = tab === 'review' ? review : tab === 'filed' ? filed : rejected;
 
   const counts: Record<TabKey, number> = { review: review.length, filed: filed.length, rejected: rejected.length };
@@ -150,14 +155,24 @@ export default function Logbook({ session }: { session: Session }) {
   }, [review.length]);
 
   const handleFiled = (entryId: string) => {
-    setJustFiled((s) => new Set(s).add(entryId));
-    qc.invalidateQueries({ queryKey: ['rough_entries'] });   // refetch -> POSTED, but justFiled keeps it shown
+    setLingering((s) => new Set(s).add(entryId));
+    qc.invalidateQueries({ queryKey: ['rough_entries'] });   // refetch -> POSTED, but lingering keeps it shown
     qc.invalidateQueries({ queryKey: ['inbox_badge'] });
     qc.invalidateQueries({ queryKey: ['ledger'] });
     qc.invalidateQueries({ queryKey: ['dashboard_metrics'] });
   };
-  const dismissFiled = (entryId: string) => {
-    setJustFiled((s) => { const n = new Set(s); n.delete(entryId); return n; });
+  const handleRejected = (entryId: string) => {
+    setLingering((s) => new Set(s).add(entryId));   // refetch -> DISMISSED, lingering keeps the undo strip in place
+    qc.invalidateQueries({ queryKey: ['rough_entries'] });
+    qc.invalidateQueries({ queryKey: ['inbox_badge'] });
+  };
+  const dismiss = (entryId: string) => {
+    setLingering((s) => { const n = new Set(s); n.delete(entryId); return n; });
+  };
+  const restore = (entryId: string) => {
+    setLingering((s) => { const n = new Set(s); n.delete(entryId); return n; });
+    qc.invalidateQueries({ queryKey: ['rough_entries'] });
+    qc.invalidateQueries({ queryKey: ['inbox_badge'] });
   };
   const viewTxn = (txnId: string) => navigate(`/ledger?txn=${encodeURIComponent(txnId)}`);
   const invalidateEntries = () => {
@@ -263,9 +278,9 @@ export default function Logbook({ session }: { session: Session }) {
                 reveal={tab === 'review' && idx === 0 && reveal}
                 onFiled={() => handleFiled(r.id)}
                 onView={viewTxn}
-                onDismissFiled={() => dismissFiled(r.id)}
-                onRejected={invalidateEntries}
-                onRestore={invalidateEntries}
+                onDismiss={() => dismiss(r.id)}
+                onRejected={() => handleRejected(r.id)}
+                onRestore={() => restore(r.id)}
                 onFix={() => setFixEntry(r)}
                 onLightbox={setLightboxUrl}
                 onError={(m) => showSnackbar(m, { type: 'error' })}

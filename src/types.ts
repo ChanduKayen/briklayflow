@@ -351,6 +351,7 @@ export interface RoughEntry {
   status: RoughEntryStatus;
   resolved_txn_id?: string | null;
   created_at: string;
+  updated_at?: string | null;   // touched on file/bin/restore -> Filed & bin tabs sort by this
   created_by?: string | null;
 }
 
