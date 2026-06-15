@@ -19,6 +19,7 @@ import { PageSkeleton } from '../components/SkeletonLoader';
 import { deriveDirection, isNotLinked, resolveAnchor, isGeneralExpense, payeeLabel, type TxnAnchor, type TxnDirection } from '../lib/transactions';
 import { V, font, serif, nums, terraGrad } from '../components/txn-ledger/ledgerTokens';
 import { DirMedallion, Amount, AnchorChip, FilterChip, FlowBar } from '../components/txn-ledger/LedgerAtoms';
+import { TrackChip, TRACK_CHIP_CSS } from '../components/txn-ledger/TrackChip';
 
 const PAGE_SIZE = 25;
 const inr = (n: number) => Math.round(n).toLocaleString('en-IN');
@@ -53,6 +54,7 @@ type EntryProps = {
   payee: string;
   context: string;
   anchor: TxnAnchor;
+  anchorNode?: ReactNode;
   remark: string | null;
   amount: string;
   attach: boolean;
@@ -111,7 +113,7 @@ function EntryRow(p: EntryProps) {
       </div>
 
       <div className="bk-ledger-anchor flex items-center gap-2">
-        <AnchorChip anchor={p.anchor} onClick={(e) => { e.stopPropagation(); p.onAnchorClick(e); }} />
+        {p.anchorNode ?? <AnchorChip anchor={p.anchor} onClick={(e) => { e.stopPropagation(); p.onAnchorClick(e); }} />}
         {p.flagged && (
           <span className="text-xs px-1.5 py-0.5 rounded shrink-0" style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font }}>flagged</span>
         )}
@@ -249,7 +251,7 @@ export default function Ledger({ session }: { session: Session }) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('transactions')
-        .select('*, stakeholders(name, type, category), txn_allocations(project_id, allocated_amount, order_type, order_ref, projects(name))')
+        .select('*, stakeholders(name, type, category), txn_allocations(allocation_id, project_id, allocated_amount, order_type, order_ref, projects(name))')
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data;
@@ -572,6 +574,7 @@ export default function Ledger({ session }: { session: Session }) {
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen" style={{ background: V.page, ...font }}>
+      <style>{TRACK_CHIP_CSS}</style>
       <div className="mx-auto px-5 sm:px-8 py-8 max-w-[880px] lg:max-w-[1040px] xl:max-w-[1200px] min-[1700px]:max-w-[1640px] min-[1700px]:grid min-[1700px]:grid-cols-[minmax(0,1fr)_340px] min-[1700px]:gap-12 min-[1700px]:items-start">
 
         {/* ── main column: the day-book ── */}
@@ -754,12 +757,23 @@ export default function Ledger({ session }: { session: Session }) {
                     const genExp = isGeneralExpense(txn);
                     const projName = (txn.txn_allocations || [])[0]?.projects?.name || null;
                     const trade = txn.stakeholders?.category || null;
-                    const party = txn.stakeholders?.type || null;
-                    // General expense: party-less, so lead with the description and tag it.
-                    const ctxParts = genExp ? ['General expense'] : [party, trade];
+                    // Context = the payee's discipline/trade + what the money was for
+                    // (description) — not the "Worker/Vendor" type label. General expense
+                    // stays party-less (its description is already the bold line).
+                    const ctxParts = genExp ? ['General expense'] : [trade, txn.remarks];
                     if (!(filterProject.length === 1) && projName) ctxParts.push(projName);
                     const context = ctxParts.filter(Boolean).join(' · ');
                     const proofUrl = txn.bill_doc_url || (txn as any).proof_document_url || null;
+                    // The "not linked" region — the ONLY part of the row that changes:
+                    //  · general expense -> a calm, non-actionable note (no tracking needed)
+                    //  · an unlinked outgoing payment to a party -> the gentle Track nudge
+                    //  · otherwise -> the existing AnchorChip (linked ref, or default)
+                    const anchorNode: ReactNode =
+                      genExp
+                        ? <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md" style={{ background: V.field, color: V.faint, ...font }}>General expense · overhead</span>
+                        : (anchor === null && dir === 'out' && txn.stakeholder_id && (txn.txn_allocations || []).length > 0)
+                          ? <TrackChip txn={txn} onLinked={() => { qc.invalidateQueries({ queryKey: ['ledger'] }); }} />
+                          : undefined;
                     return (
                       <div
                         key={txn.txn_id}
@@ -779,6 +793,7 @@ export default function Ledger({ session }: { session: Session }) {
                         selected={selectedTxnIds.has(txn.txn_id)}
                         selectionMode={selectedCount > 0}
                         sumSelected={sumSel.has(txn.txn_id)}
+                        anchorNode={anchorNode}
                         onRowClick={() => navigate(`/ledger/${txn.txn_id}`)}
                         onToggleSelect={(e) => { e.stopPropagation(); toggleTxn(txn.txn_id); }}
                         onAnchorClick={() => openPeek('TRANSACTION', txn.txn_id)}
