@@ -32,9 +32,20 @@ interface WaContact {
   name: string;
   role: string;
   is_active: boolean;
+  preferred_language: string | null;   // voice-note language (ISO-639-1); null = auto
   stakeholder_id: string | null;
   created_at: string;
 }
+
+/** Voice-note language per sender. "" (Auto) clears the override -> deployment locale
+ *  prior / auto-detect. Speech language is set here because how someone TYPES isn't how
+ *  they SPEAK (romanized English is common among Telugu/Hindi speakers). */
+const VOICE_LANGS = [
+  { value: '', label: 'Auto' },
+  { value: 'te', label: 'Telugu' },
+  { value: 'hi', label: 'Hindi' },
+  { value: 'en', label: 'English' },
+] as const;
 
 const digits = (s: string) => s.replace(/\D/g, '');
 
@@ -186,6 +197,15 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
     onError: (e: any) => show(e.message || 'Could not update access', { type: 'error' }),
   });
 
+  const setLang = useMutation({
+    mutationFn: async ({ id, lang }: { id: string; lang: string | null }) => {
+      const { error } = await supabase.from('wa_registered_numbers').update({ preferred_language: lang }).eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['wa_registered_numbers'] }),
+    onError: (e: any) => show(e.message || 'Could not set voice language', { type: 'error' }),
+  });
+
   const copyLink = (link: string) => {
     navigator.clipboard?.writeText(link).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); }).catch(() => { /* noop */ });
   };
@@ -316,6 +336,17 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
                         <Phone size={10} style={{ color: V.faint }} /> +91 {m.phone_number}
                       </p>
                     </div>
+                    {/* voice-note language for this sender (Auto = locale prior / auto-detect) */}
+                    <select
+                      aria-label="Voice note language"
+                      title="Language for this person's voice notes"
+                      value={m.preferred_language ?? ''}
+                      onChange={(e) => setLang.mutate({ id: m.id, lang: e.target.value || null })}
+                      className="px-2 rounded-lg outline-none shrink-0 appearance-none"
+                      style={{ background: V.field, color: m.preferred_language ? V.ink : V.faint, height: 30, ...font, ...T.xs }}
+                    >
+                      {VOICE_LANGS.map((l) => <option key={l.value} value={l.value}>{l.value ? `🎙 ${l.label}` : 'Auto'}</option>)}
+                    </select>
                     <button
                       aria-label="Toggle WhatsApp access"
                       onClick={() => toggle.mutate({ id: m.id, next: !m.is_active })}

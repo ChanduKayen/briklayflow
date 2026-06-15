@@ -14,6 +14,7 @@ export type OutMessage =
   | { kind: 'buttons';  body: string; buttons: { id: string; title: string }[] } // <= 3
   | { kind: 'list';     body: string; button: string; rows: { id: string; title: string; description?: string }[] }
   | { kind: 'cta';      body: string; cta: { text: string; url: string } }
+  | { kind: 'reaction'; messageId: string; emoji: string }   // ✓-react an inbound message
   | { kind: 'template'; name: string; language: string; components?: unknown[] }
 
 /** Render an OutMessage to the WhatsApp Cloud API request body for `to`. */
@@ -66,6 +67,9 @@ export function renderToWhatsApp(to: string, msg: OutMessage): Record<string, un
           action: { name: 'cta_url', parameters: { display_text: msg.cta.text, url: msg.cta.url } },
         },
       }
+
+    case 'reaction':
+      return { ...base, type: 'reaction', reaction: { message_id: msg.messageId, emoji: msg.emoji } }
 
     case 'template':
       return {

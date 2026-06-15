@@ -34,12 +34,99 @@ function entryLine(payee: string | null, amount: number | null, project: string 
 
 // ── Catalog ─────────────────────────────────────────────────────────────────────
 
-/** Complete confirmation: text + Edit CTA. */
-export function mComplete(lang: Lang, p: { payee: string | null; amount: number; project: string | null }): OutMessage {
-  const saved = pick(lang, { en: 'Saved ✓' })
-  return { kind: 'cta', body: `${saved}\n${entryLine(p.payee, p.amount, p.project)}`,
-           cta: { text: pick(lang, { en: '✏️ Edit' }), url: EDIT_LINK } }
+/**
+ * Capture-first confirmation (presentation redesign). Same states, gating and CTA
+ * target as before -- only the WORDING and LAYOUT changed:
+ *   ✓ outcome / amount-first *bold* hero ("*₹3,500* to ramu") / unlabeled
+ *   "project · mode" context / RAW note shown italic + unlabeled / a calm flag line
+ *   that explains the CTA. Blank lines group the parts; absent parts drop out.
+ *     payee matched     -> clean;  CTA "Review in Day Book"
+ *     payee unmatched   -> flag "<payee> isn't in your contacts yet"; CTA "Review & add contact"
+ *     project unmatched -> flag 'I noted the site as "<raw>" ...';     CTA "Review & set site"
+ * Italic is the only de-emphasis WhatsApp offers (no secondary-text colour). mode and
+ * direction render only when supplied -- not plumbed today, so mode is omitted and the
+ * preposition defaults to "to".
+ */
+export function mComplete(
+  lang: Lang,
+  p: {
+    payee: string | null; payeeMatched: boolean;
+    amount: number | null;
+    projectName: string | null; projectRaw: string | null;
+    note: string | null;
+    mode?: string | null;              // appended to the context line ONLY when present
+    direction?: 'out' | 'in' | null;   // 'in' -> "from", otherwise "to" (default)
+  },
+): OutMessage {
+  // 1. Outcome -- existing copy, now check-marked.
+  const outcome = '✓ ' + pick(lang, { en: 'Added to your Day Book' })
+
+  // 2. Hero -- amount FIRST and bold (WhatsApp *...*), then to/from payee. Indian
+  //    grouping unchanged; only bolded and moved ahead of the payee.
+  const amt = p.amount != null ? '*₹' + p.amount.toLocaleString('en-IN') + '*' : ''
+  const prep = p.direction === 'in' ? pick(lang, { en: 'from' }) : pick(lang, { en: 'to' })
+  const who = p.payee ?? pick(lang, { en: 'payee not set' })
+  const hero = [amt, `${prep} ${who}`].filter(Boolean).join(' ')
+
+  // 3. Context -- matched project, NO "Project:" label; append " · mode" only if a mode
+  //    is present. No project -> omit the whole line (never an empty one).
+  const modeBit = p.mode?.trim() ? ' · ' + p.mode.trim() : ''
+  const contextLine = p.projectName ? p.projectName + modeBit : ''
+  const heroBlock = contextLine ? `${hero}\n${contextLine}` : hero
+
+  // 4. Note -- shown RAW (never summarized), italic (_..._), unlabeled, only if present.
+  const noteBlock = p.note?.trim() ? `_${p.note.trim()}_` : ''
+
+  // 5. Flags -- calm, off the hero line, one per condition that fires (logic unchanged).
+  const flags: string[] = []
+  if (p.payee && !p.payeeMatched) flags.push(pick(lang, { en: `${p.payee} isn't in your contacts yet` }))
+  if (p.projectRaw) flags.push(pick(lang, { en: `I noted the site as "${p.projectRaw}" — not one of your projects yet` }))
+  const flagBlock = flags.join('\n')
+
+  // 7. CTA -- target unchanged (EDIT_LINK); label per state. The payee flag keeps the
+  //    existing priority, then unknown-site, else clean.
+  const ctaText =
+    (p.payee && !p.payeeMatched) ? pick(lang, { en: 'Review & add contact' })
+    : p.projectRaw ? pick(lang, { en: 'Review & set site' })
+    : pick(lang, { en: 'Review in Day Book' })
+
+  // 6. Blank-line grouping: outcome / hero+context / note / flag.
+  const body = [outcome, heroBlock, noteBlock, flagBlock].filter(Boolean).join('\n\n')
+
+  return { kind: 'cta', body, cta: { text: ctaText, url: EDIT_LINK } }
 }
+
+// ── The two essential-asks (the ONLY questions the Transaction agent ever sends) ──
+// Each captures a raw value; neither matches against the DB. Acknowledge-before-ask:
+// surface what is already known, ask only the gap.
+
+/** Amount missing (payee may be known): "Paid <payee> — how much?" / "How much?". */
+export function mAskAmount(lang: Lang, p: { payee: string | null }): OutMessage {
+  return { kind: 'text', body: p.payee
+    ? `${pick(lang, { en: 'Paid' })} ${p.payee} — ${pick(lang, { en: 'how much?' })}`
+    : pick(lang, { en: 'How much?' }) }
+}
+
+/** Payee missing (amount may be known): "₹<amount> to whom?" / "Who did you pay?". */
+export function mAskPayee(lang: Lang, p: { amount: number | null } = { amount: null }): OutMessage {
+  return { kind: 'text', body: p.amount != null
+    ? `₹${p.amount.toLocaleString('en-IN')} ${pick(lang, { en: 'to whom?' })}`
+    : pick(lang, { en: 'Who did you pay?' }) }
+}
+
+/** Both essentials missing: one combined natural ask. */
+export function mAskBoth(lang: Lang): OutMessage {
+  return { kind: 'text', body: pick(lang, { en: 'Who did you pay, and how much?' }) }
+}
+
+/** Re-prompt when an amount answer didn't parse to a number. */
+export function mJustAmount(lang: Lang): OutMessage {
+  return { kind: 'text', body: pick(lang, { en: 'Just the amount please — e.g. 5000 or 5k' }) }
+}
+
+// NOTE: mProjectList / mConfirmPayee / mConfirmProject below are retained for the
+// concierge and future agents. The Transaction agent no longer calls them — its
+// disambiguation moved to the Day Book (capture-first). Do not delete.
 
 /** Project selection: interactive LIST (replaces "Reply 1-5"). */
 export function mProjectList(
@@ -80,18 +167,6 @@ export function mConfirmProject(lang: Lang, p: { guess: string }): OutMessage {
   }
 }
 
-/** Amount missing: plain text, acknowledge-before-ask. */
-export function mAmountMissing(lang: Lang, p: { payee: string | null }): OutMessage {
-  return { kind: 'text', body: p.payee
-    ? pick(lang, { en: `How much did you pay ${p.payee}?` })
-    : pick(lang, { en: 'How much did you pay?' }) }
-}
-
-/** Ask for the payee name (after "No, someone else"). */
-export function mAskPayee(lang: Lang): OutMessage {
-  return { kind: 'text', body: pick(lang, { en: 'Who did you pay?' }) }
-}
-
 /** Interrupted (consolidated): a LIST whose body carries A's ack + B's question. */
 export function mInterruptedList(
   lang: Lang,
@@ -117,17 +192,63 @@ export function mFailureNoAmount(lang: Lang): OutMessage {
   return { kind: 'text', body: pick(lang, { en: "Couldn't log that — I didn't catch an amount. Try: paid 5000 to ramu." }) }
 }
 
-/** Plain acknowledgment string (for consolidated interrupt prefixes). */
+// ── Explicit write-failure (the entry did NOT commit) ─────────────────────────────
+// No silent failure, no false "✓": when the staging RPC rolls back, the user is told
+// EXPLICITLY that nothing was recorded, sees exactly what was lost (from the parsed
+// values -- the entry has no id), and gets a one-tap replay. Reply BUTTONS (a CTA URL
+// button can't share a message with reply buttons -> [Add in Day Book] sends the link
+// as a follow-up).
+
+/** "⚠️ I couldn't save this — Kumar · ₹12,000 · ASM Elite / Nothing was recorded…". */
+export function mWriteFailed(
+  lang: Lang,
+  p: { payee: string | null; amount: number | null; project: string | null; replayId: string },
+): OutMessage {
+  const line = entryLine(p.payee, p.amount, p.project)
+  const head = pick(lang, { en: "⚠️ I couldn't save this" })
+  const body = `${head}${line ? ' — ' + line : ''}\n${pick(lang, { en: 'Nothing was recorded. Try again, or add it in the app.' })}`
+  return {
+    kind: 'buttons',
+    body,
+    buttons: [
+      { id: `retry_${p.replayId}`, title: pick(lang, { en: 'Try again' }) },
+      { id: 'add_daybook', title: trunc(pick(lang, { en: 'Add in Day Book' }), 20) },
+    ],
+  }
+}
+
+/** Follow-up after [Add in Day Book]: a CTA URL to the Day Book (real https). */
+export function mDaybookLink(lang: Lang, url: string): OutMessage {
+  return { kind: 'cta', body: pick(lang, { en: 'Open your Day Book to add it.' }), cta: { text: pick(lang, { en: 'Open Day Book' }), url } }
+}
+
+/** [Try again] on a replay row that expired / no longer exists. */
+export function mReplayExpired(lang: Lang): OutMessage {
+  return { kind: 'text', body: pick(lang, { en: 'That entry expired — just send it again.' }) }
+}
+
+/**
+ * Plain acknowledgment string for the consolidated-interrupt prefix. The draft was
+ * committed flagged (never lost) — name the gap transparently so the owner knows
+ * what to tidy in the Day Book.
+ */
 export function ackLine(lang: Lang, p: { payee: string | null; amount: number | null }): string {
-  return `${pick(lang, { en: 'Saved' })} ${entryLine(p.payee, p.amount, null)} ${pick(lang, { en: '(draft)' })}`.trim()
+  const saved = pick(lang, { en: 'Saved' })
+  const line = entryLine(p.payee, p.amount, null)
+  const gap = !p.payee ? pick(lang, { en: 'payee not set' })
+    : p.amount == null ? pick(lang, { en: 'amount not set' })
+    : ''
+  if (gap) return `${saved}${line ? ' ' + line : ''} — ${gap}`.trim()
+  return `${saved} ${line} ✓`.trim()
 }
 
 export function mUnsupported(lang: Lang): OutMessage {
-  return { kind: 'text', body: pick(lang, { en: 'I can handle text, photos, and (soon) voice notes — send me a payment like "Ramu 5000 cash".' }) }
+  return { kind: 'text', body: pick(lang, { en: 'I can handle text, photos, and voice notes — send me a payment like "Ramu 5000 cash".' }) }
 }
 
-export function mVoiceComingSoon(lang: Lang): OutMessage {
-  return { kind: 'text', body: pick(lang, { en: 'Voice notes are coming soon — for now, please type your message.' }) }
+/** Voice IS supported now -- this is a transcription miss, not "coming soon". */
+export function mVoiceUnclear(lang: Lang): OutMessage {
+  return { kind: 'text', body: pick(lang, { en: "I couldn't quite catch that voice note — please try again, or type it." }) }
 }
 
 /** Disambiguation: reply buttons (next turn resolves). */

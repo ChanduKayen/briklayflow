@@ -292,6 +292,9 @@ export interface AIExtracted {
   payee_unmatched?: boolean;
   payee_confidence?: ConfidenceLevel | null;
   payee_closest_match?: Array<{ id: string; name: string; type: string; category: string }> | null;
+  // Capture-first nearest candidate (WhatsApp never asks "did you mean…" — the Day
+  // Book surfaces this as a one-tap suggestion). Present only on a near-miss.
+  suggested_payee?: { id: string; name: string; score: number } | null;
   // Server-matched project (Step 3)
   project_id?: string | null;
   project_name?: string | null;
@@ -299,6 +302,7 @@ export interface AIExtracted {
   project_unmatched?: boolean;
   project_confidence?: ConfidenceLevel | null;
   project_closest_match?: Array<{ id: string; name: string }> | null;
+  suggested_project?: { id: string; name: string; score: number } | null;
   // Transaction fields
   amount?: number | null;
   date?: string | null;
@@ -317,6 +321,9 @@ export interface AIExtracted {
   wo_number?: string | null;
   // Flat confidence fields (Step 5)
   amount_confidence?: ConfidenceLevel | null;
+  // The exact span the amount was read from (e.g. "muppai aidhu velu") — shown on the
+  // card's one read-that-right flag when amount_confidence is LOW.
+  amount_source_phrase?: string | null;
   description_confidence?: ConfidenceLevel | null;
   overall_confidence?: ConfidenceLevel | null;
   // Legacy nested confidence (backward compat with old entries)

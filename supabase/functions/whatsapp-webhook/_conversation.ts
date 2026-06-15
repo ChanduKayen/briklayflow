@@ -118,13 +118,15 @@ export async function logRouterDecision(
   row: {
     orgId: string; sender: string; wamid: string; inputText: string
     decision: string; intentAgent: string | null; confidence: number
-    slotHints: Record<string, unknown>; chosenAgent: string; convoState: string
+    chosenAgent: string; convoState: string
   },
 ): Promise<void> {
+  // slot_hints is intentionally not written: the router no longer extracts domain slots
+  // (the agent owns understanding). The nullable column stays for historical rows.
   const { error } = await supabase.from('wa_router_decisions').insert({
     org_id: row.orgId, sender: row.sender, wamid: row.wamid, input_text: row.inputText,
     decision: row.decision, intent_agent: row.intentAgent, confidence: row.confidence,
-    slot_hints: row.slotHints, chosen_agent: row.chosenAgent, convo_state: row.convoState,
+    chosen_agent: row.chosenAgent, convo_state: row.convoState,
   })
   if (error) console.error('[convo] logRouterDecision error:', error)
 }

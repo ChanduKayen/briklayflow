@@ -7,6 +7,7 @@ import {
   enqueueJobFailure,
   acquireSenderLock,
   releaseSenderLock,
+  WriteCommitFailed,
 } from './_spine.ts'
 import { send, sendTypingIndicator } from './_format.ts'
 import { normalize } from './_normalize.ts'
@@ -252,7 +253,7 @@ async function processJob(
   if (messageId) sendTypingIndicator(messageId).catch(() => {})
 
   // Normalize every inbound type to the common envelope (image->vision now,
-  // voice->transcribe behind WA_VOICE_ENABLED). Failure -> treat as unsupported.
+  // voice->transcribe via Sarvam/Whisper). Failure -> treat as unsupported.
   let norm
   try {
     norm = await normalize(supabase, message, { orgId, from, wamid: messageId })
@@ -271,7 +272,9 @@ async function processJob(
     return
   }
   if (norm.source_type === 'voice' && !norm.text.trim()) {
-    await send(supabase, from, M.mVoiceComingSoon('en'), { org_id: orgId, wamid: messageId })
+    // Voice is on (a provider key exists) but this note didn't transcribe -> say so,
+    // don't claim "coming soon". (See _normalize: the only empty path now is a real miss.)
+    await send(supabase, from, M.mVoiceUnclear('en'), { org_id: orgId, wamid: messageId })
     if (jobId) await markJob(supabase, jobId, 'WRITTEN')
     return
   }
@@ -284,15 +287,23 @@ async function processJob(
   const lockKey = messageId || from
   await acquireSenderLock(supabase, from, lockKey)
   try {
-    await dispatch({ supabase, from, senderName, registered, wamid: messageId, orgId, interactiveId }, norm.text)
+    await dispatch({ supabase, from, senderName, registered, wamid: messageId, orgId, interactiveId, image: norm.image }, norm.text)
     if (jobId) await markJob(supabase, jobId, 'WRITTEN')
   } catch (e) {
     console.error('[wa-webhook] processing error:', e)
     if (jobId) {
-      await markJob(supabase, jobId, 'FAILED', (e as Error)?.message ?? String(e))
-      // Failure reply via the outbox (same dedup_key the watchdog uses, so a
-      // crash-then-watchdog never double-sends).
-      await enqueueJobFailure(supabase, jobId, orgId, from, messageId)
+      if (e instanceof WriteCommitFailed) {
+        // The agent already sent the EXPLICIT failure message (with replay) inline.
+        // Mark FAILED (terminal) + failure_notified so the watchdog skips it and we
+        // never double-send the generic message. No enqueueJobFailure here.
+        await markJob(supabase, jobId, 'FAILED', e.message)
+        await supabase.from('processing_job').update({ failure_notified: true }).eq('id', jobId)
+      } else {
+        await markJob(supabase, jobId, 'FAILED', (e as Error)?.message ?? String(e))
+        // Generic failure reply via the outbox (same dedup_key the watchdog uses, so a
+        // crash-then-watchdog never double-sends).
+        await enqueueJobFailure(supabase, jobId, orgId, from, messageId)
+      }
     }
   } finally {
     await releaseSenderLock(supabase, from, lockKey)

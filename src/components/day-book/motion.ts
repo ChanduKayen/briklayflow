@@ -58,4 +58,9 @@ export const ANIM = `
   .tf-raw,.tf-arrow,.tf-read,.tf-chip,.tf-glow { animation: none !important; opacity: 1 !important; filter: none !important; transform: none !important; }
   .db-file-off,.db-reject-off,.db-sweep,.db-draw,.db-pop,.db-confirm { animation-duration: .01ms !important; }
 }
+/* Mobile: floor form text at 16px so iOS Safari doesn't zoom the viewport on focus
+   (inline T.sm/T.xs sit below 16px). Scoped to .db-scope -> only the Day Book shifts. */
+@media (max-width: 640px) {
+  .db-scope input, .db-scope select, .db-scope textarea { font-size: 16px !important; }
+}
 `;

@@ -244,6 +244,8 @@ Examples:
 "suresh electrician 3rd floor 15000 neft" → {"payee_raw":"suresh","amount":15000,"mode":"NEFT","transaction_type":"Worker Payment","work_type":"Electrical wiring","floor_or_area":"3rd floor","description_raw":"Electrical wiring - 3rd floor","material_name":null,"material_quantity":null,"material_unit":null,"project_raw":null,"date_raw":null}
 "paid 100 to raju" → {"payee_raw":"raju","amount":100,"mode":null,"transaction_type":"Worker Payment","work_type":null,"floor_or_area":null,"description_raw":"Payment to Raju","material_name":null,"material_quantity":null,"material_unit":null,"project_raw":null,"date_raw":null}
 
+OUTPUT LANGUAGE — input may be in Telugu/Hindi/native script. READ it natively and understand the meaning, then write in English/Latin. NAMES (payee_raw, project_raw): phonetically TRANSLITERATE, keep verbatim, never translate (రాజీవ్ → "Rajiv") — server-side name/project matching is Latin-only. EVERYTHING DESCRIPTIVE (description_raw, work_type, floor_or_area, material_name, material_unit): TRANSLATE the meaning into the ordinary, concise natural-English words for what it is (ప్లాస్టరింగ్ → "Plastering", సిమెంట్ → "Cement", మట్టి ఎత్తడం → "soil lifting") — NOT a romanization. Keep digits as digits and English words as-is. Never output native script.
+
 Return ONLY valid JSON, no other text:
 {
   "payee_raw": string | null,

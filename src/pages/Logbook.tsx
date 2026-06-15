@@ -10,7 +10,7 @@
  * The reference is a pure review gate, so the old manual composer is gone; the
  * UI_TEXT/UI_IMAGE capture path still exists at the data layer for later re-use.
  */
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
@@ -70,14 +70,29 @@ export default function Logbook({ session }: { session: Session }) {
     },
   });
 
-  // Deep-link focus: WhatsApp "[edit]" links to /logbook?entry=<id>. Scroll to and
-  // highlight that entry's card once entries have loaded.
+  // Deep-link focus: the WhatsApp confirmation links to /logbook?entry=<id>. The card
+  // only exists in the DOM when its tab is active, so we (1) switch to the tab that holds
+  // the entry — it may already be filed/dismissed, not just "to review" — then (2) scroll
+  // it into view once it has rendered. The ring highlight is applied at render below.
   const focusId = useMemo(() => new URLSearchParams(window.location.search).get('entry'), []);
+
+  // 1) Once entries load, select the tab the focused entry lives in.
   useEffect(() => {
     if (!focusId || isLoading) return;
-    const el = document.getElementById(`db-entry-${focusId}`);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const e = entries.find((x) => x.id === focusId);
+    if (!e) return;
+    setTab(e.status === 'POSTED' ? 'filed' : e.status === 'DISMISSED' ? 'rejected' : 'review');
   }, [focusId, isLoading, entries]);
+
+  // 2) After the correct tab has rendered the card, scroll to it — once.
+  const didFocus = useRef(false);
+  useEffect(() => {
+    if (!focusId || isLoading || didFocus.current) return;
+    const el = document.getElementById(`db-entry-${focusId}`);
+    if (!el) return;
+    didFocus.current = true;
+    requestAnimationFrame(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+  }, [focusId, isLoading, tab, entries]);
 
   // Lists that power the inline gap editors (match payee / pick project).
   const { data: stakeholders = [] } = useQuery({
@@ -141,13 +156,13 @@ export default function Logbook({ session }: { session: Session }) {
   };
 
   return (
-    <div className="min-h-screen" style={{ background: V.page, ...font }}>
+    <div className="db-scope min-h-screen" style={{ background: V.page, ...font }}>
       <style>{ANIM}</style>
 
       {/* full-bleed invitation */}
       <Invitation canManage={canManage} />
 
-      <div className="mx-auto py-8" style={{ width: '92%', maxWidth: 1100 }}>
+      <div className="mx-auto py-6 sm:py-8" style={{ width: '92%', maxWidth: 1100 }}>
         <h1 style={{ color: V.ink, ...serif, ...T.h1 }}>Day book</h1>
         <p className="mt-2 leading-relaxed flex flex-wrap items-center gap-x-1.5" style={{ color: V.sys, ...font, ...T.body }}>
           Everything you and your team sent to Briklay on
@@ -171,12 +186,12 @@ export default function Logbook({ session }: { session: Session }) {
         </div>
 
         {/* tabs */}
-        <div className="flex items-center gap-1 mt-8" style={{ borderBottom: `1px solid ${V.line}` }}>
+        <div className="flex items-center gap-1 mt-8 overflow-x-auto" style={{ borderBottom: `1px solid ${V.line}` }}>
           {TABS.map((t) => {
             const on = tab === t.key;
             const c = counts[t.key];
             return (
-              <button key={t.key} onClick={() => setTab(t.key)} className="relative px-3 sm:px-4 py-2.5 whitespace-nowrap" style={{ ...font, ...T.sm, color: on ? V.terraDeep : V.sys, fontWeight: on ? 500 : 400 }}>
+              <button key={t.key} onClick={() => setTab(t.key)} className="relative shrink-0 px-3 sm:px-4 py-3 whitespace-nowrap" style={{ ...font, ...T.sm, color: on ? V.terraDeep : V.sys, fontWeight: on ? 500 : 400 }}>
                 {t.label}
                 {c > 0 && <span className="ml-1.5" style={{ color: on ? V.terra : V.faint, ...nums }}>{c}</span>}
                 {on && <span className="absolute left-2 right-2 bottom-0 rounded-full" style={{ height: 2, background: V.terra }} />}

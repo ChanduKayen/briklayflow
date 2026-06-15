@@ -6,6 +6,19 @@ export type JobStatus =
   | 'RECEIVED' | 'PROCESSING' | 'WRITTEN' | 'FAILED' | 'CONFIRMED' | 'CONFIRM_PENDING'
 
 /**
+ * Thrown by an agent when the staging RPC rolled back (the entry did NOT commit)
+ * AND it has already handled the user-facing failure inline -- persisted the parsed
+ * values for replay and sent the EXPLICIT failure message. processJob catches this
+ * to mark the job FAILED WITHOUT firing the generic failure message (no double-send).
+ */
+export class WriteCommitFailed extends Error {
+  constructor(message = 'staging RPC did not commit (explicit failure handled)') {
+    super(message)
+    this.name = 'WriteCommitFailed'
+  }
+}
+
+/**
  * Create the processing_job for this wamid in PROCESSING. wamid is UNIQUE, so a
  * replay returns { duplicate: true } and the caller should stop (already handled).
  */

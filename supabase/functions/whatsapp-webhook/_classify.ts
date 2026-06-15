@@ -57,7 +57,7 @@ function isValidClass(s: string): boolean {
 }
 
 async function callClaude(
-  apiKey: string, system: string, user: string, maxTokens: number,
+  apiKey: string, system: string, user: string, maxTokens: number, temperature?: number,
 ): Promise<string> {
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -72,6 +72,7 @@ async function callClaude(
         max_tokens: maxTokens,
         system,
         messages: [{ role: 'user', content: user }],
+        ...(temperature != null ? { temperature } : {}),
       }),
     })
     if (!res.ok) return ''
@@ -81,7 +82,7 @@ async function callClaude(
 }
 
 async function callOpenAI(
-  apiKey: string, system: string, user: string, maxTokens: number,
+  apiKey: string, system: string, user: string, maxTokens: number, temperature?: number,
 ): Promise<string> {
   try {
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -97,6 +98,7 @@ async function callOpenAI(
           { role: 'system', content: system },
           { role: 'user', content: user },
         ],
+        ...(temperature != null ? { temperature } : {}),
       }),
     })
     if (!res.ok) return ''

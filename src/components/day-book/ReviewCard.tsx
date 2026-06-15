@@ -96,6 +96,7 @@ export function ReviewCard({
   const [newCategory, setNewCategory] = useState('');
   const [newCategoryOther, setNewCategoryOther] = useState('');
   const [creating, setCreating] = useState(false);
+  const [payeeSugDismissed, setPayeeSugDismissed] = useState(false);
   const openEditor = (f: Field, seed = '') => { setQ(seed); setEditing(f); };
   const mark = (f: string) => touched.current.add(f);
 
@@ -156,7 +157,7 @@ export function ReviewCard({
   if (archived) {
     const filed = entry.status === 'POSTED';
     return (
-      <div className="db-drop rounded-2xl px-5 py-4 flex items-center gap-3" style={{ background: V.surface, border: '1px solid #E3DDD4' }}>
+      <div className="db-drop rounded-2xl px-4 sm:px-5 py-4 flex items-center gap-3" style={{ background: V.surface, border: '1px solid #E3DDD4' }}>
         <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0" style={{ background: filed ? V.sageWash : V.field }}>
           {filed ? <Check size={13} color={V.sage} strokeWidth={3} /> : <X size={13} color={V.faint} />}
         </span>
@@ -190,13 +191,22 @@ export function ReviewCard({
   const sentTime = new Date(entry.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
 
   const amberChip = (label: string, onClick: () => void) => (
-    <button onClick={(e) => { e.stopPropagation(); if (canManage) onClick(); }} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md" style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font, ...T.xs }}>
+    <button onClick={(e) => { e.stopPropagation(); if (canManage) onClick(); }} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md" style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font, ...T.xs }}>
       <Pencil size={10} /> {label}
     </button>
   );
   const filledChip = (icon: React.ReactNode, label: string, onClick: () => void) => (
-    <button onClick={(e) => { e.stopPropagation(); if (canManage) onClick(); }} className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md max-w-full" style={{ background: V.field, color: V.inkSoft, ...font, ...T.xs }}>
+    <button onClick={(e) => { e.stopPropagation(); if (canManage) onClick(); }} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md max-w-full" style={{ background: V.field, color: V.inkSoft, ...font, ...T.xs }}>
       {icon}<span className="truncate">{label}</span>
+    </button>
+  );
+  // One-tap resolve button for Day Book suggestions ("Use Raju", "Pick project").
+  // This is where the matching the chat deliberately DIDN'T do gets resolved, fast.
+  const resolveBtn = (label: React.ReactNode, onClick: () => void, primary = false) => (
+    <button onClick={(e) => { e.stopPropagation(); if (canManage) onClick(); }} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md" style={primary
+      ? { background: V.sageWash, border: `1px solid ${V.sage}33`, color: V.sage, fontWeight: 500, ...font, ...T.xs }
+      : { background: V.field, color: V.inkSoft, ...font, ...T.xs }}>
+      {label}
     </button>
   );
 
@@ -243,7 +253,7 @@ export function ReviewCard({
         }}
       >
         {/* tier 1 — the site */}
-        <div className="px-5 pt-4 pb-4">
+        <div className="px-4 sm:px-5 pt-4 pb-4">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
               <span className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 font-medium" style={{ background: V.terraWash, color: V.terraDeep, ...font, ...T.sm }}>
@@ -284,7 +294,7 @@ export function ReviewCard({
         </div>
 
         {/* seam */}
-        <div className="flex items-center gap-2 px-5 relative">
+        <div className="flex items-center gap-2 px-4 sm:px-5 relative">
           <span className="flex-1" style={{ borderTop: `1px solid ${V.line}` }} />
           <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full shrink-0 ${reveal ? 'tf-arrow' : ''}`} style={{ background: V.surface, border: `1px solid ${V.line}` }}>
             <ArrowDown size={12} style={{ color: reveal ? V.terra : V.faint }} />
@@ -293,7 +303,7 @@ export function ReviewCard({
         </div>
 
         {/* tier 2 — what it becomes */}
-        <div className="px-5 pt-4 pb-4" style={{ background: V.page }}>
+        <div className="px-4 sm:px-5 pt-4 pb-4" style={{ background: V.page }}>
           <div className="flex items-center justify-between mb-2.5">
             <p className="uppercase font-medium" style={{ color: V.faint, letterSpacing: '0.1em', ...font, ...T.xs }}>Briklay understood</p>
             <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full" style={ready ? { background: V.field, color: V.sys, ...font } : { background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font }}>
@@ -326,23 +336,58 @@ export function ReviewCard({
             ) : amberChip('who was paid?', () => openEditor('payee'))}
           </div>
 
-          {/* heard a name, but it is not one of your parties yet */}
-          {!payeeId && payeeName && editing !== 'payee' && (
+          {/* low-confidence amount (a spoken/code-mixed numeral the agent wasn't sure
+              of) — the ONE amount flag, keyed to amount_confidence, showing the exact
+              phrase so the owner catches it. Never a confident silent save. */}
+          {ai.amount_confidence === 'LOW' && amountNum > 0 && (
             <button
-              onClick={(e) => { e.stopPropagation(); if (canManage) openEditor('payee', payeeName || ''); }}
+              onClick={(e) => { e.stopPropagation(); if (canManage) openEditor('amount', amount); }}
               className="mt-1.5 inline-flex items-center gap-1.5 text-left"
               style={{ color: V.ask, ...font, ...T.xs, paddingLeft: 32 }}
             >
-              <span className="w-1.5 h-1.5 rounded-full" style={{ background: V.ask }} />
-              "{payeeName}" is not linked to any party in your system — tap to link or add
+              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: V.ask }} />
+              {ai.amount_source_phrase
+                ? `read "${ai.amount_source_phrase}" as ₹${inr(amountNum)} — right?`
+                : `₹${inr(amountNum)} — read that right?`}
             </button>
           )}
 
-          {/* secondary chips: project · note · anchor */}
+          {/* heard a name, but it is not one of your parties yet — the disambiguation
+              WhatsApp deliberately skipped, resolved here in one tap */}
+          {!payeeId && payeeName && editing !== 'payee' && (
+            ai.suggested_payee && !payeeSugDismissed
+              && ai.suggested_payee.name.toLowerCase() !== (payeeName || '').toLowerCase() ? (
+              <div className="mt-2" style={{ paddingLeft: 32 }}>
+                <p style={{ color: V.ask, ...font, ...T.xs }}>
+                  Heard <span style={{ fontWeight: 600, color: V.inkSoft }}>{payeeName}</span> — did you mean{' '}
+                  <span style={{ fontWeight: 600, color: V.inkSoft }}>{ai.suggested_payee.name}</span>?
+                </p>
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  {resolveBtn(`Use ${ai.suggested_payee.name}`, () => { setPayeeId(ai.suggested_payee!.id); setPayeeName(ai.suggested_payee!.name); mark('payee'); }, true)}
+                  {resolveBtn(`Keep ${payeeName}`, () => setPayeeSugDismissed(true))}
+                  {resolveBtn(<><UserPlus size={11} /> New contact</>, () => openEditor('payee', payeeName || ''))}
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={(e) => { e.stopPropagation(); if (canManage) openEditor('payee', payeeName || ''); }}
+                className="mt-1.5 inline-flex items-center gap-1.5 text-left"
+                style={{ color: V.ask, ...font, ...T.xs, paddingLeft: 32 }}
+              >
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: V.ask }} />
+                "{payeeName}" is not linked to any party in your system — tap to link or add
+              </button>
+            )
+          )}
+
+          {/* secondary chips: project · note · anchor. A project the bot heard but
+              couldn't match is resolved in the block below, not here. */}
           <div className={`mt-3 flex flex-wrap gap-1.5 ${reveal ? 'tf-chip' : ''}`} style={{ paddingLeft: 32 }}>
             {projectId
               ? filledChip(<Link2 size={11} style={{ color: V.faint }} />, projectName || 'Project', () => openEditor('project', projectName || ''))
-              : amberChip('which project?', () => openEditor('project'))}
+              : !ai.project_raw
+                ? amberChip('which project?', () => openEditor('project'))
+                : null}
             {description.trim()
               ? filledChip(<Pencil size={10} style={{ color: V.faint }} />, description.trim(), () => openEditor('description', description))
               : amberChip('what was it for?', () => openEditor('description'))}
@@ -352,6 +397,20 @@ export function ReviewCard({
               </span>
             )}
           </div>
+
+          {/* project heard but not a registered project — one-tap resolve */}
+          {!projectId && ai.project_raw && editing !== 'project' && (
+            <div className="mt-2" style={{ paddingLeft: 32 }}>
+              <p style={{ color: V.ask, ...font, ...T.xs }}>
+                <span style={{ fontWeight: 600, color: V.inkSoft }}>{ai.project_raw}</span> — not a registered project
+              </p>
+              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                {ai.suggested_project && ai.suggested_project.name.toLowerCase() !== (ai.project_raw || '').toLowerCase()
+                  && resolveBtn(`Use ${ai.suggested_project.name}`, () => { setProjectId(ai.suggested_project!.id); setProjectName(ai.suggested_project!.name); mark('project'); }, true)}
+                {resolveBtn('Pick project', () => openEditor('project', ai.project_raw || ''))}
+              </div>
+            </div>
+          )}
 
           {/* inline editor */}
           {editing && canManage && (
@@ -438,15 +497,15 @@ export function ReviewCard({
 
         {/* actions */}
         {canManage && (
-          <div className="flex items-center gap-2 px-5 py-3" style={{ borderTop: `1px solid ${V.line}` }}>
-            <button onClick={runFile} disabled={!ready || !!leaving} title={ready ? 'File it' : 'Resolve the amber fields to file'} className="inline-flex items-center gap-1.5 font-medium px-4 py-2 rounded-lg" style={ready ? { background: terraGrad, color: '#fff', ...font, ...T.sm } : { background: V.field, color: V.faint, ...font, ...T.sm, cursor: 'not-allowed' }}>
+          <div className="flex items-center gap-2 px-4 sm:px-5 py-3" style={{ borderTop: `1px solid ${V.line}` }}>
+            <button onClick={runFile} disabled={!ready || !!leaving} title={ready ? 'File it' : 'Resolve the amber fields to file'} className="inline-flex items-center justify-center gap-1.5 font-medium px-4 py-2.5 min-h-[44px] whitespace-nowrap rounded-lg" style={ready ? { background: terraGrad, color: '#fff', ...font, ...T.sm } : { background: V.field, color: V.faint, ...font, ...T.sm, cursor: 'not-allowed' }}>
               <Check size={15} /> File it
             </button>
-            <button onClick={onFix} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg" style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.inkSoft, ...font, ...T.sm }}>
+            <button onClick={onFix} className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 min-h-[44px] whitespace-nowrap rounded-lg" style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.inkSoft, ...font, ...T.sm }}>
               <Pencil size={13} /> Fix
             </button>
             <span className="flex-1" />
-            <button onClick={runReject} disabled={!!leaving} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg" style={{ color: V.faint, ...font, ...T.sm }}>
+            <button onClick={runReject} disabled={!!leaving} className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 min-h-[44px] whitespace-nowrap rounded-lg" style={{ color: V.faint, ...font, ...T.sm }}>
               <X size={14} /> Not a transaction
             </button>
           </div>
