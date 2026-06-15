@@ -58,6 +58,7 @@ import Billing from './pages/Billing';
 import NewBill from './pages/NewBill';
 import BillDetail from './pages/BillDetail';
 import Logbook from './pages/Logbook';
+import { WhatsAppGlyph } from './components/day-book/atoms';
 import Orders from './pages/Orders';
 import InviteAccept from './pages/InviteAccept';
 import OnboardingWizard from './components/OnboardingWizard';
@@ -565,6 +566,27 @@ function NavLabel({ label, href, isActive }: { label: string; href: string; isAc
   );
 }
 
+// The Day-book nav icon: on each page load it teases its WhatsApp origin — flipping
+// to the WhatsApp glyph and back three times, then settling on the notebook mark.
+function DayBookNavIcon({ size = 16 }: { size?: number }) {
+  const location = useLocation();
+  const [showWa, setShowWa] = useState(false);
+  useEffect(() => {
+    setShowWa(false);
+    const seq = [true, false, true, false, true, false]; // wa·book ×3, ending on the book
+    // Dwell ~2.5s on each face so it reads as a calm, unhurried tease.
+    const timers = seq.map((wa, i) => setTimeout(() => setShowWa(wa), 2500 * (i + 1)));
+    return () => timers.forEach(clearTimeout);
+  }, [location.pathname]);
+  return (
+    <span className="db-nav-swap" key={showWa ? 'wa' : 'nb'}>
+      {showWa
+        ? <WhatsAppGlyph size={size} />
+        : <IconNotebook size={size} strokeWidth={1.5} style={{ flexShrink: 0 }} />}
+    </span>
+  );
+}
+
 function NavTooltip({ href, children }: { href: string; children: React.ReactNode }) {
   const tip = NAV_TOOLTIPS[href];
   const [show, setShow] = useState(false);
@@ -874,7 +896,9 @@ function SidebarContent({
             return (
               <NavTooltip key={item.path} href={item.path}>
                 <Link to={item.path} onClick={onNavigate} className="nav-item" data-active={active}>
-                  <Icon size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />
+                  {item.path === '/logbook'
+                    ? <DayBookNavIcon size={16} />
+                    : <Icon size={16} strokeWidth={1.5} style={{ flexShrink: 0 }} />}
                   <NavLabel label={item.label} href={item.path} isActive={active} />
                   {(item.badge ?? 0) > 0 && (
                     <span className="nav-badge-mono">{(item.badge ?? 0) > 9 ? '9+' : item.badge}</span>

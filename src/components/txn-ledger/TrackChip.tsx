@@ -6,11 +6,16 @@
  */
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
-import { useOrgId } from '../../lib/auth/AuthProvider';
-import { Hammer, Package, ChevronRight, ChevronDown, Check, Plus } from 'lucide-react';
+import { Hammer, Package, ChevronRight, ChevronDown, ChevronUp, Check, Plus, HelpCircle, Receipt, Wallet, Lightbulb, Clock } from 'lucide-react';
+
+// A draft / unapproved order can't take a payment yet — shown faded, tagged "Awaiting
+// approval", and not selectable until it's approved.
+const isAwaiting = (s: any) => /draft|pending|await/i.test(String(s || ''));
 import { V, font, serif, nums, terraGrad } from './ledgerTokens';
+import { WhyTrackModal } from './WhyTrack';
 
 const inr = (n: number) => '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 const inrShort = (n: number) => {
@@ -18,18 +23,17 @@ const inrShort = (n: number) => {
   if (v >= 100000) return '₹' + (v / 100000).toFixed(v % 100000 === 0 ? 0 : 1) + 'L';
   return '₹' + v.toLocaleString('en-IN', { maximumFractionDigits: 0 });
 };
-const cap = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
-
 type Kind = 'WO' | 'PO';
 
 export function TrackChip({ txn, onLinked }: { txn: any; onLinked: () => void }) {
-  const orgId = useOrgId();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [done, setDone] = useState<{ title: string; sub: string } | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [showWhy, setShowWhy] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState<{ top: number; left?: number; right: number }>({ top: 0, right: 0 });
   const fail = (e: any) => { setErr(e?.message || e?.error_description || 'Could not do that — try again'); setBusy(false); };
@@ -41,21 +45,18 @@ export function TrackChip({ txn, onLinked }: { txn: any; onLinked: () => void })
   const allocId: string | null = txn.txn_allocations?.[0]?.allocation_id ?? null;
   const stakeholderId: string | null = txn.stakeholder_id ?? null;
   const payee = txn.stakeholders?.name || 'this payee';
-  const trade = (txn.stakeholders?.category || '') as string;
   const amount = Number(txn.total_amount) || 0;
 
   const noun = kind === 'PO' ? 'order' : 'job';
   const nudge = kind === 'PO' ? 'Are you tracking this purchase?' : 'Are you tracking this job?';
-  const nudgeTe = kind === 'PO' ? 'ఈ కొనుగోలు ట్రాక్ అవుతుందా?' : 'ఈ పని ట్రాక్ అవుతుందా?';
-  const suggested = cap(trade) || (kind === 'PO' ? 'Materials' : 'Site work');
   const NewIcon = kind === 'PO' ? Package : Hammer;
 
-  // Essential details, collected before a draft is created — never a blind one-tap.
-  const [name, setName] = useState(suggested);
-  const [cost, setCost] = useState('');
-  const [hasPhases, setHasPhases] = useState(false);
-  const [phName, setPhName] = useState('');
-  const [phAmt, setPhAmt] = useState('');
+  // Creation happens on the full PO/WO page — not inline. The button morphs to a
+  // gentle "taking you there…" while we navigate, carrying the payment's context.
+  const [navigating, setNavigating] = useState(false);
+  // The "New …" card collapses to one line when existing orders are available (attach
+  // is the likely intent); it opens fully when there's nothing to track under yet.
+  const [createOpen, setCreateOpen] = useState<boolean | null>(null);
 
   const computePos = () => {
     const el = btnRef.current; if (!el) return null;
@@ -68,7 +69,7 @@ export function TrackChip({ txn, onLinked }: { txn: any; onLinked: () => void })
     if (!open) { const p = computePos(); if (p) setPos(p); setErr(null); }
     setOpen((o) => !o);
   };
-  const close = () => { setOpen(false); setExpanded(null); };
+  const close = () => { setOpen(false); setExpanded(null); setShowWhy(false); };
 
   // keep the panel attached to the chip while the page scrolls; close if it leaves view
   useEffect(() => {
@@ -85,25 +86,39 @@ export function TrackChip({ txn, onLinked }: { txn: any; onLinked: () => void })
   }, [open]);
 
   // existing jobs/orders for this payee + project, and what's been paid against each
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error: loadErr } = useQuery({
     queryKey: ['track', kind, projectId, stakeholderId],
     enabled: open && !!projectId && !!stakeholderId,
+    // Always re-read when the panel opens — a job/order just created on the full page
+    // must show up immediately, not only after a hard refresh.
+    staleTime: 0,
+    refetchOnMount: 'always',
     queryFn: async () => {
       if (kind === 'WO') {
-        const { data: wos } = await supabase.from('work_orders')
-          .select('wo_id, scope_of_work, order_value, status, wo_milestones(milestone_id, name, seq_no, planned_amount)')
+        // Fetch the WOs WITHOUT embedding milestones — an embed that fails (relationship
+        // / RLS) would null the whole query and silently hide every job. Milestones are
+        // pulled separately and grafted on; if THAT fails, jobs still show (attach at WO level).
+        const { data: wos, error: woErr } = await supabase.from('work_orders')
+          .select('wo_id, scope_of_work, order_value, status')
           .eq('project_id', projectId).eq('stakeholder_id', stakeholderId)
           .not('status', 'in', '("Closed","Cancelled")').order('date_issued', { ascending: false });
+        if (woErr) throw woErr;
         const ids = (wos ?? []).map((w: any) => w.wo_id);
+        const { data: ms } = ids.length
+          ? await supabase.from('wo_milestones').select('wo_id, milestone_id, name, seq_no, planned_amount').in('wo_id', ids)
+          : { data: [] as any[] };
+        const byWo: Record<string, any[]> = {};
+        (ms ?? []).forEach((m: any) => { (byWo[m.wo_id] ||= []).push(m); });
+        const rows = (wos ?? []).map((w: any) => ({ ...w, wo_milestones: byWo[w.wo_id] ?? [] }));
         const { data: paid } = ids.length
           ? await supabase.from('txn_allocations').select('order_ref, milestone_id, allocated_amount').eq('order_type', 'WO').in('order_ref', ids)
           : { data: [] as any[] };
-        return { rows: wos ?? [], paid: paid ?? [] };
+        return { rows, paid: paid ?? [] };
       }
       const { data: pos } = await supabase.from('purchase_orders')
         .select('po_id, status, order_value, total_value, vendor_bill_amount')
         .eq('project_id', projectId).eq('stakeholder_id', stakeholderId)
-        .in('status', ['ORDERED', 'BILLED', 'PARTIAL']).order('created_at', { ascending: false });
+        .not('status', 'in', '("CANCELLED","Cancelled","cancelled")').order('created_at', { ascending: false });
       const ids = (pos ?? []).map((p: any) => p.po_id);
       const { data: paid } = ids.length
         ? await supabase.from('txn_allocations').select('order_ref, allocated_amount').eq('order_type', 'PO').in('order_ref', ids)
@@ -132,7 +147,31 @@ export function TrackChip({ txn, onLinked }: { txn: any; onLinked: () => void })
     (data?.paid ?? []).filter((p: any) => p.order_ref === ref && (milestoneId === undefined || p.milestone_id === milestoneId))
       .reduce((s: number, p: any) => s + Number(p.allocated_amount || 0), 0);
 
-  const rows = data?.rows ?? [];
+  // Why an order can't take this payment yet: it's still a draft (awaiting approval),
+  // or it's approved but no vendor bill has been entered (you can't pay against nothing).
+  // A job (WO) has no bill stage, so only the approval gate applies.
+  const blockReason = (r: any): null | 'approval' | 'bill' => {
+    if (isAwaiting(r.status)) return 'approval';
+    if (kind === 'PO') {
+      const hasBill = /billed|partial/i.test(String(r.status || '')) || Number(r.vendor_bill_amount || 0) > 0;
+      if (!hasBill) return 'bill';
+    }
+    return null;
+  };
+  // Eligible orders first, the faded blocked ones after.
+  const rows = [...(data?.rows ?? [])].sort((a: any, b: any) => Number(!!blockReason(a)) - Number(!!blockReason(b)));
+  // Expanded by default only when there's nothing to track under yet; user toggle wins.
+  const showCreate = createOpen ?? (!isLoading && rows.length === 0);
+  const collapsedLine = kind === 'PO'
+    ? 'Create a Purchase order — track bills, materials, payments for this order'
+    : `Create a Job (Work Order) for ${payee}${projectName ? ` in ${projectName}` : ''} with its own scope, milestones and budgets`;
+
+  // A faded tag shown in place of the chevron for orders that can't take the payment yet.
+  const AwaitingTag = ({ reason }: { reason: 'approval' | 'bill' }) => (
+    <span className="inline-flex items-center gap-1 shrink-0" style={{ color: V.faint, ...font, fontSize: 10.5, fontWeight: 600 }}>
+      {reason === 'bill' ? <Receipt size={11} /> : <Clock size={11} />} {reason === 'bill' ? 'Awaiting bill entry' : 'Awaiting approval'}
+    </span>
+  );
 
   const finish = (title: string, sub: string) => {
     setDone({ title, sub });
@@ -153,55 +192,35 @@ export function TrackChip({ txn, onLinked }: { txn: any; onLinked: () => void })
     } catch (e) { fail(e); }
   };
 
-  const createJob = async () => {
-    if (busy) return;
-    if (!allocId) return noAlloc();
-    const scope = name.trim() || suggested;
-    const value = Number(cost) || amount;
-    setBusy(true); setErr(null);
-    try {
-      const milestones = hasPhases
-        ? [{ seq_no: 1, name: phName.trim() || 'Phase 1', unit_type: 'LS', quantity: 1, rate: null, planned_amount: Number(phAmt) || value, ai_extracted: false }]
-        : [{ seq_no: 1, name: 'Full Payment', unit_type: 'LS', quantity: 1, rate: null, planned_amount: value, ai_extracted: false }];
-      const { data: res, error } = await supabase.rpc('create_work_order', {
-        p_org_id: orgId, p_project_id: projectId, p_stakeholder_id: stakeholderId,
-        p_scope: scope, p_order_value: value,
-        p_date_issued: new Date().toISOString().slice(0, 10), p_source: 'manual', p_milestones: milestones,
-      });
-      if (error || !res?.success) throw new Error(res?.error || 'create failed');
-      await supabase.from('txn_allocations').update({ order_type: 'WO', order_ref: res.wo_id, milestone_id: null }).eq('allocation_id', allocId);
-      finish(`${scope} job created`, `Draft saved${projectName ? ` · ${projectName}` : ''} — refine its phases in Jobs`);
-    } catch (e) { fail(e); }
+  // No inline creation — hand off to the full PO/WO page with this payment's
+  // context (project + party + the originating txn, so that page can link the
+  // payment back once the order is saved). A short morph makes the jump feel calm.
+  const goCreate = () => {
+    if (navigating) return;
+    setNavigating(true);
+    const path = kind === 'PO' ? '/purchase-orders/new' : '/work-orders/new';
+    // Where Back / Save should return to: the ledger with THIS payment's row focused
+    // (?txn=… scrolls to and rings it), so the breadcrumb reads Ledger → New … → back
+    // to the exact row that started it — not the project-level list.
+    const params = new URLSearchParams(window.location.search);
+    params.set('txn', txn.txn_id);
+    const here = `${window.location.pathname}?${params.toString()}`;
+    const state = {
+      projectId: projectId ?? undefined,
+      stakeholderId: stakeholderId ?? undefined,
+      returnTo: here,
+      returnLabel: 'Ledger',
+      fromTxn: { txnId: txn.txn_id, allocationId: allocId, amount, payeeName: payee },
+    };
+    setTimeout(() => navigate(path, { state }), 700);
   };
 
-  const createOrder = async () => {
-    if (busy) return;
-    if (!allocId) return noAlloc();
-    const item = name.trim() || suggested;
-    const value = Number(cost) || amount;
-    setBusy(true); setErr(null);
-    try {
-      const poData = {
-        org_id: orgId, project_id: projectId, stakeholder_id: stakeholderId,
-        items: [{ description: item, qty: 1, unit: 'LS', rate: value, amount: value }],
-        order_value: value, total_value: value, gst_value: 0, status: 'ORDERED',
-        date_issued: new Date().toISOString().slice(0, 10), expected_delivery: null, delivery_location: null,
-        payment_terms_days: 30, ordered_by: null, vendor_notes: null, internal_notes: null,
-      };
-      const lineItems = [{
-        line_number: 1, category_id: null, item_name: item, specification: null, unit: 'LS',
-        quantity_ordered: 1, unit_rate: value, basic_amount: value, discount_percent: 0, discount_amount: 0,
-        gst_rate: 0, cgst: 0, sgst: 0, igst: 0, total_amount: value,
-      }];
-      const { data: res, error } = await supabase.rpc('create_purchase_order', { p_po_data: poData, p_line_items: lineItems });
-      if (error || !res?.success) throw new Error(res?.error || 'create failed');
-      await supabase.from('txn_allocations').update({ order_type: 'PO', order_ref: res.po_id, milestone_id: null }).eq('allocation_id', allocId);
-      finish(`${item} order started`, `Tracked${projectName ? ` · ${projectName}` : ''} — add items & details in Orders`);
-    } catch (e) { fail(e); }
-  };
-
-  const Pill = ({ children }: { children: React.ReactNode }) => (
-    <span className="inline-flex items-center px-2.5 py-1 rounded-full" style={{ border: `1px solid ${V.line}`, color: V.sys, ...font, ...nums, fontSize: 11.5 }}>{children}</span>
+  // A small capability row for the purchase-order explainer (materials · bills · quotes).
+  const Cap = ({ icon: Icon, children }: { icon: typeof Package; children: React.ReactNode }) => (
+    <div className="flex items-start gap-2" style={{ color: V.sys, ...font, fontSize: 12, lineHeight: 1.45 }}>
+      <Icon size={13} style={{ color: V.terraDeep, marginTop: 1 }} className="shrink-0" />
+      <span>{children}</span>
+    </div>
   );
 
   return (
@@ -238,64 +257,71 @@ export function TrackChip({ txn, onLinked }: { txn: any; onLinked: () => void })
               <>
                 {/* header */}
                 <div className="px-5 pt-5 pb-4">
-                  <p style={{ color: V.ink, ...serif, fontSize: 21, lineHeight: 1.15 }}>{nudge}</p>
-                  <p className="mt-0.5" style={{ color: V.faint, ...font, fontSize: 12.5 }}>{nudgeTe}</p>
-                  <div className="flex flex-wrap gap-1.5 mt-3">
-                    <Pill>{payee}</Pill>
-                    <Pill>{inr(amount)}</Pill>
-                    {projectName && <Pill>{projectName}</Pill>}
+                  <div className="flex items-start justify-between gap-3">
+                    <p style={{ color: V.ink, ...serif, fontSize: 21, lineHeight: 1.15 }}>{nudge}</p>
+                    <button type="button" onClick={() => setShowWhy(true)} className="shrink-0 inline-flex items-center gap-1 mt-1" style={{ color: V.terraDeep, ...font, fontSize: 11.5, fontWeight: 600 }}>
+                      <HelpCircle size={12} /> Why track?
+                    </button>
                   </div>
                 </div>
 
                 <div style={{ maxHeight: '62vh', overflowY: 'auto', borderTop: `1px solid ${V.line}` }}>
-                  {/* NEW — the elegant one-tap create */}
+                  {/* NEW — collapses to one line when existing orders are available */}
                   <div className="m-3.5 rounded-xl p-3.5" style={{ background: V.terraWash, border: `1px solid ${V.askLine}` }}>
-                    <p className="uppercase" style={{ color: V.terra, ...font, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em' }}>New {noun}</p>
-                    <p className="mt-2 mb-2.5" style={{ color: V.sys, ...font, fontSize: 12, lineHeight: 1.55 }}>
-                      {kind === 'WO'
-                        ? <>A <span style={{ fontWeight: 600, color: V.ink }}>job</span> is {payee}'s task with a scope and budget — tie payments to it to see what's paid, what's still due, and never overpay.</>
-                        : <>An <span style={{ fontWeight: 600, color: V.ink }}>order</span> is your purchase from {payee} — tie payments to it to see how much is paid vs still owed, even across part-payments.</>}
-                      {spend && spend.count > 0 && (
-                        <span style={{ color: V.faint }}> {inr(spend.total)} across {spend.count} here isn't tracked yet.</span>
-                      )}
-                    </p>
-
-                    {/* the essentials — editable, not blind */}
-                    <div className="flex items-center gap-2.5">
-                      <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0" style={{ background: V.surface, border: `1px solid ${V.askLine}` }}>
-                        <NewIcon size={16} style={{ color: V.terraDeep }} />
+                    <button type="button" onClick={() => setCreateOpen(!showCreate)} className="w-full flex items-start justify-between gap-3 text-left">
+                      <span className="min-w-0">
+                        <span className="uppercase block" style={{ color: V.terra, ...font, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em' }}>New {noun}</span>
+                        {!showCreate && <span className="block mt-1" style={{ color: V.sys, ...font, fontSize: 12, lineHeight: 1.4 }}>{collapsedLine}</span>}
                       </span>
-                      <input value={name} onChange={(e) => setName(e.target.value)} placeholder={suggested} className="bk-track-title" />
-                    </div>
-                    <label className="block mt-2.5">
-                      <span style={{ color: V.faint, ...font, fontSize: 10.5 }}>{kind === 'WO' ? 'Total job cost' : 'Order value'}</span>
-                      <div className="bk-track-field mt-1">
-                        <span style={{ color: V.faint, ...font }}>₹</span>
-                        <input value={cost} onChange={(e) => setCost(e.target.value.replace(/[^\d.]/g, ''))} inputMode="decimal" placeholder={`e.g. ${amount.toLocaleString('en-IN')}`} className="bk-track-in" />
-                      </div>
-                    </label>
-                    {kind === 'WO' && (
-                      <>
-                        <label className="flex items-center gap-2 mt-2.5" style={{ color: V.sys, ...font, fontSize: 12 }}>
-                          <input type="checkbox" checked={hasPhases} onChange={(e) => setHasPhases(e.target.checked)} /> Pay it in phases?
-                        </label>
-                        {hasPhases && (
-                          <div className="grid grid-cols-2 gap-2 mt-2">
-                            <div className="bk-track-field"><input value={phName} onChange={(e) => setPhName(e.target.value)} placeholder="First phase" className="bk-track-in" /></div>
-                            <div className="bk-track-field"><span style={{ color: V.faint, ...font }}>₹</span><input value={phAmt} onChange={(e) => setPhAmt(e.target.value.replace(/[^\d.]/g, ''))} inputMode="decimal" placeholder="amount" className="bk-track-in" /></div>
-                          </div>
-                        )}
-                      </>
-                    )}
+                      {showCreate
+                        ? <ChevronUp size={16} className="shrink-0" style={{ color: V.faint, marginTop: 1 }} />
+                        : <ChevronDown size={16} className="shrink-0" style={{ color: V.faint, marginTop: 1 }} />}
+                    </button>
 
+                    {showCreate && (
+                      <div className="mt-2">
+                        {kind === 'WO' ? (
+                          <p style={{ color: V.sys, ...font, fontSize: 12, lineHeight: 1.55 }}>
+                            Create a <span style={{ fontWeight: 600, color: V.ink }}>Job</span> <span style={{ color: V.faint }}>(Work Order)</span> for {payee}{projectName && <> in {projectName}</>} with its own scope, milestones and budgets.
+                          </p>
+                        ) : (
+                          <>
+                            <p className="mb-2" style={{ color: V.sys, ...font, fontSize: 12, lineHeight: 1.5 }}>
+                              You've already paid {payee}, so a bill exists. A <span style={{ fontWeight: 600, color: V.ink }}>purchase order</span> keeps the whole buy in one place:
+                            </p>
+                            <div className="grid gap-1.5">
+                              <Cap icon={Receipt}>Attach bills for this order — our AI auto-verifies them like an accountant</Cap>
+                              <Cap icon={Package}>Track material delivery for this order</Cap>
+                              <Cap icon={Wallet}>Group multiple payments under one order &amp; scope</Cap>
+                            </div>
+                            <p className="mt-2.5 flex items-start gap-1.5" style={{ color: V.faint, ...font, fontSize: 11, lineHeight: 1.45, fontStyle: 'italic' }}>
+                              <Lightbulb size={12} style={{ color: V.terraDeep, marginTop: 1 }} className="shrink-0" />
+                              <span><span style={{ fontWeight: 600, fontStyle: 'normal', color: V.sys }}>Tip:</span> next time, create the purchase order before you pay — so you can compare quotes from vendors.</span>
+                            </p>
+                          </>
+                        )}
+                        {spend && spend.count > 0 && (
+                          <p className="mt-2" style={{ color: V.faint, ...font, fontSize: 11.5, lineHeight: 1.5 }}>{inr(spend.total)} across {spend.count} payment{spend.count > 1 ? 's' : ''} here isn't tracked yet.</p>
+                        )}
+                      </div>
+                    )}
                     <button
                       type="button"
-                      onClick={kind === 'WO' ? createJob : createOrder}
-                      disabled={busy}
+                      onClick={goCreate}
+                      disabled={navigating}
                       className="w-full mt-3 py-2.5 rounded-xl"
-                      style={{ background: terraGrad, color: '#fff', ...font, fontSize: 14, fontWeight: 600, opacity: busy ? 0.6 : 1 }}
+                      style={{ background: terraGrad, color: '#fff', ...font, fontSize: 14, fontWeight: 600, opacity: navigating ? 0.92 : 1, transition: 'opacity .3s ease' }}
                     >
-                      {busy ? 'Working…' : `Create & track this ${noun}`}
+                      {navigating ? (
+                        <span className="inline-flex items-center justify-center gap-2 db-track-fade">
+                          <span className="db-track-spin" style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.35)', borderTopColor: '#fff', display: 'inline-block' }} />
+                          Taking you to the {kind === 'PO' ? 'purchase order' : 'work order'} page…
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center justify-center gap-2">
+                          <NewIcon size={15} /> Create a new {kind === 'PO' ? 'purchase order' : 'work order'}
+                        </span>
+                      )}
                     </button>
                     {err && <p className="mt-2" style={{ color: V.terra, ...font, fontSize: 11.5, lineHeight: 1.4 }}>{err}</p>}
                   </div>
@@ -309,20 +335,22 @@ export function TrackChip({ txn, onLinked }: { txn: any; onLinked: () => void })
                     </div>
                   )}
                   {isLoading && <p className="px-5 py-3" style={{ color: V.faint, ...font, fontSize: 12 }}>Looking…</p>}
+                  {loadErr && <p className="px-5 py-3" style={{ color: V.terra, ...font, fontSize: 11.5, lineHeight: 1.4 }}>Couldn't load existing {kind === 'PO' ? 'orders' : 'jobs'} — {(loadErr as any)?.message || 'try again'}</p>}
 
                   {kind === 'WO' && rows.map((w: any) => {
                     const phases = (w.wo_milestones ?? []).slice().sort((a: any, b: any) => (a.seq_no || 0) - (b.seq_no || 0));
                     const isOpen = expanded === w.wo_id;
                     const hasPhases = phases.length > 0;
+                    const block = blockReason(w);
                     return (
                       <div key={w.wo_id}>
-                        <button type="button" onClick={() => hasPhases ? setExpanded(isOpen ? null : w.wo_id) : attach(w.wo_id, null, w.scope_of_work || 'the job')} disabled={busy} className="w-full text-left px-5 py-3 flex items-center gap-3 hover:bg-black/[0.02]">
+                        <button type="button" onClick={() => { if (block) return; hasPhases ? setExpanded(isOpen ? null : w.wo_id) : attach(w.wo_id, null, w.scope_of_work || 'the job'); }} disabled={busy || !!block} className="w-full text-left px-5 py-3 flex items-center gap-3 hover:bg-black/[0.02] disabled:hover:bg-transparent" style={{ opacity: block ? 0.5 : 1, cursor: block ? 'default' : undefined }}>
                           <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0" style={{ background: V.field }}><Hammer size={15} style={{ color: V.sys }} /></span>
                           <span className="flex-1 min-w-0">
                             <span className="block truncate" style={{ color: V.ink, ...font, fontSize: 14, fontWeight: 500 }}>{w.scope_of_work || 'Job'}</span>
                             <span className="block truncate" style={{ color: V.faint, ...font, ...nums, fontSize: 12 }}>Work{projectName ? ` · ${projectName}` : ''} · {inrShort(paidFor(w.wo_id))} so far</span>
                           </span>
-                          {hasPhases ? (isOpen ? <ChevronDown size={16} style={{ color: V.faint }} /> : <ChevronRight size={16} style={{ color: V.faint }} />) : <ChevronRight size={16} style={{ color: V.faint }} />}
+                          {block ? <AwaitingTag reason={block} /> : hasPhases ? (isOpen ? <ChevronDown size={16} style={{ color: V.faint }} /> : <ChevronRight size={16} style={{ color: V.faint }} />) : <ChevronRight size={16} style={{ color: V.faint }} />}
                         </button>
                         {isOpen && phases.map((m: any) => {
                           const left = Math.max(0, Number(m.planned_amount || 0) - paidFor(w.wo_id, m.milestone_id));
@@ -342,14 +370,16 @@ export function TrackChip({ txn, onLinked }: { txn: any; onLinked: () => void })
 
                   {kind === 'PO' && rows.map((p: any) => {
                     const commit = Number(p.total_value || p.order_value || p.vendor_bill_amount || 0);
+                    const st = p.status ? String(p.status).charAt(0).toUpperCase() + String(p.status).slice(1).toLowerCase() : 'Order';
+                    const block = blockReason(p);
                     return (
-                      <button type="button" key={p.po_id} onClick={() => attach(p.po_id, null, p.po_id)} disabled={busy} className="w-full text-left px-5 py-3 flex items-center gap-3 hover:bg-black/[0.02]">
+                      <button type="button" key={p.po_id} onClick={() => { if (!block) attach(p.po_id, null, p.po_id); }} disabled={busy || !!block} className="w-full text-left px-5 py-3 flex items-center gap-3 hover:bg-black/[0.02] disabled:hover:bg-transparent" style={{ opacity: block ? 0.5 : 1, cursor: block ? 'default' : undefined }}>
                         <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg shrink-0" style={{ background: V.field }}><Package size={15} style={{ color: V.sys }} /></span>
                         <span className="flex-1 min-w-0">
                           <span className="block truncate" style={{ color: V.ink, ...font, fontSize: 14, fontWeight: 500 }}>{p.po_id}</span>
-                          <span className="block truncate" style={{ color: V.faint, ...font, ...nums, fontSize: 12 }}>Order{projectName ? ` · ${projectName}` : ''} · {inrShort(commit)} so far</span>
+                          <span className="block truncate" style={{ color: V.faint, ...font, ...nums, fontSize: 12 }}>{st}{projectName ? ` · ${projectName}` : ''}{commit ? ` · ${inrShort(commit)} order` : ''}</span>
                         </span>
-                        <ChevronRight size={16} style={{ color: V.faint }} />
+                        {block ? <AwaitingTag reason={block} /> : <ChevronRight size={16} style={{ color: V.faint }} />}
                       </button>
                     );
                   })}
@@ -359,6 +389,7 @@ export function TrackChip({ txn, onLinked }: { txn: any; onLinked: () => void })
               </>
             )}
           </div>
+          {showWhy && <WhyTrackModal kind={kind} onClose={() => setShowWhy(false)} />}
         </>,
         document.body,
       )}
@@ -376,6 +407,10 @@ export const TRACK_CHIP_CSS = `
 .db-track-pop { animation: dbTrackPop .6s cubic-bezier(.2,.9,.3,1.25) both; }
 @keyframes dbTrackRise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
 .db-track-rise { animation: dbTrackRise .55s ease both; }
+@keyframes dbTrackSpin { to { transform: rotate(360deg); } }
+.db-track-spin { animation: dbTrackSpin .7s linear infinite; }
+@keyframes dbTrackFade { from { opacity: 0; } to { opacity: 1; } }
+.db-track-fade { animation: dbTrackFade .3s ease both; }
 .bk-track-title { flex: 1; min-width: 0; background: transparent; border: 0; outline: none; color: ${V.ink}; font-size: 16px; font-weight: 600; }
 .bk-track-field { display: flex; align-items: center; gap: 6px; background: ${V.surface}; border: 1px solid ${V.askLine}; border-radius: 10px; padding: 7px 10px; }
 .bk-track-in { flex: 1; min-width: 0; background: transparent; border: 0; outline: none; color: ${V.ink}; font-size: 16px; }

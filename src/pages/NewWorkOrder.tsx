@@ -507,7 +507,13 @@ export default function NewWorkOrder({ session }: { session: Session }) {
       <div className="mx-auto px-5 sm:px-6 pt-6 pb-40" style={{ maxWidth: 700 }}>
 
       <Breadcrumb items={
-        initState.from === 'project' && initState.projectName
+        initState.returnTo
+          ? [
+              { label: 'Dashboard', href: '/' },
+              { label: initState.returnLabel || 'Back', href: initState.returnTo },
+              { label: 'New' },
+            ]
+          : initState.from === 'project' && initState.projectName
           ? [
               { label: 'Dashboard', href: '/' },
               { label: 'Projects', href: '/projects' },
@@ -526,7 +532,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
       <header className="flex items-center gap-3 mb-2 mt-1">
         <button
           type="button"
-          onClick={() => navigate(initState.from === 'project' && initState.projectId ? `/projects/${initState.projectId}/work-orders` : '/work-orders')}
+          onClick={() => navigate(initState.returnTo || (initState.from === 'project' && initState.projectId ? `/projects/${initState.projectId}/work-orders` : '/work-orders'))}
           aria-label="Back to work orders"
           style={{ color: VOICE.user }}
         >
@@ -889,7 +895,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
           <span className="flex-1" />
           <button
             type="button"
-            onClick={() => navigate(initState.from === 'project' && initState.projectId ? `/projects/${initState.projectId}/work-orders` : '/work-orders')}
+            onClick={() => navigate(initState.returnTo || (initState.from === 'project' && initState.projectId ? `/projects/${initState.projectId}/work-orders` : '/work-orders'))}
             className="text-sm font-medium"
             style={{ color: VOICE.system }}
           >
@@ -960,7 +966,9 @@ export default function NewWorkOrder({ session }: { session: Session }) {
       contract={orderValue}
       segments={uiSegments}
       stageCount={uiNamedStages.length}
-      onLeave={() => navigate(`/work-orders/${createWO.data}`, { state: initState.from === 'project' ? { from: 'project', projectId: initState.projectId, projectName: initState.projectName } : undefined })}
+      onLeave={() => initState.returnTo
+        ? navigate(initState.returnTo)
+        : navigate(`/work-orders/${createWO.data}`, { state: initState.from === 'project' ? { from: 'project', projectId: initState.projectId, projectName: initState.projectName } : undefined })}
     />
     </>
   );

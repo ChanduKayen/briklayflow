@@ -859,12 +859,15 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
 
   const [projectId, setProjectId]               = useState<string>((location.state as any)?.projectId || '');
   // Where Save/Back return to: the page the user LAUNCHED from, captured ONCE at
-  // mount — not the currently-selected project. The project PO page opens New PO
-  // with state.projectId; the main PO page (and side nav / FAB) pass no state.
+  // mount — not the currently-selected project. Callers that know the exact origin
+  // (e.g. a transaction in the ledger) pass state.returnTo and we honour it verbatim;
+  // the project PO page opens New PO with state.projectId; the main PO page (and side
+  // nav / FAB) pass no state.
   const returnToRef = useRef<string>(
-    (location.state as any)?.projectId
-      ? `/projects/${(location.state as any).projectId}/purchase-orders`
-      : '/purchase-orders',
+    (location.state as any)?.returnTo
+      || ((location.state as any)?.projectId
+        ? `/projects/${(location.state as any).projectId}/purchase-orders`
+        : '/purchase-orders'),
   );
   const returnTo = returnToRef.current;
   const [vendorId, setVendorId]                 = useState('');
@@ -957,6 +960,17 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
       localStorage.setItem('briklay_recent_vendors', JSON.stringify(next));
     } catch { /* ignore */ }
   }
+
+  // When launched from a payment (Track → "Create a new purchase order"), the vendor
+  // is already known — auto-select it once the vendor list loads. Runs once, so the
+  // owner can still clear/change it.
+  const prefillVendorId = (location.state as any)?.stakeholderId as string | undefined;
+  const didPrefillVendorRef = useRef(false);
+  useEffect(() => {
+    if (didPrefillVendorRef.current || !prefillVendorId || !vendors || vendorId) return;
+    const v = (vendors as any[]).find(x => x.stakeholder_id === prefillVendorId);
+    if (v) { didPrefillVendorRef.current = true; selectVendor(v); }
+  }, [vendors, prefillVendorId, vendorId]);
 
   // ── Single-page UX state ─────────────────────────────────────────────
   // Vendor dropdown visibility + per-card "active" highlight + date editor.
