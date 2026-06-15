@@ -20,7 +20,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
-  Check, X, Pencil, Link2, ArrowUpRight, ArrowDownLeft, ArrowDown, ArrowRight,
+  Check, X, Pencil, Link2, ArrowUpRight, ArrowDownLeft, ArrowRight,
   Image as ImageIcon, Search, UserPlus,
 } from 'lucide-react';
 import type { RoughEntry } from '../../types';
@@ -180,15 +180,14 @@ export function ReviewCard({
   const offClass = leaving === 'file' ? 'db-file-off' : leaving === 'reject' ? 'db-reject-off' : '';
   const said = entry.raw_text || entry.transcribed_text || (entry.raw_image_url ? '' : '—');
 
-  // tier-1 provenance, written as a sentence: "<sender> sent a photo · from WhatsApp"
+  // tier-1 provenance — entry no · sender · captured-at (the date line carries a dot).
   const fromWa = entry.source.startsWith('WHATSAPP');
   const senderName = entry.sender_name || 'Unknown sender';
-  const sentVerb =
-    entry.source === 'WHATSAPP_VOICE' ? 'sent a voice note' :
-    entry.source === 'WHATSAPP_IMAGE' ? 'sent a photo' :
-    entry.source === 'UI_IMAGE' ? 'added a photo' :
-    fromWa ? 'sent this' : 'added this';
-  const sentTime = new Date(entry.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+  const captured = new Date(entry.created_at);
+  const sentDate = captured.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+  const sentTime = captured.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+  // Show just the serial (the trailing number of an "RE-26-0142" code), not the prefix.
+  const reSerial = (entry.re_number || '').split('-').pop()?.replace(/^0+(?=\d)/, '') || '';
 
   const amberChip = (label: string, onClick: () => void) => (
     <button onClick={(e) => { e.stopPropagation(); if (canManage) onClick(); }} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md" style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font, ...T.xs }}>
@@ -254,84 +253,67 @@ export function ReviewCard({
       >
         {/* tier 1 — the site */}
         <div className="px-4 sm:px-5 pt-4 pb-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <span className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 font-medium" style={{ background: V.terraWash, color: V.terraDeep, ...font, ...T.sm }}>
-                {(entry.sender_name || '?').split(' ')[0].slice(0, 2).toUpperCase()}
-              </span>
-              <div className="min-w-0">
-                <p className="flex items-center gap-1 min-w-0" style={{ ...font, ...T.sm }}>
-                  <span className="font-medium truncate" style={{ color: V.ink }}>{senderName}</span>
-                  <span className="shrink-0" style={{ color: V.faint }}>{sentVerb}</span>
-                  {fromWa ? (
-                    <span className="shrink-0 inline-flex items-center gap-1">
-                      <span style={{ color: V.faint }}>from</span>
-                      <WhatsAppGlyph size={12} color={WA} />
-                      <span style={{ color: WA }}>WhatsApp</span>
-                    </span>
-                  ) : (
-                    <span className="shrink-0" style={{ color: V.faint }}>here</span>
-                  )}
-                </p>
-                {fromWa && entry.sender_number && (
-                  <p className="truncate mt-0.5" style={{ color: V.faint, ...font, ...nums, ...T.xs }}>+91 {entry.sender_number}</p>
-                )}
-              </div>
+          {/* header — entry no · sender, with the review status on the right */}
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              {reSerial && (
+                <span className="shrink-0 inline-flex items-center rounded-md px-1.5 py-0.5 font-medium" style={{ background: V.field, color: V.sys, ...font, ...nums, ...T.xs }}>
+                  № {reSerial}
+                </span>
+              )}
+              <span className="font-medium truncate" style={{ color: V.ink, ...font, ...T.sm }}>{senderName}</span>
             </div>
-            <span className="shrink-0 mt-0.5" style={{ color: V.faint, ...font, ...nums, ...T.xs }}>{sentTime}</span>
-          </div>
-
-          <div className="mt-3 inline-block rounded-xl rounded-tl-sm px-3 py-2" style={{ background: V.field, maxWidth: '100%' }}>
-            {entry.source === 'WHATSAPP_VOICE' && <p className="italic mb-1" style={{ color: V.faint, ...font, ...T.xs }}>voice note, transcribed</p>}
-            {said && <p className={reveal ? 'tf-raw' : ''} style={{ color: V.inkSoft, ...font, ...T.sm }}>{said}</p>}
-            {entry.raw_image_url && (
-              <button onClick={(e) => { e.stopPropagation(); onLightbox(entry.raw_image_url!); }} className="mt-2 rounded-lg overflow-hidden block" style={{ width: 120, height: 76, background: '#E8E2DA' }}>
-                <img src={entry.raw_image_url} alt="capture" className="w-full h-full object-cover" />
-              </button>
-            )}
-            {!said && !entry.raw_image_url && <span className="inline-flex items-center gap-1.5" style={{ color: V.faint, ...font, ...T.xs }}><ImageIcon size={14} /> no message body</span>}
-          </div>
-        </div>
-
-        {/* seam */}
-        <div className="flex items-center gap-2 px-4 sm:px-5 relative">
-          <span className="flex-1" style={{ borderTop: `1px solid ${V.line}` }} />
-          <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full shrink-0 ${reveal ? 'tf-arrow' : ''}`} style={{ background: V.surface, border: `1px solid ${V.line}` }}>
-            <ArrowDown size={12} style={{ color: reveal ? V.terra : V.faint }} />
-          </span>
-          <span className="flex-1" style={{ borderTop: `1px solid ${V.line}` }} />
-        </div>
-
-        {/* tier 2 — what it becomes */}
-        <div className="px-4 sm:px-5 pt-4 pb-4" style={{ background: V.page }}>
-          <div className="flex items-center justify-between mb-2.5">
-            <p className="uppercase font-medium" style={{ color: V.faint, letterSpacing: '0.1em', ...font, ...T.xs }}>Briklay understood</p>
-            <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full" style={ready ? { background: V.field, color: V.sys, ...font } : { background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font }}>
+            <span className="shrink-0 inline-flex items-center gap-1.5" style={{ color: ready ? V.sys : V.ask, ...font, ...T.xs }}>
               <span className="w-1.5 h-1.5 rounded-full" style={{ background: ready ? V.terra : V.ask }} />
               {ready ? 'ready to file' : 'needs your eye'}
             </span>
           </div>
 
+          {/* captured-at — a calm meta line with a status dot + subtle channel mark */}
+          <p className="mt-1 inline-flex items-center gap-1.5" style={{ color: V.faint, ...font, ...nums, ...T.xs }}>
+            <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: V.sage }} />
+            {sentDate} · {sentTime}
+            {fromWa && <WhatsAppGlyph size={11} color={WA} />}
+          </p>
+
+          {/* what the site said — an unboxed italic quote */}
+          {entry.source === 'WHATSAPP_VOICE' && <p className="mt-2.5 italic" style={{ color: V.faint, ...font, ...T.xs }}>voice note, transcribed</p>}
+          {said && <p className={`mt-2.5 italic leading-relaxed ${reveal ? 'tf-raw' : ''}`} style={{ color: V.inkSoft, ...font, ...T.sm }}>&ldquo;{said}&rdquo;</p>}
+          {entry.raw_image_url && (
+            <button onClick={(e) => { e.stopPropagation(); onLightbox(entry.raw_image_url!); }} className="mt-2.5 rounded-lg overflow-hidden block" style={{ width: 120, height: 76, background: '#E8E2DA' }}>
+              <img src={entry.raw_image_url} alt="capture" className="w-full h-full object-cover" />
+            </button>
+          )}
+          {!said && !entry.raw_image_url && <span className="mt-2.5 inline-flex items-center gap-1.5" style={{ color: V.faint, ...font, ...T.xs }}><ImageIcon size={14} /> no message body</span>}
+        </div>
+
+        {/* seam — a quiet hairline between what was said and what we understood */}
+        <div className="mx-4 sm:mx-5" style={{ borderTop: `1px solid ${V.line}` }} />
+
+        {/* tier 2 — what it becomes */}
+        <div className="px-4 sm:px-5 pt-4 pb-4" style={{ background: V.page }}>
+          <p className="uppercase font-medium mb-2.5" style={{ color: V.faint, letterSpacing: '0.1em', ...font, ...T.xs }}>Briklay understood</p>
+
           {/* the read line: direction · amount · payee (each inline-editable) */}
           <div className={`flex items-center flex-wrap gap-x-2 gap-y-1 ${reveal ? 'tf-read' : ''}`}>
-            <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0" style={{ background: out ? V.terraWash : V.sageWash }}>
-              {out ? <ArrowUpRight size={13} color={V.terraDeep} /> : <ArrowDownLeft size={13} color={V.sage} />}
+            <span className="shrink-0 inline-flex items-center justify-center" style={{ width: 18 }}>
+              {out ? <ArrowUpRight size={16} color={V.terraDeep} /> : <ArrowDownLeft size={16} color={V.sage} />}
             </span>
 
             {amountNum > 0 ? (
               <button onClick={(e) => { e.stopPropagation(); if (canManage) openEditor('amount', amount); }} className="font-medium" style={{ color: out ? V.terraDeep : V.sage, ...font, ...nums, ...T.amt }}>
-                {out ? '−' : '+'} ₹{inr(amountNum)}
+                {out ? '−' : '+'}₹{inr(amountNum)}
               </button>
             ) : amberChip('how much?', () => openEditor('amount'))}
 
             {payeeId ? (
-              <button onClick={(e) => { e.stopPropagation(); if (canManage) openEditor('payee', payeeName || ''); }} style={{ color: V.sys, ...font, ...T.sm }}>
-                {out ? 'to' : 'from'} {payeeName}
+              <button onClick={(e) => { e.stopPropagation(); if (canManage) openEditor('payee', payeeName || ''); }} style={{ color: V.ink, ...font, ...T.sm }}>
+                {payeeName}
               </button>
             ) : payeeName ? (
               // heard a name but not linked to a party yet -> amber until linked
               <button onClick={(e) => { e.stopPropagation(); if (canManage) openEditor('payee', payeeName || ''); }} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md" style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font, ...T.sm }}>
-                {out ? 'to' : 'from'} {payeeName}
+                {payeeName}
               </button>
             ) : amberChip('who was paid?', () => openEditor('payee'))}
           </div>
@@ -382,7 +364,7 @@ export function ReviewCard({
 
           {/* secondary chips: project · note · anchor. A project the bot heard but
               couldn't match is resolved in the block below, not here. */}
-          <div className={`mt-3 flex flex-wrap gap-1.5 ${reveal ? 'tf-chip' : ''}`} style={{ paddingLeft: 32 }}>
+          <div className={`mt-3 flex flex-wrap gap-1.5 ${reveal ? 'tf-chip' : ''}`}>
             {projectId
               ? filledChip(<Link2 size={11} style={{ color: V.faint }} />, projectName || 'Project', () => openEditor('project', projectName || ''))
               : !ai.project_raw
@@ -498,7 +480,7 @@ export function ReviewCard({
         {/* actions */}
         {canManage && (
           <div className="flex items-center gap-2 px-4 sm:px-5 py-3" style={{ borderTop: `1px solid ${V.line}` }}>
-            <button onClick={runFile} disabled={!ready || !!leaving} title={ready ? 'File it' : 'Resolve the amber fields to file'} className="inline-flex items-center justify-center gap-1.5 font-medium px-4 py-2.5 min-h-[44px] whitespace-nowrap rounded-lg" style={ready ? { background: terraGrad, color: '#fff', ...font, ...T.sm } : { background: V.field, color: V.faint, ...font, ...T.sm, cursor: 'not-allowed' }}>
+            <button onClick={runFile} disabled={!ready || !!leaving} title={ready ? 'File it' : 'Resolve the amber fields to file'} className="inline-flex items-center justify-center gap-1.5 font-medium px-4 py-2.5 min-h-[44px] whitespace-nowrap rounded-lg" style={ready ? { background: V.terraWash, border: `1px solid ${V.askLine}`, color: V.terraDeep, ...font, ...T.sm } : { background: V.field, color: V.faint, ...font, ...T.sm, cursor: 'not-allowed' }}>
               <Check size={15} /> File it
             </button>
             <button onClick={onFix} className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 min-h-[44px] whitespace-nowrap rounded-lg" style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.inkSoft, ...font, ...T.sm }}>
