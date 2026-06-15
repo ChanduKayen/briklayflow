@@ -433,6 +433,16 @@ function App() {
       >
         {/* Mobile topbar (phones only â€" replaces sidebar hamburger) */}
         <MobileTopbar session={session} />
+        {/* WhatsApp entry deep-links bake their base URL at send time; a base without
+            /logbook (e.g. a misconfigured WA_APP_LINK) lands on "/" -> /ledger and drops
+            the param. Honor ?entry= here, BEFORE the "/" rule fires, so the link always
+            reaches the Day Book entry — including already-sent messages. */}
+        {(() => {
+          const entryId = new URLSearchParams(location.search).get('entry');
+          if (entryId && location.pathname !== '/logbook') {
+            return <Navigate to={`/logbook?entry=${encodeURIComponent(entryId)}`} replace />;
+          }
+          return (
         <Routes>
           <Route path="/" element={<Navigate to="/ledger" replace />} />
           <Route path="/dashboard" element={<Dashboard session={session} />} />
@@ -479,6 +489,8 @@ function App() {
           <Route path="/procurement/*" element={<Navigate to="/procurement/requests" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+          );
+        })()}
       </main>
 
       {/* Bottom tab bar â€" mobile only */}
