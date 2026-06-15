@@ -15,7 +15,12 @@ import type { Lang } from './_messages.ts'
 import type { TxnExtract } from './_extract.ts'
 import { handleQuery } from './_handlers.ts'   // reporting/query bridge only
 
-const LINK = Deno.env.get('WA_APP_LINK') ?? 'https://briklayflow.vercel.app/logbook'
+// Forced to <origin>/logbook (see transaction.ts) so a misconfigured WA_APP_LINK can't
+// send "Open Day Book" / entry deep-links to "/" -> /ledger.
+const LINK = (() => {
+  const b = Deno.env.get('WA_APP_LINK') ?? 'https://briklayflow.vercel.app'
+  try { return new URL('/logbook', b).href } catch { return 'https://briklayflow.vercel.app/logbook' }
+})()
 
 export type DispatchCtx = {
   supabase: any

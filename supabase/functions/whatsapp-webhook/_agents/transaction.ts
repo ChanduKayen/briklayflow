@@ -23,7 +23,13 @@ import { WriteCommitFailed } from '../_spine.ts'
 import * as M from '../_messages.ts'
 import type { Lang } from '../_messages.ts'
 
-const LINK = Deno.env.get('WA_APP_LINK') ?? 'https://briklayflow.vercel.app/logbook'
+// The Day Book deep-link base. Forced to <origin>/logbook so a WA_APP_LINK that points at
+// a bare domain or another page can't land the entry CTA on "/" (which the app redirects
+// to /ledger). The RPC appends "?entry=<id>" to this.
+const LINK = (() => {
+  const b = Deno.env.get('WA_APP_LINK') ?? 'https://briklayflow.vercel.app'
+  try { return new URL('/logbook', b).href } catch { return 'https://briklayflow.vercel.app/logbook' }
+})()
 const SOURCE = 'WHATSAPP_TEXT'
 // Below this score a nearest candidate is too weak to surface as a Day Book
 // suggestion (we still take the raw value as-is either way). Env-tunable.
