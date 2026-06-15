@@ -30,6 +30,12 @@ export const PERSIST_KEY_PREFIXES = [
   'stakeholders',
   'inward-register',
   'logbook',
+  // Day Book queries — keys must be listed verbatim (prefix match only):
+  // without these the Day Book never hydrates from localStorage, so every
+  // reload shows a skeleton and blocks on a full network fetch.
+  'rough_entries',
+  'daybook_stakeholders',
+  'daybook_projects',
   'bills',
   'invoices',
   'sku_directory',
