@@ -11,6 +11,7 @@
  * UI_TEXT/UI_IMAGE capture path still exists at the data layer for later re-use.
  */
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
@@ -45,6 +46,7 @@ const STEPS = [
 
 export default function Logbook({ session }: { session: Session }) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const orgId = useOrgId();
   const { show: showSnackbar } = useSnackbar();
   const { data: profile } = useUserProfile(session.user.id);
@@ -123,9 +125,13 @@ export default function Logbook({ session }: { session: Session }) {
     return () => { supabase.removeChannel(channel); };
   }, [qc]);
 
+  // Just-filed entries: kept in the review list so their in-card "filed" strip survives
+  // the realtime refetch (which flips them POSTED and would otherwise yank the card).
+  const [justFiled, setJustFiled] = useState<Set<string>>(new Set());
+
   // ── Buckets ──────────────────────────────────────────────────────────────
   // AWAITING_CONTEXT is pending-but-incomplete -> shows under "To review".
-  const review   = useMemo(() => entries.filter(e => e.status === 'PENDING' || e.status === 'AWAITING_CONTEXT'), [entries]);
+  const review   = useMemo(() => entries.filter(e => e.status === 'PENDING' || e.status === 'AWAITING_CONTEXT' || justFiled.has(e.id)), [entries, justFiled]);
   const filed     = useMemo(() => entries.filter(e => e.status === 'POSTED'), [entries]);
   const rejected  = useMemo(() => entries.filter(e => e.status === 'DISMISSED'), [entries]);
   const shown = tab === 'review' ? review : tab === 'filed' ? filed : rejected;
@@ -143,13 +149,17 @@ export default function Logbook({ session }: { session: Session }) {
     return () => clearTimeout(t);
   }, [review.length]);
 
-  const onFiled = () => {
-    qc.invalidateQueries({ queryKey: ['rough_entries'] });
+  const handleFiled = (entryId: string) => {
+    setJustFiled((s) => new Set(s).add(entryId));
+    qc.invalidateQueries({ queryKey: ['rough_entries'] });   // refetch -> POSTED, but justFiled keeps it shown
     qc.invalidateQueries({ queryKey: ['inbox_badge'] });
     qc.invalidateQueries({ queryKey: ['ledger'] });
     qc.invalidateQueries({ queryKey: ['dashboard_metrics'] });
-    showSnackbar('Filed · in your books');
   };
+  const dismissFiled = (entryId: string) => {
+    setJustFiled((s) => { const n = new Set(s); n.delete(entryId); return n; });
+  };
+  const viewTxn = (txnId: string) => navigate(`/ledger?txn=${encodeURIComponent(txnId)}`);
   const invalidateEntries = () => {
     qc.invalidateQueries({ queryKey: ['rough_entries'] });
     qc.invalidateQueries({ queryKey: ['inbox_badge'] });
@@ -251,7 +261,9 @@ export default function Logbook({ session }: { session: Session }) {
                 stakeholders={stakeholders}
                 projects={projects}
                 reveal={tab === 'review' && idx === 0 && reveal}
-                onFiled={onFiled}
+                onFiled={() => handleFiled(r.id)}
+                onView={viewTxn}
+                onDismissFiled={() => dismissFiled(r.id)}
                 onRejected={invalidateEntries}
                 onRestore={invalidateEntries}
                 onFix={() => setFixEntry(r)}

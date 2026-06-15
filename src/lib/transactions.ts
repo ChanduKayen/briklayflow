@@ -39,6 +39,27 @@ export function isNotLinked(txn: any): boolean {
   return allocs.some((a) => !a?.order_type);
 }
 
+/**
+ * A general expense is a deliberately party-less transaction — the Day Book
+ * "General expense" path files stakeholder_id = NULL under a GEN-xx category.
+ * The GEN category distinguishes it from a NULL caused by a deleted stakeholder
+ * (ON DELETE SET NULL), which is NOT a general expense.
+ */
+export function isGeneralExpense(txn: any): boolean {
+  return !txn?.stakeholder_id && String(txn?.category ?? '').toUpperCase().startsWith('GEN');
+}
+
+/**
+ * The label for the "payee" slot. Linked party -> its name. General expense ->
+ * "General expense" (the description is shown as the identifier alongside). A NULL
+ * stakeholder that isn't a general expense -> the party was removed.
+ */
+export function payeeLabel(txn: any): string {
+  if (txn?.stakeholders?.name) return txn.stakeholders.name;
+  if (!txn?.stakeholder_id) return isGeneralExpense(txn) ? 'General expense' : '(removed contact)';
+  return 'Unknown';
+}
+
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

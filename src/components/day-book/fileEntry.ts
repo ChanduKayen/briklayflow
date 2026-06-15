@@ -33,12 +33,16 @@ export interface ResolvedFields {
   projectId: string;
   amount: number;
   description: string;
+  generalExpense?: boolean;   // a general expense needs no linked party
 }
 
 /** Ready to file once every mandatory field is resolved (payee + project must
- *  be matched to real records, not just heard). Drives the File button + swipe. */
+ *  be matched to real records, not just heard). Drives the File button + swipe.
+ *  A general expense waives ONLY the payee requirement — project/amount/description
+ *  are still mandatory. */
 export function isResolved(r: ResolvedFields): boolean {
-  return Boolean(r.payeeId) && Boolean(r.projectId) && r.amount > 0 && Boolean(r.description.trim());
+  const payeeOk = r.generalExpense ? true : Boolean(r.payeeId);
+  return payeeOk && Boolean(r.projectId) && r.amount > 0 && Boolean(r.description.trim());
 }
 
 /**
@@ -60,13 +64,17 @@ export async function fileRoughEntry(entry: RoughEntry, orgId: string, resolved:
   const mode = PAYMENT_MODES.includes(ai.mode as typeof PAYMENT_MODES[number]) ? ai.mode! : 'Cash';
   const date = /^\d{4}-\d{2}-\d{2}$/.test(ai.date || '') ? ai.date! : new Date().toISOString().slice(0, 10);
 
+  // A general expense is recorded with NO party (stakeholder_id null) under the
+  // general-expense category; everything else keeps its linked payee + inferred category.
+  const isGeneral = !!resolved.generalExpense;
+
   const payload = {
     txn_id: newTxnId,
-    stakeholder_id: resolved.payeeId,
+    stakeholder_id: isGeneral ? null : resolved.payeeId,
     date,
     total_amount: resolved.amount,
     payment_mode: mode,
-    category: ai.category_code || null,
+    category: isGeneral ? 'GEN-99' : (ai.category_code || null),
     remarks: resolved.description,
     bill_doc_url: null,
     proof_document_url: entry.raw_image_url || null,

@@ -16,7 +16,7 @@ import { StartOnWhatsApp } from '../components/day-book/StartOnWhatsApp';
 import { ShortcutTicker } from '../components/ShortcutTicker';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { PageSkeleton } from '../components/SkeletonLoader';
-import { deriveDirection, isNotLinked, resolveAnchor, type TxnAnchor, type TxnDirection } from '../lib/transactions';
+import { deriveDirection, isNotLinked, resolveAnchor, isGeneralExpense, payeeLabel, type TxnAnchor, type TxnDirection } from '../lib/transactions';
 import { V, font, serif, nums, terraGrad } from '../components/txn-ledger/ledgerTokens';
 import { DirMedallion, Amount, AnchorChip, FilterChip, FlowBar } from '../components/txn-ledger/LedgerAtoms';
 
@@ -255,6 +255,19 @@ export default function Ledger({ session }: { session: Session }) {
       return data;
     },
   });
+
+  // Deep-link focus: the Day Book's filed "View →" links to /ledger?txn=<id>. Scroll to
+  // and ring that row once the ledger has loaded (once — survives realtime refetches).
+  const focusTxn = new URLSearchParams(window.location.search).get('txn');
+  const didFocusTxn = useRef(false);
+  useEffect(() => {
+    if (!focusTxn || isLoading || didFocusTxn.current) return;
+    const el = document.getElementById(`ledger-txn-${focusTxn}`);
+    if (!el) return;
+    didFocusTxn.current = true;
+    requestAnimationFrame(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+  }, [focusTxn, isLoading, ledger]);
+
   // Captures from WhatsApp still waiting in the Day book (same review bucket the
   // Day book uses: PENDING + AWAITING_CONTEXT). Drives the nudge strip below.
   const { data: dayBookReviewCount = 0 } = useQuery({
@@ -505,8 +518,8 @@ export default function Ledger({ session }: { session: Session }) {
     const rows = txnsToExport.flatMap((t: any) => {
       const allocs: any[] = t.txn_allocations || [];
       const dir = deriveDirection(t);
-      if (allocs.length === 0) return [[t.txn_id, t.date, t.stakeholders?.name || '', getTxnType(t), dir, t.category || '', t.payment_mode || '', t.total_amount, '', t.status]];
-      return allocs.map((a: any) => [t.txn_id, t.date, t.stakeholders?.name || '', getTxnType(t), dir, t.category || '', t.payment_mode || '', t.total_amount, a.projects?.name || '', t.status]);
+      if (allocs.length === 0) return [[t.txn_id, t.date, payeeLabel(t), getTxnType(t), dir, t.category || '', t.payment_mode || '', t.total_amount, '', t.status]];
+      return allocs.map((a: any) => [t.txn_id, t.date, payeeLabel(t), getTxnType(t), dir, t.category || '', t.payment_mode || '', t.total_amount, a.projects?.name || '', t.status]);
     });
     const header = ['TXN ID', 'Date', 'Payee', 'Type', 'Direction', 'Category', 'Mode', 'Amount', 'Project', 'Status'];
     const csv = [header, ...rows].map(r => r.map((v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
@@ -738,18 +751,24 @@ export default function Ledger({ session }: { session: Session }) {
                     const anchor: TxnAnchor = dir === 'in'
                       ? resolveAnchor(txn, null)
                       : isNotLinked(txn) ? null : resolveAnchor(txn, primaryAlloc);
+                    const genExp = isGeneralExpense(txn);
                     const projName = (txn.txn_allocations || [])[0]?.projects?.name || null;
                     const trade = txn.stakeholders?.category || null;
                     const party = txn.stakeholders?.type || null;
-                    const ctxParts = [party, trade];
+                    // General expense: party-less, so lead with the description and tag it.
+                    const ctxParts = genExp ? ['General expense'] : [party, trade];
                     if (!(filterProject.length === 1) && projName) ctxParts.push(projName);
                     const context = ctxParts.filter(Boolean).join(' · ');
                     const proofUrl = txn.bill_doc_url || (txn as any).proof_document_url || null;
                     return (
-                      <EntryRow
+                      <div
                         key={txn.txn_id}
+                        id={`ledger-txn-${txn.txn_id}`}
+                        style={focusTxn === txn.txn_id ? { borderRadius: 12, boxShadow: '0 0 0 2px #C8603A', transition: 'box-shadow .3s' } : undefined}
+                      >
+                      <EntryRow
                         dir={dir}
-                        payee={txn.stakeholders?.name || 'Unknown'}
+                        payee={genExp ? ((txn.remarks || '').trim() || 'General expense') : (txn.stakeholders?.name || 'Unknown')}
                         context={context}
                         anchor={anchor}
                         remark={null}
@@ -767,6 +786,7 @@ export default function Ledger({ session }: { session: Session }) {
                         onAmountDown={() => { setIsDragging(true); setSumSel(new Set([txn.txn_id])); }}
                         onAmountEnter={() => { if (isDragging) setSumSel(prev => new Set(prev).add(txn.txn_id)); }}
                       />
+                      </div>
                     );
                   })}
 

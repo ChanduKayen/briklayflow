@@ -21,7 +21,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   Check, X, Pencil, Link2, ArrowUpRight, ArrowDownLeft, ArrowRight,
-  Image as ImageIcon, Search, UserPlus,
+  Image as ImageIcon, Search, UserPlus, Wallet,
 } from 'lucide-react';
 import type { RoughEntry } from '../../types';
 import { V, WA, font, nums, terraGrad, T } from './tokens';
@@ -37,7 +37,7 @@ type PartyType = 'Worker' | 'Vendor' | 'Client';
 export interface StakeholderLite { stakeholder_id: string; name: string; type?: string; category?: string }
 export interface ProjectLite { project_id: string; name: string }
 
-type Phase = null | 'filing' | 'filed';
+type Phase = null | 'filing' | 'filed' | 'collapsed';
 type Leaving = null | 'file' | 'reject';
 type Field = null | 'payee' | 'amount' | 'project' | 'description';
 
@@ -45,7 +45,7 @@ const inr = (n: number) => Number(n).toLocaleString('en-IN', { maximumFractionDi
 
 export function ReviewCard({
   entry, orgId, reveal, canManage, stakeholders, projects,
-  onFiled, onRejected, onRestore, onFix, onLightbox, onError,
+  onFiled, onView, onDismissFiled, onRejected, onRestore, onFix, onLightbox, onError,
 }: {
   entry: RoughEntry;
   orgId: string;
@@ -54,6 +54,8 @@ export function ReviewCard({
   stakeholders: StakeholderLite[];
   projects: ProjectLite[];
   onFiled: (txnId: string) => void;
+  onView: (txnId: string) => void;        // open the just-filed txn in the ledger (highlighted)
+  onDismissFiled: () => void;             // clear the lingering "filed" strip
   onRejected: () => void;
   onRestore: () => void;
   onFix: () => void;
@@ -72,6 +74,7 @@ export function ReviewCard({
   const [projectId, setProjectId] = useState<string | null>(ai.project_id || null);
   const [projectName, setProjectName] = useState<string | null>(ai.project_name || null);
   const [description, setDescription] = useState<string>(ai.description || ai.description_raw || '');
+  const [generalExpense, setGeneralExpense] = useState(false);   // payee-less general expense (no linked party)
 
   // keep untouched fields live while the AI is still filling them in
   useEffect(() => {
@@ -85,6 +88,7 @@ export function ReviewCard({
   const amountNum = parseFloat((amount || '').replace(/[^\d.]/g, '')) || 0;
   const resolved: ResolvedFields = {
     payeeId: payeeId || '', projectId: projectId || '', amount: amountNum, description: description.trim(),
+    generalExpense,
   };
   const ready = !archived && isResolved(resolved);
 
@@ -120,6 +124,7 @@ export function ReviewCard({
   // ── Triage / journey ──────────────────────────────────────────────────────
   const [leaving, setLeaving] = useState<Leaving>(null);
   const [phase, setPhase] = useState<Phase>(null);
+  const [filedTxnId, setFiledTxnId] = useState<string | null>(null);
 
   const runFile = async () => {
     if (!ready || leaving) return;
@@ -127,8 +132,11 @@ export function ReviewCard({
     setLeaving('file'); setPhase('filing');
     try {
       const txnId = await fileRoughEntry(entry, orgId, resolved);
+      setFiledTxnId(txnId);
       setPhase('filed');
-      setTimeout(() => onFiled(txnId), reduced ? 0 : 700);
+      onFiled(txnId);   // Logbook keeps this card in place (justFiled) + refreshes ledger
+      // hold the green "Filed" beat, then collapse to the persistent one-line strip
+      setTimeout(() => setPhase('collapsed'), reduced ? 0 : 950);
     } catch (err: unknown) {
       setLeaving(null); setPhase(null);
       onError(errMessage(err, "Couldn't file, try again"));
@@ -152,6 +160,50 @@ export function ReviewCard({
     onFileRight: runFile,
     onRejectLeft: runReject,
   });
+
+  // The lingering "filed" strip is a confirmation, not a permanent row — it clears itself.
+  useEffect(() => {
+    if (phase !== 'collapsed') return;
+    const t = setTimeout(onDismissFiled, 7000);
+    return () => clearTimeout(t);
+  }, [phase, onDismissFiled]);
+
+  // ── filed journey: filing → "Filed ✓" beat → a quiet one-line strip (in place) ──
+  if (phase === 'filing' || phase === 'filed') {
+    return (
+      <div className="relative rounded-2xl overflow-hidden db-reveal" style={{ background: V.sageWash, border: `1px solid ${V.sage}33` }}>
+        {phase === 'filing' && <div className="absolute inset-y-0 left-0 right-0 db-sweep" style={{ background: 'linear-gradient(90deg, rgba(47,93,52,0.16), rgba(47,93,52,0.05))' }} />}
+        <div className="relative flex items-center px-4 sm:px-5" style={{ minHeight: 96 }}>
+          {phase === 'filing' ? (
+            <span className="inline-flex items-center gap-2.5 font-medium" style={{ color: V.sage, ...font, ...T.sm }}>
+              <ArrowRight size={16} /> Filing to transactions
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-2.5 font-medium db-confirm" style={{ color: V.sage, ...font, ...T.sm }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path className="db-draw" d="M5 12.5l4.5 4.5L19 7" stroke={V.sage} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              Filed · in your books
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
+  if (phase === 'collapsed') {
+    return (
+      <div className="db-confirm rounded-2xl px-4 sm:px-5 py-2.5 flex items-center gap-2.5" style={{ background: V.sageWash, border: `1px solid ${V.sage}33` }}>
+        <span className="inline-flex items-center justify-center w-5 h-5 rounded-full shrink-0" style={{ background: V.sage }}>
+          <Check size={11} color="#fff" strokeWidth={3} />
+        </span>
+        <span className="font-medium" style={{ color: V.sage, ...font, ...T.sm }}>Transaction filed</span>
+        <span className="flex-1" />
+        {filedTxnId && (
+          <button onClick={(e) => { e.stopPropagation(); onView(filedTxnId); }} className="inline-flex items-center gap-1 font-medium" style={{ color: V.sage, ...font, ...T.sm }}>
+            View <ArrowRight size={14} />
+          </button>
+        )}
+      </div>
+    );
+  }
 
   // ── archived compact row ──────────────────────────────────────────────────
   if (archived) {
@@ -306,7 +358,12 @@ export function ReviewCard({
               </button>
             ) : amberChip('how much?', () => openEditor('amount'))}
 
-            {payeeId ? (
+            {generalExpense && payeeName ? (
+              // general expense: the heard name STAYS, just unlinked (amber off). Tap to link instead.
+              <button onClick={(e) => { e.stopPropagation(); if (canManage) setGeneralExpense(false); }} title="Tap to link a payee instead" style={{ color: V.sys, ...font, ...T.sm }}>
+                {payeeName}
+              </button>
+            ) : payeeId ? (
               <button onClick={(e) => { e.stopPropagation(); if (canManage) openEditor('payee', payeeName || ''); }} style={{ color: V.ink, ...font, ...T.sm }}>
                 {payeeName}
               </button>
@@ -334,9 +391,18 @@ export function ReviewCard({
             </button>
           )}
 
+          {/* general expense chosen: the amber link-warning is replaced by a calm note —
+              a general expense doesn't need a party, so the heard name simply stays unlinked */}
+          {generalExpense && (
+            <p className="mt-1.5 inline-flex items-center gap-1.5" style={{ paddingLeft: 32, color: V.faint, ...font, ...T.xs }}>
+              <Wallet size={11} style={{ color: V.faint }} />
+              General expense — a linked payee isn't needed
+            </p>
+          )}
+
           {/* heard a name, but it is not one of your parties yet — the disambiguation
               WhatsApp deliberately skipped, resolved here in one tap */}
-          {!payeeId && payeeName && editing !== 'payee' && (
+          {!payeeId && payeeName && editing !== 'payee' && !generalExpense && (
             ai.suggested_payee && !payeeSugDismissed
               && ai.suggested_payee.name.toLowerCase() !== (payeeName || '').toLowerCase() ? (
               <div className="mt-2" style={{ paddingLeft: 32 }}>
@@ -351,14 +417,20 @@ export function ReviewCard({
                 </div>
               </div>
             ) : (
-              <button
-                onClick={(e) => { e.stopPropagation(); if (canManage) openEditor('payee', payeeName || ''); }}
-                className="mt-1.5 inline-flex items-center gap-1.5 text-left"
-                style={{ color: V.ask, ...font, ...T.xs, paddingLeft: 32 }}
-              >
-                <span className="w-1.5 h-1.5 rounded-full" style={{ background: V.ask }} />
-                "{payeeName}" is not linked to any party in your system — tap to link or add
-              </button>
+              <div className="mt-1.5" style={{ paddingLeft: 32 }}>
+                <button
+                  onClick={(e) => { e.stopPropagation(); if (canManage) openEditor('payee', payeeName || ''); }}
+                  className="inline-flex items-center gap-1.5 text-left"
+                  style={{ color: V.ask, ...font, ...T.xs }}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: V.ask }} />
+                  "{payeeName}" is not linked to any party in your system — tap to link or add
+                </button>
+                <div className="mt-1.5 flex items-center flex-wrap gap-2">
+                  <span style={{ color: V.faint, ...font, ...T.xs }}>or is this a general expense?</span>
+                  {resolveBtn(<><Wallet size={11} /> General expense</>, () => setGeneralExpense(true), true)}
+                </div>
+              </div>
             )
           )}
 

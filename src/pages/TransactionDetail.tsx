@@ -3,7 +3,8 @@ import { useParams, useNavigate, useSearchParams, useLocation } from 'react-rout
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { useSignedDocUrl } from '../lib/storage';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Wallet } from 'lucide-react';
+import { isGeneralExpense } from '../lib/transactions';
 import type { Session } from '@supabase/supabase-js';
 import Breadcrumb from '../components/Breadcrumb';
 import { useUserProfile } from '../App';
@@ -817,11 +818,17 @@ export default function TransactionDetail({ session }: { session: Session }) {
                         chevron_right
                       </span>
                     </button>
+                  ) : isGeneralExpense(txn) ? (
+                    <p className="inline-flex items-center gap-1.5 text-[15px] font-semibold text-on-surface">
+                      <Wallet size={15} className="text-on-surface-variant/55" /> General expense
+                    </p>
                   ) : (
                     <p className="text-[15px] font-semibold text-on-surface">{txn.stakeholders?.name || '—'}</p>
                   )}
                   <p className="text-[11px] text-on-surface-variant/50 mt-0.5">
-                    {txn.stakeholders?.type}{txn.stakeholders?.category ? ` · ${txn.stakeholders.category}` : ''}
+                    {isGeneralExpense(txn)
+                      ? 'no linked party'
+                      : `${txn.stakeholders?.type || ''}${txn.stakeholders?.category ? ` · ${txn.stakeholders.category}` : ''}`}
                   </p>
                 </div>
 
