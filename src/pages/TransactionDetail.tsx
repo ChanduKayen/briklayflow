@@ -676,6 +676,13 @@ export default function TransactionDetail({ session }: { session: Session }) {
   });
 
   const isLoading = txnLoading || allocsLoading;
+  // documents bucket is private — resolve the stored URL to a signed URL for display.
+  // This hook MUST run before the early returns below (Rules of Hooks): otherwise a cold
+  // open renders the loading branch first (hook not called) then the loaded branch (hook
+  // called) -> "rendered more hooks than previous render" -> blank screen. Compute the URL
+  // defensively since txn may be undefined while loading.
+  const proofUrl = txn ? ((txn as any).proof_document_url || txn.bill_doc_url || null) : null;
+  const proofSigned = useSignedDocUrl(proofUrl);
   if (isLoading) return <div className="flex justify-center py-20"><Loader2 className="animate-spin text-primary/40" size={28} /></div>;
   if (!txn) return <div className="p-8 text-center text-on-surface-variant/50 text-[14px]">Transaction not found.</div>;
 
@@ -702,10 +709,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
     setAmendError(null); setAmendStep('edit');
   };
 
-  const proofUrl = (txn as any).proof_document_url || txn.bill_doc_url || null;
   const isImage = proofUrl?.match(/\.(jpeg|jpg|gif|png|webp)(\?.*)?$/i);
-  // documents bucket is private — resolve the stored URL to a signed URL for display.
-  const proofSigned = useSignedDocUrl(proofUrl);
 
   const needsActionType = (() => {
     if (txn.status === 'Voided') return false;
