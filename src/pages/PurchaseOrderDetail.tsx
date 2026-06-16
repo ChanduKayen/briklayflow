@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import Breadcrumb from '../components/Breadcrumb';
+import { BackLink } from '../components/BackLink';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import confetti from 'canvas-confetti';
 import { supabase } from '../lib/supabase';
@@ -855,6 +856,14 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   return (
     <div className="min-h-screen bg-[#f7f6f4] px-4 sm:px-6 pt-6 pb-20">
       <div className="max-w-[720px] mx-auto">
+
+        {/* BACK */}
+        <div className="detail-reveal mb-3" style={{ animationDelay: '0ms' }}>
+          <BackLink
+            to={navState.from === 'project' && navState.projectId ? `/projects/${navState.projectId}/purchase-orders` : '/purchase-orders'}
+            label="Purchase orders"
+          />
+        </div>
 
         {/* BREADCRUMB */}
         <div className="detail-reveal mb-6" style={{ animationDelay: '0ms' }}>

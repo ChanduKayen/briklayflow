@@ -21,10 +21,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   Check, X, Pencil, Link2, ArrowUpRight, ArrowDownLeft, ArrowRight,
-  Image as ImageIcon, Search, UserPlus, Wallet,
+  Image as ImageIcon, Search, UserPlus, Wallet, Mic,
 } from 'lucide-react';
 import type { RoughEntry } from '../../types';
-import { V, WA, font, nums, terraGrad, T } from './tokens';
+import { V, WA, font, serif, nums, terraGrad, T } from './tokens';
 import { WhatsAppGlyph } from './atoms';
 import {
   fileRoughEntry, rejectRoughEntry, restoreRoughEntry, createParty, isResolved, errMessage, type ResolvedFields,
@@ -277,6 +277,18 @@ export function ReviewCard({
   // tier-1 provenance — entry no · sender · captured-at (the date line carries a dot).
   const fromWa = entry.source.startsWith('WHATSAPP');
   const senderName = entry.sender_name || 'Unknown sender';
+  const initials = senderName.trim().split(/\s+/)[0].slice(0, 2).toUpperCase() || '—';
+  const channelLabel = entry.source === 'WHATSAPP_VOICE' ? 'WhatsApp voice'
+    : entry.source === 'WHATSAPP_IMAGE' ? 'WhatsApp photo' : 'WhatsApp';
+  // How Briklay got these words — a quiet provenance caption (Instagram-byline grammar).
+  const sourceCaption = entry.source === 'WHATSAPP_VOICE' ? 'Transcribed from a voice note'
+    : entry.source === 'WHATSAPP_IMAGE' ? 'Read from the photo'
+    : entry.source === 'UI_IMAGE' ? 'Scanned'
+    : entry.source === 'UI_TEXT' ? 'Added here'
+    : 'From a WhatsApp message';
+  const SourceIcon = entry.source === 'WHATSAPP_VOICE' ? Mic
+    : (entry.source === 'WHATSAPP_IMAGE' || entry.source === 'UI_IMAGE') ? ImageIcon
+    : null;
   const captured = new Date(entry.created_at);
   const sentDate = captured.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
   const sentTime = captured.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
@@ -284,13 +296,13 @@ export function ReviewCard({
   const reSerial = (entry.re_number || '').split('-').pop()?.replace(/^0+(?=\d)/, '') || '';
 
   const amberChip = (label: string, onClick: () => void) => (
-    <button onClick={(e) => { e.stopPropagation(); if (canManage) onClick(); }} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md" style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font, ...T.xs }}>
+    <button onClick={(e) => { e.stopPropagation(); if (canManage) onClick(); }} className="shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md" style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font, ...T.xs }}>
       <Pencil size={10} /> {label}
     </button>
   );
   const filledChip = (icon: React.ReactNode, label: string, onClick: () => void) => (
-    <button onClick={(e) => { e.stopPropagation(); if (canManage) onClick(); }} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md max-w-full" style={{ background: V.field, color: V.inkSoft, ...font, ...T.xs }}>
-      {icon}<span className="truncate">{label}</span>
+    <button onClick={(e) => { e.stopPropagation(); if (canManage) onClick(); }} className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md" style={{ background: V.field, color: V.inkSoft, ...font, ...T.xs }}>
+      {icon}<span className="truncate" style={{ maxWidth: 200 }}>{label}</span>
     </button>
   );
   // One-tap resolve button for Day Book suggestions ("Use Raju", "Pick project").
@@ -345,53 +357,54 @@ export function ReviewCard({
           cursor: swipe.dragging ? 'grabbing' : 'grab', touchAction: 'pan-y',
         }}
       >
-        {/* tier 1 — the site */}
+        {/* tier 1 — the site (social-post grammar: avatar · author · meta) */}
         <div className="px-4 sm:px-5 pt-4 pb-4">
-          {/* header — entry no · sender, with the review status on the right */}
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 min-w-0">
-              {reSerial && (
-                <span className="shrink-0 inline-flex items-center rounded-md px-1.5 py-0.5 font-medium" style={{ background: V.field, color: V.sys, ...font, ...nums, ...T.xs }}>
-                  № {reSerial}
-                </span>
-              )}
-              <span className="font-medium truncate" style={{ color: V.ink, ...font, ...T.sm }}>{senderName}</span>
-            </div>
-            <span className="shrink-0 inline-flex items-center gap-1.5" style={{ color: ready ? V.sys : V.ask, ...font, ...T.xs }}>
-              <span className="w-1.5 h-1.5 rounded-full" style={{ background: ready ? V.terra : V.ask }} />
-              {ready ? 'ready to file' : 'needs your eye'}
+          {/* author header — avatar, sender + meta line, review status pill on the right */}
+          <div className="flex items-center gap-3">
+            <span className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 font-medium" style={{ background: V.terraWash, color: V.terraDeep, ...font, ...T.sm }}>
+              {initials}
             </span>
+            <div className="flex-1 min-w-0">
+              <p className="font-medium truncate" style={{ color: V.ink, ...font, ...T.sm }}>{senderName}</p>
+              <p className="mt-0.5 truncate inline-flex items-center gap-1.5" style={{ color: V.faint, ...font, ...T.xs }}>
+                {reSerial && (<><span style={{ ...nums }}>№ {reSerial}</span><span style={{ color: V.line }}>·</span></>)}
+                {fromWa && (<><span className="inline-flex items-center gap-1"><WhatsAppGlyph size={11} color={WA} /> {channelLabel}</span><span style={{ color: V.line }}>·</span></>)}
+                <span style={{ ...nums }}>{sentDate} · {sentTime}</span>
+              </p>
+            </div>
+            {!ready && (
+              <span className="shrink-0 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full" style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font, ...T.xs }}>
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: V.ask }} />
+                needs your eye
+              </span>
+            )}
           </div>
 
-          {/* captured-at — a calm meta line with a status dot + subtle channel mark */}
-          <p className="mt-1 inline-flex items-center gap-1.5" style={{ color: V.faint, ...font, ...nums, ...T.xs }}>
-            <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: V.sage }} />
-            {sentDate} · {sentTime}
-            {fromWa && <WhatsAppGlyph size={11} color={WA} />}
-          </p>
-
-          {/* what the site said — an unboxed italic quote */}
-          {entry.source === 'WHATSAPP_VOICE' && <p className="mt-2.5 italic" style={{ color: V.faint, ...font, ...T.xs }}>voice note, transcribed</p>}
-          {said && <p className={`mt-2.5 italic leading-relaxed ${reveal ? 'tf-raw' : ''}`} style={{ color: V.inkSoft, ...font, ...T.sm }}>&ldquo;{said}&rdquo;</p>}
+          {/* what the site said — the hero, unquoted (Instagram-caption grammar) */}
+          {said && <p className={`mt-3 ${reveal ? 'tf-raw' : ''}`} style={{ color: V.ink, ...serif, fontSize: 'clamp(1.05rem, 0.95rem + 0.7vw, 1.3rem)', lineHeight: 1.4 }}>{said}</p>}
           {entry.raw_image_url && (
-            <button onClick={(e) => { e.stopPropagation(); onLightbox(entry.raw_image_url!); }} className="mt-2.5 rounded-lg overflow-hidden block" style={{ width: 120, height: 76, background: '#E8E2DA' }}>
+            <button onClick={(e) => { e.stopPropagation(); onLightbox(entry.raw_image_url!); }} className="mt-3 rounded-xl overflow-hidden block" style={{ width: '100%', maxWidth: 240, height: 140, background: '#E8E2DA' }}>
               <img src={entry.raw_image_url} alt="capture" className="w-full h-full object-cover" />
             </button>
           )}
-          {!said && !entry.raw_image_url && <span className="mt-2.5 inline-flex items-center gap-1.5" style={{ color: V.faint, ...font, ...T.xs }}><ImageIcon size={14} /> no message body</span>}
+          {!said && !entry.raw_image_url && <span className="mt-3 inline-flex items-center gap-1.5" style={{ color: V.faint, ...font, ...T.xs }}><ImageIcon size={14} /> no message body</span>}
+
+          {/* provenance subtext — how Briklay got these words */}
+          {(said || entry.raw_image_url) && (
+            <p className="mt-2 inline-flex items-center gap-1.5" style={{ color: V.faint, ...font, ...T.xs }}>
+              {SourceIcon && <SourceIcon size={11} />}
+              <span>{sourceCaption}</span>
+            </p>
+          )}
         </div>
 
-        {/* seam — a quiet hairline between what was said and what we understood */}
-        <div className="mx-4 sm:mx-5" style={{ borderTop: `1px solid ${V.line}` }} />
-
-        {/* tier 2 — what it becomes */}
-        <div className="px-4 sm:px-5 pt-4 pb-4" style={{ background: V.page }}>
-          <p className="uppercase font-medium mb-2.5" style={{ color: V.faint, letterSpacing: '0.1em', ...font, ...T.xs }}>Briklay understood</p>
-
+        {/* what Briklay understood — one flat surface, an excellently quiet kicker */}
+        <div className="px-4 sm:px-5 pb-4">
+          <p className="mb-2" style={{ color: V.faint, ...font, ...T.xs, letterSpacing: '0.03em' }}>Briklay understood</p>
           {/* the read line: direction · amount · payee (each inline-editable) */}
-          <div className={`flex items-center flex-wrap gap-x-2 gap-y-1 ${reveal ? 'tf-read' : ''}`}>
-            <span className="shrink-0 inline-flex items-center justify-center" style={{ width: 18 }}>
-              {out ? <ArrowUpRight size={16} color={V.terraDeep} /> : <ArrowDownLeft size={16} color={V.sage} />}
+          <div className={`flex items-center flex-wrap gap-x-2.5 gap-y-1 ${reveal ? 'tf-read' : ''}`}>
+            <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: out ? V.terraWash : V.sageWash }}>
+              {out ? <ArrowUpRight size={14} color={V.terraDeep} /> : <ArrowDownLeft size={14} color={V.sage} />}
             </span>
 
             {amountNum > 0 ? (
@@ -414,7 +427,7 @@ export function ReviewCard({
               <button onClick={(e) => { e.stopPropagation(); if (canManage) openEditor('payee', payeeName || ''); }} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md" style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font, ...T.sm }}>
                 {payeeName}
               </button>
-            ) : amberChip('who was paid?', () => openEditor('payee'))}
+            ) : null /* no name heard -> the "who was paid?" question lives in the chip rail below */}
           </div>
 
           {/* low-confidence amount (a spoken/code-mixed numeral the agent wasn't sure
@@ -424,7 +437,7 @@ export function ReviewCard({
             <button
               onClick={(e) => { e.stopPropagation(); if (canManage) openEditor('amount', amount); }}
               className="mt-1.5 inline-flex items-center gap-1.5 text-left"
-              style={{ color: V.ask, ...font, ...T.xs, paddingLeft: 32 }}
+              style={{ color: V.ask, ...font, ...T.xs, paddingLeft: 38 }}
             >
               <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: V.ask }} />
               {ai.amount_source_phrase
@@ -436,7 +449,7 @@ export function ReviewCard({
           {/* general expense chosen: the amber link-warning is replaced by a calm note —
               a general expense doesn't need a party, so the heard name simply stays unlinked */}
           {generalExpense && (
-            <p className="mt-1.5 inline-flex items-center gap-1.5" style={{ paddingLeft: 32, color: V.faint, ...font, ...T.xs }}>
+            <p className="mt-1.5 inline-flex items-center gap-1.5" style={{ paddingLeft: 38, color: V.faint, ...font, ...T.xs }}>
               <Wallet size={11} style={{ color: V.faint }} />
               General expense — a linked payee isn't needed
             </p>
@@ -447,7 +460,7 @@ export function ReviewCard({
           {!payeeId && payeeName && editing !== 'payee' && !generalExpense && (
             ai.suggested_payee && !payeeSugDismissed
               && ai.suggested_payee.name.toLowerCase() !== (payeeName || '').toLowerCase() ? (
-              <div className="mt-2" style={{ paddingLeft: 32 }}>
+              <div className="mt-2" style={{ paddingLeft: 38 }}>
                 <p style={{ color: V.ask, ...font, ...T.xs }}>
                   Heard <span style={{ fontWeight: 600, color: V.inkSoft }}>{payeeName}</span> — did you mean{' '}
                   <span style={{ fontWeight: 600, color: V.inkSoft }}>{ai.suggested_payee.name}</span>?
@@ -459,7 +472,7 @@ export function ReviewCard({
                 </div>
               </div>
             ) : (
-              <div className="mt-1.5" style={{ paddingLeft: 32 }}>
+              <div className="mt-1.5" style={{ paddingLeft: 38 }}>
                 <button
                   onClick={(e) => { e.stopPropagation(); if (canManage) openEditor('payee', payeeName || ''); }}
                   className="inline-flex items-center gap-1.5 text-left"
@@ -478,7 +491,8 @@ export function ReviewCard({
 
           {/* secondary chips: project · note · anchor. A project the bot heard but
               couldn't match is resolved in the block below, not here. */}
-          <div className={`mt-3 flex flex-wrap gap-1.5 ${reveal ? 'tf-chip' : ''}`}>
+          <div className={`mt-3 flex gap-1.5 overflow-x-auto db-noscroll ${reveal ? 'tf-chip' : ''}`} style={{ paddingLeft: 38 }} onPointerDown={(e) => e.stopPropagation()}>
+            {!payeeId && !payeeName && !generalExpense && amberChip('who was paid?', () => openEditor('payee'))}
             {projectId
               ? filledChip(<Link2 size={11} style={{ color: V.faint }} />, projectName || 'Project', () => openEditor('project', projectName || ''))
               : !ai.project_raw
@@ -496,7 +510,7 @@ export function ReviewCard({
 
           {/* project heard but not a registered project — one-tap resolve */}
           {!projectId && ai.project_raw && editing !== 'project' && (
-            <div className="mt-2" style={{ paddingLeft: 32 }}>
+            <div className="mt-2" style={{ paddingLeft: 38 }}>
               <p style={{ color: V.ask, ...font, ...T.xs }}>
                 <span style={{ fontWeight: 600, color: V.inkSoft }}>{ai.project_raw}</span> — not a registered project
               </p>

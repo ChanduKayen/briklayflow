@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import Breadcrumb from '../components/Breadcrumb';
+import { BackLink } from '../components/BackLink';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { Loader2, ArrowLeft, Download } from 'lucide-react';
@@ -697,6 +698,14 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
   return (
     <div className="min-h-screen bg-[#f7f6f4]">
       <div className="max-w-[720px] mx-auto px-4 sm:px-6 pt-6 pb-20">
+
+        {/* BACK */}
+        <div className="detail-reveal mb-3" style={{ animationDelay: '0ms' }}>
+          <BackLink
+            to={navState.from === 'project' && navState.projectId ? `/projects/${navState.projectId}/work-orders` : '/work-orders'}
+            label="Work orders"
+          />
+        </div>
 
         {/* BREADCRUMB */}
         <div className="detail-reveal mb-6" style={{ animationDelay: '0ms' }}>

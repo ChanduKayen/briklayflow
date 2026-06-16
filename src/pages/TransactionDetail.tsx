@@ -7,6 +7,7 @@ import { Loader2, Wallet } from 'lucide-react';
 import { isGeneralExpense } from '../lib/transactions';
 import type { Session } from '@supabase/supabase-js';
 import Breadcrumb from '../components/Breadcrumb';
+import { BackLink } from '../components/BackLink';
 import { useUserProfile } from '../App';
 import { usePeek } from '../context/PeekContext';
 import { ImageLightbox } from '../components/ImageLightbox';
@@ -740,6 +741,14 @@ export default function TransactionDetail({ session }: { session: Session }) {
   return (
     <div className="min-h-screen bg-[#f7f6f4]">
       <div className={`max-w-[720px] mx-auto px-4 sm:px-6 pt-6 pb-20 ${isVoided ? 'opacity-60' : ''}`}>
+
+        {/* ── Back ───────────────────────────────────────────────── */}
+        <div className="detail-reveal mb-3" style={{ animationDelay: '0ms' }}>
+          <BackLink
+            to={navState.from === 'project' && navState.projectId ? `/projects/${navState.projectId}/transactions` : '/ledger'}
+            label="Transactions"
+          />
+        </div>
 
         {/* ── Breadcrumb ─────────────────────────────────────────── */}
         <div className="detail-reveal mb-6" style={{ animationDelay: '0ms' }}>

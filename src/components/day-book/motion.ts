@@ -32,6 +32,9 @@ export const ANIM = `
 .db-reject-off { animation: dbRejectOff .42s cubic-bezier(.4,0,.2,1) forwards; }
 @keyframes dbDropIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .db-drop { animation: dbDropIn .35s ease both; }
+/* one-row chip rail: scrolls horizontally on overflow, no scrollbar chrome */
+.db-noscroll { scrollbar-width: none; -ms-overflow-style: none; -webkit-overflow-scrolling: touch; }
+.db-noscroll::-webkit-scrollbar { display: none; }
 /* card separation + hover lift — keeps cards from blending at the same level */
 .db-card { border: 1px solid #E3DDD4; box-shadow: 0 1px 2px rgba(60,46,26,0.04); transition: box-shadow .2s ease, border-color .2s ease; }
 .db-card:hover { border-color: #D2C5B4; box-shadow: 0 8px 22px rgba(60,46,26,0.10); }
