@@ -24,7 +24,7 @@ import {
   IconBarcode, IconShieldLock, IconAdjustmentsHorizontal,
   IconChevronDown, IconChevronLeft, IconPlus, IconDots,
   IconSettings, IconLogout, IconCircleDot, IconFileText, IconClock,
-  IconCircleCheck, IconBox, IconListNumbers, IconTruck, IconLoader2,
+  IconBox, IconListNumbers, IconTruck, IconLoader2,
 } from '@tabler/icons-react';
 import { supabase } from '../../lib/supabase';
 import { clearPersistedCache } from '../../lib/queryClient';
@@ -115,28 +115,32 @@ function RailItem({ item, active, open, onNavigate }: { item: Item; active: bool
 }
 
 // ── the contextual secondary panel: Purchase-orders lifecycle ─────────────────
-function POContextPanel({ poOpen, role, onNavigate }: { poOpen: number; role: Role; onNavigate: () => void }) {
+type POView = { key: string; label: string; sub: string; icon: React.ElementType; to: string; count?: number; tone: '' | 'ask'; active: boolean };
+function POContextPanel({ role, onNavigate }: { role: Role; onNavigate: () => void }) {
   const location = useLocation();
   const navigate = useNavigate();
   const status = new URLSearchParams(location.search).get('status') ?? 'all';
   const onList = location.pathname === '/purchase-orders';
   const canManage = role !== 'supervisor' && role !== 'accountant';
+  const canApprove = role === 'management' || role === 'principal';
 
-  const { data: total = 0 } = useQuery({
-    queryKey: ['nav_po_total'],
-    queryFn: async () => {
-      const { count } = await supabase.from('purchase_orders').select('*', { count: 'exact', head: true });
-      return count ?? 0;
-    },
+  const { data: liveCount = 0 } = useQuery({
+    queryKey: ['nav_po_live'],
+    queryFn: async () => (await supabase.from('purchase_orders').select('*', { count: 'exact', head: true }).eq('approval_status', 'APPROVED')).count ?? 0,
     staleTime: 60_000,
   });
+  const { data: draftCount = 0 } = useQuery({
+    queryKey: ['nav_po_draft'],
+    queryFn: async () => (await supabase.from('purchase_orders').select('*', { count: 'exact', head: true }).eq('approval_status', 'PENDING')).count ?? 0,
+    staleTime: 60_000, enabled: canApprove,
+  });
 
-  const VIEWS = [
-    { key: 'all',  label: 'All POs',    icon: IconCircleDot,   sub: 'every order',              count: total,   tone: '' as const },
-    { key: 'you',  label: 'Your move',  icon: IconFileText,    sub: 'needs you to act',         count: poOpen,  tone: 'ask' as const },
-    { key: 'them', label: 'Waiting',    icon: IconClock,       sub: 'on the vendor',            count: undefined, tone: '' as const },
-    { key: 'done', label: 'Done',       icon: IconCircleCheck, sub: 'received, billed, paid',   count: undefined, tone: '' as const },
-  ];
+  // The lifecycle: drafts await management/principal approval → out for quotes → live.
+  const VIEWS = ([
+    canApprove && { key: 'draft', label: 'Draft POs', sub: 'waiting for approval', icon: IconFileText, to: '/purchase-orders?status=draft', count: draftCount, tone: 'ask', active: onList && status === 'draft' },
+    { key: 'quotes', label: 'Sent for quotes', sub: 'awaiting vendor prices', icon: IconClock, to: '/procurement/quotes', tone: '', active: location.pathname.startsWith('/procurement/quotes') },
+    { key: 'live', label: 'Live POs', sub: 'approved & in motion', icon: IconCircleDot, to: '/purchase-orders', count: liveCount, tone: '', active: onList && status !== 'draft' },
+  ].filter(Boolean) as POView[]);
 
   return (
     <div className="h-screen flex flex-col py-5 shrink-0 nav-panel-in" style={{ width: PANEL_W, background: V.page, borderRight: `1px solid ${V.line}`, ...font }}>
@@ -153,18 +157,16 @@ function POContextPanel({ poOpen, role, onNavigate }: { poOpen: number; role: Ro
 
       <nav className="nav-scroll mt-4 flex-1 overflow-y-auto" style={{ paddingLeft: 8, paddingRight: 8 }}>
         {VIEWS.map(v => {
-          const on = v.key === 'all' ? (onList && (status === 'all')) : (onList && status === v.key);
           const ask = v.tone === 'ask';
           const Icon = v.icon;
-          const to = v.key === 'all' ? '/purchase-orders' : `/purchase-orders?status=${v.key}`;
           return (
-            <Link key={v.key} to={to} onClick={onNavigate}
+            <Link key={v.key} to={v.to} onClick={onNavigate}
               className="w-full flex items-start gap-2.5 px-3 py-2 rounded-lg"
-              style={{ background: on ? V.terraWash : 'transparent', marginBottom: 2, textDecoration: 'none' }}>
-              <Icon size={16} strokeWidth={1.8} style={{ color: on ? V.terraDeep : V.faint, marginTop: 2, flexShrink: 0 }} />
+              style={{ background: v.active ? V.terraWash : 'transparent', marginBottom: 2, textDecoration: 'none' }}>
+              <Icon size={16} strokeWidth={1.8} style={{ color: v.active ? V.terraDeep : V.faint, marginTop: 2, flexShrink: 0 }} />
               <span className="flex-1 min-w-0">
                 <span className="flex items-center justify-between gap-2">
-                  <span className="truncate" style={{ fontSize: 13, color: on ? V.terraDeep : V.inkSoft, fontWeight: on ? 500 : 400 }}>{v.label}</span>
+                  <span className="truncate" style={{ fontSize: 13, color: v.active ? V.terraDeep : V.inkSoft, fontWeight: v.active ? 500 : 400 }}>{v.label}</span>
                   {v.count != null && v.count > 0 && <span className="shrink-0" style={{ fontSize: 12, color: ask ? V.ask : V.faint, ...nums }}>{v.count}</span>}
                 </span>
                 <span className="block truncate" style={{ fontSize: 11.5, color: V.faint, marginTop: 1 }}>{v.sub}</span>
@@ -176,7 +178,7 @@ function POContextPanel({ poOpen, role, onNavigate }: { poOpen: number; role: Ro
 
       <div style={{ paddingLeft: 20, paddingRight: 16 }}>
         <p style={{ fontSize: 11.5, lineHeight: 1.5, color: V.faint }}>
-          Orders move from your move, to waiting on the vendor, to done.
+          Drafts wait for approval, then go out for quotes, then run live.
         </p>
       </div>
     </div>
@@ -316,7 +318,7 @@ export function BriklayDesktopNav({ session }: { session: Session }) {
     { route: `${projBase}/inward`, label: 'Inward register', icon: IconTruck },
   ] : [];
 
-  const showPanel = location.pathname.startsWith('/purchase-orders');
+  const showPanel = hasContextPanel(location.pathname);
   // Any navigation also settles open menus + collapses the projects tray, so
   // selecting a project drops straight to that project + its internal links.
   const close = () => { setShowUser(false); setProjOpen(false); };
@@ -484,7 +486,7 @@ export function BriklayDesktopNav({ session }: { session: Session }) {
       {/* the contextual panel — beside the slim spine, desktop only */}
       {showPanel && createPortal(
         <div className="hidden md:block" style={{ position: 'fixed', top: 0, left: RAIL_W, height: '100vh', zIndex: 40 }}>
-          <POContextPanel poOpen={poUntallied} role={role} onNavigate={() => {}} />
+          <POContextPanel role={role} onNavigate={() => {}} />
         </div>,
         document.body,
       )}
@@ -493,9 +495,10 @@ export function BriklayDesktopNav({ session }: { session: Session }) {
 }
 
 /** Whether the PO context panel is showing for a given path (App reads this to
- *  set the content margin). */
+ *  set the content margin). Spans the PO list/detail AND the quotes step, which
+ *  is one of the panel's lifecycle links. */
 export function hasContextPanel(pathname: string): boolean {
-  return pathname.startsWith('/purchase-orders');
+  return pathname.startsWith('/purchase-orders') || pathname.startsWith('/procurement/quotes');
 }
 
 export { RAIL_W, PANEL_W } from './navTokens';

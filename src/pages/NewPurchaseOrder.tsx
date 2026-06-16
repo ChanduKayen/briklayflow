@@ -4539,15 +4539,6 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
           <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => handleSubmit('DRAFT')}
-            disabled={saveMutation.isPending}
-            className="px-3 py-2.5 rounded-xl text-[13px] font-medium text-on-surface-variant/60 hover:bg-surface-container active:scale-[0.97] transition-all disabled:opacity-50"
-            title="Save as draft"
-          >
-            Draft
-          </button>
-          <button
-            type="button"
             onClick={() => handleSubmit('ORDERED')}
             disabled={!canSubmit || saveMutation.isPending}
             className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-[14px] font-medium transition-all ${

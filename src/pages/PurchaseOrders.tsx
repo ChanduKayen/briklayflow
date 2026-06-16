@@ -602,6 +602,8 @@ export default function PurchaseOrders({ session }: { session: Session }) {
     profile?.role === 'management' ||
     profile?.role === 'principal' ||
     profile?.role === 'accountant';
+  // Only management / principal approve POs; drafts await their yes.
+  const isApprover = profile?.role === 'management' || profile?.role === 'principal';
 
   const currentUserName: string =
     (profile as any)?.display_name || (profile as any)?.name || session.user.email || 'Unknown';
@@ -614,7 +616,7 @@ export default function PurchaseOrders({ session }: { session: Session }) {
       const { data, error } = await supabase
         .from('purchase_orders')
         .select(`
-          po_id, org_id, status, date_issued, created_at, ordered_by, expected_delivery,
+          po_id, org_id, status, approval_status, date_issued, created_at, ordered_by, expected_delivery,
           total_value, order_value,
           vendor_bill_amount, vendor_bill_number, vendor_bill_no,
           vendor_bill_url, vendor_bill_doc_url, vendor_bill_date,
@@ -709,17 +711,29 @@ export default function PurchaseOrders({ session }: { session: Session }) {
     );
   }, [enrichedAll, searchTerm]);
 
-  // Agency counts react to the current search/advanced-filter universe.
+  // Live vs Draft are split by approval_status (the gate), NOT the fulfillment
+  // `status`. Drafts (PENDING) are an approver-only queue; the agency tabs
+  // (Your move / Waiting / Done) operate only over APPROVED ("live") POs.
+  const isPending  = (x: { po: { approval_status?: string } }) => x.po.approval_status === 'PENDING';
+  const isApproved = (x: { po: { approval_status?: string } }) => (x.po.approval_status ?? 'APPROVED') === 'APPROVED';
+
   const tabCounts = useMemo(() => {
-    const counts: Record<string, number> = { all: enriched.length, you: 0, them: 0, done: 0 };
-    for (const x of enriched) counts[x.d.agency]++;
+    const approved = enriched.filter(isApproved);
+    const counts: Record<string, number> = { all: approved.length, draft: enriched.filter(isPending).length, you: 0, them: 0, done: 0 };
+    for (const x of approved) counts[x.d.agency]++;
     return counts;
   }, [enriched]);
 
-  const visible = useMemo(
-    () => activeTab === 'all' ? enriched : enriched.filter(x => x.d.agency === activeTab),
-    [enriched, activeTab]
-  );
+  const visible = useMemo(() => {
+    if (activeTab === 'draft') return isApprover ? enriched.filter(isPending) : enriched.filter(isApproved);
+    const approved = enriched.filter(isApproved);
+    return activeTab === 'all' ? approved : approved.filter(x => x.d.agency === activeTab);
+  }, [enriched, activeTab, isApprover]);
+
+  // Drafts tab is only offered to approvers (management / principal).
+  const filterTabs = isApprover
+    ? [{ key: 'all', label: 'All' }, { key: 'draft', label: 'Drafts' }, { key: 'you', label: 'Your move' }, { key: 'them', label: 'Waiting' }, { key: 'done', label: 'Done' }]
+    : FILTERS;
 
   // Flat chronological list (newest first). The agency split lives in the
   // filter tabs above, so there are no in-list group headers.
@@ -730,10 +744,11 @@ export default function PurchaseOrders({ session }: { session: Session }) {
     [visible]
   );
 
-  // Summary metrics (computed across the advanced-filtered universe).
-  const openValue = enrichedAll.filter(x => x.d.agency !== 'done').reduce((s, x) => s + poAmount(x.po), 0);
-  const yourCount = enrichedAll.filter(x => x.d.agency === 'you').length;
-  const awaitingGrn = enrichedAll.filter(x => !x.d.grn && x.d.agency !== 'done').length;
+  // Summary metrics (live/approved POs only — drafts have their own queue).
+  const approvedAll = enrichedAll.filter(isApproved);
+  const openValue = approvedAll.filter(x => x.d.agency !== 'done').reduce((s, x) => s + poAmount(x.po), 0);
+  const yourCount = approvedAll.filter(x => x.d.agency === 'you').length;
+  const awaitingGrn = approvedAll.filter(x => !x.d.grn && x.d.agency !== 'done').length;
 
   const advancedActiveCount =
     (datePreset !== 'all' ? 1 : 0) + (filterVendor.length ? 1 : 0) + (filterProject.length ? 1 : 0);
@@ -857,8 +872,8 @@ export default function PurchaseOrders({ session }: { session: Session }) {
             )}
           </div>
 
-          <div className="flex items-center gap-1.5 mt-2.5" role="tablist" aria-label="Filter purchase orders">
-            {FILTERS.map((f) => {
+          <div className="flex items-center gap-1.5 mt-2.5 overflow-x-auto no-scrollbar" role="tablist" aria-label="Filter purchase orders">
+            {filterTabs.map((f) => {
               const active = activeTab === f.key;
               return (
                 <button
@@ -866,7 +881,7 @@ export default function PurchaseOrders({ session }: { session: Session }) {
                   role="tab"
                   aria-selected={active}
                   onClick={() => setActiveTab(f.key)}
-                  className="text-xs font-medium px-3.5 py-2 rounded-full transition-transform active:scale-95 whitespace-nowrap"
+                  className="shrink-0 text-xs font-medium px-3.5 py-2 rounded-full transition-transform active:scale-95 whitespace-nowrap"
                   style={active
                     ? { background: C.ink, color: '#fff' }
                     : { background: C.surface, color: C.inkSoft, border: `1px solid ${C.line}` }}

@@ -348,6 +348,10 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     profile?.role === 'management' ||
     profile?.role === 'principal' ||
     profile?.role === 'accountant';
+  // Only management / principal approve POs.
+  const isApprover = profile?.role === 'management' || profile?.role === 'principal';
+  const [sendBackOpen, setSendBackOpen] = useState(false);
+  const [approvalRemark, setApprovalRemark] = useState('');
 
   const currentUserName: string = (profile as any)?.display_name || (profile as any)?.name || session.user.email || 'Unknown';
 
@@ -478,6 +482,27 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
       showSnackbar(`PO status updated to ${status}`);
     },
     onError: (err: any) => showSnackbar(err.message || 'Failed to update status', { type: 'error' }),
+  });
+
+  // ── Approval (draft → live), management/principal only ──────────────────────
+  const approve = useMutation({
+    mutationFn: async ({ action, remarks }: { action: 'APPROVE' | 'SEND_BACK'; remarks?: string }) => {
+      const { data, error } = await supabase.rpc('approve_purchase_order', {
+        p_po_id: poId!, p_action: action, p_remarks: remarks ?? null,
+      });
+      if (error) throw error;
+      const res = data as { success: boolean; error?: string };
+      if (!res?.success) throw new Error(res?.error || 'Approval failed');
+      return res;
+    },
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ['po_detail', poId] });
+      qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
+      qc.invalidateQueries({ queryKey: ['nav_po_draft'] });
+      qc.invalidateQueries({ queryKey: ['nav_po_total'] });
+      showSnackbar(vars.action === 'APPROVE' ? '✓ Purchase order approved' : 'Sent back to the creator');
+    },
+    onError: (err: any) => showSnackbar(err.message || 'Could not complete approval', { type: 'error' }),
   });
 
 
@@ -899,6 +924,11 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
                   <p className="text-[12px] text-on-surface-variant/60">Ordered {fmtDate(po.date_issued)}{po.ordered_by ? ` by ${po.ordered_by}` : ''}</p>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap justify-end">
+                  {po.approval_status === 'PENDING' && (
+                    <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold" style={{ background: '#FBF3E0', color: '#8A5A0B', border: '1px solid #E5C98F' }}>
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#8A5A0B' }} /> Awaiting approval
+                    </span>
+                  )}
                   {isOverdue(po) && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full border border-red-200/60 animate-pulse">Overdue</span>}
                   <span className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold ${STATUS_BADGE[po.status] ?? 'bg-surface-container-highest text-on-surface-variant'}`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[po.status] ?? 'bg-on-surface-variant/30'}`} />
@@ -906,6 +936,49 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
                   </span>
                 </div>
               </div>
+
+              {/* Approval gate — a draft waits for management/principal */}
+              {po.approval_status === 'PENDING' && (
+                <div className="mb-5 rounded-xl p-4" style={{ background: '#FBF7EC', border: '1px solid #E5C98F' }}>
+                  <div className="flex items-start gap-2.5">
+                    <span className="material-symbols-outlined text-[18px] mt-0.5" style={{ color: '#8A5A0B' }}>verified_user</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] font-semibold" style={{ color: '#6b4a08' }}>Waiting for approval</p>
+                      <p className="text-[12px] mt-0.5" style={{ color: '#8A5A0B' }}>
+                        {isApprover ? 'This PO stays a draft until you approve it.' : 'A draft — management or principal must approve it before it goes live.'}
+                      </p>
+
+                      {isApprover && !sendBackOpen && (
+                        <div className="flex items-center gap-2 mt-3">
+                          <button onClick={() => approve.mutate({ action: 'APPROVE' })} disabled={approve.isPending}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold text-white transition-opacity disabled:opacity-50" style={{ background: '#2F5D34' }}>
+                            <span className="material-symbols-outlined text-[16px]">check</span>{approve.isPending ? 'Approving…' : 'Approve'}
+                          </button>
+                          <button onClick={() => setSendBackOpen(true)} disabled={approve.isPending}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: 'transparent', border: '1px solid #E5C98F', color: '#8A5A0B' }}>
+                            <span className="material-symbols-outlined text-[16px]">undo</span>Send back
+                          </button>
+                        </div>
+                      )}
+
+                      {isApprover && sendBackOpen && (
+                        <div className="mt-3">
+                          <textarea autoFocus value={approvalRemark} onChange={e => setApprovalRemark(e.target.value)} rows={2}
+                            placeholder="What needs fixing? (optional note to the creator)"
+                            className="w-full text-[13px] px-3 py-2 rounded-lg outline-none" style={{ background: '#fff', border: '1px solid #E5C98F', color: '#3D3830' }} />
+                          <div className="flex items-center gap-2 mt-2">
+                            <button onClick={() => { approve.mutate({ action: 'SEND_BACK', remarks: approvalRemark.trim() }); setSendBackOpen(false); setApprovalRemark(''); }} disabled={approve.isPending}
+                              className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white disabled:opacity-50" style={{ background: '#8F3318' }}>
+                              Send back to creator
+                            </button>
+                            <button onClick={() => { setSendBackOpen(false); setApprovalRemark(''); }} className="px-3 py-2 rounded-lg text-[13px] font-medium" style={{ color: '#8A5A0B' }}>Cancel</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Row 2: Amount */}
               {totalValue > 0 && (

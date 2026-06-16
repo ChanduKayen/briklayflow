@@ -21,7 +21,7 @@ import {
   IconLogout, IconChevronLeft, IconDots,
   IconRepeat, IconLayoutGrid, IconFiles, IconUsers,
   IconMail, IconMailForward, IconCheck, IconBarcode,
-  IconCircleDot, IconClock, IconCircleCheck,
+  IconCircleDot, IconClock, IconFileText,
 } from '@tabler/icons-react';
 
 import Stakeholders from './pages/Stakeholders';
@@ -691,6 +691,13 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
     enabled: role !== 'supervisor' && role !== 'accountant',
   });
 
+  const { data: poDraftCount = 0 } = useQuery({
+    queryKey: ['nav_po_draft'],
+    queryFn: async () => (await supabase.from('purchase_orders').select('*', { count: 'exact', head: true }).eq('approval_status', 'PENDING')).count ?? 0,
+    staleTime: 60_000,
+    enabled: role === 'management' || role === 'principal',
+  });
+
   const ordersBadge = (woPendingCount ?? 0) + (poUntalliedCount ?? 0);
 
   // Glass shell shared by both context tab bars
@@ -736,19 +743,21 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
   }
 
   // ── Purchase-orders context bottom bar (the mobile mirror of the desktop
-  //    secondary panel: All / Your move / Waiting / Done — status views) ──────
-  const inPO = location.pathname.startsWith('/purchase-orders') && location.pathname !== '/purchase-orders/new';
+  //    secondary panel: Draft → Sent for quotes → Live) ────────────────────────
+  const inPO = (location.pathname.startsWith('/purchase-orders') && location.pathname !== '/purchase-orders/new')
+            || location.pathname.startsWith('/procurement/quotes');
   if (inPO) {
     const onList = location.pathname === '/purchase-orders';
+    const onQuotes = location.pathname.startsWith('/procurement/quotes');
     const status = new URLSearchParams(location.search).get('status') ?? 'all';
+    const isApprover = role === 'management' || role === 'principal';
     return (
       <nav className={shellClass} style={shellStyle}>
         <div className="flex items-stretch h-[56px]" style={innerStyle}>
-          <TabItem to="/purchase-orders"             Icon={IconCircleDot}    label="All"       active={onList && status === 'all'} />
-          <TabItem to="/purchase-orders?status=you"  Icon={IconClipboardList} label="Your move" active={onList && status === 'you'} badge={poUntalliedCount} />
-          <TabItem to="/purchase-orders?status=them" Icon={IconClock}        label="Waiting"   active={onList && status === 'them'} />
-          <TabItem to="/purchase-orders?status=done" Icon={IconCircleCheck}  label="Done"      active={onList && status === 'done'} />
-          <TabItem onClick={onMoreTap}               Icon={IconDots}         label="More"      active={false} />
+          {isApprover && <TabItem to="/purchase-orders?status=draft" Icon={IconFileText} label="Drafts" active={onList && status === 'draft'} badge={poDraftCount} />}
+          <TabItem to="/procurement/quotes" Icon={IconClock}      label="Quotes" active={onQuotes} />
+          <TabItem to="/purchase-orders"    Icon={IconCircleDot}  label="Live"   active={onList && status !== 'draft'} />
+          <TabItem onClick={onMoreTap}      Icon={IconDots}       label="More"   active={false} />
         </div>
       </nav>
     );
