@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from './lib/auth/AuthProvider';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
