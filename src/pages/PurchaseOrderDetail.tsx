@@ -920,6 +920,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
               {/* Row 1: PO ID + date + status */}
               <div className="flex items-start justify-between gap-3 mb-5">
                 <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-on-surface-variant/45 mb-1">Purchase Order</p>
                   <p className="font-mono text-[11px] text-on-surface-variant/50 mb-1 tracking-wide">{po.po_id}</p>
                   <p className="text-[12px] text-on-surface-variant/60">Ordered {fmtDate(po.date_issued)}{po.ordered_by ? ` by ${po.ordered_by}` : ''}</p>
                 </div>

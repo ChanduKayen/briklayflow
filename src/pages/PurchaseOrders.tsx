@@ -11,6 +11,7 @@ import ReceiveAtSiteDrawer from '../components/ReceiveAtSiteDrawer';
 import { usePrefetchPO } from '../hooks/usePrefetch';
 import BottomSheet from '../components/BottomSheet';
 import RecordBillSheet from '../components/RecordBillSheet';
+import { WhatsAppGlyph } from '../components/day-book/atoms';
 
 // ─────────────────────────────────────────────────────────────────────────
 //  Action-first redesign (matches BriklayPOPage handoff). Presentation only —
@@ -275,18 +276,60 @@ function Chip({ step, done, onTap }: { step: (typeof STEPS)[number]; done: boole
   );
 }
 
-function Metric({ label, value, accent }: { label: string; value: string | number; accent?: boolean }) {
+// A lifecycle stage card (Needs approval / Live POs / Sent for quotes). Calm by
+// default, warm terracotta when selected; a soft border-lift on hover. The teasing
+// card flips its icon to the WhatsApp glyph and back on entry, with the description
+// swapping in sync ("Orders from WhatsApp appear here") before settling.
+function StageCard({
+  icon, label, sub, count, active, tease, onClick,
+}: {
+  icon: string; label: string; sub: string; count?: number; active: boolean; tease?: boolean; onClick: () => void;
+}) {
+  const [wa, setWa] = useState(false);
+  useEffect(() => {
+    if (!tease) return;
+    setWa(false);
+    const seq = [true, false, true, false]; // wa·icon ×2, settle on the icon
+    const t = seq.map((s, i) => setTimeout(() => setWa(s), 2400 * (i + 1)));
+    return () => t.forEach(clearTimeout);
+  }, [tease]);
+  const showWa = !!tease && wa;
   return (
-    <div
-      className="rounded-2xl px-3.5 py-3"
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className="group text-left rounded-2xl p-3.5 sm:p-4 transition-all duration-200 active:scale-[0.985]"
       style={{
-        background: accent ? C.terraWash : C.surface,
-        border: `1px solid ${accent ? C.terraEdge : C.line}`,
+        background: active ? C.terraWash : C.surface,
+        border: `1px solid ${active ? C.terraEdge : C.line}`,
+        boxShadow: active ? '0 1px 2px rgba(143,51,24,0.06)' : '0 1px 2px rgba(31,27,22,0.03)',
       }}
+      onMouseEnter={(e) => { if (!active) e.currentTarget.style.borderColor = C.lineDash; }}
+      onMouseLeave={(e) => { if (!active) e.currentTarget.style.borderColor = C.line; }}
     >
-      <p className="text-xs mb-0.5 truncate" style={{ color: accent ? C.terraDeep : C.inkFaint }}>{label}</p>
-      <p className="text-lg font-medium tabular-nums" style={{ color: accent ? C.terraDeep : C.ink }}>{value}</p>
-    </div>
+      <div className="flex items-start justify-between gap-2">
+        <span
+          key={showWa ? 'wa' : 'ic'}
+          className={tease ? 'db-nav-swap' : ''}
+          style={{
+            width: 34, height: 34, borderRadius: 10, flexShrink: 0,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            background: active ? 'rgba(143,51,24,0.10)' : C.paper,
+            color: active ? C.terraDeep : C.inkSoft,
+          }}
+        >
+          {showWa ? <WhatsAppGlyph size={18} /> : <span className="material-symbols-outlined text-[19px]">{icon}</span>}
+        </span>
+        {count != null && (
+          <span className="text-[22px] font-semibold tabular-nums leading-none" style={{ color: active ? C.terraDeep : C.ink }}>{count}</span>
+        )}
+      </div>
+      <p className="mt-3 text-sm font-medium leading-snug" style={{ color: active ? C.terraDeep : C.ink }}>{label}</p>
+      <p className="text-[11.5px] mt-0.5 leading-snug" style={{ color: active ? 'rgba(143,51,24,0.72)' : C.inkFaint, transition: 'color .2s ease' }}>
+        {showWa ? 'Orders from WhatsApp appear here' : sub}
+      </p>
+    </button>
   );
 }
 
@@ -730,11 +773,6 @@ export default function PurchaseOrders({ session }: { session: Session }) {
     return activeTab === 'all' ? approved : approved.filter(x => x.d.agency === activeTab);
   }, [enriched, activeTab, isApprover]);
 
-  // Drafts tab is only offered to approvers (management / principal).
-  const filterTabs = isApprover
-    ? [{ key: 'all', label: 'All' }, { key: 'draft', label: 'Drafts' }, { key: 'you', label: 'Your move' }, { key: 'them', label: 'Waiting' }, { key: 'done', label: 'Done' }]
-    : FILTERS;
-
   // Flat chronological list (newest first). The agency split lives in the
   // filter tabs above, so there are no in-list group headers.
   const visibleSorted = useMemo(
@@ -744,11 +782,6 @@ export default function PurchaseOrders({ session }: { session: Session }) {
     [visible]
   );
 
-  // Summary metrics (live/approved POs only — drafts have their own queue).
-  const approvedAll = enrichedAll.filter(isApproved);
-  const openValue = approvedAll.filter(x => x.d.agency !== 'done').reduce((s, x) => s + poAmount(x.po), 0);
-  const yourCount = approvedAll.filter(x => x.d.agency === 'you').length;
-  const awaitingGrn = approvedAll.filter(x => !x.d.grn && x.d.agency !== 'done').length;
 
   const advancedActiveCount =
     (datePreset !== 'all' ? 1 : 0) + (filterVendor.length ? 1 : 0) + (filterProject.length ? 1 : 0);
@@ -823,7 +856,7 @@ export default function PurchaseOrders({ session }: { session: Session }) {
 
   return (
     <div className="min-h-screen" style={{ background: C.paper }}>
-      <div className="max-w-2xl lg:max-w-[1040px] xl:max-w-[1200px] min-[1700px]:max-w-[1640px] mx-auto px-4 sm:px-6 pb-28 min-[1700px]:grid min-[1700px]:grid-cols-[minmax(0,1fr)_340px] min-[1700px]:gap-12 min-[1700px]:items-start">
+      <div className="max-w-2xl lg:max-w-[1040px] xl:max-w-[1200px] mx-auto px-4 sm:px-6 pb-28">
 
         {/* ── main column ── */}
         <div className="min-w-0">
@@ -847,11 +880,26 @@ export default function PurchaseOrders({ session }: { session: Session }) {
           )}
         </header>
 
-        {/* Summary strip (relocates to the side rail on extra-wide screens) */}
-        <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-5 min-[1700px]:hidden">
-          <Metric label="Open value" value={inr(openValue)} />
-          <Metric label="Your move" value={yourCount} accent={yourCount > 0} />
-          <Metric label="Awaiting delivery" value={awaitingGrn} />
+        {/* Stage cards — the PO lifecycle (primary nav). Needs approval (approvers) ·
+            Live POs · Sent for quotes. The first teases its WhatsApp origin. */}
+        <div className="grid gap-2.5 sm:gap-3 mb-5" style={{ gridTemplateColumns: `repeat(${isApprover ? 3 : 2}, minmax(0, 1fr))` }}>
+          {isApprover && (
+            <StageCard
+              icon="verified_user" label="Needs approval" sub="waiting for your yes"
+              count={tabCounts.draft} active={activeTab === 'draft'} tease
+              onClick={() => setActiveTab('draft')}
+            />
+          )}
+          <StageCard
+            icon="radio_button_checked" label="Live POs" sub="approved & in motion"
+            count={tabCounts.all} active={activeTab !== 'draft'}
+            onClick={() => setActiveTab('all')}
+          />
+          <StageCard
+            icon="request_quote" label="Sent for quotes" sub="awaiting vendor prices"
+            active={false}
+            onClick={() => navigate('/procurement/quotes')}
+          />
         </div>
 
         {/* Search + filters (sticky) */}
@@ -872,8 +920,10 @@ export default function PurchaseOrders({ session }: { session: Session }) {
             )}
           </div>
 
-          <div className="flex items-center gap-1.5 mt-2.5 overflow-x-auto no-scrollbar" role="tablist" aria-label="Filter purchase orders">
-            {filterTabs.map((f) => {
+          <div className="flex items-center gap-1.5 mt-2.5 overflow-x-auto no-scrollbar" role="tablist" aria-label="Filter live purchase orders">
+            {/* Agency sub-filters apply only WITHIN Live POs; the draft (Needs approval)
+                view is not agency-triaged, so they're hidden there. */}
+            {activeTab !== 'draft' && FILTERS.map((f) => {
               const active = activeTab === f.key;
               return (
                 <button
@@ -961,16 +1011,6 @@ export default function PurchaseOrders({ session }: { session: Session }) {
           ))}
         </div>
         </div>{/* /main column */}
-
-        {/* ── summary rail: only on extra-wide (≥1700px) screens; below that the
-              metrics sit up top and the cards widen into a multi-column grid ── */}
-        <aside className="hidden min-[1700px]:block">
-          <div className="sticky top-8 space-y-3">
-            <Metric label="Open value" value={inr(openValue)} />
-            <Metric label="Your move" value={yourCount} accent={yourCount > 0} />
-            <Metric label="Awaiting delivery" value={awaitingGrn} />
-          </div>
-        </aside>
       </div>
 
       {/* Mobile FAB */}

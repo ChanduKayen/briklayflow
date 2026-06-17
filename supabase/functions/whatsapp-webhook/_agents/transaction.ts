@@ -14,7 +14,10 @@
 // The list/buttons formatter types, wa_conversations, staging, lingering reference
 // resolution, and interrupt/parking all remain for everything else.
 
-import { extractTransaction, extractTransactionFromImage, type TxnExtract } from '../_extract.ts'
+import {
+  extractTransaction, extractTransactionFromImage,
+  extractTransactions, extractTransactionsFromImage, type TxnExtract,
+} from '../_extract.ts'
 import { parseSpokenAmount } from '../_amount.ts'
 import { matchPayee, matchProject, type Match } from '../_match.ts'
 import { send, renderToWhatsApp, type OutMessage } from '../_format.ts'
@@ -92,18 +95,24 @@ async function resolveRef(supabase: any, lingering: ConvoRow | null): Promise<{ 
 // The confirmation AND the clean-entry reaction are enqueued INSIDE this RPC's
 // transaction, alongside the rough_entries insert: they can only send if the entry
 // committed (commit-gated, never optimistic). null return == the tx rolled back.
+// keyWamid = the ORIGINAL message's wamid (NOT a retry's). With entryIndex it forms the
+// idempotency key (org_id, wa_message_id, entry_index); a re-stage of the same entry
+// no-ops in-DB and returns the existing row as committed (never a false failure).
 async function stageV2(
   ctx: TxnCtx, status: string, rawText: string, ai: Record<string, unknown>, msg: OutMessage,
-  reaction?: OutMessage,
+  reaction: OutMessage | undefined, keyWamid: string, entryIndex: number,
 ): Promise<string | null> {
-  const { data, error } = await ctx.supabase.rpc('stage_entry_v2', {
-    p_org_id: ctx.orgId, p_sender: ctx.from, p_wamid: ctx.wamid, p_status: status, p_source: SOURCE,
+  const { data, error } = await ctx.supabase.rpc('stage_entry_v3', {
+    p_org_id: ctx.orgId, p_sender: ctx.from, p_wamid: keyWamid, p_entry_index: entryIndex,
+    p_status: status, p_source: SOURCE,
     p_sender_name: ctx.senderName, p_raw_text: rawText, p_ai: ai,
     p_payload: msg, p_rendered: renderToWhatsApp(ctx.from, msg), p_link_base: LINK,
     p_reaction: reaction ? renderToWhatsApp(ctx.from, reaction) : null,
   })
-  if (error) { console.error('[txn] stage_entry_v2 error:', error); return null }
-  return (data as string) ?? null
+  // v3 returns {id, committed, conflict}; ON CONFLICT is idempotent SUCCESS (never null).
+  const res = (data ?? null) as { id?: string; committed?: boolean } | null
+  if (error || !res?.committed) { if (error) console.error('[txn] stage_entry_v3 error:', error); return null }
+  return res.id ?? null
 }
 
 /**
@@ -113,21 +122,29 @@ async function stageV2(
  * caller throws WriteCommitFailed so processJob marks the job FAILED without the
  * generic message. This fires ONLY on the RPC result, never on a delivery failure.
  */
-async function handleWriteFailure(ctx: TxnCtx, plan: Plan, text: string): Promise<void> {
+async function handleWriteFailure(ctx: TxnCtx, plan: Plan, text: string, keyWamid: string, entryIndex: number): Promise<void> {
   const { supabase, from, orgId, wamid, lang } = ctx
+  await send(supabase, from, M.mWriteFailed(lang, {
+    payee: plan.payeeDisplay, amount: plan.amount, project: plan.projectName ?? plan.projectRaw,
+    replayId: await recordFailedWrite(ctx, plan, text, keyWamid, entryIndex),
+  }), { org_id: orgId, wamid })
+}
+
+/** One wa_failed_writes row carrying everything [Try again] needs to re-stage THIS entry
+ *  at its ORIGINAL key (wamid + entry_index) — so a retry that actually raced through
+ *  no-ops instead of duplicating. Returns the replay_id. */
+async function recordFailedWrite(ctx: TxnCtx, plan: Plan, text: string, keyWamid: string, entryIndex: number): Promise<string> {
   const replayId = crypto.randomUUID()
   const parsed = {
     amount: plan.amount, amount_confidence: plan.slots.amount_confidence,
     amount_source_phrase: plan.slots.amount_source_phrase, payee: plan.payeeDisplay,
     raw: plan.slots.raw, project: plan.slots.project,
     direction: plan.slots.direction, mode: plan.slots.mode, note: plan.slots.note,
-    raw_text: text, lang,
+    raw_text: text, lang: ctx.lang, wamid: keyWamid, entry_index: entryIndex,
   }
-  const { error } = await supabase.from('wa_failed_writes').insert({ replay_id: replayId, org_id: orgId, sender: from, parsed })
+  const { error } = await ctx.supabase.from('wa_failed_writes').insert({ replay_id: replayId, org_id: ctx.orgId, sender: ctx.from, parsed })
   if (error) console.error('[txn] wa_failed_writes insert error:', error)
-  await send(supabase, from, M.mWriteFailed(lang, {
-    payee: plan.payeeDisplay, amount: plan.amount, project: plan.projectName ?? plan.projectRaw, replayId,
-  }), { org_id: orgId, wamid })
+  return replayId
 }
 async function updateV2(ctx: TxnCtx, entryId: string, patch: Record<string, unknown>, status: string | null, msg: OutMessage): Promise<void> {
   const { error } = await ctx.supabase.rpc('update_entry_v2', {
@@ -213,7 +230,7 @@ function summaryOf(plan: Plan): string {
  * both essentials are present we commit and confirm; the agent asks at most ONE
  * question, ever.
  */
-async function applyPlan(ctx: TxnCtx, plan: Plan, text: string, opts: { prefix?: string; entryId?: string | null }): Promise<void> {
+async function applyPlan(ctx: TxnCtx, plan: Plan, text: string, opts: { prefix?: string; entryId?: string | null; keyWamid: string; entryIndex: number }): Promise<void> {
   const { supabase, from, orgId, wamid, lang } = ctx
   const both = plan.amountMissing && plan.payeeMissing
 
@@ -244,10 +261,10 @@ async function applyPlan(ctx: TxnCtx, plan: Plan, text: string, opts: { prefix?:
   if (opts.entryId) {
     await updateV2(ctx, opts.entryId, plan.ai, status, msg); entryId = opts.entryId
   } else {
-    entryId = await stageV2(ctx, status, text, plan.ai, msg, reaction)
+    entryId = await stageV2(ctx, status, text, plan.ai, msg, reaction, opts.keyWamid, opts.entryIndex)
     // null == the staging tx rolled back -> the entry does NOT exist. Tell the user
     // explicitly (with replay) and signal processJob; never a false "✓", never silence.
-    if (entryId === null) { await handleWriteFailure(ctx, plan, text); throw new WriteCommitFailed() }
+    if (entryId === null) { await handleWriteFailure(ctx, plan, text, opts.keyWamid, opts.entryIndex); throw new WriteCommitFailed() }
   }
 
   if (pending) {
@@ -265,7 +282,7 @@ async function applyPlan(ctx: TxnCtx, plan: Plan, text: string, opts: { prefix?:
 // ── New transaction (also the answer re-entry path via preExtract + entryId) ──────
 export async function runTransaction(
   ctx: TxnCtx, text: string,
-  opts: { prefix?: string; lingering?: ConvoRow | null; preExtract?: TxnExtract; entryId?: string | null } = {},
+  opts: { prefix?: string; lingering?: ConvoRow | null; preExtract?: TxnExtract; entryId?: string | null; keyWamid?: string; entryIndex?: number } = {},
 ): Promise<void> {
   const { supabase, orgId, from } = ctx
   // Load first so the extractor can be told the user's known projects (it returns the
@@ -300,7 +317,134 @@ export async function runTransaction(
     missingAmount: plan.amountMissing, missingPayee: plan.payeeMissing,
   }))
 
-  await applyPlan(ctx, plan, text, { prefix: opts.prefix, entryId: opts.entryId ?? null })
+  await applyPlan(ctx, plan, text, {
+    prefix: opts.prefix, entryId: opts.entryId ?? null,
+    keyWamid: opts.keyWamid ?? ctx.wamid, entryIndex: opts.entryIndex ?? 0,
+  })
+}
+
+// ── Multi-entry: many payments in one message ────────────────────────────────────
+// The registered NEW_INTENT entry point. Extract ALL payments ONCE; a single payment
+// (0 or 1 entry) takes the UNCHANGED single-entry path (we reuse the extract as
+// preExtract — no second LLM call); two or more loop the SAME single-entry commit per
+// entry, then one aggregated card. No questions for a batch (incomplete entries stage
+// flagged for the Day Book). Router + single-entry UX are untouched.
+
+type EntryOutcome = { payee: string | null; amount: number | null; project: string | null; committed: boolean; replayId?: string }
+
+/** Batch status: incomplete entries are NOT questions — they stage flagged for the Day Book. */
+function statusFor(plan: Plan): string {
+  if (plan.amountMissing || plan.payeeMissing) return 'AWAITING_CONTEXT'
+  return plan.payeeMatched ? 'PENDING' : 'AWAITING_CONTEXT'
+}
+
+/** Stage ONE batch entry (card suppressed — the batch sends one aggregated card after).
+ *  Bounded in-loop retry (3 attempts) smooths a TRANSIENT hiccup so fewer entries land
+ *  failed; a deterministic failure (or the test sentinel) exhausts the attempts and
+ *  reports failed. Idempotency is by (org, keyWamid, entryIndex) — already-landed = success. */
+async function commitEntry(ctx: TxnCtx, status: string, text: string, ai: Record<string, unknown>, keyWamid: string, entryIndex: number): Promise<string | null> {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const { data, error } = await ctx.supabase.rpc('stage_entry_v3', {
+      p_org_id: ctx.orgId, p_sender: ctx.from, p_wamid: keyWamid, p_entry_index: entryIndex,
+      p_status: status, p_source: SOURCE, p_sender_name: ctx.senderName, p_raw_text: text,
+      p_ai: ai, p_payload: null, p_rendered: null, p_link_base: LINK, p_reaction: null,
+    })
+    const res = (data ?? null) as { id?: string; committed?: boolean } | null
+    if (!error && res?.committed) return res.id ?? null
+    console.error(`[txn-batch] stage_entry_v3 entry ${entryIndex} attempt ${attempt}:`, error ?? 'no-commit')
+    if (attempt < 3) await new Promise((r) => setTimeout(r, 150 * attempt))
+  }
+  return null
+}
+
+/** Build + send the ONE aggregated card, plus a single ✓ when the whole batch is clean.
+ *  A partial batch is NOT a job failure: the committed entries are in the ledger and the
+ *  failed ones are NAMED on the card with [Try again]. So this never throws — every entry
+ *  ends in exactly one visible state (ticked, or named-not-saved). */
+async function sendBatchCard(ctx: TxnCtx, outcomes: EntryOutcome[], prefix?: string): Promise<void> {
+  const { supabase, from, orgId, wamid, lang } = ctx
+  const failed = outcomes.filter((o) => !o.committed)
+  const committedCount = outcomes.length - failed.length
+  // ≥2 failures can't each carry a button (WhatsApp caps at 3) -> ONE retry-all keyed on
+  // the original message; exactly 1 -> that entry's own replay id.
+  const retryButtonId = failed.length === 0 ? null
+    : failed.length === 1 ? `retry_${failed[0].replayId}`
+    : `retryall_${wamid}`
+  // Ordered (message order) so the serials read 1..N regardless of saved/failed grouping.
+  const card = applyPrefix(M.mBatch(lang, {
+    entries: outcomes.map((o) => ({ payee: o.payee, amount: o.amount, project: o.project, committed: o.committed })),
+    appLink: LINK, retryButtonId,
+  }), prefix)
+  await send(supabase, from, card, { org_id: orgId, wamid })
+  if (failed.length === 0 && committedCount > 0) {
+    await send(supabase, from, { kind: 'reaction', messageId: wamid, emoji: '✅' }, { org_id: orgId, wamid })
+  }
+}
+
+/** The batch loop: each entry through the SAME single-entry commit (matching + flag +
+ *  idempotent stage), card suppressed; then one aggregated card. */
+async function runBatch(
+  ctx: TxnCtx, text: string, entries: TxnExtract[],
+  stakeholders: { stakeholder_id: string; name: string }[], projects: { project_id: string; name: string }[],
+  prefix?: string,
+): Promise<void> {
+  const outcomes: EntryOutcome[] = []
+  for (let i = 0; i < entries.length; i++) {
+    const plan = buildPlan(entries[i], stakeholders, projects, ctx.from)
+    const project = plan.projectName ?? plan.projectRaw ?? null
+    const id = await commitEntry(ctx, statusFor(plan), text, plan.ai, ctx.wamid, i)
+    if (id) outcomes.push({ payee: plan.payeeDisplay, amount: plan.amount, project, committed: true })
+    else outcomes.push({ payee: plan.payeeDisplay, amount: plan.amount, project, committed: false, replayId: await recordFailedWrite(ctx, plan, text, ctx.wamid, i) })
+  }
+  await sendBatchCard(ctx, outcomes, prefix)
+}
+
+/** [Try again] for a multi-failure batch (retryall_): re-stage each held entry by its
+ *  ORIGINAL key (idempotent), clear the rows that land, re-record those that don't, and
+ *  send one fresh aggregated card. */
+export async function retryBatchEntries(ctx: TxnCtx, rows: { replay_id: string; parsed: Record<string, unknown> }[]): Promise<void> {
+  const [stakeholders, projects] = await Promise.all([loadStakeholders(ctx.supabase, ctx.orgId), loadActiveProjects(ctx.supabase, ctx.orgId)])
+  const outcomes: EntryOutcome[] = []
+  const cleared: string[] = []
+  for (const row of rows) {
+    const p = (row.parsed ?? {}) as Record<string, any>
+    const ext: TxnExtract = {
+      amount: p.amount ?? null, amount_confidence: p.amount_confidence ?? null,
+      amount_source_phrase: p.amount_source_phrase ?? null, payee: p.payee ?? p.raw ?? null,
+      project: p.project ?? null, direction: p.direction ?? null, mode: p.mode ?? null, note: p.note ?? null, ref: null,
+    }
+    const plan = buildPlan(ext, stakeholders, projects, ctx.from)
+    const project = plan.projectName ?? plan.projectRaw ?? null
+    const keyWamid = (p.wamid as string) ?? ctx.wamid
+    const idx = typeof p.entry_index === 'number' ? p.entry_index : 0
+    const id = await commitEntry(ctx, statusFor(plan), (p.raw_text as string) ?? '', plan.ai, keyWamid, idx)
+    if (id) { outcomes.push({ payee: plan.payeeDisplay, amount: plan.amount, project, committed: true }); cleared.push(row.replay_id) }
+    else outcomes.push({ payee: plan.payeeDisplay, amount: plan.amount, project, committed: false, replayId: await recordFailedWrite(ctx, plan, (p.raw_text as string) ?? '', keyWamid, idx) })
+  }
+  if (cleared.length) await ctx.supabase.from('wa_failed_writes').delete().in('replay_id', cleared)
+  await sendBatchCard(ctx, outcomes)
+}
+
+/** NEW_INTENT entry point (registered as the agent's `run`). Decides single vs batch. */
+export async function runTransactionMessage(ctx: TxnCtx, text: string, opts: { prefix?: string; lingering?: ConvoRow | null } = {}): Promise<void> {
+  const { supabase, orgId } = ctx
+  const [stakeholders, projects] = await Promise.all([loadStakeholders(supabase, orgId), loadActiveProjects(supabase, orgId)])
+  const projectNames = projects.map((p) => p.name)
+  const entries = ctx.image
+    ? await extractTransactionsFromImage(ctx.image.base64, ctx.image.mime, ctx.image.caption, projectNames, stakeholders.map((s) => s.name))
+    : await extractTransactions(text, projectNames)
+
+  console.log('[trace] multi-extract(txn)', JSON.stringify({ count: entries.length }))
+
+  if (entries.length >= 2) { await runBatch(ctx, text, entries, stakeholders, projects, opts.prefix); return }
+  // ONE payment -> the UNCHANGED single-entry path, reusing the extract (no 2nd LLM call).
+  if (entries.length === 1) {
+    await runTransaction(ctx, text, { prefix: opts.prefix, lingering: opts.lingering, preExtract: entries[0] })
+    return
+  }
+  // ZERO -> fall back to the proven single extractor (don't discard a payment the multi
+  // pass may have missed; it also drives the capture-first "who/how much?" ask).
+  await runTransaction(ctx, text, { prefix: opts.prefix, lingering: opts.lingering })
 }
 
 /** Merge a captured essential onto the slots carried across the one extra turn. */

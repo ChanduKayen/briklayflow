@@ -296,12 +296,12 @@ export function ReviewCard({
   const reSerial = (entry.re_number || '').split('-').pop()?.replace(/^0+(?=\d)/, '') || '';
 
   const amberChip = (label: string, onClick: () => void) => (
-    <button onClick={(e) => { e.stopPropagation(); if (canManage) onClick(); }} className="shrink-0 whitespace-nowrap inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md" style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font, ...T.xs }}>
+    <button onClick={(e) => { e.stopPropagation(); if (canManage) onClick(); }} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md" style={{ flexShrink: 0, whiteSpace: 'nowrap', background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font, ...T.xs }}>
       <Pencil size={10} /> {label}
     </button>
   );
   const filledChip = (icon: React.ReactNode, label: string, onClick: () => void) => (
-    <button onClick={(e) => { e.stopPropagation(); if (canManage) onClick(); }} className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md" style={{ background: V.field, color: V.inkSoft, ...font, ...T.xs }}>
+    <button onClick={(e) => { e.stopPropagation(); if (canManage) onClick(); }} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md" style={{ flexShrink: 0, whiteSpace: 'nowrap', background: V.field, color: V.inkSoft, ...font, ...T.xs }}>
       {icon}<span className="truncate" style={{ maxWidth: 200 }}>{label}</span>
     </button>
   );
@@ -401,33 +401,53 @@ export function ReviewCard({
         {/* what Briklay understood — one flat surface, an excellently quiet kicker */}
         <div className="px-4 sm:px-5 pb-4">
           <p className="mb-2" style={{ color: V.faint, ...font, ...T.xs, letterSpacing: '0.03em' }}>Briklay understood</p>
-          {/* the read line: direction · amount · payee (each inline-editable) */}
-          <div className={`flex items-center flex-wrap gap-x-2.5 gap-y-1 ${reveal ? 'tf-read' : ''}`}>
-            <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: out ? V.terraWash : V.sageWash }}>
-              {out ? <ArrowUpRight size={14} color={V.terraDeep} /> : <ArrowDownLeft size={14} color={V.sage} />}
-            </span>
+          {/* read + asks. Desktop: ONE line (values + a scrollable asks row). Mobile:
+              values on top, the asks become their own tidy horizontally-scrollable row
+              beneath — never a wall of wrapped chips, never hidden behind the amount. */}
+          <div className={`flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 ${reveal ? 'tf-read' : ''}`}>
+            {/* values — badge · amount · payee, one unit that never splits */}
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="w-7 h-7 rounded-full flex items-center justify-center" style={{ flexShrink: 0, background: out ? V.terraWash : V.sageWash }}>
+                {out ? <ArrowUpRight size={14} color={V.terraDeep} /> : <ArrowDownLeft size={14} color={V.sage} />}
+              </span>
+              {amountNum > 0 && (
+                <button onClick={(e) => { e.stopPropagation(); if (canManage) openEditor('amount', amount); }} className="font-medium" style={{ flexShrink: 0, whiteSpace: 'nowrap', color: out ? V.terraDeep : V.sage, ...font, ...nums, ...T.amt }}>
+                  {out ? '−' : '+'}₹{inr(amountNum)}
+                </button>
+              )}
+              {generalExpense && payeeName ? (
+                <button onClick={(e) => { e.stopPropagation(); if (canManage) setGeneralExpense(false); }} title="Tap to link a payee instead" className="truncate" style={{ flexShrink: 1, minWidth: 0, color: V.sys, ...font, ...T.sm }}>
+                  {payeeName}
+                </button>
+              ) : payeeId ? (
+                <button onClick={(e) => { e.stopPropagation(); if (canManage) openEditor('payee', payeeName || ''); }} className="truncate" style={{ flexShrink: 1, minWidth: 0, color: V.ink, ...font, ...T.sm }}>
+                  {payeeName}
+                </button>
+              ) : payeeName ? (
+                <button onClick={(e) => { e.stopPropagation(); if (canManage) openEditor('payee', payeeName || ''); }} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md max-w-full" style={{ flexShrink: 1, minWidth: 0, background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font, ...T.sm }}>
+                  <span className="truncate">{payeeName}</span>
+                </button>
+              ) : null}
+            </div>
 
-            {amountNum > 0 ? (
-              <button onClick={(e) => { e.stopPropagation(); if (canManage) openEditor('amount', amount); }} className="font-medium" style={{ color: out ? V.terraDeep : V.sage, ...font, ...nums, ...T.amt }}>
-                {out ? '−' : '+'}₹{inr(amountNum)}
-              </button>
-            ) : amberChip('how much?', () => openEditor('amount'))}
-
-            {generalExpense && payeeName ? (
-              // general expense: the heard name STAYS, just unlinked (amber off). Tap to link instead.
-              <button onClick={(e) => { e.stopPropagation(); if (canManage) setGeneralExpense(false); }} title="Tap to link a payee instead" style={{ color: V.sys, ...font, ...T.sm }}>
-                {payeeName}
-              </button>
-            ) : payeeId ? (
-              <button onClick={(e) => { e.stopPropagation(); if (canManage) openEditor('payee', payeeName || ''); }} style={{ color: V.ink, ...font, ...T.sm }}>
-                {payeeName}
-              </button>
-            ) : payeeName ? (
-              // heard a name but not linked to a party yet -> amber until linked
-              <button onClick={(e) => { e.stopPropagation(); if (canManage) openEditor('payee', payeeName || ''); }} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md" style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font, ...T.sm }}>
-                {payeeName}
-              </button>
-            ) : null /* no name heard -> the "who was paid?" question lives in the chip rail below */}
+            {/* the asks — a single horizontally-scrollable row (its own line on mobile) */}
+            <div className="db-noscroll" style={{ display: 'flex', flexWrap: 'nowrap', alignItems: 'center', gap: 6, overflowX: 'auto', overflowY: 'hidden', minWidth: 0 }} onPointerDown={(e) => e.stopPropagation()}>
+              {amountNum <= 0 && amberChip('how much?', () => openEditor('amount'))}
+              {!payeeId && !payeeName && !generalExpense && amberChip('who was paid?', () => openEditor('payee'))}
+              {projectId
+                ? filledChip(<Link2 size={11} style={{ color: V.faint }} />, projectName || 'Project', () => openEditor('project', projectName || ''))
+                : !ai.project_raw
+                  ? amberChip('which project?', () => openEditor('project'))
+                  : null}
+              {description.trim()
+                ? filledChip(<Pencil size={10} style={{ color: V.faint }} />, description.trim(), () => openEditor('description', description))
+                : amberChip('what was it for?', () => openEditor('description'))}
+              {ai.wo_number && (
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md" style={{ flexShrink: 0, whiteSpace: 'nowrap', background: V.field, color: V.inkSoft, ...font, ...T.xs }}>
+                  <Link2 size={11} style={{ color: V.faint }} /><span style={{ color: V.faint }}>{ai.wo_number}</span>
+                </span>
+              )}
+            </div>
           </div>
 
           {/* low-confidence amount (a spoken/code-mixed numeral the agent wasn't sure
@@ -472,41 +492,28 @@ export function ReviewCard({
                 </div>
               </div>
             ) : (
-              <div className="mt-1.5" style={{ paddingLeft: 38 }}>
+              <div className="mt-2 flex flex-col items-start gap-1.5" style={{ paddingLeft: 38 }}>
                 <button
                   onClick={(e) => { e.stopPropagation(); if (canManage) openEditor('payee', payeeName || ''); }}
                   className="inline-flex items-center gap-1.5 text-left"
                   style={{ color: V.ask, ...font, ...T.xs }}
                 >
                   <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: V.ask }} />
-                  "{payeeName}" is not linked to any party in your system — tap to link or add
+                  <span>
+                    <span style={{ fontWeight: 600, color: V.inkSoft }}>{payeeName}</span> isn’t in your contacts — <span style={{ textDecoration: 'underline', textUnderlineOffset: 2, textDecorationColor: V.askLine }}>add them</span>
+                  </span>
                 </button>
-                <div className="mt-1.5 flex items-center flex-wrap gap-2">
-                  <span style={{ color: V.faint, ...font, ...T.xs }}>or is this a general expense?</span>
-                  {resolveBtn(<><Wallet size={11} /> General expense</>, () => setGeneralExpense(true), true)}
-                </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); if (canManage) setGeneralExpense(true); }}
+                  className="inline-flex items-center gap-1.5"
+                  style={{ color: V.sys, ...font, ...T.xs }}
+                >
+                  <Wallet size={11} style={{ color: V.faint }} />
+                  <span style={{ textDecoration: 'underline', textUnderlineOffset: 2, textDecorationColor: V.line }}>or mark as a general expense</span>
+                </button>
               </div>
             )
           )}
-
-          {/* secondary chips: project · note · anchor. A project the bot heard but
-              couldn't match is resolved in the block below, not here. */}
-          <div className={`mt-3 flex gap-1.5 overflow-x-auto db-noscroll ${reveal ? 'tf-chip' : ''}`} style={{ paddingLeft: 38 }} onPointerDown={(e) => e.stopPropagation()}>
-            {!payeeId && !payeeName && !generalExpense && amberChip('who was paid?', () => openEditor('payee'))}
-            {projectId
-              ? filledChip(<Link2 size={11} style={{ color: V.faint }} />, projectName || 'Project', () => openEditor('project', projectName || ''))
-              : !ai.project_raw
-                ? amberChip('which project?', () => openEditor('project'))
-                : null}
-            {description.trim()
-              ? filledChip(<Pencil size={10} style={{ color: V.faint }} />, description.trim(), () => openEditor('description', description))
-              : amberChip('what was it for?', () => openEditor('description'))}
-            {ai.wo_number && (
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md" style={{ background: V.field, color: V.inkSoft, ...font, ...T.xs }}>
-                <Link2 size={11} style={{ color: V.faint }} /><span style={{ color: V.faint }}>{ai.wo_number}</span>
-              </span>
-            )}
-          </div>
 
           {/* project heard but not a registered project — one-tap resolve */}
           {!projectId && ai.project_raw && editing !== 'project' && (
@@ -522,12 +529,12 @@ export function ReviewCard({
             </div>
           )}
 
-          {/* inline editor */}
+          {/* inline editor — a recessed panel, tinted distinct from the white card */}
           {editing && canManage && (
-            <div onPointerDown={(e) => e.stopPropagation()} className="mt-3 rounded-xl p-2.5" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
+            <div onPointerDown={(e) => e.stopPropagation()} className="mt-3 rounded-xl p-3 w-full" style={{ maxWidth: 440, background: V.field, border: '1px solid #E3DDD4', boxShadow: 'inset 0 1px 2px rgba(60,46,26,0.05)' }}>
               {(editing === 'payee' || editing === 'project') && (
                 <>
-                  <div className="inline-flex items-center gap-2 px-2.5 rounded-lg w-full" style={{ background: V.field, height: 36 }}>
+                  <div className="inline-flex items-center gap-2 px-2.5 rounded-lg w-full" style={{ background: V.surface, border: `1px solid ${V.line}`, height: 36 }}>
                     <Search size={13} style={{ color: V.faint }} />
                     <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={editing === 'payee' ? 'Search a party…' : 'Search a project…'} className="bg-transparent outline-none flex-1" style={{ color: V.ink, ...font, ...T.sm }} />
                   </div>
@@ -557,14 +564,14 @@ export function ReviewCard({
                       </p>
                       <div className="flex gap-1 flex-wrap">
                         {(['Worker', 'Vendor', 'Client'] as PartyType[]).map(t => (
-                          <button key={t} onClick={() => { setNewType(t); setNewCategory(''); setNewCategoryOther(''); }} className="px-2.5 py-1 rounded-full font-medium" style={newType === t ? { background: V.terraWash, border: `1px solid ${V.askLine}`, color: V.terraDeep, ...font, ...T.xs } : { background: V.field, color: V.sys, ...font, ...T.xs }}>
+                          <button key={t} onClick={() => { setNewType(t); setNewCategory(''); setNewCategoryOther(''); }} className="px-2.5 py-1 rounded-full font-medium" style={newType === t ? { background: V.terraWash, border: `1px solid ${V.askLine}`, color: V.terraDeep, ...font, ...T.xs } : { background: V.surface, border: `1px solid ${V.line}`, color: V.sys, ...font, ...T.xs }}>
                             {t}
                           </button>
                         ))}
                       </div>
                       <div className="flex items-center gap-2 mt-2">
                         {newType !== 'Client' ? (
-                          <select value={newCategory} onChange={(e) => { setNewCategory(e.target.value); setNewCategoryOther(''); }} className="px-2.5 rounded-lg flex-1 outline-none appearance-none" style={{ background: V.field, color: newCategory ? V.ink : V.faint, height: 34, ...font, ...T.xs }}>
+                          <select value={newCategory} onChange={(e) => { setNewCategory(e.target.value); setNewCategoryOther(''); }} className="px-2.5 rounded-lg flex-1 min-w-0 outline-none appearance-none" style={{ background: V.surface, border: `1px solid ${V.line}`, color: newCategory ? V.ink : V.faint, height: 34, ...font, ...T.xs }}>
                             <option value="">Trade / category…</option>
                             {(newType === 'Worker' ? WORKER_TRADE_GROUPS : VENDOR_TRADE_GROUPS).map(g => (
                               <optgroup key={g.group} label={g.group}>
@@ -573,12 +580,15 @@ export function ReviewCard({
                             ))}
                           </select>
                         ) : <span className="flex-1" />}
-                        <button onClick={addParty} disabled={creating} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium shrink-0" style={{ background: terraGrad, color: '#fff', ...font, ...T.xs }}>
+                        <button onClick={addParty} disabled={creating} className="inline-flex items-center justify-center gap-1.5 px-3.5 rounded-lg font-medium shrink-0" style={{ height: 34, background: terraGrad, color: '#fff', ...font, ...T.xs }}>
                           {creating ? 'Adding…' : <>Add &amp; link</>}
+                        </button>
+                        <button onClick={() => setEditing(null)} aria-label="Cancel" className="shrink-0 inline-flex items-center justify-center rounded-lg" style={{ width: 34, height: 34, background: V.surface, border: `1px solid ${V.line}`, color: V.faint }}>
+                          <X size={15} />
                         </button>
                       </div>
                       {newType !== 'Client' && newCategory === OTHER_TRADE && (
-                        <input value={newCategoryOther} onChange={(e) => setNewCategoryOther(e.target.value)} autoFocus placeholder="Specify trade…" className="px-2.5 rounded-lg w-full outline-none mt-2" style={{ background: V.field, color: V.ink, height: 34, ...font, ...T.xs }} />
+                        <input value={newCategoryOther} onChange={(e) => setNewCategoryOther(e.target.value)} autoFocus placeholder="Specify trade…" className="px-2.5 rounded-lg w-full outline-none mt-2" style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.ink, height: 34, ...font, ...T.xs }} />
                       )}
                     </div>
                   )}
@@ -587,18 +597,18 @@ export function ReviewCard({
 
               {editing === 'amount' && (
                 <div className="flex items-center gap-2">
-                  <div className="inline-flex items-center gap-1.5 px-2.5 rounded-lg flex-1" style={{ background: V.field, height: 38 }}>
+                  <div className="inline-flex items-center gap-1.5 px-2.5 rounded-lg flex-1" style={{ background: V.surface, border: `1px solid ${V.line}`, height: 38 }}>
                     <span style={{ color: V.faint, ...font, ...T.sm }}>₹</span>
                     <input autoFocus inputMode="decimal" value={amount} onChange={(e) => { setAmount(e.target.value); mark('amount'); }} placeholder="0" className="bg-transparent outline-none flex-1" style={{ color: V.ink, ...font, ...nums, ...T.sm }} />
                   </div>
-                  <button onClick={() => setEditing(null)} className="px-3 py-2 rounded-lg font-medium" style={{ background: V.field, color: V.inkSoft, ...font, ...T.sm }}>Done</button>
+                  <button onClick={() => setEditing(null)} className="px-3 py-2 rounded-lg font-medium" style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.inkSoft, ...font, ...T.sm }}>Done</button>
                 </div>
               )}
 
               {editing === 'description' && (
                 <div className="flex items-center gap-2">
-                  <input autoFocus value={description} onChange={(e) => { setDescription(e.target.value); mark('description'); }} placeholder="What was it for?" className="px-2.5 rounded-lg flex-1 outline-none" style={{ background: V.field, color: V.ink, height: 38, ...font, ...T.sm }} />
-                  <button onClick={() => setEditing(null)} className="px-3 py-2 rounded-lg font-medium" style={{ background: V.field, color: V.inkSoft, ...font, ...T.sm }}>Done</button>
+                  <input autoFocus value={description} onChange={(e) => { setDescription(e.target.value); mark('description'); }} placeholder="What was it for?" className="px-2.5 rounded-lg flex-1 outline-none" style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.ink, height: 38, ...font, ...T.sm }} />
+                  <button onClick={() => setEditing(null)} className="px-3 py-2 rounded-lg font-medium" style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.inkSoft, ...font, ...T.sm }}>Done</button>
                 </div>
               )}
             </div>

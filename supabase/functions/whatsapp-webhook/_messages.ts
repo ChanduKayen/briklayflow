@@ -217,6 +217,59 @@ export function mWriteFailed(
   }
 }
 
+/**
+ * Aggregated multi-entry card. ALL good -> a CTA listing each entry + the day-total.
+ * PARTIAL -> reply-buttons naming each saved/not-saved line + [Try again] (one entry's
+ * replay id, or a retry-all token for ≥2) + [Add in Day Book]. Functional EN copy; the
+ * message-system pass polishes te-latin/te-script later. retryButtonId is null only when
+ * nothing failed. appLink is a REAL https Day Book url (this card is sent OUTSIDE the
+ * staging RPC, so the __ENTRY_LINK__ placeholder wouldn't be substituted).
+ */
+type BatchEntry = { payee: string | null; amount: number | null; project: string | null; committed: boolean }
+
+export function mBatch(
+  lang: Lang,
+  p: { entries: BatchEntry[]; appLink: string; retryButtonId: string | null },
+): OutMessage {
+  // "Rajeev Sharma → ₹3,25,000 · The Pride" — payee · amount · project (project omitted when absent).
+  const line = (e: BatchEntry) => {
+    const amt = e.amount != null ? '₹' + e.amount.toLocaleString('en-IN') : pick(lang, { en: 'amount not set' })
+    const who = e.payee ?? pick(lang, { en: 'payee not set' })
+    const proj = e.project ? ` · ${e.project}` : ''
+    return `${who} → ${amt}${proj}`
+  }
+  const committed = p.entries.filter((e) => e.committed).length
+  const failed = p.entries.length - committed
+  // Sum of what actually saved (free — already in memory; NOT a day-total query).
+  const savedSum = p.entries.filter((e) => e.committed).reduce((s, e) => s + (e.amount ?? 0), 0)
+  const sumStr = '₹' + savedSum.toLocaleString('en-IN')
+
+  if (failed === 0) {
+    const head = '✓ ' + pick(lang, { en: `Added ${committed} to your Day Book` })
+    const lines = p.entries.map((e) => line(e)).join('\n')
+    const total = pick(lang, { en: `That's ${sumStr} across these ${committed}.` })
+    const body = [head, lines, total].join('\n\n')
+    return { kind: 'cta', body, cta: { text: pick(lang, { en: 'Review in Day Book' }), url: p.appLink } }
+  }
+
+  const head = pick(lang, { en: `Added ${committed} · couldn't save ${failed}` })
+  const lines = p.entries.map((e) =>
+    e.committed
+      ? `${line(e)}  (${pick(lang, { en: 'saved' })})`
+      : `${line(e)} — ${pick(lang, { en: 'not saved, nothing recorded' })}`,
+  ).join('\n')
+  const total = pick(lang, { en: `${sumStr} saved in all — the rest above wasn't recorded.` })
+  const body = [head, lines, total].join('\n\n')
+  return {
+    kind: 'buttons',
+    body,
+    buttons: [
+      { id: p.retryButtonId ?? 'add_daybook', title: pick(lang, { en: 'Try again' }) },
+      { id: 'add_daybook', title: trunc(pick(lang, { en: 'Add in Day Book' }), 20) },
+    ],
+  }
+}
+
 /** Follow-up after [Add in Day Book]: a CTA URL to the Day Book (real https). */
 export function mDaybookLink(lang: Lang, url: string): OutMessage {
   return { kind: 'cta', body: pick(lang, { en: 'Open your Day Book to add it.' }), cta: { text: pick(lang, { en: 'Open Day Book' }), url } }

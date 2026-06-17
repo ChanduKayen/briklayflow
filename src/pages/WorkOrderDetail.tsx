@@ -739,6 +739,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
               {/* Row 1: WO ID & Status badge */}
               <div className="flex items-start justify-between gap-3 mb-5">
                 <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-on-surface-variant/45 mb-1">Work Order</p>
                   <p className="font-mono text-[11px] text-on-surface-variant/50 mb-1 tracking-wide">{wo.wo_id}</p>
                   <p className="text-[12px] text-on-surface-variant/60">Issued {fmtDate(wo.date_issued)}</p>
                 </div>

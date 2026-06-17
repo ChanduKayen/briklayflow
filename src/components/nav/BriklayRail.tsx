@@ -14,7 +14,6 @@
  * lives in App's BottomTabBar / MoreNavSheet.
  */
 import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import type { Session } from '@supabase/supabase-js';
@@ -22,8 +21,8 @@ import {
   IconArrowsExchange, IconNotebook, IconFileInvoice, IconLayoutDashboard,
   IconShoppingBag, IconLayoutGrid, IconClipboardList, IconUsersGroup,
   IconBarcode, IconShieldLock, IconAdjustmentsHorizontal,
-  IconChevronDown, IconChevronLeft, IconPlus, IconDots,
-  IconSettings, IconLogout, IconCircleDot, IconFileText, IconClock,
+  IconChevronDown, IconChevronLeft, IconDots,
+  IconSettings, IconLogout,
   IconBox, IconListNumbers, IconTruck, IconLoader2,
 } from '@tabler/icons-react';
 import { supabase } from '../../lib/supabase';
@@ -31,7 +30,7 @@ import { clearPersistedCache } from '../../lib/queryClient';
 import { useAuth } from '../../lib/auth/AuthProvider';
 import { useUserProfile } from '../../App';
 import { WhatsAppGlyph } from '../day-book/atoms';
-import { V, N, font, serif, nums, terraGrad, RAIL_W, RAIL_OPEN, PANEL_W, NAV_ANIM } from './navTokens';
+import { V, N, font, serif, nums, RAIL_W, RAIL_OPEN, NAV_ANIM } from './navTokens';
 
 type Role = string;
 
@@ -114,86 +113,19 @@ function RailItem({ item, active, open, onNavigate }: { item: Item; active: bool
   );
 }
 
-// ── the contextual secondary panel: Purchase-orders lifecycle ─────────────────
-type POView = { key: string; label: string; sub: string; icon: React.ElementType; to: string; count?: number; tone: '' | 'ask'; active: boolean };
-function POContextPanel({ role, onNavigate }: { role: Role; onNavigate: () => void }) {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const status = new URLSearchParams(location.search).get('status') ?? 'all';
-  const onList = location.pathname === '/purchase-orders';
-  const canManage = role !== 'supervisor' && role !== 'accountant';
-  const canApprove = role === 'management' || role === 'principal';
-
-  const { data: liveCount = 0 } = useQuery({
-    queryKey: ['nav_po_live'],
-    queryFn: async () => (await supabase.from('purchase_orders').select('*', { count: 'exact', head: true }).eq('approval_status', 'APPROVED')).count ?? 0,
-    staleTime: 60_000,
-  });
-  const { data: draftCount = 0 } = useQuery({
-    queryKey: ['nav_po_draft'],
-    queryFn: async () => (await supabase.from('purchase_orders').select('*', { count: 'exact', head: true }).eq('approval_status', 'PENDING')).count ?? 0,
-    staleTime: 60_000, enabled: canApprove,
-  });
-
-  // The lifecycle: drafts await management/principal approval → out for quotes → live.
-  const VIEWS = ([
-    canApprove && { key: 'draft', label: 'Draft POs', sub: 'waiting for approval', icon: IconFileText, to: '/purchase-orders?status=draft', count: draftCount, tone: 'ask', active: onList && status === 'draft' },
-    { key: 'quotes', label: 'Sent for quotes', sub: 'awaiting vendor prices', icon: IconClock, to: '/procurement/quotes', tone: '', active: location.pathname.startsWith('/procurement/quotes') },
-    { key: 'live', label: 'Live POs', sub: 'approved & in motion', icon: IconCircleDot, to: '/purchase-orders', count: liveCount, tone: '', active: onList && status !== 'draft' },
-  ].filter(Boolean) as POView[]);
-
-  return (
-    <div className="h-screen flex flex-col py-5 shrink-0 nav-panel-in" style={{ width: PANEL_W, background: V.page, borderRight: `1px solid ${V.line}`, ...font }}>
-      <div style={{ paddingLeft: 20, paddingRight: 16 }}>
-        <p className="uppercase font-medium" style={{ color: V.faint, letterSpacing: '0.12em', fontSize: 11 }}>Purchase orders</p>
-        {canManage && (
-          <button onClick={() => { navigate('/purchase-orders/new'); onNavigate(); }}
-            className="mt-3 w-full inline-flex items-center justify-center gap-1.5 py-2 rounded-lg font-medium"
-            style={{ background: terraGrad, color: '#fff', fontSize: 13 }}>
-            <IconPlus size={15} strokeWidth={2.2} /> New PO
-          </button>
-        )}
-      </div>
-
-      <nav className="nav-scroll mt-4 flex-1 overflow-y-auto" style={{ paddingLeft: 8, paddingRight: 8 }}>
-        {VIEWS.map(v => {
-          const ask = v.tone === 'ask';
-          const Icon = v.icon;
-          return (
-            <Link key={v.key} to={v.to} onClick={onNavigate}
-              className="w-full flex items-start gap-2.5 px-3 py-2 rounded-lg"
-              style={{ background: v.active ? V.terraWash : 'transparent', marginBottom: 2, textDecoration: 'none' }}>
-              <Icon size={16} strokeWidth={1.8} style={{ color: v.active ? V.terraDeep : V.faint, marginTop: 2, flexShrink: 0 }} />
-              <span className="flex-1 min-w-0">
-                <span className="flex items-center justify-between gap-2">
-                  <span className="truncate" style={{ fontSize: 13, color: v.active ? V.terraDeep : V.inkSoft, fontWeight: v.active ? 500 : 400 }}>{v.label}</span>
-                  {v.count != null && v.count > 0 && <span className="shrink-0" style={{ fontSize: 12, color: ask ? V.ask : V.faint, ...nums }}>{v.count}</span>}
-                </span>
-                <span className="block truncate" style={{ fontSize: 11.5, color: V.faint, marginTop: 1 }}>{v.sub}</span>
-              </span>
-            </Link>
-          );
-        })}
-      </nav>
-
-      <div style={{ paddingLeft: 20, paddingRight: 16 }}>
-        <p style={{ fontSize: 11.5, lineHeight: 1.5, color: V.faint }}>
-          Drafts wait for approval, then go out for quotes, then run live.
-        </p>
-      </div>
-    </div>
-  );
-}
-
 // ── the assembled desktop navigation ──────────────────────────────────────────
-export function BriklayDesktopNav({ session }: { session: Session }) {
+// Default: a STATIC, always-expanded rail. Pass `collapsible` to get the hover
+// collapse-to-icons behaviour (kept for screens that pair the rail with a second
+// nav and need to reclaim width).
+export function BriklayDesktopNav({ session, collapsible = false }: { session: Session; collapsible?: boolean }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { data: profile } = useUserProfile(session.user.id);
   const { orgId } = useAuth();
   const role: Role = profile?.role ?? '';
 
-  const [open, setOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const open = collapsible ? hovered : true;   // static unless collapsible
   const [projOpen, setProjOpen] = useState(false);
   const [showUser, setShowUser] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -318,7 +250,6 @@ export function BriklayDesktopNav({ session }: { session: Session }) {
     { route: `${projBase}/inward`, label: 'Inward register', icon: IconTruck },
   ] : [];
 
-  const showPanel = hasContextPanel(location.pathname);
   // Any navigation also settles open menus + collapses the projects tray, so
   // selecting a project drops straight to that project + its internal links.
   const close = () => { setShowUser(false); setProjOpen(false); };
@@ -330,19 +261,20 @@ export function BriklayDesktopNav({ session }: { session: Session }) {
 
       {/* the rail */}
       <aside
-        onMouseEnter={() => setOpen(true)}
-        onMouseLeave={() => { if (!signingOut) { setOpen(false); setProjOpen(false); close(); } }}
+        onMouseEnter={collapsible ? () => setHovered(true) : undefined}
+        onMouseLeave={() => { setHovered(false); if (!signingOut) { setProjOpen(false); close(); } }}
         className="hidden md:flex flex-col py-4"
         style={{
           position: 'fixed', top: 0, left: 0, height: '100vh',
           width: open ? RAIL_OPEN : RAIL_W, background: N.bg,
-          // Open: a quick, confident reach. Close: a longer, decelerating settle —
-          // a soft-close hinge easing the panel flush into the spine.
+          // collapsible only: quick open, soft-close settle. Static: width never changes.
           transition: open
             ? 'width .2s cubic-bezier(.32,.72,0,1), box-shadow .22s ease'
             : 'width .44s cubic-bezier(.16,1,.3,1), box-shadow .5s ease',
+          borderRight: collapsible ? 'none' : `1px solid ${N.keyline}`,
           overflow: 'hidden', zIndex: 50,
-          boxShadow: open ? '6px 0 28px rgba(20,16,12,0.28)' : 'none', ...font,
+          boxShadow: collapsible && open ? '6px 0 28px rgba(20,16,12,0.28)' : 'none',
+          ...font,
         }}
       >
         {/* brand — the logo wordmark; "Briklay." ⇄ "B." with the dot riding home */}
@@ -482,23 +414,8 @@ export function BriklayDesktopNav({ session }: { session: Session }) {
           )}
         </div>
       </aside>
-
-      {/* the contextual panel — beside the slim spine, desktop only */}
-      {showPanel && createPortal(
-        <div className="hidden md:block" style={{ position: 'fixed', top: 0, left: RAIL_W, height: '100vh', zIndex: 40 }}>
-          <POContextPanel role={role} onNavigate={() => {}} />
-        </div>,
-        document.body,
-      )}
     </>
   );
 }
 
-/** Whether the PO context panel is showing for a given path (App reads this to
- *  set the content margin). Spans the PO list/detail AND the quotes step, which
- *  is one of the panel's lifecycle links. */
-export function hasContextPanel(pathname: string): boolean {
-  return pathname.startsWith('/purchase-orders') || pathname.startsWith('/procurement/quotes');
-}
-
-export { RAIL_W, PANEL_W } from './navTokens';
+export { RAIL_W } from './navTokens';

@@ -12,7 +12,7 @@
 
 import type { ConvoRow } from './_conversation.ts'
 import type { TxnCtx } from './_agents/transaction.ts'
-import { runTransaction, answerTransaction, commitInterrupted } from './_agents/transaction.ts'
+import { runTransactionMessage, answerTransaction, commitInterrupted } from './_agents/transaction.ts'
 import { runConcierge } from './_agents/concierge.ts'
 
 // The uniform turn context the dispatcher hands any agent. (The transaction agent's
@@ -45,7 +45,8 @@ function conciergeRun(ctx: AgentCtx, text: string, opts: TurnOpts): Promise<void
 
 const TRANSACTION: AgentDef = {
   intent: 'TRANSACTION',
-  run: (ctx, text, opts) => runTransaction(ctx, text, { prefix: opts.prefix, lingering: opts.lingering }),
+  // Batch-aware: extracts ALL payments; 0/1 -> the unchanged single path, 2+ -> loop.
+  run: (ctx, text, opts) => runTransactionMessage(ctx, text, { prefix: opts.prefix, lingering: opts.lingering }),
   answer: (ctx, text, convo) => answerTransaction(ctx, text, convo),
   commitInterrupted: (ctx, convo) => commitInterrupted(ctx, convo),
 }

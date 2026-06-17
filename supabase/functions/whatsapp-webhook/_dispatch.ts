@@ -8,7 +8,7 @@ import {
   getRouterView, openConversation, abandonConversation, logRouterDecision, type ConvoRow,
 } from './_conversation.ts'
 import { agentFor } from './_registry.ts'
-import { runTransaction, type TxnCtx } from './_agents/transaction.ts'   // direct: the replay path
+import { runTransaction, retryBatchEntries, type TxnCtx } from './_agents/transaction.ts'   // direct: the replay path
 import { send } from './_format.ts'
 import * as M from './_messages.ts'
 import type { Lang } from './_messages.ts'
@@ -45,6 +45,10 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
   // share a message with reply buttons, so it arrives as its own message).
   if (ctx.interactiveId === 'add_daybook') {
     await send(supabase, from, M.mDaybookLink('en', LINK), { org_id: orgId, wamid })
+    return
+  }
+  if (ctx.interactiveId?.startsWith('retryall_')) {
+    await handleRetryBatch(ctx, ctx.interactiveId.slice('retryall_'.length))
     return
   }
   if (ctx.interactiveId?.startsWith('retry_')) {
@@ -165,11 +169,40 @@ async function handleRetry(ctx: DispatchCtx, replayId: string): Promise<void> {
   }
   const txnCtx: TxnCtx = { supabase, from, senderName, orgId, wamid, lang, interactiveId: null }
 
-  // Throws WriteCommitFailed on a re-failure (a fresh failure message is sent inside);
-  // that propagates to processJob, which marks the job FAILED without a generic message.
-  await runTransaction(txnCtx, p.raw_text ?? '', { preExtract: ext })
+  // Re-stage at the entry's ORIGINAL key (wamid + index from parsed) so a retry that
+  // actually raced through no-ops instead of duplicating. Legacy rows (no wamid/index)
+  // fall back to this message's wamid + index 0 — unchanged single-entry behaviour.
+  // Throws WriteCommitFailed on a re-failure (a fresh failure message is sent inside).
+  await runTransaction(txnCtx, p.raw_text ?? '', {
+    preExtract: ext,
+    keyWamid: (p.wamid as string) ?? wamid,
+    entryIndex: typeof p.entry_index === 'number' ? p.entry_index : 0,
+  })
   // Reached only on success -> clear the replay row.
   await supabase.from('wa_failed_writes').delete().eq('replay_id', replayId)
+}
+
+/**
+ * [Try again] for a multi-failure batch. Loads every still-held failed entry for the
+ * ORIGINAL message and re-stages each by its own key (idempotent), then sends one fresh
+ * aggregated card. Rows that land are cleared inside retryBatchEntries.
+ */
+async function handleRetryBatch(ctx: DispatchCtx, originalWamid: string): Promise<void> {
+  const { supabase, from, orgId, wamid } = ctx
+  const { data: rows } = await supabase
+    .from('wa_failed_writes')
+    .select('replay_id, parsed, expires_at')
+    .eq('org_id', orgId).eq('sender', from)
+  const now = new Date()
+  const mine = (rows ?? []).filter((r: any) =>
+    (r.parsed?.wamid) === originalWamid && (!r.expires_at || new Date(r.expires_at) >= now))
+  if (mine.length === 0) {
+    await send(supabase, from, M.mReplayExpired('en'), { org_id: orgId, wamid })
+    return
+  }
+  const lang = (mine[0].parsed?.lang ?? 'en') as Lang
+  const txnCtx: TxnCtx = { supabase, from, senderName: ctx.senderName, orgId, wamid, lang, interactiveId: null }
+  await retryBatchEntries(txnCtx, mine.map((r: any) => ({ replay_id: r.replay_id, parsed: r.parsed ?? {} })))
 }
 
 /** Concierge never leaves a lingering pending: drop any OPEN concierge convo. */

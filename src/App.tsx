@@ -57,7 +57,7 @@ import Billing from './pages/Billing';
 import NewBill from './pages/NewBill';
 import BillDetail from './pages/BillDetail';
 import Logbook from './pages/Logbook';
-import { BriklayDesktopNav, hasContextPanel } from './components/nav/BriklayRail';
+import { BriklayDesktopNav } from './components/nav/BriklayRail';
 import Orders from './pages/Orders';
 import InviteAccept from './pages/InviteAccept';
 import OnboardingWizard from './components/OnboardingWizard';
@@ -407,7 +407,7 @@ function App() {
     >
       <BriklayDesktopNav session={session} />
       <main
-        className={`min-h-screen mobile-main-pb transition-[margin-left] duration-[220ms] ease-[cubic-bezier(0.4,0,0.6,1)] ${hasContextPanel(location.pathname) ? 'md:ml-[280px]' : 'md:ml-[56px]'}`}
+        className={`min-h-screen mobile-main-pb transition-[margin-left] duration-[220ms] ease-[cubic-bezier(0.4,0,0.6,1)] md:ml-[220px]`}
         {...longPress}
       >
         {/* Mobile topbar (phones only â€" replaces sidebar hamburger) */}
@@ -754,7 +754,7 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
     return (
       <nav className={shellClass} style={shellStyle}>
         <div className="flex items-stretch h-[56px]" style={innerStyle}>
-          {isApprover && <TabItem to="/purchase-orders?status=draft" Icon={IconFileText} label="Drafts" active={onList && status === 'draft'} badge={poDraftCount} />}
+          {isApprover && <TabItem to="/purchase-orders?status=draft" Icon={IconFileText} label="Approvals" active={onList && status === 'draft'} badge={poDraftCount} />}
           <TabItem to="/procurement/quotes" Icon={IconClock}      label="Quotes" active={onQuotes} />
           <TabItem to="/purchase-orders"    Icon={IconCircleDot}  label="Live"   active={onList && status !== 'draft'} />
           <TabItem onClick={onMoreTap}      Icon={IconDots}       label="More"   active={false} />

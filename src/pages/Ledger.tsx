@@ -86,23 +86,28 @@ function EntryRow(p: EntryProps) {
         transition: 'background .15s',
       }}
     >
-      {/* hover-revealed bulk checkbox in the left gutter */}
-      <button
-        type="button"
-        onClick={p.onToggleSelect}
-        aria-label={p.selected ? 'Deselect' : 'Select'}
-        className="absolute flex items-center justify-center rounded"
-        style={{
-          left: 1, top: '50%', transform: 'translateY(-50%)', width: 14, height: 14,
-          border: `1.5px solid ${p.selected ? V.terra : V.line}`,
-          background: p.selected ? V.terra : V.surface,
-          opacity: showCheck ? 1 : 0, transition: 'opacity .15s', zIndex: 2,
-        }}
-      >
-        {p.selected && <span style={{ color: '#fff', fontSize: 9, lineHeight: 1 }}>✓</span>}
-      </button>
-
-      <div className="bk-ledger-med"><DirMedallion dir={p.dir} /></div>
+      {/* select ↔ medallion swap: the direction medallion BECOMES the checkbox on
+          hover / in select mode (Gmail-style) — so the box never overlaps the glyph. */}
+      <div className="bk-ledger-med flex items-center justify-center">
+        {showCheck ? (
+          <button
+            type="button"
+            onClick={p.onToggleSelect}
+            aria-label={p.selected ? 'Deselect' : 'Select'}
+            className="flex items-center justify-center rounded-md"
+            style={{
+              width: 20, height: 20,
+              border: `1.5px solid ${p.selected ? V.terra : V.line}`,
+              background: p.selected ? V.terra : V.surface,
+              transition: 'background .15s, border-color .15s',
+            }}
+          >
+            {p.selected && <span style={{ color: '#fff', fontSize: 11, lineHeight: 1 }}>✓</span>}
+          </button>
+        ) : (
+          <DirMedallion dir={p.dir} />
+        )}
+      </div>
 
       <div className="bk-ledger-main">
         <p className="text-sm font-medium truncate" style={{ color: V.ink, ...font }}>
@@ -230,6 +235,18 @@ export default function Ledger({ session }: { session: Session }) {
   const [chipDropPos, setChipDropPos] = useState<{ top: number; left: number } | null>(null);
   const [datePreset, setDatePreset] = useState<DatePreset>('month');
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  // Infinite scroll: a sentinel near the end auto-reveals the next page (with a brief
+  // spinner beat), so the accountant never has to click "Load more".
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // Elastic over-pull at either end (Android-style), applied to the page content.
+  const elasticRef = useRef<HTMLDivElement>(null);
+  // The WhatsApp review nudge rotates BOTH its message and its CTA together:
+  // slide 0 = "X waiting" → Review in Day book; slide 1 = the invite → Start on WhatsApp (QR).
+  // Rotation pauses while the cursor is over the banner so the CTA can't flip out from
+  // under a click (each slide has a DIFFERENT action).
+  const [nudgeSlide, setNudgeSlide] = useState(0);
+  const nudgePaused = useRef(false);
 
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
@@ -490,6 +507,72 @@ export default function Ledger({ session }: { session: Session }) {
   }
 
   const visibleTxns = sortedTxns.slice(0, visibleCount);
+  const hasMore = !isLoading && sortedTxns.length > visibleCount;
+
+  // Rotate the review-nudge slide every 4s (text + CTA switch together), unless paused
+  // (hovering the banner) so a deliberate click always lands on the slide you aimed at.
+  useEffect(() => {
+    const t = setInterval(() => { if (!nudgePaused.current) setNudgeSlide((p) => (p + 1) % 2); }, 4000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Auto-load the next page when the sentinel nears the viewport (a 300px lead-in),
+  // with a short spinner beat so the reveal reads as a deliberate motion, not a jump.
+  useEffect(() => {
+    if (!hasMore) return;
+    const el = loadMoreRef.current;
+    if (!el) return;
+    let t: ReturnType<typeof setTimeout>;
+    const io = new IntersectionObserver(([e]) => {
+      if (e.isIntersecting) {
+        setLoadingMore(true);
+        t = setTimeout(() => { setVisibleCount((c) => c + PAGE_SIZE); setLoadingMore(false); }, 280);
+      }
+    }, { rootMargin: '300px 0px' });
+    io.observe(el);
+    return () => { io.disconnect(); clearTimeout(t); };
+  }, [hasMore, visibleCount]);
+
+  // Elastic over-pull (touch only): at the very top/bottom, a downward/upward drag
+  // rubber-bands the content with damping, then springs back — the Android feel.
+  useEffect(() => {
+    const wrap = elasticRef.current;
+    if (!wrap || !('ontouchstart' in window)) return;
+    const root = (document.scrollingElement || document.documentElement) as HTMLElement;
+    let startY = 0, pull = 0, edge: 0 | 1 | -1 = 0; // -1 top, 1 bottom
+    const onStart = (e: TouchEvent) => {
+      startY = e.touches[0].clientY; pull = 0;
+      const atTop = root.scrollTop <= 0;
+      const atBottom = root.scrollTop + window.innerHeight >= root.scrollHeight - 1;
+      edge = atTop ? -1 : atBottom ? 1 : 0;
+    };
+    const onMove = (e: TouchEvent) => {
+      if (!edge) return;
+      const dy = e.touches[0].clientY - startY;
+      if ((edge === -1 && dy > 0) || (edge === 1 && dy < 0)) {
+        pull = Math.sign(dy) * Math.min(Math.abs(dy) * 0.4, 72); // damped, capped
+        wrap.style.transition = 'none';
+        wrap.style.transform = `translateY(${pull}px)`;
+        e.preventDefault(); // hold native scroll while rubber-banding
+      }
+    };
+    const release = () => {
+      if (!pull) return;
+      wrap.style.transition = 'transform .42s cubic-bezier(.16,1,.3,1)';
+      wrap.style.transform = '';
+      pull = 0; edge = 0;
+    };
+    window.addEventListener('touchstart', onStart, { passive: true });
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('touchend', release);
+    window.addEventListener('touchcancel', release);
+    return () => {
+      window.removeEventListener('touchstart', onStart);
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', release);
+      window.removeEventListener('touchcancel', release);
+    };
+  }, []);
   const visibleDays: { date: string; rows: any[] }[] = [];
   for (const t of visibleTxns) {
     const last = visibleDays[visibleDays.length - 1];
@@ -573,7 +656,7 @@ export default function Ledger({ session }: { session: Session }) {
 
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen" style={{ background: V.page, ...font }}>
+    <div ref={elasticRef} className="min-h-screen" style={{ background: V.page, ...font, overscrollBehaviorY: 'contain' }}>
       <style>{TRACK_CHIP_CSS}</style>
       <div className="mx-auto px-5 sm:px-8 py-8 max-w-[880px] lg:max-w-[1040px] xl:max-w-[1200px] min-[1700px]:max-w-[1640px] min-[1700px]:grid min-[1700px]:grid-cols-[minmax(0,1fr)_340px] min-[1700px]:gap-12 min-[1700px]:items-start">
 
@@ -617,17 +700,29 @@ export default function Ledger({ session }: { session: Session }) {
         {/* nudge: WhatsApp captures waiting in the Day book (when the ledger has
             entries; an empty ledger makes the case more fully in its empty state) */}
         {dayBookReviewCount > 0 && (ledger?.length ?? 0) > 0 && (
-          <button
-            onClick={() => navigate('/logbook')}
-            className="flex items-center gap-2 w-full text-left mt-6 px-3.5 py-2.5 rounded-xl"
-            style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font }}
-          >
-            <span className="text-sm font-medium" style={{ ...nums }}>{dayBookReviewCount}</span>
-            <span className="text-sm">
-              {dayBookReviewCount === 1 ? 'entry' : 'entries'} from WhatsApp {dayBookReviewCount === 1 ? 'is' : 'are'} waiting to be reviewed
-            </span>
-            <span className="ml-auto text-sm font-medium whitespace-nowrap">Review in Day book →</span>
-          </button>
+          (() => {
+            const slides = [
+              { text: `${dayBookReviewCount} ${dayBookReviewCount === 1 ? 'entry' : 'entries'} from WhatsApp ${dayBookReviewCount === 1 ? 'is' : 'are'} waiting to be reviewed`, cta: 'Review in Day book →', action: () => navigate('/logbook') },
+              { text: 'Send a bill, a voice note, or a message on WhatsApp — never miss a transaction', cta: 'Start on WhatsApp →', action: () => setWaSheetOpen(true) },
+            ];
+            const s = slides[nudgeSlide % slides.length];
+            return (
+              <div
+                onMouseEnter={() => { nudgePaused.current = true; }}
+                onMouseLeave={() => { nudgePaused.current = false; }}
+                className="flex items-center gap-2.5 w-full mt-6 px-3.5 py-2.5 rounded-xl"
+                style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font }}
+              >
+                <WhatsAppGlyph size={16} color="#1FA855" />
+                <button onClick={s.action} className="text-sm min-w-0 flex-1 text-left" style={{ color: V.ask }}>
+                  <span key={`t${nudgeSlide}`} className="block truncate nudge-rotate-in">{s.text}</span>
+                </button>
+                <button onClick={s.action} className="text-sm font-medium whitespace-nowrap shrink-0" style={{ color: V.ask }}>
+                  <span key={`c${nudgeSlide}`} className="inline-block nudge-rotate-in">{s.cta}</span>
+                </button>
+              </div>
+            );
+          })()
         )}
 
         {/* subtle invite: has entries, but never set up WhatsApp capture. Quiet,
@@ -823,11 +918,16 @@ export default function Ledger({ session }: { session: Session }) {
           })
         )}
 
-        {/* load more */}
-        {!isLoading && sortedTxns.length > visibleCount && (
-          <div className="flex items-center justify-between mt-6 px-1">
-            <span className="text-xs" style={{ color: V.faint, ...font }}>Showing {visibleTxns.length} of {sortedTxns.length}</span>
-            <button onClick={() => setVisibleCount(c => c + PAGE_SIZE)} className="text-sm font-semibold" style={{ color: V.terraDeep, ...font }}>Load more</button>
+        {/* auto-load sentinel: nearing this reveals the next page (no click needed) */}
+        {hasMore && (
+          <div ref={loadMoreRef} className="flex items-center justify-center gap-2 mt-6 px-1" style={{ minHeight: 44 }}>
+            <span
+              className="animate-spin"
+              style={{ width: 16, height: 16, border: `2px solid ${V.line}`, borderTopColor: V.terra, borderRadius: '50%', opacity: loadingMore ? 1 : 0.45, transition: 'opacity .2s' }}
+            />
+            <span className="text-xs" style={{ color: V.faint, ...font }}>
+              {loadingMore ? 'Loading more…' : `Showing ${visibleTxns.length} of ${sortedTxns.length}`}
+            </span>
           </div>
         )}
         </div>{/* /main column */}
