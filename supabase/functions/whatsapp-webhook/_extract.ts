@@ -182,9 +182,11 @@ AMOUNT — read spoken/code-mixed Indian numerals carefully. Fold tens+units BEF
 - amount_source_phrase: copy the EXACT words/digits you read the amount from, verbatim; null if no amount.
 - amount_confidence: "high" if unambiguous; "low" if a spoken numeral was partial, garbled, or you are unsure.
 
-PAYEE — who paid or was paid, exactly as the user wrote it (transliterated to Latin).
-Do NOT correct, normalize, or guess a "proper" spelling — keep "ramu" as "ramu",
-never "Raju". null if absent.
+PAYEE — who paid or was paid. ALWAYS return the name in Latin/Roman letters. If the user
+wrote it in Telugu/Hindi/native script, phonetically TRANSLITERATE it to Latin
+(దావీద్ -> "Daveed", రూతమ్మ -> "Rutamma", శివ -> "Shiva"). A name in native script is
+ALWAYS wrong output. Keep the user's OWN phonetic spelling — do NOT correct, normalize, or
+guess a "proper" spelling (keep "ramu" as "ramu", never "Raju"). null if absent.
 
 PROJECT — the user's known projects: {{KNOWN_PROJECTS}}.
 People almost never say the full name. They refer to a project by the person it's named
@@ -222,9 +224,10 @@ REF — if the payee or project is a pronoun/reference instead of a name ("him",
 OUTPUT LANGUAGE — the message may arrive in Telugu/Hindi/native script. READ it natively,
 then write in English/Latin. For NAMES and the amount span (payee, project,
 amount_source_phrase): phonetically TRANSLITERATE, never translate, keep verbatim
-(రాజీవ్ -> "Rajiv") — name-matching and the spoken-amount parser are Latin-only. For the
-NOTE: TRANSLATE the meaning into concise natural English, NOT a romanization. Keep digits
-as digits and English words as-is.`
+(రాజీవ్ -> "Rajiv", దావీద్ -> "Daveed") — name-matching and the spoken-amount parser are
+Latin-only, so a name returned in native (Telugu/Devanagari) script is ALWAYS wrong. For
+the NOTE: TRANSLATE the meaning into concise natural English, NOT a romanization. Keep
+digits as digits and English words as-is.`
 
 // Multi-entry: ONE message can carry several payments. Reuse the EXACT single-entry
 // field rules (everything from "AMOUNT —" onward, incl. {{KNOWN_PROJECTS}}) so the two
