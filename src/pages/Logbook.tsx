@@ -22,12 +22,12 @@ import { useSnackbar } from '../components/Snackbar';
 import { ResolvePopup } from '../components/ResolvePopup';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { PageSkeleton } from '../components/SkeletonLoader';
-import { V, font, serif, nums, terraGrad, T } from '../components/day-book/tokens';
+import { V, font, serif, nums, T } from '../components/day-book/tokens';
 import { ANIM, hasRevealed, markRevealed } from '../components/day-book/motion';
 import { prefersReducedMotion } from '../components/day-book/useSwipeTriage';
 import { WhatsAppGlyph } from '../components/day-book/atoms';
 import { Invitation, ManageTeam } from '../components/day-book/Invitation';
-import { StartOnWhatsApp } from '../components/day-book/StartOnWhatsApp';
+import { StartOnWhatsAppButton } from '../components/day-book/StartOnWhatsApp';
 import { ReviewCard, type StakeholderLite, type ProjectLite } from '../components/day-book/ReviewCard';
 
 type TabKey = 'review' | 'filed' | 'rejected';
@@ -57,7 +57,6 @@ export default function Logbook({ session }: { session: Session }) {
   const [fixEntry, setFixEntry] = useState<RoughEntry | null>(null);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [teamOpen, setTeamOpen] = useState(false);
-  const [waSheetOpen, setWaSheetOpen] = useState(false);
 
   // ── Data (unchanged hooks) ───────────────────────────────────────────────
   const { data: entries = [], isLoading } = useQuery({
@@ -244,9 +243,7 @@ export default function Logbook({ session }: { session: Session }) {
                       They wait here for you to check, and go into your books whenever you get a minute.
                     </p>
                     <div className="mt-5 flex flex-col items-center gap-2.5">
-                      <button onClick={() => setWaSheetOpen(true)} className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl" style={{ background: terraGrad, color: '#fff', ...font }}>
-                        <WhatsAppGlyph size={14} color="#fff" /> Start on WhatsApp
-                      </button>
+                      <StartOnWhatsAppButton size="sm" tone="solid" />
                       {canManage && (
                         <button onClick={() => setTeamOpen(true)} className="text-xs" style={{ color: V.faint, ...font }}>
                           or add who can send →
@@ -312,12 +309,6 @@ export default function Logbook({ session }: { session: Session }) {
       )}
 
       {teamOpen && <ManageTeam onClose={() => setTeamOpen(false)} />}
-      {waSheetOpen && (
-        <StartOnWhatsApp
-          onClose={() => setWaSheetOpen(false)}
-          onManageTeam={canManage ? () => { setWaSheetOpen(false); setTeamOpen(true); } : undefined}
-        />
-      )}
 
       <ImageLightbox url={lightboxUrl} title="Capture" onClose={() => setLightboxUrl(null)} />
     </div>

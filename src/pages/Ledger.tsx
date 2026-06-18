@@ -12,7 +12,7 @@ import { useSnackbar } from '../components/Snackbar';
 import { getCostCode } from '../lib/costCodes';
 import { Plus, Search, Download, Paperclip, Check, ArrowRight, X } from 'lucide-react';
 import { WhatsAppGlyph } from '../components/day-book/atoms';
-import { StartOnWhatsApp } from '../components/day-book/StartOnWhatsApp';
+import { StartOnWhatsAppButton } from '../components/day-book/StartOnWhatsApp';
 import { ShortcutTicker } from '../components/ShortcutTicker';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { PageSkeleton } from '../components/SkeletonLoader';
@@ -163,7 +163,7 @@ function JourneyStop({ wash, accent, icon, title, body }: { wash: string; accent
   );
 }
 
-function LedgerEmpty({ reviewCount, onReview, onTeam, onNew }: { reviewCount: number; onReview: () => void; onTeam: () => void; onNew: () => void }) {
+function LedgerEmpty({ reviewCount, onReview, onNew }: { reviewCount: number; onReview: () => void; onNew: () => void }) {
   const waiting = reviewCount > 0;
   return (
     <div className="mx-auto mt-12 mb-8" style={{ maxWidth: 480 }}>
@@ -205,9 +205,7 @@ function LedgerEmpty({ reviewCount, onReview, onTeam, onNew }: { reviewCount: nu
             Review {reviewCount} in Day book <ArrowRight size={15} />
           </button>
         ) : (
-          <button onClick={onTeam} className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl" style={{ background: terraGrad, color: '#fff', ...font }}>
-            <WhatsAppGlyph size={14} color="#fff" /> Start on WhatsApp
-          </button>
+          <StartOnWhatsAppButton size="sm" tone="solid" />
         )}
         <button onClick={onNew} className="text-sm font-medium px-4 py-2.5 rounded-xl" style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.inkSoft, ...font }}>
           Add a transaction
@@ -337,10 +335,6 @@ export default function Ledger({ session }: { session: Session }) {
     try { localStorage.setItem('ledger_wa_idle_hint', '1'); } catch { /* private mode */ }
     setWaIdleDismissed(true);
   };
-  // "Start on WhatsApp": a QR to scan + the number to message Briklay. The person
-  // sends the first hello and the auto-responder greets them back (the honest
-  // direction — a business cannot message a user unprompted without a template).
-  const [waSheetOpen, setWaSheetOpen] = useState(false);
 
   const { data: _stakeholders } = useQuery({ queryKey: ['stakeholders'], queryFn: async () => { const { data } = await supabase.from('stakeholders').select('*'); return data as Stakeholder[]; } });
   const { data: _projects } = useQuery({ queryKey: ['projects'], queryFn: async () => { const { data } = await supabase.from('projects').select('*'); return data as Project[]; } });
@@ -702,8 +696,8 @@ export default function Ledger({ session }: { session: Session }) {
         {dayBookReviewCount > 0 && (ledger?.length ?? 0) > 0 && (
           (() => {
             const slides = [
-              { text: `${dayBookReviewCount} ${dayBookReviewCount === 1 ? 'entry' : 'entries'} from WhatsApp ${dayBookReviewCount === 1 ? 'is' : 'are'} waiting to be reviewed`, cta: 'Review in Day book →', action: () => navigate('/logbook') },
-              { text: 'Send a bill, a voice note, or a message on WhatsApp — never miss a transaction', cta: 'Start on WhatsApp →', action: () => setWaSheetOpen(true) },
+              { text: `${dayBookReviewCount} ${dayBookReviewCount === 1 ? 'entry' : 'entries'} from WhatsApp ${dayBookReviewCount === 1 ? 'is' : 'are'} waiting to be reviewed`, cta: 'Review in Day book →', action: () => navigate('/logbook'), wa: false },
+              { text: 'Send a bill, a voice note, or a message on WhatsApp — never miss a transaction', cta: '', action: null as null, wa: true },
             ];
             const s = slides[nudgeSlide % slides.length];
             return (
@@ -714,12 +708,25 @@ export default function Ledger({ session }: { session: Session }) {
                 style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font }}
               >
                 <WhatsAppGlyph size={16} color="#1FA855" />
-                <button onClick={s.action} className="text-sm min-w-0 flex-1 text-left" style={{ color: V.ask }}>
-                  <span key={`t${nudgeSlide}`} className="block truncate nudge-rotate-in">{s.text}</span>
-                </button>
-                <button onClick={s.action} className="text-sm font-medium whitespace-nowrap shrink-0" style={{ color: V.ask }}>
-                  <span key={`c${nudgeSlide}`} className="inline-block nudge-rotate-in">{s.cta}</span>
-                </button>
+                {s.wa ? (
+                  <span className="text-sm min-w-0 flex-1" style={{ color: V.ask }}>
+                    <span key={`t${nudgeSlide}`} className="block truncate nudge-rotate-in">{s.text}</span>
+                  </span>
+                ) : (
+                  <button onClick={s.action ?? undefined} className="text-sm min-w-0 flex-1 text-left" style={{ color: V.ask }}>
+                    <span key={`t${nudgeSlide}`} className="block truncate nudge-rotate-in">{s.text}</span>
+                  </button>
+                )}
+                {s.wa ? (
+                  // keeps rotation paused while the user is mid-flow (number entry / opening WhatsApp)
+                  <span key={`c${nudgeSlide}`} className="shrink-0 nudge-rotate-in">
+                    <StartOnWhatsAppButton tone="link" onBusyChange={(b) => { nudgePaused.current = b; }} />
+                  </span>
+                ) : (
+                  <button onClick={s.action ?? undefined} className="text-sm font-medium whitespace-nowrap shrink-0" style={{ color: V.ask }}>
+                    <span key={`c${nudgeSlide}`} className="inline-block nudge-rotate-in">{s.cta}</span>
+                  </button>
+                )}
               </div>
             );
           })()
@@ -755,9 +762,7 @@ export default function Ledger({ session }: { session: Session }) {
             <p className="text-sm min-w-0 flex-1" style={{ color: V.sys }}>
               You or your team can now message Briklay on WhatsApp. Each one waits in your Day book, and once you approve it, it lands here.
             </p>
-            <button onClick={() => setWaSheetOpen(true)} className="text-sm font-medium whitespace-nowrap shrink-0" style={{ color: V.terraDeep }}>
-              Start sending →
-            </button>
+            <span className="shrink-0"><StartOnWhatsAppButton tone="link" label="Start sending" /></span>
             <button onClick={dismissWaIdle} aria-label="Dismiss" className="shrink-0">
               <X size={15} style={{ color: V.faint }} />
             </button>
@@ -815,7 +820,6 @@ export default function Ledger({ session }: { session: Session }) {
             <LedgerEmpty
               reviewCount={dayBookReviewCount}
               onReview={() => navigate('/logbook')}
-              onTeam={() => setWaSheetOpen(true)}
               onNew={() => navigate('/ledger/new')}
             />
           ) : (
@@ -1004,13 +1008,6 @@ export default function Ledger({ session }: { session: Session }) {
       )}
 
       <ImageLightbox url={lightboxUrl} title="Payment Proof" onClose={() => setLightboxUrl(null)} />
-
-      {waSheetOpen && (
-        <StartOnWhatsApp
-          onClose={() => setWaSheetOpen(false)}
-          onManageTeam={() => { setWaSheetOpen(false); navigate('/logbook'); }}
-        />
-      )}
 
       {/* bulk action bar */}
       {selectedCount > 0 && (

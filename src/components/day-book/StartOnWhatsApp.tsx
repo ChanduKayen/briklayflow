@@ -16,7 +16,7 @@
  * reads and writes go through SECURITY DEFINER RPCs because RLS on
  * wa_registered_numbers is admin-only — a plain member can't see/add their own row.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { X, Check, ArrowRight, Loader2, ExternalLink } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
@@ -97,20 +97,58 @@ const SIZES = {
   sm: { padY: 8, padX: 16, glyph: 15, gap: 7, type: T.sm, inputW: '7.5rem', go: 26 },
 } as const;
 
+// Tone = the look for the surface it sits on. The motion + logic are identical;
+// only colours change, driven by CSS custom properties set on the wrapper.
+//   wash  — green wash on a dark banner (Day Book)
+//   solid — terracotta on a light surface (prominent Ledger/Logbook CTAs)
+//   link  — transparent text link on a light surface (Ledger nudges)
+const TONES = {
+  wash: {
+    glyph: true, arrow: false, fg: WA, err: '#F0A088', pad: null as string | null,
+    vars: {
+      '--wa-bg': 'rgba(37,211,102,0.16)', '--wa-bgh': 'rgba(37,211,102,0.26)', '--wa-bgi': 'rgba(37,211,102,0.20)',
+      '--wa-bd': 'rgba(37,211,102,0.18)', '--wa-bdh': 'rgba(37,211,102,0.40)', '--wa-bdi': 'rgba(37,211,102,0.45)',
+      '--wa-ifg': '#fff', '--wa-pfx': 'rgba(255,255,255,0.55)', '--wa-ph': 'rgba(255,255,255,0.38)',
+      '--wa-go-bg': WA, '--wa-go-fg': '#fff', '--wa-glow': 'rgba(37,211,102,0.24)', '--wa-goglow': 'rgba(37,211,102,0.45)',
+      '--wa-ring': 'rgba(37,211,102,0.55)', '--wa-rings': 'rgba(37,211,102,0.16)', '--wa-sheen': 'rgba(255,255,255,0.22)',
+    },
+  },
+  solid: {
+    glyph: true, arrow: false, fg: '#fff', err: V.terraDeep, pad: null as string | null,
+    vars: {
+      '--wa-bg': terraGrad, '--wa-bgh': terraGrad, '--wa-bgi': terraGrad,
+      '--wa-bd': 'transparent', '--wa-bdh': 'transparent', '--wa-bdi': 'rgba(255,255,255,0.45)',
+      '--wa-ifg': '#fff', '--wa-pfx': 'rgba(255,255,255,0.72)', '--wa-ph': 'rgba(255,255,255,0.5)',
+      '--wa-go-bg': 'rgba(255,255,255,0.92)', '--wa-go-fg': V.terraDeep, '--wa-glow': 'rgba(175,60,32,0.34)', '--wa-goglow': 'rgba(255,255,255,0.5)',
+      '--wa-ring': 'rgba(175,60,32,0.5)', '--wa-rings': 'rgba(175,60,32,0.16)', '--wa-sheen': 'rgba(255,255,255,0.28)',
+    },
+  },
+  link: {
+    glyph: false, arrow: true, fg: V.terraDeep, err: V.terraDeep, pad: '3px 6px',
+    vars: {
+      '--wa-bg': 'transparent', '--wa-bgh': 'rgba(143,51,24,0.07)', '--wa-bgi': V.field,
+      '--wa-bd': 'transparent', '--wa-bdh': 'transparent', '--wa-bdi': V.line,
+      '--wa-ifg': V.ink, '--wa-pfx': V.faint, '--wa-ph': V.faint,
+      '--wa-go-bg': WA, '--wa-go-fg': '#fff', '--wa-glow': 'transparent', '--wa-goglow': 'rgba(37,211,102,0.4)',
+      '--wa-ring': 'rgba(143,51,24,0.4)', '--wa-rings': 'rgba(143,51,24,0.12)', '--wa-sheen': 'rgba(143,51,24,0.10)',
+    },
+  },
+} as const;
+
 const INLINE_CSS = `
 .was { position: relative; display: inline-block; }
-.was-pill { display: inline-flex; align-items: center; border-radius: 10px; cursor: pointer;
+.was-pill { display: inline-flex; align-items: center; border-radius: 10px;
   position: relative; overflow: hidden;
-  background: rgba(37,211,102,0.16); border: 1px solid rgba(37,211,102,0.18); color: ${WA};
+  background: var(--wa-bg); border: 1px solid var(--wa-bd); color: var(--wa-fg);
   transition: background .28s ease, border-color .28s ease, box-shadow .28s cubic-bezier(.2,.7,.2,1), transform .16s cubic-bezier(.2,.7,.2,1); }
-.was-pill[data-input="true"] { background: rgba(37,211,102,0.20); border-color: rgba(37,211,102,0.45); }
+.was-pill[data-input="true"] { background: var(--wa-bgi); border-color: var(--wa-bdi); }
 .was-pill[data-err="true"] { border-color: rgba(217,106,67,0.85); animation: wasShake .34s cubic-bezier(.36,.07,.19,.97); }
 /* tactile button feel — only when it's actually a button (not a field, not busy) */
 .was-pill[data-tappable="true"] { cursor: pointer; }
-.was-pill[data-tappable="true"]:hover { background: rgba(37,211,102,0.26); border-color: rgba(37,211,102,0.40);
-  transform: translateY(-1px); box-shadow: 0 8px 22px rgba(37,211,102,0.24); }
-.was-pill[data-tappable="true"]:active { transform: translateY(0) scale(.972); box-shadow: 0 2px 8px rgba(37,211,102,0.18); transition-duration: .06s; }
-.was-pill[data-tappable="true"]:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(37,211,102,0.16), 0 0 0 1px rgba(37,211,102,0.55); }
+.was-pill[data-tappable="true"]:hover { background: var(--wa-bgh); border-color: var(--wa-bdh);
+  transform: translateY(-1px); box-shadow: 0 8px 22px var(--wa-glow); }
+.was-pill[data-tappable="true"]:active { transform: translateY(0) scale(.972); box-shadow: 0 2px 8px var(--wa-glow); transition-duration: .06s; }
+.was-pill[data-tappable="true"]:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--wa-rings), 0 0 0 1px var(--wa-ring); }
 /* the leading glyph gives a hair of life on hover */
 .was-glyph { display: inline-flex; transition: transform .28s cubic-bezier(.2,.9,.3,1.3); }
 .was-pill[data-tappable="true"]:hover .was-glyph { transform: scale(1.08) rotate(-6deg); }
@@ -123,21 +161,23 @@ const INLINE_CSS = `
 .was-seg[data-open="false"] .was-label { opacity: 0; }
 .was-row { opacity: 0; transition: opacity .3s ease .08s; }
 .was-seg[data-open="true"] .was-row { opacity: 1; }
-.was-prefix { color: rgba(255,255,255,0.55); font-variant-numeric: tabular-nums; }
-.was-input { background: transparent; border: none; outline: none; color: #fff; font-variant-numeric: tabular-nums; }
-.was-input::placeholder { color: rgba(255,255,255,0.38); }
+.was-prefix { color: var(--wa-pfx); font-variant-numeric: tabular-nums; }
+.was-input { background: transparent; border: none; outline: none; color: var(--wa-ifg); font-variant-numeric: tabular-nums; }
+.was-input::placeholder { color: var(--wa-ph); }
 .was-go { display: inline-flex; align-items: center; justify-content: center; border-radius: 999px;
-  background: ${WA}; color: #fff; flex: none; transition: transform .22s cubic-bezier(.2,.9,.3,1.3), opacity .2s ease, box-shadow .2s ease; }
-.was-go:not(:disabled):hover { transform: scale(1.08); box-shadow: 0 4px 12px rgba(37,211,102,0.45); }
+  background: var(--wa-go-bg); color: var(--wa-go-fg); flex: none; transition: transform .22s cubic-bezier(.2,.9,.3,1.3), opacity .2s ease, box-shadow .2s ease; }
+.was-go:not(:disabled):hover { transform: scale(1.08); box-shadow: 0 4px 12px var(--wa-goglow); }
 .was-go:not(:disabled):active { transform: scale(.92); }
 .was-go:disabled { opacity: .45; }
 /* redirecting — an elegant "opening WhatsApp" beat: glyph breathes, a light sweeps across */
 .was-busy-glyph { animation: wasBreath 1.05s ease-in-out infinite; }
 .was-sheen { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; }
 .was-sheen::after { content: ''; position: absolute; top: 0; bottom: 0; left: -45%; width: 45%;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.22), transparent);
+  background: linear-gradient(90deg, transparent, var(--wa-sheen), transparent);
   animation: wasSheen 1.15s cubic-bezier(.4,0,.2,1) infinite; }
 .was-arrow { display: inline-flex; animation: wasNudge 1.15s ease-in-out infinite; }
+.was-tip { display: inline-flex; transition: transform .24s cubic-bezier(.2,.9,.3,1.3); }
+.was-pill[data-tappable="true"]:hover .was-tip { transform: translateX(2px); }
 .was-err { position: absolute; left: 2px; top: calc(100% + 6px); white-space: nowrap;
   animation: wasErrIn .26s ease both; }
 @keyframes wasShake { 10%,90% { transform: translateX(-1px); } 30%,70% { transform: translateX(2px); } 50% { transform: translateX(-3px); } }
@@ -146,7 +186,7 @@ const INLINE_CSS = `
 @keyframes wasSheen { 0% { left: -45%; } 60%,100% { left: 115%; } }
 @keyframes wasNudge { 0%,100% { transform: translateX(0); } 50% { transform: translateX(3px); } }
 @media (prefers-reduced-motion: reduce) {
-  .was-seg, .was-label, .was-row, .was-go, .was-glyph, .was-pill { transition: none !important; }
+  .was-seg, .was-label, .was-row, .was-go, .was-glyph, .was-tip, .was-pill { transition: none !important; }
   .was-pill[data-err="true"], .was-busy-glyph, .was-sheen::after, .was-arrow { animation: none !important; }
   .was-pill[data-tappable="true"]:hover, .was-pill[data-tappable="true"]:active { transform: none; }
 }
@@ -154,8 +194,16 @@ const INLINE_CSS = `
 
 type InlineState = 'idle' | 'input' | 'working' | 'done' | 'redirecting';
 
-export function StartOnWhatsAppButton({ size = 'xs' }: { size?: 'xs' | 'sm' }) {
+export function StartOnWhatsAppButton({
+  size = 'xs', tone = 'wash', label: idleLabel = 'Start on WhatsApp', onBusyChange,
+}: {
+  size?: 'xs' | 'sm';
+  tone?: 'wash' | 'solid' | 'link';
+  label?: string;
+  onBusyChange?: (busy: boolean) => void;   // lets a host (e.g. a rotating carousel) pause while in use
+}) {
   const S = SIZES[size];
+  const TN = TONES[tone];
   const orgId = useOrgId();
   const qc = useQueryClient();
   const [reg, setReg] = useState<Reg | null>(null);
@@ -192,6 +240,12 @@ export function StartOnWhatsAppButton({ size = 'xs' }: { size?: 'xs' | 'sm' }) {
     return () => { alive = false; };
   }, [orgId]);
 
+  // Let a host pause itself (carousel rotation) while the button is mid-interaction.
+  const busyCb = useRef(onBusyChange);
+  useEffect(() => { busyCb.current = onBusyChange; });
+  const busy = state !== 'idle' || pending;
+  useEffect(() => { busyCb.current?.(busy); }, [busy]);
+
   const onTap = () => {
     if (state !== 'idle' || pending) return;
     if (checked) { act(reg, false); return; }     // in-gesture → open a tab
@@ -226,12 +280,18 @@ export function StartOnWhatsAppButton({ size = 'xs' }: { size?: 'xs' | 'sm' }) {
   const redirecting = state === 'redirecting';
   const waiting = pending;
   const tappable = state === 'idle' && !pending;
-  const label = redirecting ? 'Opening WhatsApp' : waiting ? 'One sec…' : 'Start on WhatsApp';
+  const label = redirecting ? 'Opening WhatsApp' : waiting ? 'One sec…' : idleLabel;
 
-  const pad = `${S.padY}px ${S.padX}px`;
+  // Leading mark: full glyph for wash/solid; for the link tone only a spinner/breath
+  // when busy (so idle reads as a plain text link).
+  const leadGlyph = redirecting
+    ? <span className="was-busy-glyph inline-flex"><WhatsAppGlyph size={S.glyph} color={TN.fg} /></span>
+    : waiting ? <Loader2 size={S.glyph} className="db-spin" color={TN.fg} />
+    : TN.glyph ? <WhatsAppGlyph size={S.glyph} color={TN.fg} /> : null;
+  const showLead = TN.glyph || redirecting || waiting;
 
   return (
-    <div className="was" style={{ ...font, ...S.type }}>
+    <div className="was" style={{ ...font, ...S.type, ...(TN.vars as CSSProperties) }}>
       <style>{INLINE_CSS}</style>
       <div
         className="was-pill"
@@ -242,21 +302,19 @@ export function StartOnWhatsAppButton({ size = 'xs' }: { size?: 'xs' | 'sm' }) {
         tabIndex={tappable ? 0 : undefined}
         onClick={tappable ? onTap : undefined}
         onKeyDown={tappable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onTap(); } } : undefined}
-        style={{ padding: pad, gap: S.gap }}
+        style={{ padding: TN.pad ?? `${S.padY}px ${S.padX}px`, gap: S.gap }}
       >
         {redirecting && <span className="was-sheen" aria-hidden />}
 
-        <span className="was-glyph shrink-0" style={{ marginRight: S.gap - 2 }}>
-          {redirecting ? <span className="was-busy-glyph inline-flex"><WhatsAppGlyph size={S.glyph} color={WA} /></span>
-            : waiting ? <Loader2 size={S.glyph} className="db-spin" color={WA} />
-            : <WhatsAppGlyph size={S.glyph} color={WA} />}
-        </span>
+        {showLead && <span className="was-glyph shrink-0" style={{ marginRight: S.gap - 2 }}>{leadGlyph}</span>}
 
         {/* label segment — collapses as the field opens */}
         <div className="was-seg" data-open={!inputMode}>
           <span className="was-clip" style={{ gap: 5 }}>
             <span className="was-label">{label}</span>
-            {redirecting && <span className="was-arrow"><ExternalLink size={S.glyph - 2} /></span>}
+            {redirecting ? <span className="was-arrow"><ExternalLink size={S.glyph - 2} /></span>
+              : (TN.arrow && tappable) ? <span className="was-tip"><ArrowRight size={S.glyph - 2} /></span>
+              : null}
           </span>
         </div>
 
@@ -291,7 +349,7 @@ export function StartOnWhatsAppButton({ size = 'xs' }: { size?: 'xs' | 'sm' }) {
         </div>
       </div>
 
-      {error && <span className="was-err" style={{ color: '#F0A088', ...S.type }}>{error}</span>}
+      {error && <span className="was-err" style={{ color: TN.err, ...S.type }}>{error}</span>}
     </div>
   );
 }
