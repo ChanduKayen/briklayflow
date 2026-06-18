@@ -7,11 +7,10 @@
  * wa_registered_numbers, whose is_active toggle is the real "can capture" gate the
  * webhook enforces — turning it off stops that contact's future captures.
  *
- * HONEST INVITE: there is no approved outbound template yet, so "Start on
- * WhatsApp" opens the StartOnWhatsApp surface — a QR + click-to-chat link to
- * Briklay's number, so a person scans and says the first hello inbound (a
- * business cannot message a user unprompted without a template). Who may send
- * is governed separately in the Manage-team slide-over. No fake "invite sent".
+ * "Start on WhatsApp" opens the StartOnWhatsApp surface — the person types their
+ * own number and we send THEM the approved welcome template (a utility template
+ * delivers unprompted), self-registering them on the spot. Who may send is
+ * governed separately in the Manage-team slide-over.
  *
  * project-per-contact is intentionally not shown — wa_registered_numbers has no
  * project column yet (follow-up schema ticket).
@@ -24,7 +23,7 @@ import { useSnackbar } from '../Snackbar';
 import { useOrgId } from '../../lib/auth/AuthProvider';
 import { N, V, WA, font, serif, nums, terraGrad, T } from './tokens';
 import { WhatsAppGlyph } from './atoms';
-import { StartOnWhatsApp } from './StartOnWhatsApp';
+import { StartOnWhatsAppButton } from './StartOnWhatsApp';
 
 interface WaContact {
   id: string;
@@ -717,7 +716,6 @@ export function Invitation({ canManage }: { canManage: boolean }) {
   const orgId = useOrgId();
   const { data: team = [] } = useTeam(orgId);
   const [manage, setManage] = useState(false);
-  const [startWa, setStartWa] = useState(false);
 
   const activeCount = team.filter((t) => t.is_active).length;
 
@@ -726,41 +724,22 @@ export function Invitation({ canManage }: { canManage: boolean }) {
   // No team-management controls are exposed.
   if (!canManage) {
     return (
-      <>
-        {startWa && <StartOnWhatsApp onClose={() => setStartWa(false)} />}
-        <div style={{ background: N.bg }}>
-          <div className="mx-auto py-3 flex items-center gap-x-3 gap-y-1.5 flex-wrap" style={{ width: '92%', maxWidth: 1100 }}>
-            <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'rgba(37,211,102,0.14)' }}>
-              <WhatsAppGlyph size={15} color={WA} />
-            </span>
-            <p className="flex-1 min-w-0" style={{ color: N.text, ...font, ...T.sm }}>
-              Send your payments and bills to Briklay on WhatsApp.
-            </p>
-            <button
-              onClick={() => setStartWa(true)}
-              className="inline-flex items-center gap-1.5 font-medium py-1.5 px-3.5 rounded-lg whitespace-nowrap shrink-0"
-              style={{ background: 'rgba(37,211,102,0.16)', color: WA, ...font, ...T.xs }}
-            >
-              <WhatsAppGlyph size={13} color={WA} /> Start on WhatsApp
-            </button>
-          </div>
+      <div style={{ background: N.bg }}>
+        <div className="mx-auto py-3 flex items-center gap-x-3 gap-y-1.5 flex-wrap" style={{ width: '92%', maxWidth: 1100 }}>
+          <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'rgba(37,211,102,0.14)' }}>
+            <WhatsAppGlyph size={15} color={WA} />
+          </span>
+          <p className="flex-1 min-w-0" style={{ color: N.text, ...font, ...T.sm }}>
+            Send your payments and bills to Briklay on WhatsApp.
+          </p>
+          <StartOnWhatsAppButton size="xs" />
         </div>
-      </>
+      </div>
     );
   }
 
-  // shared overlays — the QR / click-to-chat surface and the manage-team slide-over
-  const overlays = (
-    <>
-      {manage && <ManageTeam onClose={() => setManage(false)} />}
-      {startWa && (
-        <StartOnWhatsApp
-          onClose={() => setStartWa(false)}
-          onManageTeam={() => { setStartWa(false); setManage(true); }}
-        />
-      )}
-    </>
-  );
+  // the manage-team slide-over (the WhatsApp start now lives inline in the button)
+  const overlays = manage && <ManageTeam onClose={() => setManage(false)} />;
 
   // collapsed: once the org has active contacts, the top banner is a slim reminder
   if (activeCount > 0) {
@@ -785,13 +764,7 @@ export function Invitation({ canManage }: { canManage: boolean }) {
                 {onlyYou ? 'add your team' : 'manage team'}
               </button>
             </p>
-            <button
-              onClick={() => setStartWa(true)}
-              className="inline-flex items-center gap-1.5 font-medium py-1.5 px-3.5 rounded-lg whitespace-nowrap shrink-0 transition-colors"
-              style={{ background: 'rgba(37,211,102,0.16)', color: WA, ...font, ...T.xs }}
-            >
-              <WhatsAppGlyph size={13} color={WA} /> Start on WhatsApp
-            </button>
+            <StartOnWhatsAppButton size="xs" />
           </div>
         </div>
       </>
@@ -813,20 +786,14 @@ export function Invitation({ canManage }: { canManage: boolean }) {
               <div className="min-w-0" style={{ flexBasis: '60%', flexGrow: 1 }}>
                 <p className="font-medium" style={{ color: N.text, ...font, ...T.sm }}>Bring your site onto WhatsApp</p>
                 <p className="mt-1 leading-relaxed" style={{ color: N.textSoft, ...font, ...T.xs }}>
-                  Scan the code to message Briklay — payments, bills, and photos, nothing to install.
+                  Enter your number and Briklay says hello — payments, bills, and photos, nothing to install.
                   {' '}
                   <button onClick={() => setManage(true)} className="whitespace-nowrap underline underline-offset-2" style={{ color: N.textSoft, textDecorationColor: N.keyline }}>
                     manage who can send
                   </button>.
                 </p>
               </div>
-              <button
-                onClick={() => setStartWa(true)}
-                className="inline-flex items-center justify-center gap-1.5 font-medium py-2 px-4 rounded-lg whitespace-nowrap shrink-0"
-                style={{ background: 'rgba(37,211,102,0.16)', color: WA, ...font, ...T.sm }}
-              >
-                <WhatsAppGlyph size={15} color={WA} /> Start on WhatsApp
-              </button>
+              <StartOnWhatsAppButton size="sm" />
             </div>
           </div>
         </div>
