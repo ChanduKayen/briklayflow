@@ -66,6 +66,7 @@ import Welcome from './pages/Welcome';
 import CreateWorkspace from './pages/CreateWorkspace';
 import Login from './pages/Login';
 import Landing from './pages/Landing';
+import Privacy from './pages/Privacy';
 import SKUDirectory from './pages/SKUDirectory';
 import ProcurementRequests from './pages/ProcurementRequests';
 import ProcurementQuotes from './pages/ProcurementQuotes';
@@ -308,6 +309,12 @@ function App() {
       localStorage.setItem(`briklay_onboarding_${session.user.id}`, 'true');
     }
   }, [appProfile?.onboarding_done, session?.user?.id]);
+
+  // Public privacy policy — no auth required (Meta/WhatsApp verification,
+  // footer links). Render before any gate so it loads regardless of session.
+  if (location.pathname === '/privacy') {
+    return <Privacy />;
+  }
 
   if (!routerReady) {
     return <SplashLoader />;
