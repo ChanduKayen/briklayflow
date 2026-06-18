@@ -512,6 +512,11 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
   // Change an existing sender's WhatsApp number. Stores the canonical +91 form the
   // webhook matches inbound against. A no-op (same number) returns quietly; a clash
   // with another registered row surfaces a clear message instead of a raw constraint.
+  //
+  // The new number is a FRESH contact: clear welcomed_at + oriented_at so the welcome
+  // re-sends on the next enable (otherwise the old number's "already welcomed" marker
+  // suppresses it — the teammate on the new number would get nothing) and the inbound
+  // webhook greets them on their first message.
   const changeNumber = async (id: string, phone: string) => {
     const stored = intlPhone(phone);
     const current = senders.find((s) => s.id === id);
@@ -519,7 +524,9 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
     if (senders.some((s) => s.id !== id && intlPhone(s.phone_number) === stored)) {
       throw new Error('That number is already registered to someone else.');
     }
-    const { error } = await supabase.from('wa_registered_numbers').update({ phone_number: stored }).eq('id', id);
+    const { error } = await supabase.from('wa_registered_numbers')
+      .update({ phone_number: stored, welcomed_at: null, oriented_at: null })
+      .eq('id', id);
     if (error) {
       if (/duplicate|unique/i.test(error.message)) throw new Error('That number is already registered to someone else.');
       throw error;
