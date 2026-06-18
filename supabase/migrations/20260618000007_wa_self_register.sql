@@ -11,9 +11,9 @@
 --     "Start on WhatsApp" → we mint a short-lived, single-use claim token tied to
 --     their org and pre-fill it into the WhatsApp message. When that number
 --     messages Briklay, the webhook reads the token and registers the SENDER's
---     number into that org (active) — so a person redirected from the platform is
---     never met with "you're not registered". Token-gated and expiring (multi-use
---     within a 24h window, so one shared code can onboard a whole team).
+--     number into that org (active) AND links it to that member's own account
+--     (user_id) — so the signed-in person who tapped it is recognised as themselves,
+--     never "you're not registered" and never a separate sender. Single-use, 24h.
 -- ===========================================================================
 
 -- ── (A) Org-scoped RLS on wa_registered_numbers ────────────────────────────
@@ -44,8 +44,8 @@ CREATE TABLE IF NOT EXISTS public.wa_link_tokens (
   role          TEXT NOT NULL DEFAULT 'Supervisor',
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   expires_at    TIMESTAMPTZ NOT NULL DEFAULT now() + INTERVAL '24 hours',
-  used_at       TIMESTAMPTZ,            -- last claim (a code may onboard several teammates)
-  claimed_phone TEXT                    -- last number that claimed it
+  used_at       TIMESTAMPTZ,            -- consumed on claim (single-use)
+  claimed_phone TEXT                    -- the number that claimed it
 );
 ALTER TABLE public.wa_link_tokens ENABLE ROW LEVEL SECURITY;
 -- No client policies: only the SECURITY DEFINER RPCs below ever touch this table.
@@ -86,21 +86,25 @@ BEGIN
   v_to := regexp_replace(coalesce(p_phone, ''), '\D', '', 'g');
   IF length(v_to) = 10 THEN v_to := '91' || v_to; END IF;
 
-  -- Multi-use within the 24h window: one code can onboard several teammates (shared
-  -- QR). Low harm — a registered number can only submit entries for owner review.
+  -- Single-use: the signed-in member is linking THEIR OWN number, so the first
+  -- number to present the token claims it and the token is spent.
   SELECT * INTO v_tok FROM public.wa_link_tokens
-  WHERE token = upper(btrim(coalesce(p_token, ''))) AND expires_at > now()
+  WHERE token = upper(btrim(coalesce(p_token, ''))) AND used_at IS NULL AND expires_at > now()
   FOR UPDATE;
   IF NOT FOUND THEN RETURN jsonb_build_object('ok', false); END IF;
 
-  v_name := coalesce(nullif(btrim(coalesce(p_wa_name, '')), ''), v_tok.name);
+  -- Prefer the member's account name (the token was minted by them).
+  v_name := coalesce(v_tok.name, nullif(btrim(coalesce(p_wa_name, '')), ''));
 
-  INSERT INTO public.wa_registered_numbers (phone_number, name, role, is_active, invite_status, org_id)
-  VALUES (v_to, v_name, v_tok.role, true, 'active', v_tok.org_id)
+  -- Register the sending number AS this member's number — linked to their user_id,
+  -- so they're recognised as that member, never a separate "other sender".
+  INSERT INTO public.wa_registered_numbers (phone_number, name, role, is_active, invite_status, org_id, user_id)
+  VALUES (v_to, v_name, v_tok.role, true, 'active', v_tok.org_id, v_tok.user_id)
   ON CONFLICT (phone_number) DO UPDATE SET
     is_active     = true,
     invite_status = 'active',
     org_id        = COALESCE(public.wa_registered_numbers.org_id, EXCLUDED.org_id),
+    user_id       = COALESCE(public.wa_registered_numbers.user_id, EXCLUDED.user_id),
     name          = COALESCE(public.wa_registered_numbers.name, EXCLUDED.name);
 
   UPDATE public.wa_link_tokens SET used_at = now(), claimed_phone = v_to WHERE token = v_tok.token;

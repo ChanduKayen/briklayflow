@@ -66,7 +66,7 @@ export function StartOnWhatsApp({ onClose, onManageTeam }: { onClose: () => void
         {digits ? (
           <>
             <p className="mt-3 leading-relaxed" style={{ color: V.sys, ...font, ...T.sm }}>
-              Scan this with your phone's camera, or tap Open WhatsApp. The number you message from is added to your team automatically — then just send your payments and bills the same way.
+              Scan this with your phone's camera, or tap Open WhatsApp. The number you message from is saved as your Briklay number — so everything you send comes in under your name. Then just send your payments and bills the same way.
             </p>
 
             <div className="mt-4 flex justify-center">
