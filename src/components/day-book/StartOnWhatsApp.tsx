@@ -50,9 +50,9 @@ export function StartOnWhatsApp({ onClose, onManageTeam }: { onClose: () => void
     navigator.clipboard?.writeText(pretty).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }).catch(() => { /* noop */ });
   };
 
-  // On a phone, a QR you'd scan with the same device is useless — open WhatsApp
-  // directly instead. We still wait a beat for the claim token so the number gets
-  // self-registered, then navigate (a navigation, not a popup, so it's never blocked).
+  // On a phone, a QR you'd scan with the same device is useless — go straight to
+  // WhatsApp. We wait a brief, graceful beat for the claim token (so the number
+  // self-registers), then navigate (a navigation, not a popup → never blocked).
   const isMobile = useMemo(() => /android|iphone|ipad|ipod|iemobile|mobile/i.test(navigator.userAgent), []);
   const redirected = useRef(false);
   const openDirect = useCallback(() => {
@@ -60,28 +60,37 @@ export function StartOnWhatsApp({ onClose, onManageTeam }: { onClose: () => void
     redirected.current = true;
     window.location.href = waUrl;
   }, [waUrl]);
-  useEffect(() => {
+  useEffect(() => {                                   // hard cap — never linger on the loader
     if (!isMobile || !digits) return;
-    if (token) { openDirect(); return; }      // token ready → go now
-    const t = setTimeout(openDirect, 1500);     // otherwise go shortly regardless
+    const cap = setTimeout(openDirect, 1600);
+    return () => clearTimeout(cap);
+  }, [isMobile, digits, openDirect]);
+  useEffect(() => {                                   // token ready → a gentle beat, then go
+    if (!isMobile || !token) return;
+    const t = setTimeout(openDirect, 700);
     return () => clearTimeout(t);
-  }, [isMobile, token, digits, openDirect]);
+  }, [isMobile, token, openDirect]);
 
+  // Mobile: a calm hand-off, no controls — a soft pulse + a line, then it goes.
   if (isMobile && digits) {
     return (
-      <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: 'rgba(30,26,21,0.4)' }} onClick={onClose}>
-        <div className="db-drop w-full rounded-2xl p-6 text-center" style={{ maxWidth: 320, background: V.surface, border: '1px solid #E3DDD4', boxShadow: '0 20px 50px rgba(30,26,21,0.22)' }} onClick={(e) => e.stopPropagation()}>
-          <span className="w-11 h-11 rounded-2xl inline-flex items-center justify-center" style={{ background: 'rgba(37,211,102,0.12)' }}>
-            <WhatsAppGlyph size={20} />
+      <div className="fixed inset-0 z-[70] flex flex-col items-center justify-center p-8 db-fade" style={{ background: 'rgba(28,24,19,0.44)', backdropFilter: 'blur(2px)' }} onClick={onClose}>
+        <style>{`
+          @keyframes waSonar { 0% { transform: scale(.55); opacity: .55; } 100% { transform: scale(1.8); opacity: 0; } }
+          @keyframes waBreath { 0%,100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+          .wa-sonar { animation: waSonar 1.8s cubic-bezier(.2,.6,.3,1) infinite; }
+          .wa-sonar.d { animation-delay: .9s; }
+          .wa-breath { animation: waBreath 2.6s ease-in-out infinite; }
+          @media (prefers-reduced-motion: reduce) { .wa-sonar { display: none; } .wa-breath { animation: none; } }
+        `}</style>
+        <div className="relative flex items-center justify-center" style={{ width: 76, height: 76 }}>
+          <span className="wa-sonar absolute rounded-full" style={{ inset: 0, border: '1.5px solid rgba(37,211,102,0.6)' }} />
+          <span className="wa-sonar d absolute rounded-full" style={{ inset: 0, border: '1.5px solid rgba(37,211,102,0.6)' }} />
+          <span className="wa-breath relative inline-flex items-center justify-center rounded-full" style={{ width: 54, height: 54, background: '#fff', boxShadow: '0 8px 22px rgba(37,211,102,0.30)' }}>
+            <WhatsAppGlyph size={26} />
           </span>
-          <p className="mt-3" style={{ color: V.ink, ...serif, fontSize: '1.15rem' }}>Opening WhatsApp…</p>
-          <p className="mt-1.5 leading-relaxed" style={{ color: V.sys, ...font, ...T.sm }}>
-            If it doesn't open on its own, tap below. The number you message from is saved as your Briklay number.
-          </p>
-          <a href={waUrl} className="mt-4 w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-xl font-medium" style={{ background: terraGrad, color: '#fff', ...font, ...T.sm }}>
-            Open WhatsApp <ExternalLink size={14} />
-          </a>
         </div>
+        <p className="mt-6" style={{ color: 'rgba(255,255,255,0.92)', ...font, ...T.sm, letterSpacing: '0.01em' }}>Taking you to WhatsApp…</p>
       </div>
     );
   }
