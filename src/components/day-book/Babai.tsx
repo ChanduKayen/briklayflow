@@ -9,9 +9,9 @@
  *
  * Decorative by default (aria-hidden); pass `alt` only where he carries meaning.
  *
- * NOTE: /babai.png must be a transparent PNG for a clean blend.
+ * The asset is a transparent SVG (background masked out) so it blends cleanly.
  */
-const SRC = '/babai.png';
+const SRC = '/babai.svg';
 
 export function Babai({ size = 40, variant = 'badge', alt = '', className = '' }: {
   size?: number;
