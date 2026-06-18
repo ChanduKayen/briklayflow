@@ -173,7 +173,7 @@ export function ProjectBudget({ projectId, canEdit }: Props) {
   for (const div of allKnownDivisions) {
     const codesInDiv = div.items.filter(i => allCodes.has(i.code)).map(i => i.code);
     if (codesInDiv.length > 0) {
-      groupedRows.push({ type: div.type, divCode: div.code, divName: div.name, codes: codesInDiv });
+      groupedRows.push({ type: div.type as 'MAT' | 'WRK', divCode: div.code, divName: div.name, codes: codesInDiv });
     }
   }
 
