@@ -296,12 +296,12 @@ export function ackLine(lang: Lang, p: { payee: string | null; amount: number | 
 }
 
 export function mUnsupported(lang: Lang): OutMessage {
-  return { kind: 'text', body: pick(lang, { en: 'I can handle text, photos, and voice notes — send me a payment like "Ramu 5000 cash".' }) }
+  return { kind: 'text', body: pick(lang, { en: 'I can read text, photos and voice notes 👍\n\nSend me a payment like "Ramu 5000 cash" and I\'ll log it for you.' }) }
 }
 
 /** Voice IS supported now -- this is a transcription miss, not "coming soon". */
 export function mVoiceUnclear(lang: Lang): OutMessage {
-  return { kind: 'text', body: pick(lang, { en: "I couldn't quite catch that voice note — please try again, or type it." }) }
+  return { kind: 'text', body: pick(lang, { en: "🎙️ I couldn't quite catch that voice note.\n\nPlease try again, or just type it out." }) }
 }
 
 /** Disambiguation: reply buttons (next turn resolves). */
