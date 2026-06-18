@@ -745,6 +745,9 @@ export default function Landing() {
           </p>
           <span>· built by builders, for builders</span>
           <span className="flex-1" />
+          <a href="/privacy" className="tlink" style={{ color: V.faint }}>Privacy</a>
+          <a href="/terms" className="tlink" style={{ color: V.faint }}>Terms</a>
+          <a href="/data-deletion" className="tlink" style={{ color: V.faint }}>Data deletion</a>
           <span>© 2026 Briklay Engineering</span>
           <button onClick={() => open('signin')} className="tlink" style={{ color: V.sys }}>Sign in</button>
         </div>
