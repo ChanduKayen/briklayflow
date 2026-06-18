@@ -18,7 +18,7 @@
  */
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { UserPlus, X, Phone, Mail, Copy, Check, Clock, Loader2, ArrowRight } from 'lucide-react';
+import { UserPlus, X, Phone, Mail, Copy, Check, Clock, Loader2, ArrowRight, Pencil } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useSnackbar } from '../Snackbar';
 import { useOrgId } from '../../lib/auth/AuthProvider';
@@ -175,13 +175,96 @@ const VOICE_LANG_SELECT = (value: string, onChange: (v: string) => void) => (
 );
 
 /**
+ * Inline editor to change an existing sender's WhatsApp number. Validates a
+ * 10-digit local number; onSave receives the digits and is expected to store the
+ * canonical +91 form. Shared by member rows and other-sender rows. Closes itself
+ * on a successful save (the list refetches and shows the new number).
+ */
+function NumberEditor({ initial, onSave, onCancel }: {
+  initial: string;
+  onSave: (phone: string) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const { show } = useSnackbar();
+  const [val, setVal] = useState(local10(initial));
+  const [saving, setSaving] = useState(false);
+  const ok = digits(val).length >= 10;
+  const save = async () => {
+    if (!ok) { show('Enter a 10-digit WhatsApp number', { type: 'error' }); return; }
+    setSaving(true);
+    try { await onSave(digits(val)); onCancel(); }
+    catch (e: any) { show(e?.message || 'Could not update the number', { type: 'error' }); setSaving(false); }
+  };
+  return (
+    <div className="mt-3 db-drop">
+      <p className="mb-1.5" style={{ color: V.sys, ...font, ...T.xs }}>Change WhatsApp number</p>
+      <div className="flex items-center gap-2">
+        <div className="inline-flex items-center gap-2 px-3 rounded-lg flex-1" style={{ background: V.field, height: 40 }}>
+          <WhatsAppGlyph size={13} color={WA} />
+          <span style={{ color: V.faint, ...font, ...nums, ...T.sm }}>+91</span>
+          <input
+            autoFocus value={val}
+            onChange={(e) => setVal(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && ok) save(); }}
+            placeholder="98765 43210"
+            className="bg-transparent outline-none flex-1 min-w-0"
+            style={{ color: V.ink, ...font, ...nums, ...T.sm }}
+          />
+        </div>
+        <button onClick={onCancel} className="px-3 py-2 rounded-lg shrink-0" style={{ border: `1px solid ${V.line}`, color: V.sys, ...font, ...T.xs }}>Cancel</button>
+        <button
+          disabled={!ok || saving}
+          onClick={save}
+          className="inline-flex items-center gap-1 px-3 py-2 rounded-lg font-medium shrink-0"
+          style={{ background: 'rgba(37,211,102,0.16)', color: WA, opacity: ok && !saving ? 1 : 0.5, ...font, ...T.xs }}
+        >
+          {saving ? <Loader2 size={13} className="db-spin" /> : <>Save <Check size={13} /></>}
+        </button>
+      </div>
+      <p className="mt-1.5 leading-relaxed" style={{ color: V.faint, ...font, ...T.xs }}>They'll be recognised on this number from their next message. History stays.</p>
+    </div>
+  );
+}
+
+/**
+ * A legacy / phone-only sender row (not tied to a platform member). Toggle send
+ * access, set voice language, and change the number inline.
+ */
+function OtherSenderRow({ contact, onToggle, onLang, onChangeNumber }: {
+  contact: WaContact;
+  onToggle: () => void;
+  onLang: (lang: string | null) => void;
+  onChangeNumber: (phone: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  return (
+    <div className="rounded-xl p-3" style={{ background: V.surface, border: '1px solid #E3DDD4', opacity: contact.is_active ? 1 : 0.55 }}>
+      <div className="flex items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <p className="font-medium truncate" style={{ color: V.ink, ...font, ...T.sm }}>{contact.name || 'Site contact'}</p>
+          <p className="truncate mt-0.5 inline-flex items-center gap-1" style={{ color: V.sys, ...font, ...nums, ...T.xs }}>
+            <Phone size={10} style={{ color: V.faint }} /> +91 {prettyPhone(contact.phone_number)}
+            {!editing && (
+              <button onClick={() => setEditing(true)} aria-label="Change number" className="ml-1 shrink-0" style={{ color: V.faint }}><Pencil size={11} /></button>
+            )}
+          </p>
+        </div>
+        {!editing && VOICE_LANG_SELECT(contact.preferred_language ?? '', (v) => onLang(v || null))}
+        {!editing && <WaToggle on={contact.is_active} onClick={onToggle} />}
+      </div>
+      {editing && <NumberEditor initial={contact.phone_number} onSave={onChangeNumber} onCancel={() => setEditing(false)} />}
+    </div>
+  );
+}
+
+/**
  * One org member, with their WhatsApp send-eligibility inline. The unit of the
  * redesigned panel: name · number · toggle, with a number-capture step when no
  * number is on file, and a subtle select→success motion on grant (which also
  * fires the welcome message, server-side).
  */
 function WaMemberRow({
-  member, sender, suggestPhone, onEnable, onDisable, onLang,
+  member, sender, suggestPhone, onEnable, onDisable, onLang, onChangeNumber,
 }: {
   member: OrgMember;
   sender: WaContact | null;
@@ -189,11 +272,12 @@ function WaMemberRow({
   onEnable: (phone: string) => Promise<boolean>;   // resolves true if a welcome was sent
   onDisable: () => Promise<void>;
   onLang: (lang: string | null) => void;
+  onChangeNumber?: (phone: string) => Promise<void>;   // change an existing sender row's number
 }) {
   const { show } = useSnackbar();
   const active = !!sender?.is_active;
   const knownPhone = local10(sender?.phone_number ?? suggestPhone ?? '');
-  type Phase = 'idle' | 'capture' | 'saving' | 'sent';
+  type Phase = 'idle' | 'capture' | 'saving' | 'sent' | 'edit';
   const [phase, setPhase] = useState<Phase>('idle');
   const [welcomed, setWelcomed] = useState(false);
   const [val, setVal] = useState('');
@@ -245,6 +329,9 @@ function WaMemberRow({
           ) : showNumber ? (
             <p className="truncate mt-0.5 inline-flex items-center gap-1" style={{ color: V.sys, ...font, ...nums, ...T.xs }}>
               <Phone size={10} style={{ color: V.faint }} /> +91 {prettyPhone(knownPhone)}
+              {sender && onChangeNumber && phase === 'idle' && (
+                <button onClick={() => setPhase('edit')} aria-label="Change number" className="ml-1 shrink-0" style={{ color: V.faint }}><Pencil size={11} /></button>
+              )}
             </p>
           ) : (
             <p className="truncate mt-0.5" style={{ color: V.faint, ...font, ...T.xs }}>{roleLabel(member.role)} · add a number to enable</p>
@@ -252,7 +339,7 @@ function WaMemberRow({
         </div>
 
         {/* voice language only once active — keeps the row calm until it matters */}
-        {active && phase !== 'capture' && VOICE_LANG_SELECT(sender?.preferred_language ?? '', (v) => onLang(v || null))}
+        {active && phase !== 'capture' && phase !== 'edit' && VOICE_LANG_SELECT(sender?.preferred_language ?? '', (v) => onLang(v || null))}
 
         {phase === 'sent' ? (
           <span className="w-7 h-7 rounded-full inline-flex items-center justify-center shrink-0 db-ring" style={{ background: 'rgba(37,211,102,0.14)' }}>
@@ -292,6 +379,11 @@ function WaMemberRow({
           </div>
           <p className="mt-1.5 leading-relaxed" style={{ color: V.faint, ...font, ...T.xs }}>We'll send them a short welcome so they know they can start sending.</p>
         </div>
+      )}
+
+      {/* inline number change (existing sender) */}
+      {phase === 'edit' && onChangeNumber && (
+        <NumberEditor initial={knownPhone} onSave={onChangeNumber} onCancel={() => setPhase('idle')} />
       )}
     </div>
   );
@@ -414,6 +506,24 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
     if (!row) return;
     const { error } = await supabase.from('wa_registered_numbers').update({ is_active: false }).eq('id', row.id);
     if (error) throw error;
+    await qc.invalidateQueries({ queryKey: ['wa_registered_numbers'] });
+  };
+
+  // Change an existing sender's WhatsApp number. Stores the canonical +91 form the
+  // webhook matches inbound against. A no-op (same number) returns quietly; a clash
+  // with another registered row surfaces a clear message instead of a raw constraint.
+  const changeNumber = async (id: string, phone: string) => {
+    const stored = intlPhone(phone);
+    const current = senders.find((s) => s.id === id);
+    if (current && intlPhone(current.phone_number) === stored) return;   // unchanged
+    if (senders.some((s) => s.id !== id && intlPhone(s.phone_number) === stored)) {
+      throw new Error('That number is already registered to someone else.');
+    }
+    const { error } = await supabase.from('wa_registered_numbers').update({ phone_number: stored }).eq('id', id);
+    if (error) {
+      if (/duplicate|unique/i.test(error.message)) throw new Error('That number is already registered to someone else.');
+      throw error;
+    }
     await qc.invalidateQueries({ queryKey: ['wa_registered_numbers'] });
   };
 
@@ -619,6 +729,7 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
                     onEnable={(ph) => enableMember(m, ph)}
                     onDisable={() => disableMember(m)}
                     onLang={(lang) => { const row = senderForMember(m); if (row) setLang.mutate({ id: row.id, lang }); }}
+                    onChangeNumber={senderForMember(m) ? (ph) => changeNumber(senderForMember(m)!.id, ph) : undefined}
                   />
                 ))}
               </div>
@@ -634,16 +745,13 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
               <p className="uppercase font-medium mb-2" style={labelCaps}>Other site senders</p>
               <div className="space-y-2">
                 {otherSenders.map((m) => (
-                  <div key={m.id} className="rounded-xl p-3 flex items-center gap-3" style={{ background: V.surface, border: '1px solid #E3DDD4', opacity: m.is_active ? 1 : 0.55 }}>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate" style={{ color: V.ink, ...font, ...T.sm }}>{m.name || 'Site contact'}</p>
-                      <p className="truncate mt-0.5 inline-flex items-center gap-1" style={{ color: V.sys, ...font, ...nums, ...T.xs }}>
-                        <Phone size={10} style={{ color: V.faint }} /> +91 {prettyPhone(m.phone_number)}
-                      </p>
-                    </div>
-                    {VOICE_LANG_SELECT(m.preferred_language ?? '', (v) => setLang.mutate({ id: m.id, lang: v || null }))}
-                    <WaToggle on={m.is_active} onClick={() => toggle.mutate({ id: m.id, next: !m.is_active })} />
-                  </div>
+                  <OtherSenderRow
+                    key={m.id}
+                    contact={m}
+                    onToggle={() => toggle.mutate({ id: m.id, next: !m.is_active })}
+                    onLang={(lang) => setLang.mutate({ id: m.id, lang })}
+                    onChangeNumber={(ph) => changeNumber(m.id, ph)}
+                  />
                 ))}
               </div>
             </div>
