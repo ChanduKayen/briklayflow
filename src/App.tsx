@@ -67,6 +67,8 @@ import CreateWorkspace from './pages/CreateWorkspace';
 import Login from './pages/Login';
 import Landing from './pages/Landing';
 import Privacy from './pages/Privacy';
+import Terms from './pages/Terms';
+import DataDeletion from './pages/DataDeletion';
 import SKUDirectory from './pages/SKUDirectory';
 import ProcurementRequests from './pages/ProcurementRequests';
 import ProcurementQuotes from './pages/ProcurementQuotes';
@@ -310,10 +312,16 @@ function App() {
     }
   }, [appProfile?.onboarding_done, session?.user?.id]);
 
-  // Public privacy policy — no auth required (Meta/WhatsApp verification,
-  // footer links). Render before any gate so it loads regardless of session.
+  // Public legal pages — no auth required (Meta/WhatsApp verification, footer
+  // links). Render before any gate so they load regardless of session.
   if (location.pathname === '/privacy') {
     return <Privacy />;
+  }
+  if (location.pathname === '/terms') {
+    return <Terms />;
+  }
+  if (location.pathname === '/data-deletion') {
+    return <DataDeletion />;
   }
 
   if (!routerReady) {
