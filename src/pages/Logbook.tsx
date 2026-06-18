@@ -243,16 +243,16 @@ export default function Logbook({ session }: { session: Session }) {
                       Send your payments and bills to Briklay on WhatsApp. A photo or a few words is enough.
                       They wait here for you to check, and go into your books whenever you get a minute.
                     </p>
-                    {canManage && (
-                      <div className="mt-5 flex flex-col items-center gap-2.5">
-                        <button onClick={() => setWaSheetOpen(true)} className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl" style={{ background: terraGrad, color: '#fff', ...font }}>
-                          <WhatsAppGlyph size={14} color="#fff" /> Start on WhatsApp
-                        </button>
+                    <div className="mt-5 flex flex-col items-center gap-2.5">
+                      <button onClick={() => setWaSheetOpen(true)} className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl" style={{ background: terraGrad, color: '#fff', ...font }}>
+                        <WhatsAppGlyph size={14} color="#fff" /> Start on WhatsApp
+                      </button>
+                      {canManage && (
                         <button onClick={() => setTeamOpen(true)} className="text-xs" style={{ color: V.faint, ...font }}>
                           or add who can send →
                         </button>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <p className="text-center py-12" style={{ color: V.faint, ...font, ...T.sm }}>All caught up. Your books match your site.</p>
@@ -315,7 +315,7 @@ export default function Logbook({ session }: { session: Session }) {
       {waSheetOpen && (
         <StartOnWhatsApp
           onClose={() => setWaSheetOpen(false)}
-          onManageTeam={() => { setWaSheetOpen(false); setTeamOpen(true); }}
+          onManageTeam={canManage ? () => { setWaSheetOpen(false); setTeamOpen(true); } : undefined}
         />
       )}
 

@@ -780,7 +780,33 @@ export function Invitation({ canManage }: { canManage: boolean }) {
 
   const activeCount = team.filter((t) => t.is_active).length;
 
-  if (!canManage) return null;
+  // Non-admins still get a way to start sending on WhatsApp — tapping it self-
+  // registers the number they message from (claim token), so they're never blocked.
+  // No team-management controls are exposed.
+  if (!canManage) {
+    return (
+      <>
+        {startWa && <StartOnWhatsApp onClose={() => setStartWa(false)} />}
+        <div style={{ background: N.bg }}>
+          <div className="mx-auto py-3 flex items-center gap-x-3 gap-y-1.5 flex-wrap" style={{ width: '92%', maxWidth: 1100 }}>
+            <span className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'rgba(37,211,102,0.14)' }}>
+              <WhatsAppGlyph size={15} color={WA} />
+            </span>
+            <p className="flex-1 min-w-0" style={{ color: N.text, ...font, ...T.sm }}>
+              Send your payments and bills to Briklay on WhatsApp.
+            </p>
+            <button
+              onClick={() => setStartWa(true)}
+              className="inline-flex items-center gap-1.5 font-medium py-1.5 px-3.5 rounded-lg whitespace-nowrap shrink-0"
+              style={{ background: 'rgba(37,211,102,0.16)', color: WA, ...font, ...T.xs }}
+            >
+              <WhatsAppGlyph size={13} color={WA} /> Start on WhatsApp
+            </button>
+          </div>
+        </div>
+      </>
+    );
+  }
 
   // shared overlays — the QR / click-to-chat surface and the manage-team slide-over
   const overlays = (
