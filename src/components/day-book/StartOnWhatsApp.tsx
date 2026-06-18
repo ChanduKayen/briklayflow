@@ -17,8 +17,10 @@
  * wa_registered_numbers is admin-only — a plain member can't see/add their own row.
  */
 import { useEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { X, Check, ArrowRight, Loader2, ExternalLink } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { useOrgId } from '../../lib/auth/AuthProvider';
 import { V, WA, font, serif, nums, terraGrad, T } from './tokens';
 import { WhatsAppGlyph } from './atoms';
 
@@ -35,10 +37,11 @@ export type Reg = { phone: string; name: string; welcomed: boolean };
 
 // ── The brain: three plain async ops, shared by both presentations ──────────────
 
-/** Does the caller already have a number on file? null = no (or the RPC isn't there
- *  yet, in which case we fall back to asking for the number). */
-async function checkRegistration(): Promise<Reg | null> {
-  const { data, error } = await supabase.rpc('wa_my_registration');
+/** Does the caller already have a number on file IN THIS ORG? null = no (or the RPC
+ *  isn't there yet, in which case we fall back to asking for the number). Org-scoped
+ *  so a number registered in another org doesn't read as "already on" here. */
+async function checkRegistration(orgId?: string): Promise<Reg | null> {
+  const { data, error } = await supabase.rpc('wa_my_registration', { p_org_id: orgId ?? null });
   if (error) return null;
   const r = data as { has_number?: boolean; phone?: string; name?: string; welcomed?: boolean } | null;
   if (!r?.has_number || !r.phone) return null;
@@ -59,10 +62,10 @@ function greetOnce(r: Reg, onWelcomed?: () => void) {
     });
 }
 
-/** Register the caller's own typed number, send the one-time welcome, stamp it.
- *  Returns the resolved Reg or throws with a human message. */
-async function registerNumber(phoneInput: string): Promise<Reg> {
-  const { data, error } = await supabase.rpc('wa_self_register', { p_phone: onlyDigits(phoneInput) });
+/** Register the caller's own typed number into THIS ORG, send the one-time welcome,
+ *  stamp it. Returns the resolved Reg or throws with a human message. */
+async function registerNumber(phoneInput: string, orgId?: string): Promise<Reg> {
+  const { data, error } = await supabase.rpc('wa_self_register', { p_phone: onlyDigits(phoneInput), p_org_id: orgId ?? null });
   if (error) throw new Error(error.message);
   const res = data as { ok: boolean; error?: string; phone?: string; name?: string; needs_welcome?: boolean };
   if (!res?.ok) throw new Error(res?.error || 'Could not register your number');
@@ -153,6 +156,8 @@ type InlineState = 'idle' | 'input' | 'working' | 'done' | 'redirecting';
 
 export function StartOnWhatsAppButton({ size = 'xs' }: { size?: 'xs' | 'sm' }) {
   const S = SIZES[size];
+  const orgId = useOrgId();
+  const qc = useQueryClient();
   const [reg, setReg] = useState<Reg | null>(null);
   const [checked, setChecked] = useState(false);     // registration lookup finished
   const [state, setState] = useState<InlineState>('idle');
@@ -183,16 +188,16 @@ export function StartOnWhatsAppButton({ size = 'xs' }: { size?: 'xs' | 'sm' }) {
   // Look up the caller's number on mount so a tap is instant.
   useEffect(() => {
     let alive = true;
-    checkRegistration().then((r) => { if (alive) { setReg(r); setChecked(true); } });
+    checkRegistration(orgId).then((r) => { if (alive) { setReg(r); setChecked(true); } });
     return () => { alive = false; };
-  }, []);
+  }, [orgId]);
 
   const onTap = () => {
     if (state !== 'idle' || pending) return;
     if (checked) { act(reg, false); return; }     // in-gesture → open a tab
     // Outran the lookup: show "One sec…", finish the check, then hand off top-level.
     setPending(true);
-    checkRegistration().then((r) => { setReg(r); setChecked(true); setPending(false); act(r, true); });
+    checkRegistration(orgId).then((r) => { setReg(r); setChecked(true); setPending(false); act(r, true); });
   };
 
   const valid = onlyDigits(phone).length >= 10;
@@ -202,7 +207,8 @@ export function StartOnWhatsAppButton({ size = 'xs' }: { size?: 'xs' | 'sm' }) {
     setError(null);
     setState('working');
     try {
-      await registerNumber(phone);
+      await registerNumber(phone, orgId);
+      qc.invalidateQueries({ queryKey: ['wa_registered_numbers'] });   // refresh "Manage who can send"
       setState('done');                                // check pops in the go-button
       // a held beat on the check → the field collapses back into "Opening WhatsApp" → hand off
       setTimeout(() => {
@@ -295,6 +301,8 @@ export function StartOnWhatsAppButton({ size = 'xs' }: { size?: 'xs' | 'sm' }) {
 type Phase = 'checking' | 'has' | 'ask' | 'sending' | 'done';
 
 export function StartOnWhatsApp({ onClose, onManageTeam }: { onClose: () => void; onManageTeam?: () => void }) {
+  const orgId = useOrgId();
+  const qc = useQueryClient();
   const [phase, setPhase] = useState<Phase>('checking');
   const [reg, setReg] = useState<Reg | null>(null);
   const [phone, setPhone] = useState('');
@@ -303,12 +311,12 @@ export function StartOnWhatsApp({ onClose, onManageTeam }: { onClose: () => void
 
   useEffect(() => {
     let alive = true;
-    checkRegistration().then((r) => {
+    checkRegistration(orgId).then((r) => {
       if (!alive) return;
       if (r) { setReg(r); setPhase('has'); } else setPhase('ask');
     });
     return () => { alive = false; };
-  }, []);
+  }, [orgId]);
 
   const valid = onlyDigits(phone).length >= 10;
 
@@ -317,7 +325,8 @@ export function StartOnWhatsApp({ onClose, onManageTeam }: { onClose: () => void
     setError(null);
     setPhase('sending');
     try {
-      const r = await registerNumber(phone);
+      const r = await registerNumber(phone, orgId);
+      qc.invalidateQueries({ queryKey: ['wa_registered_numbers'] });   // refresh "Manage who can send"
       setSavedPhone(r.phone);
       setPhase('done');
     } catch (e) {

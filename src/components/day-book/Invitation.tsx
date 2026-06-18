@@ -562,6 +562,22 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
     onError: (e: any) => show(e.message || 'Could not set voice language', { type: 'error' }),
   });
 
+  // Flip is_active on any sender row by id (used by the "Other senders" list, which
+  // covers numbers not tied to an active member — e.g. someone who self-registered
+  // via "Start on WhatsApp" but isn't an active org member, or legacy phone-only rows).
+  const toggleSender = useMutation({
+    mutationFn: async ({ id, on }: { id: string; on: boolean }) => {
+      const { error } = await supabase.from('wa_registered_numbers').update({ is_active: on }).eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['wa_registered_numbers'] }),
+    onError: (e: any) => show(e.message || 'Could not update', { type: 'error' }),
+  });
+
+  // Senders not linked to an active member — so a registered number is never invisible.
+  const memberUserIds = new Set(members.map((m) => m.id));
+  const otherSenders = senders.filter((s) => !(s.user_id && memberUserIds.has(s.user_id)));
+
   const copyLink = (link: string) => {
     navigator.clipboard?.writeText(link).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); }).catch(() => { /* noop */ });
   };
@@ -705,6 +721,33 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
               Turning someone on lets their WhatsApp number send to Briklay, and sends them a one-time welcome. Turn it off when they leave the site — their history stays.
             </p>
           </div>
+
+          {/* Other senders — registered numbers not tied to an active member (self-
+              registered via "Start on WhatsApp", or legacy phone-only rows). Shown so
+              nothing that can send is ever hidden from this panel. */}
+          {otherSenders.length > 0 && (
+            <div className="mt-6">
+              <p className="uppercase font-medium mb-2" style={labelCaps}>Other senders</p>
+              <div className="space-y-2">
+                {otherSenders.map((s) => (
+                  <div key={s.id} className="rounded-xl p-3 flex items-center gap-3" style={{ background: V.surface, border: '1px solid #E3DDD4' }}>
+                    <span className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: V.field, color: V.faint }}>
+                      {s.name ? <span className="font-medium" style={{ ...font, ...T.sm }}>{initials(s.name)}</span> : <Phone size={14} />}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium truncate" style={{ color: V.ink, ...font, ...T.sm }}>{s.name || 'WhatsApp number'}</p>
+                      <p className="truncate mt-0.5 inline-flex items-center gap-1" style={{ color: V.sys, ...font, ...nums, ...T.xs }}>
+                        <Phone size={10} style={{ color: V.faint }} /> +91 {prettyPhone(s.phone_number)}
+                        {s.role ? <span style={{ color: V.faint }}>· {roleLabel(s.role)}</span> : null}
+                      </p>
+                    </div>
+                    {s.is_active && VOICE_LANG_SELECT(s.preferred_language ?? '', (v) => setLang.mutate({ id: s.id, lang: v || null }))}
+                    <WaToggle on={s.is_active} busy={toggleSender.isPending} onClick={() => toggleSender.mutate({ id: s.id, on: !s.is_active })} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
