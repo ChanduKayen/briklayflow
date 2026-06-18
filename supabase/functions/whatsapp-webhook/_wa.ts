@@ -21,9 +21,12 @@ export async function sendWA(to: string, text: string): Promise<void> {
       }),
     },
   )
+  // Always log the send response so a silent send (or a 200 that Meta rejects
+  // downstream) is never invisible again. Read the body once, then branch.
+  const body = await res.json().catch(() => ({}))
+  console.log('[wa-send]', res.status, JSON.stringify(body))
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    console.error('[wa] send error:', err)
+    console.error('[wa] send error:', body)
   }
 }
 

@@ -26,9 +26,11 @@ async function postToMeta(body: unknown): Promise<{ ok: boolean; error?: string 
         body: JSON.stringify(body),
       },
     )
+    // Always log the send response so a silent send is never invisible again.
+    const bodyText = await res.text().catch(() => '')
+    console.log('[wa-send]', res.status, bodyText)
     if (!res.ok) {
-      const errBody = await res.text().catch(() => '')
-      return { ok: false, error: `meta ${res.status}: ${errBody.slice(0, 300)}` }
+      return { ok: false, error: `meta ${res.status}: ${bodyText.slice(0, 300)}` }
     }
     return { ok: true }
   } catch (e) {
