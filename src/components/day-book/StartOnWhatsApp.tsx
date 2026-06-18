@@ -36,7 +36,10 @@ export function StartOnWhatsApp({ onClose, onManageTeam }: { onClose: () => void
   useEffect(() => {
     let alive = true;
     supabase.rpc('wa_create_link_token').then(({ data, error }) => {
-      if (alive && !error && typeof data === 'string') setToken(data);
+      if (!alive) return;
+      if (error) { console.error('[start-wa] could not mint link token:', error); return; }
+      if (typeof data === 'string' && data) { console.log('[start-wa] link token ready:', data); setToken(data); }
+      else console.error('[start-wa] link token RPC returned no token:', data);
     });
     return () => { alive = false; };
   }, []);
