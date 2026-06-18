@@ -272,6 +272,10 @@ export default function Ledger({ session }: { session: Session }) {
       return data;
     },
   });
+  // A ledger row (transactions + its nested joins). The client is untyped, so this
+  // resolves loosely — but it lets the helpers below take a named type, not bare `any`.
+  type LedgerRow = NonNullable<typeof ledger>[number];
+  type TxnAlloc = NonNullable<LedgerRow['txn_allocations']>[number];
 
   // Deep-link focus: the Day Book's filed "View →" links to /ledger?txn=<id>. Scroll to
   // and ring that row once the ledger has loaded (once — survives realtime refetches).
@@ -336,8 +340,9 @@ export default function Ledger({ session }: { session: Session }) {
     setWaIdleDismissed(true);
   };
 
-  const { data: _stakeholders } = useQuery({ queryKey: ['stakeholders'], queryFn: async () => { const { data } = await supabase.from('stakeholders').select('*'); return data as Stakeholder[]; } });
-  const { data: _projects } = useQuery({ queryKey: ['projects'], queryFn: async () => { const { data } = await supabase.from('projects').select('*'); return data as Project[]; } });
+  // fetched to warm the react-query cache for the peek/editor surfaces; data unused here
+  useQuery({ queryKey: ['stakeholders'], queryFn: async () => { const { data } = await supabase.from('stakeholders').select('*'); return data as Stakeholder[]; } });
+  useQuery({ queryKey: ['projects'], queryFn: async () => { const { data } = await supabase.from('projects').select('*'); return data as Project[]; } });
 
   const { show: showSnackbar } = useSnackbar();
 
@@ -350,7 +355,7 @@ export default function Ledger({ session }: { session: Session }) {
       qc.invalidateQueries({ queryKey: ['ledger'] }); setSelectedTxnIds(new Set()); setShowVoidAll(false);
       showSnackbar(`${ids.length} transaction${ids.length !== 1 ? 's' : ''} voided`);
     },
-    onError: (err: any) => showSnackbar(err.message || 'Failed to void', { type: 'error' }),
+    onError: (err: unknown) => showSnackbar((err instanceof Error && err.message) || 'Failed to void', { type: 'error' }),
   });
 
   const recatMutation = useMutation({
@@ -359,7 +364,7 @@ export default function Ledger({ session }: { session: Session }) {
       if (error) throw error;
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['ledger'] }); setSelectedTxnIds(new Set()); setShowRecategorize(false); setRecatCategory(''); showSnackbar('Category updated'); },
-    onError: (err: any) => showSnackbar(err.message || 'Failed to update', { type: 'error' }),
+    onError: (err: unknown) => showSnackbar((err instanceof Error && err.message) || 'Failed to update', { type: 'error' }),
   });
 
   const filterBarRef = useRef<HTMLDivElement>(null);
@@ -394,10 +399,16 @@ export default function Ledger({ session }: { session: Session }) {
     return () => { window.removeEventListener('mouseup', handleMouseUp); window.removeEventListener('mousedown', handleClickOutside); };
   }, []);
 
-  useEffect(() => {
+  // Reset selection + pagination when the active filters change — the React-sanctioned
+  // "adjust state during render" pattern (https://react.dev/learn/you-might-not-need-an-effect),
+  // which avoids the extra commit (and cascading-render lint) of doing it in an effect.
+  const filterKey = JSON.stringify([searchTerm, filterProject, filterType, datePreset, filterFlagged, filterNeedsAction, filterUnlinked]);
+  const [seenFilterKey, setSeenFilterKey] = useState(filterKey);
+  if (filterKey !== seenFilterKey) {
+    setSeenFilterKey(filterKey);
     setSelectedTxnIds(new Set());
     setVisibleCount(PAGE_SIZE);
-  }, [searchTerm, filterProject, filterType, datePreset, filterFlagged, filterNeedsAction, filterUnlinked]);
+  }
 
   useEffect(() => {
     const handler = () => navigate('/ledger/new');
@@ -407,18 +418,18 @@ export default function Ledger({ session }: { session: Session }) {
 
   const MATERIAL_CATEGORIES_LEGACY = ['Material Supply', 'PO Advance', 'PO Settlement', 'Transport & Handling'];
 
-  const getNeedsAction = (txn: any): 'link_wo' | 'link_po' | false => {
+  const getNeedsAction = (txn: LedgerRow): 'link_wo' | 'link_po' | false => {
     if (txn.status === 'Voided') return false;
     const stkType = txn.stakeholders?.type;
     if (stkType !== 'Worker' && stkType !== 'Vendor') return false;
     const allocs = txn.txn_allocations || [];
     if (allocs.length === 0) return false;
-    const hasUnlinked = allocs.some((a: any) => !a.order_type);
+    const hasUnlinked = allocs.some((a: TxnAlloc) => !a.order_type);
     if (!hasUnlinked) return false;
     return stkType === 'Worker' ? 'link_wo' : 'link_po';
   };
 
-  const getTxnType = (txn: any): string => {
+  const getTxnType = (txn: LedgerRow): string => {
     if (deriveDirection(txn) === 'in') return 'Client Receipt';
     if (txn.stakeholders?.type === 'Worker') return 'Worker Payment';
     if (txn.stakeholders?.type === 'Vendor') {
@@ -458,13 +469,13 @@ export default function Ledger({ session }: { session: Session }) {
   })();
 
   // ── Filtering (per transaction; project filter matches any allocation) ───────
-  const passesBase = (txn: any): boolean => {
+  const passesBase = (txn: LedgerRow): boolean => {
     const term = searchTerm.toLowerCase();
     const matchesSearch = !term || txn.txn_id.toLowerCase().includes(term) || txn.stakeholders?.name?.toLowerCase().includes(term) || txn.category?.toLowerCase().includes(term) || (txn.remarks || '').toLowerCase().includes(term);
     const matchesFlagged = filterFlagged ? txn.ai_flag_status === 'Flagged' : true;
     const matchesNeedsAction = filterNeedsAction ? !!getNeedsAction(txn) : true;
     const matchesType = filterType.length ? filterType.includes(getTxnType(txn)) : true;
-    const matchesProject = filterProject.length ? (txn.txn_allocations || []).some((a: any) => filterProject.includes(a.projects?.name || '')) : true;
+    const matchesProject = filterProject.length ? (txn.txn_allocations || []).some((a: TxnAlloc) => filterProject.includes(a.projects?.name || '')) : true;
     const matchesDate = (() => {
       const { from, to } = activeDateRange;
       if (!from || !to) return true;
@@ -567,7 +578,7 @@ export default function Ledger({ session }: { session: Session }) {
       window.removeEventListener('touchcancel', release);
     };
   }, []);
-  const visibleDays: { date: string; rows: any[] }[] = [];
+  const visibleDays: { date: string; rows: LedgerRow[] }[] = [];
   for (const t of visibleTxns) {
     const last = visibleDays[visibleDays.length - 1];
     if (!last || last.date !== t.date) visibleDays.push({ date: t.date, rows: [t] });
@@ -582,26 +593,26 @@ export default function Ledger({ session }: { session: Session }) {
   };
 
   const selectedTxns = (ledger || []).filter(t => selectedTxnIds.has(t.txn_id));
-  const selectedCategories = Array.from(new Set(selectedTxns.map((t: any) => t.category).filter(Boolean))) as string[];
-  const hasAmendedSelected = selectedTxns.some((t: any) => (t as any).amendments?.length > 0);
-  const voidableSelected = selectedTxns.filter((t: any) => t.status !== 'Voided');
+  const selectedCategories = Array.from(new Set(selectedTxns.map((t) => t.category).filter(Boolean))) as string[];
+  const hasAmendedSelected = selectedTxns.some((t) => t.amendments?.length > 0);
+  const voidableSelected = selectedTxns.filter((t) => t.status !== 'Voided');
 
   // ── Drag-to-sum, direction-aware ────────────────────────────────────────────
-  const sumRows = (ledger || []).filter((t: any) => sumSel.has(t.txn_id));
+  const sumRows = (ledger || []).filter((t) => sumSel.has(t.txn_id));
   let sumOut = 0, sumIn = 0;
   for (const t of sumRows) { if (deriveDirection(t) === 'in') sumIn += Number(t.total_amount); else sumOut += Number(t.total_amount); }
   const sumNet = sumIn - sumOut;
 
   const exportCSV = () => {
     const txnsToExport = selectedCount > 0 ? selectedTxns : filteredTransactions;
-    const rows = txnsToExport.flatMap((t: any) => {
-      const allocs: any[] = t.txn_allocations || [];
+    const rows = txnsToExport.flatMap((t) => {
+      const allocs = t.txn_allocations || [];
       const dir = deriveDirection(t);
       if (allocs.length === 0) return [[t.txn_id, t.date, payeeLabel(t), getTxnType(t), dir, t.category || '', t.payment_mode || '', t.total_amount, '', t.status]];
-      return allocs.map((a: any) => [t.txn_id, t.date, payeeLabel(t), getTxnType(t), dir, t.category || '', t.payment_mode || '', t.total_amount, a.projects?.name || '', t.status]);
+      return allocs.map((a: TxnAlloc) => [t.txn_id, t.date, payeeLabel(t), getTxnType(t), dir, t.category || '', t.payment_mode || '', t.total_amount, a.projects?.name || '', t.status]);
     });
     const header = ['TXN ID', 'Date', 'Payee', 'Type', 'Direction', 'Category', 'Mode', 'Amount', 'Project', 'Status'];
-    const csv = [header, ...rows].map(r => r.map((v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const csv = [header, ...rows].map(r => r.map((v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url;
@@ -609,7 +620,7 @@ export default function Ledger({ session }: { session: Session }) {
     a.click(); URL.revokeObjectURL(url);
   };
 
-  const uniqueProjects = Array.from(new Set((ledger || []).flatMap((t: any) => (t.txn_allocations || []).map((a: any) => a.projects?.name).filter(Boolean)))) as string[];
+  const uniqueProjects = Array.from(new Set((ledger || []).flatMap((t) => (t.txn_allocations || []).map((a: TxnAlloc) => a.projects?.name).filter(Boolean)))) as string[];
   const uniqueTypes = ['Worker Payment', 'Material Purchase', 'General Expense', 'Client Receipt'];
 
   // ── Filter chip + dropdown (reference look, multi-select body) ───────────────
@@ -771,7 +782,7 @@ export default function Ledger({ session }: { session: Session }) {
 
         {/* filters */}
         <div ref={filterBarRef} className="flex items-center gap-2 flex-wrap mt-7">
-          <FilterChip active onClick={(e: any) => openDrop('date', e)}>{periodLabel}</FilterChip>
+          <FilterChip active onClick={(e) => openDrop('date', e)}>{periodLabel}</FilterChip>
           {activeFilterDropdown === 'date' && chipDropPos && createPortal(
             <div ref={chipDropRef} className="rounded-xl overflow-hidden py-1" style={{ position: 'fixed', top: chipDropPos.top, left: chipDropPos.left, zIndex: 9999, width: 200, background: V.surface, border: `1px solid ${V.line}`, boxShadow: '0 10px 30px rgba(30,26,21,0.12)' }}>
               {datePresets.map(d => (
@@ -784,12 +795,12 @@ export default function Ledger({ session }: { session: Session }) {
             document.body,
           )}
 
-          <FilterChip active={filterType.length > 0} onClick={(e: any) => openDrop('type', e)}>
+          <FilterChip active={filterType.length > 0} onClick={(e) => openDrop('type', e)}>
             {filterType.length === 1 ? filterType[0] : filterType.length > 1 ? `Type: ${filterType.length}` : 'Type'}
           </FilterChip>
           {activeFilterDropdown === 'type' && multiDropdown(uniqueTypes, filterType, setFilterType)}
 
-          <FilterChip active={filterProject.length > 0} onClick={(e: any) => openDrop('project', e)}>
+          <FilterChip active={filterProject.length > 0} onClick={(e) => openDrop('project', e)}>
             {filterProject.length === 1 ? filterProject[0] : filterProject.length > 1 ? `Project: ${filterProject.length}` : 'Project'}
           </FilterChip>
           {activeFilterDropdown === 'project' && multiDropdown(uniqueProjects, filterProject, setFilterProject)}
@@ -847,9 +858,9 @@ export default function Ledger({ session }: { session: Session }) {
                   {/* the spine: one thread of money through the day */}
                   <div aria-hidden="true" className="absolute" style={{ left: 29, top: 16, bottom: 64, width: 1, background: V.line }} />
 
-                  {day.rows.map((txn: any) => {
+                  {day.rows.map((txn) => {
                     const dir = deriveDirection(txn);
-                    const primaryAlloc = (txn.txn_allocations || []).find((a: any) => a.order_type) ?? null;
+                    const primaryAlloc = (txn.txn_allocations || []).find((a: TxnAlloc) => a.order_type) ?? null;
                     const anchor: TxnAnchor = dir === 'in'
                       ? resolveAnchor(txn, null)
                       : isNotLinked(txn) ? null : resolveAnchor(txn, primaryAlloc);
@@ -862,7 +873,7 @@ export default function Ledger({ session }: { session: Session }) {
                     const ctxParts = genExp ? ['General expense'] : [trade, txn.remarks];
                     if (!(filterProject.length === 1) && projName) ctxParts.push(projName);
                     const context = ctxParts.filter(Boolean).join(' · ');
-                    const proofUrl = txn.bill_doc_url || (txn as any).proof_document_url || null;
+                    const proofUrl = txn.bill_doc_url || txn.proof_document_url || null;
                     // The "not linked" region — the ONLY part of the row that changes:
                     //  · general expense -> a calm, non-actionable note (no tracking needed)
                     //  · an unlinked outgoing payment to a party -> the gentle Track nudge
@@ -1087,7 +1098,7 @@ export default function Ledger({ session }: { session: Session }) {
               </div>
             )}
             <div className="mb-5 max-h-40 overflow-y-auto bg-surface-container-low rounded-xl border border-outline-variant/30 p-3 space-y-1">
-              {voidableSelected.map((t: any) => (
+              {voidableSelected.map((t) => (
                 <div key={t.txn_id} className="flex items-center justify-between text-body-sm">
                   <span className="font-data-mono">{t.txn_id}</span>
                   <span className="text-on-surface-variant text-[12px]">₹{Number(t.total_amount).toLocaleString('en-IN')}</span>
@@ -1097,7 +1108,7 @@ export default function Ledger({ session }: { session: Session }) {
             <div className="flex gap-3 justify-end">
               <button onClick={() => setShowVoidAll(false)} className="bk-btn-ghost px-4 py-2 rounded-xl text-body-sm">Cancel</button>
               <button disabled={voidAllMutation.isPending}
-                onClick={() => voidAllMutation.mutate(voidableSelected.map((t: any) => t.txn_id))}
+                onClick={() => voidAllMutation.mutate(voidableSelected.map((t) => t.txn_id))}
                 className="px-4 py-2 rounded-xl text-body-sm font-bold bg-error text-on-error hover:bg-error/90 transition-colors disabled:opacity-50">
                 {voidAllMutation.isPending ? 'Voiding…' : `Void ${voidableSelected.length}`}
               </button>
