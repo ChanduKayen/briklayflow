@@ -595,7 +595,7 @@ export default function TeamAccess({ session }: { session: Session }) {
   return (
     <div className="db-scope" style={{ background: V.page, minHeight: '100%' }}>
       <style>{ANIM}{HERO_CSS}</style>
-      <div className="mx-auto px-4 sm:px-6 py-6" style={{ maxWidth: 760 }}>
+      <div className="mx-auto py-6 sm:py-8" style={{ width: '92%', maxWidth: 1100 }}>
 
         {/* ── Hero ─────────────────────────────────────────────────────────── */}
         <div className="relative overflow-hidden rounded-3xl px-6 py-7 db-fade" style={{ background: N.bg }}>
@@ -631,21 +631,23 @@ export default function TeamAccess({ session }: { session: Session }) {
 
           {adding && !result && (
             <div className="rounded-2xl p-4 db-card db-drop" style={{ background: V.surface }}>
-              <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (optional)"
-                className="w-full px-3 py-2.5 rounded-xl outline-none mb-2.5" style={{ background: V.field, color: V.ink, ...font, ...T.sm }} />
-              <div className="inline-flex items-center gap-2 px-3 rounded-xl w-full mb-2.5" style={{ background: V.field, height: 42 }}>
-                <Mail size={14} style={{ color: V.faint }} />
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email address (optional)" className="bg-transparent outline-none flex-1" style={{ color: V.ink, ...font, ...T.sm }} />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (optional)"
+                  className="px-3 py-2.5 rounded-xl outline-none" style={{ background: V.field, color: V.ink, ...font, ...T.sm }} />
+                <div className="inline-flex items-center gap-2 px-3 rounded-xl" style={{ background: V.field, height: 42 }}>
+                  <Mail size={14} style={{ color: V.faint }} />
+                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email address (optional)" className="bg-transparent outline-none flex-1 min-w-0" style={{ color: V.ink, ...font, ...T.sm }} />
+                </div>
+                <div className="inline-flex items-center gap-2 px-3 rounded-xl" style={{ background: V.field, height: 42 }}>
+                  <WhatsAppGlyph size={13} color={WA} />
+                  <span style={{ color: V.faint, ...font, ...nums, ...T.sm }}>+91</span>
+                  <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="98765 43210" className="bg-transparent outline-none flex-1 min-w-0" style={{ color: V.ink, ...font, ...nums, ...T.sm }} />
+                </div>
+                <select value={role} onChange={(e) => setRole(e.target.value)} className="px-3 py-2.5 rounded-xl outline-none" style={{ background: V.field, color: V.ink, ...font, ...T.sm }}>
+                  {INVITE_ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
               </div>
-              <div className="inline-flex items-center gap-2 px-3 rounded-xl w-full mb-2.5" style={{ background: V.field, height: 42 }}>
-                <WhatsAppGlyph size={13} color={WA} />
-                <span style={{ color: V.faint, ...font, ...nums, ...T.sm }}>+91</span>
-                <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="98765 43210" className="bg-transparent outline-none flex-1" style={{ color: V.ink, ...font, ...nums, ...T.sm }} />
-              </div>
-              <select value={role} onChange={(e) => setRole(e.target.value)} className="w-full px-3 py-2.5 rounded-xl outline-none mb-2.5" style={{ background: V.field, color: V.ink, ...font, ...T.sm }}>
-                {INVITE_ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
-              </select>
-              <p style={{ color: V.faint, ...font, ...T.xs }}>
+              <p className="mt-3" style={{ color: V.faint, ...font, ...T.xs }}>
                 {emailProvided
                   ? 'They get a join link, and their number can send to Briklay on WhatsApp.'
                   : 'WhatsApp-only — no email needed. They go live the moment they message Briklay.'}
