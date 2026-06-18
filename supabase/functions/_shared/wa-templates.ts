@@ -8,14 +8,23 @@
 // type, how many body variables, dynamic URL buttons) to build the send body. But
 // a template with no variables and a static header needs only { name, language }.
 
-// Header shapes Meta supports. "dynamic: false" = a fixed/static asset uploaded at
-// template creation → we omit the header component at send time.
+// Header shapes Meta supports. For MEDIA headers (image/video/document) Meta
+// always needs the asset at send time — the file uploaded when the template was
+// created is only the approval sample, never reused on send. So:
+//   dynamic: true  → caller passes the URL per send (headerImage/Video/Document)
+//   dynamic: false → a FIXED asset that's the same every send; put its public
+//                    URL in `url` here and we send that link on every message.
+// Omitting the header component for a media-header template is rejected by Meta
+// with error #132012 (parameter format does not match the created template).
 export type HeaderSpec =
   | { kind: "none" }
   | { kind: "text" }
-  | { kind: "image"; dynamic: boolean }
-  | { kind: "video"; dynamic: boolean }
-  | { kind: "document"; dynamic: boolean };
+  | { kind: "image"; dynamic: true }
+  | { kind: "image"; dynamic: false; url: string }
+  | { kind: "video"; dynamic: true }
+  | { kind: "video"; dynamic: false; url: string }
+  | { kind: "document"; dynamic: true }
+  | { kind: "document"; dynamic: false; url: string };
 
 export interface TemplateDef {
   name: string;        // EXACT Meta template name
@@ -30,7 +39,14 @@ export const TEMPLATES = {
   teammate_welcome: {
     name: "teammate_welcome_to_whatsapp_utility",
     language: "en",
-    header: { kind: "image", dynamic: true }, // set dynamic:false if you uploaded a fixed image
+    // Fixed image header — the "Welcome to Briklay!" graphic. Meta needs the media
+    // link on every send (the creation-time upload is only the approval sample), so
+    // we serve it from the public `wa-public` bucket. Same image each time.
+    header: {
+      kind: "image",
+      dynamic: false,
+      url: "https://momzyincivvpngazvfgq.supabase.co/storage/v1/object/public/wa-public/teammate_welcome.png",
+    },
     bodyParams: ["name"],                     // {{1}} = "Welcome, {{1}}!"
   },
 } satisfies Record<string, TemplateDef>;

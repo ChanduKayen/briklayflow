@@ -9,23 +9,32 @@
 import { sendTemplate } from "../_shared/whatsapp.ts";
 import type { TemplateKey } from "../_shared/wa-templates.ts";
 
+// Browser callers (the Day Book Manage-team slide-over invokes this via
+// supabase.functions.invoke) trigger a CORS preflight; without these headers the
+// fetch fails as "Failed to send a request to the Edge Function".
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     const { templateKey, to, params } = await req.json();
     if (!templateKey || !to) {
       return new Response(JSON.stringify({ error: "templateKey and to are required" }), {
         status: 400,
-        headers: { "Content-Type": "application/json" },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
     const result = await sendTemplate(templateKey as TemplateKey, to, params ?? {});
     return new Response(JSON.stringify({ ok: true, wamid: result.wamid }), {
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
     return new Response(JSON.stringify({ ok: false, error: String((e as Error).message ?? e) }), {
       status: 500,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });

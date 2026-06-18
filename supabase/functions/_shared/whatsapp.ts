@@ -35,17 +35,19 @@ function buildComponents(def: TemplateDef, params: SendTemplateParams) {
   if (h.kind === "text") {
     if (!params.headerText) throw new Error(`Template "${def.name}" needs headerText`);
     components.push({ type: "header", parameters: [{ type: "text", text: params.headerText }] });
-  } else if (h.kind !== "none" && h.dynamic) {
+  } else if (h.kind !== "none") {
+    // Media header — always required at send time. URL is the per-send param when
+    // dynamic, otherwise the fixed URL declared on the template.
     const map = { image: "headerImage", video: "headerVideo", document: "headerDocument" } as const;
     const field = map[h.kind];
-    const url = params[field];
-    if (!url) throw new Error(`Template "${def.name}" needs ${field}`);
+    const url = h.dynamic ? params[field] : h.url;
+    if (!url) throw new Error(`Template "${def.name}" needs ${h.dynamic ? field : "a fixed header url"}`);
     components.push({
       type: "header",
       parameters: [{ type: h.kind, [h.kind]: { link: url } }],
     });
   }
-  // h.kind === "none" or static media → no header component
+  // h.kind === "none" → no header component
 
   // ---- body
   if (def.bodyParams.length) {

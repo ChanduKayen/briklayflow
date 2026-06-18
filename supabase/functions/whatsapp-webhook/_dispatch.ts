@@ -9,6 +9,7 @@ import {
 } from './_conversation.ts'
 import { agentFor } from './_registry.ts'
 import { runTransaction, retryBatchEntries, type TxnCtx } from './_agents/transaction.ts'   // direct: the replay path
+import { runConcierge } from './_agents/concierge.ts'   // direct: first-touch orientation
 import { send } from './_format.ts'
 import * as M from './_messages.ts'
 import type { Lang } from './_messages.ts'
@@ -31,6 +32,26 @@ export type DispatchCtx = {
   orgId: string
   interactiveId: string | null   // Sprint 5: id of a tapped LIST row / reply button
   image?: { base64: string; mime: string; caption: string }   // payment-image -> agent vision extraction
+  firstTouch?: boolean   // Sprint 6: member's first-ever contact -> orient / welcome
+  dormant?: boolean      // Sprint 6: returning after a long gap -> welcome-back prefix
+}
+
+/** Join a first-contact welcome with any interrupt ack into one prefix (or undefined). */
+function mergePrefix(a?: string, b?: string): string | undefined {
+  return [a, b].filter(Boolean).join('\n\n') || undefined
+}
+
+/** Org display name for the orientation summary (one cheap read, first touch only). */
+async function orgNameOf(supabase: any, orgId: string): Promise<string | null> {
+  const { data } = await supabase.from('organizations').select('name').eq('org_id', orgId).maybeSingle()
+  return (data?.name as string) ?? null
+}
+
+/** Stamp the one-time orientation marker so a member is oriented at most once. */
+async function markOriented(supabase: any, from: string): Promise<void> {
+  await supabase.from('wa_registered_numbers')
+    .update({ oriented_at: new Date().toISOString() })
+    .eq('phone_number', from).is('oriented_at', null)
 }
 
 // Reporting/data query the router doesn't model yet -> legacy handleQuery bridge.
@@ -81,6 +102,26 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
   // TRACE 2/4 -- what is PASSED TO THE AGENT (the raw text + the routing call).
   console.log('[trace] route', JSON.stringify({ agent: chosenAgent, decision: d.decision, lang, convo: view.state, text: text.slice(0, 300) }))
 
+  // ── First contact (Sprint 6) ─────────────────────────────────────────────────
+  // A member's FIRST-EVER message with no real intent (greeting / unclear) gets a
+  // warm orientation — name, org, role, what I do, a sample command — instead of
+  // generic chitchat or a disambiguation prompt. A first message that DOES carry an
+  // intent (a payment) is honoured as usual, with the welcome FOLDED into that one
+  // reply (capture-first: never make them repeat themselves). A returning-after-a-gap
+  // member just gets a light "welcome back" folded in. Stamped once via oriented_at.
+  const firstContact = ctx.firstTouch === true
+  if (firstContact && (d.decision === 'CHITCHAT' || d.decision === 'AMBIGUOUS') && !QUERY_RE.test(text)) {
+    await runConcierge(supabase, {
+      from, orgId, wamid, text, language: lang, mode: 'orientation',
+      orientation: { name: ctx.senderName, orgName: await orgNameOf(supabase, orgId), role: registered?.role ?? null },
+    })
+    await markOriented(supabase, from)
+    return
+  }
+  const welcome = firstContact ? M.welcomePrefix(lang, { name: ctx.senderName })
+    : ctx.dormant ? M.welcomeBack(lang) : undefined
+  if (firstContact) await markOriented(supabase, from)
+
   // ── ANSWERS_PENDING: route by the DB's owning agent (never the LLM's) ────────
   if (d.decision === 'ANSWERS_PENDING') {
     const owner = agentFor(pending?.agent)
@@ -104,6 +145,8 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
     if (owner.commitInterrupted) prefix = await owner.commitInterrupted(actx, view.open as ConvoRow)
     else await abandonConversation(supabase, orgId, from)
   }
+  // Lead with the first-contact welcome / welcome-back, ahead of any interrupt ack.
+  prefix = mergePrefix(welcome, prefix)
 
   switch (d.decision) {
     case 'NEW_INTENT': {

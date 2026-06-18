@@ -35,6 +35,9 @@ interface WaContact {
   preferred_language: string | null;   // voice-note language (ISO-639-1); null = auto
   stakeholder_id: string | null;
   user_id: string | null;              // links a sender row to an org member (auth.users.id)
+  welcomed_at: string | null;          // when the one-time welcome was sent; null = never
+  oriented_at: string | null;          // when first-contact orientation was sent; null = never
+  invite_status: string;               // 'active' | 'invited' (self-activates on first msg) | 'revoked'
   created_at: string;
 }
 
@@ -49,6 +52,12 @@ const VOICE_LANGS = [
 ] as const;
 
 const digits = (s: string) => s.replace(/\D/g, '');
+/** Last 10 digits — the local part, used for display + matching across stored formats. */
+const local10 = (s: string) => digits(s).slice(-10);
+/** Canonical stored form: international +91 (digits only), matching what Meta sends
+ *  inbound as `from` and what the webhook looks up. Day Book MUST store this so a
+ *  registered number is recognised on the next inbound message. */
+const intlPhone = (s: string) => '91' + local10(s);
 
 /** Platform roles a teammate can be invited as (mirrors the /team access route). */
 const INVITE_ROLES = [
@@ -129,7 +138,7 @@ const inviteLinkFor = (token: string) => `${window.location.origin}/invite/${tok
 const roleLabel = (r: string) => r.charAt(0).toUpperCase() + r.slice(1);
 const daysLeft = (iso: string) => Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000));
 const norm = (s: string) => (s || '').trim().toLowerCase();
-const prettyPhone = (p: string) => { const d = digits(p); return d.length === 10 ? `${d.slice(0, 5)} ${d.slice(5)}` : d; };
+const prettyPhone = (p: string) => { const d = local10(p); return d.length === 10 ? `${d.slice(0, 5)} ${d.slice(5)}` : d; };
 const initials = (name: string) => (name || '?').split(' ').filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase() || '?';
 
 /** A tiny green pill toggle, shared by member rows and legacy sender rows. */
@@ -177,15 +186,16 @@ function WaMemberRow({
   member: OrgMember;
   sender: WaContact | null;
   suggestPhone: string;
-  onEnable: (phone: string) => Promise<void>;
+  onEnable: (phone: string) => Promise<boolean>;   // resolves true if a welcome was sent
   onDisable: () => Promise<void>;
   onLang: (lang: string | null) => void;
 }) {
   const { show } = useSnackbar();
   const active = !!sender?.is_active;
-  const knownPhone = digits(sender?.phone_number ?? suggestPhone ?? '');
+  const knownPhone = local10(sender?.phone_number ?? suggestPhone ?? '');
   type Phase = 'idle' | 'capture' | 'saving' | 'sent';
   const [phase, setPhase] = useState<Phase>('idle');
+  const [welcomed, setWelcomed] = useState(false);
   const [val, setVal] = useState('');
 
   const doEnable = async (phone: string) => {
@@ -193,7 +203,8 @@ function WaMemberRow({
     if (ph.length < 10) { show('Enter a 10-digit WhatsApp number', { type: 'error' }); return; }
     setPhase('saving');
     try {
-      await onEnable(ph);
+      const didWelcome = await onEnable(ph);
+      setWelcomed(didWelcome);
       setPhase('sent');
       setTimeout(() => setPhase('idle'), 1900);
     } catch (e: any) {
@@ -229,7 +240,7 @@ function WaMemberRow({
           <p className="font-medium truncate" style={{ color: V.ink, ...font, ...T.sm }}>{member.name || 'Unnamed'}</p>
           {phase === 'sent' ? (
             <p className="truncate mt-0.5 inline-flex items-center gap-1 db-drop" style={{ color: WA, ...font, ...T.xs }}>
-              <WhatsAppGlyph size={10} color={WA} /> Welcome sent
+              <WhatsAppGlyph size={10} color={WA} /> {welcomed ? 'Welcome sent' : 'Sending enabled'}
             </p>
           ) : showNumber ? (
             <p className="truncate mt-0.5 inline-flex items-center gap-1" style={{ color: V.sys, ...font, ...nums, ...T.xs }}>
@@ -299,17 +310,21 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [role, setRole] = useState<string>(INVITE_ROLES[0].value);
-  const [result, setResult] = useState<{ link: string; phone: string } | null>(null);
+  const [result, setResult] = useState<{ link?: string; phone: string; mode: 'email' | 'wa'; name: string } | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const emailProvided = email.trim().length > 0;
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
   const phoneOk = digits(phone).length >= 10;
+  // Email is optional: with it, the full platform invite; without it, a WhatsApp-only
+  // invite that self-activates the moment they first message Briklay.
+  const canInvite = phoneOk && (!emailProvided || emailOk);
 
   // Linkage: a member is WhatsApp-eligible when a wa_registered_numbers row carries
   // their user_id. Legacy/phone-only rows (no user_id) are kept under "Other senders"
   // so nothing existing is lost; a name match just pre-fills the capture field.
   const senderForMember = (m: OrgMember) => senders.find((s) => s.user_id === m.id) ?? null;
-  const suggestPhoneFor = (m: OrgMember) => senders.find((s) => !s.user_id && norm(s.name) === norm(m.name))?.phone_number ?? '';
+  const suggestPhoneFor = (m: OrgMember) => local10(senders.find((s) => !s.user_id && norm(s.name) === norm(m.name))?.phone_number ?? '');
   const memberNames = new Set(members.map((m) => norm(m.name)));
   const otherSenders = senders.filter((s) => !s.user_id && !memberNames.has(norm(s.name)));
 
@@ -319,25 +334,79 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
   };
   const resetForm = () => { setAdding(false); setName(''); setEmail(''); setPhone(''); setRole(INVITE_ROLES[0].value); setResult(null); };
 
-  // Grant a member WhatsApp send-access: link/insert their number, then fire the
-  // welcome (server-side, idempotent). Upsert by user_id OR matching phone so we
-  // never collide with the UNIQUE(phone_number) constraint on a legacy row.
+  // Grant a member WhatsApp send-access: link/insert their number, then welcome
+  // them via the approved `teammate_welcome` template (delivers outside Meta's 24h
+  // window, unlike free-form text). Upsert by user_id OR matching phone so we never
+  // collide with the UNIQUE(phone_number) constraint on a legacy row. The welcome
+  // fires once per row — gated on the durable `welcomed_at` marker, NOT on whether
+  // we just inserted — so an invited/legacy teammate (whose row already exists) is
+  // greeted on their first enable, and re-enabling never re-sends.
+  const sendWelcome = async (m: OrgMember, ph: string) => {
+    const to = ph.length === 10 ? `91${ph}` : ph;
+    const first = (m.name || '').trim().split(/\s+/)[0] || m.name || 'there';
+    const { data, error } = await supabase.functions.invoke('send-template', {
+      body: { templateKey: 'teammate_welcome', to, params: { name: first } },
+    });
+    if (error) {
+      // Surface the function's error body (Meta message) when present.
+      let msg = error.message;
+      try {
+        const ctx = (error as any).context;
+        const parsed = ctx && typeof ctx.json === 'function' ? await ctx.json() : null;
+        if (parsed?.error) msg = parsed.error;
+      } catch { /* fall back to error.message */ }
+      throw new Error(msg || 'Could not send the welcome message');
+    }
+    if (data && data.ok === false) throw new Error(data.error || 'Could not send the welcome message');
+  };
+
   const enableMember = async (m: OrgMember, phoneInput: string) => {
-    const ph = digits(phoneInput);
+    const ph = local10(phoneInput);
     if (ph.length < 10) throw new Error('Enter a 10-digit WhatsApp number');
-    const existing = senders.find((s) => s.user_id === m.id) ?? senders.find((s) => digits(s.phone_number) === ph);
+    const stored = intlPhone(ph);   // canonical +91 form the webhook matches inbound against
+    const existing = senders.find((s) => s.user_id === m.id) ?? senders.find((s) => local10(s.phone_number) === ph);
+
+    // Resolve the row we're enabling + whether it has ever been welcomed.
+    let rowId: string | undefined;
+    let alreadyWelcomed = false;
     if (existing) {
+      rowId = existing.id;
+      alreadyWelcomed = !!existing.welcomed_at;
+      // Also heal a legacy 10-digit row to the canonical form so inbound matches.
       const { error } = await supabase.from('wa_registered_numbers')
-        .update({ is_active: true, user_id: m.id }).eq('id', existing.id);
+        .update({ is_active: true, user_id: m.id, phone_number: stored }).eq('id', existing.id);
       if (error) throw error;
     } else {
-      const { error } = await supabase.from('wa_registered_numbers')
-        .insert({ user_id: m.id, name: m.name, phone_number: ph, role: roleLabel(m.role), is_active: true });
-      if (error && !/duplicate|unique/i.test(error.message)) throw error;
+      const { data, error } = await supabase.from('wa_registered_numbers')
+        .insert({ user_id: m.id, name: m.name, phone_number: stored, role: roleLabel(m.role), is_active: true })
+        .select('id, welcomed_at').single();
+      if (error) {
+        if (!/duplicate|unique/i.test(error.message)) throw error;
+        // dup race: another path inserted this number first — adopt that row.
+        const { data: dup } = await supabase.from('wa_registered_numbers')
+          .select('id, welcomed_at').eq('phone_number', stored).single();
+        rowId = dup?.id;
+        alreadyWelcomed = !!dup?.welcomed_at;
+        if (rowId) await supabase.from('wa_registered_numbers').update({ is_active: true, user_id: m.id }).eq('id', rowId);
+      } else {
+        rowId = data?.id;
+      }
     }
-    const { error: wErr } = await supabase.rpc('wa_send_welcome', { p_phone: ph, p_name: m.name });
-    if (wErr) throw wErr;
+
+    // First-ever enable of this row → welcome once, then stamp so we never re-send.
+    // sendWelcome throws on failure (surfaced as a toast); welcomed_at stays NULL
+    // so a later retry still greets them.
+    let didWelcome = false;
+    if (!alreadyWelcomed) {
+      await sendWelcome(m, ph);
+      if (rowId) {
+        await supabase.from('wa_registered_numbers')
+          .update({ welcomed_at: new Date().toISOString() }).eq('id', rowId);
+      }
+      didWelcome = true;
+    }
     await qc.invalidateQueries({ queryKey: ['wa_registered_numbers'] });
+    return didWelcome; // true → a welcome was sent (drives the row's success label)
   };
 
   const disableMember = async (m: OrgMember) => {
@@ -348,27 +417,42 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
     await qc.invalidateQueries({ queryKey: ['wa_registered_numbers'] });
   };
 
-  // Invite: the platform email route (create_invite) + register their WhatsApp number
-  // so they can send the moment they join. One action, both kinds of access.
+  // Invite. With an email: the platform route (create_invite) + register their number
+  // active so they can send the moment they join. Without an email: a WhatsApp-only
+  // invite — wa_invite_number pre-registers the number INACTIVE ('invited'); it
+  // self-activates the moment they first message Briklay (no proactive template, no
+  // wait). One form, two kinds of access.
   const invite = useMutation({
     mutationFn: async () => {
-      if (!emailOk) throw new Error('Enter a valid email address');
       if (!phoneOk) throw new Error('Enter their WhatsApp number');
-      const { data: u } = await supabase.auth.getUser();
-      const { data, error } = await supabase.rpc('create_invite', {
-        p_org_id: orgId,
-        p_email: email.trim().toLowerCase(),
-        p_role: role,
-        p_invited_by: u.user?.id,
-      }).single();
+      const nm = name.trim();
+
+      if (emailProvided) {
+        if (!emailOk) throw new Error('Enter a valid email address');
+        const { data: u } = await supabase.auth.getUser();
+        const { data, error } = await supabase.rpc('create_invite', {
+          p_org_id: orgId,
+          p_email: email.trim().toLowerCase(),
+          p_role: role,
+          p_invited_by: u.user?.id,
+        }).single();
+        if (error) throw error;
+        const row = data as { token: string; success: boolean; error: string | null };
+        if (!row.success) throw new Error(row.error ?? 'Could not create the invite');
+        // register the number for WhatsApp send-access; a duplicate number is harmless
+        const { error: waErr } = await supabase.from('wa_registered_numbers')
+          .insert({ name: nm || email.trim(), phone_number: intlPhone(phone), role: roleLabel(role), is_active: true });
+        if (waErr && !/duplicate|unique/i.test(waErr.message)) throw waErr;
+        return { link: inviteLinkFor(row.token), phone: digits(phone), mode: 'email' as const, name: nm };
+      }
+
+      // WhatsApp-only: pre-register the number as 'invited' (inactive). The inbound
+      // webhook flips it active + welcomes them on their first message.
+      const { error } = await supabase.rpc('wa_invite_number', {
+        p_phone: intlPhone(phone), p_name: nm || null, p_role: roleLabel(role),
+      });
       if (error) throw error;
-      const row = data as { token: string; success: boolean; error: string | null };
-      if (!row.success) throw new Error(row.error ?? 'Could not create the invite');
-      // register the number for WhatsApp send-access; a duplicate number is harmless
-      const { error: waErr } = await supabase.from('wa_registered_numbers')
-        .insert({ name: name.trim() || email.trim(), phone_number: digits(phone), role: roleLabel(role), is_active: true });
-      if (waErr && !/duplicate|unique/i.test(waErr.message)) throw waErr;
-      return { link: inviteLinkFor(row.token), phone: digits(phone) };
+      return { phone: digits(phone), mode: 'wa' as const, name: nm };
     },
     onSuccess: (r) => { setResult(r); refresh(); },
     onError: (e: any) => show(e.message || 'Could not send the invite', { type: 'error' }),
@@ -437,7 +521,7 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
               <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (optional)" className="w-full px-3 py-2 rounded-lg outline-none" style={{ background: V.field, color: V.ink, ...font, ...T.sm }} />
               <div className="inline-flex items-center gap-2 px-3 rounded-lg w-full" style={{ background: V.field, height: 40 }}>
                 <Mail size={14} style={{ color: V.faint }} />
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email address" className="bg-transparent outline-none flex-1" style={{ color: V.ink, ...font, ...T.sm }} />
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email address (optional)" className="bg-transparent outline-none flex-1" style={{ color: V.ink, ...font, ...T.sm }} />
               </div>
               <div className="inline-flex items-center gap-2 px-3 rounded-lg w-full" style={{ background: V.field, height: 40 }}>
                 <WhatsAppGlyph size={13} color={WA} />
@@ -447,32 +531,51 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
               <select value={role} onChange={(e) => setRole(e.target.value)} className="w-full px-3 py-2 rounded-lg outline-none" style={{ background: V.field, color: V.ink, ...font, ...T.sm }}>
                 {INVITE_ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
               </select>
-              <p style={{ color: V.faint, ...font, ...T.xs }}>They get a join link, and their number can send to Briklay on WhatsApp.</p>
+              <p style={{ color: V.faint, ...font, ...T.xs }}>
+                {emailProvided
+                  ? 'They get a join link, and their number can send to Briklay on WhatsApp.'
+                  : 'WhatsApp-only — no email needed. They go live the moment they send their first message to Briklay.'}
+              </p>
               <div className="flex gap-2 pt-1">
                 <button onClick={resetForm} className="flex-1 py-2 rounded-lg" style={{ border: `1px solid ${V.line}`, color: V.sys, ...font, ...T.sm }}>Cancel</button>
-                <button disabled={!emailOk || !phoneOk || invite.isPending} onClick={() => invite.mutate()} className="flex-1 py-2 rounded-lg font-medium" style={{ background: terraGrad, color: '#fff', opacity: emailOk && phoneOk ? 1 : 0.5, ...font, ...T.sm }}>
-                  {invite.isPending ? 'Inviting…' : 'Send invite'}
+                <button disabled={!canInvite || invite.isPending} onClick={() => invite.mutate()} className="flex-1 py-2 rounded-lg font-medium" style={{ background: terraGrad, color: '#fff', opacity: canInvite ? 1 : 0.5, ...font, ...T.sm }}>
+                  {invite.isPending ? 'Inviting…' : emailProvided ? 'Send invite' : 'Add to WhatsApp'}
                 </button>
               </div>
             </div>
           )}
 
-          {result && (
+          {result && result.mode === 'email' && (
             <div className="rounded-xl p-3.5 db-drop" style={{ background: V.surface, border: '1px solid #E3DDD4' }}>
               <p className="inline-flex items-center gap-1.5 font-medium" style={{ color: V.ink, ...font, ...T.sm }}>
                 <span className="w-5 h-5 rounded-full inline-flex items-center justify-center db-pop" style={{ background: V.sageWash }}><Check size={12} color={V.sage} strokeWidth={3} /></span>
                 Invite ready
               </p>
               <p className="mt-1.5 leading-relaxed" style={{ color: V.sys, ...font, ...T.xs }}>Share this link so they can join. Their WhatsApp number can already send to Briklay.</p>
-              <button onClick={() => copyLink(result.link)} className="mt-3 w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg" style={{ background: V.field, color: V.inkSoft, ...font, ...T.xs }}>
+              <button onClick={() => result.link && copyLink(result.link)} className="mt-3 w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg" style={{ background: V.field, color: V.inkSoft, ...font, ...T.xs }}>
                 <span className="truncate">{result.link}</span>
                 {copied ? <Check size={14} style={{ color: V.sage, flexShrink: 0 }} /> : <Copy size={13} style={{ color: V.faint, flexShrink: 0 }} />}
               </button>
               <div className="flex gap-2 mt-2.5">
-                <a href={waInviteUrl(result.phone, result.link)} target="_blank" rel="noopener noreferrer" className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-lg font-medium" style={{ background: 'rgba(37,211,102,0.16)', color: WA, ...font, ...T.sm }}>
+                <a href={waInviteUrl(result.phone, result.link!)} target="_blank" rel="noopener noreferrer" className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-lg font-medium" style={{ background: 'rgba(37,211,102,0.16)', color: WA, ...font, ...T.sm }}>
                   <WhatsAppGlyph size={14} color={WA} /> Send on WhatsApp
                 </a>
                 <button onClick={resetForm} className="px-4 py-2 rounded-lg" style={{ border: `1px solid ${V.line}`, color: V.sys, ...font, ...T.sm }}>Done</button>
+              </div>
+            </div>
+          )}
+
+          {result && result.mode === 'wa' && (
+            <div className="rounded-xl p-3.5 db-drop" style={{ background: V.surface, border: '1px solid #E3DDD4' }}>
+              <p className="inline-flex items-center gap-1.5 font-medium" style={{ color: V.ink, ...font, ...T.sm }}>
+                <span className="w-5 h-5 rounded-full inline-flex items-center justify-center db-pop" style={{ background: V.sageWash }}><Check size={12} color={V.sage} strokeWidth={3} /></span>
+                Added to WhatsApp
+              </p>
+              <p className="mt-1.5 leading-relaxed" style={{ color: V.sys, ...font, ...T.xs }}>
+                <span style={{ ...nums }}>+91 {prettyPhone(result.phone)}</span>{result.name ? ` · ${result.name}` : ''} goes live the moment they send their first WhatsApp message to Briklay — Briklay greets them automatically. Share “Start on WhatsApp” so they can say hello.
+              </p>
+              <div className="flex gap-2 mt-2.5">
+                <button onClick={resetForm} className="flex-1 py-2 rounded-lg font-medium" style={{ background: terraGrad, color: '#fff', ...font, ...T.sm }}>Done</button>
               </div>
             </div>
           )}

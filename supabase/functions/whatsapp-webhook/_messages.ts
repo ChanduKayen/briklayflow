@@ -323,3 +323,34 @@ export function mNotRegistered(lang: Lang): OutMessage {
 export function mNoOrg(lang: Lang): OutMessage {
   return { kind: 'text', body: pick(lang, { en: "Your account isn't fully set up yet. Please contact your manager." }) }
 }
+
+/** Sender row exists but is switched off (and not an 'invited' self-activation row). */
+export function mAccessPaused(lang: Lang): OutMessage {
+  return { kind: 'text', body: pick(lang, {
+    en: "Your WhatsApp access is paused right now. Ask your manager to turn it back on.",
+    te: "మీ వాట్సాప్ యాక్సెస్ ప్రస్తుతం నిలిపివేయబడింది. మీ మేనేజర్‌ను మళ్లీ ఆన్ చేయమని అడగండి.",
+    hi: "आपकी WhatsApp एक्सेस अभी रुकी हुई है। अपने मैनेजर से इसे दोबारा चालू करने को कहें।",
+  }) }
+}
+
+// ── First-contact prefixes (folded into a member's first-touch / dormant reply) ──
+// Returned as plain strings (not OutMessage): the dispatcher passes them as the
+// `prefix`/`welcomePrefix` an agent folds into its single reply, so a brand-new
+// teammate who logs a payment on their first message gets ONE message — the
+// confirmation, led by a welcome — never a separate greeting they must scroll past.
+
+/** "Welcome aboard, Ramu! ✓" — prepended to a member's very first reply. */
+export function welcomePrefix(lang: Lang, p: { name?: string | null }): string {
+  const first = (p.name ?? '').trim().split(/\s+/)[0]
+  const named = first ? `, ${first}` : ''
+  return pick(lang, {
+    en: `Welcome aboard${named}! 👋`,
+    te: `స్వాగతం${named}! 👋`,
+    hi: `स्वागत है${named}! 👋`,
+  })
+}
+
+/** "Welcome back! 👋" — prepended when a dormant member returns. */
+export function welcomeBack(lang: Lang): string {
+  return pick(lang, { en: 'Welcome back! 👋', te: 'మళ్లీ స్వాగతం! 👋', hi: 'वापसी पर स्वागत है! 👋' })
+}

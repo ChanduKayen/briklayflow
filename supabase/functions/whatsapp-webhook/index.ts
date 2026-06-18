@@ -12,7 +12,12 @@ import {
 import { send, sendTypingIndicator } from './_format.ts'
 import { normalize } from './_normalize.ts'
 import { dispatch } from './_dispatch.ts'
+import { runConcierge } from './_agents/concierge.ts'
 import * as M from './_messages.ts'
+
+// A member who hasn't been active in this long gets a light "welcome back" on their
+// next message (computed from wa_message_log; orientation supersedes it on first touch).
+const DORMANT_MS = 14 * 24 * 60 * 60 * 1000
 // Pre-dispatch edge replies have no router language yet -> default 'en' templates.
 // Sprint 3: the 4-way router + dispatcher supersede _classify.ts (no longer in the
 // live path). Legacy _handlers/_session are reached only via the dispatcher's bridge.
@@ -129,9 +134,17 @@ serve(async (req) => {
           console.error('[wa-webhook] background processing error (recovered by watchdog/outbox):', err),
         ),
       )
-    } else if (inbound.kind === 'unregistered') {
+    } else if (inbound.kind === 'prospect') {
+      // Unknown number: greet + nudge in the background (an LLM call shouldn't delay
+      // the 200). Idempotent — the wamid dedup gate above means this runs at most once.
+      EdgeRuntime.waitUntil(
+        handleProspect(supabase, inbound.from, inbound.text, inbound.wamid).catch((err) =>
+          console.error('[wa-webhook] prospect handling error:', err),
+        ),
+      )
+    } else if (inbound.kind === 'paused') {
       // Durable reply via the outbox (enqueued before the 200).
-      await send(supabase, inbound.from, M.mNotRegistered('en'))
+      await send(supabase, inbound.from, M.mAccessPaused('en'))
     } else if (inbound.kind === 'no_org') {
       await send(supabase, inbound.from, M.mNoOrg('en'))
     }
@@ -151,7 +164,8 @@ serve(async (req) => {
 type Inbound =
   | { kind: 'ignore' }
   | { kind: 'duplicate' }
-  | { kind: 'unregistered'; from: string }
+  | { kind: 'prospect'; from: string; text: string; wamid: string }   // unknown number → greet + nudge
+  | { kind: 'paused'; from: string }                    // registered but switched off (not an invite)
   | { kind: 'no_org'; from: string }
   | {
       kind: 'ready'
@@ -163,6 +177,8 @@ type Inbound =
       messageId: string
       jobId: string | null
       orgId: string
+      firstTouch: boolean   // member's first-ever contact (oriented_at was NULL)
+      dormant: boolean      // returning after a long gap (welcome-back, not orientation)
     }
 
 async function recordInbound(
@@ -199,20 +215,59 @@ async function recordInbound(
     wa_message_id: messageId,
   })
 
-  // Registration + org resolution (T1.6).
-  const { data: registered } = await supabase
+  // Registration + org resolution (T1.6). Fetch REGARDLESS of is_active so we can
+  // tell three things apart that all used to look "unregistered": an unknown number
+  // (no row), a pre-registered 'invited' number that self-activates here, and a row
+  // a manager switched off (paused — must NOT auto-reactivate).
+  let registered: any = (await supabase
     .from('wa_registered_numbers')
     .select('*')
     .eq('phone_number', from)
-    .eq('is_active', true)
-    .maybeSingle()
-  if (!registered) return { kind: 'unregistered', from }
+    .maybeSingle()).data
+
+  const text = (message.text?.body ?? '') as string
+  if (!registered) return { kind: 'prospect', from, text, wamid: messageId }
+
+  if (!registered.is_active) {
+    if (registered.invite_status === 'invited') {
+      // Self-activation: the teammate's first inbound opens Meta's 24h window. Flip
+      // them active durably (before the ack) so the rest of the pipeline treats this
+      // as a first-touch member. oriented_at stays NULL → the dispatcher orients them.
+      const { data: activated } = await supabase
+        .from('wa_registered_numbers')
+        .update({ is_active: true, invite_status: 'active' })
+        .eq('id', registered.id)
+        .select('*')
+        .single()
+      registered = activated ?? { ...registered, is_active: true, invite_status: 'active' }
+      console.log('[wa-webhook] invited number self-activated on first contact:', from)
+    } else {
+      // Switched off (and not an invite) — silent to Meta cost, one gentle reply.
+      return { kind: 'paused', from }
+    }
+  }
 
   // Never write an un-orged row: a registered number with no resolvable org is quarantined.
-  const orgId: string | null = (registered as any).org_id ?? null
+  const orgId: string | null = registered.org_id ?? null
   if (!orgId) {
     console.error('[wa-webhook] registered number has no org_id; quarantining:', from)
     return { kind: 'no_org', from }
+  }
+
+  // First-touch (orientation) + dormancy (welcome-back) flags for the dispatcher.
+  const firstTouch = !registered.oriented_at
+  let dormant = false
+  if (!firstTouch) {
+    const { data: prior } = await supabase
+      .from('wa_message_log')
+      .select('created_at')
+      .eq('phone_number', from)
+      .eq('direction', 'IN')
+      .neq('wa_message_id', messageId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    dormant = !!prior?.created_at && (Date.now() - new Date(prior.created_at as string).getTime() > DORMANT_MS)
   }
 
   // processing_job (T1.2): created PROCESSING, wamid-unique (idempotent alongside dedup).
@@ -236,8 +291,40 @@ async function recordInbound(
   return {
     kind: 'ready',
     message, from, senderName: registered.name as string, registered,
-    messageType, messageId, jobId, orgId,
+    messageType, messageId, jobId, orgId, firstTouch, dormant,
   }
+}
+
+// ── Prospect handling (unknown number — greet, capture as a lead, nudge once) ────
+// Runs in the background (after the durable dedup record + the 200). wa_prospect_touch
+// upserts the lead, charges one reply slot against the daily cap, and tells us if this
+// is a first touch. Capped → stay silent (cost / Meta-quality guard). Otherwise the
+// concierge replies warmly in prospect mode (first touch also nudges them to sign up).
+async function handleProspect(
+  supabase: ReturnType<typeof createClient>,
+  from: string,
+  text: string,
+  wamid: string,
+): Promise<void> {
+  const { data, error } = await supabase.rpc('wa_prospect_touch', { p_phone: from, p_text: text })
+  if (error) { console.error('[wa-webhook] wa_prospect_touch error:', error); return }
+  const row = Array.isArray(data) ? data[0] : data
+  if (row?.capped) {
+    console.log('[wa-webhook] prospect daily cap reached, staying silent:', from)
+    return
+  }
+  await runConcierge(supabase, {
+    from, orgId: null, wamid, text, language: guessLang(text), mode: 'prospect',
+    prospect: { firstTouch: !!row?.first_touch },
+  })
+}
+
+/** Cheap script-based language guess for senders with no router context (prospects).
+ *  Romanized Telugu/Hindi can't be detected from script → 'en' (the LLM still mirrors). */
+function guessLang(text: string): 'en' | 'te' | 'hi' {
+  if (/[ఀ-౿]/.test(text)) return 'te'   // Telugu block
+  if (/[ऀ-ॿ]/.test(text)) return 'hi'   // Devanagari
+  return 'en'
 }
 
 // ── Background processing (kept alive by EdgeRuntime.waitUntil) ──────────────────
@@ -247,7 +334,7 @@ async function processJob(
   supabase: ReturnType<typeof createClient>,
   inbound: Extract<Inbound, { kind: 'ready' }>,
 ): Promise<void> {
-  const { message, from, senderName, registered, messageId, jobId, orgId } = inbound
+  const { message, from, senderName, registered, messageId, jobId, orgId, firstTouch, dormant } = inbound
 
   // Typing indicator: inline, best-effort, fire-and-forget. Never affects the job.
   if (messageId) sendTypingIndicator(messageId).catch(() => {})
@@ -287,7 +374,7 @@ async function processJob(
   const lockKey = messageId || from
   await acquireSenderLock(supabase, from, lockKey)
   try {
-    await dispatch({ supabase, from, senderName, registered, wamid: messageId, orgId, interactiveId, image: norm.image }, norm.text)
+    await dispatch({ supabase, from, senderName, registered, wamid: messageId, orgId, interactiveId, image: norm.image, firstTouch, dormant }, norm.text)
     if (jobId) await markJob(supabase, jobId, 'WRITTEN')
   } catch (e) {
     console.error('[wa-webhook] processing error:', e)
