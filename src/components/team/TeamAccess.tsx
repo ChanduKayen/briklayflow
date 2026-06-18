@@ -678,7 +678,7 @@ export default function TeamAccess({ session }: { session: Session }) {
                 </>
               ) : (
                 <p className="mt-1.5 leading-relaxed" style={{ color: V.sys, ...font, ...T.xs }}>
-                  <span style={{ ...nums }}>+91 {prettyPhone(result.phone)}</span>{result.name ? ` · ${result.name}` : ''} goes live the moment they send their first WhatsApp message to Briklay — Babai greets them automatically.
+                  <span style={{ ...nums }}>+91 {prettyPhone(result.phone)}</span>{result.name ? ` · ${result.name}` : ''} goes live the moment they send their first WhatsApp message to Briklay — they're greeted automatically.
                 </p>
               )}
               <div className="flex gap-2 mt-3">

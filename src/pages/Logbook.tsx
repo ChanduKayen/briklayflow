@@ -26,7 +26,6 @@ import { V, font, serif, nums, terraGrad, T } from '../components/day-book/token
 import { ANIM, hasRevealed, markRevealed } from '../components/day-book/motion';
 import { prefersReducedMotion } from '../components/day-book/useSwipeTriage';
 import { WhatsAppGlyph } from '../components/day-book/atoms';
-import { Babai } from '../components/day-book/Babai';
 import { Invitation, ManageTeam } from '../components/day-book/Invitation';
 import { StartOnWhatsApp } from '../components/day-book/StartOnWhatsApp';
 import { ReviewCard, type StakeholderLite, type ProjectLite } from '../components/day-book/ReviewCard';
@@ -189,10 +188,7 @@ export default function Logbook({ session }: { session: Session }) {
       <Invitation canManage={canManage} />
 
       <div className="mx-auto py-6 sm:py-8" style={{ width: '92%', maxWidth: 1100 }}>
-        <div className="flex items-center gap-2.5">
-          <Babai size={48} alt="Babai, Briklay's bookkeeper" />
-          <h1 style={{ color: V.ink, ...serif, ...T.h1 }}>Day book</h1>
-        </div>
+        <h1 style={{ color: V.ink, ...serif, ...T.h1 }}>Day book</h1>
         <p className="mt-2 leading-relaxed flex flex-wrap items-center gap-x-1.5" style={{ color: V.sys, ...font, ...T.body }}>
           Everything you and your team sent to Briklay on
           <span className="inline-flex items-center gap-1 font-medium" style={{ color: V.inkSoft }}>
@@ -238,12 +234,14 @@ export default function Logbook({ session }: { session: Session }) {
               tab === 'review' ? (
                 entries.length === 0 ? (
                   // never used yet — show a lay builder, in plain words, how it works
-                  <div className="text-center py-12 mx-auto db-fade" style={{ maxWidth: 460 }}>
-                    <Babai size={116} variant="hero" alt="Babai, your Briklay bookkeeper" />
-                    <p className="mt-4" style={{ color: V.ink, ...serif, fontSize: '1.3rem' }}>Meet Babai, your bookkeeper</p>
+                  <div className="text-center py-12 mx-auto" style={{ maxWidth: 420 }}>
+                    <span className="inline-flex items-center justify-center w-12 h-12 rounded-full" style={{ background: V.field }}>
+                      <WhatsAppGlyph size={20} color="#1FA855" />
+                    </span>
+                    <p className="mt-4" style={{ color: V.ink, ...serif, fontSize: '1.15rem' }}>Nothing to review yet</p>
                     <p className="text-sm mt-2 leading-relaxed" style={{ color: V.sys, ...font }}>
-                      Send him a payment or a bill on WhatsApp — a photo or a few words is enough.
-                      He lines each one up here for you to check, and files it into your books when you're ready.
+                      Send your payments and bills to Briklay on WhatsApp. A photo or a few words is enough.
+                      They wait here for you to check, and go into your books whenever you get a minute.
                     </p>
                     {canManage && (
                       <div className="mt-5 flex flex-col items-center gap-2.5">
@@ -257,10 +255,7 @@ export default function Logbook({ session }: { session: Session }) {
                     )}
                   </div>
                 ) : (
-                  <div className="text-center py-12 db-fade">
-                    <Babai size={56} alt="" />
-                    <p className="mt-3" style={{ color: V.sys, ...font, ...T.sm }}>All caught up — your books match your site.</p>
-                  </div>
+                  <p className="text-center py-12" style={{ color: V.faint, ...font, ...T.sm }}>All caught up. Your books match your site.</p>
                 )
               ) : (
                 <p className="text-center py-12" style={{ color: V.faint, ...font, ...T.sm }}>
