@@ -14,7 +14,7 @@
  * The number is hardcoded (it doesn't change) — the single source of truth, so a
  * stale VITE_BRIKLAY_WA_NUMBER in the deploy env can't override it.
  */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { X, Copy, ExternalLink, Check } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { V, font, serif, nums, terraGrad, T } from './tokens';
@@ -49,6 +49,42 @@ export function StartOnWhatsApp({ onClose, onManageTeam }: { onClose: () => void
   const copy = () => {
     navigator.clipboard?.writeText(pretty).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }).catch(() => { /* noop */ });
   };
+
+  // On a phone, a QR you'd scan with the same device is useless — open WhatsApp
+  // directly instead. We still wait a beat for the claim token so the number gets
+  // self-registered, then navigate (a navigation, not a popup, so it's never blocked).
+  const isMobile = useMemo(() => /android|iphone|ipad|ipod|iemobile|mobile/i.test(navigator.userAgent), []);
+  const redirected = useRef(false);
+  const openDirect = useCallback(() => {
+    if (redirected.current || !waUrl) return;
+    redirected.current = true;
+    window.location.href = waUrl;
+  }, [waUrl]);
+  useEffect(() => {
+    if (!isMobile || !digits) return;
+    if (token) { openDirect(); return; }      // token ready → go now
+    const t = setTimeout(openDirect, 1500);     // otherwise go shortly regardless
+    return () => clearTimeout(t);
+  }, [isMobile, token, digits, openDirect]);
+
+  if (isMobile && digits) {
+    return (
+      <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: 'rgba(30,26,21,0.4)' }} onClick={onClose}>
+        <div className="db-drop w-full rounded-2xl p-6 text-center" style={{ maxWidth: 320, background: V.surface, border: '1px solid #E3DDD4', boxShadow: '0 20px 50px rgba(30,26,21,0.22)' }} onClick={(e) => e.stopPropagation()}>
+          <span className="w-11 h-11 rounded-2xl inline-flex items-center justify-center" style={{ background: 'rgba(37,211,102,0.12)' }}>
+            <WhatsAppGlyph size={20} />
+          </span>
+          <p className="mt-3" style={{ color: V.ink, ...serif, fontSize: '1.15rem' }}>Opening WhatsApp…</p>
+          <p className="mt-1.5 leading-relaxed" style={{ color: V.sys, ...font, ...T.sm }}>
+            If it doesn't open on its own, tap below. The number you message from is saved as your Briklay number.
+          </p>
+          <a href={waUrl} className="mt-4 w-full inline-flex items-center justify-center gap-2 py-2.5 rounded-xl font-medium" style={{ background: terraGrad, color: '#fff', ...font, ...T.sm }}>
+            Open WhatsApp <ExternalLink size={14} />
+          </a>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" style={{ background: 'rgba(30,26,21,0.4)' }} onClick={onClose}>
