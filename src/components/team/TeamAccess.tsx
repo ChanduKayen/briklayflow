@@ -388,9 +388,13 @@ export default function TeamAccess({ session }: { session: Session }) {
   });
 
   const { data: senders = [] } = useQuery({
-    queryKey: ['wa_registered_numbers'],
+    queryKey: ['wa_registered_numbers', orgId],
+    enabled: !!orgId,
     queryFn: async () => {
-      const { data, error } = await supabase.from('wa_registered_numbers').select('*').order('created_at', { ascending: false });
+      const { data, error } = await supabase
+        .from('wa_registered_numbers').select('*')
+        .eq('org_id', orgId)                 // tenant isolation — only this org's senders
+        .order('created_at', { ascending: false });
       if (error) throw error;
       return (data ?? []) as WaContact[];
     },

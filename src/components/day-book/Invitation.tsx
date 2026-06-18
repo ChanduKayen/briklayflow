@@ -69,13 +69,15 @@ const INVITE_ROLES = [
 interface OrgMember { id: string; name: string; role: string }
 interface PendingInvite { invite_id: string; email: string; role: string; token: string; expires_at: string }
 
-function useTeam() {
+function useTeam(orgId: string) {
   return useQuery({
-    queryKey: ['wa_registered_numbers'],
+    queryKey: ['wa_registered_numbers', orgId],
+    enabled: !!orgId,
     queryFn: async () => {
       const { data, error } = await supabase
         .from('wa_registered_numbers')
         .select('*')
+        .eq('org_id', orgId)                 // tenant isolation — only this org's senders
         .order('created_at', { ascending: false });
       if (error) throw error;
       return (data ?? []) as WaContact[];
@@ -395,7 +397,7 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
   const orgId = useOrgId();
   const { data: members = [] } = useOrgMembers(orgId);
   const { data: invites = [] } = usePendingInvites(orgId);
-  const { data: senders = [] } = useTeam();
+  const { data: senders = [] } = useTeam(orgId);
 
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
@@ -771,7 +773,8 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
 
 // ── The banner ──────────────────────────────────────────────────────────────────
 export function Invitation({ canManage }: { canManage: boolean }) {
-  const { data: team = [] } = useTeam();
+  const orgId = useOrgId();
+  const { data: team = [] } = useTeam(orgId);
   const [manage, setManage] = useState(false);
   const [startWa, setStartWa] = useState(false);
 

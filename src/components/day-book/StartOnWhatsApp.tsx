@@ -14,8 +14,9 @@
  * The number is hardcoded (it doesn't change) — the single source of truth, so a
  * stale VITE_BRIKLAY_WA_NUMBER in the deploy env can't override it.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X, Copy, ExternalLink, Check } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
 import { V, font, serif, nums, terraGrad, T } from './tokens';
 import { WhatsAppGlyph } from './atoms';
 
@@ -26,10 +27,24 @@ export function StartOnWhatsApp({ onClose, onManageTeam }: { onClose: () => void
   // source of truth: no env override, so a stale VITE_BRIKLAY_WA_NUMBER can't win.
   const raw = '+91 7330872705';
   const digits = onlyDigits(raw);
-  const waUrl = digits ? `https://wa.me/${digits}?text=${encodeURIComponent('Hi Briklay')}` : '';
+  const [copied, setCopied] = useState(false);
+
+  // Mint a one-time-window claim token so the number that messages from here is
+  // auto-registered into this org (no "you're not registered" wall). The whole
+  // surface still works without it (plain "Hi Briklay") if the call fails.
+  const [token, setToken] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    supabase.rpc('wa_create_link_token').then(({ data, error }) => {
+      if (alive && !error && typeof data === 'string') setToken(data);
+    });
+    return () => { alive = false; };
+  }, []);
+
+  const message = token ? `Hi Briklay! Please add me to my team.\n\nJoin code: ${token}` : 'Hi Briklay';
+  const waUrl = digits ? `https://wa.me/${digits}?text=${encodeURIComponent(message)}` : '';
   const qrUrl = digits ? `https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=12&data=${encodeURIComponent(waUrl)}` : '';
   const pretty = digits ? `+${digits}` : '';
-  const [copied, setCopied] = useState(false);
 
   const copy = () => {
     navigator.clipboard?.writeText(pretty).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }).catch(() => { /* noop */ });
@@ -51,7 +66,7 @@ export function StartOnWhatsApp({ onClose, onManageTeam }: { onClose: () => void
         {digits ? (
           <>
             <p className="mt-3 leading-relaxed" style={{ color: V.sys, ...font, ...T.sm }}>
-              Scan this with your phone's camera, or tap Open WhatsApp. Say hi, and Briklay says hi back. Then send your payments and bills the same way.
+              Scan this with your phone's camera, or tap Open WhatsApp. The number you message from is added to your team automatically — then just send your payments and bills the same way.
             </p>
 
             <div className="mt-4 flex justify-center">
@@ -76,7 +91,7 @@ export function StartOnWhatsApp({ onClose, onManageTeam }: { onClose: () => void
 
         {onManageTeam && (
           <button onClick={onManageTeam} className="mt-4 w-full text-center" style={{ color: V.faint, ...font, ...T.xs }}>
-            Only people you have added can send. Manage who can send →
+            See who's on your team →
           </button>
         )}
       </div>

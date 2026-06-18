@@ -226,6 +226,26 @@ async function recordInbound(
     .maybeSingle()).data
 
   const text = (message.text?.body ?? '') as string
+
+  // Self-registration: a "Start on WhatsApp" message carries a one-time claim token
+  // (BK-XXXXXXXX) tied to the org of the signed-in person who tapped it. An unknown
+  // sender presenting a valid token is registered into that org here — so a teammate
+  // redirected from the platform is greeted, never met with "you're not registered".
+  if (!registered) {
+    const token = text.match(/BK-[0-9A-Fa-f]{6,}/i)?.[0]
+    if (token) {
+      const waName = (body as any)?.entry?.[0]?.changes?.[0]?.value?.contacts?.[0]?.profile?.name ?? null
+      const { data: claim, error: claimErr } = await supabase.rpc('wa_claim_link_token', {
+        p_phone: from, p_token: token.toUpperCase(), p_wa_name: waName,
+      })
+      if (claimErr) console.error('[wa-webhook] wa_claim_link_token error:', claimErr)
+      if ((claim as any)?.ok) {
+        console.log('[wa-webhook] number self-registered via Start-on-WhatsApp token:', from)
+        registered = (await supabase.from('wa_registered_numbers').select('*').eq('phone_number', from).maybeSingle()).data
+      }
+    }
+  }
+
   if (!registered) return { kind: 'prospect', from, text, wamid: messageId }
 
   if (!registered.is_active) {
