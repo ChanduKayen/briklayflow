@@ -14,7 +14,7 @@
  * The number is hardcoded (it doesn't change) — the single source of truth, so a
  * stale VITE_BRIKLAY_WA_NUMBER in the deploy env can't override it.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { X, Copy, ExternalLink, Check } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { V, font, serif, nums, terraGrad, T } from './tokens';
@@ -50,31 +50,36 @@ export function StartOnWhatsApp({ onClose, onManageTeam }: { onClose: () => void
     navigator.clipboard?.writeText(pretty).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }).catch(() => { /* noop */ });
   };
 
-  // On a phone, a QR you'd scan with the same device is useless — go straight to
-  // WhatsApp. We wait a brief, graceful beat for the claim token (so the number
-  // self-registers), then navigate (a navigation, not a popup → never blocked).
+  // On a phone, a QR you'd scan with the same device is useless — open WhatsApp
+  // directly. Many people have BOTH WhatsApp and WhatsApp Business installed, and
+  // the number they send from depends on which one — so let them pick. On Android
+  // each app is targetable by package; iOS can't target Business, so it gets one.
   const isMobile = useMemo(() => /android|iphone|ipad|ipod|iemobile|mobile/i.test(navigator.userAgent), []);
-  const redirected = useRef(false);
-  const openDirect = useCallback(() => {
-    if (redirected.current || !waUrl) return;
-    redirected.current = true;
-    window.location.href = waUrl;
-  }, [waUrl]);
-  useEffect(() => {                                   // hard cap — never linger on the loader
-    if (!isMobile || !digits) return;
-    const cap = setTimeout(openDirect, 1600);
-    return () => clearTimeout(cap);
-  }, [isMobile, digits, openDirect]);
-  useEffect(() => {                                   // token ready → a gentle beat, then go
-    if (!isMobile || !token) return;
-    const t = setTimeout(openDirect, 700);
+  const isAndroid = useMemo(() => /android/i.test(navigator.userAgent), []);
+  // Hold the action until the claim token is in the link, so the number self-registers.
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    if (token) { setReady(true); return; }
+    const t = setTimeout(() => setReady(true), 1200);   // proceed anyway if the mint is slow
     return () => clearTimeout(t);
-  }, [isMobile, token, openDirect]);
+  }, [token]);
 
-  // Mobile: a calm hand-off, no controls — a soft pulse + a line, then it goes.
   if (isMobile && digits) {
+    const enc = encodeURIComponent(message);
+    const waMe = `https://wa.me/${digits}?text=${enc}`;
+    // Android intent that opens a SPECIFIC app, falling back to wa.me if not installed.
+    const intentFor = (pkg: string) =>
+      `intent://send?phone=${digits}&text=${enc}#Intent;scheme=whatsapp;package=${pkg};S.browser_fallback_url=${encodeURIComponent(waMe)};end`;
+    const btn = (href: string, label: string, primary: boolean) => (
+      <a href={href} className="w-full inline-flex items-center justify-center gap-2 py-3 rounded-xl font-medium"
+        style={primary
+          ? { background: '#25D366', color: '#fff', ...font, ...T.sm }
+          : { background: 'rgba(255,255,255,0.12)', color: '#fff', border: '1px solid rgba(255,255,255,0.28)', ...font, ...T.sm }}>
+        <WhatsAppGlyph size={16} color="#fff" /> {label}
+      </a>
+    );
     return (
-      <div className="fixed inset-0 z-[70] flex flex-col items-center justify-center p-8 db-fade" style={{ background: 'rgba(28,24,19,0.44)', backdropFilter: 'blur(2px)' }} onClick={onClose}>
+      <div className="fixed inset-0 z-[70] flex flex-col items-center justify-center p-8 db-fade" style={{ background: 'rgba(28,24,19,0.5)', backdropFilter: 'blur(2px)' }} onClick={onClose}>
         <style>{`
           @keyframes waSonar { 0% { transform: scale(.55); opacity: .55; } 100% { transform: scale(1.8); opacity: 0; } }
           @keyframes waBreath { 0%,100% { transform: scale(1); } 50% { transform: scale(1.05); } }
@@ -83,14 +88,38 @@ export function StartOnWhatsApp({ onClose, onManageTeam }: { onClose: () => void
           .wa-breath { animation: waBreath 2.6s ease-in-out infinite; }
           @media (prefers-reduced-motion: reduce) { .wa-sonar { display: none; } .wa-breath { animation: none; } }
         `}</style>
-        <div className="relative flex items-center justify-center" style={{ width: 76, height: 76 }}>
-          <span className="wa-sonar absolute rounded-full" style={{ inset: 0, border: '1.5px solid rgba(37,211,102,0.6)' }} />
-          <span className="wa-sonar d absolute rounded-full" style={{ inset: 0, border: '1.5px solid rgba(37,211,102,0.6)' }} />
-          <span className="wa-breath relative inline-flex items-center justify-center rounded-full" style={{ width: 54, height: 54, background: '#fff', boxShadow: '0 8px 22px rgba(37,211,102,0.30)' }}>
-            <WhatsAppGlyph size={26} />
-          </span>
+        <div className="flex flex-col items-center w-full" style={{ maxWidth: 320 }} onClick={(e) => e.stopPropagation()}>
+          <div className="relative flex items-center justify-center" style={{ width: 72, height: 72 }}>
+            <span className="wa-sonar absolute rounded-full" style={{ inset: 0, border: '1.5px solid rgba(37,211,102,0.6)' }} />
+            <span className="wa-sonar d absolute rounded-full" style={{ inset: 0, border: '1.5px solid rgba(37,211,102,0.6)' }} />
+            <span className="wa-breath relative inline-flex items-center justify-center rounded-full" style={{ width: 52, height: 52, background: '#fff', boxShadow: '0 8px 22px rgba(37,211,102,0.30)' }}>
+              <WhatsAppGlyph size={25} />
+            </span>
+          </div>
+
+          {!ready ? (
+            <p className="mt-6" style={{ color: 'rgba(255,255,255,0.92)', ...font, ...T.sm }}>Getting your link ready…</p>
+          ) : (
+            <div className="w-full mt-6 db-fade">
+              <p className="text-center mb-3" style={{ color: 'rgba(255,255,255,0.92)', ...font, ...T.sm }}>
+                {isAndroid ? 'Which WhatsApp do you use?' : 'Open WhatsApp to start'}
+              </p>
+              <div className="flex flex-col gap-2.5">
+                {isAndroid ? (
+                  <>
+                    {btn(intentFor('com.whatsapp'), 'WhatsApp', true)}
+                    {btn(intentFor('com.whatsapp.w4b'), 'WhatsApp Business', false)}
+                  </>
+                ) : (
+                  btn(waMe, 'Open WhatsApp', true)
+                )}
+              </div>
+              <p className="text-center mt-4 leading-relaxed" style={{ color: 'rgba(255,255,255,0.7)', ...font, ...T.xs }}>
+                The number you message from is saved as your Briklay number.
+              </p>
+            </div>
+          )}
         </div>
-        <p className="mt-6" style={{ color: 'rgba(255,255,255,0.92)', ...font, ...T.sm, letterSpacing: '0.01em' }}>Taking you to WhatsApp…</p>
       </div>
     );
   }
