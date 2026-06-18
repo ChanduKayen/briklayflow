@@ -229,37 +229,6 @@ function NumberEditor({ initial, onSave, onCancel }: {
 }
 
 /**
- * A legacy / phone-only sender row (not tied to a platform member). Toggle send
- * access, set voice language, and change the number inline.
- */
-function OtherSenderRow({ contact, onToggle, onLang, onChangeNumber }: {
-  contact: WaContact;
-  onToggle: () => void;
-  onLang: (lang: string | null) => void;
-  onChangeNumber: (phone: string) => Promise<void>;
-}) {
-  const [editing, setEditing] = useState(false);
-  return (
-    <div className="rounded-xl p-3" style={{ background: V.surface, border: '1px solid #E3DDD4', opacity: contact.is_active ? 1 : 0.55 }}>
-      <div className="flex items-center gap-3">
-        <div className="flex-1 min-w-0">
-          <p className="font-medium truncate" style={{ color: V.ink, ...font, ...T.sm }}>{contact.name || 'Site contact'}</p>
-          <p className="truncate mt-0.5 inline-flex items-center gap-1" style={{ color: V.sys, ...font, ...nums, ...T.xs }}>
-            <Phone size={10} style={{ color: V.faint }} /> +91 {prettyPhone(contact.phone_number)}
-            {!editing && (
-              <button onClick={() => setEditing(true)} aria-label="Change number" className="ml-1 shrink-0" style={{ color: V.faint }}><Pencil size={11} /></button>
-            )}
-          </p>
-        </div>
-        {!editing && VOICE_LANG_SELECT(contact.preferred_language ?? '', (v) => onLang(v || null))}
-        {!editing && <WaToggle on={contact.is_active} onClick={onToggle} />}
-      </div>
-      {editing && <NumberEditor initial={contact.phone_number} onSave={onChangeNumber} onCancel={() => setEditing(false)} />}
-    </div>
-  );
-}
-
-/**
  * One org member, with their WhatsApp send-eligibility inline. The unit of the
  * redesigned panel: name · number · toggle, with a number-capture step when no
  * number is on file, and a subtle select→success motion on grant (which also
@@ -419,8 +388,6 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
   // so nothing existing is lost; a name match just pre-fills the capture field.
   const senderForMember = (m: OrgMember) => senders.find((s) => s.user_id === m.id) ?? null;
   const suggestPhoneFor = (m: OrgMember) => local10(senders.find((s) => !s.user_id && norm(s.name) === norm(m.name))?.phone_number ?? '');
-  const memberNames = new Set(members.map((m) => norm(m.name)));
-  const otherSenders = senders.filter((s) => !s.user_id && !memberNames.has(norm(s.name)));
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['daybook_pending_invites'] });
@@ -586,14 +553,6 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
     onError: (e: any) => show(e.message || 'Could not revoke', { type: 'error' }),
   });
 
-  const toggle = useMutation({
-    mutationFn: async ({ id, next }: { id: string; next: boolean }) => {
-      const { error } = await supabase.from('wa_registered_numbers').update({ is_active: next }).eq('id', id);
-      if (error) throw error;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['wa_registered_numbers'] }),
-    onError: (e: any) => show(e.message || 'Could not update access', { type: 'error' }),
-  });
 
   const setLang = useMutation({
     mutationFn: async ({ id, lang }: { id: string; lang: string | null }) => {
@@ -747,24 +706,6 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
               Turning someone on lets their WhatsApp number send to Briklay, and sends them a one-time welcome. Turn it off when they leave the site — their history stays.
             </p>
           </div>
-
-          {/* legacy / phone-only senders not tied to a member — preserved, never lost */}
-          {otherSenders.length > 0 && (
-            <div className="mt-6">
-              <p className="uppercase font-medium mb-2" style={labelCaps}>Other site senders</p>
-              <div className="space-y-2">
-                {otherSenders.map((m) => (
-                  <OtherSenderRow
-                    key={m.id}
-                    contact={m}
-                    onToggle={() => toggle.mutate({ id: m.id, next: !m.is_active })}
-                    onLang={(lang) => setLang.mutate({ id: m.id, lang })}
-                    onChangeNumber={(ph) => changeNumber(m.id, ph)}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>

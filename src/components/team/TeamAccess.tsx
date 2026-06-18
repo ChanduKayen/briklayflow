@@ -315,29 +315,6 @@ function MemberCard({
   );
 }
 
-// ── legacy / phone-only sender ────────────────────────────────────────────────
-function OtherSenderRow({ contact, onToggle, onLang, onChangeNumber }: {
-  contact: WaContact; onToggle: () => void; onLang: (lang: string | null) => void; onChangeNumber: (phone: string) => Promise<void>;
-}) {
-  const [editing, setEditing] = useState(false);
-  return (
-    <div className="rounded-xl p-3 db-card" style={{ background: V.surface, opacity: contact.is_active ? 1 : 0.6 }}>
-      <div className="flex items-center gap-3">
-        <div className="flex-1 min-w-0">
-          <p className="font-medium truncate" style={{ color: V.ink, ...font, ...T.sm }}>{contact.name || 'Site contact'}</p>
-          <p className="truncate mt-0.5 inline-flex items-center gap-1" style={{ color: V.sys, ...font, ...nums, ...T.xs }}>
-            <Phone size={10} style={{ color: V.faint }} /> +91 {prettyPhone(contact.phone_number)}
-            {!editing && <button onClick={() => setEditing(true)} aria-label="Change number" className="ml-1 shrink-0" style={{ color: V.faint }}><Pencil size={11} /></button>}
-          </p>
-        </div>
-        {!editing && <VoiceLangSelect value={contact.preferred_language ?? ''} onChange={(v) => onLang(v || null)} />}
-        {!editing && <WaToggle on={contact.is_active} onClick={onToggle} />}
-      </div>
-      {editing && <NumberEditor initial={contact.phone_number} cta="Save" label="Change WhatsApp number" onSave={onChangeNumber} onCancel={() => setEditing(false)} />}
-    </div>
-  );
-}
-
 const labelCaps = { color: V.faint, letterSpacing: '0.09em', ...font, ...T.xs } as const;
 
 // ── page ──────────────────────────────────────────────────────────────────────
@@ -425,8 +402,6 @@ export default function TeamAccess({ session }: { session: Session }) {
   // ── derived ─────────────────────────────────────────────────────────────────
   const senderForMember = (m: Member) => senders.find((s) => s.user_id === m.id) ?? null;
   const suggestPhoneFor = (m: Member) => local10(senders.find((s) => !s.user_id && norm(s.name) === norm(m.name))?.phone_number ?? '');
-  const memberNames = new Set(members.map((m) => norm(m.name)));
-  const otherSenders = senders.filter((s) => !s.user_id && !memberNames.has(norm(s.name)));
   const principalCount = members.filter((m) => m.role === 'principal').length;
   const eligibleCount = members.filter((m) => senderForMember(m)?.is_active).length;
 
@@ -509,14 +484,6 @@ export default function TeamAccess({ session }: { session: Session }) {
     onError: (e: any) => show(e.message || 'Could not set voice language', { type: 'error' }),
   });
 
-  const toggleOther = useMutation({
-    mutationFn: async ({ id, next }: { id: string; next: boolean }) => {
-      const { error } = await supabase.from('wa_registered_numbers').update({ is_active: next }).eq('id', id);
-      if (error) throw error;
-    },
-    onSuccess: refreshWa,
-    onError: (e: any) => show(e.message || 'Could not update access', { type: 'error' }),
-  });
 
   // ── member admin actions ──────────────────────────────────────────────────
   const updateProfile = async (userId: string, updates: Record<string, unknown>) => {
@@ -743,20 +710,6 @@ export default function TeamAccess({ session }: { session: Session }) {
           </p>
         </div>
 
-        {/* ── Other site senders ───────────────────────────────────────────── */}
-        {otherSenders.length > 0 && (
-          <div className="mt-7 pb-4">
-            <p className="uppercase font-medium mb-2.5" style={labelCaps}>Other site senders</p>
-            <div className="space-y-2">
-              {otherSenders.map((m) => (
-                <OtherSenderRow key={m.id} contact={m}
-                  onToggle={() => toggleOther.mutate({ id: m.id, next: !m.is_active })}
-                  onLang={(lang) => setLang.mutate({ id: m.id, lang })}
-                  onChangeNumber={(ph) => changeNumber(m.id, ph)} />
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

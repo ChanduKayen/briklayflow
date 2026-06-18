@@ -97,15 +97,19 @@ BEGIN
   v_name := coalesce(v_tok.name, nullif(btrim(coalesce(p_wa_name, '')), ''));
 
   -- Register the sending number AS this member's number — linked to their user_id,
-  -- so they're recognised as that member, never a separate "other sender".
+  -- so they're recognised as that member, never a separate "other sender". A claim
+  -- (RE)ASSIGNS the number to the claimer's org + account: the person controls the
+  -- number (they sent from it), so it must belong to THEM — this also corrects a
+  -- number that was previously registered to the wrong org, so their future
+  -- transactions lodge to the right account.
   INSERT INTO public.wa_registered_numbers (phone_number, name, role, is_active, invite_status, org_id, user_id)
   VALUES (v_to, v_name, v_tok.role, true, 'active', v_tok.org_id, v_tok.user_id)
   ON CONFLICT (phone_number) DO UPDATE SET
     is_active     = true,
     invite_status = 'active',
-    org_id        = COALESCE(public.wa_registered_numbers.org_id, EXCLUDED.org_id),
-    user_id       = COALESCE(public.wa_registered_numbers.user_id, EXCLUDED.user_id),
-    name          = COALESCE(public.wa_registered_numbers.name, EXCLUDED.name);
+    org_id        = EXCLUDED.org_id,
+    user_id       = EXCLUDED.user_id,
+    name          = COALESCE(EXCLUDED.name, public.wa_registered_numbers.name);
 
   UPDATE public.wa_link_tokens SET used_at = now(), claimed_phone = v_to WHERE token = v_tok.token;
   RETURN jsonb_build_object('ok', true, 'org_id', v_tok.org_id);
