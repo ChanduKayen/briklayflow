@@ -106,6 +106,7 @@ const TONES = {
   wash: {
     glyph: true, arrow: false, fg: WA, err: '#F0A088', pad: null as string | null,
     vars: {
+      '--wa-fg': WA,
       '--wa-bg': 'rgba(37,211,102,0.16)', '--wa-bgh': 'rgba(37,211,102,0.26)', '--wa-bgi': 'rgba(37,211,102,0.20)',
       '--wa-bd': 'rgba(37,211,102,0.18)', '--wa-bdh': 'rgba(37,211,102,0.40)', '--wa-bdi': 'rgba(37,211,102,0.45)',
       '--wa-ifg': '#fff', '--wa-pfx': 'rgba(255,255,255,0.55)', '--wa-ph': 'rgba(255,255,255,0.38)',
@@ -116,6 +117,7 @@ const TONES = {
   solid: {
     glyph: true, arrow: false, fg: '#fff', err: V.terraDeep, pad: null as string | null,
     vars: {
+      '--wa-fg': '#fff',
       '--wa-bg': terraGrad, '--wa-bgh': terraGrad, '--wa-bgi': terraGrad,
       '--wa-bd': 'transparent', '--wa-bdh': 'transparent', '--wa-bdi': 'rgba(255,255,255,0.45)',
       '--wa-ifg': '#fff', '--wa-pfx': 'rgba(255,255,255,0.72)', '--wa-ph': 'rgba(255,255,255,0.5)',
@@ -126,6 +128,7 @@ const TONES = {
   link: {
     glyph: false, arrow: true, fg: V.terraDeep, err: V.terraDeep, pad: '3px 6px',
     vars: {
+      '--wa-fg': V.terraDeep,
       '--wa-bg': 'transparent', '--wa-bgh': 'rgba(143,51,24,0.07)', '--wa-bgi': V.field,
       '--wa-bd': 'transparent', '--wa-bdh': 'transparent', '--wa-bdi': V.line,
       '--wa-ifg': V.ink, '--wa-pfx': V.faint, '--wa-ph': V.faint,
