@@ -296,12 +296,12 @@ export function ackLine(lang: Lang, p: { payee: string | null; amount: number | 
 }
 
 export function mUnsupported(lang: Lang): OutMessage {
-  return { kind: 'text', body: pick(lang, { en: 'I can read text, photos and voice notes 👍\n\nSend me a payment like "Ramu 5000 cash" and I\'ll log it for you.' }) }
+  return { kind: 'text', body: pick(lang, { en: 'I can read text, photos and voice notes — send me a payment like "Ramu 5000 cash" and I\'ll file it for you.' }) }
 }
 
 /** Voice IS supported now -- this is a transcription miss, not "coming soon". */
 export function mVoiceUnclear(lang: Lang): OutMessage {
-  return { kind: 'text', body: pick(lang, { en: "🎙️ I couldn't quite catch that voice note.\n\nPlease try again, or just type it out." }) }
+  return { kind: 'text', body: pick(lang, { en: "I couldn't quite catch that voice note — please try again, or just type it out." }) }
 }
 
 /** Disambiguation: reply buttons (next turn resolves). */
@@ -320,16 +320,24 @@ export function mNotRegistered(lang: Lang): OutMessage {
   return { kind: 'text', body: pick(lang, { en: "You're not registered on Briklay. Contact your manager to get access." }) }
 }
 
-export function mNoOrg(lang: Lang): OutMessage {
-  return { kind: 'text', body: pick(lang, { en: "Your account isn't fully set up yet. Please contact your manager." }) }
+/** Registered number with no org. Two honest paths: join a team (ask the manager) OR
+ *  run your own site (a tappable Set-up button → sign-up / create-org). */
+export function mNoOrg(lang: Lang, signupUrl: string): OutMessage {
+  return {
+    kind: 'cta',
+    body: pick(lang, {
+      en: "You're almost set up — your number is recognised, but it isn't linked to a site yet.\n\nIf your team already uses Briklay, ask your site manager to add you — then just message me and you're in.\n\nWant to run your own site instead? Set it up yourself below.",
+    }),
+    cta: { text: 'Set up my site', url: signupUrl },
+  }
 }
 
 /** Sender row exists but is switched off (and not an 'invited' self-activation row). */
 export function mAccessPaused(lang: Lang): OutMessage {
   return { kind: 'text', body: pick(lang, {
-    en: "Your WhatsApp access is paused right now. Ask your manager to turn it back on.",
-    te: "మీ వాట్సాప్ యాక్సెస్ ప్రస్తుతం నిలిపివేయబడింది. మీ మేనేజర్‌ను మళ్లీ ఆన్ చేయమని అడగండి.",
-    hi: "आपकी WhatsApp एक्सेस अभी रुकी हुई है। अपने मैनेजर से इसे दोबारा चालू करने को कहें।",
+    en: "Your access to Briklay is paused for now — no worries.\n\nAsk your site manager to switch it back on, and you'll be able to send straight away.",
+    te: "మీ Briklay యాక్సెస్ ప్రస్తుతం నిలిపివేయబడింది — ఫర్వాలేదు.\n\nమీ సైట్ మేనేజర్‌ను దాన్ని మళ్లీ ఆన్ చేయమని అడగండి, వెంటనే మీరు పంపగలరు.",
+    hi: "आपकी Briklay एक्सेस अभी रुकी हुई है — कोई बात नहीं।\n\nअपने साइट मैनेजर से इसे दोबारा चालू करने को कहें, और आप तुरंत भेज पाएँगे।",
   }) }
 }
 
@@ -350,7 +358,14 @@ export function welcomePrefix(lang: Lang, p: { name?: string | null }): string {
   })
 }
 
-/** "Welcome back! 👋" — prepended when a dormant member returns. */
-export function welcomeBack(lang: Lang): string {
-  return pick(lang, { en: 'Welcome back! 👋', te: 'మళ్లీ స్వాగతం! 👋', hi: 'वापसी पर स्वागत है! 👋' })
+/** "Welcome back, Ramu 👋" — prepended when a dormant member returns. Personalised by
+ *  first name when we have one, so the return feels recognised, not canned. */
+export function welcomeBack(lang: Lang, p: { name?: string | null } = {}): string {
+  const first = (p.name ?? '').trim().split(/\s+/)[0]
+  const named = first ? `, ${first}` : ''
+  return pick(lang, {
+    en: `Welcome back${named} 👋`,
+    te: `మళ్లీ స్వాగతం${named} 👋`,
+    hi: `वापसी पर स्वागत है${named} 👋`,
+  })
 }

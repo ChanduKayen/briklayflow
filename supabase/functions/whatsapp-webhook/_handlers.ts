@@ -505,8 +505,7 @@ export async function handleQuery(
   }
 
   await sendWA(from,
-    'For detailed reports open the app:\n*briklayflow.vercel.app*\n\n' +
-    'Full query support coming soon! 🚀')
+    "I can't pull up live reports right here yet — but your full ledger, balances and pending payments are always ready in the app:\nbriklayflow.vercel.app/logbook")
 }
 
 // ── General handler ───────────────────────────────────────────────────────────

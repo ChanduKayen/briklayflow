@@ -18,6 +18,11 @@ import * as M from './_messages.ts'
 // A member who hasn't been active in this long gets a light "welcome back" on their
 // next message (computed from wa_message_log; orientation supersedes it on first touch).
 const DORMANT_MS = 14 * 24 * 60 * 60 * 1000
+
+// Self-serve sign-up / create-your-own-site link (a CTA button needs a real https URL;
+// the env may be scheme-less, so normalise). Used by the no-org reply.
+const SIGNUP_RAW = Deno.env.get('WA_SIGNUP_LINK') ?? 'https://briklayflow.vercel.app'
+const SIGNUP_URL = /^https?:\/\//.test(SIGNUP_RAW) ? SIGNUP_RAW : `https://${SIGNUP_RAW}`
 // Pre-dispatch edge replies have no router language yet -> default 'en' templates.
 // Sprint 3: the 4-way router + dispatcher supersede _classify.ts (no longer in the
 // live path). Legacy _handlers/_session are reached only via the dispatcher's bridge.
@@ -146,7 +151,7 @@ serve(async (req) => {
       // Durable reply via the outbox (enqueued before the 200).
       await send(supabase, inbound.from, M.mAccessPaused('en'))
     } else if (inbound.kind === 'no_org') {
-      await send(supabase, inbound.from, M.mNoOrg('en'))
+      await send(supabase, inbound.from, M.mNoOrg('en', SIGNUP_URL))
     }
     // 'duplicate' / 'ignore' → nothing more to do.
 

@@ -19,6 +19,17 @@ const SIGNUP_RAW  = Deno.env.get('WA_SIGNUP_LINK') ?? 'https://briklayflow.verce
 const SIGNUP_URL  = /^https?:\/\//.test(SIGNUP_RAW) ? SIGNUP_RAW : `https://${SIGNUP_RAW}`
 const SIGNUP_LINK = SIGNUP_URL.replace(/^https?:\/\//, '')
 
+// A bare greeting in any of our languages/scripts ("hi", "hi briklay", "namaste",
+// "హాయ్", "नमस्ते"…). These don't need a model round-trip — we answer instantly from
+// the deterministic reply, so the most common opener feels snappy, not laggy.
+const GREETING_RE =
+  /^(hi+|hey+|hello+|hii+|helo|yo|hola|namaste|namaskaram|namaskar|vanakkam|good\s*(morning|afternoon|evening)|హాయ్|నమస్తే|నమస్కారం|हाय|हेलो|नमस्ते|नमस्कार)(\s+(briklay|babai|sir|anna|bro|boss|madam|there|all|ji))*\s*[!।.,…?]*$/i
+
+function isGreeting(text: string): boolean {
+  const t = (text ?? '').trim()
+  return t.length > 0 && t.length <= 32 && GREETING_RE.test(t)
+}
+
 export type ConciergeMode = 'default' | 'orientation' | 'prospect'
 
 export type ConciergeCtx = {
@@ -38,7 +49,9 @@ export type ConciergeCtx = {
 
 /** Produce and send (via the outbox) one warm concierge reply. */
 export async function runConcierge(supabase: any, ctx: ConciergeCtx): Promise<void> {
-  const reply = (await composeLLM(ctx)) || fallbackReply(ctx)
+  // Bare greeting → skip the LLM and answer instantly from the deterministic reply;
+  // otherwise compose with the model (falling back to deterministic on failure).
+  const reply = (isGreeting(ctx.text) ? null : await composeLLM(ctx)) || fallbackReply(ctx)
   const body = ctx.prefix ? `${ctx.prefix}\n\n${reply}` : reply
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
 
@@ -65,64 +78,54 @@ const IDENTITY =
 // The house formatting style — WhatsApp-native, warm, scannable. Shared by every mode
 // so replies feel like one polished product, never a flat wall of text.
 const FORMATTING =
-  `FORMATTING — this is a WhatsApp chat. Make it warm, calm and easy to scan; never a wall of text:
-- Put a BLANK LINE between separate thoughts so the message breathes.
-- *Bold* ONLY the single most important thing (an action, a name, an amount) — never whole sentences.
-- Use _italics_ sparingly, for a soft aside.
-- When you say what they can do or give examples, put EACH on its own line led by a fitting emoji — 💸 for a payment, 🧾 for a bill photo, 🎙️ for a voice note. Keep to 2-3 lines.
-- Lead a greeting with ONE warm emoji (👋). Emoji are anchors — about one per line, never decoration spam.
-- Show a sample command in quotes so it pops: "Ramu 5000 cash".
-- WhatsApp formatting only: *bold*, _italic_. No #, no markdown links like [text](url), no tables, no headings.`
+  `STYLE — this is a real WhatsApp conversation between people, not a bot menu:
+- Reply to what they ACTUALLY said. Never recite a fixed script or the same capability list message after message — repeating yourself reads as a robot and irritates people.
+- Keep it short and human — usually one or two natural lines. A blank line between separate thoughts so it breathes.
+- *Bold* at most ONE key thing (a name, an amount, an action); most replies need none.
+- Emoji: use RARELY, and only when it genuinely lands — a single 👋 on a true first hello, a ✓ on a confirmation. Most messages should have none. Never decorate.
+- Spell out a list of what you can do ONLY if they ask "what can you do?" or are clearly stuck — otherwise weave any mention into one natural sentence.
+- WhatsApp formatting only: *bold*, _italic_. No #, no markdown links, no tables, no headings.`
 
 const SYSTEM_DEFAULT = `${IDENTITY}
-Reply in the user's language (en = English, te = Telugu, te-en = Tenglish/code-mix, hi = Hindi). Warm and brief. The user already knows you — do NOT re-introduce yourself unless they ask who you are.
+Reply in the user's language (en/te/te-en/hi). You're a calm, friendly human — not a menu. Read what they actually said and respond to THAT, in one or two natural lines. The user already knows you, so don't re-introduce yourself, and don't list your capabilities unless they ask.
 
-What you can do (mention only when relevant; when you do, lay it out as emoji-led lines like below):
-💸 Log a payment — "Ramu 5000 cash"
-🧾 Send a bill or receipt photo
-🎙️ Or a voice note
-…and it lands in the owner's Day Book for approval. (Procurement & site reports are coming.)
+Read the room and respond to the FEELING, not just the words:
+- Warm or thankful → match it briefly and let it be; don't over-talk.
+- Frustrated, worried, or something went wrong → acknowledge it calmly and sincerely first, then help. Never defensive, never chirpy.
+- When it fits naturally, give ONE light nudge toward logging a payment or using Briklay — never pushy, and never the same nudge twice.
+
+Only if they ASK what you can do (or are clearly stuck): say in a sentence that you log site payments and expenses to the Day Book for the owner to approve — a line like "Ramu 5000 cash", a bill photo, or a voice note all work.
 
 ${SECURITY}
 
 ${FORMATTING}
 
-Use the provided CONTEXT:
-- If JUST_SAVED is present and the user seems to refer to it ("is it saved?", "yes", "ok"), reassure them it's *saved* and can be edited in the app: ${APP_LINK}. Don't re-ask.
-- If the user sent a bare "yes/ok" but nothing is pending and nothing was just saved, gently ask what they'd like to log.
-- If they ask for procurement / site updates / attendance, say that's coming soon but they can log payments now.
-- Otherwise greet/help briefly with a light nudge of what they can do.`
+CONTEXT:
+- JUST_SAVED present and they refer to it ("is it saved?", "yes", "ok") → reassure it's saved and editable in the app: ${APP_LINK}. Don't re-ask.
+- Bare "yes/ok" with nothing pending or just-saved → gently ask what they'd like to log.
+- They ask for procurement / site updates / attendance → it's coming soon; they can log payments now.`
 
 const SYSTEM_ORIENTATION = `${IDENTITY}
-This is the user's FIRST message to you — make a warm, polished first impression. Structure it exactly like this, with blank lines between each part:
-1. "Hi <first name>, I'm *Babai* from Briklay 👋" (their name from CONTEXT).
-2. One line naming their *organisation* and role.
-3. 2-3 emoji-led lines of what they can do, then one closing line that it all goes to the owner's Day Book for approval.
-Reply in the user's language (en/te/te-en/hi).
-
-The capabilities, formatted like this:
-💸 Pay someone — "Ramu 5000 cash"
-🧾 Snap a bill photo
-🎙️ Or send a voice note
+This is the user's FIRST message — make a warm, human first impression, the way a person greets a new teammate (NOT a feature list). In a few natural lines: greet them by their first name, welcome them onto their organisation (from CONTEXT), and say in a sentence or two how you help — you log their site payments and expenses to the Day Book for the owner to approve, and they can just send a line like "Ramu 5000 cash", a bill photo, or a voice note. Close by inviting them to try whenever they're ready. Reply in the user's language (en/te/te-en/hi). A single 👋 is welcome; no other emoji.
 
 ${SECURITY}
 
 ${FORMATTING}
 
-Do NOT re-ask anything. Make them feel recognised and ready to send their first payment.`
+Do NOT re-ask anything. Keep it short and warm — make them feel recognised and ready to send their first payment.`
 
 const SYSTEM_PROSPECT = `${IDENTITY}
-Briklay helps construction teams in India track site payments, bills and expenses over WhatsApp — no app to install. The person messaging you is NOT yet set up on Briklay. Be welcoming and human. Reply in the user's language (en/te/te-en/hi).
+Briklay helps construction teams in India track site payments, bills and expenses over WhatsApp — no app to install. The person messaging is NOT yet set up on Briklay. Be welcoming and genuinely human, and respond to what they actually said — match their tone (warm if they're warm; patient and reassuring if they're unsure or hesitant). Reply in the user's language (en/te/te-en/hi).
 
 CONTEXT field "returning":
-- returning=false (first time they've reached us): OPEN with "Hi, I'm *Babai* from Briklay 👋", a blank line, then respond naturally to what they said in 1-2 short lines, a blank line, then ONE warm invitation to set up their site. A tappable *Set up my site* button is shown BELOW your message — so invite them and point at the button (e.g. "tap below 👇"); do NOT paste any URL yourself.
-- returning=true (they've messaged before): reply briefly and helpfully in 1-2 lines, no re-introduction. Do NOT repeat the sign-up invitation unless they ask how to start or show interest — then point them to ${SIGNUP_LINK}.
+- returning=false (first time): a brief, warm hello (a single 👋 is fine), answer what they said in a line or two, then ONE natural invitation to set up their site. A tappable *Set up my site* button appears below your message — point to it ("tap below") instead of pasting any URL.
+- returning=true (messaged before): reply briefly and helpfully, no re-introduction, and don't repeat the sign-up pitch unless they ask how to start — then point them to ${SIGNUP_LINK}.
 
 ${SECURITY}
 
 ${FORMATTING}
 
-Never claim they have an account or any data. Don't be pushy or salesy — one friendly invitation is enough.`
+Never claim they have an account or any data. Never pushy or salesy — one friendly invitation is plenty.`
 
 function systemFor(mode: ConciergeMode): string {
   return mode === 'orientation' ? SYSTEM_ORIENTATION
@@ -196,11 +199,11 @@ function fallbackReply(ctx: ConciergeCtx): string {
     const hi = name ? `Hi ${name}, I'm *Babai* from Briklay 👋` : `Hi, I'm *Babai* from Briklay 👋`
     const onTeam = org ? `\n\nYou're on *${org}*'s team.` : ''
     const how = ({
-      en:      `Here's what I can do for you:\n💸 Pay someone — "Ramu 5000 cash"\n🧾 Snap a bill photo\n🎙️ Or send a voice note\n\nIt all lands in your *Day Book* for approval.`,
-      'te-en': `Nenu mee kosam cheyagaligindi:\n💸 Payment — "Ramu 5000 cash"\n🧾 Bill photo\n🎙️ Leda voice note\n\nAnni mee *Day Book* lo approval kosam vastayi.`,
-      te:      `నేను మీ కోసం చేయగలిగేది:\n💸 చెల్లింపు — "Ramu 5000 cash"\n🧾 బిల్ ఫోటో\n🎙️ లేదా వాయిస్ నోట్\n\nఅన్నీ మీ *Day Book* లో ఆమోదం కోసం వస్తాయి.`,
-      hi:      `मैं आपके लिए ये कर सकता हूँ:\n💸 भुगतान — "Ramu 5000 cash"\n🧾 बिल फोटो\n🎙️ या वॉइस नोट\n\nसब आपके *Day Book* में मंज़ूरी के लिए आता है।`,
-    } as Record<string, string>)[L] ?? `Here's what I can do:\n💸 Pay someone — "Ramu 5000 cash"\n🧾 Snap a bill photo\n🎙️ Or a voice note`
+      en:      `I keep your site payments in order — just send a line like "Ramu 5000 cash", a bill photo, or a voice note, and I'll file it to the Day Book for approval. Try it whenever you're ready.`,
+      'te-en': `Mee site payments ni order lo unchutaanu — "Ramu 5000 cash" laaga oka line, bill photo, leda voice note pampandi, nenu Day Book lo approval kosam file chestanu. Ready unnapudu try cheyandi.`,
+      te:      `మీ సైట్ చెల్లింపులను ఒక చోట చక్కగా ఉంచుతాను — "Ramu 5000 cash" లాంటి లైన్, బిల్ ఫోటో, లేదా వాయిస్ నోట్ పంపండి, నేను Day Book లో ఆమోదం కోసం పెడతాను. మీకు వీలైనప్పుడు ప్రయత్నించండి.`,
+      hi:      `मैं आपके साइट पेमेंट व्यवस्थित रखता हूँ — "Ramu 5000 cash" जैसी एक लाइन, बिल फोटो, या वॉइस नोट भेजें, और मैं उसे Day Book में मंज़ूरी के लिए दर्ज कर दूँगा। जब तैयार हों तब आज़माएँ।`,
+    } as Record<string, string>)[L] ?? `I keep your site payments in order — send a line like "Ramu 5000 cash", a bill photo, or a voice note, and I'll file it to the Day Book.`
     return `${hi}${onTeam}\n\n${how}`
   }
 
@@ -208,19 +211,19 @@ function fallbackReply(ctx: ConciergeCtx): string {
     // Returning prospect: a light, link-free acknowledgement (don't re-pitch).
     if (ctx.prospect?.firstTouch === false) {
       return ({
-        en:      `Thanks for the message! 🙂\n\nWhenever you're ready to track your site payments, I'm right here.`,
-        'te-en': `Message ki thanks! 🙂\n\nMee site payments track cheyadaniki ready ayinappudu, nenu ikkade unna.`,
-        te:      `మెసేజ్‌కి ధన్యవాదాలు! 🙂\n\nమీ సైట్ చెల్లింపులను ట్రాక్ చేయడానికి సిద్ధమైనప్పుడు నేను ఇక్కడే ఉన్నాను.`,
-        hi:      `मैसेज के लिए धन्यवाद! 🙂\n\nजब आप अपने साइट पेमेंट ट्रैक करने को तैयार हों, मैं यहीं हूँ।`,
-      } as Record<string, string>)[L] ?? `Thanks for the message! 🙂\n\nWhenever you're ready to track your site payments, I'm right here.`
+        en:      `Thanks for the message. Whenever you're ready to track your site payments, I'm right here.`,
+        'te-en': `Message ki thanks. Mee site payments track cheyadaniki ready ayinappudu, nenu ikkade unna.`,
+        te:      `మెసేజ్‌కి ధన్యవాదాలు. మీ సైట్ చెల్లింపులను ట్రాక్ చేయడానికి సిద్ధమైనప్పుడు నేను ఇక్కడే ఉన్నాను.`,
+        hi:      `मैसेज के लिए धन्यवाद। जब आप अपने साइट पेमेंट ट्रैक करने को तैयार हों, मैं यहीं हूँ।`,
+      } as Record<string, string>)[L] ?? `Thanks for the message. Whenever you're ready to track your site payments, I'm right here.`
     }
     // First touch: NO link in the body — runConcierge attaches a "Set up my site" button.
     return ({
-      en:      `Hi! 👋 I'm *Babai* from Briklay.\n\nI help construction teams track site payments, bills and expenses right here on WhatsApp — nothing to install.\n\nWant to set up your site? Tap below 👇`,
-      'te-en': `Hi! 👋 Nenu *Babai*, Briklay nunchi.\n\nSite payments, bills, expenses ni WhatsApp lōnē track cheyadaniki help chestanu — emi install cheyyakkarledu.\n\nMee site setup cheyala? Kinda tap cheyandi 👇`,
-      te:      `నమస్తే! 👋 నేను *బాబాయ్*, Briklay నుంచి.\n\nసైట్ చెల్లింపులు, బిల్లులు, ఖర్చులను వాట్సాప్‌లోనే ట్రాక్ చేయడంలో సహాయం చేస్తాను — ఏదీ ఇన్‌స్టాల్ చేయక్కర్లేదు.\n\nమీ సైట్‌ను సెటప్ చేయాలా? కింద ట్యాప్ చేయండి 👇`,
-      hi:      `नमस्ते! 👋 मैं Briklay से *Babai* हूँ।\n\nमैं साइट पेमेंट, बिल और खर्च WhatsApp पर ही ट्रैक करने में मदद करता हूँ — कुछ इंस्टॉल नहीं करना।\n\nअपनी साइट सेटअप करें? नीचे टैप करें 👇`,
-    } as Record<string, string>)[L] ?? `Hi! 👋 I'm *Babai* from Briklay — I help construction teams track site payments on WhatsApp.\n\nWant to set up your site? Tap below 👇`
+      en:      `Hi 👋 I'm *Babai* from Briklay. I help construction teams track their site payments, bills and expenses right here on WhatsApp — nothing to install.\n\nWant to set up your site? Tap below to get started.`,
+      'te-en': `Hi 👋 Nenu *Babai*, Briklay nunchi. Site payments, bills, expenses ni WhatsApp lōnē track cheyadaniki help chestanu — emi install cheyyakkarledu.\n\nMee site setup cheyala? Modalu pettadaniki kinda tap cheyandi.`,
+      te:      `నమస్తే 👋 నేను *బాబాయ్*, Briklay నుంచి. సైట్ చెల్లింపులు, బిల్లులు, ఖర్చులను వాట్సాప్‌లోనే ట్రాక్ చేయడంలో సహాయం చేస్తాను — ఏదీ ఇన్‌స్టాల్ చేయక్కర్లేదు.\n\nమీ సైట్‌ను సెటప్ చేయాలా? మొదలుపెట్టడానికి కింద ట్యాప్ చేయండి.`,
+      hi:      `नमस्ते 👋 मैं Briklay से *Babai* हूँ। मैं साइट पेमेंट, बिल और खर्च WhatsApp पर ही ट्रैक करने में मदद करता हूँ — कुछ इंस्टॉल नहीं करना।\n\nअपनी साइट सेटअप करें? शुरू करने के लिए नीचे टैप करें।`,
+    } as Record<string, string>)[L] ?? `Hi 👋 I'm *Babai* from Briklay — I help construction teams track site payments on WhatsApp.\n\nWant to set up your site? Tap below to get started.`
   }
 
   // default mode
@@ -233,9 +236,9 @@ function fallbackReply(ctx: ConciergeCtx): string {
     } as Record<string, string>)[L] ?? `That's *saved* ✓\n\nEdit it anytime in the app:\n${APP_LINK}`
   }
   return ({
-    en:      `Hi! 👋 I log your site payments to the *Day Book*.\n\n💸 Pay someone — "Ramu 5000 cash"\n🧾 Send a bill photo\n🎙️ Or a voice note`,
-    'te-en': `Hi! 👋 Mee site payments ni *Day Book* lo log chestanu.\n\n💸 "Ramu 5000 cash"\n🧾 Bill photo\n🎙️ Voice note`,
-    te:      `నమస్తే! 👋 మీ సైట్ చెల్లింపులను *Day Book* లో నమోదు చేస్తాను.\n\n💸 "Ramu 5000 cash"\n🧾 బిల్ ఫోటో\n🎙️ వాయిస్ నోట్`,
-    hi:      `नमस्ते! 👋 मैं आपके साइट पेमेंट *Day Book* में दर्ज करता हूँ।\n\n💸 "Ramu 5000 cash"\n🧾 बिल फोटो\n🎙️ वॉइस नोट`,
-  } as Record<string, string>)[L] ?? `Hi! 👋 Send a payment like "Ramu 5000 cash" and I'll log it to the Day Book.`
+    en:      `Hi 👋 Send me a payment whenever you like — something like "Ramu 5000 cash" — and I'll file it to your Day Book for approval.`,
+    'te-en': `Hi 👋 Eppudu kaavalante appudu oka payment pampandi — "Ramu 5000 cash" laaga — nenu mee Day Book lo approval kosam file chestanu.`,
+    te:      `నమస్తే 👋 మీకు వీలైనప్పుడు ఒక చెల్లింపు పంపండి — "Ramu 5000 cash" లాగా — నేను మీ Day Book లో ఆమోదం కోసం పెడతాను.`,
+    hi:      `नमस्ते 👋 जब चाहें एक पेमेंट भेजें — "Ramu 5000 cash" जैसा — और मैं उसे आपके Day Book में मंज़ूरी के लिए दर्ज कर दूँगा।`,
+  } as Record<string, string>)[L] ?? `Hi 👋 Send a payment like "Ramu 5000 cash" and I'll file it to your Day Book.`
 }

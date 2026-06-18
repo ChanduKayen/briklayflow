@@ -55,7 +55,9 @@ async function markOriented(supabase: any, from: string): Promise<void> {
 }
 
 // Reporting/data query the router doesn't model yet -> legacy handleQuery bridge.
-const QUERY_RE = /how\s*much|how much|balance|pending|due|outstanding|ledger|total|statement|enta|entha|evariki|\?$/i
+// Match ONLY genuine money/report words — NOT every "?", which used to swallow plain
+// conversational questions ("do you speak Hindi?") and dump them on the reports handler.
+const QUERY_RE = /how\s*much|balance|pending|due|outstanding|ledger|\btotal\b|statement|enta|entha|evariki/i
 
 export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
   const { supabase, from, registered, wamid, orgId } = ctx
@@ -119,7 +121,7 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
     return
   }
   const welcome = firstContact ? M.welcomePrefix(lang, { name: ctx.senderName })
-    : ctx.dormant ? M.welcomeBack(lang) : undefined
+    : ctx.dormant ? M.welcomeBack(lang, { name: ctx.senderName }) : undefined
   if (firstContact) await markOriented(supabase, from)
 
   // ── ANSWERS_PENDING: route by the DB's owning agent (never the LLM's) ────────
