@@ -46,6 +46,11 @@ export const ANIM = `
 .db-sweep { animation: dbSweep .85s cubic-bezier(.4,0,.1,1) forwards; }
 @keyframes dbDraw { to { stroke-dashoffset: 0; } }
 .db-draw { stroke-dasharray: 20; stroke-dashoffset: 20; animation: dbDraw .4s cubic-bezier(.5,0,.2,1) .05s forwards; }
+/* grant-access micro-animations: a soft sage halo while selecting, a settled check on success */
+@keyframes dbGlow { 0% { box-shadow: 0 0 0 0 rgba(47,93,52,0); } 45% { box-shadow: 0 0 0 3px rgba(47,93,52,0.13); } 100% { box-shadow: 0 0 0 0 rgba(47,93,52,0); } }
+.db-glow { animation: dbGlow 1.05s ease both; }
+@keyframes dbRing { 0% { transform: scale(.5); opacity: 0; } 55% { opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
+.db-ring { animation: dbRing .5s cubic-bezier(.2,.9,.3,1.3) both; }
 /* the transformation: said -> understood, shown once */
 @keyframes tfRaw   { 0%{opacity:0; transform:translateY(4px);} 10%,46%{opacity:1; transform:none;} 58%{opacity:.25; filter:blur(2px);} 100%{opacity:.25; filter:blur(2px);} }
 @keyframes tfArrow { 0%,46%{opacity:0; transform:translateY(-3px) scale(.8);} 56%{opacity:1; transform:none;} 100%{opacity:1;} }
@@ -59,7 +64,7 @@ export const ANIM = `
 .tf-glow  { animation: tfGlow  3.4s ease forwards; }
 @media (prefers-reduced-motion: reduce) {
   .tf-raw,.tf-arrow,.tf-read,.tf-chip,.tf-glow { animation: none !important; opacity: 1 !important; filter: none !important; transform: none !important; }
-  .db-file-off,.db-reject-off,.db-sweep,.db-draw,.db-pop,.db-confirm { animation-duration: .01ms !important; }
+  .db-file-off,.db-reject-off,.db-sweep,.db-draw,.db-pop,.db-confirm,.db-glow,.db-ring { animation-duration: .01ms !important; }
 }
 /* Mobile: floor form text at 16px so iOS Safari doesn't zoom the viewport on focus
    (inline T.sm/T.xs sit below 16px). Scoped to .db-scope -> only the Day Book shifts. */

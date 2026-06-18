@@ -18,7 +18,7 @@
  */
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { UserPlus, X, Phone, Mail, Copy, Check, Clock } from 'lucide-react';
+import { UserPlus, X, Phone, Mail, Copy, Check, Clock, Loader2, ArrowRight } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useSnackbar } from '../Snackbar';
 import { useOrgId } from '../../lib/auth/AuthProvider';
@@ -34,6 +34,7 @@ interface WaContact {
   is_active: boolean;
   preferred_language: string | null;   // voice-note language (ISO-639-1); null = auto
   stakeholder_id: string | null;
+  user_id: string | null;              // links a sender row to an org member (auth.users.id)
   created_at: string;
 }
 
@@ -127,6 +128,163 @@ const inviteLinkFor = (token: string) => `${window.location.origin}/invite/${tok
 // ── Manage team slide-over ──────────────────────────────────────────────────────
 const roleLabel = (r: string) => r.charAt(0).toUpperCase() + r.slice(1);
 const daysLeft = (iso: string) => Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000));
+const norm = (s: string) => (s || '').trim().toLowerCase();
+const prettyPhone = (p: string) => { const d = digits(p); return d.length === 10 ? `${d.slice(0, 5)} ${d.slice(5)}` : d; };
+const initials = (name: string) => (name || '?').split(' ').filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase() || '?';
+
+/** A tiny green pill toggle, shared by member rows and legacy sender rows. */
+function WaToggle({ on, busy, onClick }: { on: boolean; busy?: boolean; onClick: () => void }) {
+  return (
+    <button
+      aria-label="Toggle WhatsApp access"
+      disabled={busy}
+      onClick={onClick}
+      className="w-9 h-5 rounded-full relative shrink-0"
+      style={{ background: on ? WA : V.line, transition: 'background .18s ease', opacity: busy ? 0.6 : 1 }}
+    >
+      <span
+        className="absolute top-0.5 w-4 h-4 rounded-full flex items-center justify-center"
+        style={{ background: '#fff', left: on ? 18 : 2, transition: 'left .18s cubic-bezier(.3,.8,.3,1.2)', boxShadow: '0 1px 2px rgba(0,0,0,0.18)' }}
+      >
+        {busy && <Loader2 size={9} className="db-spin" style={{ color: WA }} />}
+      </span>
+    </button>
+  );
+}
+
+const VOICE_LANG_SELECT = (value: string, onChange: (v: string) => void) => (
+  <select
+    aria-label="Voice note language"
+    title="Language for this person's voice notes"
+    value={value}
+    onChange={(e) => onChange(e.target.value)}
+    className="px-2 rounded-lg outline-none shrink-0 appearance-none"
+    style={{ background: V.field, color: value ? V.ink : V.faint, height: 30, ...font, ...T.xs }}
+  >
+    {VOICE_LANGS.map((l) => <option key={l.value} value={l.value}>{l.value ? `🎙 ${l.label}` : 'Auto'}</option>)}
+  </select>
+);
+
+/**
+ * One org member, with their WhatsApp send-eligibility inline. The unit of the
+ * redesigned panel: name · number · toggle, with a number-capture step when no
+ * number is on file, and a subtle select→success motion on grant (which also
+ * fires the welcome message, server-side).
+ */
+function WaMemberRow({
+  member, sender, suggestPhone, onEnable, onDisable, onLang,
+}: {
+  member: OrgMember;
+  sender: WaContact | null;
+  suggestPhone: string;
+  onEnable: (phone: string) => Promise<void>;
+  onDisable: () => Promise<void>;
+  onLang: (lang: string | null) => void;
+}) {
+  const { show } = useSnackbar();
+  const active = !!sender?.is_active;
+  const knownPhone = digits(sender?.phone_number ?? suggestPhone ?? '');
+  type Phase = 'idle' | 'capture' | 'saving' | 'sent';
+  const [phase, setPhase] = useState<Phase>('idle');
+  const [val, setVal] = useState('');
+
+  const doEnable = async (phone: string) => {
+    const ph = digits(phone);
+    if (ph.length < 10) { show('Enter a 10-digit WhatsApp number', { type: 'error' }); return; }
+    setPhase('saving');
+    try {
+      await onEnable(ph);
+      setPhase('sent');
+      setTimeout(() => setPhase('idle'), 1900);
+    } catch (e: any) {
+      show(e?.message || 'Could not enable WhatsApp', { type: 'error' });
+      setPhase('idle');
+    }
+  };
+
+  const onToggle = async () => {
+    if (active) {
+      setPhase('saving');
+      try { await onDisable(); } catch (e: any) { show(e?.message || 'Could not update', { type: 'error' }); }
+      setPhase('idle');
+      return;
+    }
+    if (knownPhone.length >= 10) { doEnable(knownPhone); return; }
+    setVal(suggestPhone || '');
+    setPhase('capture');
+  };
+
+  const showNumber = active || knownPhone.length >= 10;
+
+  return (
+    <div
+      className={`rounded-xl p-3.5 ${phase === 'saving' ? 'db-glow' : ''}`}
+      style={{ background: V.surface, border: '1px solid #E3DDD4', transition: 'opacity .2s', opacity: active || phase !== 'idle' ? 1 : 0.92 }}
+    >
+      <div className="flex items-center gap-3">
+        <span className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 font-medium" style={{ background: V.terraWash, color: V.terraDeep, ...font, ...T.sm }}>
+          {initials(member.name)}
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="font-medium truncate" style={{ color: V.ink, ...font, ...T.sm }}>{member.name || 'Unnamed'}</p>
+          {phase === 'sent' ? (
+            <p className="truncate mt-0.5 inline-flex items-center gap-1 db-drop" style={{ color: WA, ...font, ...T.xs }}>
+              <WhatsAppGlyph size={10} color={WA} /> Welcome sent
+            </p>
+          ) : showNumber ? (
+            <p className="truncate mt-0.5 inline-flex items-center gap-1" style={{ color: V.sys, ...font, ...nums, ...T.xs }}>
+              <Phone size={10} style={{ color: V.faint }} /> +91 {prettyPhone(knownPhone)}
+            </p>
+          ) : (
+            <p className="truncate mt-0.5" style={{ color: V.faint, ...font, ...T.xs }}>{roleLabel(member.role)} · add a number to enable</p>
+          )}
+        </div>
+
+        {/* voice language only once active — keeps the row calm until it matters */}
+        {active && phase !== 'capture' && VOICE_LANG_SELECT(sender?.preferred_language ?? '', (v) => onLang(v || null))}
+
+        {phase === 'sent' ? (
+          <span className="w-7 h-7 rounded-full inline-flex items-center justify-center shrink-0 db-ring" style={{ background: 'rgba(37,211,102,0.14)' }}>
+            <Check size={14} color={WA} strokeWidth={3} />
+          </span>
+        ) : (
+          <WaToggle on={active} busy={phase === 'saving'} onClick={onToggle} />
+        )}
+      </div>
+
+      {/* inline number capture */}
+      {phase === 'capture' && (
+        <div className="mt-3 db-drop">
+          <p className="mb-1.5" style={{ color: V.sys, ...font, ...T.xs }}>What number does {member.name?.split(' ')[0] || 'this teammate'} use on WhatsApp?</p>
+          <div className="flex items-center gap-2">
+            <div className="inline-flex items-center gap-2 px-3 rounded-lg flex-1" style={{ background: V.field, height: 40 }}>
+              <WhatsAppGlyph size={13} color={WA} />
+              <span style={{ color: V.faint, ...font, ...nums, ...T.sm }}>+91</span>
+              <input
+                autoFocus value={val}
+                onChange={(e) => setVal(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && digits(val).length >= 10) doEnable(val); }}
+                placeholder="98765 43210"
+                className="bg-transparent outline-none flex-1 min-w-0"
+                style={{ color: V.ink, ...font, ...nums, ...T.sm }}
+              />
+            </div>
+            <button onClick={() => setPhase('idle')} className="px-3 py-2 rounded-lg shrink-0" style={{ border: `1px solid ${V.line}`, color: V.sys, ...font, ...T.xs }}>Cancel</button>
+            <button
+              disabled={digits(val).length < 10}
+              onClick={() => doEnable(val)}
+              className="inline-flex items-center gap-1 px-3 py-2 rounded-lg font-medium shrink-0"
+              style={{ background: 'rgba(37,211,102,0.16)', color: WA, opacity: digits(val).length < 10 ? 0.5 : 1, ...font, ...T.xs }}
+            >
+              Enable <ArrowRight size={13} />
+            </button>
+          </div>
+          <p className="mt-1.5 leading-relaxed" style={{ color: V.faint, ...font, ...T.xs }}>We'll send them a short welcome so they know they can start sending.</p>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function ManageTeam({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
@@ -147,11 +305,48 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
   const phoneOk = digits(phone).length >= 10;
 
+  // Linkage: a member is WhatsApp-eligible when a wa_registered_numbers row carries
+  // their user_id. Legacy/phone-only rows (no user_id) are kept under "Other senders"
+  // so nothing existing is lost; a name match just pre-fills the capture field.
+  const senderForMember = (m: OrgMember) => senders.find((s) => s.user_id === m.id) ?? null;
+  const suggestPhoneFor = (m: OrgMember) => senders.find((s) => !s.user_id && norm(s.name) === norm(m.name))?.phone_number ?? '';
+  const memberNames = new Set(members.map((m) => norm(m.name)));
+  const otherSenders = senders.filter((s) => !s.user_id && !memberNames.has(norm(s.name)));
+
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['daybook_pending_invites'] });
     qc.invalidateQueries({ queryKey: ['wa_registered_numbers'] });
   };
   const resetForm = () => { setAdding(false); setName(''); setEmail(''); setPhone(''); setRole(INVITE_ROLES[0].value); setResult(null); };
+
+  // Grant a member WhatsApp send-access: link/insert their number, then fire the
+  // welcome (server-side, idempotent). Upsert by user_id OR matching phone so we
+  // never collide with the UNIQUE(phone_number) constraint on a legacy row.
+  const enableMember = async (m: OrgMember, phoneInput: string) => {
+    const ph = digits(phoneInput);
+    if (ph.length < 10) throw new Error('Enter a 10-digit WhatsApp number');
+    const existing = senders.find((s) => s.user_id === m.id) ?? senders.find((s) => digits(s.phone_number) === ph);
+    if (existing) {
+      const { error } = await supabase.from('wa_registered_numbers')
+        .update({ is_active: true, user_id: m.id }).eq('id', existing.id);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.from('wa_registered_numbers')
+        .insert({ user_id: m.id, name: m.name, phone_number: ph, role: roleLabel(m.role), is_active: true });
+      if (error && !/duplicate|unique/i.test(error.message)) throw error;
+    }
+    const { error: wErr } = await supabase.rpc('wa_send_welcome', { p_phone: ph, p_name: m.name });
+    if (wErr) throw wErr;
+    await qc.invalidateQueries({ queryKey: ['wa_registered_numbers'] });
+  };
+
+  const disableMember = async (m: OrgMember) => {
+    const row = senders.find((s) => s.user_id === m.id);
+    if (!row) return;
+    const { error } = await supabase.from('wa_registered_numbers').update({ is_active: false }).eq('id', row.id);
+    if (error) throw error;
+    await qc.invalidateQueries({ queryKey: ['wa_registered_numbers'] });
+  };
 
   // Invite: the platform email route (create_invite) + register their WhatsApp number
   // so they can send the moment they join. One action, both kinds of access.
@@ -212,6 +407,7 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
   const waInviteUrl = (p: string, link: string) => `https://wa.me/91${p}?text=${encodeURIComponent(`You're invited to Briklay. Join here: ${link}`)}`;
 
   const labelCaps = { color: V.faint, letterSpacing: '0.08em', ...font, ...T.xs } as const;
+  const eligibleCount = members.filter((m) => senderForMember(m)?.is_active).length;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" style={{ background: 'rgba(30,26,21,0.32)' }} onClick={onClose}>
@@ -301,69 +497,54 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
-          {/* platform members */}
-          <div className="mt-5">
-            <p className="uppercase font-medium mb-2" style={labelCaps}>Members</p>
+          {/* members — each with WhatsApp send-eligibility inline */}
+          <div className="mt-6">
+            <div className="flex items-baseline justify-between mb-2">
+              <p className="uppercase font-medium inline-flex items-center gap-1.5" style={labelCaps}><WhatsAppGlyph size={11} color={WA} /> Who can send on WhatsApp</p>
+              {members.length > 0 && <p style={{ color: V.faint, ...font, ...nums, ...T.xs }}>{eligibleCount}/{members.length} on</p>}
+            </div>
             {members.length === 0 ? (
               <p className="py-6 text-center" style={{ color: V.faint, ...font, ...T.sm }}>No one yet. Invite the people who handle money on site.</p>
             ) : (
               <div className="space-y-2">
                 {members.map((m) => (
-                  <div key={m.id} className="rounded-xl p-3.5 flex items-center gap-3" style={{ background: V.surface, border: '1px solid #E3DDD4' }}>
-                    <span className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 font-medium" style={{ background: V.terraWash, color: V.terraDeep, ...font, ...T.sm }}>
-                      {(m.name || '?').split(' ')[0].slice(0, 2).toUpperCase()}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate" style={{ color: V.ink, ...font, ...T.sm }}>{m.name || 'Unnamed'}</p>
-                      <p className="truncate mt-0.5" style={{ color: V.faint, ...font, ...T.xs }}>{roleLabel(m.role)}</p>
-                    </div>
-                  </div>
+                  <WaMemberRow
+                    key={m.id}
+                    member={m}
+                    sender={senderForMember(m)}
+                    suggestPhone={suggestPhoneFor(m)}
+                    onEnable={(ph) => enableMember(m, ph)}
+                    onDisable={() => disableMember(m)}
+                    onLang={(lang) => { const row = senderForMember(m); if (row) setLang.mutate({ id: row.id, lang }); }}
+                  />
                 ))}
               </div>
             )}
+            <p className="mt-2.5 leading-relaxed" style={{ color: V.faint, ...font, ...T.xs }}>
+              Turning someone on lets their WhatsApp number send to Briklay, and sends them a one-time welcome. Turn it off when they leave the site — their history stays.
+            </p>
           </div>
 
-          {/* whatsapp send-access */}
-          {senders.length > 0 && (
-            <div className="mt-5">
-              <p className="uppercase font-medium mb-2 inline-flex items-center gap-1.5" style={labelCaps}><WhatsAppGlyph size={11} color={WA} /> Can send on WhatsApp</p>
+          {/* legacy / phone-only senders not tied to a member — preserved, never lost */}
+          {otherSenders.length > 0 && (
+            <div className="mt-6">
+              <p className="uppercase font-medium mb-2" style={labelCaps}>Other site senders</p>
               <div className="space-y-2">
-                {senders.map((m) => (
+                {otherSenders.map((m) => (
                   <div key={m.id} className="rounded-xl p-3 flex items-center gap-3" style={{ background: V.surface, border: '1px solid #E3DDD4', opacity: m.is_active ? 1 : 0.55 }}>
                     <div className="flex-1 min-w-0">
                       <p className="font-medium truncate" style={{ color: V.ink, ...font, ...T.sm }}>{m.name || 'Site contact'}</p>
                       <p className="truncate mt-0.5 inline-flex items-center gap-1" style={{ color: V.sys, ...font, ...nums, ...T.xs }}>
-                        <Phone size={10} style={{ color: V.faint }} /> +91 {m.phone_number}
+                        <Phone size={10} style={{ color: V.faint }} /> +91 {prettyPhone(m.phone_number)}
                       </p>
                     </div>
-                    {/* voice-note language for this sender (Auto = locale prior / auto-detect) */}
-                    <select
-                      aria-label="Voice note language"
-                      title="Language for this person's voice notes"
-                      value={m.preferred_language ?? ''}
-                      onChange={(e) => setLang.mutate({ id: m.id, lang: e.target.value || null })}
-                      className="px-2 rounded-lg outline-none shrink-0 appearance-none"
-                      style={{ background: V.field, color: m.preferred_language ? V.ink : V.faint, height: 30, ...font, ...T.xs }}
-                    >
-                      {VOICE_LANGS.map((l) => <option key={l.value} value={l.value}>{l.value ? `🎙 ${l.label}` : 'Auto'}</option>)}
-                    </select>
-                    <button
-                      aria-label="Toggle WhatsApp access"
-                      onClick={() => toggle.mutate({ id: m.id, next: !m.is_active })}
-                      className="w-9 h-5 rounded-full relative shrink-0"
-                      style={{ background: m.is_active ? V.sage : V.line, transition: 'background .15s' }}
-                    >
-                      <span className="absolute top-0.5 w-4 h-4 rounded-full" style={{ background: '#fff', left: m.is_active ? 18 : 2, transition: 'left .15s' }} />
-                    </button>
+                    {VOICE_LANG_SELECT(m.preferred_language ?? '', (v) => setLang.mutate({ id: m.id, lang: v || null }))}
+                    <WaToggle on={m.is_active} onClick={() => toggle.mutate({ id: m.id, next: !m.is_active })} />
                   </div>
                 ))}
               </div>
             </div>
           )}
-
-          <p className="mt-5 leading-relaxed" style={{ color: V.faint, ...font, ...T.xs }}>
-            Inviting someone sends them a join link and lets their WhatsApp number send to Briklay. The green toggle turns sending off for anyone who has left the site, without deleting their history.
-          </p>
         </div>
       </div>
     </div>
