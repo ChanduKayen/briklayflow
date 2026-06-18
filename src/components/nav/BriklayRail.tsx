@@ -18,7 +18,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import type { Session } from '@supabase/supabase-js';
 import {
-  IconArrowsExchange, IconNotebook, IconFileInvoice, IconLayoutDashboard,
+  IconArrowsExchange, IconNotebook, IconFileInvoice, IconChartPie,
   IconShoppingBag, IconLayoutGrid, IconClipboardList, IconUsersGroup,
   IconBarcode, IconShieldLock, IconAdjustmentsHorizontal,
   IconChevronDown, IconChevronLeft, IconDots,
@@ -211,7 +211,7 @@ export function BriklayDesktopNav({ session, collapsible = false }: { session: S
         can(role !== 'supervisor') && { route: '/ledger', label: 'Transactions', icon: IconArrowsExchange, accent: true },
         { route: '/logbook', label: 'Day book', node: <DayBookIcon />, badge: inbox },
         can(role !== 'supervisor') && { route: '/billing', label: 'Client billing', icon: IconFileInvoice, badge: billOverdue },
-        { route: '/dashboard', label: 'Dashboard', icon: IconLayoutDashboard },
+        { route: '/insights', label: 'Insights', icon: IconChartPie },
       ].filter(Boolean) as Item[]),
     },
     {

@@ -33,7 +33,8 @@ export interface ResolvedFields {
   projectId: string;
   amount: number;
   description: string;
-  generalExpense?: boolean;   // a general expense needs no linked party
+  generalExpense?: boolean;       // a general expense needs no linked party
+  generalExpenseHead?: string;    // the GEN-xx head it's filed under (default GEN-99)
 }
 
 /** Ready to file once every mandatory field is resolved (payee + project must
@@ -77,7 +78,7 @@ export async function fileRoughEntry(entry: RoughEntry, orgId: string, resolved:
     date,
     total_amount: resolved.amount,
     payment_mode: mode,
-    category: isGeneral ? 'GEN-99' : (ai.category_code || null),
+    category: isGeneral ? (resolved.generalExpenseHead || 'GEN-99') : (ai.category_code || null),
     remarks: resolved.description,
     bill_doc_url: null,
     proof_document_url: entry.raw_image_url || null,

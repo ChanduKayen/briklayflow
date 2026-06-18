@@ -559,7 +559,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const focusProjectId = searchParams.get('project');
-  const navState = (location.state as { from?: string; projectId?: string; projectName?: string }) || {};
+  const navState = (location.state as { from?: string; projectId?: string; projectName?: string; backTo?: string; backLabel?: string }) || {};
   const qc = useQueryClient();
 
   const { data: profile } = useUserProfile(session.user.id);
@@ -745,8 +745,8 @@ export default function TransactionDetail({ session }: { session: Session }) {
         {/* ── Back ───────────────────────────────────────────────── */}
         <div className="detail-reveal mb-3" style={{ animationDelay: '0ms' }}>
           <BackLink
-            to={navState.from === 'project' && navState.projectId ? `/projects/${navState.projectId}/transactions` : '/ledger'}
-            label="Transactions"
+            to={navState.backTo || (navState.from === 'project' && navState.projectId ? `/projects/${navState.projectId}/transactions` : '/ledger')}
+            label={navState.backLabel || 'Transactions'}
           />
         </div>
 

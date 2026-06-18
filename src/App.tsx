@@ -14,7 +14,7 @@ import { CommandBarProvider, useCommandBar } from './context/CommandBarContext';
 import { CommandBar } from './components/CommandBar';
 import { PageSkeleton } from './components/SkeletonLoader';
 import {
-  IconLayoutDashboard, IconArrowsExchange,
+  IconChartPie, IconArrowsExchange,
   IconNotebook, IconClipboardList, IconShoppingBag,
   IconFileInvoice,
   IconShieldLock, IconAdjustmentsHorizontal,
@@ -44,7 +44,7 @@ import NewPurchaseOrder from './pages/NewPurchaseOrder';
 import PurchaseOrderDetail from './pages/PurchaseOrderDetail';
 import Ledger from './pages/Ledger';
 import NewTransaction from './pages/NewTransaction';
-import Dashboard from './pages/Dashboard';
+import Insights from './pages/Insights';
 import Settings from './pages/Settings';
 import NewWorkOrder from './pages/NewWorkOrder';
 import Financials from './pages/Financials';
@@ -424,7 +424,10 @@ function App() {
           return (
         <Routes>
           <Route path="/" element={<Navigate to="/ledger" replace />} />
-          <Route path="/dashboard" element={<Dashboard session={session} />} />
+          <Route path="/insights" element={<Insights />} />
+          {/* Dashboard retired → Insights. Keep the old path as a redirect so post-login
+              / onboarding / invite flows that still send users to /dashboard land here. */}
+          <Route path="/dashboard" element={<Navigate to="/insights" replace />} />
           <Route path="/logbook" element={<Logbook session={session} />} />
           <Route path="/ledger" element={<Ledger session={session} />} />
           <Route path="/ledger/new" element={<NewTransaction session={session} />} />
@@ -516,7 +519,7 @@ function GlobalShortcuts() {
 function getMobileTitle(pathname: string): string {
   const routes: Record<string, string> = {
     '/':                    'Transactions',
-    '/dashboard':           'Dashboard',
+    '/insights':            'Insights',
     '/logbook':             'Day book',
     '/ledger':              'Transactions',
     '/ledger/new':          'New Transaction',
@@ -765,7 +768,7 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
 
   // ── Global context bottom bar ──────────────────────────────────────────
   const isOrdersActive = isActivePath('/orders') || isActivePath('/purchase-orders') || isActivePath('/work-orders');
-  const moreActive = ['/billing', '/team', '/settings', '/logbook', '/invoices', '/dashboard', '/sku-directory'].some(p => isActivePath(p));
+  const moreActive = ['/billing', '/team', '/settings', '/logbook', '/invoices', '/insights', '/sku-directory'].some(p => isActivePath(p));
 
   type Tab = { path: string; icon: React.ElementType; label: string; show: boolean; badge?: number };
   const tabs: Tab[] = [
@@ -821,14 +824,14 @@ function MoreNavSheet({
     { path: `${base}/inventory`, icon: IconFiles,           label: 'Inventory',       show: true },
     { path: `${base}/boqs`,      icon: IconClipboardList,   label: 'BOQs',            show: true },
     { path: `${base}/inward`,    icon: IconShoppingBag,     label: 'Inward Register', show: true },
-    { path: '/dashboard',        icon: IconLayoutDashboard, label: 'Dashboard',       show: true },
+    { path: '/insights',         icon: IconChartPie,        label: 'Insights',        show: true },
   ] : [];
 
   const globalItems = [
     { path: '/logbook',       icon: IconNotebook,              label: 'Day book',       show: true },
     { path: '/inward-register', icon: IconLayoutGrid,          label: 'Inward Register', show: role !== 'supervisor' && role !== 'accountant' },
     { path: '/billing',       icon: IconFileInvoice,           label: 'Client Billing', show: role !== 'supervisor' },
-    { path: '/dashboard',     icon: IconLayoutDashboard,       label: 'Dashboard',      show: true },
+    { path: '/insights',      icon: IconChartPie,              label: 'Insights',       show: true },
     { path: '/sku-directory', icon: IconBarcode,               label: 'SKU Directory',  show: role === 'principal' || role === 'management' },
     { path: '/team',          icon: IconShieldLock,            label: 'Team & Access',  show: role === 'principal' || role === 'management' },
     { path: '/settings',      icon: IconAdjustmentsHorizontal, label: 'Settings',       show: true },

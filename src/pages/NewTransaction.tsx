@@ -9,7 +9,8 @@ import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/tr
 import { useSnackbar } from '../components/Snackbar';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import { CostCodePicker } from '../components/CostCodePicker';
-import { getCostCode, costCodeLabel, ALL_COST_CODES } from '../lib/costCodes';
+import { GenHeadPicker } from '../components/GenHeadPicker';
+import { getCostCode, costCodeLabel, ALL_COST_CODES, GEN_HEADS, GEN_FALLBACK } from '../lib/costCodes';
 import { autoCloseWOIfFullyPaid } from '../lib/woAutoClose';
 
 // ── New Transaction UI redesign — four-voice + money-direction tokens ──────────
@@ -681,7 +682,8 @@ export default function NewTransaction({ session: _session }: { session: Session
         const { data: pubData } = supabase.storage.from('documents').getPublicUrl(`bills/${filename}`);
         bill_doc_url = pubData.publicUrl;
       }
-      let effectiveCategory = isClientReceipt ? 'CLIENT-RECEIPT' : category;
+      // A general expense always files under a head — default to GEN-99 if none chosen.
+      let effectiveCategory = isClientReceipt ? 'CLIENT-RECEIPT' : (category || (txnType === 'expense' ? GEN_FALLBACK : category));
       let effectiveRemarks = '';
 
       if (isClientReceipt) {
@@ -719,7 +721,7 @@ export default function NewTransaction({ session: _session }: { session: Session
         }
       }
       const payload = {
-        txn_id: txnId, stakeholder_id: stkId, date, total_amount: totalAmt,
+        txn_id: txnId, stakeholder_id: stkId || null, date, total_amount: totalAmt,
         payment_mode: mode,
         category: effectiveCategory,
         remarks: effectiveRemarks, bill_doc_url,
@@ -909,6 +911,9 @@ export default function NewTransaction({ session: _session }: { session: Session
 
   const suggestCostCode = async (text: string) => {
     if (!text || text.trim().length < 5) { setAiCodeState('idle'); return; }
+    // General expenses classify against the GEN heads only; everything else against
+    // the full MAT/WRK chart of accounts.
+    const isExpense = txnType === 'expense';
     setAiCodeState('loading');
     setAiSuggestedCode(null);
     try {
@@ -916,11 +921,13 @@ export default function NewTransaction({ session: _session }: { session: Session
         body: {
           action:     'suggestCostCode',
           remark:     text.trim(),
-          cost_codes: ALL_COST_CODES.map(c => ({ code: c.code, name: c.name })),
+          cost_codes: (isExpense ? GEN_HEADS : ALL_COST_CODES).map(c => ({ code: c.code, name: c.name })),
         },
       });
       if (error) throw error;
-      const result = String((data as any)?.code || 'NONE').toUpperCase();
+      let result = String((data as any)?.code || 'NONE').toUpperCase();
+      // a general expense always lands on a head — fall back to GEN-99 on a miss
+      if (isExpense && (result === 'NONE' || !getCostCode(result))) result = GEN_FALLBACK;
       if (result === 'NONE' || !getCostCode(result)) {
         setAiSuggestedCode(null);
         setAiCodeState('none');
@@ -942,7 +949,9 @@ export default function NewTransaction({ session: _session }: { session: Session
       createTxn.mutate({ saveMode });
       return;
     }
-    if (!stkId || !totalAmt || totalAmt <= 0 || !remarks.trim() || isOver) return;
+    // General expenses carry no payee — only amount/remarks/project are mandatory.
+    const payeeRequired = txnType !== 'expense';
+    if ((payeeRequired && !stkId) || !totalAmt || totalAmt <= 0 || !remarks.trim() || isOver) return;
     if (effectiveAllocs.some((a) => !a.project_id)) return;
 
     // Bug 6: WO linked at header level but has phases — user must select a specific phase
@@ -989,7 +998,7 @@ export default function NewTransaction({ session: _session }: { session: Session
     createTxn.mutate({ saveMode });
   };
 
-  const missingPayee = saveAttempted && !stkId;
+  const missingPayee = saveAttempted && !stkId && txnType !== 'expense';
   const missingAmount = saveAttempted && totalAmt <= 0;
   const missingRemarks = saveAttempted && !remarks.trim() && txnType !== 'client_receipt';
   const missingProject = saveAttempted && effectiveAllocs.some((a) => !a.project_id);
@@ -1162,6 +1171,7 @@ export default function NewTransaction({ session: _session }: { session: Session
                   <div className="relative" ref={stkDropRef}>
                     <label className="block text-[11px] font-medium text-on-surface-variant/60 mb-2.5">
                       {txnType === 'worker' ? 'Worker' : txnType === 'material' ? 'Vendor' : txnType === 'client_receipt' ? 'Client' : 'Payee'}
+                      {txnType === 'expense' && <span className="text-on-surface-variant/35 ml-1">(optional — general expenses need no payee)</span>}
                       {missingPayee && <span className="text-error ml-1.5">required</span>}
                     </label>
 
@@ -1360,18 +1370,27 @@ export default function NewTransaction({ session: _session }: { session: Session
               <div className="bg-white rounded-2xl border border-black/[0.05] shadow-[0_8px_30px_rgb(0,0,0,0.02)]">
                 <div className="p-5 space-y-4">
 
-                  {/* Cost code picker — optional, AI-assisted */}
+                  {/* Cost code / expense head picker — optional, AI-assisted. A general
+                      expense files under a GEN head; everything else uses the MAT/WRK chart. */}
                   <div>
                     <label className="block text-[11px] font-medium text-on-surface-variant/60 mb-2">
-                      Cost Code <span className="text-on-surface-variant/35">(optional)</span>
+                      {txnType === 'expense' ? 'Expense Head' : 'Cost Code'} <span className="text-on-surface-variant/35">(optional)</span>
                     </label>
-                    <CostCodePicker
-                      value={category}
-                      onChange={(v) => { setCategory(v); setAiCodeState('idle'); setAiSuggestedCode(null); }}
-                      defaultType={txnType ? COA_DEFAULTS[txnType]?.type : 'MAT'}
-                      defaultDivision={txnType ? COA_DEFAULTS[txnType]?.division : undefined}
-                      error={false}
-                    />
+                    {txnType === 'expense' ? (
+                      <GenHeadPicker
+                        value={category}
+                        onChange={(v) => { setCategory(v); setAiCodeState('idle'); setAiSuggestedCode(null); }}
+                        error={false}
+                      />
+                    ) : (
+                      <CostCodePicker
+                        value={category}
+                        onChange={(v) => { setCategory(v); setAiCodeState('idle'); setAiSuggestedCode(null); }}
+                        defaultType={txnType ? COA_DEFAULTS[txnType]?.type : 'MAT'}
+                        defaultDivision={txnType ? COA_DEFAULTS[txnType]?.division : undefined}
+                        error={false}
+                      />
+                    )}
 
                     {/* AI suggestion chip (auto-applied with Undo) */}
                     {aiCodeState !== 'idle' && (

@@ -11,8 +11,8 @@
  * swap for a vendored generator later). The link is a public click-to-chat URL,
  * nothing sensitive.
  *
- * Needs VITE_BRIKLAY_WA_NUMBER. If it is not set, the surface says so plainly
- * rather than showing a broken code.
+ * The number is hardcoded (it doesn't change); VITE_BRIKLAY_WA_NUMBER can still
+ * override it. If neither resolves, the surface says so plainly.
  */
 import { useState } from 'react';
 import { X, Copy, ExternalLink, Check } from 'lucide-react';
@@ -22,7 +22,9 @@ import { WhatsAppGlyph } from './atoms';
 const onlyDigits = (s: string) => s.replace(/\D/g, '');
 
 export function StartOnWhatsApp({ onClose, onManageTeam }: { onClose: () => void; onManageTeam?: () => void }) {
-  const raw = import.meta.env.VITE_BRIKLAY_WA_NUMBER as string | undefined;
+  // The Briklay WhatsApp business number — hardcoded (it doesn't change). An env
+  // override is still honoured if VITE_BRIKLAY_WA_NUMBER is ever set.
+  const raw = (import.meta.env.VITE_BRIKLAY_WA_NUMBER as string | undefined) || '+91 7330872705';
   const digits = raw ? onlyDigits(raw) : '';
   const waUrl = digits ? `https://wa.me/${digits}?text=${encodeURIComponent('Hi Briklay')}` : '';
   const qrUrl = digits ? `https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=12&data=${encodeURIComponent(waUrl)}` : '';

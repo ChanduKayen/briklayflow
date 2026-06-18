@@ -1168,3 +1168,87 @@ html, body {
 @media (prefers-reduced-motion: reduce) {
   .nudge-rotate-in { animation: none !important; }
 }
+
+@keyframes db-spin { to { transform: rotate(360deg); } }
+.db-spin { animation: db-spin 0.7s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .db-spin { animation-duration: 1.4s; }
+}
+
+/* ── Insights "Explore in detail" hero CTA ── */
+.ins-cta {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 18px 22px;
+  border: none;
+  border-radius: 16px;
+  cursor: pointer;
+  text-align: left;
+  color: #fff;
+  background: linear-gradient(135deg, #1a3551 0%, #0b1c30 62%);
+  box-shadow: 0 10px 30px rgba(11, 28, 48, 0.18);
+  font-family: 'Manrope', sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform .28s cubic-bezier(.2, .8, .2, 1), box-shadow .28s ease;
+}
+.ins-cta:hover { transform: translateY(-2px); box-shadow: 0 20px 46px rgba(11, 28, 48, 0.30); }
+.ins-cta:active { transform: translateY(0) scale(.985); box-shadow: 0 8px 20px rgba(11, 28, 48, 0.22); transition-duration: .09s; }
+.ins-cta:focus-visible { outline: 2px solid #C45B39; outline-offset: 3px; }
+
+/* light sweep that crosses the button on hover */
+.ins-cta__sheen {
+  position: absolute; top: 0; left: -65%;
+  width: 55%; height: 100%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.14), transparent);
+  transform: skewX(-18deg);
+  pointer-events: none;
+  transition: left .65s ease;
+}
+.ins-cta:hover .ins-cta__sheen { left: 135%; }
+
+.ins-cta__icon {
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 46px; height: 46px;
+  border-radius: 13px;
+  color: #fff;
+  background: linear-gradient(135deg, #C45B39, #a8492b);
+  box-shadow: 0 6px 16px rgba(196, 91, 57, 0.40);
+  transition: transform .28s cubic-bezier(.2, .8, .2, 1);
+}
+.ins-cta:hover .ins-cta__icon { transform: scale(1.06) rotate(-4deg); }
+
+.ins-cta__text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ins-cta__title { font-size: 15.5px; font-weight: 700; letter-spacing: -0.01em; }
+.ins-cta__sub { font-size: 12.5px; font-weight: 500; color: rgba(255, 255, 255, 0.62); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.ins-cta__arrow {
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.10);
+  transition: transform .28s cubic-bezier(.2, .8, .2, 1), background .2s ease;
+}
+.ins-cta:hover .ins-cta__arrow { transform: translateX(4px); background: rgba(255, 255, 255, 0.18); }
+.ins-cta:active .ins-cta__arrow { transform: translateX(8px); }
+
+.ins-fade { animation: ins-fade .28s ease both; }
+@keyframes ins-fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* drill-down transaction row — quiet hover affordance */
+.ins-txn { transition: background .15s ease; }
+.ins-txn:hover { background: rgba(11, 28, 48, 0.04); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ins-cta, .ins-cta__sheen, .ins-cta__icon, .ins-cta__arrow { transition: none; }
+  .ins-cta:hover { transform: none; }
+  .ins-cta:hover .ins-cta__sheen { left: -65%; }
+  .ins-fade { animation: none; }
+}

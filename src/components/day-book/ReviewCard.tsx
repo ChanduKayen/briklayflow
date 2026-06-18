@@ -31,6 +31,8 @@ import {
 } from './fileEntry';
 import { useSwipeTriage } from './useSwipeTriage';
 import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../../lib/trades';
+import { GEN_HEADS, getCostCode } from '../../lib/costCodes';
+import { classifyExpenseHead } from '../../lib/expenseHeads';
 
 type PartyType = 'Worker' | 'Vendor' | 'Client';
 
@@ -39,7 +41,7 @@ export interface ProjectLite { project_id: string; name: string }
 
 type Phase = null | 'filing' | 'filed' | 'collapsed' | 'rejected';
 type Leaving = null | 'file' | 'reject';
-type Field = null | 'payee' | 'amount' | 'project' | 'description';
+type Field = null | 'payee' | 'amount' | 'project' | 'description' | 'genHead';
 
 const inr = (n: number) => Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 
@@ -75,6 +77,8 @@ export function ReviewCard({
   const [projectName, setProjectName] = useState<string | null>(ai.project_name || null);
   const [description, setDescription] = useState<string>(ai.description || ai.description_raw || '');
   const [generalExpense, setGeneralExpense] = useState(false);   // payee-less general expense (no linked party)
+  const [genHead, setGenHead] = useState<string>('');            // GEN-xx head it's filed under
+  const [genHeadLoading, setGenHeadLoading] = useState(false);   // LLM is picking the head
 
   // keep untouched fields live while the AI is still filling them in
   useEffect(() => {
@@ -88,9 +92,24 @@ export function ReviewCard({
   const amountNum = parseFloat((amount || '').replace(/[^\d.]/g, '')) || 0;
   const resolved: ResolvedFields = {
     payeeId: payeeId || '', projectId: projectId || '', amount: amountNum, description: description.trim(),
-    generalExpense,
+    generalExpense, generalExpenseHead: genHead || undefined,
   };
   const ready = !archived && isResolved(resolved);
+
+  // Turn an entry into (or out of) a general expense. On enter, the LLM reads the
+  // description and picks the right GEN head; the owner can change it after.
+  const markGeneral = async (on: boolean) => {
+    setGeneralExpense(on);
+    if (!on) { setGenHead(''); return; }
+    if (genHead) return;                 // keep an already-chosen head
+    setGenHeadLoading(true);
+    try {
+      const code = await classifyExpenseHead(description || ai.description_raw || '');
+      setGenHead(code);
+    } finally {
+      setGenHeadLoading(false);
+    }
+  };
 
   // ── Inline editor + filter ───────────────────────────────────────────────
   const qc = useQueryClient();
@@ -315,6 +334,10 @@ export function ReviewCard({
     </button>
   );
 
+  // the linked payee's own trade/category — shown next to the general-expense option
+  const payeeStk = payeeId ? stakeholders.find(s => s.stakeholder_id === payeeId) : null;
+  const payeeTrade = payeeStk?.category || payeeStk?.type || null;
+
   const filteredStk = stakeholders
     .filter(s => s.name.toLowerCase().includes(q.toLowerCase()))
     .slice(0, 7);
@@ -416,7 +439,7 @@ export function ReviewCard({
                 </button>
               )}
               {generalExpense && payeeName ? (
-                <button onClick={(e) => { e.stopPropagation(); if (canManage) setGeneralExpense(false); }} title="Tap to link a payee instead" className="truncate" style={{ flexShrink: 1, minWidth: 0, color: V.sys, ...font, ...T.sm }}>
+                <button onClick={(e) => { e.stopPropagation(); if (canManage) markGeneral(false); }} title="Tap to link a payee instead" className="truncate" style={{ flexShrink: 1, minWidth: 0, color: V.sys, ...font, ...T.sm }}>
                   {payeeName}
                 </button>
               ) : payeeId ? (
@@ -466,15 +489,6 @@ export function ReviewCard({
             </button>
           )}
 
-          {/* general expense chosen: the amber link-warning is replaced by a calm note —
-              a general expense doesn't need a party, so the heard name simply stays unlinked */}
-          {generalExpense && (
-            <p className="mt-1.5 inline-flex items-center gap-1.5" style={{ paddingLeft: 38, color: V.faint, ...font, ...T.xs }}>
-              <Wallet size={11} style={{ color: V.faint }} />
-              General expense — a linked payee isn't needed
-            </p>
-          )}
-
           {/* heard a name, but it is not one of your parties yet — the disambiguation
               WhatsApp deliberately skipped, resolved here in one tap */}
           {!payeeId && payeeName && editing !== 'payee' && !generalExpense && (
@@ -492,27 +506,65 @@ export function ReviewCard({
                 </div>
               </div>
             ) : (
-              <div className="mt-2 flex flex-col items-start gap-1.5" style={{ paddingLeft: 38 }}>
-                <button
-                  onClick={(e) => { e.stopPropagation(); if (canManage) openEditor('payee', payeeName || ''); }}
-                  className="inline-flex items-center gap-1.5 text-left"
-                  style={{ color: V.ask, ...font, ...T.xs }}
-                >
-                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: V.ask }} />
-                  <span>
-                    <span style={{ fontWeight: 600, color: V.inkSoft }}>{payeeName}</span> isn’t in your contacts — <span style={{ textDecoration: 'underline', textUnderlineOffset: 2, textDecorationColor: V.askLine }}>add them</span>
-                  </span>
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); if (canManage) setGeneralExpense(true); }}
-                  className="inline-flex items-center gap-1.5"
-                  style={{ color: V.sys, ...font, ...T.xs }}
-                >
-                  <Wallet size={11} style={{ color: V.faint }} />
-                  <span style={{ textDecoration: 'underline', textUnderlineOffset: 2, textDecorationColor: V.line }}>or mark as a general expense</span>
-                </button>
-              </div>
+              <button
+                onClick={(e) => { e.stopPropagation(); if (canManage) openEditor('payee', payeeName || ''); }}
+                className="mt-2 inline-flex items-center gap-1.5 text-left"
+                style={{ paddingLeft: 38, color: V.ask, ...font, ...T.xs }}
+              >
+                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: V.ask }} />
+                <span>
+                  <span style={{ fontWeight: 600, color: V.inkSoft }}>{payeeName}</span> isn’t in your contacts — <span style={{ textDecoration: 'underline', textUnderlineOffset: 2, textDecorationColor: V.askLine }}>add them</span>
+                </span>
+              </button>
             )
+          )}
+
+          {/* general expense — sits BELOW the name line so "add them" reads first. On
+              every entry (any payment can be a general expense). With a payee linked,
+              it shows that party's trade/category, with general-expense as the alternative.
+              Once chosen, the LLM picks the expense head from the description; the owner
+              can change it — general expenses file under a head, never a payee. */}
+          {generalExpense ? (
+            <div className="mt-1.5 inline-flex items-center gap-1.5 flex-wrap" style={{ paddingLeft: 38, color: V.faint, ...font, ...T.xs }}>
+              <Wallet size={11} style={{ color: V.faint }} />
+              {genHeadLoading ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="db-spin inline-block w-3 h-3 rounded-full" style={{ border: `1.5px solid ${V.line}`, borderTopColor: V.faint }} />
+                  Finding the right expense head…
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 flex-wrap">
+                  <span>General expense ·</span>
+                  <button onClick={(e) => { e.stopPropagation(); if (canManage) openEditor('genHead'); }} className="inline-flex items-center gap-1" style={{ color: V.inkSoft, fontWeight: 600 }}>
+                    {genHead && getCostCode(genHead) ? getCostCode(genHead)!.item.name : 'Pick an expense head'}
+                    <Pencil size={9} style={{ color: V.faint }} />
+                  </button>
+                </span>
+              )}
+            </div>
+          ) : !canManage ? null : payeeId && payeeTrade ? (
+            <p className="mt-1.5 inline-flex items-center gap-1.5 flex-wrap" style={{ paddingLeft: 38, color: V.sys, ...font, ...T.xs }}>
+              <Wallet size={11} style={{ color: V.faint }} />
+              <span>
+                Is it <span style={{ color: V.inkSoft }}>{payeeTrade}</span> or a{' '}
+                <button onClick={(e) => { e.stopPropagation(); markGeneral(true); }} style={{ textDecoration: 'underline', textUnderlineOffset: 2, textDecorationColor: V.line, color: V.sys }}>general expense</button>?
+              </span>
+            </p>
+          ) : (
+            <div className="mt-1.5" style={{ paddingLeft: 38 }}>
+              <button
+                onClick={(e) => { e.stopPropagation(); markGeneral(true); }}
+                className="inline-flex items-center gap-1.5 text-left"
+                style={{ color: V.sys, ...font, ...T.xs }}
+              >
+                <Wallet size={11} style={{ color: V.faint }} />
+                <span><span style={{ textDecoration: 'underline', textUnderlineOffset: 2, textDecorationColor: V.line }}>Mark as a general expense</span> — a payee link isn't needed</span>
+              </button>
+              {/* scoped to general expenses only — normal payments still track to the payee */}
+              <p className="mt-1" style={{ paddingLeft: 18, color: V.faint, ...font, ...T.xs, opacity: 0.85 }}>
+                General expenses go under a category head, not a payee.
+              </p>
+            </div>
           )}
 
           {/* project heard but not a registered project — one-tap resolve */}
@@ -610,6 +662,23 @@ export function ReviewCard({
                   <input autoFocus value={description} onChange={(e) => { setDescription(e.target.value); mark('description'); }} placeholder="What was it for?" className="px-2.5 rounded-lg flex-1 outline-none" style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.ink, height: 38, ...font, ...T.sm }} />
                   <button onClick={() => setEditing(null)} className="px-3 py-2 rounded-lg font-medium" style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.inkSoft, ...font, ...T.sm }}>Done</button>
                 </div>
+              )}
+
+              {editing === 'genHead' && (
+                <>
+                  <div className="inline-flex items-center gap-2 px-2.5 rounded-lg w-full" style={{ background: V.surface, border: `1px solid ${V.line}`, height: 36 }}>
+                    <Search size={13} style={{ color: V.faint }} />
+                    <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search an expense head…" className="bg-transparent outline-none flex-1" style={{ color: V.ink, ...font, ...T.sm }} />
+                  </div>
+                  <div className="mt-2 max-h-44 overflow-y-auto -mx-0.5">
+                    {GEN_HEADS.filter(h => h.name.toLowerCase().includes(q.toLowerCase()) || h.code.toLowerCase().includes(q.toLowerCase())).map(h => (
+                      <button key={h.code} onClick={() => { setGenHead(h.code); setEditing(null); }} className="w-full text-left px-2.5 py-2 rounded-lg flex items-center justify-between gap-2" style={{ ...font }}>
+                        <span className="truncate" style={{ color: h.code === genHead ? V.ink : V.inkSoft, fontWeight: h.code === genHead ? 600 : 400, ...T.sm }}>{h.name}</span>
+                        {h.code === genHead && <Check size={13} style={{ color: V.sage }} className="shrink-0" />}
+                      </button>
+                    ))}
+                  </div>
+                </>
               )}
             </div>
           )}

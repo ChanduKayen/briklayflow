@@ -1,6 +1,7 @@
 // ── Construction Cost Code Taxonomy ───────────────────────────────────────────
 // Type A  : MATERIALS  (MAT-01 … MAT-25)
 // Type B  : WORKS      (WRK-01 … WRK-23)
+// Type C  : GENERAL    (GEN-01 … GEN-99) — overhead/expense heads with no payee
 
 export interface CostCodeItem {
   code: string;   // e.g. "MAT-09-04"
@@ -10,7 +11,7 @@ export interface CostCodeItem {
 export interface CostCodeDivision {
   code: string;   // e.g. "MAT-09"
   name: string;   // e.g. "Flooring, Tiles & Stone"
-  type: 'MAT' | 'WRK';
+  type: 'MAT' | 'WRK' | 'GEN';
   items: CostCodeItem[];
 }
 
@@ -672,22 +673,57 @@ const WRK: CostCodeDivision[] = [
   },
 ];
 
+// ── TYPE C : GENERAL EXPENSES ───────────────────────────────────────────────────
+// Overhead / running-cost heads. A general expense is filed under one of these and
+// carries NO payee (stakeholder_id null). GEN-99 is the catch-all fallback.
+
+const GEN: CostCodeDivision = {
+  code: 'GEN', name: 'General Expenses', type: 'GEN',
+  items: [
+    { code: 'GEN-01', name: 'Transport & logistics' },
+    { code: 'GEN-02', name: 'Fuel & diesel' },
+    { code: 'GEN-03', name: 'Site utilities (power, water, internet)' },
+    { code: 'GEN-04', name: 'Tools & consumables' },
+    { code: 'GEN-05', name: 'Food & refreshments' },
+    { code: 'GEN-06', name: 'Site accommodation & stay' },
+    { code: 'GEN-07', name: 'Office & administration' },
+    { code: 'GEN-08', name: 'Professional & consultant fees' },
+    { code: 'GEN-09', name: 'Government, taxes & statutory fees' },
+    { code: 'GEN-10', name: 'Repairs & maintenance' },
+    { code: 'GEN-11', name: 'Safety & PPE' },
+    { code: 'GEN-12', name: 'Equipment & machinery rental' },
+    { code: 'GEN-13', name: 'Bank & finance charges' },
+    { code: 'GEN-14', name: 'Medical & first-aid' },
+    { code: 'GEN-15', name: 'Security & watchman' },
+    { code: 'GEN-99', name: 'Miscellaneous / uncategorised' },
+  ],
+};
+
 // ── Exports ────────────────────────────────────────────────────────────────────
 
+// COST_DIVISIONS stays MAT+WRK so the MAT/WRK CostCodePicker and ALL_COST_CODES
+// (the candidate list for normal-payment classification) are unchanged. GEN is a
+// separate axis used only by the general-expense flow.
 export const COST_DIVISIONS: CostCodeDivision[] = [...MAT, ...WRK];
 
 export const MAT_DIVISIONS = MAT;
 export const WRK_DIVISIONS = WRK;
 
+/** The general-expense heads (GEN-xx) — the candidate set for expense classification. */
+export const GEN_DIVISION = GEN;
+export const GEN_HEADS: CostCodeItem[] = GEN.items;
+export const GEN_FALLBACK = 'GEN-99';
+export const isGenCode = (code: string | null | undefined): boolean => !!code && code.startsWith('GEN-');
+
 /** Flat list of every leaf item */
 export const ALL_COST_CODES: CostCodeItem[] = COST_DIVISIONS.flatMap((d) => d.items);
 
-/** Look up an item by its full code (e.g. "MAT-09-04") */
+/** Look up an item by its full code (e.g. "MAT-09-04" or "GEN-01") */
 export function getCostCode(code: string): {
   division: CostCodeDivision;
   item: CostCodeItem;
 } | null {
-  for (const div of COST_DIVISIONS) {
+  for (const div of [...COST_DIVISIONS, GEN]) {
     const item = div.items.find((i) => i.code === code);
     if (item) return { division: div, item };
   }
