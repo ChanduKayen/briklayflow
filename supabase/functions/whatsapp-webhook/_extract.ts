@@ -425,6 +425,9 @@ function normalizeTxn(p: Record<string, unknown>): TxnExtract {
   const num = (v: unknown) => (typeof v === 'number' && isFinite(v) ? v : null)
   const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null)
   const enumv = <T extends string>(v: unknown, allow: T[]) => (typeof v === 'string' && allow.includes(v as T) ? (v as T) : null)
+  // Capitalize the first character of the note (e.g. "for carrying bricks" ->
+  // "For carrying bricks"). No-op for null / a note starting with a digit or symbol.
+  const capFirst = (v: string | null) => (v ? v.charAt(0).toUpperCase() + v.slice(1) : v)
   return {
     amount: num(p.amount),
     amount_source_phrase: str(p.amount_source_phrase),
@@ -433,7 +436,7 @@ function normalizeTxn(p: Record<string, unknown>): TxnExtract {
     project: str(p.project),
     direction: enumv(p.direction, ['out', 'in']),
     mode: enumv(p.mode, ['cash', 'upi', 'bank']),
-    note: str(p.note),
+    note: capFirst(str(p.note)),
     ref: str(p.ref),
   }
 }
