@@ -190,7 +190,7 @@ export default function Logbook({ session }: { session: Session }) {
 
       <div className="mx-auto py-6 sm:py-8" style={{ width: '92%', maxWidth: 1100 }}>
         <div className="flex items-center gap-2.5">
-          <Babai size={38} alt="Babai, Briklay's bookkeeper" />
+          <Babai size={48} alt="Babai, Briklay's bookkeeper" />
           <h1 style={{ color: V.ink, ...serif, ...T.h1 }}>Day book</h1>
         </div>
         <p className="mt-2 leading-relaxed flex flex-wrap items-center gap-x-1.5" style={{ color: V.sys, ...font, ...T.body }}>
