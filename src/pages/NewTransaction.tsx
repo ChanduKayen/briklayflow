@@ -38,7 +38,7 @@ const COA_DEFAULTS: Record<string, { type: 'MAT' | 'WRK'; division?: string }> =
 
 type TxnType = 'worker' | 'material' | 'expense' | 'client_receipt';
 type PayMode = 'NEFT' | 'UPI' | 'Cheque' | 'Cash';
-interface AllocDraft { id: string; project_id: string; order_type: 'WO' | 'PO' | ''; order_ref: string; allocated_amount: number; }
+interface AllocDraft { id: string; project_id: string; order_type: 'WO' | 'PO' | ''; order_ref: string; milestone_id: string; allocated_amount: number; }
 
 function genTxnId() {
   return `TXN-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
@@ -309,7 +309,7 @@ function POObligationRow({ po, selectedObligation, onSelect, poPaid }: {
 
 // ── LinkingPanel ──────────────────────────────────────────────────────────────
 
-function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip, onOpenWO, onOpenPO, txnType }: {
+function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip, onOpenWO, onOpenPO, txnType, hideCreate }: {
   wos: any[]; pos: any[]; loading: boolean;
   selectedObligation: SelectedObligation | null;
   onSelect: (ob: SelectedObligation) => void;
@@ -317,6 +317,7 @@ function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip,
   onOpenWO: () => void;
   onOpenPO: () => void;
   txnType?: string | null;
+  hideCreate?: boolean;   // split rows: select existing orders only, no inline create
 }) {
   const [expandedWOs, setExpandedWOs] = useState<string[]>([]);
   const [milestonePayments, setMilestonePayments] = useState<Record<string, number>>({});
@@ -366,7 +367,17 @@ function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip,
     );
   }
 
-  if (!hasData) return <NoObligationsState onSkip={onSkip} onOpenWO={onOpenWO} onOpenPO={onOpenPO} txnType={txnType} />;
+  if (!hasData) {
+    if (hideCreate) {
+      return (
+        <div className="mt-3 rounded-xl border border-black/[0.05] bg-stone-50/40 px-4 py-3 flex items-center justify-between gap-3">
+          <span className="text-[12px] text-on-surface-variant/55">No {txnType === 'worker' ? 'work orders' : 'purchase orders'} for this project.</span>
+          <button type="button" onClick={onSkip} className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant/40 hover:text-primary transition-colors whitespace-nowrap">Record unlinked</button>
+        </div>
+      );
+    }
+    return <NoObligationsState onSkip={onSkip} onOpenWO={onOpenWO} onOpenPO={onOpenPO} txnType={txnType} />;
+  }
 
   return (
     <div className="mt-4 rounded-2xl border border-black/[0.05] overflow-hidden bg-white shadow-[0_8px_30px_rgb(0,0,0,0.015)]">
@@ -384,11 +395,13 @@ function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip,
               <p className="text-[9px] font-bold uppercase tracking-wider text-on-surface-variant/35">
                 Work Orders ({wos.length})
               </p>
-              <button type="button" onClick={onOpenWO}
-                className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-[#C8603A]/70 hover:text-[#C8603A] transition-colors">
-                <span className="material-symbols-outlined text-[12px]">add</span>
-                New WO
-              </button>
+              {!hideCreate && (
+                <button type="button" onClick={onOpenWO}
+                  className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-[#C8603A]/70 hover:text-[#C8603A] transition-colors">
+                  <span className="material-symbols-outlined text-[12px]">add</span>
+                  New WO
+                </button>
+              )}
             </div>
             <div className="divide-y divide-black/[0.03]">
               {wos.map((wo: any) => (
@@ -408,11 +421,13 @@ function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip,
               <p className="text-[9px] font-bold uppercase tracking-wider text-on-surface-variant/35">
                 Purchase Orders ({pos.length})
               </p>
-              <button type="button" onClick={onOpenPO}
-                className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-[#006c49]/70 hover:text-[#006c49] transition-colors">
-                <span className="material-symbols-outlined text-[12px]">add</span>
-                New PO
-              </button>
+              {!hideCreate && (
+                <button type="button" onClick={onOpenPO}
+                  className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-[#006c49]/70 hover:text-[#006c49] transition-colors">
+                  <span className="material-symbols-outlined text-[12px]">add</span>
+                  New PO
+                </button>
+              )}
             </div>
             <div className="divide-y divide-black/[0.03]">
               {pos.map((po: any) => (
@@ -431,6 +446,79 @@ function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip,
         </button>
       </div>
     </div>
+  );
+}
+
+/** SelectedObligation → the link fields stored on a split row's allocation. */
+function obligationToAllocLink(ob: SelectedObligation): Pick<AllocDraft, 'order_type' | 'order_ref' | 'milestone_id'> {
+  if (ob.type === 'WO' || ob.type === 'WO_PHASE') return { order_type: 'WO', order_ref: ob.wo_id || '', milestone_id: ob.phase_id || '' };
+  if (ob.type === 'PO') return { order_type: 'PO', order_ref: ob.po_id || '', milestone_id: '' };
+  return { order_type: '', order_ref: '', milestone_id: '' };
+}
+
+/**
+ * Per-split obligation linking. Loads THIS row's project WOs (worker) or POs
+ * (vendor) for the shared payee and reuses LinkingPanel, so each split links its
+ * own order + milestone — the split equivalent of the single-transaction linker.
+ * Mounted per row (keyed by project) so changing the row's project reloads it.
+ */
+function RowObligationLink({ projectId, stkId, txnType, onSelect, onClear }: {
+  projectId: string;
+  stkId: string;
+  txnType: string | null;
+  onSelect: (ob: SelectedObligation) => void;
+  onClear: () => void;
+}) {
+  const [wos, setWos] = useState<any[]>([]);
+  const [pos, setPos] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [sel, setSel] = useState<SelectedObligation | null>(null);
+  const [skipped, setSkipped] = useState(false);
+
+  useEffect(() => {
+    setSel(null); setSkipped(false);
+    if (!projectId || !stkId || (txnType !== 'worker' && txnType !== 'material')) {
+      setWos([]); setPos([]); return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    if (txnType === 'worker') {
+      supabase.from('work_orders')
+        .select('wo_id, scope_of_work, order_value, status, stakeholders(name, category), wo_milestones(*)')
+        .eq('project_id', projectId).eq('stakeholder_id', stkId)
+        .not('status', 'in', '("Closed","Cancelled")')
+        .order('created_at', { ascending: false })
+        .then(({ data }) => { if (!cancelled) { setWos(data || []); setPos([]); setLoading(false); } });
+    } else {
+      supabase.from('purchase_orders')
+        .select('po_id, status, vendor_bill_amount, total_value, order_value, stakeholders(name, category), po_line_items(*)')
+        .eq('project_id', projectId).eq('stakeholder_id', stkId)
+        .order('created_at', { ascending: false })
+        .then(({ data }) => { if (!cancelled) { setPos(data || []); setWos([]); setLoading(false); } });
+    }
+    return () => { cancelled = true; };
+  }, [projectId, stkId, txnType]);
+
+  if (skipped) {
+    return (
+      <button type="button" onClick={() => setSkipped(false)}
+        className="flex items-center gap-1.5 text-[12px] text-on-surface-variant/50 hover:text-primary transition-colors">
+        <span className="material-symbols-outlined text-[14px]">link</span>
+        Link to a Work Order or PO
+      </button>
+    );
+  }
+
+  return (
+    <LinkingPanel
+      wos={wos} pos={pos} loading={loading}
+      selectedObligation={sel}
+      onSelect={(ob) => { setSel(ob); onSelect(ob); }}
+      onSkip={() => { setSkipped(true); setSel(null); onClear(); }}
+      onOpenWO={() => {}} onOpenPO={() => {}}
+      txnType={txnType}
+      hideCreate
+    />
   );
 }
 
@@ -465,7 +553,7 @@ export default function NewTransaction({ session: _session }: { session: Session
   const [remarks, setRemarks] = useState('');
   const [billFile, setBillFile] = useState<File | null>(null);
   const [allocs, setAllocs] = useState<AllocDraft[]>([
-    { id: '1', project_id: initialProjectId, order_type: '', order_ref: '', allocated_amount: 0 },
+    { id: '1', project_id: initialProjectId, order_type: '', order_ref: '', milestone_id: '', allocated_amount: 0 },
   ]);
   const [splitMode, setSplitMode] = useState(false);
 
@@ -722,8 +810,8 @@ export default function NewTransaction({ session: _session }: { session: Session
       }
       // SPLIT MODE → each project becomes its OWN transaction (separate ledger
       // entries), created atomically via insert_split_transactions. Shared party/
-      // date/mode/bill/remarks; the amount is divided per row. (Per-split WO/PO
-      // linking is the follow-up — the split rows don't link orders yet.)
+      // date/mode/bill/remarks; the amount is divided per row, and each row carries
+      // its own WO/PO + milestone link.
       if (splitMode && !isClientReceipt) {
         const base = {
           stakeholder_id: stkId || null, date, payment_mode: mode,
@@ -736,7 +824,9 @@ export default function NewTransaction({ session: _session }: { session: Session
           txn_id: `TXN-${new Date().getFullYear()}-${String(baseTs + i).slice(-6)}`,
           total_amount: a.allocated_amount,
           project_id: a.project_id,
-          order_type: null, order_ref: null, milestone_id: null,
+          order_type: a.order_type || null,
+          order_ref: a.order_ref || null,
+          milestone_id: a.milestone_id || null,
         }));
         const { error: splitErr } = await supabase.rpc('insert_split_transactions', { p_base: base, p_splits: splits });
         if (splitErr) throw splitErr;
@@ -786,7 +876,7 @@ export default function NewTransaction({ session: _session }: { session: Session
         setTotalAmt(0); setCategory(''); setRemarks(''); setBillFile(null);
         setSaveAttempted(false); setSplitMode(false);
         setDate(new Date().toISOString().split('T')[0]);
-        setAllocs([{ id: Math.random().toString(), project_id: keptProject, order_type: '', order_ref: '', allocated_amount: 0 }]);
+        setAllocs([{ id: Math.random().toString(), project_id: keptProject, order_type: '', order_ref: '', milestone_id: '', allocated_amount: 0 }]);
         setSelectedObligation(null); setSkipped(false); setAmountTouched(false);
         setProjectWOs([]); setProjectPOs([]);
         setAiCodeState('idle'); setAiSuggestedCode(null);
@@ -800,7 +890,7 @@ export default function NewTransaction({ session: _session }: { session: Session
     },
   });
 
-  const addAlloc = () => setAllocs((prev) => [...prev, { id: Math.random().toString(), project_id: '', order_type: '', order_ref: '', allocated_amount: 0 }]);
+  const addAlloc = () => setAllocs((prev) => [...prev, { id: Math.random().toString(), project_id: '', order_type: '', order_ref: '', milestone_id: '', allocated_amount: 0 }]);
   const rmAlloc = (id: string) => setAllocs((prev) => prev.filter((a) => a.id !== id));
   const upAlloc = (id: string, updates: Partial<AllocDraft>) => setAllocs((prev) => prev.map((a) => (a.id === id ? { ...a, ...updates } : a)));
 
@@ -1591,13 +1681,25 @@ export default function NewTransaction({ session: _session }: { session: Session
                         </label>
                         <select
                           value={a.project_id}
-                          onChange={(e) => upAlloc(a.id, { project_id: e.target.value, order_type: '', order_ref: '' })}
+                          onChange={(e) => upAlloc(a.id, { project_id: e.target.value, order_type: '', order_ref: '', milestone_id: '' })}
                           className={`bk-input ${missingProject && !a.project_id ? 'border-error' : ''}`}
                         >
                           <option value="">Select project…</option>
                           {projects?.map((p) => <option key={p.project_id} value={p.project_id}>{p.name}</option>)}
                         </select>
                       </div>
+
+                      {/* Per-split obligation linking — each split links its own WO/PO + milestone */}
+                      {splitMode && (txnType === 'worker' || txnType === 'material') && a.project_id && stkId && (
+                        <RowObligationLink
+                          key={a.project_id}
+                          projectId={a.project_id}
+                          stkId={stkId}
+                          txnType={txnType}
+                          onSelect={(ob) => upAlloc(a.id, { ...obligationToAllocLink(ob), allocated_amount: a.allocated_amount || ob.balance })}
+                          onClear={() => upAlloc(a.id, { order_type: '', order_ref: '', milestone_id: '' })}
+                        />
+                      )}
 
                       {/* Linking Panel — replaces old WO/PO dropdowns */}
                       {!splitMode && txnType !== 'expense' && a.project_id && !skipped && (
