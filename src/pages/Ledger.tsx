@@ -831,28 +831,16 @@ export default function Ledger({ session }: { session: Session }) {
             (filterUnlinked ? 1 : 0) + (datePreset !== 'month' ? 1 : 0);
           return (
             <div className="sm:hidden mt-5 space-y-2.5">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setFiltersOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-3.5 rounded-full shrink-0 active:scale-[0.98] transition-transform"
-                  style={{ height: 40, background: V.surface, border: `1px solid ${activeFilterCount ? V.terra : V.line}`, color: activeFilterCount ? V.terraDeep : V.inkSoft, ...font }}
-                >
-                  <SlidersHorizontal size={15} />
-                  <span className="text-sm font-medium">Filters</span>
-                  {activeFilterCount > 0 && (
-                    <span className="inline-flex items-center justify-center text-[11px] font-bold rounded-full" style={{ minWidth: 18, height: 18, padding: '0 5px', background: V.terra, color: '#fff' }}>{activeFilterCount}</span>
-                  )}
-                </button>
-                <button
-                  onClick={() => setNetExpanded(v => !v)}
-                  className="flex-1 inline-flex items-center justify-between gap-2 px-3.5 rounded-full active:scale-[0.99] transition-transform"
-                  style={{ height: 40, background: V.surface, border: `1px solid ${V.line}` }}
-                >
-                  <span className="text-[11px] uppercase" style={{ color: V.faint, letterSpacing: '0.05em', ...font }}>Net</span>
-                  <span className="text-[15px] font-semibold" style={{ color: monthNet < 0 ? V.terraDeep : V.sage, ...nums }}>{netLabel}</span>
-                  <ChevronDown size={15} style={{ color: V.faint, transform: netExpanded ? 'rotate(180deg)' : 'none', transition: 'transform .2s ease' }} />
-                </button>
-              </div>
+              {/* in/out/net — collapsed, full width, taps to reveal the flow bar */}
+              <button
+                onClick={() => setNetExpanded(v => !v)}
+                className="w-full inline-flex items-center justify-between gap-2 px-4 rounded-full active:scale-[0.99] transition-transform"
+                style={{ height: 40, background: V.surface, border: `1px solid ${V.line}` }}
+              >
+                <span className="text-[11px] uppercase" style={{ color: V.faint, letterSpacing: '0.05em', ...font }}>Net</span>
+                <span className="text-[15px] font-semibold" style={{ color: monthNet < 0 ? V.terraDeep : V.sage, ...nums }}>{netLabel}</span>
+                <ChevronDown size={15} style={{ color: V.faint, transform: netExpanded ? 'rotate(180deg)' : 'none', transition: 'transform .2s ease' }} />
+              </button>
 
               {netExpanded && (
                 <div className="rounded-2xl px-3.5 py-3 animate-in fade-in slide-in-from-top-1 duration-150" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
@@ -860,11 +848,23 @@ export default function Ledger({ session }: { session: Session }) {
                 </div>
               )}
 
+              {/* filter · search · download — one aligned row */}
               <div className="flex items-center gap-2">
-                <div className="inline-flex items-center gap-2 px-3 rounded-full flex-1" style={{ background: V.surface, border: `1px solid ${V.line}`, height: 40 }}>
-                  <Search size={15} style={{ color: V.faint }} />
-                  <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search payee, order, remark" className="bg-transparent text-sm outline-none flex-1 min-w-0" style={{ color: V.ink, ...font }} />
-                  {searchTerm && <button onClick={() => setSearchTerm('')} aria-label="Clear search"><X size={15} style={{ color: V.faint }} /></button>}
+                <button
+                  onClick={() => setFiltersOpen(true)}
+                  aria-label={activeFilterCount ? `Filters (${activeFilterCount} active)` : 'Filters'}
+                  className="inline-flex items-center gap-1.5 rounded-full shrink-0 active:scale-95 transition-transform"
+                  style={{ height: 40, padding: activeFilterCount ? '0 12px' : '0', width: activeFilterCount ? undefined : 40, justifyContent: 'center', background: V.surface, border: `1px solid ${activeFilterCount ? V.terra : V.line}`, color: activeFilterCount ? V.terraDeep : V.inkSoft }}
+                >
+                  <SlidersHorizontal size={16} />
+                  {activeFilterCount > 0 && (
+                    <span className="inline-flex items-center justify-center text-[11px] font-bold rounded-full" style={{ minWidth: 17, height: 17, padding: '0 5px', background: V.terra, color: '#fff' }}>{activeFilterCount}</span>
+                  )}
+                </button>
+                <div className="inline-flex items-center gap-2 px-3 rounded-full flex-1 min-w-0" style={{ background: V.surface, border: `1px solid ${V.line}`, height: 40 }}>
+                  <Search size={15} style={{ color: V.faint, flexShrink: 0 }} />
+                  <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search" className="bg-transparent text-sm outline-none flex-1 min-w-0" style={{ color: V.ink, ...font }} />
+                  {searchTerm && <button onClick={() => setSearchTerm('')} aria-label="Clear search" className="shrink-0"><X size={15} style={{ color: V.faint }} /></button>}
                 </div>
                 <button onClick={exportCSV} aria-label="Export CSV" className="inline-flex items-center justify-center rounded-full shrink-0 active:scale-95 transition-transform" style={{ width: 40, height: 40, background: V.surface, border: `1px solid ${V.line}` }}>
                   <Download size={16} style={{ color: V.faint }} />
