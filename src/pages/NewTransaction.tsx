@@ -720,6 +720,29 @@ export default function NewTransaction({ session: _session }: { session: Session
           }
         }
       }
+      // SPLIT MODE → each project becomes its OWN transaction (separate ledger
+      // entries), created atomically via insert_split_transactions. Shared party/
+      // date/mode/bill/remarks; the amount is divided per row. (Per-split WO/PO
+      // linking is the follow-up — the split rows don't link orders yet.)
+      if (splitMode && !isClientReceipt) {
+        const base = {
+          stakeholder_id: stkId || null, date, payment_mode: mode,
+          category: effectiveCategory, remarks: effectiveRemarks, bill_doc_url,
+          ai_flag_status: 'Clean', ai_flag_data: {}, org_id: orgId,
+        };
+        const baseTs = Date.now();
+        const splits = effectiveAllocs.map((a, i) => ({
+          // distinct id per split (Date.now()+i avoids same-millisecond collisions)
+          txn_id: `TXN-${new Date().getFullYear()}-${String(baseTs + i).slice(-6)}`,
+          total_amount: a.allocated_amount,
+          project_id: a.project_id,
+          order_type: null, order_ref: null, milestone_id: null,
+        }));
+        const { error: splitErr } = await supabase.rpc('insert_split_transactions', { p_base: base, p_splits: splits });
+        if (splitErr) throw splitErr;
+        return { savedId: splits[0]?.txn_id ?? txnId, saveMode, autoCloseWoId: null as string | null };
+      }
+
       const payload = {
         txn_id: txnId, stakeholder_id: stkId || null, date, total_amount: totalAmt,
         payment_mode: mode,
@@ -953,6 +976,7 @@ export default function NewTransaction({ session: _session }: { session: Session
     const payeeRequired = txnType !== 'expense';
     if ((payeeRequired && !stkId) || !totalAmt || totalAmt <= 0 || !remarks.trim() || isOver) return;
     if (effectiveAllocs.some((a) => !a.project_id)) return;
+    if (splitMode && remaining !== 0) return;   // splits must sum EXACTLY to the total
 
     // Bug 6: WO linked at header level but has phases — user must select a specific phase
     if (selectedObligation?.type === 'WO') {
