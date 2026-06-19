@@ -716,8 +716,8 @@ export default function Ledger({ session }: { session: Session }) {
               <div
                 onMouseEnter={() => { nudgePaused.current = true; }}
                 onMouseLeave={() => { nudgePaused.current = false; }}
-                className="flex items-center gap-2.5 w-full mt-6 px-3.5 py-2.5 rounded-xl"
-                style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font }}
+                className="flex items-center gap-2.5 w-full mt-6 px-3.5 rounded-xl"
+                style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, minHeight: 54, ...font }}
               >
                 <WhatsAppGlyph size={16} color="#1FA855" />
                 {s.wa ? (
@@ -830,16 +830,25 @@ export default function Ledger({ session }: { session: Session }) {
             (filterUnlinked ? 1 : 0) + (datePreset !== 'month' ? 1 : 0);
           return (
             <div className="sm:hidden mt-5 space-y-2.5">
-              {/* in/out/net — plain text, no separate bar */}
-              <p className="text-[13px] leading-relaxed px-0.5" style={{ ...nums, ...font }}>
-                <span style={{ color: V.faint }}>Net </span>
-                <span className="font-semibold" style={{ color: monthNet < 0 ? V.terraDeep : V.sage }}>{netLabel}</span>
-                <span style={{ color: V.faint }}> · </span>
-                <span style={{ color: V.sage }}>+₹{inr(monthIn)}</span>
-                <span style={{ color: V.faint }}> in · </span>
-                <span style={{ color: V.terraDeep }}>−₹{inr(monthOut)}</span>
-                <span style={{ color: V.faint }}> out</span>
-              </p>
+              {/* in/out/net — quiet typographic summary: net hero (serif) + subtle in/out */}
+              <div className="px-0.5">
+                <div className="flex items-baseline gap-2">
+                  <span style={{ ...serif, ...nums, fontSize: 22, lineHeight: 1.1, color: monthNet < 0 ? V.terraDeep : V.sage }}>{netLabel}</span>
+                  <span className="uppercase" style={{ ...font, fontSize: 10, letterSpacing: '0.1em', color: V.faint }}>net</span>
+                </div>
+                <div className="flex items-center gap-4 mt-2 text-[12px]" style={{ ...font, ...nums }}>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span style={{ width: 5, height: 5, borderRadius: 99, background: V.sage, flexShrink: 0 }} />
+                    <span style={{ color: V.inkSoft }}>₹{inr(monthIn)}</span>
+                    <span style={{ color: V.faint }}>in</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span style={{ width: 5, height: 5, borderRadius: 99, background: V.terra, flexShrink: 0 }} />
+                    <span style={{ color: V.inkSoft }}>₹{inr(monthOut)}</span>
+                    <span style={{ color: V.faint }}>out</span>
+                  </span>
+                </div>
+              </div>
 
               {/* filter · search · download — one aligned row */}
               <div className="flex items-center gap-2">
