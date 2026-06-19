@@ -10,7 +10,8 @@ import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
 import { getCostCode } from '../lib/costCodes';
-import { Plus, Search, Download, Paperclip, Check, ArrowRight, X } from 'lucide-react';
+import { Plus, Search, Download, Paperclip, Check, ArrowRight, X, SlidersHorizontal, ChevronDown } from 'lucide-react';
+import BottomSheet from '../components/BottomSheet';
 import { WhatsAppGlyph } from '../components/day-book/atoms';
 import { StartOnWhatsAppButton } from '../components/day-book/StartOnWhatsApp';
 import { ShortcutTicker } from '../components/ShortcutTicker';
@@ -232,6 +233,8 @@ export default function Ledger({ session }: { session: Session }) {
   const [activeFilterDropdown, setActiveFilterDropdown] = useState<string | null>(null);
   const [chipDropPos, setChipDropPos] = useState<{ top: number; left: number } | null>(null);
   const [datePreset, setDatePreset] = useState<DatePreset>('month');
+  const [filtersOpen, setFiltersOpen] = useState(false);   // mobile: all filters in one sheet
+  const [netExpanded, setNetExpanded] = useState(false);   // mobile: collapsed in/out/net pill
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   // Infinite scroll: a sentinel near the end auto-reveals the next page (with a brief
   // spinner beat), so the accountant never has to click "Load more".
@@ -675,7 +678,7 @@ export default function Ledger({ session }: { session: Session }) {
             <p className="text-sm mt-2" style={{ color: V.sys, ...font, ...nums }}>
               {periodLabel} · {filteredTransactions.length} {filteredTransactions.length === 1 ? 'entry' : 'entries'}
             </p>
-            <div className="min-[1700px]:hidden">
+            <div className="hidden sm:block min-[1700px]:hidden">
               <FlowBar inLabel={inr(monthIn)} outLabel={inr(monthOut)} net={netLabel} outPct={outPct} />
             </div>
           </div>
@@ -696,7 +699,6 @@ export default function Ledger({ session }: { session: Session }) {
                 { key: 'P', label: 'view purchase orders' },
                 { key: 'W', label: 'view work orders' },
                 { key: 'L', label: 'view day book' },
-                { key: '⟵ hold', label: 'long press screen for quick actions' },
               ]} className="w-full" />
             </div>
           </div>
@@ -780,8 +782,8 @@ export default function Ledger({ session }: { session: Session }) {
           </div>
         )}
 
-        {/* filters */}
-        <div ref={filterBarRef} className="flex items-center gap-2 flex-wrap mt-7">
+        {/* filters — desktop chip bar */}
+        <div ref={filterBarRef} className="hidden sm:flex items-center gap-2 flex-wrap mt-7">
           <FilterChip active onClick={(e) => openDrop('date', e)}>{periodLabel}</FilterChip>
           {activeFilterDropdown === 'date' && chipDropPos && createPortal(
             <div ref={chipDropRef} className="rounded-xl overflow-hidden py-1" style={{ position: 'fixed', top: chipDropPos.top, left: chipDropPos.left, zIndex: 9999, width: 200, background: V.surface, border: `1px solid ${V.line}`, boxShadow: '0 10px 30px rgba(30,26,21,0.12)' }}>
@@ -821,6 +823,113 @@ export default function Ledger({ session }: { session: Session }) {
             <Download size={13} style={{ color: V.faint }} /> Export
           </button>
         </div>
+
+        {/* filters — mobile: one Filters button + a collapsed in/out/net pill + search */}
+        {(() => {
+          const activeFilterCount =
+            (filterType.length ? 1 : 0) + (filterProject.length ? 1 : 0) +
+            (filterUnlinked ? 1 : 0) + (datePreset !== 'month' ? 1 : 0);
+          return (
+            <div className="sm:hidden mt-5 space-y-2.5">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setFiltersOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3.5 rounded-full shrink-0 active:scale-[0.98] transition-transform"
+                  style={{ height: 40, background: V.surface, border: `1px solid ${activeFilterCount ? V.terra : V.line}`, color: activeFilterCount ? V.terraDeep : V.inkSoft, ...font }}
+                >
+                  <SlidersHorizontal size={15} />
+                  <span className="text-sm font-medium">Filters</span>
+                  {activeFilterCount > 0 && (
+                    <span className="inline-flex items-center justify-center text-[11px] font-bold rounded-full" style={{ minWidth: 18, height: 18, padding: '0 5px', background: V.terra, color: '#fff' }}>{activeFilterCount}</span>
+                  )}
+                </button>
+                <button
+                  onClick={() => setNetExpanded(v => !v)}
+                  className="flex-1 inline-flex items-center justify-between gap-2 px-3.5 rounded-full active:scale-[0.99] transition-transform"
+                  style={{ height: 40, background: V.surface, border: `1px solid ${V.line}` }}
+                >
+                  <span className="text-[11px] uppercase" style={{ color: V.faint, letterSpacing: '0.05em', ...font }}>Net</span>
+                  <span className="text-[15px] font-semibold" style={{ color: monthNet < 0 ? V.terraDeep : V.sage, ...nums }}>{netLabel}</span>
+                  <ChevronDown size={15} style={{ color: V.faint, transform: netExpanded ? 'rotate(180deg)' : 'none', transition: 'transform .2s ease' }} />
+                </button>
+              </div>
+
+              {netExpanded && (
+                <div className="rounded-2xl px-3.5 py-3 animate-in fade-in slide-in-from-top-1 duration-150" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
+                  <FlowBar inLabel={inr(monthIn)} outLabel={inr(monthOut)} net={netLabel} outPct={outPct} />
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                <div className="inline-flex items-center gap-2 px-3 rounded-full flex-1" style={{ background: V.surface, border: `1px solid ${V.line}`, height: 40 }}>
+                  <Search size={15} style={{ color: V.faint }} />
+                  <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search payee, order, remark" className="bg-transparent text-sm outline-none flex-1 min-w-0" style={{ color: V.ink, ...font }} />
+                  {searchTerm && <button onClick={() => setSearchTerm('')} aria-label="Clear search"><X size={15} style={{ color: V.faint }} /></button>}
+                </div>
+                <button onClick={exportCSV} aria-label="Export CSV" className="inline-flex items-center justify-center rounded-full shrink-0 active:scale-95 transition-transform" style={{ width: 40, height: 40, background: V.surface, border: `1px solid ${V.line}` }}>
+                  <Download size={16} style={{ color: V.faint }} />
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* mobile filter sheet — every filter in one place */}
+        <BottomSheet open={filtersOpen} onClose={() => setFiltersOpen(false)} title="Filters">
+          {(() => {
+            const chip = (label: string, on: boolean, onClick: () => void) => (
+              <button key={label} onClick={onClick} className="px-3 py-2 rounded-full text-sm active:scale-[0.97] transition-transform"
+                style={{ background: on ? V.terraWash : V.field, color: on ? V.terraDeep : V.inkSoft, border: `1px solid ${on ? V.terra : 'transparent'}`, ...font }}>
+                {label}
+              </button>
+            );
+            const toggle = (opt: string, cur: string[], set: (f: string[]) => void) =>
+              chip(opt, cur.includes(opt), () => set(cur.includes(opt) ? cur.filter(v => v !== opt) : [...cur, opt]));
+            const label = { color: V.faint, letterSpacing: '0.06em', ...font } as const;
+            return (
+              <div className="px-5 pb-5 space-y-5">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase mb-2.5" style={label}>Period</p>
+                  <div className="flex flex-wrap gap-2">
+                    {datePresets.map(d => chip(d.label, datePreset === d.k, () => setDatePreset(d.k)))}
+                  </div>
+                </div>
+                {uniqueTypes.length > 0 && (
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase mb-2.5" style={label}>Type</p>
+                    <div className="flex flex-wrap gap-2">{uniqueTypes.map(o => toggle(o, filterType, setFilterType))}</div>
+                  </div>
+                )}
+                {uniqueProjects.length > 0 && (
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase mb-2.5" style={label}>Project</p>
+                    <div className="flex flex-wrap gap-2">{uniqueProjects.map(o => toggle(o, filterProject, setFilterProject))}</div>
+                  </div>
+                )}
+                {unlinkedCount > 0 && (
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase mb-2.5" style={label}>Linkage</p>
+                    {chip(`${unlinkedCount} not linked`, filterUnlinked, () => setFilterUnlinked(v => !v))}
+                  </div>
+                )}
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={() => { setDatePreset('month'); setFilterType([]); setFilterProject([]); setFilterUnlinked(false); }}
+                    className="px-4 rounded-xl text-sm font-medium" style={{ height: 46, background: V.field, color: V.inkSoft, ...font }}
+                  >
+                    Clear all
+                  </button>
+                  <button
+                    onClick={() => setFiltersOpen(false)}
+                    className="flex-1 rounded-xl text-sm font-semibold" style={{ height: 46, background: terraGrad, color: '#fff', ...font }}
+                  >
+                    Show {filteredTransactions.length} {filteredTransactions.length === 1 ? 'entry' : 'entries'}
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+        </BottomSheet>
 
         {/* the day-book */}
         {isLoading ? (
