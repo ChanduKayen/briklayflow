@@ -42,7 +42,7 @@ BEGIN
       ai_flag_status, ai_flag_data, entered_by, org_id
     ) VALUES (
       v_txn_id,
-      NULLIF(p_base->>'stakeholder_id', '')::uuid,
+      NULLIF(p_base->>'stakeholder_id', ''),
       (p_base->>'date')::date,
       (v_split->>'total_amount')::numeric,
       (p_base->>'payment_mode')::public.payment_mode,
