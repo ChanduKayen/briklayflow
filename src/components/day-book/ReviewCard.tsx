@@ -711,7 +711,7 @@ export function ReviewCard({
 
         {/* split across projects — sits with the File action */}
         {canManage && !archived && amountNum > 0 && (
-          <div className="px-4 sm:px-5 pt-3" onPointerDown={(e) => e.stopPropagation()}>
+          <div className="px-4 sm:px-5 pt-3 pb-3" onPointerDown={(e) => e.stopPropagation()}>
             {splitRows === null ? (
               // ── trigger ──
               <button onClick={startSplit} className="inline-flex items-center gap-1.5" style={{ color: V.terraDeep, ...font, ...T.xs }}>
