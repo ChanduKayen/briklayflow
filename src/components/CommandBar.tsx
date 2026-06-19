@@ -356,19 +356,6 @@ export function CommandBar() {
         </div>
       )}
 
-      <MobilePill />
     </>
-  );
-}
-
-// ─── Mobile pill trigger ──────────────────────────────────────────────────────
-
-function MobilePill() {
-  const { open } = useCommandBar();
-  return (
-    <button className="cmdbar-mobile-pill" onClick={open} aria-label="Search">
-      <IconSearch size={15} style={{ color: 'rgba(255,255,255,0.55)', flexShrink: 0 }} />
-      <span>Search</span>
-    </button>
   );
 }

@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from './lib/auth/AuthProvider';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
@@ -20,7 +20,6 @@ import {
   IconShieldLock, IconAdjustmentsHorizontal,
   IconLogout, IconChevronLeft, IconDots,
   IconRepeat, IconLayoutGrid, IconFiles, IconUsers,
-  IconBarcode,
   IconCircleDot, IconClock, IconFileText,
 } from '@tabler/icons-react';
 
@@ -74,8 +73,6 @@ import ProcurementRequests from './pages/ProcurementRequests';
 import ProcurementQuotes from './pages/ProcurementQuotes';
 import ProcurementOrders from './pages/ProcurementOrders';
 import { FloatingActionButton } from './components/FloatingActionButton';
-import { QuickActionsOverlay } from './components/QuickActionsOverlay';
-import { useLongPress } from './hooks/useLongPress';
 import BottomSheet from './components/BottomSheet';
 import GlobalRefetchIndicator from './components/GlobalRefetchIndicator';
 import { clearPersistedCache } from './lib/queryClient';
@@ -223,8 +220,6 @@ function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [showMoreSheet, setShowMoreSheet] = useState(false);
-  const [quickActionsOpen, setQuickActionsOpen] = useState(false);
-  const longPress = useLongPress(() => setQuickActionsOpen(true));
   const [routerReady, setRouterReady] = useState(false);
   // Must be at top level — hooks cannot be called after conditional returns
   const triggerSignOut = useCallback(() => setSigningOut(true), []);
@@ -405,7 +400,6 @@ function App() {
       <BriklayDesktopNav session={session} />
       <main
         className={`min-h-screen mobile-main-pb transition-[margin-left] duration-[220ms] ease-[cubic-bezier(0.4,0,0.6,1)] md:ml-[220px]`}
-        {...longPress}
       >
         {/* Mobile topbar (phones only â€" replaces sidebar hamburger) */}
         <MobileTopbar session={session} />
@@ -484,9 +478,6 @@ function App() {
 
       {/* FAB â€" mobile only */}
       <FloatingActionButton />
-
-      {/* Long-press quick actions overlay â€" mobile only */}
-      <QuickActionsOverlay isOpen={quickActionsOpen} onClose={() => setQuickActionsOpen(false)} />
     </div>
 
     {/* Background-refetch progress bar (cache-first signal) */}
@@ -567,6 +558,17 @@ function MobileTopbar({ session }: { session: Session }) {
   const initials = (name: string) =>
     name.split(' ').filter(Boolean).map(w => w[0]).join('').toUpperCase().slice(0, 2) || '?';
 
+  // Account menu (mirrors the desktop avatar dropdown: Settings + Sign out).
+  const { triggerSignOut } = useSignOut();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const h = (e: Event) => { if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false); };
+    document.addEventListener('pointerdown', h);
+    return () => document.removeEventListener('pointerdown', h);
+  }, [menuOpen]);
+
   return (
     <header
       className="md:hidden sticky top-0 z-30 bg-white/90 backdrop-blur-xl supports-[backdrop-filter]:bg-white/75"
@@ -591,10 +593,49 @@ function MobileTopbar({ session }: { session: Session }) {
           {title}
         </h1>
         {profile && (
-          <div
-            className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 ${avatarColor[profile.role] ?? 'bg-surface-container-high text-on-surface'}`}
-          >
-            {initials(profile.name ?? 'U')}
+          <div className="relative shrink-0" ref={menuRef}>
+            <button
+              onClick={() => setMenuOpen(o => !o)}
+              aria-label="Account"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold touch-active transition-transform active:scale-95 ${avatarColor[profile.role] ?? 'bg-surface-container-high text-on-surface'}`}
+            >
+              {initials(profile.name ?? 'U')}
+            </button>
+            {menuOpen && (
+              <div
+                role="menu"
+                className="absolute right-0 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150"
+                style={{ top: 'calc(100% + 8px)', minWidth: 208, background: '#FFFFFF', border: '1px solid #EAE6E0', borderRadius: 14, boxShadow: '0 14px 36px rgba(20,16,12,0.20)', zIndex: 50, transformOrigin: 'top right' }}
+              >
+                <div className="flex items-center gap-2.5 px-3.5 py-3" style={{ borderBottom: '1px solid #F0ECE6' }}>
+                  <span className={`w-9 h-9 rounded-full flex items-center justify-center text-[12px] font-bold shrink-0 ${avatarColor[profile.role] ?? 'bg-surface-container-high text-on-surface'}`}>
+                    {initials(profile.name ?? 'U')}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-[13.5px] font-semibold text-on-surface truncate leading-tight">{profile.name ?? 'User'}</p>
+                    <p className="text-[11px] text-on-surface-variant capitalize truncate">{profile.role}</p>
+                  </div>
+                </div>
+                <button
+                  role="menuitem"
+                  onClick={() => { setMenuOpen(false); navigate('/settings'); }}
+                  className="w-full flex items-center gap-3 px-3.5 py-3 text-left text-[14px] text-on-surface touch-active"
+                >
+                  <IconAdjustmentsHorizontal size={17} strokeWidth={1.7} style={{ color: '#9A9186', flexShrink: 0 }} /> Settings
+                </button>
+                <div style={{ borderTop: '1px solid #F0ECE6' }} />
+                <button
+                  role="menuitem"
+                  onClick={() => { setMenuOpen(false); triggerSignOut(); }}
+                  className="w-full flex items-center gap-3 px-3.5 py-3 text-left text-[14px] font-medium touch-active"
+                  style={{ color: '#B2402A' }}
+                >
+                  <IconLogout size={17} strokeWidth={1.7} style={{ flexShrink: 0 }} /> Sign out
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -765,14 +806,14 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
 
   // ── Global context bottom bar ──────────────────────────────────────────
   const isOrdersActive = isActivePath('/orders') || isActivePath('/purchase-orders') || isActivePath('/work-orders');
-  const moreActive = ['/billing', '/team', '/settings', '/logbook', '/invoices', '/insights', '/sku-directory'].some(p => isActivePath(p));
+  const moreActive = ['/billing', '/team', '/settings', '/stakeholders', '/invoices', '/insights', '/inward-register'].some(p => isActivePath(p));
 
   type Tab = { path: string; icon: React.ElementType; label: string; show: boolean; badge?: number };
   const tabs: Tab[] = [
-    { path: '/ledger',       icon: IconRepeat,     label: 'Txns',     show: role !== 'supervisor' },
-    { path: '/projects',     icon: IconLayoutGrid, label: 'Projects', show: true },
-    { path: '/orders',       icon: IconFiles,      label: 'Orders',   show: true, badge: ordersBadge },
-    { path: '/stakeholders', icon: IconUsers,      label: 'Parties',  show: role !== 'supervisor' && role !== 'accountant' },
+    { path: '/ledger',   icon: IconRepeat,     label: 'Txns',     show: role !== 'supervisor' },
+    { path: '/projects', icon: IconLayoutGrid, label: 'Projects', show: true },
+    { path: '/orders',   icon: IconFiles,      label: 'Orders',   show: true, badge: ordersBadge },
+    { path: '/logbook',  icon: IconNotebook,   label: 'Day book', show: true },
   ].filter(t => t.show);
 
   return (
@@ -825,11 +866,10 @@ function MoreNavSheet({
   ] : [];
 
   const globalItems = [
-    { path: '/logbook',       icon: IconNotebook,              label: 'Day book',       show: true },
+    { path: '/stakeholders',  icon: IconUsers,                 label: 'Parties',         show: role !== 'supervisor' && role !== 'accountant' },
     { path: '/inward-register', icon: IconLayoutGrid,          label: 'Inward Register', show: role !== 'supervisor' && role !== 'accountant' },
     { path: '/billing',       icon: IconFileInvoice,           label: 'Client Billing', show: role !== 'supervisor' },
     { path: '/insights',      icon: IconChartPie,              label: 'Insights',       show: true },
-    { path: '/sku-directory', icon: IconBarcode,               label: 'SKU Directory',  show: role === 'principal' || role === 'management' },
     { path: '/team',          icon: IconShieldLock,            label: 'Team & Access',  show: role === 'principal' || role === 'management' },
     { path: '/settings',      icon: IconAdjustmentsHorizontal, label: 'Settings',       show: true },
   ].filter(i => i.show);
@@ -882,8 +922,8 @@ function MoreNavSheet({
             </div>
             <button
               onClick={() => { onClose(); triggerSignOut(); }}
-              className="flex items-center gap-1.5 px-3 h-9 rounded-lg text-[12px] font-medium text-on-surface-variant touch-active"
-              style={{ background: 'rgba(0,0,0,0.04)' }}
+              className="flex items-center gap-1.5 px-3 h-9 rounded-lg text-[12px] font-medium touch-active"
+              style={{ background: 'rgba(178,64,42,0.08)', color: '#B2402A' }}
             >
               <IconLogout size={14} strokeWidth={1.8} />
               Sign out

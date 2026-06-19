@@ -1063,34 +1063,6 @@ html, body {
   line-height: 1;
 }
 
-/* ── Mobile pill trigger ── */
-.cmdbar-mobile-pill {
-  display: none;
-}
-@media (max-width: 767px) {
-  .cmdbar-mobile-pill {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    position: fixed;
-    bottom: calc(56px + env(safe-area-inset-bottom) + 14px);
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 50;
-    background: rgba(24, 24, 26, 0.88);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 99px;
-    padding: 10px 20px;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
-    cursor: pointer;
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.55);
-    letter-spacing: -0.01em;
-  }
-}
-
 /* ── Mobile bar (slides up, full-width) ── */
 @media (max-width: 767px) {
   .cmdbar-bar {
