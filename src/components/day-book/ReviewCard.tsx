@@ -21,13 +21,13 @@ import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   Check, X, Pencil, Link2, ArrowUpRight, ArrowDownLeft, ArrowRight,
-  Image as ImageIcon, Search, UserPlus, Wallet, Mic,
+  Image as ImageIcon, Search, UserPlus, Wallet, Mic, Split, Plus,
 } from 'lucide-react';
 import type { RoughEntry } from '../../types';
 import { V, WA, font, serif, nums, terraGrad, T } from './tokens';
 import { WhatsAppGlyph } from './atoms';
 import {
-  fileRoughEntry, rejectRoughEntry, restoreRoughEntry, createParty, isResolved, errMessage, type ResolvedFields,
+  fileRoughEntry, fileRoughEntrySplit, rejectRoughEntry, restoreRoughEntry, createParty, isResolved, errMessage, type ResolvedFields,
 } from './fileEntry';
 import { useSwipeTriage } from './useSwipeTriage';
 import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../../lib/trades';
@@ -75,6 +75,8 @@ export function ReviewCard({
   const [amount, setAmount] = useState<string>(ai.amount != null ? String(ai.amount) : '');
   const [projectId, setProjectId] = useState<string | null>(ai.project_id || null);
   const [projectName, setProjectName] = useState<string | null>(ai.project_name || null);
+  // Day Book split: opt-in, projects only. null = not splitting.
+  const [splitRows, setSplitRows] = useState<{ id: string; projectId: string; amount: string }[] | null>(null);
   const [description, setDescription] = useState<string>(ai.description || ai.description_raw || '');
   const [generalExpense, setGeneralExpense] = useState(false);   // payee-less general expense (no linked party)
   const [genHead, setGenHead] = useState<string>('');            // GEN-xx head it's filed under
@@ -94,7 +96,15 @@ export function ReviewCard({
     payeeId: payeeId || '', projectId: projectId || '', amount: amountNum, description: description.trim(),
     generalExpense, generalExpenseHead: genHead || undefined,
   };
-  const ready = !archived && isResolved(resolved);
+  // Split (opt-in, projects only): each row needs a project + amount and they must sum to the total.
+  const splitting = splitRows !== null && splitRows.length > 1;
+  const splitParsed = (splitRows ?? []).map(r => ({ projectId: r.projectId, amount: parseFloat((r.amount || '').replace(/[^\d.]/g, '')) || 0 }));
+  const splitRemaining = amountNum - splitParsed.reduce((s, r) => s + r.amount, 0);
+  const splitReady = splitting && splitParsed.every(r => r.projectId && r.amount > 0) && Math.abs(splitRemaining) < 0.01;
+  const payeeOk = generalExpense ? true : Boolean(payeeId);
+  const baseReadyNoProject = !archived && payeeOk && amountNum > 0 && Boolean(description.trim());
+
+  const ready = splitting ? (baseReadyNoProject && splitReady) : (!archived && isResolved(resolved));
 
   // Turn an entry into (or out of) a general expense. On enter, the LLM reads the
   // description and picks the right GEN head; the owner can change it after.
@@ -122,6 +132,10 @@ export function ReviewCard({
   const [payeeSugDismissed, setPayeeSugDismissed] = useState(false);
   const openEditor = (f: Field, seed = '') => { setQ(seed); setEditing(f); };
   const mark = (f: string) => touched.current.add(f);
+  const startSplit = () => setSplitRows([
+    { id: '1', projectId: projectId || '', amount: amountNum > 0 ? String(amountNum) : '' },
+    { id: '2', projectId: '', amount: '' },
+  ]);
 
   const addParty = async () => {
     const nm = q.trim();
@@ -150,7 +164,14 @@ export function ReviewCard({
     const reduced = swipe.reducedMotion;
     setLeaving('file'); setPhase('filing');
     try {
-      const txnId = await fileRoughEntry(entry, orgId, resolved);
+      let txnId: string;
+      if (splitting) {
+        const base = { payeeId: payeeId || '', amount: amountNum, description: description.trim(), generalExpense, generalExpenseHead: genHead || undefined };
+        const ids = await fileRoughEntrySplit(entry, orgId, base, splitParsed);
+        txnId = ids[0];
+      } else {
+        txnId = await fileRoughEntry(entry, orgId, resolved);
+      }
       setFiledTxnId(txnId);
       setPhase('filed');
       onFiled(txnId);   // Logbook keeps this card in place (justFiled) + refreshes ledger
@@ -462,6 +483,13 @@ export function ReviewCard({
                 : !ai.project_raw
                   ? amberChip('which project?', () => openEditor('project'))
                   : null}
+              {projectId && canManage && amountNum > 0 && !splitRows && (
+                <button onClick={(e) => { e.stopPropagation(); startSplit(); }}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md shrink-0 whitespace-nowrap"
+                  style={{ background: V.field, color: V.faint, ...font, ...T.xs }}>
+                  <Split size={11} /> split
+                </button>
+              )}
               {description.trim()
                 ? filledChip(<Pencil size={10} style={{ color: V.faint }} />, description.trim(), () => openEditor('description', description))
                 : amberChip('what was it for?', () => openEditor('description'))}
@@ -471,6 +499,48 @@ export function ReviewCard({
                 </span>
               )}
             </div>
+
+            {/* Split-across-projects editor — opt-in, just project + amount per row */}
+            {splitRows && (
+              <div className="mt-3 rounded-xl p-3 db-drop" style={{ background: V.field, border: `1px solid ${V.line}` }} onPointerDown={(e) => e.stopPropagation()}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="uppercase inline-flex items-center gap-1.5" style={{ ...font, fontSize: 10, letterSpacing: '0.06em', color: V.faint }}>
+                    <Split size={11} /> Split across projects
+                  </span>
+                  <span style={{ ...font, ...nums, fontSize: 11, color: Math.abs(splitRemaining) < 0.01 ? V.sage : splitRemaining < 0 ? V.terraDeep : V.ask }}>
+                    {Math.abs(splitRemaining) < 0.01 ? 'Balanced' : splitRemaining < 0 ? `₹${inr(Math.abs(splitRemaining))} over` : `₹${inr(splitRemaining)} left`}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {splitRows.map((r) => (
+                    <div key={r.id} className="flex items-center gap-2">
+                      <select value={r.projectId}
+                        onChange={(e) => setSplitRows(rows => rows!.map(x => x.id === r.id ? { ...x, projectId: e.target.value } : x))}
+                        className="flex-1 min-w-0 px-2 rounded-lg outline-none appearance-none" style={{ height: 36, background: V.surface, border: `1px solid ${V.line}`, color: r.projectId ? V.ink : V.faint, ...font, ...T.sm }}>
+                        <option value="">Project…</option>
+                        {projects.map(p => <option key={p.project_id} value={p.project_id}>{p.name}</option>)}
+                      </select>
+                      <div className="inline-flex items-center gap-1 px-2 rounded-lg shrink-0" style={{ height: 36, width: 104, background: V.surface, border: `1px solid ${V.line}` }}>
+                        <span style={{ color: V.faint, ...font, ...nums, ...T.sm }}>₹</span>
+                        <input inputMode="decimal" value={r.amount}
+                          onChange={(e) => setSplitRows(rows => rows!.map(x => x.id === r.id ? { ...x, amount: e.target.value } : x))}
+                          placeholder="0" className="bg-transparent outline-none w-full min-w-0" style={{ color: V.ink, ...font, ...nums, ...T.sm }} />
+                      </div>
+                      {splitRows!.length > 1 && (
+                        <button onClick={() => setSplitRows(rows => rows!.filter(x => x.id !== r.id))} aria-label="Remove split" className="shrink-0" style={{ color: V.faint }}><X size={15} /></button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="flex items-center justify-between mt-2.5">
+                  <button onClick={() => setSplitRows(rows => [...rows!, { id: Math.random().toString(), projectId: '', amount: '' }])}
+                    className="inline-flex items-center gap-1" style={{ color: V.terraDeep, ...font, ...T.xs }}>
+                    <Plus size={13} /> Add project
+                  </button>
+                  <button onClick={() => setSplitRows(null)} style={{ color: V.faint, ...font, ...T.xs }}>Cancel split</button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* low-confidence amount (a spoken/code-mixed numeral the agent wasn't sure

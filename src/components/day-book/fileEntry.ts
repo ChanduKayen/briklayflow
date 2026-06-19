@@ -110,6 +110,65 @@ export async function fileRoughEntry(entry: RoughEntry, orgId: string, resolved:
   return newTxnId;
 }
 
+/** One project slice of a split file. */
+export interface ProjectSplit { projectId: string; amount: number; }
+
+/**
+ * File a captured entry as a SPLIT across projects — N separate transactions, one
+ * per project (just project + amount; the Day Book keeps it simple, no order
+ * linking). Atomic via insert_split_transactions. `base` carries the shared fields
+ * (payee/description/amount-total/general-expense) minus the per-split project.
+ * Returns the new txn_ids.
+ */
+export async function fileRoughEntrySplit(
+  entry: RoughEntry,
+  orgId: string,
+  base: Omit<ResolvedFields, 'projectId'>,
+  splits: ProjectSplit[],
+): Promise<string[]> {
+  const ai = entry.ai_extracted || {};
+  const mode = PAYMENT_MODES.includes(ai.mode as typeof PAYMENT_MODES[number]) ? ai.mode! : 'Cash';
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(ai.date || '') ? ai.date! : new Date().toISOString().slice(0, 10);
+  const isGeneral = !!base.generalExpense;
+  const genName = isGeneral ? String(ai.payee_name || ai.payee_raw || '').trim() : '';
+
+  const p_base = {
+    stakeholder_id: isGeneral ? null : base.payeeId,
+    date,
+    payment_mode: mode,
+    category: isGeneral ? (base.generalExpenseHead || 'GEN-99') : (ai.category_code || null),
+    remarks: base.description,
+    bill_doc_url: null,
+    proof_document_url: entry.raw_image_url || null,
+    ai_flag_status: 'Clean',
+    ai_flag_data: genName ? { general_payee: genName } : {},
+    org_id: orgId,
+  };
+  const baseTs = Date.now();
+  const p_splits = splits.map((s, i) => ({
+    txn_id: `TXN-${new Date().getFullYear()}-${String(baseTs + i).slice(-6)}`,
+    total_amount: s.amount,
+    project_id: s.projectId,
+    order_type: null, order_ref: null, milestone_id: null,
+  }));
+
+  const { data, error: rpcErr } = await supabase.rpc('insert_split_transactions', { p_base, p_splits });
+  if (rpcErr) throw rpcErr;
+  const ids = (((data as any)?.txn_ids as string[]) ?? p_splits.map(s => s.txn_id));
+
+  // provenance: point every split transaction back at its capture
+  await supabase.from('transactions')
+    .update({ source_re_id: entry.id, proof_document_url: entry.raw_image_url || null })
+    .in('txn_id', ids);
+
+  const { error: postErr } = await supabase.from('rough_entries')
+    .update({ status: 'POSTED', resolved_txn_id: ids[0] ?? null })
+    .eq('id', entry.id);
+  if (postErr) throw postErr;
+
+  return ids;
+}
+
 /**
  * Create a new party inline (same shape as ResolvePopup's new-stakeholder form),
  * so the owner can link a heard-but-unknown payee without leaving the card.
