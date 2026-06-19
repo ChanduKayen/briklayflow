@@ -10,7 +10,7 @@ import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
 import { getCostCode } from '../lib/costCodes';
-import { Plus, Search, Download, Paperclip, Check, ArrowRight, X, SlidersHorizontal, ChevronDown } from 'lucide-react';
+import { Plus, Search, Download, Paperclip, Check, ArrowRight, X, SlidersHorizontal } from 'lucide-react';
 import BottomSheet from '../components/BottomSheet';
 import { WhatsAppGlyph } from '../components/day-book/atoms';
 import { StartOnWhatsAppButton } from '../components/day-book/StartOnWhatsApp';
@@ -234,7 +234,6 @@ export default function Ledger({ session }: { session: Session }) {
   const [chipDropPos, setChipDropPos] = useState<{ top: number; left: number } | null>(null);
   const [datePreset, setDatePreset] = useState<DatePreset>('month');
   const [filtersOpen, setFiltersOpen] = useState(false);   // mobile: all filters in one sheet
-  const [netExpanded, setNetExpanded] = useState(false);   // mobile: collapsed in/out/net pill
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   // Infinite scroll: a sentinel near the end auto-reveals the next page (with a brief
   // spinner beat), so the accountant never has to click "Load more".
@@ -831,22 +830,16 @@ export default function Ledger({ session }: { session: Session }) {
             (filterUnlinked ? 1 : 0) + (datePreset !== 'month' ? 1 : 0);
           return (
             <div className="sm:hidden mt-5 space-y-2.5">
-              {/* in/out/net — collapsed, full width, taps to reveal the flow bar */}
-              <button
-                onClick={() => setNetExpanded(v => !v)}
-                className="w-full inline-flex items-center justify-between gap-2 px-4 rounded-full active:scale-[0.99] transition-transform"
-                style={{ height: 40, background: V.surface, border: `1px solid ${V.line}` }}
-              >
-                <span className="text-[11px] uppercase" style={{ color: V.faint, letterSpacing: '0.05em', ...font }}>Net</span>
-                <span className="text-[15px] font-semibold" style={{ color: monthNet < 0 ? V.terraDeep : V.sage, ...nums }}>{netLabel}</span>
-                <ChevronDown size={15} style={{ color: V.faint, transform: netExpanded ? 'rotate(180deg)' : 'none', transition: 'transform .2s ease' }} />
-              </button>
-
-              {netExpanded && (
-                <div className="rounded-2xl px-3.5 py-3 animate-in fade-in slide-in-from-top-1 duration-150" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
-                  <FlowBar inLabel={inr(monthIn)} outLabel={inr(monthOut)} net={netLabel} outPct={outPct} />
-                </div>
-              )}
+              {/* in/out/net — plain text, no separate bar */}
+              <p className="text-[13px] leading-relaxed px-0.5" style={{ ...nums, ...font }}>
+                <span style={{ color: V.faint }}>Net </span>
+                <span className="font-semibold" style={{ color: monthNet < 0 ? V.terraDeep : V.sage }}>{netLabel}</span>
+                <span style={{ color: V.faint }}> · </span>
+                <span style={{ color: V.sage }}>+₹{inr(monthIn)}</span>
+                <span style={{ color: V.faint }}> in · </span>
+                <span style={{ color: V.terraDeep }}>−₹{inr(monthOut)}</span>
+                <span style={{ color: V.faint }}> out</span>
+              </p>
 
               {/* filter · search · download — one aligned row */}
               <div className="flex items-center gap-2">
