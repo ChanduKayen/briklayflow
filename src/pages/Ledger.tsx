@@ -830,24 +830,13 @@ export default function Ledger({ session }: { session: Session }) {
             (filterUnlinked ? 1 : 0) + (datePreset !== 'month' ? 1 : 0);
           return (
             <div className="sm:hidden mt-5 space-y-2.5">
-              {/* in/out/net — quiet typographic summary: net hero (serif) + subtle in/out */}
-              <div className="px-0.5">
-                <div className="flex items-baseline gap-2">
-                  <span style={{ ...serif, ...nums, fontSize: 22, lineHeight: 1.1, color: monthNet < 0 ? V.terraDeep : V.sage }}>{netLabel}</span>
-                  <span className="uppercase" style={{ ...font, fontSize: 10, letterSpacing: '0.1em', color: V.faint }}>net</span>
-                </div>
-                <div className="flex items-center gap-4 mt-2 text-[12px]" style={{ ...font, ...nums }}>
-                  <span className="inline-flex items-center gap-1.5">
-                    <span style={{ width: 5, height: 5, borderRadius: 99, background: V.sage, flexShrink: 0 }} />
-                    <span style={{ color: V.inkSoft }}>₹{inr(monthIn)}</span>
-                    <span style={{ color: V.faint }}>in</span>
-                  </span>
-                  <span className="inline-flex items-center gap-1.5">
-                    <span style={{ width: 5, height: 5, borderRadius: 99, background: V.terra, flexShrink: 0 }} />
-                    <span style={{ color: V.inkSoft }}>₹{inr(monthOut)}</span>
-                    <span style={{ color: V.faint }}>out</span>
-                  </span>
-                </div>
+              {/* in/out/net — one quiet line: net hero (serif) + colour-coded in/out */}
+              <div className="flex items-baseline gap-2 px-0.5 whitespace-nowrap overflow-hidden" style={{ ...font, ...nums }}>
+                <span style={{ ...serif, fontSize: 18, color: monthNet < 0 ? V.terraDeep : V.sage }}>{netLabel}</span>
+                <span className="uppercase" style={{ fontSize: 9.5, letterSpacing: '0.1em', color: V.faint }}>net</span>
+                <span aria-hidden style={{ color: V.line, padding: '0 2px' }}>·</span>
+                <span className="text-[12.5px]" style={{ color: V.sage }}>+₹{inr(monthIn)}</span>
+                <span className="text-[12.5px]" style={{ color: V.terraDeep }}>−₹{inr(monthOut)}</span>
               </div>
 
               {/* filter · search · download — one aligned row */}
