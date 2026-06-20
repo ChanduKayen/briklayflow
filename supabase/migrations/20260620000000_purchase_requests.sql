@@ -51,9 +51,27 @@ CREATE TABLE IF NOT EXISTS public.purchase_requests (
   -- Promotion seam: a purchase_request is to material_requests what rough_entries
   -- is to the transaction ledger — a capture/review buffer that promotes into the
   -- procurement system of record on approval. The promotion is post-approval
-  -- (DEFERRED); v1 just records the link target. NULL until promoted.
-  material_request_id uuid REFERENCES public.material_requests(id) ON DELETE SET NULL
+  -- (DEFERRED); v1 just records the link target. NULL until promoted. Plain uuid (no
+  -- inline FK) because the procurement module (material_requests) may not be applied
+  -- in every DB; the FK is added conditionally below when that table exists.
+  material_request_id uuid
 );
+
+-- Conditional FK: only wire it if the procurement module's material_requests exists,
+-- so this migration applies cleanly whether or not 20260521000001 has been run.
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'material_requests'
+  ) AND NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE constraint_schema = 'public' AND constraint_name = 'purchase_requests_material_request_id_fkey'
+  ) THEN
+    ALTER TABLE public.purchase_requests
+      ADD CONSTRAINT purchase_requests_material_request_id_fkey
+      FOREIGN KEY (material_request_id) REFERENCES public.material_requests(id) ON DELETE SET NULL;
+  END IF;
+END $$;
 
 -- idempotency seam: one PR per (org, wa message, request_index) — mirrors stage_entry_v3
 CREATE UNIQUE INDEX IF NOT EXISTS purchase_requests_wamid_uq
