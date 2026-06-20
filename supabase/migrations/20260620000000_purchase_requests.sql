@@ -46,7 +46,13 @@ CREATE TABLE IF NOT EXISTS public.purchase_requests (
 
   status        public.purchase_request_status NOT NULL DEFAULT 'draft',
   approver_id   uuid REFERENCES auth.users(id) ON DELETE SET NULL,
-  approved_at   timestamptz
+  approved_at   timestamptz,
+
+  -- Promotion seam: a purchase_request is to material_requests what rough_entries
+  -- is to the transaction ledger — a capture/review buffer that promotes into the
+  -- procurement system of record on approval. The promotion is post-approval
+  -- (DEFERRED); v1 just records the link target. NULL until promoted.
+  material_request_id uuid REFERENCES public.material_requests(id) ON DELETE SET NULL
 );
 
 -- idempotency seam: one PR per (org, wa message, request_index) — mirrors stage_entry_v3
