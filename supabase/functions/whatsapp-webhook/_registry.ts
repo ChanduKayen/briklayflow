@@ -13,6 +13,7 @@
 import type { ConvoRow } from './_conversation.ts'
 import type { TxnCtx } from './_agents/transaction.ts'
 import { runTransactionMessage, answerTransaction, commitInterrupted } from './_agents/transaction.ts'
+import { runProcurementMessage, answerProcurement } from './_agents/procurement.ts'
 import { runConcierge } from './_agents/concierge.ts'
 
 // The uniform turn context the dispatcher hands any agent. (The transaction agent's
@@ -53,10 +54,15 @@ const TRANSACTION: AgentDef = {
 
 const CONCIERGE: AgentDef = { intent: 'CONCIERGE', run: conciergeRun }
 
-// Registered intents the router may emit but whose agents aren't built yet: they
-// bridge to the concierge ("coming soon"). Swapping in the real agent is a one-line
-// change HERE — the dispatcher never changes.
-const PROCUREMENT: AgentDef = { intent: 'PROCUREMENT', run: conciergeRun }
+// Procurement — un-bridged (Sprint: PR agent v1). Mirrors TRANSACTION's shape:
+// run = capture-first understanding + one-PR guard; answer = the sourcing button taps.
+const PROCUREMENT: AgentDef = {
+  intent: 'PROCUREMENT',
+  run: (ctx, text, opts) => runProcurementMessage(ctx, text, { prefix: opts.prefix, lingering: opts.lingering }),
+  answer: (ctx, text, convo) => answerProcurement(ctx, text, convo),
+}
+
+// SITEOPS still bridges to the concierge ("coming soon") until its agent is built.
 const SITEOPS: AgentDef = { intent: 'SITEOPS', run: conciergeRun }
 
 export const AGENTS: Record<string, AgentDef> = { TRANSACTION, CONCIERGE, PROCUREMENT, SITEOPS }

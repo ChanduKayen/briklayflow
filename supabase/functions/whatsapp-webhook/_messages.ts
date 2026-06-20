@@ -366,6 +366,68 @@ export function welcomeBack(lang: Lang, p: { name?: string | null } = {}): strin
   return pick(lang, {
     en: `Welcome back${named} 👋`,
     te: `మళ్లీ స్వాగతం${named} 👋`,
-    hi: `वापसी पर स्वागत है${named} 👋`,
+    hi: `Welcome back${named} 👋`,
   })
+}
+
+// ── Procurement (purchase request) ───────────────────────────────────────────
+
+/** Instant ack when a vendor is named & confident — proceed silently. */
+export function mProcAck(lang: Lang): OutMessage {
+  return { kind: 'text', body: pick(lang, { en: 'Got it — raising the request 👍' }) }
+}
+
+/** One-PR guard: 2+ distinct vendors/sites in one message. Name what we saw, state
+ *  the rule, redirect — NEVER silently merge. (The twin of the txn thin-guard.) */
+export function mProcMultiGuard(lang: Lang, p: { requests: { label: string }[] }): OutMessage {
+  const parts = p.requests.map((r) => r.label).filter(Boolean)
+  const named = parts.length >= 2 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts.join(', ')
+  return { kind: 'text', body: pick(lang, {
+    en: `Looks like ${named} — those are separate orders. Send each on its own and I'll catch both.`,
+  }) }
+}
+
+/** Sourcing prompt when no vendor is named. v1: reply buttons (Flow seam left).
+ *  Takes a LIST of requests (v1 length 1) so multi-request later renders multi-screen
+ *  with no caller change. Solo orgs (no approver) drop "Let ... decide". */
+export function buildSourcingPrompt(
+  lang: Lang,
+  p: { requests: { label: string }[]; hasApprover: boolean; approverName?: string | null },
+): OutMessage {
+  const what = p.requests[0]?.label ? `${p.requests[0].label} — ` : ''
+  const buttons = [
+    { id: 'proc_src_direct', title: pick(lang, { en: 'Send to a vendor' }) },
+    { id: 'proc_src_rfq', title: pick(lang, { en: 'Get quotes' }) },
+  ]
+  if (p.hasApprover) {
+    const who = (p.approverName ?? '').trim().split(/\s+/)[0]
+    buttons.push({ id: 'proc_src_defer', title: trunc(pick(lang, { en: who ? `Let ${who} decide` : 'Let manager decide' }), 20) })
+  }
+  return { kind: 'buttons', body: pick(lang, { en: `${what}how would you like to source it?` }), buttons: buttons.slice(0, 3) }
+}
+
+/** The vendor LIST (after "Send to a vendor" / "Get quotes"). */
+export function buildVendorList(lang: Lang, vendors: { id: string; name: string }[]): OutMessage {
+  return {
+    kind: 'list',
+    body: pick(lang, { en: 'Which vendor?' }),
+    button: pick(lang, { en: 'Choose vendor' }),
+    rows: vendors.slice(0, 10).map((v) => ({ id: `proc_vendor_${v.id}`, title: trunc(v.name, 24) })),
+  }
+}
+
+/** Capture confirmation — the request is raised + a calm flag for any gap. */
+export function mProcComplete(
+  lang: Lang,
+  p: { headline: string; site: string | null; vendor: string | null; vendorMatched: boolean; siteMissing: boolean },
+): OutMessage {
+  const ctx: string[] = [p.headline]
+  if (p.site) ctx.push(p.site)
+  if (p.vendor) ctx.push(`${pick(lang, { en: 'to' })} ${p.vendor}`)
+  const head = '✓ ' + pick(lang, { en: 'Raised your request' }) + '\n' + ctx.filter(Boolean).join(' · ')
+  const flags: string[] = []
+  if (p.vendor && !p.vendorMatched) flags.push(pick(lang, { en: `${p.vendor} isn't in your vendors yet` }))
+  if (p.siteMissing) flags.push(pick(lang, { en: 'Site not set — add it in the app' }))
+  const body = [head, flags.join('\n')].filter(Boolean).join('\n\n')
+  return { kind: 'text', body }
 }
