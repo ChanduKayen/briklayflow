@@ -71,7 +71,7 @@ interface WaContact {
   welcomed_at: string | null;
   created_at: string;
 }
-interface Member { id: string; name: string; role: UserRole; assigned_projects: string[] }
+interface Member { id: string; name: string; role: UserRole; assigned_projects: string[]; can_approve_procurement: boolean; procurement_approval_limit: number | null }
 interface PendingInvite { invite_id: string; email: string; role: string; token: string; expires_at: string }
 
 // ── atoms ───────────────────────────────────────────────────────────────────────
@@ -147,7 +147,7 @@ function NumberEditor({ initial, label, cta, onSave, onCancel }: {
 
 function MemberCard({
   member, sender, suggestPhone, projects,
-  onEnable, onDisable, onChangeNumber, onLang, onRole, onRename, onDelete, onToggleProject,
+  onEnable, onDisable, onChangeNumber, onLang, onRole, onRename, onDelete, onToggleProject, onProcApproval,
 }: {
   member: Member;
   sender: WaContact | null;
@@ -161,6 +161,7 @@ function MemberCard({
   onRename: (name: string) => Promise<void>;
   onDelete: () => void;
   onToggleProject: (projectId: string) => void;
+  onProcApproval: (updates: { can_approve_procurement?: boolean; procurement_approval_limit?: number | null }) => void;
 }) {
   const { show } = useSnackbar();
   const active = !!sender?.is_active;
@@ -311,6 +312,34 @@ function MemberCard({
           )}
         </div>
       )}
+
+      {/* purchase-request approval — the governance primitive (Part 7) */}
+      <div className="mt-3 flex items-center gap-2.5 rounded-xl px-3 py-2.5" style={{ background: member.can_approve_procurement ? V.terraWash : V.field }}>
+        <div className="flex-1 min-w-0">
+          <p style={{ color: V.inkSoft, ...font, ...T.xs }}>Can approve purchase requests</p>
+          {member.can_approve_procurement && (
+            <div className="mt-1.5 inline-flex items-center gap-1.5">
+              <span style={{ color: V.faint, ...font, ...T.xs }}>up to ₹</span>
+              <input
+                inputMode="numeric"
+                defaultValue={member.procurement_approval_limit ?? ''}
+                placeholder="no limit"
+                onBlur={(e) => { const v = e.target.value.replace(/[^\d.]/g, ''); onProcApproval({ procurement_approval_limit: v ? parseFloat(v) : null }); }}
+                className="px-2 py-0.5 rounded outline-none"
+                style={{ width: 96, background: V.surface, border: `1px solid ${V.line}`, color: V.ink, ...font, ...nums, ...T.xs }}
+              />
+            </div>
+          )}
+        </div>
+        <button
+          onClick={() => onProcApproval({ can_approve_procurement: !member.can_approve_procurement })}
+          aria-label="Toggle purchase-request approval"
+          className="w-9 h-5 rounded-full relative shrink-0"
+          style={{ background: member.can_approve_procurement ? V.terra : V.line, transition: 'background .18s ease' }}
+        >
+          <span className="absolute top-0.5 w-4 h-4 rounded-full" style={{ background: '#fff', left: member.can_approve_procurement ? 18 : 2, transition: 'left .18s cubic-bezier(.3,.8,.3,1.2)', boxShadow: '0 1px 2px rgba(0,0,0,0.18)' }} />
+        </button>
+      </div>
     </div>
   );
 }
@@ -346,7 +375,7 @@ export default function TeamAccess({ session }: { session: Session }) {
     enabled: isAdmin && !!orgId,
     queryFn: async () => {
       const { data: rows, error } = await supabase
-        .from('org_memberships').select('role, status, user_id, joined_at')
+        .from('org_memberships').select('role, status, user_id, joined_at, can_approve_procurement, procurement_approval_limit')
         .eq('org_id', orgId).eq('status', 'active').order('joined_at', { ascending: false });
       if (error) throw error;
       const ids = (rows ?? []).map((r: any) => r.user_id).filter(Boolean);
@@ -359,7 +388,7 @@ export default function TeamAccess({ session }: { session: Session }) {
         const p = pById.get(r.user_id);
         // Display + edit the SAME column (user_profiles.role) so a role change reflects
         // immediately; fall back to the membership role if a profile role isn't set.
-        return { id: r.user_id, name: p.name ?? 'Unnamed', role: (p.role ?? r.role) as UserRole, assigned_projects: (p.assigned_projects ?? []) as string[] } satisfies Member;
+        return { id: r.user_id, name: p.name ?? 'Unnamed', role: (p.role ?? r.role) as UserRole, assigned_projects: (p.assigned_projects ?? []) as string[], can_approve_procurement: !!r.can_approve_procurement, procurement_approval_limit: r.procurement_approval_limit ?? null } satisfies Member;
       });
     },
   });
@@ -502,6 +531,11 @@ export default function TeamAccess({ session }: { session: Session }) {
     updateProfile(m.id, { role: r }).then(() => show('Role updated')).catch((e) => show(e.message || 'Could not change role', { type: 'error' }));
   };
   const rename = (m: Member, n: string) => updateProfile(m.id, { name: n });
+  // Procurement approval lives on org_memberships (not user_profiles) — the governance primitive.
+  const setProcApproval = (m: Member, updates: { can_approve_procurement?: boolean; procurement_approval_limit?: number | null }) => {
+    supabase.from('org_memberships').update(updates).eq('user_id', m.id).eq('org_id', orgId)
+      .then(({ error }: { error: { message?: string } | null }) => { if (error) show(error.message || 'Could not update approval setting', { type: 'error' }); refreshMembers(); });
+  };
   const toggleProject = (m: Member, projectId: string) => {
     const cur = m.assigned_projects ?? [];
     const next = cur.includes(projectId) ? cur.filter((id) => id !== projectId) : [...cur, projectId];
@@ -701,6 +735,7 @@ export default function TeamAccess({ session }: { session: Session }) {
                   onRename={(n) => rename(m, n)}
                   onDelete={() => { if (confirm(`Remove ${m.name} from the team?`)) removeMember.mutate(m.id); }}
                   onToggleProject={(pid) => toggleProject(m, pid)}
+                  onProcApproval={(updates) => setProcApproval(m, updates)}
                 />
               ))}
             </div>
