@@ -30,13 +30,47 @@ import { Invitation, ManageTeam } from '../components/day-book/Invitation';
 import { StartOnWhatsAppButton } from '../components/day-book/StartOnWhatsApp';
 import { ReviewCard, type StakeholderLite, type ProjectLite } from '../components/day-book/ReviewCard';
 
-type TabKey = 'review' | 'filed' | 'rejected';
+type TabKey = 'review' | 'filed' | 'rejected' | 'requests';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'review',   label: 'To review' },
   { key: 'filed',    label: 'Filed' },
   { key: 'rejected', label: 'Not a transaction' },
+  { key: 'requests', label: 'Purchase requests' },
 ];
+
+// A PR pointer row in the Day Book feed — NOT a review card. Item/title + site +
+// a calm status line; tapping opens the request in the Purchase Requests page.
+function PRPointerRow({ pr, onOpen }: { pr: PRPointer; onOpen: () => void }) {
+  const items = pr.purchase_request_items ?? [];
+  const headline = items.length === 0
+    ? (pr.title ?? 'Purchase request')
+    : items.length <= 2
+      ? items.map((i) => `${i.quantity ?? ''}${i.unit ? ' ' + i.unit : ''} ${i.item_name}`.trim()).join(', ')
+      : `${pr.title ?? `${items[0].item_name} + ${items.length - 1} more`} · ${items.length} items`;
+  const site = pr.projects?.name ?? pr.site_raw ?? null;
+  const st = pr.status === 'approved' ? { label: 'Approved', color: V.sage }
+    : pr.status === 'sent_for_approval' ? { label: 'Sent for approval', color: V.ask }
+    : { label: 'Draft', color: V.sys };
+  return (
+    <button onClick={onOpen} className="w-full text-left rounded-2xl p-4 db-card flex items-start gap-3" style={{ background: V.surface }}>
+      <span className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 font-bold" style={{ background: V.terraWash, color: V.terraDeep, ...font, fontSize: 11, letterSpacing: '0.04em' }}>PR</span>
+      <div className="flex-1 min-w-0">
+        <p className="font-medium truncate" style={{ color: V.ink, ...font, ...T.sm }}>{headline}</p>
+        <p className="text-[12px] mt-0.5 truncate" style={{ color: site ? V.sys : V.ask, ...font }}>{site ?? 'needs site'}</p>
+        <p className="text-[11px] mt-1.5" style={{ color: st.color, ...font }}>
+          {pr.status === 'draft' && !site ? 'Draft · complete it →' : `${st.label} · open →`}
+        </p>
+      </div>
+    </button>
+  );
+}
+
+interface PRPointer {
+  id: string; status: string; title: string | null; site_raw: string | null;
+  purchase_request_items: { item_name: string; quantity: number | null; unit: string | null }[];
+  projects: { name: string } | null;
+}
 
 const STEPS = [
   { n: '1', t: 'Send it on WhatsApp', s: 'a payment, a bill photo, a voice note' },
@@ -129,6 +163,18 @@ export default function Logbook({ session }: { session: Session }) {
   // refetch, which flips them POSTED/DISMISSED and would otherwise yank the card.
   const [lingering, setLingering] = useState<Set<string>>(new Set());
 
+  // Purchase requests — merged into the feed as a peer tab of pointer rows.
+  const { data: prs = [] } = useQuery({
+    queryKey: ['daybook_purchase_requests', orgId],
+    enabled: !!orgId,
+    queryFn: async () => {
+      const { data } = await supabase.from('purchase_requests')
+        .select('id, status, title, site_raw, purchase_request_items(item_name, quantity, unit), projects(name)')
+        .eq('org_id', orgId).order('created_at', { ascending: false }).limit(60);
+      return (data ?? []) as unknown as PRPointer[];
+    },
+  });
+
   // ── Buckets ──────────────────────────────────────────────────────────────
   // AWAITING_CONTEXT is pending-but-incomplete -> shows under "To review".
   // Filed / binned tabs sort by WHEN they were filed/binned (updated_at), latest first —
@@ -140,7 +186,7 @@ export default function Logbook({ session }: { session: Session }) {
   const rejected  = useMemo(() => entries.filter(e => e.status === 'DISMISSED').sort(byRecent), [entries]);
   const shown = tab === 'review' ? review : tab === 'filed' ? filed : rejected;
 
-  const counts: Record<TabKey, number> = { review: review.length, filed: filed.length, rejected: rejected.length };
+  const counts: Record<TabKey, number> = { review: review.length, filed: filed.length, rejected: rejected.length, requests: prs.length };
 
   // ── One-time reveal: first time the owner opens a Day Book with work to do ──
   const [reveal, setReveal] = useState(false);
@@ -227,6 +273,12 @@ export default function Logbook({ session }: { session: Session }) {
         {/* queue / archives */}
         {isLoading ? (
           <div className="mt-6"><PageSkeleton /></div>
+        ) : tab === 'requests' ? (
+          <div className="space-y-2.5 mt-6">
+            {prs.length === 0
+              ? <p className="text-center py-12" style={{ color: V.faint, ...font, ...T.sm }}>No purchase requests yet. Ask Briklay to order materials on WhatsApp.</p>
+              : prs.map((pr) => <PRPointerRow key={pr.id} pr={pr} onOpen={() => navigate('/purchase-requests')} />)}
+          </div>
         ) : (
           <div className="space-y-4 mt-6">
             {shown.length === 0 && (

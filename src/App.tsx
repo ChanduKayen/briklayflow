@@ -39,6 +39,7 @@ import InwardRegister from './pages/InwardRegister';
 import NewProjectWizard from './components/NewProjectWizard';
 import TransactionDetail from './pages/TransactionDetail';
 import PurchaseOrders from './pages/PurchaseOrders';
+import PurchaseRequests from './pages/PurchaseRequests';
 import NewPurchaseOrder from './pages/NewPurchaseOrder';
 import PurchaseOrderDetail from './pages/PurchaseOrderDetail';
 import Ledger from './pages/Ledger';
@@ -445,6 +446,7 @@ function App() {
           <Route path="/work-orders/new" element={<NewWorkOrder session={session} />} />
           <Route path="/work-orders/:woId" element={<WorkOrderDetail session={session} />} />
           <Route path="/purchase-orders" element={<PurchaseOrders session={session} />} />
+          <Route path="/purchase-requests" element={<PurchaseRequests session={session} />} />
           <Route path="/purchase-orders/new" element={<NewPurchaseOrder session={session} />} />
           <Route path="/purchase-orders/:poId" element={<PurchaseOrderDetail session={session} />} />
           <Route path="/inward-register" element={<InwardRegister session={session} />} />
