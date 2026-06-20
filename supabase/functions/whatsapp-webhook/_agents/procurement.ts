@@ -39,6 +39,18 @@ async function loadApprover(ctx: ProcCtx): Promise<{ has: boolean; name: string 
   return { has: true, name: row.user_profiles?.name ?? null }
 }
 
+/** Advance a sourced PR draft -> sent_for_approval, but ONLY if an approver exists
+ *  (solo orgs have no one to route to, so their PRs stay draft for the owner to act
+ *  on in-app). The .eq('status','draft') guard never downgrades an approved PR.
+ *  NOTE: the WhatsApp approver PUSH (template + signed deep-link) is a separate
+ *  milestone; this just moves the lifecycle so the in-app approval surface is correct. */
+async function markReadyForApproval(ctx: ProcCtx, prId: string): Promise<void> {
+  const approver = await loadApprover(ctx)
+  if (!approver.has) return
+  await ctx.supabase.from('purchase_requests')
+    .update({ status: 'sent_for_approval' }).eq('id', prId).eq('status', 'draft')
+}
+
 /** Stage a request as a draft PR + its items — idempotent on (wamid, request_index),
  *  3-retry (mirrors commitEntry). Returns the PR id, or null on a hard failure. */
 async function stageRequest(
@@ -135,6 +147,7 @@ async function handleSingle(ctx: ProcCtx, req: ProcRequest | null): Promise<void
 
   const prId = await stageRequest(ctx, req, 0, vendorId, siteId, 'direct')
   if (!prId) return
+  await markReadyForApproval(ctx, prId)   // vendor decided -> ready for approval
 
   await send(supabase, from, mProcComplete(lang, {
     headline: titleWithCount(req),
@@ -155,6 +168,7 @@ export async function answerProcurement(ctx: ProcCtx, _text: string, convo: Conv
 
   if (interactiveId === 'proc_src_defer') {
     await supabase.from('purchase_requests').update({ sourcing_mode: 'defer' }).eq('id', prId)
+    await markReadyForApproval(ctx, prId)
     await send(supabase, from, { kind: 'text', body: 'Okay — left for your approver to decide.' }, meta)
     return
   }
@@ -168,6 +182,7 @@ export async function answerProcurement(ctx: ProcCtx, _text: string, convo: Conv
     const vid = interactiveId.slice('proc_vendor_'.length)
     if (vid && vid !== 'yes' && vid !== 'no_choose' && vid !== 'none') {
       await supabase.from('purchase_requests').update({ vendor_id: vid }).eq('id', prId)
+      await markReadyForApproval(ctx, prId)
       await send(supabase, from, { kind: 'text', body: '✓ Vendor set — your request is ready.' }, meta)
       return
     }
