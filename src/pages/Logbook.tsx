@@ -277,7 +277,7 @@ export default function Logbook({ session }: { session: Session }) {
           <div className="space-y-2.5 mt-6">
             {prs.length === 0
               ? <p className="text-center py-12" style={{ color: V.faint, ...font, ...T.sm }}>No purchase requests yet. Ask Briklay to order materials on WhatsApp.</p>
-              : prs.map((pr) => <PRPointerRow key={pr.id} pr={pr} onOpen={() => navigate('/purchase-requests')} />)}
+              : prs.map((pr) => <PRPointerRow key={pr.id} pr={pr} onOpen={() => navigate('/purchase-orders?status=draft')} />)}
           </div>
         ) : (
           <div className="space-y-4 mt-6">

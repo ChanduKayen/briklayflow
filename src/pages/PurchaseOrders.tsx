@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { useOrgId } from '../lib/auth/AuthProvider';
 import { openDoc } from '../lib/storage';
 import { PageSkeleton } from '../components/SkeletonLoader';
 import type { Session } from '@supabase/supabase-js';
@@ -609,6 +610,92 @@ const FILTERS: { key: string; label: string }[] = [
   { key: 'done', label: 'Done' },
 ];
 
+// ── Purchase requests (WhatsApp captures awaiting a PO) ─────────────────────────
+// The draft queue also lists open purchase_requests. Direct (single-vendor) ones
+// that are sent_for_approval can be approved here -> a live PO is created via the
+// promote_purchase_request_to_po RPC. RFQ / still-sourcing requests just display.
+interface PRItemRow { item_name: string; quantity: number | null; unit: string | null }
+interface PReq {
+  id: string; status: string; title: string | null;
+  site_id: string | null; site_raw: string | null;
+  vendor_id: string | null; vendor_raw: string | null;
+  sourcing_mode: string | null; created_at: string;
+  purchase_request_items: PRItemRow[];
+  projects: { name: string } | null;
+  stakeholders: { name: string } | null;
+}
+
+const prItemLine = (pr: PReq): string => {
+  const items = pr.purchase_request_items ?? [];
+  if (items.length === 0) return pr.title ?? 'Purchase request';
+  if (items.length <= 2) return items.map((i) => `${i.quantity ?? ''}${i.unit ? ' ' + i.unit : ''} ${i.item_name}`.trim()).join(', ');
+  return `${pr.title ?? `${items[0].item_name} + ${items.length - 1} more`} · ${items.length} items`;
+};
+
+const PR_STATUS = (s: string, sourcing: string | null): { label: string; color: string; bg: string } => {
+  if (s === 'sent_for_approval') return { label: 'Awaiting approval', color: '#8A5A0B', bg: '#FBF3E2' };
+  if (sourcing === 'rfq') return { label: 'Gathering quotes', color: '#6E665C', bg: '#F1EEE9' };
+  return { label: 'Draft', color: '#6E665C', bg: '#F1EEE9' };
+};
+
+/** Sheet to finish an unfinished request — pick the vendor + site, then approve
+ *  (-> live PO) or send for approval (non-approvers). */
+function CompleteRequestSheet({ pr, vendors, projects, canApprove, busy, onClose, onSubmit }: {
+  pr: PReq | null;
+  vendors: { stakeholder_id: string; name: string }[];
+  projects: { project_id: string; name: string }[];
+  canApprove: boolean;
+  busy: boolean;
+  onClose: () => void;
+  onSubmit: (vendorId: string, siteId: string, approve: boolean) => void;
+}) {
+  const [vendorId, setVendorId] = useState('');
+  const [siteId, setSiteId] = useState('');
+  useEffect(() => {
+    setVendorId(pr?.vendor_id ?? '');
+    setSiteId(pr?.site_id ?? '');
+  }, [pr?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const ready = !!vendorId && !!siteId && !busy;
+  const selStyle = { background: C.surface, color: C.ink, border: `1px solid ${C.line}` };
+
+  return (
+    <BottomSheet open={!!pr} onClose={onClose} title="Complete request" desktopAllowed>
+      <div className="px-5 pb-6 space-y-4">
+        {pr && <p className="text-sm" style={{ color: C.inkSoft }}>{prItemLine(pr)}</p>}
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] mb-2" style={{ color: C.inkFaint }}>Vendor</p>
+          <select value={vendorId} onChange={(e) => setVendorId(e.target.value)} className="w-full h-11 px-3 rounded-xl text-sm outline-none" style={selStyle}>
+            <option value="">Select vendor</option>
+            {vendors.map((v) => <option key={v.stakeholder_id} value={v.stakeholder_id}>{v.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] mb-2" style={{ color: C.inkFaint }}>Site</p>
+          <select value={siteId} onChange={(e) => setSiteId(e.target.value)} className="w-full h-11 px-3 rounded-xl text-sm outline-none" style={selStyle}>
+            <option value="">Select site</option>
+            {projects.map((p) => <option key={p.project_id} value={p.project_id}>{p.name}</option>)}
+          </select>
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <button onClick={onClose} className="text-sm font-medium px-4 py-2.5 rounded-xl" style={{ color: C.inkSoft, border: `1px solid ${C.line}` }}>
+            Cancel
+          </button>
+          <button
+            onClick={() => onSubmit(vendorId, siteId, canApprove)}
+            disabled={!ready}
+            className="inline-flex items-center gap-1.5 text-sm font-medium px-4 py-2.5 rounded-xl text-white"
+            style={{ background: C.sage, opacity: ready ? 1 : 0.5 }}
+          >
+            <span className="material-symbols-outlined text-[16px]">check</span>
+            {canApprove ? 'Approve & create PO' : 'Send for approval'}
+          </button>
+        </div>
+      </div>
+    </BottomSheet>
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function PurchaseOrders({ session }: { session: Session }) {
@@ -712,6 +799,111 @@ export default function PurchaseOrders({ session }: { session: Session }) {
     staleTime: 60_000,
   });
 
+  // ── Purchase requests in the draft queue ────────────────────────────────
+  const orgId = useOrgId();
+
+  // PR approval is gated on the can_approve_procurement flag (NOT the PO role gate).
+  const { data: canApprovePR = false } = useQuery({
+    queryKey: ['can_approve_procurement', session.user.id, orgId],
+    enabled: !!orgId,
+    queryFn: async () => {
+      const { data } = await supabase.from('org_memberships')
+        .select('can_approve_procurement').eq('user_id', session.user.id).eq('org_id', orgId).maybeSingle();
+      return !!(data as { can_approve_procurement?: boolean } | null)?.can_approve_procurement;
+    },
+  });
+
+  const { data: openRequests = [] } = useQuery({
+    queryKey: ['open_purchase_requests', orgId],
+    enabled: !!orgId,
+    queryFn: async () => {
+      const { data, error } = await supabase.from('purchase_requests')
+        .select('id, status, title, site_id, site_raw, vendor_id, vendor_raw, sourcing_mode, created_at, purchase_request_items(item_name, quantity, unit), projects(name), stakeholders(name)')
+        .eq('org_id', orgId).in('status', ['draft', 'sent_for_approval'])
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as unknown as PReq[];
+    },
+  });
+
+  // Approve a request -> create a live PO (promote RPC). Errors (e.g. missing site
+  // / project code) surface as a snackbar so the approver knows what to fix.
+  const promotePR = useMutation({
+    mutationFn: async (prId: string) => {
+      const { data, error } = await supabase.rpc('promote_purchase_request_to_po', {
+        p_pr_id: prId, p_approver_id: session.user.id,
+      });
+      if (error) throw error;
+      const res = data as { success?: boolean; po_id?: string; error?: string } | null;
+      if (!res?.success) throw new Error(res?.error ?? 'Could not approve');
+      return res.po_id as string;
+    },
+    onSuccess: (poId) => {
+      qc.invalidateQueries({ queryKey: ['open_purchase_requests'] });
+      qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
+      showSnackbar(`✓ Approved — ${poId} created`);
+    },
+    onError: (e: unknown) => showSnackbar(e instanceof Error ? e.message : 'Could not approve', { type: 'error' }),
+  });
+
+  // Vendor + site options for completing an unfinished request in-app.
+  const { data: vendorOpts = [] } = useQuery({
+    queryKey: ['org_vendors', orgId],
+    enabled: !!orgId,
+    queryFn: async () => {
+      const { data } = await supabase.from('stakeholders')
+        .select('stakeholder_id, name').eq('org_id', orgId).eq('type', 'Vendor').order('name');
+      return (data ?? []) as { stakeholder_id: string; name: string }[];
+    },
+  });
+  const { data: projectOpts = [] } = useQuery({
+    queryKey: ['org_projects', orgId],
+    enabled: !!orgId,
+    queryFn: async () => {
+      const { data } = await supabase.from('projects')
+        .select('project_id, name').eq('org_id', orgId).order('name');
+      return (data ?? []) as { project_id: string; name: string }[];
+    },
+  });
+
+  const [completePR, setCompletePR] = useState<PReq | null>(null);
+
+  // Discard an unfinished request (soft close -> drops out of the draft queue).
+  const discardPR = useMutation({
+    mutationFn: async (prId: string) => {
+      const { error } = await supabase.from('purchase_requests').update({ status: 'closed' }).eq('id', prId);
+      if (error) throw error;
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['open_purchase_requests'] }); showSnackbar('Request discarded'); },
+    onError: (e: unknown) => showSnackbar(e instanceof Error ? e.message : 'Could not discard', { type: 'error' }),
+  });
+
+  // Complete a request: set vendor + site, then either approve (-> live PO) or send
+  // for approval (non-approvers). The vendor flow's direct mode is implied.
+  const completePRMut = useMutation({
+    mutationFn: async ({ prId, vendorId, siteId, approve }: { prId: string; vendorId: string; siteId: string; approve: boolean }) => {
+      const { error } = await supabase.from('purchase_requests')
+        .update({ vendor_id: vendorId, site_id: siteId, sourcing_mode: 'direct', status: 'sent_for_approval' })
+        .eq('id', prId);
+      if (error) throw error;
+      if (!approve) return null;
+      const { data, error: rErr } = await supabase.rpc('promote_purchase_request_to_po', {
+        p_pr_id: prId, p_approver_id: session.user.id,
+      });
+      if (rErr) throw rErr;
+      const res = data as { success?: boolean; po_id?: string; error?: string } | null;
+      if (!res?.success) throw new Error(res?.error ?? 'Could not approve');
+      return res.po_id as string;
+    },
+    onSuccess: (poId) => {
+      qc.invalidateQueries({ queryKey: ['open_purchase_requests'] });
+      qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
+      setCompletePR(null);
+      showSnackbar(poId ? `✓ Approved — ${poId} created` : '✓ Sent for approval');
+    },
+    onError: (e: unknown) => showSnackbar(e instanceof Error ? e.message : 'Could not save', { type: 'error' }),
+  });
+
   const vendors  = [...new Set(pos.map(p => p.stakeholders?.name).filter(Boolean))].sort() as string[];
   const projects = [...new Set(pos.map(p => p.projects?.name).filter(Boolean))].sort() as string[];
 
@@ -768,10 +960,23 @@ export default function PurchaseOrders({ session }: { session: Session }) {
   }, [enriched]);
 
   const visible = useMemo(() => {
-    if (activeTab === 'draft') return isApprover ? enriched.filter(isPending) : enriched.filter(isApproved);
+    // Draft tab: approvers see PENDING POs (requests render in their own section
+    // above); non-approvers see no PO list here (just their requests).
+    if (activeTab === 'draft') return isApprover ? enriched.filter(isPending) : [];
     const approved = enriched.filter(isApproved);
     return activeTab === 'all' ? approved : approved.filter(x => x.d.agency === activeTab);
   }, [enriched, activeTab, isApprover]);
+
+  const draftMode = activeTab === 'draft';
+  const draftRequests = useMemo(() => {
+    if (!draftMode) return [] as PReq[];
+    const q = searchTerm.trim().toLowerCase();
+    if (!q) return openRequests;
+    return openRequests.filter((pr) =>
+      prItemLine(pr).toLowerCase().includes(q) ||
+      (pr.stakeholders?.name ?? pr.vendor_raw ?? '').toLowerCase().includes(q) ||
+      (pr.projects?.name ?? pr.site_raw ?? '').toLowerCase().includes(q));
+  }, [draftMode, openRequests, searchTerm]);
 
   // Flat chronological list (newest first). The agency split lives in the
   // filter tabs above, so there are no in-list group headers.
@@ -882,14 +1087,14 @@ export default function PurchaseOrders({ session }: { session: Session }) {
 
         {/* Stage cards — the PO lifecycle (primary nav). Needs approval (approvers) ·
             Live POs · Sent for quotes. The first teases its WhatsApp origin. */}
-        <div className="grid gap-2.5 sm:gap-3 mb-5" style={{ gridTemplateColumns: `repeat(${isApprover ? 3 : 2}, minmax(0, 1fr))` }}>
-          {isApprover && (
-            <StageCard
-              icon="verified_user" label="Needs approval" sub="waiting for your yes"
-              count={tabCounts.draft} active={activeTab === 'draft'} tease
-              onClick={() => setActiveTab('draft')}
-            />
-          )}
+        <div className="grid gap-2.5 sm:gap-3 mb-5" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+          <StageCard
+            icon="verified_user" label="Requests"
+            sub={isApprover ? 'awaiting your yes' : 'raised, awaiting a PO'}
+            count={openRequests.length + (isApprover ? tabCounts.draft : 0)}
+            active={activeTab === 'draft'} tease
+            onClick={() => setActiveTab('draft')}
+          />
           <StageCard
             icon="radio_button_checked" label="Live POs" sub="approved & in motion"
             count={tabCounts.all} active={activeTab !== 'draft'}
@@ -960,8 +1165,82 @@ export default function PurchaseOrders({ session }: { session: Session }) {
         {/* Loading */}
         {isLoading && <div className="mt-4"><PageSkeleton /></div>}
 
+        {/* Draft queue: open purchase requests (WhatsApp captures). Direct ones that
+            are sent_for_approval can be approved here -> a live PO is created. */}
+        {!isLoading && draftMode && (
+          <div className="space-y-3 mt-2">
+            {draftRequests.length === 0 ? (
+              <div className="text-center py-14">
+                <span className="material-symbols-outlined text-[28px] mb-3" style={{ color: C.inkFaint }}>inbox</span>
+                <p className="text-sm" style={{ color: C.inkSoft }}>No open requests. Ask Briklay to order materials on WhatsApp.</p>
+              </div>
+            ) : draftRequests.map((pr) => {
+              const st = PR_STATUS(pr.status, pr.sourcing_mode);
+              const vendor = pr.stakeholders?.name ?? pr.vendor_raw ?? null;
+              const site = pr.projects?.name ?? pr.site_raw ?? null;
+              const isRfq = pr.sourcing_mode === 'rfq';
+              const needsCompletion = !isRfq && (!pr.vendor_id || !pr.site_id);
+              const approvable = canApprovePR && !isRfq && !!pr.vendor_id && !!pr.site_id;
+              return (
+                <div key={pr.id} className="rounded-2xl p-4" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <WhatsAppGlyph size={13} />
+                    <span className="text-[11px] font-medium px-2 py-0.5 rounded-full" style={{ color: st.color, background: st.bg }}>{st.label}</span>
+                  </div>
+                  <p className="text-sm font-medium" style={{ color: C.ink }}>{prItemLine(pr)}</p>
+                  <p className="text-xs mt-1" style={{ color: C.inkSoft }}>
+                    {vendor ?? 'No vendor'}{site ? ` · ${site}` : ' · No site'}
+                  </p>
+                  {needsCompletion && (
+                    <p className="text-xs mt-1.5 inline-flex items-center gap-1" style={{ color: C.amber }}>
+                      <span className="material-symbols-outlined text-[14px]">warning</span>
+                      {!pr.vendor_id && !pr.site_id ? 'Add a vendor and site to finish' : !pr.vendor_id ? 'Add a vendor to finish' : 'Add a site to finish'}
+                    </p>
+                  )}
+                  <div className="flex justify-end gap-2 mt-3">
+                    <button
+                      onClick={() => discardPR.mutate(pr.id)}
+                      disabled={discardPR.isPending}
+                      className="inline-flex items-center gap-1.5 text-sm font-medium px-3.5 py-2 rounded-xl"
+                      style={{ color: C.inkSoft, border: `1px solid ${C.line}` }}
+                    >
+                      Discard
+                    </button>
+                    {needsCompletion && (
+                      <button
+                        onClick={() => setCompletePR(pr)}
+                        className="inline-flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-xl text-white"
+                        style={{ background: C.ink }}
+                      >
+                        <span className="material-symbols-outlined text-[16px]">edit</span>
+                        Complete
+                      </button>
+                    )}
+                    {approvable && (
+                      <button
+                        onClick={() => promotePR.mutate(pr.id)}
+                        disabled={promotePR.isPending}
+                        className="inline-flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-xl text-white"
+                        style={{ background: C.sage, opacity: promotePR.isPending ? 0.5 : 1 }}
+                      >
+                        <span className="material-symbols-outlined text-[16px]">check</span>
+                        Approve &amp; create PO
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            {isApprover && visibleSorted.length > 0 && (
+              <p className="text-[11px] font-semibold uppercase tracking-wide pt-3 pb-1" style={{ color: C.inkFaint }}>
+                Purchase orders pending approval
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Empty: zero POs ever */}
-        {!isLoading && pos.length === 0 && (
+        {!isLoading && !draftMode && pos.length === 0 && (
           <div className="flex flex-col items-center text-center py-16">
             <span className="material-symbols-outlined text-[40px] mb-3" style={{ color: C.inkFaint }}>shopping_cart</span>
             <h3 className="text-base font-medium mb-1" style={{ color: C.ink }}>No purchase orders yet</h3>
@@ -977,7 +1256,7 @@ export default function PurchaseOrders({ session }: { session: Session }) {
         )}
 
         {/* Empty: search / tab returns nothing */}
-        {!isLoading && pos.length > 0 && visibleSorted.length === 0 && (
+        {!isLoading && !draftMode && pos.length > 0 && visibleSorted.length === 0 && (
           <div className="text-center py-16">
             <span className="material-symbols-outlined text-[28px] mb-3" style={{ color: C.inkFaint }}>receipt_long</span>
             <p className="text-sm" style={{ color: C.inkSoft }}>
@@ -1047,6 +1326,19 @@ export default function PurchaseOrders({ session }: { session: Session }) {
         po={billPO}
         currentUserName={currentUserName}
         onSaved={({ billNo }) => showSnackbar(billNo ? `Bill ${billNo} recorded` : 'Vendor bill recorded')}
+      />
+
+      {/* Complete an unfinished request: pick vendor + site, then approve / send for approval */}
+      <CompleteRequestSheet
+        pr={completePR}
+        vendors={vendorOpts}
+        projects={projectOpts}
+        canApprove={canApprovePR}
+        busy={completePRMut.isPending}
+        onClose={() => setCompletePR(null)}
+        onSubmit={(vendorId, siteId, approve) => {
+          if (completePR) completePRMut.mutate({ prId: completePR.id, vendorId, siteId, approve });
+        }}
       />
 
       {/* Advanced filters sheet — date range / vendor / project */}

@@ -406,6 +406,51 @@ export function buildSourcingPrompt(
   return { kind: 'buttons', body: pick(lang, { en: `${what}how would you like to source it?` }), buttons: buttons.slice(0, 3) }
 }
 
+// ── Vendor Flows (WhatsApp interactive forms) ────────────────────────────────
+// Two terminal flows replace the plain vendor list when a richer pick is wanted:
+//   SELECT_VENDOR  — RadioButtonsGroup (single)   -> { mode:"single", vendor:<id> }
+//   PICK_VENDORS   — CheckboxGroup (rfq, min 1)    -> { mode:"rfq", selected_vendors:[<id>…] }
+// Both bind ${data.vendors} to an array of these four fields (all required by the
+// flow's data schema, so every vendor must emit all four — see loadVendors).
+
+/** One item in a vendor Flow's ${data.vendors}. */
+export type FlowVendor = { id: string; title: string; description: string; metadata: string }
+
+/** SELECT_VENDOR flow — single vendor (RadioButtonsGroup). flowToken carries the PR id
+ *  (not echoed back; completion binds via the open conversation). */
+export function buildSelectVendorFlow(
+  lang: Lang,
+  p: { flowId: string; flowToken: string; vendors: FlowVendor[]; draft?: boolean },
+): OutMessage {
+  return {
+    kind: 'flow',
+    body: pick(lang, { en: 'Choose the vendor to order from.' }),
+    flowId: p.flowId,
+    flowToken: p.flowToken,
+    cta: pick(lang, { en: 'Choose vendor' }),
+    screen: 'SELECT_VENDOR',
+    data: { vendors: p.vendors },
+    ...(p.draft ? { draft: true } : {}),
+  }
+}
+
+/** PICK_VENDORS flow — RFQ multi-select (CheckboxGroup, min 1). */
+export function buildPickVendorsFlow(
+  lang: Lang,
+  p: { flowId: string; flowToken: string; vendors: FlowVendor[]; draft?: boolean },
+): OutMessage {
+  return {
+    kind: 'flow',
+    body: pick(lang, { en: 'Select vendors to request quotes from.' }),
+    flowId: p.flowId,
+    flowToken: p.flowToken,
+    cta: pick(lang, { en: 'Get quotes' }),
+    screen: 'PICK_VENDORS',
+    data: { vendors: p.vendors },
+    ...(p.draft ? { draft: true } : {}),
+  }
+}
+
 /** The vendor LIST (after "Send to a vendor" / "Get quotes"). */
 export function buildVendorList(lang: Lang, vendors: { id: string; name: string }[]): OutMessage {
   return {

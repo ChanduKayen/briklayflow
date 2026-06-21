@@ -9,21 +9,42 @@
 import { send } from '../_format.ts'
 import type { TxnCtx } from './transaction.ts'
 import type { ConvoRow } from '../_conversation.ts'
-import { openConversation } from '../_conversation.ts'
+import { openConversation, closeConversation, abandonConversation } from '../_conversation.ts'
 import { matchPayee, matchProject } from '../_match.ts'
 import { gateProcurement, extractProcurements, titleWithCount, type ProcRequest } from '../_proc_extract.ts'
 import {
   mProcAck, mProcMultiGuard, buildSourcingPrompt, buildVendorList, mProcComplete,
+  buildSelectVendorFlow, buildPickVendorsFlow, type FlowVendor,
 } from '../_messages.ts'
 
 export type ProcCtx = TxnCtx
 
 // ── data loads ───────────────────────────────────────────────────────────────
 
-async function loadVendors(ctx: ProcCtx): Promise<{ stakeholder_id: string; name: string }[]> {
+type VendorRow = {
+  stakeholder_id: string; name: string
+  category: string | null; is_approved: boolean | null; rating: number | null
+}
+async function loadVendors(ctx: ProcCtx): Promise<VendorRow[]> {
   const { data } = await ctx.supabase.from('stakeholders')
-    .select('stakeholder_id, name').eq('org_id', ctx.orgId).eq('type', 'Vendor')
-  return (data ?? []) as { stakeholder_id: string; name: string }[]
+    .select('stakeholder_id, name, category, is_approved, rating')
+    .eq('org_id', ctx.orgId).eq('type', 'Vendor')
+  return (data ?? []) as VendorRow[]
+}
+
+/** Map a vendor row to the Flow's ${data.vendors} item — ALL four fields, always
+ *  non-empty (the flow data schema declares id/title/description/metadata). */
+function toFlowVendor(v: VendorRow): FlowVendor {
+  const tags: string[] = []
+  if (v.is_approved) tags.push('Preferred')
+  if (typeof v.rating === 'number' && v.rating > 0) tags.push(`★ ${v.rating.toFixed(1)}`)
+  const cat = (v.category ?? '').trim()
+  return {
+    id: v.stakeholder_id,
+    title: (v.name ?? '').slice(0, 80) || 'Vendor',
+    description: cat || 'Vendor',
+    metadata: tags.length ? tags.join(' · ') : 'Vendor',
+  }
 }
 async function loadProjects(ctx: ProcCtx): Promise<{ project_id: string; name: string }[]> {
   const { data } = await ctx.supabase.from('projects').select('project_id, name').eq('org_id', ctx.orgId)
@@ -49,6 +70,47 @@ async function markReadyForApproval(ctx: ProcCtx, prId: string): Promise<void> {
   if (!approver.has) return
   await ctx.supabase.from('purchase_requests')
     .update({ status: 'sent_for_approval' }).eq('id', prId).eq('status', 'draft')
+}
+
+/** Resolve the WhatsApp sender to a user_id IFF they are an active procurement
+ *  approver in this org (phone -> wa_registered_numbers.user_id -> membership flag).
+ *  Returns null otherwise (unknown number, no membership, or not an approver). */
+async function senderApproverId(ctx: ProcCtx): Promise<string | null> {
+  const { data: reg } = await ctx.supabase.from('wa_registered_numbers')
+    .select('user_id').eq('phone_number', ctx.from).maybeSingle()
+  const uid = (reg as { user_id?: string | null } | null)?.user_id
+  if (!uid) return null
+  const { data: m } = await ctx.supabase.from('org_memberships')
+    .select('can_approve_procurement')
+    .eq('user_id', uid).eq('org_id', ctx.orgId).eq('status', 'active').maybeSingle()
+  return (m as { can_approve_procurement?: boolean } | null)?.can_approve_procurement ? uid : null
+}
+
+/** After a single (direct) vendor is set on the PR: if the SENDER can approve,
+ *  promote straight to a live PO (auto-approve); otherwise send for approval so it
+ *  lands in the /purchase-orders?status=draft queue. Closes the conversation either
+ *  way. Promotion that can't proceed yet (e.g. no site) falls back to sent_for_approval. */
+async function finalizeDirectVendor(ctx: ProcCtx, prId: string): Promise<void> {
+  const { supabase, from, orgId, wamid } = ctx
+  const meta = { org_id: orgId, wamid }
+
+  const approverUid = await senderApproverId(ctx)
+  if (approverUid) {
+    const { data } = await supabase.rpc('promote_purchase_request_to_po', {
+      p_pr_id: prId, p_approver_id: approverUid,
+    })
+    const res = data as { success?: boolean; po_id?: string; error?: string } | null
+    if (res?.success && res.po_id) {
+      await closeConversation(supabase, { orgId, sender: from, lastActionSummary: `PR -> PO ${res.po_id}`, stagedEntryId: prId, lastMessageId: wamid })
+      await send(supabase, from, { kind: 'text', body: `✓ Approved — purchase order ${res.po_id} created.` }, meta)
+      return
+    }
+    // Couldn't promote yet (missing site / no project code) -> fall through to approval queue.
+  }
+
+  await markReadyForApproval(ctx, prId)
+  await closeConversation(supabase, { orgId, sender: from, lastActionSummary: 'PR sent for approval', stagedEntryId: prId, lastMessageId: wamid })
+  await send(supabase, from, { kind: 'text', body: '✓ Vendor set — sent for approval.' }, meta)
 }
 
 /** Stage a request as a draft PR + its items — idempotent on (wamid, request_index),
@@ -158,13 +220,158 @@ async function handleSingle(ctx: ProcCtx, req: ProcRequest | null): Promise<void
   }), meta)
 }
 
-// ── ANSWERS_PENDING — sourcing button taps + vendor list pick (Part 4) ───────
+// ── Interruption — a NEW order arrives mid-sourcing ─────────────────────────────
+
+/** A new request interrupts an open sourcing/vendor conversation. Capture-first: the
+ *  half-finished draft is KEPT (finish or discard it in-app); we just close the old
+ *  conversation and tell the user it was saved. Returns '' because runProcurementMessage
+ *  ignores the folded prefix — so the ack is sent here directly. */
+export async function commitInterruptedProc(ctx: ProcCtx, convo: ConvoRow): Promise<string> {
+  const { supabase, from, orgId, wamid } = ctx
+  const prId = convo.staged_entry_id
+  if (prId) {
+    await closeConversation(supabase, {
+      orgId, sender: from, stagedEntryId: prId, lastMessageId: wamid,
+      lastActionSummary: 'Saved earlier request as a draft',
+    })
+    await send(supabase, from, { kind: 'text', body: '📝 Saved your earlier request as a draft — finish or discard it in the app.' }, { org_id: orgId, wamid })
+  } else {
+    await abandonConversation(supabase, orgId, from)
+  }
+  return ''
+}
+
+// ── Vendor Flow send ──────────────────────────────────────────────────────────
+
+const flowIdFor = (mode: 'single' | 'rfq') =>
+  (mode === 'rfq' ? Deno.env.get('WA_FLOW_RFQ_PICK_VENDORS_ID') : Deno.env.get('WA_FLOW_SELECT_VENDOR_ID')) ?? ''
+
+/** Send the vendor Flow for an EXISTING PR (single -> SELECT_VENDOR / RadioButtonsGroup,
+ *  rfq -> PICK_VENDORS / CheckboxGroup) and re-point the open conversation at the Flow's
+ *  pending question. Returns false WITHOUT sending if the Flow isn't configured (no env
+ *  id) so the caller can fall back to the plain vendor list. Completion lands in
+ *  answerProcurement via the open conversation (terminal flow, no token echo; flow_token
+ *  carries the PR id as a belt-and-suspenders hint only). */
+async function sendVendorFlow(ctx: ProcCtx, mode: 'single' | 'rfq', prId: string): Promise<boolean> {
+  const { supabase, from, orgId, wamid, lang } = ctx
+  const meta = { org_id: orgId, wamid }
+
+  const flowId = flowIdFor(mode)
+  if (!flowId) return false   // not configured -> caller falls back to the list
+
+  const vendors = await loadVendors(ctx)
+  if (vendors.length === 0) {
+    await send(supabase, from, { kind: 'text', body: 'No vendors yet — add a vendor first.' }, meta)
+    return true   // handled (an empty Flow/list helps no one)
+  }
+
+  await openConversation(supabase, {
+    orgId, sender: from, owningAgent: 'PROCUREMENT',
+    pendingQuestion: mode === 'rfq' ? 'AWAIT_RFQ_FLOW' : 'AWAIT_VENDOR_FLOW',
+    stagedEntryId: prId, lastMessageId: wamid,
+  })
+
+  const flowVendors = vendors.slice(0, 30).map(toFlowVendor)
+  const draft = (Deno.env.get('WA_FLOW_MODE') ?? '').toLowerCase() === 'draft'
+  const msg = mode === 'rfq'
+    ? buildPickVendorsFlow(lang, { flowId, flowToken: prId, vendors: flowVendors, draft })
+    : buildSelectVendorFlow(lang, { flowId, flowToken: prId, vendors: flowVendors, draft })
+  await send(supabase, from, msg, meta)
+  return true
+}
+
+/** TEST trigger `pr single|rfq <text>`: stage a draft PR from <description>, then send
+ *  the matching vendor Flow. Bails with a clear setup message if the Flow id env is
+ *  unset (so we don't orphan a draft PR for a test that can't complete). */
+export async function startVendorFlow(
+  ctx: ProcCtx, mode: 'single' | 'rfq', description: string,
+): Promise<void> {
+  const { supabase, from, orgId, wamid } = ctx
+  const meta = { org_id: orgId, wamid }
+
+  if (!flowIdFor(mode)) {
+    const envName = mode === 'rfq' ? 'WA_FLOW_RFQ_PICK_VENDORS_ID' : 'WA_FLOW_SELECT_VENDOR_ID'
+    await send(supabase, from, { kind: 'text', body: `Flow not configured — set ${envName} to the published Flow id.` }, meta)
+    return
+  }
+
+  const req: ProcRequest = {
+    vendor_raw: null, sourcing_intent: mode === 'rfq' ? 'rfq' : 'direct', site_raw: null,
+    items: [{ item_name: description, quantity: null, unit: null, note: null }],
+    title: description,
+  }
+  const prId = await stageRequest(ctx, req, 0, null, null, mode === 'rfq' ? 'rfq' : null)
+  if (!prId) {
+    await send(supabase, from, { kind: 'text', body: "Couldn't stage the request — try again." }, meta)
+    return
+  }
+  await sendVendorFlow(ctx, mode, prId)
+}
+
+// ── ANSWERS_PENDING — Flow completion + sourcing button taps + vendor list pick ──
+
+/** Flow radio/checkbox values bind to the item id; tolerate {id} objects too. */
+function pickVendorId(v: unknown): string | null {
+  if (typeof v === 'string') return v.trim() || null
+  if (v && typeof v === 'object' && typeof (v as { id?: unknown }).id === 'string') {
+    return ((v as { id: string }).id).trim() || null
+  }
+  return null
+}
+/** CheckboxGroup returns an array of ids; tolerate a JSON-stringified array / single id. */
+function pickVendorIds(v: unknown): string[] {
+  const arr: unknown[] = Array.isArray(v) ? v
+    : typeof v === 'string'
+      ? (() => { try { const p = JSON.parse(v); return Array.isArray(p) ? p : [v] } catch { return v ? [v] : [] } })()
+      : []
+  const out: string[] = []
+  for (const x of arr) { const id = pickVendorId(x); if (id) out.push(id) }
+  return out
+}
 
 export async function answerProcurement(ctx: ProcCtx, _text: string, convo: ConvoRow): Promise<void> {
-  const { supabase, from, orgId, wamid, lang, interactiveId } = ctx
+  const { supabase, from, orgId, wamid, lang, interactiveId, flowResponse } = ctx
   const meta = { org_id: orgId, wamid }
   const prId = convo.staged_entry_id
   if (!prId) return
+
+  // ── WhatsApp Flow completion (terminal nfm_reply.response_json) ───────────────
+  // Bound by THIS open conversation (owning_agent=PROCUREMENT, staged_entry_id=prId).
+  //   select_vendor    -> { mode:"single", vendor:"<stakeholder_id>" }
+  //   rfq_pick_vendors -> { mode:"rfq", selected_vendors:["<stakeholder_id>", …] }
+  if (flowResponse) {
+    const fmode = typeof flowResponse.mode === 'string' ? flowResponse.mode : null
+
+    // single -> vendor_id + sent_for_approval
+    if (fmode === 'single' || flowResponse.vendor != null) {
+      const vendorId = pickVendorId(flowResponse.vendor)
+      if (!vendorId) {
+        await send(supabase, from, { kind: 'text', body: "Didn't catch the vendor — tap the button again." }, meta)
+        return
+      }
+      await supabase.from('purchase_requests')
+        .update({ vendor_id: vendorId, sourcing_mode: 'direct' }).eq('id', prId)
+      await finalizeDirectVendor(ctx, prId)   // auto-approve -> live PO if sender can approve
+      return
+    }
+
+    // rfq -> sourcing_mode 'rfq' + selected_vendor_ids, stays draft
+    if (fmode === 'rfq' || flowResponse.selected_vendors != null) {
+      const ids = pickVendorIds(flowResponse.selected_vendors)
+      if (ids.length === 0) {
+        await send(supabase, from, { kind: 'text', body: 'Pick at least one vendor to quote.' }, meta)
+        return
+      }
+      await supabase.from('purchase_requests')
+        .update({ sourcing_mode: 'rfq', selected_vendor_ids: ids }).eq('id', prId)
+      await closeConversation(supabase, { orgId, sender: from, lastActionSummary: 'PR RFQ vendors selected (flow)', stagedEntryId: prId, lastMessageId: wamid })
+      await send(supabase, from, { kind: 'text', body: `✓ Quotes requested from ${ids.length} vendor${ids.length > 1 ? 's' : ''}.` }, meta)
+      return
+    }
+
+    await send(supabase, from, { kind: 'text', body: "Didn't recognise that selection — try again." }, meta)
+    return
+  }
 
   if (interactiveId === 'proc_src_defer') {
     await supabase.from('purchase_requests').update({ sourcing_mode: 'defer' }).eq('id', prId)
@@ -173,19 +380,38 @@ export async function answerProcurement(ctx: ProcCtx, _text: string, convo: Conv
     return
   }
   if (interactiveId === 'proc_src_direct' || interactiveId === 'proc_src_rfq') {
-    await supabase.from('purchase_requests').update({ sourcing_mode: interactiveId === 'proc_src_rfq' ? 'rfq' : 'direct' }).eq('id', prId)
-    const vendors = await loadVendors(ctx)
-    await send(supabase, from, buildVendorList(lang, vendors.map((v) => ({ id: v.stakeholder_id, name: v.name }))), meta)
+    const mode = interactiveId === 'proc_src_rfq' ? 'rfq' : 'single'
+    await supabase.from('purchase_requests').update({ sourcing_mode: mode === 'rfq' ? 'rfq' : 'direct' }).eq('id', prId)
+    // Open the vendor Flow directly; fall back to the plain list if it isn't configured.
+    const sent = await sendVendorFlow(ctx, mode, prId)
+    if (!sent) {
+      const vendors = await loadVendors(ctx)
+      await send(supabase, from, buildVendorList(lang, vendors.map((v) => ({ id: v.stakeholder_id, name: v.name }))), meta)
+    }
     return
   }
   if (interactiveId && interactiveId.startsWith('proc_vendor_')) {
     const vid = interactiveId.slice('proc_vendor_'.length)
     if (vid && vid !== 'yes' && vid !== 'no_choose' && vid !== 'none') {
-      await supabase.from('purchase_requests').update({ vendor_id: vid }).eq('id', prId)
-      await markReadyForApproval(ctx, prId)
-      await send(supabase, from, { kind: 'text', body: '✓ Vendor set — your request is ready.' }, meta)
+      await supabase.from('purchase_requests').update({ vendor_id: vid, sourcing_mode: 'direct' }).eq('id', prId)
+      await finalizeDirectVendor(ctx, prId)   // auto-approve -> live PO if sender can approve
       return
     }
   }
-  await send(supabase, from, { kind: 'text', body: 'Tap one of the options above to set how to source this.' }, meta)
+  // Nothing matched (they typed instead of tapping, or the buttons scrolled off):
+  // RE-SEND the prompt we're actually waiting on, so there's always a live control.
+  const pq = convo.pending_question
+  if (pq === 'AWAIT_VENDOR_FLOW' || pq === 'AWAIT_RFQ_FLOW') {
+    const mode: 'single' | 'rfq' = pq === 'AWAIT_RFQ_FLOW' ? 'rfq' : 'single'
+    if (!(await sendVendorFlow(ctx, mode, prId))) {
+      const vendors = await loadVendors(ctx)
+      await send(supabase, from, buildVendorList(lang, vendors.map((v) => ({ id: v.stakeholder_id, name: v.name }))), meta)
+    }
+    return
+  }
+  // default: AWAIT_SOURCING -> re-send the sourcing buttons (direct / get quotes / defer)
+  const approver = await loadApprover(ctx)
+  await send(supabase, from, buildSourcingPrompt(lang, {
+    requests: [{ label: '' }], hasApprover: approver.has, approverName: approver.name,
+  }), meta)
 }

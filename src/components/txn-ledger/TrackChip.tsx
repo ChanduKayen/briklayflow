@@ -16,6 +16,7 @@ import { Hammer, Package, ChevronRight, ChevronDown, ChevronUp, Check, Plus, Hel
 const isAwaiting = (s: any) => /draft|pending|await/i.test(String(s || ''));
 import { V, font, serif, nums, terraGrad } from './ledgerTokens';
 import { WhyTrackModal } from './WhyTrack';
+import { ContractHub, CONTRACT_HUB_CSS } from './ContractHub';
 
 const inr = (n: number) => '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 const inrShort = (n: number) => {
@@ -243,9 +244,13 @@ export function TrackChip({ txn, onLinked }: { txn: any; onLinked: () => void })
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
-            style={{ position: 'fixed', top: pos.top, left: pos.left, right: pos.right, zIndex: 9999, width: pos.left === undefined ? 'min(94vw, 430px)' : undefined, background: V.surface, border: `1px solid ${V.line}`, boxShadow: '0 24px 60px rgba(30,26,21,0.22)' }}
+            style={{ position: 'fixed', top: pos.top, left: pos.left, right: pos.right, zIndex: 9999, width: pos.left === undefined ? (kind === 'WO' ? 'min(94vw, 480px)' : 'min(94vw, 430px)') : undefined, maxHeight: kind === 'WO' ? '85vh' : undefined, overflowY: kind === 'WO' ? 'auto' : undefined, background: V.surface, border: `1px solid ${V.line}`, boxShadow: '0 24px 60px rgba(30,26,21,0.22)' }}
           >
-            {done ? (
+            {/* WORKER (Work Order) → the new contract hub; VENDOR (PO) keeps the existing panel.
+                Cast avoids narrowing `kind` to 'PO' in the untouched else branch below. */}
+            {(kind as string) === 'WO' ? (
+              <ContractHub txn={txn} onClose={close} onLinked={onLinked} />
+            ) : done ? (
               <div className="px-6 py-10 text-center">
                 <span className="inline-flex items-center justify-center w-12 h-12 rounded-full db-track-pop" style={{ background: V.sageWash }}>
                   <Check size={24} style={{ color: '#2F5D34' }} strokeWidth={3} />
@@ -414,4 +419,4 @@ export const TRACK_CHIP_CSS = `
 .bk-track-title { flex: 1; min-width: 0; background: transparent; border: 0; outline: none; color: ${V.ink}; font-size: 16px; font-weight: 600; }
 .bk-track-field { display: flex; align-items: center; gap: 6px; background: ${V.surface}; border: 1px solid ${V.askLine}; border-radius: 10px; padding: 7px 10px; }
 .bk-track-in { flex: 1; min-width: 0; background: transparent; border: 0; outline: none; color: ${V.ink}; font-size: 16px; }
-`;
+` + CONTRACT_HUB_CSS;

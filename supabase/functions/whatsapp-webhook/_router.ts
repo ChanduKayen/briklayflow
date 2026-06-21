@@ -58,6 +58,23 @@ function looksActionableTxn(text: string): boolean {
   return hasAmount && (hasVerb || hasCurrency)
 }
 
+/** A concrete NEW order to BUY (not a payment, not a sourcing answer). Deliberately
+ *  conservative — requires a quantity+unit, or a material with a quantity/order verb —
+ *  so it never fires on sourcing replies ("get quotes", "send to a vendor", "rfq",
+ *  "defer", a bare vendor name). Order verbs exclude send/get (they collide with the
+ *  sourcing buttons). Used to interrupt a pending PROCUREMENT sourcing question. */
+function looksActionableProcurement(text: string): boolean {
+  const t = text.toLowerCase()
+  const qtyUnit = /\b\d+(\.\d+)?\s*(bags?|kgs?|tons?|tonnes?|mt|nos|pcs|pieces?|bricks?|blocks?|bundles?|trips?|loads?|cft|sqft|sft|l(itre|iter)?s?|ltr)\b/i
+  const material = /\b(cement|steel|tmt|sand|gravel|aggregate|bricks?|blocks?|rebar|concrete|rmc|tiles?|paint|pipes?|wires?|timber|ply|plywood|jelly|msand|m-?sand|grit|rods?)\b/i
+  const orderVerb = /\b(order|buy|purchase|need|want|require|required|arrange|supply|chahiye|kavali|kaavali|kavaali|mangao|mangwao)\b/i
+  const hasQty = /\b\d{1,6}\b/.test(t)
+  if (qtyUnit.test(t)) return true
+  if (material.test(t) && (hasQty || orderVerb.test(t))) return true
+  if (orderVerb.test(t) && hasQty) return true
+  return false
+}
+
 /** Route one message. Defensive: never throws; safe defaults on any failure. */
 export async function routeMessage(input: RouterInput): Promise<RouterDecision> {
   const text = (input.text ?? '').trim()
@@ -81,13 +98,25 @@ export async function routeMessage(input: RouterInput): Promise<RouterDecision> 
 
   // ── LLM classification (fast/cheap model), injection-hardened ───────────────
   const llm = await classifyWithLLM(input, lang)
-  if (llm) return llm
+  if (llm) {
+    // Deterministic interrupt: a concrete NEW order (qty+material) while a PROCUREMENT
+    // sourcing question is pending is a NEW_INTENT, never an answer. The LLM tends to
+    // over-bind it to the pending question; this is the safety net (mirrors the
+    // transaction-interrupt rule already in the prompt).
+    if (llm.decision === 'ANSWERS_PENDING' && input.pending?.agent === 'PROCUREMENT' && looksActionableProcurement(text)) {
+      return { ...llm, decision: 'NEW_INTENT', intent_agent: 'PROCUREMENT', reasoning: 'override: new order interrupts pending sourcing' }
+    }
+    return llm
+  }
 
   // ── Fallback when the LLM is unavailable/malformed ──────────────────────────
   // A clearly-actionable transaction is a NEW_INTENT even while pending (interrupt),
   // so check it BEFORE the short-reply heuristic (which would mislabel it ANSWERS_PENDING).
   if (looksActionableTxn(text)) {
     return { ...base, decision: 'NEW_INTENT', intent_agent: 'TRANSACTION', confidence: 0.5, reasoning: 'fallback: looks like a transaction' }
+  }
+  if (looksActionableProcurement(text)) {
+    return { ...base, decision: 'NEW_INTENT', intent_agent: 'PROCUREMENT', confidence: 0.5, reasoning: 'fallback: looks like an order' }
   }
   if (input.pending) {
     // A value/number/short reply while pending -> treat as the answer; else ambiguous.
@@ -115,7 +144,7 @@ CONTEXT (trusted, provided by the system, not the user):
 - LINGERING: a just-finished action, for reference resolution only.
 
 DECISION RULES (apply in order):
-- ANSWERS_PENDING: there IS a PENDING question AND the message is a direct answer to it -- a value, a list number/selection, or a bare yes/no in any language. If the message itself states a NEW payment (an amount together with a party or a payment verb), it is NEW_INTENT, not an answer -- even while pending. intent_agent = the pending agent.
+- ANSWERS_PENDING: there IS a PENDING question AND the message is a direct answer to it -- a value, a list number/selection, or a bare yes/no in any language. If the message itself states a NEW payment (an amount together with a party or a payment verb), it is NEW_INTENT, not an answer -- even while pending. LIKEWISE, if the message states a NEW order / material request to buy (a quantity and/or a material, e.g. "100 bags cement", "need 20 ton sand", "order tmt steel"), it is NEW_INTENT / PROCUREMENT, not an answer -- EVEN while a procurement sourcing question is pending. A sourcing reply like "get quotes", "send to a vendor", "rfq", "defer", or a bare vendor name IS an answer. intent_agent = the pending agent.
 - NEW_INTENT: a NEW actionable task, EVEN IF something is pending (never scold).
     TRANSACTION = a payment/expense, including a material ALREADY bought with an amount. Past-tense purchase verbs mean ALREADY bought -> TRANSACTION: Telugu konnam/konnaru, Hindi liya/khareeda, English bought/paid ("ramu 5000 cash", "paid suresh 15000", "cement 50 bags konnam 7000", "mistri ko 8000 diya").
     PROCUREMENT = a request to BUY/ORDER something not yet purchased ("order 100 bags cement for tomorrow").

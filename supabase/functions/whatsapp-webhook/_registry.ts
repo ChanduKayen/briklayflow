@@ -13,7 +13,7 @@
 import type { ConvoRow } from './_conversation.ts'
 import type { TxnCtx } from './_agents/transaction.ts'
 import { runTransactionMessage, answerTransaction, commitInterrupted } from './_agents/transaction.ts'
-import { runProcurementMessage, answerProcurement } from './_agents/procurement.ts'
+import { runProcurementMessage, answerProcurement, commitInterruptedProc } from './_agents/procurement.ts'
 import { runConcierge } from './_agents/concierge.ts'
 
 // The uniform turn context the dispatcher hands any agent. (The transaction agent's
@@ -60,6 +60,8 @@ const PROCUREMENT: AgentDef = {
   intent: 'PROCUREMENT',
   run: (ctx, text, opts) => runProcurementMessage(ctx, text, { prefix: opts.prefix, lingering: opts.lingering }),
   answer: (ctx, text, convo) => answerProcurement(ctx, text, convo),
+  // A new order mid-sourcing: keep the half-finished draft, close the old convo, ack.
+  commitInterrupted: (ctx, convo) => commitInterruptedProc(ctx, convo),
 }
 
 // SITEOPS still bridges to the concierge ("coming soon") until its agent is built.

@@ -46,6 +46,7 @@ export type TxnCtx = {
   wamid: string
   lang: Lang
   interactiveId: string | null   // id of a tapped LIST row / reply button (kept for parity)
+  flowResponse?: Record<string, unknown> | null   // decoded nfm_reply.response_json (WhatsApp Flow completion)
   image?: { base64: string; mime: string; caption: string }   // present for payment images -> vision extraction
 }
 

@@ -9,6 +9,7 @@ import {
 } from './_conversation.ts'
 import { agentFor } from './_registry.ts'
 import { runTransaction, retryBatchEntries, type TxnCtx } from './_agents/transaction.ts'   // direct: the replay path
+import { startVendorFlow } from './_agents/procurement.ts'   // direct: vendor-Flow test trigger
 import { runConcierge } from './_agents/concierge.ts'   // direct: first-touch orientation
 import { send } from './_format.ts'
 import * as M from './_messages.ts'
@@ -31,6 +32,7 @@ export type DispatchCtx = {
   wamid: string
   orgId: string
   interactiveId: string | null   // Sprint 5: id of a tapped LIST row / reply button
+  flowResponse?: Record<string, unknown> | null   // decoded WhatsApp Flow completion (nfm_reply.response_json)
   image?: { base64: string; mime: string; caption: string }   // payment-image -> agent vision extraction
   firstTouch?: boolean   // Sprint 6: member's first-ever contact -> orient / welcome
   dormant?: boolean      // Sprint 6: returning after a long gap -> welcome-back prefix
@@ -79,6 +81,20 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
     return
   }
 
+  // ── Vendor-Flow test trigger: `pr single <text>` / `pr rfq <text>` ───────────
+  // Deterministic (bypasses the LLM router): stage a draft PR from <text>, then send
+  // the matching vendor Flow so send + receive can be exercised end-to-end. <text>
+  // becomes the PR title/item so the test PR is distinguishable.
+  const prTest = /^pr\s+(single|rfq)\s+([\s\S]+)/i.exec(text.trim())
+  if (prTest) {
+    const fctx: TxnCtx = {
+      supabase, from, senderName: ctx.senderName, orgId, wamid,
+      lang: 'en', interactiveId: null, flowResponse: null, image: ctx.image,
+    }
+    await startVendorFlow(fctx, prTest[1].toLowerCase() === 'rfq' ? 'rfq' : 'single', prTest[2].trim())
+    return
+  }
+
   // ── Three-tier read: OPEN -> lingering CLOSED -> fresh ──────────────────────
   const view = await getRouterView(supabase, orgId, from)
   const pending = view.open
@@ -88,21 +104,30 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
 
   const d = await routeMessage({ text, pending, lingering })
   const lang = d.reply_language
-  // The uniform agent context (carries language + the tapped interactive id).
-  const actx: TxnCtx = { supabase, from, senderName: ctx.senderName, orgId, wamid, lang, interactiveId: ctx.interactiveId, image: ctx.image }
+  // The uniform agent context (carries language + the tapped interactive id + any Flow payload).
+  const actx: TxnCtx = { supabase, from, senderName: ctx.senderName, orgId, wamid, lang, interactiveId: ctx.interactiveId, flowResponse: ctx.flowResponse ?? null, image: ctx.image }
+
+  // An INTERACTIVE reply (button tap / list pick / Flow completion) against an OPEN
+  // conversation is, by construction, an ANSWER to what we asked — never a fresh
+  // intent. Override any router misread (e.g. the button title "Send to a vendor"
+  // classified AMBIGUOUS -> concierge). Terminal Flows echo no token, so the open
+  // wa_conversation (owning_agent + staged_entry_id) IS the binding.
+  const isInteractiveReply = !!(ctx.interactiveId || ctx.flowResponse)
+  const decision = (view.open && isInteractiveReply) ? 'ANSWERS_PENDING' : d.decision
+
   const chosenAgent =
-    d.decision === 'ANSWERS_PENDING' ? (pending?.agent ?? 'CONCIERGE')
-    : d.decision === 'NEW_INTENT' ? (d.intent_agent ?? 'CONCIERGE')
+    decision === 'ANSWERS_PENDING' ? (pending?.agent ?? 'CONCIERGE')
+    : decision === 'NEW_INTENT' ? (d.intent_agent ?? 'CONCIERGE')
     : 'CONCIERGE'
 
   await logRouterDecision(supabase, {
     orgId, sender: from, wamid, inputText: text,
-    decision: d.decision, intentAgent: d.intent_agent, confidence: d.confidence,
+    decision, intentAgent: d.intent_agent, confidence: d.confidence,
     chosenAgent, convoState: view.state,
   })
 
   // TRACE 2/4 -- what is PASSED TO THE AGENT (the raw text + the routing call).
-  console.log('[trace] route', JSON.stringify({ agent: chosenAgent, decision: d.decision, lang, convo: view.state, text: text.slice(0, 300) }))
+  console.log('[trace] route', JSON.stringify({ agent: chosenAgent, decision, routerDecision: d.decision, lang, convo: view.state, text: text.slice(0, 300) }))
 
   // ── First contact (Sprint 6) ─────────────────────────────────────────────────
   // A member's FIRST-EVER message with no real intent (greeting / unclear) gets a
@@ -112,7 +137,7 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
   // reply (capture-first: never make them repeat themselves). A returning-after-a-gap
   // member just gets a light "welcome back" folded in. Stamped once via oriented_at.
   const firstContact = ctx.firstTouch === true
-  if (firstContact && (d.decision === 'CHITCHAT' || d.decision === 'AMBIGUOUS') && !QUERY_RE.test(text)) {
+  if (firstContact && (decision === 'CHITCHAT' || decision === 'AMBIGUOUS') && !QUERY_RE.test(text)) {
     await runConcierge(supabase, {
       from, orgId, wamid, text, language: lang, mode: 'orientation',
       orientation: { name: ctx.senderName, orgName: await orgNameOf(supabase, orgId), role: registered?.role ?? null },
@@ -125,7 +150,7 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
   if (firstContact) await markOriented(supabase, from)
 
   // ── ANSWERS_PENDING: route by the DB's owning agent (never the LLM's) ────────
-  if (d.decision === 'ANSWERS_PENDING') {
+  if (decision === 'ANSWERS_PENDING') {
     const owner = agentFor(pending?.agent)
     if (owner.answer && view.open) {
       // The agent owns cancel-vs-answer (a bare "no" means "someone else" at a
@@ -150,7 +175,7 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
   // Lead with the first-contact welcome / welcome-back, ahead of any interrupt ack.
   prefix = mergePrefix(welcome, prefix)
 
-  switch (d.decision) {
+  switch (decision) {
     case 'NEW_INTENT': {
       const agent = agentFor(d.intent_agent)
       if (agent.intent === 'TRANSACTION') {

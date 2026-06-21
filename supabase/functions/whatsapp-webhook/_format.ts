@@ -16,6 +16,12 @@ export type OutMessage =
   | { kind: 'cta';      body: string; cta: { text: string; url: string } }
   | { kind: 'reaction'; messageId: string; emoji: string }   // ✓-react an inbound message
   | { kind: 'template'; name: string; language: string; components?: unknown[] }
+  // WhatsApp Flow (interactive form). `data` is injected into the first `screen`;
+  // `flowToken` is required on send but terminal flows echo NO token back (completion
+  // is bound by the open wa_conversation, not the token). header/footer optional.
+  // `draft: true` sends an UNPUBLISHED flow (required to test before publishing).
+  | { kind: 'flow'; body: string; flowId: string; cta: string; screen: string
+      data: Record<string, unknown>; flowToken: string; draft?: boolean; header?: string; footer?: string }
 
 /** Render an OutMessage to the WhatsApp Cloud API request body for `to`. */
 export function renderToWhatsApp(to: string, msg: OutMessage): Record<string, unknown> {
@@ -65,6 +71,30 @@ export function renderToWhatsApp(to: string, msg: OutMessage): Record<string, un
           type: 'cta_url',
           body: { text: msg.body },
           action: { name: 'cta_url', parameters: { display_text: msg.cta.text, url: msg.cta.url } },
+        },
+      }
+
+    case 'flow':
+      return {
+        ...base,
+        type: 'interactive',
+        interactive: {
+          type: 'flow',
+          ...(msg.header ? { header: { type: 'text', text: msg.header } } : {}),
+          body: { text: msg.body },
+          ...(msg.footer ? { footer: { text: msg.footer } } : {}),
+          action: {
+            name: 'flow',
+            parameters: {
+              flow_message_version: '3',
+              flow_token: msg.flowToken,
+              flow_id: msg.flowId,
+              flow_cta: msg.cta,
+              flow_action: 'navigate',
+              ...(msg.draft ? { mode: 'draft' } : {}),
+              flow_action_payload: { screen: msg.screen, data: msg.data },
+            },
+          },
         },
       }
 

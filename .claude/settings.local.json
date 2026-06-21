@@ -47,7 +47,23 @@
       "Bash(git checkout *)",
       "Bash(git clean *)",
       "Bash(git commit -q -m 'fix\\(landing\\): stop manifesto layout shift during brick wipe *)",
-      "Bash(grep -r \"CREATE TABLE.*transaction\\\\|CREATE TABLE public\\\\\\\\.transaction\" . --include=\"*.sql\")"
+      "Bash(grep -r \"CREATE TABLE.*transaction\\\\|CREATE TABLE public\\\\\\\\.transaction\" . --include=\"*.sql\")",
+      "Bash(grep -rnA18 \"rpc\\('create_purchase_order'\" src/)",
+      "Bash(echo \"=== TSC EXIT: $? ===\")",
+      "Bash(xargs grep -l \"from.*supabase\\\\|\\\\.from\\\\\\(\")",
+      "Bash(xargs grep -l \"\\\\.from\")",
+      "Bash(git commit -m 'fix\\(budget\\): narrow division type to MAT|WRK in grouped rows \\(TS2322\\) *)",
+      "PowerShell(npm run *)",
+      "Bash(git commit -m 'feat\\(legal\\): add public /terms and /data-deletion routes *)",
+      "Bash(git commit -m 'feat\\(landing\\): link Privacy, Terms, Data deletion in footer *)",
+      "Bash(git commit -m 'feat\\(day-book\\): per-member WhatsApp eligibility + welcome message *)",
+      "Bash(git commit -m 'feat\\(wa\\): config-driven WhatsApp template sender *)",
+      "PowerShell(npx supabase storage cp --help 2>&1 | Select-Object -Last 40)",
+      "Bash(xargs grep -l \"invite\")",
+      "Bash(git commit *)",
+      "Bash(git --no-pager log --oneline -1 origin/main)",
+      "Bash(npx eslint *)",
+      "Bash(sort -t_ -k1.1,1.8)"
     ]
   }
 }

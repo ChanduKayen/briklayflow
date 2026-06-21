@@ -395,11 +395,20 @@ async function processJob(
   const interactiveId: string | null =
     message?.interactive?.list_reply?.id ?? message?.interactive?.button_reply?.id ?? null
 
+  // WhatsApp Flow completion: a terminal flow returns interactive.nfm_reply with a
+  // JSON-encoded response_json (the screen's complete payload). Decode it here; the
+  // dispatcher binds it to the OPEN conversation (terminal flows echo no flow_token).
+  const flowResponse: Record<string, unknown> | null = (() => {
+    const raw = message?.interactive?.nfm_reply?.response_json
+    if (typeof raw !== 'string') return null
+    try { return JSON.parse(raw) as Record<string, unknown> } catch { return null }
+  })()
+
   // Feed the normalized text into the dispatcher, serialized per sender.
   const lockKey = messageId || from
   await acquireSenderLock(supabase, from, lockKey)
   try {
-    await dispatch({ supabase, from, senderName, registered, wamid: messageId, orgId, interactiveId, image: norm.image, firstTouch, dormant }, norm.text)
+    await dispatch({ supabase, from, senderName, registered, wamid: messageId, orgId, interactiveId, flowResponse, image: norm.image, firstTouch, dormant }, norm.text)
     if (jobId) await markJob(supabase, jobId, 'WRITTEN')
   } catch (e) {
     console.error('[wa-webhook] processing error:', e)
