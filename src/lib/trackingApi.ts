@@ -23,7 +23,7 @@ export interface TrackTxn {
   total_amount?: number | string | null;
   remarks?: string | null;
   stakeholder_id?: string | null;
-  stakeholders?: { name?: string | null; category?: string | null } | null;
+  stakeholders?: { name?: string | null; category?: string | null; type?: string | null } | null;
   txn_allocations?: Array<{
     allocation_id?: string | null;
     project_id?: string | null;
@@ -69,7 +69,7 @@ export interface TrackingOptions {
   openContracts: OpenContract[];
 }
 
-interface WoRow { wo_id: string; scope_of_work: string | null; order_value: number | null; status: string | null }
+interface WoRow { wo_id: string; title: string | null; scope_of_work: string | null; order_value: number | null; status: string | null }
 interface MsRow { wo_id: string; milestone_id: string; name: string | null; seq_no: number | null; planned_amount: number | null }
 interface MsCreatedRow { milestone_id: string; name: string | null; seq_no: number | null; planned_amount: number | null }
 interface PaidRow { order_ref: string; milestone_id: string | null; allocated_amount: number | null }
@@ -93,16 +93,20 @@ export async function getTrackingOptions(txn: TrackTxn): Promise<TrackingOptions
 
   let openContracts: OpenContract[] = [];
   if (projectId && stakeholderId) {
-    const { data: wos, error } = await supabase
+    const woQuery = (cols: string) => supabase
       .from('work_orders')
-      .select('wo_id, scope_of_work, order_value, status')
+      .select(cols)
       .eq('project_id', projectId)
       .eq('stakeholder_id', stakeholderId)
       .not('status', 'in', '("Closed","Cancelled")')
       .order('date_issued', { ascending: false });
+    // Prefer the title column; fall back if the migration hasn't been applied yet so
+    // the hub keeps working (name then derives from scope_of_work).
+    let { data: wos, error } = await woQuery('wo_id, title, scope_of_work, order_value, status');
+    if (error) ({ data: wos, error } = await woQuery('wo_id, scope_of_work, order_value, status'));
     if (error) throw error;
 
-    const rows = (wos ?? []) as WoRow[];
+    const rows = (wos ?? []) as unknown as WoRow[];
     const ids = rows.map((w) => w.wo_id);
     // Milestones (for the phase picker / single-phase auto-allocate) are read separately
     // so a failed embed can't null the whole query and hide every contract.
@@ -135,7 +139,7 @@ export async function getTrackingOptions(txn: TrackTxn): Promise<TrackingOptions
         });
       return {
         woId: w.wo_id,
-        name: w.scope_of_work || w.wo_id,
+        name: w.title || w.scope_of_work || w.wo_id,
         total,
         balance: Math.max(0, total - used),
         paidPct: total > 0 ? Math.round((used / total) * 100) : 0,
@@ -170,17 +174,41 @@ export async function attachToContract(txn: TrackTxn, contract: OpenContract, mi
 
 export interface NewPhase { name: string; amount: number }
 
+/** Deterministic header from a scope — the client-side fallback mirroring wo-namer. */
+function fallbackTitle(scope: string): string {
+  const first = String(scope || '').replace(/^e\.g\.\s*/i, '').split(/[—,.;\n]/)[0].trim();
+  const t = first || 'Contract';
+  return t.length > 48 ? t.slice(0, 46).trimEnd() + '…' : t;
+}
+
+/** Ask the wo-namer edge function for a short contract header (OpenAI gpt-4o-mini);
+ *  fall back to a deterministic header if it's unavailable, so the hub never blocks. */
+export async function generateContractTitle(scope: string, trade: string | null, project: string | null): Promise<string> {
+  try {
+    const { data, error } = await supabase.functions.invoke('wo-namer', { body: { scope, trade, project } });
+    const title = (data as { title?: string } | null)?.title?.trim();
+    if (error || !title) return fallbackTitle(scope);
+    return title;
+  } catch {
+    return fallbackTitle(scope);
+  }
+}
+
 export interface CreateContractInput {
   orgId: string;
   txn: TrackTxn;
   value: number;
   description: string;
+  /** Short LLM header that names the contract; scope_of_work keeps the full detail. */
+  title?: string;
   /** Optional split. Empty/omitted → one "Full Payment" milestone of the full value. */
   phases?: NewPhase[];
 }
 
 export interface CreatedContract {
   woId: string;
+  /** the header the contract was named with (LLM or fallback) */
+  title: string;
   total: number;
   balance: number;
   /** true → the payment was already linked (single phase). false → caller must pick a
@@ -194,10 +222,11 @@ export interface CreatedContract {
  *  (or no split) → the payment is linked to that phase here and attached === true.
  *  Multiple phases → nothing is linked yet; the caller shows a phase picker over the
  *  returned phases (just like an existing multi-phase contract) and attaches the choice. */
-export async function createContract({ orgId, txn, value, description, phases }: CreateContractInput): Promise<CreatedContract> {
+export async function createContract({ orgId, txn, value, description, title, phases }: CreateContractInput): Promise<CreatedContract> {
   const projectId = projectIdOf(txn);
   const stakeholderId = txn.stakeholder_id ?? null;
   if (!projectId || !stakeholderId) throw new Error(NO_ALLOC);
+  const finalTitle = (title || '').trim() || fallbackTitle(description);
 
   const usePhases = !!phases && phases.length > 0;
   const milestones = usePhases
@@ -220,6 +249,10 @@ export async function createContract({ orgId, txn, value, description, phases }:
   if (!result?.success || !result.wo_id) throw new Error(result?.error ?? 'Failed to create contract');
 
   const woId = result.wo_id;
+  // Name the contract: scope_of_work keeps the detail; title holds the short header.
+  // Best-effort — if the title column isn't there yet (migration pending), don't lose
+  // the created contract; it just falls back to the scope-derived name.
+  try { await supabase.from('work_orders').update({ title: finalTitle }).eq('wo_id', woId); } catch { /* title column pending */ }
   const allocId = allocIdOf(txn);
   const amount = num(txn.total_amount);
 
@@ -236,7 +269,7 @@ export async function createContract({ orgId, txn, value, description, phases }:
       const planned = num(m.planned_amount);
       return { milestoneId: m.milestone_id, name: m.name || `Phase ${m.seq_no ?? ''}`.trim(), planned, paid: 0, left: planned, seqNo: m.seq_no || 0 };
     });
-    return { woId, total: value, balance: value, attached: false, phases: builtPhases };
+    return { woId, title: finalTitle, total: value, balance: value, attached: false, phases: builtPhases };
   }
 
   // Single phase → link the payment to it so the phase reads as paid.
@@ -248,7 +281,7 @@ export async function createContract({ orgId, txn, value, description, phases }:
       .eq('allocation_id', allocId);
     if (e2) throw e2;
   }
-  return { woId, total: value, balance: Math.max(0, value - amount), attached: true, phases: [] };
+  return { woId, title: finalTitle, total: value, balance: Math.max(0, value - amount), attached: true, phases: [] };
 }
 
 /** Split the whole transaction across several phases of one contract: update the
@@ -256,28 +289,21 @@ export async function createContract({ orgId, txn, value, description, phases }:
  *  parts must sum to the payment so the project allocation total is preserved (the
  *  caller enforces this). RLS lets the client insert with its own org_id. */
 export async function splitAcrossPhases(txn: TrackTxn, woId: string, parts: Array<{ milestoneId: string; amount: number }>, orgId: string): Promise<void> {
-  const allocId = allocIdOf(txn);
   const projectId = projectIdOf(txn);
   const txnId = txn.txn_id;
-  if (!allocId || !projectId || !txnId) throw new Error(NO_ALLOC);
+  if (!projectId || !txnId) throw new Error(NO_ALLOC);
   const valid = parts.filter((p) => p.amount > 0);
   if (valid.length === 0) throw new Error('Enter at least one phase amount.');
 
-  const [first, ...rest] = valid;
-  const { error } = await supabase
-    .from('txn_allocations')
-    .update({ order_type: 'WO', order_ref: woId, milestone_id: first.milestoneId, allocated_amount: first.amount })
-    .eq('allocation_id', allocId);
+  // Re-split the whole allocation atomically (the schema validates allocations sum to the
+  // transaction total; an update-then-insert from the client trips that mid-way).
+  const { data, error } = await supabase.rpc('replace_txn_allocations', {
+    p_txn_id: txnId, p_project_id: projectId, p_org_id: orgId,
+    p_parts: valid.map((p) => ({ order_type: 'WO', order_ref: woId, milestone_id: p.milestoneId, allocated_amount: p.amount })),
+  });
   if (error) throw error;
-
-  if (rest.length) {
-    const rows = rest.map((p) => ({
-      txn_id: txnId, project_id: projectId, order_type: 'WO', order_ref: woId,
-      milestone_id: p.milestoneId, allocated_amount: p.amount, org_id: orgId,
-    }));
-    const { error: e2 } = await supabase.from('txn_allocations').insert(rows);
-    if (e2) throw e2;
-  }
+  const res = data as { success?: boolean; error?: string } | null;
+  if (!res?.success) throw new Error(res?.error ?? 'Could not record the split');
 }
 
 export interface DailyWageResult { rate: number; days: number; amount: number; }

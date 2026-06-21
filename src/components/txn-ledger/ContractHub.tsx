@@ -18,7 +18,7 @@ import { useOrgId } from '../../lib/auth/AuthProvider';
 import { V, font, serif, nums } from './ledgerTokens';
 import {
   getTrackingOptions, attachToContract, createContract, markDailyWage, fileAsLabour, splitAcrossPhases,
-  type OpenContract, type ContractPhase, type TrackTxn,
+  generateContractTitle, type OpenContract, type ContractPhase, type TrackTxn,
 } from '../../lib/trackingApi';
 
 const rupee = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
@@ -41,28 +41,24 @@ const prefersReduced = () =>
 // The last segment is the contract's short name ("Farmhouse — RCC structure" → "RCC structure").
 const shortContractName = (name: string) => (name.includes(' — ') ? name.split(' — ').pop()! : name);
 
-// Trim a typed description down to a chip-friendly name.
-function descToName(s: string): string {
-  const w = s.replace(/^e\.g\.\s*/i, '').split(/[—,]/)[0].trim();
-  return w.length > 30 ? w.slice(0, 28) + '…' : w;
-}
-
-// Placeholder sampled from the transaction: its note if usable, else a trade-based sample.
+// A proper, detailed scope example — seeded by the payee's trade so the builder sees
+// the kind of detail worth writing (what work, where, what's included). Seeded by the
+// transaction note when there is one. The clearer the scope, the better it can be named.
 function samplePlaceholder(note: string | null, trade: string | null, projectName: string | null): string {
-  const proj = projectName ? ` — ${projectName}` : '';
-  if (note) return `e.g. ${note}${proj}`;
+  const at = projectName ? ` at ${projectName}` : '';
+  if (note) return `e.g. ${note}${at} — add what's included so the whole scope is clear (work, where, materials, finishing).`;
   const t = (trade || '').toLowerCase();
   const map: Array<[RegExp, string]> = [
-    [/carpen|joinery|wardrobe|kitchen/, 'All carpentry — doors, windows, railings'],
-    [/mason|brick|block|stone/, 'Brick & block work, full structure'],
-    [/steel|fabricat|weld/, 'Steel fabrication & erection'],
-    [/electric/, 'Complete electrical — wiring & fixtures'],
-    [/plumb|sanitary/, 'Plumbing & sanitary, full building'],
-    [/paint|polish/, 'Interior & exterior painting'],
-    [/tile|marble|granite|floor/, 'Full flooring & tiling'],
+    [/carpen|joinery|wardrobe|kitchen/, `All carpentry & joinery${at} — main & internal doors with frames, windows, wardrobes and staircase railing, including fixing, fittings and finish.`],
+    [/mason|brick|block|stone/, `Brick & block masonry for the full structure${at} — external & internal walls, lintels and parapet, including scaffolding and curing, up to slab level.`],
+    [/steel|fabricat|weld/, `Steel fabrication & erection${at} — MS railings, grills and staircase, including cutting, welding, primer and on-site installation.`],
+    [/electric/, `Complete electrical${at} — concealed conduiting, wiring, switchboards, DB and fixtures across all floors, including testing.`],
+    [/plumb|sanitary/, `Plumbing & sanitary for the whole building${at} — concealed lines, drainage, fixtures and fittings, including testing and commissioning.`],
+    [/paint|polish/, `Interior & exterior painting${at} — surface prep, putty, primer and two finish coats on all walls, ceilings and grills.`],
+    [/tile|marble|granite|floor/, `Flooring & tiling${at} — floor and wall tiles, skirting and staircase, including levelling, fixing and grouting.`],
   ];
   const found = map.find(([re]) => re.test(t));
-  return `e.g. ${found ? found[1] : 'Full scope of work'}${proj}`;
+  return `e.g. ${found ? found[1] : `Describe the full scope${at} — what work, where, and what's included (materials, labour, finishing). The clearer the scope, the better we can name and track it.`}`;
 }
 
 type Confirm =
@@ -101,7 +97,8 @@ export function ContractHub({ txn, onClose, onLinked }: { txn: TrackTxn; onClose
   const [phasesOpen, setPhasesOpen] = useState(false);
   const [phaseRows, setPhaseRows] = useState<Array<{ id: string; name: string; amount: string }>>([]);
   // A just-created multi-phase contract awaiting "which phase is this payment for?".
-  const [pending, setPending] = useState<{ woId: string; total: number; desc: string; phases: ContractPhase[] } | null>(null);
+  const [pending, setPending] = useState<{ woId: string; total: number; title: string; phases: ContractPhase[] } | null>(null);
+  const [naming, setNaming] = useState(false);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
 
   const showDesc = cval.replace(/[^0-9]/g, '').length > 0;
@@ -162,26 +159,28 @@ export function ContractHub({ txn, onClose, onLinked }: { txn: TrackTxn; onClose
           .map((r) => ({ name: r.name, amount: parseInt(r.amount.replace(/[^0-9]/g, ''), 10) || 0 }))
           .filter((p) => p.amount > 0)
       : [];
-    setBusy(true); setErr(null);
+    setBusy(true); setErr(null); setNaming(true);
     try {
-      const res = await createContract({ orgId, txn, value, description: desc, phases: phases.length ? phases : undefined });
+      const title = await generateContractTitle(desc, trade, projectName);
+      setNaming(false);
+      const res = await createContract({ orgId, txn, value, description: desc, title, phases: phases.length ? phases : undefined });
       if (res.attached) {
-        setConfirm({ type: 'contract', title: 'Contract started', sub: descToName(desc), total: res.total, oldBal: res.total, newBal: res.balance, pay: amount });
+        setConfirm({ type: 'contract', title: 'Contract started', sub: res.title, total: res.total, oldBal: res.total, newBal: res.balance, pay: amount });
       } else {
         // multi-phase: ask which phase this payment belongs to (like an existing contract)
-        setPending({ woId: res.woId, total: res.total, desc, phases: res.phases });
+        setPending({ woId: res.woId, total: res.total, title: res.title, phases: res.phases });
         setBusy(false);
       }
-    } catch (e) { fail(e); }
+    } catch (e) { setNaming(false); fail(e); }
   };
 
   // Place the payment into a chosen phase of the just-created contract.
   const pickPhase = async (milestoneId: string) => {
     if (busy || !pending) return; setBusy(true); setErr(null);
-    const c: OpenContract = { woId: pending.woId, name: pending.desc, total: pending.total, balance: pending.total, paidPct: 0, phases: pending.phases };
+    const c: OpenContract = { woId: pending.woId, name: pending.title, total: pending.total, balance: pending.total, paidPct: 0, phases: pending.phases };
     try {
       await attachToContract(txn, c, milestoneId);
-      setConfirm({ type: 'contract', title: 'Contract started', sub: descToName(pending.desc), total: pending.total, oldBal: pending.total, newBal: Math.max(0, pending.total - amount), pay: amount });
+      setConfirm({ type: 'contract', title: 'Contract started', sub: pending.title, total: pending.total, oldBal: pending.total, newBal: Math.max(0, pending.total - amount), pay: amount });
     } catch (e) { fail(e); }
   };
 
@@ -190,7 +189,7 @@ export function ContractHub({ txn, onClose, onLinked }: { txn: TrackTxn; onClose
     if (busy || !pending) return; setBusy(true); setErr(null);
     try {
       await splitAcrossPhases(txn, pending.woId, parts, orgId);
-      setConfirm({ type: 'contract', title: 'Contract started', sub: descToName(pending.desc), total: pending.total, oldBal: pending.total, newBal: Math.max(0, pending.total - amount), pay: amount });
+      setConfirm({ type: 'contract', title: 'Contract started', sub: pending.title, total: pending.total, oldBal: pending.total, newBal: Math.max(0, pending.total - amount), pay: amount });
     } catch (e) { fail(e); }
   };
 
@@ -223,7 +222,7 @@ export function ContractHub({ txn, onClose, onLinked }: { txn: TrackTxn; onClose
       <div className="ch-root" style={{ ...font }}>
         <div className="ch-h" style={{ ...serif }}>Which phase is this payment for?</div>
         <div className="ch-help">
-          <b>{descToName(pending.desc)}</b> is set up. Place this {rupee(amount)} payment in a phase — you can track the rest as you pay.
+          <b>{pending.title}</b> is set up. Place this {rupee(amount)} payment in a phase — you can track the rest as you pay.
         </div>
         <PhasePicker phases={pending.phases} payment={amount} busy={busy} variant="standalone" onPick={pickPhase} onSplit={splitPending} />
         {err && <p className="ch-err">{err}</p>}
@@ -334,7 +333,7 @@ export function ContractHub({ txn, onClose, onLinked }: { txn: TrackTxn; onClose
           </button>
         )}
 
-        <button type="button" className="ch-cbtn ch-ndbtn" disabled={busy || overAllocated} onClick={addNew}>Track balance →</button>
+        <button type="button" className="ch-cbtn ch-ndbtn" disabled={busy || overAllocated} onClick={addNew}>{naming ? 'Naming your contract…' : 'Track balance →'}</button>
         {overAllocated && <span className="ch-phhint">Phases exceed the contract by {rupee(allocated - contractValue)}</span>}
         {!phasesOpen && contractValue > 0 && amount > contractValue && (
           <span className="ch-phhint">This {rupee(amount)} payment is {rupee(amount - contractValue)} more than the contract value.</span>
@@ -591,7 +590,7 @@ export const CONTRACT_HUB_CSS = `
 .ch-ndesc:focus{border-color:${V.terra};box-shadow:0 0 0 3px rgba(192,81,44,.1)}
 .ch-ndesc::placeholder{color:#c0b6a7}
 .ch-ndbtn{margin-top:13px}
-.ch-phlink{display:inline-flex;align-items:center;gap:6px;margin-top:12px;background:transparent;border:0;padding:0;font-size:12px;font-weight:500;color:${V.sys};cursor:pointer;transition:.14s;font-family:inherit}
+.ch-phlink{display:flex;width:fit-content;max-width:100%;align-items:center;gap:6px;margin-top:12px;background:transparent;border:0;padding:0;font-size:12px;font-weight:500;color:${V.sys};cursor:pointer;transition:.14s;font-family:inherit}
 .ch-phlink:hover{color:${V.terraDeep}}
 .ch-phlink-arr{color:${V.faint};transition:.14s}
 .ch-phlink:hover .ch-phlink-arr{color:${V.terra};transform:translateX(2px)}
