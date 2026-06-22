@@ -49,6 +49,21 @@ export const TEMPLATES = {
     },
     bodyParams: ["name"],                     // {{1}} = "Welcome, {{1}}!"
   },
+
+  // Proactive nudge to an approver that a purchase order awaits them (outside the 24h
+  // session window → must be a template). Body e.g.:
+  //   "{{1}} needs your approval — ₹{{2}} to {{3}} for {{4}}. Review or approve below."
+  //   {{1}}=po_id, {{2}}=amount, {{3}}=vendor, {{4}}=site
+  // A dynamic URL button ("Review details") whose suffix variable is the po_id, opening
+  // <WA_APP_LINK>/purchase-orders/{{po_id}}.  ⚠ Register this template in Meta (exact
+  // name/language/components) before enabling the send — it can't go out until approved.
+  procurement_approval: {
+    name: "procurement_approval_notification",
+    language: "en",
+    header: { kind: "none" },
+    bodyParams: ["po_id", "amount", "vendor", "site"],
+    buttonUrlParams: [{ index: 0, name: "po_id" }],
+  },
 } satisfies Record<string, TemplateDef>;
 
 export type TemplateKey = keyof typeof TEMPLATES;

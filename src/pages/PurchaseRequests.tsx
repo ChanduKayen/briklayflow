@@ -1,21 +1,18 @@
 /**
- * Purchase Requests — the in-app surface for the WhatsApp-captured PR drafts.
- * The Day Book PR rows are pointers here. This page shows each request (items,
- * site, vendor, sourcing, status) and — for members with can_approve_procurement —
- * the Approve action that lives on the PR draft (NOT the Day Book row, NOT the PO
- * page: at approval time the PO doesn't exist yet).
- *
- * The cross-channel approver push (WhatsApp template + signed deep-link) is a
- * separate milestone; this is the in-app half of the loop.
+ * Purchase Requests — a read-only overview of the WhatsApp-captured PR drafts. The
+ * Day Book PR rows point here. Approval does NOT happen on this page: there is one
+ * approval surface — the /purchase-orders draft queue — where the approver sets
+ * vendor/site and promotes the request into a live PO in a single action. This page
+ * lists requests and routes approvers there ("Review & approve →").
  */
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { useOrgId } from '../lib/auth/AuthProvider';
-import { useSnackbar } from '../components/Snackbar';
 import { PageSkeleton } from '../components/SkeletonLoader';
 import { V, font, serif } from '../components/day-book/tokens';
-import { Check, Package } from 'lucide-react';
+import { Check, Package, ArrowRight } from 'lucide-react';
 
 interface PRItem { item_name: string; quantity: number | null; unit: string | null }
 interface PR {
@@ -29,10 +26,11 @@ interface PR {
 }
 
 const STATUS = (s: string): { label: string; color: string; bg: string } => {
-  if (s === 'approved') return { label: 'Approved', color: V.sage, bg: V.sageWash };
-  if (s === 'sent_for_approval') return { label: 'Sent for approval', color: V.ask, bg: V.askWash };
+  if (s === 'placed' || s === 'approved') return { label: 'Ordered', color: V.sage, bg: V.sageWash };
+  if (s === 'sent_for_approval') return { label: 'Awaiting approval', color: V.ask, bg: V.askWash };
   return { label: 'Draft', color: V.inkSoft, bg: V.field };
 };
+const isSettled = (s: string) => s === 'placed' || s === 'approved' || s === 'fulfilled' || s === 'closed';
 
 const itemLine = (pr: PR): string => {
   const items = pr.purchase_request_items ?? [];
@@ -44,8 +42,7 @@ const itemLine = (pr: PR): string => {
 
 export default function PurchaseRequests({ session }: { session: Session }) {
   const orgId = useOrgId();
-  const qc = useQueryClient();
-  const { show } = useSnackbar();
+  const navigate = useNavigate();
 
   const { data: canApprove = false } = useQuery({
     queryKey: ['can_approve_procurement', session.user.id, orgId],
@@ -69,22 +66,17 @@ export default function PurchaseRequests({ session }: { session: Session }) {
     },
   });
 
-  const approve = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from('purchase_requests')
-        .update({ status: 'approved', approved_at: new Date().toISOString(), approver_id: session.user.id })
-        .eq('id', id);
-      if (error) throw error;
-    },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['purchase_requests'] }); show('Approved'); },
-    onError: (e: unknown) => show(e instanceof Error ? e.message : 'Could not approve', { type: 'error' }),
-  });
+  // One approval surface: the PO draft queue. Approvers review there (set vendor/site,
+  // then promote to a live PO). This page never writes approval state itself.
+  const goReview = () => navigate('/purchase-orders?status=draft');
 
   return (
     <div className="min-h-screen" style={{ background: V.page, ...font }}>
       <div className="mx-auto px-5 sm:px-8 py-8 max-w-[860px]">
         <h1 className="text-3xl" style={{ color: V.ink, ...serif }}>Purchase requests</h1>
-        <p className="text-sm mt-2" style={{ color: V.sys, ...font }}>Material requests raised on WhatsApp, ready to review.</p>
+        <p className="text-sm mt-2" style={{ color: V.sys, ...font }}>
+          Material requests raised on WhatsApp.{canApprove ? ' Review and approve them in the purchase-order queue.' : ' An approver will review them.'}
+        </p>
 
         {isLoading ? (
           <div className="mt-7"><PageSkeleton /></div>
@@ -98,9 +90,10 @@ export default function PurchaseRequests({ session }: { session: Session }) {
               const st = STATUS(pr.status);
               const site = pr.projects?.name ?? pr.site_raw ?? null;
               const vendor = pr.stakeholders?.name ?? pr.vendor_raw ?? null;
-              const showApprove = canApprove && pr.status !== 'approved';
+              const settled = isSettled(pr.status);
+              const showReview = canApprove && !settled;
               return (
-                <div key={pr.id} className="rounded-2xl p-4" style={{ background: V.surface, border: '1px solid #E3DDD4' }}>
+                <div key={pr.id} onClick={showReview ? goReview : undefined} className="rounded-2xl p-4" style={{ background: V.surface, border: '1px solid #E3DDD4', cursor: showReview ? 'pointer' : 'default' }}>
                   <div className="flex items-start gap-3">
                     <span className="w-9 h-9 rounded-full flex items-center justify-center shrink-0" style={{ background: V.terraWash, color: V.terraDeep }}>
                       <Package size={16} />
@@ -115,19 +108,18 @@ export default function PurchaseRequests({ session }: { session: Session }) {
                         {!site && <span className="text-[11px]" style={{ color: V.ask }}>needs site</span>}
                       </div>
                     </div>
-                    {showApprove && (
+                    {showReview && (
                       <button
-                        onClick={() => approve.mutate(pr.id)}
-                        disabled={approve.isPending}
+                        onClick={(e) => { e.stopPropagation(); goReview(); }}
                         className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-medium shrink-0 self-center active:scale-95 transition-transform"
-                        style={{ background: V.sageWash, color: V.sage, border: `1px solid ${V.sage}33`, ...font, fontSize: 13 }}
+                        style={{ background: V.terraWash, color: V.terraDeep, border: `1px solid ${V.terraDeep}22`, ...font, fontSize: 13 }}
                       >
-                        <Check size={14} /> Approve
+                        Review &amp; approve <ArrowRight size={14} />
                       </button>
                     )}
-                    {pr.status === 'approved' && (
+                    {settled && (
                       <span className="inline-flex items-center gap-1 shrink-0 self-center" style={{ color: V.sage, ...font, fontSize: 12 }}>
-                        <Check size={14} /> Approved
+                        <Check size={14} /> Ordered
                       </span>
                     )}
                   </div>

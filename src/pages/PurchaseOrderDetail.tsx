@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import confetti from 'canvas-confetti';
 import { supabase } from '../lib/supabase';
 import { openDoc, resolveDocUrl } from '../lib/storage';
+import { poGateState } from '../lib/poLifecycle';
 import { useSnackbar } from '../components/Snackbar';
 import { PageSkeleton } from '../components/SkeletonLoader';
 import { jsPDF } from 'jspdf';
@@ -350,7 +351,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     profile?.role === 'accountant';
   // Only management / principal approve POs.
   const isApprover = profile?.role === 'management' || profile?.role === 'principal';
-  const [sendBackOpen, setSendBackOpen] = useState(false);
+  const [noteAction, setNoteAction] = useState<'SEND_BACK' | 'REJECT' | null>(null);
   const [approvalRemark, setApprovalRemark] = useState('');
 
   const currentUserName: string = (profile as any)?.display_name || (profile as any)?.name || session.user.email || 'Unknown';
@@ -485,14 +486,20 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   });
 
   // ── Approval (draft → live), management/principal only ──────────────────────
+  const inrShort = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
   const approve = useMutation({
-    mutationFn: async ({ action, remarks }: { action: 'APPROVE' | 'SEND_BACK'; remarks?: string }) => {
-      const { data, error } = await supabase.rpc('approve_purchase_order', {
+    mutationFn: async ({ action, remarks }: { action: 'APPROVE' | 'SEND_BACK' | 'REJECT'; remarks?: string }) => {
+      const { data, error } = await supabase.rpc('decide_purchase_order', {
         p_po_id: poId!, p_action: action, p_remarks: remarks ?? null,
       });
       if (error) throw error;
-      const res = data as { success: boolean; error?: string };
-      if (!res?.success) throw new Error(res?.error || 'Approval failed');
+      const res = data as { success: boolean; error?: string; amount?: number; limit?: number; escalate_to?: string | null };
+      if (!res?.success) {
+        if (res?.error === 'above_limit') {
+          throw new Error(`This ${inrShort(res.amount ?? 0)} order is above your approval limit${res.limit != null ? ` of ${inrShort(res.limit)}` : ''}${res.escalate_to ? ' — it goes to your approver to sign off.' : ' — a higher approver must sign off.'}`);
+        }
+        throw new Error(res?.error || 'Approval failed');
+      }
       return res;
     },
     onSuccess: (_d, vars) => {
@@ -500,7 +507,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
       qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
       qc.invalidateQueries({ queryKey: ['nav_po_draft'] });
       qc.invalidateQueries({ queryKey: ['nav_po_total'] });
-      showSnackbar(vars.action === 'APPROVE' ? '✓ Purchase order approved' : 'Sent back to the creator');
+      showSnackbar(vars.action === 'APPROVE' ? '✓ Purchase order approved' : vars.action === 'REJECT' ? 'Rejected' : 'Sent back to the creator');
     },
     onError: (err: any) => showSnackbar(err.message || 'Could not complete approval', { type: 'error' }),
   });
@@ -920,21 +927,34 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
               {/* Row 1: PO ID + date + status */}
               <div className="flex items-start justify-between gap-3 mb-5">
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-on-surface-variant/45 mb-1">Purchase Order</p>
+                  {/* An unapproved order IS the purchase request — one continuum, named by gate. */}
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-on-surface-variant/45 mb-1">{po.approval_status === 'APPROVED' ? 'Purchase Order' : 'Purchase Request'}</p>
                   <p className="font-mono text-[11px] text-on-surface-variant/50 mb-1 tracking-wide">{po.po_id}</p>
                   <p className="text-[12px] text-on-surface-variant/60">Ordered {fmtDate(po.date_issued)}{po.ordered_by ? ` by ${po.ordered_by}` : ''}</p>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap justify-end">
-                  {po.approval_status === 'PENDING' && (
-                    <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold" style={{ background: '#FBF3E0', color: '#8A5A0B', border: '1px solid #E5C98F' }}>
-                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#8A5A0B' }} /> Awaiting approval
-                    </span>
-                  )}
                   {isOverdue(po) && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full border border-red-200/60 animate-pulse">Overdue</span>}
-                  <span className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold ${STATUS_BADGE[po.status] ?? 'bg-surface-container-highest text-on-surface-variant'}`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[po.status] ?? 'bg-on-surface-variant/30'}`} />
-                    {STATUS_LABEL[po.status] ?? po.status}
-                  </span>
+                  {(() => {
+                    // One derived status: the gate/price state wins until the PO is a
+                    // live, priced order; then we show the fulfillment status.
+                    const gate = poGateState(po);
+                    if (gate) {
+                      const c = gate.tone === 'pending'
+                        ? { bg: '#FBF3E0', fg: '#8A5A0B', bd: '#E5C98F' }
+                        : { bg: '#FBEEE6', fg: gate.tone === 'rejected' ? '#8F3318' : '#A8421F', bd: '#E9C3AD' };
+                      return (
+                        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold" style={{ background: c.bg, color: c.fg, border: `1px solid ${c.bd}` }}>
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ background: c.fg }} /> {gate.label}
+                        </span>
+                      );
+                    }
+                    return (
+                      <span className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold ${STATUS_BADGE[po.status] ?? 'bg-surface-container-highest text-on-surface-variant'}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[po.status] ?? 'bg-on-surface-variant/30'}`} />
+                        {STATUS_LABEL[po.status] ?? po.status}
+                      </span>
+                    );
+                  })()}
                 </div>
               </div>
 
@@ -949,30 +969,34 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
                         {isApprover ? 'This PO stays a draft until you approve it.' : 'A draft — management or principal must approve it before it goes live.'}
                       </p>
 
-                      {isApprover && !sendBackOpen && (
-                        <div className="flex items-center gap-2 mt-3">
+                      {isApprover && !noteAction && (
+                        <div className="flex items-center gap-2 mt-3 flex-wrap">
                           <button onClick={() => approve.mutate({ action: 'APPROVE' })} disabled={approve.isPending}
                             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold text-white transition-opacity disabled:opacity-50" style={{ background: '#2F5D34' }}>
                             <span className="material-symbols-outlined text-[16px]">check</span>{approve.isPending ? 'Approving…' : 'Approve'}
                           </button>
-                          <button onClick={() => setSendBackOpen(true)} disabled={approve.isPending}
+                          <button onClick={() => setNoteAction('SEND_BACK')} disabled={approve.isPending}
                             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: 'transparent', border: '1px solid #E5C98F', color: '#8A5A0B' }}>
                             <span className="material-symbols-outlined text-[16px]">undo</span>Send back
+                          </button>
+                          <button onClick={() => setNoteAction('REJECT')} disabled={approve.isPending}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: 'transparent', border: '1px solid #E9C3AD', color: '#8F3318' }}>
+                            <span className="material-symbols-outlined text-[16px]">block</span>Reject
                           </button>
                         </div>
                       )}
 
-                      {isApprover && sendBackOpen && (
+                      {isApprover && noteAction && (
                         <div className="mt-3">
                           <textarea autoFocus value={approvalRemark} onChange={e => setApprovalRemark(e.target.value)} rows={2}
-                            placeholder="What needs fixing? (optional note to the creator)"
+                            placeholder={noteAction === 'REJECT' ? 'Why is this rejected? (optional note)' : 'What needs fixing? (optional note to the creator)'}
                             className="w-full text-[13px] px-3 py-2 rounded-lg outline-none" style={{ background: '#fff', border: '1px solid #E5C98F', color: '#3D3830' }} />
                           <div className="flex items-center gap-2 mt-2">
-                            <button onClick={() => { approve.mutate({ action: 'SEND_BACK', remarks: approvalRemark.trim() }); setSendBackOpen(false); setApprovalRemark(''); }} disabled={approve.isPending}
+                            <button onClick={() => { approve.mutate({ action: noteAction, remarks: approvalRemark.trim() }); setNoteAction(null); setApprovalRemark(''); }} disabled={approve.isPending}
                               className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white disabled:opacity-50" style={{ background: '#8F3318' }}>
-                              Send back to creator
+                              {noteAction === 'REJECT' ? 'Reject this order' : 'Send back to creator'}
                             </button>
-                            <button onClick={() => { setSendBackOpen(false); setApprovalRemark(''); }} className="px-3 py-2 rounded-lg text-[13px] font-medium" style={{ color: '#8A5A0B' }}>Cancel</button>
+                            <button onClick={() => { setNoteAction(null); setApprovalRemark(''); }} className="px-3 py-2 rounded-lg text-[13px] font-medium" style={{ color: '#8A5A0B' }}>Cancel</button>
                           </div>
                         </div>
                       )}

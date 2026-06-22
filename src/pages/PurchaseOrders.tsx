@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import { openDoc } from '../lib/storage';
+import { poGateState } from '../lib/poLifecycle';
 import { PageSkeleton } from '../components/SkeletonLoader';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
@@ -425,13 +426,20 @@ function POCard({
         </div>
       )}
 
-      {/* Footer: status line + single CTA */}
+      {/* Footer: status line + single CTA. Gate/price state (Awaiting approval · Needs
+          prices · Rejected) wins over the fulfillment label until the PO is a live order. */}
       <div className="flex items-center justify-between gap-3">
-        <span className="text-xs flex items-center gap-1.5" style={{ color: statusColor }}>
-          {(d.agency === 'them' || d.overdue) && <span className="material-symbols-outlined text-[14px]">schedule</span>}
-          {d.agency === 'done' && <span className="material-symbols-outlined text-[14px]" style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>}
-          {d.status}
-        </span>
+        {(() => {
+          const gate = poGateState(po);
+          const gateColor = gate?.tone === 'rejected' ? C.terraDeep : gate?.tone === 'attention' ? C.terraDeep : C.amber;
+          return (
+            <span className="text-xs flex items-center gap-1.5" style={{ color: gate ? gateColor : statusColor }}>
+              {!gate && (d.agency === 'them' || d.overdue) && <span className="material-symbols-outlined text-[14px]">schedule</span>}
+              {!gate && d.agency === 'done' && <span className="material-symbols-outlined text-[14px]" style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>}
+              {gate ? gate.label : d.status}
+            </span>
+          );
+        })()}
 
         {showCta && (
           d.ctaKind === 'upload' ? (

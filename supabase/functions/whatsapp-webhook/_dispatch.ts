@@ -81,6 +81,42 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
     return
   }
 
+  // ── Procurement approval taps (approve_po_<id> / reject_po_<id> / review_po_<id>) ──
+  // The button carries the PO id. The sender's phone is already resolved to a user via
+  // wa_registered_numbers; we act AS that user through decide_purchase_order (which
+  // re-checks authority + the amount limit). Review just sends the deep link.
+  if (ctx.interactiveId && /^(approve|reject|review)_po_/.test(ctx.interactiveId)) {
+    const [act, , ...idParts] = ctx.interactiveId.split('_')
+    const poId = idParts.join('_')
+    const poLink = (() => {
+      const b = Deno.env.get('WA_APP_LINK') ?? 'https://briklayflow.vercel.app'
+      try { return new URL('/purchase-orders/' + poId, b).href } catch { return 'https://briklayflow.vercel.app/purchase-orders/' + poId }
+    })()
+    if (act === 'review') {
+      await send(supabase, from, { kind: 'cta', body: `Purchase order ${poId} — review the full details, then approve or send back.`, cta: { text: 'Review details', url: poLink } }, { org_id: orgId, wamid })
+      return
+    }
+    const actorId = ctx.registered?.user_id ?? null
+    if (!actorId) {
+      await send(supabase, from, { kind: 'text', body: "We couldn't verify your account for approvals. Please review in the app." }, { org_id: orgId, wamid })
+      return
+    }
+    const { data } = await supabase.rpc('decide_purchase_order', {
+      p_po_id: poId, p_action: act === 'approve' ? 'APPROVE' : 'REJECT',
+      p_remarks: `${act === 'approve' ? 'Approved' : 'Rejected'} on WhatsApp by ${ctx.senderName || from}`,
+      p_actor_id: actorId,
+    })
+    const res = (data ?? {}) as { success?: boolean; already?: boolean; error?: string; amount?: number; limit?: number }
+    let body: string
+    if (res.already) body = `Purchase order ${poId} was already decided.`
+    else if (res.success) body = act === 'approve' ? `✅ Approved — ${poId} is now a live order.` : `Rejected — ${poId} won't proceed.`
+    else if (res.error === 'above_limit') body = `${poId} is above your approval limit — it goes to your higher approver to sign off.`
+    else if (res.error === 'Not authorized to approve procurement') body = `You're not set up to approve purchases. Ask an approver to review ${poId}.`
+    else body = `Couldn't record that for ${poId}. Please try in the app.`
+    await send(supabase, from, { kind: 'cta', body, cta: { text: 'Open in app', url: poLink } }, { org_id: orgId, wamid })
+    return
+  }
+
   // ── Vendor-Flow test trigger: `pr single <text>` / `pr rfq <text>` ───────────
   // Deterministic (bypasses the LLM router): stage a draft PR from <text>, then send
   // the matching vendor Flow so send + receive can be exercised end-to-end. <text>

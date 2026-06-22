@@ -71,7 +71,7 @@ interface WaContact {
   welcomed_at: string | null;
   created_at: string;
 }
-interface Member { id: string; name: string; role: UserRole; assigned_projects: string[]; can_approve_procurement: boolean; procurement_approval_limit: number | null }
+interface Member { id: string; name: string; role: UserRole; assigned_projects: string[]; can_approve_procurement: boolean; procurement_approval_limit: number | null; higher_approver_id: string | null }
 interface PendingInvite { invite_id: string; email: string; role: string; token: string; expires_at: string }
 
 // ── atoms ───────────────────────────────────────────────────────────────────────
@@ -146,13 +146,14 @@ function NumberEditor({ initial, label, cta, onSave, onCancel }: {
 // ── member card ─────────────────────────────────────────────────────────────────
 
 function MemberCard({
-  member, sender, suggestPhone, projects,
+  member, sender, suggestPhone, projects, approvers,
   onEnable, onDisable, onChangeNumber, onLang, onRole, onRename, onDelete, onToggleProject, onProcApproval,
 }: {
   member: Member;
   sender: WaContact | null;
   suggestPhone: string;
   projects: { project_id: string; name: string }[];
+  approvers: { id: string; name: string }[];
   onEnable: (phone: string) => Promise<boolean>;
   onDisable: () => Promise<void>;
   onChangeNumber: (phone: string) => Promise<void>;
@@ -161,7 +162,7 @@ function MemberCard({
   onRename: (name: string) => Promise<void>;
   onDelete: () => void;
   onToggleProject: (projectId: string) => void;
-  onProcApproval: (updates: { can_approve_procurement?: boolean; procurement_approval_limit?: number | null }) => void;
+  onProcApproval: (updates: { can_approve_procurement?: boolean; procurement_approval_limit?: number | null; higher_approver_id?: string | null }) => void;
 }) {
   const { show } = useSnackbar();
   const active = !!sender?.is_active;
@@ -318,16 +319,31 @@ function MemberCard({
         <div className="flex-1 min-w-0">
           <p style={{ color: V.inkSoft, ...font, ...T.xs }}>Can approve purchase requests</p>
           {member.can_approve_procurement && (
-            <div className="mt-1.5 inline-flex items-center gap-1.5">
-              <span style={{ color: V.faint, ...font, ...T.xs }}>up to ₹</span>
-              <input
-                inputMode="numeric"
-                defaultValue={member.procurement_approval_limit ?? ''}
-                placeholder="no limit"
-                onBlur={(e) => { const v = e.target.value.replace(/[^\d.]/g, ''); onProcApproval({ procurement_approval_limit: v ? parseFloat(v) : null }); }}
-                className="px-2 py-0.5 rounded outline-none"
-                style={{ width: 96, background: V.surface, border: `1px solid ${V.line}`, color: V.ink, ...font, ...nums, ...T.xs }}
-              />
+            <div className="mt-1.5 flex flex-col gap-1.5">
+              <div className="inline-flex items-center gap-1.5">
+                <span style={{ color: V.faint, ...font, ...T.xs }}>up to ₹</span>
+                <input
+                  inputMode="numeric"
+                  defaultValue={member.procurement_approval_limit ?? ''}
+                  placeholder="no limit"
+                  onBlur={(e) => { const v = e.target.value.replace(/[^\d.]/g, ''); onProcApproval({ procurement_approval_limit: v ? parseFloat(v) : null }); }}
+                  className="px-2 py-0.5 rounded outline-none"
+                  style={{ width: 96, background: V.surface, border: `1px solid ${V.line}`, color: V.ink, ...font, ...nums, ...T.xs }}
+                />
+              </div>
+              {/* Above the limit → escalates to this higher approver. */}
+              <div className="inline-flex items-center gap-1.5 flex-wrap">
+                <span style={{ color: V.faint, ...font, ...T.xs }}>over that, ask</span>
+                <select
+                  value={member.higher_approver_id ?? ''}
+                  onChange={(e) => onProcApproval({ higher_approver_id: e.target.value || null })}
+                  className="px-2 py-0.5 rounded outline-none"
+                  style={{ background: V.surface, border: `1px solid ${V.line}`, color: member.higher_approver_id ? V.ink : V.faint, ...font, ...T.xs, maxWidth: 180 }}
+                >
+                  <option value="">+ add approver</option>
+                  {approvers.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              </div>
             </div>
           )}
         </div>
@@ -375,7 +391,7 @@ export default function TeamAccess({ session }: { session: Session }) {
     enabled: isAdmin && !!orgId,
     queryFn: async () => {
       const { data: rows, error } = await supabase
-        .from('org_memberships').select('role, status, user_id, joined_at, can_approve_procurement, procurement_approval_limit')
+        .from('org_memberships').select('role, status, user_id, joined_at, can_approve_procurement, procurement_approval_limit, higher_approver_id')
         .eq('org_id', orgId).eq('status', 'active').order('joined_at', { ascending: false });
       if (error) throw error;
       const ids = (rows ?? []).map((r: any) => r.user_id).filter(Boolean);
@@ -388,7 +404,7 @@ export default function TeamAccess({ session }: { session: Session }) {
         const p = pById.get(r.user_id);
         // Display + edit the SAME column (user_profiles.role) so a role change reflects
         // immediately; fall back to the membership role if a profile role isn't set.
-        return { id: r.user_id, name: p.name ?? 'Unnamed', role: (p.role ?? r.role) as UserRole, assigned_projects: (p.assigned_projects ?? []) as string[], can_approve_procurement: !!r.can_approve_procurement, procurement_approval_limit: r.procurement_approval_limit ?? null } satisfies Member;
+        return { id: r.user_id, name: p.name ?? 'Unnamed', role: (p.role ?? r.role) as UserRole, assigned_projects: (p.assigned_projects ?? []) as string[], can_approve_procurement: !!r.can_approve_procurement, procurement_approval_limit: r.procurement_approval_limit ?? null, higher_approver_id: r.higher_approver_id ?? null } satisfies Member;
       });
     },
   });
@@ -532,7 +548,7 @@ export default function TeamAccess({ session }: { session: Session }) {
   };
   const rename = (m: Member, n: string) => updateProfile(m.id, { name: n });
   // Procurement approval lives on org_memberships (not user_profiles) — the governance primitive.
-  const setProcApproval = (m: Member, updates: { can_approve_procurement?: boolean; procurement_approval_limit?: number | null }) => {
+  const setProcApproval = (m: Member, updates: { can_approve_procurement?: boolean; procurement_approval_limit?: number | null; higher_approver_id?: string | null }) => {
     supabase.from('org_memberships').update(updates).eq('user_id', m.id).eq('org_id', orgId)
       .then(({ error }: { error: { message?: string } | null }) => { if (error) show(error.message || 'Could not update approval setting', { type: 'error' }); refreshMembers(); });
   };
@@ -727,6 +743,7 @@ export default function TeamAccess({ session }: { session: Session }) {
             <div className="space-y-2.5">
               {members.map((m) => (
                 <MemberCard key={m.id} member={m} sender={senderForMember(m)} suggestPhone={suggestPhoneFor(m)} projects={projects}
+                  approvers={members.filter((x) => x.id !== m.id).map((x) => ({ id: x.id, name: x.name }))}
                   onEnable={(ph) => enableMember(m, ph)}
                   onDisable={() => disableMember(m)}
                   onChangeNumber={(ph) => changeNumber(senderForMember(m)!.id, ph)}
