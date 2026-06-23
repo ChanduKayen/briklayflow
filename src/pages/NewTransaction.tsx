@@ -130,8 +130,8 @@ function NoObligationsState({ onSkip, onOpenWO, onOpenPO, txnType }: {
 
 // ── WOObligationRow ───────────────────────────────────────────────────────────
 
-function WOObligationRow({ wo, selectedObligation, onSelect, onOpenPhases, woPaid }: {
-  wo: any; selectedObligation: SelectedObligation | null;
+function WOObligationRow({ wo, index, selectedObligation, onSelect, onOpenPhases, woPaid }: {
+  wo: any; index: number; selectedObligation: SelectedObligation | null;
   onSelect: (ob: SelectedObligation) => void;
   onOpenPhases: (wo: any) => void;
   woPaid: Record<string, number>;
@@ -156,6 +156,7 @@ function WOObligationRow({ wo, selectedObligation, onSelect, onOpenPhases, woPai
     <button type="button" onClick={handleTap}
       className={`w-full text-left flex items-center gap-3 px-4 py-3.5 transition-colors ${isSelected ? '' : 'hover:bg-black/[0.025] active:bg-black/[0.04]'}`}
       style={{ background: isSelected ? VOICE.outWash : undefined, borderLeft: `3px solid ${isSelected ? VOICE.out : 'transparent'}` }}>
+      <span className="shrink-0 text-right tabular-nums" style={{ width: 14, color: VOICE.systemFaint, fontSize: 11.5, fontWeight: 600 }}>{index}</span>
       <span className="shrink-0 grid place-items-center rounded-full" style={{ width: 18, height: 18, border: isSelected ? 'none' : `1.5px solid ${VOICE.hairStrong}`, background: isSelected ? VOICE.out : 'transparent' }}>
         {isSelected && <span className="material-symbols-outlined text-white" style={{ fontSize: 12, fontVariationSettings: "'FILL' 1" }}>check</span>}
       </span>
@@ -182,8 +183,8 @@ function WOObligationRow({ wo, selectedObligation, onSelect, onOpenPhases, woPai
 
 // ── POObligationRow ───────────────────────────────────────────────────────────
 
-function POObligationRow({ po, selectedObligation, onSelect, poPaid }: {
-  po: any; selectedObligation: SelectedObligation | null;
+function POObligationRow({ po, index, selectedObligation, onSelect, poPaid }: {
+  po: any; index: number; selectedObligation: SelectedObligation | null;
   onSelect: (ob: SelectedObligation) => void;
   poPaid: Record<string, number>;
 }) {
@@ -209,6 +210,7 @@ function POObligationRow({ po, selectedObligation, onSelect, poPaid }: {
         onSelect({ type: 'PO', po_id: po.po_id, label: `${po.po_id} · ${po.stakeholders?.name || ''}`, balance: poNet });
       }}
     >
+      <span className="shrink-0 text-right tabular-nums" style={{ width: 14, color: VOICE.systemFaint, fontSize: 11.5, fontWeight: 600 }}>{index}</span>
       <span className="shrink-0 grid place-items-center rounded-full" style={{ width: 18, height: 18, border: isSelected ? 'none' : `1.5px solid ${VOICE.hairStrong}`, background: isSelected ? VOICE.inn : 'transparent' }}>
         {isSelected && <span className="material-symbols-outlined text-white" style={{ fontSize: 12, fontVariationSettings: "'FILL' 1" }}>check</span>}
       </span>
@@ -369,12 +371,12 @@ function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip,
       </div>
 
       <div className="divide-y divide-black/[0.04]">
-        {wos.map((wo: any) => (
-          <WOObligationRow key={wo.wo_id} wo={wo} selectedObligation={selectedObligation}
+        {wos.map((wo: any, i: number) => (
+          <WOObligationRow key={wo.wo_id} wo={wo} index={i + 1} selectedObligation={selectedObligation}
             onSelect={onSelect} onOpenPhases={(w) => setPhasingWoId(w.wo_id)} woPaid={woPaid} />
         ))}
-        {pos.map((po: any) => (
-          <POObligationRow key={po.po_id} po={po} selectedObligation={selectedObligation} onSelect={onSelect} poPaid={poPaid} />
+        {pos.map((po: any, i: number) => (
+          <POObligationRow key={po.po_id} po={po} index={i + 1} selectedObligation={selectedObligation} onSelect={onSelect} poPaid={poPaid} />
         ))}
       </div>
 
