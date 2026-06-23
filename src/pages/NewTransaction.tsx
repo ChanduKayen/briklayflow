@@ -1098,6 +1098,23 @@ export default function NewTransaction({ session: _session }: { session: Session
   const missingAmount = saveAttempted && totalAmt <= 0;
   const missingRemarks = saveAttempted && !remarks.trim() && txnType !== 'client_receipt';
   const missingProject = saveAttempted && effectiveAllocs.some((a) => !a.project_id);
+
+  // Smart CTA: the next still-empty MANDATORY field, in form order. While a gap remains the
+  // primary button names it ("Enter the amount" → jumps & focuses it); once none remain it
+  // becomes "Save & exit". Optional fields (proof, and the note on receipts) never block.
+  const nextGap: { label: string; el: () => HTMLElement | null } | null = !txnType ? null : (() => {
+    if (!totalAmt || totalAmt <= 0) return { label: 'Enter the amount', el: () => document.getElementById('txn-amount-input') };
+    if (txnType !== 'expense' && !stkId) return { label: txnType === 'client_receipt' ? 'Who is paying?' : 'Add the payee', el: () => payeeRef.current };
+    if (effectiveAllocs.some((a) => !a.project_id)) return { label: 'Choose a project', el: () => document.getElementById('txn-project-0') };
+    if (txnType !== 'client_receipt' && !remarks.trim()) return { label: 'Add a note', el: () => document.getElementById('txn-remarks') };
+    return null;
+  })();
+  const goToGap = () => {
+    setSaveAttempted(true);
+    const el = nextGap?.el();
+    if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => el.focus({ preventScroll: true }), 120); }
+  };
+
   const needsPhaseSelection = !!(
     selectedObligation?.type === 'WO' &&
     (projectWOs.find((w: any) => w.wo_id === selectedObligation.wo_id)?.wo_milestones?.length || 0) > 0
@@ -1283,8 +1300,8 @@ export default function NewTransaction({ session: _session }: { session: Session
                   // Smooth viewport-based size (NOT digit-count tiers) so it never jumps/shrinks as
                   // you type; a very long amount just scrolls within the input. Baseline-aligned with ₹.
                   style={{
-                    fontFamily: VOICE.serif, fontWeight: 600, lineHeight: 1, letterSpacing: '-1px',
-                    fontSize: 'clamp(36px, 11vw, 56px)',
+                    fontFamily: VOICE.serif, fontWeight: 600, lineHeight: 1, letterSpacing: '-1.5px',
+                    fontSize: 'clamp(50px, 15vw, 62px)',
                     background: 'transparent', border: 'none', outline: 'none', color: VOICE.ivory,
                     caretColor: txnType === 'client_receipt' ? VOICE.innSoft : VOICE.accentSoft,
                     flex: '1 1 auto', width: '100%', minWidth: 0, padding: 0,
@@ -2377,22 +2394,35 @@ export default function NewTransaction({ session: _session }: { session: Session
           <div className="flex-1" />
           <div className="flex flex-col items-end gap-1">
             <div className="flex items-center gap-2">
-              <button type="button" onClick={() => handleSave('new')} disabled={!txnType || createTxn.isPending}
-                aria-label="Save & new"
-                className="flex items-center gap-1.5 px-3.5 sm:px-4 py-2.5 rounded-xl border border-black/15 text-on-surface text-[13px] font-bold hover:bg-black/[0.02] transition-all duration-200 active:scale-95 disabled:opacity-35 disabled:pointer-events-none">
-                {createTxn.isPending && (createTxn.variables as any)?.saveMode === 'new'
-                  ? <Loader2 className="animate-spin" size={14} />
-                  : <span className="material-symbols-outlined text-[16px]">add</span>}
-                <span className="hidden sm:inline">Save &amp; new</span>
-              </button>
-              <button type="button" onClick={() => handleSave('exit')} disabled={!txnType || createTxn.isPending}
-                className="flex items-center gap-1.5 px-4 sm:px-5 py-2.5 rounded-xl text-[13px] font-bold transition-all duration-200 active:scale-95 disabled:opacity-35 disabled:pointer-events-none"
-                style={{ background: VOICE.walnut, color: VOICE.ivory, boxShadow: '0 8px 20px -10px rgba(34,26,19,.6)' }}>
-                {createTxn.isPending && (createTxn.variables as any)?.saveMode === 'exit'
-                  ? <Loader2 className="animate-spin" size={14} />
-                  : <span className="material-symbols-outlined text-[16px]">check</span>}
-                Save &amp; exit
-              </button>
+              {nextGap ? (
+                /* Incomplete → one guiding button that names the next gap and jumps to it. */
+                <button type="button" onClick={goToGap} disabled={!txnType}
+                  className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-[13px] font-bold transition-all duration-200 active:scale-95 disabled:opacity-35"
+                  style={{ background: VOICE.walnut, color: VOICE.ivory, boxShadow: '0 8px 20px -10px rgba(34,26,19,.6)' }}>
+                  {nextGap.label}
+                  <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+                </button>
+              ) : (
+                /* Complete → the real save actions. */
+                <>
+                  <button type="button" onClick={() => handleSave('new')} disabled={!txnType || createTxn.isPending}
+                    aria-label="Save & new"
+                    className="flex items-center gap-1.5 px-3.5 sm:px-4 py-2.5 rounded-xl border border-black/15 text-on-surface text-[13px] font-bold hover:bg-black/[0.02] transition-all duration-200 active:scale-95 disabled:opacity-35 disabled:pointer-events-none">
+                    {createTxn.isPending && (createTxn.variables as any)?.saveMode === 'new'
+                      ? <Loader2 className="animate-spin" size={14} />
+                      : <span className="material-symbols-outlined text-[16px]">add</span>}
+                    <span className="hidden sm:inline">Save &amp; new</span>
+                  </button>
+                  <button type="button" onClick={() => handleSave('exit')} disabled={!txnType || createTxn.isPending}
+                    className="flex items-center gap-1.5 px-4 sm:px-5 py-2.5 rounded-xl text-[13px] font-bold transition-all duration-200 active:scale-95 disabled:opacity-35 disabled:pointer-events-none"
+                    style={{ background: VOICE.walnut, color: VOICE.ivory, boxShadow: '0 8px 20px -10px rgba(34,26,19,.6)' }}>
+                    {createTxn.isPending && (createTxn.variables as any)?.saveMode === 'exit'
+                      ? <Loader2 className="animate-spin" size={14} />
+                      : <span className="material-symbols-outlined text-[16px]">check</span>}
+                    Save &amp; exit
+                  </button>
+                </>
+              )}
             </div>
             <p className="hidden sm:block text-[9px] font-bold uppercase tracking-wider text-on-surface-variant/30 mr-1 select-none">⌘ Enter</p>
           </div>
