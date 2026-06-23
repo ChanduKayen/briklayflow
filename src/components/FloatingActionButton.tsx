@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { IconReceipt2, IconFileInvoice, IconHammer, IconUserPlus } from '@tabler/icons-react';
 
 const OPTIONS = [
@@ -15,6 +15,7 @@ export function FloatingActionButton() {
   const [open, setOpen]     = useState(false);
   const [visible, setVisible] = useState(false);
   const navigate             = useNavigate();
+  const location             = useLocation();
   const ref                  = useRef<HTMLDivElement>(null);
   const timerRef             = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -49,6 +50,9 @@ export function FloatingActionButton() {
   }, [visible]);
 
   const go = (path: string) => { navigate(path); handleClose(); };
+
+  // Full-screen create forms (New Transaction, etc.) own their own actions — hide the FAB.
+  if (/\/new$/.test(location.pathname)) return null;
 
   return (
     <div

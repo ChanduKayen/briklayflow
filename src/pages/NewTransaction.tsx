@@ -48,6 +48,13 @@ type TxnType = 'worker' | 'material' | 'expense' | 'client_receipt';
 type PayMode = 'NEFT' | 'UPI' | 'Cheque' | 'Cash';
 interface AllocDraft { id: string; project_id: string; order_type: 'WO' | 'PO' | ''; order_ref: string; milestone_id: string; allocated_amount: number; }
 
+const TXN_TYPES: { key: TxnType; icon: string; label: string; dir: 'in' | 'out' }[] = [
+  { key: 'worker',         icon: 'engineering',   label: 'Worker payment',    dir: 'out' },
+  { key: 'material',       icon: 'shopping_cart', label: 'Material purchase', dir: 'out' },
+  { key: 'expense',        icon: 'receipt_long',  label: 'General expense',   dir: 'out' },
+  { key: 'client_receipt', icon: 'payments',      label: 'Client receipt',    dir: 'in'  },
+];
+
 function genTxnId() {
   return `TXN-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
 }
@@ -485,6 +492,8 @@ export default function NewTransaction({ session: _session }: { session: Session
 
   // ── Type ──────────────────────────────────────────────────────────────────
   const [txnType, setTxnType] = useState<TxnType | null>(initialTxnType as TxnType | null);
+  // The 2×2 type grid collapses to a compact chip once a type is chosen (frees space on mobile).
+  const [pickingType, setPickingType] = useState(false);
 
   // ── Core form ────────────────────────────────────────────────────────────
   const [txnId, setTxnId] = useState(genTxnId);
@@ -1122,7 +1131,9 @@ export default function NewTransaction({ session: _session }: { session: Session
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen" style={{ background: VOICE.page }}>
+    <div className="min-h-screen txn-new-page" style={{ background: VOICE.page }}>
+      {/* On mobile, < 16px inputs make iOS zoom-and-jump on focus — pin them to 16px here. */}
+      <style>{`@media (max-width: 640px){ .txn-new-page input:not(#txn-amount-input), .txn-new-page select, .txn-new-page textarea{ font-size:16px } }`}</style>
       <div className="mx-auto px-4 pt-8 pb-36" style={{ maxWidth: 720 }}>
 
         {/* ── Header — voice restyle (back + copy handlers unchanged) ──────── */}
@@ -1169,51 +1180,60 @@ export default function NewTransaction({ session: _session }: { session: Session
           </div>
         </div>
 
-        {/* ── Type selector — direction-encoded cards (visual redesign) ──── */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-10">
-          {([
-            { key: 'worker'         as TxnType, icon: 'engineering',   label: 'Worker payment',    dir: 'out' as const },
-            { key: 'material'       as TxnType, icon: 'shopping_cart', label: 'Material purchase', dir: 'out' as const },
-            { key: 'expense'        as TxnType, icon: 'receipt_long',  label: 'General expense',   dir: 'out' as const },
-            { key: 'client_receipt' as TxnType, icon: 'payments',      label: 'Client receipt',    dir: 'in'  as const },
-          ]).map((t) => {
-            const isSelected = txnType === t.key;
-            const accentSoft = t.dir === 'in' ? VOICE.innSoft : VOICE.accentSoft;
-            return (
-              <button
-                key={t.key}
-                type="button"
-                aria-pressed={isSelected}
-                onClick={() => {
-                  if (txnType !== t.key) {
-                    setTxnType(t.key); setStkId(''); setStkSearch('');
-                    setCategory(''); setSaveAttempted(false);
-                    setNewStkTrade(''); setNewStkTradeOther('');
-                    setDismissedReceiptSuggestion(false);
-                    setDismissedMilestoneSuggestion(false);
-                  }
-                }}
-                className="rounded-xl px-3 py-3 text-left transition-transform active:scale-[0.98] relative"
-                style={isSelected
-                  ? { background: VOICE.walnut, border: `1.5px solid ${VOICE.walnut}`, boxShadow: '0 14px 30px -18px rgba(34,26,19,.6)' }
-                  : { background: VOICE.surface, border: `1px solid ${VOICE.line}` }}
-              >
-                {isSelected && <span className="absolute top-3 right-3 w-[7px] h-[7px] rounded-full" style={{ background: accentSoft }} />}
-                <span
-                  className="material-symbols-outlined text-[18px]"
-                  style={{ color: isSelected ? accentSoft : VOICE.systemFaint, fontVariationSettings: isSelected ? "'FILL' 1" : "'FILL' 0" }}
-                >
-                  {t.icon}
+        {/* ── Type selector — collapses to a compact chip once chosen (frees space on mobile) ── */}
+        {txnType && !pickingType ? (() => {
+          const sel = TXN_TYPES.find((t) => t.key === txnType)!;
+          const acc = sel.dir === 'in' ? VOICE.innSoft : VOICE.accentSoft;
+          return (
+            <div className="flex items-center justify-between gap-2 mb-6 rounded-xl px-3.5 py-2.5" style={{ background: VOICE.walnut }}>
+              <span className="inline-flex items-center gap-2 min-w-0">
+                <span className="material-symbols-outlined text-[18px] shrink-0" style={{ color: acc, fontVariationSettings: "'FILL' 1" }}>{sel.icon}</span>
+                <span className="text-sm font-medium truncate" style={{ color: VOICE.ivory }}>{sel.label}</span>
+                <span className="text-[11px] inline-flex items-center gap-0.5 shrink-0" style={{ color: acc }}>
+                  <span className="material-symbols-outlined text-[12px]">{sel.dir === 'in' ? 'south_west' : 'north_east'}</span>
+                  {sel.dir === 'in' ? 'in' : 'out'}
                 </span>
-                <p className="text-sm font-medium mt-1.5" style={{ color: isSelected ? VOICE.ivory : VOICE.user }}>{t.label}</p>
-                <p className="text-xs mt-0.5 inline-flex items-center gap-1" style={{ color: isSelected ? accentSoft : VOICE.systemFaint }}>
-                  <span className="material-symbols-outlined text-[12px]">{t.dir === 'in' ? 'south_west' : 'north_east'}</span>
-                  money {t.dir === 'in' ? 'in' : 'out'}
-                </p>
-              </button>
-            );
-          })}
-        </div>
+              </span>
+              <button type="button" onClick={() => setPickingType(true)} className="text-xs font-semibold shrink-0 px-2.5 py-1 rounded-lg" style={{ color: VOICE.ivory, background: 'rgba(243,234,219,.12)' }}>Change</button>
+            </div>
+          );
+        })() : (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-8">
+            {TXN_TYPES.map((t) => {
+              const isSelected = txnType === t.key;
+              const accentSoft = t.dir === 'in' ? VOICE.innSoft : VOICE.accentSoft;
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  aria-pressed={isSelected}
+                  onClick={() => {
+                    setPickingType(false);
+                    if (txnType !== t.key) {
+                      setTxnType(t.key); setStkId(''); setStkSearch('');
+                      setCategory(''); setSaveAttempted(false);
+                      setNewStkTrade(''); setNewStkTradeOther('');
+                      setDismissedReceiptSuggestion(false);
+                      setDismissedMilestoneSuggestion(false);
+                    }
+                  }}
+                  className="rounded-xl px-3 py-2.5 sm:py-3 text-left transition-transform active:scale-[0.98] relative"
+                  style={isSelected
+                    ? { background: VOICE.walnut, border: `1.5px solid ${VOICE.walnut}`, boxShadow: '0 14px 30px -18px rgba(34,26,19,.6)' }
+                    : { background: VOICE.surface, border: `1px solid ${VOICE.line}` }}
+                >
+                  {isSelected && <span className="absolute top-2.5 right-2.5 w-[7px] h-[7px] rounded-full" style={{ background: accentSoft }} />}
+                  <span className="material-symbols-outlined text-[18px]" style={{ color: isSelected ? accentSoft : VOICE.systemFaint, fontVariationSettings: isSelected ? "'FILL' 1" : "'FILL' 0" }}>{t.icon}</span>
+                  <p className="text-[13px] sm:text-sm font-medium mt-1 leading-tight" style={{ color: isSelected ? VOICE.ivory : VOICE.user }}>{t.label}</p>
+                  <p className="text-[11px] mt-0.5 inline-flex items-center gap-1" style={{ color: isSelected ? accentSoft : VOICE.systemFaint }}>
+                    <span className="material-symbols-outlined text-[12px]">{t.dir === 'in' ? 'south_west' : 'north_east'}</span>
+                    money {t.dir === 'in' ? 'in' : 'out'}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* ── Empty state ─────────────────────────────────────────────────── */}
         {!txnType && (
@@ -2348,30 +2368,31 @@ export default function NewTransaction({ session: _session }: { session: Session
             </div>
           )}
           <button type="button" onClick={() => navigate('/ledger')}
-            className="text-[13px] font-bold px-4 py-2.5 rounded-xl transition-all duration-200 active:scale-95"
+            className="hidden sm:block text-[13px] font-bold px-4 py-2.5 rounded-xl transition-all duration-200 active:scale-95"
             style={{ color: VOICE.system }}>
             Cancel
           </button>
           <div className="flex-1" />
           <div className="flex flex-col items-end gap-1">
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2">
               <button type="button" onClick={() => handleSave('new')} disabled={!txnType || createTxn.isPending}
-                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-black/15 text-on-surface text-[13px] font-bold hover:bg-black/[0.02] transition-all duration-200 active:scale-95 disabled:opacity-35 disabled:pointer-events-none">
+                aria-label="Save & new"
+                className="flex items-center gap-1.5 px-3.5 sm:px-4 py-2.5 rounded-xl border border-black/15 text-on-surface text-[13px] font-bold hover:bg-black/[0.02] transition-all duration-200 active:scale-95 disabled:opacity-35 disabled:pointer-events-none">
                 {createTxn.isPending && (createTxn.variables as any)?.saveMode === 'new'
                   ? <Loader2 className="animate-spin" size={14} />
                   : <span className="material-symbols-outlined text-[16px]">add</span>}
-                Save & new
+                <span className="hidden sm:inline">Save &amp; new</span>
               </button>
               <button type="button" onClick={() => handleSave('exit')} disabled={!txnType || createTxn.isPending}
-                className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-[13px] font-bold transition-all duration-200 active:scale-95 disabled:opacity-35 disabled:pointer-events-none"
+                className="flex items-center gap-1.5 px-4 sm:px-5 py-2.5 rounded-xl text-[13px] font-bold transition-all duration-200 active:scale-95 disabled:opacity-35 disabled:pointer-events-none"
                 style={{ background: VOICE.walnut, color: VOICE.ivory, boxShadow: '0 8px 20px -10px rgba(34,26,19,.6)' }}>
                 {createTxn.isPending && (createTxn.variables as any)?.saveMode === 'exit'
                   ? <Loader2 className="animate-spin" size={14} />
                   : <span className="material-symbols-outlined text-[16px]">check</span>}
-                Save & exit
+                Save &amp; exit
               </button>
             </div>
-            <p className="text-[9px] font-bold uppercase tracking-wider text-on-surface-variant/30 mr-1 select-none">⌘ Enter</p>
+            <p className="hidden sm:block text-[9px] font-bold uppercase tracking-wider text-on-surface-variant/30 mr-1 select-none">⌘ Enter</p>
           </div>
         </div>
       </div>
