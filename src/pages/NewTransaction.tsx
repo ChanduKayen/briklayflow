@@ -1119,18 +1119,15 @@ export default function NewTransaction({ session: _session }: { session: Session
   // get cancelled by that relayout. Desktop just centers.
   const bringIntoFrame = (el: HTMLElement | null) => {
     if (!el) return;
-    const mobile = window.innerWidth < 640;
-    if (!mobile) {
-      el.focus({ preventScroll: true });
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (window.innerWidth < 640) {
+      // Mobile: let the browser's native focus-scroll place the field above the keyboard at
+      // the right height. A manual scrollIntoView({block:'start'}) snap over-scrolled it to
+      // the top (~15% too high), so we don't fight it.
+      el.focus();
       return;
     }
-    el.focus(); // native focus-scroll brings the input above the keyboard
-    const snap = () => el.scrollIntoView({ block: 'start' });
-    const vv = window.visualViewport;
-    if (vv) vv.addEventListener('resize', () => snap(), { once: true });
-    setTimeout(snap, 300);
-    setTimeout(snap, 550);
+    el.focus({ preventScroll: true });
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
   const fieldEl = (k: 'amount' | 'payee' | 'remark' | 'project'): HTMLElement | null =>
     k === 'amount' ? document.getElementById('txn-amount-input')
