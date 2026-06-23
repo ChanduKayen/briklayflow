@@ -308,6 +308,17 @@ export default function Ledger({ session }: { session: Session }) {
     requestAnimationFrame(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }));
   }, [focusTxn, isLoading, ledger]);
 
+  // On open with no ?txn deep-link, land on the first transaction row so the entries —
+  // not the search/filter header — are the focus. Once only.
+  const didInitLedgerScroll = useRef(false);
+  useEffect(() => {
+    if (focusTxn || isLoading || didInitLedgerScroll.current) return;
+    const el = document.querySelector('[id^="ledger-txn-"]');
+    if (!el) return;
+    didInitLedgerScroll.current = true;
+    requestAnimationFrame(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }, [focusTxn, isLoading, ledger]);
+
   // Captures from WhatsApp still waiting in the Day book (same review bucket the
   // Day book uses: PENDING + AWAITING_CONTEXT). Drives the nudge strip below.
   const { data: dayBookReviewCount = 0 } = useQuery({
@@ -1005,7 +1016,7 @@ export default function Ledger({ session }: { session: Session }) {
                       <div
                         key={txn.txn_id}
                         id={`ledger-txn-${txn.txn_id}`}
-                        style={focusTxn === txn.txn_id ? { borderRadius: 12, boxShadow: '0 0 0 2px #C8603A', transition: 'box-shadow .3s' } : undefined}
+                        style={{ scrollMarginTop: 80, ...(focusTxn === txn.txn_id ? { borderRadius: 12, boxShadow: '0 0 0 2px #C8603A', transition: 'box-shadow .3s' } : {}) }}
                       >
                       <EntryRow
                         dir={dir}

@@ -186,6 +186,17 @@ export default function Logbook({ session }: { session: Session }) {
   const rejected  = useMemo(() => entries.filter(e => e.status === 'DISMISSED').sort(byRecent), [entries]);
   const shown = tab === 'review' ? review : tab === 'filed' ? filed : rejected;
 
+  // On open with no deep-link, land on the first entry card so the cards — not the header
+  // preamble — are the focus (the tabs stay peeking via scroll-margin). Once only.
+  const didInitScroll = useRef(false);
+  useEffect(() => {
+    if (focusId || isLoading || didInitScroll.current) return;
+    const el = document.getElementById(`db-entry-${shown[0]?.id}`);
+    if (!el) return;
+    didInitScroll.current = true;
+    requestAnimationFrame(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }, [focusId, isLoading, shown]);
+
   const counts: Record<TabKey, number> = { review: review.length, filed: filed.length, rejected: rejected.length, requests: prs.length };
 
   // ── One-time reveal: first time the owner opens a Day Book with work to do ──
@@ -316,7 +327,7 @@ export default function Logbook({ session }: { session: Session }) {
               <div
                 key={r.id}
                 id={`db-entry-${r.id}`}
-                style={focusId === r.id ? { borderRadius: 18, boxShadow: '0 0 0 2px #C8603A', transition: 'box-shadow .3s' } : undefined}
+                style={{ scrollMarginTop: 76, ...(focusId === r.id ? { borderRadius: 18, boxShadow: '0 0 0 2px #C8603A', transition: 'box-shadow .3s' } : {}) }}
               >
               <ReviewCard
                 entry={r}
