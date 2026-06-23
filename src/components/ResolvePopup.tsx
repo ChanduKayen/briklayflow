@@ -606,15 +606,15 @@ function PopupContents({
 
   return (
     <>
-      {/* ── Sticky header ── */}
-      <div className="shrink-0 flex items-center justify-between px-4 py-3" style={{ borderBottom: `1px solid ${VOICE.line}` }}>
-        <span className="font-data-mono text-[12px]" style={{ color: VOICE.systemFaint, ...VNUMS }}>{entry.re_number}</span>
+      {/* ── Sticky header (compact) ── */}
+      <div className="shrink-0 flex items-center justify-between px-4 py-1.5" style={{ borderBottom: `1px solid ${VOICE.line}` }}>
+        <span className="font-data-mono text-[11px]" style={{ color: VOICE.systemFaint, ...VNUMS }}>{entry.re_number}</span>
         <button
           onClick={onClose}
-          className="w-9 h-9 flex items-center justify-center rounded-xl transition-colors"
+          className="w-7 h-7 flex items-center justify-center rounded-lg transition-colors -mr-1"
           style={{ color: VOICE.system }}
         >
-          <span className="material-symbols-outlined text-[20px]">close</span>
+          <span className="material-symbols-outlined text-[18px]">close</span>
         </button>
       </div>
 
@@ -1000,10 +1000,10 @@ function PopupContents({
           </div>
         )}
 
-        <div className="flex flex-col-reverse md:flex-row gap-2 items-stretch md:items-center">
+        <div className="flex flex-row gap-2 items-center">
           <button
             onClick={() => setShowDismissConfirm(true)}
-            className="flex-1 md:flex-none px-4 py-2.5 rounded-xl text-[13px] font-medium transition-colors"
+            className="shrink-0 md:flex-none px-4 py-2.5 rounded-xl text-[13px] font-medium transition-colors"
             style={{ border: `1px solid ${VOICE.line}`, color: VOICE.system }}
           >
             Dismiss
