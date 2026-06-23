@@ -280,7 +280,16 @@ export function ResolvePopup({ entry, onClose, onUpdated }: Props) {
 
   // On open, focus the amount (matches NewTransaction's amount-first behaviour).
   useEffect(() => {
-    setTimeout(() => document.getElementById('resolve-amount-input')?.focus(), 60);
+    setTimeout(() => document.getElementById('resolve-amount-input')?.focus({ preventScroll: true }), 60);
+  }, []);
+
+  // Lock the background scroll while the editor is open, so focusing a field can't jolt the
+  // document underneath the fixed sheet (the source of the up/down jitter on mobile). The
+  // sheet's own overflow-y-auto body still scrolls.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
   }, []);
 
   useEffect(() => {
@@ -308,12 +317,11 @@ export function ResolvePopup({ entry, onClose, onUpdated }: Props) {
   // "scroll the focused input above the keyboard" behaviour. Desktop just centers.
   const bringIntoFrame = (el: HTMLElement | null) => {
     if (!el) return;
-    if (window.innerWidth < 640) {
-      el.focus();
-      return;
-    }
+    // Always preventScroll — inside a fixed sheet the native focus-scroll jolts the document.
+    // Then scroll the field within the sheet's own scroll body: to the top on mobile (clears
+    // the sticky header via scroll-margin and sits above the keyboard), centered on desktop.
     el.focus({ preventScroll: true });
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.scrollIntoView({ behavior: 'smooth', block: window.innerWidth < 640 ? 'start' : 'center' });
   };
   const fieldEl = (k: 'amount' | 'payee' | 'description' | 'project'): HTMLElement | null =>
     k === 'amount' ? document.getElementById('resolve-amount-input')
