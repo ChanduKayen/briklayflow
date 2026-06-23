@@ -1112,13 +1112,26 @@ export default function NewTransaction({ session: _session }: { session: Session
     return null;
   })();
   // Focus SYNCHRONOUSLY inside the tap (so the cursor/keyboard activates on mobile — a
-  // deferred focus() loses the gesture), then scroll into the visible frame. On mobile we
-  // align to the TOP (with scroll-margin) so the field clears the keyboard; centering would
-  // leave it hidden behind the keyboard.
+  // deferred focus() loses the gesture), then scroll into the visible frame. On mobile the
+  // page only becomes scrollable AFTER the keyboard appears (it shrinks the visual viewport),
+  // so an immediate scroll is a no-op and the field stays hidden. We therefore re-scroll on
+  // the visualViewport 'resize' (the keyboard-open signal), aligning to the TOP so it clears
+  // the keyboard. Desktop just centers.
   const bringIntoFrame = (el: HTMLElement | null) => {
     if (!el) return;
     el.focus({ preventScroll: true });
-    el.scrollIntoView({ behavior: 'smooth', block: window.innerWidth < 640 ? 'start' : 'center' });
+    const mobile = window.innerWidth < 640;
+    const scroll = () => el.scrollIntoView({ behavior: 'smooth', block: mobile ? 'start' : 'center' });
+    scroll(); // desktop / keyboard-already-open case
+    if (mobile) {
+      const vv = window.visualViewport;
+      if (vv) {
+        const onResize = () => { scroll(); vv.removeEventListener('resize', onResize); };
+        vv.addEventListener('resize', onResize);
+        setTimeout(() => vv.removeEventListener('resize', onResize), 1200); // safety cleanup
+      }
+      setTimeout(scroll, 350); // fallback if no resize fires (keyboard already up)
+    }
   };
   const fieldEl = (k: 'amount' | 'payee' | 'remark' | 'project'): HTMLElement | null =>
     k === 'amount' ? document.getElementById('txn-amount-input')
