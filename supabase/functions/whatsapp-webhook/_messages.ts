@@ -176,7 +176,7 @@ export function mInterruptedList(
 }
 
 /** Abandoned: text + Edit CTA (this is the A1 fix path; also enqueued by the SQL sweep). */
-export function mAbandoned(lang: Lang, p: { payee: string | null; amount: number; missing: string }): OutMessage {
+export function mAbandoned(lang: Lang, p: { payee: string | null; amount: number | null; missing: string }): OutMessage {
   return {
     kind: 'cta',
     body: `${pick(lang, { en: 'Saved' })} ${entryLine(p.payee, p.amount, null)} — ${p.missing} ${pick(lang, { en: 'not set. Add anytime.' })}`,

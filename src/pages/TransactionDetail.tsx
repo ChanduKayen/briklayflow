@@ -715,6 +715,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
 
   const needsActionType = (() => {
     if (txn.status === 'Voided') return false;
+    if (txn.is_one_time) return false; // a deliberate one-time payment is resolved, not orphaned
     const stkType = txn.stakeholders?.type;
     if (stkType !== 'Worker' && stkType !== 'Vendor') return false;
     const hasUnlinked = allocs?.some(a => !a.order_type);

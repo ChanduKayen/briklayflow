@@ -61,6 +61,7 @@ export default function OnboardingWizard({ profile, orgName, orgId, onComplete }
   const [scDone, setScDone]           = useState<number[]>([])
   const [finishing, setFinishing]     = useState(false)
   const [creating, setCreating]       = useState(false)
+  const [projError, setProjError]     = useState('')
 
   useEffect(() => {
     if (step !== 4) return
@@ -79,20 +80,37 @@ export default function OnboardingWizard({ profile, orgName, orgId, onComplete }
 
   async function handleCreateProject() {
     setCreating(true)
+    setProjError('')
     const name          = projName.trim() || 'My First Project'
     const resolvedOrgId = orgId ?? profile.org_id
+    // A project MUST carry a project_code: WO/PO id generation (generate_document_id)
+    // raises "missing project code" without it. Derive it exactly like the New Project
+    // wizard / the migration backfill — strip common words, 4 alpha chars, uppercase —
+    // and guard the 2–6 char A-Z0-9 CHECK with a safe fallback.
+    const stripped = name
+      .replace(/\b(villa|flat|building|project|new|phase|the|and|of|for|at|in|a|an|dr|mr|mrs)\b/gi, '')
+      .replace(/[^a-zA-Z]/g, '')
+    let projectCode = (stripped || name.replace(/[^a-zA-Z]/g, '')).substring(0, 4).toUpperCase()
+    if (projectCode.length < 2) projectCode = 'PROJ'
     const { error } = await supabase
       .from('projects')
       .insert({
         project_id:    crypto.randomUUID(),
         org_id:        resolvedOrgId,
         name,
+        project_code:  projectCode,
         status:        'Active',
         created_by:    profile.id,
         start_date:    new Date().toISOString().split('T')[0],
       })
-    if (error) console.error('[OnboardingWizard] project creation failed:', error)
     setCreating(false)
+    if (error) {
+      // Surface the failure instead of swallowing it — otherwise onboarding claims
+      // success while no project exists (and every later WO/PO/transaction has no home).
+      console.error('[OnboardingWizard] project creation failed:', error)
+      setProjError(error.message || 'Could not create the project. Please try again.')
+      return
+    }
     setProjSaved(name)
     setProjTypeStr(projType)
     setProjCreated(true)
@@ -194,6 +212,7 @@ export default function OnboardingWizard({ profile, orgName, orgId, onComplete }
               projSaved={projSaved}
               projTypeStr={projTypeStr}
               creating={creating}
+              projError={projError}
               onCreate={handleCreateProject}
               onSkip={() => setStep(3)}
               onNext={() => setStep(3)}
@@ -320,12 +339,12 @@ function TeamStep({
 
 function ProjectStep({
   projName, setProjName, projType, setProjType,
-  projCreated, projSaved, projTypeStr, creating,
+  projCreated, projSaved, projTypeStr, creating, projError,
   onCreate, onSkip, onNext,
 }: {
   projName: string; setProjName: (s: string) => void
   projType: string; setProjType: (s: string) => void
-  projCreated: boolean; projSaved: string; projTypeStr: string; creating: boolean
+  projCreated: boolean; projSaved: string; projTypeStr: string; creating: boolean; projError: string
   onCreate: () => void; onSkip: () => void; onNext: () => void
 }) {
   if (projCreated) {
@@ -452,6 +471,12 @@ function ProjectStep({
           : 'Create project →'
         }
       </button>
+
+      {projError && (
+        <p style={{ fontSize: 12, color: '#b42318', margin: 0, maxWidth: 380, textAlign: 'center', lineHeight: 1.45 }}>
+          {projError}
+        </p>
+      )}
 
       <button
         onClick={onSkip}

@@ -16,14 +16,22 @@ import { autoCloseWOIfFullyPaid } from '../lib/woAutoClose';
 // ── New Transaction UI redesign — four-voice + money-direction tokens ──────────
 // Visual only (NewTransaction_v1.jsx reference). Applied via inline styles; never
 // read by any handler/mutation/query. worker/material/expense = OUT, receipt = IN.
+// "Walnut-ledger" palette — briklay-new-transaction reference. Warm cream canvas,
+// walnut ink, terracotta accent for money-out, sage for money-in. The whole page reads
+// its colour from here, so retuning these values re-skins it at the source.
 const VOICE = {
-  user: '#1E1A15', userSoft: '#3D3830',
-  system: '#6B6258', systemFaint: '#9A9186',
-  ask: '#8A5A0B', askDeep: '#6B4407', askWash: '#FBF3E0', askLine: '#E5C98F',
-  confirm: '#2F5D34', confirmWash: '#E9F2E7',
-  out: '#9A3B1F', outWash: '#FAEFE9', outLine: '#E8C5B4',
-  inn: '#2F5D34', innWash: '#E9F2E7', innLine: '#BFD8BC',
-  page: '#FBFAF8', surface: '#FFFFFF', field: '#F4F2EE', line: '#E8E4DE',
+  user: '#2A211B', userSoft: '#5A4E42',
+  system: '#5A4E42', systemFaint: '#9A8E80',
+  ask: '#C75E32', askDeep: '#AC4D27', askWash: '#F7E9DF', askLine: '#E5C98F',
+  confirm: '#4C6B47', confirmWash: '#EBF1E7',
+  out: '#C75E32', outWash: '#F7E9DF', outLine: '#E8C5B4',
+  inn: '#5E8157', innWash: '#EBF1E7', innLine: '#BFD8BC',
+  page: '#F7F2E9', surface: '#FFFFFF', field: '#F4EEE3', line: '#EAE1D2',
+  // added for the redesign
+  walnut: '#221A13', ivory: '#F3EADB', faint: '#C7BCAC', hairStrong: '#DDD2C0',
+  cream2: '#FBF7EF', surface2: '#F4EEE3',
+  accentSoft: '#E08A5C', accentDeep: '#AC4D27', accentTint: '#F7E9DF', innSoft: '#9CBB91',
+  serif: "'Playfair Display', Georgia, 'Times New Roman', serif",
 };
 const VNUMS = { fontVariantNumeric: 'tabular-nums' as const };
 
@@ -42,6 +50,15 @@ interface AllocDraft { id: string; project_id: string; order_type: 'WO' | 'PO' |
 
 function genTxnId() {
   return `TXN-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+}
+
+// "Today, 23 Jun" when the date is today, else "23 Jun" — for the header date pill.
+function fmtDateShort(d: string) {
+  const dt = new Date(d + 'T00:00:00');
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const lbl = `${dt.getDate()} ${m[dt.getMonth()]}`;
+  return dt.getTime() === today.getTime() ? `Today, ${lbl}` : lbl;
 }
 
 // ── Section label ─────────────────────────────────────────────────────────────
@@ -113,124 +130,53 @@ function NoObligationsState({ onSkip, onOpenWO, onOpenPO, txnType }: {
 
 // ── WOObligationRow ───────────────────────────────────────────────────────────
 
-function WOObligationRow({ wo, selectedObligation, expanded, onToggleExpand, onSelect, milestonePayments, woPaid }: {
+function WOObligationRow({ wo, selectedObligation, onSelect, onOpenPhases, woPaid }: {
   wo: any; selectedObligation: SelectedObligation | null;
-  expanded: boolean; onToggleExpand: () => void;
   onSelect: (ob: SelectedObligation) => void;
-  milestonePayments: Record<string, number>;
+  onOpenPhases: (wo: any) => void;
   woPaid: Record<string, number>;
 }) {
-  const hasPhases = (wo.wo_milestones?.length || 0) > 0;
+  const phases = wo.wo_milestones || [];
+  const multiPhase = phases.length > 1;   // 0 or 1 phase → one-tap select; >1 → a focused step
   const woBalance = getWOBalance(wo);
-  // Remaining = order value minus what's already been paid against this WO.
   const woNet = Math.max(0, woBalance - (woPaid[wo.wo_id] || 0));
-  const isSelected = selectedObligation?.wo_id === wo.wo_id && !selectedObligation?.phase_id;
+  const woPct = woBalance > 0 ? Math.min(100, Math.round(((woPaid[wo.wo_id] || 0) / woBalance) * 100)) : 0;
+  const isSelected = selectedObligation?.wo_id === wo.wo_id;
+
+  const handleTap = () => {
+    if (multiPhase) { onOpenPhases(wo); return; }
+    if (phases.length === 1) {
+      onSelect({ type: 'WO_PHASE', wo_id: wo.wo_id, phase_id: phases[0].milestone_id, label: wo.scope_of_work || wo.wo_id, balance: woNet });
+    } else {
+      onSelect({ type: 'WO', wo_id: wo.wo_id, label: `${wo.wo_id} · ${wo.stakeholders?.name || ''}`, balance: woNet });
+    }
+  };
 
   return (
-    <div className={`transition-colors duration-200 ${isSelected ? 'bg-[#C8603A]/[0.02]' : ''}`}>
-      <div
-        className="px-5 py-3.5 flex items-center gap-3 cursor-pointer hover:bg-black/[0.01] transition-colors relative group"
-        onClick={hasPhases ? onToggleExpand : () => onSelect({
-          type: 'WO', wo_id: wo.wo_id,
-          label: `${wo.wo_id} · ${wo.stakeholders?.name || ''}`,
-          balance: woNet,
-        })}
-      >
-        <div className="w-5 shrink-0 flex items-center justify-center relative z-10">
-          {hasPhases ? (
-            <span className={`material-symbols-outlined text-[18px] text-on-surface-variant/40 transition-transform duration-200 ${expanded ? 'rotate-90 text-[#C8603A]' : ''}`}>
-              chevron_right
-            </span>
-          ) : isSelected ? (
-            <div className="w-4 h-4 rounded-full bg-[#C8603A] flex items-center justify-center shadow-[0_2px_6px_rgba(200,96,58,0.3)]">
-              <span className="material-symbols-outlined text-white text-[10px]" style={{ fontVariationSettings: "'FILL' 1" }}>check</span>
-            </div>
-          ) : (
-            <div className="w-4 h-4 rounded-full border border-black/15 bg-white group-hover:border-[#C8603A]/50 transition-colors" />
-          )}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <p className="text-[13px] font-semibold text-on-surface truncate group-hover:text-primary transition-colors">{wo.stakeholders?.name || 'Unknown'}</p>
-            <span className="font-data-mono text-[9px] px-1.5 py-0.5 rounded bg-black/[0.03] text-on-surface-variant/50 shrink-0 font-bold uppercase tracking-wider">{wo.wo_id}</span>
-          </div>
-          {wo.scope_of_work && (
-            <p className="text-[11px] text-on-surface-variant/45 truncate mt-0.5">{(wo.scope_of_work as string)}</p>
-          )}
-        </div>
-        <div className="text-right shrink-0 ml-3">
-          <p className={`text-[13px] font-bold font-data-mono ${woNet > 0 ? 'text-on-surface' : 'text-on-surface-variant/30'}`}>
-            {woNet > 0 ? `₹${woNet.toLocaleString('en-IN')}` : 'Settled'}
-          </p>
-          {hasPhases && (
-            <span className="inline-block text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border border-black/[0.06] text-on-surface-variant/40 mt-1 bg-black/[0.01]">
-              {wo.wo_milestones.length} phases
-            </span>
-          )}
-        </div>
-      </div>
-
-      {hasPhases && expanded && (
-        <div className="relative border-t border-black/[0.03] bg-black/[0.005] pb-1.5">
-          {/* Absolute branch connector line */}
-          <div className="absolute left-[24px] top-0 bottom-6 w-px border-l border-dashed border-black/15 pointer-events-none" />
-
-          {wo.wo_milestones.map((phase: any) => {
-            const balance = getPhaseBalance(phase);
-            const isPhaseSelected = selectedObligation?.phase_id === phase.milestone_id;
-            const settled = phase.status === 'PAID' || phase.status === 'Paid';
-            const paid = milestonePayments[phase.milestone_id] || 0;
-            const due = balance - paid;
-            return (
-              <div key={phase.milestone_id}
-                className={`pl-10 pr-5 py-3 flex items-center gap-3 transition-colors relative group
-                  ${settled ? 'opacity-40 cursor-not-allowed bg-black/[0.01]' : isPhaseSelected ? 'bg-[#C8603A]/[0.04] cursor-pointer' : 'cursor-pointer hover:bg-black/[0.01]'}`}
-                onClick={() => {
-                  if (settled) return;
-                  onSelect({ type: 'WO_PHASE', wo_id: wo.wo_id, phase_id: phase.milestone_id, label: `${phase.name} · ${wo.wo_id}`, balance: Math.max(0, due) });
-                }}
-              >
-                {/* Horizontal branch point indicator */}
-                <div className="absolute left-[24px] top-1/2 -translate-y-1/2 w-2 h-px bg-black/15 pointer-events-none" />
-
-                <div className="w-5 shrink-0 flex items-center justify-center relative z-10">
-                  {isPhaseSelected ? (
-                    <div className="w-4 h-4 rounded-full bg-[#C8603A] flex items-center justify-center shadow-[0_2px_6px_rgba(200,96,58,0.3)]">
-                      <span className="material-symbols-outlined text-white text-[10px]" style={{ fontVariationSettings: "'FILL' 1" }}>check</span>
-                    </div>
-                  ) : (
-                    <div className="w-2.5 h-2.5 rounded-full border border-black/20 bg-white group-hover:border-[#C8603A]/50 transition-colors" />
-                  )}
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <p className="text-[12.5px] font-medium text-on-surface group-hover:text-primary transition-colors">{phase.name}</p>
-                  {phase.qty && phase.unit_type && (
-                    <p className="text-[10px] text-on-surface-variant/40 mt-0.5 font-medium">
-                      {phase.qty} {phase.unit_type}{phase.rate ? ` × ₹${Number(phase.rate).toLocaleString('en-IN')}` : ''}
-                    </p>
-                  )}
-                </div>
-                <div className="text-right shrink-0 ml-3 flex flex-col items-end">
-                  <p className="text-[12.5px] font-bold font-data-mono text-on-surface">₹{balance.toLocaleString('en-IN')}</p>
-                  <div className="mt-1">
-                    {settled ? (
-                      <span className="px-1.5 py-0.5 rounded text-[8.5px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-600/10">Settled</span>
-                    ) : due < 0 ? (
-                      <span className="px-1.5 py-0.5 rounded text-[8.5px] font-bold uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-600/10">Overpaid</span>
-                    ) : due === 0 ? (
-                      <span className="px-1.5 py-0.5 rounded text-[8.5px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-600/10">Paid</span>
-                    ) : (
-                      <span className="px-1.5 py-0.5 rounded text-[8.5px] font-bold uppercase tracking-wider bg-[#C8603A]/5 text-[#C8603A] border border-[#C8603A]/10">₹{due.toLocaleString('en-IN')} Due</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
+    <button type="button" onClick={handleTap}
+      className={`w-full text-left flex items-center gap-3 px-4 py-3.5 transition-colors ${isSelected ? '' : 'hover:bg-black/[0.025] active:bg-black/[0.04]'}`}
+      style={{ background: isSelected ? VOICE.outWash : undefined, borderLeft: `3px solid ${isSelected ? VOICE.out : 'transparent'}` }}>
+      <span className="shrink-0 grid place-items-center rounded-full" style={{ width: 18, height: 18, border: isSelected ? 'none' : `1.5px solid ${VOICE.hairStrong}`, background: isSelected ? VOICE.out : 'transparent' }}>
+        {isSelected && <span className="material-symbols-outlined text-white" style={{ fontSize: 12, fontVariationSettings: "'FILL' 1" }}>check</span>}
+      </span>
+      <span className="flex-1 min-w-0">
+        <span className="block text-[13.5px] font-semibold truncate" style={{ color: VOICE.user }}>{wo.scope_of_work || wo.stakeholders?.name || wo.wo_id}</span>
+        <span className="block text-[11px] mt-0.5 truncate" style={{ color: VOICE.systemFaint, ...VNUMS }}>
+          {woPct}% paid · {wo.stakeholders?.name || 'Unknown'}{multiPhase ? ` · ${phases.length} stages` : ''}
+        </span>
+      </span>
+      <span className="text-right shrink-0" style={{ minWidth: 92 }}>
+        <span className="block text-[13px] font-semibold" style={{ color: woNet > 0 ? VOICE.accentDeep : VOICE.systemFaint, ...VNUMS }}>
+          {woNet > 0 ? `₹${woNet.toLocaleString('en-IN')}` : 'Settled'}{woNet > 0 && <span style={{ color: VOICE.systemFaint, fontWeight: 500, fontSize: 10, marginLeft: 2 }}>left</span>}
+        </span>
+        <span className="block h-1.5 rounded-full overflow-hidden mt-1.5" style={{ background: '#eee3d4' }}>
+          <span className="block h-full rounded-full" style={{ width: `${woPct}%`, background: `linear-gradient(90deg, ${VOICE.out}, #dd7d52)` }} />
+        </span>
+      </span>
+      {multiPhase
+        ? <span className="material-symbols-outlined shrink-0" style={{ fontSize: 18, color: VOICE.systemFaint }}>chevron_right</span>
+        : <span className="shrink-0 block" style={{ width: 8 }} />}
+    </button>
   );
 }
 
@@ -248,6 +194,7 @@ function POObligationRow({ po, selectedObligation, onSelect, poPaid }: {
   // Bill amount if present, otherwise estimated PO value; minus payments already made.
   const rawBalance = getPOBalance(po);
   const poNet = Math.max(0, rawBalance - (poPaid[po.po_id] || 0));
+  const poPct = rawBalance > 0 ? Math.min(100, Math.round(((poPaid[po.po_id] || 0) / rawBalance) * 100)) : 0;
   const fullyPaid = isPaid || (rawBalance > 0 && poNet <= 0);
 
   const isSelected = selectedObligation?.po_id === po.po_id;
@@ -255,53 +202,32 @@ function POObligationRow({ po, selectedObligation, onSelect, poPaid }: {
 
   return (
     <div
-      className={`px-5 py-3.5 flex items-center gap-3 transition-colors duration-200 group
-        ${!isLinkable ? 'opacity-40 cursor-not-allowed bg-black/[0.01]' : isSelected ? 'bg-[#006c49]/[0.02] cursor-pointer' : 'cursor-pointer hover:bg-black/[0.01]'}`}
+      className={`flex items-center gap-3 px-4 py-3.5 transition-colors ${!isLinkable ? 'opacity-50 cursor-not-allowed' : isSelected ? '' : 'cursor-pointer hover:bg-black/[0.025] active:bg-black/[0.04]'}`}
+      style={{ background: isSelected ? VOICE.innWash : undefined, borderLeft: `3px solid ${isSelected ? VOICE.inn : 'transparent'}` }}
       onClick={() => {
         if (!isLinkable) return;
         onSelect({ type: 'PO', po_id: po.po_id, label: `${po.po_id} · ${po.stakeholders?.name || ''}`, balance: poNet });
       }}
     >
-      <div className="w-5 shrink-0 flex items-center justify-center relative z-10">
-        {isSelected ? (
-          <div className="w-4 h-4 rounded-full bg-[#006c49] flex items-center justify-center shadow-[0_2px_6px_rgba(0,108,73,0.3)]">
-            <span className="material-symbols-outlined text-white text-[10px]" style={{ fontVariationSettings: "'FILL' 1" }}>check</span>
-          </div>
-        ) : (
-          <div className="w-4 h-4 rounded-full border border-black/15 bg-white group-hover:border-[#006c49]/50 transition-colors" />
-        )}
-      </div>
+      <span className="shrink-0 grid place-items-center rounded-full" style={{ width: 18, height: 18, border: isSelected ? 'none' : `1.5px solid ${VOICE.hairStrong}`, background: isSelected ? VOICE.inn : 'transparent' }}>
+        {isSelected && <span className="material-symbols-outlined text-white" style={{ fontSize: 12, fontVariationSettings: "'FILL' 1" }}>check</span>}
+      </span>
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <p className="text-[13px] font-semibold text-on-surface group-hover:text-primary transition-colors">{po.stakeholders?.name || 'Unknown'}</p>
-          <span className="font-data-mono text-[9px] px-1.5 py-0.5 rounded bg-black/[0.03] text-on-surface-variant/50 shrink-0 font-bold uppercase tracking-wider">{po.po_id}</span>
-        </div>
-        {po.po_line_items?.[0] && (
-          <p className="text-[11px] text-on-surface-variant/45 truncate mt-0.5">
-            {po.po_line_items[0].item_name || po.po_line_items[0].description || po.po_line_items[0].name || ''}
-            {po.po_line_items.length > 1 && ` +${po.po_line_items.length - 1} more`}
-          </p>
-        )}
-      </div>
-      <div className="text-right shrink-0 ml-3 flex flex-col items-end">
-        <p className="text-[13px] font-bold font-data-mono text-on-surface">
-          ₹{poNet.toLocaleString('en-IN')}
+        <p className="text-[13.5px] font-semibold truncate" style={{ color: VOICE.user }}>
+          {po.po_line_items?.[0]?.item_name || po.po_line_items?.[0]?.description || po.po_line_items?.[0]?.name || po.stakeholders?.name || po.po_id}
         </p>
-        <div className="mt-1">
-          {isCancelled ? (
-            <span className="px-1.5 py-0.5 rounded text-[8.5px] font-bold uppercase tracking-wider bg-red-50 text-red-700 border border-red-600/10">Cancelled</span>
-          ) : fullyPaid ? (
-            <span className="px-1.5 py-0.5 rounded text-[8.5px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-600/10">Settled</span>
-          ) : (
-            <span className={`px-1.5 py-0.5 rounded text-[8.5px] font-bold uppercase tracking-wider border ${
-              hasBill 
-                ? 'bg-[#006c49]/5 text-[#006c49] border-[#006c49]/10' 
-                : 'bg-amber-50 text-amber-700 border-amber-600/10'
-            }`}>
-              {hasBill ? 'Due' : 'Est. Advance'}
-            </span>
-          )}
-        </div>
+        <p className="text-[11px] mt-0.5 truncate" style={{ color: VOICE.systemFaint, ...VNUMS }}>
+          {isCancelled ? 'Cancelled' : fullyPaid ? 'Settled' : `${poPct}% paid`} · {po.stakeholders?.name || 'Unknown'}{!hasBill && !isCancelled && !fullyPaid ? ' · est. advance' : ''}
+        </p>
+      </div>
+      <div className="text-right shrink-0" style={{ minWidth: 104 }}>
+        <p className="text-[13.5px] font-semibold" style={{ color: poNet > 0 ? VOICE.inn : VOICE.systemFaint, ...VNUMS }}>
+          {fullyPaid ? 'Settled' : `₹${poNet.toLocaleString('en-IN')}`}{!fullyPaid && <span style={{ color: VOICE.systemFaint, fontWeight: 500, fontSize: 10, marginLeft: 2 }}>left</span>}
+        </p>
+        <span className="block h-1.5 rounded-full overflow-hidden mt-1.5" style={{ background: '#dfe9d8' }}>
+          <span className="block h-full rounded-full" style={{ width: `${poPct}%`, background: `linear-gradient(90deg, ${VOICE.inn}, #7a9a6c)` }} />
+        </span>
+        <p className="text-[10px] mt-1" style={{ color: VOICE.systemFaint, ...VNUMS }}>of ₹{rawBalance.toLocaleString('en-IN')}</p>
       </div>
     </div>
   );
@@ -319,7 +245,9 @@ function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip,
   txnType?: string | null;
   hideCreate?: boolean;   // split rows: select existing orders only, no inline create
 }) {
-  const [expandedWOs, setExpandedWOs] = useState<string[]>([]);
+  // When set, the picker shows a focused "Which stage?" step for this contract
+  // (instead of an inline phase tree) — one question on screen at a time.
+  const [phasingWoId, setPhasingWoId] = useState<string | null>(null);
   const [milestonePayments, setMilestonePayments] = useState<Record<string, number>>({});
   // Total paid (non-voided) per WO and per PO, so rows show the REMAINING balance
   // — not the gross order/bill value — once a payment has already been recorded.
@@ -379,70 +307,89 @@ function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip,
     return <NoObligationsState onSkip={onSkip} onOpenWO={onOpenWO} onOpenPO={onOpenPO} txnType={txnType} />;
   }
 
+  // ── Step 2 — "Which stage?" for a multi-phase contract (replaces the list) ──
+  const phasingWo = phasingWoId ? wos.find((w: any) => w.wo_id === phasingWoId) : null;
+  if (phasingWo) {
+    const phaseList = [...(phasingWo.wo_milestones || [])].sort((a: any, b: any) => (a.seq_no || 0) - (b.seq_no || 0));
+    const dueOf = (m: any) => Math.max(0, getPhaseBalance(m) - (milestonePayments[m.milestone_id] || 0));
+    const nextDueId = phaseList.find((m: any) => m.status !== 'PAID' && m.status !== 'Paid' && dueOf(m) > 0)?.milestone_id;
+    return (
+      <div className="mt-3 rounded-2xl overflow-hidden" style={{ background: VOICE.surface, border: `1px solid ${VOICE.line}` }}>
+        <div className="px-3 pt-3 pb-3 flex items-center gap-2.5" style={{ borderBottom: `1px solid ${VOICE.line}` }}>
+          <button type="button" onClick={() => setPhasingWoId(null)} aria-label="Back to contracts"
+            className="shrink-0 grid place-items-center rounded-lg transition-colors hover:bg-black/[0.03]" style={{ width: 32, height: 32, border: `1px solid ${VOICE.line}`, color: VOICE.user }}>
+            <span className="material-symbols-outlined text-[18px]">arrow_back</span>
+          </button>
+          <div className="min-w-0">
+            <p className="text-[13px] font-semibold truncate" style={{ color: VOICE.user }}>{phasingWo.scope_of_work || phasingWo.wo_id}</p>
+            <p className="text-[11px]" style={{ color: VOICE.systemFaint }}>Which stage is this payment for?</p>
+          </div>
+        </div>
+        <div className="divide-y divide-black/[0.04]">
+          {phaseList.map((m: any) => {
+            const planned = getPhaseBalance(m);
+            const due = planned - (milestonePayments[m.milestone_id] || 0);
+            const settled = m.status === 'PAID' || m.status === 'Paid' || due <= 0;
+            const isSel = selectedObligation?.phase_id === m.milestone_id;
+            const isNext = m.milestone_id === nextDueId;
+            return (
+              <button type="button" key={m.milestone_id} disabled={settled}
+                onClick={() => onSelect({ type: 'WO_PHASE', wo_id: phasingWo.wo_id, phase_id: m.milestone_id, label: `${m.name} · ${phasingWo.wo_id}`, balance: Math.max(0, due) })}
+                className={`w-full text-left flex items-center gap-3 px-4 py-3.5 transition-colors ${settled ? 'opacity-50 cursor-not-allowed' : isSel ? '' : 'cursor-pointer hover:bg-black/[0.025] active:bg-black/[0.04]'}`}
+                style={{ background: isSel ? VOICE.outWash : isNext && !isSel ? VOICE.cream2 : undefined, borderLeft: `3px solid ${isSel ? VOICE.out : 'transparent'}` }}>
+                <span className="shrink-0 grid place-items-center rounded-full" style={{ width: 18, height: 18, border: isSel ? 'none' : `1.5px solid ${VOICE.hairStrong}`, background: isSel ? VOICE.out : 'transparent' }}>
+                  {isSel && <span className="material-symbols-outlined text-white" style={{ fontSize: 12, fontVariationSettings: "'FILL' 1" }}>check</span>}
+                </span>
+                <span className="flex-1 min-w-0">
+                  <span className="flex items-center gap-1.5">
+                    <span className="text-[13px] font-semibold truncate" style={{ color: VOICE.user }}>{m.name}</span>
+                    {isNext && !isSel && <span className="text-[8.5px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full shrink-0" style={{ background: VOICE.accentTint, color: VOICE.accentDeep }}>next due</span>}
+                  </span>
+                  {(m.qty || m.unit_type) && <span className="block text-[10.5px] mt-0.5" style={{ color: VOICE.systemFaint, ...VNUMS }}>{m.qty} {m.unit_type}{m.rate ? ` × ₹${Number(m.rate).toLocaleString('en-IN')}` : ''}</span>}
+                </span>
+                <span className="text-right shrink-0" style={{ ...VNUMS }}>
+                  {settled
+                    ? <span className="text-[11px] font-semibold inline-flex items-center gap-1" style={{ color: VOICE.confirm }}><span className="material-symbols-outlined text-[14px]" style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>paid</span>
+                    : <span className="text-[13px] font-semibold" style={{ color: VOICE.accentDeep }}>₹{Math.max(0, due).toLocaleString('en-IN')}<span style={{ color: VOICE.systemFaint, fontWeight: 500, fontSize: 10, marginLeft: 2 }}>due</span></span>}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="mt-4 rounded-2xl border border-black/[0.05] overflow-hidden bg-white shadow-[0_8px_30px_rgb(0,0,0,0.015)]">
-      <div className="px-5 py-3.5 bg-black/[0.01] border-b border-black/[0.03]">
-        <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-on-surface-variant/40">
-          Obligations Ledger
+    <div className="mt-3 rounded-2xl overflow-hidden" style={{ background: VOICE.surface, border: `1px solid ${VOICE.line}` }}>
+      <div className="px-4 pt-3.5 pb-1.5">
+        <p className="text-[10px] font-bold uppercase tracking-[0.1em]" style={{ color: VOICE.systemFaint }}>
+          {txnType === 'worker' ? 'Add to an open contract' : 'Add to an open order'}
         </p>
-        <p className="text-[12px] text-on-surface-variant/60 font-medium mt-0.5">Select a ledger item to link this payment</p>
       </div>
 
       <div className="divide-y divide-black/[0.04]">
-        {wos.length > 0 && (
-          <div>
-            <div className="px-5 py-2 bg-black/[0.005] border-b border-black/[0.015] flex items-center justify-between">
-              <p className="text-[9px] font-bold uppercase tracking-wider text-on-surface-variant/35">
-                Contracts ({wos.length})
-              </p>
-              {!hideCreate && (
-                <button type="button" onClick={onOpenWO}
-                  className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-[#C8603A]/70 hover:text-[#C8603A] transition-colors">
-                  <span className="material-symbols-outlined text-[12px]">add</span>
-                  New WO
-                </button>
-              )}
-            </div>
-            <div className="divide-y divide-black/[0.03]">
-              {wos.map((wo: any) => (
-                <WOObligationRow key={wo.wo_id} wo={wo} selectedObligation={selectedObligation}
-                  expanded={expandedWOs.includes(wo.wo_id)}
-                  onToggleExpand={() => setExpandedWOs(prev =>
-                    prev.includes(wo.wo_id) ? prev.filter(id => id !== wo.wo_id) : [...prev, wo.wo_id]
-                  )}
-                  onSelect={onSelect} milestonePayments={milestonePayments} woPaid={woPaid} />
-              ))}
-            </div>
-          </div>
-        )}
-        {pos.length > 0 && (
-          <div>
-            <div className="px-5 py-2 bg-black/[0.005] border-b border-black/[0.015] flex items-center justify-between">
-              <p className="text-[9px] font-bold uppercase tracking-wider text-on-surface-variant/35">
-                Purchase Orders ({pos.length})
-              </p>
-              {!hideCreate && (
-                <button type="button" onClick={onOpenPO}
-                  className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-[#006c49]/70 hover:text-[#006c49] transition-colors">
-                  <span className="material-symbols-outlined text-[12px]">add</span>
-                  New PO
-                </button>
-              )}
-            </div>
-            <div className="divide-y divide-black/[0.03]">
-              {pos.map((po: any) => (
-                <POObligationRow key={po.po_id} po={po} selectedObligation={selectedObligation} onSelect={onSelect} poPaid={poPaid} />
-              ))}
-            </div>
-          </div>
-        )}
+        {wos.map((wo: any) => (
+          <WOObligationRow key={wo.wo_id} wo={wo} selectedObligation={selectedObligation}
+            onSelect={onSelect} onOpenPhases={(w) => setPhasingWoId(w.wo_id)} woPaid={woPaid} />
+        ))}
+        {pos.map((po: any) => (
+          <POObligationRow key={po.po_id} po={po} selectedObligation={selectedObligation} onSelect={onSelect} poPaid={poPaid} />
+        ))}
       </div>
 
-      <div className="px-5 py-3 border-t border-black/[0.04] bg-black/[0.005]">
+      <div className="px-4 py-3.5" style={{ borderTop: `1px solid ${VOICE.line}` }}>
+        {!hideCreate && (
+          <button type="button" onClick={txnType === 'worker' ? onOpenWO : onOpenPO}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-[12.5px] font-semibold mb-2.5 transition-colors hover:opacity-90"
+            style={{ background: VOICE.cream2, border: `1.5px dashed ${VOICE.hairStrong}`, color: VOICE.accentDeep }}>
+            <span className="material-symbols-outlined text-[16px]">add</span>
+            {txnType === 'worker' ? 'Create a new contract' : 'Create a new order'}
+          </button>
+        )}
         <button type="button" onClick={onSkip}
-          className="text-[11px] font-bold uppercase tracking-wider text-on-surface-variant/40 hover:text-primary transition-colors flex items-center gap-1.5">
-          <span>Skip & Record Unlinked</span>
-          <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+          className="text-[11px] font-semibold inline-flex items-center gap-1.5 transition-colors" style={{ color: VOICE.systemFaint }}>
+          Record without linking <span className="material-symbols-outlined text-[13px]">arrow_forward</span>
         </button>
       </div>
     </div>
@@ -566,6 +513,9 @@ export default function NewTransaction({ session: _session }: { session: Session
   // ── Obligation linking state ─────────────────────────────────────────────
   const [selectedObligation, setSelectedObligation] = useState<SelectedObligation | null>(null);
   const [skipped, setSkipped] = useState(false);
+  // Link hub gate: false = show the "Link to a contract/order vs one-time" choice;
+  // true = the obligation picker is open. `skipped` means one-time (not linked).
+  const [linkOpen, setLinkOpen] = useState(false);
   const [loadingObligations, setLoadingObligations] = useState(false);
   const [projectWOs, setProjectWOs] = useState<any[]>([]);
   const [projectPOs, setProjectPOs] = useState<any[]>([]);
@@ -649,6 +599,8 @@ export default function NewTransaction({ session: _session }: { session: Session
   }, [stakeholders, recentPayees.length]);
   // Fetch WOs for workers, POs for vendors — scoped to the selected project + stakeholder
   const selectedProjectId = !splitMode ? (allocs[0]?.project_id || '') : '';
+  // Fresh link decision whenever the project, payee or type changes.
+  useEffect(() => { setLinkOpen(false); setSkipped(false); setSelectedObligation(null); }, [selectedProjectId, stkId, txnType]);
   useEffect(() => {
     if (!selectedProjectId || !stkId || txnType === 'expense' || txnType === 'client_receipt') {
       setProjectWOs([]); setProjectPOs([]); setSelectedObligation(null); setSkipped(false);
@@ -856,6 +808,13 @@ export default function NewTransaction({ session: _session }: { session: Session
       });
       const { error } = await supabase.rpc('insert_transaction_with_allocations', { p_txn: payload, p_allocations: mapped });
       if (error) throw error;
+      // Link hub: "one-time payment/purchase" → mark the txn so the ledger shows it as a
+      // settled one-time (not the "link / one-time" nudge). The insert RPC doesn't carry
+      // this column, so set it directly. Best-effort: a missing is_one_time column
+      // (migration 20260623000000 not yet applied) must NOT fail the save.
+      if (skipped && (txnType === 'worker' || txnType === 'material')) {
+        await supabase.from('transactions').update({ is_one_time: true }).eq('txn_id', txnId);
+      }
       const autoCloseWoId = (selectedObligation?.type === 'WO' || selectedObligation?.type === 'WO_PHASE')
         ? (selectedObligation.wo_id ?? null) : null;
       return { savedId: txnId, saveMode, autoCloseWoId };
@@ -1056,6 +1015,22 @@ export default function NewTransaction({ session: _session }: { session: Session
 
   const handleSave = async (saveMode: 'new' | 'exit') => {
     setSaveAttempted(true);
+
+    // Jump the owner to the first still-missing required field (visual order:
+    // payee → amount → project → note) instead of a silent no-op on submit.
+    const firstMissing: HTMLElement | null = (() => {
+      if (txnType !== 'expense' && !stkId) return payeeRef.current;
+      if (!totalAmt || totalAmt <= 0) return document.getElementById('txn-amount-input');
+      if (effectiveAllocs.some((a) => !a.project_id)) return document.getElementById('txn-project-0');
+      if (txnType !== 'client_receipt' && !remarks.trim()) return document.getElementById('txn-remarks');
+      return null;
+    })();
+    if (firstMissing) {
+      firstMissing.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setTimeout(() => firstMissing.focus({ preventScroll: true }), 120);
+      return;
+    }
+
     if (txnType === 'client_receipt') {
       if (!stkId || !totalAmt || totalAmt <= 0) return;
       if (effectiveAllocs.some((a) => !a.project_id)) return;
@@ -1159,28 +1134,37 @@ export default function NewTransaction({ session: _session }: { session: Session
             <span className="material-symbols-outlined">arrow_back</span>
           </button>
           <h1 className="text-xl font-medium flex-1 tracking-tight" style={{ color: VOICE.user }}>New transaction</h1>
-          <span className="text-xs px-2.5 py-1 rounded-full inline-flex items-center gap-1.5" style={{ background: VOICE.field, color: VOICE.system, ...VNUMS }}>
-            {txnId}
-            <button
-              type="button"
-              onClick={() => {
-                navigator.clipboard.writeText(txnId);
-                setTxnIdCopied(true);
-                setTimeout(() => setTxnIdCopied(false), 2000);
-              }}
-              className="flex items-center shrink-0"
-              style={{ color: VOICE.systemFaint }}
-              title="Copy Transaction ID"
-              aria-label="Copy transaction number"
-            >
-              <span className="material-symbols-outlined text-[13px]">
-                {txnIdCopied ? 'check' : 'content_copy'}
-              </span>
-            </button>
-            {txnIdCopied && (
-              <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: VOICE.confirm }}>Copied</span>
-            )}
-          </span>
+          <div className="flex flex-col items-end gap-1.5">
+            <span className="text-xs px-2.5 py-1 rounded-full inline-flex items-center gap-1.5" style={{ background: VOICE.field, color: VOICE.system, ...VNUMS }}>
+              {txnId}
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(txnId);
+                  setTxnIdCopied(true);
+                  setTimeout(() => setTxnIdCopied(false), 2000);
+                }}
+                className="flex items-center shrink-0"
+                style={{ color: VOICE.systemFaint }}
+                title="Copy Transaction ID"
+                aria-label="Copy transaction number"
+              >
+                <span className="material-symbols-outlined text-[13px]">
+                  {txnIdCopied ? 'check' : 'content_copy'}
+                </span>
+              </button>
+              {txnIdCopied && (
+                <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: VOICE.confirm }}>Copied</span>
+              )}
+            </span>
+            {/* Date — moved here next to the ref; today by default, tap the pencil to change */}
+            <label className="relative text-xs px-2.5 py-1 rounded-full inline-flex items-center gap-1.5 cursor-pointer" style={{ background: VOICE.field, color: VOICE.system }}>
+              <span className="material-symbols-outlined text-[13px]" style={{ color: VOICE.systemFaint }}>calendar_today</span>
+              <span style={{ ...VNUMS }}>{fmtDateShort(date)}</span>
+              <span className="material-symbols-outlined text-[12px]" style={{ color: VOICE.systemFaint }}>edit</span>
+              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="absolute inset-0 opacity-0 cursor-pointer" aria-label="Transaction date" />
+            </label>
+          </div>
         </div>
 
         {/* ── Type selector — direction-encoded cards (visual redesign) ──── */}
@@ -1192,8 +1176,7 @@ export default function NewTransaction({ session: _session }: { session: Session
             { key: 'client_receipt' as TxnType, icon: 'payments',      label: 'Client receipt',    dir: 'in'  as const },
           ]).map((t) => {
             const isSelected = txnType === t.key;
-            const c = t.dir === 'in' ? VOICE.inn : VOICE.out;
-            const wash = t.dir === 'in' ? VOICE.innWash : VOICE.outWash;
+            const accentSoft = t.dir === 'in' ? VOICE.innSoft : VOICE.accentSoft;
             return (
               <button
                 key={t.key}
@@ -1208,19 +1191,20 @@ export default function NewTransaction({ session: _session }: { session: Session
                     setDismissedMilestoneSuggestion(false);
                   }
                 }}
-                className="rounded-xl px-3 py-3 text-left transition-transform active:scale-[0.98]"
+                className="rounded-xl px-3 py-3 text-left transition-transform active:scale-[0.98] relative"
                 style={isSelected
-                  ? { background: wash, border: `1.5px solid ${c}` }
+                  ? { background: VOICE.walnut, border: `1.5px solid ${VOICE.walnut}`, boxShadow: '0 14px 30px -18px rgba(34,26,19,.6)' }
                   : { background: VOICE.surface, border: `1px solid ${VOICE.line}` }}
               >
+                {isSelected && <span className="absolute top-3 right-3 w-[7px] h-[7px] rounded-full" style={{ background: accentSoft }} />}
                 <span
                   className="material-symbols-outlined text-[18px]"
-                  style={{ color: isSelected ? c : VOICE.systemFaint, fontVariationSettings: isSelected ? "'FILL' 1" : "'FILL' 0" }}
+                  style={{ color: isSelected ? accentSoft : VOICE.systemFaint, fontVariationSettings: isSelected ? "'FILL' 1" : "'FILL' 0" }}
                 >
                   {t.icon}
                 </span>
-                <p className="text-sm font-medium mt-1.5" style={{ color: isSelected ? c : VOICE.user }}>{t.label}</p>
-                <p className="text-xs mt-0.5 inline-flex items-center gap-1" style={{ color: isSelected ? c : VOICE.systemFaint }}>
+                <p className="text-sm font-medium mt-1.5" style={{ color: isSelected ? VOICE.ivory : VOICE.user }}>{t.label}</p>
+                <p className="text-xs mt-0.5 inline-flex items-center gap-1" style={{ color: isSelected ? accentSoft : VOICE.systemFaint }}>
                   <span className="material-symbols-outlined text-[12px]">{t.dir === 'in' ? 'south_west' : 'north_east'}</span>
                   money {t.dir === 'in' ? 'in' : 'out'}
                 </p>
@@ -1241,37 +1225,64 @@ export default function NewTransaction({ session: _session }: { session: Session
         {txnType && (
           <div className="space-y-8">
 
-            {/* Hero Amount Input */}
-            <div className="text-center py-6 mb-2 relative">
-              <div className="inline-block relative">
-                <div className="flex items-baseline justify-center gap-1.5">
-                  <span className="text-3xl md:text-4xl font-light select-none" style={{ color: txnType === 'client_receipt' ? VOICE.inn : VOICE.out }}>{txnType === 'client_receipt' ? '+' : '−'}</span>
-                  <span className="text-4xl md:text-5xl font-light select-none font-sans" style={{ color: VOICE.systemFaint }}>₹</span>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    step="0.01"
-                    min="0"
-                    value={totalAmt || ''}
-                    onChange={(e) => { setAmountTouched(true); setTotalAmt(parseFloat(e.target.value) || 0); }}
-                    onFocus={(e) => e.target.select()}
-                    placeholder="0"
-                    className={`w-auto min-w-[120px] max-w-full text-5xl md:text-6xl font-bold font-data-mono text-center bg-transparent border-none outline-none focus:ring-0 placeholder:text-on-surface-variant/15 transition-all text-on-surface ${
-                      missingAmount ? 'text-error' : ''
-                    }`}
-                    style={{
-                      width: totalAmt ? `${Math.max(3, String(totalAmt).length) * 0.62}em` : '2.5em',
-                    }}
-                  />
-                </div>
-                {/* Subtle custom bottom glow / elegant hairline divider */}
-                <div className="h-0.5 w-full bg-gradient-to-r from-transparent via-black/[0.06] to-transparent mt-2 rounded-full" />
-                <p className="text-xs mt-2" style={{ color: VOICE.systemFaint }}>{txnType === 'client_receipt' ? 'money coming in' : 'money going out'}</p>
-                {missingAmount && (
-                  <span className="block mt-2 text-[10px] font-bold text-error uppercase tracking-wider animate-fadeIn">
-                    Amount is required
-                  </span>
-                )}
+            {/* Hero Amount — dark walnut "ledger" card (signature element) */}
+            <style>{`
+              #txn-amount-input::placeholder{color:rgba(243,234,219,.26)}
+              #txn-amount-input::-webkit-outer-spin-button,#txn-amount-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+              #txn-amount-input{-moz-appearance:textfield}
+            `}</style>
+            <div
+              className="relative overflow-hidden mb-2"
+              onClick={() => document.getElementById('txn-amount-input')?.focus()}
+              style={{
+                borderRadius: 24, padding: '28px 26px 24px', cursor: 'text',
+                background: txnType === 'client_receipt'
+                  ? 'radial-gradient(120% 120% at 85% 0%, rgba(156,187,145,.16) 0%, rgba(156,187,145,0) 42%), linear-gradient(158deg,#232619 0%,#1c2014 60%,#161a0f 100%)'
+                  : 'radial-gradient(120% 120% at 85% 0%, rgba(224,138,92,.14) 0%, rgba(224,138,92,0) 42%), linear-gradient(158deg,#2D2118 0%,#221A13 60%,#1B140E 100%)',
+                boxShadow: '0 26px 50px -28px rgba(34,26,19,.7), inset 0 0 0 1px rgba(243,234,219,.06)',
+              }}
+            >
+              <span className="inline-flex items-center gap-1.5 mb-3.5" style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '1.6px', textTransform: 'uppercase', color: txnType === 'client_receipt' ? VOICE.innSoft : VOICE.accentSoft }}>
+                <span className="material-symbols-outlined text-[13px]">{txnType === 'client_receipt' ? 'south_west' : 'north_east'}</span>
+                {txnType === 'client_receipt' ? 'Money coming in' : 'Money going out'}
+              </span>
+              <div className="flex items-start gap-1.5 min-w-0">
+                <span style={{ fontFamily: VOICE.serif, fontSize: 'clamp(22px, 7vw, 30px)', fontWeight: 600, color: txnType === 'client_receipt' ? VOICE.innSoft : VOICE.accentSoft, marginTop: 11, flex: '0 0 auto' }}>₹</span>
+                <input
+                  id="txn-amount-input"
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  min="0"
+                  value={totalAmt || ''}
+                  onChange={(e) => { setAmountTouched(true); setTotalAmt(parseFloat(e.target.value) || 0); }}
+                  onFocus={(e) => e.target.select()}
+                  onClick={(e) => e.stopPropagation()}
+                  // Stop the mouse wheel from silently changing the amount while focused.
+                  onWheel={(e) => e.currentTarget.blur()}
+                  placeholder="0"
+                  aria-label="Amount"
+                  // Figure shrinks by digit-count so it always fits the card on one line (mobile too)
+                  // — pure clamp() still overflowed for long amounts.
+                  style={{
+                    fontFamily: VOICE.serif, fontWeight: 600, lineHeight: 0.95, letterSpacing: '-1px',
+                    fontSize: (() => {
+                      const n = String(totalAmt || '').length;
+                      return n <= 7 ? 'clamp(40px, 13vw, 64px)' : n <= 10 ? 'clamp(30px, 9.5vw, 48px)' : 'clamp(22px, 7.2vw, 36px)';
+                    })(),
+                    background: 'transparent', border: 'none', outline: 'none', color: VOICE.ivory,
+                    caretColor: txnType === 'client_receipt' ? VOICE.innSoft : VOICE.accentSoft,
+                    flex: '1 1 auto', width: '100%', minWidth: 0, padding: 0,
+                  }}
+                />
+              </div>
+              <div className="mt-4 pt-3.5 flex items-center justify-between" style={{ borderTop: '1px solid rgba(243,234,219,.1)' }}>
+                <span className="inline-flex items-center gap-1.5" style={{ fontSize: 12, fontWeight: 500, color: missingAmount ? '#F0A593' : 'rgba(243,234,219,.5)' }}>
+                  {missingAmount
+                    ? <><span className="material-symbols-outlined text-[14px]">error</span>Enter an amount above zero</>
+                    : 'Tap to enter the amount'}
+                </span>
+                <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.5px', color: 'rgba(243,234,219,.28)' }}>DRAFT</span>
               </div>
             </div>
 
@@ -1283,45 +1294,11 @@ export default function NewTransaction({ session: _session }: { session: Session
 
                   {/* Payee / Client */}
                   <div className="relative" ref={stkDropRef}>
-                    <label className="block text-[11px] font-medium text-on-surface-variant/60 mb-2.5">
-                      {txnType === 'worker' ? 'Worker' : txnType === 'material' ? 'Vendor' : txnType === 'client_receipt' ? 'Client' : 'Payee'}
-                      {txnType === 'expense' && <span className="text-on-surface-variant/35 ml-1">(optional — general expenses need no payee)</span>}
-                      {missingPayee && <span className="text-error ml-1.5">required</span>}
-                    </label>
-
-                    {/* Quick-Payee Avatars */}
-                    {filteredRecents.length > 0 && !stkId && (
-                      <div className="mb-4">
-                        <div className="flex gap-2.5 overflow-x-auto no-scrollbar pb-1.5 pt-0.5">
-                          {filteredRecents.map((p) => {
-                            const initials = p.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
-                            const hue = p.name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % 360;
-                            const gradientStyle = {
-                              background: `linear-gradient(135deg, hsl(${hue}, 85%, 90%), hsl(${(hue + 60) % 360}, 80%, 80%))`,
-                              color: `hsl(${hue}, 70%, 25%)`
-                            };
-                            return (
-                              <button
-                                key={p.id}
-                                type="button"
-                                onClick={() => { setStkId(p.id); setStkSearch(p.name); setShowSug(false); }}
-                                className="flex flex-col items-center shrink-0 w-16 group transition-all duration-200 active:scale-95"
-                              >
-                                <div
-                                  className="w-11 h-11 rounded-full flex items-center justify-center text-[13px] font-bold shadow-[0_2px_8px_rgba(0,0,0,0.04)] border border-white group-hover:scale-105 group-hover:shadow-[0_4px_12px_rgba(0,0,0,0.08)] transition-all duration-200"
-                                  style={gradientStyle}
-                                >
-                                  {initials}
-                                </div>
-                                <span className="text-[9.5px] font-semibold text-on-surface-variant/75 mt-1.5 truncate w-full text-center group-hover:text-on-surface leading-tight">
-                                  {p.name.split(' ')[0]}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
+                    <h2 className="mb-3" style={{ fontFamily: VOICE.serif, fontSize: 19, fontWeight: 600, letterSpacing: '-0.2px', color: missingPayee ? VOICE.out : VOICE.user }}>
+                      {txnType === 'client_receipt' ? "Who's this from?" : 'Who are you paying?'}
+                      {txnType !== 'expense' && <span style={{ color: VOICE.out }}> *</span>}
+                      {txnType === 'expense' && <span className="ml-1.5" style={{ fontFamily: 'inherit', fontSize: 12, fontWeight: 500, color: VOICE.systemFaint }}>· optional</span>}
+                    </h2>
 
                     <div className="relative">
                       <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-[18px] text-on-surface-variant/35 pointer-events-none">search</span>
@@ -1363,14 +1340,29 @@ export default function NewTransaction({ session: _session }: { session: Session
                             <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{s.category}</p>
                           </div>
                         ))}
-                        {filtStk.length === 0 && stkSearch && (
-                          <div className="px-4 py-4 text-[13px] text-on-surface-variant/50 text-center">No matches for "{stkSearch}"</div>
+                        {filtStk.length === 0 && stkSearch ? (
+                          /* Zero matches → create is the hero row (one tap to add a brand-new payee) */
+                          <div onClick={() => { setShowCreate(true); setShowSug(false); }}
+                            className="px-4 py-3 cursor-pointer flex items-center gap-3"
+                            style={{ background: VOICE.accentTint }}>
+                            <span className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-[15px] font-bold" style={{ background: VOICE.out, color: '#fff' }}>
+                              {stkSearch.trim()[0]?.toUpperCase() || '+'}
+                            </span>
+                            <span className="flex-1 min-w-0">
+                              <span className="block text-[13px] font-semibold" style={{ color: VOICE.user }}>Create &ldquo;{stkSearch.trim()}&rdquo;</span>
+                              <span className="block text-[11px]" style={{ color: VOICE.systemFaint }}>New {tgtType ? tgtType.toLowerCase() : 'payee'} · add trade &amp; phone</span>
+                            </span>
+                            <span className="material-symbols-outlined text-[18px]" style={{ color: VOICE.out }}>arrow_forward</span>
+                          </div>
+                        ) : (
+                          /* Matches present → quiet add footer */
+                          <div onClick={() => { setShowCreate(true); setShowSug(false); }}
+                            className="px-4 py-3 cursor-pointer flex items-center gap-2.5 border-t hover:bg-black/[0.02]"
+                            style={{ color: VOICE.out, borderColor: VOICE.line }}>
+                            <span className="material-symbols-outlined text-[17px]">person_add</span>
+                            <span className="text-[13px] font-semibold">Add new {tgtType ? tgtType.toLowerCase() : 'payee'}{stkSearch ? ` "${stkSearch}"` : ''}</span>
+                          </div>
                         )}
-                        <div onClick={() => setShowCreate(true)}
-                          className="px-4 py-3 cursor-pointer flex items-center gap-2.5 text-primary border-t border-outline-variant/15 hover:bg-primary/[0.04]">
-                          <span className="material-symbols-outlined text-[17px]">person_add</span>
-                          <span className="text-[13px] font-semibold">Add new{stkSearch ? ` "${stkSearch}"` : ''}</span>
-                        </div>
                       </div>
                     )}
 
@@ -1453,24 +1445,19 @@ export default function NewTransaction({ session: _session }: { session: Session
                     </>
                   )}
 
-                  {/* Date + Mode */}
-                  <div className="grid grid-cols-2 gap-5">
-                    <div>
-                      <label className="block text-[11px] font-medium text-on-surface-variant/60 mb-2">Date</label>
-                      <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="bk-input" />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-medium text-on-surface-variant/60 mb-2">Payment mode</label>
-                      <div className="flex rounded-xl overflow-hidden border border-outline-variant/25">
-                        {(['NEFT', 'UPI', 'Cheque', 'Cash'] as PayMode[]).map((m, i) => (
-                          <button key={m} type="button" onClick={() => setMode(m)}
-                            className={`flex-1 py-2.5 text-[12px] font-semibold transition-colors ${
-                              mode === m ? 'bg-primary text-on-primary' : 'bg-white text-on-surface-variant/60 hover:bg-surface-container-low/60'
-                            } ${i > 0 ? 'border-l border-outline-variant/25' : ''}`}>
-                            {m}
-                          </button>
-                        ))}
-                      </div>
+                  {/* Payment mode (date moved to the header next to the txn ref) */}
+                  <div>
+                    <label className="block text-[11px] font-medium text-on-surface-variant/60 mb-2">Paid via</label>
+                    <div className="flex rounded-xl overflow-hidden border" style={{ borderColor: VOICE.line }}>
+                      {(['NEFT', 'UPI', 'Cheque', 'Cash'] as PayMode[]).map((m, i) => (
+                        <button key={m} type="button" onClick={() => setMode(m)}
+                          className="flex-1 py-2.5 text-[12px] font-semibold transition-colors"
+                          style={mode === m
+                            ? { background: VOICE.walnut, color: VOICE.ivory, borderLeft: i > 0 ? `1px solid ${VOICE.walnut}` : undefined }
+                            : { background: VOICE.surface, color: VOICE.system, borderLeft: i > 0 ? `1px solid ${VOICE.line}` : undefined }}>
+                          {m}
+                        </button>
+                      ))}
                     </div>
                   </div>
 
@@ -1480,12 +1467,14 @@ export default function NewTransaction({ session: _session }: { session: Session
 
             {/* ━━ 02 · Categorise (hidden for client_receipt) ━━━━━━━━━━━━━ */}
             {txnType !== 'client_receipt' && <div>
-              <SectionLabel n="02" title="Categorise" />
+              <SectionLabel n="02" title="Note" />
               <div className="bg-white rounded-2xl border border-black/[0.05] shadow-[0_8px_30px_rgb(0,0,0,0.02)]">
                 <div className="p-5 space-y-4">
 
-                  {/* Cost code / expense head picker — optional, AI-assisted. A general
-                      expense files under a GEN head; everything else uses the MAT/WRK chart. */}
+                  {/* ── COST CODE — removed from the UI per the redesign. The wiring is kept
+                       for later: `category` state still saves, CostCodePicker/GenHeadPicker and
+                       the AI auto-suggest effect are intact. Flip `false` → `true` to restore. ── */}
+                  {false && (
                   <div>
                     <label className="block text-[11px] font-medium text-on-surface-variant/60 mb-2">
                       {txnType === 'expense' ? 'Expense Head' : 'Cost Code'} <span className="text-on-surface-variant/35">(optional)</span>
@@ -1535,6 +1524,7 @@ export default function NewTransaction({ session: _session }: { session: Session
                       </div>
                     )}
                   </div>
+                  )}
 
                   {/* Remarks — required */}
                   <div>
@@ -1545,6 +1535,7 @@ export default function NewTransaction({ session: _session }: { session: Session
                         : <span className="text-on-surface-variant/35 ml-1">(what is this payment for?)</span>}
                     </label>
                     <textarea
+                      id="txn-remarks"
                       value={remarks}
                       onChange={(e) => {
                         setRemarks(e.target.value);
@@ -1584,6 +1575,10 @@ export default function NewTransaction({ session: _session }: { session: Session
                   </span>
                 )}
               </div>
+
+              <h2 className="mb-3 ml-0.5" style={{ fontFamily: VOICE.serif, fontSize: 19, fontWeight: 600, letterSpacing: '-0.2px', color: VOICE.user }}>
+                Which project is this for?<span style={{ color: VOICE.out }}> *</span>
+              </h2>
 
               {/* Premium Slim Visual progress bar for split mode */}
               {splitMode && totalAmt > 0 && txnType !== 'client_receipt' && (
@@ -1644,6 +1639,7 @@ export default function NewTransaction({ session: _session }: { session: Session
                       Project / Site{missingProject && !allocs[0]?.project_id && <span className="ml-1.5">required</span>}
                     </label>
                     <select
+                      id="txn-project-0"
                       value={allocs[0]?.project_id || ''}
                       onChange={(e) => setAllocs([{ ...allocs[0], project_id: e.target.value }])}
                       className={`bk-input ${missingProject && !allocs[0]?.project_id ? 'border-error' : ''}`}
@@ -1680,6 +1676,7 @@ export default function NewTransaction({ session: _session }: { session: Session
                           Project / Site{missingProject && !a.project_id && <span className="ml-1.5">required</span>}
                         </label>
                         <select
+                          id={idx === 0 ? 'txn-project-0' : undefined}
                           value={a.project_id}
                           onChange={(e) => upAlloc(a.id, { project_id: e.target.value, order_type: '', order_ref: '', milestone_id: '' })}
                           className={`bk-input ${missingProject && !a.project_id ? 'border-error' : ''}`}
@@ -1701,66 +1698,108 @@ export default function NewTransaction({ session: _session }: { session: Session
                         />
                       )}
 
-                      {/* Linking Panel — replaces old WO/PO dropdowns */}
-                      {!splitMode && txnType !== 'expense' && a.project_id && !skipped && (
-                        <>
-                          <LinkingPanel
-                            wos={projectWOs}
-                            pos={projectPOs}
-                            loading={loadingObligations}
-                            selectedObligation={selectedObligation}
-                            onSelect={(ob) => {
-                              setSelectedObligation(ob);
-                              setSkipped(false);
-                              if (!amountTouched) setTotalAmt(ob.balance);
-                            }}
-                            onSkip={() => { setSelectedObligation(null); setSkipped(true); }}
-                            onOpenWO={() => openDrawer('WO')}
-                            onOpenPO={() => openDrawer('PO')}
-                            txnType={txnType}
-                          />
-                          {needsPhaseSelection && (
-                            <div className="mt-3 p-4 rounded-xl border border-amber-200/50 bg-amber-50/50 text-amber-800 animate-fadeIn">
-                              <div className="flex items-start gap-2.5">
-                                <span className="material-symbols-outlined text-[18px] text-amber-600 mt-0.5" style={{ fontVariationSettings: "'FILL' 1" }}>warning</span>
-                                <div className="flex-1 text-[12px] leading-relaxed">
-                                  <p className="font-semibold text-amber-900">Select a phase or milestone to continue.</p>
-                                  <p className="mt-0.5 text-amber-800/80">This Contract has phases. Expand it above and select the specific phase to link this payment to.</p>
-                                </div>
-                              </div>
+                      {/* ── Link hub — the ledger's "link vs one-time" gate, adapted to this page.
+                           Worker → contract; Material → order. Reuses LinkingPanel + `skipped`
+                           (= one-time / not linked). Shown once a project AND payee are chosen. ── */}
+                      {!splitMode && txnType !== 'expense' && a.project_id && stkId && (() => {
+                        const isWorker = txnType === 'worker';
+                        // Worker not on a contract = a one-time labour payment; a material buy not
+                        // raised against a PO = a "direct purchase" (the accounting-sound term).
+                        const oneTimeLabel = isWorker ? 'One-time payment' : 'Direct purchase';
+
+                        // (a) one-time chosen → settled, reversible chip
+                        if (skipped) {
+                          return (
+                            <div className="flex items-center justify-between rounded-xl px-3.5 py-3" style={{ background: VOICE.field, border: `1px solid ${VOICE.line}` }}>
+                              <span className="inline-flex items-center gap-2 text-[13px] font-medium" style={{ color: VOICE.userSoft }}>
+                                <span className="material-symbols-outlined text-[16px]" style={{ color: VOICE.confirm }}>check_circle</span>
+                                {oneTimeLabel} · not linked
+                              </span>
+                              <button type="button" onClick={() => { setSkipped(false); setSelectedObligation(null); setLinkOpen(false); }}
+                                className="text-[12px] font-semibold" style={{ color: VOICE.out }}>Change</button>
                             </div>
-                          )}
-                          {(() => {
-                            if (selectedObligation?.type === 'PO') {
-                              const selPO = projectPOs.find((p: any) => p.po_id === selectedObligation.po_id);
-                              if (selPO && !Number(selPO.vendor_bill_amount)) {
-                                return (
-                                  <div className="mt-3 p-4 rounded-xl border border-amber-200/50 bg-amber-50/50 text-amber-800 animate-fadeIn">
-                                    <div className="flex items-start gap-2.5">
-                                      <span className="material-symbols-outlined text-[18px] text-amber-600 mt-0.5" style={{ fontVariationSettings: "'FILL' 1" }}>warning</span>
-                                      <div className="flex-1 text-[12px] leading-relaxed">
-                                        <p className="font-semibold text-amber-900">No bill copy or amount has been recorded for this Purchase Order yet.</p>
-                                        <p className="mt-0.5 text-amber-800/80">This payment will be registered as a <strong>PO Advance</strong> in the ledger and PO details.</p>
-                                      </div>
+                          );
+                        }
+
+                        // (b) chose to link → the obligation picker
+                        if (linkOpen) {
+                          return (
+                            <>
+                              <div className="flex items-center justify-between mb-2.5">
+                                <p style={{ fontFamily: VOICE.serif, fontSize: 15, fontWeight: 600, color: VOICE.user }}>{isWorker ? 'Which contract?' : 'Which order?'}</p>
+                                <button type="button" onClick={() => { setLinkOpen(false); setSelectedObligation(null); }}
+                                  className="text-[12px] font-medium inline-flex items-center gap-1" style={{ color: VOICE.system }}>
+                                  <span className="material-symbols-outlined text-[14px]">arrow_back</span>Back
+                                </button>
+                              </div>
+                              <LinkingPanel
+                                wos={projectWOs}
+                                pos={projectPOs}
+                                loading={loadingObligations}
+                                selectedObligation={selectedObligation}
+                                onSelect={(ob) => { setSelectedObligation(ob); setSkipped(false); if (!amountTouched) setTotalAmt(ob.balance); }}
+                                onSkip={() => { setSelectedObligation(null); setSkipped(true); setLinkOpen(false); }}
+                                onOpenWO={() => openDrawer('WO')}
+                                onOpenPO={() => openDrawer('PO')}
+                                txnType={txnType}
+                              />
+                              {needsPhaseSelection && (
+                                <div className="mt-3 p-4 rounded-xl border border-amber-200/50 bg-amber-50/50 text-amber-800 animate-fadeIn">
+                                  <div className="flex items-start gap-2.5">
+                                    <span className="material-symbols-outlined text-[18px] text-amber-600 mt-0.5" style={{ fontVariationSettings: "'FILL' 1" }}>warning</span>
+                                    <div className="flex-1 text-[12px] leading-relaxed">
+                                      <p className="font-semibold text-amber-900">Select a phase or milestone to continue.</p>
+                                      <p className="mt-0.5 text-amber-800/80">This Contract has phases. Expand it above and select the specific phase to link this payment to.</p>
                                     </div>
                                   </div>
-                                );
-                              }
-                            }
-                            return null;
-                          })()}
-                        </>
-                      )}
+                                </div>
+                              )}
+                              {(() => {
+                                if (selectedObligation?.type === 'PO') {
+                                  const selPO = projectPOs.find((p: any) => p.po_id === selectedObligation.po_id);
+                                  if (selPO && !Number(selPO.vendor_bill_amount)) {
+                                    return (
+                                      <div className="mt-3 p-4 rounded-xl border border-amber-200/50 bg-amber-50/50 text-amber-800 animate-fadeIn">
+                                        <div className="flex items-start gap-2.5">
+                                          <span className="material-symbols-outlined text-[18px] text-amber-600 mt-0.5" style={{ fontVariationSettings: "'FILL' 1" }}>warning</span>
+                                          <div className="flex-1 text-[12px] leading-relaxed">
+                                            <p className="font-semibold text-amber-900">No bill copy or amount has been recorded for this Purchase Order yet.</p>
+                                            <p className="mt-0.5 text-amber-800/80">This payment will be registered as a <strong>PO Advance</strong> in the ledger and PO details.</p>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    );
+                                  }
+                                }
+                                return null;
+                              })()}
+                            </>
+                          );
+                        }
 
-                      {/* Relink button shown after skip */}
-                      {!splitMode && txnType !== 'expense' && a.project_id && skipped && (
-                        <button type="button"
-                          onClick={() => { setSkipped(false); setSelectedObligation(null); }}
-                          className="flex items-center gap-1.5 text-[12px] text-on-surface-variant/50 hover:text-primary transition-colors">
-                          <span className="material-symbols-outlined text-[14px]">link</span>
-                          Link to a Contract or PO
-                        </button>
-                      )}
+                        // (c) the gate
+                        return (
+                          <div className="rounded-2xl p-4" style={{ background: VOICE.cream2, border: `1px solid ${VOICE.line}` }}>
+                            <p className="mb-3" style={{ fontFamily: VOICE.serif, fontSize: 15.5, fontWeight: 600, color: VOICE.user }}>
+                              {isWorker ? 'Is this transaction part of an existing contract?' : 'Is this transaction part of an existing order?'}
+                            </p>
+                            <div className="flex gap-2.5">
+                              <button type="button" onClick={() => setLinkOpen(true)}
+                                className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-[13px] font-semibold transition-opacity hover:opacity-90"
+                                style={{ background: VOICE.accentTint, border: `1px solid ${VOICE.outLine}`, color: VOICE.accentDeep }}>
+                                <span className="material-symbols-outlined text-[16px]">{isWorker ? 'engineering' : 'inventory_2'}</span>
+                                {isWorker ? 'Link to a contract' : 'Link to an order'}
+                                <span className="material-symbols-outlined text-[15px]">arrow_forward</span>
+                              </button>
+                              <button type="button" onClick={() => { setSkipped(true); setSelectedObligation(null); }}
+                                className="inline-flex items-center justify-center px-3.5 py-2.5 rounded-xl text-[13px] font-medium transition-colors"
+                                style={{ background: VOICE.surface, border: `1px solid ${VOICE.line}`, color: VOICE.system }}>
+                                {oneTimeLabel}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       {/* Split amount */}
                       {splitMode && (
@@ -2299,11 +2338,11 @@ export default function NewTransaction({ session: _session }: { session: Session
       <div className="fixed bottom-0 left-0 right-0 z-40 backdrop-blur-xl" style={{ background: 'rgba(255,255,255,0.9)', borderTop: `1px solid ${VOICE.line}` }}>
         <div className="mx-auto px-5 py-4 flex items-center gap-3" style={{ maxWidth: 720 }}>
           {txnType && (
-            <div>
-              <p className="text-sm font-medium" style={{ color: txnType === 'client_receipt' ? VOICE.inn : VOICE.out, ...VNUMS }}>
-                {txnType === 'client_receipt' ? '+' : '−'} {totalAmt > 0 ? `₹${totalAmt.toLocaleString('en-IN')}` : '₹0'}
+            <div className="mr-1">
+              <p style={{ fontFamily: VOICE.serif, fontSize: 20, fontWeight: 600, color: VOICE.user, ...VNUMS }}>
+                {txnType === 'client_receipt' ? '+' : '−'}{totalAmt > 0 ? `₹${totalAmt.toLocaleString('en-IN')}` : '₹0'}
               </p>
-              <p className="text-xs" style={{ color: VOICE.systemFaint }}>draft</p>
+              <p className="uppercase" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.7px', color: VOICE.faint }}>Draft</p>
             </div>
           )}
           <button type="button" onClick={() => navigate('/ledger')}
@@ -2322,7 +2361,8 @@ export default function NewTransaction({ session: _session }: { session: Session
                 Save & new
               </button>
               <button type="button" onClick={() => handleSave('exit')} disabled={!txnType || createTxn.isPending}
-                className="bk-btn flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-[13px] font-bold transition-all duration-200 active:scale-95 disabled:opacity-35 disabled:pointer-events-none shadow-[0_4px_12px_rgba(0,0,0,0.05)]">
+                className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl text-[13px] font-bold transition-all duration-200 active:scale-95 disabled:opacity-35 disabled:pointer-events-none"
+                style={{ background: VOICE.walnut, color: VOICE.ivory, boxShadow: '0 8px 20px -10px rgba(34,26,19,.6)' }}>
                 {createTxn.isPending && (createTxn.variables as any)?.saveMode === 'exit'
                   ? <Loader2 className="animate-spin" size={14} />
                   : <span className="material-symbols-outlined text-[16px]">check</span>}

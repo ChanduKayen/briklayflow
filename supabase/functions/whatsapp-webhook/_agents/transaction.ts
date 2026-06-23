@@ -21,7 +21,8 @@ import {
 import { parseSpokenAmount } from '../_amount.ts'
 import { matchPayee, matchProject, type Match } from '../_match.ts'
 import { send, renderToWhatsApp, type OutMessage } from '../_format.ts'
-import { openConversation, closeConversation, abandonConversation, type ConvoRow } from '../_conversation.ts'
+import { closeConversation, abandonConversation, type ConvoRow } from '../_conversation.ts'
+import { toLatinName } from '../_translit.ts'
 import { WriteCommitFailed } from '../_spine.ts'
 import * as M from '../_messages.ts'
 import type { Lang } from '../_messages.ts'
@@ -226,36 +227,38 @@ function summaryOf(plan: Plan): string {
 }
 
 /**
- * The two-essential gate. Stage-on-ask (capture-first): the draft is written even
- * when we ask, so an interrupt/timeout can commit it flagged -- never lost. When
- * both essentials are present we commit and confirm; the agent asks at most ONE
- * question, ever.
+ * Capture-first commit — NO follow-up questions, ever. The draft is ALWAYS written:
+ * a complete entry confirms with a ✓; an entry missing an essential (amount/payee) is
+ * staged FLAGGED with a "Saved — finish in the Day Book" reply. Single entries follow
+ * the same no-question policy as batches; the owner corrects gaps in the Day Book.
  */
 async function applyPlan(ctx: TxnCtx, plan: Plan, text: string, opts: { prefix?: string; entryId?: string | null; keyWamid: string; entryIndex: number }): Promise<void> {
   const { supabase, from, orgId, wamid, lang } = ctx
-  const both = plan.amountMissing && plan.payeeMissing
+  const incomplete = plan.amountMissing || plan.payeeMissing
 
+  // Missing an essential -> "Saved … <gap> not set. Add anytime." + Day Book CTA (never
+  // a question). Complete -> the usual confirmation.
   let msg: OutMessage
-  let pending: string | null
-  if (both) { msg = M.mAskBoth(lang); pending = 'AWAIT_BOTH' }
-  else if (plan.amountMissing) { msg = M.mAskAmount(lang, { payee: plan.payeeDisplay }); pending = 'AWAIT_AMOUNT' }
-  else if (plan.payeeMissing) { msg = M.mAskPayee(lang, { amount: plan.amount }); pending = 'AWAIT_PAYEE' }
-  else {
+  if (incomplete) {
+    const missing = (plan.amountMissing && plan.payeeMissing)
+      ? 'amount and payee'
+      : plan.amountMissing ? 'amount' : 'payee'
+    msg = M.mAbandoned(lang, { payee: plan.payeeDisplay, amount: plan.amount, missing })
+  } else {
     msg = M.mComplete(lang, {
       payee: plan.payeeDisplay, payeeMatched: plan.payeeMatched, amount: plan.amount,
       projectName: plan.projectName, projectRaw: plan.projectRaw, note: plan.note,
     })
-    pending = null
   }
   msg = applyPrefix(msg, opts.prefix)
 
-  // Incomplete while asking -> AWAITING_CONTEXT; complete -> PENDING when the payee
-  // auto-linked, else AWAITING_CONTEXT so the Day Book surfaces the link/suggestion.
-  const status = pending ? 'AWAITING_CONTEXT' : (plan.payeeMatched ? 'PENDING' : 'AWAITING_CONTEXT')
+  // Complete + auto-linked -> PENDING (ready); incomplete or unmatched -> AWAITING_CONTEXT
+  // so the Day Book surfaces the gap/suggestion. Same gate as the batch path.
+  const status = statusFor(plan)
 
   // Clean-entry ✓ reaction (only a fully-matched, ready entry earns it). Enqueued
   // in-tx by the staging RPC, so it's commit-gated exactly like the confirmation.
-  const reaction: OutMessage | undefined = (!pending && status === 'PENDING')
+  const reaction: OutMessage | undefined = (!incomplete && status === 'PENDING')
     ? { kind: 'reaction', messageId: wamid, emoji: '✅' } : undefined
 
   let entryId: string | null
@@ -268,16 +271,11 @@ async function applyPlan(ctx: TxnCtx, plan: Plan, text: string, opts: { prefix?:
     if (entryId === null) { await handleWriteFailure(ctx, plan, text, opts.keyWamid, opts.entryIndex); throw new WriteCommitFailed() }
   }
 
-  if (pending) {
-    await openConversation(supabase, {
-      orgId, sender: from, owningAgent: 'TRANSACTION', pendingQuestion: pending,
-      slots: plan.slots, stagedEntryId: entryId, lastMessageId: wamid,
-    })
-  } else {
-    await closeConversation(supabase, {
-      orgId, sender: from, stagedEntryId: entryId, lastMessageId: wamid, lastActionSummary: summaryOf(plan),
-    })
-  }
+  // No pending question -> always close the conversation (keeps the lingering context for
+  // "another 2000 to him"). Incomplete entries are finished in the Day Book.
+  await closeConversation(supabase, {
+    orgId, sender: from, stagedEntryId: entryId, lastMessageId: wamid, lastActionSummary: summaryOf(plan),
+  })
 }
 
 // ── New transaction (also the answer re-entry path via preExtract + entryId) ──────
@@ -302,6 +300,12 @@ export async function runTransaction(
     if (r.payee) ext.payee = r.payee
     if (!ext.project && r.project) ext.project = r.project
   }
+
+  // Universal Latin gate: a name is NEVER stored in native script -- whether it came from
+  // the extractor (single-shot) or a raw follow-up answer, both funnel through here.
+  // Idempotent on Latin input, so it runs unconditionally.
+  ext.payee = toLatinName(ext.payee)
+  ext.project = toLatinName(ext.project)
 
   // TRACE 3/4 -- what the AGENT DECODED (its own understanding of the message).
   console.log('[trace] decoded(txn)', JSON.stringify({
