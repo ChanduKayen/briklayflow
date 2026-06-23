@@ -1033,9 +1033,10 @@ export default function NewTransaction({ session: _session }: { session: Session
       return null;
     })();
     if (firstMissing) {
-      // Focus synchronously (within the click) so the cursor activates on mobile, then scroll.
+      // Focus synchronously (within the click) so the cursor activates on mobile, then scroll
+      // it to the top of the frame on mobile so it clears the keyboard.
       firstMissing.focus({ preventScroll: true });
-      firstMissing.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      firstMissing.scrollIntoView({ behavior: 'smooth', block: window.innerWidth < 640 ? 'start' : 'center' });
       return;
     }
 
@@ -1110,14 +1111,36 @@ export default function NewTransaction({ session: _session }: { session: Session
     if (effectiveAllocs.some((a) => !a.project_id)) return { label: 'Choose a project', el: () => document.getElementById('txn-project-0') };
     return null;
   })();
-  const goToGap = () => {
-    setSaveAttempted(true);
-    const el = nextGap?.el();
+  // Focus SYNCHRONOUSLY inside the tap (so the cursor/keyboard activates on mobile — a
+  // deferred focus() loses the gesture), then scroll into the visible frame. On mobile we
+  // align to the TOP (with scroll-margin) so the field clears the keyboard; centering would
+  // leave it hidden behind the keyboard.
+  const bringIntoFrame = (el: HTMLElement | null) => {
     if (!el) return;
-    // Focus SYNCHRONOUSLY inside the tap so the cursor/keyboard actually activates on mobile
-    // (a deferred focus() loses the user-gesture and won't open the keyboard), then scroll.
     el.focus({ preventScroll: true });
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.scrollIntoView({ behavior: 'smooth', block: window.innerWidth < 640 ? 'start' : 'center' });
+  };
+  const fieldEl = (k: 'amount' | 'payee' | 'remark' | 'project'): HTMLElement | null =>
+    k === 'amount' ? document.getElementById('txn-amount-input')
+      : k === 'payee' ? payeeRef.current
+      : k === 'remark' ? document.getElementById('txn-remarks')
+      : document.getElementById('txn-project-0');
+  const goToGap = () => { setSaveAttempted(true); bringIntoFrame(nextGap?.el() ?? null); };
+
+  // Called after a field is completed (esp. a dropdown pick) — jump to the first still-empty
+  // mandatory field, cursor active, in the frame. Computed from CURRENT state synchronously
+  // (treating `justFilled` as done, since its setState hasn't flushed yet) so the gesture
+  // carries through and the keyboard opens on the next field.
+  const advanceAfter = (justFilled: 'amount' | 'payee' | 'remark' | 'project') => {
+    const empty: Record<string, boolean> = {
+      amount: !totalAmt || totalAmt <= 0,
+      payee: txnType !== 'expense' && !stkId,
+      remark: txnType !== 'client_receipt' && !remarks.trim(),
+      project: effectiveAllocs.some((a) => !a.project_id),
+    };
+    for (const k of ['amount', 'payee', 'remark', 'project'] as const) {
+      if (k !== justFilled && empty[k]) { bringIntoFrame(fieldEl(k)); return; }
+    }
   };
 
   const needsPhaseSelection = !!(
@@ -1151,7 +1174,8 @@ export default function NewTransaction({ session: _session }: { session: Session
   return (
     <div className="min-h-screen txn-new-page" style={{ background: VOICE.page }}>
       {/* On mobile, < 16px inputs make iOS zoom-and-jump on focus — pin them to 16px here. */}
-      <style>{`@media (max-width: 640px){ .txn-new-page input:not(#txn-amount-input), .txn-new-page select, .txn-new-page textarea{ font-size:16px } }`}</style>
+      <style>{`@media (max-width: 640px){ .txn-new-page input:not(#txn-amount-input), .txn-new-page select, .txn-new-page textarea{ font-size:16px } }
+        .txn-new-page input, .txn-new-page textarea, .txn-new-page select, #txn-project-0, #txn-amount-input { scroll-margin-top: 84px; scroll-margin-bottom: 150px; }`}</style>
       <div className="mx-auto px-4 pt-8 pb-36" style={{ maxWidth: 720 }}>
 
         {/* ── Header — voice restyle (back + copy handlers unchanged) ──────── */}
@@ -1361,7 +1385,7 @@ export default function NewTransaction({ session: _session }: { session: Session
                           <>
                             <div className="px-4 pt-3 pb-1 text-[9px] font-bold text-on-surface-variant/40 uppercase tracking-widest">Recent</div>
                             {filteredRecents.map((p) => (
-                              <div key={p.id} onClick={() => { setStkId(p.id); setStkSearch(p.name); setShowSug(false); }}
+                              <div key={p.id} onClick={() => { setStkId(p.id); setStkSearch(p.name); setShowSug(false); advanceAfter('payee'); }}
                                 className="px-4 py-2.5 hover:bg-surface-container-low/60 cursor-pointer flex items-center gap-3">
                                 <span className="material-symbols-outlined text-[14px] text-on-surface-variant/40">history</span>
                                 <span className="text-[13px] font-medium text-on-surface">{p.name}</span>
@@ -1371,7 +1395,7 @@ export default function NewTransaction({ session: _session }: { session: Session
                           </>
                         )}
                         {filtStk.map((s) => (
-                          <div key={s.stakeholder_id} onClick={() => { setStkId(s.stakeholder_id); setStkSearch(s.name); setShowSug(false); }}
+                          <div key={s.stakeholder_id} onClick={() => { setStkId(s.stakeholder_id); setStkSearch(s.name); setShowSug(false); advanceAfter('payee'); }}
                             className="px-4 py-3 hover:bg-surface-container-low/60 cursor-pointer border-b border-outline-variant/[0.08] last:border-0">
                             <p className="text-[13px] font-semibold text-on-surface">{s.name}</p>
                             <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{s.category}</p>
@@ -1678,7 +1702,7 @@ export default function NewTransaction({ session: _session }: { session: Session
                     <select
                       id="txn-project-0"
                       value={allocs[0]?.project_id || ''}
-                      onChange={(e) => setAllocs([{ ...allocs[0], project_id: e.target.value }])}
+                      onChange={(e) => { setAllocs([{ ...allocs[0], project_id: e.target.value }]); if (e.target.value) advanceAfter('project'); }}
                       className={`bk-input ${missingProject && !allocs[0]?.project_id ? 'border-error' : ''}`}
                     >
                       <option value="">Select project…</option>
