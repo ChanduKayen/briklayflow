@@ -1016,7 +1016,7 @@ export default function Ledger({ session }: { session: Session }) {
                       <div
                         key={txn.txn_id}
                         id={`ledger-txn-${txn.txn_id}`}
-                        style={{ scrollMarginTop: 80, ...(focusTxn === txn.txn_id ? { borderRadius: 12, boxShadow: '0 0 0 2px #C8603A', transition: 'box-shadow .3s' } : {}) }}
+                        style={{ scrollMarginTop: 40, ...(focusTxn === txn.txn_id ? { borderRadius: 12, boxShadow: '0 0 0 2px #C8603A', transition: 'box-shadow .3s' } : {}) }}
                       >
                       <EntryRow
                         dir={dir}
