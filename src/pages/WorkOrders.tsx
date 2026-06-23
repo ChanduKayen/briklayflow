@@ -310,7 +310,7 @@ export default function WorkOrders({ session }: { session: Session }) {
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
     a.href     = url;
-    a.download = `briklay-work-orders-${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `briklay-contracts-${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -331,7 +331,7 @@ export default function WorkOrders({ session }: { session: Session }) {
         {/* ── Header ─────────────────────────────────────────────────────── */}
         <div className="flex items-start justify-between mb-7">
           <div>
-            <h1 className="text-[24px] font-bold text-on-surface tracking-tight leading-none">Work Orders</h1>
+            <h1 className="text-[24px] font-bold text-on-surface tracking-tight leading-none">Contracts</h1>
             <p className="text-[12px] text-on-surface-variant/50 mt-1.5 font-medium">
               {filtered.length} order{filtered.length !== 1 ? 's' : ''}
               {totalValue > 0 && <> · ₹{totalValue.toLocaleString('en-IN')}</>}
@@ -341,7 +341,7 @@ export default function WorkOrders({ session }: { session: Session }) {
           <div className="hidden md:flex flex-col items-end gap-1">
             <div className="flex items-center gap-2">
               {canManage && (
-                <CreateHint message="press / to create a new work order">
+                <CreateHint message="press / to create a new contract">
                   <button
                     onClick={() => navigate('/work-orders/new')}
                     style={{
@@ -358,16 +358,16 @@ export default function WorkOrders({ session }: { session: Session }) {
                     onMouseLeave={e => { e.currentTarget.style.opacity = '1';    e.currentTarget.style.boxShadow = '0 1px 2px rgba(200,96,58,0.25)'; }}
                   >
                     <span style={{ fontSize: 17, fontWeight: 300, lineHeight: 1 }}>+</span>
-                    New Work Order
+                    New Contract
                   </button>
                 </CreateHint>
               )}
             </div>
             <ShortcutTicker hints={[
-              { key: '/',       label: 'new work order' },
+              { key: '/',       label: 'new contract' },
               { key: 'T',       label: 'view transactions' },
               { key: 'P',       label: 'view purchase orders' },
-              { key: 'W',       label: 'view work orders' },
+              { key: 'W',       label: 'view contracts' },
               { key: 'L',       label: 'view day book' },
               { key: '⟵ hold', label: 'long press screen for quick actions' },
             ]} className="w-full" />
@@ -488,7 +488,7 @@ export default function WorkOrders({ session }: { session: Session }) {
               <span className="material-symbols-outlined text-[56px] text-on-surface-variant/15 block mb-4">
                 {hasAnyFilter ? 'search_off' : 'file_present'}
               </span>
-              <p className="text-[15px] font-medium text-on-surface/50">No work orders found</p>
+              <p className="text-[15px] font-medium text-on-surface/50">No contracts found</p>
               {hasAnyFilter && (
                 <button onClick={clearAllFilters}
                   className="mt-5 h-11 px-5 rounded-full border border-outline-variant/30 text-[13px] font-medium text-on-surface-variant/60">
@@ -568,7 +568,7 @@ export default function WorkOrders({ session }: { session: Session }) {
               <span className="material-symbols-outlined text-[56px] text-on-surface-variant/15 block mb-4">
                 {hasAnyFilter ? 'search_off' : 'file_present'}
               </span>
-              <p className="text-[15px] font-medium text-on-surface/50">No work orders found</p>
+              <p className="text-[15px] font-medium text-on-surface/50">No contracts found</p>
               {hasAnyFilter && (
                 <>
                   <p className="text-[12px] text-on-surface-variant/35 mt-1.5">Try adjusting your filters</p>
@@ -706,7 +706,7 @@ export default function WorkOrders({ session }: { session: Session }) {
 
       {/* ── FAB (mobile) ─────────────────────────────────────────────────── */}
       {canManage && (
-        <button className="bk-fab" onClick={() => navigate('/work-orders/new')} title="New Work Order">
+        <button className="bk-fab" onClick={() => navigate('/work-orders/new')} title="New Contract">
           <span className="material-symbols-outlined text-[24px]">add</span>
         </button>
       )}

@@ -553,7 +553,7 @@ export default function Landing() {
           Everything cross-checks everything.
         </h2>
         <p className="text-center text-sm sm:text-base mt-5 mx-auto leading-relaxed" style={{ color: V.sys, maxWidth: 600 }}>
-          Purchase orders, work orders, and tasks aren't three separate
+          Purchase orders, contracts, and tasks aren't three separate
           registers. Briklay reads them together, the way an experienced
           auditor and a site engineer would, and tells you what they'd catch.
         </p>
@@ -562,7 +562,7 @@ export default function Landing() {
           <div className="vcard rounded-2xl p-5 sm:p-6" style={{ background: V.surface, border: '1px solid #E3DDD4' }}>
             <Bloom />
             <div className="flex items-center justify-center gap-2 flex-wrap">
-              {['Purchase orders', 'Work orders', 'Tasks'].map((t, i) => (
+              {['Purchase orders', 'Contracts', 'Tasks'].map((t, i) => (
                 <span key={t} className={`xch${i} text-xs px-2.5 py-1 rounded-full`} style={{ background: V.field, color: V.inkSoft, ...font }}>{t}</span>
               ))}
             </div>
@@ -616,7 +616,7 @@ export default function Landing() {
       <section id="why" className="py-16" style={{ background: V.surface, borderTop: `1px solid ${V.line}`, borderBottom: `1px solid ${V.line}` }}>
         <div className="mx-auto px-5 sm:px-8 grid sm:grid-cols-3 gap-10" style={{ maxWidth: 1280 }}>
           {[
-            ['Where did the money go?', "Every payment answers a question before it settles: against which purchase order, which work order, which stage? A rupee with no parent gets flagged, never quietly filed. That's where leaks used to live."],
+            ['Where did the money go?', "Every payment answers a question before it settles: against which purchase order, which contract, which stage? A rupee with no parent gets flagged, never quietly filed. That's where leaks used to live."],
             ["What's pending on site?", "Every purchase order shows its own next step: goods, bill, photo. Nothing waits in someone's memory."],
             ['Will my site team actually use it?', "They won't be typing. The AI is. Pages read like sentences, questions come in plain Telugu and English, and a bill photo files itself."],
           ].map(([q, a]) => (
@@ -668,7 +668,7 @@ export default function Landing() {
               <div className="mr-auto max-w-xs rounded-2xl rounded-bl-md px-3.5 py-2.5" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
                 <p className="text-sm" style={{ color: V.ink }}>
                   Recorded. <b style={nums}>− ₹20,000</b> to A Raju · Sunshine
-                  Residence. He has an open work order here: brickwork, stage
+                  Residence. He has an open contract here: brickwork, stage
                   2 of 4 (<span style={nums}>₹65,000</span> milestone). Link
                   this payment there, or is it separate?
                 </p>

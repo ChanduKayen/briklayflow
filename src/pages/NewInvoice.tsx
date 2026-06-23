@@ -395,9 +395,38 @@ export default function NewInvoice({ session }: { session: Session }) {
                     )}
                   </div>
 
-                  {showClientSug && !clientId && (
+                  {showClientSug && !clientId && (() => {
+                    const hasMatches = filteredClients.length > 0;
+                    const typed = clientSearch.trim();
+                    const openCreate = () => { setShowClientCreate(true); setShowClientSug(false); };
+                    return (
                     <div className="absolute left-0 right-0 top-full bg-white border border-black/[0.08] rounded-xl mt-1 z-30 shadow-lg max-h-52 overflow-y-auto">
-                      {filteredClients.map(c => (
+
+                      {/* Zero matches → create becomes the hero row, one tap to add a brand-new client */}
+                      {!hasMatches && (
+                        <div onClick={openCreate}
+                          className="group px-4 py-3.5 cursor-pointer flex items-center gap-3 bg-primary/[0.05] hover:bg-primary/[0.09] transition-colors">
+                          <span className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-[15px] font-bold bg-primary text-on-primary shadow-sm">
+                            {typed ? typed[0].toUpperCase() : '+'}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            {typed ? (
+                              <>
+                                <p className="text-[13px] font-semibold text-on-surface truncate">Create &ldquo;{typed}&rdquo;</p>
+                                <p className="text-[11px] text-on-surface-variant/55">New client · add phone &amp; GSTIN</p>
+                              </>
+                            ) : (
+                              <>
+                                <p className="text-[13px] font-semibold text-on-surface">Add a new client</p>
+                                <p className="text-[11px] text-on-surface-variant/55">No clients yet — create one</p>
+                              </>
+                            )}
+                          </div>
+                          <span className="material-symbols-outlined text-[18px] text-primary/60 group-hover:translate-x-0.5 transition-transform">arrow_forward</span>
+                        </div>
+                      )}
+
+                      {hasMatches && filteredClients.map(c => (
                         <div
                           key={c.stakeholder_id}
                           onClick={() => { setClientId(c.stakeholder_id); setClientSearch(c.name); setShowClientSug(false); }}
@@ -407,18 +436,20 @@ export default function NewInvoice({ session }: { session: Session }) {
                           {c.gstin && <p className="text-[11px] text-on-surface-variant/50">{c.gstin}</p>}
                         </div>
                       ))}
-                      {filteredClients.length === 0 && clientSearch && (
-                        <div className="px-4 py-3 text-[13px] text-on-surface-variant/50 text-center">No clients found</div>
+
+                      {/* Subtle add footer — only when matches exist (the hero covers the empty case) */}
+                      {hasMatches && (
+                        <div
+                          onClick={openCreate}
+                          className="px-4 py-3 cursor-pointer flex items-center gap-2 text-primary border-t border-outline-variant/15 hover:bg-primary/[0.04]"
+                        >
+                          <span className="material-symbols-outlined text-[17px]">business</span>
+                          <span className="text-[13px] font-semibold">{typed ? <>Not listed? Add &ldquo;{typed}&rdquo;</> : 'Add new client'}</span>
+                        </div>
                       )}
-                      <div
-                        onClick={() => { setShowClientCreate(true); setShowClientSug(false); }}
-                        className="px-4 py-3 cursor-pointer flex items-center gap-2 text-primary border-t border-outline-variant/15 hover:bg-primary/[0.04]"
-                      >
-                        <span className="material-symbols-outlined text-[17px]">business</span>
-                        <span className="text-[13px] font-semibold">Add new client{clientSearch ? ` "${clientSearch}"` : ''}</span>
-                      </div>
                     </div>
-                  )}
+                    );
+                  })()}
 
                   {showClientCreate && !clientId && (
                     <div className="mt-2 border border-outline-variant/30 rounded-2xl p-5 bg-surface-container-lowest/60">

@@ -333,7 +333,7 @@ export default function Settings({ session }: { session: Session }) {
               <div className="rounded-xl bg-red-50 border border-red-100 p-4 space-y-2">
                 <p className="text-[12px] font-bold text-red-800 uppercase tracking-wider">Everything will be deleted</p>
                 {[
-                  'All projects, transactions, and work orders',
+                  'All projects, transactions, and contracts',
                   'All purchase orders and vendor records',
                   'All invoices, bills, and financial data',
                   'All team members and their access',

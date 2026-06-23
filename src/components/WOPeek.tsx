@@ -136,7 +136,7 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
           <Loader2 size={24} className="animate-spin text-on-surface-variant" />
         </div>
       ) : !wo ? (
-        <p className="text-center text-on-surface-variant py-12 text-body-sm">Work order not found.</p>
+        <p className="text-center text-on-surface-variant py-12 text-body-sm">Contract not found.</p>
       ) : (
         <div className="flex flex-col gap-5">
 

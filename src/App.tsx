@@ -514,8 +514,8 @@ function getMobileTitle(pathname: string): string {
     '/ledger':              'Transactions',
     '/ledger/new':          'New Transaction',
     '/projects':            'Projects',
-    '/work-orders':         'Work Orders',
-    '/work-orders/new':     'New Work Order',
+    '/work-orders':         'Contracts',
+    '/work-orders/new':     'New Contract',
     '/purchase-orders':     'Purchase Orders',
     '/purchase-orders/new': 'New Purchase Order',
     '/billing':             'Billing',
@@ -537,7 +537,7 @@ function getMobileTitle(pathname: string): string {
   if (routes[pathname]) return routes[pathname];
   const seg = pathname.split('/').filter(Boolean);
   const detailTitles: Record<string, string> = {
-    'ledger': 'Transaction', 'projects': 'Project', 'work-orders': 'Work Order',
+    'ledger': 'Transaction', 'projects': 'Project', 'work-orders': 'Contract',
     'purchase-orders': 'Purchase Order', 'billing': 'Bill', 'stakeholders': 'Stakeholder',
     'invoices': 'Invoice', 'procurement': 'Procurement',
   };
@@ -777,7 +777,7 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
 
           <TabItem to={base}                       Icon={IconLayoutGrid}      label="Overview" active={isOverview} />
           <TabItem to={`${base}/transactions`}     Icon={IconArrowsExchange}  label="Txns"     active={isTxns} />
-          <TabItem to={`${base}/work-orders`}      Icon={IconClipboardList}   label="W.Orders" active={isWOs} />
+          <TabItem to={`${base}/work-orders`}      Icon={IconClipboardList}   label="Contracts" active={isWOs} />
           <TabItem to={`${base}/purchase-orders`}  Icon={IconShoppingBag}     label="POs"      active={isPOs} />
           <TabItem onClick={onMoreTap}             Icon={IconDots}            label="More"     active={isOther} />
         </div>

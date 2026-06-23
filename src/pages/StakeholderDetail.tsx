@@ -1033,7 +1033,7 @@ export default function StakeholderDetail({ session }: { session: Session }) {
             <span className="material-symbols-outlined text-[16px] text-stone-450">
               {showWOs ? 'expand_less' : 'expand_more'}
             </span>
-            <span>{(workOrders || []).length} Work Order{(workOrders || []).length !== 1 ? 's' : ''}</span>
+            <span>{(workOrders || []).length} Contract{(workOrders || []).length !== 1 ? 's' : ''}</span>
             {!showWOs && (
               <span className="normal-case font-semibold text-stone-400 ml-1.5 hover:underline">View All →</span>
             )}
@@ -1049,7 +1049,7 @@ export default function StakeholderDetail({ session }: { session: Session }) {
                 </div>
               ) : (workOrders || []).length === 0 ? (
                 <div className="bg-white rounded-2xl border border-[#EAE6DE]/75 p-8 text-center text-stone-500 font-medium">
-                  No work orders registered for this stakeholder.
+                  No contracts registered for this stakeholder.
                 </div>
               ) : (
                 (workOrders || []).map((wo: any) => {

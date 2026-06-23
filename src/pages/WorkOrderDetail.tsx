@@ -387,7 +387,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
     const doc = new jsPDF('p', 'mm', 'a4');
 
     // ── Header ────────────────────────────────────────────────────────────────
-    let y = drawHeader(doc, 'WORK ORDER', wo.wo_id);
+    let y = drawHeader(doc, 'CONTRACT', wo.wo_id);
 
     // ── Identity block ────────────────────────────────────────────────────────
     const rx = MARGIN + CONTENT / 2;
@@ -604,7 +604,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
     // ── Footer ────────────────────────────────────────────────────────────────
     drawFooter(doc);
 
-    doc.save(`WorkOrder_${wo.wo_id}.pdf`);
+    doc.save(`Contract_${wo.wo_id}.pdf`);
   };
 
   // ─── Closed celebration effect ─────────────────────────────────────────────
@@ -631,9 +631,9 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
     return (
       <div className="px-margin-mobile md:px-margin-desktop pt-6">
         <div className="bg-error-container text-on-error-container p-6 rounded-xl">
-          <h3 className="text-headline-md font-headline-md">Work Order Not Found</h3>
+          <h3 className="text-headline-md font-headline-md">Contract Not Found</h3>
           <button onClick={() => navigate(navState.from === 'project' && navState.projectId ? `/projects/${navState.projectId}/work-orders` : '/work-orders')} className="mt-4 flex items-center gap-2 hover:underline">
-            <ArrowLeft size={16} /> Back to Work Orders
+            <ArrowLeft size={16} /> Back to Contracts
           </button>
         </div>
       </div>
@@ -703,7 +703,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
         <div className="detail-reveal mb-3" style={{ animationDelay: '0ms' }}>
           <BackLink
             to={navState.from === 'project' && navState.projectId ? `/projects/${navState.projectId}/work-orders` : '/work-orders'}
-            label="Work orders"
+            label="Contracts"
           />
         </div>
 
@@ -716,12 +716,12 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                     { label: 'Dashboard', href: '/' },
                     { label: 'Projects', href: '/projects' },
                     { label: navState.projectName, href: `/projects/${navState.projectId}` },
-                    { label: 'Work Orders', href: `/projects/${navState.projectId}/work-orders` },
+                    { label: 'Contracts', href: `/projects/${navState.projectId}/work-orders` },
                     { label: woId! },
                   ]
                 : [
                     { label: 'Dashboard', href: '/' },
-                    { label: 'Work Orders', href: '/work-orders' },
+                    { label: 'Contracts', href: '/work-orders' },
                     { label: woId! },
                   ]
             }
@@ -739,7 +739,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
               {/* Row 1: WO ID & Status badge */}
               <div className="flex items-start justify-between gap-3 mb-5">
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-on-surface-variant/45 mb-1">Work Order</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-on-surface-variant/45 mb-1">Contract</p>
                   <p className="font-mono text-[11px] text-on-surface-variant/50 mb-1 tracking-wide">{wo.wo_id}</p>
                   <p className="text-[12px] text-on-surface-variant/60">Issued {fmtDate(wo.date_issued)}</p>
                 </div>
@@ -825,7 +825,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                 <>
                   <button onClick={() => setConfirmAction('issue')} className="bk-btn flex items-center gap-1.5 py-1.5 px-3 text-[12px]">
                     <span className="material-symbols-outlined text-[15px]">send</span>
-                    Issue Work Order
+                    Issue Contract
                   </button>
                   <button onClick={() => setConfirmAction('cancel')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error/30 text-error text-[12px] font-semibold hover:bg-error-container/30 transition-colors">
                     <span className="material-symbols-outlined text-[14px]">cancel</span> Cancel WO
@@ -851,7 +851,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                 <>
                   <button onClick={() => setConfirmAction('close')} className="bk-btn flex items-center gap-1.5 py-1.5 px-3 text-[12px]">
                     <span className="material-symbols-outlined text-[15px]">check_circle</span>
-                    Close Work Order
+                    Close Contract
                   </button>
                   <button onClick={() => setConfirmAction('cancel')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error/30 text-error text-[12px] font-semibold hover:bg-error-container/30 transition-colors">
                     <span className="material-symbols-outlined text-[14px]">cancel</span> Cancel WO
@@ -911,7 +911,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                 <div className="flex items-center justify-between px-4 py-3 bg-[rgba(22,163,74,0.03)] border-b border-outline-variant/10">
                   <div>
                     <p className="text-[12px] font-medium text-[#16A34A]">Credit — By Work Done</p>
-                    <p className="text-[11px] text-on-surface-variant/60 mt-0.5">Work order value</p>
+                    <p className="text-[11px] text-on-surface-variant/60 mt-0.5">Contract value</p>
                   </div>
                   <span className="font-data-mono font-semibold text-[14px] text-[#16A34A]">
                     ₹{orderValue.toLocaleString('en-IN')}
@@ -1606,7 +1606,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                     <span className="material-symbols-outlined text-[20px] text-blue-700">verified</span>
                   </div>
                   <div>
-                    <h3 className="text-headline-sm font-headline-sm">Approve Work Order</h3>
+                    <h3 className="text-headline-sm font-headline-sm">Approve Contract</h3>
                     <p className="text-[11px] text-on-surface-variant font-data-mono mt-0.5">{wo.wo_id}</p>
                   </div>
                 </div>
@@ -1639,13 +1639,13 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                   <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
                     <span className="material-symbols-outlined text-[20px] text-blue-700">send</span>
                   </div>
-                  <h3 className="text-headline-sm font-headline-sm">Issue Work Order</h3>
+                  <h3 className="text-headline-sm font-headline-sm">Issue Contract</h3>
                 </div>
                 <p className="text-body-sm text-on-surface-variant mb-5">
                   This will formally issue <strong className="font-data-mono">{wo.wo_id}</strong> to{' '}
                   <strong>{wo.stakeholders?.name}</strong> for{' '}
                   <strong className="font-data-mono">₹{orderValue.toLocaleString()}</strong>.
-                  The work order becomes read-only after issuing.
+                  The contract becomes read-only after issuing.
                 </p>
                 {transitionError && <p className="text-error text-body-sm mb-4 p-3 bg-error-container/30 rounded-lg">{transitionError}</p>}
                 <div className="flex gap-3 justify-end">
@@ -1684,7 +1684,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                   <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center shrink-0">
                     <span className="material-symbols-outlined text-[20px] text-green-700">check_circle</span>
                   </div>
-                  <h3 className="text-headline-sm font-headline-sm">Close Work Order</h3>
+                  <h3 className="text-headline-sm font-headline-sm">Close Contract</h3>
                 </div>
                 <p className="text-body-sm text-on-surface-variant mb-4">Ensure all payments are settled before closing.</p>
                 <div className="grid grid-cols-3 gap-3 mb-4">
@@ -1742,7 +1742,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                   <div className="w-10 h-10 rounded-full bg-error-container flex items-center justify-center shrink-0">
                     <span className="material-symbols-outlined text-[20px] text-error">cancel</span>
                   </div>
-                  <h3 className="text-headline-sm font-headline-sm text-error">Cancel Work Order</h3>
+                  <h3 className="text-headline-sm font-headline-sm text-error">Cancel Contract</h3>
                 </div>
                 <p className="text-body-sm text-on-surface-variant mb-5">
                   Cancel <strong className="font-data-mono">{wo.wo_id}</strong>? This cannot be undone.

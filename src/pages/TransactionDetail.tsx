@@ -254,14 +254,14 @@ function DetailLinkingPanel({ wos, pos, loading, selectedObligation, onSelect, o
     return (
       <div className="rounded-xl border border-dashed border-outline-variant/30 p-5 text-center">
         <span className="material-symbols-outlined text-[28px] text-on-surface-variant/20 mb-2 block">link_off</span>
-        <p className="text-[13px] font-medium text-on-surface mb-1">No open {isWorker ? 'Work Orders' : isVendor ? 'Purchase Orders' : 'WOs or POs'} found</p>
+        <p className="text-[13px] font-medium text-on-surface mb-1">No open {isWorker ? 'Contracts' : isVendor ? 'Purchase Orders' : 'Contracts or POs'} found</p>
         <p className="text-[11px] text-on-surface-variant/50 mb-4">Create one to link this payment, or keep unlinked.</p>
         <div className="flex gap-2 justify-center flex-wrap">
           {isWorker && (
             <button type="button"
               onClick={() => nav(`/work-orders/new?project=${projectId}`)}
               className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-outline-variant/30 text-[12px] font-medium text-on-surface hover:bg-surface-container transition-colors">
-              <span className="material-symbols-outlined text-[15px]">assignment_add</span> New Work Order
+              <span className="material-symbols-outlined text-[15px]">assignment_add</span> New Contract
             </button>
           )}
           {isVendor && (
@@ -282,14 +282,14 @@ function DetailLinkingPanel({ wos, pos, loading, selectedObligation, onSelect, o
   return (
     <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
       <div className="px-4 py-2.5 bg-black/[0.02] border-b border-outline-variant/[0.08]">
-        <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/50">Link to Work Order or Purchase Order</p>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/50">Link to Contract or Purchase Order</p>
         <p className="text-[11px] text-on-surface-variant/40 mt-0.5">Select what this payment is for</p>
       </div>
       <div className="divide-y divide-outline-variant/[0.06]">
         {wos.length > 0 && (
           <div>
             <div className="px-4 py-1.5 bg-black/[0.01]">
-              <p className="text-[9px] font-bold uppercase tracking-wide text-on-surface-variant/40">Work Orders ({wos.length})</p>
+              <p className="text-[9px] font-bold uppercase tracking-wide text-on-surface-variant/40">Contracts ({wos.length})</p>
             </div>
             {wos.map((wo: any) => (
               <WOObligationRow key={wo.wo_id} wo={wo} selectedObligation={selectedObligation}
@@ -913,7 +913,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
             <div className="flex items-center gap-3 px-4 py-3 bg-amber-50 border border-amber-200/70 rounded-xl">
               <span className="material-symbols-outlined text-amber-500 text-[18px] shrink-0">link_off</span>
               <p className="text-[12px] text-amber-800 flex-1 font-medium">
-                {needsActionType === 'link_wo' ? 'Payment not linked to a Work Order' : 'Payment not linked to a Purchase Order'} —{' '}
+                {needsActionType === 'link_wo' ? 'Payment not linked to a Contract' : 'Payment not linked to a Purchase Order'} —{' '}
                 <button onClick={() => document.getElementById('alloc-table')?.scrollIntoView({ behavior: 'smooth' })}
                   className="font-bold underline underline-offset-2">Map below</button>
               </p>

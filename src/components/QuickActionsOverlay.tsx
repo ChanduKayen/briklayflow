@@ -5,7 +5,7 @@ import { IconReceipt2, IconFileInvoice, IconHammer, IconUserPlus, IconBook } fro
 const ACTIONS = [
   { icon: IconReceipt2,    label: 'New Transaction',    path: '/ledger/new' },
   { icon: IconFileInvoice, label: 'New Purchase Order', path: '/purchase-orders/new' },
-  { icon: IconHammer,      label: 'New Work Order',     path: '/work-orders/new' },
+  { icon: IconHammer,      label: 'New Contract',     path: '/work-orders/new' },
   { icon: IconUserPlus,    label: 'New Party',          path: '/stakeholders?new=1' },
   { icon: IconBook,        label: 'Day book',           path: '/logbook' },
 ];

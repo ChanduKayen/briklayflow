@@ -8,9 +8,10 @@
  *  · markDailyWage → MOCK. The NMR / muster / attendance backend isn't built yet;
  *    this returns the computed shape with NO DB write. Swap the body for the real
  *    muster RPC once it lands — callers don't change.
- *  · fileAsLabour → no-op acknowledgement. A one-off has no tracking object and the
- *    payment already sits in the project's cost breakdown via its allocation. There
- *    is no "intentionally untracked" flag in the schema yet, so nothing is written.
+ *  · fileAsLabour / clearOneTime → set/unset transactions.is_one_time, the deliberate
+ *    "this is a standalone one-time payment" flag. The money already sits in the project
+ *    cost breakdown via its allocation; the flag only records intent so the ledger stops
+ *    nudging and party ledgers group these under "One-time payments".
  *
  * A "contract" in this hub is a Work Order (work_orders). Its balance is COMPUTED
  * (order_value − allocations linked to it), never stored.
@@ -23,6 +24,7 @@ export interface TrackTxn {
   total_amount?: number | string | null;
   remarks?: string | null;
   stakeholder_id?: string | null;
+  is_one_time?: boolean | null;
   stakeholders?: { name?: string | null; category?: string | null; type?: string | null } | null;
   txn_allocations?: Array<{
     allocation_id?: string | null;
@@ -315,10 +317,19 @@ export async function markDailyWage(txn: TrackTxn, { rate }: { rate: number }): 
   return { rate, days: rate > 0 ? amount / rate : 0, amount };
 }
 
-/** File the payment as a one-off labour expense — no tracking object. The money is
- *  already in the project's cost breakdown via its allocation, so this is purely an
- *  acknowledgement today (pending the labour module / an "untracked" flag). */
+/** Mark the payment as a deliberate one-time payment — a standalone outflow that is NOT
+ *  part of any contract. Sets transactions.is_one_time so the ledger stops nudging to link
+ *  it and party ledgers group it under "One-time payments". The money already sits in the
+ *  project cost breakdown via its allocation; this only records the owner's intent. */
 export async function fileAsLabour(txn: TrackTxn): Promise<void> {
-  void txn; // accepted for API symmetry; nothing is written yet
-  return;
+  if (!txn.txn_id) return;
+  const { error } = await supabase.from('transactions').update({ is_one_time: true }).eq('txn_id', txn.txn_id);
+  if (error) throw error;
+}
+
+/** Reverse a one-time marking (the chip's Undo) — the payment becomes unlinked again. */
+export async function clearOneTime(txn: TrackTxn): Promise<void> {
+  if (!txn.txn_id) return;
+  const { error } = await supabase.from('transactions').update({ is_one_time: false }).eq('txn_id', txn.txn_id);
+  if (error) throw error;
 }

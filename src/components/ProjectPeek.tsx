@@ -73,7 +73,7 @@ export function ProjectPeek({ projectId, onClose }: ProjectPeekProps) {
               </p>
             </div>
             <div className="rounded-xl bg-surface-container-low p-4">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant mb-1">Active WOs</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant mb-1">Active Contracts</p>
               <p className="text-[18px] font-bold text-on-surface">{stats?.activeWOs ?? '—'}</p>
             </div>
           </div>

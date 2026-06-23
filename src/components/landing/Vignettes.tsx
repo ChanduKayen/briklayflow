@@ -177,7 +177,7 @@ export function VignetteWO() {
     <div className="vcard h-full flex flex-col rounded-2xl p-5" style={{ background: V.surface, border: '1px solid #E3DDD4' }}>
       <div className="mb-3"><ChapterTag n="04" label="Assign & track work" /></div>
       <Bloom />
-      <AppWin title="New work order">
+      <AppWin title="New contract">
       <p className="text-sm leading-relaxed" style={{ color: V.inkSoft, ...serif }}>
         Hiring <b>Harish K</b> for <b>The Pride</b>, worth{' '}
         <b style={nums}>₹5,00,000</b>, paid in <b>3 stages</b>.

@@ -249,7 +249,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
         p_milestones:     milestones,
       });
       if (error) throw error;
-      if (!data?.success) throw new Error(data?.error ?? 'Failed to create work order');
+      if (!data?.success) throw new Error(data?.error ?? 'Failed to create contract');
       return data.wo_id as string;
     },
     onSuccess: () => {
@@ -493,7 +493,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
       <div className="px-margin-mobile md:px-margin-desktop pt-6">
         <div className="bg-error-container text-on-error-container p-6 rounded-xl">
           <h3 className="text-headline-md font-headline-md">Access Denied</h3>
-          <p className="text-body-sm mt-2">Only Management and Principal can create Work Orders.</p>
+          <p className="text-body-sm mt-2">Only Management and Principal can create Contracts.</p>
         </div>
       </div>
     );
@@ -518,12 +518,12 @@ export default function NewWorkOrder({ session }: { session: Session }) {
               { label: 'Dashboard', href: '/' },
               { label: 'Projects', href: '/projects' },
               { label: initState.projectName, href: `/projects/${initState.projectId}` },
-              { label: 'Work Orders', href: `/projects/${initState.projectId}/work-orders` },
+              { label: 'Contracts', href: `/projects/${initState.projectId}/work-orders` },
               { label: 'New' },
             ]
           : [
               { label: 'Dashboard', href: '/' },
-              { label: 'Work Orders', href: '/work-orders' },
+              { label: 'Contracts', href: '/work-orders' },
               { label: 'New' },
             ]
       } />
@@ -533,12 +533,12 @@ export default function NewWorkOrder({ session }: { session: Session }) {
         <button
           type="button"
           onClick={() => navigate(initState.returnTo || (initState.from === 'project' && initState.projectId ? `/projects/${initState.projectId}/work-orders` : '/work-orders'))}
-          aria-label="Back to work orders"
+          aria-label="Back to contracts"
           style={{ color: VOICE.user }}
         >
           <span className="material-symbols-outlined">arrow_back</span>
         </button>
-        <p className="text-sm flex-1" style={{ color: VOICE.system }}>New work order</p>
+        <p className="text-sm flex-1" style={{ color: VOICE.system }}>New contract</p>
         <span className="text-xs px-2.5 py-1 rounded-full" style={{ background: VOICE.field, color: VOICE.system, ...VNUMS }}>WO · auto</span>
       </header>
 
@@ -911,7 +911,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
             >
               {createWO.isPending
                 ? <><Loader2 className="animate-spin" size={15} /> Saving…</>
-                : <><span className="material-symbols-outlined text-[18px]">check</span> Create work order</>}
+                : <><span className="material-symbols-outlined text-[18px]">check</span> Create contract</>}
             </button>
             <UiSaveHint text={isOver ? `stages exceed contract by ₹${(stagesTotal - orderValue).toLocaleString('en-IN')}` : null} />
           </div>

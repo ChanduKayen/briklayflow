@@ -1,11 +1,11 @@
-# Graph Report - Briklay Fly  (2026-06-21)
+# Graph Report - Briklay Fly  (2026-06-22)
 
 ## Corpus Check
-- 323 files · ~766,788 words
+- 326 files · ~768,575 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1140 nodes · 1717 edges · 38 communities detected
+- 1145 nodes · 1722 edges · 39 communities detected
 - Extraction: 86% EXTRACTED · 14% INFERRED · 0% AMBIGUOUS · INFERRED: 243 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
@@ -45,9 +45,10 @@
 - [[_COMMUNITY_Community 46|Community 46]]
 - [[_COMMUNITY_Community 47|Community 47]]
 - [[_COMMUNITY_Community 48|Community 48]]
-- [[_COMMUNITY_Community 50|Community 50]]
-- [[_COMMUNITY_Community 54|Community 54]]
-- [[_COMMUNITY_Community 73|Community 73]]
+- [[_COMMUNITY_Community 51|Community 51]]
+- [[_COMMUNITY_Community 55|Community 55]]
+- [[_COMMUNITY_Community 74|Community 74]]
+- [[_COMMUNITY_Community 75|Community 75]]
 
 ## God Nodes (most connected - your core abstractions)
 1. `pick()` - 33 edges
@@ -64,14 +65,14 @@
 ## Surprising Connections (you probably didn't know these)
 - `handleDownloadPDF()` --calls--> `SectionLabel()`  [INFERRED]
   src\pages\BillDetail.tsx → src\pages\NewTransaction.tsx
-- `commitEdit()` --calls--> `parseAmount()`  [INFERRED]
-  src\components\ProjectBudget.tsx → supabase\functions\whatsapp-webhook\_agents\transaction.ts
 - `suggestCostCode()` --calls--> `getCostCode()`  [INFERRED]
   src\components\QuickTransactionSheet.tsx → src\lib\costCodes.ts
 - `TxnRow()` --calls--> `formatTxn()`  [INFERRED]
   src\components\TxnRow.tsx → src\lib\formatTxn.ts
 - `VendorHub()` --calls--> `useOrgId()`  [INFERRED]
   src\components\txn-ledger\VendorHub.tsx → src\lib\auth\AuthProvider.tsx
+- `isStopWord()` --calls--> `buildPills()`  [INFERRED]
+  src\lib\brandFilter.ts → src\lib\buildPillsFromResolution.ts
 
 ## Communities
 
@@ -81,7 +82,7 @@ Nodes (65): isStopWord(), buildConflictPills(), buildNovelVariantPills(), buildP
 
 ### Community 1 - "Community 1"
 Cohesion: 0.07
-Nodes (72): composeLLM(), fallbackReply(), isGreeting(), runConcierge(), systemFor(), userContent(), answerProcurement(), commitInterruptedProc() (+64 more)
+Nodes (71): composeLLM(), fallbackReply(), isGreeting(), runConcierge(), systemFor(), userContent(), answerProcurement(), commitInterruptedProc() (+63 more)
 
 ### Community 2 - "Community 2"
 Cohesion: 0.1
@@ -89,7 +90,7 @@ Nodes (43): parseDigitToken(), parseSpokenAmount(), callClaude(), callOpenAI(), 
 
 ### Community 3 - "Community 3"
 Cohesion: 0.08
-Nodes (27): commitEdit(), handleSave(), buildConfirmMsg(), buildDescription(), createRoughEntry(), fetchImageAsBase64(), findTopMatches(), fmtAmount() (+19 more)
+Nodes (28): parseAmount(), commitEdit(), handleSave(), buildConfirmMsg(), buildDescription(), createRoughEntry(), fetchImageAsBase64(), findTopMatches() (+20 more)
 
 ### Community 4 - "Community 4"
 Cohesion: 0.07
@@ -136,12 +137,12 @@ Cohesion: 0.15
 Nodes (13): handler(), close(), go(), handleClose(), handleOpen(), toggle(), close(), handleSave() (+5 more)
 
 ### Community 15 - "Community 15"
-Cohesion: 0.12
-Nodes (5): PeekLink(), WOPeek(), usePeek(), statusBadgeClass(), WorkOrderDetail()
-
-### Community 16 - "Community 16"
 Cohesion: 0.17
 Nodes (14): deriveDirection(), escapeRegExp(), isGeneralExpense(), isNotLinked(), parseStageLabel(), payeeLabel(), resolveAnchor(), emit() (+6 more)
+
+### Community 16 - "Community 16"
+Cohesion: 0.12
+Nodes (5): PeekLink(), WOPeek(), usePeek(), statusBadgeClass(), WorkOrderDetail()
 
 ### Community 17 - "Community 17"
 Cohesion: 0.12
@@ -200,32 +201,36 @@ Cohesion: 0.43
 Nodes (5): TxnRow(), dot(), formatShortDate(), formatTxn(), isCostCode()
 
 ### Community 45 - "Community 45"
-Cohesion: 0.8
-Nodes (4): addCustomBrand(), brandsFor(), getCustomBrands(), LS_KEY()
-
-### Community 46 - "Community 46"
-Cohesion: 0.6
-Nodes (4): matchSKUs(), matchSKUsFromFile(), matchSKUsFromText(), handleDocumentUpload()
-
-### Community 47 - "Community 47"
 Cohesion: 0.5
 Nodes (2): FinancialsCashflow(), lastNMonths()
 
-### Community 48 - "Community 48"
+### Community 46 - "Community 46"
 Cohesion: 0.5
 Nodes (2): handleSubmit(), triggerCelebration()
 
-### Community 50 - "Community 50"
+### Community 47 - "Community 47"
+Cohesion: 0.6
+Nodes (4): matchSKUs(), matchSKUsFromFile(), matchSKUsFromText(), handleDocumentUpload()
+
+### Community 48 - "Community 48"
+Cohesion: 0.8
+Nodes (4): addCustomBrand(), brandsFor(), getCustomBrands(), LS_KEY()
+
+### Community 51 - "Community 51"
 Cohesion: 0.6
 Nodes (2): buildComponents(), sendTemplate()
 
-### Community 54 - "Community 54"
+### Community 55 - "Community 55"
 Cohesion: 0.67
 Nodes (2): handleClose(), handleSubmit()
 
-### Community 73 - "Community 73"
+### Community 74 - "Community 74"
 Cohesion: 1.0
 Nodes (2): downloadGRNChallan(), fmtDate()
+
+### Community 75 - "Community 75"
+Cohesion: 1.0
+Nodes (2): poGateState(), poIsPriced()
 
 ## Knowledge Gaps
 - **Thin community `Community 20`** (14 nodes): `clearPersistedCache()`, `shouldPersistQuery()`, `can()`, `close()`, `doSignOut()`, `e()`, `h()`, `initials()`, `isActive()`, `measure()`, `RailItem()`, `RailLabel()`, `BriklayRail.tsx`, `queryClient.ts`
@@ -234,26 +239,28 @@ Nodes (2): downloadGRNChallan(), fmtDate()
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 27`** (10 nodes): `AnimatedNumber()`, `e()`, `fmtAmt()`, `fmtDate()`, `genTxnId()`, `h()`, `if()`, `isClientReceipt()`, `isExcludedFromSpent()`, `ProjectDetail.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 47`** (5 nodes): `FinancialsCashflow()`, `fmt()`, `lastNMonths()`, `monthLabel()`, `FinancialsCashflow.tsx`
+- **Thin community `Community 45`** (5 nodes): `FinancialsCashflow()`, `fmt()`, `lastNMonths()`, `monthLabel()`, `FinancialsCashflow.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 48`** (5 nodes): `handleForgotPassword()`, `handleResendConfirmation()`, `handleSubmit()`, `triggerCelebration()`, `Login.tsx`
+- **Thin community `Community 46`** (5 nodes): `handleForgotPassword()`, `handleResendConfirmation()`, `handleSubmit()`, `triggerCelebration()`, `Login.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 50`** (5 nodes): `buildComponents()`, `sendTemplate()`, `index.ts`, `wa-templates.ts`, `whatsapp.ts`
+- **Thin community `Community 51`** (5 nodes): `buildComponents()`, `sendTemplate()`, `index.ts`, `wa-templates.ts`, `whatsapp.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 54`** (4 nodes): `handleClose()`, `handleSubmit()`, `updateRow()`, `QuoteEntryDrawer.tsx`
+- **Thin community `Community 55`** (4 nodes): `handleClose()`, `handleSubmit()`, `updateRow()`, `QuoteEntryDrawer.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 73`** (3 nodes): `downloadGRNChallan()`, `fmtDate()`, `grnChallan.ts`
+- **Thin community `Community 74`** (3 nodes): `downloadGRNChallan()`, `fmtDate()`, `grnChallan.ts`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 75`** (3 nodes): `poGateState()`, `poIsPriced()`, `poLifecycle.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `NewInvoice()` connect `Community 4` to `Community 1`, `Community 3`?**
-  _High betweenness centrality (0.123) - this node is a cross-community bridge._
+- **Why does `NewInvoice()` connect `Community 4` to `Community 3`?**
+  _High betweenness centrality (0.119) - this node is a cross-community bridge._
+- **Why does `useOrgId()` connect `Community 4` to `Community 16`?**
+  _High betweenness centrality (0.081) - this node is a cross-community bridge._
 - **Why does `computeLine()` connect `Community 4` to `Community 0`?**
-  _High betweenness centrality (0.081) - this node is a cross-community bridge._
-- **Why does `useOrgId()` connect `Community 4` to `Community 15`?**
-  _High betweenness centrality (0.081) - this node is a cross-community bridge._
+  _High betweenness centrality (0.077) - this node is a cross-community bridge._
 - **Are the 17 inferred relationships involving `dispatch()` (e.g. with `processJob()` and `send()`) actually correct?**
   _`dispatch()` has 17 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 9 inferred relationships involving `resolveAgainstSingleFamily()` (e.g. with `addStep()` and `resolveAgainstTree()`) actually correct?**

@@ -1,14 +1,31 @@
 /**
- * TrackChip — the gentle nudge on a payment row's "not linked" slot. Tapping it opens
- * the right hub in place: a worker payment → the job/contract hub (ContractHub); a
- * material-vendor payment → the purchase hub (VendorHub). This component is just the
- * trigger + the floating container; each hub owns its own data and confirmation.
+ * TrackChip — the "not linked" slot on a payment row, framed as a declarative,
+ * swappable status: "This payment is — [ Linked to a contract › ] [ One-time ]".
+ *
+ * WORKER payments (→ ContractHub) get the segmented control:
+ *   · Linked to a contract ›  routes through the hub (link to an open contract, start
+ *                             a new one, or — inside — daily-wage/labour). Decision A:
+ *                             labour lives in the hub. Once linked, the row swaps to the
+ *                             contract reference and this chip unmounts, so the control
+ *                             only ever shows two states: unanswered + one-time-chosen.
+ *   · One-time                sets directly (fileAsLabour). Tap again to clear; tap the
+ *                             contract side to swap. Green = the selected tick, never a
+ *                             red "reject" — one-time is a valid, neutral outcome.
+ *
+ * VENDOR payments (→ VendorHub) keep the single-tap nudge — the vendor side has no
+ * one-off path, so there's no binary/segment to offer.
+ *
+ * NOTE on persistence: fileAsLabour writes nothing today (no "untracked" flag in the
+ * schema), so the one-time selection is session-local — the 'chosen' state IS the
+ * feedback. When that flag lands, init `chosen` from it and call onLinked() in
+ * setOneTime() so the swap survives a refresh.
  */
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Hammer, Package, ChevronDown } from 'lucide-react';
+import { Hammer, Package, ChevronDown, ChevronRight, Check, RotateCcw } from 'lucide-react';
 import { V, font } from './ledgerTokens';
 import type { TrackTxn } from '../../lib/trackingApi';
+import { fileAsLabour, clearOneTime } from '../../lib/trackingApi';
 import { ContractHub, CONTRACT_HUB_CSS } from './ContractHub';
 import { VendorHub, VENDOR_HUB_CSS } from './VendorHub';
 
@@ -16,12 +33,13 @@ type Kind = 'WO' | 'PO';
 
 export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => void }) {
   const [open, setOpen] = useState(false);
+  // WO only: true once the owner marks this a one-time payment (persisted via is_one_time).
+  const [chosenOneTime, setChosenOneTime] = useState(!!txn.is_one_time);
+  const [busy, setBusy] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState<{ top: number; left?: number; right: number }>({ top: 0, right: 0 });
 
   const kind: Kind = txn.stakeholders?.type === 'Vendor' ? 'PO' : 'WO';
-  const nudge = kind === 'PO' ? 'Are you tracking this purchase?' : 'Are you tracking this job?';
-  const NewIcon = kind === 'PO' ? Package : Hammer;
 
   const computePos = () => {
     const el = btnRef.current; if (!el) return null;
@@ -47,17 +65,91 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
     return () => { window.removeEventListener('scroll', reposition, true); window.removeEventListener('resize', reposition); };
   }, [open]);
 
-  return (
-    <span className="inline-flex" onClick={(e) => e.stopPropagation()}>
+  const setOneTime = async () => {
+    if (busy) return;
+    setBusy(true);
+    try { await fileAsLabour(txn); setChosenOneTime(true); onLinked(); }
+    catch { setChosenOneTime(false); } // e.g. migration not applied yet — leave the choice open
+    finally { setBusy(false); }
+  };
+
+  const undoOneTime = async () => {
+    if (busy) return;
+    setBusy(true);
+    try { await clearOneTime(txn); setChosenOneTime(false); onLinked(); }
+    catch { /* keep the settled state if the clear failed */ }
+    finally { setBusy(false); }
+  };
+
+  // ── WORKER payments ────────────────────────────────────────────────────────
+  // Chosen "one-time" reads as a settled status (calm grey, like an assigned PO/WO
+  // reference) — not a green "success" — with a quiet Undo to reverse it.
+  const woButtons = chosenOneTime ? (
+    <span className="inline-flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+      <span
+        className="db-otp-pop inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg"
+        style={{ background: V.field, border: `1px solid ${V.line}`, color: V.inkSoft, ...font }}
+      >
+        <Check size={12} className="shrink-0" style={{ color: V.faint }} />
+        <span>One-time payment</span>
+      </span>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={(e) => { e.stopPropagation(); void undoOneTime(); }}
+        className="inline-flex items-center gap-1 text-xs font-medium hover:underline disabled:opacity-60"
+        style={{ color: V.terra, ...font }}
+      >
+        <RotateCcw size={11} className="shrink-0" />
+        Undo
+      </button>
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+
+      {/* Link to a contract — the value path (subtle terracotta tint), opens the hub. */}
       <button
         ref={btnRef}
         type="button"
         onClick={(e) => { e.stopPropagation(); toggle(); }}
-        className="db-track-pulse inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-md min-w-0"
-        style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, maxWidth: 250, ...font }}
+        className="db-link-btn inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg"
+        style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.terraDeep, fontWeight: 600 }}
       >
-        <NewIcon size={11} className="shrink-0" /> <span className="truncate">{nudge}</span> <ChevronDown size={11} className="shrink-0" style={{ opacity: 0.7 }} />
+        <Hammer size={12} className="shrink-0" style={{ color: V.terra }} />
+        <span>Link to a contract</span>
+        <ChevronRight size={12} className="shrink-0" style={{ opacity: 0.7 }} />
       </button>
+
+      {/* One-time payment — neutral outlined button; sets the settled state above. */}
+      <button
+        type="button"
+        disabled={busy}
+        onClick={(e) => { e.stopPropagation(); void setOneTime(); }}
+        className="db-onetime-btn inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg disabled:opacity-60"
+        style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.sys, fontWeight: 500 }}
+      >
+        <span>{busy ? 'Filing…' : 'One-time payment'}</span>
+      </button>
+    </span>
+  );
+
+  return (
+    <span className="inline-flex" onClick={(e) => e.stopPropagation()}>
+
+      {kind === 'WO' ? woButtons : (
+        /* PO · single-tap nudge → VendorHub (no one-off path to offer) */
+        <button
+          ref={btnRef}
+          type="button"
+          onClick={(e) => { e.stopPropagation(); toggle(); }}
+          className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg min-w-0 transition-opacity hover:opacity-80"
+          style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.sys, maxWidth: 250, ...font }}
+        >
+          <Package size={11} className="shrink-0" />
+          <span className="truncate">Part of a purchase order?</span>
+          <ChevronDown size={11} className="shrink-0" style={{ opacity: 0.7 }} />
+        </button>
+      )}
 
       {open && createPortal(
         <>
@@ -83,7 +175,13 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
 export const TRACK_CHIP_CSS = `
 @keyframes dbTrackPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(188,75,39,0.0); } 50% { box-shadow: 0 0 0 3px rgba(188,75,39,0.10); } }
 .db-track-pulse { animation: dbTrackPulse 3.4s ease-in-out infinite; }
-.db-track-pulse:hover { animation: none; background: ${V.terraWash} !important; }
+.db-track-pulse:hover { animation: none; }
+.db-link-btn, .db-onetime-btn { transition: background .16s ease, border-color .16s ease, color .16s ease, transform .12s ease; }
+.db-link-btn:hover { background: ${V.terraWash} !important; border-color: rgba(188,75,39,.45) !important; }
+.db-onetime-btn:hover { background: ${V.sageWash} !important; border-color: ${V.sage} !important; color: ${V.sage} !important; }
+.db-link-btn:active, .db-onetime-btn:active { transform: scale(.95); }
+.db-otp-pop { animation: dbOtpPop .3s cubic-bezier(.2,.85,.3,1.2); }
+@keyframes dbOtpPop { 0% { transform: scale(.9); opacity: .45; } 60% { transform: scale(1.04); } 100% { transform: scale(1); opacity: 1; } }
 @keyframes dbTrackPopIn { from { opacity: 0; transform: translateY(-8px) scale(.97); } to { opacity: 1; transform: none; } }
 .db-track-pop-in { animation: dbTrackPopIn .28s cubic-bezier(.2,.8,.2,1) both; transform-origin: top right; }
 ` + CONTRACT_HUB_CSS + VENDOR_HUB_CSS;

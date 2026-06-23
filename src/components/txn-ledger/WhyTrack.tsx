@@ -10,7 +10,7 @@ import { X } from 'lucide-react';
 
 // ── Real worked examples ─────────────────────────────────────────────────────────
 const WO_CFG = {
-  subject: 'Uday Kumar', subtitle: 'ASM Elite', noun: 'work order',
+  subject: 'Uday Kumar', subtitle: 'ASM Elite', noun: 'contract',
   lanes: [
     { name: 'Internal flooring', paid: 10000, budget: 12000 },
     { name: 'External flooring', paid: 21500, budget: 22500 },

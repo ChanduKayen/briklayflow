@@ -43,7 +43,7 @@ const railChip = { background: 'rgba(247,243,236,0.09)', color: N.text, border: 
 
 // Underline the keyboard-shortcut letter inside a label (T-ransactions, etc.).
 const SHORTCUTS: Record<string, string> = {
-  '/ledger': 'T', '/work-orders': 'W', '/purchase-orders': 'P', '/logbook': 'L',
+  '/ledger': 'T', '/work-orders': 'C', '/purchase-orders': 'P', '/logbook': 'L',
 };
 function RailLabel({ label, route, active }: { label: string; route: string; active: boolean }) {
   const letter = SHORTCUTS[route];
@@ -219,7 +219,7 @@ export function BriklayDesktopNav({ session, collapsible = false }: { session: S
       items: ([
         can(role !== 'supervisor' && role !== 'accountant') && { route: '/purchase-orders', label: 'Purchase orders', icon: IconShoppingBag, badge: poUntallied, hasPanel: true },
         can(role !== 'supervisor' && role !== 'accountant') && { route: '/inward-register', label: 'Inward register', icon: IconLayoutGrid },
-        { route: '/work-orders', label: 'Work orders', icon: IconClipboardList, badge: woPending },
+        { route: '/work-orders', label: 'Contracts', icon: IconClipboardList, badge: woPending },
       ].filter(Boolean) as Item[]),
     },
     {
@@ -243,7 +243,7 @@ export function BriklayDesktopNav({ session, collapsible = false }: { session: S
   const projItems: Item[] = inProject ? [
     { route: projBase, label: 'Overview', icon: IconLayoutGrid },
     { route: `${projBase}/transactions`, label: 'Transactions', icon: IconArrowsExchange },
-    { route: `${projBase}/work-orders`, label: 'Work orders', icon: IconClipboardList },
+    { route: `${projBase}/work-orders`, label: 'Contracts', icon: IconClipboardList },
     { route: `${projBase}/purchase-orders`, label: 'Purchase orders', icon: IconShoppingBag },
     { route: `${projBase}/inventory`, label: 'Inventory', icon: IconBox },
     { route: `${projBase}/boqs`, label: 'BOQs', icon: IconListNumbers },

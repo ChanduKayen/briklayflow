@@ -81,7 +81,7 @@ export default function Orders({ session: _ }: { session: Session }) {
             className="relative z-10 flex-1 h-9 text-[13px] font-semibold rounded-lg"
             style={{ color: tab === t ? V.terraDeep : V.faint, transition: 'color .2s ease' }}
           >
-            {t === 'po' ? 'Purchase Orders' : 'Work Orders'}
+            {t === 'po' ? 'Purchase Orders' : 'Contracts'}
           </button>
         ))}
       </div>
@@ -141,7 +141,7 @@ export default function Orders({ session: _ }: { session: Session }) {
 
         {!loading && list.length === 0 && (
           <div className="py-16 text-center">
-            <p className="text-[14px]" style={{ color: V.faint }}>No {tab === 'po' ? 'purchase orders' : 'work orders'} yet</p>
+            <p className="text-[14px]" style={{ color: V.faint }}>No {tab === 'po' ? 'purchase orders' : 'contracts'} yet</p>
           </div>
         )}
       </div>

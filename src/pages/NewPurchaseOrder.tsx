@@ -3465,39 +3465,69 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
         {/* Search results dropdown */}
         {showVendorResults && vendorSearch.trim().length > 0 && (
           <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl border border-outline-variant/20 shadow-lg z-50 max-h-[260px] overflow-y-auto">
-            {filteredVendors.length > 0 ? (
-              filteredVendors.slice(0, 12).map((v: any) => (
-                <button
-                  key={v.stakeholder_id}
-                  type="button"
-                  onMouseDown={() => selectVendor(v)}
-                  className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-surface-container-low/60 transition-colors"
-                >
-                  <div className="w-8 h-8 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center text-[12px] font-bold shrink-0">
-                    {getInitials(v.name)}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-[14px] font-medium text-on-surface truncate">{v.name}</p>
-                    <p className="text-[12px] text-on-surface-variant/50 truncate">{v.category}</p>
-                  </div>
-                </button>
-              ))
-            ) : (
-              <button
-                type="button"
-                onMouseDown={() => {
-                  setNewVendorName(vendorSearch.trim());
-                  setShowVendorCreate(true);
-                  setShowVendorResults(false);
-                }}
-                className="w-full flex items-center gap-2 px-4 py-4 text-left text-primary hover:bg-primary/5"
-              >
-                <span className="material-symbols-outlined text-[18px]">add</span>
-                <span className="text-[14px] font-medium">
-                  {vendorSearch.trim() ? `Add "${vendorSearch.trim()}" as new vendor` : 'No vendors found'}
-                </span>
-              </button>
-            )}
+            {(() => {
+              const hasMatches = filteredVendors.length > 0;
+              const typed = vendorSearch.trim();
+              const openCreate = () => {
+                setNewVendorName(typed);
+                setShowVendorCreate(true);
+                setShowVendorResults(false);
+              };
+              return (
+                <>
+                  {/* Zero matches → create becomes the hero row, one tap to add a brand-new vendor */}
+                  {!hasMatches && (
+                    <button
+                      type="button"
+                      onMouseDown={openCreate}
+                      className="group w-full flex items-center gap-3 px-4 py-3.5 text-left bg-primary/[0.05] hover:bg-primary/[0.09] transition-colors"
+                    >
+                      <div className="w-9 h-9 rounded-full bg-primary text-on-primary flex items-center justify-center text-[13px] font-bold shrink-0 shadow-sm">
+                        {typed ? getInitials(typed) : '+'}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[14px] font-semibold text-on-surface truncate">
+                          {typed ? <>Create &ldquo;{typed}&rdquo;</> : 'Add a new vendor'}
+                        </p>
+                        <p className="text-[12px] text-on-surface-variant/55">New vendor · add category &amp; GSTIN</p>
+                      </div>
+                      <span className="material-symbols-outlined text-[18px] text-primary/60 group-hover:translate-x-0.5 transition-transform">arrow_forward</span>
+                    </button>
+                  )}
+
+                  {hasMatches && filteredVendors.slice(0, 12).map((v: any) => (
+                    <button
+                      key={v.stakeholder_id}
+                      type="button"
+                      onMouseDown={() => selectVendor(v)}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-surface-container-low/60 transition-colors border-b border-outline-variant/[0.06] last:border-0"
+                    >
+                      <div className="w-8 h-8 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center text-[12px] font-bold shrink-0">
+                        {getInitials(v.name)}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[14px] font-medium text-on-surface truncate">{v.name}</p>
+                        <p className="text-[12px] text-on-surface-variant/50 truncate">{v.category}</p>
+                      </div>
+                    </button>
+                  ))}
+
+                  {/* Subtle add footer — only when matches exist (the hero covers the empty case) */}
+                  {hasMatches && (
+                    <button
+                      type="button"
+                      onMouseDown={openCreate}
+                      className="w-full flex items-center gap-2 px-4 py-3 text-left text-primary hover:bg-primary/[0.04] border-t border-outline-variant/15"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">add</span>
+                      <span className="text-[13px] font-medium">
+                        {typed ? <>Not listed? Add &ldquo;{typed}&rdquo; as new vendor</> : 'Add a new vendor'}
+                      </span>
+                    </button>
+                  )}
+                </>
+              );
+            })()}
           </div>
         )}
       </div>

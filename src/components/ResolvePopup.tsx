@@ -1,29 +1,20 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import type { RoughEntry } from '../types';
 import { useSnackbar } from './Snackbar';
 import { useOrgId } from '../lib/auth/AuthProvider';
-import { CostCodePicker } from './CostCodePicker';
 import { ImageLightbox } from './ImageLightbox';
+import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function genTxnId() {
-  return `TXN-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
-}
-
-type Confidence = 'HIGH' | 'MEDIUM' | 'LOW' | null;
 type PayeeState = 'A' | 'B' | 'C' | 'confirmed';
 
-function ConfBadge({ c, label }: { c: Confidence; label?: string }) {
-  if (!c) return <span className="text-[11px] text-red-500 font-semibold">✗ {label || 'Required'}</span>;
-  if (c === 'HIGH') return <span className="text-[11px] text-emerald-600">✓</span>;
-  if (c === 'MEDIUM') return <span className="text-[11px] text-amber-500 font-semibold">⚠ Verify</span>;
-  return <span className="text-[11px] text-red-500 font-semibold">✗ Check</span>;
-}
+// Names read better title-cased — capitalise the first letter of each word as the
+// owner types, without fighting intentional caps elsewhere (e.g. "McRavi" stays).
+const capitalizeWords = (v: string) => v.replace(/(^|\s)([a-z])/g, (_, sp, c) => sp + c.toUpperCase());
 
 function FieldRow({
   icon, label, children, required, missing,
@@ -32,60 +23,18 @@ function FieldRow({
   required?: boolean; missing?: boolean;
 }) {
   return (
-    <div className={`flex items-start gap-3 py-2.5 border-b border-outline-variant/[0.06] last:border-0 min-h-[44px] ${missing ? 'bg-red-50/40' : ''}`}>
-      <span className={`material-symbols-outlined text-[18px] mt-0.5 shrink-0 ${missing ? 'text-red-400' : 'text-on-surface-variant/35'}`}>
+    <div className="flex items-start gap-3 py-2.5 border-b border-outline-variant/[0.06] last:border-0 min-h-[44px]">
+      <span className={`material-symbols-outlined text-[18px] mt-0.5 shrink-0 ${missing ? 'text-amber-500/80' : 'text-on-surface-variant/35'}`}>
         {icon}
       </span>
       <div className="w-20 shrink-0 pt-0.5">
-        <span className={`text-[11px] font-medium ${missing ? 'text-red-500' : 'text-on-surface-variant/55'}`}>
-          {label}{required && <span className="text-red-500 ml-0.5">*</span>}
+        <span className={`text-[11px] font-medium ${missing ? 'text-amber-600' : 'text-on-surface-variant/55'}`}>
+          {label}{required && <span className="text-amber-500/70 ml-0.5">*</span>}
         </span>
       </div>
       <div className="flex-1 min-w-0">{children}</div>
     </div>
   );
-}
-
-// ── Cost code suggestion ──────────────────────────────────────────────────────
-
-function suggestCostCode(extracted: any): { code: string; name: string } | null {
-  const desc = (extracted?.description_raw || extracted?.category_name || '').toLowerCase();
-  const type = extracted?.transaction_type || '';
-
-  if (type === 'Worker Payment') {
-    if (/plaster|plastering/i.test(desc)) return { code: 'WRK-06-01', name: 'Internal wall plastering' };
-    if (/tile|tiling|floor/i.test(desc))  return { code: 'WRK-07-01', name: 'Ceramic and vitrified tile laying' };
-    if (/electr|wiring|wire/i.test(desc)) return { code: 'WRK-15-01', name: 'Conduit laying (concealed)' };
-    if (/plumb|pipe/i.test(desc))         return { code: 'WRK-13-01', name: 'Water supply rough-in' };
-    if (/paint/i.test(desc))              return { code: 'WRK-10-01', name: 'Interior wall and ceiling painting' };
-    if (/mason|brick|block/i.test(desc))  return { code: 'WRK-04-01', name: 'Brick masonry' };
-    if (/carpenter|wood|door/i.test(desc))return { code: 'WRK-11-02', name: 'Finished carpentry' };
-    if (/steel|rod|bar|rebar/i.test(desc))return { code: 'WRK-03-01', name: 'Reinforcement bar bending' };
-    if (/concrete|slab|column|beam/i.test(desc)) return { code: 'WRK-03-04', name: 'RMC placement and compaction' };
-    if (/false ceil|ceiling/i.test(desc)) return { code: 'WRK-08-01', name: 'Gypsum board false ceiling' };
-    return { code: 'WRK-22-01', name: 'Site labour (general)' };
-  }
-  if (type === 'Material Purchase') {
-    if (/cement/i.test(desc))             return { code: 'MAT-04-01', name: 'OPC/PPC cement' };
-    if (/sand/i.test(desc))               return { code: 'MAT-05-01', name: 'River sand / M-sand' };
-    if (/aggregate|jelly|gravel/i.test(desc)) return { code: 'MAT-05-02', name: 'Coarse aggregate' };
-    if (/steel|tmt|rod|bar/i.test(desc))  return { code: 'MAT-06-01', name: 'TMT steel bars' };
-    if (/tile/i.test(desc))               return { code: 'MAT-09-02', name: 'Vitrified tiles' };
-    if (/paint/i.test(desc))              return { code: 'MAT-11-01', name: 'Interior emulsion paint' };
-    if (/wire|cable|conduit/i.test(desc)) return { code: 'MAT-16-01', name: 'Cables and wires' };
-    if (/pipe|plumb/i.test(desc))         return { code: 'MAT-14-01', name: 'CPVC/UPVC pipes' };
-    if (/brick|block/i.test(desc))        return { code: 'MAT-05-04', name: 'Red clay bricks' };
-    if (/marble/i.test(desc))             return { code: 'MAT-09-04', name: 'Marble slabs and tiles' };
-    if (/granite/i.test(desc))            return { code: 'MAT-09-05', name: 'Granite slabs and tiles' };
-    return null;
-  }
-  if (type === 'General Expense') {
-    if (/diesel|fuel/i.test(desc))           return { code: 'WRK-22-07', name: 'Diesel and fuel for equipment' };
-    if (/transport|lorry|vehicle/i.test(desc)) return { code: 'OHD-005', name: 'Transport and logistics' };
-    if (/tool/i.test(desc))                  return { code: 'MAT-23-01', name: 'Hand tools' };
-    return { code: 'OHD-003', name: 'Site utilities' };
-  }
-  return null;
 }
 
 // ── Payee fuzzy sort ──────────────────────────────────────────────────────────
@@ -122,9 +71,10 @@ function CreateStakeholderForm({
   const qc = useQueryClient();
   const { show: showSnackbar } = useSnackbar();
   const orgId = useOrgId();
-  const [name, setName] = useState(defaultName);
+  const [name, setName] = useState(capitalizeWords(defaultName));
   const [type, setType] = useState<'Worker' | 'Vendor' | 'Client'>('Worker');
   const [category, setCategory] = useState('');
+  const [categoryOther, setCategoryOther] = useState('');
   const [phone, setPhone] = useState('');
   const [creating, setCreating] = useState(false);
 
@@ -133,11 +83,12 @@ function CreateStakeholderForm({
     setCreating(true);
     try {
       const newId = `STK-${Math.floor(1000 + Math.random() * 9000)}`;
+      const trade = category === OTHER_TRADE ? (categoryOther.trim() || 'Other') : category;
       const { data, error } = await supabase.from('stakeholders').insert([{
         stakeholder_id: newId,
         name: name.trim(),
         type,
-        category: category.trim() || type,
+        category: trade || type,
         contact: phone.trim() || null,
         org_id: orgId,
       }]).select().single();
@@ -157,27 +108,46 @@ function CreateStakeholderForm({
       <input
         type="text"
         value={name}
-        onChange={(e) => setName(e.target.value)}
+        onChange={(e) => setName(capitalizeWords(e.target.value))}
         placeholder="Full name"
         autoFocus
+        autoCapitalize="words"
         className="w-full text-[13px] px-2.5 py-1.5 rounded-lg border border-outline-variant/30 bg-white outline-none focus:border-primary transition-colors"
       />
       <div className="flex gap-1.5">
         {(['Worker', 'Vendor', 'Client'] as const).map(t => (
-          <button key={t} type="button" onClick={() => setType(t)}
+          <button key={t} type="button" onClick={() => { setType(t); setCategory(''); setCategoryOther(''); }}
             className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors ${
               type === t ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant hover:bg-surface-container-high'
             }`}
           >{t}</button>
         ))}
       </div>
-      <input
-        type="text"
-        value={category}
-        onChange={(e) => setCategory(e.target.value)}
-        placeholder="Trade / category (e.g. Mason, Cement Dealer)"
-        className="w-full text-[13px] px-2.5 py-1.5 rounded-lg border border-outline-variant/30 bg-white outline-none focus:border-primary transition-colors"
-      />
+      {type !== 'Client' && (
+        <select
+          value={category}
+          onChange={(e) => { setCategory(e.target.value); setCategoryOther(''); }}
+          className="w-full text-[13px] px-2.5 py-1.5 rounded-lg border border-outline-variant/30 bg-white outline-none focus:border-primary transition-colors appearance-none"
+          style={{ color: category ? undefined : '#9A9186' }}
+        >
+          <option value="">Trade / category…</option>
+          {(type === 'Worker' ? WORKER_TRADE_GROUPS : VENDOR_TRADE_GROUPS).map(g => (
+            <optgroup key={g.group} label={g.group}>
+              {g.trades.map(tr => <option key={tr} value={tr}>{tr}</option>)}
+            </optgroup>
+          ))}
+        </select>
+      )}
+      {type !== 'Client' && category === OTHER_TRADE && (
+        <input
+          type="text"
+          value={categoryOther}
+          onChange={(e) => setCategoryOther(e.target.value)}
+          autoFocus
+          placeholder="Specify trade…"
+          className="w-full text-[13px] px-2.5 py-1.5 rounded-lg border border-outline-variant/30 bg-white outline-none focus:border-primary transition-colors"
+        />
+      )}
       <input
         type="tel"
         value={phone}
@@ -213,10 +183,8 @@ interface Props {
 }
 
 export function ResolvePopup({ entry, onClose, onUpdated }: Props) {
-  const navigate = useNavigate();
   const qc = useQueryClient();
   const { show: showSnackbar } = useSnackbar();
-  const orgId = useOrgId();
 
   const ai = entry.ai_extracted;
 
@@ -229,15 +197,6 @@ export function ResolvePopup({ entry, onClose, onUpdated }: Props) {
   const [description, setDescription] = useState(ai.description || ai.description_raw || '');
   const [projectId, setProjectId] = useState(ai.project_id || '');
   const [mode, setMode] = useState<'Cash' | 'NEFT' | 'UPI' | 'Cheque'>(ai.mode || 'Cash');
-  const [categoryCode, setCategoryCode] = useState(ai.category_code || '');
-  const [date, setDate] = useState(() => {
-    if (ai.date) {
-      const d = new Date(ai.date);
-      if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
-    }
-    return new Date().toISOString().split('T')[0];
-  });
-  const [notes, setNotes] = useState('');
   const [showDismissConfirm, setShowDismissConfirm] = useState(false);
   const [posting, setPosting] = useState(false);
 
@@ -284,18 +243,6 @@ export function ResolvePopup({ entry, onClose, onUpdated }: Props) {
     },
   });
 
-  const { data: workOrders = [] } = useQuery({
-    queryKey: ['work_orders_active'],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('work_orders')
-        .select('wo_id, project_id, stakeholder_id, scope_of_work, status')
-        .not('status', 'in', '("Cancelled","Settled")');
-      return (data ?? []) as any[];
-    },
-    enabled: !!projectId,
-  });
-
   // ── Sync payee after stakeholders load ─────────────────────────────────────
   const hasPreselected = useRef(false);
   useEffect(() => {
@@ -325,9 +272,6 @@ export function ResolvePopup({ entry, onClose, onUpdated }: Props) {
   const filteredPayees = stakeholders.filter(
     (s) => s.name.toLowerCase().includes(payeeSearch.toLowerCase())
   );
-  const relatedWOs = workOrders.filter(
-    (wo) => wo.project_id === projectId && (!payeeId || wo.stakeholder_id === payeeId)
-  );
 
   const mandatoryFilled = !!payeeId && !!amount && Number(amount) > 0 && !!description.trim() && !!projectId;
   const missingPayee = !payeeId;
@@ -337,57 +281,35 @@ export function ResolvePopup({ entry, onClose, onUpdated }: Props) {
   const payeeUnmatched = !payeeId && !!(ai.payee_unmatched || ai.payee_name || ai.payee_raw);
   const projectUnmatched = !projectId && !!ai.project_unmatched;
 
-  // ── Post action ────────────────────────────────────────────────────────────
-  const handlePost = async () => {
-    if (!mandatoryFilled || posting) return;
+  // ── Save action — Edit just records the owner's corrections back onto the entry so
+  // the Day Book card reflects them. It does NOT file the transaction; that happens
+  // when the owner taps Approve on the card. Status stays PENDING (still in review).
+  const handleSave = async () => {
+    if (posting) return;
     setPosting(true);
     try {
-      const newTxnId = genTxnId();
-      const payload = {
-        txn_id: newTxnId,
-        stakeholder_id: payeeId,
-        date,
-        total_amount: Number(amount),
-        payment_mode: mode,
-        category: categoryCode || null,
-        remarks: [description.trim(), notes.trim()].filter(Boolean).join(' · '),
-        bill_doc_url: null,
-        proof_document_url: entry.raw_image_url || null,
-        ai_flag_status: 'Clean',
-        ai_flag_data: {},
-        org_id: orgId,
+      const projectName = projects.find((p) => p.project_id === projectId)?.name ?? ai.project_name ?? null;
+      const nextAi = {
+        ...ai,
+        payee_id: payeeId || null,
+        payee_name: payeeName || null,
+        amount: amount === '' ? null : Number(amount),
+        project_id: projectId || null,
+        project_name: projectName,
+        description: description.trim(),
+        mode,
       };
-      const allocations = [{ project_id: projectId, order_type: null, order_ref: null, milestone_id: null, allocated_amount: Number(amount) }];
-
-      const { error: rpcErr } = await supabase.rpc('insert_transaction_with_allocations', {
-        p_txn: payload,
-        p_allocations: allocations,
-      });
-      if (rpcErr) throw rpcErr;
-
-      await supabase.from('transactions').update({
-        source_re_id: entry.id,
-        proof_document_url: entry.raw_image_url || null,
-      }).eq('txn_id', newTxnId);
-
       const { data: updatedEntry } = await supabase
         .from('rough_entries')
-        .update({ status: 'POSTED', resolved_txn_id: newTxnId })
+        .update({ ai_extracted: nextAi })
         .eq('id', entry.id)
         .select().single();
 
       qc.invalidateQueries({ queryKey: ['rough_entries'] });
-      qc.invalidateQueries({ queryKey: ['inbox_badge'] });
-      qc.invalidateQueries({ queryKey: ['ledger'] });
-      qc.invalidateQueries({ queryKey: ['dashboard_metrics'] });
-
       onUpdated(updatedEntry as RoughEntry);
       onClose();
-      showSnackbar(`${newTxnId} posted ✓`, {
-        action: { label: 'View', onClick: () => navigate(`/ledger/${newTxnId}`) },
-      });
     } catch (err: any) {
-      showSnackbar(err.message || 'Failed to post', { type: 'error' });
+      showSnackbar(err.message || 'Failed to save', { type: 'error' });
     } finally {
       setPosting(false);
     }
@@ -429,16 +351,12 @@ export function ResolvePopup({ entry, onClose, onUpdated }: Props) {
     description, setDescription,
     projectId, setProjectId, projectRef, projects,
     mode, setMode,
-    categoryCode, setCategoryCode,
-    relatedWOs,
-    date, setDate,
-    notes, setNotes,
     isWhatsApp,
     missingPayee, missingAmount, missingDescription, missingProject,
     payeeUnmatched, projectUnmatched,
     mandatoryFilled, posting,
     showDismissConfirm, setShowDismissConfirm,
-    onClose, handlePost, handleDismiss,
+    onClose, handleSave, handleDismiss,
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -514,16 +432,12 @@ interface ContentProps {
   projectId: string; setProjectId: (v: string) => void; projectRef: React.RefObject<HTMLSelectElement | null>;
   projects: any[];
   mode: 'Cash' | 'NEFT' | 'UPI' | 'Cheque'; setMode: (v: 'Cash' | 'NEFT' | 'UPI' | 'Cheque') => void;
-  categoryCode: string; setCategoryCode: (v: string) => void;
-  relatedWOs: any[];
-  date: string; setDate: (v: string) => void;
-  notes: string; setNotes: (v: string) => void;
   isWhatsApp: boolean;
   missingPayee: boolean; missingAmount: boolean; missingDescription: boolean; missingProject: boolean;
   payeeUnmatched: boolean; projectUnmatched: boolean;
   mandatoryFilled: boolean; posting: boolean;
   showDismissConfirm: boolean; setShowDismissConfirm: (v: boolean) => void;
-  onClose: () => void; handlePost: () => void; handleDismiss: () => void;
+  onClose: () => void; handleSave: () => void; handleDismiss: () => void;
 }
 
 function PopupContents({
@@ -534,16 +448,12 @@ function PopupContents({
   description, setDescription,
   projectId, setProjectId, projectRef, projects,
   mode, setMode,
-  categoryCode, setCategoryCode,
-  relatedWOs,
-  date, setDate,
-  notes, setNotes,
   isWhatsApp,
   missingPayee, missingAmount, missingDescription, missingProject,
   payeeUnmatched, projectUnmatched,
   mandatoryFilled, posting,
   showDismissConfirm, setShowDismissConfirm,
-  onClose, handlePost, handleDismiss,
+  onClose, handleSave, handleDismiss,
 }: ContentProps) {
   const payeeDropRef    = useRef<HTMLDivElement>(null);
   const [showCreateStkForm, setShowCreateStkForm] = useState(false);
@@ -551,11 +461,6 @@ function PopupContents({
   const ai = entry.ai_extracted;
 
   // Confidence values
-  const payeeConf  = ai.payee_confidence  ?? ai.confidence?.payee  ?? null;
-  const amountConf = ai.amount_confidence ?? ai.confidence?.amount ?? null;
-  const descConf   = ai.description_confidence ?? ai.confidence?.description ?? null;
-  const projConf   = ai.project_confidence ?? ai.confidence?.project ?? null;
-  const overallConf = ai.overall_confidence ?? ai.confidence?.overall ?? null;
 
   // ── Payee state machine ────────────────────────────────────────────────────
   // A = confirmed HIGH (auto-accepted)
@@ -569,20 +474,6 @@ function PopupContents({
   });
 
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
-
-  // ── Cost code suggestion ───────────────────────────────────────────────────
-  const suggestedCode = suggestCostCode(ai);
-  const [costCodeSuggested, setCostCodeSuggested] = useState(
-    !ai.category_code && !!suggestedCode
-  );
-
-  // Confidence banner
-  const bannerState = (() => {
-    if (!ai.processed) return null;
-    if (payeeUnmatched || overallConf === 'LOW') return 'error' as const;
-    if (projectUnmatched || overallConf === 'MEDIUM') return 'warn' as const;
-    return 'ok' as const;
-  })();
 
   // Close payee dropdown on outside click
   useEffect(() => {
@@ -609,6 +500,8 @@ function PopupContents({
   const searchedPayees = payeeSearch
     ? sortedPayees.filter((s: any) => s.name.toLowerCase().includes(payeeSearch.toLowerCase()))
     : sortedPayees;
+  // The name the owner typed (or what the AI heard) — used to personalise the "Add …" CTA.
+  const typedName = (payeeSearch.trim() || ai.payee_raw || '').trim();
 
   return (
     <>
@@ -652,45 +545,16 @@ function PopupContents({
         ) : null}
       </div>
 
-      {/* ── Confidence banner ── */}
-      {bannerState && (
-        <div className={`shrink-0 px-4 py-2 border-b border-outline-variant/[0.06] flex items-center gap-2 ${
-          bannerState === 'error' ? 'bg-red-50/80' :
-          bannerState === 'warn'  ? 'bg-amber-50/80' :
-          'bg-emerald-50/80'
-        }`}>
-          <span className={`material-symbols-outlined text-[14px] ${
-            bannerState === 'error' ? 'text-red-600' :
-            bannerState === 'warn'  ? 'text-amber-600' :
-            'text-emerald-600'
-          }`} style={{ fontVariationSettings: "'FILL' 1" }}>
-            {bannerState === 'error' ? 'error' : bannerState === 'warn' ? 'warning' : 'check_circle'}
-          </span>
-          <span className={`text-[11px] font-medium ${
-            bannerState === 'error' ? 'text-red-700' :
-            bannerState === 'warn'  ? 'text-amber-700' :
-            'text-emerald-700'
-          }`}>
-            {bannerState === 'error'
-              ? (payeeUnmatched ? 'Payee not matched — review required' : 'Low confidence — review carefully')
-              : bannerState === 'warn'
-              ? (projectUnmatched ? 'Project not identified — assign manually' : 'Some fields need review')
-              : 'All fields verified by AI ✓'}
-          </span>
-        </div>
-      )}
-
       {/* ── Fields ── */}
-      <div className="flex-1 overflow-y-auto px-4 py-2">
+      <div className="px-4 py-1.5">
 
         {/* 1. Payee */}
         <FieldRow icon="person" label="Payee" required missing={missingPayee && payeeState !== 'B'}>
 
           {/* STATE A / confirmed — green ✓ */}
           {(payeeState === 'A' || payeeState === 'confirmed') && (
-            <div className="flex items-center justify-between py-0.5">
+            <div className="flex items-center justify-between py-1.5 px-2.5 -mx-0.5 rounded-lg border border-emerald-300/45 bg-emerald-50/25">
               <div className="flex items-center gap-2 min-w-0">
-                <span className="text-emerald-600 text-[15px] font-bold shrink-0">✓</span>
                 <div className="min-w-0">
                   <span className="text-[13px] font-semibold text-on-surface">{payeeName}</span>
                   {(() => {
@@ -779,7 +643,7 @@ function PopupContents({
                     placeholder="Search name…"
                     className={`w-full text-[13px] px-2.5 py-1.5 pr-8 rounded-lg border outline-none transition-colors ${
                       missingPayee
-                        ? 'border-red-300 bg-red-50'
+                        ? 'border-amber-300/60 bg-amber-50/40'
                         : 'border-outline-variant/30 bg-surface-container-lowest/60'
                     }`}
                     autoComplete="off"
@@ -789,12 +653,49 @@ function PopupContents({
                   </span>
                 </div>
 
-                {showPayeeDrop && (
+                {showPayeeDrop && (() => {
                   /* stopPropagation on mousedown prevents the hidden PopupContents instance's
                      document mousedown handler from closing this dropdown before onClick fires */
-                  <div className="absolute left-0 right-0 top-full mt-1 z-10 bg-white border border-black/[0.08] rounded-xl shadow-lg max-h-48 overflow-y-auto"
+                  const hasMatches = searchedPayees.length > 0;
+                  const openCreate = (e: React.MouseEvent) => {
+                    e.preventDefault();
+                    setShowPayeeDrop(false);
+                    setShowCreateStkForm(true);
+                  };
+                  return (
+                  <div className="absolute left-0 right-0 top-full mt-1 z-10 bg-white border border-black/[0.08] rounded-xl shadow-lg max-h-56 overflow-y-auto"
                        onMouseDown={(e) => e.stopPropagation()}>
-                    {searchedPayees.slice(0, 8).map((s: any) => {
+
+                    {/* ── Zero matches → the create action is promoted to the top as the hero.
+                         A brand-new name is one tap: the form opens pre-filled with what was typed. ── */}
+                    {!hasMatches && (
+                      <button type="button" onMouseDown={openCreate}
+                        className="group w-full flex items-center gap-3 px-3 py-3 text-left bg-primary/[0.05] hover:bg-primary/[0.09] transition-colors"
+                      >
+                        <span className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-[15px] font-bold bg-primary text-on-primary shadow-sm">
+                          {typedName ? typedName[0].toUpperCase() : '+'}
+                        </span>
+                        <span className="flex-1 min-w-0">
+                          {typedName ? (
+                            <>
+                              <p className="text-[13px] font-semibold text-on-surface truncate">Create &ldquo;{typedName}&rdquo;</p>
+                              <p className="text-[11px] text-on-surface-variant/55">New contact · add type &amp; phone</p>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-[13px] font-semibold text-on-surface">Add a new contact</p>
+                              <p className="text-[11px] text-on-surface-variant/55">No one to match — create one</p>
+                            </>
+                          )}
+                        </span>
+                        <span className="material-symbols-outlined text-[18px] text-primary/60 group-hover:translate-x-0.5 transition-transform">
+                          arrow_forward
+                        </span>
+                      </button>
+                    )}
+
+                    {/* ── Matches, when present ── */}
+                    {hasMatches && searchedPayees.slice(0, 8).map((s: any) => {
                       const score = payeeSimilarityScore(s.name, ai.payee_raw || '');
                       const showHint = ai.payee_raw && score > 30 && s.name.toLowerCase() !== (ai.payee_raw || '').toLowerCase();
                       return (
@@ -814,18 +715,27 @@ function PopupContents({
                         </button>
                       );
                     })}
-                    {searchedPayees.length === 0 && (
-                      <p className="px-3 py-3 text-[12px] text-on-surface-variant/50 text-center">No matches</p>
+
+                    {/* ── Subtle "add" footer — only when matches exist (the hero covers the empty case) ── */}
+                    {hasMatches && (
+                      <button type="button" onMouseDown={openCreate}
+                        className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left hover:bg-primary/[0.04] border-t border-outline-variant/[0.06]"
+                      >
+                        <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 text-[12px] font-bold bg-primary/10 text-primary">
+                          {typedName ? typedName[0].toUpperCase() : '+'}
+                        </span>
+                        <span className="flex-1 min-w-0 text-[12px] text-on-surface-variant">
+                          {typedName ? (
+                            <>Not here? Add <span className="font-semibold text-on-surface">{typedName}</span> <span className="text-on-surface-variant/45">· new contact</span></>
+                          ) : (
+                            <span className="font-semibold text-primary">Add a new contact</span>
+                          )}
+                        </span>
+                      </button>
                     )}
-                    <button type="button"
-                      onMouseDown={(e) => { e.preventDefault(); setShowPayeeDrop(false); setShowCreateStkForm(true); }}
-                      className="w-full flex items-center gap-1.5 px-3 py-2.5 text-[12px] text-primary font-semibold hover:bg-primary/[0.04] border-t border-outline-variant/[0.06]"
-                    >
-                      <span className="material-symbols-outlined text-[14px]">add_circle</span>
-                      Add new stakeholder
-                    </button>
                   </div>
-                )}
+                  );
+                })()}
               </div>
 
               {showCreateStkForm && (
@@ -838,9 +748,6 @@ function PopupContents({
             </>
           )}
 
-          <div className="mt-1">
-            <ConfBadge c={!payeeId ? null : payeeConf || 'HIGH'} label="Required" />
-          </div>
         </FieldRow>
 
         {/* 2. Amount */}
@@ -855,13 +762,12 @@ function PopupContents({
               placeholder="0"
               className={`w-full text-[14px] font-bold font-data-mono px-2 py-1 rounded-lg border outline-none transition-colors ${
                 missingAmount
-                  ? 'border-red-300 bg-red-50 text-red-600'
+                  ? 'border-amber-300/60 bg-amber-50/40 text-on-surface'
+                  : amount
+                  ? 'border-emerald-300/45 bg-emerald-50/25 text-on-surface'
                   : 'border-outline-variant/30 bg-surface-container-lowest/60 text-on-surface'
               }`}
             />
-          </div>
-          <div className="mt-1">
-            <ConfBadge c={!amount ? null : amountConf || 'HIGH'} label="Required" />
           </div>
         </FieldRow>
 
@@ -874,13 +780,12 @@ function PopupContents({
             placeholder="What was this payment for?"
             className={`w-full text-[13px] px-2.5 py-1.5 rounded-lg border outline-none transition-colors ${
               missingDescription
-                ? 'border-red-300 bg-red-50'
+                ? 'border-amber-300/60 bg-amber-50/40'
+                : description.trim()
+                ? 'border-emerald-300/45 bg-emerald-50/25'
                 : 'border-outline-variant/30 bg-surface-container-lowest/60'
             }`}
           />
-          <div className="mt-1">
-            <ConfBadge c={!description ? null : descConf || 'HIGH'} label="Required" />
-          </div>
         </FieldRow>
 
         {/* 4. Project */}
@@ -891,9 +796,9 @@ function PopupContents({
             onChange={(e) => setProjectId(e.target.value)}
             className={`w-full text-[13px] px-2.5 py-1.5 rounded-lg border outline-none transition-colors ${
               missingProject && !projectUnmatched
-                ? 'border-red-400 bg-red-50 ring-1 ring-red-300'
+                ? 'border-amber-300/70 bg-amber-50/40'
                 : projectId
-                ? 'border-emerald-300 bg-emerald-50/30'
+                ? 'border-emerald-300/45 bg-emerald-50/25'
                 : projectUnmatched
                 ? 'border-amber-300 bg-amber-50/30'
                 : 'border-outline-variant/30 bg-surface-container-lowest/60'
@@ -924,12 +829,9 @@ function PopupContents({
             </div>
           )}
 
-          <div className="mt-1">
-            {isWhatsApp && !projectId && !projectUnmatched
-              ? <span className="text-[11px] text-red-500 font-semibold">✗ Required — WhatsApp entries never have a project</span>
-              : <ConfBadge c={!projectId ? null : projConf || 'HIGH'} label="Required" />
-            }
-          </div>
+          {isWhatsApp && !projectId && !projectUnmatched && (
+            <div className="mt-1.5"><span className="inline-flex items-center gap-1 text-[11px] text-amber-600"><span className="w-1.5 h-1.5 rounded-full bg-amber-500/80" /> Pick a project</span></div>
+          )}
         </FieldRow>
 
         {/* 5. Mode */}
@@ -946,86 +848,6 @@ function PopupContents({
               >{m}</button>
             ))}
           </div>
-          <div className="mt-1"><ConfBadge c="HIGH" /></div>
-        </FieldRow>
-
-        {/* 6. Category / Cost Code */}
-        <FieldRow icon="sell" label="Category">
-          {costCodeSuggested && suggestedCode ? (
-            /* 💡 Client-side suggestion — needs confirmation */
-            <div className="p-2.5 bg-blue-50/70 border border-blue-200 rounded-xl">
-              <div className="flex items-center gap-1.5 mb-1.5">
-                <span className="text-[13px]">💡</span>
-                <span className="text-[11px] font-semibold text-blue-700">Suggested</span>
-                <span className="text-[10px] text-on-surface-variant/40 ml-1">· based on description</span>
-              </div>
-              <p className="text-[13px] font-semibold text-on-surface font-data-mono">{suggestedCode.code}</p>
-              <p className="text-[12px] text-on-surface-variant/60 mb-2.5">{suggestedCode.name}</p>
-              <div className="flex gap-2">
-                <button type="button"
-                  onClick={() => {
-                    setCategoryCode(suggestedCode.code);
-                    setCostCodeSuggested(false);
-                  }}
-                  className="flex-1 py-1.5 rounded-lg bg-primary text-on-primary text-[12px] font-semibold hover:opacity-90 transition-colors"
-                >
-                  ✓ Use this
-                </button>
-                <button type="button"
-                  onClick={() => setCostCodeSuggested(false)}
-                  className="flex-1 py-1.5 rounded-lg border border-outline-variant/30 text-[12px] font-semibold text-on-surface-variant hover:bg-surface-container transition-colors"
-                >
-                  Pick different
-                </button>
-              </div>
-            </div>
-          ) : (
-            /* CostCodePicker handles both empty and selected-chip display */
-            <CostCodePicker
-              value={categoryCode}
-              onChange={setCategoryCode}
-              defaultType={ai.transaction_type === 'Worker Payment' ? 'WRK' : 'MAT'}
-            />
-          )}
-        </FieldRow>
-
-        {/* 7. Work Order */}
-        {relatedWOs.length > 0 && (
-          <FieldRow icon="description" label="Work Order">
-            <select
-              value=""
-              className="w-full text-[13px] px-2.5 py-1.5 rounded-lg border border-outline-variant/30 bg-surface-container-lowest/60 outline-none"
-            >
-              <option value="">None / Unlinked</option>
-              {relatedWOs.map((wo) => (
-                <option key={wo.wo_id} value={wo.wo_id}>
-                  {wo.wo_id} · {wo.scope_of_work?.slice(0, 30)}
-                </option>
-              ))}
-            </select>
-          </FieldRow>
-        )}
-
-        {/* 8. Date */}
-        <FieldRow icon="calendar_today" label="Date">
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="text-[13px] px-2.5 py-1.5 rounded-lg border border-outline-variant/30 bg-surface-container-lowest/60 outline-none"
-          />
-          <div className="mt-1"><ConfBadge c="HIGH" /></div>
-        </FieldRow>
-
-        {/* 9. Notes */}
-        <FieldRow icon="chat_bubble" label="Notes">
-          <input
-            type="text"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="Add a note (optional)"
-            className="w-full text-[13px] px-2.5 py-1.5 rounded-lg border border-outline-variant/30 bg-surface-container-lowest/60 outline-none"
-          />
         </FieldRow>
       </div>
 
@@ -1035,10 +857,7 @@ function PopupContents({
 
         {!mandatoryFilled && (
           <p className="text-[12px] text-amber-600 text-center mb-2.5">
-            {missingProject ? 'Select a project to post' :
-             missingPayee   ? (payeeUnmatched ? 'Match or create a payee to post' : 'Select a payee to post') :
-             missingAmount  ? 'Enter an amount to post' :
-             'Add a description to post'}
+            Some details still need confirming — you can save and finish on the card.
           </p>
         )}
 
@@ -1066,21 +885,19 @@ function PopupContents({
             Dismiss
           </button>
           <button
-            onClick={handlePost}
-            disabled={!mandatoryFilled || posting}
+            onClick={handleSave}
+            disabled={posting}
             className={`flex-1 flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-[14px] font-semibold transition-all ${
-              mandatoryFilled && !posting
-                ? 'bg-[#C45B39] text-white hover:opacity-90 shadow-sm'
-                : 'bg-surface-container text-on-surface-variant/40 cursor-not-allowed'
+              posting ? 'bg-surface-container text-on-surface-variant/40 cursor-not-allowed' : 'bg-[#C45B39] text-white hover:opacity-90 shadow-sm'
             }`}
           >
             {posting ? (
               <>
                 <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                Posting…
+                Saving…
               </>
             ) : (
-              <>Post Transaction →</>
+              <>Done</>
             )}
           </button>
         </div>

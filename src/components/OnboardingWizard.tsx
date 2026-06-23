@@ -24,7 +24,7 @@ const SC_KEYS = ['t', 'p', 'w', 'l', '/'] as const
 const SC_ITEMS = [
   { key: 'T', action: 'New transaction',    hint: 'Most common action on site' },
   { key: 'P', action: 'New purchase order', hint: 'Raise a PO in seconds' },
-  { key: 'W', action: 'New work order',     hint: 'Assign work to contractors' },
+  { key: 'W', action: 'New contract',     hint: 'Assign work to contractors' },
   { key: 'L', action: 'Open logbook',       hint: 'All site entries in one view' },
   { key: '/', action: 'New entry',          hint: 'Pick what to create' },
 ]
@@ -511,7 +511,7 @@ function OrdersStep({ onNext }: { onNext: () => void }) {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 8 }}>
             <IconHammer size={13} color="#45464d" />
-            <span style={{ fontSize: 11, color: '#45464d' }}>Work order</span>
+            <span style={{ fontSize: 11, color: '#45464d' }}>Contract</span>
           </div>
           <p style={{ fontSize: 13, fontWeight: 500, color: '#0b1c30', margin: '0 0 4px' }}>What gets done</p>
           <p style={{ fontSize: 11, color: '#45464d', margin: '0 0 10px', lineHeight: 1.5 }}>

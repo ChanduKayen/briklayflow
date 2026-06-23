@@ -4,7 +4,7 @@ import { IconReceipt2, IconFileInvoice, IconHammer, IconUserPlus } from '@tabler
 
 const OPTIONS = [
   { icon: IconFileInvoice, label: 'New Purchase Order', path: '/purchase-orders/new', highlight: false },
-  { icon: IconHammer,      label: 'New Work Order',     path: '/work-orders/new',     highlight: false },
+  { icon: IconHammer,      label: 'New Contract',     path: '/work-orders/new',     highlight: false },
   { icon: IconUserPlus,    label: 'New Party',          path: '/stakeholders?new=1',  highlight: false },
   { icon: IconReceipt2,    label: 'New Transaction',    path: '/ledger/new',          highlight: true  },
 ];

@@ -34,6 +34,7 @@ export function deriveDirection(txn: any): TxnDirection {
  */
 export function isNotLinked(txn: any): boolean {
   if (deriveDirection(txn) === 'in') return false;
+  if (txn?.is_one_time) return false; // a deliberate one-time payment is resolved, not orphaned
   const allocs: any[] = txn?.txn_allocations ?? [];
   if (allocs.length === 0) return true;
   return allocs.some((a) => !a?.order_type);

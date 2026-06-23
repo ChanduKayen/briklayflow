@@ -38,7 +38,7 @@ interface ActionItem {
 const TYPE_CFG: Record<ResultType, { Icon: React.ElementType; bg: string; color: string; label: string; section: string }> = {
   project:        { Icon: IconBuildingEstate, bg: 'rgba(59,130,246,0.15)',  color: '#60A5FA', label: 'Project',     section: 'PROJECTS'        },
   person:         { Icon: IconUser,           bg: 'rgba(168,85,247,0.15)',  color: '#C084FC', label: 'Person',      section: 'PEOPLE'          },
-  work_order:     { Icon: IconClipboardList,  bg: 'rgba(245,158,11,0.15)', color: '#FCD34D', label: 'Work Order',  section: 'WORK ORDERS'     },
+  work_order:     { Icon: IconClipboardList,  bg: 'rgba(245,158,11,0.15)', color: '#FCD34D', label: 'Contract',  section: 'CONTRACTS'     },
   purchase_order: { Icon: IconShoppingBag,    bg: 'rgba(16,185,129,0.15)', color: '#34D399', label: 'P.O.',        section: 'PURCHASE ORDERS' },
   transaction:    { Icon: IconArrowsExchange, bg: 'rgba(239,68,68,0.15)',  color: '#F87171', label: 'Transaction', section: 'TRANSACTIONS'    },
 };
@@ -83,7 +83,7 @@ export function CommandBar() {
     const ctx = getContextAction(location.pathname);
     return [
       { label: 'New Transaction',    Icon: IconArrowsExchange, href: '/ledger/new',          iconBg: 'rgba(239,68,68,0.15)',  iconColor: '#F87171' },
-      { label: 'New Work Order',     Icon: IconClipboardList,  href: '/work-orders/new',     iconBg: 'rgba(245,158,11,0.15)', iconColor: '#FCD34D' },
+      { label: 'New Contract',     Icon: IconClipboardList,  href: '/work-orders/new',     iconBg: 'rgba(245,158,11,0.15)', iconColor: '#FCD34D' },
       { label: 'New Purchase Order', Icon: IconShoppingBag,    href: '/purchase-orders/new', iconBg: 'rgba(16,185,129,0.15)', iconColor: '#34D399' },
       { ...ctx, iconBg: 'rgba(200,96,58,0.18)', iconColor: '#E8825A', accent: true },
     ];

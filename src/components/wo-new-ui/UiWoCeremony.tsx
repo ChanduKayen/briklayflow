@@ -35,7 +35,7 @@ export default function UiWoCeremony({
         style={{ background: V.surface }}
         role="dialog"
         aria-modal="true"
-        aria-label="Work order created"
+        aria-label="Contract created"
       >
         <div className="w-12 h-12 rounded-full mx-auto mb-4 flex items-center justify-center" style={{ background: V.confirmWash }}>
           <ListChecks size={22} color={V.confirm} />
@@ -67,7 +67,7 @@ export default function UiWoCeremony({
             Done
           </button>
           <button onClick={onLeave} className="flex-1 py-3 rounded-xl text-sm font-medium" style={{ background: V.user, color: '#fff' }}>
-            View work order
+            View contract
           </button>
         </div>
       </div>

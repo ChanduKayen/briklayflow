@@ -84,7 +84,7 @@ function NoObligationsState({ onSkip, onOpenWO, onOpenPO, txnType }: {
     <div className="mt-3 rounded-xl border border-dashed border-outline-variant/30 p-6 text-center">
       <span className="material-symbols-outlined text-[32px] text-on-surface-variant/20 mb-2 block">link_off</span>
       <p className="text-[14px] font-medium text-on-surface mb-1">
-        {txnType === 'worker' ? 'No open Work Orders' : txnType === 'material' ? 'No open Purchase Orders' : 'No open WOs or POs'}
+        {txnType === 'worker' ? 'No open Contracts' : txnType === 'material' ? 'No open Purchase Orders' : 'No open Contracts or POs'}
       </p>
       <p className="text-[12px] text-on-surface-variant/50 mb-4">Create one to link this payment, or record without linking.</p>
       <div className="flex gap-2 justify-center flex-wrap">
@@ -92,7 +92,7 @@ function NoObligationsState({ onSkip, onOpenWO, onOpenPO, txnType }: {
           <button type="button" onClick={onOpenWO}
             className="px-4 py-2 rounded-lg border border-[#C8603A]/30 bg-[#C8603A]/[0.03] text-[13px] font-semibold text-[#C8603A] hover:bg-[#C8603A]/[0.07] transition-colors flex items-center gap-1.5">
             <span className="material-symbols-outlined text-[15px]">engineering</span>
-            New Work Order
+            New Contract
           </button>
         )}
         {showPO && (
@@ -371,7 +371,7 @@ function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip,
     if (hideCreate) {
       return (
         <div className="mt-3 rounded-xl border border-black/[0.05] bg-stone-50/40 px-4 py-3 flex items-center justify-between gap-3">
-          <span className="text-[12px] text-on-surface-variant/55">No {txnType === 'worker' ? 'work orders' : 'purchase orders'} for this project.</span>
+          <span className="text-[12px] text-on-surface-variant/55">No {txnType === 'worker' ? 'contracts' : 'purchase orders'} for this project.</span>
           <button type="button" onClick={onSkip} className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant/40 hover:text-primary transition-colors whitespace-nowrap">Record unlinked</button>
         </div>
       );
@@ -393,7 +393,7 @@ function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip,
           <div>
             <div className="px-5 py-2 bg-black/[0.005] border-b border-black/[0.015] flex items-center justify-between">
               <p className="text-[9px] font-bold uppercase tracking-wider text-on-surface-variant/35">
-                Work Orders ({wos.length})
+                Contracts ({wos.length})
               </p>
               {!hideCreate && (
                 <button type="button" onClick={onOpenWO}
@@ -504,7 +504,7 @@ function RowObligationLink({ projectId, stkId, txnType, onSelect, onClear }: {
       <button type="button" onClick={() => setSkipped(false)}
         className="flex items-center gap-1.5 text-[12px] text-on-surface-variant/50 hover:text-primary transition-colors">
         <span className="material-symbols-outlined text-[14px]">link</span>
-        Link to a Work Order or PO
+        Link to a Contract or PO
       </button>
     );
   }
@@ -939,7 +939,7 @@ export default function NewTransaction({ session: _session }: { session: Session
         p_milestones:     [{ seq_no: 1, name: 'Full Payment', unit_type: 'LS', quantity: 1, rate: null, planned_amount: woValue, ai_extracted: false }],
       });
       if (error) throw error;
-      if (!data?.success) throw new Error(data?.error ?? 'Failed to create work order');
+      if (!data?.success) throw new Error(data?.error ?? 'Failed to create contract');
       const newId = data.wo_id as string;
       setCelebrating(true);
       setCreatedOrderId(newId);
@@ -949,7 +949,7 @@ export default function NewTransaction({ session: _session }: { session: Session
         setRefetchTrigger(t => t + 1);
       }, 1900);
     } catch (err: any) {
-      showSnackbar(err.message || 'Failed to create work order', { type: 'error' });
+      showSnackbar(err.message || 'Failed to create contract', { type: 'error' });
     } finally {
       setCreatingOrder(false);
     }
@@ -1725,7 +1725,7 @@ export default function NewTransaction({ session: _session }: { session: Session
                                 <span className="material-symbols-outlined text-[18px] text-amber-600 mt-0.5" style={{ fontVariationSettings: "'FILL' 1" }}>warning</span>
                                 <div className="flex-1 text-[12px] leading-relaxed">
                                   <p className="font-semibold text-amber-900">Select a phase or milestone to continue.</p>
-                                  <p className="mt-0.5 text-amber-800/80">This Work Order has phases. Expand it above and select the specific phase to link this payment to.</p>
+                                  <p className="mt-0.5 text-amber-800/80">This Contract has phases. Expand it above and select the specific phase to link this payment to.</p>
                                 </div>
                               </div>
                             </div>
@@ -1758,7 +1758,7 @@ export default function NewTransaction({ session: _session }: { session: Session
                           onClick={() => { setSkipped(false); setSelectedObligation(null); }}
                           className="flex items-center gap-1.5 text-[12px] text-on-surface-variant/50 hover:text-primary transition-colors">
                           <span className="material-symbols-outlined text-[14px]">link</span>
-                          Link to a Work Order or PO
+                          Link to a Contract or PO
                         </button>
                       )}
 
@@ -1915,7 +1915,7 @@ export default function NewTransaction({ session: _session }: { session: Session
                 <span className="material-symbols-outlined text-amber-600 text-[18px] shrink-0 mt-0.5">warning</span>
                 <div className="flex-1 text-[12px] leading-relaxed">
                   <p className="font-bold text-amber-900">Unlinked payment recorded</p>
-                  <p className="text-amber-800/80 mt-0.5">This payment won't be linked to a specific Work Order or Purchase Order balance. That's fine for general expenses.</p>
+                  <p className="text-amber-800/80 mt-0.5">This payment won't be linked to a specific Contract or Purchase Order balance. That's fine for general expenses.</p>
                 </div>
               </div>
             )}
@@ -2042,7 +2042,7 @@ export default function NewTransaction({ session: _session }: { session: Session
               </div>
               <div className="flex-1 min-w-0">
                 <h2 className="text-[15px] font-bold text-on-surface">
-                  {drawerOpen === 'WO' ? 'New Work Order' : 'New Purchase Order'}
+                  {drawerOpen === 'WO' ? 'New Contract' : 'New Purchase Order'}
                 </h2>
                 <p className="text-[11px] text-on-surface-variant/50 mt-0.5">
                   {drawerOpen === 'WO' ? 'Quick-create & link to this transaction' : 'Quick-create & link to this transaction'}
@@ -2253,7 +2253,7 @@ export default function NewTransaction({ session: _session }: { session: Session
                   {creatingOrder ? (
                     <><Loader2 className="animate-spin" size={15} /> Creating…</>
                   ) : (
-                    <><span className="material-symbols-outlined text-[17px]">check</span>Create {drawerOpen === 'WO' ? 'Work Order' : 'Purchase Order'}</>
+                    <><span className="material-symbols-outlined text-[17px]">check</span>Create {drawerOpen === 'WO' ? 'Contract' : 'Purchase Order'}</>
                   )}
                 </button>
               </div>
@@ -2280,7 +2280,7 @@ export default function NewTransaction({ session: _session }: { session: Session
                 {/* Text */}
                 <div className="mt-6 text-center celebrate-text">
                   <p className="text-[16px] font-bold text-on-surface">
-                    {drawerOpen === 'WO' ? 'Work Order Created' : 'Purchase Order Created'}
+                    {drawerOpen === 'WO' ? 'Contract Created' : 'Purchase Order Created'}
                   </p>
                   {createdOrderId && (
                     <p className={`text-[12px] font-data-mono font-bold mt-1 ${

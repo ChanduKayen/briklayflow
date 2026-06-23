@@ -13,7 +13,7 @@
  * pipeline state (the selected worker id lives in the page).
  */
 import { useState } from 'react';
-import { Search, Check, UserPlus } from 'lucide-react';
+import { Search, Check, UserPlus, ArrowRight } from 'lucide-react';
 import { V } from '../po-new-ui/voiceTokens';
 
 const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -114,14 +114,37 @@ export default function UiContractorCombobox({
             </button>
           ))}
 
-          {/* Add-as-new — suppressed when a normalized match already exists (ruling 5) */}
-          {q !== '' && !exactExists && (
+          {/* Add-as-new — suppressed when a normalized match already exists (ruling 5).
+              Zero matches → promoted to a hero row (one tap to add a brand-new contractor);
+              with matches present it stays a quiet footer under the list. */}
+          {q !== '' && !exactExists && filtered.length === 0 && (
+            <button
+              type="button"
+              onMouseDown={() => { onAddNew(q); setUiQuery(''); setUiOpen(false); }}
+              role="option"
+              className="group w-full flex items-center gap-3 px-3.5 py-3 text-left"
+              style={{ background: V.askWash }}
+            >
+              <span
+                className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 font-bold"
+                style={{ background: V.user, color: '#fff', fontSize: 14 }}
+              >
+                {q[0].toUpperCase()}
+              </span>
+              <span className="flex-1 min-w-0">
+                <span className="block text-sm font-semibold truncate" style={{ color: V.user }}>Add &ldquo;{q}&rdquo;</span>
+                <span className="block text-xs" style={{ color: V.system }}>New contractor · add trade &amp; phone</span>
+              </span>
+              <ArrowRight size={16} style={{ color: V.askDeep }} className="shrink-0 transition-transform group-hover:translate-x-0.5" />
+            </button>
+          )}
+          {q !== '' && !exactExists && filtered.length > 0 && (
             <button
               type="button"
               onMouseDown={() => { onAddNew(q); setUiQuery(''); setUiOpen(false); }}
               role="option"
               className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left"
-              style={{ borderTop: filtered.length ? `1px solid ${V.line}` : 'none' }}
+              style={{ borderTop: `1px solid ${V.line}` }}
             >
               <span
                 className="w-7 h-7 rounded-full flex items-center justify-center shrink-0"
@@ -130,7 +153,7 @@ export default function UiContractorCombobox({
                 <UserPlus size={13} />
               </span>
               <span className="text-sm" style={{ color: V.user }}>
-                <span className="font-medium">{q}</span>
+                Not here? <span className="font-medium">{q}</span>
                 <span style={{ color: V.askDeep }}> — add as new contractor</span>
               </span>
             </button>

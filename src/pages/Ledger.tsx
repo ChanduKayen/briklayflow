@@ -21,6 +21,7 @@ import { deriveDirection, isNotLinked, resolveAnchor, isGeneralExpense, payeeLab
 import { V, font, serif, nums, terraGrad } from '../components/txn-ledger/ledgerTokens';
 import { DirMedallion, Amount, AnchorChip, FilterChip, FlowBar } from '../components/txn-ledger/LedgerAtoms';
 import { TrackChip, TRACK_CHIP_CSS } from '../components/txn-ledger/TrackChip';
+import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
 
 const PAGE_SIZE = 25;
 const inr = (n: number) => Math.round(n).toLocaleString('en-IN');
@@ -53,6 +54,8 @@ function CreateHint({ message, children }: { message: string; children: ReactNod
 type EntryProps = {
   dir: TxnDirection;
   payee: string;
+  stakeholderId?: string | null;
+  onPayeeClick?: (e: MouseEvent) => void;
   context: string;
   anchor: TxnAnchor;
   anchorNode?: ReactNode;
@@ -112,7 +115,19 @@ function EntryRow(p: EntryProps) {
 
       <div className="bk-ledger-main">
         <p className="text-sm font-medium truncate" style={{ color: V.ink, ...font }}>
-          {p.payee}
+          {p.stakeholderId && p.onPayeeClick ? (
+            <span
+              role="button"
+              tabIndex={0}
+              title={`View ${p.payee}'s ledger`}
+              onClick={(e) => { e.stopPropagation(); p.onPayeeClick!(e); }}
+              className="cursor-pointer hover:underline underline-offset-2 decoration-dotted"
+            >
+              {p.payee}
+            </span>
+          ) : (
+            p.payee
+          )}
           {p.voided && <span className="ml-1.5 text-xs" style={{ color: V.faint, ...font }}>· voided</span>}
         </p>
         <p className="text-xs truncate" style={{ color: V.faint, ...font }}>{p.context}</p>
@@ -249,6 +264,8 @@ export default function Ledger({ session }: { session: Session }) {
   const nudgePaused = useRef(false);
 
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  // Tapping a party name opens their running ledger in a side drawer (as on Txn Detail).
+  const [drawerStk, setDrawerStk] = useState<string | null>(null);
 
   // Direction-aware drag-to-sum: a Set of txn_ids the accountant rubber-bands.
   const [sumSel, setSumSel] = useState<Set<string>>(new Set());
@@ -696,7 +713,7 @@ export default function Ledger({ session }: { session: Session }) {
                 { key: '/', label: 'new transaction' },
                 { key: 'T', label: 'view transactions' },
                 { key: 'P', label: 'view purchase orders' },
-                { key: 'W', label: 'view work orders' },
+                { key: 'W', label: 'view contracts' },
                 { key: 'L', label: 'view day book' },
               ]} className="w-full" />
             </div>
@@ -993,6 +1010,8 @@ export default function Ledger({ session }: { session: Session }) {
                       <EntryRow
                         dir={dir}
                         payee={genExp ? ((txn.remarks || '').trim() || 'General expense') : (txn.stakeholders?.name || 'Unknown')}
+                        stakeholderId={genExp ? null : (txn.stakeholder_id ?? null)}
+                        onPayeeClick={() => { if (txn.stakeholder_id) setDrawerStk(txn.stakeholder_id); }}
                         context={context}
                         anchor={anchor}
                         remark={null}
@@ -1119,6 +1138,10 @@ export default function Ledger({ session }: { session: Session }) {
       )}
 
       <ImageLightbox url={lightboxUrl} title="Payment Proof" onClose={() => setLightboxUrl(null)} />
+
+      {drawerStk && (
+        <StakeholderLedgerDrawer isOpen={!!drawerStk} onClose={() => setDrawerStk(null)} stakeholderId={drawerStk} />
+      )}
 
       {/* bulk action bar */}
       {selectedCount > 0 && (

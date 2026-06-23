@@ -170,7 +170,7 @@ export default function ProjectWorkOrders({ session }: { session: Session }) {
     const csv = [header, ...csvRows].map(r => r.map((v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = `work-orders-${new Date().toISOString().split('T')[0]}.csv`; a.click()
+    const a = document.createElement('a'); a.href = url; a.download = `contracts-${new Date().toISOString().split('T')[0]}.csv`; a.click()
     URL.revokeObjectURL(url)
   }
 
@@ -227,9 +227,9 @@ export default function ProjectWorkOrders({ session }: { session: Session }) {
             <div className="flex items-center gap-1.5 mb-2">
               <button onClick={() => navigate(`/projects/${projectId}`)} className="text-[12px] text-on-surface-variant/50 hover:text-primary transition-colors">{project?.name ?? 'Project'}</button>
               <span className="text-[12px] text-on-surface-variant/25">/</span>
-              <span className="text-[12px] text-on-surface font-semibold">Work Orders</span>
+              <span className="text-[12px] text-on-surface font-semibold">Contracts</span>
             </div>
-            <h1 className="text-[24px] font-bold text-on-surface tracking-tight leading-none">Work Orders</h1>
+            <h1 className="text-[24px] font-bold text-on-surface tracking-tight leading-none">Contracts</h1>
             <p className="text-[12px] text-on-surface-variant/50 mt-1.5 font-medium">
               {filtered.length} order{filtered.length !== 1 ? 's' : ''}
               {totalValue > 0 && <> · ₹{totalValue.toLocaleString('en-IN')}</>}
@@ -243,7 +243,7 @@ export default function ProjectWorkOrders({ session }: { session: Session }) {
               onMouseEnter={e => { e.currentTarget.style.opacity = '0.88'; e.currentTarget.style.boxShadow = '0 3px 8px rgba(200,96,58,0.35)' }}
               onMouseLeave={e => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.boxShadow = '0 1px 2px rgba(200,96,58,0.25)' }}>
               <span style={{ fontSize: 17, fontWeight: 300, lineHeight: 1 }}>+</span>
-              New Work Order
+              New Contract
             </button>
           )}
         </div>
@@ -326,12 +326,12 @@ export default function ProjectWorkOrders({ session }: { session: Session }) {
           : isError ? (
             <div className="py-20 text-center">
               <span className="material-symbols-outlined text-[56px] text-on-surface-variant/15 block mb-4">error_outline</span>
-              <p className="text-[15px] font-medium text-on-surface/50">Failed to load work orders</p>
+              <p className="text-[15px] font-medium text-on-surface/50">Failed to load contracts</p>
             </div>
           ) : filtered.length === 0 ? (
             <div className="py-20 text-center">
               <span className="material-symbols-outlined text-[56px] text-on-surface-variant/15 block mb-4">{hasAnyFilter ? 'search_off' : 'file_present'}</span>
-              <p className="text-[15px] font-medium text-on-surface/50">No work orders found</p>
+              <p className="text-[15px] font-medium text-on-surface/50">No contracts found</p>
               {hasAnyFilter && <button onClick={clearAllFilters} className="mt-5 h-11 px-5 rounded-full border border-outline-variant/30 text-[13px] font-medium text-on-surface-variant/60">Clear filters</button>}
             </div>
           ) : (
@@ -375,13 +375,13 @@ export default function ProjectWorkOrders({ session }: { session: Session }) {
           : isError ? (
             <div className="py-20 text-center">
               <span className="material-symbols-outlined text-[56px] text-on-surface-variant/15 block mb-4">error_outline</span>
-              <p className="text-[15px] font-medium text-on-surface/50">Failed to load work orders</p>
+              <p className="text-[15px] font-medium text-on-surface/50">Failed to load contracts</p>
               <p className="text-[12px] text-on-surface-variant/35 mt-1.5">There was a problem fetching data</p>
             </div>
           ) : visible.length === 0 ? (
             <div className="py-20 text-center">
               <span className="material-symbols-outlined text-[56px] text-on-surface-variant/15 block mb-4">{hasAnyFilter ? 'search_off' : 'file_present'}</span>
-              <p className="text-[15px] font-medium text-on-surface/50">No work orders found</p>
+              <p className="text-[15px] font-medium text-on-surface/50">No contracts found</p>
               {hasAnyFilter && (
                 <>
                   <p className="text-[12px] text-on-surface-variant/35 mt-1.5">Try adjusting your filters</p>
@@ -452,7 +452,7 @@ export default function ProjectWorkOrders({ session }: { session: Session }) {
       </div>
 
       {canManage && (
-        <button className="bk-fab md:hidden" onClick={() => navigate('/work-orders/new', { state: { projectId, from: 'project', projectName: project?.name } })} title="New Work Order">
+        <button className="bk-fab md:hidden" onClick={() => navigate('/work-orders/new', { state: { projectId, from: 'project', projectName: project?.name } })} title="New Contract">
           <span className="material-symbols-outlined text-[24px]">add</span>
         </button>
       )}

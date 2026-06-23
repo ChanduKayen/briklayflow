@@ -233,7 +233,7 @@ export function ProjectBudget({ projectId, canEdit }: Props) {
         <MetricCard
           label="Committed"
           value={`₹${fmt(totalCommitted)}`}
-          sub={`${activeWOs.length} WO · ${activePOs.length} PO`}
+          sub={`${activeWOs.length} Contract · ${activePOs.length} PO`}
           accent="amber"
         />
         <MetricCard
@@ -490,7 +490,7 @@ export function ProjectBudget({ projectId, canEdit }: Props) {
           <div className="border-t border-outline-variant/[0.08]">
             {activeWOs.length === 0 && activePOs.length === 0 ? (
               <p className="px-5 py-6 text-center text-[12px] text-on-surface-variant/35">
-                No active WOs or POs for this project
+                No active Contracts or POs for this project
               </p>
             ) : (
               <div className="divide-y divide-outline-variant/[0.05]">

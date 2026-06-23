@@ -100,6 +100,9 @@ export function ContractHub({ txn, onClose, onLinked }: { txn: TrackTxn; onClose
   const [pending, setPending] = useState<{ woId: string; total: number; title: string; phases: ContractPhase[] } | null>(null);
   const [naming, setNaming] = useState(false);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
+  // When open contracts exist, the new-contract form stays behind a button so the list
+  // (the likely choice) is the focus; tapping "Create a new contract" reveals it.
+  const [creatingNew, setCreatingNew] = useState(false);
 
   const showDesc = cval.replace(/[^0-9]/g, '').length > 0;
   const contractValue = parseInt(cval.replace(/[^0-9]/g, ''), 10) || 0;
@@ -230,53 +233,10 @@ export function ContractHub({ txn, onClose, onLinked }: { txn: TrackTxn; onClose
     );
   }
 
-  return (
-    <div className="ch-root" style={{ ...font }}>
-      <div className="ch-h" style={{ ...serif }}>Track this as a contract with {payee}?</div>
-      <div className="ch-help">
-        A subcontract has a <b>fixed value</b> — we'll show the balance burn down as you pay.
-        Daily labour doesn't need this.
-      </div>
-
-      {/* A — add to an open contract */}
-      {!isLoading && openContracts.length > 0 && (
-        <>
-          <div className="ch-sub">Add to an open contract</div>
-          <div className="ch-clist">
-            {openContracts.map((c) => {
-              const multi = c.phases.length > 1;
-              const isOpen = expanded === c.woId;
-              return (
-                <div className="ch-cwrap" key={c.woId}>
-                  <button type="button" className="ch-crow2" disabled={busy} onClick={() => onCardTap(c)}>
-                    <span className="ch-cnm">
-                      <span className="ch-c1">{shortContractName(c.name)}</span>
-                      <span className="ch-c2" style={{ ...nums }}>
-                        {c.paidPct}% paid · {payee}{multi ? ` · ${c.phases.length} phases` : ''}
-                      </span>
-                    </span>
-                    <span className="ch-cbal">
-                      <span className="ch-cb1" style={{ ...nums }}>{rupee(c.balance)} <i>left</i></span>
-                      <span className="ch-barm"><i style={{ width: `${c.paidPct}%` }} /></span>
-                      <span className="ch-cbmeta" style={{ ...nums }}>of {rupee(c.total)}</span>
-                    </span>
-                    <span className="ch-cadd">{multi ? (isOpen ? '▾' : '▸') : '→'}</span>
-                  </button>
-                  {!multi && amount > c.balance && (
-                    <div className="ch-coverflow">This {rupee(amount)} is {rupee(amount - c.balance)} over the {rupee(c.balance)} left on this contract.</div>
-                  )}
-                  {multi && isOpen && (
-                    <PhasePicker phases={c.phases} payment={amount} busy={busy} variant="nested" onPick={(m) => addExisting(c, m)} onSplit={(parts) => splitExisting(c, parts)} />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          <div className="ch-orline">or start a new one</div>
-        </>
-      )}
-
-      {/* B — new contract */}
+  // New-contract form: agreed value → reveals description, optional phases, Track balance.
+  // Gated behind "Create a new contract" when open contracts exist; shown directly when none.
+  const newContractForm = (
+    <>
       <div className="ch-optrow">
         <span className="ch-orl">New contract</span>
         <span className="ch-crow">
@@ -333,12 +293,76 @@ export function ContractHub({ txn, onClose, onLinked }: { txn: TrackTxn; onClose
           </button>
         )}
 
-        <button type="button" className="ch-cbtn ch-ndbtn" disabled={busy || overAllocated} onClick={addNew}>{naming ? 'Naming your contract…' : 'Track balance →'}</button>
+        <button type="button" className="ch-cbtn ch-ndbtn" disabled={busy || overAllocated} onClick={addNew}>{naming ? 'Naming your contract…' : 'Link payment'}</button>
         {overAllocated && <span className="ch-phhint">Phases exceed the contract by {rupee(allocated - contractValue)}</span>}
         {!phasesOpen && contractValue > 0 && amount > contractValue && (
           <span className="ch-phhint">This {rupee(amount)} payment is {rupee(amount - contractValue)} more than the contract value.</span>
         )}
       </div>
+    </>
+  );
+
+  return (
+    <div className="ch-root" style={{ ...font }}>
+      <div className="ch-h" style={{ ...serif }}>Track this as a contract with {payee}?</div>
+      <div className="ch-help">
+        A subcontract has a <b>fixed value</b> — we'll show the balance burn down as you pay.
+        Daily labour doesn't need this.
+      </div>
+
+      {isLoading ? (
+        <p className="ch-help" style={{ marginBottom: 0 }}>Looking for open contracts…</p>
+      ) : openContracts.length > 0 ? (
+        <>
+          {/* Existing open contracts — pick one… */}
+          <div className="ch-sub">Add to an open contract</div>
+          <div className="ch-clist">
+            {openContracts.map((c) => {
+              const multi = c.phases.length > 1;
+              const isOpen = expanded === c.woId;
+              return (
+                <div className="ch-cwrap" key={c.woId}>
+                  <button type="button" className="ch-crow2" disabled={busy} onClick={() => onCardTap(c)}>
+                    <span className="ch-cnm">
+                      <span className="ch-c1">{shortContractName(c.name)}</span>
+                      <span className="ch-c2" style={{ ...nums }}>
+                        {c.paidPct}% paid · {payee}{multi ? ` · ${c.phases.length} phases` : ''}
+                      </span>
+                    </span>
+                    <span className="ch-cbal">
+                      <span className="ch-cb1" style={{ ...nums }}>{rupee(c.balance)} <i>left</i></span>
+                      <span className="ch-barm"><i style={{ width: `${c.paidPct}%` }} /></span>
+                      <span className="ch-cbmeta" style={{ ...nums }}>of {rupee(c.total)}</span>
+                    </span>
+                    <span className="ch-cadd">{multi ? (isOpen ? '▾' : '▸') : '→'}</span>
+                  </button>
+                  {!multi && amount > c.balance && (
+                    <div className="ch-coverflow">This {rupee(amount)} is {rupee(amount - c.balance)} over the {rupee(c.balance)} left on this contract.</div>
+                  )}
+                  {multi && isOpen && (
+                    <PhasePicker phases={c.phases} payment={amount} busy={busy} variant="nested" onPick={(m) => addExisting(c, m)} onSplit={(parts) => splitExisting(c, parts)} />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* …or create a new one — revealed on tap, so the list stays the focus */}
+          {creatingNew ? newContractForm : (
+            <button type="button" className="ch-newbtn" onClick={() => setCreatingNew(true)}>
+              <span className="ch-newbtn-plus">+</span> Create a new contract
+            </button>
+          )}
+        </>
+      ) : (
+        <>
+          {/* No open contracts for this payee/site — say so, then create as usual */}
+          <p className="ch-empty">
+            No open contracts with <b>{payee}</b>{projectName ? <> at <b>{projectName}</b></> : null} yet.
+          </p>
+          {newContractForm}
+        </>
+      )}
 
       {/* C — labour exit (quiet inline link) */}
       <div className={`ch-lzone${labourOpen ? ' ch-lzone--open' : ''}`}>
@@ -535,6 +559,11 @@ export const CONTRACT_HUB_CSS = `
 .ch-help b{color:${V.terraDeep};font-weight:600}
 .ch-sub{font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:${V.faint};margin:0 0 10px}
 .ch-clist{display:flex;flex-direction:column;gap:9px}
+.ch-newbtn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:14px;background:${V.surface};border:1.5px dashed ${V.line};border-radius:12px;padding:13px;font-size:12.5px;font-weight:600;color:${V.terraDeep};cursor:pointer;transition:.16s;font-family:inherit}
+.ch-newbtn:hover{border-color:${V.terra};background:${V.terraWash}}
+.ch-newbtn-plus{font-size:16px;line-height:1;color:${V.terra}}
+.ch-empty{font-size:12.5px;color:${V.sys};line-height:1.55;margin:0 0 15px;padding:12px 14px;background:${V.field};border-radius:12px}
+.ch-empty b{color:${V.inkSoft};font-weight:600}
 .ch-crow2{display:flex;align-items:center;gap:16px;width:100%;text-align:left;background:${V.surface};border:1px solid ${V.line};border-left:3px solid #ebcab9;border-radius:13px;padding:14px 16px;cursor:pointer;transition:.18s cubic-bezier(.22,1,.36,1);position:relative}
 .ch-crow2:hover{border-color:#dba78d;border-left-color:${V.terra};transform:translateY(-1px);box-shadow:0 10px 26px -14px rgba(192,81,44,.45)}
 .ch-crow2:active{transform:translateY(0) scale(.995)}

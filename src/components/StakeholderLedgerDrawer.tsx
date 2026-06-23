@@ -30,6 +30,7 @@ interface LedgerRow {
   source: string;
   txn_id: string | null;
   txn_link: string | null;
+  is_one_time?: boolean;
   runningBalance: number;
 }
 
@@ -252,6 +253,7 @@ export default function StakeholderLedgerDrawer({
           source: 'PAYMENT',
           txn_id: t.txn_id,
           txn_link: `/ledger/${t.txn_id}`,
+          is_one_time: !!t.is_one_time,
         });
       }
     } else if (stkType === 'Worker') {
@@ -297,6 +299,7 @@ export default function StakeholderLedgerDrawer({
           source: 'PAYMENT',
           txn_id: t.txn_id,
           txn_link: `/ledger/${t.txn_id}`,
+          is_one_time: !!t.is_one_time,
         });
       }
     } else if (stkType === 'Client') {
@@ -361,7 +364,7 @@ export default function StakeholderLedgerDrawer({
   const groupOrder: string[] = [];
   const poGroupsMap = new Map<string, LedgerRow[]>();
   for (const row of displayRows) {
-    const key = row.ref_id || 'unlinked';
+    const key = row.is_one_time ? 'one-time' : (row.ref_id || 'unlinked');
     if (!seenGroupKeys.has(key)) {
       seenGroupKeys.add(key);
       groupOrder.push(key);
@@ -372,7 +375,8 @@ export default function StakeholderLedgerDrawer({
     poGroupsMap.get(key)!.push(row);
   }
   const orderedGroupKeys = [
-    ...groupOrder.filter(k => k !== 'unlinked'),
+    ...groupOrder.filter(k => k !== 'unlinked' && k !== 'one-time'),
+    ...(groupOrder.includes('one-time') ? ['one-time'] : []),
     ...(groupOrder.includes('unlinked') ? ['unlinked'] : []),
   ];
 
@@ -794,7 +798,7 @@ export default function StakeholderLedgerDrawer({
                           {/* Group Card Header */}
                           <div className="px-5 py-4 bg-stone-50/[0.35] border-b border-[#EAE6DE]/50 flex flex-wrap items-center justify-between gap-4">
                             <div className="flex items-center gap-2">
-                              {groupKey !== 'unlinked' ? (
+                              {groupKey !== 'unlinked' && groupKey !== 'one-time' ? (
                                 <>
                                   <span className={`text-[9px] font-semibold tracking-wider uppercase px-2 py-0.5 rounded-full border ${badgeBg}`}>
                                     {rows[0]?.ref_type || 'PO'}
@@ -808,6 +812,11 @@ export default function StakeholderLedgerDrawer({
                                     <span className="material-symbols-outlined text-[10px] text-stone-400 group-hover/peeklink:text-stone-900 transition-colors">open_in_new</span>
                                   </button>
                                 </>
+                              ) : groupKey === 'one-time' ? (
+                                <span className="flex items-center gap-1.5 text-[11.5px] font-semibold text-stone-500 uppercase tracking-wider">
+                                  <span className="material-symbols-outlined text-[13px] text-stone-400">bolt</span>
+                                  One-time payments
+                                </span>
                               ) : (
                                 <span className="text-[11.5px] font-semibold text-stone-400 uppercase tracking-wider">Unassociated Ledger Entries</span>
                               )}

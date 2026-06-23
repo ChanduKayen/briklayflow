@@ -380,7 +380,7 @@ export function QuickTransactionSheet({ stakeholder, onClose, onSuccess }: Quick
           {projectId && txnType !== 'client_receipt' && !skipped && (
             <div>
               <label className="block text-[11px] font-semibold text-on-surface-variant/60 mb-2 uppercase tracking-wide">
-                Link to {txnType === 'worker' ? 'Work Order' : 'Purchase Order'}
+                Link to {txnType === 'worker' ? 'Contract' : 'Purchase Order'}
               </label>
               {loadingObligations ? (
                 <div className="rounded-xl border border-black/[0.05] p-4 space-y-2 animate-pulse">
@@ -425,7 +425,7 @@ export function QuickTransactionSheet({ stakeholder, onClose, onSuccess }: Quick
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
-                                <p className="text-[13px] font-semibold text-on-surface truncate">{wo.scope_of_work || 'Work Order'}</p>
+                                <p className="text-[13px] font-semibold text-on-surface truncate">{wo.scope_of_work || 'Contract'}</p>
                                 <span className="font-data-mono text-[9px] px-1.5 py-0.5 rounded bg-black/[0.03] text-on-surface-variant/50 shrink-0 font-bold uppercase tracking-wider">{wo.wo_id}</span>
                               </div>
                               {hasPhases && <p className="text-[10px] text-on-surface-variant/40 mt-0.5">{wo.wo_milestones.length} phases</p>}
@@ -535,7 +535,7 @@ export function QuickTransactionSheet({ stakeholder, onClose, onSuccess }: Quick
             <button type="button" onClick={() => { setSkipped(false); setSelectedObligation(null); }}
               className="flex items-center gap-1.5 text-[12px] text-on-surface-variant/50 hover:text-primary transition-colors">
               <span className="material-symbols-outlined text-[14px]">link</span>
-              Link to a Work Order or PO
+              Link to a Contract or PO
             </button>
           )}
 

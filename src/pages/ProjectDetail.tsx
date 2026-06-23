@@ -577,7 +577,7 @@ export default function ProjectDetail({ session }: { session: Session }) {
           <MetricCard label="Budget" value={totalBudget} icon="account_balance" />
         )}
         <MetricCard label="Spent" value={totalSpent} accent icon="payments" />
-        <MetricCard label="Committed" value={totalCommitted} icon="pending_actions" sub={`${openWOs.length} WOs + ${openPOs.length} POs`} />
+        <MetricCard label="Committed" value={totalCommitted} icon="pending_actions" sub={`${openWOs.length} Contracts + ${openPOs.length} POs`} />
         {remaining !== null && (
           <MetricCard label="Available" value={remaining} icon="savings" />
         )}
@@ -625,7 +625,7 @@ export default function ProjectDetail({ session }: { session: Session }) {
       {/* ── Nav tiles ───────────────────────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10, marginBottom: 24 }}>
         <NavTile href={`/projects/${projectId}/transactions`} icon="swap_horiz" label="Transactions" count={uniqueTxns.length} />
-        <NavTile href={`/projects/${projectId}/work-orders`} icon="assignment" label="Work Orders" count={workOrders.length} />
+        <NavTile href={`/projects/${projectId}/work-orders`} icon="assignment" label="Contracts" count={workOrders.length} />
         <NavTile href={`/projects/${projectId}/purchase-orders`} icon="shopping_bag" label="Purchase Orders" count={purchaseOrders.length} />
         <NavTile href={`/projects/${projectId}/inventory`} icon="inventory_2" label="Inventory" color="#7c3aed" />
         <NavTile href={`/projects/${projectId}/boqs`} icon="format_list_numbered" label="BOQs" color="#2563eb" />
@@ -655,12 +655,12 @@ export default function ProjectDetail({ session }: { session: Session }) {
         {/* Recent work orders */}
         <div style={{ background: '#fff', borderRadius: 16, border: '1px solid rgba(0,0,0,0.06)', overflow: 'hidden' }}>
           <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(0,0,0,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <p style={{ fontSize: 14, fontWeight: 700, color: '#0b1c30' }}>Work Orders</p>
+            <p style={{ fontSize: 14, fontWeight: 700, color: '#0b1c30' }}>Contracts</p>
             <Link to={`/projects/${projectId}/work-orders`} style={{ fontSize: 12, color: '#C8603A', textDecoration: 'none', fontWeight: 500 }}>See all →</Link>
           </div>
           {workOrders.length === 0 ? (
             <div style={{ padding: '32px 20px', textAlign: 'center' }}>
-              <p style={{ fontSize: 13, color: 'rgba(0,0,0,0.30)' }}>No work orders yet</p>
+              <p style={{ fontSize: 13, color: 'rgba(0,0,0,0.30)' }}>No contracts yet</p>
             </div>
           ) : (
             workOrders.slice(0, 5).map((wo: any) => {
