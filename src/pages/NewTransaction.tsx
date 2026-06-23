@@ -530,8 +530,10 @@ export default function NewTransaction({ session: _session }: { session: Session
   // true = the obligation picker is open. `skipped` means one-time (not linked).
   const [linkOpen, setLinkOpen] = useState(false);
   const [loadingObligations, setLoadingObligations] = useState(false);
-  const [projectWOs, setProjectWOs] = useState<any[]>([]);
-  const [projectPOs, setProjectPOs] = useState<any[]>([]);
+  // ALL of the payee's open orders, prefetched the moment they're selected (across every
+  // project) — so linking is instant once a project is chosen. projectWOs/POs filter these.
+  const [stkWOs, setStkWOs] = useState<any[]>([]);
+  const [stkPOs, setStkPOs] = useState<any[]>([]);
   const [amountTouched, setAmountTouched] = useState(false);
 
   // ── Inline WO/PO drawer state ────────────────────────────────────────────
@@ -570,8 +572,8 @@ export default function NewTransaction({ session: _session }: { session: Session
   const stkDropRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Focus payee field when a type is selected (or pre-selected on mount)
-    if (txnType) setTimeout(() => payeeRef.current?.focus(), 60);
+    // Focus the amount field when a type is selected (or pre-selected on mount) — amount first.
+    if (txnType) setTimeout(() => document.getElementById('txn-amount-input')?.focus(), 60);
   }, [txnType]);
 
   useEffect(() => {
@@ -612,74 +614,66 @@ export default function NewTransaction({ session: _session }: { session: Session
   }, [stakeholders, recentPayees.length]);
   // Fetch WOs for workers, POs for vendors — scoped to the selected project + stakeholder
   const selectedProjectId = !splitMode ? (allocs[0]?.project_id || '') : '';
+  // Filtered from the payee's prefetched orders — no round-trip when the project changes.
+  const projectWOs = selectedProjectId ? stkWOs.filter((w: any) => w.project_id === selectedProjectId) : [];
+  const projectPOs = selectedProjectId ? stkPOs.filter((p: any) => p.project_id === selectedProjectId) : [];
   // Fresh link decision whenever the project, payee or type changes.
   useEffect(() => { setLinkOpen(false); setSkipped(false); setSelectedObligation(null); }, [selectedProjectId, stkId, txnType]);
+  // Prefetch ALL of the payee's open orders the moment they're picked — keyed on the payee
+  // (not the project), so the data is already in hand by the time a project is chosen and
+  // linking is instant. projectWOs/POs filter this locally.
   useEffect(() => {
-    if (!selectedProjectId || !stkId || txnType === 'expense' || txnType === 'client_receipt') {
-      setProjectWOs([]); setProjectPOs([]); setSelectedObligation(null); setSkipped(false);
+    if (!stkId || (txnType !== 'worker' && txnType !== 'material')) {
+      setStkWOs([]); setStkPOs([]);
       return;
     }
     let cancelled = false;
     setLoadingObligations(true);
-    // Only clear selection if this isn't a post-creation refetch
-    if (!createdOrderId) { setSelectedObligation(null); setSkipped(false); }
 
     if (txnType === 'worker') {
-      // Worker payment → show only their WOs for this project
       supabase
         .from('work_orders')
-        .select('wo_id, scope_of_work, order_value, status, stakeholders(name, category), wo_milestones(*)')
-        .eq('project_id', selectedProjectId)
+        .select('wo_id, project_id, scope_of_work, order_value, status, stakeholders(name, category), wo_milestones(*)')
         .eq('stakeholder_id', stkId)
         .not('status', 'in', '("Closed","Cancelled")')
         .order('created_at', { ascending: false })
-        .then(({ data: wos, error: woErr }) => {
-          if (woErr) console.error('[LinkingPanel] WO fetch error:', woErr);
-          if (!cancelled) {
-            setProjectWOs(wos || []);
-            setProjectPOs([]);
-            setLoadingObligations(false);
-            // Auto-select newly created WO
-            if (createdOrderId && wos) {
-              const match = wos.find((w: any) => w.wo_id === createdOrderId);
-              if (match) {
-                const bal = getWOBalance(match);
-                setSelectedObligation({ type: 'WO', wo_id: match.wo_id, label: `${match.wo_id} · ${(match.stakeholders as any)?.name || ''}`, balance: bal });
-                if (!amountTouched) setTotalAmt(bal);
-                setCreatedOrderId(null);
-              }
+        .then(({ data: wos, error }) => {
+          if (cancelled) return;
+          if (error) console.error('[obligations] WO prefetch error:', error);
+          setStkWOs(wos || []); setStkPOs([]); setLoadingObligations(false);
+          if (createdOrderId && wos) {
+            const match = wos.find((w: any) => w.wo_id === createdOrderId);
+            if (match) {
+              const bal = getWOBalance(match);
+              setSelectedObligation({ type: 'WO', wo_id: match.wo_id, label: `${match.wo_id} · ${(match.stakeholders as any)?.name || ''}`, balance: bal });
+              if (!amountTouched) setTotalAmt(bal);
+              setCreatedOrderId(null);
             }
           }
         });
     } else {
-      // Material payment → show only their POs for this project
       supabase
         .from('purchase_orders')
-        .select('po_id, status, vendor_bill_amount, total_value, order_value, stakeholders(name, category), po_line_items(*)')
-        .eq('project_id', selectedProjectId)
+        .select('po_id, project_id, status, vendor_bill_amount, total_value, order_value, stakeholders(name, category), po_line_items(*)')
         .eq('stakeholder_id', stkId)
         .order('created_at', { ascending: false })
-        .then(({ data: pos, error: poErr }) => {
-          if (poErr) console.error('[LinkingPanel] PO fetch error:', poErr);
-          if (!cancelled) {
-            setProjectWOs([]);
-            setProjectPOs(pos || []);
-            setLoadingObligations(false);
-            // Auto-select newly created PO
-            if (createdOrderId && pos) {
-              const match = pos.find((p: any) => p.po_id === createdOrderId);
-              if (match) {
-                const bal = getPOBalance(match);
-                setSelectedObligation({ type: 'PO', po_id: match.po_id, label: `${match.po_id} · ${(match.stakeholders as any)?.name || ''}`, balance: bal });
-                if (!amountTouched) setTotalAmt(bal);
-                setCreatedOrderId(null);
-              }
+        .then(({ data: pos, error }) => {
+          if (cancelled) return;
+          if (error) console.error('[obligations] PO prefetch error:', error);
+          setStkWOs([]); setStkPOs(pos || []); setLoadingObligations(false);
+          if (createdOrderId && pos) {
+            const match = pos.find((p: any) => p.po_id === createdOrderId);
+            if (match) {
+              const bal = getPOBalance(match);
+              setSelectedObligation({ type: 'PO', po_id: match.po_id, label: `${match.po_id} · ${(match.stakeholders as any)?.name || ''}`, balance: bal });
+              if (!amountTouched) setTotalAmt(bal);
+              setCreatedOrderId(null);
             }
           }
         });
     }
     return () => { cancelled = true; };
-  }, [selectedProjectId, stkId, txnType, refetchTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [stkId, txnType, refetchTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Derived ──────────────────────────────────────────────────────────────
   const tgtType = txnType === 'worker' ? 'Worker' : txnType === 'material' ? 'Vendor' : txnType === 'client_receipt' ? 'Client' : '';
@@ -850,14 +844,14 @@ export default function NewTransaction({ session: _session }: { session: Session
         setDate(new Date().toISOString().split('T')[0]);
         setAllocs([{ id: Math.random().toString(), project_id: keptProject, order_type: '', order_ref: '', milestone_id: '', allocated_amount: 0 }]);
         setSelectedObligation(null); setSkipped(false); setAmountTouched(false);
-        setProjectWOs([]); setProjectPOs([]);
+        setRefetchTrigger((n) => n + 1); // re-prefetch the payee's orders with updated balances
         setAiCodeState('idle'); setAiSuggestedCode(null);
         setDismissedReceiptSuggestion(false);
         setDismissedMilestoneSuggestion(false);
         setReceiptDescription('');
         setReceiptRef('');
         showSnackbar(`${savedId} saved`, { action: { label: 'View', onClick: () => navigate(`/ledger/${savedId}`) } });
-        setTimeout(() => payeeRef.current?.focus(), 80);
+        setTimeout(() => document.getElementById('txn-amount-input')?.focus(), 80);
       }
     },
   });
@@ -1270,8 +1264,8 @@ export default function NewTransaction({ session: _session }: { session: Session
                 <span className="material-symbols-outlined text-[13px]">{txnType === 'client_receipt' ? 'south_west' : 'north_east'}</span>
                 {txnType === 'client_receipt' ? 'Money coming in' : 'Money going out'}
               </span>
-              <div className="flex items-start gap-1.5 min-w-0">
-                <span style={{ fontFamily: VOICE.serif, fontSize: 'clamp(22px, 7vw, 30px)', fontWeight: 600, color: txnType === 'client_receipt' ? VOICE.innSoft : VOICE.accentSoft, marginTop: 11, flex: '0 0 auto' }}>₹</span>
+              <div className="flex items-baseline gap-1.5 min-w-0">
+                <span style={{ fontFamily: VOICE.serif, fontSize: 'clamp(20px, 6vw, 28px)', fontWeight: 600, color: txnType === 'client_receipt' ? VOICE.innSoft : VOICE.accentSoft, flex: '0 0 auto' }}>₹</span>
                 <input
                   id="txn-amount-input"
                   type="number"
@@ -1286,14 +1280,11 @@ export default function NewTransaction({ session: _session }: { session: Session
                   onWheel={(e) => e.currentTarget.blur()}
                   placeholder="0"
                   aria-label="Amount"
-                  // Figure shrinks by digit-count so it always fits the card on one line (mobile too)
-                  // — pure clamp() still overflowed for long amounts.
+                  // Smooth viewport-based size (NOT digit-count tiers) so it never jumps/shrinks as
+                  // you type; a very long amount just scrolls within the input. Baseline-aligned with ₹.
                   style={{
-                    fontFamily: VOICE.serif, fontWeight: 600, lineHeight: 0.95, letterSpacing: '-1px',
-                    fontSize: (() => {
-                      const n = String(totalAmt || '').length;
-                      return n <= 7 ? 'clamp(40px, 13vw, 64px)' : n <= 10 ? 'clamp(30px, 9.5vw, 48px)' : 'clamp(22px, 7.2vw, 36px)';
-                    })(),
+                    fontFamily: VOICE.serif, fontWeight: 600, lineHeight: 1, letterSpacing: '-1px',
+                    fontSize: 'clamp(36px, 11vw, 56px)',
                     background: 'transparent', border: 'none', outline: 'none', color: VOICE.ivory,
                     caretColor: txnType === 'client_receipt' ? VOICE.innSoft : VOICE.accentSoft,
                     flex: '1 1 auto', width: '100%', minWidth: 0, padding: 0,
