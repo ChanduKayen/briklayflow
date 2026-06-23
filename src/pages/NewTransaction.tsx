@@ -1105,8 +1105,8 @@ export default function NewTransaction({ session: _session }: { session: Session
   const nextGap: { label: string; el: () => HTMLElement | null } | null = !txnType ? null : (() => {
     if (!totalAmt || totalAmt <= 0) return { label: 'Enter the amount', el: () => document.getElementById('txn-amount-input') };
     if (txnType !== 'expense' && !stkId) return { label: txnType === 'client_receipt' ? 'Who is paying?' : 'Add the payee', el: () => payeeRef.current };
+    if (txnType !== 'client_receipt' && !remarks.trim()) return { label: 'Add a remark', el: () => document.getElementById('txn-remarks') };
     if (effectiveAllocs.some((a) => !a.project_id)) return { label: 'Choose a project', el: () => document.getElementById('txn-project-0') };
-    if (txnType !== 'client_receipt' && !remarks.trim()) return { label: 'Add a note', el: () => document.getElementById('txn-remarks') };
     return null;
   })();
   const goToGap = () => {
