@@ -22,10 +22,12 @@
  */
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Hammer, Package, ChevronDown, ChevronRight, Check, RotateCcw } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Hammer, Package, ChevronRight, Check } from 'lucide-react';
 import { V, font } from './ledgerTokens';
 import type { TrackTxn } from '../../lib/trackingApi';
-import { fileAsLabour, clearOneTime } from '../../lib/trackingApi';
+import { fileAsLabour, clearOneTime, getTrackingOptions } from '../../lib/trackingApi';
+import { getVendorHub } from '../../lib/vendorTrackingApi';
 import { ContractHub, CONTRACT_HUB_CSS } from './ContractHub';
 import { VendorHub, VENDOR_HUB_CSS } from './VendorHub';
 
@@ -40,6 +42,22 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
   const [pos, setPos] = useState<{ top: number; left?: number; right: number }>({ top: 0, right: 0 });
 
   const kind: Kind = txn.stakeholders?.type === 'Vendor' ? 'PO' : 'WO';
+
+  // Warm the hub's data as soon as this chip scrolls into view, so opening it is instant.
+  const qc = useQueryClient();
+  const rootRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const el = rootRef.current; if (!el || chosenOneTime) return;
+    const io = new IntersectionObserver((es) => {
+      if (!es[0]?.isIntersecting) return;
+      io.disconnect();
+      if (kind === 'WO') void qc.prefetchQuery({ queryKey: ['trackOptions', txn.txn_id], queryFn: () => getTrackingOptions(txn), staleTime: 30_000 });
+      else void qc.prefetchQuery({ queryKey: ['vendorHub', txn.txn_id], queryFn: () => getVendorHub(txn), staleTime: 30_000 });
+    }, { rootMargin: '150px' });
+    io.observe(el);
+    return () => io.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const computePos = () => {
     const el = btnRef.current; if (!el) return null;
@@ -81,33 +99,30 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
     finally { setBusy(false); }
   };
 
-  // ── WORKER payments ────────────────────────────────────────────────────────
-  // Chosen "one-time" reads as a settled status (calm grey, like an assigned PO/WO
-  // reference) — not a green "success" — with a quiet Undo to reverse it.
-  const woButtons = chosenOneTime ? (
-    <span className="inline-flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-      <span
-        className="db-otp-pop inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg"
-        style={{ background: V.field, border: `1px solid ${V.line}`, color: V.inkSoft, ...font }}
-      >
-        <Check size={12} className="shrink-0" style={{ color: V.faint }} />
-        <span>One-time payment</span>
-      </span>
-      <button
-        type="button"
-        disabled={busy}
-        onClick={(e) => { e.stopPropagation(); void undoOneTime(); }}
-        className="inline-flex items-center gap-1 text-xs font-medium hover:underline disabled:opacity-60"
-        style={{ color: V.terra, ...font }}
-      >
-        <RotateCcw size={11} className="shrink-0" />
-        Undo
-      </button>
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+  // Worker → contract; Vendor → order. Both share one gate; "one-time payment" (worker)
+  // and "direct purchase" (vendor) are the SAME mechanism (fileAsLabour → is_one_time).
+  const isWO = kind === 'WO';
+  const Icon = isWO ? Hammer : Package;
+  const linkLabel = isWO ? 'Link to a contract' : 'Link to a bill';
+  const oneLabel = isWO ? 'One-time payment' : 'Direct purchase';
 
-      {/* Link to a contract — the value path (subtle terracotta tint), opens the hub. */}
+  const gate = chosenOneTime ? (
+    // ── RESOLVED — uniform with the linked AnchorChip (calm grey, same size/shape).
+    //    Tap to change (clears is_one_time and reopens the choice). ──
+    <button
+      type="button"
+      disabled={busy}
+      onClick={(e) => { e.stopPropagation(); void undoOneTime(); }}
+      className="db-otp-pop inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md disabled:opacity-60"
+      style={{ background: V.field, color: V.inkSoft, ...font }}
+      title="Change"
+    >
+      <Check size={11} className="shrink-0" style={{ color: V.faint }} />
+      <span>{oneLabel}</span>
+    </button>
+  ) : (
+    // ── UNRESOLVED — the choice, mobile-friendly (wraps), with an "or" connector. ──
+    <span className="inline-flex items-center gap-1.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
       <button
         ref={btnRef}
         type="button"
@@ -115,12 +130,11 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
         className="db-link-btn inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg"
         style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.terraDeep, fontWeight: 600 }}
       >
-        <Hammer size={12} className="shrink-0" style={{ color: V.terra }} />
-        <span>Link to a contract</span>
+        <Icon size={12} className="shrink-0" style={{ color: V.terra }} />
+        <span>{linkLabel}</span>
         <ChevronRight size={12} className="shrink-0" style={{ opacity: 0.7 }} />
       </button>
-
-      {/* One-time payment — neutral outlined button; sets the settled state above. */}
+      <span className="text-[11px] select-none" style={{ color: V.faint, ...font }}>or</span>
       <button
         type="button"
         disabled={busy}
@@ -128,28 +142,15 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
         className="db-onetime-btn inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg disabled:opacity-60"
         style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.sys, fontWeight: 500 }}
       >
-        <span>{busy ? 'Filing…' : 'One-time payment'}</span>
+        <span>{busy ? 'Saving…' : oneLabel}</span>
       </button>
     </span>
   );
 
   return (
-    <span className="inline-flex" onClick={(e) => e.stopPropagation()}>
+    <span ref={rootRef} className="inline-flex" onClick={(e) => e.stopPropagation()}>
 
-      {kind === 'WO' ? woButtons : (
-        /* PO · single-tap nudge → VendorHub (no one-off path to offer) */
-        <button
-          ref={btnRef}
-          type="button"
-          onClick={(e) => { e.stopPropagation(); toggle(); }}
-          className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg min-w-0 transition-opacity hover:opacity-80"
-          style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.sys, maxWidth: 250, ...font }}
-        >
-          <Package size={11} className="shrink-0" />
-          <span className="truncate">Part of a purchase order?</span>
-          <ChevronDown size={11} className="shrink-0" style={{ opacity: 0.7 }} />
-        </button>
-      )}
+      {gate}
 
       {open && createPortal(
         <>

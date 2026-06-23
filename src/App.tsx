@@ -743,12 +743,33 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
 
   const ordersBadge = (woPendingCount ?? 0) + (poUntalliedCount ?? 0);
 
+  // ── Mobile auto-hide: tuck the bar away on scroll-down, bring it back on scroll-up;
+  //    and hide it entirely on full-screen "/…/new" forms (New Transaction, New PO/WO/
+  //    Bill/Invoice) which own their own bottom action bar, so the two never stack. ──
+  const [navHidden, setNavHidden] = useState(false);
+  const hideForRoute = /\/new$/.test(location.pathname);
+  useEffect(() => {
+    let last = window.scrollY;
+    const onScroll = () => {
+      const y = window.scrollY;
+      if (Math.abs(y - last) < 10) return;
+      setNavHidden(y > last && y > 72); // hide when scrolling down past 72px, show on up
+      last = y;
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+  const navTucked = navHidden || hideForRoute;
+
   // Glass shell shared by both context tab bars
   const shellClass =
     "md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/90 backdrop-blur-xl supports-[backdrop-filter]:bg-white/75";
   const shellStyle: React.CSSProperties = {
     boxShadow: '0 -1px 3px rgba(0,0,0,0.04), 0 -8px 24px rgba(0,0,0,0.04)',
     height: 'calc(56px + env(safe-area-inset-bottom))',
+    transform: navTucked ? 'translateY(115%)' : 'translateY(0)',
+    transition: 'transform .28s cubic-bezier(.4,0,.2,1)',
+    willChange: 'transform',
   };
   const innerStyle: React.CSSProperties = { paddingBottom: 'env(safe-area-inset-bottom)' };
 

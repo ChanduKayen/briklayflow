@@ -997,7 +997,7 @@ export default function Ledger({ session }: { session: Session }) {
                     //  · otherwise -> the existing AnchorChip (linked ref, or default)
                     const anchorNode: ReactNode =
                       genExp
-                        ? <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md" style={{ background: V.field, color: V.faint, ...font }}>General expense · overhead</span>
+                        ? <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md" style={{ background: V.field, color: V.inkSoft, ...font }}><span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: V.faint }} />General expense <span style={{ color: V.faint }}>· overhead</span></span>
                         : (anchor === null && dir === 'out' && txn.stakeholder_id && (txn.txn_allocations || []).length > 0)
                           ? <TrackChip txn={txn} onLinked={() => { qc.invalidateQueries({ queryKey: ['ledger'] }); }} />
                           : undefined;

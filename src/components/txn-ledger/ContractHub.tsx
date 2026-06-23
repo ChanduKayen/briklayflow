@@ -317,12 +317,13 @@ export function ContractHub({ txn, onClose, onLinked }: { txn: TrackTxn; onClose
           {/* Existing open contracts — pick one… */}
           <div className="ch-sub">Add to an open contract</div>
           <div className="ch-clist">
-            {openContracts.map((c) => {
+            {openContracts.map((c, i) => {
               const multi = c.phases.length > 1;
               const isOpen = expanded === c.woId;
               return (
                 <div className="ch-cwrap" key={c.woId}>
                   <button type="button" className="ch-crow2" disabled={busy} onClick={() => onCardTap(c)}>
+                    <span className="ch-cnum" style={{ ...nums }}>{i + 1}</span>
                     <span className="ch-cnm">
                       <span className="ch-c1">{shortContractName(c.name)}</span>
                       <span className="ch-c2" style={{ ...nums }}>
@@ -564,7 +565,8 @@ export const CONTRACT_HUB_CSS = `
 .ch-newbtn-plus{font-size:16px;line-height:1;color:${V.terra}}
 .ch-empty{font-size:12.5px;color:${V.sys};line-height:1.55;margin:0 0 15px;padding:12px 14px;background:${V.field};border-radius:12px}
 .ch-empty b{color:${V.inkSoft};font-weight:600}
-.ch-crow2{display:flex;align-items:center;gap:16px;width:100%;text-align:left;background:${V.surface};border:1px solid ${V.line};border-left:3px solid #ebcab9;border-radius:13px;padding:14px 16px;cursor:pointer;transition:.18s cubic-bezier(.22,1,.36,1);position:relative}
+.ch-crow2{display:flex;align-items:center;gap:13px;width:100%;text-align:left;background:${V.surface};border:1px solid ${V.line};border-left:3px solid #ebcab9;border-radius:13px;padding:14px 16px;cursor:pointer;transition:.18s cubic-bezier(.22,1,.36,1);position:relative}
+.ch-cnum{font-size:11px;font-weight:600;color:${V.faint};min-width:13px;text-align:right;flex:0 0 auto}
 .ch-crow2:hover{border-color:#dba78d;border-left-color:${V.terra};transform:translateY(-1px);box-shadow:0 10px 26px -14px rgba(192,81,44,.45)}
 .ch-crow2:active{transform:translateY(0) scale(.995)}
 .ch-crow2:disabled{cursor:default;opacity:.6}

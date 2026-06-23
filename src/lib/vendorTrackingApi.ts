@@ -22,6 +22,8 @@ export interface VendorBill {
   name: string;      // a readable line ("Cement — 50 bags")
   po: string;        // shown under the line (the PO id)
   due: number;       // amount still due
+  total: number;     // the bill's full value (for the % paid / burn-down)
+  paid: number;      // already paid against it
 }
 
 export interface VendorHubData {
@@ -91,7 +93,7 @@ export async function getVendorHub(txn: TrackTxn): Promise<VendorHubData> {
     const due = Math.max(0, total - (paidByPo[p.po_id] || 0));
     totalBal += due;
     if (projectId && p.project_id === projectId) siteBal += due;
-    if (due > 0) bills.push({ id: p.po_id, name: poName(p.items, p.po_id), po: p.po_id, due });
+    if (due > 0) bills.push({ id: p.po_id, name: poName(p.items, p.po_id), po: p.po_id, due, total, paid: paidByPo[p.po_id] || 0 });
   }
   if (!projectId) siteBal = totalBal;
 

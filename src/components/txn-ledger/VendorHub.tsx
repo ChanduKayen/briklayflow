@@ -47,7 +47,7 @@ const prefersReduced = () =>
   typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
 // An allocation target: an existing PO bill, or a declared new purchase (a quick PO).
-interface Target { key: string; name: string; ref: string; due: number; kind: 'bill' | 'buy' }
+interface Target { key: string; name: string; ref: string; due: number; total: number; paid: number; kind: 'bill' | 'buy' }
 type Declared = { name: string; pending: number; hasBill: boolean; gst?: number; poId: string };
 
 interface ConfirmHit { key: string; name: string; applied: number; left: number; kind: 'bill' | 'buy' }
@@ -69,7 +69,6 @@ export function VendorHub({ txn, onClose, onLinked }: { txn: TrackTxn; onClose: 
 
   const [declared, setDeclared] = useState<Declared[]>([]);
   const [amounts, setAmounts] = useState<Record<string, string>>({});
-  const inited = useRef(false);
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
   const [addedPo, setAddedPo] = useState<string | null>(null);
@@ -83,16 +82,6 @@ export function VendorHub({ txn, onClose, onLinked }: { txn: TrackTxn; onClose: 
   const nameRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Pre-fill the existing bills oldest-first, once, when they load.
-  useEffect(() => {
-    if (!data || inited.current) return;
-    inited.current = true;
-    const out: Record<string, string> = {};
-    let rem = amount;
-    for (const b of data.bills) { const g = Math.min(rem, b.due); out[`bill:${b.id}`] = g > 0 ? String(Math.round(g)) : ''; rem -= g; }
-    setAmounts(out);
-  }, [data, amount]);
-
   useEffect(() => { if (adding) setTimeout(() => nameRef.current?.focus(), 30); }, [adding]);
 
   if (confirm) return <VendorConfirm p={confirm} onDone={() => { onLinked(); onClose(); }} />;
@@ -104,15 +93,17 @@ export function VendorHub({ txn, onClose, onLinked }: { txn: TrackTxn; onClose: 
   const hasBills = v.bills.length > 0;
 
   const targets: Target[] = [
-    ...v.bills.map((b) => ({ key: `bill:${b.id}`, name: b.name, ref: b.po, due: b.due, kind: 'bill' as const })),
-    ...declared.map((d, i) => ({ key: `buy:${i}`, name: d.name, ref: d.poId, due: d.pending, kind: 'buy' as const })),
+    ...v.bills.map((b) => ({ key: `bill:${b.id}`, name: b.name, ref: b.po, due: b.due, total: b.total, paid: b.paid, kind: 'bill' as const })),
+    ...declared.map((d, i) => ({ key: `buy:${i}`, name: d.name, ref: d.poId, due: d.pending, total: d.pending, paid: 0, kind: 'buy' as const })),
   ];
   const parseAmt = (k: string) => parseInt((amounts[k] || '').replace(/[^0-9]/g, ''), 10) || 0;
   const placed = targets.reduce((s, t) => s + parseAmt(t.key), 0);
-  const over = placed > amount;
+  const totalDue = targets.reduce((s, t) => s + t.due, 0); // total balance across the listed bills/purchases
   const leftover = Math.max(0, amount - placed);
 
-  const setAmt = (k: string, val: string) => setAmounts((a) => ({ ...a, [k]: val.replace(/[^0-9]/g, '') }));
+  // Tap a bill → the WHOLE payment lands on it (like linking the payment to one contract).
+  // If it exceeds the bill it over-clears into a credit on that PO — no separate "advance".
+  const onSelect = (t: Target) => setAmounts({ [t.key]: String(Math.round(amount)) });
 
   const startDeclare = () => { setAdding(true); setBillState(null); setBillData(null); setBuyName(''); setBuyAmt(''); };
   const cancelDeclare = () => { setAdding(false); setSaving(false); setBillState(null); setBillData(null); };
@@ -157,7 +148,7 @@ export function VendorHub({ txn, onClose, onLinked }: { txn: TrackTxn; onClose: 
   };
 
   const confirmAll = async () => {
-    if (busy || over) return; setBusy(true); setErr(null);
+    if (busy || placed === 0) return; setBusy(true); setErr(null);
     const hits: ConfirmHit[] = targets
       .map((t) => ({ key: t.key, name: t.name, kind: t.kind, applied: parseAmt(t.key), left: t.due - parseAmt(t.key) }))
       .filter((h) => h.applied > 0);
@@ -180,61 +171,48 @@ export function VendorHub({ txn, onClose, onLinked }: { txn: TrackTxn; onClose: 
     } catch (e) { setErr((e as { message?: string })?.message || 'Could not record that — try again'); setBusy(false); }
   };
 
-  const effect = (t: Target): { text: string; cls: string } => {
-    const applied = parseAmt(t.key);
-    if (applied <= 0) return { text: `balance ${rupee(t.due)}`, cls: 'none' };
-    if (applied > t.due) return { text: `${rupee(applied - t.due)} over this bill`, cls: 'part' };
-    if (applied === t.due) return { text: t.kind === 'buy' ? '✓ paid in full' : '✓ cleared', cls: 'clr' };
-    return { text: `balance ${rupee(t.due - applied)} for this bill`, cls: 'part' };
-  };
-
-  // Nothing placed on a bill/purchase → the whole payment is an advance. Once something
-  // is allocated, it's a plain "pay" (the leftover, if any, still shows on confirmation).
-  const confLabel = placed === 0 ? `Hold ${rupee(amount)} as advance →` : 'Confirm & pay →';
 
   return (
     <div className="vh-root" style={{ ...font }}>
-      <div className="vh-head">
-        <div className="vh-name" style={{ ...serif }}>{v.vendor}</div>
-        <div className="vh-balq" style={{ ...nums }}>
-          you owe <b>{rupee(v.totalBal)}</b>{v.siteBal !== v.totalBal ? ` · ${rupee(v.siteBal)} here` : ''}
-        </div>
+      <div className="ch-h" style={{ ...serif }}>Track this as a purchase with {v.vendor}?</div>
+      <div className="ch-help">
+        An open bill has an <b>amount due</b> — link this payment to it and its balance burns down as you pay.
+        A direct purchase has no bill to clear.
+      </div>
+      <div className="vh-balq" style={{ ...nums, marginBottom: 8 }}>
+        You owe <b>{rupee(v.totalBal)}</b>{v.siteBal !== v.totalBal ? ` · ${rupee(v.siteBal)} on this site` : ''}
       </div>
 
-      <div className="vh-qline" style={{ ...serif }}>What is this <b style={{ ...nums }}>{rupee(amount)}</b> for?</div>
-
       {hasBills ? (
-        <div className="vh-subhead">Clearing existing bills <span className="vh-shh">set how much goes to each</span></div>
+        <div className="ch-sub" style={{ marginTop: 4 }}>Add to an open bill</div>
       ) : (
-        <div className="vh-ctxcard">
-          <div className="vh-ct1" style={{ ...nums }}>You've paid <b>{rupee(v.paidToDate)}</b> to {v.vendor}{project ? ` for ${project}` : ''} so far.</div>
-          <div className="vh-ct2">Tell us what you bought from {v.vendor} just below — we'll keep the account straight, so we can answer the moment you ask <i>“how much do I owe them?”</i></div>
-        </div>
+        <p className="ch-empty">
+          No open bills with <b>{v.vendor}</b>{project ? <> at <b>{project}</b></> : null} yet.
+        </p>
       )}
 
       {targets.length > 0 && (
-        <div className="vh-bills">
-          {targets.map((t) => {
-            const e = effect(t);
-            const overRow = parseAmt(t.key) > t.due;
+        <div className="ch-clist">
+          {targets.map((t, i) => {
+            const applied = parseAmt(t.key);
+            const sel = applied > 0;
+            const balLeft = Math.max(0, t.due - applied);
+            const overBill = sel && applied > t.due;
+            const pct = t.total > 0 ? Math.min(100, Math.round(((t.paid + applied) / t.total) * 100)) : (sel ? 100 : 0);
             return (
-              <div className={`vh-bill${t.kind === 'buy' ? ' vh-buy' : ''}`} key={t.key}>
-                <div className="vh-bl">
-                  <span className="vh-bic">{t.kind === 'buy' ? '📦' : '🧾'}</span>
-                  <div className="min-w-0">
-                    <div className="vh-bn">{t.name}</div>
-                    <div className="vh-bp" style={{ ...nums }}>{t.ref}</div>
-                  </div>
-                </div>
-                <div className="vh-bd">
-                  <span className="vh-balloc">allocating to this {t.kind === 'buy' ? 'purchase' : 'bill'}</span>
-                  <span className={`vh-bamt${overRow ? ' vh-bamt-over' : ''}`}>
-                    <span className="vh-cu">₹</span>
-                    <input inputMode="numeric" value={amounts[t.key] || ''} onChange={(ev) => setAmt(t.key, ev.target.value)} placeholder="0" style={{ ...nums }} />
-                  </span>
-                  <div className={`vh-beff vh-beff-${e.cls}`} style={{ ...nums }}>{e.text}</div>
-                </div>
-              </div>
+              <button type="button" key={t.key} className={`ch-crow2${sel ? ' vh-crow-sel' : ''}`} onClick={() => onSelect(t)}>
+                <span className="ch-cnum" style={{ ...nums }}>{i + 1}</span>
+                <span className="ch-cnm">
+                  <span className="ch-c1">{t.name}</span>
+                  <span className="ch-c2" style={{ ...nums }}>{pct}% paid · {v.vendor}{t.kind === 'buy' ? ' · new' : ''}</span>
+                </span>
+                <span className="ch-cbal">
+                  <span className="ch-cb1" style={{ ...nums }}>{rupee(balLeft)} <i>left</i></span>
+                  <span className="ch-barm"><i style={{ width: `${pct}%`, transition: 'width .55s cubic-bezier(.22,1,.36,1)' }} /></span>
+                  <span className="ch-cbmeta" style={{ ...nums }}>{overBill ? `${rupee(applied - t.due)} over · credit` : sel ? `applied ${rupee(applied)} · of ${rupee(t.total)}` : `of ${rupee(t.total)}`}</span>
+                </span>
+                <span className="ch-cadd">{sel ? '✓' : '→'}</span>
+              </button>
             );
           })}
         </div>
@@ -269,15 +247,23 @@ export function VendorHub({ txn, onClose, onLinked }: { txn: TrackTxn; onClose: 
           {addedPo && (
             <div className="vh-added" key={addedPo}>✓ Recorded in Purchase Orders · <b style={{ ...nums }}>{addedPo}</b></div>
           )}
-          <button type="button" className="vh-addrow" onClick={startDeclare}>+ {hasBills ? 'Bought something else' : 'What have you bought?'}</button>
+          <button type="button" className="ch-newbtn" onClick={startDeclare}><span className="ch-newbtn-plus">+</span> Add a new bill</button>
         </>
       )}
 
+      {targets.length > 0 && (
+        <div className="vh-summary" style={{ ...nums }}>
+          <div className="vh-sumrow"><span>Total bills balance</span><span>{rupee(totalDue)}</span></div>
+          <div className="vh-sumrow"><span>This payment applied</span><span className="vh-sum-neg">− {rupee(placed)}</span></div>
+          <div className="vh-sumdiv" />
+          <div className="vh-sumrow vh-sumtotal"><span>Remaining balance</span><span>{rupee(Math.max(0, totalDue - placed))}</span></div>
+        </div>
+      )}
+
       <div className="vh-confirmbar">
-        <button type="button" className="vh-cbtn" disabled={busy || over} onClick={confirmAll}>{confLabel}</button>
+        <button type="button" className="vh-cbtn" disabled={busy || placed === 0} onClick={confirmAll}>Link payment</button>
         <button type="button" className="vh-dismiss" onClick={onClose}>cancel</button>
       </div>
-      {over && <p className="vh-err" style={{ ...nums }}>{rupee(placed - amount)} more than this payment — lower the amounts to {rupee(amount)} or less.</p>}
       {err && <p className="vh-err">{err}</p>}
     </div>
   );
@@ -375,9 +361,25 @@ export const VENDOR_HUB_CSS = `
 .vh-ct1{font-size:13px;color:${V.ink}}.vh-ct1 b{font-weight:600}
 .vh-ct2{font-size:11.5px;color:${V.faint};margin-top:5px;line-height:1.5}
 .vh-bills{display:flex;flex-direction:column;gap:8px}
-.vh-bill{display:flex;align-items:center;justify-content:space-between;gap:12px;background:${V.surface};border:1px solid ${V.line};border-radius:11px;padding:11px 13px}
-.vh-bill.vh-buy{border-style:dashed;border-color:#dcb49d}
-.vh-bl{display:flex;align-items:center;gap:11px;min-width:0}
+.vh-bill{display:flex;align-items:center;gap:11px;background:${V.surface};border:1px solid ${V.line};border-left:3px solid ${V.line};border-radius:11px;padding:11px 13px;transition:box-shadow .15s,border-color .15s,transform .12s}
+.vh-bill:hover{box-shadow:0 4px 14px -6px rgba(34,26,19,.18);border-color:#dcd2c2}
+.vh-bill:active{transform:scale(.995)}
+.vh-bill.vh-bill-on{border-left-color:${V.terra}}
+.vh-bill.vh-buy{border-top-style:dashed;border-right-style:dashed;border-bottom-style:dashed;border-top-color:#dcb49d;border-right-color:#dcb49d;border-bottom-color:#dcb49d}
+.vh-bnum{font-size:11px;font-weight:600;color:${V.faint};min-width:13px;text-align:right;flex:0 0 auto}
+.vh-balloc-amt{font-size:14.5px;font-weight:700;color:${V.terraDeep}}
+.vh-balloc-none{font-size:13px;color:${V.faint}}
+.vh-summary{margin-top:13px;background:${V.surface};border:1px solid ${V.line};border-radius:12px;padding:13px 15px}
+.vh-sumrow{display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-size:12.5px;color:${V.sys};margin:7px 0}
+.vh-sumrow:first-child{margin-top:0}
+.vh-sumrow>span:last-child{font-weight:600;color:${V.ink}}
+.vh-sum-neg{color:${V.terraDeep}!important}
+.vh-sumdiv{height:1px;background:${V.line};margin:10px 0}
+.vh-sumtotal>span:first-child{font-weight:600;color:${V.ink};font-size:13px}
+.vh-sumtotal>span:last-child{font-size:16px;font-weight:700;color:${V.ink}}
+.vh-sumnote{margin-top:10px;font-size:11px;color:${V.sage};line-height:1.5}
+.vh-crow-sel{border-color:#dba78d !important;border-left-color:${V.terra} !important;background:#fffaf4 !important}
+.vh-bl{display:flex;align-items:center;gap:11px;min-width:0;flex:1}
 .vh-bic{width:26px;height:26px;border-radius:7px;background:${V.field};display:grid;place-items:center;font-size:13px;flex:0 0 auto}
 .vh-bn{font-weight:600;font-size:13.5px;color:${V.ink};white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .vh-bp{color:${V.faint};font-size:11px;margin-top:2px}

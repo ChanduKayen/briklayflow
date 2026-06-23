@@ -188,12 +188,12 @@ export default function StakeholderLedgerDrawer({
   const { data: stakeholderPOs, isLoading: posLoading } = useQuery({
     queryKey: ['stk_drawer_pos', stakeholderId],
     queryFn: async () => {
+      // All of the vendor's POs (not just billed ones) — the credit loop skips un-billed
+      // rows itself, and total_value gives the COMMITTED figure for the statement grid.
       const { data, error } = await supabase
         .from('purchase_orders')
-        .select('po_id, vendor_bill_number, vendor_bill_no, vendor_bill_amount, bill_recorded_at')
-        .eq('stakeholder_id', stakeholderId)
-        .not('vendor_bill_amount', 'is', null)
-        .gt('vendor_bill_amount', 0);
+        .select('po_id, vendor_bill_number, vendor_bill_no, vendor_bill_amount, bill_recorded_at, total_value, order_value, status')
+        .eq('stakeholder_id', stakeholderId);
       if (error) throw error;
       return data as any[];
     },
@@ -396,6 +396,13 @@ export default function StakeholderLedgerDrawer({
   const finalBalance = totalCredit - totalDebit; // Cr positive = payable, Dr negative = advance
   const totalPaid = activeTxns.reduce((s: number, t: any) => s + Number(t.total_amount || 0), 0);
   const totalBilled = (stakeholderPOs || []).reduce((s: number, po: any) => s + Number(po.vendor_bill_amount || 0), 0);
+  // Committed = the total ordered value (WO order_value / PO total_value) — a commitment,
+  // NOT a liability, so it's shown for context but never folded into the net balance.
+  const totalCommitted = stkType === 'Worker'
+    ? (workOrders || []).filter((w: any) => !['Cancelled', 'Closed'].includes(w.status)).reduce((s: number, w: any) => s + Number(w.order_value || 0), 0)
+    : stkType === 'Vendor'
+      ? (stakeholderPOs || []).filter((p: any) => p.status !== 'CANCELLED').reduce((s: number, p: any) => s + Number(p.total_value ?? p.order_value ?? 0), 0)
+      : 0;
 
   const initials = getInitials(stk?.name || '');
   const phones = (stk?.contact || '').split(/[,;/]/).map((s: string) => s.trim()).filter(Boolean);
@@ -560,6 +567,11 @@ export default function StakeholderLedgerDrawer({
                     <p className="text-[10px] text-stone-450 mt-2 font-medium">
                       {stkType === 'Client' ? 'bills issued' : stkType === 'Vendor' ? 'recorded bills' : 'certified milestones'}
                     </p>
+                    {(stkType === 'Vendor' || stkType === 'Worker') && totalCommitted > 0 && (
+                      <p className="text-[10px] text-stone-400 mt-1.5 font-medium font-sans">
+                        of ₹{fmt(totalCommitted)} {stkType === 'Vendor' ? 'ordered' : 'committed'}
+                      </p>
+                    )}
                   </div>
 
                   {/* Col 2: Total Paid / Payouts */}
