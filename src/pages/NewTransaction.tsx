@@ -96,41 +96,30 @@ function getPOBalance(po: any): number { return Number(po.vendor_bill_amount || 
 
 // ── NoObligationsState ────────────────────────────────────────────────────────
 
-function NoObligationsState({ onSkip, onOpenWO, onOpenPO, txnType }: {
+function NoObligationsState({ onSkip, onOpenWO, onOpenPO, txnType, payeeName, projectName }: {
   onSkip: () => void;
   onOpenWO: () => void;
   onOpenPO: () => void;
   txnType?: string | null;
+  payeeName?: string | null;
+  projectName?: string | null;
 }) {
-  const showWO = txnType === 'worker' || (!txnType);
-  const showPO = txnType === 'material' || (!txnType);
+  const isW = txnType === 'worker';
   return (
-    <div className="mt-3 rounded-xl border border-dashed border-outline-variant/30 p-6 text-center">
-      <span className="material-symbols-outlined text-[32px] text-on-surface-variant/20 mb-2 block">link_off</span>
-      <p className="text-[14px] font-medium text-on-surface mb-1">
-        {txnType === 'worker' ? 'No open Contracts' : txnType === 'material' ? 'No open Purchase Orders' : 'No open Contracts or POs'}
+    <div className="mt-3">
+      <p style={{ fontSize: 12.5, lineHeight: 1.55, color: VOICE.system, margin: '0 0 12px', padding: '12px 14px', background: VOICE.field, borderRadius: 12 }}>
+        No open {isW ? 'contracts' : 'bills'} with <b style={{ color: VOICE.userSoft }}>{payeeName || 'this party'}</b>{projectName ? <> at <b style={{ color: VOICE.userSoft }}>{projectName}</b></> : null} yet.
       </p>
-      <p className="text-[12px] text-on-surface-variant/50 mb-4">Create one to link this payment, or record without linking.</p>
-      <div className="flex gap-2 justify-center flex-wrap">
-        {showWO && (
-          <button type="button" onClick={onOpenWO}
-            className="px-4 py-2 rounded-lg border border-[#C8603A]/30 bg-[#C8603A]/[0.03] text-[13px] font-semibold text-[#C8603A] hover:bg-[#C8603A]/[0.07] transition-colors flex items-center gap-1.5">
-            <span className="material-symbols-outlined text-[15px]">engineering</span>
-            New Contract
-          </button>
-        )}
-        {showPO && (
-          <button type="button" onClick={onOpenPO}
-            className="px-4 py-2 rounded-lg border border-[#006c49]/30 bg-[#006c49]/[0.03] text-[13px] font-semibold text-[#006c49] hover:bg-[#006c49]/[0.07] transition-colors flex items-center gap-1.5">
-            <span className="material-symbols-outlined text-[15px]">shopping_cart</span>
-            New Purchase Order
-          </button>
-        )}
-        <button type="button" onClick={onSkip}
-          className="px-4 py-2 rounded-lg text-[13px] text-on-surface-variant/50 hover:text-on-surface transition-colors">
-          Record without linking
-        </button>
-      </div>
+      <button type="button" onClick={isW ? onOpenWO : onOpenPO}
+        className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-[12.5px] font-semibold transition-opacity hover:opacity-90"
+        style={{ background: VOICE.cream2, border: `1.5px dashed ${VOICE.hairStrong}`, color: VOICE.accentDeep }}>
+        <span className="material-symbols-outlined text-[16px]">add</span>
+        {isW ? 'Create a new contract' : 'Add a new bill'}
+      </button>
+      <button type="button" onClick={onSkip}
+        className="mt-2.5 text-[11px] font-semibold inline-flex items-center gap-1.5" style={{ color: VOICE.systemFaint }}>
+        Record without linking <span className="material-symbols-outlined text-[13px]">arrow_forward</span>
+      </button>
     </div>
   );
 }
@@ -244,7 +233,7 @@ function POObligationRow({ po, index, selectedObligation, onSelect, poPaid }: {
 
 // ── LinkingPanel ──────────────────────────────────────────────────────────────
 
-function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip, onOpenWO, onOpenPO, txnType, hideCreate }: {
+function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip, onOpenWO, onOpenPO, txnType, hideCreate, payeeName, projectName }: {
   wos: any[]; pos: any[]; loading: boolean;
   selectedObligation: SelectedObligation | null;
   onSelect: (ob: SelectedObligation) => void;
@@ -253,6 +242,8 @@ function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip,
   onOpenPO: () => void;
   txnType?: string | null;
   hideCreate?: boolean;   // split rows: select existing orders only, no inline create
+  payeeName?: string | null;
+  projectName?: string | null;
 }) {
   // When set, the picker shows a focused "Which stage?" step for this contract
   // (instead of an inline phase tree) — one question on screen at a time.
@@ -313,7 +304,7 @@ function LinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip,
         </div>
       );
     }
-    return <NoObligationsState onSkip={onSkip} onOpenWO={onOpenWO} onOpenPO={onOpenPO} txnType={txnType} />;
+    return <NoObligationsState onSkip={onSkip} onOpenWO={onOpenWO} onOpenPO={onOpenPO} txnType={txnType} payeeName={payeeName} projectName={projectName} />;
   }
 
   // ── Step 2 — "Which stage?" for a multi-phase contract (replaces the list) ──
@@ -494,6 +485,17 @@ export default function NewTransaction({ session: _session }: { session: Session
   const [txnType, setTxnType] = useState<TxnType | null>(initialTxnType as TxnType | null);
   // The 2×2 type grid collapses to a compact chip once a type is chosen (frees space on mobile).
   const [pickingType, setPickingType] = useState(false);
+  // Mobile keyboard: tuck the fixed footer away when the on-screen keyboard is up, so it
+  // never overlaps the focused field or jumps (iOS doesn't reposition fixed elements). The
+  // >150px viewport shrink only happens on a real keyboard, so desktop is unaffected.
+  const [kbOpen, setKbOpen] = useState(false);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onResize = () => setKbOpen(window.innerHeight - vv.height > 150);
+    vv.addEventListener('resize', onResize);
+    return () => vv.removeEventListener('resize', onResize);
+  }, []);
 
   // ── Core form ────────────────────────────────────────────────────────────
   const [txnId, setTxnId] = useState(genTxnId);
@@ -1747,13 +1749,20 @@ export default function NewTransaction({ session: _session }: { session: Session
                         if (linkOpen) {
                           return (
                             <>
-                              <div className="flex items-center justify-between mb-2.5">
-                                <p style={{ fontFamily: VOICE.serif, fontSize: 15, fontWeight: 600, color: VOICE.user }}>{isWorker ? 'Which contract?' : 'Which order?'}</p>
+                              <div className="flex items-start justify-between gap-3 mb-1">
+                                <h3 style={{ fontFamily: VOICE.serif, fontSize: 18, fontWeight: 600, letterSpacing: '-0.01em', color: VOICE.user }}>
+                                  {isWorker ? `Track this as a contract with ${selName}?` : `Track this as a purchase with ${selName}?`}
+                                </h3>
                                 <button type="button" onClick={() => { setLinkOpen(false); setSelectedObligation(null); }}
-                                  className="text-[12px] font-medium inline-flex items-center gap-1" style={{ color: VOICE.system }}>
+                                  className="shrink-0 mt-1 text-[12px] font-medium inline-flex items-center gap-1" style={{ color: VOICE.system }}>
                                   <span className="material-symbols-outlined text-[14px]">arrow_back</span>Back
                                 </button>
                               </div>
+                              <p className="mb-3.5" style={{ fontSize: 12.5, lineHeight: 1.55, color: VOICE.system }}>
+                                {isWorker
+                                  ? "A subcontract has a fixed value — we'll show the balance burn down as you pay. Daily labour doesn't need this."
+                                  : "An open bill has an amount due — link this payment to it and its balance burns down as you pay. A direct purchase has no bill to clear."}
+                              </p>
                               <LinkingPanel
                                 wos={projectWOs}
                                 pos={projectPOs}
@@ -1764,6 +1773,8 @@ export default function NewTransaction({ session: _session }: { session: Session
                                 onOpenWO={() => openDrawer('WO')}
                                 onOpenPO={() => openDrawer('PO')}
                                 txnType={txnType}
+                                payeeName={selName}
+                                projectName={projects?.find((p: any) => p.project_id === a.project_id)?.name || null}
                               />
                               {needsPhaseSelection && (
                                 <div className="mt-3 p-4 rounded-xl border border-amber-200/50 bg-amber-50/50 text-amber-800 animate-fadeIn">
@@ -2357,7 +2368,7 @@ export default function NewTransaction({ session: _session }: { session: Session
       )}
 
       {/* ── Bottom Action Bar — voice restyle (handlers unchanged) ──────────── */}
-      <div className="fixed bottom-0 left-0 right-0 z-40 backdrop-blur-xl" style={{ background: 'rgba(255,255,255,0.9)', borderTop: `1px solid ${VOICE.line}` }}>
+      <div className="fixed bottom-0 left-0 right-0 z-40 backdrop-blur-xl" style={{ background: 'rgba(255,255,255,0.9)', borderTop: `1px solid ${VOICE.line}`, transform: kbOpen ? 'translateY(115%)' : 'translateY(0)', transition: 'transform .22s cubic-bezier(.4,0,.2,1)' }}>
         <div className="mx-auto px-5 py-4 flex items-center gap-3" style={{ maxWidth: 720 }}>
           {txnType && (
             <div className="mr-1">
