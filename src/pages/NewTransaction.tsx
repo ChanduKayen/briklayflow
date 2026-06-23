@@ -1033,8 +1033,9 @@ export default function NewTransaction({ session: _session }: { session: Session
       return null;
     })();
     if (firstMissing) {
+      // Focus synchronously (within the click) so the cursor activates on mobile, then scroll.
+      firstMissing.focus({ preventScroll: true });
       firstMissing.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      setTimeout(() => firstMissing.focus({ preventScroll: true }), 120);
       return;
     }
 
@@ -1112,7 +1113,11 @@ export default function NewTransaction({ session: _session }: { session: Session
   const goToGap = () => {
     setSaveAttempted(true);
     const el = nextGap?.el();
-    if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => el.focus({ preventScroll: true }), 120); }
+    if (!el) return;
+    // Focus SYNCHRONOUSLY inside the tap so the cursor/keyboard actually activates on mobile
+    // (a deferred focus() loses the user-gesture and won't open the keyboard), then scroll.
+    el.focus({ preventScroll: true });
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
 
   const needsPhaseSelection = !!(
