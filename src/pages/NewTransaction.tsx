@@ -1323,7 +1323,7 @@ export default function NewTransaction({ session: _session }: { session: Session
                 {txnType === 'client_receipt' ? 'Money coming in' : 'Money going out'}
               </span>
               <div className="flex items-baseline gap-1.5 min-w-0">
-                <span style={{ fontFamily: VOICE.serif, fontSize: 'clamp(20px, 6vw, 28px)', fontWeight: 600, color: txnType === 'client_receipt' ? VOICE.innSoft : VOICE.accentSoft, flex: '0 0 auto' }}>₹</span>
+                <span style={{ fontFamily: VOICE.serif, fontSize: 'clamp(24px, 7vw, 30px)', fontWeight: 600, color: txnType === 'client_receipt' ? VOICE.innSoft : VOICE.accentSoft, flex: '0 0 auto' }}>₹</span>
                 <input
                   id="txn-amount-input"
                   type="number"
@@ -1342,7 +1342,9 @@ export default function NewTransaction({ session: _session }: { session: Session
                   // you type; a very long amount just scrolls within the input. Baseline-aligned with ₹.
                   style={{
                     fontFamily: VOICE.serif, fontWeight: 600, lineHeight: 1, letterSpacing: '-1.5px',
-                    fontSize: 'clamp(50px, 15vw, 62px)',
+                    // Mobile floor raised so the figure is as large as desktop (was 15vw → ~54px
+                    // on a 360px phone; now ~61px, matching the 64px desktop cap).
+                    fontSize: 'clamp(58px, 17vw, 64px)',
                     background: 'transparent', border: 'none', outline: 'none', color: VOICE.ivory,
                     caretColor: txnType === 'client_receipt' ? VOICE.innSoft : VOICE.accentSoft,
                     flex: '1 1 auto', width: '100%', minWidth: 0, padding: 0,
