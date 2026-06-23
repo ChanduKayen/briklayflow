@@ -327,7 +327,7 @@ export default function Logbook({ session }: { session: Session }) {
               <div
                 key={r.id}
                 id={`db-entry-${r.id}`}
-                style={{ scrollMarginTop: 76, ...(focusId === r.id ? { borderRadius: 18, boxShadow: '0 0 0 2px #C8603A', transition: 'box-shadow .3s' } : {}) }}
+                style={{ scrollMarginTop: 40, ...(focusId === r.id ? { borderRadius: 18, boxShadow: '0 0 0 2px #C8603A', transition: 'box-shadow .3s' } : {}) }}
               >
               <ReviewCard
                 entry={r}
