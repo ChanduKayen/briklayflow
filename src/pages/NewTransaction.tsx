@@ -1111,27 +1111,26 @@ export default function NewTransaction({ session: _session }: { session: Session
     if (effectiveAllocs.some((a) => !a.project_id)) return { label: 'Choose a project', el: () => document.getElementById('txn-project-0') };
     return null;
   })();
-  // Focus SYNCHRONOUSLY inside the tap (so the cursor/keyboard activates on mobile — a
-  // deferred focus() loses the gesture), then scroll into the visible frame. On mobile the
-  // page only becomes scrollable AFTER the keyboard appears (it shrinks the visual viewport),
-  // so an immediate scroll is a no-op and the field stays hidden. We therefore re-scroll on
-  // the visualViewport 'resize' (the keyboard-open signal), aligning to the TOP so it clears
-  // the keyboard. Desktop just centers.
+  // Focus SYNCHRONOUSLY inside the tap so the cursor/keyboard activates on mobile (a deferred
+  // focus() loses the gesture). On mobile we DON'T preventScroll — that would disable the
+  // browser's native "scroll the focused input above the keyboard" behaviour, which is the
+  // most reliable mechanism. We then snap it to the top of the frame once the keyboard has
+  // actually opened (visualViewport 'resize') plus timeout fallbacks, since smooth scrolls
+  // get cancelled by that relayout. Desktop just centers.
   const bringIntoFrame = (el: HTMLElement | null) => {
     if (!el) return;
-    el.focus({ preventScroll: true });
     const mobile = window.innerWidth < 640;
-    const scroll = () => el.scrollIntoView({ behavior: 'smooth', block: mobile ? 'start' : 'center' });
-    scroll(); // desktop / keyboard-already-open case
-    if (mobile) {
-      const vv = window.visualViewport;
-      if (vv) {
-        const onResize = () => { scroll(); vv.removeEventListener('resize', onResize); };
-        vv.addEventListener('resize', onResize);
-        setTimeout(() => vv.removeEventListener('resize', onResize), 1200); // safety cleanup
-      }
-      setTimeout(scroll, 350); // fallback if no resize fires (keyboard already up)
+    if (!mobile) {
+      el.focus({ preventScroll: true });
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
     }
+    el.focus(); // native focus-scroll brings the input above the keyboard
+    const snap = () => el.scrollIntoView({ block: 'start' });
+    const vv = window.visualViewport;
+    if (vv) vv.addEventListener('resize', () => snap(), { once: true });
+    setTimeout(snap, 300);
+    setTimeout(snap, 550);
   };
   const fieldEl = (k: 'amount' | 'payee' | 'remark' | 'project'): HTMLElement | null =>
     k === 'amount' ? document.getElementById('txn-amount-input')
