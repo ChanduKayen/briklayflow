@@ -1491,8 +1491,8 @@ export default function NewTransaction({ session: _session }: { session: Session
                       <CostCodePicker
                         value={category}
                         onChange={(v) => { setCategory(v); setAiCodeState('idle'); setAiSuggestedCode(null); }}
-                        defaultType={txnType ? COA_DEFAULTS[txnType]?.type : 'MAT'}
-                        defaultDivision={txnType ? COA_DEFAULTS[txnType]?.division : undefined}
+                        defaultType={COA_DEFAULTS[txnType ?? '']?.type ?? 'MAT'}
+                        defaultDivision={COA_DEFAULTS[txnType ?? '']?.division}
                         error={false}
                       />
                     )}
@@ -1509,7 +1509,7 @@ export default function NewTransaction({ session: _session }: { session: Session
                         {aiCodeState === 'suggested' && aiSuggestedCode && category === aiSuggestedCode && (
                           <div className="mt-2.5 flex items-center gap-1.5 text-[11px] text-indigo-600 font-semibold pl-1 animate-fadeIn">
                             <span className="material-symbols-outlined text-[13px] animate-pulse" style={{ fontVariationSettings: "'FILL' 1" }}>auto_awesome</span>
-                            <span>AI auto-selected cost code: <strong className="font-bold">{costCodeLabel(aiSuggestedCode)}</strong></span>
+                            <span>AI auto-selected cost code: <strong className="font-bold">{costCodeLabel(aiSuggestedCode ?? '')}</strong></span>
                             <button type="button"
                               onClick={() => { setCategory(''); setAiCodeState('idle'); setAiSuggestedCode(null); }}
                               className="ml-2 underline hover:text-indigo-800 transition-colors font-bold shrink-0">
