@@ -38,7 +38,7 @@ export function Amount({ dir, value }: { dir: TxnDirection; value: string }) {
   );
 }
 
-export function AnchorChip({ anchor, info, onClick }: { anchor: TxnAnchor; info?: AnchorInfo; onClick?: (e: MouseEvent) => void }) {
+export function AnchorChip({ anchor, info, siblings = 0, onClick }: { anchor: TxnAnchor; info?: AnchorInfo; siblings?: number; onClick?: (e: MouseEvent) => void }) {
   const [hover, setHover] = useState(false);
   if (!anchor) {
     return (
@@ -63,15 +63,35 @@ export function AnchorChip({ anchor, info, onClick }: { anchor: TxnAnchor; info?
     const isWO = info.kind === 'WO';
     const TypeIcon = isWO ? Hammer : Package;
     const fill = isWO ? V.terra : V.sys; // WO terracotta; PO a calmer tone
+    // Silent depth cue: when this party has OTHER open obligations of the same kind,
+    // grow a faint stacked-card edge peeking out bottom-right (1 sibling = one card,
+    // 2+ = two receding/lightening cards). No text — the count lives only in the
+    // tooltip + the order peek. Warm low-contrast edges, a hair darker than V.field.
+    const stack = siblings > 0;
+    const edgeNear = V.line;          // #EAE6E0 — closest card, just visible over V.field
+    const edgeFar  = '#EFEBE4';       // a touch lighter (blend toward V.surface) — recedes
+    const stackShadow = !stack
+      ? undefined
+      : siblings === 1
+        ? `2.5px 2.5px 0 0 ${edgeNear}`
+        : `2px 2px 0 0 ${edgeNear}, 4px 4px 0 0 ${edgeFar}`;
+    const tipNoun = info.kind === 'WO' ? 'contract holder' : 'vendor';
+    const tip = stack ? `${anchor.ref} · ${siblings} more open with this ${tipNoun}` : anchor.ref;
     return (
       <button
         type="button"
-        title={anchor.ref}
+        title={tip}
         onClick={onClick}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
         className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md max-w-full"
-        style={{ background: V.field, color: V.inkSoft, ...font }}
+        style={{
+          background: V.field,
+          color: V.inkSoft,
+          ...font,
+          // reserve room so the stacked edge isn't clipped by the row
+          ...(stack ? { boxShadow: stackShadow, marginRight: 4, marginBottom: 4 } : {}),
+        }}
       >
         <TypeIcon size={11} style={{ color: V.faint }} className="shrink-0" />
         <span className="truncate" style={{ maxWidth: 140 }}>

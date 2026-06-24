@@ -5,6 +5,7 @@ import { PeekModal } from './PeekModal';
 import type { POLineItem } from '../types';
 import { usePeek } from '../context/PeekContext';
 import { TxnRow } from './TxnRow';
+import { OtherOpenWithParty } from './OtherOpenWithParty';
 
 function fmtDate(d: string | null | undefined) {
   if (!d) return '—';
@@ -202,6 +203,14 @@ export function POPeek({ poId, onClose }: POPeekProps) {
               </div>
             </div>
           )}
+
+          {/* Silent "more here" follow-through: this vendor's OTHER open bills */}
+          <OtherOpenWithParty
+            kind="PO"
+            stakeholderId={po.stakeholder_id}
+            currentOrderId={poId}
+            partyName={po.stakeholders?.name}
+          />
 
           {po.terms_conditions && (
             <div>

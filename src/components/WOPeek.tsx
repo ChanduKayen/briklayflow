@@ -8,6 +8,7 @@ import { statusBadgeClass } from '../pages/WorkOrderDetail';
 import { useUserProfile } from '../App';
 import { usePeek } from '../context/PeekContext';
 import { TxnRow } from './TxnRow';
+import { OtherOpenWithParty } from './OtherOpenWithParty';
 
 function fmtDate(d: string | null | undefined) {
   if (!d) return '—';
@@ -282,6 +283,14 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
               </div>
             </div>
           )}
+
+          {/* Silent "more here" follow-through: this worker's OTHER open contracts */}
+          <OtherOpenWithParty
+            kind="WO"
+            stakeholderId={wo.stakeholder_id}
+            currentOrderId={woId}
+            partyName={wo.stakeholders?.name}
+          />
 
           {wo.terms_conditions && (
             <div>

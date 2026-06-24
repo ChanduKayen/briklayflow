@@ -92,6 +92,7 @@ type EntryProps = {
   context: string;
   anchor: TxnAnchor;
   info?: OrderInfo;
+  siblings?: number;
   anchorNode?: ReactNode;
   remark: string | null;
   amount: string;
@@ -168,7 +169,7 @@ function EntryRow(p: EntryProps) {
       </div>
 
       <div className="bk-ledger-anchor flex items-center gap-2">
-        {p.anchorNode ?? <AnchorChip anchor={p.anchor} info={p.info} onClick={(e) => { e.stopPropagation(); p.onAnchorClick(e); }} />}
+        {p.anchorNode ?? <AnchorChip anchor={p.anchor} info={p.info} siblings={p.siblings} onClick={(e) => { e.stopPropagation(); p.onAnchorClick(e); }} />}
         {p.flagged && (
           <span className="text-xs px-1.5 py-0.5 rounded shrink-0" style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font }}>flagged</span>
         )}
@@ -400,6 +401,78 @@ export default function Ledger({ session }: { session: Session }) {
         }
       }
       return map;
+    },
+  });
+
+  // ── Silent "other open obligations" signal ───────────────────────────────────
+  // The distinct stakeholder_ids whose rows carry an order-typed (WO/PO) allocation.
+  // These are the parties for whom a "more open here" depth cue could apply; we count
+  // each party's OPEN obligations per kind so the chip can grow a stacked-card edge.
+  const partyIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const txn of ledger ?? []) {
+      if (!txn.stakeholder_id) continue;
+      const hasOrderAlloc = ((txn.txn_allocations || []) as TxnAlloc[]).some(
+        (a) => a?.order_type === 'WO' || a?.order_type === 'PO',
+      );
+      if (hasOrderAlloc) ids.add(String(txn.stakeholder_id));
+    }
+    return [...ids].sort();
+  }, [ledger]);
+
+  // Per-party open-obligation counts by kind. Open = an order with (total − paid) > 0.
+  // Fetched once for all visible parties; sums paid-to-date across ALL txns per order.
+  // Errors degrade gracefully (a missing party just shows no depth cue, never blanks).
+  const { data: partyOpen = {} } = useQuery<Record<string, { WO: number; PO: number }>>({
+    queryKey: ['ledger_party_open', partyIds],
+    enabled: partyIds.length > 0,
+    queryFn: async () => {
+      const counts: Record<string, { WO: number; PO: number }> = {};
+      // total + paid per order, tagged with its party + kind
+      const orders: Array<{ id: string; party: string; kind: 'WO' | 'PO'; total: number }> = [];
+
+      const woRes = await supabase
+        .from('work_orders')
+        .select('wo_id, stakeholder_id, order_value, status')
+        .in('stakeholder_id', partyIds)
+        .not('status', 'in', '("Closed","Cancelled")');
+      for (const w of (woRes.data ?? []) as any[]) {
+        if (!w.stakeholder_id) continue;
+        orders.push({ id: String(w.wo_id), party: String(w.stakeholder_id), kind: 'WO', total: Number(w.order_value) || 0 });
+      }
+
+      const poRes = await supabase
+        .from('purchase_orders')
+        .select('po_id, stakeholder_id, total_value, order_value, status')
+        .in('stakeholder_id', partyIds);
+      for (const p of (poRes.data ?? []) as any[]) {
+        if (!p.stakeholder_id) continue;
+        orders.push({ id: String(p.po_id), party: String(p.stakeholder_id), kind: 'PO', total: Number(p.total_value) || Number(p.order_value) || 0 });
+      }
+
+      if (orders.length === 0) return counts;
+
+      // Paid-to-date for every order, in one sweep over its allocations.
+      const paidByOrder: Record<string, number> = {};
+      const allRefs = orders.map((o) => o.id);
+      const allocRes = await supabase
+        .from('txn_allocations')
+        .select('order_ref, allocated_amount')
+        .in('order_ref', allRefs);
+      for (const a of (allocRes.data ?? []) as any[]) {
+        const ref = String(a.order_ref);
+        paidByOrder[ref] = (paidByOrder[ref] || 0) + (Number(a.allocated_amount) || 0);
+      }
+
+      for (const o of orders) {
+        const balance = o.total - (paidByOrder[o.id] || 0);
+        if (balance > 0) {
+          const c = counts[o.party] ?? { WO: 0, PO: 0 };
+          c[o.kind] += 1;
+          counts[o.party] = c;
+        }
+      }
+      return counts;
     },
   });
 
@@ -1109,6 +1182,14 @@ export default function Ledger({ session }: { session: Session }) {
                     if (!(filterProject.length === 1) && projName) ctxParts.push(projName);
                     const context = ctxParts.filter(Boolean).join(' · ');
                     const proofUrl = txn.bill_doc_url || txn.proof_document_url || null;
+                    // Silent depth cue: how many OTHER open obligations of the same kind
+                    // this party has (beyond the one shown). Drives the stacked-card edge.
+                    const linkedInfo = anchor && (anchor.kind === 'WO' || anchor.kind === 'PO') ? orderMap[anchor.ref] : undefined;
+                    const partyOpenCount = anchor && txn.stakeholder_id && (anchor.kind === 'WO' || anchor.kind === 'PO')
+                      ? (partyOpen[txn.stakeholder_id]?.[anchor.kind] ?? 0)
+                      : 0;
+                    const linkedOpen = linkedInfo ? (linkedInfo.total - linkedInfo.paid) > 0 : false;
+                    const siblings = Math.max(0, partyOpenCount - (linkedOpen ? 1 : 0));
                     // The "not linked" region — the ONLY part of the row that changes:
                     //  · general expense -> a calm, non-actionable note (no tracking needed)
                     //  · an unlinked outgoing payment to a party -> the gentle Track nudge
@@ -1132,7 +1213,8 @@ export default function Ledger({ session }: { session: Session }) {
                         onPayeeClick={() => { if (txn.stakeholder_id) setDrawerStk(txn.stakeholder_id); }}
                         context={context}
                         anchor={anchor}
-                        info={anchor && (anchor.kind === 'WO' || anchor.kind === 'PO') ? orderMap[anchor.ref] : undefined}
+                        info={linkedInfo}
+                        siblings={siblings}
                         remark={null}
                         amount={inr(Number(txn.total_amount))}
                         attach={!!proofUrl}
