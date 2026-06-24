@@ -354,17 +354,23 @@ export default function Ledger({ session }: { session: Session }) {
     enabled: woRefs.length > 0 || poRefs.length > 0,
     queryFn: async () => {
       const map: Record<string, OrderInfo> = {};
-      const [woRes, poRes] = await Promise.all([
-        woRefs.length
-          ? supabase.from('work_orders').select('wo_id, title, scope_of_work, order_value').in('wo_id', woRefs)
-          : Promise.resolve({ data: [], error: null }),
-        poRefs.length
-          ? supabase.from('purchase_orders').select('po_id, total_value, order_value, po_line_items(item_name, description)').in('po_id', poRefs)
-          : Promise.resolve({ data: [], error: null }),
-      ]);
-      if (woRes.error) throw woRes.error;
-      if (poRes.error) throw poRes.error;
-      for (const w of (woRes.data ?? []) as any[]) {
+
+      // WO: prefer the `title` column, but fall back if that migration isn't applied yet —
+      // otherwise the column error would blank the whole map and the chip silently reverts.
+      let woData: any[] = [];
+      if (woRefs.length) {
+        let r: any = await supabase.from('work_orders').select('wo_id, title, scope_of_work, order_value').in('wo_id', woRefs);
+        if (r.error) r = await supabase.from('work_orders').select('wo_id, scope_of_work, order_value').in('wo_id', woRefs);
+        woData = (r.data ?? []) as any[];
+      }
+      // PO: prefer the line-item embed; fall back to bare totals if the embed errors.
+      let poData: any[] = [];
+      if (poRefs.length) {
+        let r: any = await supabase.from('purchase_orders').select('po_id, total_value, order_value, po_line_items(item_name, description)').in('po_id', poRefs);
+        if (r.error) r = await supabase.from('purchase_orders').select('po_id, total_value, order_value').in('po_id', poRefs);
+        poData = (r.data ?? []) as any[];
+      }
+      for (const w of woData) {
         map[String(w.wo_id)] = {
           kind: 'WO',
           title: (w.title?.trim?.() || '') || summarizeScope(w.scope_of_work),
@@ -372,7 +378,7 @@ export default function Ledger({ session }: { session: Session }) {
           paid: 0,
         };
       }
-      for (const p of (poRes.data ?? []) as any[]) {
+      for (const p of poData) {
         map[String(p.po_id)] = {
           kind: 'PO',
           title: summarizeItems(p.po_line_items),
