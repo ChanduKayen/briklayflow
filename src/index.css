@@ -1224,3 +1224,9 @@ html, body {
   .ins-cta:hover .ins-cta__sheen { left: -65%; }
   .ins-fade { animation: none; }
 }
+
+/* Ledger anchor "more open obligations" tooltip — gentle rise + fade. */
+@keyframes anchorTipIn {
+  from { opacity: 0; transform: translateY(3px) scale(0.97); }
+  to   { opacity: 1; transform: none; }
+}

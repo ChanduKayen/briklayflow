@@ -2,7 +2,8 @@
  * Ledger atoms — verbatim visuals from docs/reference/BriklayTransactionsPage.jsx,
  * parameterised for real data/handlers (the invisible wiring lives in the page).
  */
-import { useState, type ReactNode, type MouseEvent, type CSSProperties } from 'react';
+import { useState, useRef, type ReactNode, type MouseEvent, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowUpRight, ArrowDownLeft, Link2, ChevronDown, Hammer, Package } from 'lucide-react';
 import { V, font, nums } from './ledgerTokens';
 import type { TxnAnchor, TxnDirection } from '../../lib/transactions';
@@ -40,6 +41,8 @@ export function Amount({ dir, value }: { dir: TxnDirection; value: string }) {
 
 export function AnchorChip({ anchor, info, siblings = 0, onClick }: { anchor: TxnAnchor; info?: AnchorInfo; siblings?: number; onClick?: (e: MouseEvent) => void }) {
   const [hover, setHover] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [tipPos, setTipPos] = useState<{ top: number; left: number } | null>(null);
   if (!anchor) {
     return (
       <button
@@ -75,15 +78,21 @@ export function AnchorChip({ anchor, info, siblings = 0, onClick }: { anchor: Tx
       : siblings === 1
         ? `2.5px 2.5px 0 0 ${edgeNear}`
         : `2px 2px 0 0 ${edgeNear}, 4px 4px 0 0 ${edgeFar}`;
-    const tipNoun = info.kind === 'WO' ? 'contract holder' : 'vendor';
-    const tip = stack ? `${anchor.ref} · ${siblings} more open with this ${tipNoun}` : anchor.ref;
+    // The id is already revealed in-place on hover, so the tooltip never repeats it — it
+    // carries ONLY the silent-count truth, in a beautiful walnut pill (portal'd so the row's
+    // overflow can't clip it). Noun + accent match the obligation kind.
+    const tipNoun = info.kind === 'WO' ? (siblings === 1 ? 'contract' : 'contracts') : (siblings === 1 ? 'bill' : 'bills');
+    const tipAccent = info.kind === 'WO' ? '#E89A72' : '#9CBB91';
+    const showTip = () => { setHover(true); const el = btnRef.current; if (stack && el) { const r = el.getBoundingClientRect(); setTipPos({ top: r.top, left: r.left }); } };
+    const hideTip = () => { setHover(false); setTipPos(null); };
     return (
+      <>
       <button
+        ref={btnRef}
         type="button"
-        title={tip}
         onClick={onClick}
-        onMouseEnter={() => setHover(true)}
-        onMouseLeave={() => setHover(false)}
+        onMouseEnter={showTip}
+        onMouseLeave={hideTip}
         className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md max-w-full"
         style={{
           background: V.field,
@@ -115,6 +124,22 @@ export function AnchorChip({ anchor, info, siblings = 0, onClick }: { anchor: Tx
           <span className="shrink-0 whitespace-nowrap" style={{ color: V.terraDeep, ...font, ...nums }}>₹{inr(balance)} left</span>
         )}
       </button>
+      {stack && tipPos && createPortal(
+        <div role="tooltip" style={{ position: 'fixed', top: tipPos.top - 9, left: tipPos.left, transform: 'translateY(-100%)', zIndex: 9999, pointerEvents: 'none' }}>
+          <div style={{
+            position: 'relative', padding: '7px 11px', borderRadius: 10, whiteSpace: 'nowrap',
+            background: 'linear-gradient(158deg,#2D2118 0%,#1B140E 100%)', color: '#F3EADB',
+            fontSize: 11, fontWeight: 500, letterSpacing: '0.01em', ...font,
+            boxShadow: '0 14px 32px -12px rgba(20,15,10,.6), inset 0 0 0 1px rgba(243,234,219,.08)',
+            animation: 'anchorTipIn .17s cubic-bezier(.2,.85,.25,1) both',
+          }}>
+            <span style={{ color: tipAccent, fontWeight: 700, ...nums }}>+{siblings}</span> more open {tipNoun}
+            <span aria-hidden="true" style={{ position: 'absolute', top: '100%', left: 15, width: 9, height: 9, background: '#1B140E', borderRight: '1px solid rgba(243,234,219,.08)', borderBottom: '1px solid rgba(243,234,219,.08)', transform: 'translateY(-5px) rotate(45deg)' }} />
+          </div>
+        </div>,
+        document.body,
+      )}
+      </>
     );
   }
   // No resolved info (CLIENT anchors, or an order we couldn't load): the original chip.
