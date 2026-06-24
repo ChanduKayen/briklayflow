@@ -30,7 +30,7 @@ const inr = (n: number) => Math.round(n).toLocaleString('en-IN');
 
 // What the redesigned AnchorChip needs to show a title, a burn-down bar, and the
 // remaining balance — keyed by order id (wo_id / po_id). Total/paid drive the bar.
-export type OrderInfo = { kind: 'WO' | 'PO'; title: string; total: number; paid: number };
+export type OrderInfo = { kind: 'WO' | 'PO'; title: string; total: number; paid: number; project: string };
 
 // A WO's scope is a long paragraph; show the opening ~40 chars as a human header
 // when the AI/user title is missing.
@@ -362,15 +362,15 @@ export default function Ledger({ session }: { session: Session }) {
       // otherwise the column error would blank the whole map and the chip silently reverts.
       let woData: any[] = [];
       if (woRefs.length) {
-        let r: any = await supabase.from('work_orders').select('wo_id, title, scope_of_work, order_value').in('wo_id', woRefs);
-        if (r.error) r = await supabase.from('work_orders').select('wo_id, scope_of_work, order_value').in('wo_id', woRefs);
+        let r: any = await supabase.from('work_orders').select('wo_id, project_id, title, scope_of_work, order_value').in('wo_id', woRefs);
+        if (r.error) r = await supabase.from('work_orders').select('wo_id, project_id, scope_of_work, order_value').in('wo_id', woRefs);
         woData = (r.data ?? []) as any[];
       }
       // PO: prefer the line-item embed; fall back to bare totals if the embed errors.
       let poData: any[] = [];
       if (poRefs.length) {
-        let r: any = await supabase.from('purchase_orders').select('po_id, total_value, order_value, po_line_items(item_name, description)').in('po_id', poRefs);
-        if (r.error) r = await supabase.from('purchase_orders').select('po_id, total_value, order_value').in('po_id', poRefs);
+        let r: any = await supabase.from('purchase_orders').select('po_id, project_id, total_value, order_value, po_line_items(item_name, description)').in('po_id', poRefs);
+        if (r.error) r = await supabase.from('purchase_orders').select('po_id, project_id, total_value, order_value').in('po_id', poRefs);
         poData = (r.data ?? []) as any[];
       }
       for (const w of woData) {
@@ -379,6 +379,7 @@ export default function Ledger({ session }: { session: Session }) {
           title: (w.title?.trim?.() || '') || summarizeScope(w.scope_of_work),
           total: Number(w.order_value) || 0,
           paid: 0,
+          project: String(w.project_id ?? ''),
         };
       }
       for (const p of poData) {
@@ -387,6 +388,7 @@ export default function Ledger({ session }: { session: Session }) {
           title: summarizeItems(p.po_line_items),
           total: Number(p.total_value) || Number(p.order_value) || 0,
           paid: 0,
+          project: String(p.project_id ?? ''),
         };
       }
       // Paid-to-date: sum every allocation booked against these orders.
@@ -1189,7 +1191,9 @@ export default function Ledger({ session }: { session: Session }) {
                     // Silent depth cue: how many OTHER open obligations of the same kind
                     // this party has (beyond the one shown). Drives the stacked-card edge.
                     const linkedInfo = anchor && (anchor.kind === 'WO' || anchor.kind === 'PO') ? orderMap[anchor.ref] : undefined;
-                    const siteProjectId = primaryAlloc?.project_id ? String(primaryAlloc.project_id) : '';
+                    // Use the linked ORDER's project (same source the count is keyed on) so the
+                    // lookup can't miss; fall back to the allocation's project.
+                    const siteProjectId = linkedInfo?.project || (primaryAlloc?.project_id ? String(primaryAlloc.project_id) : '');
                     const siteName = (primaryAlloc?.projects as any)?.name ?? null;
                     const partyOpenCount = anchor && txn.stakeholder_id && (anchor.kind === 'WO' || anchor.kind === 'PO')
                       ? (partyOpen[`${txn.stakeholder_id}::${siteProjectId}`]?.[anchor.kind] ?? 0)
