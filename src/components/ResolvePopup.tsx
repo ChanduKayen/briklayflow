@@ -204,6 +204,14 @@ export function ResolvePopup({ entry, onClose, onUpdated }: Props) {
   const [payeeName, setPayeeName] = useState(ai.payee_name || '');
   const [payeeSearch, setPayeeSearch] = useState(ai.payee_name || ai.payee_raw || '');
   const [showPayeeDrop, setShowPayeeDrop] = useState(false);
+  // Payee resolution state machine (lifted here so the smart-CTA gap logic can read it):
+  // A = confirmed match · B = matched LOW-confidence, needs confirm · C = searching/unmatched
+  // · confirmed = user explicitly chose. Payee is "resolved" only in A or confirmed.
+  const [payeeState, setPayeeState] = useState<PayeeState>(() => {
+    if (!ai.payee_id) return 'C';
+    if (ai.payee_matched === true && ai.payee_confidence === 'LOW') return 'B';
+    return 'A';
+  });
   const [amount, setAmount] = useState<number | ''>(ai.amount ?? '');
   const [description, setDescription] = useState(ai.description || ai.description_raw || '');
   const [projectId, setProjectId] = useState(ai.project_id || '');
@@ -218,7 +226,7 @@ export function ResolvePopup({ entry, onClose, onUpdated }: Props) {
   const dragStartY = useRef(0);
   const [dragY, setDragY] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
-  const [fullHeight, setFullHeight] = useState(false);
+  const [vp, setVp] = useState<{ height: number; offsetTop: number } | null>(null);
   const payeeRef = useRef<HTMLInputElement>(null);
   const projectRef = useRef<HTMLSelectElement>(null);
 
@@ -242,7 +250,6 @@ export function ResolvePopup({ entry, onClose, onUpdated }: Props) {
     const delta = e.clientY - dragStartY.current;
     const threshold = (sheetRef.current?.offsetHeight || 400) * 0.4;
     if (delta > threshold) { onClose(); return; }
-    if (delta < -40) setFullHeight(true);   // small upward pull → snap to full height
     setDragY(0);
   }, [isDragging, onClose]);
 
@@ -278,11 +285,6 @@ export function ResolvePopup({ entry, onClose, onUpdated }: Props) {
 
   const isWhatsApp = entry.source.startsWith('WHATSAPP');
 
-  // On open, focus the amount (matches NewTransaction's amount-first behaviour).
-  useEffect(() => {
-    setTimeout(() => document.getElementById('resolve-amount-input')?.focus({ preventScroll: true }), 60);
-  }, []);
-
   // Lock the background scroll while the editor is open, so focusing a field can't jolt the
   // document underneath the fixed sheet (the source of the up/down jitter on mobile). The
   // sheet's own overflow-y-auto body still scrolls.
@@ -290,6 +292,19 @@ export function ResolvePopup({ entry, onClose, onUpdated }: Props) {
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => { document.body.style.overflow = prev; };
+  }, []);
+
+  // Bind the mobile sheet to the visual viewport so it always fills the visible area ABOVE
+  // the keyboard, instead of a bottom-anchored partial sheet the keyboard shoves around
+  // (that anchoring was the jitter). The sheet's own body scrolls within.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => setVp({ height: vv.height, offsetTop: vv.offsetTop });
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update); };
   }, []);
 
   useEffect(() => {
@@ -315,49 +330,53 @@ export function ResolvePopup({ entry, onClose, onUpdated }: Props) {
   // Focus SYNCHRONOUSLY inside the tap so the cursor/keyboard activates on mobile.
   // On mobile we DON'T preventScroll — that disables the browser's native
   // "scroll the focused input above the keyboard" behaviour. Desktop just centers.
+  // Focus the field within the sheet's own body (preventScroll so the native focus-scroll
+  // can't jolt the fixed sheet), then scroll it into view — top on mobile (clears the header
+  // via scroll-margin), centered on desktop. Only inputs/selects take focus; others just scroll.
   const bringIntoFrame = (el: HTMLElement | null) => {
     if (!el) return;
-    // Always preventScroll — inside a fixed sheet the native focus-scroll jolts the document.
-    // Then scroll the field within the sheet's own scroll body: to the top on mobile (clears
-    // the sticky header via scroll-margin and sits above the keyboard), centered on desktop.
-    el.focus({ preventScroll: true });
+    if (el.matches('input, select, textarea')) el.focus({ preventScroll: true });
     el.scrollIntoView({ behavior: 'smooth', block: window.innerWidth < 640 ? 'start' : 'center' });
   };
-  const fieldEl = (k: 'amount' | 'payee' | 'description' | 'project'): HTMLElement | null =>
+
+  // A field counts as RESOLVED, not merely filled — payee is resolved only once confirmed.
+  const amountResolved = amount !== '' && Number(amount) > 0;
+  const payeeResolved = !!payeeId && (payeeState === 'A' || payeeState === 'confirmed');
+  const descriptionResolved = !!description.trim();
+  const projectResolved = !!projectId;
+
+  type GapKey = 'amount' | 'payee' | 'description' | 'project';
+  const fieldEl = (k: GapKey): HTMLElement | null =>
     k === 'amount' ? document.getElementById('resolve-amount-input')
-      : k === 'payee' ? payeeRef.current
+      : k === 'payee' ? (payeeState === 'C' || !payeeId ? payeeRef.current : document.getElementById('resolve-payee-field'))
       : k === 'description' ? document.getElementById('resolve-description-input')
       : projectRef.current;
 
-  // Smart-CTA gap order: amount → payee → description → project. While a gap
-  // remains the footer names it; once none remain it becomes "File it".
-  const nextGap: { label: string; key: 'amount' | 'payee' | 'description' | 'project' } | null = (() => {
-    if (missingAmount) return { label: 'Enter the amount', key: 'amount' };
-    if (missingPayee) return { label: 'Add the payee', key: 'payee' };
-    if (missingDescription) return { label: 'Add a remark', key: 'description' };
-    if (missingProject) return { label: 'Choose a project', key: 'project' };
+  // Smart CTA walks ONLY the unresolved fields, in order. While a gap remains the footer
+  // names it; once none remain it becomes "File it".
+  const nextGap: { label: string; key: GapKey } | null = (() => {
+    if (!amountResolved) return { label: 'Enter the amount', key: 'amount' };
+    if (!payeeResolved) return { label: payeeState === 'B' ? 'Confirm the payee' : 'Add the payee', key: 'payee' };
+    if (!descriptionResolved) return { label: 'Add a remark', key: 'description' };
+    if (!projectResolved) return { label: 'Choose a project', key: 'project' };
     return null;
   })();
   const goToGap = () => { if (nextGap) bringIntoFrame(fieldEl(nextGap.key)); };
 
-  // Called after a field is completed — jump to the first still-empty mandatory
-  // field, cursor active, in the frame. Computed from CURRENT state synchronously
-  // (treating `justFilled` as done, since its setState hasn't flushed yet).
-  const advanceAfter = (justFilled: 'amount' | 'payee' | 'description' | 'project') => {
-    const empty: Record<string, boolean> = {
-      amount: missingAmount,
-      payee: missingPayee,
-      description: missingDescription,
-      project: missingProject,
-    };
+  // After a field is completed, jump to the first still-UNRESOLVED field — cursor active,
+  // in the frame. Computed from current state synchronously (treating `justFilled` as done,
+  // since its setState hasn't flushed yet), so the gesture carries and the keyboard opens.
+  const advanceAfter = (justFilled: GapKey) => {
+    const resolved: Record<GapKey, boolean> = { amount: amountResolved, payee: payeeResolved, description: descriptionResolved, project: projectResolved };
     for (const k of ['amount', 'payee', 'description', 'project'] as const) {
-      if (k !== justFilled && empty[k]) { bringIntoFrame(fieldEl(k)); return; }
+      if (k !== justFilled && !resolved[k]) { bringIntoFrame(fieldEl(k)); return; }
     }
   };
 
-  // On open (WhatsApp without a project) jump straight to the project picker.
+  // On open, ready the amount at the top (no scroll); the CTA and auto-advance drive the
+  // rest. (Replaces the old amount-first + WhatsApp-project focus.)
   useEffect(() => {
-    if (isWhatsApp && !projectId) setTimeout(() => projectRef.current?.focus(), 400);
+    setTimeout(() => document.getElementById('resolve-amount-input')?.focus({ preventScroll: true }), 120);
   }, []);
 
   // ── Save action — Edit just records the owner's corrections back onto the entry so
@@ -437,6 +456,7 @@ export function ResolvePopup({ entry, onClose, onUpdated }: Props) {
     showDismissConfirm, setShowDismissConfirm,
     onClose, handleSave, handleDismiss,
     payeeRef, advanceAfter, nextGap, goToGap,
+    payeeState, setPayeeState,
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -461,13 +481,13 @@ export function ResolvePopup({ entry, onClose, onUpdated }: Props) {
       {/* Mobile: bottom sheet (swipe up → full height, swipe down → dismiss) */}
       <div
         ref={sheetRef}
-        className="resolve-editor md:hidden fixed bottom-0 left-0 right-0 z-[61] flex flex-col rounded-t-[20px] shadow-2xl overflow-hidden"
+        className="resolve-editor md:hidden fixed left-0 right-0 z-[61] flex flex-col rounded-t-[20px] shadow-2xl overflow-hidden"
         style={{
           background: VOICE.page,
-          height: fullHeight ? '100dvh' : undefined,
-          maxHeight: fullHeight ? '100dvh' : '92vh',
+          top: vp ? vp.offsetTop : 0,
+          height: vp ? vp.height : '100dvh',
           transform: `translateY(${isDragging ? dragY : 0}px)`,
-          transition: isDragging ? 'none' : 'transform 280ms cubic-bezier(0.4,0,0.2,1), height 280ms cubic-bezier(0.4,0,0.2,1), max-height 280ms cubic-bezier(0.4,0,0.2,1)',
+          transition: isDragging ? 'none' : 'transform 280ms cubic-bezier(0.4,0,0.2,1)',
           animation: isDragging ? 'none' : 'sheetIn 280ms cubic-bezier(0.4,0,0.2,1) both',
         }}
         onClick={(e) => e.stopPropagation()}
@@ -531,6 +551,7 @@ interface ContentProps {
   advanceAfter: (justFilled: 'amount' | 'payee' | 'description' | 'project') => void;
   nextGap: { label: string; key: 'amount' | 'payee' | 'description' | 'project' } | null;
   goToGap: () => void;
+  payeeState: PayeeState; setPayeeState: (v: PayeeState) => void;
 }
 
 function PopupContents({
@@ -548,22 +569,15 @@ function PopupContents({
   showDismissConfirm, setShowDismissConfirm,
   onClose, handleSave, handleDismiss,
   payeeRef, advanceAfter, nextGap, goToGap,
+  payeeState, setPayeeState,
 }: ContentProps) {
   const payeeDropRef    = useRef<HTMLDivElement>(null);
   const [showCreateStkForm, setShowCreateStkForm] = useState(false);
 
   const ai = entry.ai_extracted;
 
-  // ── Payee state machine ────────────────────────────────────────────────────
-  // A = confirmed HIGH (auto-accepted)
-  // B = matched but LOW confidence → show confirmation prompt
-  // C = not matched / user searching
-  // confirmed = user explicitly chose from B or C
-  const [payeeState, setPayeeState] = useState<PayeeState>(() => {
-    if (!ai.payee_id) return 'C';
-    if (ai.payee_matched === true && ai.payee_confidence === 'LOW') return 'B';
-    return 'A';
-  });
+  // Payee state machine (A/B/C/confirmed) is lifted to the parent so the smart-CTA gap
+  // logic can read it; this component just renders + drives it via the passed setter.
 
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
@@ -621,32 +635,21 @@ function PopupContents({
       {/* Scrollable body */}
       <div className="flex-1 overflow-y-auto">
 
-      {/* ── Source strip ── */}
-      <div className="shrink-0 px-4 py-3" style={{ background: VOICE.cream2, borderBottom: `1px solid ${VOICE.line}` }}>
-        <div className="flex items-center gap-2 mb-1.5">
-          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: sm.bg, color: sm.fg }}>{sm.label}</span>
-          <span className="text-[11px]" style={{ color: VOICE.systemFaint }}>{entry.sender_name || '—'}</span>
-          <span className="text-[11px]" style={{ color: VOICE.faint }}>·</span>
-          <span className="text-[11px]" style={{ color: VOICE.systemFaint }}>{fmtTime(entry.created_at)}</span>
-        </div>
+      {/* ── Source strip (compact, one line) ── */}
+      <div className="shrink-0 flex items-center gap-2 px-4 py-1.5" style={{ background: VOICE.cream2, borderBottom: `1px solid ${VOICE.line}` }}>
+        <span className="text-[9.5px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ background: sm.bg, color: sm.fg }}>{sm.label}</span>
+        <span className="text-[11px] shrink-0" style={{ color: VOICE.systemFaint }}>{entry.sender_name || '—'}</span>
+        <span className="text-[11px] shrink-0" style={{ color: VOICE.faint }}>·</span>
+        <span className="text-[11px] shrink-0" style={{ color: VOICE.systemFaint }}>{fmtTime(entry.created_at)}</span>
         {entry.raw_image_url ? (
-          <div className="flex items-center gap-2.5 mt-2">
-            <button
-              onClick={() => setLightboxUrl(entry.raw_image_url!)}
-              className="relative group shrink-0"
-            >
-              <img src={entry.raw_image_url} className="w-16 h-16 rounded-lg object-cover group-hover:opacity-80 transition-opacity" style={{ border: `1px solid ${VOICE.line}` }} />
-              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                <span className="bg-black/50 text-white text-[10px] px-1.5 py-0.5 rounded-full">View</span>
-              </div>
-            </button>
-            <button onClick={() => setLightboxUrl(entry.raw_image_url!)}
-               className="text-[12px] underline hover:opacity-80" style={{ color: VOICE.accentDeep }}>View full image →</button>
-          </div>
+          <button onClick={() => setLightboxUrl(entry.raw_image_url!)} className="ml-auto shrink-0 inline-flex items-center gap-1.5">
+            <img src={entry.raw_image_url} className="w-6 h-6 rounded object-cover" style={{ border: `1px solid ${VOICE.line}` }} />
+            <span className="text-[11px] underline" style={{ color: VOICE.accentDeep }}>View</span>
+          </button>
         ) : entry.raw_text ? (
-          <p className="text-[12px] italic leading-relaxed" style={{ color: VOICE.systemFaint }}>
-            "{entry.raw_text.length > 120 ? entry.raw_text.slice(0, 120) + '…' : entry.raw_text}"
-          </p>
+          <span className="ml-auto text-[11px] italic truncate" style={{ color: VOICE.systemFaint, maxWidth: '46%' }} title={entry.raw_text}>
+            "{entry.raw_text.length > 48 ? entry.raw_text.slice(0, 48) + '…' : entry.raw_text}"
+          </span>
         ) : null}
       </div>
 
@@ -702,7 +705,7 @@ function PopupContents({
         </div>
 
         {/* 2. Payee */}
-        <div>
+        <div id="resolve-payee-field" style={{ scrollMarginTop: 24 }}>
           <FieldQuestion text="Who are you paying?" missing={missingPayee && payeeState !== 'B'} />
 
           {/* STATE A / confirmed — sage ✓ */}
