@@ -93,6 +93,7 @@ type EntryProps = {
   anchor: TxnAnchor;
   info?: OrderInfo;
   siblings?: number;
+  partyName?: string | null;
   anchorNode?: ReactNode;
   remark: string | null;
   amount: string;
@@ -169,7 +170,7 @@ function EntryRow(p: EntryProps) {
       </div>
 
       <div className="bk-ledger-anchor flex items-center gap-2">
-        {p.anchorNode ?? <AnchorChip anchor={p.anchor} info={p.info} siblings={p.siblings} onClick={(e) => { e.stopPropagation(); p.onAnchorClick(e); }} />}
+        {p.anchorNode ?? <AnchorChip anchor={p.anchor} info={p.info} siblings={p.siblings} partyName={p.partyName} onClick={(e) => { e.stopPropagation(); p.onAnchorClick(e); }} />}
         {p.flagged && (
           <span className="text-xs px-1.5 py-0.5 rounded shrink-0" style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font }}>flagged</span>
         )}
@@ -1215,6 +1216,7 @@ export default function Ledger({ session }: { session: Session }) {
                         anchor={anchor}
                         info={linkedInfo}
                         siblings={siblings}
+                        partyName={txn.stakeholders?.name ?? null}
                         remark={null}
                         amount={inr(Number(txn.total_amount))}
                         attach={!!proofUrl}

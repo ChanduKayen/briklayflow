@@ -39,7 +39,7 @@ export function Amount({ dir, value }: { dir: TxnDirection; value: string }) {
   );
 }
 
-export function AnchorChip({ anchor, info, siblings = 0, onClick }: { anchor: TxnAnchor; info?: AnchorInfo; siblings?: number; onClick?: (e: MouseEvent) => void }) {
+export function AnchorChip({ anchor, info, siblings = 0, partyName, onClick }: { anchor: TxnAnchor; info?: AnchorInfo; siblings?: number; partyName?: string | null; onClick?: (e: MouseEvent) => void }) {
   const [hover, setHover] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const [tipPos, setTipPos] = useState<{ top: number; left: number } | null>(null);
@@ -133,7 +133,7 @@ export function AnchorChip({ anchor, info, siblings = 0, onClick }: { anchor: Tx
             boxShadow: '0 14px 32px -12px rgba(20,15,10,.6), inset 0 0 0 1px rgba(243,234,219,.08)',
             animation: 'anchorTipIn .17s cubic-bezier(.2,.85,.25,1) both',
           }}>
-            <span style={{ color: tipAccent, fontWeight: 700, ...nums }}>+{siblings}</span> more open {tipNoun}
+            <span style={{ color: '#F3EADB', fontWeight: 600 }}>{partyName?.trim() || 'This party'}</span> has <span style={{ color: tipAccent, fontWeight: 700, ...nums }}>+{siblings}</span> more open {tipNoun}
             <span aria-hidden="true" style={{ position: 'absolute', top: '100%', left: 15, width: 9, height: 9, background: '#1B140E', borderRight: '1px solid rgba(243,234,219,.08)', borderBottom: '1px solid rgba(243,234,219,.08)', transform: 'translateY(-5px) rotate(45deg)' }} />
           </div>
         </div>,
