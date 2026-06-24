@@ -2,10 +2,15 @@
  * Ledger atoms — verbatim visuals from docs/reference/BriklayTransactionsPage.jsx,
  * parameterised for real data/handlers (the invisible wiring lives in the page).
  */
-import type { ReactNode, MouseEvent, CSSProperties } from 'react';
-import { ArrowUpRight, ArrowDownLeft, Link2, ChevronDown } from 'lucide-react';
+import { useState, type ReactNode, type MouseEvent, type CSSProperties } from 'react';
+import { ArrowUpRight, ArrowDownLeft, Link2, ChevronDown, Hammer, Package } from 'lucide-react';
 import { V, font, nums } from './ledgerTokens';
 import type { TxnAnchor, TxnDirection } from '../../lib/transactions';
+
+const inr = (n: number) => Math.round(n).toLocaleString('en-IN');
+
+/** What the chip needs to render a title + burn-down (built in Ledger.tsx). */
+export type AnchorInfo = { kind: 'WO' | 'PO'; title: string; total: number; paid: number };
 
 export function DirMedallion({ dir }: { dir: TxnDirection }) {
   const out = dir === 'out';
@@ -33,7 +38,8 @@ export function Amount({ dir, value }: { dir: TxnDirection; value: string }) {
   );
 }
 
-export function AnchorChip({ anchor, onClick }: { anchor: TxnAnchor; onClick?: (e: MouseEvent) => void }) {
+export function AnchorChip({ anchor, info, onClick }: { anchor: TxnAnchor; info?: AnchorInfo; onClick?: (e: MouseEvent) => void }) {
+  const [hover, setHover] = useState(false);
   if (!anchor) {
     return (
       <button
@@ -46,6 +52,52 @@ export function AnchorChip({ anchor, onClick }: { anchor: TxnAnchor; onClick?: (
       </button>
     );
   }
+  // Linked WO/PO with resolved order info: a human title + a burn-down + balance —
+  // the bare code only surfaces on hover (and via the native title tooltip).
+  if (info) {
+    const total = info.total;
+    const paid = info.paid;
+    const balance = Math.max(0, total - paid);
+    const paidPct = total > 0 ? Math.min(100, Math.max(0, (paid / total) * 100)) : 0;
+    const settled = balance <= 0 && total > 0;
+    const isWO = info.kind === 'WO';
+    const TypeIcon = isWO ? Hammer : Package;
+    const fill = isWO ? V.terra : V.sys; // WO terracotta; PO a calmer tone
+    return (
+      <button
+        type="button"
+        title={anchor.ref}
+        onClick={onClick}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md max-w-full"
+        style={{ background: V.field, color: V.inkSoft, ...font }}
+      >
+        <TypeIcon size={11} style={{ color: V.faint }} className="shrink-0" />
+        <span className="truncate" style={{ maxWidth: 140 }}>
+          {hover ? <span style={{ fontFamily: 'monospace', fontSize: 10.5, color: V.faint }}>{anchor.ref}</span> : info.title}
+        </span>
+        {total > 0 && (
+          <span
+            aria-hidden="true"
+            className="shrink-0 overflow-hidden rounded-full"
+            style={{ width: 40, height: 4, background: V.line }}
+          >
+            <span
+              className="block h-full rounded-full"
+              style={{ width: `${paidPct}%`, background: settled ? V.sage : fill }}
+            />
+          </span>
+        )}
+        {settled ? (
+          <span className="shrink-0 whitespace-nowrap" style={{ color: V.sage, ...font }}>✓ settled</span>
+        ) : (
+          <span className="shrink-0 whitespace-nowrap" style={{ color: V.terraDeep, ...font, ...nums }}>₹{inr(balance)} left</span>
+        )}
+      </button>
+    );
+  }
+  // No resolved info (CLIENT anchors, or an order we couldn't load): the original chip.
   return (
     <button
       type="button"

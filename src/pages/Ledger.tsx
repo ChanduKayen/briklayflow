@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type ReactNode, type MouseEvent } from 'react';
+import { useState, useRef, useEffect, useMemo, type ReactNode, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -25,6 +25,39 @@ import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
 
 const PAGE_SIZE = 25;
 const inr = (n: number) => Math.round(n).toLocaleString('en-IN');
+
+/* ---------- linked-order info: a human title + burn-down for each WO/PO chip ---------- */
+
+// What the redesigned AnchorChip needs to show a title, a burn-down bar, and the
+// remaining balance — keyed by order id (wo_id / po_id). Total/paid drive the bar.
+export type OrderInfo = { kind: 'WO' | 'PO'; title: string; total: number; paid: number };
+
+// A WO's scope is a long paragraph; show the opening ~40 chars as a human header
+// when the AI/user title is missing.
+function summarizeScope(s: string | null | undefined): string {
+  const t = (s ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return 'Contract';
+  return t.length > 40 ? t.slice(0, 40).trimEnd() + '…' : t;
+}
+
+// A PO is a basket of line items; name the leading item(s) that fit in ~24 chars,
+// then "+N others" for the rest — e.g. "Cement +23 others", "Cement, Steel +4 others".
+function summarizeItems(items: Array<{ item_name?: string | null; description?: string | null }> | null | undefined): string {
+  const names = (items ?? [])
+    .map((it) => (it?.item_name || it?.description || '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  if (names.length === 0) return 'Purchase';
+  const lead: string[] = [];
+  let used = 0;
+  for (const n of names) {
+    const add = (lead.length ? 2 : 0) + n.length; // ", " separator
+    if (lead.length > 0 && used + add > 24) break;
+    lead.push(n);
+    used += add;
+  }
+  const rest = names.length - lead.length;
+  return rest > 0 ? `${lead.join(', ')} +${rest} other${rest === 1 ? '' : 's'}` : lead.join(', ');
+}
 
 function CreateHint({ message, children }: { message: string; children: ReactNode }) {
   const [show, setShow] = useState(false);
@@ -58,6 +91,7 @@ type EntryProps = {
   onPayeeClick?: (e: MouseEvent) => void;
   context: string;
   anchor: TxnAnchor;
+  info?: OrderInfo;
   anchorNode?: ReactNode;
   remark: string | null;
   amount: string;
@@ -134,7 +168,7 @@ function EntryRow(p: EntryProps) {
       </div>
 
       <div className="bk-ledger-anchor flex items-center gap-2">
-        {p.anchorNode ?? <AnchorChip anchor={p.anchor} onClick={(e) => { e.stopPropagation(); p.onAnchorClick(e); }} />}
+        {p.anchorNode ?? <AnchorChip anchor={p.anchor} info={p.info} onClick={(e) => { e.stopPropagation(); p.onAnchorClick(e); }} />}
         {p.flagged && (
           <span className="text-xs px-1.5 py-0.5 rounded shrink-0" style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font }}>flagged</span>
         )}
@@ -295,6 +329,73 @@ export default function Ledger({ session }: { session: Session }) {
   // resolves loosely — but it lets the helpers below take a named type, not bare `any`.
   type LedgerRow = NonNullable<typeof ledger>[number];
   type TxnAlloc = NonNullable<LedgerRow['txn_allocations']>[number];
+
+  // The distinct WO/PO ids referenced by the visible ledger's allocations. These
+  // key the order-info query so the chip can show a title + burn-down instead of a
+  // bare code. Sorted so the query key is stable across re-renders.
+  const { woRefs, poRefs } = useMemo(() => {
+    const wo = new Set<string>();
+    const po = new Set<string>();
+    for (const txn of ledger ?? []) {
+      for (const a of (txn.txn_allocations || []) as TxnAlloc[]) {
+        if (!a?.order_type || !a?.order_ref) continue;
+        if (a.order_type === 'PO') po.add(String(a.order_ref));
+        else if (a.order_type === 'WO') wo.add(String(a.order_ref));
+      }
+    }
+    return { woRefs: [...wo].sort(), poRefs: [...po].sort() };
+  }, [ledger]);
+
+  // One small lookup of order_id -> { kind, title, total, paid } for every order the
+  // visible rows link to. Paid-to-date sums ALL allocations against each order (not
+  // just the visible row), so the burn-down reflects the order's true settlement.
+  const { data: orderMap = {} } = useQuery<Record<string, OrderInfo>>({
+    queryKey: ['ledger_order_info', woRefs, poRefs],
+    enabled: woRefs.length > 0 || poRefs.length > 0,
+    queryFn: async () => {
+      const map: Record<string, OrderInfo> = {};
+      const [woRes, poRes] = await Promise.all([
+        woRefs.length
+          ? supabase.from('work_orders').select('wo_id, title, scope_of_work, order_value').in('wo_id', woRefs)
+          : Promise.resolve({ data: [], error: null }),
+        poRefs.length
+          ? supabase.from('purchase_orders').select('po_id, total_value, order_value, po_line_items(item_name, description)').in('po_id', poRefs)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+      if (woRes.error) throw woRes.error;
+      if (poRes.error) throw poRes.error;
+      for (const w of (woRes.data ?? []) as any[]) {
+        map[String(w.wo_id)] = {
+          kind: 'WO',
+          title: (w.title?.trim?.() || '') || summarizeScope(w.scope_of_work),
+          total: Number(w.order_value) || 0,
+          paid: 0,
+        };
+      }
+      for (const p of (poRes.data ?? []) as any[]) {
+        map[String(p.po_id)] = {
+          kind: 'PO',
+          title: summarizeItems(p.po_line_items),
+          total: Number(p.total_value) || Number(p.order_value) || 0,
+          paid: 0,
+        };
+      }
+      // Paid-to-date: sum every allocation booked against these orders.
+      const allRefs = [...woRefs, ...poRefs];
+      if (allRefs.length) {
+        const { data: allocs, error } = await supabase
+          .from('txn_allocations')
+          .select('order_ref, allocated_amount')
+          .in('order_ref', allRefs);
+        if (error) throw error;
+        for (const a of (allocs ?? []) as any[]) {
+          const ref = String(a.order_ref);
+          if (map[ref]) map[ref].paid += Number(a.allocated_amount) || 0;
+        }
+      }
+      return map;
+    },
+  });
 
   // Deep-link focus: the Day Book's filed "View →" links to /ledger?txn=<id>. Scroll to
   // and ring that row once the ledger has loaded (once — survives realtime refetches).
@@ -1025,6 +1126,7 @@ export default function Ledger({ session }: { session: Session }) {
                         onPayeeClick={() => { if (txn.stakeholder_id) setDrawerStk(txn.stakeholder_id); }}
                         context={context}
                         anchor={anchor}
+                        info={anchor && (anchor.kind === 'WO' || anchor.kind === 'PO') ? orderMap[anchor.ref] : undefined}
                         remark={null}
                         amount={inr(Number(txn.total_amount))}
                         attach={!!proofUrl}
@@ -1036,7 +1138,12 @@ export default function Ledger({ session }: { session: Session }) {
                         anchorNode={anchorNode}
                         onRowClick={() => navigate(`/ledger/${txn.txn_id}`)}
                         onToggleSelect={(e) => { e.stopPropagation(); toggleTxn(txn.txn_id); }}
-                        onAnchorClick={() => openPeek('TRANSACTION', txn.txn_id)}
+                        onAnchorClick={() => {
+                          // A linked WO/PO chip opens that order's card; CLIENT/unlinked
+                          // chips fall back to the transaction peek.
+                          if (anchor && (anchor.kind === 'WO' || anchor.kind === 'PO')) openPeek(anchor.kind, anchor.ref);
+                          else openPeek('TRANSACTION', txn.txn_id);
+                        }}
                         onAttach={async () => { const u = await resolveDocUrl(proofUrl); if (u) setLightboxUrl(u); }}
                         onAmountDown={() => { setIsDragging(true); setSumSel(new Set([txn.txn_id])); }}
                         onAmountEnter={() => { if (isDragging) setSumSel(prev => new Set(prev).add(txn.txn_id)); }}
