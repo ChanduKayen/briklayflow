@@ -736,8 +736,12 @@ export default function TransactionDetail({ session }: { session: Session }) {
 
   function AmountDisplay({ amount }: { amount: number }) {
     const displayed = useCountUp(amount);
-    return <span>₹{displayed.toLocaleString('en-IN')}</span>;
+    return <span>{displayed.toLocaleString('en-IN')}</span>;
   }
+
+  // Direction drives the amount-hero accent: Client receipt = money IN (sage), else OUT (terracotta).
+  const isIn = txn.stakeholders?.type === 'Client';
+  const accentSoft = isIn ? '#9CBB91' : '#E89A72';
 
   return (
     <div className="min-h-screen bg-[#f7f6f4]">
@@ -774,45 +778,52 @@ export default function TransactionDetail({ session }: { session: Session }) {
         <div className="detail-reveal" style={{ animationDelay: '40ms' }}>
           <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm overflow-hidden mb-4">
 
-            {/* Top color accent bar */}
-            <div className={`h-1 w-full ${isVoided ? 'bg-error' : 'bg-gradient-to-r from-primary via-secondary to-tertiary'}`} />
-
-            <div className="p-6">
-              {/* Row 1: TXN ID + Status */}
-              <div className="flex items-start justify-between gap-3 mb-5">
+            {/* ── Walnut amount hero (mirrors the editor / day-book card) ── */}
+            <div style={{
+              padding: '20px 24px 22px',
+              background: isVoided
+                ? 'linear-gradient(158deg,#2A2622 0%,#221F1B 60%,#1A1714 100%)'
+                : isIn
+                  ? 'radial-gradient(120% 120% at 85% 0%, rgba(156,187,145,.17) 0%, rgba(156,187,145,0) 42%), linear-gradient(158deg,#232619 0%,#1c2014 60%,#161a0f 100%)'
+                  : 'radial-gradient(120% 120% at 85% 0%, rgba(224,138,92,.15) 0%, rgba(224,138,92,0) 42%), linear-gradient(158deg,#2D2118 0%,#221A13 60%,#1B140E 100%)',
+            }}>
+              {/* Voucher id / date + status badges (dark) */}
+              <div className="flex items-start justify-between gap-3 mb-4">
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-on-surface-variant/45 mb-1">Transaction Voucher</p>
-                  <p className="font-mono text-[11px] text-on-surface-variant/50 mb-1 tracking-wide">{txn.txn_id}</p>
-                  <p className="text-[12px] text-on-surface-variant/60">{dateStr}{timeStr ? ` · ${timeStr}` : ''}</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] mb-1" style={{ color: accentSoft }}>Transaction Voucher</p>
+                  <p className="font-mono text-[11px] mb-1 tracking-wide" style={{ color: 'rgba(243,234,219,.52)' }}>{txn.txn_id}</p>
+                  <p className="text-[12px]" style={{ color: 'rgba(243,234,219,.42)' }}>{dateStr}{timeStr ? ` · ${timeStr}` : ''}</p>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap justify-end">
                   {isAmended && (
-                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200/60">AMENDED</span>
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold" style={{ background: 'rgba(96,165,250,.16)', color: '#A9C9F5', border: '1px solid rgba(96,165,250,.24)' }}>AMENDED</span>
                   )}
                   {txn.ai_flag_status === 'Flagged' && (
-                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-error-container text-error">FLAGGED</span>
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold" style={{ background: 'rgba(224,138,92,.18)', color: '#EBAE86', border: '1px solid rgba(224,138,92,.26)' }}>FLAGGED</span>
                   )}
-                  <span className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold ${
-                    txn.status === 'Active'
-                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
-                      : txn.status === 'Voided'
-                        ? 'bg-error-container text-error border border-error/20'
-                        : 'bg-surface-container-high text-on-surface-variant'
-                  }`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${txn.status === 'Active' ? 'bg-emerald-500' : txn.status === 'Voided' ? 'bg-error' : 'bg-on-surface-variant/40'}`} />
+                  <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold" style={
+                    txn.status === 'Active' ? { background: 'rgba(123,176,108,.16)', color: '#AFD3A1', border: '1px solid rgba(123,176,108,.24)' }
+                    : txn.status === 'Voided' ? { background: 'rgba(229,115,115,.16)', color: '#F0A593', border: '1px solid rgba(229,115,115,.24)' }
+                    : { background: 'rgba(243,234,219,.1)', color: 'rgba(243,234,219,.6)', border: '1px solid rgba(243,234,219,.14)' }
+                  }>
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: txn.status === 'Active' ? '#84BE74' : txn.status === 'Voided' ? '#E57373' : 'rgba(243,234,219,.4)' }} />
                     {txn.status?.toUpperCase()}
                   </span>
                 </div>
               </div>
 
-              {/* Row 2: Amount hero */}
-              <div className="mb-5">
-                <p className="text-[11px] font-medium text-on-surface-variant/50 mb-1 uppercase tracking-wider">Total Amount</p>
-                <p className="text-[38px] font-black text-on-surface tracking-tight leading-none font-data-mono">
-                  <AmountDisplay amount={Number(effective.total_amount) || 0} />
-                </p>
-              </div>
+              {/* Direction eyebrow + serif amount */}
+              <span className="inline-flex items-center gap-1.5" style={{ color: accentSoft, fontSize: 10.5, fontWeight: 700, letterSpacing: '0.14em' }}>
+                <span className="material-symbols-outlined text-[13px]">{isIn ? 'south_west' : 'north_east'}</span>
+                {isIn ? 'MONEY IN' : 'MONEY OUT'}
+              </span>
+              <p className="mt-1.5" style={{ color: '#F3EADB', fontFamily: "Georgia, 'Times New Roman', serif", fontVariantNumeric: 'tabular-nums', lineHeight: 1, letterSpacing: '-0.02em', fontSize: 'clamp(2.4rem, 1.5rem + 4.4vw, 3.4rem)' }}>
+                <span style={{ fontSize: '0.4em', fontWeight: 600, marginRight: '0.1em', color: accentSoft }}>{isIn ? '+ ₹' : '− ₹'}</span><AmountDisplay amount={Number(effective.total_amount) || 0} />
+              </p>
+            </div>
 
+            {/* ── Details (on white) ── */}
+            <div className="p-6 pt-5">
               {/* Row 3: Payee + Project pills */}
               <div className="flex flex-wrap gap-3 mb-5">
                 <div className="flex-1 min-w-0">
