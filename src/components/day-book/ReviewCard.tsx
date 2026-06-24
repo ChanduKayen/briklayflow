@@ -13,7 +13,7 @@
  * journey is bound to the REAL write — never a false "Filed".
  */
 import { useEffect, useState } from 'react';
-import { Check, X, Pencil, ArrowRight, Image as ImageIcon, Mic, ChevronRight } from 'lucide-react';
+import { Check, X, Pencil, ArrowRight, ArrowUpRight, Image as ImageIcon, Mic, ChevronRight } from 'lucide-react';
 import type { RoughEntry } from '../../types';
 import { V, WA, font, serif, nums, terraGrad, T } from './tokens';
 import { WhatsAppGlyph } from './atoms';
@@ -72,6 +72,7 @@ export function ReviewCard({
   const [phase, setPhase] = useState<Phase>(null);
   const [filedTxnId, setFiledTxnId] = useState<string | null>(null);
   const [nudge, setNudge] = useState(false);
+  const [hover, setHover] = useState(false);
 
   const runFile = async () => {
     if (!ready || leaving) return;
@@ -249,30 +250,54 @@ export function ReviewCard({
       <div
         className={`db-card ${offClass}`}
         {...swipe.bind}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
         style={{
           transform: leaving ? undefined : `translateX(${dx}px) rotate(${dx * 0.02}deg)`,
-          transition: !swipe.dragging && !leaving ? 'transform .25s cubic-bezier(.3,.7,.2,1), box-shadow .2s ease, border-color .2s ease' : 'none',
-          background: V.surface, borderRadius: 16, border: '1px solid #E3DDD4',
+          transition: !swipe.dragging && !leaving ? 'transform .25s cubic-bezier(.3,.7,.2,1), box-shadow .25s ease, border-color .25s ease' : 'none',
+          background: V.surface, borderRadius: 16, overflow: 'hidden',
+          border: `1px solid ${hover ? '#D8CFC2' : '#E3DDD4'}`,
+          boxShadow: hover ? '0 16px 38px -16px rgba(34,26,19,.24)' : '0 1px 2px rgba(34,26,19,.03)',
           cursor: swipe.dragging ? 'grabbing' : 'grab', touchAction: 'pan-y',
         }}
       >
-        {/* hero — eyebrow, amount, the three facts */}
-        <div className={`px-4 sm:px-5 pt-4 pb-4 ${reveal ? 'tf-read' : ''}`}>
-          <span className="inline-flex items-center gap-1.5" style={{ color: V.terra, ...font, ...T.xs, fontWeight: 600, letterSpacing: '0.1em', opacity: 0.92 }}>
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: V.terra }} /> MONEY OUT
-          </span>
+        {/* ── Walnut amount hero — mirrors the editor's amount card ── */}
+        <div className={reveal ? 'tf-read' : ''} style={{
+          position: 'relative', overflow: 'hidden', padding: '15px 20px 15px',
+          background: 'radial-gradient(120% 120% at 85% 0%, rgba(217,106,67,.16) 0%, rgba(217,106,67,0) 42%), linear-gradient(158deg,#2D2118 0%,#221A13 60%,#1B140E 100%)',
+          transition: 'filter .3s ease', filter: hover ? 'brightness(1.07)' : 'none',
+        }}>
+          <div className="flex items-center justify-between gap-2">
+            <span className="inline-flex items-center gap-1.5" style={{ color: '#E89A72', ...font, fontSize: 10.5, fontWeight: 700, letterSpacing: '0.14em' }}>
+              <ArrowUpRight size={12} strokeWidth={2.5} /> MONEY OUT
+            </span>
+            {!archived && (
+              <span className="inline-flex items-center gap-1.5 px-2 py-[3px] rounded-full" style={{
+                ...font, fontSize: 9, fontWeight: 700, letterSpacing: '.07em',
+                background: ready ? 'rgba(123,176,108,.15)' : 'rgba(224,138,92,.15)',
+                color: ready ? '#AFD3A1' : '#EBAE86',
+                border: `1px solid ${ready ? 'rgba(123,176,108,.24)' : 'rgba(224,138,92,.24)'}`,
+              }}>
+                <span className="w-1 h-1 rounded-full" style={{ background: ready ? '#84BE74' : '#E08A5C' }} />
+                {ready ? 'READY' : 'IN REVIEW'}
+              </span>
+            )}
+          </div>
 
           {amountNum > 0 ? (
-            <p className="mt-1.5" style={{ color: V.terraDeep, ...serif, ...nums, ...T.h1, lineHeight: 1.05, letterSpacing: '-0.015em' }}>
-              <span style={{ fontSize: '0.5em', fontWeight: 500, letterSpacing: 0, marginRight: '0.06em' }}>− ₹</span>{inr(amountNum)}
+            <p className="mt-2" style={{ color: '#F3EADB', ...serif, ...nums, lineHeight: 1, letterSpacing: '-0.02em', fontSize: 'clamp(2rem, 1.35rem + 3.4vw, 2.85rem)' }}>
+              <span style={{ fontSize: '0.4em', fontWeight: 600, letterSpacing: 0, marginRight: '0.12em', color: '#E89A72' }}>− ₹</span>{inr(amountNum)}
             </p>
           ) : (
-            <p className="mt-1.5 inline-flex items-center gap-1.5" style={{ color: V.ask, ...serif, ...T.amt }}>
-              <span className="w-1.5 h-1.5 rounded-full" style={{ background: V.ask }} /> Amount missing
+            <p className="mt-2.5 inline-flex items-center gap-2" style={{ color: '#EBAE86', ...serif, fontSize: 'clamp(1.05rem, 0.85rem + 1vw, 1.35rem)' }}>
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#E08A5C' }} /> Amount missing
             </p>
           )}
+        </div>
 
-          <div className="mt-3.5 flex flex-col gap-2">
+        {/* facts — To / at / for, on cream */}
+        <div className={`px-4 sm:px-5 pt-3.5 pb-4 ${reveal ? 'tf-read' : ''}`}>
+          <div className="flex flex-col gap-2">
             {rows.map((r, i) => 'miss' in r ? (
               <div key={i} className="flex items-center rounded-md" style={{ transition: 'background .3s ease', background: nudge ? V.askWash : 'transparent', padding: nudge ? '3px 6px' : 0, marginLeft: nudge ? -6 : 0 }}>
                 <span className="inline-flex items-center" style={{ width: 26, flexShrink: 0 }}>
