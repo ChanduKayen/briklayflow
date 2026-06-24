@@ -27,35 +27,35 @@ export function OtherOpenWithParty({
   stakeholderId,
   currentOrderId,
   partyName,
+  projectId,
+  siteName,
 }: {
   kind: 'WO' | 'PO';
   stakeholderId: string | null | undefined;
   currentOrderId: string;
   partyName: string | null | undefined;
+  projectId?: string | null;
+  siteName?: string | null;
 }) {
   const { openPeek } = usePeek();
 
   const { data: siblings = [] } = useQuery<Sibling[]>({
-    queryKey: ['peek_other_open', kind, stakeholderId, currentOrderId],
+    queryKey: ['peek_other_open', kind, stakeholderId, currentOrderId, projectId ?? ''],
     enabled: !!stakeholderId,
     queryFn: async () => {
       if (!stakeholderId) return [];
       const rows: Sibling[] = [];
 
       if (kind === 'WO') {
-        // Prefer the `title` column, fall back if that migration isn't applied yet.
-        let r: any = await supabase
-          .from('work_orders')
-          .select('wo_id, title, scope_of_work, order_value')
-          .eq('stakeholder_id', stakeholderId)
-          .not('status', 'in', '("Closed","Cancelled")');
-        if (r.error) {
-          r = await supabase
-            .from('work_orders')
-            .select('wo_id, scope_of_work, order_value')
-            .eq('stakeholder_id', stakeholderId)
-            .not('status', 'in', '("Closed","Cancelled")');
-        }
+        // Same party, same SITE (a contract belongs to one project). Prefer the `title`
+        // column, fall back if that migration isn't applied yet.
+        const woSel = (cols: string) => {
+          let q = supabase.from('work_orders').select(cols).eq('stakeholder_id', stakeholderId).not('status', 'in', '("Closed","Cancelled")');
+          if (projectId) q = q.eq('project_id', projectId);
+          return q;
+        };
+        let r: any = await woSel('wo_id, title, scope_of_work, order_value');
+        if (r.error) r = await woSel('wo_id, scope_of_work, order_value');
         for (const w of (r.data ?? []) as any[]) {
           rows.push({
             id: String(w.wo_id),
@@ -65,10 +65,12 @@ export function OtherOpenWithParty({
           });
         }
       } else {
-        const r: any = await supabase
+        let q: any = supabase
           .from('purchase_orders')
           .select('po_id, total_value, order_value, po_line_items(item_name, description)')
           .eq('stakeholder_id', stakeholderId);
+        if (projectId) q = q.eq('project_id', projectId);
+        const r: any = await q;
         for (const p of (r.data ?? []) as any[]) {
           const lead = (p.po_line_items ?? [])
             .map((it: any) => (it?.item_name || it?.description || '').trim())
@@ -109,7 +111,7 @@ export function OtherOpenWithParty({
   return (
     <div>
       <p className="text-[10px] font-semibold tracking-wider text-on-surface-variant uppercase mb-2">
-        Also open with {partyName || 'this party'}
+        Also open with {partyName || 'this party'}{siteName?.trim() ? ` on ${siteName.trim()}` : ''}
         <span className="ml-1.5 font-normal lowercase tracking-normal text-on-surface-variant/70">
           · {siblings.length} other {siblings.length === 1 ? noun.replace(/s$/, '') : noun}
         </span>

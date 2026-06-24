@@ -210,6 +210,8 @@ export function POPeek({ poId, onClose }: POPeekProps) {
             stakeholderId={po.stakeholder_id}
             currentOrderId={poId}
             partyName={po.stakeholders?.name}
+            projectId={po.project_id}
+            siteName={po.projects?.name}
           />
 
           {po.terms_conditions && (

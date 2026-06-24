@@ -94,6 +94,7 @@ type EntryProps = {
   info?: OrderInfo;
   siblings?: number;
   partyName?: string | null;
+  siteName?: string | null;
   anchorNode?: ReactNode;
   remark: string | null;
   amount: string;
@@ -170,7 +171,7 @@ function EntryRow(p: EntryProps) {
       </div>
 
       <div className="bk-ledger-anchor flex items-center gap-2">
-        {p.anchorNode ?? <AnchorChip anchor={p.anchor} info={p.info} siblings={p.siblings} partyName={p.partyName} onClick={(e) => { e.stopPropagation(); p.onAnchorClick(e); }} />}
+        {p.anchorNode ?? <AnchorChip anchor={p.anchor} info={p.info} siblings={p.siblings} partyName={p.partyName} siteName={p.siteName} onClick={(e) => { e.stopPropagation(); p.onAnchorClick(e); }} />}
         {p.flagged && (
           <span className="text-xs px-1.5 py-0.5 rounded shrink-0" style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font }}>flagged</span>
         )}
@@ -428,27 +429,28 @@ export default function Ledger({ session }: { session: Session }) {
     queryKey: ['ledger_party_open', partyIds],
     enabled: partyIds.length > 0,
     queryFn: async () => {
+      // Counts are keyed by `${party}::${projectId}` — a contract/bill belongs to ONE site,
+      // and the chip is reviewed in a site context, so "more open" means more on THIS site.
       const counts: Record<string, { WO: number; PO: number }> = {};
-      // total + paid per order, tagged with its party + kind
-      const orders: Array<{ id: string; party: string; kind: 'WO' | 'PO'; total: number }> = [];
+      const orders: Array<{ id: string; party: string; project: string; kind: 'WO' | 'PO'; total: number }> = [];
 
       const woRes = await supabase
         .from('work_orders')
-        .select('wo_id, stakeholder_id, order_value, status')
+        .select('wo_id, stakeholder_id, project_id, order_value, status')
         .in('stakeholder_id', partyIds)
         .not('status', 'in', '("Closed","Cancelled")');
       for (const w of (woRes.data ?? []) as any[]) {
         if (!w.stakeholder_id) continue;
-        orders.push({ id: String(w.wo_id), party: String(w.stakeholder_id), kind: 'WO', total: Number(w.order_value) || 0 });
+        orders.push({ id: String(w.wo_id), party: String(w.stakeholder_id), project: String(w.project_id ?? ''), kind: 'WO', total: Number(w.order_value) || 0 });
       }
 
       const poRes = await supabase
         .from('purchase_orders')
-        .select('po_id, stakeholder_id, total_value, order_value, status')
+        .select('po_id, stakeholder_id, project_id, total_value, order_value, status')
         .in('stakeholder_id', partyIds);
       for (const p of (poRes.data ?? []) as any[]) {
         if (!p.stakeholder_id) continue;
-        orders.push({ id: String(p.po_id), party: String(p.stakeholder_id), kind: 'PO', total: Number(p.total_value) || Number(p.order_value) || 0 });
+        orders.push({ id: String(p.po_id), party: String(p.stakeholder_id), project: String(p.project_id ?? ''), kind: 'PO', total: Number(p.total_value) || Number(p.order_value) || 0 });
       }
 
       if (orders.length === 0) return counts;
@@ -468,9 +470,10 @@ export default function Ledger({ session }: { session: Session }) {
       for (const o of orders) {
         const balance = o.total - (paidByOrder[o.id] || 0);
         if (balance > 0) {
-          const c = counts[o.party] ?? { WO: 0, PO: 0 };
+          const key = `${o.party}::${o.project}`;
+          const c = counts[key] ?? { WO: 0, PO: 0 };
           c[o.kind] += 1;
-          counts[o.party] = c;
+          counts[key] = c;
         }
       }
       return counts;
@@ -1186,8 +1189,10 @@ export default function Ledger({ session }: { session: Session }) {
                     // Silent depth cue: how many OTHER open obligations of the same kind
                     // this party has (beyond the one shown). Drives the stacked-card edge.
                     const linkedInfo = anchor && (anchor.kind === 'WO' || anchor.kind === 'PO') ? orderMap[anchor.ref] : undefined;
+                    const siteProjectId = primaryAlloc?.project_id ? String(primaryAlloc.project_id) : '';
+                    const siteName = (primaryAlloc?.projects as any)?.name ?? null;
                     const partyOpenCount = anchor && txn.stakeholder_id && (anchor.kind === 'WO' || anchor.kind === 'PO')
-                      ? (partyOpen[txn.stakeholder_id]?.[anchor.kind] ?? 0)
+                      ? (partyOpen[`${txn.stakeholder_id}::${siteProjectId}`]?.[anchor.kind] ?? 0)
                       : 0;
                     const linkedOpen = linkedInfo ? (linkedInfo.total - linkedInfo.paid) > 0 : false;
                     const siblings = Math.max(0, partyOpenCount - (linkedOpen ? 1 : 0));
@@ -1217,6 +1222,7 @@ export default function Ledger({ session }: { session: Session }) {
                         info={linkedInfo}
                         siblings={siblings}
                         partyName={txn.stakeholders?.name ?? null}
+                        siteName={siteName}
                         remark={null}
                         amount={inr(Number(txn.total_amount))}
                         attach={!!proofUrl}

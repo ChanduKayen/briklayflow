@@ -290,6 +290,8 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
             stakeholderId={wo.stakeholder_id}
             currentOrderId={woId}
             partyName={wo.stakeholders?.name}
+            projectId={wo.project_id}
+            siteName={wo.projects?.name}
           />
 
           {wo.terms_conditions && (
