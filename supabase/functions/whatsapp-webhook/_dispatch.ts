@@ -225,6 +225,10 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
         if (prefix) await send(supabase, from, { kind: 'text', body: prefix }, { org_id: orgId, wamid })
         await handleQuery(supabase, text, from, registered)
       } else {
+        // Procurement (materials request) gets the same instant ack as TRANSACTION, sent
+        // directly so it lands before the slower sourcing reply. Concierge shares this
+        // branch but is conversational — no slow work to cover, so no ack.
+        if (agent.intent === 'PROCUREMENT') await sendNow(from, M.mProcAck(lang))
         await agent.run(actx, text, { prefix, lingering: view.lingering })
       }
       return

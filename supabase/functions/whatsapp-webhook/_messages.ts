@@ -120,6 +120,24 @@ export function mTxnAck(lang: Lang): OutMessage {
   return { kind: 'text', body: pick(lang, c) }
 }
 
+// Procurement (materials request) routing ack — same instant-ack pattern + mature voice
+// as TXN_ACKS, but a procurement glyph (📦) and sourcing verbs. No destination named
+// (the procurement flow's own messages own "purchase request"/"order"); it stays general
+// because we haven't read the items/qty yet. Verb rotates so repeats don't read robotic.
+const PROC_ACKS: { en: string; te?: string; hi?: string }[] = [
+  { en: '📦 *Got it* — preparing your order…' },
+  { en: '📦 *Received* — sourcing this now…' },
+  { en: '📦 *Noted* — drafting your request…' },
+  { en: '📦 *Got it* — getting the order ready…' },
+  { en: '📦 *Received* — pulling the details together…' },
+]
+
+/** A quick procurement "received, sourcing…" — rotated, sent before sourcing begins. */
+export function mProcAck(lang: Lang): OutMessage {
+  const c = PROC_ACKS[Math.floor(Math.random() * PROC_ACKS.length)]
+  return { kind: 'text', body: pick(lang, c) }
+}
+
 // ── The two essential-asks (the ONLY questions the Transaction agent ever sends) ──
 // Each captures a raw value; neither matches against the DB. Acknowledge-before-ask:
 // surface what is already known, ask only the gap.
