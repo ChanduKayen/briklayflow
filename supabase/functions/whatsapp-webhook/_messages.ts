@@ -101,16 +101,17 @@ export function mComplete(
 // extraction + staging — so the sender knows it landed and isn't left waiting. TONE:
 // mature and confidence-inspiring, not cute. ONE calm line: a single consistent ledger
 // emoji (🧾, not a rotating zoo of cute ones), a *bold* receipt word, then a precise
-// BOOKKEEPING action that names where it's going (your Day Book / books / ledger) so the
-// owner trusts their money is being filed properly. No payee/amount yet (not read) → it
-// stays general. The verb rotates so back-to-back entries don't read like a robot; the
-// real confirmation (mComplete) follows. EN filled; te/hi stay stubs (fall back to EN).
+// BOOKKEEPING action. It does NOT name a destination — "Day Book" is owned by the
+// confirmation (mComplete: "Added to your Day Book"); naming "books"/"ledger" here would
+// introduce a competing term and confuse. No payee/amount yet (not read) → it stays
+// general. The verb rotates so back-to-back entries don't read like a robot. EN filled;
+// te/hi stay stubs (fall back to EN).
 const TXN_ACKS: { en: string; te?: string; hi?: string }[] = [
-  { en: '🧾 *Got it* — recording this in your Day Book…' },
-  { en: '🧾 *Received* — posting it to your books…' },
-  { en: '🧾 *Noted* — filing it in your ledger…' },
-  { en: '🧾 *Got it* — entering your transaction now…' },
-  { en: '🧾 *Received* — securing this in your books…' },
+  { en: '🧾 *Got it* — recording your transaction…' },
+  { en: '🧾 *Received* — putting it on record…' },
+  { en: '🧾 *Noted* — filing your entry…' },
+  { en: '🧾 *Got it* — recording the details now…' },
+  { en: '🧾 *Received* — entering your transaction…' },
 ]
 
 /** A quick "received, working on it…" — rotated, sent before extraction begins. */
