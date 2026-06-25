@@ -228,7 +228,7 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
         // Procurement (materials request) gets the same instant ack as TRANSACTION, sent
         // directly so it lands before the slower sourcing reply. Concierge shares this
         // branch but is conversational — no slow work to cover, so no ack.
-        if (agent.intent === 'PROCUREMENT') await sendNow(from, M.mProcAck(lang))
+        if (agent.intent === 'PROCUREMENT') await sendNow(from, M.mProcRouteAck(lang))
         await agent.run(actx, text, { prefix, lingering: view.lingering })
       }
       return

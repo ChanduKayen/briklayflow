@@ -132,8 +132,9 @@ const PROC_ACKS: { en: string; te?: string; hi?: string }[] = [
   { en: '📦 *Received* — pulling the details together…' },
 ]
 
-/** A quick procurement "received, sourcing…" — rotated, sent before sourcing begins. */
-export function mProcAck(lang: Lang): OutMessage {
+/** A quick procurement "received, sourcing…" — rotated, sent on routing before the gate.
+ *  (Distinct from the flow's mProcAck below, which is the vendor-confirmed "raising it".) */
+export function mProcRouteAck(lang: Lang): OutMessage {
   const c = PROC_ACKS[Math.floor(Math.random() * PROC_ACKS.length)]
   return { kind: 'text', body: pick(lang, c) }
 }

@@ -13,7 +13,7 @@ import { openConversation, closeConversation, abandonConversation } from '../_co
 import { matchPayee, matchProject } from '../_match.ts'
 import { gateProcurement, extractProcurements, titleWithCount, type ProcRequest } from '../_proc_extract.ts'
 import {
-  mProcAck, mProcMultiGuard, buildSourcingPrompt, buildVendorList, mProcComplete,
+  mProcMultiGuard, buildSourcingPrompt, buildVendorList, mProcComplete,
   buildSelectVendorFlow, buildPickVendorsFlow, type FlowVendor,
 } from '../_messages.ts'
 
@@ -163,7 +163,7 @@ export async function runProcurementMessage(
 
   // ── single segment ────────────────────────────────────────────────────────
   if (vendorConfident) {
-    await send(supabase, from, mProcAck(lang), meta)                 // instant ack
+    // (the instant routing ack is already sent in dispatch — no second "Got it" here)
     const reqs = await extractProcurements(text, (await loadProjects(ctx)).map((p) => p.name))
     await handleSingle(ctx, reqs[0] ?? null)
     return
