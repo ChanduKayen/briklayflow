@@ -10,7 +10,8 @@ import { usePeek } from '../context/PeekContext';
 import { TxnRow } from './TxnRow';
 import { OtherOpenWithParty } from './OtherOpenWithParty';
 import {
-  WalnutHero, HeroFigure, HeroPill, BurnDown, GroupLabel, TERRA, fmtRupee,
+  WalnutHero, HeroFigure, HeroPill, BurnDown, TERRA, fmtRupee,
+  DocPaper, DocMarker, Watermark, ExecutedSeal, SERIF, INK, INK_SOFT,
 } from './PeekHero';
 
 function fmtDate(d: string | null | undefined) {
@@ -27,13 +28,16 @@ function woPillTone(status: string): 'active' | 'error' | 'neutral' {
   return 'active';
 }
 
-const MS_BADGE: Record<string, string> = {
-  PAID:           'bg-green-100 text-green-800',
-  OVERPAID:       'bg-purple-100 text-purple-800',
-  PARTIALLY_PAID: 'bg-amber-100 text-amber-800',
-  DUE:            'bg-red-100 text-red-800',
-  PENDING:        'bg-surface-container-high text-on-surface-variant',
-};
+// Map a payment status to a quiet contract-voice schedule note.
+function scheduleNote(status: string): string {
+  switch (status) {
+    case 'PAID':           return 'paid';
+    case 'OVERPAID':       return 'paid';
+    case 'PARTIALLY_PAID': return 'part';
+    case 'DUE':            return 'due';
+    default:               return '';
+  }
+}
 
 function getMilestoneStatus(milestone: any, paid: number): string {
   const planned = Number(milestone.amount) || 0;
@@ -51,6 +55,29 @@ function summarizeScope(s: string | null | undefined): string {
   const t = (s ?? '').replace(/\s+/g, ' ').trim();
   if (!t) return 'Contract';
   return t.length > 48 ? t.slice(0, 48).trimEnd() + '…' : t;
+}
+
+/** One ruled row in the contract's payment schedule (annexure style). */
+function ScheduleRow({
+  stage, name, amount, note, first,
+}: {
+  stage: number; name: string; amount: number; note: string; first?: boolean;
+}) {
+  return (
+    <div
+      className="flex items-baseline justify-between gap-3 py-2"
+      style={first ? undefined : { borderTop: '1px solid rgba(0,0,0,.08)' }}
+    >
+      <div className="flex items-baseline gap-2.5 min-w-0">
+        <span style={{ fontFamily: SERIF, color: INK_SOFT, fontVariantNumeric: 'tabular-nums' }} className="text-[12px] shrink-0">{stage}.</span>
+        <span style={{ fontFamily: SERIF, color: INK }} className="text-[13px] truncate">{name}</span>
+      </div>
+      <div className="flex items-baseline gap-2.5 shrink-0">
+        {note && <span className="text-[9.5px] font-semibold uppercase tracking-wider" style={{ color: INK_SOFT }}>{note}</span>}
+        <span style={{ fontFamily: SERIF, color: INK, fontVariantNumeric: 'tabular-nums' }} className="text-[13px] tabular-nums">{fmtRupee(amount)}</span>
+      </div>
+    </div>
+  );
 }
 
 // ── Primary query (shared by useQuery + prefetchWo) ──
@@ -149,6 +176,8 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
   });
 
   const heroTitle = (wo as any)?.title?.trim?.() || summarizeScope(wo?.scope_of_work);
+  // The formal recital paragraph: the full scope of work, else the title.
+  const recital = (wo?.scope_of_work?.trim?.() || (wo as any)?.title?.trim?.() || 'Contract for works as agreed between the parties.');
 
   return (
     <PeekModal
@@ -222,107 +251,132 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
             </div>
           )}
 
-          {/* ── WHO & WHERE ── */}
-          <div>
-            <GroupLabel>Who &amp; Where</GroupLabel>
-            <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-[13px]">
-              <div>
-                <p className="text-[11px] font-semibold tracking-wider text-on-surface-variant uppercase mb-0.5">Worker</p>
-                {wo.stakeholder_id ? (
-                  <button
-                    onClick={() => openPeek('STAKEHOLDER', wo.stakeholder_id!)}
-                    className="text-on-surface font-medium text-primary hover:underline text-left"
-                  >
-                    {wo.stakeholders?.name || '—'} ↗
-                  </button>
-                ) : (
-                  <p className="text-on-surface font-medium">{wo.stakeholders?.name || '—'}</p>
-                )}
-                <p className="text-on-surface-variant text-[11px]">{wo.stakeholders?.category || ''}</p>
-              </div>
-              <div>
-                <p className="text-[11px] font-semibold tracking-wider text-on-surface-variant uppercase mb-0.5">Project</p>
-                <p className="text-on-surface font-medium">{wo.projects?.name || '—'}</p>
-                {wo.projects?.site_location && <p className="text-on-surface-variant text-[11px]">{wo.projects.site_location}</p>}
-              </div>
-              {wo.start_date && (
-                <div>
-                  <p className="text-[11px] font-semibold tracking-wider text-on-surface-variant uppercase mb-0.5">Start Date</p>
-                  <p className="text-on-surface">{fmtDate(wo.start_date)}</p>
-                </div>
-              )}
-              {wo.end_date && (
-                <div>
-                  <p className="text-[11px] font-semibold tracking-wider text-on-surface-variant uppercase mb-0.5">End Date</p>
-                  <p className="text-on-surface">{fmtDate(wo.end_date)}</p>
-                </div>
-              )}
-            </div>
-          </div>
+          {/* ── CONTRACT PAPER ── the body reads like a legacy agreement ── */}
+          <DocPaper accent={TERRA} watermark={<Watermark text={woId} accent={INK} variant="id" />}>
+            <div className="flex flex-col gap-7">
 
-          {/* ── PHASES (milestones) ── */}
-          {milestones && milestones.length > 0 && (
-            <div>
-              <GroupLabel>Phases</GroupLabel>
-              <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
-                {milestones.map((m: any, i: number) => {
-                  const paid   = paidByMilestone[m.id] || 0;
-                  const status = getMilestoneStatus(m, paid);
-                  return (
-                    <div
-                      key={m.id}
-                      className={`flex items-center justify-between px-3 py-2.5 text-[12px] ${i > 0 ? 'border-t border-outline-variant/10' : ''}`}
+              {/* § THE WORK — formal recital of the scope */}
+              <section>
+                <DocMarker label="The Work" glyph="§" accent={TERRA} />
+                <p
+                  style={{ fontFamily: SERIF, color: INK, fontSize: 14.5, lineHeight: 1.7 }}
+                  className="whitespace-pre-line"
+                >
+                  {recital}
+                </p>
+              </section>
+
+              {/* THE PARTIES */}
+              <section>
+                <DocMarker label="The Parties" accent={TERRA} />
+                <p style={{ fontFamily: SERIF, color: INK, fontSize: 14, lineHeight: 1.7 }}>
+                  Made between <span className="italic">the Owner</span> and{' '}
+                  {wo.stakeholder_id ? (
+                    <button
+                      onClick={() => openPeek('STAKEHOLDER', wo.stakeholder_id!)}
+                      className="font-semibold hover:underline"
+                      style={{ color: INK, fontFamily: SERIF }}
                     >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="text-on-surface-variant shrink-0 font-data-mono">{i + 1}.</span>
-                        <span className="text-on-surface truncate">{m.name}</span>
-                      </div>
-                      <div className="flex items-center gap-2 ml-3 shrink-0">
-                        <span className="font-data-mono text-on-surface">{fmtRupee(Number(m.amount) || 0)}</span>
-                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${MS_BADGE[status] || MS_BADGE.PENDING}`}>
-                          {status.replace('_', ' ')}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+                      {wo.stakeholders?.name || '—'} ↗
+                    </button>
+                  ) : (
+                    <span className="font-semibold">{wo.stakeholders?.name || '—'}</span>
+                  )}
+                  {wo.stakeholders?.category && (
+                    <span style={{ color: INK_SOFT }}> ({wo.stakeholders.category})</span>
+                  )}
+                  .
+                </p>
+                <p className="mt-1.5 text-[11.5px]" style={{ color: INK_SOFT }}>
+                  for {wo.projects?.name || '—'}
+                  {wo.projects?.site_location ? `, ${wo.projects.site_location}` : ''}
+                  {(wo.start_date || wo.end_date) && (
+                    <>  ·  {fmtDate(wo.start_date)}–{fmtDate(wo.end_date)}</>
+                  )}
+                </p>
+              </section>
 
-          {/* ── RECENT PAYMENTS ── */}
-          {allocations && allocations.length > 0 && (
-            <div>
-              <GroupLabel>Recent Payments</GroupLabel>
-              <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
-                {allocations.map((a: any) => (
-                  <TxnRow
-                    key={a.allocation_id}
-                    txn={{ ...a.transactions, total_amount: a.allocated_amount }}
-                    context="wo"
-                    onClick={() => a.transactions?.txn_id && openPeek('TRANSACTION', a.transactions.txn_id)}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
+              {/* SCHEDULE OF PAYMENTS — ruled annexure */}
+              <section className="relative">
+                <DocMarker label="Schedule of Payments" accent={TERRA} />
+                <div>
+                  {milestones && milestones.length > 0 ? (
+                    milestones.map((m: any, i: number) => {
+                      const paid = paidByMilestone[m.id] || 0;
+                      return (
+                        <ScheduleRow
+                          key={m.id}
+                          stage={i + 1}
+                          name={m.name}
+                          amount={Number(m.amount) || 0}
+                          note={scheduleNote(getMilestoneStatus(m, paid))}
+                          first={i === 0}
+                        />
+                      );
+                    })
+                  ) : (
+                    <ScheduleRow stage={1} name="Lump sum" amount={displayTotal} note={scheduleNote(totalPaid >= displayTotal && displayTotal > 0 ? 'PAID' : totalPaid > 0 ? 'PARTIALLY_PAID' : 'PENDING')} first />
+                  )}
 
-          {/* Silent "more here" follow-through: this worker's OTHER open contracts */}
-          <OtherOpenWithParty
-            kind="WO"
-            stakeholderId={wo.stakeholder_id}
-            currentOrderId={woId}
-            partyName={wo.stakeholders?.name}
-            projectId={wo.project_id}
-            siteName={wo.projects?.name}
-          />
+                  {/* TOTAL row — double hairline above */}
+                  <div
+                    className="flex items-baseline justify-between pt-2.5 mt-1"
+                    style={{ borderTop: `3px double ${INK_SOFT}` }}
+                  >
+                    <span style={{ fontFamily: SERIF, color: INK }} className="text-[12.5px] font-semibold uppercase tracking-wide">Contract Value</span>
+                    <span style={{ fontFamily: SERIF, color: INK, fontVariantNumeric: 'tabular-nums' }} className="text-[15px] font-bold">{fmtRupee(displayTotal)}</span>
+                  </div>
+                  <div className="flex items-center justify-between mt-1.5">
+                    <p className="text-[11px]" style={{ color: INK_SOFT }}>
+                      <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtRupee(totalPaid)}</span> received
+                      <span className="mx-1.5" style={{ color: 'rgba(0,0,0,.2)' }}>·</span>
+                      <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtRupee(balance)}</span> balance
+                    </p>
+                    {(wo.status === 'Assigned' || wo.status === 'Active') && <ExecutedSeal accent={TERRA} />}
+                  </div>
+                </div>
+              </section>
 
-          {wo.terms_conditions && (
-            <div>
-              <GroupLabel>Terms</GroupLabel>
-              <p className="text-[12px] text-on-surface-variant whitespace-pre-line leading-relaxed">{wo.terms_conditions}</p>
+              {/* RECENT PAYMENTS — document voice header */}
+              {allocations && allocations.length > 0 && (
+                <section>
+                  <DocMarker label="Recent Payments" accent={TERRA} />
+                  <div className="rounded-lg overflow-hidden" style={{ border: '1px solid rgba(0,0,0,.07)', background: 'rgba(255,255,255,.5)' }}>
+                    {allocations.map((a: any) => (
+                      <TxnRow
+                        key={a.allocation_id}
+                        txn={{ ...a.transactions, total_amount: a.allocated_amount }}
+                        context="wo"
+                        onClick={() => a.transactions?.txn_id && openPeek('TRANSACTION', a.transactions.txn_id)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* this worker's OTHER open contracts */}
+              <OtherOpenWithParty
+                kind="WO"
+                stakeholderId={wo.stakeholder_id}
+                currentOrderId={woId}
+                partyName={wo.stakeholders?.name}
+                projectId={wo.project_id}
+                siteName={wo.projects?.name}
+              />
+
+              {wo.terms_conditions && (
+                <section>
+                  <DocMarker label="Terms & Conditions" accent={TERRA} />
+                  <p
+                    className="whitespace-pre-line"
+                    style={{ fontFamily: SERIF, color: INK_SOFT, fontSize: 12.5, lineHeight: 1.7 }}
+                  >
+                    {wo.terms_conditions}
+                  </p>
+                </section>
+              )}
             </div>
-          )}
+          </DocPaper>
         </div>
       )}
     </PeekModal>

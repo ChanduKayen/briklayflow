@@ -168,4 +168,204 @@ export function GroupLabel({ children }: { children: ReactNode }) {
   );
 }
 
-export { IVORY };
+// ── Document-soul helpers (shared by WOPeek "contract" + POPeek "invoice") ──
+
+/** Warm cream "paper" palette for the document body below the hero. */
+export const PAPER = '#FBF7EF';
+export const PAPER_EDGE = '#EDE3D2';
+const INK = '#2C2620';
+const INK_SOFT = '#6B6052';
+
+/**
+ * A formal serif section marker: a short terracotta rule + uppercase label,
+ * with a hairline rule running under the whole marker. The document voice for
+ * what GroupLabel is to the generic body.
+ */
+export function DocMarker({
+  label,
+  glyph,
+  accent = TERRA,
+}: {
+  label: string;
+  /** Optional leading glyph, e.g. "§". */
+  glyph?: string;
+  accent?: string;
+}) {
+  return (
+    <div className="mb-3" style={{ borderBottom: `1px solid ${PAPER_EDGE}` }}>
+      <div className="flex items-center gap-2 pb-1.5">
+        <span className="inline-block rounded-full" style={{ width: 18, height: 2.5, background: accent }} />
+        {glyph && (
+          <span style={{ fontFamily: SERIF, fontSize: 14, color: accent, lineHeight: 1 }}>{glyph}</span>
+        )}
+        <span
+          style={{ fontFamily: SERIF, color: INK_SOFT }}
+          className="text-[10.5px] font-semibold uppercase tracking-[0.16em]"
+        >
+          {label}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The cream "paper" surface that holds the document body. Bleeds to the modal
+ * edges (cancels PeekModal's `p-5`), carries a hairline border + soft inner
+ * shadow, and clips an optional watermark child. `topEdge="perforated"` draws a
+ * receipt-style scalloped/perforated divider along the top.
+ */
+export function DocPaper({
+  children,
+  watermark,
+  topEdge,
+  accent = TERRA,
+}: {
+  children: ReactNode;
+  /** Optional faint rotated watermark, clipped to the paper. */
+  watermark?: ReactNode;
+  topEdge?: 'perforated';
+  accent?: string;
+}) {
+  return (
+    <div className="-mx-5 relative">
+      {topEdge === 'perforated' && <Perforation />}
+      <div
+        className="relative overflow-hidden px-6 py-6"
+        style={{
+          background: PAPER,
+          borderTop: `1px solid ${PAPER_EDGE}`,
+          borderBottom: `1px solid ${PAPER_EDGE}`,
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,.5), inset 0 0 60px rgba(150,120,80,.04)',
+          color: INK,
+        }}
+      >
+        {/* faint paper texture: a barely-there warm wash from the accent */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{ background: `radial-gradient(140% 90% at 100% 0%, ${hexA(accent, 0.05)} 0%, transparent 55%)` }}
+        />
+        {watermark}
+        <div className="relative">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/** Receipt-style perforated top edge built from a row of radial-gradient notches. */
+function Perforation() {
+  return (
+    <div
+      aria-hidden
+      className="h-3 -mb-px"
+      style={{
+        background: PAPER,
+        WebkitMaskImage: 'radial-gradient(circle 6px at 9px 0, transparent 5px, #000 5.5px)',
+        maskImage: 'radial-gradient(circle 6px at 9px 0, transparent 5px, #000 5.5px)',
+        WebkitMaskSize: '18px 12px',
+        maskSize: '18px 12px',
+        WebkitMaskRepeat: 'repeat-x',
+        maskRepeat: 'repeat-x',
+        borderLeft: `1px solid ${PAPER_EDGE}`,
+        borderRight: `1px solid ${PAPER_EDGE}`,
+      }}
+    />
+  );
+}
+
+/**
+ * A huge, faint, rotated watermark of an id/word behind the paper. Clipped by
+ * DocPaper's overflow-hidden; non-interactive. `variant="id"` for a small
+ * rotated id stamp at the corner; `variant="stamp"` for a big diagonal word.
+ */
+export function Watermark({
+  text,
+  accent = INK,
+  variant = 'id',
+}: {
+  text: string;
+  accent?: string;
+  variant?: 'id' | 'stamp';
+}) {
+  if (variant === 'stamp') {
+    return (
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 flex items-center justify-center select-none"
+        style={{ overflow: 'hidden' }}
+      >
+        <span
+          style={{
+            fontFamily: SERIF,
+            fontWeight: 800,
+            fontSize: 'clamp(4rem, 18vw, 7rem)',
+            letterSpacing: '0.12em',
+            transform: 'rotate(-22deg)',
+            color: 'transparent',
+            WebkitTextStroke: `2px ${hexA(accent, 0.1)}`,
+            opacity: 0.9,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {text}
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div aria-hidden className="pointer-events-none absolute -right-6 top-2 select-none" style={{ overflow: 'hidden' }}>
+      <span
+        style={{
+          fontFamily: SERIF,
+          fontWeight: 700,
+          fontSize: 'clamp(3rem, 12vw, 5rem)',
+          letterSpacing: '0.04em',
+          transform: 'rotate(-12deg)',
+          color: hexA(accent, 0.04),
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {text}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * A small embossed-look "executed" wax seal: a terracotta ring with a check,
+ * for an assigned/active contract. ~44px, subtle.
+ */
+export function ExecutedSeal({ accent = TERRA }: { accent?: string }) {
+  return (
+    <div
+      aria-hidden
+      className="flex items-center justify-center rounded-full shrink-0"
+      style={{
+        width: 44,
+        height: 44,
+        background: `radial-gradient(circle at 35% 30%, ${hexA(accent, 0.28)}, ${hexA(accent, 0.12)})`,
+        border: `1.5px solid ${hexA(accent, 0.55)}`,
+        boxShadow: `inset 0 1px 2px ${hexA('#FFFFFF', 0.5)}, 0 1px 2px ${hexA(accent, 0.25)}`,
+      }}
+    >
+      <div
+        className="flex items-center justify-center rounded-full"
+        style={{ width: 30, height: 30, border: `1px dashed ${hexA(accent, 0.5)}` }}
+      >
+        <span className="material-symbols-outlined" style={{ fontSize: 16, color: hexA(accent, 0.95) }}>check</span>
+      </div>
+    </div>
+  );
+}
+
+/** Tiny helper: a hex colour at an alpha (handles #rgb / #rrggbb). */
+export function hexA(hex: string, a: number) {
+  let h = hex.replace('#', '');
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  const n = parseInt(h, 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+export { IVORY, INK, INK_SOFT };
