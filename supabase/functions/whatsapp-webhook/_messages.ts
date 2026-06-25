@@ -96,6 +96,27 @@ export function mComplete(
   return { kind: 'cta', body, cta: { text: ctaText, url: EDIT_LINK } }
 }
 
+// ── Instant routing ack ───────────────────────────────────────────────────────
+// Sent the MOMENT a message is routed to the Transaction agent — before the (slower)
+// extraction + staging — so the sender knows it landed and isn't left waiting. Design:
+// ONE short line; a status emoji, a *bold* receipt word, then a soft _italic_ "working
+// on it…". No payee/amount yet (we haven't read it), so it stays generic. Rotated so
+// back-to-back entries never read like a robot. The real confirmation (mComplete)
+// follows. EN filled; te/hi stay stubs (fall back to EN) — same policy as the rest.
+const TXN_ACKS: { en: string; te?: string; hi?: string }[] = [
+  { en: '✍️  *Got it* — _recording your entry…_' },
+  { en: '📝  *Noted* — _filing this now…_' },
+  { en: '👍  *Received* — _logging the details…_' },
+  { en: '⚡  *On it* — _writing this up…_' },
+  { en: '🧾  *Got it* — _sorting your transaction…_' },
+]
+
+/** A quick "received, working on it…" — rotated, sent before extraction begins. */
+export function mTxnAck(lang: Lang): OutMessage {
+  const c = TXN_ACKS[Math.floor(Math.random() * TXN_ACKS.length)]
+  return { kind: 'text', body: pick(lang, c) }
+}
+
 // ── The two essential-asks (the ONLY questions the Transaction agent ever sends) ──
 // Each captures a raw value; neither matches against the DB. Acknowledge-before-ask:
 // surface what is already known, ask only the gap.

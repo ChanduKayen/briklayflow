@@ -215,6 +215,10 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
     case 'NEW_INTENT': {
       const agent = agentFor(d.intent_agent)
       if (agent.intent === 'TRANSACTION') {
+        // Instant ack the moment we route to TRANSACTION — before the (slower) extraction
+        // + staging — so the sender isn't left staring at a read receipt. The real
+        // confirmation (mComplete / asks / batch card) still follows from agent.run.
+        await send(supabase, from, M.mTxnAck(lang), { org_id: orgId, wamid })
         await agent.run(actx, text, { prefix, lingering: view.lingering })
       } else if (QUERY_RE.test(text)) {
         if (prefix) await send(supabase, from, { kind: 'text', body: prefix }, { org_id: orgId, wamid })
