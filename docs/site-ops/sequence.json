@@ -1,0 +1,149 @@
+{
+  "model": "rcc_residential",
+  "label": "RCC Residential (villa / apartment)",
+  "description": "The editable core. The generator reads this file + a project's shape (floors, units, common areas) and expands it into site_tasks. Edit this file to change what gets generated. Cardinality is the only structural concept: once = one site-wide task; per_floor = repeated for each floor; per_unit = repeated for each floor x unit; common = shared circulation, emitted when the project has common areas. Each trade carries a `note` — the one-line grounding the LLM reads to write the task description and QC points. Keep the notes; they are what make the output reflect real practice.",
+  "cardinalities": {
+    "once": "Emitted once for the whole project (site-wide work and shared services).",
+    "per_floor": "Emitted once per floor (structural frame).",
+    "per_unit": "Emitted once per floor x unit (per-flat build-out and finishes). Villa = 1 unit, so once per floor.",
+    "common": "Emitted once for shared circulation/areas, only when the project has common areas (apartments, not villas)."
+  },
+  "phases": [
+    {
+      "key": "site_foundation",
+      "label": "Site & Foundation",
+      "cardinality": "once",
+      "trades": [
+        { "key": "ground_leveling", "label": "Ground Leveling",
+          "note": "Clear and level the plot to a working datum before setting out." },
+        { "key": "site_marking", "label": "Site Marking / Setting Out",
+          "note": "Set out the building grid from drawings — column centres and axes. Errors here cascade through the entire build." },
+        { "key": "excavation", "label": "Excavation",
+          "note": "Dig to founding depth per soil report; keep sides safe and dewater if the water table is high (common on coastal AP sites)." },
+        { "key": "pcc", "label": "PCC (Levelling Course)",
+          "note": "Plain cement concrete blinding below footings — a clean, level base for the reinforcement." },
+        { "key": "footings", "label": "Footings",
+          "note": "Footing under each column: PCC bed, reinforcement cage, shutter, pour, cure before the plinth beam. (Edit this trade for combined/raft/pile jobs.)" },
+        { "key": "plinth_beam", "label": "Plinth Beam",
+          "note": "Ties columns at plinth level and carries the blockwork above. Level is critical — every floor stacks true off this." },
+        { "key": "backfill", "label": "Backfill & Compaction",
+          "note": "Fill and compact around the foundation in layers before the plinth slab." },
+        { "key": "plinth_slab", "label": "Plinth Slab",
+          "note": "Ground-floor base poured after backfill compaction; sets the finished ground level." }
+      ]
+    },
+    {
+      "key": "frame",
+      "label": "Structural Frame",
+      "cardinality": "per_floor",
+      "trades": [
+        { "key": "columns", "label": "Columns",
+          "note": "This floor's vertical members: reinforcement, shutter, plumb-check, pour. Plumb is non-negotiable — out-of-plumb compounds upward." },
+        { "key": "beams_shuttering", "label": "Beams & Shuttering",
+          "note": "Beam formwork and props for this floor's slab level, set true to line and level." },
+        { "key": "slab_reinforcement", "label": "Slab Reinforcement",
+          "note": "Deck this floor's slab. Reinforcement laid; conduits for the floor ABOVE are cast in now, before the pour." },
+        { "key": "slab_pour", "label": "Slab Pour",
+          "note": "The stage-gate event. Shuttering, reinforcement and cast-in conduits all checked before concrete. Cure 7–14 days before loading." }
+      ]
+    },
+    {
+      "key": "build_out",
+      "label": "Floor Build-out",
+      "cardinality": "per_unit",
+      "trades": [
+        { "key": "blockwork", "label": "Blockwork",
+          "note": "Partition and external walls for this unit: line, level, plumb; lintels over openings." },
+        { "key": "door_frames", "label": "Door Frames",
+          "note": "Frames set during/before plaster — NOT the shutters (those hang late in finishes). A door is not 'done' here." },
+        { "key": "window_frames", "label": "Window Frames",
+          "note": "Window frames/sub-frames fixed before plaster so plaster closes neatly to them." },
+        { "key": "electrical_conduit", "label": "Electrical Conduiting",
+          "note": "Wall and ceiling conduiting with back-boxes before plaster, positioned per the electrical layout." },
+        { "key": "plumbing_conduit", "label": "Plumbing Chases & Sleeves",
+          "note": "In-wall water and drainage chases and sleeves for this unit before plaster." },
+        { "key": "plastering", "label": "Internal Plastering",
+          "note": "Internal cement plaster AFTER conduiting and frames, BEFORE putty. Two-coat, cured." },
+        { "key": "false_ceiling", "label": "False Ceiling",
+          "note": "Gypsum/POP grid where specified. Skip on jobs without false ceilings." },
+        { "key": "wiring", "label": "Wiring",
+          "note": "Pull wires through the conduit after plaster; fixtures come later." },
+        { "key": "putty", "label": "Wall Putty",
+          "note": "Wall finishing over plaster before paint. Only where a painted finish is in scope." },
+        { "key": "floor_preparation", "label": "Floor Preparation",
+          "note": "Level/screed the base for tiling. Wet-area waterproofing is a SEPARATE finishes task, not here." }
+      ]
+    },
+    {
+      "key": "services",
+      "label": "Building Services",
+      "cardinality": "once",
+      "trades": [
+        { "key": "vertical_plumbing_risers", "label": "Vertical Plumbing Risers",
+          "note": "Main vertical stacks run once all frames are up — they pass through every floor, so they wait for frame completion." },
+        { "key": "floor_plumbing_rough_ins", "label": "Floor Plumbing Rough-ins",
+          "note": "In-floor lines per wet area. Positions can shift — confirm against the fixture layout before tiling seals them in." }
+      ]
+    },
+    {
+      "key": "finishes",
+      "label": "Finishes",
+      "cardinality": "per_unit",
+      "trades": [
+        { "key": "wet_area_waterproofing", "label": "Wet-area Waterproofing",
+          "note": "Bathrooms and balconies before tiling. Ponding test BEFORE covering — a leak found later means breaking tile." },
+        { "key": "tiling", "label": "Tiling",
+          "note": "Floor and wall tiling after plumbing rough-ins and waterproofing. Once tiled, the in-floor lines are sealed in." },
+        { "key": "door_installation", "label": "Door Installation",
+          "note": "Hang the shutters now (frames went in at build-out). After painting prep, to avoid damage." },
+        { "key": "window_grills", "label": "Window Grills",
+          "note": "Protection/safety grills fixed to the window openings." },
+        { "key": "painting", "label": "Painting",
+          "note": "Final interior coats after putty. Façade painting is the separate envelope track." }
+      ]
+    },
+    {
+      "key": "common_areas",
+      "label": "Common Areas",
+      "cardinality": "common",
+      "trades": [
+        { "key": "staircase_finishing", "label": "Staircase Finishing",
+          "note": "Shared staircase: railing, treads, finishing. Circulation used during construction, so finished late." },
+        { "key": "lobby_corridor", "label": "Lobby & Corridors",
+          "note": "Shared lobby and corridor flooring, plaster, paint — apartment common circulation, not per-unit." },
+        { "key": "lift_installation", "label": "Lift Installation",
+          "note": "Lift fitted and commissioned in the shaft. Only where a lift is in scope." }
+      ]
+    },
+    {
+      "key": "envelope",
+      "label": "Envelope & Terrace",
+      "cardinality": "once",
+      "trades": [
+        { "key": "facade_treatment", "label": "Façade Treatment",
+          "note": "Runs PARALLEL to interior finishes (separate crew/track); it does not block interior work." },
+        { "key": "terrace_waterproofing", "label": "Terrace Waterproofing",
+          "note": "After the roof slab has cured. Ponding test. Critical — a terrace leak ruins everything below it." },
+        { "key": "terrace_finishing", "label": "Terrace Finishing",
+          "note": "Protective screed / tiles / china-mosaic over the terrace waterproofing." },
+        { "key": "external_painting", "label": "External Painting",
+          "note": "Exterior coats — weather-dependent; sequence around the monsoon on coastal AP sites." }
+      ]
+    },
+    {
+      "key": "final",
+      "label": "Final & Handover",
+      "cardinality": "once",
+      "trades": [
+        { "key": "cellar_parking_flooring", "label": "Cellar / Parking Flooring",
+          "note": "Stilt/parking/cellar floor — often last, to avoid construction-traffic damage." },
+        { "key": "fixtures", "label": "Fixtures",
+          "note": "CP fittings, sanitaryware, electrical fixtures, switches, fans. Near the very end to avoid damage and theft." },
+        { "key": "decorative_installations", "label": "Decorative Installations",
+          "note": "Final decorative elements, feature cladding, landscaping touches." },
+        { "key": "snagging_handover", "label": "Snagging & Handover",
+          "note": "Defect walk, touch-ups, deep clean, handover. The done-of-done." }
+      ]
+    }
+  ]
+}
