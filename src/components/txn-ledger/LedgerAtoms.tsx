@@ -39,7 +39,7 @@ export function Amount({ dir, value }: { dir: TxnDirection; value: string }) {
   );
 }
 
-export function AnchorChip({ anchor, info, siblings = 0, partyName, siteName, onClick }: { anchor: TxnAnchor; info?: AnchorInfo; siblings?: number; partyName?: string | null; siteName?: string | null; onClick?: (e: MouseEvent) => void }) {
+export function AnchorChip({ anchor, info, siblings = 0, partyName, siteName, onClick, onHover }: { anchor: TxnAnchor; info?: AnchorInfo; siblings?: number; partyName?: string | null; siteName?: string | null; onClick?: (e: MouseEvent) => void; onHover?: () => void }) {
   const [hover, setHover] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const [tipPos, setTipPos] = useState<{ top: number; left: number } | null>(null);
@@ -83,7 +83,7 @@ export function AnchorChip({ anchor, info, siblings = 0, partyName, siteName, on
     // overflow can't clip it). Noun + accent match the obligation kind.
     const tipNoun = info.kind === 'WO' ? (siblings === 1 ? 'contract' : 'contracts') : (siblings === 1 ? 'bill' : 'bills');
     const tipAccent = info.kind === 'WO' ? '#E89A72' : '#9CBB91';
-    const showTip = () => { setHover(true); const el = btnRef.current; if (stack && el) { const r = el.getBoundingClientRect(); setTipPos({ top: r.top, left: r.left }); } };
+    const showTip = () => { onHover?.(); setHover(true); const el = btnRef.current; if (stack && el) { const r = el.getBoundingClientRect(); setTipPos({ top: r.top, left: r.left }); } };
     const hideTip = () => { setHover(false); setTipPos(null); };
     return (
       <>

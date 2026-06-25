@@ -107,6 +107,7 @@ type EntryProps = {
   onRowClick: () => void;
   onToggleSelect: (e: MouseEvent) => void;
   onAnchorClick: (e: MouseEvent) => void;
+  onAnchorHover?: () => void;
   onAmountDown: (e: MouseEvent) => void;
   onAmountEnter: () => void;
   onAttach?: (e: MouseEvent) => void;
@@ -171,7 +172,7 @@ function EntryRow(p: EntryProps) {
       </div>
 
       <div className="bk-ledger-anchor flex items-center gap-2">
-        {p.anchorNode ?? <AnchorChip anchor={p.anchor} info={p.info} siblings={p.siblings} partyName={p.partyName} siteName={p.siteName} onClick={(e) => { e.stopPropagation(); p.onAnchorClick(e); }} />}
+        {p.anchorNode ?? <AnchorChip anchor={p.anchor} info={p.info} siblings={p.siblings} partyName={p.partyName} siteName={p.siteName} onHover={p.onAnchorHover} onClick={(e) => { e.stopPropagation(); p.onAnchorClick(e); }} />}
         {p.flagged && (
           <span className="text-xs px-1.5 py-0.5 rounded shrink-0" style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font }}>flagged</span>
         )}
@@ -271,7 +272,7 @@ function LedgerEmpty({ reviewCount, onReview, onNew }: { reviewCount: number; on
 export default function Ledger({ session }: { session: Session }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const { openPeek } = usePeek();
+  const { openPeek, prefetchPeek } = usePeek();
   const [searchParams] = useSearchParams();
   const { data: profile } = useUserProfile(session.user.id);
 
@@ -1243,6 +1244,11 @@ export default function Ledger({ session }: { session: Session }) {
                           // chips fall back to the transaction peek.
                           if (anchor && (anchor.kind === 'WO' || anchor.kind === 'PO')) openPeek(anchor.kind, anchor.ref);
                           else openPeek('TRANSACTION', txn.txn_id);
+                        }}
+                        onAnchorHover={() => {
+                          // Warm the cache so the click paints instantly.
+                          if (anchor && (anchor.kind === 'WO' || anchor.kind === 'PO')) prefetchPeek(anchor.kind, anchor.ref);
+                          else prefetchPeek('TRANSACTION', txn.txn_id);
                         }}
                         onAttach={async () => { const u = await resolveDocUrl(proofUrl); if (u) setLightboxUrl(u); }}
                         onAmountDown={() => { setIsDragging(true); setSumSel(new Set([txn.txn_id])); }}

@@ -1,14 +1,17 @@
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { Loader2 } from 'lucide-react';
 import type { Session } from '@supabase/supabase-js';
 import { PeekModal } from './PeekModal';
-import { statusBadgeClass } from '../pages/WorkOrderDetail';
+import { PeekHeroSkeleton } from './PeekSkeleton';
 import { useUserProfile } from '../App';
 import { usePeek } from '../context/PeekContext';
 import { TxnRow } from './TxnRow';
 import { OtherOpenWithParty } from './OtherOpenWithParty';
+import {
+  WalnutHero, HeroFigure, HeroPill, BurnDown, GroupLabel, TERRA, fmtRupee,
+} from './PeekHero';
 
 function fmtDate(d: string | null | undefined) {
   if (!d) return '—';
@@ -17,8 +20,11 @@ function fmtDate(d: string | null | undefined) {
   return p.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-function fmtRupee(n: number) {
-  return '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 0 });
+// Map a WO status to the dark-hero pill tone.
+function woPillTone(status: string): 'active' | 'error' | 'neutral' {
+  if (status === 'Cancelled') return 'error';
+  if (status === 'Draft') return 'neutral';
+  return 'active';
 }
 
 const MS_BADGE: Record<string, string> = {
@@ -40,6 +46,31 @@ function getMilestoneStatus(milestone: any, paid: number): string {
   return 'PENDING';
 }
 
+// A WO's scope is a paragraph; show the opening ~48 chars as a human eyebrow.
+function summarizeScope(s: string | null | undefined): string {
+  const t = (s ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return 'Contract';
+  return t.length > 48 ? t.slice(0, 48).trimEnd() + '…' : t;
+}
+
+// ── Primary query (shared by useQuery + prefetchWo) ──
+const woPeekKey = (woId: string) => ['wo_peek', woId];
+const woPeekFn = async (woId: string) => {
+  const { data, error } = await supabase
+    .from('work_orders')
+    .select('*, projects(name, site_location), stakeholders(name, category)')
+    .eq('wo_id', woId)
+    .single();
+  if (error) throw error;
+  return data;
+};
+
+/** Warm the WO peek's primary query so the click paints instantly. */
+export function prefetchWo(qc: QueryClient, woId: string) {
+  if (!woId) return;
+  void qc.prefetchQuery({ queryKey: woPeekKey(woId), queryFn: () => woPeekFn(woId) });
+}
+
 interface WOPeekProps {
   woId: string;
   onClose: () => void;
@@ -53,16 +84,8 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
   const canApprove = profile?.role === 'management' || profile?.role === 'principal';
   const [approving, setApproving] = useState(false);
   const { data: wo, isLoading: loadingWo } = useQuery({
-    queryKey: ['wo_peek', woId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('work_orders')
-        .select('*, projects(name, site_location), stakeholders(name, category)')
-        .eq('wo_id', woId)
-        .single();
-      if (error) throw error;
-      return data;
-    },
+    queryKey: woPeekKey(woId),
+    queryFn: () => woPeekFn(woId),
   });
 
   const { data: milestones } = useQuery({
@@ -115,7 +138,7 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
   // Derive a display total even when order_value is not set on the WO
   const displayTotal  = orderValue > 0 ? orderValue : msTotal > 0 ? msTotal : totalPaid;
   const orderValueSet = orderValue > 0;
-  const pctPaid       = displayTotal > 0 ? Math.min((totalPaid / displayTotal) * 100, 100) : 100;
+  const balance       = Math.max(displayTotal - totalPaid, 0);
 
   // Paid per milestone
   const paidByMilestone: Record<string, number> = {};
@@ -125,6 +148,8 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
     }
   });
 
+  const heroTitle = (wo as any)?.title?.trim?.() || summarizeScope(wo?.scope_of_work);
+
   return (
     <PeekModal
       title={woId}
@@ -133,25 +158,37 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
       onClose={onClose}
     >
       {loadingWo ? (
-        <div className="flex items-center justify-center py-16">
-          <Loader2 size={24} className="animate-spin text-on-surface-variant" />
-        </div>
+        <PeekHeroSkeleton />
       ) : !wo ? (
         <p className="text-center text-on-surface-variant py-12 text-body-sm">Contract not found.</p>
       ) : (
         <div className="flex flex-col gap-5">
 
-          {/* Identity row */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold ${statusBadgeClass(wo.status)}`}>
-              {wo.status}
-            </span>
-            {wo.scope_of_work && (
-              <span className="text-[12px] text-on-surface-variant">{wo.scope_of_work}</span>
+          {/* ── HERO: contract burn-down ── */}
+          <WalnutHero
+            variant="terra"
+            topLeft={
+              <>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] mb-1" style={{ color: TERRA }}>Contract</p>
+                <p className="text-[13px] leading-snug" style={{ color: '#F3EADB' }}>{heroTitle}</p>
+              </>
+            }
+            topRight={<HeroPill label={wo.status} tone={woPillTone(wo.status)} />}
+            eyebrow={
+              <span className="inline-flex items-center gap-1.5" style={{ color: TERRA, fontSize: 10.5, fontWeight: 700, letterSpacing: '0.14em' }}>
+                <span className="material-symbols-outlined text-[13px]">savings</span>
+                BALANCE LEFT
+              </span>
+            }
+          >
+            <HeroFigure prefix="₹" value={balance.toLocaleString('en-IN')} accent={TERRA} />
+            {!orderValueSet && (
+              <p className="mt-2 text-[10px]" style={{ color: 'rgba(243,234,219,.42)' }}>Order value not set — estimated from milestones</p>
             )}
-          </div>
+            <BurnDown total={displayTotal} paid={totalPaid} accent={TERRA} totalKnown={displayTotal > 0} />
+          </WalnutHero>
 
-          {/* Approve banner — Draft WO, management/principal only */}
+          {/* ── Approve banner — Draft WO, management/principal only ── */}
           {wo.status === 'Draft' && canApprove && (
             <div className="rounded-xl bg-blue-50 border border-blue-200/60 p-3">
               {!approving ? (
@@ -185,62 +222,48 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
             </div>
           )}
 
-          {/* Key fields */}
-          <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-[13px]">
-            <div>
-              <p className="text-[10px] font-semibold tracking-wider text-on-surface-variant uppercase mb-0.5">Worker</p>
-              <p className="text-on-surface font-medium">{wo.stakeholders?.name || '—'}</p>
-              <p className="text-on-surface-variant text-[11px]">{wo.stakeholders?.category || ''}</p>
-            </div>
-            <div>
-              <p className="text-[10px] font-semibold tracking-wider text-on-surface-variant uppercase mb-0.5">Project</p>
-              <p className="text-on-surface font-medium">{wo.projects?.name || '—'}</p>
-              {wo.projects?.site_location && <p className="text-on-surface-variant text-[11px]">{wo.projects.site_location}</p>}
-            </div>
-            {wo.start_date && (
+          {/* ── WHO & WHERE ── */}
+          <div>
+            <GroupLabel>Who &amp; Where</GroupLabel>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-[13px]">
               <div>
-                <p className="text-[10px] font-semibold tracking-wider text-on-surface-variant uppercase mb-0.5">Start Date</p>
-                <p className="text-on-surface">{fmtDate(wo.start_date)}</p>
+                <p className="text-[11px] font-semibold tracking-wider text-on-surface-variant uppercase mb-0.5">Worker</p>
+                {wo.stakeholder_id ? (
+                  <button
+                    onClick={() => openPeek('STAKEHOLDER', wo.stakeholder_id!)}
+                    className="text-on-surface font-medium text-primary hover:underline text-left"
+                  >
+                    {wo.stakeholders?.name || '—'} ↗
+                  </button>
+                ) : (
+                  <p className="text-on-surface font-medium">{wo.stakeholders?.name || '—'}</p>
+                )}
+                <p className="text-on-surface-variant text-[11px]">{wo.stakeholders?.category || ''}</p>
               </div>
-            )}
-            {wo.end_date && (
               <div>
-                <p className="text-[10px] font-semibold tracking-wider text-on-surface-variant uppercase mb-0.5">End Date</p>
-                <p className="text-on-surface">{fmtDate(wo.end_date)}</p>
+                <p className="text-[11px] font-semibold tracking-wider text-on-surface-variant uppercase mb-0.5">Project</p>
+                <p className="text-on-surface font-medium">{wo.projects?.name || '—'}</p>
+                {wo.projects?.site_location && <p className="text-on-surface-variant text-[11px]">{wo.projects.site_location}</p>}
               </div>
-            )}
-          </div>
-
-          {/* Financial summary */}
-          <div className="rounded-xl bg-surface-container-low p-4">
-            <div className="flex justify-between items-baseline mb-1">
-              <span className="text-[11px] font-semibold tracking-wider text-on-surface-variant uppercase">Order Value</span>
-              {orderValueSet
-                ? <span className="text-[16px] font-bold font-data-mono text-on-surface">{fmtRupee(orderValue)}</span>
-                : <span className="text-[13px] font-medium text-on-surface-variant">—</span>
-              }
-            </div>
-            {!orderValueSet && (
-              <p className="text-[10px] text-amber-600 mb-1">Order value not set on this WO</p>
-            )}
-            <div className="h-1.5 rounded-full bg-surface-container-highest overflow-hidden mb-2 mt-2">
-              <div
-                className="h-full rounded-full bg-secondary transition-all duration-700"
-                style={{ width: `${pctPaid}%` }}
-              />
-            </div>
-            <div className="flex justify-between text-[11px] text-on-surface-variant">
-              <span>Paid: <span className="font-data-mono text-on-surface font-medium">{fmtRupee(totalPaid)}</span></span>
-              <span>Remaining: <span className="font-data-mono text-on-surface font-medium">
-                {orderValueSet ? fmtRupee(Math.max(orderValue - totalPaid, 0)) : '—'}
-              </span></span>
+              {wo.start_date && (
+                <div>
+                  <p className="text-[11px] font-semibold tracking-wider text-on-surface-variant uppercase mb-0.5">Start Date</p>
+                  <p className="text-on-surface">{fmtDate(wo.start_date)}</p>
+                </div>
+              )}
+              {wo.end_date && (
+                <div>
+                  <p className="text-[11px] font-semibold tracking-wider text-on-surface-variant uppercase mb-0.5">End Date</p>
+                  <p className="text-on-surface">{fmtDate(wo.end_date)}</p>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Milestones */}
+          {/* ── PHASES (milestones) ── */}
           {milestones && milestones.length > 0 && (
             <div>
-              <p className="text-[10px] font-semibold tracking-wider text-on-surface-variant uppercase mb-2">Milestones</p>
+              <GroupLabel>Phases</GroupLabel>
               <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
                 {milestones.map((m: any, i: number) => {
                   const paid   = paidByMilestone[m.id] || 0;
@@ -267,10 +290,10 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
             </div>
           )}
 
-          {/* Payments */}
+          {/* ── RECENT PAYMENTS ── */}
           {allocations && allocations.length > 0 && (
             <div>
-              <p className="text-[10px] font-semibold tracking-wider text-on-surface-variant uppercase mb-2">Payments</p>
+              <GroupLabel>Recent Payments</GroupLabel>
               <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
                 {allocations.map((a: any) => (
                   <TxnRow
@@ -296,7 +319,7 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
 
           {wo.terms_conditions && (
             <div>
-              <p className="text-[10px] font-semibold tracking-wider text-on-surface-variant uppercase mb-1">Terms</p>
+              <GroupLabel>Terms</GroupLabel>
               <p className="text-[12px] text-on-surface-variant whitespace-pre-line leading-relaxed">{wo.terms_conditions}</p>
             </div>
           )}

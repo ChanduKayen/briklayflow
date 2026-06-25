@@ -1,0 +1,171 @@
+/**
+ * Shared peek hero language — the walnut amount/burn-down card that crowns each
+ * preview popup, plus the thin burn-down track. Mirrors the TransactionDetail
+ * WALNUT AMOUNT HERO (radial-terracotta + linear walnut, ivory serif figure,
+ * dark-styled status pills). Reused across TransactionPeek / WOPeek / POPeek.
+ */
+import type { ReactNode } from 'react';
+
+const IVORY = '#F3EADB';
+export const SERIF = "Georgia, 'Times New Roman', serif";
+
+// Soft accents: terracotta for money-OUT / contracts; sage for money-IN.
+export const TERRA = '#E89A72';
+export const SAGE = '#9CBB91';
+
+const WALNUT_OUT =
+  'radial-gradient(120% 120% at 85% 0%, rgba(224,138,92,.15) 0%, rgba(224,138,92,0) 42%), linear-gradient(158deg,#2D2118 0%,#221A13 60%,#1B140E 100%)';
+const WALNUT_IN =
+  'radial-gradient(120% 120% at 85% 0%, rgba(156,187,145,.17) 0%, rgba(156,187,145,0) 42%), linear-gradient(158deg,#232619 0%,#1c2014 60%,#161a0f 100%)';
+
+export function fmtRupee(n: number) {
+  return '₹' + Math.round(n).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+}
+
+/** A dark-styled status pill for use on the walnut field. */
+export function HeroPill({
+  label,
+  tone = 'neutral',
+}: {
+  label: string;
+  tone?: 'active' | 'error' | 'neutral';
+}) {
+  const styles =
+    tone === 'active'
+      ? { background: 'rgba(123,176,108,.16)', color: '#AFD3A1', border: '1px solid rgba(123,176,108,.24)', dot: '#84BE74' }
+      : tone === 'error'
+      ? { background: 'rgba(229,115,115,.16)', color: '#F0A593', border: '1px solid rgba(229,115,115,.24)', dot: '#E57373' }
+      : { background: 'rgba(243,234,219,.1)', color: 'rgba(243,234,219,.6)', border: '1px solid rgba(243,234,219,.14)', dot: 'rgba(243,234,219,.4)' };
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold shrink-0"
+      style={{ background: styles.background, color: styles.color, border: styles.border }}
+    >
+      <span className="w-1.5 h-1.5 rounded-full" style={{ background: styles.dot }} />
+      {label.toUpperCase()}
+    </span>
+  );
+}
+
+/**
+ * The full-bleed walnut hero. Designed to escape the modal body's `p-5` via
+ * negative margins (`-mx-5 -mt-5`) and round its top corners to match the chrome.
+ */
+export function WalnutHero({
+  variant = 'terra',
+  eyebrow,
+  topLeft,
+  topRight,
+  children,
+}: {
+  variant?: 'terra' | 'sage';
+  /** Optional eyebrow line above the headline figure (e.g. "MONEY OUT" or a scope summary). */
+  eyebrow?: ReactNode;
+  /** Optional small top-left identity block (id / subtitle). */
+  topLeft?: ReactNode;
+  /** Optional top-right block — typically the status pill(s). */
+  topRight?: ReactNode;
+  /** The hero body — the big serif figure + any burn-down. */
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className="-mx-5 -mt-5 mb-5 px-6 pt-5 pb-6 rounded-t-2xl sm:rounded-t-2xl"
+      style={{ background: variant === 'sage' ? WALNUT_IN : WALNUT_OUT }}
+    >
+      {(topLeft || topRight) && (
+        <div className="flex items-start justify-between gap-3 mb-4">
+          <div className="min-w-0">{topLeft}</div>
+          <div className="flex items-center gap-2 flex-wrap justify-end shrink-0">{topRight}</div>
+        </div>
+      )}
+      {eyebrow && <div className="mb-1.5">{eyebrow}</div>}
+      {children}
+    </div>
+  );
+}
+
+/** The big ivory serif headline figure (with a soft-accent prefix glyph). */
+export function HeroFigure({
+  prefix,
+  value,
+  accent,
+}: {
+  prefix?: string;
+  value: string;
+  accent: string;
+}) {
+  return (
+    <p
+      style={{
+        color: IVORY,
+        fontFamily: SERIF,
+        fontVariantNumeric: 'tabular-nums',
+        lineHeight: 1,
+        letterSpacing: '-0.02em',
+        fontSize: 'clamp(2.2rem, 1.4rem + 4vw, 3.1rem)',
+      }}
+    >
+      {prefix && (
+        <span style={{ fontSize: '0.4em', fontWeight: 600, marginRight: '0.1em', color: accent }}>{prefix}</span>
+      )}
+      {value}
+    </p>
+  );
+}
+
+/** Direction eyebrow — small accent-coloured "MONEY IN / OUT" with an arrow glyph. */
+export function DirectionEyebrow({ isIn, accent }: { isIn: boolean; accent: string }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1.5"
+      style={{ color: accent, fontSize: 10.5, fontWeight: 700, letterSpacing: '0.14em' }}
+    >
+      <span className="material-symbols-outlined text-[13px]">{isIn ? 'south_west' : 'north_east'}</span>
+      {isIn ? 'MONEY IN' : 'MONEY OUT'}
+    </span>
+  );
+}
+
+/**
+ * Burn-down — a thin track + filled portion, on the dark hero field, with the
+ * "{paidPct}% paid · ₹{paid} of ₹{total}" caption beneath. Accent fills the bar.
+ */
+export function BurnDown({
+  total,
+  paid,
+  accent,
+  totalKnown = true,
+}: {
+  total: number;
+  paid: number;
+  accent: string;
+  totalKnown?: boolean;
+}) {
+  const pctPaid = total > 0 ? Math.min((paid / total) * 100, 100) : paid > 0 ? 100 : 0;
+  return (
+    <div className="mt-4">
+      <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(243,234,219,.12)' }}>
+        <div
+          className="h-full rounded-full transition-all duration-700"
+          style={{ width: `${pctPaid}%`, background: accent }}
+        />
+      </div>
+      <p className="mt-2 text-[11px]" style={{ color: 'rgba(243,234,219,.6)' }}>
+        <span style={{ color: accent, fontWeight: 700 }}>{Math.round(pctPaid)}% paid</span>
+        <span className="mx-1.5" style={{ color: 'rgba(243,234,219,.28)' }}>·</span>
+        <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtRupee(paid)}</span> of{' '}
+        <span style={{ fontVariantNumeric: 'tabular-nums' }}>{totalKnown ? fmtRupee(total) : '—'}</span>
+      </p>
+    </div>
+  );
+}
+
+/** A small uppercase group label used to chunk the modal body. */
+export function GroupLabel({ children }: { children: ReactNode }) {
+  return (
+    <p className="text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant mb-2">{children}</p>
+  );
+}
+
+export { IVORY };
