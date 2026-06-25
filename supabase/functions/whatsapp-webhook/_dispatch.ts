@@ -11,7 +11,7 @@ import { agentFor } from './_registry.ts'
 import { runTransaction, retryBatchEntries, type TxnCtx } from './_agents/transaction.ts'   // direct: the replay path
 import { startVendorFlow } from './_agents/procurement.ts'   // direct: vendor-Flow test trigger
 import { runConcierge } from './_agents/concierge.ts'   // direct: first-touch orientation
-import { send } from './_format.ts'
+import { send, sendNow } from './_format.ts'
 import * as M from './_messages.ts'
 import type { Lang } from './_messages.ts'
 import type { TxnExtract } from './_extract.ts'
@@ -216,9 +216,10 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
       const agent = agentFor(d.intent_agent)
       if (agent.intent === 'TRANSACTION') {
         // Instant ack the moment we route to TRANSACTION — before the (slower) extraction
-        // + staging — so the sender isn't left staring at a read receipt. The real
-        // confirmation (mComplete / asks / batch card) still follows from agent.run.
-        await send(supabase, from, M.mTxnAck(lang), { org_id: orgId, wamid })
+        // + staging. Sent DIRECTLY (sendNow), NOT via the durable outbox: the queued path
+        // is drained later and would land after the confirmation. The real confirmation
+        // (mComplete / asks / batch card) still follows from agent.run via the outbox.
+        await sendNow(from, M.mTxnAck(lang))
         await agent.run(actx, text, { prefix, lingering: view.lingering })
       } else if (QUERY_RE.test(text)) {
         if (prefix) await send(supabase, from, { kind: 'text', body: prefix }, { org_id: orgId, wamid })

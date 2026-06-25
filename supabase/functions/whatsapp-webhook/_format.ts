@@ -140,6 +140,26 @@ export async function send(
 }
 
 /**
+ * Send a message RIGHT NOW, bypassing the durable outbox/drainer. For EPHEMERAL,
+ * order-critical messages (the instant routing ack) that must land before the slower
+ * queued confirmation — a drained-15s-later "recording…" arriving after "Added" is
+ * nonsense. Best-effort: never throws into the caller (a failed ack must not fail the
+ * job; the real confirmation still goes through the durable path).
+ */
+export async function sendNow(to: string, msg: OutMessage): Promise<void> {
+  try {
+    const res = await fetch(`https://graph.facebook.com/v18.0/${WA_PHONE_NUMBER_ID}/messages`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${WA_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(renderToWhatsApp(to, msg)),
+    })
+    if (!res.ok) console.warn('[format] sendNow non-2xx:', res.status, await res.text().catch(() => ''))
+  } catch (e) {
+    console.warn('[format] sendNow failed (ignored):', (e as Error)?.message ?? e)
+  }
+}
+
+/**
  * Mark-read + typing indicator on an inbound message. EPHEMERAL: sent inline,
  * best-effort, fire-and-forget -- a typing indicator drained 15s later is nonsense.
  * Never throws into the caller; failures here must not affect the job.
