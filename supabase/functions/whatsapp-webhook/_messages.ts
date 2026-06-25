@@ -98,17 +98,19 @@ export function mComplete(
 
 // ── Instant routing ack ───────────────────────────────────────────────────────
 // Sent the MOMENT a message is routed to the Transaction agent — before the (slower)
-// extraction + staging — so the sender knows it landed and isn't left waiting. Design:
-// ONE short line; a status emoji, a *bold* receipt word, then a soft _italic_ "working
-// on it…". No payee/amount yet (we haven't read it), so it stays generic. Rotated so
-// back-to-back entries never read like a robot. The real confirmation (mComplete)
-// follows. EN filled; te/hi stay stubs (fall back to EN) — same policy as the rest.
+// extraction + staging — so the sender knows it landed and isn't left waiting. TONE:
+// mature and confidence-inspiring, not cute. ONE calm line: a single consistent ledger
+// emoji (🧾, not a rotating zoo of cute ones), a *bold* receipt word, then a precise
+// BOOKKEEPING action that names where it's going (your Day Book / books / ledger) so the
+// owner trusts their money is being filed properly. No payee/amount yet (not read) → it
+// stays general. The verb rotates so back-to-back entries don't read like a robot; the
+// real confirmation (mComplete) follows. EN filled; te/hi stay stubs (fall back to EN).
 const TXN_ACKS: { en: string; te?: string; hi?: string }[] = [
-  { en: '✍️  *Got it* — _recording your entry…_' },
-  { en: '📝  *Noted* — _filing this now…_' },
-  { en: '👍  *Received* — _logging the details…_' },
-  { en: '⚡  *On it* — _writing this up…_' },
-  { en: '🧾  *Got it* — _sorting your transaction…_' },
+  { en: '🧾 *Got it* — recording this in your Day Book…' },
+  { en: '🧾 *Received* — posting it to your books…' },
+  { en: '🧾 *Noted* — filing it in your ledger…' },
+  { en: '🧾 *Got it* — entering your transaction now…' },
+  { en: '🧾 *Received* — securing this in your books…' },
 ]
 
 /** A quick "received, working on it…" — rotated, sent before extraction begins. */
