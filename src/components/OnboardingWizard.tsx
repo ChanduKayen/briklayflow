@@ -15,6 +15,7 @@ import {
   IconBuildingSkyscraper,
 } from '@tabler/icons-react'
 import { supabase } from '../lib/supabase'
+import { uniqueProjectId } from '../lib/projectId'
 import type { UserProfile } from '../types'
 
 const STEPS = ['welcome', 'team', 'project', 'orders', 'shortcuts', 'finish'] as const
@@ -95,10 +96,11 @@ export default function OnboardingWizard({ profile, orgName, orgId, onComplete }
     const { error } = await supabase
       .from('projects')
       .insert({
-        project_id:    crypto.randomUUID(),
+        project_id:    uniqueProjectId(name),   // PRJ-* convention (H1); unique suffix guards the default-name collision
         org_id:        resolvedOrgId,
         name,
         project_code:  projectCode,
+        project_type:  projType,                // persist the captured type (H3)
         status:        'Active',
         created_by:    profile.id,
         start_date:    new Date().toISOString().split('T')[0],

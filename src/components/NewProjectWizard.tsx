@@ -4,6 +4,7 @@ import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { useUserProfile } from '../App'
 import { useQueryClient } from '@tanstack/react-query'
+import { fmtProjectId } from '../lib/projectId'
 
 const PROJECT_TYPES = [
   { label: 'Residential', icon: '🏠' },
@@ -14,10 +15,7 @@ const PROJECT_TYPES = [
   { label: 'Renovation',  icon: '🔨' },
 ]
 
-function fmtId(name: string): string {
-  const slug = name.toUpperCase().replace(/[^A-Z0-9]/g, '-').replace(/-+/g, '-').slice(0, 12)
-  return `PRJ-${slug || 'NEW'}`
-}
+const fmtId = fmtProjectId   // shared generator (src/lib/projectId.ts)
 
 // Celebration particle
 function Particle({ delay, x, color }: { delay: number; x: number; color: string }) {
@@ -102,6 +100,7 @@ export default function NewProjectWizard({ session }: { session: Session }) {
         org_id: resolvedOrgId,
         name: name.trim(),
         project_code: projectCode,
+        project_type: projType,            // persist the captured type (H3)
         site_location: location.trim(),
         status: 'Active',
         created_by: session.user.id,
