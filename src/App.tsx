@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, lazy, Suspense, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from './lib/auth/AuthProvider';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
@@ -23,42 +23,46 @@ import {
   IconCircleDot, IconClock, IconFileText,
 } from '@tabler/icons-react';
 
-import Stakeholders from './pages/Stakeholders';
-import StakeholderDetail from './pages/StakeholderDetail';
-import WorkOrders from './pages/WorkOrders';
-import WorkOrderDetail from './pages/WorkOrderDetail';
-import ProjectDetail from './pages/ProjectDetail';
-import Projects from './pages/Projects';
-import ProjectTransactions from './pages/ProjectTransactions';
-import ProjectTasks from './pages/ProjectTasks';
-import ProjectWorkOrders from './pages/ProjectWorkOrders';
-import ProjectPurchaseOrders from './pages/ProjectPurchaseOrders';
-import ProjectInventory from './pages/ProjectInventory';
-import ProjectBOQs from './pages/ProjectBOQs';
-import ProjectInward from './pages/ProjectInward';
-import InwardRegister from './pages/InwardRegister';
-import NewProjectWizard from './components/NewProjectWizard';
-import TransactionDetail from './pages/TransactionDetail';
-import PurchaseOrders from './pages/PurchaseOrders';
-import NewPurchaseOrder from './pages/NewPurchaseOrder';
-import PurchaseOrderDetail from './pages/PurchaseOrderDetail';
-import Ledger from './pages/Ledger';
-import NewTransaction from './pages/NewTransaction';
-import Insights from './pages/Insights';
-import Settings from './pages/Settings';
-import NewWorkOrder from './pages/NewWorkOrder';
-import Financials from './pages/Financials';
-import FinancialsPL from './pages/FinancialsPL';
-import FinancialsCashflow from './pages/FinancialsCashflow';
-import Invoices from './pages/Invoices';
-import NewInvoice from './pages/NewInvoice';
-import InvoiceDetail from './pages/InvoiceDetail';
-import Billing from './pages/Billing';
-import NewBill from './pages/NewBill';
-import BillDetail from './pages/BillDetail';
-import Logbook from './pages/Logbook';
+// Route pages are lazy-loaded so the dev server (and the prod bundle) only transform/ship
+// the page you're on — not all ~40 at once. The big eager import graph was what OOM-killed
+// esbuild on a low-RAM box. Components used OUTSIDE <Routes> (TeamAccess, Privacy, Terms,
+// DataDeletion, the auth/entry screens) stay eager below.
+const Stakeholders = lazy(() => import('./pages/Stakeholders'));
+const StakeholderDetail = lazy(() => import('./pages/StakeholderDetail'));
+const WorkOrders = lazy(() => import('./pages/WorkOrders'));
+const WorkOrderDetail = lazy(() => import('./pages/WorkOrderDetail'));
+const ProjectDetail = lazy(() => import('./pages/ProjectDetail'));
+const Projects = lazy(() => import('./pages/Projects'));
+const ProjectTransactions = lazy(() => import('./pages/ProjectTransactions'));
+const ProjectTasks = lazy(() => import('./pages/ProjectTasks'));
+const ProjectWorkOrders = lazy(() => import('./pages/ProjectWorkOrders'));
+const ProjectPurchaseOrders = lazy(() => import('./pages/ProjectPurchaseOrders'));
+const ProjectInventory = lazy(() => import('./pages/ProjectInventory'));
+const ProjectBOQs = lazy(() => import('./pages/ProjectBOQs'));
+const ProjectInward = lazy(() => import('./pages/ProjectInward'));
+const InwardRegister = lazy(() => import('./pages/InwardRegister'));
+const NewProjectWizard = lazy(() => import('./components/NewProjectWizard'));
+const TransactionDetail = lazy(() => import('./pages/TransactionDetail'));
+const PurchaseOrders = lazy(() => import('./pages/PurchaseOrders'));
+const NewPurchaseOrder = lazy(() => import('./pages/NewPurchaseOrder'));
+const PurchaseOrderDetail = lazy(() => import('./pages/PurchaseOrderDetail'));
+const Ledger = lazy(() => import('./pages/Ledger'));
+const NewTransaction = lazy(() => import('./pages/NewTransaction'));
+const Insights = lazy(() => import('./pages/Insights'));
+const Settings = lazy(() => import('./pages/Settings'));
+const NewWorkOrder = lazy(() => import('./pages/NewWorkOrder'));
+const Financials = lazy(() => import('./pages/Financials'));
+const FinancialsPL = lazy(() => import('./pages/FinancialsPL'));
+const FinancialsCashflow = lazy(() => import('./pages/FinancialsCashflow'));
+const Invoices = lazy(() => import('./pages/Invoices'));
+const NewInvoice = lazy(() => import('./pages/NewInvoice'));
+const InvoiceDetail = lazy(() => import('./pages/InvoiceDetail'));
+const Billing = lazy(() => import('./pages/Billing'));
+const NewBill = lazy(() => import('./pages/NewBill'));
+const BillDetail = lazy(() => import('./pages/BillDetail'));
+const Logbook = lazy(() => import('./pages/Logbook'));
 import { BriklayDesktopNav } from './components/nav/BriklayRail';
-import Orders from './pages/Orders';
+const Orders = lazy(() => import('./pages/Orders'));
 import InviteAccept from './pages/InviteAccept';
 import OnboardingWizard from './components/OnboardingWizard';
 import Pending from './pages/Pending';
@@ -69,10 +73,10 @@ import Landing from './pages/Landing';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
 import DataDeletion from './pages/DataDeletion';
-import SKUDirectory from './pages/SKUDirectory';
-import ProcurementRequests from './pages/ProcurementRequests';
-import ProcurementQuotes from './pages/ProcurementQuotes';
-import ProcurementOrders from './pages/ProcurementOrders';
+const SKUDirectory = lazy(() => import('./pages/SKUDirectory'));
+const ProcurementRequests = lazy(() => import('./pages/ProcurementRequests'));
+const ProcurementQuotes = lazy(() => import('./pages/ProcurementQuotes'));
+const ProcurementOrders = lazy(() => import('./pages/ProcurementOrders'));
 import { FloatingActionButton } from './components/FloatingActionButton';
 import BottomSheet from './components/BottomSheet';
 import GlobalRefetchIndicator from './components/GlobalRefetchIndicator';
@@ -414,6 +418,7 @@ function App() {
             return <Navigate to={`/logbook?entry=${encodeURIComponent(entryId)}`} replace />;
           }
           return (
+        <Suspense fallback={<PageSkeleton />}>
         <Routes>
           <Route path="/" element={<Navigate to="/ledger" replace />} />
           <Route path="/insights" element={<Insights />} />
@@ -466,6 +471,7 @@ function App() {
           <Route path="/procurement/*" element={<Navigate to="/procurement/requests" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </Suspense>
           );
         })()}
       </main>
