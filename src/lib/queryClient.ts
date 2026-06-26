@@ -27,6 +27,7 @@ export const PERSIST_KEY_PREFIXES = [
   'txn-list',
   'projects',
   'sidebar_projects',
+  'project_tasks_v2',
   'stakeholders',
   'inward-register',
   'logbook',

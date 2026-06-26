@@ -30,6 +30,7 @@ import WorkOrderDetail from './pages/WorkOrderDetail';
 import ProjectDetail from './pages/ProjectDetail';
 import Projects from './pages/Projects';
 import ProjectTransactions from './pages/ProjectTransactions';
+import ProjectTasks from './pages/ProjectTasks';
 import ProjectWorkOrders from './pages/ProjectWorkOrders';
 import ProjectPurchaseOrders from './pages/ProjectPurchaseOrders';
 import ProjectInventory from './pages/ProjectInventory';
@@ -433,6 +434,7 @@ function App() {
           <Route path="/projects/new" element={<NewProjectWizard session={session} />} />
           <Route path="/projects/:projectId" element={<ProjectDetail session={session} />} />
           <Route path="/projects/:projectId/transactions" element={<ProjectTransactions session={session} />} />
+          <Route path="/projects/:projectId/tasks" element={<ProjectTasks session={session} />} />
           <Route path="/projects/:projectId/work-orders" element={<ProjectWorkOrders session={session} />} />
           <Route path="/projects/:projectId/purchase-orders" element={<ProjectPurchaseOrders session={session} />} />
           <Route path="/projects/:projectId/inventory" element={<ProjectInventory session={session} />} />
