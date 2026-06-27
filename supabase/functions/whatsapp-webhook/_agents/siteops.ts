@@ -9,7 +9,7 @@
 import { send } from '../_format.ts'
 import { resolveProject, planItemProjects, type ProjectRef, type ItemPlan } from '../_resolve.ts'
 import { openConversation, closeConversation, type ConvoRow } from '../_conversation.ts'
-import { decompose, type SiteItem } from '../_siteops_extract.ts'
+import { decompose, callLLM, safeParse, type SiteItem } from '../_siteops_extract.ts'
 import {
   routeItems, applyProgress, buildConfirm, buildMultiConfirm, parseWhen,
   type RouteCtx, type RouteOutcome, type SiteTaskRow, type ProgressResult, type OrgMember,
@@ -79,10 +79,33 @@ async function senderUserId(ctx: SiteopsCtx): Promise<string | null> {
   return data?.user_id ?? null
 }
 
+// Deeper per-message JUDGE — given the issue + the assignee's reply, decide whether it's
+// truly RESOLVED or still alive, with a one-line REASON shown in the UI as the why. Reuses
+// the same LLM client as decompose; conservative (keep-open when unsure); understands
+// non-English replies the keyword layer can't.
+const JUDGE_SYSTEM = `You decide whether a construction-site ISSUE is now RESOLVED, based on the assignee's reply.
+RULES:
+- RESOLVED only if the reply clearly says the problem is fixed / cleared / done / delivered / arrived / settled.
+- KEEP OPEN if the reply is progress-but-not-done, a promise or ETA, a blocker, a question, or unclear.
+- Be conservative: when in doubt, KEEP OPEN — never wrongly close an issue.
+- Replies may be in English, Telugu, Hindi, or a mix — understand the meaning, not just keywords.
+Reply ONLY with JSON: {"resolved": true|false, "reason": "<one short sentence a site manager would read, grounded in the reply>"}.`
+
+async function judgeResolution(issue: { title: string; cause: string | null }, reply: string): Promise<{ resolved: boolean; reason: string } | null> {
+  try {
+    const user = `Issue: "${issue.title}" (cause: ${issue.cause ?? 'other'}).\nAssignee's reply: "${reply.slice(0, 400)}".\nIs the issue resolved?`
+    const parsed = safeParse(await callLLM(JUDGE_SYSTEM, user)) as { resolved?: unknown; reason?: unknown } | null
+    if (!parsed || typeof parsed.resolved !== 'boolean') return null
+    return { resolved: parsed.resolved, reason: typeof parsed.reason === 'string' ? parsed.reason.trim().slice(0, 200) : '' }
+  } catch { return null }
+}
+
 /**
  * Apply a reply to ONE batch item: log the reply, then either RESOLVE it, or keep
  * it open and RE-TIME the next chase (to a stated date, else the cause cadence).
- * Always appends to the item's trail (B1). Returns the resolved/open verdict.
+ * For ISSUES the resolve/keep-open call is an LLM judgment whose REASON is recorded
+ * (the UI's "why"); to-dos keep the simple keyword strike-off. Always appends to the
+ * item's trail (B1). Returns the resolved/open verdict.
  */
 async function applyBatchResolution(
   ctx: SiteopsCtx, item: BatchItem, status: 'resolved' | 'still_open' | 'unknown',
@@ -90,18 +113,31 @@ async function applyBatchResolution(
 ): Promise<'resolved' | 'open'> {
   await trailEvent(ctx, item, 'reply_received', replyText.slice(0, 180), actorId)
 
-  if (status === 'resolved') {
+  // ISSUES → LLM judgment (with reason); fall back to the keyword status if the model is
+  // unavailable. TO-DOS → keyword strike-off.
+  let resolved: boolean
+  let reason = ''
+  if (item.kind === 'issue') {
+    const judged = await judgeResolution({ title: item.title, cause: item.cause }, replyText)
+    resolved = judged ? judged.resolved : status === 'resolved'
+    reason = judged?.reason ?? ''
+  } else {
+    resolved = status === 'resolved'
+  }
+
+  if (resolved) {
+    const note = reason || replyText.trim().slice(0, 140)
     if (item.kind === 'issue') {
       await ctx.supabase.from('problems').update({ status: 'RESOLVED', next_followup_at: null }).eq('id', item.id)
-      await trailEvent(ctx, item, 'status_changed', 'Resolved — confirmed by reply', actorId)
+      await trailEvent(ctx, item, 'status_changed', note ? `Resolved — ${note}` : 'Resolved — confirmed by reply', actorId)
     } else {
       await ctx.supabase.from('todos').update({ status: 'DONE' }).eq('id', item.id)
-      await trailEvent(ctx, item, 'status_changed', 'Done — confirmed by reply', actorId)
+      await trailEvent(ctx, item, 'status_changed', note ? `Done — “${note}”` : 'Done — confirmed by reply', actorId)
     }
     return 'resolved'
   }
 
-  // still open (or unknown → keep open: never wrongly close a chase) — re-time
+  // kept alive — re-time the next chase (to a stated date, else the cause cadence)
   const when = parseWhen(replyText, now)
   if (item.kind === 'issue') {
     let next: Date
@@ -111,8 +147,13 @@ async function applyBatchResolution(
       const days = row.cadence ?? row.clock ?? 2
       next = new Date(now.getTime() + days * 86_400_000)
     }
-    await ctx.supabase.from('problems').update({ next_followup_at: next.toISOString() }).eq('id', item.id)
-    if (when) await trailEvent(ctx, item, 'blocker_noted', `Still open — expected ${fmtDay(next)}`, actorId)
+    // a reply = engagement → advance OPEN → ADDRESSING, and re-time. The judgment REASON
+    // (the why we kept it alive) rides the status entry shown in the UI.
+    const { data: cur } = await ctx.supabase.from('problems').select('status').eq('id', item.id).maybeSingle()
+    const advancing = cur?.status === 'OPEN'
+    await ctx.supabase.from('problems').update({ next_followup_at: next.toISOString(), ...(advancing ? { status: 'ADDRESSING' } : {}) }).eq('id', item.id)
+    const why = reason || (when ? `expected ${fmtDay(next)}` : 'will check back')
+    await trailEvent(ctx, item, 'status_changed', advancing ? `Now addressing — ${why}` : `Kept open — ${why}`, actorId)
   } else if (when) {
     await ctx.supabase.from('todos').update({ due_date: when.toISOString().slice(0, 10) }).eq('id', item.id)
   }

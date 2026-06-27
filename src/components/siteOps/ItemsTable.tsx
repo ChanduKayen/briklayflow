@@ -7,10 +7,12 @@
 // Aesthetic mirrors the transaction-detail hero: serif titles, soft pill+dot chips, a tone rail,
 // hover-lift, staggered reveal.
 
-import { useState, type ReactNode } from 'react'
+import { useState, useRef, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
+import confetti from 'canvas-confetti'
 import { UserPicker, MemberAvatar } from './UserPicker'
+import { TaskPicker } from './TaskPicker'
 import { CAUSES } from '../../lib/siteOps/causes'
 import { useItemTrail, appendEvent, notifyAssignment, trailKey, type FollowupKind, type FollowupEventType, type FollowupEvent, type FollowState } from '../../lib/siteOps/followup'
 
@@ -18,6 +20,9 @@ const INK = '#221A13', INK_SOFT = 'rgba(34,26,19,0.58)', INK_FAINT = 'rgba(34,26
 const TERRA = '#C8603A', SAGE = '#5E8157', FAIL = '#B2402A', AMBER = '#B07D2B'
 const LINE = 'rgba(34,26,19,0.10)', CARD_LINE = 'rgba(34,26,19,0.08)'
 const SERIF = "'Playfair Display', Georgia, serif"
+// dark "detail hero" tokens — mirrors the transaction-detail walnut hero
+const CREAM = '#F3EADB', CREAM_SOFT = 'rgba(243,234,219,0.64)', CREAM_FAINT = 'rgba(243,234,219,0.42)', CREAM_GHOST = 'rgba(243,234,219,0.26)'
+const D_LINE = 'rgba(243,234,219,0.13)', D_FIELD = 'rgba(243,234,219,0.06)', ACCENT = '#E89A72', SAGE_SOFT = '#9CBB91'
 
 const isHex = (c: string) => c.startsWith('#')
 const softBg = (c: string) => (isHex(c) ? `${c}14` : 'rgba(34,26,19,0.045)')
@@ -157,7 +162,7 @@ function Row({ r, index, orgId, actorId, followStates, ownerName, taskNames, sho
   const isIssue = r.kind === 'issue'
   const p = r.problem
   const fs = followStates?.[r.id]
-  const { label: whenLabel, overdue } = whenInfo(r.whenIso, r.done)
+  const { overdue } = whenInfo(r.whenIso, r.done)
 
   const tone = isIssue ? (overdue ? FAIL : p ? STATUS_COLOR[p.status] : TERRA) : (r.done ? SAGE : INK_GHOST)
   const blocking = r.todo?.task_id ?? p?.task_id
@@ -185,41 +190,66 @@ function Row({ r, index, orgId, actorId, followStates, ownerName, taskNames, sho
 
   const assigneeBlock = <AssigneeRow ownerId={r.ownerId} ownerName={ownerName} onPick={() => setPick(true)} note={assignNote} />
 
+  // ── resolution / done animations (mirrors the Day Book's filing motion) ──
+  const cardRef = useRef<HTMLDivElement>(null)
+  const [phase, setPhase] = useState<null | 'resolving' | 'striking'>(null)
+  // ISSUE → swipe-left into a sage "Issue resolved!" celebration + a subtle confetti burst.
+  const resolveIssue = (note: string) => {
+    if (!p) return
+    setPhase('resolving')
+    const el = cardRef.current
+    if (el) {
+      const rc = el.getBoundingClientRect()
+      confetti({ particleCount: 36, spread: 58, startVelocity: 26, scalar: 0.8, ticks: 130, disableForReducedMotion: true,
+        origin: { x: (rc.left + rc.width / 2) / window.innerWidth, y: (rc.top + Math.min(rc.height, 120) / 2) / window.innerHeight },
+        colors: ['#5E8157', '#9CBB91', '#C8603A', '#E89A72', '#F3EADB'] })
+    }
+    setTimeout(() => onPatchProblem(p.id, { status: 'RESOLVED', next_followup_at: null }, `Resolved — “${note}”`, 'system'), 1250)
+  }
+  // TO-DO → strike-through, then "to-do closed", then file it.
+  const markTodoDone = () => { setPhase('striking'); setTimeout(() => onToggleTodo(r.todo!), 850) }
+  const onTodoToggle = () => { if (r.done) onToggleTodo(r.todo!); else markTodoDone() }
+
   return (
-    <div className={`it-card${overdue ? ' it-overdue' : ''}${open ? ' it-open' : ''}`} style={{ animationDelay: `${Math.min(index, 12) * 28}ms` }}>
-      <span className="it-rail" style={{ background: tone }} />
-
-      {/* ── COLLAPSED ── */}
-      <div className="it-main" onClick={() => setOpen((o) => !o)}>
-        <div className="it-mark" onClick={(e) => e.stopPropagation()}>
-          {isIssue ? (
-            <span className="it-glyph" style={{ background: softBg(tone), color: tone, border: `1px solid ${softBorder(tone)}` }}>
-              <span className="material-symbols-outlined" style={{ fontSize: 16 }}>{overdue ? 'priority_high' : 'warning'}</span>
-            </span>
-          ) : (
-            <button onClick={() => onToggleTodo(r.todo!)} aria-label="Toggle done" className="it-check"
-              style={{ borderColor: r.done ? SAGE : INK_GHOST, background: r.done ? SAGE : '#fff' }}>
-              {r.done && <span className="material-symbols-outlined" style={{ fontSize: 14, color: '#fff' }}>check</span>}
-            </button>
-          )}
+    <div ref={cardRef} className={`it-card${overdue ? ' it-overdue' : ''}${open ? ' it-open' : ''}${phase ? ' it-leaving' : ''}`} style={{ animationDelay: `${Math.min(index, 12) * 28}ms` }}>
+      {/* celebration revealed underneath as the foreground swipes away (issue resolve) */}
+      {phase === 'resolving' && (
+        <div className="it-cel">
+          <span className="it-cel-check"><span className="material-symbols-outlined" style={{ fontSize: 19 }}>check</span></span>
+          <span className="it-cel-text">Issue resolved!</span>
         </div>
+      )}
 
-        <div className="it-body">
-          <div className="it-titlerow">
-            <h3 className="it-title" style={{ fontFamily: SERIF, color: r.done ? INK_FAINT : INK, textDecoration: r.done && !isIssue ? 'line-through' : 'none', fontWeight: isIssue ? 600 : 500 }}>
-              {r.title}
-            </h3>
+      <div className="it-fg" style={{ transform: phase === 'resolving' ? 'translateX(-101%)' : undefined }}>
+        <span className="it-rail" style={{ background: phase === 'striking' ? SAGE : tone }} />
+
+        {/* ── COLLAPSED ── */}
+        <div className="it-main" onClick={() => setOpen((o) => !o)}>
+          <div className="it-mark" onClick={(e) => e.stopPropagation()}>
+            {isIssue ? (
+              <span className="it-glyph" style={{ background: softBg(tone), color: tone, border: `1px solid ${softBorder(tone)}` }}>
+                <span className="material-symbols-outlined" style={{ fontSize: 16 }}>{overdue ? 'priority_high' : 'warning'}</span>
+              </span>
+            ) : (
+              <button onClick={onTodoToggle} aria-label="Toggle done" className="it-check"
+                style={{ borderColor: (r.done || phase === 'striking') ? SAGE : INK_GHOST, background: (r.done || phase === 'striking') ? SAGE : '#fff' }}>
+                {(r.done || phase === 'striking') && <span className="material-symbols-outlined" style={{ fontSize: 14, color: '#fff' }}>check</span>}
+              </button>
+            )}
+          </div>
+
+          <div className="it-body">
+            <div className="it-titlerow">
+              <h3 className="it-title" style={{ fontFamily: SERIF, color: (r.done || phase === 'striking') ? INK_FAINT : INK, textDecoration: r.done && !isIssue ? 'line-through' : 'none', fontWeight: isIssue ? 600 : 500 }}>
+                {r.title}
+                {phase === 'striking' && <span className="it-strikeline" />}
+              </h3>
             <div className="it-right">
               {/* assignee — glance only (edit lives in the expand) */}
               <span className="it-ava" title={ownerName(r.ownerId)}>
                 {r.ownerId ? <MemberAvatar name={ownerName(r.ownerId)} size={22} />
                   : <span className="it-avatar-empty" style={{ width: 22, height: 22 }}><span className="material-symbols-outlined" style={{ fontSize: 14, color: INK_GHOST }}>person</span></span>}
               </span>
-              {whenLabel !== '—' && (
-                <span className="it-when" style={{ color: overdue ? FAIL : INK_SOFT, fontWeight: overdue ? 700 : 500 }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: 13 }}>{overdue ? 'event_busy' : 'event'}</span>{whenLabel}
-                </span>
-              )}
               {isIssue && p
                 ? <StatusPill status={p.status} />
                 : <span className="it-typetag" style={{ color: INK_FAINT, borderColor: LINE }}>To-do</span>}
@@ -236,8 +266,12 @@ function Row({ r, index, orgId, actorId, followStates, ownerName, taskNames, sho
                 <span className="it-dot" style={{ background: TERRA }} />{projName(r.projectId)}
               </Link>
             )}
-            <span className="it-blocking">{blockingName ? `blocking ${blockingName}` : 'project-level'}</span>
+            <span className="it-blocking">{blockingName ? `task · ${blockingName}` : 'project-wide'}</span>
           </div>
+
+          {phase === 'striking' && (
+            <div className="it-closed"><span className="material-symbols-outlined" style={{ fontSize: 14 }}>task_alt</span> To-do closed</div>
+          )}
 
           {isIssue && p?.impact?.implication && (
             <div className="it-impact" onClick={(e) => e.stopPropagation()}>
@@ -253,12 +287,13 @@ function Row({ r, index, orgId, actorId, followStates, ownerName, taskNames, sho
         </div>
       </div>
 
-      {/* ── EXPAND — three zones ── */}
-      {open && (
-        isIssue && p
-          ? <IssueDetail p={p} assignee={assigneeBlock} blockingName={blockingName} projectId={r.projectId} orgId={orgId} actorId={actorId} ownerName={ownerName} onPatchProblem={onPatchProblem} />
-          : <TodoDetail t={r.todo!} assignee={assigneeBlock} blockingName={blockingName} projectId={r.projectId} orgId={orgId} actorId={actorId} ownerName={ownerName} onToggleTodo={onToggleTodo} />
-      )}
+        {/* ── EXPAND — three zones ── */}
+        {open && (
+          isIssue && p
+            ? <IssueDetail p={p} assignee={assigneeBlock} blockingName={blockingName} projectId={r.projectId} orgId={orgId} actorId={actorId} ownerName={ownerName} onPatchProblem={onPatchProblem} onResolve={resolveIssue} />
+            : <TodoDetail t={r.todo!} assignee={assigneeBlock} blockingName={blockingName} projectId={r.projectId} orgId={orgId} actorId={actorId} ownerName={ownerName} onToggleTodo={onTodoToggle} onPatchTodo={onPatchTodo} />
+        )}
+      </div>
 
       {pick && <UserPicker orgId={orgId} currentId={r.ownerId} title="Assign to" onPick={assign} onClose={() => setPick(false)} />}
     </div>
@@ -274,8 +309,21 @@ function StatusPill({ status }: { status: IStatus }) {
   return <span className="it-status-pill" style={{ color: c, background: softBg(c), borderColor: softBorder(c) }}><span className="it-dot" style={{ background: c }} />{STATUS_LABEL[status]}</span>
 }
 function SummaryBand({ fu }: { fu: Followup }) {
+  // Loud (tinted pill) only when it wants attention — awaiting / escalated / overdue.
+  // Calm states (scheduled / tracked / replied) read as quiet inline text, so the single
+  // remaining mention informs without distracting.
+  const loud = !!fu.intensify || fu.tone === FAIL || fu.tone === AMBER
+  if (!loud) {
+    return (
+      <div className="it-summary-quiet" title={fu.hint} onClick={(e) => e.stopPropagation()} style={{ color: fu.tone === INK_FAINT ? INK_SOFT : fu.tone }}>
+        <span className="material-symbols-outlined" style={{ fontSize: 15 }}>{fu.icon}</span>
+        <span>{fu.label}</span>
+        {fu.waitingSince && <span style={{ color: INK_FAINT }}>· {timeAgo(fu.waitingSince)} waiting</span>}
+      </div>
+    )
+  }
   return (
-    <div className="it-summary" style={{ color: fu.tone, background: softBg(fu.tone), borderColor: softBorder(fu.tone) }} onClick={(e) => e.stopPropagation()}>
+    <div className="it-summary" title={fu.hint} style={{ color: fu.tone, background: softBg(fu.tone), borderColor: softBorder(fu.tone) }} onClick={(e) => e.stopPropagation()}>
       <span className="material-symbols-outlined" style={{ fontSize: 16 }}>{fu.icon}</span>
       <span style={{ fontWeight: 600 }}>{fu.label}</span>
       {fu.waitingSince && <span style={{ fontSize: 11.5, color: fu.intensify ? FAIL : INK_FAINT, fontWeight: fu.intensify ? 700 : 500 }}>· {timeAgo(fu.waitingSince)} waiting</span>}
@@ -323,8 +371,8 @@ function AssigneeRow({ ownerId, ownerName, onPick, note }: { ownerId: string | n
       <span className="it-kv-val" style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
         <button onClick={onPick} className="it-assignee-btn">
           {ownerId ? <MemberAvatar name={ownerName(ownerId)} size={24} />
-            : <span className="it-avatar-empty" style={{ width: 24, height: 24 }}><span className="material-symbols-outlined" style={{ fontSize: 15, color: INK_GHOST }}>person_add</span></span>}
-          <span style={{ fontSize: 13, fontWeight: 600, color: ownerId ? INK : INK_SOFT }}>{ownerName(ownerId)}</span>
+            : <span className="it-avatar-empty" style={{ width: 24, height: 24 }}><span className="material-symbols-outlined" style={{ fontSize: 15, color: CREAM_GHOST }}>person_add</span></span>}
+          <span style={{ fontSize: 13, fontWeight: 600, color: ownerId ? CREAM : CREAM_SOFT }}>{ownerName(ownerId)}</span>
           <span className="material-symbols-outlined it-assignee-edit" style={{ fontSize: 14 }}>edit</span>
         </button>
         {note && (
@@ -338,91 +386,150 @@ function AssigneeRow({ ownerId, ownerName, onPick, note }: { ownerId: string | n
 }
 
 // ── ISSUE detail — 3 zones ────────────────────────────────────────────────────
-function IssueDetail({ p, assignee, blockingName, projectId, orgId, actorId, ownerName, onPatchProblem }: {
+function IssueDetail({ p, assignee, blockingName, projectId, orgId, actorId, ownerName, onPatchProblem, onResolve }: {
   p: DeskProblem; assignee: ReactNode; blockingName?: string; projectId: string | null
   orgId: string; actorId: string | null; ownerName: (id: string | null) => string
   onPatchProblem: ItemsTableProps['onPatchProblem']
+  onResolve: (note: string) => void
 }) {
   const qc = useQueryClient()
   const { data: events = [], isLoading } = useItemTrail('issue', p.id, true)
   const setStatus = (s: IStatus) => onPatchProblem(p.id, { status: s }, `Status → ${s.toLowerCase()}`)
   const setCause = (c: string) => onPatchProblem(p.id, { cause: c }, `Cause set to ${causeLabel(c)}`)
-  const logFollowup = () => onPatchProblem(p.id, {}, 'Follow-up sent', 'chase')
-  const logResponse = () => {
-    const movesUp = p.status === 'OPEN'
-    onPatchProblem(p.id, movesUp ? { status: 'ADDRESSING' } : {}, movesUp ? 'Response received — now addressing' : 'Response received', 'reply')
-  }
   const retime = (iso: string) => onPatchProblem(p.id, { next_followup_at: iso }, `Next check moved to ${fmtDay(iso)}`, 'system')
+  const [taskPick, setTaskPick] = useState(false)
+  const [resolving, setResolving] = useState(false)
+  const [resNote, setResNote] = useState('')
+  // Resolving an issue is a deliberate act — capture HOW it was sorted (a resolution note).
+  const onSeg = (s: IStatus) => {
+    if (s === 'RESOLVED' && p.status !== 'RESOLVED') { setResolving(true); return }
+    setResolving(false); setStatus(s)
+  }
+  const confirmResolve = () => {
+    const note = resNote.trim()
+    if (!note) return
+    setResolving(false); setResNote('')
+    onResolve(note)   // Row plays the resolve celebration, then commits
+  }
 
   return (
-    <div className="it-detail">
-      <Section title="Information">
-        {assignee}
-        <KeyVal label="Status">
-          <div className="it-seg">
-            {STATUSES.map((s) => {
-              const on = p.status === s
-              return <button key={s} onClick={() => setStatus(s)} style={{ color: on ? '#fff' : INK_SOFT, background: on ? STATUS_COLOR[s] : 'transparent', boxShadow: on ? `0 1px 4px ${STATUS_COLOR[s]}55` : 'none' }}>{STATUS_LABEL[s]}</button>
-            })}
-          </div>
-        </KeyVal>
-        <KeyVal label="Cause">
-          <select value={p.cause ?? 'other'} onChange={(e) => setCause(e.target.value)} className="it-causesel">
-            {CAUSES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-          </select>
-        </KeyVal>
-        <KeyVal label="Blocking">
-          <span>{blockingName ?? 'project-level'}</span>
-          {projectId && <Link to={`/projects/${projectId}/tasks`} className="it-link" style={{ marginLeft: 8 }}>→ task plan</Link>}
-        </KeyVal>
-        <KeyVal label="Next check">{fmtDay(p.next_followup_at)}</KeyVal>
-        {p.deadline && <KeyVal label="Deadline">{fmtDay(p.deadline)}</KeyVal>}
-        <StatusBanner issue={{ nextFollowupAt: p.next_followup_at, status: p.status, onLogFollowup: logFollowup, onLogResponse: logResponse, onRetime: retime }} events={events} />
-      </Section>
+    <>
+      <div className="it-detail">
+        <Section title="Information">
+          {assignee}
+          <KeyVal label="Status">
+            <div className="it-seg">
+              {STATUSES.map((s) => {
+                const on = p.status === s
+                return <button key={s} onClick={() => onSeg(s)} style={{ color: on ? '#fff' : CREAM_SOFT, background: on ? STATUS_COLOR[s] : 'transparent', boxShadow: on ? `0 1px 6px ${STATUS_COLOR[s]}77` : 'none' }}>{STATUS_LABEL[s]}</button>
+              })}
+            </div>
+          </KeyVal>
+          {resolving && (
+            <div className="it-resolve">
+              <div className="it-eyebrow" style={{ color: SAGE_SOFT, marginBottom: 7 }}>Resolution — how was it sorted?</div>
+              <textarea value={resNote} onChange={(e) => setResNote(e.target.value)} rows={2} autoFocus className="it-textarea"
+                placeholder="e.g. supplier delivered Fri; masons back on site" />
+              <div style={{ display: 'flex', gap: 8, marginTop: 9 }}>
+                <button onClick={confirmResolve} disabled={!resNote.trim()} className="it-post"
+                  style={{ background: SAGE, boxShadow: `0 2px 10px -2px ${SAGE}99`, opacity: resNote.trim() ? 1 : 0.45, cursor: resNote.trim() ? 'pointer' : 'default' }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: 15, verticalAlign: '-3px', marginRight: 4 }}>check_circle</span>Mark resolved
+                </button>
+                <button onClick={() => { setResolving(false); setResNote('') }} className="it-ghostbtn" style={{ color: CREAM_SOFT, borderColor: D_LINE }}>Cancel</button>
+              </div>
+            </div>
+          )}
+          <KeyVal label="Cause">
+            <select value={p.cause ?? 'other'} onChange={(e) => setCause(e.target.value)} className="it-causesel">
+              {CAUSES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+            </select>
+          </KeyVal>
+          <KeyVal label="Task">
+            {projectId
+              ? <button onClick={() => setTaskPick(true)} className="it-pickbtn">
+                  <span className="material-symbols-outlined" style={{ fontSize: 15, color: blockingName ? ACCENT : CREAM_GHOST }}>{blockingName ? 'link' : 'add_link'}</span>
+                  {blockingName ?? 'Link to a task…'}
+                  <span className="material-symbols-outlined" style={{ fontSize: 15, color: CREAM_GHOST }}>unfold_more</span>
+                </button>
+              : <span>{blockingName ?? 'project-wide'}</span>}
+            {projectId && blockingName && <Link to={`/projects/${projectId}/tasks`} className="it-link">open in plan</Link>}
+          </KeyVal>
+          <KeyVal label="Auto follow-up">
+            {p.next_followup_at
+              ? <span>{fmtDay(p.next_followup_at)} <span className="it-kv-sub">· we’ll WhatsApp the assignee to check progress</span></span>
+              : <span className="it-kv-sub">not chased — recorded only</span>}
+          </KeyVal>
+          {p.deadline && <KeyVal label="Deadline">{fmtDay(p.deadline)} <span className="it-kv-sub">· target to close by</span></KeyVal>}
+        </Section>
 
-      <Section title="Activity">
-        <Story events={events} isLoading={isLoading} genesisLabel="Issue opened" createdAt={p.created_at} ownerName={ownerName} />
-      </Section>
+        <Section title="Activity">
+          <Story events={events} isLoading={isLoading} genesisLabel="Issue opened" createdAt={p.created_at} ownerName={ownerName} />
+        </Section>
 
-      <Section title="Add a note">
-        <Compose kind="issue" id={p.id} orgId={orgId} actorId={actorId} onRetime={retime} onPosted={() => qc.invalidateQueries({ queryKey: trailKey('issue', p.id) })} />
-      </Section>
-    </div>
+        <Section title="Add a note">
+          <Compose kind="issue" id={p.id} orgId={orgId} actorId={actorId} onRetime={retime}
+            onEngaged={() => { if (p.status === 'OPEN') onPatchProblem(p.id, { status: 'ADDRESSING' }, 'Now addressing — note added', 'system') }}
+            onPosted={() => qc.invalidateQueries({ queryKey: trailKey('issue', p.id) })} />
+        </Section>
+      </div>
+
+      {taskPick && projectId && (
+        <TaskPicker projectId={projectId} currentTaskId={p.task_id}
+          onPick={(tid, label) => { onPatchProblem(p.id, { task_id: tid }, tid ? `Linked to ${label}` : 'Set to project-wide'); setTaskPick(false) }}
+          onClose={() => setTaskPick(false)} />
+      )}
+    </>
   )
 }
 
 // ── TO-DO detail — lighter, same 3-zone frame ─────────────────────────────────
-function TodoDetail({ t, assignee, blockingName, projectId, orgId, actorId, ownerName, onToggleTodo }: {
+function TodoDetail({ t, assignee, blockingName, projectId, orgId, actorId, ownerName, onToggleTodo, onPatchTodo }: {
   t: DeskTodo; assignee: ReactNode; blockingName?: string; projectId: string | null
   orgId: string; actorId: string | null; ownerName: (id: string | null) => string
   onToggleTodo: (t: DeskTodo) => void
+  onPatchTodo: ItemsTableProps['onPatchTodo']
 }) {
   const qc = useQueryClient()
   const { data: events = [], isLoading } = useItemTrail('todo', t.id, true)
+  const [taskPick, setTaskPick] = useState(false)
   return (
-    <div className="it-detail">
-      <Section title="Information">
-        {assignee}
-        <KeyVal label="Status">
-          <button onClick={() => onToggleTodo(t)} className="it-todo-toggle" style={{ color: t.status === 'DONE' ? SAGE : INK_SOFT, borderColor: t.status === 'DONE' ? softBorder(SAGE) : LINE, background: t.status === 'DONE' ? softBg(SAGE) : '#fff' }}>
-            <span className="material-symbols-outlined" style={{ fontSize: 15 }}>{t.status === 'DONE' ? 'task_alt' : 'radio_button_unchecked'}</span>{t.status === 'DONE' ? 'Done' : 'Mark done'}
-          </button>
-        </KeyVal>
-        <KeyVal label="For">
-          <span>{blockingName ?? 'project-level'}</span>
-          {projectId && <Link to={`/projects/${projectId}/tasks`} className="it-link" style={{ marginLeft: 8 }}>→ task plan</Link>}
-        </KeyVal>
-        {t.due_date && <KeyVal label="Due">{fmtDay(t.due_date)}</KeyVal>}
-      </Section>
+    <>
+      <div className="it-detail">
+        <Section title="Information">
+          {assignee}
+          <KeyVal label="Status">
+            <button onClick={() => onToggleTodo(t)} className="it-todo-toggle" style={{ color: t.status === 'DONE' ? SAGE_SOFT : CREAM_SOFT, borderColor: t.status === 'DONE' ? softBorder(SAGE) : D_LINE, background: t.status === 'DONE' ? softBg(SAGE) : D_FIELD }}>
+              <span className="material-symbols-outlined" style={{ fontSize: 15 }}>{t.status === 'DONE' ? 'task_alt' : 'radio_button_unchecked'}</span>{t.status === 'DONE' ? 'Done' : 'Mark done'}
+            </button>
+          </KeyVal>
+          <KeyVal label="Task">
+            {projectId
+              ? <button onClick={() => setTaskPick(true)} className="it-pickbtn">
+                  <span className="material-symbols-outlined" style={{ fontSize: 15, color: blockingName ? ACCENT : CREAM_GHOST }}>{blockingName ? 'link' : 'add_link'}</span>
+                  {blockingName ?? 'Link to a task…'}
+                  <span className="material-symbols-outlined" style={{ fontSize: 15, color: CREAM_GHOST }}>unfold_more</span>
+                </button>
+              : <span>{blockingName ?? 'project-wide'}</span>}
+            {projectId && blockingName && <Link to={`/projects/${projectId}/tasks`} className="it-link">open in plan</Link>}
+          </KeyVal>
+          {t.due_date && <KeyVal label="Due">{fmtDay(t.due_date)}</KeyVal>}
+        </Section>
 
-      <Section title="Activity">
-        <Story events={events} isLoading={isLoading} genesisLabel="Added" createdAt={t.created_at} ownerName={ownerName} />
-      </Section>
+        <Section title="Activity">
+          <Story events={events} isLoading={isLoading} genesisLabel="Added" createdAt={t.created_at} ownerName={ownerName} />
+        </Section>
 
-      <Section title="Add a note">
-        <Compose kind="todo" id={t.id} orgId={orgId} actorId={actorId} onPosted={() => qc.invalidateQueries({ queryKey: trailKey('todo', t.id) })} />
-      </Section>
-    </div>
+        <Section title="Add a note">
+          <Compose kind="todo" id={t.id} orgId={orgId} actorId={actorId} onPosted={() => qc.invalidateQueries({ queryKey: trailKey('todo', t.id) })} />
+        </Section>
+      </div>
+
+      {taskPick && projectId && (
+        <TaskPicker projectId={projectId} currentTaskId={t.task_id}
+          onPick={(tid) => { onPatchTodo(t.id, { task_id: tid }); setTaskPick(false) }}
+          onClose={() => setTaskPick(false)} />
+      )}
+    </>
   )
 }
 
@@ -432,23 +539,23 @@ function Story({ events, isLoading, genesisLabel, createdAt, ownerName }: {
 }) {
   return (
     <div className="it-story">
-      <TrailRow color={INK_FAINT} body={genesisLabel} at={createdAt} first />
+      <TrailRow color={CREAM_FAINT} body={genesisLabel} at={createdAt} first />
       {events.map((e) => {
         const quoted = e.type === 'reply_received' || e.type === 'comment'
         const raw = e.body ?? e.type.replace(/_/g, ' ')
-        return <TrailRow key={e.id} color={trailColor(e.type)} tag={eventTag(e.type)} body={quoted ? `“${raw}”` : raw} at={e.created_at} by={e.actor_kind === 'user' ? ownerName(e.actor_id) : null} />
+        return <TrailRow key={e.id} color={trailColorDark(e.type)} tag={eventTag(e.type)} body={quoted ? `“${raw}”` : raw} at={e.created_at} by={e.actor_kind === 'user' ? ownerName(e.actor_id) : null} />
       })}
       {!isLoading && events.length === 0 && (
-        <p style={{ fontSize: 12, color: INK_FAINT, fontStyle: 'italic', margin: '0 0 0 16px' }}>Nothing else yet — the first check-in will show here once it goes out.</p>
+        <p style={{ fontSize: 12, color: CREAM_FAINT, fontStyle: 'italic', margin: '0 0 0 16px' }}>Nothing else yet — the first check-in will show here once it goes out.</p>
       )}
     </div>
   )
 }
 
 // ── the composer (input) ──────────────────────────────────────────────────────
-function Compose({ kind, id, orgId, actorId, onRetime, onPosted }: {
+function Compose({ kind, id, orgId, actorId, onRetime, onPosted, onEngaged }: {
   kind: FollowupKind; id: string; orgId: string; actorId: string | null
-  onRetime?: (iso: string) => void; onPosted: () => void
+  onRetime?: (iso: string) => void; onPosted: () => void; onEngaged?: () => void
 }) {
   const [draft, setDraft] = useState('')
   const [blocker, setBlocker] = useState(false)
@@ -466,6 +573,7 @@ function Compose({ kind, id, orgId, actorId, onRetime, onPosted }: {
     setDraft(''); setBlocker(false); setRetimeOn(false); setRetimeDate('')
     setBusy(false)
     onPosted()
+    if (note) onEngaged?.()   // a note/blocker is activity → move OPEN → ADDRESSING (issues)
   }
 
   return (
@@ -488,28 +596,36 @@ function Compose({ kind, id, orgId, actorId, onRetime, onPosted }: {
 
 function ToggleChip({ on, onClick, tone, icon, children }: { on: boolean; onClick: () => void; tone: string; icon: string; children: ReactNode }) {
   return (
-    <button onClick={onClick} className="it-toggle" style={{ color: on ? tone : INK_SOFT, background: on ? softBg(tone) : 'transparent', borderColor: on ? softBorder(tone) : LINE }}>
+    <button onClick={onClick} className="it-toggle" style={{ color: on ? tone : CREAM_SOFT, background: on ? softBg(tone) : 'transparent', borderColor: on ? softBorder(tone) : D_LINE }}>
       <span className="material-symbols-outlined" style={{ fontSize: 14 }}>{icon}</span>{children}
     </button>
   )
 }
 
 // ── follow-up summary derivation ──────────────────────────────────────────────
-interface Followup { label: string; tone: string; icon: string; waitingSince?: string; intensify?: boolean }
+// The follow-up summary — plain language about WHO does WHAT and WHY (the chase engine
+// auto-messages the assignee on WhatsApp; `hint` is the hover tooltip that spells it out).
+interface Followup { label: string; tone: string; icon: string; hint: string; waitingSince?: string; intensify?: boolean }
 function deriveFollowup(r: NRow, fs?: FollowState): Followup | null {
   if (r.done) return null
   const now = Date.now()
   const overdue = !!r.whenIso && new Date(r.whenIso).getTime() < now
-  if (fs?.escalated) return { label: 'Escalated', tone: FAIL, icon: 'arrow_upward', waitingSince: fs.lastChaseAt ?? undefined, intensify: true }
+  const day = r.whenIso ? whenInfo(r.whenIso, false).label : ''
+
+  if (fs?.escalated) return { label: 'Escalated', tone: FAIL, icon: 'arrow_upward', waitingSince: fs.lastChaseAt ?? undefined, intensify: true, hint: 'No resolution — pushed up to the supervisor / principal.' }
   const chased = fs?.lastChaseAt, replied = fs?.lastReplyAt
   if (chased && (!replied || replied < chased)) {
     const waitDays = (now - new Date(chased).getTime()) / 86_400_000
-    return { label: 'Awaiting reply', tone: AMBER, icon: 'hourglass_top', waitingSince: chased, intensify: overdue || waitDays > 2 }
+    return { label: 'Awaiting reply', tone: AMBER, icon: 'hourglass_top', waitingSince: chased, intensify: overdue || waitDays > 2, hint: 'We WhatsApp’d the assignee to check progress — waiting for their reply.' }
   }
-  if (replied) return { label: r.problem?.status === 'ADDRESSING' ? 'Replied · addressing' : 'Replied', tone: SAGE, icon: 'mark_chat_read' }
-  if (r.kind === 'issue' && !r.whenIso) return { label: 'Tracked, not chased', tone: INK_FAINT, icon: 'visibility' }
-  if (r.whenIso && !overdue) return { label: `${r.kind === 'issue' ? 'Next check' : 'Due'} ${whenInfo(r.whenIso, false).label}`, tone: INK_FAINT, icon: 'event' }
-  if (overdue) return { label: 'Due now', tone: AMBER, icon: 'notifications_active', intensify: true }
+  if (replied) return { label: r.problem?.status === 'ADDRESSING' ? 'Replied · in progress' : 'Replied', tone: SAGE, icon: 'mark_chat_read', hint: 'The assignee replied on WhatsApp.' }
+  if (r.kind === 'issue' && !r.whenIso) return { label: 'Tracked — not chased', tone: INK_FAINT, icon: 'visibility', hint: 'Recorded for the record — no automatic follow-up (e.g. weather / auspicious timing).' }
+  if (r.whenIso && !overdue) {
+    return r.kind === 'issue'
+      ? { label: `We'll follow up ${day}`, tone: INK_FAINT, icon: 'schedule_send', hint: `If it's still open, we'll WhatsApp the assignee on ${day} to check progress.` }
+      : { label: `Due ${day}`, tone: INK_FAINT, icon: 'event', hint: `Due ${day}.` }
+  }
+  if (overdue) return { label: 'Follow-up due now', tone: AMBER, icon: 'notifications_active', intensify: true, hint: 'The next follow-up is due — the assignee will be messaged on the next run.' }
   return null
 }
 
@@ -522,6 +638,11 @@ function trailColor(type: FollowupEventType): string {
     case 'comment':        return INK
     default:               return INK_FAINT
   }
+}
+// On the dark expand, the two ink-toned events (comment / status) would vanish — lift them to cream.
+function trailColorDark(type: FollowupEventType): string {
+  const c = trailColor(type)
+  return c === INK ? CREAM : c === INK_FAINT ? CREAM_FAINT : c
 }
 function eventTag(type: FollowupEventType): string {
   switch (type) {
@@ -540,41 +661,9 @@ function TrailRow({ color, body, at, by, tag, first }: { color: string; body: st
       <span className="it-trail-node" style={{ background: color, boxShadow: first ? 'none' : `0 0 0 3px ${isHex(color) ? `${color}1f` : 'transparent'}` }} />
       <span className="it-trail-body">
         {tag && <span className="it-trail-tag" style={{ color }}>{tag}</span>}
-        {body}{by && by !== 'Unassigned' ? <span style={{ color: INK_FAINT }}> · {by}</span> : null}
+        {body}{by && by !== 'Unassigned' ? <span style={{ color: CREAM_FAINT }}> · {by}</span> : null}
       </span>
       {at && <span className="it-trail-at">{timeAgo(at)}</span>}
-    </div>
-  )
-}
-
-interface IssueTrailActions { nextFollowupAt: string | null; status: IStatus; onLogFollowup: () => void; onLogResponse: () => void; onRetime: (iso: string) => void }
-function liveStatus(issue: IssueTrailActions, events: FollowupEvent[]): { line: string; sub?: string; tone: string } {
-  if (issue.status === 'RESOLVED') return { line: 'Resolved', sub: 'Closed out — no more chasing.', tone: SAGE }
-  const last = (t: FollowupEventType) => { const m = events.filter((e) => e.type === t); return m[m.length - 1] }
-  const lastChase = last('chase_sent'), lastReply = last('reply_received'), lastBlocker = last('blocker_noted'), lastEsc = last('escalated')
-  const next = issue.nextFollowupAt ? fmtDay(issue.nextFollowupAt) : null
-  if (lastEsc) return { line: 'Escalated', sub: lastEsc.body ?? 'Chased up — the owner hasn’t resolved it.', tone: FAIL }
-  const awaiting = lastChase && (!lastReply || new Date(lastChase.created_at) > new Date(lastReply.created_at))
-  if (awaiting) return { line: `Awaiting a reply — we checked in ${timeAgo(lastChase!.created_at)}`, sub: next ? `No word yet; we’ll nudge again around ${next}.` : 'Waiting on the owner.', tone: AMBER }
-  if (lastReply) {
-    const why = lastBlocker && new Date(lastBlocker.created_at) >= new Date(lastReply.created_at) ? lastBlocker.body : 'Owner replied, but it isn’t marked resolved'
-    return { line: `Replied ${timeAgo(lastReply.created_at)} — still open`, sub: `${why}${next ? ` · checking again ${next}` : ''}.`, tone: AMBER }
-  }
-  if (next) return { line: `Scheduled — first check ${next}`, sub: 'Not chased yet.', tone: INK_SOFT }
-  return { line: 'Tracked, not chased', sub: 'Recorded only (e.g. weather / auspicious) — no chase planned.', tone: INK_SOFT }
-}
-function StatusBanner({ issue, events }: { issue: IssueTrailActions; events: FollowupEvent[] }) {
-  const s = liveStatus(issue, events)
-  return (
-    <div className="it-banner" style={{ borderLeft: `3px solid ${s.tone}` }}>
-      <div className="it-banner-top">
-        <span className="it-dot" style={{ background: s.tone, width: 8, height: 8 }} />
-        <strong style={{ fontSize: 13, color: INK }}>{s.line}</strong>
-        <span style={{ flex: 1 }} />
-        <button onClick={issue.onLogFollowup} className="it-ghostbtn" style={{ color: TERRA, borderColor: softBorder(TERRA) }}>Log chase</button>
-        <button onClick={issue.onLogResponse} className="it-ghostbtn" style={{ color: SAGE, borderColor: softBorder(SAGE) }}>Log reply</button>
-      </div>
-      {s.sub && <div style={{ fontSize: 12, color: INK_SOFT, marginTop: 5, lineHeight: 1.4 }}>{s.sub}</div>}
     </div>
   )
 }
@@ -590,8 +679,19 @@ const CSS = `
 .it-card.it-overdue { background:linear-gradient(180deg,#FFFCFB 0%,#fff 30%); }
 @keyframes itRise { from { opacity:0; transform:translateY(9px); } }
 
-.it-rail { position:absolute; left:0; top:0; bottom:0; width:3px; transition:width .2s; }
+.it-rail { position:absolute; left:0; top:0; bottom:0; width:3px; transition:width .2s, background .3s; }
 .it-card:hover .it-rail, .it-card.it-open .it-rail { width:5px; }
+
+/* resolve / done motion (mirrors the Day Book filing reveal) */
+.it-fg { position:relative; z-index:1; background:#fff; transition:transform .6s cubic-bezier(.5,0,.12,1); }
+.it-card.it-leaving { box-shadow:0 16px 36px -14px rgba(34,26,19,.22); }
+.it-cel { position:absolute; inset:0; z-index:0; display:flex; align-items:center; justify-content:center; gap:11px;
+  background:radial-gradient(120% 140% at 12% 50%, rgba(255,255,255,.14) 0%, transparent 45%), linear-gradient(120deg,#5E8157 0%,#6E9566 52%,#54704A 100%); }
+.it-cel-check { display:flex; align-items:center; justify-content:center; width:30px; height:30px; border-radius:50%; background:rgba(255,255,255,.24); color:#fff; animation:itPop .5s cubic-bezier(.2,1.35,.4,1) both; }
+.it-cel-text { font-family:${SERIF}; font-size:18px; font-weight:600; color:#fff; letter-spacing:-.01em; animation:itRise .45s .08s backwards; }
+@keyframes itPop { from { transform:scale(0); opacity:0; } to { transform:scale(1); opacity:1; } }
+.it-strikeline { position:absolute; left:0; top:54%; height:2px; border-radius:2px; background:${SAGE}; width:0; animation:itStrike .42s cubic-bezier(.5,0,.2,1) forwards; }
+@keyframes itStrike { to { width:100%; } }
 
 .it-main { display:flex; gap:13px; padding:15px 17px 15px 18px; cursor:pointer; }
 .it-mark { flex-shrink:0; padding-top:1px; }
@@ -601,7 +701,7 @@ const CSS = `
 
 .it-body { flex:1; min-width:0; }
 .it-titlerow { display:flex; align-items:flex-start; gap:12px; }
-.it-title { flex:1; min-width:0; margin:0; font-size:16px; line-height:1.3; letter-spacing:-0.01em; }
+.it-title { position:relative; flex:1; min-width:0; margin:0; font-size:16px; line-height:1.3; letter-spacing:-0.01em; }
 .it-right { display:flex; align-items:center; gap:9px; flex-shrink:0; }
 .it-ava { display:flex; }
 .it-when { display:inline-flex; align-items:center; gap:3px; font-size:12.5px; white-space:nowrap; }
@@ -623,56 +723,66 @@ const CSS = `
 .it-impact-x:hover { color:${FAIL}; }
 
 .it-summary { display:inline-flex; align-items:center; gap:7px; margin-top:11px; padding:6px 12px; border:1px solid; border-radius:11px; font-size:12.5px; }
+.it-summary-quiet { display:inline-flex; align-items:center; gap:6px; margin-top:10px; font-size:12px; }
+.it-closed { display:inline-flex; align-items:center; gap:5px; margin-top:9px; font-size:12px; font-weight:600; color:${SAGE}; animation:itRise .35s .22s backwards; }
 .it-latest { display:flex; align-items:center; gap:7px; margin-top:9px; padding-left:2px; font-size:12px; color:${INK}; }
 .it-latest-body { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
-/* expand */
-.it-detail { border-top:1px solid ${CARD_LINE}; background:linear-gradient(180deg,#FCFAF7 0%,#FBF9F6 100%); animation:itReveal .3s ease backwards; }
+/* expand — the dark "detail hero" (mirrors the transaction-detail walnut hero) */
+.it-detail { border-top:1px solid rgba(0,0,0,.3);
+  background:
+    radial-gradient(120% 120% at 88% -8%, rgba(224,138,92,.16) 0%, rgba(224,138,92,0) 46%),
+    linear-gradient(158deg,#2D2118 0%,#221A13 58%,#19130D 100%);
+  animation:itReveal .3s ease backwards; }
 @keyframes itReveal { from { opacity:0; transform:translateY(-5px); } }
 
-.it-section { padding:14px 18px; border-bottom:1px solid ${CARD_LINE}; }
+.it-section { padding:15px 18px; border-bottom:1px solid ${D_LINE}; }
 .it-section:last-child { border-bottom:none; }
-.it-section-title { font-size:9.5px; font-weight:700; color:${INK_FAINT}; letter-spacing:.12em; text-transform:uppercase; margin-bottom:11px; }
+.it-section-title { font-size:9.5px; font-weight:700; color:${ACCENT}; letter-spacing:.13em; text-transform:uppercase; margin-bottom:12px; }
 
 .it-kv { display:flex; gap:12px; padding:6px 0; align-items:flex-start; }
-.it-kv-label { flex-shrink:0; width:84px; font-size:11.5px; color:${INK_FAINT}; padding-top:3px; }
-.it-kv-val { flex:1; min-width:0; font-size:13px; color:${INK}; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.it-kv-label { flex-shrink:0; width:88px; font-size:11.5px; color:${CREAM_FAINT}; padding-top:3px; }
+.it-kv-val { flex:1; min-width:0; font-size:13px; color:${CREAM}; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.it-kv-sub { color:${CREAM_FAINT}; font-size:11.5px; }
 
-.it-assignee-btn { display:inline-flex; align-items:center; gap:9px; padding:4px 12px 4px 5px; border:1px solid ${LINE}; border-radius:999px; background:#fff; cursor:pointer; transition:border-color .15s, box-shadow .15s; }
-.it-assignee-btn:hover { border-color:${INK_GHOST}; box-shadow:0 2px 8px -3px rgba(34,26,19,.14); }
-.it-assignee-btn:hover .it-assignee-edit { color:${TERRA}; }
-.it-assignee-edit { color:${INK_GHOST}; transition:color .15s; }
-.it-avatar-empty { display:flex; align-items:center; justify-content:center; border-radius:50%; border:1.5px dashed ${INK_GHOST}; }
+.it-assignee-btn { display:inline-flex; align-items:center; gap:9px; padding:4px 12px 4px 5px; border:1px solid ${D_LINE}; border-radius:999px; background:${D_FIELD}; cursor:pointer; transition:border-color .15s, box-shadow .15s; }
+.it-assignee-btn:hover { border-color:rgba(243,234,219,.3); box-shadow:0 3px 12px -4px rgba(0,0,0,.5); }
+.it-assignee-btn:hover .it-assignee-edit { color:${ACCENT}; }
+.it-assignee-edit { color:${CREAM_GHOST}; transition:color .15s; }
+.it-avatar-empty { display:flex; align-items:center; justify-content:center; border-radius:50%; border:1.5px dashed ${CREAM_GHOST}; }
 .it-assignnote { display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border:1px solid; border-radius:999px; font-size:11px; font-weight:600; animation:itRise .3s backwards; }
 
-.it-seg { display:inline-flex; gap:3px; padding:3px; background:rgba(34,26,19,.04); border:1px solid ${LINE}; border-radius:10px; }
+.it-seg { display:inline-flex; gap:3px; padding:3px; background:rgba(0,0,0,.26); border:1px solid ${D_LINE}; border-radius:10px; }
 .it-seg button { font-size:11px; font-weight:600; padding:5px 12px; border-radius:7px; border:none; cursor:pointer; transition:all .16s; }
-.it-causesel { font-size:12.5px; color:${INK}; border:1px solid ${LINE}; border-radius:8px; padding:4px 9px; background:#fff; cursor:pointer; font-family:inherit; }
+.it-causesel { font-size:12.5px; color:${CREAM}; border:1px solid ${D_LINE}; border-radius:8px; padding:4px 9px; background:${D_FIELD}; cursor:pointer; font-family:inherit; }
+.it-causesel option { color:#221A13; }
+.it-pickbtn { display:inline-flex; align-items:center; gap:6px; font-size:13px; font-weight:500; color:${CREAM}; padding:4px 10px; border:1px solid ${D_LINE}; border-radius:9px; background:${D_FIELD}; cursor:pointer; transition:border-color .15s, box-shadow .15s; }
+.it-pickbtn:hover { border-color:rgba(243,234,219,.3); box-shadow:0 3px 12px -4px rgba(0,0,0,.5); }
 .it-todo-toggle { display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600; padding:5px 12px; border:1px solid; border-radius:999px; cursor:pointer; }
-.it-link { color:${TERRA}; font-weight:600; text-decoration:none; }
+.it-link { color:${ACCENT}; font-weight:600; text-decoration:none; }
 .it-link:hover { text-decoration:underline; text-underline-offset:2px; }
 
-.it-banner { background:#fff; border:1px solid ${LINE}; border-radius:12px; padding:11px 13px; margin-top:12px; }
-.it-banner-top { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-.it-ghostbtn { font-size:11px; font-weight:600; padding:4px 11px; border:1px solid; border-radius:999px; background:#fff; cursor:pointer; transition:transform .12s; }
+.it-resolve { background:rgba(94,129,87,.16); border:1px solid rgba(156,187,145,.3); border-radius:12px; padding:11px 13px; margin:4px 0 6px; animation:itReveal .25s ease backwards; }
+.it-resolve .it-textarea { font-size:13px; }
+.it-ghostbtn { font-size:11px; font-weight:600; padding:4px 11px; border:1px solid; border-radius:999px; background:transparent; cursor:pointer; transition:transform .12s; }
 .it-ghostbtn:hover { transform:translateY(-1px); }
 
 .it-story { display:flex; flex-direction:column; gap:11px; padding-left:2px; }
 .it-trailrow { display:flex; gap:10px; align-items:baseline; }
 .it-trail-node { width:7px; height:7px; border-radius:50%; flex-shrink:0; margin-top:5px; }
-.it-trail-body { flex:1; min-width:0; font-size:12.5px; color:${INK}; line-height:1.45; }
+.it-trail-body { flex:1; min-width:0; font-size:12.5px; color:${CREAM}; line-height:1.45; }
 .it-trail-tag { font-size:9px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; margin-right:7px; }
-.it-trail-at { font-size:11px; color:${INK_FAINT}; white-space:nowrap; }
+.it-trail-at { font-size:11px; color:${CREAM_FAINT}; white-space:nowrap; }
 
-.it-compose { background:#fff; border:1px solid ${LINE}; border-radius:12px; padding:11px 12px; transition:border-color .15s, box-shadow .15s; }
-.it-compose:focus-within { border-color:${TERRA}66; box-shadow:0 0 0 3px ${TERRA}14; }
-.it-textarea { width:100%; box-sizing:border-box; resize:vertical; border:none; outline:none; font-size:13.5px; color:${INK}; background:transparent; font-family:inherit; line-height:1.5; }
-.it-textarea::placeholder { color:${INK_GHOST}; }
+.it-compose { background:${D_FIELD}; border:1px solid ${D_LINE}; border-radius:12px; padding:11px 12px; transition:border-color .15s, box-shadow .15s; }
+.it-compose:focus-within { border-color:${ACCENT}88; box-shadow:0 0 0 3px rgba(224,138,92,.2); }
+.it-textarea { width:100%; box-sizing:border-box; resize:vertical; border:none; outline:none; font-size:13.5px; color:${CREAM}; background:transparent; font-family:inherit; line-height:1.5; }
+.it-textarea::placeholder { color:${CREAM_GHOST}; }
 .it-compose-bar { display:flex; align-items:center; gap:8px; margin-top:9px; flex-wrap:wrap; }
-.it-toggle { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:600; padding:4px 10px; border:1px solid; border-radius:999px; background:#fff; cursor:pointer; transition:all .15s; }
-.it-date { font-size:12px; border:1px solid ${LINE}; border-radius:8px; padding:4px 8px; color:${INK}; font-family:inherit; }
-.it-post { font-size:12px; font-weight:700; padding:6px 18px; border-radius:999px; border:none; background:${TERRA}; color:#fff; box-shadow:0 2px 8px -2px ${TERRA}77; transition:transform .12s, box-shadow .15s; }
-.it-post:not(:disabled):hover { transform:translateY(-1px); box-shadow:0 5px 14px -3px ${TERRA}88; }
+.it-toggle { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:600; padding:4px 10px; border:1px solid; border-radius:999px; background:transparent; cursor:pointer; transition:all .15s; }
+.it-date { font-size:12px; border:1px solid ${D_LINE}; border-radius:8px; padding:4px 8px; color:${CREAM}; background:${D_FIELD}; font-family:inherit; color-scheme:dark; }
+.it-post { font-size:12px; font-weight:700; padding:6px 18px; border-radius:999px; border:none; background:${TERRA}; color:#fff; box-shadow:0 2px 10px -2px ${TERRA}aa; transition:transform .12s, box-shadow .15s; }
+.it-post:not(:disabled):hover { transform:translateY(-1px); box-shadow:0 6px 16px -3px ${TERRA}; }
 
 .it-arch-toggle:hover { background:rgba(34,26,19,.04); }
 

@@ -174,7 +174,7 @@ EDGE EXAMPLES (negation drops the false "done"; multi-floor splits per task; jun
 {"project_hint":null,"items":[]}`
 
 /** Strip a ```json fence and parse; null on any failure (mirrors _extract/_proc_extract). */
-function safeParse(raw: string): Record<string, unknown> | null {
+export function safeParse(raw: string): Record<string, unknown> | null {
   try { return JSON.parse(raw.replace(/^```json\n?|\n?```$/g, '').trim()) } catch { return null }
 }
 
@@ -213,7 +213,7 @@ function coerceItem(raw: unknown): SiteItem | null {
   }
 }
 
-async function callLLM(system: string, user: string): Promise<string> {
+export async function callLLM(system: string, user: string): Promise<string> {
   const OPENAI = Deno.env.get('OPENAI_API_KEY')
   const ANTHROPIC = Deno.env.get('ANTHROPIC_API_KEY')
   const ctrl = new AbortController()
