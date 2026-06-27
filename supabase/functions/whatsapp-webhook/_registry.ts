@@ -15,6 +15,7 @@ import type { TxnCtx } from './_agents/transaction.ts'
 import { runTransactionMessage, answerTransaction, commitInterrupted } from './_agents/transaction.ts'
 import { runProcurementMessage, answerProcurement, commitInterruptedProc } from './_agents/procurement.ts'
 import { runConcierge } from './_agents/concierge.ts'
+import { runSiteops, answerSiteops } from './_agents/siteops.ts'
 
 // The uniform turn context the dispatcher hands any agent. (The transaction agent's
 // TxnCtx already carries exactly these fields, so it consumes this directly.)
@@ -64,8 +65,13 @@ const PROCUREMENT: AgentDef = {
   commitInterrupted: (ctx, convo) => commitInterruptedProc(ctx, convo),
 }
 
-// SITEOPS still bridges to the concierge ("coming soon") until its agent is built.
-const SITEOPS: AgentDef = { intent: 'SITEOPS', run: conciergeRun }
+// SITEOPS — real agent (Block A). Full pipeline: decompose → resolve → route → confirm,
+// with a need-to-ask task disambiguation resumed via answer() (the AWAIT_PROJECT mechanism).
+const SITEOPS: AgentDef = {
+  intent: 'SITEOPS',
+  run: (ctx, text, opts) => runSiteops(ctx, text, { prefix: opts.prefix }),
+  answer: (ctx, text, convo) => answerSiteops(ctx, text, convo),
+}
 
 export const AGENTS: Record<string, AgentDef> = { TRANSACTION, CONCIERGE, PROCUREMENT, SITEOPS }
 

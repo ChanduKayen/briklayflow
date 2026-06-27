@@ -64,6 +64,36 @@ export const TEMPLATES = {
     bodyParams: ["po_id", "amount", "vendor", "site"],
     buttonUrlParams: [{ index: 0, name: "po_id" }],
   },
+
+  // Block B chase templates — APPROVED in Meta (user-supplied specs). ⚠ `language` is
+  // assumed "en"; correct it if Meta registered another code (a mismatch → #132012).
+  //
+  // issue_followup — the batched status-check chase (out-of-window). Approved body:
+  //   "Hi {{1}}, quick check :\n\n{{2}}\n\nHow's it looking? Reply back - and if anything's
+  //    stuck, tell me and I'll help clear it."
+  //   {{1}} = the owner's name · {{2}} = the status list.
+  // NOTE: this is a TWO-slot template (name + one content slot), NOT a free-form {{1}}.
+  // The batched digest rides {{2}} as the NEWLINE-FREE one-liner from renderDigestInline
+  // (Meta rejects newlines in a variable value) — so out-of-window batches read as a single
+  // line, not the pretty multi-line in-window digest. That's the approved shape's limit.
+  issue_followup: {
+    name: "issue_followup",
+    language: "en",
+    header: { kind: "none" },
+    bodyParams: ["name", "summary"],   // {{1}} = owner name, {{2}} = status list
+  },
+
+  // issue_assignment — a hand-off to a new owner (out-of-window). Approved body:
+  //   "Hi {{1}}, you have to follow-up on this :\n\n*{{2}}*\nAiming to close by {{3}}.\n\n
+  //    Reply here anytime with how it's going — a voice note's fine. I'll check in as the
+  //    date gets close."
+  //   {{1}} = new owner name · {{2}} = the item · {{3}} = the close/target date.
+  issue_assignment: {
+    name: "issue_assignment",
+    language: "en",
+    header: { kind: "none" },
+    bodyParams: ["name", "item", "due"],   // {{1}} owner, {{2}} item, {{3}} close date
+  },
 } satisfies Record<string, TemplateDef>;
 
 export type TemplateKey = keyof typeof TEMPLATES;

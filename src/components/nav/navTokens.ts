@@ -32,6 +32,11 @@ export const N = {
   // — a touch warmer + deeper than the rail, with a faint top highlight for depth.
   recess: 'rgba(28,18,11,0.55)',
   recessLine: 'rgba(247,243,236,0.05)',
+  // the secondary navbar surface — SAME dark family as the rail, only a HAIR warmer/lighter so
+  // it reads as a quiet step beside the spine (an elegant difference, not a contrast). A whisper
+  // of terra glow at its head (panelGlow) for warmth.
+  panel: 'linear-gradient(180deg, #3A312A 0%, #322A22 100%)',
+  panelGlow: 'radial-gradient(ellipse 85% 38% at 50% 0%, rgba(224,122,79,0.055) 0%, transparent 70%)',
 } as const;
 
 /** WhatsApp brand green — channel signature only. */
@@ -47,6 +52,17 @@ export const terraGrad = 'linear-gradient(135deg, #C75530 0%, #A93E1F 100%)';
 export const RAIL_W = 56;     // collapsed icon spine
 export const RAIL_OPEN = 220; // hovered / pinned
 export const PANEL_W = 224;   // contextual secondary panel
+
+/** Routes that show a secondary navbar (the second column): the Site Management hub AND any
+ *  in-project page. On these the rail collapses to its spine and the App shell reserves
+ *  RAIL_W + PANEL_W. Kept here so the rail's collapse and the content margin read from ONE place. */
+export const SITE_MGMT_ROUTES = ['/tasks', '/site-desk', '/follow-up-rules'];
+export function isSecondaryNavRoute(pathname: string): boolean {
+  if (SITE_MGMT_ROUTES.some((r) => pathname === r || pathname.startsWith(r + '/'))) return true;
+  // in a specific project (/projects/:id/…) — but not the list (/projects) or the wizard (/projects/new)
+  const m = pathname.match(/^\/projects\/([^/]+)/);
+  return !!(m && m[1] !== 'new');
+}
 
 /** Keyframes + scroll chrome for the rail and panel. Mounted once by the rail. */
 export const NAV_ANIM = `

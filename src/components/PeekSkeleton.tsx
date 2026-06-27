@@ -46,6 +46,49 @@ export function PeekHeroSkeleton() {
   );
 }
 
+/**
+ * Skeleton that mirrors the cream document peeks (WOPeek / POPeek): a single
+ * cream paper that bleeds to the modal edges, a masthead (eyebrow + title +
+ * headline figure + burn-down) and a couple of body sections. Shows instantly.
+ */
+export function PeekDocSkeleton() {
+  const PAPER = '#FBF7EF';
+  const EDGE = '#EDE3D2';
+  const bar = 'rgba(60,48,36,.08)';
+  const barStrong = 'rgba(60,48,36,.13)';
+  return (
+    <div className="-mx-5 -my-5 animate-pulse">
+      <div
+        className="px-6 py-6"
+        style={{ background: PAPER, borderTop: `1px solid ${EDGE}`, borderBottom: `1px solid ${EDGE}` }}
+      >
+        {/* masthead */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="h-2.5 w-24 rounded" style={{ background: barStrong }} />
+          <div className="h-5 w-16 rounded-full" style={{ background: bar }} />
+        </div>
+        <div className="h-7 w-3/4 rounded mb-2" style={{ background: barStrong }} />
+        <div className="h-3 w-1/2 rounded mb-5" style={{ background: bar }} />
+        <div className="h-px w-full mb-5" style={{ background: EDGE }} />
+        <div className="h-2.5 w-16 rounded mb-2" style={{ background: bar }} />
+        <div className="h-9 w-44 rounded mb-3" style={{ background: barStrong }} />
+        <div className="h-1.5 w-full rounded-full" style={{ background: bar }} />
+        {/* body sections */}
+        <div className="mt-8 space-y-3">
+          <div className="h-2.5 w-24 rounded" style={{ background: bar }} />
+          <div className="h-3.5 w-full rounded" style={{ background: bar }} />
+          <div className="h-3.5 w-5/6 rounded" style={{ background: bar }} />
+        </div>
+        <div className="mt-7 space-y-3">
+          <div className="h-2.5 w-28 rounded" style={{ background: bar }} />
+          <div className="h-3.5 w-full rounded" style={{ background: bar }} />
+          <div className="h-3.5 w-2/3 rounded" style={{ background: bar }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function DataField({ label, value, mono = false }: { label: string; value?: string | null; mono?: boolean }) {
   return (
     <div>

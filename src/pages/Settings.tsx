@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { useBillingMode, type BillingMode } from '../lib/billingMode';
 import { useQuery } from '@tanstack/react-query';
@@ -263,6 +264,27 @@ export default function Settings({ session }: { session: Session }) {
               </label>
             ))}
           </div>
+        </section>
+
+        {/* Site Operations — Follow-up Rules */}
+        <section className="bg-surface-container-lowest rounded-2xl border border-outline-variant/30 shadow-card overflow-hidden">
+          <div className="px-6 py-4 bg-surface-container-low border-b border-outline-variant/20">
+            <h3 className="text-headline-sm font-headline-md text-on-surface flex items-center gap-2">
+              <span className="material-symbols-outlined text-primary">notifications_active</span>
+              Site Operations
+            </h3>
+          </div>
+          <Link to="/follow-up-rules" className="block p-6 hover:bg-surface-container-low/40 transition-colors">
+            <div className="flex items-center gap-4">
+              <div className="flex-1">
+                <p className="text-[14px] font-semibold text-on-surface">Follow-up Rules</p>
+                <p className="text-[12px] text-on-surface-variant mt-0.5">
+                  How soon and how often we follow up when work stalls — tuned per reason (material, labour, design, …).
+                </p>
+              </div>
+              <span className="material-symbols-outlined text-on-surface-variant shrink-0">chevron_right</span>
+            </div>
+          </Link>
         </section>
 
         {/* Save */}

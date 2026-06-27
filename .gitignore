@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Generated graph/analysis output (tool cache — not source)
+graphify-out
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -74,6 +74,22 @@ function buildComponents(def: TemplateDef, params: SendTemplateParams) {
   return components;
 }
 
+/**
+ * Build a DURABLE template OutMessage (for whatsapp-webhook/_format.ts `send()` →
+ * outbox → drainer), instead of the direct-to-Meta `sendTemplate` below. Same
+ * registry + same validation (throws on a missing/wrong param BEFORE enqueue), so
+ * a proactive template inherits the outbox's durability/backoff/TTL like every
+ * other message. The drainer POSTs the rendered body.
+ */
+export function buildTemplateMessage(
+  key: TemplateKey,
+  params: SendTemplateParams = {},
+): { kind: 'template'; name: string; language: string; components: unknown[] } {
+  const def = TEMPLATES[key];
+  if (!def) throw new Error(`Unknown template key "${String(key)}"`);
+  return { kind: "template", name: def.name, language: def.language, components: buildComponents(def, params) };
+}
+
 export async function sendTemplate(
   key: TemplateKey,
   to: string,                 // E.164 without "+", e.g. "9198XXXXXXXX"

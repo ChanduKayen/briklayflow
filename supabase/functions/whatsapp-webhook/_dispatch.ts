@@ -16,6 +16,7 @@ import * as M from './_messages.ts'
 import type { Lang } from './_messages.ts'
 import type { TxnExtract } from './_extract.ts'
 import { handleQuery } from './_handlers.ts'   // reporting/query bridge only
+import { getOpenBatch } from './_siteops_batch.ts'   // B3 — open chase batch as patient site-ops context
 
 // Forced to <origin>/logbook (see transaction.ts) so a misconfigured WA_APP_LINK can't
 // send "Open Day Book" / entry deep-links to "/" -> /ledger.
@@ -136,7 +137,15 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
   const pending = view.open
     ? { agent: view.open.owning_agent ?? 'CONCIERGE', question: view.open.pending_question ?? '', slots: view.open.slots_so_far }
     : null
-  const lingering = view.lingering ? { last_action_summary: view.lingering.last_action_summary ?? '' } : null
+  // An open chase batch is a persistent, PATIENT site-ops context (loaded ONCE; used both to
+  // bias routing below and, inside the agent, to match the reply). Only when nothing's pending.
+  const openBatch = pending ? null : await getOpenBatch(supabase, orgId, from)
+  const batchOpen = !!(openBatch && openBatch.items.length)
+  let lingering = view.lingering ? { last_action_summary: view.lingering.last_action_summary ?? '' } : null
+  // Surface it as a lingering site-ops summary so the router leans SITEOPS for a status reply.
+  if (!lingering && batchOpen) {
+    lingering = { last_action_summary: `site-ops follow-up — awaiting word on ${openBatch!.items.length} open site item(s)` }
+  }
 
   const d = await routeMessage({ text, pending, lingering })
   const lang = d.reply_language
@@ -149,11 +158,19 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
   // classified AMBIGUOUS -> concierge). Terminal Flows echo no token, so the open
   // wa_conversation (owning_agent + staged_entry_id) IS the binding.
   const isInteractiveReply = !!(ctx.interactiveId || ctx.flowResponse)
-  const decision = (view.open && isInteractiveReply) ? 'ANSWERS_PENDING' : d.decision
+  let decision = (view.open && isInteractiveReply) ? 'ANSWERS_PENDING' : d.decision
+  let intentAgent = d.intent_agent
+  // B3 — with an OPEN chase batch, a VAGUE reply (chitchat/ambiguous, NOT a query, NOT first
+  // contact) is almost certainly a follow-up answer ("ok", "yes", "👍", a terse note), not
+  // concierge smalltalk → hand it to SITEOPS, which matches it to the batch or routes it as
+  // new. A clear NEW_INTENT to another agent (a payment, a PO) still wins — the batch waits.
+  if (batchOpen && !ctx.firstTouch && !QUERY_RE.test(text) && (decision === 'CHITCHAT' || decision === 'AMBIGUOUS')) {
+    decision = 'NEW_INTENT'; intentAgent = 'SITEOPS'
+  }
 
   const chosenAgent =
     decision === 'ANSWERS_PENDING' ? (pending?.agent ?? 'CONCIERGE')
-    : decision === 'NEW_INTENT' ? (d.intent_agent ?? 'CONCIERGE')
+    : decision === 'NEW_INTENT' ? (intentAgent ?? 'CONCIERGE')
     : 'CONCIERGE'
 
   await logRouterDecision(supabase, {
@@ -213,7 +230,7 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
 
   switch (decision) {
     case 'NEW_INTENT': {
-      const agent = agentFor(d.intent_agent)
+      const agent = agentFor(intentAgent)
       if (agent.intent === 'TRANSACTION') {
         // Instant ack the moment we route to TRANSACTION — before the (slower) extraction
         // + staging. Sent DIRECTLY (sendNow), NOT via the durable outbox: the queued path

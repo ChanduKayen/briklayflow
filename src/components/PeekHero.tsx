@@ -177,6 +177,174 @@ const INK = '#2C2620';
 const INK_SOFT = '#6B6052';
 
 /**
+ * Deep terracotta + sage, tuned for INK-on-cream use (text, bar fills, seals).
+ * The soft `TERRA`/`SAGE` above are calibrated for the dark hero field; on the
+ * pale paper they wash out, so the document masthead uses these deeper tones.
+ */
+export const TERRA_INK = '#B25433';
+export const SAGE_INK = '#5E8157';
+
+/**
+ * A light status pill that sits ON the cream masthead (terracotta / sage / ink
+ * tones), the document-voice counterpart to the dark `HeroPill`. A faint tinted
+ * fill, a hairline ring, a small dot, letterspaced caps.
+ */
+export function DocPill({
+  label,
+  tone = 'neutral',
+}: {
+  label: string;
+  tone?: 'active' | 'paid' | 'error' | 'neutral';
+}) {
+  const c =
+    tone === 'paid'
+      ? SAGE_INK
+      : tone === 'error'
+      ? '#B0473A'
+      : tone === 'active'
+      ? TERRA_INK
+      : INK_SOFT;
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold shrink-0"
+      style={{
+        background: hexA(c, 0.1),
+        color: c,
+        border: `1px solid ${hexA(c, 0.28)}`,
+        letterSpacing: '0.06em',
+      }}
+    >
+      <span className="w-1.5 h-1.5 rounded-full" style={{ background: c }} />
+      {label.toUpperCase()}
+    </span>
+  );
+}
+
+/**
+ * A short letterspaced document marker for a masthead top row — a terracotta
+ * § rule + label (e.g. "CONTRACT", "TAX INVOICE"). Lighter than `DocMarker`
+ * (no underline rule) — it crowns the headline rather than chunking the body.
+ */
+export function DocEyebrow({
+  label,
+  glyph,
+  accent = TERRA_INK,
+}: {
+  label: string;
+  glyph?: string;
+  accent?: string;
+}) {
+  return (
+    <span className="inline-flex items-center gap-2 min-w-0">
+      <span className="inline-block rounded-full shrink-0" style={{ width: 16, height: 2.5, background: accent }} />
+      {glyph && <span style={{ fontFamily: SERIF, fontSize: 13, color: accent, lineHeight: 1 }}>{glyph}</span>}
+      <span
+        style={{ fontFamily: SERIF, color: accent }}
+        className="text-[10.5px] font-semibold uppercase tracking-[0.18em] truncate"
+      >
+        {label}
+      </span>
+    </span>
+  );
+}
+
+/**
+ * The headline figure for a cream masthead: a calm `label` (BALANCE / BALANCE
+ * DUE), the big serif `₹` figure in deep ink-on-cream accent, a `{pct}% paid`
+ * note, and a refined LIGHT burn-down — a thin warm track filled to pct with a
+ * `₹{paid} of ₹{total}` caption. The figure reads as part of the same paper as
+ * the body below it (same cream, same serif).
+ */
+export function DocFigure({
+  label,
+  value,
+  accent,
+  total,
+  paid,
+  totalKnown = true,
+  note,
+}: {
+  label: string;
+  /** The big figure, already formatted with its ₹ (or pass a number-string). */
+  value: string;
+  accent: string;
+  total: number;
+  paid: number;
+  totalKnown?: boolean;
+  /** Optional quiet sub-note under the figure (e.g. estimated-from-milestones). */
+  note?: ReactNode;
+}) {
+  const pctPaid = total > 0 ? Math.min((paid / total) * 100, 100) : paid > 0 ? 100 : 0;
+  return (
+    <div>
+      <p
+        className="text-[10px] font-semibold uppercase tracking-[0.16em] mb-1.5"
+        style={{ color: INK_SOFT }}
+      >
+        {label}
+      </p>
+      <div className="flex items-end justify-between gap-4 flex-wrap">
+        <p
+          style={{
+            color: accent,
+            fontFamily: SERIF,
+            fontVariantNumeric: 'tabular-nums',
+            lineHeight: 0.95,
+            letterSpacing: '-0.02em',
+            fontSize: 'clamp(2.1rem, 1.3rem + 3.6vw, 2.9rem)',
+          }}
+        >
+          <span style={{ fontSize: '0.42em', fontWeight: 600, marginRight: '0.08em', verticalAlign: '0.18em' }}>₹</span>
+          {value}
+        </p>
+        <p
+          className="text-[12px] pb-1.5"
+          style={{ color: INK_SOFT, fontFamily: SERIF, fontVariantNumeric: 'tabular-nums' }}
+        >
+          <span style={{ color: accent, fontWeight: 700 }}>{Math.round(pctPaid)}%</span> paid
+        </p>
+      </div>
+      {note && <div className="mt-1.5">{note}</div>}
+      <DocBurnDown total={total} paid={paid} accent={accent} totalKnown={totalKnown} />
+    </div>
+  );
+}
+
+/**
+ * Light burn-down for the cream paper: a thin faint-warm track filled to pct
+ * with the document accent, and a tabular `₹{paid} of ₹{total}` caption below.
+ * The ink-on-cream counterpart to the dark-field `BurnDown`.
+ */
+export function DocBurnDown({
+  total,
+  paid,
+  accent,
+  totalKnown = true,
+}: {
+  total: number;
+  paid: number;
+  accent: string;
+  totalKnown?: boolean;
+}) {
+  const pctPaid = total > 0 ? Math.min((paid / total) * 100, 100) : paid > 0 ? 100 : 0;
+  return (
+    <div className="mt-3">
+      <div className="h-1.5 rounded-full overflow-hidden" style={{ background: hexA(INK, 0.08) }}>
+        <div
+          className="h-full rounded-full transition-all duration-700"
+          style={{ width: `${pctPaid}%`, background: accent }}
+        />
+      </div>
+      <p className="mt-2 text-[11px]" style={{ color: INK_SOFT, fontVariantNumeric: 'tabular-nums' }}>
+        <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtRupee(paid)}</span>
+        <span className="mx-1" style={{ color: hexA(INK, 0.3) }}>of</span>
+        <span style={{ fontVariantNumeric: 'tabular-nums' }}>{totalKnown ? fmtRupee(total) : '—'}</span>
+      </p>
+    </div>
+  );
+}
+
+/**
  * A formal serif section marker: a short terracotta rule + uppercase label,
  * with a hairline rule running under the whole marker. The document voice for
  * what GroupLabel is to the generic body.

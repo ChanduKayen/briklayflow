@@ -23,14 +23,15 @@ import {
   IconBarcode, IconShieldLock, IconAdjustmentsHorizontal,
   IconChevronDown, IconChevronLeft, IconDots,
   IconSettings, IconLogout,
-  IconBox, IconListNumbers, IconTruck, IconLoader2,
+  IconBox, IconListNumbers, IconTruck, IconLoader2, IconChecklist, IconAlertTriangle,
+  IconListCheck, IconBell, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand,
 } from '@tabler/icons-react';
 import { supabase } from '../../lib/supabase';
 import { clearPersistedCache } from '../../lib/queryClient';
 import { useAuth } from '../../lib/auth/AuthProvider';
 import { useUserProfile } from '../../App';
 import { WhatsAppGlyph } from '../day-book/atoms';
-import { V, N, font, serif, nums, RAIL_W, RAIL_OPEN, NAV_ANIM } from './navTokens';
+import { V, N, font, serif, nums, RAIL_W, RAIL_OPEN, PANEL_W, NAV_ANIM, SITE_MGMT_ROUTES } from './navTokens';
 
 type Role = string;
 
@@ -117,15 +118,27 @@ function RailItem({ item, active, open, onNavigate }: { item: Item; active: bool
 // Default: a STATIC, always-expanded rail. Pass `collapsible` to get the hover
 // collapse-to-icons behaviour (kept for screens that pair the rail with a second
 // nav and need to reclaim width).
-export function BriklayDesktopNav({ session, collapsible = false }: { session: Session; collapsible?: boolean }) {
+export function BriklayDesktopNav({ session, collapsible = false, railExpanded = false, onToggleRail }: { session: Session; collapsible?: boolean; railExpanded?: boolean; onToggleRail?: () => void }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { data: profile } = useUserProfile(session.user.id);
   const { orgId } = useAuth();
   const role: Role = profile?.role ?? '';
 
+  // ── Secondary-nav contexts — BOTH the in-project nav and the Site Management hub use the same
+  //    two-tier pattern: the rail collapses to its icon spine and a second column beside it carries
+  //    the context's sub-nav. ──
+  const projMatch = location.pathname.match(/^\/projects\/([^/]+)/);
+  const activeProjectId = projMatch?.[1];
+  const inProject = !!(activeProjectId && activeProjectId !== 'new');
+  const inSiteMgmt = SITE_MGMT_ROUTES.some(r => location.pathname === r || location.pathname.startsWith(r + '/'));
+  const inSecondary = inProject || inSiteMgmt;
+
   const [hovered, setHovered] = useState(false);
-  const open = collapsible ? hovered : true;   // static unless collapsible
+  // In a secondary-nav context the rail width is the user's toggle (railExpanded: full 220 / spine
+  // 56), and both columns push content (no overlay). Elsewhere it's the static full rail (or the
+  // legacy hover-collapse when explicitly `collapsible`).
+  const open = inSecondary ? railExpanded : (collapsible ? hovered : true);
   const [projOpen, setProjOpen] = useState(false);
   const [showUser, setShowUser] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -210,6 +223,9 @@ export function BriklayDesktopNav({ session, collapsible = false }: { session: S
       items: ([
         can(role !== 'supervisor') && { route: '/ledger', label: 'Transactions', icon: IconArrowsExchange, accent: true },
         { route: '/logbook', label: 'Day book', node: <DayBookIcon />, badge: inbox },
+        // Site Management — clicking enters its own secondary nav (Task Manager / To-dos & Issues /
+        // Follow-up Rules); /site-desk is the hub's landing page.
+        { route: '/site-desk', label: 'Site management', icon: IconAlertTriangle },
         can(role !== 'supervisor') && { route: '/billing', label: 'Client billing', icon: IconFileInvoice, badge: billOverdue },
         { route: '/insights', label: 'Insights', icon: IconChartPie },
       ].filter(Boolean) as Item[]),
@@ -233,15 +249,17 @@ export function BriklayDesktopNav({ session, collapsible = false }: { session: S
     },
   ];
 
-  // ── in-project sub-nav (stays in the rail) ──
-  const projMatch = location.pathname.match(/^\/projects\/([^/]+)/);
-  const activeProjectId = projMatch?.[1];
-  const inProject = !!(activeProjectId && activeProjectId !== 'new');
+  // ── in-project sub-nav (rendered in the secondary navbar; inProject/activeProjectId hoisted up) ──
   const activeProj = projects.find(p => p.project_id === activeProjectId);
   const projName = activeProj?.name ?? '…';
   const projBase = `/projects/${activeProjectId}`;
   const projItems: Item[] = inProject ? [
     { route: projBase, label: 'Overview', icon: IconLayoutGrid },
+    { route: `${projBase}/tasks`, label: 'Task Manager', icon: IconChecklist },
+    // Issues + To-dos are first-class, distinct entries (P1.3) — both ride the same surface,
+    // scoped by ?view=. Issues ride heavy (cause/timing/thread); to-dos light (checkable).
+    { route: `${projBase}/issues?view=issues`, label: 'Issues', icon: IconAlertTriangle },
+    { route: `${projBase}/issues?view=todos`, label: 'To-dos', icon: IconListCheck },
     { route: `${projBase}/transactions`, label: 'Transactions', icon: IconArrowsExchange },
     { route: `${projBase}/work-orders`, label: 'Contracts', icon: IconClipboardList },
     { route: `${projBase}/purchase-orders`, label: 'Purchase orders', icon: IconShoppingBag },
@@ -249,6 +267,32 @@ export function BriklayDesktopNav({ session, collapsible = false }: { session: S
     { route: `${projBase}/boqs`, label: 'BOQs', icon: IconListNumbers },
     { route: `${projBase}/inward`, label: 'Inward register', icon: IconTruck },
   ] : [];
+
+  // ── Site Management secondary navbar — the items shown in the second column (see inSiteMgmt). ──
+  const siteMgmtItems: Item[] = [
+    { route: '/tasks', label: 'Task Manager', icon: IconChecklist },
+    { route: '/site-desk', label: 'To-dos & Issues', icon: IconAlertTriangle },
+    ...(role === 'principal' || role === 'management'
+      ? [{ route: '/follow-up-rules', label: 'Follow-up Rules', icon: IconBell } as Item]
+      : []),
+  ];
+
+  // ── secondary navbar config — one panel, two contexts (project / Site Management) ──
+  const panelCfg = inProject
+    ? {
+        backTo: '/projects', backLabel: 'All projects',
+        chip: initials(projName) as React.ReactNode, title: projName, subtitle: 'Active project',
+        items: projItems, isItemActive: (route: string) => projItemActive(route, projBase, location),
+        footer: null as string | null,
+      }
+    : inSiteMgmt
+    ? {
+        backTo: role === 'supervisor' ? '/projects' : '/ledger', backLabel: 'Menu',
+        chip: <IconChecklist size={17} strokeWidth={1.7} /> as React.ReactNode, title: 'Site Management', subtitle: 'Across every site',
+        items: siteMgmtItems, isItemActive: (route: string) => isActive(route),
+        footer: 'Plan work, track issues, and tune how follow-ups are chased — across all your sites.' as string | null,
+      }
+    : null;
 
   // Any navigation also settles open menus + collapses the projects tray, so
   // selecting a project drops straight to that project + its internal links.
@@ -267,10 +311,8 @@ export function BriklayDesktopNav({ session, collapsible = false }: { session: S
         style={{
           position: 'fixed', top: 0, left: 0, height: '100vh',
           width: open ? RAIL_OPEN : RAIL_W, background: N.bg,
-          // collapsible only: quick open, soft-close settle. Static: width never changes.
-          transition: open
-            ? 'width .2s cubic-bezier(.32,.72,0,1), box-shadow .22s ease'
-            : 'width .44s cubic-bezier(.16,1,.3,1), box-shadow .5s ease',
+          // width animates on toggle/collapse; the spine and panel both push content.
+          transition: 'width .26s cubic-bezier(.32,.72,0,1), box-shadow .22s ease',
           borderRight: collapsible ? 'none' : `1px solid ${N.keyline}`,
           overflow: 'hidden', zIndex: 50,
           boxShadow: collapsible && open ? '6px 0 28px rgba(20,16,12,0.28)' : 'none',
@@ -331,55 +373,24 @@ export function BriklayDesktopNav({ session, collapsible = false }: { session: S
           </div>
         </div>
 
-        {/* sections */}
+        {/* sections — the PRIMARY rail always shows the top-level nav (icon spine when collapsed).
+            In-project / Site-Management sub-navs live in the secondary navbar beside it. */}
         <nav className="nav-scroll flex-1 overflow-y-auto overflow-x-hidden mt-4" style={pad}>
-          {inProject ? (
-            <>
-              {/* back out of the project → restores the global "home" menu */}
-              <Link to="/projects" title="Back to all projects" onClick={close}
-                className="flex items-center" style={{ height: 30, gap: 9, paddingLeft: open ? 10 : 0, paddingRight: open ? 8 : 0, justifyContent: open ? 'flex-start' : 'center', borderRadius: 8, textDecoration: 'none', background: 'transparent', transition: 'background .12s ease' }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'rgba(247,243,236,0.07)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                <span className="flex items-center justify-center shrink-0" style={{ width: 28, height: 28, color: N.textFaint }}><IconChevronLeft size={16} strokeWidth={1.8} /></span>
-                <span className="truncate" style={{ fontSize: 12, color: N.textFaint, opacity: open ? 1 : 0, transition: 'opacity .15s', display: open ? 'inline-block' : 'none' }}>All projects</span>
-              </Link>
-
-              {/* the project context, recessed like a drawer you've stepped into */}
-              <div style={{ background: open ? N.recess : 'transparent', boxShadow: open ? `inset 0 1px 0 ${N.recessLine}` : 'none', borderRadius: 12, padding: open ? 6 : 0, marginTop: 6, transition: 'background .2s ease' }}>
-                {/* active project plaque */}
-                <div className="flex items-center" style={{ height: 38, gap: 9, paddingLeft: open ? 6 : 0, justifyContent: open ? 'flex-start' : 'center', margin: open ? '0 0 8px' : '2px 0 8px' }}>
-                  <span className="flex items-center justify-center shrink-0" style={{ width: 28, height: 28, fontSize: 11, fontWeight: 500, borderRadius: 8, ...railChip }}>{initials(projName)}</span>
-                  <span className="min-w-0" style={{ opacity: open ? 1 : 0, transition: 'opacity .15s', overflow: 'hidden', flex: open ? '1 1 0%' : '0 0 0px', width: open ? 'auto' : 0 }}>
-                    <span className="block truncate" style={{ fontSize: 12.5, fontWeight: 600, color: N.text }}>{projName}</span>
-                    <span className="block" style={{ fontSize: 10.5, color: N.textFaint }}>Active project</span>
-                  </span>
-                </div>
+          {SECTIONS.map((s, i) => (
+            s.items.length === 0 ? null : (
+              <div key={i} style={{ marginTop: i > 0 ? (open ? 18 : 0) : 0 }}>
+                {s.label && (
+                  <p className="uppercase font-medium truncate" style={{ color: N.textFaint, letterSpacing: '0.11em', fontSize: 10.5, paddingLeft: 10, marginBottom: open ? 7 : 0, height: open ? 12 : 0, overflow: 'hidden', opacity: open ? 1 : 0, transition: 'opacity .15s' }}>{s.label}</p>
+                )}
+                {!open && i > 0 && <div style={{ height: 16 }} />}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  {projItems.map(it => (
-                    <RailItem key={it.route} item={it} open={open}
-                      active={it.route === projBase ? location.pathname === projBase : location.pathname.startsWith(it.route)}
-                      onNavigate={close} />
+                  {s.items.map(it => (
+                    <RailItem key={it.route} item={it} open={open} active={it.route === '/site-desk' ? inSiteMgmt : isActive(it.route)} onNavigate={close} />
                   ))}
                 </div>
               </div>
-            </>
-          ) : (
-            SECTIONS.map((s, i) => (
-              s.items.length === 0 ? null : (
-                <div key={i} style={{ marginTop: i > 0 ? (open ? 18 : 0) : 0 }}>
-                  {s.label && (
-                    <p className="uppercase font-medium truncate" style={{ color: N.textFaint, letterSpacing: '0.11em', fontSize: 10.5, paddingLeft: 10, marginBottom: open ? 7 : 0, height: open ? 12 : 0, overflow: 'hidden', opacity: open ? 1 : 0, transition: 'opacity .15s' }}>{s.label}</p>
-                  )}
-                  {!open && i > 0 && <div style={{ height: 16 }} />}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    {s.items.map(it => (
-                      <RailItem key={it.route} item={it} open={open} active={isActive(it.route)} onNavigate={close} />
-                    ))}
-                  </div>
-                </div>
-              )
-            ))
-          )}
+            )
+          ))}
         </nav>
 
         {/* user identity + menu */}
@@ -414,8 +425,82 @@ export function BriklayDesktopNav({ session, collapsible = false }: { session: S
           )}
         </div>
       </aside>
+
+      {/* ── SECONDARY NAVBAR — a literal second column beside the rail, in the SAME dark family
+            (one shade warmer, faint terra glow). Carries the active context's sub-nav (a project's
+            internal pages, or the Site Management hub). The toggle collapses/expands the rail. ── */}
+      {panelCfg && (
+        <aside
+          key="secondary-panel"
+          className="hidden md:flex flex-col nav-panel-in py-4"
+          style={{
+            position: 'fixed', top: 0, left: open ? RAIL_OPEN : RAIL_W, height: '100vh', width: PANEL_W,
+            // solid dark fill + (glow over panel gradient) stacked in ONE property — never split a
+            // `background` shorthand and `backgroundImage`, the latter wipes the former's image.
+            backgroundColor: '#342B23',
+            backgroundImage: `${N.panelGlow}, ${N.panel}`,
+            borderRight: `1px solid ${N.keyline}`,
+            boxShadow: `inset 1px 0 0 ${N.recessLine}`, zIndex: 40,
+            transition: 'left .26s cubic-bezier(.32,.72,0,1)', ...font,
+          }}
+        >
+          {/* header — context identity (rail typography) + collapse/expand toggle + back-out */}
+          <div style={{ padding: '0 14px 12px', borderBottom: `1px solid ${N.keyline}` }}>
+            <div className="flex items-center" style={{ height: 32, justifyContent: 'space-between' }}>
+              <Link to={panelCfg.backTo} onClick={close}
+                className="inline-flex items-center" style={{ gap: 5, fontSize: 11.5, fontWeight: 500, color: N.textFaint, textDecoration: 'none' }}
+                onMouseEnter={e => (e.currentTarget.style.color = N.textSoft)} onMouseLeave={e => (e.currentTarget.style.color = N.textFaint)}>
+                <IconChevronLeft size={13} strokeWidth={2} /> {panelCfg.backLabel}
+              </Link>
+              {onToggleRail && (
+                <button onClick={onToggleRail} title={open ? 'Collapse menu' : 'Expand menu'} aria-label={open ? 'Collapse menu' : 'Expand menu'}
+                  className="flex items-center justify-center" style={{ width: 26, height: 26, borderRadius: 7, background: 'transparent', color: N.textFaint, transition: 'background .12s ease, color .12s ease' }}
+                  onMouseEnter={e => { e.currentTarget.style.background = N.hover; e.currentTarget.style.color = N.textSoft; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = N.textFaint; }}>
+                  {open ? <IconLayoutSidebarLeftCollapse size={17} strokeWidth={1.7} /> : <IconLayoutSidebarLeftExpand size={17} strokeWidth={1.7} />}
+                </button>
+              )}
+            </div>
+            <div className="flex items-center" style={{ gap: 10, marginTop: 6 }}>
+              <span className="flex items-center justify-center shrink-0" style={{ width: 30, height: 30, borderRadius: 8, fontSize: 11, fontWeight: 500, ...railChip }}>
+                {panelCfg.chip}
+              </span>
+              <div className="min-w-0">
+                <p className="truncate" style={{ fontSize: 13.5, fontWeight: 600, color: N.text }}>{panelCfg.title}</p>
+                <p className="truncate" style={{ fontSize: 10.5, color: N.textFaint }}>{panelCfg.subtitle}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* items — the rail's OWN row component, so font/sizing/states match exactly */}
+          <nav className="nav-scroll flex-1 overflow-y-auto" style={{ padding: '10px 8px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {panelCfg.items.map(it => (
+              <RailItem key={it.route} item={it} open active={panelCfg.isItemActive(it.route)} onNavigate={close} />
+            ))}
+          </nav>
+
+          {panelCfg.footer && (
+            <p style={{ padding: '12px 16px 0', fontSize: 10.5, lineHeight: 1.5, color: N.textFaint, borderTop: `1px solid ${N.keyline}` }}>
+              {panelCfg.footer}
+            </p>
+          )}
+        </aside>
+      )}
     </>
   );
+}
+
+// Active-state for in-project sub-nav, query-aware so the split Issues/To-dos entries (which
+// share the /issues pathname and differ only by ?view=) highlight independently. A bare /issues
+// visit (no view) reads as the default 'all' and highlights Issues.
+function projItemActive(route: string, projBase: string, location: { pathname: string; search: string }): boolean {
+  const [path, query] = route.split('?');
+  if (path === projBase) return location.pathname === projBase;
+  if (!location.pathname.startsWith(path)) return false;
+  if (!query) return true;
+  const want = new URLSearchParams(query).get('view');
+  const have = new URLSearchParams(location.search).get('view') ?? 'all';
+  return want === have || (want === 'issues' && have === 'all');
 }
 
 export { RAIL_W } from './navTokens';

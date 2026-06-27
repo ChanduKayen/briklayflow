@@ -20,7 +20,7 @@ import {
   IconShieldLock, IconAdjustmentsHorizontal,
   IconLogout, IconChevronLeft, IconDots,
   IconRepeat, IconLayoutGrid, IconFiles, IconUsers,
-  IconCircleDot, IconClock, IconFileText,
+  IconCircleDot, IconClock, IconFileText, IconChecklist,
 } from '@tabler/icons-react';
 
 // Route pages are lazy-loaded so the dev server (and the prod bundle) only transform/ship
@@ -35,6 +35,8 @@ const ProjectDetail = lazy(() => import('./pages/ProjectDetail'));
 const Projects = lazy(() => import('./pages/Projects'));
 const ProjectTransactions = lazy(() => import('./pages/ProjectTransactions'));
 const ProjectTasks = lazy(() => import('./pages/ProjectTasks'));
+const ProjectIssues = lazy(() => import('./pages/ProjectIssues'));
+const SiteDesk = lazy(() => import('./pages/SiteDesk'));
 const ProjectWorkOrders = lazy(() => import('./pages/ProjectWorkOrders'));
 const ProjectPurchaseOrders = lazy(() => import('./pages/ProjectPurchaseOrders'));
 const ProjectInventory = lazy(() => import('./pages/ProjectInventory'));
@@ -50,6 +52,7 @@ const Ledger = lazy(() => import('./pages/Ledger'));
 const NewTransaction = lazy(() => import('./pages/NewTransaction'));
 const Insights = lazy(() => import('./pages/Insights'));
 const Settings = lazy(() => import('./pages/Settings'));
+const FollowUpRules = lazy(() => import('./pages/FollowUpRules'));
 const NewWorkOrder = lazy(() => import('./pages/NewWorkOrder'));
 const Financials = lazy(() => import('./pages/Financials'));
 const FinancialsPL = lazy(() => import('./pages/FinancialsPL'));
@@ -62,6 +65,7 @@ const NewBill = lazy(() => import('./pages/NewBill'));
 const BillDetail = lazy(() => import('./pages/BillDetail'));
 const Logbook = lazy(() => import('./pages/Logbook'));
 import { BriklayDesktopNav } from './components/nav/BriklayRail';
+import { isSecondaryNavRoute } from './components/nav/navTokens';
 const Orders = lazy(() => import('./pages/Orders'));
 import InviteAccept from './pages/InviteAccept';
 import OnboardingWizard from './components/OnboardingWizard';
@@ -226,6 +230,16 @@ function App() {
   const [signingOut, setSigningOut] = useState(false);
   const [showMoreSheet, setShowMoreSheet] = useState(false);
   const [routerReady, setRouterReady] = useState(false);
+  // Secondary-nav contexts (Site Management): the user toggles whether the main rail is
+  // expanded (labels, 220px) or collapsed to its icon spine (56px) beside the panel. Persisted.
+  const [railExpanded, setRailExpanded] = useState<boolean>(() => {
+    try { return localStorage.getItem('briklay_rail_expanded') === '1'; } catch { return false; }
+  });
+  const toggleRail = useCallback(() => setRailExpanded(v => {
+    const next = !v;
+    try { localStorage.setItem('briklay_rail_expanded', next ? '1' : '0'); } catch { /* private mode */ }
+    return next;
+  }), []);
   // Must be at top level — hooks cannot be called after conditional returns
   const triggerSignOut = useCallback(() => setSigningOut(true), []);
   // Real-time badge invalidation (cheap; one channel for the session)
@@ -293,6 +307,26 @@ function App() {
       localStorage.setItem(`briklay_onboarding_${session.user.id}`, 'true');
     }
   }, [appProfile?.onboarding_done, session?.user?.id]);
+
+  // Warm the Site Management chunks once the main page is up + the browser is idle — so opening
+  // Task Manager / To-dos & Issues / Follow-up Rules is instant, not gated on a lazy import at
+  // click time. Vite dedupes: these import() calls just prime the same chunks lazy() will use.
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    const prefetch = () => {
+      import('./pages/ProjectTasks');
+      import('./pages/SiteDesk');
+      import('./pages/FollowUpRules');
+      import('./pages/ProjectIssues');
+    };
+    const ric = window.requestIdleCallback;
+    if (ric) {
+      const id = ric(prefetch, { timeout: 3000 });
+      return () => window.cancelIdleCallback?.(id);
+    }
+    const t = setTimeout(prefetch, 1500);
+    return () => clearTimeout(t);
+  }, [session?.user?.id]);
 
   // Public legal pages — no auth required (Meta/WhatsApp verification, footer
   // links). Render before any gate so they load regardless of session.
@@ -402,9 +436,12 @@ function App() {
         willChange: 'filter, transform',
       } : { transition: 'filter 200ms, transform 200ms' }}
     >
-      <BriklayDesktopNav session={session} />
+      <BriklayDesktopNav session={session} railExpanded={railExpanded} onToggleRail={toggleRail} />
       <main
-        className={`min-h-screen mobile-main-pb transition-[margin-left] duration-[220ms] ease-[cubic-bezier(0.4,0,0.6,1)] md:ml-[220px]`}
+        // Shell margin reserves the rail. Inside a hub with a secondary navbar it's the panel
+        // (224) plus the rail at whatever width the user toggled it to (spine 56 / full 220).
+        style={{ ['--shell-ml' as string]: isSecondaryNavRoute(location.pathname) ? `${(railExpanded ? 220 : 56) + 224}px` : '220px' } as React.CSSProperties}
+        className={`min-h-screen mobile-main-pb transition-[margin-left] duration-[220ms] ease-[cubic-bezier(0.4,0,0.6,1)] md:ml-[var(--shell-ml)]`}
       >
         {/* Mobile topbar (phones only â€" replaces sidebar hamburger) */}
         <MobileTopbar session={session} />
@@ -426,6 +463,12 @@ function App() {
               / onboarding / invite flows that still send users to /dashboard land here. */}
           <Route path="/dashboard" element={<Navigate to="/insights" replace />} />
           <Route path="/logbook" element={<Logbook session={session} />} />
+          {/* Site Desk — cross-project Issues & To-dos rollup; deep-link target of a
+              multi-project WhatsApp narration. */}
+          <Route path="/site-desk" element={<SiteDesk session={session} />} />
+          {/* Global Task Manager — the org-level mount; ProjectTasks shows a project filter here
+              and hides it inside a specific project (context-aware, P1.4). */}
+          <Route path="/tasks" element={<ProjectTasks session={session} />} />
           <Route path="/ledger" element={<Ledger session={session} />} />
           <Route path="/ledger/new" element={<NewTransaction session={session} />} />
           <Route path="/ledger/:txnId" element={<TransactionDetail session={session} />} />
@@ -440,6 +483,7 @@ function App() {
           <Route path="/projects/:projectId" element={<ProjectDetail session={session} />} />
           <Route path="/projects/:projectId/transactions" element={<ProjectTransactions session={session} />} />
           <Route path="/projects/:projectId/tasks" element={<ProjectTasks session={session} />} />
+          <Route path="/projects/:projectId/issues" element={<ProjectIssues session={session} />} />
           <Route path="/projects/:projectId/work-orders" element={<ProjectWorkOrders session={session} />} />
           <Route path="/projects/:projectId/purchase-orders" element={<ProjectPurchaseOrders session={session} />} />
           <Route path="/projects/:projectId/inventory" element={<ProjectInventory session={session} />} />
@@ -460,6 +504,8 @@ function App() {
           <Route path="/sku-directory" element={<SKUDirectory session={session} />} />
           <Route path="/team" element={<Team session={session} />} />
           <Route path="/settings" element={<Settings session={session} />} />
+          {/* Follow-up Rules — org-tunable timing per cause (how soon / how often we chase). */}
+          <Route path="/follow-up-rules" element={<FollowUpRules session={session} />} />
           <Route path="/financials" element={<PrincipalGuard session={session}><Financials /></PrincipalGuard>} />
           <Route path="/financials/pl" element={<PrincipalGuard session={session}><FinancialsPL /></PrincipalGuard>} />
           <Route path="/financials/cashflow" element={<PrincipalGuard session={session}><FinancialsCashflow /></PrincipalGuard>} />
@@ -519,6 +565,7 @@ function getMobileTitle(pathname: string): string {
     '/':                    'Transactions',
     '/insights':            'Insights',
     '/logbook':             'Day book',
+    '/site-desk':           'Site Desk',
     '/ledger':              'Transactions',
     '/ledger/new':          'New Transaction',
     '/projects':            'Projects',
@@ -890,6 +937,9 @@ function MoreNavSheet({
   const base = activeProjectId ? `/projects/${activeProjectId}` : '';
   const projectMoreItems = isInProject ? [
     { path: base,                icon: IconLayoutGrid,      label: 'Overview',        show: true },
+    { path: `${base}/tasks`,           icon: IconClipboardList, label: 'Task Manager', show: true },
+    { path: `${base}/issues?view=issues`, icon: IconCircleDot,  label: 'Issues',       show: true },
+    { path: `${base}/issues?view=todos`,  icon: IconClipboardList, label: 'To-dos',    show: true },
     { path: `${base}/inventory`, icon: IconFiles,           label: 'Inventory',       show: true },
     { path: `${base}/boqs`,      icon: IconClipboardList,   label: 'BOQs',            show: true },
     { path: `${base}/inward`,    icon: IconShoppingBag,     label: 'Inward Register', show: true },
@@ -897,11 +947,14 @@ function MoreNavSheet({
   ] : [];
 
   const globalItems = [
+    { path: '/site-desk',     icon: IconClipboardList,         label: 'Site Desk',       show: true },
+    { path: '/tasks',         icon: IconChecklist,             label: 'Task Manager',    show: true },
     { path: '/stakeholders',  icon: IconUsers,                 label: 'Parties',         show: role !== 'supervisor' && role !== 'accountant' },
     { path: '/inward-register', icon: IconLayoutGrid,          label: 'Inward Register', show: role !== 'supervisor' && role !== 'accountant' },
     { path: '/billing',       icon: IconFileInvoice,           label: 'Client Billing', show: role !== 'supervisor' },
     { path: '/insights',      icon: IconChartPie,              label: 'Insights',       show: true },
     { path: '/team',          icon: IconShieldLock,            label: 'Team & Access',  show: role === 'principal' || role === 'management' },
+    { path: '/follow-up-rules', icon: IconClock,               label: 'Follow-up Rules', show: role === 'principal' || role === 'management' },
     { path: '/settings',      icon: IconAdjustmentsHorizontal, label: 'Settings',       show: true },
   ].filter(i => i.show);
 

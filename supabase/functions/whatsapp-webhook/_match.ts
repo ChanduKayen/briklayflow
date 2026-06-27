@@ -34,6 +34,26 @@ function bandOf(score: number, autoThreshold: number): Band {
   return score >= autoThreshold ? 'auto' : score >= TXN_CONFIRM ? 'confirm' : 'open'
 }
 
+// Distinctive-token matching — people rarely repeat a stored project name verbatim; they
+// say the memorable word ("Lakshmi") and drop the filler ("villa/project/site"). FILLER is
+// stripped before comparing, and tokenisation folds punctuation/case so "LAKSHMI-001" and
+// "Sri Lakshmi Residence" both surface "lakshmi". (Filler words are construction-project
+// generics; they never appear in person names, so this is inert for payee matching.)
+const FILLER = new Set([
+  'villa', 'villas', 'site', 'sites', 'project', 'projects', 'building', 'buildings',
+  'apartment', 'apartments', 'apt', 'apts', 'residency', 'residences', 'residence',
+  'enclave', 'towers', 'tower', 'homes', 'home', 'flats', 'flat', 'block', 'blocks',
+  'phase', 'plot', 'plots', 'the',
+])
+function tokenize(s: string): string[] {
+  return s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim().split(/\s+/).filter(Boolean)
+}
+/** Content tokens with filler removed; falls back to all tokens if everything was filler. */
+function distinctiveTokens(s: string): string[] {
+  const t = tokenize(s).filter((w) => !FILLER.has(w))
+  return t.length ? t : tokenize(s)
+}
+
 /** Score one candidate name against the query in 0..1 (1 = exact). */
 function scoreName(q: string, name: string): number {
   const sn = name.toLowerCase()
@@ -43,6 +63,15 @@ function scoreName(q: string, name: string): number {
   const abbr = initials(name); const qClean = q.replace(/\s+/g, '').toUpperCase()
   if (abbr === qClean && qClean.length >= 2) return 0.75
   if (sn.split(/\s+/).some((w) => w.startsWith(q) && q.length >= 3)) return 0.7
+  // Distinctive-token overlap — only for NAME-LIKE queries (<=4 content tokens), so a whole
+  // narration scanned for an embedded name can't loose-match on a single coincidental word
+  // (that path stays on the strict substring/levenshtein scoring below — precision wins).
+  const qd = distinctiveTokens(q)
+  if (qd.length && qd.length <= 4) {
+    const nd = new Set(distinctiveTokens(sn))
+    if (qd.every((w) => nd.has(w))) return 0.9              // every distinctive query word is in the name
+    if (qd.some((w) => w.length >= 4 && nd.has(w))) return 0.85  // a shared distinctive (>=4-char) word
+  }
   const d = levenshtein(q, sn); const rel = d / Math.max(q.length, sn.length)
   if (d <= 2) return 0.7
   if (rel <= 0.4) return 0.55
@@ -68,4 +97,21 @@ export function matchPayee(raw: string | null, stakeholders: { stakeholder_id: s
 
 export function matchProject(raw: string | null, projects: { project_id: string; name: string }[]): Match {
   return match(raw, projects.map((p) => ({ id: p.project_id, name: p.name })), TXN_PROJECT_AUTO)
+}
+
+/** Every project scored + banded against the query, sorted best-first. resolveProject uses
+ *  this (not just the single best) so it can tell a clean single auto-match from a genuine
+ *  multi-project ambiguity (two buildings sharing the named token) → disambiguate, not guess. */
+export function scoreProjects(
+  raw: string | null,
+  projects: { project_id: string; name: string }[],
+): { id: string; name: string; score: number; band: Band }[] {
+  if (!raw?.trim() || !projects.length) return []
+  const q = raw.toLowerCase().trim()
+  return projects
+    .map((p) => {
+      const score = scoreName(q, p.name)
+      return { id: p.project_id, name: p.name, score, band: bandOf(score, TXN_PROJECT_AUTO) }
+    })
+    .sort((a, b) => b.score - a.score)
 }

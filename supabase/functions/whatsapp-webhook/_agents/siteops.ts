@@ -1,0 +1,546 @@
+// Block A — the real SITEOPS agent. A3 wires the full pipeline onto the A1 capture shell:
+//   decompose (Stage 1) → resolveProject + resolveTask (Stage 2) → route to progress/
+//   issue/todo + answer QC (Stage 3) → one-line confirm (Stage 4).
+// Carry-through: hold inferences LOOSELY, lean on the confirm net. map-or-park (never
+// force-map), disambiguate ONLY on genuine progress ambiguity (a need-to-ask), cause as a
+// surfaced suggestion. Disambiguation reuses the AWAIT_PROJECT mechanism (openConversation +
+// the dispatcher's ANSWERS_PENDING → answer()), not a new interaction.
+
+import { send } from '../_format.ts'
+import { resolveProject, planItemProjects, type ProjectRef, type ItemPlan } from '../_resolve.ts'
+import { openConversation, closeConversation, type ConvoRow } from '../_conversation.ts'
+import { decompose, type SiteItem } from '../_siteops_extract.ts'
+import {
+  routeItems, applyProgress, buildConfirm, buildMultiConfirm, parseWhen,
+  type RouteCtx, type RouteOutcome, type SiteTaskRow, type ProgressResult, type OrgMember,
+  type ConfirmSection,
+} from '../_siteops_route.ts'
+import { loadCadenceMap, type CadenceMap } from '../_siteops_timing.ts'
+import {
+  getOpenBatch, dropBatchItems, matchPieceToBatch, interpretStatus,
+  type OpenBatch, type BatchItem,
+} from '../_siteops_batch.ts'
+
+export type SiteopsCtx = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any
+  from: string
+  orgId: string
+  wamid: string
+  lang: 'en' | 'te' | 'te-en' | 'hi'
+}
+
+const TASK_COLS = 'task_id, phase, trade, floor_label, unit_label, name, status, owner_id, owner_source'
+
+// Web app ORIGIN for the deep links in the confirm. Same env the transaction agent uses
+// (WA_APP_LINK); we take its origin and append the project route in buildConfirm.
+const APP_BASE = (() => {
+  const b = Deno.env.get('WA_APP_LINK') ?? 'https://briklayflow.vercel.app'
+  try { return new URL(b).origin } catch { return 'https://briklayflow.vercel.app' }
+})()
+
+async function findPrincipal(supabase: SiteopsCtx['supabase'], orgId: string): Promise<string | null> {
+  const { data } = await supabase.from('user_profiles').select('id').eq('org_id', orgId).eq('role', 'principal').limit(1).maybeSingle()
+  return data?.id ?? null
+}
+async function loadMembers(supabase: SiteopsCtx['supabase'], orgId: string): Promise<OrgMember[]> {
+  const { data } = await supabase.from('user_profiles').select('id, name').eq('org_id', orgId)
+  return (data ?? []) as OrgMember[]
+}
+async function loadSupervisor(supabase: SiteopsCtx['supabase'], projectId: string): Promise<string | null> {
+  const { data } = await supabase.from('projects').select('supervisor_id').eq('project_id', projectId).maybeSingle()
+  return data?.supervisor_id ?? null
+}
+/** Build the owner-resolution context once (members + supervisor + principal). */
+async function ownerCtx(supabase: SiteopsCtx['supabase'], orgId: string, projectId: string) {
+  const [members, supervisorId, principalId] = await Promise.all([
+    loadMembers(supabase, orgId), loadSupervisor(supabase, projectId), findPrincipal(supabase, orgId),
+  ])
+  return { members, supervisorId, principalId }
+}
+
+const fmtDay = (d: Date) => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+/** First few words of an item's title — the short label for the readback line. */
+const shortLabel = (title: string) => title.trim().split(/\s+/).slice(0, 3).join(' ')
+
+/** Append one trail event (B1) for a batch item. actorId present → a human reply. */
+async function trailEvent(ctx: SiteopsCtx, item: { kind: 'issue' | 'todo'; id: string; orgId: string }, type: string, body: string, actorId: string | null): Promise<void> {
+  await ctx.supabase.from('followup_events').insert({
+    org_id: item.orgId,
+    problem_id: item.kind === 'issue' ? item.id : null,
+    todo_id: item.kind === 'todo' ? item.id : null,
+    type, body, actor_kind: actorId ? 'user' : 'system', actor_id: actorId ?? null,
+  })
+}
+/** The replying supervisor's user_id (for trail attribution), or null. */
+async function senderUserId(ctx: SiteopsCtx): Promise<string | null> {
+  const { data } = await ctx.supabase.from('wa_registered_numbers')
+    .select('user_id').eq('phone_number', ctx.from).eq('is_active', true).limit(1).maybeSingle()
+  return data?.user_id ?? null
+}
+
+/**
+ * Apply a reply to ONE batch item: log the reply, then either RESOLVE it, or keep
+ * it open and RE-TIME the next chase (to a stated date, else the cause cadence).
+ * Always appends to the item's trail (B1). Returns the resolved/open verdict.
+ */
+async function applyBatchResolution(
+  ctx: SiteopsCtx, item: BatchItem, status: 'resolved' | 'still_open' | 'unknown',
+  replyText: string, cadenceMap: CadenceMap, actorId: string | null, now: Date,
+): Promise<'resolved' | 'open'> {
+  await trailEvent(ctx, item, 'reply_received', replyText.slice(0, 180), actorId)
+
+  if (status === 'resolved') {
+    if (item.kind === 'issue') {
+      await ctx.supabase.from('problems').update({ status: 'RESOLVED', next_followup_at: null }).eq('id', item.id)
+      await trailEvent(ctx, item, 'status_changed', 'Resolved — confirmed by reply', actorId)
+    } else {
+      await ctx.supabase.from('todos').update({ status: 'DONE' }).eq('id', item.id)
+      await trailEvent(ctx, item, 'status_changed', 'Done — confirmed by reply', actorId)
+    }
+    return 'resolved'
+  }
+
+  // still open (or unknown → keep open: never wrongly close a chase) — re-time
+  const when = parseWhen(replyText, now)
+  if (item.kind === 'issue') {
+    let next: Date
+    if (when && when.getTime() > now.getTime()) next = when
+    else {
+      const row = cadenceMap.get(item.cause ?? 'other') ?? cadenceMap.get('other') ?? { clock: 2, cadence: 3 }
+      const days = row.cadence ?? row.clock ?? 2
+      next = new Date(now.getTime() + days * 86_400_000)
+    }
+    await ctx.supabase.from('problems').update({ next_followup_at: next.toISOString() }).eq('id', item.id)
+    if (when) await trailEvent(ctx, item, 'blocker_noted', `Still open — expected ${fmtDay(next)}`, actorId)
+  } else if (when) {
+    await ctx.supabase.from('todos').update({ due_date: when.toISOString().slice(0, 10) }).eq('id', item.id)
+  }
+  return 'open'
+}
+
+/** "cement ✓ resolved" / "masons still open (will check back)" — one readback part. */
+function readbackPart(item: BatchItem, verdict: 'resolved' | 'open'): string {
+  if (verdict === 'resolved') return `${shortLabel(item.title)} ✓ ${item.kind === 'todo' ? 'done' : 'resolved'}`
+  return `${shortLabel(item.title)} still open (will check back)`
+}
+
+/**
+ * B3 — REPLY HANDLING. The open batch is a patient context; this sorts each
+ * decomposed piece of the supervisor's message into "answers an open chase"
+ * (resolve/re-time + trail) vs "new narration" (route normally), handles a
+ * genuine same-cause collision with ONE targeted site question, and confirms
+ * per item. Returns TRUE if it consumed the message; FALSE if NOTHING matched
+ * the batch (then runSiteops routes it fresh, leaving the batch open).
+ */
+async function handleBatchReply(
+  ctx: SiteopsCtx, text: string, pieces: SiteItem[], topProjectHint: string | null,
+  batch: OpenBatch, projects: ProjectRef[], narrationId: string | null,
+): Promise<boolean> {
+  const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
+  const now = new Date()
+
+  // a terse "sorted"/"done" decomposes to nothing — treat the whole line as one piece
+  const frags = pieces.length ? pieces : [{ text, task_hint: null, project_hint: null } as unknown as SiteItem]
+
+  // ALL-clear shortcut: "all done", "everything sorted" → resolve the whole batch
+  const allClear = /\b(all|everything|sab)\b/i.test(text) && /\b(done|sorted|sortd|resolved|cleared|finished|complete)\b/i.test(text)
+
+  const resolutions: { item: BatchItem; verdict: 'resolved' | 'open' }[] = []
+  const leftovers: SiteItem[] = []
+  let collision: { piece: SiteItem; items: BatchItem[]; status: 'resolved' | 'still_open' | 'unknown' } | null = null
+  const matchedIdx = new Set<number>()
+
+  const cadenceMap = await loadCadenceMap(ctx.supabase, ctx.orgId)
+  const actorId = await senderUserId(ctx)
+
+  if (allClear) {
+    for (let i = 0; i < batch.items.length; i++) {
+      const v = await applyBatchResolution(ctx, batch.items[i], 'resolved', text, cadenceMap, actorId, now)
+      resolutions.push({ item: batch.items[i], verdict: v }); matchedIdx.add(i)
+    }
+  } else {
+    // ONE pending item + a SINGLE-fragment reply → it's about that item, attach it even if
+    // we can't classify the status word (terse / non-English replies). The reply is recorded
+    // (interpretStatus then decides resolve vs keep-open). Multi-fragment → match per piece.
+    const singleAnswer = batch.items.length === 1 && frags.length === 1
+    for (const piece of frags) {
+      const m = (singleAnswer || (batch.items.length === 1 && interpretStatus(piece.text) !== 'unknown'))
+        ? { kind: 'unique' as const, index: 0 }
+        : matchPieceToBatch(piece, batch.items)
+
+      if (m.kind === 'unique') {
+        if (matchedIdx.has(m.index)) continue
+        matchedIdx.add(m.index)
+        const status = interpretStatus(piece.text)
+        const v = await applyBatchResolution(ctx, batch.items[m.index], status, piece.text, cadenceMap, actorId, now)
+        resolutions.push({ item: batch.items[m.index], verdict: v })
+      } else if (m.kind === 'collision' && !collision) {
+        collision = { piece, items: m.indexes.map((i) => batch.items[i]), status: interpretStatus(piece.text) }
+      } else if (m.kind === 'collision') {
+        // a second collision in one message is rare — leave it in the batch for next cycle
+      } else {
+        leftovers.push(piece)
+      }
+    }
+  }
+
+  // nothing touched the batch → let runSiteops route it as a fresh narration
+  if (!resolutions.length && !collision) return false
+
+  // route the genuinely-new pieces (interruption "…also 3rd floor slab done"). Site = a named
+  // site, else the batch's site when it's single-project; ambiguous progress parks (no nested pick).
+  let leftoverLine = ''
+  if (leftovers.length) leftoverLine = await routeLeftovers(ctx, text, leftovers, topProjectHint, batch, projects, narrationId)
+
+  const parts = resolutions.map((r) => readbackPart(r.item, r.verdict))
+  const head = parts.length ? `Got it — ${parts.join(' · ')}` : 'Got it'
+  const extra = leftoverLine ? `\n${leftoverLine}` : ''
+
+  // Drop RESOLVED items from the batch (in BOTH paths — a collision must not strand them).
+  // A still-open re-timed item stays in the batch; a collider stays for the pending ask below.
+  const resolvedIds = resolutions.filter((r) => r.verdict === 'resolved').map((r) => r.item.id)
+  let closed = false
+  if (resolvedIds.length) ({ closed } = await dropBatchItems(ctx.supabase, batch, resolvedIds))
+
+  // GENUINE COLLISION → everything else is already resolved/dropped; ask ONLY about the collider.
+  if (collision) {
+    const cands = collision.items.map((it) => ({ id: it.id, kind: it.kind, orgId: it.orgId, projectName: it.projectName, title: it.title, cause: it.cause }))
+    await openConversation(ctx.supabase, {
+      orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
+      pendingQuestion: `which site: ${collision.piece.text}`,
+      slots: { kind: 'siteops_batch_collision', status: collision.status, piece_text: collision.piece.text, candidates: cands },
+      lastMessageId: ctx.wamid,
+    })
+    const sites = collision.items.map((it) => it.projectName)
+    await send(ctx.supabase, ctx.from, {
+      kind: 'list',
+      body: `${head}${extra}\n\n"${shortLabel(collision.piece.text)}" — which site? ${sites.join(' or ')}?`,
+      button: 'Pick site',
+      rows: cands.slice(0, 10).map((c, i) => ({ id: `pick:${i + 1}`, title: c.projectName.slice(0, 24) })),
+    }, meta)
+    return true
+  }
+
+  const tail = closed ? `\n\nAll caught up 👍` : ''
+  await send(ctx.supabase, ctx.from, { kind: 'text', body: `${head}${extra}${tail}` }, meta)
+  return true
+}
+
+/** Route new-narration pieces surfaced inside a batch reply. Returns a one-line summary. */
+async function routeLeftovers(
+  ctx: SiteopsCtx, text: string, items: SiteItem[], topProjectHint: string | null,
+  batch: OpenBatch, projects: ProjectRef[], narrationId: string | null,
+): Promise<string> {
+  // determine a site: a named one wins; else the batch's site if it's all one project
+  const proj = await resolveProject(ctx.supabase, ctx.orgId, { narration: text, nameHint: topProjectHint })
+  let projectId = proj.projectId
+  const batchPids = [...new Set(batch.items.map((b) => b.projectId).filter(Boolean))] as string[]
+  if (!projectId && batchPids.length === 1) projectId = batchPids[0]
+  if (!projectId) return `· ${items.length} new note${items.length > 1 ? 's' : ''} couldn't be sited — resend with the site`
+
+  const out = await routeGroup(ctx, projectId, items, narrationId)
+  const n = out.progress.length + out.problems.length + out.todos.length
+  const parked = out.parked.length + out.ambiguous.length
+  const bits: string[] = []
+  if (n) bits.push(`logged ${n} new update${n > 1 ? 's' : ''}`)
+  if (parked) bits.push(`${parked} parked`)
+  return bits.length ? `· also ${bits.join(', ')}` : ''
+}
+
+export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?: string } = {}): Promise<void> {
+  const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
+  const say = (body: string) => send(ctx.supabase, ctx.from, { kind: 'text', body: opts.prefix ? `${opts.prefix}\n\n${body}` : body }, meta)
+
+  // B3 — an open chase batch for this sender? (sorted against AFTER we decompose.)
+  const batch = await getOpenBatch(ctx.supabase, ctx.orgId, ctx.from)
+
+  // Capture-first: persist the raw narration immediately so nothing is ever lost.
+  const { data: nrow } = await ctx.supabase.from('site_narrations')
+    .insert({ org_id: ctx.orgId, raw_text: text, resolved_project_via: 'unresolved' })
+    .select('id').single()
+  const narrationId: string | null = nrow?.id ?? null
+
+  // Roster for project resolution: hand the extractor the org's active project NAMES so it
+  // returns the CANONICAL project (semantic match), mirroring the transaction agent. Then
+  // resolveProject's string match is just a safety net, not the primary resolver. We load ids
+  // too so the multi-project planner can resolve each item's site without a second round-trip.
+  const { data: projRows } = await ctx.supabase.from('projects').select('project_id, name').eq('org_id', ctx.orgId).eq('status', 'Active')
+  const projects: ProjectRef[] = ((projRows ?? []) as { project_id: string; name: string }[]).map((p) => ({ id: p.project_id, name: p.name }))
+  const projectNames = projects.map((p) => p.name)
+
+  // STAGE 1 — decompose. Empty/unreadable from non-empty input surfaces, never silently drops.
+  let decomposed
+  try {
+    decomposed = await decompose(text, projectNames)
+  } catch {
+    await say(`Didn't catch a site update in that — try again if you meant to send one.`)
+    return
+  }
+
+  // B3 — if a chase batch is open, sort this message's pieces into batch answers vs new narration.
+  // Consumes the message when something matched; otherwise falls through to fresh routing (the
+  // batch stays open in the background — an interruption is never a mode error).
+  if (batch && batch.items.length) {
+    const consumed = await handleBatchReply(ctx, text, decomposed.items, decomposed.project_hint, batch, projects, narrationId)
+    if (consumed) return
+  }
+
+  // STAGE 2a — project. Plan each item's site from its per-item hint (mirrors the transaction
+  // agent's per-entry project). A narration that names TWO-plus sites takes the multi path so
+  // each item files against its OWN project; the single-project norm keeps the proven path below
+  // untouched (zero regression).
+  const plan = planItemProjects(decomposed.items.map((it) => it.project_hint), projects)
+  if (plan.isMulti) {
+    await runMulti(ctx, decomposed.items, plan, projects, narrationId)
+    return
+  }
+
+  // STAGE 2a (single) — Named-match (project_hint) → selected → park. Never auto-assume (6 active).
+  const proj = await resolveProject(ctx.supabase, ctx.orgId, { narration: text, nameHint: decomposed.project_hint })
+  await ctx.supabase.from('site_narrations').update({
+    project_id: proj.projectId, decomposed: decomposed.items, resolved_project_via: proj.via,
+  }).eq('id', narrationId)
+
+  if (!proj.projectId) {
+    // PROJECT FOLLOW-UP (need-to-ask) — open a pending pick mirroring AWAIT_PROJECT; the reply
+    // resumes in answerSiteops, which routes the STORED decomposition against the chosen project.
+    // (Previously this only parked + asked, with no pending convo — so the reply was orphaned.)
+    //
+    // The question tells the sender whether their name was HEARD-but-unmatched vs never given,
+    // so a real name isn't met with a blank "which project?". The list we SHOW is the list we
+    // STORE (pickList) so the numeric reply maps to the same row in answerSiteops.
+    const ambiguous = proj.nameTried && proj.matches.length > 1
+    const pickList = ambiguous ? proj.matches : proj.candidates
+    const body = ambiguous
+      ? `You said "${proj.nameTried}" — a few projects match. Which one?`
+      : proj.nameTried
+        ? `I couldn't find a project called "${proj.nameTried}". Which one is it?`
+        : `Got your site note — which project is it for?`
+    await openConversation(ctx.supabase, {
+      orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
+      pendingQuestion: 'which project?',
+      slots: { kind: 'siteops_project', items: decomposed.items, candidates: pickList, narration_id: narrationId },
+      lastMessageId: ctx.wamid,
+    })
+    await send(ctx.supabase, ctx.from, {
+      kind: 'list',
+      body,
+      button: 'Pick project',
+      rows: pickList.slice(0, 10).map((c, i) => ({ id: `pick:${i + 1}`, title: c.name.slice(0, 24) })),
+    }, meta)
+    return
+  }
+
+  await finishRoute(ctx, proj.projectId, proj.projectName, decomposed.items, narrationId)
+}
+
+/**
+ * Route a resolved project's items → write + confirm, OR open a task-disambiguation pick if a
+ * progress item is ambiguous. Shared by the fresh path and the project-followup resume (so a
+ * project pick chains naturally into a floor pick). Returns true if it left a pending pick open.
+ */
+async function finishRoute(ctx: SiteopsCtx, projectId: string, projectName: string | null, items: SiteItem[], narrationId: string | null): Promise<boolean> {
+  const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
+  const { data: taskRows } = await ctx.supabase.from('site_tasks').select(TASK_COLS).eq('project_id', projectId)
+  const tasks = (taskRows ?? []) as SiteTaskRow[]
+  const oc = await ownerCtx(ctx.supabase, ctx.orgId, projectId)
+  const rc: RouteCtx = { supabase: ctx.supabase, orgId: ctx.orgId, projectId, byLabel: ctx.from, ...oc, narrationId, now: new Date() }
+
+  const out = await routeItems(rc, tasks, items)
+
+  // STAGE 2c — disambiguation (need-to-ask): one pending question, mirroring AWAIT_PROJECT.
+  if (out.ambiguous.length) {
+    const first = out.ambiguous[0]
+    const extraParked = out.ambiguous.length - 1   // ask about the first; the rare extras park
+    const candidates = first.candidates.map((t) => ({
+      task_id: t.task_id, name: t.name, floor: t.floor_label, unit: t.unit_label,
+    }))
+    const confirm = buildConfirm({
+      site: projectName,
+      progress: out.progress, problems: out.problems, todos: out.todos,
+      parked: out.parked.length + extraParked, pendingPick: 1, ownerLabel: 'you',
+      projectId, appBase: APP_BASE,
+    })
+    await openConversation(ctx.supabase, {
+      orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
+      pendingQuestion: `which task: ${first.item.text}`,
+      slots: { kind: 'siteops_disambig', project_id: projectId, project_name: projectName, item: first.item, candidates, narration_id: narrationId },
+      lastMessageId: ctx.wamid,
+    })
+    await send(ctx.supabase, ctx.from, {
+      kind: 'list',
+      body: `${confirm}\n\nWhich one is "${first.item.text}"?`,
+      button: 'Pick task',
+      rows: candidates.slice(0, 10).map((c, i) => ({
+        id: `pick:${i + 1}`,
+        title: c.name.slice(0, 24),
+        description: [c.floor ? (`${c.floor}`) : 'Site-wide', c.unit].filter(Boolean).join(' · '),
+      })),
+    }, meta)
+    return true   // left a task pick open
+  }
+
+  // confirm (names the site so the sender can catch a mis-attribution).
+  await send(ctx.supabase, ctx.from, { kind: 'text', body: buildConfirm({
+    site: projectName,
+    progress: out.progress, problems: out.problems, todos: out.todos,
+    parked: out.parked.length, pendingPick: 0, ownerLabel: 'you',
+    projectId, appBase: APP_BASE,
+  }) }, meta)
+  return false
+}
+
+/** Route ONE project's items → write + return its outcome (no send; the multi confirm composes). */
+async function routeGroup(ctx: SiteopsCtx, projectId: string, items: SiteItem[], narrationId: string | null): Promise<RouteOutcome> {
+  const { data: taskRows } = await ctx.supabase.from('site_tasks').select(TASK_COLS).eq('project_id', projectId)
+  const tasks = (taskRows ?? []) as SiteTaskRow[]
+  const oc = await ownerCtx(ctx.supabase, ctx.orgId, projectId)
+  const rc: RouteCtx = { supabase: ctx.supabase, orgId: ctx.orgId, projectId, byLabel: ctx.from, ...oc, narrationId, now: new Date() }
+  return await routeItems(rc, tasks, items)
+}
+
+/**
+ * MULTI-PROJECT narration — file each item against its OWN site, then confirm grouped by project.
+ * Mirrors the transaction agent's multi-project handling (per-item project, one grouped receipt).
+ * Capture-first: every confidently-sited item is written immediately; the ONE follow-up we ask is
+ * the project pick for leftover items whose site couldn't be determined (the mis-file guard the
+ * user called out — never silently attach an unprojected item to the first site).
+ *
+ * Task-level floor disambiguation is NOT chained across sites here (that would stack picks): a
+ * task-ambiguous progress item parks (surfaced in the confirm, recoverable from the stored
+ * narration). The single-project path keeps its task pick — only the multi path trades it away.
+ */
+async function runMulti(ctx: SiteopsCtx, items: SiteItem[], plan: ItemPlan, projects: ProjectRef[], narrationId: string | null): Promise<void> {
+  const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
+  // The narration spans several sites, so the audit row carries no single project_id.
+  await ctx.supabase.from('site_narrations').update({ project_id: null, decomposed: items, resolved_project_via: 'multi' }).eq('id', narrationId)
+
+  // Group items by resolved project, preserving first-appearance order (carry-forward order).
+  const groups = new Map<string, { project: ProjectRef; items: SiteItem[] }>()
+  for (let i = 0; i < items.length; i++) {
+    const pid = plan.assignment[i]
+    if (!pid) continue
+    const project = plan.projectsById.get(pid)
+    if (!project) continue
+    const g = groups.get(pid) ?? { project, items: [] }
+    g.items.push(items[i])
+    groups.set(pid, g)
+  }
+
+  // File each group (capture-first). ambiguous progress folds into the parked count (surfaced).
+  const sections: ConfirmSection[] = []
+  for (const { project, items: gItems } of groups.values()) {
+    const out = await routeGroup(ctx, project.id, gItems, narrationId)
+    sections.push({
+      projectName: project.name, projectId: project.id,
+      progress: out.progress, problems: out.problems, todos: out.todos,
+      parked: out.parked.length + out.ambiguous.length,
+    })
+  }
+
+  const pendingItems = plan.pendingIdxs.map((i) => items[i])
+  if (pendingItems.length) {
+    // Leftover items (ambiguous mention, or none-named-before-them) → ONE project pick, reusing the
+    // AWAIT_PROJECT mechanism. The reply resumes in answerSiteops (siteops_project) → finishRoute.
+    const candidates = projects.map((p) => ({ id: p.id, name: p.name }))
+    await openConversation(ctx.supabase, {
+      orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
+      pendingQuestion: 'which project?',
+      slots: { kind: 'siteops_project', items: pendingItems, candidates, narration_id: narrationId },
+      lastMessageId: ctx.wamid,
+    })
+    const confirm = buildMultiConfirm(sections, { appBase: APP_BASE })
+    const texts = pendingItems.map((it) => `"${it.text}"`).join(', ')
+    const body = sections.length
+      ? `${confirm}\n\nOne more — which project for ${texts}?`
+      : `Which project for ${texts}?`
+    await send(ctx.supabase, ctx.from, {
+      kind: 'list', body, button: 'Pick project',
+      rows: candidates.slice(0, 10).map((c, i) => ({ id: `pick:${i + 1}`, title: c.name.slice(0, 24) })),
+    }, meta)
+    return
+  }
+
+  // No leftovers — send the one grouped, per-project confirmation.
+  await send(ctx.supabase, ctx.from, { kind: 'text', body: buildMultiConfirm(sections, { appBase: APP_BASE }) }, meta)
+}
+
+/** Resume a pending SITEOPS follow-up — a project pick OR a task disambiguation. */
+export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoRow): Promise<void> {
+  const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const slots = (convo.slots_so_far ?? {}) as any
+
+  // ── B3 same-cause collision → the supervisor named the site for the held item ──
+  if (slots.kind === 'siteops_batch_collision') {
+    const cands = (slots.candidates ?? []) as { id: string; kind: 'issue' | 'todo'; orgId: string; projectName: string; title: string; cause: string | null }[]
+    const t = text.trim().toLowerCase()
+    const m = text.match(/(\d+)/)
+    const idx = m ? parseInt(m[1], 10) - 1
+      : cands.findIndex((c) => { const n = c.projectName.toLowerCase(); return n === t || (n.includes(t) && t.length >= 3) || (t.includes(n.split(/\s+/)[0]) && n.length >= 3) })
+    const chosen = idx >= 0 && idx < cands.length ? cands[idx] : null
+    if (!chosen) {
+      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Which site — reply with the number, or the site name.` }, meta)
+      return
+    }
+    const now = new Date()
+    const cadenceMap = await loadCadenceMap(ctx.supabase, ctx.orgId)
+    const actorId = await senderUserId(ctx)
+    const item: BatchItem = { kind: chosen.kind, id: chosen.id, orgId: chosen.orgId, projectId: null, projectName: chosen.projectName, title: chosen.title, taskName: null, cause: chosen.cause }
+    const verdict = await applyBatchResolution(ctx, item, slots.status ?? 'still_open', slots.piece_text ?? text, cadenceMap, actorId, now)
+    const batch = await getOpenBatch(ctx.supabase, ctx.orgId, ctx.from)
+    if (batch) await dropBatchItems(ctx.supabase, batch, [chosen.id])
+    await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site update' })
+    await send(ctx.supabase, ctx.from, { kind: 'text', body: `${readbackPart(item, verdict)} — ${chosen.projectName}` }, meta)
+    return
+  }
+
+  // ── project pick → route the STORED decomposition against the chosen project ──
+  if (slots.kind === 'siteops_project') {
+    const candidates = (slots.candidates ?? []) as { id: string; name: string }[]
+    const t = text.trim().toLowerCase()
+    const m = text.match(/(\d+)/)
+    const idx = m ? parseInt(m[1], 10) - 1
+      : candidates.findIndex((c) => { const n = c.name.toLowerCase(); return n === t || (n.includes(t) && t.length >= 3) || (t.includes(n) && n.length >= 3) })
+    const chosen = idx >= 0 && idx < candidates.length ? candidates[idx] : null
+    if (!chosen) {
+      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Reply with the project number, or its name.` }, meta)
+      return
+    }
+    if (slots.narration_id) {
+      await ctx.supabase.from('site_narrations').update({ project_id: chosen.id, resolved_project_via: 'selected' }).eq('id', slots.narration_id)
+    }
+    const awaiting = await finishRoute(ctx, chosen.id, chosen.name, (slots.items ?? []) as SiteItem[], slots.narration_id ?? null)
+    // finishRoute reuses the OPEN convo when it opens a task pick; otherwise we're done.
+    if (!awaiting) await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site update' })
+    return
+  }
+
+  if (slots.kind !== 'siteops_disambig') {
+    await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site note' })
+    await send(ctx.supabase, ctx.from, { kind: 'text', body: 'Okay.' }, meta)
+    return
+  }
+  const candidates = (slots.candidates ?? []) as { task_id: string; name: string; floor: string | null; unit: string | null }[]
+  const m = text.match(/(\d+)/)
+  const pickIdx = m ? parseInt(m[1], 10) - 1 : candidates.findIndex((c) => c.name.toLowerCase() === text.trim().toLowerCase())
+  const chosen = pickIdx >= 0 ? candidates[pickIdx] : null
+  if (!chosen) {
+    await send(ctx.supabase, ctx.from, { kind: 'text', body: `Reply with the number of the task.` }, meta)
+    return
+  }
+
+  const { data: taskRows } = await ctx.supabase.from('site_tasks').select(TASK_COLS).eq('task_id', chosen.task_id)
+  const task = (taskRows ?? [])[0] as SiteTaskRow | undefined
+  const oc = await ownerCtx(ctx.supabase, ctx.orgId, slots.project_id)
+  const rc: RouteCtx = { supabase: ctx.supabase, orgId: ctx.orgId, projectId: slots.project_id, byLabel: ctx.from, ...oc, narrationId: slots.narration_id ?? null, now: new Date() }
+
+  let progress: ProgressResult[] = []
+  if (task) progress = [await applyProgress(rc, task, slots.item)]
+  await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site update' })
+  await send(ctx.supabase, ctx.from, {
+    kind: 'text',
+    body: buildConfirm({ site: slots.project_name ?? null, progress, problems: [], todos: [], parked: 0, pendingPick: 0, ownerLabel: 'you', projectId: slots.project_id, appBase: APP_BASE }),
+  }, meta)
+}

@@ -142,10 +142,44 @@ export function planFanOut(
 export interface EnrichReport { calls: number; tradesEnriched: number; instances: number; qcRows: number }
 
 /**
+ * Write one batch of (phase,trade) enrichments with replace discipline, scoped to the tasks
+ * the enrich map covers: replace those tasks' QC, then set their descriptions. QC is written
+ * BEFORE the description so a description-update realtime event always arrives after its QC is
+ * already in the DB. Delete-then-insert is the clean replace — no duplicate, no orphan, no
+ * second critical (the site_task_qc_one_critical partial unique index is the hard backstop on
+ * the insert). Re-runnable; never touches structure or source='manual'.
+ */
+async function writeEnrichment(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- browser or service-role client
+  supabase: any, projectId: string, orgId: string,
+  tasks: TaskRow[], enrich: Map<string, TradeEnrichment>,
+): Promise<{ instances: number; qcRows: number }> {
+  const { qcRows, enrichedTaskIds, descByKey } = planFanOut(tasks, orgId, enrich)
+  if (enrichedTaskIds.length) {
+    const { error } = await supabase.from('site_task_qc').delete().in('task_id', enrichedTaskIds)
+    if (error) throw new Error(`replace QC (delete): ${error.message}`)
+  }
+  if (qcRows.length) {
+    const { error } = await supabase.from('site_task_qc').insert(qcRows)
+    if (error) throw new Error(`insert QC: ${error.message}`)
+  }
+  // descriptions: one update per (phase,trade), not per instance
+  for (const [key, description] of descByKey) {
+    const [phase, trade] = key.split('::')
+    const { error } = await supabase.from('site_tasks').update({ description })
+      .eq('project_id', projectId).eq('phase', phase).eq('trade', trade).eq('source', 'generated')
+    if (error) throw new Error(`set description for ${key}: ${error.message}`)
+  }
+  return { instances: enrichedTaskIds.length, qcRows: qcRows.length }
+}
+
+/**
  * Enrich a project's generated tasks. One LLM call per phase (with at least one task),
- * validated + retried once on a contract violation; then fan-out write with replace
- * discipline (per task: overwrite description, delete-and-replace its 3 QC rows). Re-runnable
- * — never touches task structure, only description + QC. source='manual' tasks are not touched.
+ * validated + retried once on a contract violation; each phase's result is WRITTEN immediately
+ * (replace discipline) before moving to the next — so enriched rows land in phase-sized waves
+ * and a live task view fills group-by-group as enrichment runs, rather than all at once at the
+ * end. Re-runnable — never touches task structure, only description + QC. source='manual'
+ * tasks are not touched.
  */
 export async function enrichProject(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- browser or service-role client
@@ -172,9 +206,13 @@ export async function enrichProject(
     present.get(t.phase)!.add(t.trade)
   }
 
-  // one call per phase (sequence order), enriching its distinct trades
-  const enrich = new Map<string, TradeEnrichment>()
+  // one call per phase (sequence order), enriching its distinct trades — then write that
+  // phase immediately so enriched rows arrive in phase-sized waves (the task view fills
+  // group-by-group live via realtime/poll) rather than all at once after every phase.
   let calls = 0
+  let tradesEnriched = 0
+  let instances = 0
+  let qcTotal = 0
   for (const phase of sequence.phases) {
     const set = present.get(phase.key)
     if (!set || set.size === 0) continue
@@ -191,29 +229,14 @@ export async function enrichProject(
       else lastErr = err
     }
     if (!parsed) throw new Error(`phase "${phase.key}" enrichment invalid after retry: ${lastErr}`)
-    for (const e of parsed) enrich.set(`${phase.key}::${e.trade}`, e)
+
+    const phaseEnrich = new Map<string, TradeEnrichment>()
+    for (const e of parsed) phaseEnrich.set(`${phase.key}::${e.trade}`, e)
+    const w = await writeEnrichment(supabase, projectId, project.org_id, tasks as TaskRow[], phaseEnrich)
+    tradesEnriched += phaseEnrich.size
+    instances += w.instances
+    qcTotal += w.qcRows
   }
 
-  const { qcRows, enrichedTaskIds, descByKey } = planFanOut(tasks as TaskRow[], project.org_id, enrich)
-
-  // WRITE (replace discipline): replace QC for the enriched tasks, then set descriptions.
-  // Delete-then-insert is the clean replace — no duplicate, no orphan, no second critical
-  // (the site_task_qc_one_critical partial unique index is the hard backstop on the insert).
-  if (enrichedTaskIds.length) {
-    const { error } = await supabase.from('site_task_qc').delete().in('task_id', enrichedTaskIds)
-    if (error) throw new Error(`replace QC (delete): ${error.message}`)
-  }
-  if (qcRows.length) {
-    const { error } = await supabase.from('site_task_qc').insert(qcRows)
-    if (error) throw new Error(`insert QC: ${error.message}`)
-  }
-  // descriptions: one update per (phase,trade), not per instance
-  for (const [key, description] of descByKey) {
-    const [phase, trade] = key.split('::')
-    const { error } = await supabase.from('site_tasks').update({ description })
-      .eq('project_id', projectId).eq('phase', phase).eq('trade', trade).eq('source', 'generated')
-    if (error) throw new Error(`set description for ${key}: ${error.message}`)
-  }
-
-  return { calls, tradesEnriched: enrich.size, instances: enrichedTaskIds.length, qcRows: qcRows.length }
+  return { calls, tradesEnriched, instances, qcRows: qcTotal }
 }

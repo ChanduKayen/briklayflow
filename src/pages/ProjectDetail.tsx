@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import { UserPicker, useOrgMembers, MemberAvatar } from '../components/siteOps/UserPicker';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { usePeek } from '../context/PeekContext';
@@ -403,6 +404,8 @@ export default function ProjectDetail({ session }: { session: Session }) {
   const [editLoc, setEditLoc] = useState('');
   const [editDate, setEditDate] = useState('');
   const [editStatus, setEditStatus] = useState('Active');
+  const [editSupervisor, setEditSupervisor] = useState<string | null>(null);
+  const [supervisorPick, setSupervisorPick] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => { const t = setTimeout(() => setMounted(true), 40); return () => clearTimeout(t); }, []);
@@ -418,6 +421,9 @@ export default function ProjectDetail({ session }: { session: Session }) {
     },
     enabled: !!projectId,
   });
+
+  const { data: members = [] } = useOrgMembers(project?.org_id as string | undefined);
+  const supervisorName = (id: string | null) => (id ? (members.find((m) => m.id === id)?.name ?? 'Assigned') : null);
 
   const { data: workOrders = [] } = useQuery({
     queryKey: ['project_wos_v2', projectId],
@@ -560,7 +566,7 @@ export default function ProjectDetail({ session }: { session: Session }) {
               Transaction
             </button>
             {canManage && (
-              <button onClick={() => { setEditName(project.name); setEditLoc(project.site_location); setEditDate(project.start_date?.split('T')[0] ?? ''); setEditStatus(project.status); setShowEditSheet(true); }}
+              <button onClick={() => { setEditName(project.name); setEditLoc(project.site_location); setEditDate(project.start_date?.split('T')[0] ?? ''); setEditStatus(project.status); setEditSupervisor(project.supervisor_id ?? null); setShowEditSheet(true); }}
                 style={{ width: 38, height: 38, borderRadius: 99, background: 'rgba(0,0,0,0.05)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(0,0,0,0.45)', transition: 'all 150ms' }}
                 onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,0,0,0.08)'; (e.currentTarget as HTMLButtonElement).style.color = '#0b1c30' }}
                 onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,0,0,0.05)'; (e.currentTarget as HTMLButtonElement).style.color = 'rgba(0,0,0,0.45)' }}>
@@ -624,13 +630,15 @@ export default function ProjectDetail({ session }: { session: Session }) {
 
       {/* ── Nav tiles ───────────────────────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10, marginBottom: 24 }}>
+        <NavTile href={`/projects/${projectId}/tasks`} icon="checklist" label="Task Manager" color="#C8603A" />
         <NavTile href={`/projects/${projectId}/transactions`} icon="swap_horiz" label="Transactions" count={uniqueTxns.length} />
         <NavTile href={`/projects/${projectId}/work-orders`} icon="assignment" label="Contracts" count={workOrders.length} />
         <NavTile href={`/projects/${projectId}/purchase-orders`} icon="shopping_bag" label="Purchase Orders" count={purchaseOrders.length} />
         <NavTile href={`/projects/${projectId}/inventory`} icon="inventory_2" label="Inventory" color="#7c3aed" />
         <NavTile href={`/projects/${projectId}/boqs`} icon="format_list_numbered" label="BOQs" color="#2563eb" />
         <NavTile href={`/projects/${projectId}/inward`} icon="local_shipping" label="Inward Register" color="#059669" />
-        <NavTile href={`/projects/${projectId}/tasks`} icon="construction" label="Tasks" color="#C8603A" />
+        <NavTile href={`/projects/${projectId}/issues?view=issues`} icon="warning" label="Issues" color="#C8603A" />
+        <NavTile href={`/projects/${projectId}/issues?view=todos`} icon="task_alt" label="To-dos" color="#5E8157" />
       </div>
 
       {/* ── Recent activity ─────────────────────────────────────────────── */}
@@ -725,12 +733,22 @@ export default function ProjectDetail({ session }: { session: Session }) {
                   </select>
                 </div>
               </div>
+              {/* Supervisor — an app user; owner resolution prefers them over the principal */}
+              <div>
+                <label style={{ display: 'block', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(0,0,0,0.35)', marginBottom: 6 }}>Supervisor</label>
+                <button type="button" onClick={() => setSupervisorPick(true)}
+                  style={{ width: '100%', height: 44, padding: '0 12px', borderRadius: 12, border: '1.5px solid rgba(0,0,0,0.10)', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, fontFamily: 'inherit' }}>
+                  {editSupervisor ? <MemberAvatar name={supervisorName(editSupervisor)} size={24} /> : <span style={{ width: 24, height: 24, borderRadius: '50%', border: '1.5px dashed rgba(0,0,0,0.30)' }} />}
+                  <span style={{ flex: 1, textAlign: 'left', fontSize: 14, color: editSupervisor ? '#0b1c30' : 'rgba(0,0,0,0.45)' }}>{editSupervisor ? supervisorName(editSupervisor) : 'No supervisor — tasks default to principal'}</span>
+                  <span style={{ fontSize: 12, color: '#C8603A', fontWeight: 600 }}>Change</span>
+                </button>
+              </div>
               <div style={{ display: 'flex', gap: 10, paddingTop: 4 }}>
                 <button onClick={() => setShowEditSheet(false)}
                   style={{ flex: '0 0 auto', height: 46, padding: '0 18px', borderRadius: 12, border: '1.5px solid rgba(0,0,0,0.10)', background: 'transparent', color: 'rgba(0,0,0,0.50)', cursor: 'pointer', fontSize: 14, fontFamily: 'inherit' }}>
                   Cancel
                 </button>
-                <button onClick={() => updateProject.mutate({ name: editName, site_location: editLoc, start_date: editDate, status: editStatus })} disabled={updateProject.isPending}
+                <button onClick={() => updateProject.mutate({ name: editName, site_location: editLoc, start_date: editDate, status: editStatus, supervisor_id: editSupervisor })} disabled={updateProject.isPending}
                   style={{ flex: 1, height: 46, borderRadius: 12, border: 'none', background: '#0b1c30', color: '#fff', cursor: 'pointer', fontSize: 14, fontWeight: 600, fontFamily: 'inherit', opacity: updateProject.isPending ? 0.5 : 1 }}>
                   {updateProject.isPending ? 'Saving…' : 'Save Changes'}
                 </button>
@@ -738,6 +756,11 @@ export default function ProjectDetail({ session }: { session: Session }) {
             </div>
           </div>
         </div>
+      )}
+
+      {supervisorPick && (
+        <UserPicker orgId={(project?.org_id as string) ?? ''} currentId={editSupervisor} title="Assign supervisor"
+          onPick={(id) => { setEditSupervisor(id); setSupervisorPick(false); }} onClose={() => setSupervisorPick(false)} />
       )}
 
       {/* ── Quick transaction drawer ────────────────────────────────────── */}

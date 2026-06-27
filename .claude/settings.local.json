@@ -63,7 +63,10 @@
       "Bash(git commit *)",
       "Bash(git --no-pager log --oneline -1 origin/main)",
       "Bash(npx eslint *)",
-      "Bash(sort -t_ -k1.1,1.8)"
+      "Bash(sort -t_ -k1.1,1.8)",
+      "Bash(NODE_OPTIONS=--max-old-space-size=3072 npx tsc -b)",
+      "Bash(echo \"EXIT: $?\")",
+      "Read(//tmp/**)"
     ]
   }
 }

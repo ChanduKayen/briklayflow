@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase'
 import { useUserProfile } from '../App'
 import { useQueryClient } from '@tanstack/react-query'
 import { fmtProjectId } from '../lib/projectId'
+import ConstructionConfig from './siteOps/ConstructionConfig'
 
 const PROJECT_TYPES = [
   { label: 'Residential', icon: '🏠' },
@@ -47,7 +48,7 @@ export default function NewProjectWizard({ session }: { session: Session }) {
   const qc = useQueryClient()
   const { data: profile } = useUserProfile(session.user.id)
 
-  const [step, setStep] = useState(0) // 0=name, 1=details, 2=celebrate
+  const [step, setStep] = useState(0) // 0=name, 1=details, 2=construction, 3=celebrate
   const [name, setName] = useState('')
   const [projectId, setProjectId] = useState('')
   const [projectCode, setProjectCode] = useState('')
@@ -118,17 +119,18 @@ export default function NewProjectWizard({ session }: { session: Session }) {
     }
   }
 
-  // Auto-navigate after celebration
+  // Auto-navigate after celebration — land on the Task Manager with the first-arrival cascade.
   useEffect(() => {
-    if (step === 2 && createdProjectId) {
-      const t = setTimeout(() => navigate(`/projects/${createdProjectId}`), 2200)
+    if (step === 3 && createdProjectId) {
+      const t = setTimeout(() => navigate(`/projects/${createdProjectId}/tasks`, { state: { justCreated: true } }), 2200)
       return () => clearTimeout(t)
     }
-  }, [step, createdProjectId])
+  }, [step, createdProjectId, navigate])
 
   const steps = [
     { label: 'Name', pct: 0 },
-    { label: 'Details', pct: 50 },
+    { label: 'Details', pct: 33 },
+    { label: 'Build', pct: 66 },
     { label: 'Done', pct: 100 },
   ]
 
@@ -184,7 +186,7 @@ export default function NewProjectWizard({ session }: { session: Session }) {
       </div>
 
       {/* Progress */}
-      {step < 2 && (
+      {step < 3 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 40 }}>
           {steps.map((s, i) => (
             <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -350,7 +352,7 @@ export default function NewProjectWizard({ session }: { session: Session }) {
           <div style={{ padding: '48px 48px 40px' }}>
             <div style={{ marginBottom: 8 }}>
               <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#C8603A', opacity: 0.7 }}>
-                Step 2 of 2
+                Step 2 of 3
               </span>
             </div>
             <h1 style={{ fontSize: 28, fontWeight: 700, color: '#0b1c30', letterSpacing: '-0.02em', lineHeight: 1.2, marginBottom: 8, fontFamily: 'Manrope, sans-serif' }}>
@@ -449,8 +451,31 @@ export default function NewProjectWizard({ session }: { session: Session }) {
           </div>
         )}
 
-        {/* Step 2: Celebration */}
-        {step === 2 && (
+        {/* Step 2: Construction set-up — the meta that generates the task plan (skippable) */}
+        {step === 2 && createdProjectId && (
+          <div style={{ padding: '44px 48px 40px' }}>
+            <div style={{ marginBottom: 8 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#C8603A', opacity: 0.7 }}>
+                Step 3 of 3
+              </span>
+            </div>
+            <h1 style={{ fontSize: 28, fontWeight: 700, color: '#0b1c30', letterSpacing: '-0.02em', lineHeight: 1.2, marginBottom: 8, fontFamily: 'Manrope, sans-serif' }}>
+              Build the task plan
+            </h1>
+            <p style={{ fontSize: 14, color: 'rgba(0,0,0,0.45)', marginBottom: 28, lineHeight: 1.5 }}>
+              A few details about the build generate the full site task list automatically. You can skip and set this up later.
+            </p>
+            <ConstructionConfig
+              projectId={createdProjectId}
+              projectType={projType}
+              onComplete={goNext}
+              onSkip={goNext}
+            />
+          </div>
+        )}
+
+        {/* Step 3: Celebration */}
+        {step === 3 && (
           <div style={{ padding: '56px 48px', textAlign: 'center', position: 'relative', overflow: 'hidden' }}>
             {/* Particles */}
             <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
@@ -479,7 +504,7 @@ export default function NewProjectWizard({ session }: { session: Session }) {
               Project created!
             </h2>
             <p style={{ fontSize: 14, color: 'rgba(0,0,0,0.45)', marginBottom: 32 }}>
-              Taking you to <strong style={{ color: '#0b1c30' }}>{name}</strong> now…
+              Taking you to the <strong style={{ color: '#0b1c30' }}>{name}</strong> task plan…
             </p>
 
             <div style={{ display: 'flex', justifyContent: 'center' }}>
