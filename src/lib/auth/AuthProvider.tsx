@@ -156,7 +156,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        if (event === 'SIGNED_IN' && session?.user) {
+        // USER_UPDATED fires when the email gets confirmed (among other profile changes) — re-resolve
+        // so a freshly-confirmed user is picked up without a stale "confirm your email" state lingering.
+        if ((event === 'SIGNED_IN' || event === 'USER_UPDATED') && session?.user) {
           await runResolver(session.user.id, session.user.email ?? '')
         }
         if (event === 'SIGNED_OUT') {

@@ -9,7 +9,7 @@ import { supabase } from '../../lib/supabase';
 import type { RoughEntry } from '../../types';
 
 function genTxnId() {
-  return `TXN-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+  return `TXN-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
 }
 
 /**
@@ -145,8 +145,9 @@ export async function fileRoughEntrySplit(
     org_id: orgId,
   };
   const baseTs = Date.now();
+  const rnd = Math.random().toString(36).slice(2, 5).toUpperCase();
   const p_splits = splits.map((s, i) => ({
-    txn_id: `TXN-${new Date().getFullYear()}-${String(baseTs + i).slice(-6)}`,
+    txn_id: `TXN-${new Date().getFullYear()}-${String(baseTs + i).slice(-6)}-${rnd}`,
     total_amount: s.amount,
     project_id: s.projectId,
     order_type: null, order_ref: null, milestone_id: null,

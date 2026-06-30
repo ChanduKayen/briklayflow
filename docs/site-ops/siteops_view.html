@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SiteOps — engine-rendered</title>
+<!--
+  ENGINE-DRIVEN view. The approved design (siteops_final.html) carried a THROWAWAY mock engine
+  (a hand-typed ruleset + status/ordering helpers + hardcoded floors) used only to prototype
+  visuals. ALL of it is deleted here. This file is a PURE RENDERER of the ProjectVM the real engine
+  emits (src/lib/siteOps/engine -> supabase/functions/siteops-generate). It computes no status,
+  ordering, "why", freedom, or %. The single source of truth is the engine; the UI only draws.
+-->
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;450;500;600&display=swap');
+  :root{
+    --bg:#0e0e10; --bg2:#141417; --surf:#19191d; --surf2:#202026; --line:#2a2a31; --line2:#34343c;
+    --ink:#f4f3f1; --ink2:#a8a6a3; --mut:#6c6a68;
+    --accent:#e0734a; --accent-soft:rgba(224,115,74,.14);
+    --struct:#7b8794; --serv:#c98a52; --fin:#6b9bc4; --done:#5f8a5f;
+    --warn:#d4a23c; --dest:#e08a4a; --imp:#d8635a;
+    --ease:cubic-bezier(.22,.61,.36,1);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  body{background:radial-gradient(120% 70% at 50% 0%,#16161a 0%,var(--bg) 55%);color:var(--ink);
+    font-family:'Inter',sans-serif;font-size:15px;line-height:1.5;min-height:100vh;padding-bottom:80px;overflow-x:hidden}
+  .wrap{max-width:660px;margin:0 auto;padding:0 22px}
+
+  header{padding:28px 0 4px;display:flex;align-items:flex-start;justify-content:space-between}
+  .name{font-family:'Fraunces',serif;font-size:26px;font-weight:500;letter-spacing:-.01em;line-height:1.1}
+  .meta{font-size:13px;color:var(--mut);margin-top:5px}
+  .h-r{text-align:right}
+  .h-r .big{font-family:'Fraunces',serif;font-size:25px;font-weight:500;font-variant-numeric:tabular-nums}
+  .h-r .lbl{font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.12em;margin-top:1px}
+  .dryflag{display:inline-block;margin-left:8px;font-size:9px;font-weight:700;letter-spacing:.12em;color:var(--warn);
+    border:1px solid rgba(212,162,60,.4);border-radius:5px;padding:2px 6px;vertical-align:middle}
+
+  /* ===== TIMELINE (top, horizontal, scrub) ===== */
+  .tl{margin:26px 0 4px}
+  .tl-h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px}
+  .tl-h .l{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--ink2)}
+  .tl-h .r{font-size:12.5px;color:var(--mut)}.tl-h .r b{color:var(--ink);font-weight:500}
+  .vp{position:relative;height:128px;overflow:hidden;
+    -webkit-mask-image:linear-gradient(90deg,transparent,#000 14%,#000 86%,transparent);
+            mask-image:linear-gradient(90deg,transparent,#000 14%,#000 86%,transparent)}
+  .ground{position:absolute;left:0;right:0;bottom:30px;height:1px;
+    background:linear-gradient(90deg,transparent,var(--line2) 12%,var(--line2) 88%,transparent);z-index:0}
+  .ground::after{content:'';position:absolute;left:0;right:0;top:1px;height:8px;
+    background:linear-gradient(180deg,rgba(0,0,0,.18),transparent)}
+  .nowm{position:absolute;left:50%;top:8px;bottom:30px;width:0;border-left:1.5px dashed rgba(224,115,74,.4);transform:translateX(-50%);z-index:3}
+  .nowm::after{content:'TODAY';position:absolute;top:-3px;left:50%;transform:translateX(-50%);
+    font-size:7.5px;font-weight:700;letter-spacing:.16em;color:var(--accent)}
+  .track{position:absolute;left:0;bottom:30px;display:flex;align-items:flex-end;gap:14px;will-change:transform;transform:translateZ(0);z-index:2}
+  .stop{flex:0 0 auto;width:54px;display:flex;flex-direction:column;align-items:center;cursor:pointer;position:relative}
+  .bar{width:46px;background:transparent;border-radius:5px 5px 0 0;position:relative;
+    display:flex;flex-direction:column-reverse;overflow:hidden;will-change:transform;transform-origin:bottom center;
+    border:1px solid var(--line);border-bottom:none}
+  .bar .ghost{position:absolute;inset:0;border-radius:5px 5px 0 0;
+    background:repeating-linear-gradient(180deg,rgba(255,255,255,.022) 0 6px,transparent 6px 12px)}
+  .seg{width:100%;position:relative;z-index:1;transition:height 1s var(--ease)}
+  .seg.struct{background:linear-gradient(180deg,#8e9aa8,#5e6874)}
+  .seg.serv{background:linear-gradient(180deg,#d49a62,#a06a3a)}
+  .seg.fin{background:linear-gradient(180deg,#7eaad4,#4d77a0)}
+  .seg.done{background:linear-gradient(180deg,#6f9a6f,#4e734e)}
+  .stop .nm{position:absolute;bottom:-26px;left:50%;transform:translateX(-50%);font-size:10px;color:var(--mut);font-weight:500;white-space:nowrap}
+  .stop .pc{position:absolute;bottom:-38px;left:50%;transform:translateX(-50%);font-size:8.5px;color:var(--mut);font-variant-numeric:tabular-nums}
+
+  .leg{display:flex;gap:15px;margin-top:8px;font-size:10.5px;color:var(--mut);justify-content:center}
+  .leg span{display:flex;align-items:center;gap:6px}
+  .lw{width:9px;height:9px;border-radius:3px}
+  .lw.s{background:var(--struct)}.lw.v{background:var(--serv)}.lw.f{background:var(--fin)}.lw.d{background:var(--done)}
+  .hint{text-align:center;font-size:10.5px;color:var(--mut);margin-top:7px;font-style:italic;opacity:.8}
+
+  /* ===== FOCUSED FLOOR ===== */
+  .fd-h{display:flex;align-items:baseline;gap:11px;margin:26px 0 16px;padding:0 1px}
+  .fd-name{font-family:'Fraunces',serif;font-size:21px;font-weight:500;letter-spacing:-.01em}
+  .fd-blocks{font-size:12px;color:var(--mut);margin-left:auto}
+
+  .blk{background:var(--surf);border:1px solid var(--line);border-radius:14px;padding:17px 17px 8px;margin-bottom:14px}
+  .blk-h{display:flex;align-items:center;gap:9px;margin-bottom:15px}
+  .blk-n{font-size:14px;font-weight:600;letter-spacing:-.005em}
+  .blk-s{font-size:11.5px;color:var(--mut);margin-left:auto;font-variant-numeric:tabular-nums}
+  .lbars{display:flex;flex-direction:column;gap:7px;margin-bottom:4px}
+  .lbar{display:flex;align-items:center;gap:10px}
+  .lbar .n{width:62px;font-size:11px;color:var(--mut)}
+  .lbar .t{flex:1;height:3px;background:var(--line);border-radius:99px;overflow:hidden}
+  .lbar .f{height:100%;border-radius:99px;transition:width 1s var(--ease)}
+  .lbar .p{width:30px;text-align:right;font-size:10.5px;color:var(--mut);font-variant-numeric:tabular-nums}
+
+  .lsec{margin-top:18px}
+  .lsec-h{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  .ldot{width:6px;height:6px;border-radius:50%}
+  .lname{font-size:11.5px;font-weight:600;letter-spacing:.02em;color:var(--ink2)}
+  .lfree{font-size:10px;color:var(--fin);opacity:.8}
+  .lrule{flex:1;height:1px;background:linear-gradient(90deg,var(--line),transparent)}
+  .lcount{font-size:10.5px;color:var(--mut);font-variant-numeric:tabular-nums}
+
+  .task{display:flex;align-items:center;gap:12px;padding:9px 4px;border-radius:8px;transition:background .18s}
+  .task:hover{background:var(--surf2)}
+  .grip{width:11px;color:var(--mut);font-size:11px;opacity:0;cursor:grab;transition:.15s;flex-shrink:0}
+  .task:hover .grip{opacity:.4}
+  .node{width:18px;height:18px;flex-shrink:0;position:relative;display:flex;align-items:center;justify-content:center}
+  .ring{width:15px;height:15px;border-radius:50%;border:1.5px solid var(--line2);transition:.3s}
+  .t-available .ring{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .t-active .ring{border-color:var(--accent);background:conic-gradient(var(--accent) 0 60%,transparent 60%)}
+  .t-active .node::after{content:'';position:absolute;width:4px;height:4px;border-radius:50%;background:var(--accent);animation:tp 2s ease-in-out infinite}
+  @keyframes tp{0%,100%{opacity:.4;transform:scale(.8)}50%{opacity:1;transform:scale(1.1)}}
+  .t-done .ring{border-color:var(--done);background:var(--done)}
+  .t-done .node::after{content:'✓';position:absolute;color:#fff;font-size:9px;font-weight:700}
+  .t-blocked .ring{border-color:var(--line2);border-style:dashed;opacity:.6}
+  .tn{font-size:13.5px;font-weight:450;letter-spacing:-.005em}
+  .t-done .tn,.t-blocked .tn{color:var(--mut)}
+  .tg{flex:1}
+  .taf{font-size:11px;color:var(--mut)}.taf b{color:var(--ink2);font-weight:500}
+  .ttr{font-size:9.5px;color:var(--mut);letter-spacing:.03em}
+  .trv{font-size:8.5px;font-weight:700;letter-spacing:.06em;color:var(--warn);border:1px solid rgba(212,162,60,.4);border-radius:4px;padding:1px 4px;margin-left:6px}
+  .reveal{width:100%;padding:9px;margin:6px 0 4px;font-size:11.5px;color:var(--ink2);background:transparent;
+    border:1px solid var(--line);border-radius:8px;cursor:pointer;font-family:inherit;transition:.2s}
+  .reveal:hover{border-color:var(--line2);background:var(--surf2);color:var(--ink)}
+
+  .exp{max-height:0;overflow:hidden;transition:max-height .38s var(--ease);margin-left:30px}
+  .exp.open{max-height:280px}
+  .exp-in{padding:12px 14px;margin:3px 0 9px;background:var(--bg2);border:1px solid var(--line);border-radius:10px}
+  .enat{display:inline-block;font-size:10.5px;font-weight:600;padding:3px 10px;border-radius:99px;margin-bottom:10px}
+  .nat-imp{background:rgba(216,99,90,.13);color:#e89a93}.nat-dest{background:rgba(224,138,74,.13);color:#eab088}
+  .nat-strong{background:rgba(212,162,60,.13);color:#e0c578}.nat-free{background:rgba(107,155,196,.13);color:#9fc2e0}
+  .edep{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--ink2);padding:4px 0}
+  .edep .i{width:13px;font-size:11px}.edep .g{flex:1}.edep .r{font-size:9px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+  .efree{margin-top:9px;font-size:12px;color:#9fc2e0;line-height:1.5;padding:9px 11px;background:rgba(107,155,196,.06);border:1px solid rgba(107,155,196,.16);border-radius:8px}
+  .efree b{color:#bcd5ec}
+
+  .task.dragging{opacity:.35}
+  .task.d-ok{box-shadow:inset 0 1.5px 0 var(--done)}.task.d-warn{box-shadow:inset 0 1.5px 0 var(--warn)}
+  .task.d-dest{box-shadow:inset 0 1.5px 0 var(--dest)}.task.d-forbid{box-shadow:inset 0 1.5px 0 var(--imp)}
+  .verdict{position:fixed;z-index:80;pointer-events:none;font-size:12.5px;font-weight:500;padding:9px 14px;border-radius:11px;
+    opacity:0;transition:opacity .12s;max-width:250px;box-shadow:0 12px 32px -8px rgba(0,0,0,.7);backdrop-filter:blur(8px)}
+  .verdict.show{opacity:1}
+  .v-ok{background:rgba(40,58,40,.92);color:#a8d0a0;border:1px solid rgba(95,138,95,.5)}
+  .v-warn{background:rgba(58,50,32,.92);color:#e8cf7a;border:1px solid rgba(212,162,60,.5)}
+  .v-dest{background:rgba(58,44,32,.92);color:#f0b488;border:1px solid rgba(224,138,74,.5)}
+  .v-forbid{background:rgba(58,34,34,.92);color:#f0a0a0;border:1px solid rgba(216,99,90,.5)}
+  .vsub{font-weight:400;font-size:11px;opacity:.85;margin-top:2px}
+
+  .applybar{position:fixed;left:50%;bottom:24px;transform:translate(-50%,140%);z-index:90;
+    display:flex;align-items:center;gap:14px;padding:12px 14px 12px 18px;border-radius:14px;
+    background:rgba(30,30,34,.92);border:1px solid var(--line2);backdrop-filter:blur(14px);
+    box-shadow:0 16px 40px -10px rgba(0,0,0,.7);transition:transform .4s var(--ease);max-width:calc(100% - 32px)}
+  .applybar.show{transform:translate(-50%,0)}
+  .applybar .at{font-size:13px;color:var(--ink)}.applybar .at b{font-weight:600}
+  .applybar .au{font-size:11.5px;color:var(--mut);margin-top:1px}
+  .applybar .btns{display:flex;gap:7px;margin-left:6px}
+  .applybar button{font-family:inherit;font-size:12.5px;font-weight:600;padding:8px 14px;border-radius:9px;cursor:pointer;border:none}
+  .applybar .apply{background:var(--accent);color:#fff}
+  .applybar .apply:hover{background:#d06438}
+  .applybar .dismiss{background:transparent;color:var(--ink2);border:1px solid var(--line2)!important}
+  .applybar .dismiss:hover{color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div><div class="name" id="pname">—</div><div class="meta" id="pmeta"></div></div>
+    <div class="h-r"><div class="big" id="poverall">—</div><div class="lbl" id="plbl">Complete</div></div>
+  </header>
+
+  <div class="tl">
+    <div class="tl-h"><span class="l">Foundation → Finishing</span><span class="r" id="flbl"></span></div>
+    <div class="vp" id="vp"><div class="ground"></div><div class="nowm"></div><div class="track" id="track"></div></div>
+    <div class="leg">
+      <span><i class="lw s"></i>Structure</span><span><i class="lw v"></i>Services</span>
+      <span><i class="lw f"></i>Finishes</span><span><i class="lw d"></i>Done</span>
+    </div>
+    <div class="hint">the building rising, left to right · move across to focus a stage</div>
+  </div>
+
+  <div class="fd-h"><span class="fd-name" id="fdn"></span><span class="fd-blocks" id="fdb"></span></div>
+  <div id="blocks"></div>
+</div>
+<div class="verdict" id="verdict"></div>
+<div class="applybar" id="applybar">
+  <div><div class="at" id="apply-text"></div><div class="au" id="apply-sub"></div></div>
+  <div class="btns"><button class="apply" id="apply-yes">Apply to all</button><button class="dismiss" id="apply-no">Dismiss</button></div>
+</div>
+
+<!-- Offline-preview fallback: a real engine-emitted ProjectVM (NOT a mock engine — pure data). -->
+<script src="./demo-vm.js"></script>
+<script>
+/* =======================================================================
+   PURE RENDERER. No task-sequencing logic lives here. Everything about
+   status / ordering / why / freedom / % comes from the engine's ProjectVM.
+   ======================================================================= */
+
+/* ---- 1. obtain the ProjectVM (live engine endpoint, else offline preview) ---- */
+async function loadVM(){
+  const cfg = window.SITEOPS_CONFIG;   // {url, anonKey, token, projectId} → live dry-run fetch
+  if(cfg && cfg.url && cfg.projectId){
+    try{
+      const r = await fetch(`${cfg.url}/functions/v1/siteops-generate`,{
+        method:'POST',
+        headers:{'Content-Type':'application/json','apikey':cfg.anonKey||'','Authorization':`Bearer ${cfg.token||cfg.anonKey||''}`},
+        body:JSON.stringify({project_id:cfg.projectId})
+      });
+      const d = await r.json();
+      if(d && d.ok && d.vm) return d.vm;
+      console.error('siteops-generate:', d && d.error);
+    }catch(e){ console.error('VM fetch failed; using offline preview', e); }
+  }
+  return window.PROJECT_VM;   // engine-generated fallback embedded by demo-vm.js
+}
+
+/* ---- 2. view state (display-only; never edits the graph) ---- */
+let VM=null, FLOORS=[], focusIdx=0, locked=false, dragT=null;
+const STCLS={done:'t-done',active:'t-active',available:'t-available',blocked:'t-blocked'};
+const LCOL={structure:'var(--struct)',services:'var(--serv)',finishes:'var(--fin)'};
+const LAYERS=[['structure','Structure'],['services','Services'],['finishes','Finishes']];
+const LTAG={structure:'struct',services:'serv',finishes:'fin'};   // engine layer → timeline seg tag
+let RISE=[];   // per-floor slot heights, ascending = building rising (derived from floor count)
+
+const track=document.getElementById('track'),vp=document.getElementById('vp'),STOPW=54+14;
+let targetX=0,curX=0,hovering=false,rafOn=false,lastFocus=-1;
+const HALF=()=> vp.clientWidth/2;
+const centerOf=i=> i*STOPW+27;
+const xForFocus=i=> HALF()-centerOf(i);
+
+/* ---- 3. timeline (reads FloorVM.fills / .pc / .name straight from the engine) ---- */
+function buildTL(){track.innerHTML=FLOORS.map((f,i)=>{
+  const slot=RISE[i];
+  const builtH=slot*f.pc/100;
+  const fillsH=f.fills.map(x=>x[1]).reduce((a,b)=>a+b,0)||1;
+  const segs=f.fills.map(x=>`<div class="seg ${x[0]}" style="height:${(builtH*x[1]/fillsH).toFixed(1)}px"></div>`).join('');
+  return `<div class="stop" data-i="${i}">
+   <div class="bar" style="height:${slot}px"><div class="ghost"></div>${segs}</div>
+   <div class="nm">${f.name}</div><div class="pc">${f.pc}%</div></div>`}).join('');
+ track.querySelectorAll('.stop').forEach(s=>s.addEventListener('click',()=>{
+   locked=true; focusIdx=+s.dataset.i; targetX=xForFocus(focusIdx); startRAF();
+ }));}
+
+function paintStops(){
+ const center=HALF();
+ track.querySelectorAll('.stop').forEach((el,i)=>{
+   const x=curX+centerOf(i);
+   const d=Math.abs(x-center)/STOPW;
+   const k=Math.max(0,1-d);
+   const scale=1+0.13*k;
+   const op=Math.max(.24,1-0.4*d);
+   const bar=el.querySelector('.bar');
+   bar.style.transform=`scaleX(${(1+0.10*k).toFixed(3)}) scaleY(${scale.toFixed(3)})`;
+   bar.style.borderColor = k>0.5? 'rgba(224,115,74,'+(0.3+0.6*k).toFixed(2)+')':'';
+   bar.style.boxShadow = k>0.5? `0 10px 26px -10px rgba(224,115,74,${(0.5*k).toFixed(2)})`:'';
+   const nm=el.querySelector('.nm');
+   nm.style.color = k>0.5?'var(--accent)':'var(--mut)';
+   nm.style.fontWeight = k>0.5?'600':'500';
+   el.style.opacity=op.toFixed(3);
+ });
+}
+function nearestFocus(){const center=HALF();let best=0,bd=1e9;
+ for(let i=0;i<FLOORS.length;i++){const d=Math.abs(curX+centerOf(i)-center);if(d<bd){bd=d;best=i}}return best;}
+function loop(){
+ curX += (targetX-curX)*0.18;
+ if(Math.abs(targetX-curX)<0.4) curX=targetX;
+ track.style.transform=`translateX(${curX}px)`;
+ paintStops();
+ const nf=nearestFocus();
+ if(nf!==lastFocus){ lastFocus=nf; focusIdx=nf; renderDetail(); }
+ if(Math.abs(targetX-curX)>0.4 || hovering){ requestAnimationFrame(loop); } else { rafOn=false; }
+}
+function startRAF(){ if(!rafOn){rafOn=true; requestAnimationFrame(loop);} }
+
+/* ---- 4. task rows + blocks (read TaskVM.status / .label / .trade / .why / .freedomSet) ---- */
+function taskRow(t,bi){const st=t.status;
+ let af='';
+ if(st==='blocked'&&t.why&&t.why.length) af=`<span class="taf">after <b>${t.why[0].afterLabel}</b></span>`;
+ const rv=t.needsReview?'<span class="trv">REVIEW</span>':'';
+ const drag=st!=='done';
+ return `<div class="task ${STCLS[st]}" data-task="${t.taskType}" data-bi="${bi}" ${drag?'draggable="true"':''}>
+   <span class="grip">⠿</span><span class="node"><span class="ring"></span></span>
+   <span class="tn">${t.label}${rv}</span><span class="tg"></span>${af}<span class="ttr">${t.trade}</span></div>
+   <div class="exp" data-exp="${t.taskType}-${bi}"><div class="exp-in"></div></div>`}
+
+function blockState(bi){return FLOORS[focusIdx].blocks[bi];}
+function ensureOrder(b){ if(!b._order){ b._order=b.tasks.map(t=>t.taskType); b._byType={}; b.tasks.forEach(t=>b._byType[t.taskType]=t); } return b; }
+
+function renderBlocks(){const f=FLOORS[focusIdx];
+ document.getElementById('blocks').innerHTML=f.blocks.map((b,bi)=>{ ensureOrder(b);
+   const lp=b.layerPct;
+   let h=`<div class="blk"><div class="blk-h"><span class="blk-n">${b.name}</span><span class="blk-s">${b.stage.label} · ${b.overallPct}%</span></div>
+     <div class="lbars">${LAYERS.map(([k,n])=>{const p=lp[k];
+       return `<div class="lbar"><span class="n">${n}</span><span class="t"><span class="f" style="width:${p}%;background:${LCOL[k]}"></span></span><span class="p">${p}%</span></div>`}).join('')}</div>`;
+   for(const[lk,ln]of LAYERS){
+     const types=b._order.filter(tt=>b._byType[tt] && b._byType[tt].layer===lk);
+     if(!types.length)continue;
+     const ts=types.map(tt=>b._byType[tt]);
+     const done=ts.filter(t=>t.status==='done').length, free=lk!=='structure';
+     const coll=lk==='finishes'&&ts.every(t=>t.status==='blocked'),shown=coll?ts.slice(0,3):ts,hid=coll?ts.slice(3):[];
+     h+=`<div class="lsec"><div class="lsec-h"><span class="ldot" style="background:${LCOL[lk]}"></span>
+        <span class="lname">${ln}</span>${free?'<span class="lfree">parallel</span>':''}<span class="lrule"></span><span class="lcount">${done}/${ts.length}</span></div>
+        ${shown.map(t=>taskRow(t,bi)).join('')}`;
+     if(hid.length)h+=`<div id="h-${bi}-${lk}" style="display:none">${hid.map(t=>taskRow(t,bi)).join('')}</div>
+        <button class="reveal" onclick="document.getElementById('h-${bi}-${lk}').style.display='block';this.remove();wireTasks()">${hid.length} more finishes →</button>`;
+     h+=`</div>`}
+   return h+`</div>`}).join('');
+ wireTasks()}
+
+/* ---- 5. expand panel: renders the ENGINE's hard preds + why + freedom (no UI ruleset) ---- */
+function toggleExp(row){const tt=row.dataset.task,bi=+row.dataset.bi,exp=document.querySelector(`[data-exp="${tt}-${bi}"]`);
+ if(!exp.classList.toggle('open'))return;
+ const b=ensureOrder(blockState(bi)),t=b._byType[tt];
+ const preds=t.hardPreds||[];
+ const top=preds.reduce((a,p)=>{const r={IMPOSSIBLE:4,DESTRUCTIVE:3,STRONG_PREF:2,WEAK_PREF:1,INDIFFERENT:0};return (!a||r[p.nature]>r[a.nature])?p:a;},null);
+ const nat = !top?['Free to start','nat-free']
+   : top.nature==='IMPOSSIBLE'?['Required first','nat-imp']
+   : top.nature==='DESTRUCTIVE'?['Costly to rush','nat-dest']
+   : top.nature==='STRONG_PREF'?['Best in order','nat-strong']:['Free to start','nat-free'];
+ const unmet=new Set((t.why||[]).map(w=>w.afterLabel));
+ const deps=preds.length?preds.map(p=>{const d=!unmet.has(p.label);
+   return `<div class="edep"><span class="i">${d?'✓':'◷'}</span><span class="g">${p.label}</span><span class="r">${p.reason}</span></div>`}).join('')
+   :'<div class="edep" style="color:var(--mut)">Nothing comes before this</div>';
+ const fs=t.freedomSet;
+ exp.querySelector('.exp-in').innerHTML=`<span class="enat ${nat[1]}">${nat[0]}</span>${deps}${fs?`<div class="efree">Part of <b>${fs}</b> — any order alongside the rest.</div>`:''}`}
+
+/* ---- 6. drag legality: THIN renderer over engine-supplied hardPreds/hardDeps (no ruleset) ---- */
+function checkMove(T,TGT,b){ if(T===TGT)return null; ensureOrder(b);
+ const order=b._order, ti=order.indexOf(TGT), t=b._byType[T];
+ const rank={IMPOSSIBLE:4,DESTRUCTIVE:3,STRONG_PREF:2,WEAK_PREF:1,INDIFFERENT:0};let w=null;
+ // a hard predecessor that would sit AT/AFTER the target → violation
+ for(const p of (t.hardPreds||[])){const pi=order.indexOf(p.taskType);
+   if(pi>=0 && pi>=ti){ if(!w||rank[p.nature]>rank[w.nat]) w={pre:p.label,nat:p.nature,reason:p.reason}; }}
+ // a hard dependent that would sit BEFORE/AT the target → forward violation
+ if(!w)for(const d of (t.hardDeps||[])){const di=order.indexOf(d.taskType);
+   if(di>=0 && di<=ti){ if(!w||rank[d.nature]>rank[w.nat]) w={pre:d.label,nat:d.nature,reason:d.reason,fwd:1}; }}
+ if(!w){const fs=t.freedomSet;return{v:'ok',msg:fs?`Free — ${fs}`:'Fits here',cls:'ok'}}
+ const rt={structural:'structural',concealment:'would get covered',curing_time:'needs curing',logistics:'access / order',quality:'finish quality',policy:'policy'}[w.reason]||w.reason;
+ if(w.nat==='IMPOSSIBLE')return{v:'forbid',msg:`Needs ${w.pre} first`,sub:rt,cls:'forbid'};
+ if(w.nat==='DESTRUCTIVE')return{v:'dest',msg:`${w.pre} ${w.fwd?'depends on this':'must come first'}`,sub:`${rt} — costly to undo`,cls:'dest'};
+ return{v:'warn',msg:`Usually after ${w.pre}`,sub:rt,cls:'warn'}}
+
+function wireTasks(){const vd=document.getElementById('verdict');
+ document.querySelectorAll('.task').forEach(row=>{row.onclick=e=>{if(e.target.classList.contains('grip'))return;if(!dragT)toggleExp(row)}});
+ document.querySelectorAll('.task[draggable]').forEach(row=>{
+   row.ondragstart=e=>{dragT=row.dataset.task;row.classList.add('dragging');e.dataTransfer.effectAllowed='move'};
+   row.ondragend=()=>{row.classList.remove('dragging');document.querySelectorAll('.task').forEach(r=>r.classList.remove('d-ok','d-warn','d-dest','d-forbid'));vd.classList.remove('show');dragT=null}});
+ document.querySelectorAll('.task').forEach(row=>{
+   row.ondragover=e=>{if(!dragT||row.dataset.task===dragT)return;e.preventDefault();const res=checkMove(dragT,row.dataset.task,blockState(+row.dataset.bi));
+     document.querySelectorAll('.task').forEach(r=>r.classList.remove('d-ok','d-warn','d-dest','d-forbid'));
+     if(res){row.classList.add('d-'+res.cls);vd.className='verdict show v-'+res.cls;vd.innerHTML=`${res.msg}${res.sub?`<div class="vsub">${res.sub}</div>`:''}`;
+       vd.style.left=Math.min(e.clientX+14,innerWidth-260)+'px';vd.style.top=(e.clientY+16)+'px'}};
+   row.ondrop=e=>{e.preventDefault();if(!dragT)return;const tgt=row.dataset.task,bi=+row.dataset.bi,b=ensureOrder(blockState(bi));const res=checkMove(dragT,tgt,b);vd.classList.remove('show');
+     const dragT0=dragT;
+     const commit=()=>{ const from=b._order.indexOf(dragT0); if(from<0)return; b._order.splice(from,1);
+       let to=b._order.indexOf(tgt); if(to<0)to=b._order.length; b._order.splice(to,0,dragT0);
+       dragT=null; renderBlocks();
+       requestAnimationFrame(()=>{const moved=document.querySelector(`.task[data-task="${dragT0}"][data-bi="${bi}"]`); if(moved)flash(moved,'ok');});
+       maybeOfferApplyAll(bi, dragT0, tgt);
+     };
+     if(!res){commit();return;}
+     if(res.v==='forbid'){flash(row,'forbid');return;}
+     if(res.v==='dest'){ if(confirm(`${res.msg} — ${res.sub}.\nMove anyway?`)) commit(); return; }
+     commit(); // ok or warn → allow the DISPLAY move (graph is untouched; persisted as order_source='manual' in Step 5)
+   };
+ })}
+function flash(row,c){row.classList.add('d-'+c);setTimeout(()=>row.classList.remove('d-'+c),550)}
+
+/* ---- 7. apply-to-all-units (display order across the floor's other blocks) ---- */
+function orderPlaces(order,T,TGT){const o=order.slice();const f=o.indexOf(T);if(f<0)return o;o.splice(f,1);let t=o.indexOf(TGT);if(t<0)t=o.length;o.splice(t,0,T);return o;}
+function sameRelative(order,T,TGT){return order.indexOf(T)===order.indexOf(TGT)-1}
+let pendingApply=null;
+function maybeOfferApplyAll(srcBi,T,TGT){
+  const f=FLOORS[focusIdx];
+  if(f.blocks.length<2){hideApply();return;}
+  const targets=[];
+  f.blocks.forEach((b,bi)=>{ if(bi===srcBi)return; ensureOrder(b);
+    if(!b._byType[T]||!b._byType[TGT])return;        // unit lacks one of these tasks
+    if(sameRelative(b._order,T,TGT))return;          // already in this order
+    const res=checkMove(T,TGT,b);                    // ask the engine-data legality per block
+    if(res&&res.v==='forbid')return;                 // illegal here — don't offer
+    targets.push(bi);
+  });
+  if(!targets.length){hideApply();return;}
+  pendingApply={T,TGT,targets};
+  const lbl=(blockState(srcBi)._byType[T]||{}).label||T;
+  const names=targets.map(bi=>f.blocks[bi].name).join(', ');
+  document.getElementById('apply-text').innerHTML=`Move <b>${lbl}</b> earlier in the other ${targets.length>1?'units':'unit'} too?`;
+  document.getElementById('apply-sub').textContent=`Same order for ${names}`;
+  document.getElementById('applybar').classList.add('show');
+}
+function hideApply(){document.getElementById('applybar').classList.remove('show');pendingApply=null}
+document.getElementById('apply-yes').onclick=()=>{
+  if(!pendingApply)return;const f=FLOORS[focusIdx];const T=pendingApply.T,tg=pendingApply.TGT,tgs=pendingApply.targets.slice();
+  tgs.forEach(bi=>{const b=ensureOrder(f.blocks[bi]);b._order=orderPlaces(b._order,T,tg)});
+  hideApply();renderBlocks();
+  requestAnimationFrame(()=>document.querySelectorAll(`.task[data-task="${T}"]`).forEach(el=>flash(el,'ok')));
+};
+document.getElementById('apply-no').onclick=hideApply;
+
+/* ---- 8. detail panel + header ---- */
+function renderDetail(){
+ if(typeof hideApply==='function') hideApply();
+ const f=FLOORS[focusIdx];
+ document.getElementById('flbl').innerHTML=`<b>${f.name}</b> in focus`;
+ document.getElementById('fdn').textContent=f.name+' Floor';
+ document.getElementById('fdb').textContent=f.blocks.length>1?`${f.blocks.length} blocks`:'';
+ renderBlocks();
+}
+
+/* ---- 9. continuous scrub ---- */
+vp.addEventListener('mouseenter',()=>{ if(!locked){hovering=true; startRAF();} });
+vp.addEventListener('mousemove',e=>{
+ if(locked)return; hovering=true;
+ const r=vp.getBoundingClientRect();
+ const frac=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));
+ const fpos=frac*(FLOORS.length-1);
+ targetX=HALF()-centerOf(fpos); startRAF();
+});
+vp.addEventListener('mouseleave',()=>{ hovering=false; if(!locked){ targetX=xForFocus(nearestFocus()); startRAF(); } });
+vp.addEventListener('dblclick',()=>{ locked=false; hovering=true; startRAF(); });
+window.addEventListener('resize',()=>{ targetX=xForFocus(focusIdx); curX=targetX; track.style.transform=`translateX(${curX}px)`; paintStops(); });
+
+/* ---- 10. boot: load the VM, bind it, render ---- */
+function deriveRise(n){ // ascending slot heights as the building rises (44 → 120 over n floors)
+ if(n<=1)return[88]; const lo=44,hi=120,out=[]; for(let i=0;i<n;i++)out.push(Math.round(lo+(hi-lo)*i/(n-1))); return out;
+}
+function focusCurrentFloor(){ // first floor that isn't fully done = the natural focus
+ const i=FLOORS.findIndex(f=>f.pc<100); return i<0?Math.max(0,FLOORS.length-1):i;
+}
+loadVM().then(vm=>{
+ VM=vm; FLOORS=vm.floors;
+ RISE=deriveRise(FLOORS.length);
+ const totalTasks=FLOORS.reduce((s,f)=>s+f.blocks.reduce((a,b)=>a+b.tasks.length,0),0);
+ document.getElementById('pname').textContent=vm.name;
+ document.getElementById('pmeta').textContent=`${FLOORS.length} floors · ${totalTasks} tasks`;
+ document.getElementById('poverall').innerHTML=`${vm.overallPct}%${vm.dryRun?'<span class="dryflag">DRY RUN</span>':''}`;
+ focusIdx=focusCurrentFloor();
+ buildTL();
+ curX=targetX=xForFocus(focusIdx);
+ track.style.transform=`translateX(${curX}px)`;
+ paintStops(); renderDetail();
+});
+</script>
+</body>
+</html>

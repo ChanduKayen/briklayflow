@@ -336,12 +336,16 @@
     "hash": "14e12b6bdfab5b4a284529849554e2d0"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\components\\siteOps\\ItemsTable.tsx": {
-    "mtime": 1782541413.9486425,
-    "hash": "4138edfa361b9d9d1355a6ace370d39b"
+    "mtime": 1782548041.1828313,
+    "hash": "f81563c5bbe3473d7f6325ba98246284"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\components\\siteOps\\NarrationComposer.tsx": {
     "mtime": 1782473907.7212062,
     "hash": "06f306b6115cafed21677423835c1d2f"
+  },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\components\\siteOps\\TaskPicker.tsx": {
+    "mtime": 1782543205.9309692,
+    "hash": "bb641a819af5461b7dae883b788d4048"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\components\\siteOps\\UserPicker.tsx": {
     "mtime": 1782458669.6842842,
@@ -896,8 +900,8 @@
     "hash": "882dc62bdfabe325542bd49f3be3a217"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\_siteops_extract.ts": {
-    "mtime": 1782525841.6369884,
-    "hash": "179d5e7ae6346cf96afcfe4f7a01266c"
+    "mtime": 1782544815.1754036,
+    "hash": "b2c939cfcc9468bd1c54ab2044f623ba"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\_siteops_impact.ts": {
     "mtime": 1782524038.292088,
@@ -932,8 +936,8 @@
     "hash": "69dac265b02d2764e8650c5b8a8c5e0a"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\_agents\\siteops.ts": {
-    "mtime": 1782539533.071422,
-    "hash": "8a2ef44009b989bf02bed91b511eec3b"
+    "mtime": 1782544864.9557035,
+    "hash": "906e8c26bc3e07d9867c21c5637124ea"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\_agents\\transaction.ts": {
     "mtime": 1782204578.4652348,

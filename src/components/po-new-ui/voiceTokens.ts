@@ -28,7 +28,13 @@ export const V = {
   page:        '#FBFAF8',
   surface:     '#FFFFFF',
   field:       '#F4F2EE',
-  line:        '#E8E4DE',
+  // borders carry definition now (the old #E8E4DE was near-invisible); a real accent gives hierarchy.
+  line:        '#DED7CB',
+  lineStrong:  '#CFC6B6',
+  accent:      '#C2592F',
+  accentDeep:  '#A8451F',
+  accentSoft:  '#FBECE3',
+  accentLine:  '#EBC3AE',
 } as const;
 
 export const nums = { fontVariantNumeric: 'tabular-nums' } as const;

@@ -66,7 +66,11 @@
       "Bash(sort -t_ -k1.1,1.8)",
       "Bash(NODE_OPTIONS=--max-old-space-size=3072 npx tsc -b)",
       "Bash(echo \"EXIT: $?\")",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(echo \"--- exit \\(1 = no matches = PASS\\): $? ---\")",
+      "Bash(node_modules/.bin/eslint src/components/siteOps/ProjectSequence.tsx --format compact)",
+      "Bash(node_modules/.bin/tsc -p tsconfig.app.json --noEmit)",
+      "Bash(grep *)"
     ]
   }
 }

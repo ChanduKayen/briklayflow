@@ -582,10 +582,20 @@ export default function TeamAccess({ session }: { session: Session }) {
         const { error: waErr } = await supabase.from('wa_registered_numbers')
           .insert({ name: nm || email.trim(), phone_number: intlPhone(phone), role: roleLabel(role), is_active: true });
         if (waErr && !/duplicate|unique/i.test(waErr.message)) throw waErr;
+        // Notify the new teammate on WhatsApp via the existing welcome template (best-effort — the
+        // invite itself already succeeded; a failed send must not fail the invite).
+        try {
+          await sendWelcome(nm || email.trim(), digits(phone));
+          await supabase.from('wa_registered_numbers').update({ welcomed_at: new Date().toISOString() }).eq('phone_number', intlPhone(phone));
+        } catch { /* welcome is best-effort */ }
         return { link: inviteLinkFor(row.token), phone: digits(phone), mode: 'email' as const, name: nm };
       }
       const { error } = await supabase.rpc('wa_invite_number', { p_phone: intlPhone(phone), p_name: nm || null, p_role: roleLabel(role) });
       if (error) throw error;
+      try {
+        await sendWelcome(nm || 'there', digits(phone));
+        await supabase.from('wa_registered_numbers').update({ welcomed_at: new Date().toISOString() }).eq('phone_number', intlPhone(phone));
+      } catch { /* welcome is best-effort */ }
       return { phone: digits(phone), mode: 'wa' as const, name: nm };
     },
     onSuccess: (r) => { setResult(r); refreshInvites(); },

@@ -12,14 +12,16 @@ import { openConversation, closeConversation, type ConvoRow } from '../_conversa
 import { decompose, callLLM, safeParse, type SiteItem } from '../_siteops_extract.ts'
 import {
   routeItems, applyProgress, buildConfirm, buildMultiConfirm, parseWhen,
-  type RouteCtx, type RouteOutcome, type SiteTaskRow, type ProgressResult, type OrgMember,
-  type ConfirmSection,
+  type RouteCtx, type RouteOutcome, type SiteTaskRow, type OrgMember,
+  type ConfirmSection, type ProgressResult, type ProblemResult, type TodoResult,
 } from '../_siteops_route.ts'
 import { loadCadenceMap, type CadenceMap } from '../_siteops_timing.ts'
 import {
   getOpenBatch, dropBatchItems, matchPieceToBatch, interpretStatus,
   type OpenBatch, type BatchItem,
 } from '../_siteops_batch.ts'
+// The engine, bundled for Deno — used to materialise a project's full task set on first WhatsApp touch.
+import { buildProjectVM } from '../../_shared/siteops-engine.js'
 
 export type SiteopsCtx = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -30,7 +32,68 @@ export type SiteopsCtx = {
   lang: 'en' | 'te' | 'te-en' | 'hi'
 }
 
-const TASK_COLS = 'task_id, phase, trade, floor_label, unit_label, name, status, owner_id, owner_source'
+const TASK_COLS = 'task_id, phase, trade, floor_label, unit_label, name, status, node_key, task_type_id, owner_id, owner_source'
+
+/** Prefer engine rows (with node_key) over legacy flat rows and dedup by node_key — so the agent
+ *  matches/updates exactly the rows the UI's engine Sequence view reads, with no duplicate candidates
+ *  and no updates landing on a no-node_key row the UI ignores. Falls back to all rows for stack-less
+ *  projects that have no engine tasks. */
+function engineTasks(rows: SiteTaskRow[]): SiteTaskRow[] {
+  const engine = [...new Map(rows.filter((t) => t.node_key).map((t) => [t.node_key as string, t])).values()]
+  return engine.length > 0 ? engine : rows
+}
+
+/**
+ * Ensure a project's full engine task set exists as site_tasks rows, so a WhatsApp message can reach
+ * a task that was never opened in the UI (rows are otherwise lazily materialised only on drawer-open).
+ * Idempotent — inserts ONLY the node_keys that don't exist yet, mirroring the UI's materialise shape.
+ * Best-effort: a failure never blocks the message (matching falls back to whatever rows are present).
+ */
+async function materializeProjectTasks(ctx: SiteopsCtx, projectId: string): Promise<Set<string>> {
+  // Returns the project's CURRENT VM fold-id set (every node_key the UI overlay can render). The
+  // write path uses it for the `visibleInVM` check (Step-1 diagnostic / Step-3 guardrail).
+  const vmKeys = new Set<string>()
+  try {
+    let pr = await ctx.supabase.from('projects')
+      .select('org_id, name, construction_stack, has_common_areas, common_systems, suppressed_tasks').eq('project_id', projectId).maybeSingle()
+    if (pr.error) pr = await ctx.supabase.from('projects')
+      .select('org_id, name, construction_stack, has_common_areas').eq('project_id', projectId).maybeSingle()
+    const project = pr.data
+    const stack = project?.construction_stack
+    if (!stack) { console.log(`[siteops:materialize] project=${projectId} HAS NO construction_stack — cannot generate tasks`); return vmKeys }
+    const { data: existing } = await ctx.supabase.from('site_tasks').select('node_key, status').eq('project_id', projectId)
+    const completion = new Map<string, 'active' | 'done'>()
+    const seen = new Set<string>()
+    for (const r of (existing ?? [])) {
+      if (r.node_key) { seen.add(r.node_key); if (r.status === 'active' || r.status === 'done') completion.set(r.node_key, r.status) }
+    }
+    const vm = buildProjectVM(projectId, stack, completion, {
+      name: project?.name ?? projectId, dryRun: true,
+      hasCommonAreas: !!project?.has_common_areas, hasExternalWorks: !!project?.has_common_areas,
+      commonSystems: project?.common_systems ?? [], suppressedTasks: project?.suppressed_tasks ?? [],
+    })
+    const rows: Record<string, unknown>[] = []
+    for (const f of vm.floors) for (const b of f.blocks) for (const t of b.tasks) {
+      vmKeys.add(t.nodeKey)
+      if (seen.has(t.nodeKey)) continue
+      seen.add(t.nodeKey)
+      rows.push({
+        org_id: project.org_id, project_id: projectId, node_key: t.nodeKey, task_type_id: t.taskType,
+        name: t.label, trade: t.trade, phase: t.layer,
+        floor_label: f.name, unit_label: t.nodeKey.includes('/') ? (b.name === 'Whole floor' ? null : b.name) : null,
+        seq_no: t.seqNo, status: 'not_started', source: 'generated', placement_source: 'authored',
+      })
+    }
+    if (rows.length) {
+      const { error } = await ctx.supabase.from('site_tasks').insert(rows)
+      if (error) console.error('[siteops:materialize] insert FAILED:', error.message)
+    }
+    console.log(`[siteops:materialize] project=${projectId} existingRows=${(existing ?? []).length} vmNodeKeys=${vmKeys.size} inserted=${rows.length}`)
+  } catch (e) {
+    console.error('[siteops:materialize] ENGINE/BUILD ERROR:', (e as Error).message, (e as Error).stack)
+  }
+  return vmKeys
+}
 
 // Web app ORIGIN for the deep links in the confirm. Same env the transaction agent uses
 // (WA_APP_LINK); we take its origin and append the project route in buildConfirm.
@@ -38,6 +101,29 @@ const APP_BASE = (() => {
   const b = Deno.env.get('WA_APP_LINK') ?? 'https://briklayflow.vercel.app'
   try { return new URL(b).origin } catch { return 'https://briklayflow.vercel.app' }
 })()
+
+/**
+ * Send the site-update confirmation. For a SINGLE task update (no issues/to-dos), attach a tappable
+ * "View task" button that deep-links straight to THAT task in the Task Manager — the app opens the
+ * task's drawer focused (mirrors the Day Book "View →" focus). Anything richer (issues/to-dos/multi)
+ * keeps the plain text confirm with its section links.
+ */
+async function sendTaskConfirm(
+  ctx: SiteopsCtx,
+  meta: { org_id: string; wamid: string },
+  site: string | null,
+  projectId: string,
+  outc: { progress: ProgressResult[]; problems: ProblemResult[]; todos: TodoResult[]; parked: number },
+): Promise<void> {
+  const single = outc.progress.length === 1 && outc.problems.length === 0 && outc.todos.length === 0 ? outc.progress[0] : null
+  const base = { site, progress: outc.progress, problems: outc.problems, todos: outc.todos, parked: outc.parked, pendingPick: 0, ownerLabel: 'you', projectId, appBase: APP_BASE }
+  if (single?.nodeKey && APP_BASE) {
+    const url = `${APP_BASE}/projects/${projectId}/tasks?task=${encodeURIComponent(single.nodeKey)}`
+    await send(ctx.supabase, ctx.from, { kind: 'cta', body: buildConfirm({ ...base, ctaMode: true }), cta: { text: 'View task', url } }, meta)
+    return
+  }
+  await send(ctx.supabase, ctx.from, { kind: 'text', body: buildConfirm(base) }, meta)
+}
 
 async function findPrincipal(supabase: SiteopsCtx['supabase'], orgId: string): Promise<string | null> {
   const { data } = await supabase.from('user_profiles').select('id').eq('org_id', orgId).eq('role', 'principal').limit(1).maybeSingle()
@@ -77,6 +163,14 @@ async function senderUserId(ctx: SiteopsCtx): Promise<string | null> {
   const { data } = await ctx.supabase.from('wa_registered_numbers')
     .select('user_id').eq('phone_number', ctx.from).eq('is_active', true).limit(1).maybeSingle()
   return data?.user_id ?? null
+}
+/** The sender's display name (registered team member), stamped on the narration so the task feed
+ *  shows WHO sent each WhatsApp update — not a faceless "WhatsApp". Null when the number is unknown. */
+async function senderName(ctx: SiteopsCtx): Promise<string | null> {
+  const uid = await senderUserId(ctx)
+  if (!uid) return null
+  const { data } = await ctx.supabase.from('user_profiles').select('name').eq('id', uid).maybeSingle()
+  return data?.name ?? null
 }
 
 // Deeper per-message JUDGE — given the issue + the assignee's reply, decide whether it's
@@ -296,11 +390,13 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
   // B3 — an open chase batch for this sender? (sorted against AFTER we decompose.)
   const batch = await getOpenBatch(ctx.supabase, ctx.orgId, ctx.from)
 
-  // Capture-first: persist the raw narration immediately so nothing is ever lost.
-  const { data: nrow } = await ctx.supabase.from('site_narrations')
-    .insert({ org_id: ctx.orgId, raw_text: text, resolved_project_via: 'unresolved' })
-    .select('id').single()
-  const narrationId: string | null = nrow?.id ?? null
+  // Capture-first: persist the raw narration immediately so nothing is ever lost. Stamp the sender's
+  // name so the task feed shows who sent it; fall back without the column if the migration isn't applied
+  // yet (capture-first must never fail on a missing column).
+  const base = { org_id: ctx.orgId, raw_text: text, resolved_project_via: 'unresolved' }
+  let ins = await ctx.supabase.from('site_narrations').insert({ ...base, sender_name: await senderName(ctx) }).select('id').single()
+  if (ins.error) ins = await ctx.supabase.from('site_narrations').insert(base).select('id').single()
+  const narrationId: string | null = ins.data?.id ?? null
 
   // Roster for project resolution: hand the extractor the org's active project NAMES so it
   // returns the CANONICAL project (semantic match), mirroring the transaction agent. Then
@@ -383,10 +479,13 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
  */
 async function finishRoute(ctx: SiteopsCtx, projectId: string, projectName: string | null, items: SiteItem[], narrationId: string | null): Promise<boolean> {
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
+  const vmNodeKeys = await materializeProjectTasks(ctx, projectId)
   const { data: taskRows } = await ctx.supabase.from('site_tasks').select(TASK_COLS).eq('project_id', projectId)
-  const tasks = (taskRows ?? []) as SiteTaskRow[]
+  const rawRows = (taskRows ?? []) as SiteTaskRow[]
+  const tasks = engineTasks(rawRows)
+  console.log(`[siteops:dbg:load] project=${projectId} rawRows=${rawRows.length} engineRows=${rawRows.filter((t) => t.node_key).length} flatRows=${rawRows.filter((t) => !t.node_key).length} usedForMatch=${tasks.length} vmNodeKeys=${vmNodeKeys.size}`)
   const oc = await ownerCtx(ctx.supabase, ctx.orgId, projectId)
-  const rc: RouteCtx = { supabase: ctx.supabase, orgId: ctx.orgId, projectId, byLabel: ctx.from, ...oc, narrationId, now: new Date() }
+  const rc: RouteCtx = { supabase: ctx.supabase, orgId: ctx.orgId, projectId, byLabel: ctx.from, ...oc, narrationId, now: new Date(), vmNodeKeys }
 
   const out = await routeItems(rc, tasks, items)
 
@@ -394,9 +493,11 @@ async function finishRoute(ctx: SiteopsCtx, projectId: string, projectName: stri
   if (out.ambiguous.length) {
     const first = out.ambiguous[0]
     const extraParked = out.ambiguous.length - 1   // ask about the first; the rare extras park
+    // store node_key with each candidate (engine identity) so the resume writes the overlay-visible row.
     const candidates = first.candidates.map((t) => ({
-      task_id: t.task_id, name: t.name, floor: t.floor_label, unit: t.unit_label,
+      task_id: t.task_id, node_key: t.node_key ?? null, name: t.name, floor: t.floor_label, unit: t.unit_label,
     }))
+    const ask = first.question ?? `Which task is "${first.item.text}"?`   // the resolver's exact ask, naming the real choices
     const confirm = buildConfirm({
       site: projectName,
       progress: out.progress, problems: out.problems, todos: out.todos,
@@ -411,7 +512,7 @@ async function finishRoute(ctx: SiteopsCtx, projectId: string, projectName: stri
     })
     await send(ctx.supabase, ctx.from, {
       kind: 'list',
-      body: `${confirm}\n\nWhich one is "${first.item.text}"?`,
+      body: `${confirm}\n\n${ask}`,
       button: 'Pick task',
       rows: candidates.slice(0, 10).map((c, i) => ({
         id: `pick:${i + 1}`,
@@ -422,22 +523,23 @@ async function finishRoute(ctx: SiteopsCtx, projectId: string, projectName: stri
     return true   // left a task pick open
   }
 
-  // confirm (names the site so the sender can catch a mis-attribution).
-  await send(ctx.supabase, ctx.from, { kind: 'text', body: buildConfirm({
-    site: projectName,
-    progress: out.progress, problems: out.problems, todos: out.todos,
-    parked: out.parked.length, pendingPick: 0, ownerLabel: 'you',
-    projectId, appBase: APP_BASE,
-  }) }, meta)
+  // confirm (names the site so the sender can catch a mis-attribution). A single task update gets a
+  // tappable "View task" button straight to that task.
+  await sendTaskConfirm(ctx, meta, projectName, projectId, {
+    progress: out.progress, problems: out.problems, todos: out.todos, parked: out.parked.length,
+  })
   return false
 }
 
 /** Route ONE project's items → write + return its outcome (no send; the multi confirm composes). */
 async function routeGroup(ctx: SiteopsCtx, projectId: string, items: SiteItem[], narrationId: string | null): Promise<RouteOutcome> {
+  const vmNodeKeys = await materializeProjectTasks(ctx, projectId)
   const { data: taskRows } = await ctx.supabase.from('site_tasks').select(TASK_COLS).eq('project_id', projectId)
-  const tasks = (taskRows ?? []) as SiteTaskRow[]
+  const rawRows = (taskRows ?? []) as SiteTaskRow[]
+  const tasks = engineTasks(rawRows)
+  console.log(`[siteops:dbg:load] (multi) project=${projectId} rawRows=${rawRows.length} engineRows=${rawRows.filter((t) => t.node_key).length} flatRows=${rawRows.filter((t) => !t.node_key).length} usedForMatch=${tasks.length} vmNodeKeys=${vmNodeKeys.size}`)
   const oc = await ownerCtx(ctx.supabase, ctx.orgId, projectId)
-  const rc: RouteCtx = { supabase: ctx.supabase, orgId: ctx.orgId, projectId, byLabel: ctx.from, ...oc, narrationId, now: new Date() }
+  const rc: RouteCtx = { supabase: ctx.supabase, orgId: ctx.orgId, projectId, byLabel: ctx.from, ...oc, narrationId, now: new Date(), vmNodeKeys }
   return await routeItems(rc, tasks, items)
 }
 
@@ -507,6 +609,20 @@ async function runMulti(ctx: SiteopsCtx, items: SiteItem[], plan: ItemPlan, proj
   await send(ctx.supabase, ctx.from, { kind: 'text', body: buildMultiConfirm(sections, { appBase: APP_BASE }) }, meta)
 }
 
+// "answer-or-let-go" — given the question the assistant asked and the user's reply, judge (LLM,
+// language-agnostic, by MEANING) whether they're trying to ANSWER it or want to LET IT GO. Only
+// consulted AFTER a real pick fails to match, so an honest misroute never traps the user.
+async function judgePending(question: string, reply: string): Promise<'answer' | 'letgo'> {
+  try {
+    const sys = `You decide whether a user's WhatsApp reply is TRYING TO ANSWER a specific question the assistant asked, or wants to LET IT GO — i.e. they decline, dismiss it, say it isn't relevant, or change the subject. Replies may be English, Telugu, Hindi, or a code-mix; judge by MEANING, not keywords.
+Return ONLY JSON: {"answering": true|false}. true = an attempt to answer it (even vague / misspelled / partial); false = declining / not-for-this / off-topic.`
+    const user = `The assistant asked: "${question}"\nThe user replied: "${reply.slice(0, 300)}"\nAre they trying to answer that question?`
+    const parsed = safeParse(await callLLM(sys, user)) as { answering?: unknown } | null
+    if (!parsed || typeof parsed.answering !== 'boolean') return 'answer'   // unsure → keep helping (never wrongly drop a real answer)
+    return parsed.answering ? 'answer' : 'letgo'
+  } catch { return 'answer' }
+}
+
 /** Resume a pending SITEOPS follow-up — a project pick OR a task disambiguation. */
 export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoRow): Promise<void> {
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
@@ -522,7 +638,14 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
       : cands.findIndex((c) => { const n = c.projectName.toLowerCase(); return n === t || (n.includes(t) && t.length >= 3) || (t.includes(n.split(/\s+/)[0]) && n.length >= 3) })
     const chosen = idx >= 0 && idx < cands.length ? cands[idx] : null
     if (!chosen) {
-      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Which site — reply with the number, or the site name.` }, meta)
+      const sites = cands.map((c) => c.projectName).join(' or ')
+      if (await judgePending(`which site is "${slots.piece_text ?? 'this'}" — ${sites}?`, text) === 'letgo') {
+        // bail — the item stays in the batch and gets re-asked next cycle
+        await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site update' })
+        await send(ctx.supabase, ctx.from, { kind: 'text', body: `No problem — I'll check back on it next time.` }, meta)
+        return
+      }
+      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Which site — reply with the number or the site name, or *skip* to leave it.` }, meta)
       return
     }
     const now = new Date()
@@ -546,7 +669,13 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
       : candidates.findIndex((c) => { const n = c.name.toLowerCase(); return n === t || (n.includes(t) && t.length >= 3) || (t.includes(n) && n.length >= 3) })
     const chosen = idx >= 0 && idx < candidates.length ? candidates[idx] : null
     if (!chosen) {
-      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Reply with the project number, or its name.` }, meta)
+      // Not a project pick — judge whether they're answering or want out; never trap a misroute.
+      if (await judgePending('which project is this site note for?', text) === 'letgo') {
+        await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'note dropped' })
+        await send(ctx.supabase, ctx.from, { kind: 'text', body: `No worries — I've left that out. If it's a site note, just send it again with the site name. 👍` }, meta)
+        return
+      }
+      await send(ctx.supabase, ctx.from, { kind: 'text', body: `I didn't catch the project — reply with its number or name, or *skip* if it's not a site note.` }, meta)
       return
     }
     if (slots.narration_id) {
@@ -563,25 +692,38 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
     await send(ctx.supabase, ctx.from, { kind: 'text', body: 'Okay.' }, meta)
     return
   }
-  const candidates = (slots.candidates ?? []) as { task_id: string; name: string; floor: string | null; unit: string | null }[]
+  const candidates = (slots.candidates ?? []) as { task_id: string; node_key?: string | null; name: string; floor: string | null; unit: string | null }[]
   const m = text.match(/(\d+)/)
   const pickIdx = m ? parseInt(m[1], 10) - 1 : candidates.findIndex((c) => c.name.toLowerCase() === text.trim().toLowerCase())
   const chosen = pickIdx >= 0 ? candidates[pickIdx] : null
   if (!chosen) {
-    await send(ctx.supabase, ctx.from, { kind: 'text', body: `Reply with the number of the task.` }, meta)
+    if (await judgePending('which task is this update about?', text) === 'letgo') {
+      await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site update' })
+      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Left that one for now — send it again with the floor/task if you'd like it logged.` }, meta)
+      return
+    }
+    await send(ctx.supabase, ctx.from, { kind: 'text', body: `Reply with the number of the task, or *skip* to leave it.` }, meta)
     return
   }
 
+  const vmNodeKeys = await materializeProjectTasks(ctx, slots.project_id)
   const { data: taskRows } = await ctx.supabase.from('site_tasks').select(TASK_COLS).eq('task_id', chosen.task_id)
   const task = (taskRows ?? [])[0] as SiteTaskRow | undefined
+  console.log(`[siteops:dbg:resume-pick] task_id=${chosen.task_id} node_key=${task?.node_key ?? 'NULL'} visibleInVM=${!!(task?.node_key && vmNodeKeys.has(task.node_key))}`)
   const oc = await ownerCtx(ctx.supabase, ctx.orgId, slots.project_id)
-  const rc: RouteCtx = { supabase: ctx.supabase, orgId: ctx.orgId, projectId: slots.project_id, byLabel: ctx.from, ...oc, narrationId: slots.narration_id ?? null, now: new Date() }
+  const rc: RouteCtx = { supabase: ctx.supabase, orgId: ctx.orgId, projectId: slots.project_id, byLabel: ctx.from, ...oc, narrationId: slots.narration_id ?? null, now: new Date(), vmNodeKeys }
 
-  let progress: ProgressResult[] = []
-  if (task) progress = [await applyProgress(rc, task, slots.item)]
   await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site update' })
-  await send(ctx.supabase, ctx.from, {
-    kind: 'text',
-    body: buildConfirm({ site: slots.project_name ?? null, progress, problems: [], todos: [], parked: 0, pendingPick: 0, ownerLabel: 'you', projectId: slots.project_id, appBase: APP_BASE }),
-  }, meta)
+  if (!task) {
+    await send(ctx.supabase, ctx.from, { kind: 'text', body: `I couldn't find that task anymore — send the update again and I'll re-place it.` }, meta)
+    return
+  }
+  const res = await applyProgress(rc, task, slots.item)
+  // GUARDRAIL (Step 3): a pick that resolved to a row the UI can't render must NEVER read back as
+  // "✓ logged" — that's the silent-loss bug. Be honest and let the supervisor re-place it.
+  if (!res.visibleInVM) {
+    await send(ctx.supabase, ctx.from, { kind: 'text', body: `I couldn't attach that to a task on your screen — send it again with the floor/task and I'll place it.` }, meta)
+    return
+  }
+  await sendTaskConfirm(ctx, meta, slots.project_name ?? null, slots.project_id, { progress: [res], problems: [], todos: [], parked: 0 })
 }

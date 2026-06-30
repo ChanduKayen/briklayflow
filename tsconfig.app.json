@@ -22,5 +22,6 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "docs/site-ops/sequence.json"]
+  "include": ["src", "docs/site-ops/sequence.json"],
+  "exclude": ["src/**/__tests__/**"]
 }

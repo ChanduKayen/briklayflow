@@ -844,6 +844,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
   const { data: profile } = useUserProfile(session.user.id);
   const orgId = useOrgId();
   const vendorSearchRef   = useRef<HTMLInputElement>(null);
+  const [vendorHint, setVendorHint] = useState(false); // surfaces "select a vendor first" at the vendor field when items are touched first
   const searchDebounceRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const aiMatchDebounceRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   // Separate timer for the immediate "Did you mean?" AI fire — runs in parallel
@@ -971,6 +972,12 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
     const v = (vendors as any[]).find(x => x.stakeholder_id === prefillVendorId);
     if (v) { didPrefillVendorRef.current = true; selectVendor(v); }
   }, [vendors, prefillVendorId, vendorId]);
+
+  // A single-project org has nothing to choose — auto-select it so the PO is linkable and submittable
+  // (without it, opening New PO globally left projectId empty with no way to set it).
+  useEffect(() => {
+    if (!projectId && projects && projects.length === 1) setProjectId(projects[0].project_id);
+  }, [projects, projectId]);
 
   // ── Single-page UX state ─────────────────────────────────────────────
   // Vendor dropdown visibility + per-card "active" highlight + date editor.
@@ -3408,6 +3415,13 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
       {/* ────────────────────────────────────────────────────────────── */}
 
       {/* Vendor search — either the search input OR the selected-vendor pill, never both */}
+      <div className="flex items-center gap-2 mb-2">
+        <span className="h-3.5 w-[3px] rounded-full" style={{ background: uiV.accent }} />
+        <p className="text-[11px] font-bold uppercase tracking-[0.09em]" style={{ color: uiV.userSoft }}>Vendor</p>
+        {vendorHint && !selectedVendor && (
+          <span className="text-[11px] font-bold uppercase tracking-wider animate-pulse" style={{ color: uiV.accent }}>· Select first</span>
+        )}
+      </div>
       <div className="relative mb-4">
         {selectedVendor && !showVendorResults && !vendorSearch ? (
           // Display mode — selected vendor as a static pill
@@ -3448,7 +3462,8 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
               onFocus={() => setShowVendorResults(true)}
               onBlur={() => window.setTimeout(() => setShowVendorResults(false), 180)}
               placeholder="Search vendor…"
-              className="w-full h-12 pl-11 pr-10 rounded-xl border border-outline-variant/20 bg-white text-[15px] placeholder:text-on-surface-variant/25 focus:border-primary/40 focus:ring-2 focus:ring-primary/10 focus:outline-none transition-all"
+              style={{ color: uiV.user }}
+              className={`w-full h-12 pl-11 pr-10 rounded-xl bg-white text-[15px] font-medium border-[1.5px] placeholder:font-normal placeholder:text-on-surface-variant/30 focus:outline-none focus:ring-[3px] focus:ring-primary/15 focus:border-primary transition-all ${vendorHint && !selectedVendor ? 'border-primary ring-[3px] ring-primary/15' : 'border-black/[0.12] hover:border-black/20'}`}
             />
             {vendorSearch && (
               <button
@@ -3572,10 +3587,14 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
       )}
 
       {/* Project — ui/new-po-redesign chips (selected state + mobile horizontal scroll).
-          Existing handleProjectChange handler and the >1 guard are preserved exactly. */}
-      {projects && projects.length > 1 && (
+          Show the selector whenever there's a project so it's always visible (and a single project
+          is auto-selected below, so it reads as chosen). */}
+      {projects && projects.length > 0 && (
         <div className="mt-4 mb-4">
-          <p className="text-xs mb-2" style={{ color: uiV.system }}>Project</p>
+          <div className="flex items-center gap-2 mb-2">
+            <span className="h-3.5 w-[3px] rounded-full" style={{ background: uiV.accent }} />
+            <p className="text-[11px] font-bold uppercase tracking-[0.09em]" style={{ color: uiV.userSoft }}>Project</p>
+          </div>
           <UiProjectChips
             projects={projects.map((p: any) => ({ id: p.project_id, name: p.name }))}
             selectedId={projectId}
@@ -3584,8 +3603,12 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
         </div>
       )}
 
-      {/* Date — text by default, picker on click */}
-      <div className="flex items-center gap-2 mb-2 text-[14px]">
+      {/* Date — a clear, tappable chip (not muted text) */}
+      <div className="mb-2">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="h-3.5 w-[3px] rounded-full" style={{ background: uiV.accent }} />
+          <p className="text-[11px] font-bold uppercase tracking-[0.09em]" style={{ color: uiV.userSoft }}>Order date</p>
+        </div>
         {isEditingDate ? (
           <input
             type="date"
@@ -3593,20 +3616,20 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
             onChange={e => setOrderedDate(e.target.value)}
             onBlur={() => setIsEditingDate(false)}
             autoFocus
-            className="h-9 px-3 rounded-lg border border-outline-variant/20 text-[14px] focus:border-primary focus:ring-1 focus:ring-primary/10 focus:outline-none"
+            className="h-10 px-3 rounded-xl border-[1.5px] border-black/[0.12] text-[14px] font-medium focus:border-primary focus:ring-[3px] focus:ring-primary/15 focus:outline-none transition-all"
+            style={{ color: uiV.user }}
           />
         ) : (
-          <>
-            <span className="text-on-surface-variant/50">{orderedDate ? fmtDate(orderedDate) : 'Today'}</span>
-            <button
-              type="button"
-              onClick={() => setIsEditingDate(true)}
-              className="text-on-surface-variant/30 hover:text-on-surface-variant"
-              aria-label="Edit date"
-            >
-              <span className="material-symbols-outlined text-[14px]">edit</span>
-            </button>
-          </>
+          <button
+            type="button"
+            onClick={() => setIsEditingDate(true)}
+            className="inline-flex items-center gap-2 h-10 px-3.5 rounded-xl bg-white border-[1.5px] border-black/[0.12] hover:border-primary/40 active:scale-[0.98] transition-all"
+            aria-label="Edit date"
+          >
+            <span className="material-symbols-outlined text-[16px]" style={{ color: uiV.accent }}>calendar_today</span>
+            <span className="text-[14px] font-medium" style={{ color: uiV.user }}>{orderedDate ? fmtDate(orderedDate) : 'Today'}</span>
+            <span className="material-symbols-outlined text-[14px]" style={{ color: uiV.systemFaint }}>edit</span>
+          </button>
         )}
       </div>
 
@@ -3625,35 +3648,35 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
         />
       )}
 
-      {/* ═══ ITEMS SECTION — vendor-first gate: absent until a vendor is chosen ═══ */}
-      {!selectedVendor ? (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <span className="material-symbols-outlined text-[32px] text-on-surface-variant/20 mb-3">inventory_2</span>
-          <p className="text-[14px] text-on-surface-variant/40 mb-1">Select a vendor to start adding items</p>
-          <p className="text-[12px] text-on-surface-variant/25">The vendor determines which products are searchable</p>
-        </div>
-      ) : (
+      {/* ═══ ITEMS SECTION — always visible. The old hard gate hid the items until a vendor was
+          chosen, which confused people. The fields are present now; focusing one with no vendor
+          selected bounces focus up to the vendor field and surfaces a hint there — guided, not hidden. ═══ */}
+      <div onFocusCapture={(e) => {
+        if (!vendorId && (e.target as HTMLElement).tagName === 'INPUT') {
+          setVendorHint(true);
+          vendorSearchRef.current?.focus();
+        }
+      }}>
       <>
       {/* Items header + inline doc-upload trigger */}
-      <div className="flex items-center justify-between mt-5 mb-3">
-        <h2 className="text-[13px] font-semibold text-on-surface-variant/40 uppercase tracking-wider">Items</h2>
-        <div className="flex items-center gap-3">
-          {lineItems.length > 0 && (
-            // ui/new-po-redesign (decision 2): display-only — align header count to
-            // the footer's filtered (named-rows) computation. Same expression as :4505.
-            <span className="text-[12px] text-on-surface-variant/30">{lineItems.filter(li => li.item_name.trim()).length} item{lineItems.filter(li => li.item_name.trim()).length !== 1 ? 's' : ''}</span>
+      <div className="flex items-center justify-between mt-6 mb-3">
+        <div className="flex items-center gap-2">
+          <span className="h-3.5 w-[3px] rounded-full" style={{ background: uiV.accent }} />
+          <h2 className="text-[11px] font-bold uppercase tracking-[0.09em]" style={{ color: uiV.userSoft }}>Items</h2>
+          {lineItems.filter(li => li.item_name.trim()).length > 0 && (
+            <span className="text-[11px] font-bold leading-none px-1.5 py-1 rounded-full" style={{ color: uiV.accent, background: uiV.accentSoft }}>{lineItems.filter(li => li.item_name.trim()).length}</span>
           )}
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-1 text-[12px] text-on-surface-variant/50 hover:text-primary transition-colors"
-            title="Upload a quotation or bill — AI extracts items"
-          >
-            <span className="material-symbols-outlined text-[16px]">upload_file</span>
-            {/* ui/new-po-redesign (amendment C): copy only — same position, same handler */}
-            <span className="hidden sm:inline">Scan bill / quote</span>
-          </button>
         </div>
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className="inline-flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg border-[1.5px] active:scale-95 transition-all hover:brightness-95"
+          style={{ color: uiV.accentDeep, borderColor: uiV.accentLine, background: uiV.accentSoft }}
+          title="Upload a quotation or bill — AI extracts items"
+        >
+          <span className="material-symbols-outlined text-[16px]">document_scanner</span>
+          <span className="hidden sm:inline">Scan bill / quote</span>
+        </button>
       </div>
 
       {/* Hidden file input — kept for fileInputRef.current?.click() */}
@@ -4542,13 +4565,13 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
             
             <button
               onClick={addLine}
-              className="mt-3 flex items-center gap-1.5 text-[12px] text-primary/70 font-semibold hover:text-primary hover:bg-primary/5 px-3 py-2 rounded-lg transition-colors"
+              className="mt-3 w-full flex items-center justify-center gap-1.5 text-[12.5px] text-primary/70 font-semibold border border-dashed border-primary/25 hover:border-primary/45 hover:text-primary hover:bg-primary/[0.04] active:scale-[0.99] px-3 py-2.5 rounded-xl transition-all duration-200"
             >
-              <span className="material-symbols-outlined text-[15px]">add</span>
+              <span className="material-symbols-outlined text-[16px]">add</span>
               Add Row
             </button>
       </>
-      )}
+      </div>
 
     </div>
 
@@ -4571,9 +4594,9 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
             type="button"
             onClick={() => handleSubmit('ORDERED')}
             disabled={!canSubmit || saveMutation.isPending}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-[14px] font-medium transition-all ${
+            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-[14px] font-semibold transition-all duration-200 ${
               canSubmit && !saveMutation.isPending
-                ? 'bg-primary text-on-primary active:scale-[0.97] shadow-sm'
+                ? 'bg-primary text-on-primary active:scale-[0.97] shadow-md shadow-primary/20 hover:shadow-lg hover:shadow-primary/25'
                 : 'bg-surface-container text-on-surface-variant/30 cursor-not-allowed'
             }`}
           >

@@ -56,7 +56,9 @@ const TXN_TYPES: { key: TxnType; icon: string; label: string; dir: 'in' | 'out' 
 ];
 
 function genTxnId() {
-  return `TXN-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+  // PK (text). The old `Date.now().slice(-6)` cycled every ~16.7 min → duplicate-key collisions on
+  // transactions_pkey. A short random suffix makes it collision-proof while keeping the readable form.
+  return `TXN-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
 }
 
 // "Today, 23 Jun" when the date is today, else "23 Jun" — for the header date pill.
@@ -153,9 +155,9 @@ function WOObligationRow({ wo, index, selectedObligation, onSelect, onOpenPhases
       className={`w-full text-left flex items-center gap-3 px-4 py-3.5 transition-colors ${isSelected ? '' : 'hover:bg-black/[0.025] active:bg-black/[0.04]'}`}
       style={{ background: isSelected ? VOICE.outWash : undefined, borderLeft: `3px solid ${isSelected ? VOICE.out : 'transparent'}` }}>
       <span className="shrink-0 text-right tabular-nums" style={{ width: 14, color: VOICE.systemFaint, fontSize: 11.5, fontWeight: 600 }}>{index}</span>
-      <span className="shrink-0 grid place-items-center rounded-full" style={{ width: 18, height: 18, border: isSelected ? 'none' : `1.5px solid ${VOICE.hairStrong}`, background: isSelected ? VOICE.out : 'transparent' }}>
-        {isSelected && <span className="material-symbols-outlined text-white" style={{ fontSize: 12, fontVariationSettings: "'FILL' 1" }}>check</span>}
-      </span>
+      {isSelected
+        ? <span className="material-symbols-outlined shrink-0" style={{ fontSize: 21, color: VOICE.out, fontVariationSettings: "'FILL' 1" }}>check_circle</span>
+        : <span className="material-symbols-outlined shrink-0" style={{ fontSize: 21, color: VOICE.hairStrong, fontVariationSettings: "'FILL' 0" }}>radio_button_unchecked</span>}
       <span className="flex-1 min-w-0">
         <span className="block text-[13.5px] font-semibold truncate" style={{ color: VOICE.user }}>{wo.scope_of_work || wo.stakeholders?.name || wo.wo_id}</span>
         <span className="block text-[11px] mt-0.5 truncate" style={{ color: VOICE.systemFaint, ...VNUMS }}>
@@ -207,9 +209,9 @@ function POObligationRow({ po, index, selectedObligation, onSelect, poPaid }: {
       }}
     >
       <span className="shrink-0 text-right tabular-nums" style={{ width: 14, color: VOICE.systemFaint, fontSize: 11.5, fontWeight: 600 }}>{index}</span>
-      <span className="shrink-0 grid place-items-center rounded-full" style={{ width: 18, height: 18, border: isSelected ? 'none' : `1.5px solid ${VOICE.hairStrong}`, background: isSelected ? VOICE.inn : 'transparent' }}>
-        {isSelected && <span className="material-symbols-outlined text-white" style={{ fontSize: 12, fontVariationSettings: "'FILL' 1" }}>check</span>}
-      </span>
+      {isSelected
+        ? <span className="material-symbols-outlined shrink-0" style={{ fontSize: 21, color: VOICE.inn, fontVariationSettings: "'FILL' 1" }}>check_circle</span>
+        : <span className="material-symbols-outlined shrink-0" style={{ fontSize: 21, color: VOICE.hairStrong, fontVariationSettings: "'FILL' 0" }}>radio_button_unchecked</span>}
       <div className="flex-1 min-w-0">
         <p className="text-[13.5px] font-semibold truncate" style={{ color: VOICE.user }}>
           {po.po_line_items?.[0]?.item_name || po.po_line_items?.[0]?.description || po.po_line_items?.[0]?.name || po.stakeholders?.name || po.po_id}
@@ -778,9 +780,10 @@ export default function NewTransaction({ session: _session }: { session: Session
           ai_flag_status: 'Clean', ai_flag_data: {}, org_id: orgId,
         };
         const baseTs = Date.now();
+        const rnd = Math.random().toString(36).slice(2, 5).toUpperCase();
         const splits = effectiveAllocs.map((a, i) => ({
-          // distinct id per split (Date.now()+i avoids same-millisecond collisions)
-          txn_id: `TXN-${new Date().getFullYear()}-${String(baseTs + i).slice(-6)}`,
+          // distinct id per split (baseTs+i) + a shared random suffix → globally collision-proof
+          txn_id: `TXN-${new Date().getFullYear()}-${String(baseTs + i).slice(-6)}-${rnd}`,
           total_amount: a.allocated_amount,
           project_id: a.project_id,
           order_type: a.order_type || null,

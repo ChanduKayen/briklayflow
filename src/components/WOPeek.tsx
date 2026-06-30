@@ -28,7 +28,7 @@ function woTone(status: string): { c: string; label: string } {
 }
 
 function getMilestoneStatus(milestone: any, paid: number): string {
-  const planned = Number(milestone.amount) || 0;
+  const planned = Number(milestone.planned_amount) || 0;
   if (planned > 0 && paid > planned + 100) return 'paid';
   if (planned > 0 && paid >= planned - 100) return 'paid';
   if (paid > 0) return 'part';
@@ -102,7 +102,7 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
     queryKey: ['wo_milestones_peek', woId],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('wo_milestones').select('*').eq('wo_id', woId).order('created_at', { ascending: true });
+        .from('wo_milestones').select('*').eq('wo_id', woId).order('seq_no', { ascending: true });
       if (error) throw error;
       return data;
     },
@@ -244,7 +244,7 @@ export function WOPeek({ woId, onClose, session }: WOPeekProps) {
           {/* ── Schedule ── */}
           <Section label="Schedule">
             {(milestones && milestones.length > 0
-              ? milestones.map((m: any, i: number) => ({ key: m.id, n: i + 1, name: m.name, amount: Number(m.amount) || 0, note: getMilestoneStatus(m, paidByMilestone[m.id] || 0), first: i === 0 }))
+              ? milestones.map((m: any, i: number) => ({ key: m.milestone_id, n: i + 1, name: m.name, amount: Number(m.planned_amount) || 0, note: getMilestoneStatus(m, paidByMilestone[m.milestone_id] || 0), first: i === 0 }))
               : [{ key: 'lump', n: 1, name: 'Lump sum', amount: displayTotal, note: totalPaid >= displayTotal && displayTotal > 0 ? 'paid' : totalPaid > 0 ? 'part' : '', first: true }]
             ).map((r) => (
               <div key={r.key} className="flex items-baseline justify-between gap-3 py-2" style={r.first ? undefined : { borderTop: `1px solid ${hexA(INK, 0.06)}` }}>

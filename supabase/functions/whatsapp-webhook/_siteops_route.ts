@@ -22,6 +22,8 @@ export interface SiteTaskRow {
   unit_label: string | null
   name: string
   status: string
+  node_key?: string | null   // engine identity; present on engine-generated rows (not legacy flat rows)
+  task_type_id?: string | null
   owner_id?: string | null
   owner_source?: string
 }
@@ -86,25 +88,48 @@ export function floorFromHint(hint: string | null): string | null {
   }
   return null
 }
-/** Unit ("Unit A") from a hint, or null. */
+/** Unit ("Unit A") from a hint, or null. Accepts both letters ("unit a") and numbers ("unit 1" → A,
+ *  "unit 2" → B) — supervisors say either, while the engine names units by letter. */
 function unitFromHint(hint: string | null): string | null {
   if (!hint) return null
-  const m = hint.toLowerCase().match(/\bunit\s*([a-z])\b/)
-  return m ? `Unit ${m[1].toUpperCase()}` : null
-}
-/** Trade keywords present in the hint (matched against task name/trade). */
-function tradeTokens(hint: string | null): string[] {
-  if (!hint) return []
-  const TRADES = ['slab', 'column', 'beam', 'plaster', 'block', 'brick', 'footing', 'plinth', 'excavat',
-    'pcc', 'backfill', 'tile', 'tiling', 'paint', 'putty', 'wiring', 'conduit', 'plumb', 'waterproof',
-    'ceiling', 'door', 'window', 'grill', 'flooring', 'curing', 'shutter', 'reinforc', 'pour', 'cast', 'pile', 'raft']
   const h = hint.toLowerCase()
-  return TRADES.filter((t) => h.includes(t))
+  const letter = h.match(/\bunit\s*([a-z])\b/)
+  if (letter) return `Unit ${letter[1].toUpperCase()}`
+  const num = h.match(/\bunit\s*(\d{1,2})\b/)
+  if (num) { const n = parseInt(num[1], 10); if (n >= 1 && n <= 26) return `Unit ${String.fromCharCode(64 + n)}` }
+  return null
+}
+// Trade SYNONYM GROUPS — a supervisor's word ("brick work") and the engine's label ("Blockwork
+// (walls)") must resolve to the SAME group. We canonicalise BOTH sides to group indices and match
+// group-vs-group, so vocabulary differences (brick≡block≡masonry, wiring≡conduit, tiling≡flooring…)
+// never cause a false "parked".
+const TRADE_GROUPS: string[][] = [
+  ['block', 'brick', 'masonry'],          // brick work = block work = masonry walls
+  ['plaster', 'rendering'],
+  ['conduit', 'wiring', 'cable', 'electric'],
+  ['plumb', 'sanitary', 'pipe'],
+  ['tile', 'tiling', 'flooring', 'floor finish'],
+  ['paint', 'putty'],
+  ['slab', 'pour', 'cast', 'casting', 'concreting'],
+  ['column'], ['beam'], ['footing'], ['plinth'], ['excavat', 'digging'], ['pcc'], ['backfill'],
+  ['waterproof'], ['ceiling'], ['door'], ['window'], ['grill', 'railing'], ['curing'],
+  ['shutter', 'de-prop', 'deprop', 'deshutter'], ['reinforc', 'steel', 'rebar'], ['pile'], ['raft'],
+  ['screed'], ['skirting'], ['frame'],
+]
+/** Which trade groups a free-text string mentions (by index). Works for BOTH a message hint and a
+ *  task's "name + trade" label, so the two can be matched as sets. */
+function tradeGroups(s: string | null): number[] {
+  if (!s) return []
+  const h = s.toLowerCase()
+  const out: number[] = []
+  TRADE_GROUPS.forEach((g, i) => { if (g.some((w) => h.includes(w))) out.push(i) })
+  return out
 }
 
 export type TaskResolution =
   | { kind: 'attached'; task: SiteTaskRow }
-  | { kind: 'ambiguous'; candidates: SiteTaskRow[] }
+  | { kind: 'attached_all'; tasks: SiteTaskRow[] }   // same task across units → apply to the whole floor
+  | { kind: 'ambiguous'; candidates: SiteTaskRow[]; question?: string }   // question = the LLM's exact ask
   | { kind: 'parked' }
 
 /**
@@ -115,9 +140,8 @@ export type TaskResolution =
 export function resolveTask(tasks: SiteTaskRow[], item: SiteItem): TaskResolution {
   const floor = floorFromHint(item.task_hint)
   const unit = unitFromHint(item.task_hint)
-  const trades = tradeTokens(item.task_hint)
-  const hay = (t: SiteTaskRow) => `${t.name} ${t.trade}`.toLowerCase()
-  const tradeOk = (t: SiteTaskRow) => trades.length === 0 || trades.some((tr) => hay(t).includes(tr))
+  const trades = tradeGroups(item.task_hint)
+  const tradeOk = (t: SiteTaskRow) => trades.length === 0 || tradeGroups(`${t.name} ${t.trade}`).some((g) => trades.includes(g))
   const floorOk = (t: SiteTaskRow) => !floor || t.floor_label === floor
   const unitOk = (t: SiteTaskRow) => !unit || t.unit_label === unit
 
@@ -130,10 +154,69 @@ export function resolveTask(tasks: SiteTaskRow[], item: SiteItem): TaskResolutio
   for (const tier of tiers) {
     if (tier.length === 1) return { kind: 'attached', task: tier[0] }
     if (tier.length > 1) {
+      // Floor named, unit NOT, candidates are the SAME task across units (e.g. "third floor
+      // plastering" → Unit A + Unit B plastering) → apply to ALL of them. A supervisor means the
+      // whole floor, not one unit; asking "which?" is friction and leaves nothing written. We require
+      // a floor so a bare "plastering done" can't sweep every floor. Genuinely different tasks still ask.
+      if (floor && !unit && new Set(tier.map((t) => (t.name || '').toLowerCase().trim())).size === 1) {
+        return { kind: 'attached_all', tasks: tier }
+      }
       // genuine multi-candidate ambiguity — only if a trade was actually named (else it's noise)
       if (trades.length > 0 || floor) return { kind: 'ambiguous', candidates: tier.slice(0, 8) }
     }
   }
+  return { kind: 'parked' }
+}
+
+// ── LLM task resolution — the model picks the task(s) from the real list, or asks exactly what it
+//    needs. This replaces brittle string heuristics (e.g. "brick work" ≠ "Blockwork"): the model
+//    understands synonyms, Indian English/Telugu/Hindi, and floor-vs-unit intent. resolveTask stays
+//    as a deterministic FALLBACK when there's no API key / the call fails.
+const RESOLVE_SYSTEM = `You map a site supervisor's WhatsApp update to the exact construction task(s) it refers to, chosen ONLY from the numbered project task list given. The supervisor writes casually in Indian English / Telugu / Hindi and uses field synonyms (brick work = block work = masonry; wiring = conduiting; tiling = flooring; de-shuttering = de-prop; rebar = reinforcement). Judge by MEANING, never string overlap.
+RULES
+- Clear single task → return that one number.
+- Same work across MULTIPLE units/zones on a floor with NO single unit named (e.g. "third floor plastering done") → return ALL those numbers (the whole floor).
+- Cannot decide — several DIFFERENT tasks plausibly fit, or a needed detail (which unit? which floor?) is missing → set "ask" to ONE short, specific question that names the real choices. NEVER guess.
+- Nothing in the list fits → empty list, ask null.
+Output STRICT JSON ONLY: {"task_numbers": number[], "ask": string|null}. When "ask" is set, "task_numbers" must be the candidate numbers you're choosing between.`
+
+export async function resolveTaskLLM(tasks: SiteTaskRow[], item: SiteItem): Promise<TaskResolution> {
+  if (!tasks.length) return { kind: 'parked' }
+  const OPENAI = Deno.env.get('OPENAI_API_KEY')
+  const ANTHROPIC = Deno.env.get('ANTHROPIC_API_KEY')
+  if (!OPENAI && !ANTHROPIC) return resolveTask(tasks, item)   // no model → deterministic fallback
+  const list = tasks.map((t, i) => `${i + 1}. ${t.floor_label ?? 'site-wide'} · ${t.unit_label ?? '-'} · ${t.name}`).join('\n')
+  const user = `UPDATE: "${item.text}"${item.task_hint ? `\nKEY PHRASE: "${item.task_hint}"` : ''}\n\nTASKS (number. floor · unit · name):\n${list}`
+  const ctrl = new AbortController()
+  const tmo = setTimeout(() => ctrl.abort(), 12000)
+  let raw = ''
+  try {
+    if (OPENAI) {
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        signal: ctrl.signal, method: 'POST',
+        headers: { Authorization: `Bearer ${OPENAI}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: Deno.env.get('WA_SITEOPS_MODEL') ?? 'gpt-4.1', max_tokens: 300, temperature: 0, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: RESOLVE_SYSTEM }, { role: 'user', content: user }] }),
+      })
+      if (res.ok) raw = (await res.json()).choices?.[0]?.message?.content ?? ''
+    } else if (ANTHROPIC) {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        signal: ctrl.signal, method: 'POST',
+        headers: { 'x-api-key': ANTHROPIC, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 300, temperature: 0, system: RESOLVE_SYSTEM, messages: [{ role: 'user', content: user }] }),
+      })
+      if (res.ok) raw = (await res.json()).content?.[0]?.text ?? ''
+    }
+  } catch { /* fall through */ } finally { clearTimeout(tmo) }
+  let parsed: { task_numbers?: unknown; ask?: unknown } | null = null
+  try { parsed = JSON.parse(raw.replace(/^```json\n?|\n?```$/g, '').trim()) } catch { /* */ }
+  if (!parsed) return resolveTask(tasks, item)   // garbled / no response → deterministic fallback
+  const nums = [...new Set((Array.isArray(parsed.task_numbers) ? parsed.task_numbers : [])
+    .map((n) => Number(n)).filter((n) => Number.isInteger(n) && n >= 1 && n <= tasks.length))]
+  const ask = typeof parsed.ask === 'string' && parsed.ask.trim() ? parsed.ask.trim() : null
+  const picked = nums.map((n) => tasks[n - 1])
+  if (ask) return { kind: 'ambiguous', candidates: picked.length ? picked.slice(0, 8) : tasks.slice(0, 8), question: ask }
+  if (picked.length === 1) return { kind: 'attached', task: picked[0] }
+  if (picked.length > 1) return { kind: 'attached_all', tasks: picked }
   return { kind: 'parked' }
 }
 
@@ -218,6 +301,7 @@ export interface RouteCtx {
   supabase: SB; orgId: string; projectId: string; byLabel: string
   members: OrgMember[]; supervisorId: string | null; principalId: string | null
   narrationId: string | null; now: Date
+  vmNodeKeys?: Set<string>   // the project's current VM fold-id set — for the visibleInVM check at writes
 }
 /** Map a user id to a display name (for confirm lines). */
 export function ownerName(c: RouteCtx, id: string | null): string {
@@ -225,12 +309,22 @@ export function ownerName(c: RouteCtx, id: string | null): string {
   return c.members.find((m) => m.id === id)?.name ?? 'owner'
 }
 
-export interface ProgressResult { taskId: string; taskName: string; statusFrom: string; statusTo: string; qcConfirmed: { question: string; answer: string }[] }
+export interface ProgressResult { taskId: string; taskName: string; floor: string | null; unit: string | null; statusFrom: string; statusTo: string; qcConfirmed: { question: string; answer: string }[]; nodeKey: string | null; visibleInVM: boolean }
 
 /** progress → update task status + status_history, answer QC only where explicit. */
 export async function applyProgress(c: RouteCtx, task: SiteTaskRow, item: SiteItem): Promise<ProgressResult> {
   const statusFrom = task.status
   const statusTo = statusFromProgress(item.text, statusFrom)
+  // GUARDRAIL (Step 3): only write to the SAME identity the UI overlay renders. If we have the VM
+  // fold-set and the target isn't in it, this write would be invisible — we REFUSE it and return
+  // visibleInVM=false, so Stage 4 can never emit a false "✓ logged" (silent data loss). The caller
+  // re-asks / parks honestly instead. (When vmNodeKeys is absent we can't judge → proceed, unguarded.)
+  const visibleInVM = !!(task.node_key && c.vmNodeKeys?.has(task.node_key))
+  console.log(`[siteops:dbg:write] task_id=${task.task_id} node_key=${task.node_key ?? 'NULL'} task_type_id=${task.task_type_id ?? '-'} status=${statusFrom}->${statusTo} visibleInVM=${visibleInVM}`)
+  if (c.vmNodeKeys && !visibleInVM) {
+    console.error(`[siteops:GUARDRAIL] REFUSED write to non-VM-visible row task_id=${task.task_id} node_key=${task.node_key ?? 'NULL'} — not confirming as logged`)
+    return { taskId: task.task_id, taskName: task.name, floor: task.floor_label, unit: task.unit_label, statusFrom, statusTo: statusFrom, qcConfirmed: [], nodeKey: task.node_key ?? null, visibleInVM: false }
+  }
   // QC answering (restraint)
   const { data: qcRows } = await c.supabase.from('site_task_qc').select('id, question, is_critical, seq, qc_status').eq('task_id', task.task_id)
   const qc = (qcRows ?? []) as QcRow[]
@@ -242,11 +336,18 @@ export async function applyProgress(c: RouteCtx, task: SiteTaskRow, item: SiteIt
     }).eq('id', a.id)
     if (error) console.error('[siteops] qc update failed:', error.message)
   }
-  if (statusTo !== statusFrom) {
+  // Record the narration's touch on the task ALWAYS — not only when the status changes — so the task
+  // feed shows EVERY WhatsApp message about it (a progress note that doesn't move the status still
+  // surfaces). The entry carries `status` only when it actually changed; either way the narration_id
+  // links it, and the UI (useTaskNarrations) fetches the raw message for the feed.
+  const changed = statusTo !== statusFrom
+  if (changed || c.narrationId) {
     const { data: cur } = await c.supabase.from('site_tasks').select('status_history').eq('task_id', task.task_id).maybeSingle()
     const history = Array.isArray(cur?.status_history) ? cur.status_history : []
-    history.push({ status: statusTo, at: c.now.toISOString(), by: c.byLabel, source: 'narration', narration_id: c.narrationId })
-    const { error } = await c.supabase.from('site_tasks').update({ status: statusTo, status_history: history }).eq('task_id', task.task_id)
+    history.push({ ...(changed ? { status: statusTo } : {}), at: c.now.toISOString(), by: c.byLabel, source: 'narration', narration_id: c.narrationId })
+    const upd: Record<string, unknown> = { status_history: history }
+    if (changed) upd.status = statusTo
+    const { error } = await c.supabase.from('site_tasks').update(upd).eq('task_id', task.task_id)
     if (error) console.error('[siteops] task status update failed:', error.message)
   }
   // OWNERSHIP is SITE-LEVEL: a task INHERITS the project's supervisor (the site owner) by
@@ -254,7 +355,7 @@ export async function applyProgress(c: RouteCtx, task: SiteTaskRow, item: SiteIt
   // overrides it at task level (owner_source='manual', via the UI picker) — and that override
   // is never touched here. (Issues, being discrete items, still carry their own owner.)
   const byId = new Map(qc.map((q) => [q.id, q.question]))
-  return { taskId: task.task_id, taskName: task.name, statusFrom, statusTo, qcConfirmed: confirmed.map((a) => ({ question: byId.get(a.id) ?? '', answer: a.answer })) }
+  return { taskId: task.task_id, taskName: task.name, floor: task.floor_label, unit: task.unit_label, statusFrom, statusTo, qcConfirmed: confirmed.map((a) => ({ question: byId.get(a.id) ?? '', answer: a.answer })), nodeKey: task.node_key ?? null, visibleInVM: true }
 }
 
 export interface ProblemResult { id: string | null; title: string; cause: string | null; ownerId: string | null; ownerName: string; followupAt: string | null; deadline: string | null; implication: string | null; taskId: string | null }
@@ -331,7 +432,7 @@ export interface RouteOutcome {
   problems: ProblemResult[]
   todos: TodoResult[]
   parked: { item: SiteItem }[]
-  ambiguous: { item: SiteItem; candidates: SiteTaskRow[] }[]
+  ambiguous: { item: SiteItem; candidates: SiteTaskRow[]; question?: string }[]
 }
 /**
  * Route every item: progress → attach+QC (or ambiguous/park), issue → problem (task or
@@ -341,6 +442,7 @@ export interface RouteOutcome {
  */
 export async function routeItems(c: RouteCtx, tasks: SiteTaskRow[], items: SiteItem[]): Promise<RouteOutcome> {
   const out: RouteOutcome = { progress: [], problems: [], todos: [], parked: [], ambiguous: [] }
+  console.log(`[siteops:route] ${tasks.length} tasks, ${items.length} items; tasksSample=${JSON.stringify(tasks.slice(0, 5).map((t) => ({ n: t.name, f: t.floor_label, u: t.unit_label, nk: !!t.node_key })))}; items=${JSON.stringify(items.map((i) => ({ type: i.type, hint: i.task_hint, text: i.text })))}`)
   // Load the org's follow-up cadence ONCE (taxonomy defaults + org overrides) for every issue's timing.
   const hasIssue = items.some((i) => i.type === 'issue')
   const cadenceMap: CadenceMap = hasIssue ? await loadCadenceMap(c.supabase, c.orgId) : new Map()
@@ -355,11 +457,20 @@ export async function routeItems(c: RouteCtx, tasks: SiteTaskRow[], items: SiteI
       out.problems.push(await createProblem(c, item, r.kind === 'attached' ? r.task.task_id : null, cadenceMap))
       continue
     }
-    // progress — needs a definite task to update, so it's the only type that disambiguates
-    const r = resolveTask(tasks, item)
-    if (r.kind === 'attached') out.progress.push(await applyProgress(c, r.task, item))
-    else if (r.kind === 'ambiguous') out.ambiguous.push({ item, candidates: r.candidates })
-    else out.parked.push({ item })
+    // progress — needs a definite task to update, so it's the only type that disambiguates. The LLM
+    // resolver is PRIMARY (semantic, bounded to the real engine-task set); resolveTask is its fallback
+    // (built into resolveTaskLLM) when no model is available. A write only counts as logged when it
+    // landed on a VM-visible row (the guardrail) — otherwise the item parks honestly, never a false ✓.
+    const r = await resolveTaskLLM(tasks, item)
+    console.log(`[siteops:resolve] hint="${item.task_hint}" floor=${floorFromHint(item.task_hint)} → ${r.kind}${r.kind === 'ambiguous' ? ` (${r.candidates.length}: ${r.candidates.map((c2) => `${c2.name}/${c2.unit_label ?? '-'}`).join(', ')})${r.question ? ` ask="${r.question}"` : ''}` : r.kind === 'attached_all' ? ` (${r.tasks.length})` : ''}`)
+    if (r.kind === 'attached') {
+      const res = await applyProgress(c, r.task, item)
+      if (res.visibleInVM) out.progress.push(res); else out.parked.push({ item })
+    } else if (r.kind === 'attached_all') {
+      for (const t of r.tasks) { const res = await applyProgress(c, t, item); if (res.visibleInVM) out.progress.push(res) }
+    } else if (r.kind === 'ambiguous') {
+      out.ambiguous.push({ item, candidates: r.candidates, question: r.question })
+    } else out.parked.push({ item })
   }
   return out
 }
@@ -384,11 +495,19 @@ const fmtDay = (iso: string | null): string => {
 }
 
 /** The type-labelled item lines for one project's outcome (shared by single + multi confirm). */
-function itemLines(progress: ProgressResult[], problems: ProblemResult[], todos: TodoResult[]): string[] {
+function itemLines(progress: ProgressResult[], problems: ProblemResult[], todos: TodoResult[], md = true): string[] {
+  const bold = (s: string) => (md ? `*${s}*` : s)
   const lines: string[] = []
   for (const p of progress) {
     const qc = p.qcConfirmed.length ? ` (${p.qcConfirmed.map((q) => q.answer).join('; ')} noted)` : ''
-    lines.push(`✅ Task update — ${p.taskName}${qc}`)
+    // FULL identity in words — floor · unit(s) · task — plus a plain confirmation of what changed.
+    // No raw id; the tappable "View task" button (added by the sender) takes them straight to it.
+    const conf = p.statusTo === 'done' ? 'marked done'
+      : (p.statusTo === 'active' && p.statusFrom !== 'active') ? 'marked in progress'
+      : 'logged'
+    const loc = [p.floor, p.unit].filter(Boolean).join(' · ')
+    const head = loc ? `${loc} · ${bold(p.taskName)}` : bold(p.taskName)
+    lines.push(`✅ ${head} — ${conf}${qc}`)
   }
   for (const pr of problems) {
     // Phase 2.3: the impact suggestion rides along at capture (the most useful moment), as a
@@ -409,13 +528,14 @@ export function buildConfirm(parts: {
   md?: boolean             // WhatsApp markdown (default); the UI channel passes false (plain text)
   projectId?: string | null  // with appBase, turns the view-links into real tappable deep links
   appBase?: string | null    // web app ORIGIN (e.g. https://briklayflow.vercel.app)
+  ctaMode?: boolean          // a tappable button replaces the text orientation links → omit them here
 }): string {
   const md = parts.md !== false
   const bold = (s: string) => (md ? `*${s}*` : s)
   const ital = (s: string) => (md ? `_${s}_` : s)
 
   // ITEM LINES — type-labelled, no owner shown, date if given.
-  const lines = itemLines(parts.progress, parts.problems, parts.todos)
+  const lines = itemLines(parts.progress, parts.problems, parts.todos, md)
   // routing-engine status notes (not type-labelled items): unmapped progress + a pending floor pick.
   if (parts.parked) lines.push(`• ${parts.parked} item${parts.parked > 1 ? 's' : ''} parked for triage`)
   if (parts.pendingPick) lines.push(`• ${parts.pendingPick} need${parts.pendingPick > 1 ? '' : 's'} you to pick the floor`)
@@ -440,6 +560,8 @@ export function buildConfirm(parts: {
   // When this confirm is a preamble to a follow-up question (a pending floor pick), end on the
   // question — don't trail "go to your Site Desk" links above a "which one?" prompt.
   if (parts.pendingPick) return out.join('\n')
+  // CTA mode: a tappable "View task" button carries the link, so we don't repeat it as text here.
+  if (parts.ctaMode) return out.join('\n')
 
   if (md && base) {
     const orient = hasProgress && hasFollow
@@ -486,7 +608,7 @@ export function buildMultiConfirm(sections: ConfirmSection[], opts: {
   const blocks: string[] = []
   let followCount = 0
   for (const s of sections) {
-    const lines = itemLines(s.progress, s.problems, s.todos)
+    const lines = itemLines(s.progress, s.problems, s.todos, md)
     if (s.parked) lines.push(`• ${s.parked} item${s.parked > 1 ? 's' : ''} parked for triage`)
     if (!lines.length) continue
     blocks.push([bold(`${s.projectName?.trim() || 'Site'} — logged:`), ...lines].join('\n'))

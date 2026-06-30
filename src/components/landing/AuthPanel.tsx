@@ -99,7 +99,10 @@ export default function AuthPanel({
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
-        setError(error.message);
+        // Unconfirmed email is a recoverable state, not a dead end: route to the "check your email"
+        // panel (with Resend). Once confirmed, a fresh sign-in clears this and proceeds normally.
+        if (/email not confirmed|not confirmed|confirm/i.test(error.message)) setSignupComplete(true);
+        else setError(error.message);
       } else if (redirectTo) {
         navigate(redirectTo, { replace: true });
       }

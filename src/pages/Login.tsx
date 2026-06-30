@@ -141,7 +141,9 @@ export default function Login() {
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
-        setError(error.message);
+        // Unconfirmed email → show the actionable "check your email" state (with Resend), not a dead end.
+        if (/email not confirmed|not confirmed|confirm/i.test(error.message)) setSignupComplete(true);
+        else setError(error.message);
       } else if (redirectTo) {
         navigate(redirectTo, { replace: true });
       }

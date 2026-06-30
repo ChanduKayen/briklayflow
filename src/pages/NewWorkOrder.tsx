@@ -15,7 +15,6 @@ import { useSnackbar } from '../components/Snackbar';
 // VOICE/VNUMS are aliases so the prior reskin's VOICE.x usages keep working unchanged.
 import { V as VOICE, nums as VNUMS } from '../components/po-new-ui/voiceTokens';
 import { SEG } from '../components/wo-new-ui/woTokens';
-import UiLivingSentence from '../components/wo-new-ui/UiLivingSentence';
 import UiAllocationBar from '../components/wo-new-ui/UiAllocationBar';
 import UiContractorCombobox from '../components/wo-new-ui/UiContractorCombobox';
 import UiWoCeremony from '../components/wo-new-ui/UiWoCeremony';
@@ -554,14 +553,9 @@ export default function NewWorkOrder({ session }: { session: Session }) {
         </div>
       )}
 
-      {/* The living sentence */}
-      <div className="mt-7">
-        <UiLivingSentence
-          workerName={selectedWorker?.name}
-          projectName={selectedProject?.name}
-          contract={orderValue}
-          stageCount={uiNamedStages.length}
-        />
+      {/* Title — a plain heading; this is a contract */}
+      <div className="mt-6 mb-1">
+        <h1 className="text-[26px] font-semibold tracking-tight" style={{ color: VOICE.user }}>New Contract</h1>
       </div>
 
       {/* Entry mode — "extract from a document" (existing handleFileUpload, relocated) */}

@@ -37,13 +37,32 @@ const PARKING: { value: 'none' | 'stilt' | 'cellar'; label: string; hint: string
   { value: 'cellar', label: 'Cellar', hint: 'Parking below ground' },
 ]
 
+// Opt-in common-area / amenity systems — ids MUST match the engine's ca_* task-types (library.ts).
+// Ticking one surfaces it in the project's "Common areas" stage.
+const CA_SYSTEMS: { id: string; label: string }[] = [
+  { id: 'ca_lift', label: 'Lift' },
+  { id: 'ca_parking', label: 'Parking' },
+  { id: 'ca_stair', label: 'Common staircase' },
+  { id: 'ca_corridor', label: 'Corridor finishes' },
+  { id: 'ca_fire', label: 'Fire fighting' },
+  { id: 'ca_oht', label: 'Overhead tank' },
+  { id: 'ca_ugt', label: 'Sump / UG tank' },
+  { id: 'ca_borewell', label: 'Borewell' },
+  { id: 'ca_stp', label: 'STP' },
+  { id: 'ca_transformer', label: 'Transformer' },
+  { id: 'ca_generator', label: 'DG / generator' },
+  { id: 'ca_solar', label: 'Rooftop solar' },
+  { id: 'ca_compound', label: 'Compound wall & gate' },
+  { id: 'ca_landscaping', label: 'Landscaping' },
+]
+
 export default function ConstructionConfig({ projectId, projectType, onComplete, onSkip }: Props) {
   const supported = SUPPORTED.includes(projectType)
 
   const [parking, setParking] = useState<'none' | 'stilt' | 'cellar'>('none')
   const [floors, setFloors] = useState(1)
   const [units, setUnits] = useState(1)
-  const [common, setCommon] = useState(false)
+  const [commonSet, setCommonSet] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -58,16 +77,20 @@ export default function ConstructionConfig({ projectId, projectType, onComplete,
         onComplete({ generated: false, reason: 'unsupported_type' })
         return
       }
-      const stack = buildStack({ dedicated_parking: parking, habitable_floors: floors, units_per_floor: units, has_common_areas: common })
-      const { error: e } = await supabase.from('projects').update({
+      const hasCommon = commonSet.size > 0
+      const stack = buildStack({ dedicated_parking: parking, habitable_floors: floors, units_per_floor: units, has_common_areas: hasCommon })
+      const baseUpdate = {
         construction_stack: stack,
         dedicated_parking: parking,
         habitable_floors: floors,
         units_per_floor: units,
-        has_common_areas: common,
+        has_common_areas: hasCommon,
         project_type: projectType,
         sequence_model: 'rcc_residential',
-      }).eq('project_id', projectId)
+      }
+      // common_systems is a later migration; persist it when present, else fall back gracefully.
+      let e = (await supabase.from('projects').update({ ...baseUpdate, common_systems: [...commonSet] }).eq('project_id', projectId)).error
+      if (e) e = (await supabase.from('projects').update(baseUpdate).eq('project_id', projectId)).error
       if (e) throw e
       const res = await generateSiteTasks(supabase, projectId, sequence)
       onComplete({ generated: true, taskCount: res.inserted })
@@ -127,16 +150,24 @@ export default function ConstructionConfig({ projectId, projectType, onComplete,
         <Stepper label="Units per floor" hint="1 = single home" value={units} setValue={setUnits} min={1} />
       </div>
 
-      {/* common areas */}
-      <button onClick={() => setCommon((c) => !c)} className="flex items-center justify-between rounded-xl border border-outline-variant/40 px-3.5 py-3 text-left">
-        <span>
-          <span className="block text-[14px] font-medium text-on-surface">Common areas</span>
-          <span className="block text-[11px] text-on-surface-variant/60">Lobby, staircase, lift</span>
-        </span>
-        <span className={`relative h-6 w-10 rounded-full transition ${common ? '' : 'bg-outline-variant/40'}`} style={common ? { background: '#C8603A' } : undefined}>
-          <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${common ? 'left-[18px]' : 'left-0.5'}`} />
-        </span>
-      </button>
+      {/* common areas / amenities — tick what this project has */}
+      <div>
+        <label className="mb-1.5 block text-[13px] font-medium text-on-surface">Common areas & amenities</label>
+        <p className="mb-2 text-[11px] text-on-surface-variant/60">Tick what applies — each becomes a task in the project's Common areas stage.</p>
+        <div className="flex flex-wrap gap-2">
+          {CA_SYSTEMS.map((s) => {
+            const on = commonSet.has(s.id)
+            return (
+              <button key={s.id} type="button"
+                onClick={() => setCommonSet((prev) => { const n = new Set(prev); n.has(s.id) ? n.delete(s.id) : n.add(s.id); return n })}
+                className={`rounded-full border px-3 py-1.5 text-[12.5px] font-medium transition ${on ? 'border-transparent text-white' : 'border-outline-variant/40 text-on-surface-variant'}`}
+                style={on ? { background: '#C8603A' } : undefined}>
+                {on ? '✓ ' : ''}{s.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
 
       {error && <p className="text-[13px] text-error">{error}</p>}
 

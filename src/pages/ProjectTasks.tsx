@@ -1,45 +1,24 @@
-import { useState, useEffect, useRef, useCallback, createContext, useContext, type CSSProperties, type ReactNode } from 'react'
-import { useParams, useLocation, Link } from 'react-router-dom'
+import { useState, useEffect, useRef, useCallback, useContext, type CSSProperties, type ReactNode } from 'react'
+import { useParams, useLocation, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { PageSkeleton } from '../components/SkeletonLoader'
+import { useQueryGate } from '../components/QueryGate'
 import ConstructionConfig from '../components/siteOps/ConstructionConfig'
-import { UserPicker, useOrgMembers, MemberAvatar, type OrgMember } from '../components/siteOps/UserPicker'
+import ProjectSequence, { prefetchProjectQueries } from '../components/siteOps/ProjectSequence'
+import { UserPicker, useOrgMembers, MemberAvatar } from '../components/siteOps/UserPicker'
 import { NarrationComposer } from '../components/siteOps/NarrationComposer'
 import { useUserProfile } from '../App'
 import { useAuth } from '../lib/auth/AuthProvider'
-
-type QcStatus = 'pending' | 'confirmed' | 'failed' | null
-
-// Shared per-page actions/identity for task rows (avoids drilling through Group → List → Row).
-interface TaskCtxValue {
-  orgId: string
-  authorId: string
-  authorName: string
-  members: OrgMember[]
-  ownerName: (id: string | null | undefined) => string
-  supervisorId: string | null   // the SITE owner — tasks inherit this by default
-  principalId: string | null    // fallback when no supervisor is set
-  setQc: (taskId: string, qcId: string, next: QcStatus) => void
-  setDuration: (taskId: string, days: number) => void
-  setOwner: (taskId: string, ownerId: string | null) => void
-}
-const TaskCtx = createContext<TaskCtxValue | null>(null)
-
-const DEFAULT_DURATION = 1
-const addDays = (d: Date, n: number): Date => { const r = new Date(d); r.setDate(r.getDate() + n); return r }
-const fmtDate = (d: Date): string => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
-
-// ── palette (walnut-ledger) ──────────────────────────────────────────────────
-const CREAM = '#FBF9F6'
-const INK = '#221A13'
-const INK_SOFT = 'rgba(34,26,19,0.55)'
-const INK_FAINT = 'rgba(34,26,19,0.34)'
-const TERRA = '#C8603A'
-const SAGE = '#5E8157'
-const LINE = 'rgba(34,26,19,0.10)'
-const SERIF = "'Playfair Display', Georgia, serif"
+import {
+  CREAM, INK, INK_SOFT, INK_FAINT, TERRA, SAGE, LINE, FAIL, SERIF, DARK_CANVAS,
+  DEFAULT_DURATION, addDays, fmtDate, isParking, titleCase, whereLabel, chip, metaTag,
+} from '../components/siteOps/taskTokens'
+import TaskDetail, {
+  TaskCtx, qcProgress, QcProgressChip, ScheduleCell, StatusBadge, StatusNode, PendingSubtext,
+  type TaskCtxValue, type Task, type QcStatus,
+} from '../components/siteOps/TaskDetail'
 
 // ── cascade timings (Motion 1) — tune here ───────────────────────────────────
 const CAP = 14          // stagger only the first screenful; the rest render settled
@@ -47,31 +26,6 @@ const STAGGER = 50      // ms between consecutive task lines (40–70)
 const LINE_BASE = 160   // ms before the first line settles (after headers)
 const SETTLE = 250      // ms line settle duration → also the gap before its sub-text
 const CASCADE_TOTAL = LINE_BASE + CAP * STAGGER + SETTLE + 200  // when the cascade window closes
-
-const isParking = (floor: string) => /^(stilt|cellar|basement)/i.test(floor)
-
-interface QcRow {
-  id: string; question: string; is_critical: boolean; seq: number; qc_status: QcStatus
-  answer?: string | null; answered_at?: string | null; source_narration_id?: string | null
-}
-interface StatusEvent { status?: string; at?: string; by?: string; source?: string; narration_id?: string | null }
-interface Task {
-  task_id: string; task_no: string; phase: string; trade: string
-  floor_label: string | null; unit_label: string | null
-  name: string; description: string | null; seq_no: number; status: string
-  source: 'generated' | 'manual'
-  duration_days?: number | null
-  owner_id?: string | null; owner_source?: 'auto' | 'manual'
-  status_history?: StatusEvent[]
-  updated_at?: string | null
-  site_task_qc: QcRow[]
-}
-/** Where a task sits (floor + unit), shown as a tag since the list is sequence-ordered, not grouped. */
-function whereLabel(floor: string | null, unit: string | null): string {
-  if (!floor) return 'Site-wide'
-  const base = isParking(floor) ? floor : `${floor} Floor`
-  return unit ? `${base} · ${unit}` : base
-}
 
 // Deterministic order: seq_no, then task_no as a stable tie-break. Without the tie-break, rows
 // that share a seq_no come back in a nondeterministic order on each refetch, so editing one
@@ -81,7 +35,25 @@ const bySeq = (a: Task, b: Task) => a.seq_no - b.seq_no || (a.task_no < b.task_n
 const KEYFRAMES = `
 @keyframes siteSettle { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes siteGroupIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-@keyframes siteSubIn { from { opacity: 0; } to { opacity: 1; } }`
+@keyframes siteSubIn { from { opacity: 0; } to { opacity: 1; } }
+/* hover-to-insert affordance: a task responds to the mouse and reveals a quiet "add task here"
+   between rows. On touch (no hover) it stays faintly visible so it's tappable. */
+.task-wrap { position: relative; }
+.ins-aff { height: 0; opacity: 0; overflow: hidden; transition: height .16s ease, opacity .16s ease; }
+.task-wrap:hover .ins-aff { height: 28px; opacity: 1; }
+@media (hover: none) { .ins-aff { height: 22px; opacity: .55; } }
+/* add-project affordance floating over the sequence — quiet until you reach for it */
+.addproj-hot { opacity: .32; transition: opacity .2s ease, transform .2s ease; }
+.addproj-hot:hover { opacity: 1; transform: translateY(-1px); }
+@media (hover: none) { .addproj-hot { opacity: .6; } }
+.proj-name { transition: color .2s ease, transform .2s ease; }
+/* project selector positioning — clears the fixed left nav on desktop (offset by --shell-ml),
+   and collapses on mobile where a left column has no room (it would overlap the sequence). */
+.proj-centre { position: fixed; top: 0; right: 0; bottom: 0; left: 0; }
+@media (min-width: 768px) { .proj-centre { left: var(--shell-ml, 0px); } }
+.proj-side { position: fixed; top: 14px; left: calc(var(--shell-ml, 0px) + 14px); z-index: 80; }
+.proj-add { position: fixed; top: 16px; right: 20px; z-index: 80; }
+@media (max-width: 767px) { .proj-side { display: none !important; } .proj-add { display: none !important; } }`
 
 // The Task Manager BODY — always scoped to one project. Mounted two ways (see the default
 // export below): INSIDE a project (projectId from the URL, no filter) or at the GLOBAL level
@@ -102,7 +74,10 @@ function ProjectTasksScoped({ session, projectId, filterSlot }: { session: Sessi
   const firedRef = useRef(false)
   const [showSetup, setShowSetup] = useState(false)  // construction-config modal (set up & generate)
   const [showAdd, setShowAdd] = useState(false)      // manual add-task modal
+  const [addAfter, setAddAfter] = useState<{ afterId: string; floor: string | null } | null>(null)  // hover-insert target
   const [siteOwnerPick, setSiteOwnerPick] = useState(false)  // site-level supervisor picker
+  const [phaseOpen, setPhaseOpen] = useState<Record<string, boolean>>({})  // per-phase expand override (absent → smart default)
+  const [view, setView] = useState<'list' | 'sequence'>('list')  // List (operational) vs Sequence (engine timeline)
 
   // ── first-arrival cascade flag (Motion 1) ──
   // From the wizard's navigation state {justCreated:true}, a one-shot sessionStorage marker,
@@ -136,12 +111,12 @@ function ProjectTasksScoped({ session, projectId, filterSlot }: { session: Sessi
 
   const { data: members = [] } = useOrgMembers(project?.org_id as string | undefined)
 
-  const { data: tasks = [], isLoading } = useQuery({
+  const { data: tasks = [], isLoading, isError, refetch } = useQuery({
     queryKey: ['project_tasks_v2', projectId],
     queryFn: async () => {
       // Rich select carries the Block-A-UI layers (owner, history, QC provenance, duration).
       // If those columns aren't migrated yet, fall back to the base shape so the page keeps working.
-      const RICH = 'task_id, task_no, phase, trade, floor_label, unit_label, name, description, seq_no, status, source, duration_days, owner_id, owner_source, status_history, updated_at, site_task_qc(id, question, is_critical, seq, qc_status, answer, answered_at, source_narration_id)'
+      const RICH = 'task_id, task_no, phase, trade, floor_label, unit_label, name, description, seq_no, status, source, duration_days, owner_id, owner_source, status_history, updated_at, node_key, task_type_id, site_task_qc(id, question, is_critical, seq, qc_status, answer, answered_at, source_narration_id)'
       const BASE = 'task_id, task_no, phase, trade, floor_label, unit_label, name, description, seq_no, status, source, site_task_qc(id, question, is_critical, seq, qc_status)'
       const q = (cols: string) => supabase.from('site_tasks').select(cols).eq('project_id', projectId).order('seq_no').order('task_no')
       let res: { data: unknown; error: { message: string } | null } = await q(RICH)
@@ -258,6 +233,19 @@ function ProjectTasksScoped({ session, projectId, filterSlot }: { session: Sessi
     })
   }, [queryClient, projectId])
 
+  // Per-task status (mark active / done) — optimistic, appends to status_history. Shared by the
+  // List row and the Sequence drawer (both render TaskDetail, both call this through TaskCtx).
+  const setStatus = useCallback((taskId: string, status: 'not_started' | 'active' | 'done') => {
+    const ev = { status, at: new Date().toISOString(), by: session.user.id }
+    queryClient.setQueryData(['project_tasks_v2', projectId], (old: Task[] | undefined) =>
+      old?.map((t) => (t.task_id === taskId ? { ...t, status, status_history: [...(t.status_history ?? []), ev] } : t)))
+    supabase.from('site_tasks').update({ status }).eq('task_id', taskId).then(({ error }) => {
+      if (error) queryClient.invalidateQueries({ queryKey: ['project_tasks_v2', projectId] })
+      // refresh the Sequence's completion state so the timeline / blocks reflect the new status
+      queryClient.invalidateQueries({ queryKey: ['seq_task_status', projectId] })
+    })
+  }, [queryClient, projectId, session.user.id])
+
   // SITE owner (the project supervisor) — the primary, site-level assignment. Optimistic.
   const setSupervisor = useCallback((id: string | null) => {
     queryClient.setQueryData(['project', projectId], (old: Record<string, unknown> | undefined) => (old ? { ...old, supervisor_id: id } : old))
@@ -292,7 +280,28 @@ function ProjectTasksScoped({ session, projectId, filterSlot }: { session: Sessi
       .then((rs) => { if (rs.some((r) => r.error)) queryClient.invalidateQueries({ queryKey: ['project_tasks_v2', projectId] }) })
   }, [queryClient, projectId])
 
-  if (isLoading) return <PageSkeleton />
+  // Place a freshly-created task immediately AFTER `afterId` (renumber + persist), so a hover-inserted
+  // task lands exactly where it was asked for instead of at the end.
+  const placeAfter = useCallback((newId: string, afterId: string) => {
+    const old = queryClient.getQueryData<Task[]>(['project_tasks_v2', projectId])
+    if (!old) return
+    const arr = [...old].sort(bySeq)
+    const fromIdx = arr.findIndex((t) => t.task_id === newId)
+    if (fromIdx < 0) return
+    const [moved] = arr.splice(fromIdx, 1)
+    const afterIdx = arr.findIndex((t) => t.task_id === afterId)
+    arr.splice(afterIdx < 0 ? arr.length : afterIdx + 1, 0, moved)
+    const renum = arr.map((t, i) => (t.seq_no === i + 1 ? t : { ...t, seq_no: i + 1 }))
+    queryClient.setQueryData(['project_tasks_v2', projectId], renum)
+    const changed = renum.filter((t) => old.find((x) => x.task_id === t.task_id)?.seq_no !== t.seq_no)
+    Promise.all(changed.map((t) => supabase.from('site_tasks').update({ seq_no: t.seq_no }).eq('task_id', t.task_id)))
+      .then((rs) => { if (rs.some((r) => r.error)) queryClient.invalidateQueries({ queryKey: ['project_tasks_v2', projectId] }) })
+  }, [queryClient, projectId])
+
+  // S1-1: loading/error gate — skeleton while loading, retry card on error or a >12s hang (never an
+  // infinite spinner). Success render below is unchanged.
+  const tasksGate = useQueryGate({ isLoading, isError, hasData: tasks.length > 0, refetch, skeleton: <PageSkeleton />, label: 'your tasks' })
+  if (tasksGate) return tasksGate
 
   // Flat construction order — by seq_no, NOT grouped by floor/module. seq_no is the sequence.
   const ordered = [...tasks].sort(bySeq)
@@ -346,8 +355,38 @@ function ProjectTasksScoped({ session, projectId, filterSlot }: { session: Sessi
   }
   const totalDays = ordered.reduce((s, t) => s + Math.max(1, t.duration_days ?? DEFAULT_DURATION), 0)
 
+  // ── PHASE grouping (the construction work-breakdown) — phases in sequence order, tasks by
+  //    seq within each. The flat dump becomes a structured, focused plan. ──
+  type PhaseGroup = { phase: string; items: Task[]; done: number; active: number; total: number; allDone: boolean; start: Date | null; end: Date | null }
+  const phaseGroups: PhaseGroup[] = (() => {
+    const order: string[] = []
+    const map = new Map<string, Task[]>()
+    for (const t of ordered) {
+      if (!map.has(t.phase)) { map.set(t.phase, []); order.push(t.phase) }
+      map.get(t.phase)!.push(t)
+    }
+    return order.map((phase) => {
+      const items = map.get(phase)!
+      const done = items.filter((t) => t.status === 'done').length
+      const active = items.filter((t) => t.status === 'active').length
+      const sc = items.map((t) => schedule.get(t.task_id)).filter(Boolean) as { start: Date; end: Date }[]
+      return { phase, items, done, active, total: items.length, allDone: items.length > 0 && done === items.length, start: sc[0]?.start ?? null, end: sc.length ? sc[sc.length - 1].end : null }
+    })
+  })()
+  // The "current" phase = the first not-fully-done one — the natural focus.
+  const currentPhaseIdx = phaseGroups.findIndex((g) => !g.allDone)
+  const phaseIsOpen = (g: PhaseGroup, idx: number): boolean => {
+    if (g.phase in phaseOpen) return phaseOpen[g.phase]          // user override wins
+    if (g.allDone) return false                                  // done → collapsed
+    if (g.active > 0) return true                                // anything active → open
+    return currentPhaseIdx !== -1 && idx === currentPhaseIdx     // the current phase → open; future → collapsed
+  }
+  const togglePhase = (g: PhaseGroup, idx: number) => setPhaseOpen((o) => ({ ...o, [g.phase]: !phaseIsOpen(g, idx) }))
+  const tasksDone = tasks.filter((t) => t.status === 'done').length
+  const taskPct = tasks.length ? Math.round((tasksDone / tasks.length) * 100) : 0
+
   const anim = { doCascade, cascadeDone, lineIndex, pendingMode }
-  const toggleTask = (id: string) => setExpanded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleTask = (id: string) => setExpanded((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const refetchTasks = () => queryClient.invalidateQueries({ queryKey: ['project_tasks_v2', projectId] })
 
   // drag handlers shared by every row
@@ -374,6 +413,7 @@ function ProjectTasksScoped({ session, projectId, filterSlot }: { session: Sessi
     setQc,
     setDuration,
     setOwner,
+    setStatus,
   }
 
   // level options for the manual add form: existing levels + Site-wide.
@@ -382,10 +422,38 @@ function ProjectTasksScoped({ session, projectId, filterSlot }: { session: Sessi
     { value: '__sitewide__', label: 'Site-wide' },
   ]
 
+  // the List view is retired (the Sequence + its drawer carry everything); its JSX is retained
+  // dormant behind this flag so "views later" is a one-line flip, not a re-build.
+  const showLegacyList = false as boolean
+
   return (
-    <div style={{ minHeight: '100vh', background: CREAM }}>
+    <div style={{ minHeight: '100vh', background: DARK_CANVAS }}>
       <style>{KEYFRAMES}</style>
-      <div className="mx-auto w-full max-w-[880px] lg:max-w-[1040px] xl:max-w-[1200px]" style={{ padding: '32px 24px 120px' }}>
+
+      {/* THE VIEW — the engine Sequence, full-bleed on one dark canvas. The retired List's full task
+          surface now lives entirely in the Sequence drawer (the one shared TaskDetail). */}
+      {tasks.length > 0 ? (
+        <TaskCtx.Provider value={taskCtx}>
+          <div style={{ paddingTop: filterSlot ? 8 : 0 }}>
+            <ProjectSequence projectId={projectId} headerSlot={
+              // project assignee (site supervisor) — subtle, in the sequence header next to the name
+              <button onClick={() => setSiteOwnerPick(true)} title="Project assignee"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 999, padding: '4px 12px 4px 4px', cursor: 'pointer' }}>
+                {supervisorId ? <MemberAvatar name={memberName(supervisorId)} size={20} /> : <span style={{ width: 20, height: 20, borderRadius: '50%', border: '1.5px dashed rgba(255,255,255,0.3)' }} />}
+                <span style={{ fontSize: 12, fontWeight: 600, color: supervisorId ? '#f4f3f1' : '#a8a6a3' }}>{supervisorId ? memberName(supervisorId) : 'Assign lead'}</span>
+              </button>
+            } />
+          </div>
+        </TaskCtx.Provider>
+      ) : (
+        <div className="mx-auto w-full" style={{ maxWidth: 600, padding: '70px 18px 90px' }}>
+          <EmptyState hasStack={hasStack} onSetUp={() => setShowSetup(true)} />
+        </div>
+      )}
+
+      {/* ── LEGACY List view — kept DORMANT (never rendered) so views can return later. ── */}
+      {showLegacyList && (
+      <div className="mx-auto w-full max-w-[880px]" style={{ padding: '30px 26px 110px', background: CREAM, borderRadius: 22 }}>
         {/* ── header ───────────────────────────────────────────────────── */}
         {filterSlot
           ? <div style={{ marginBottom: 4 }}>{filterSlot}</div>
@@ -396,13 +464,13 @@ function ProjectTasksScoped({ session, projectId, filterSlot }: { session: Sessi
           )}
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, marginTop: 10, flexWrap: 'wrap' }}>
           <div>
-            <h1 style={{ fontFamily: SERIF, fontSize: 34, fontWeight: 600, color: INK, margin: 0, letterSpacing: '-0.01em' }}>Task Manager</h1>
+            <h1 style={{ fontFamily: SERIF, fontSize: 34, fontWeight: 600, color: INK, margin: 0, letterSpacing: '-0.01em' }}>Project Management</h1>
             {tasks.length > 0 && (
               <p style={{ fontSize: 14, color: INK_SOFT, margin: '6px 0 0' }}>
                 {tasks.length} tasks · {levelCount} {levelCount === 1 ? 'level' : 'levels'} ·{' '}
-                <span style={{ color: allDetailed ? SAGE : TERRA, fontWeight: 600 }}>
-                  {allDetailed ? 'fully detailed' : !detailed ? 'structure ready — details pending' : `${detailed}/${genTasks.length} detailed`}
-                </span>
+                <strong style={{ color: taskPct === 100 ? SAGE : TERRA, fontWeight: 700 }}>{taskPct}% done</strong>
+                {currentPhaseIdx >= 0 && <> · now on <strong style={{ color: INK, fontWeight: 600 }}>{titleCase(phaseGroups[currentPhaseIdx].phase)}</strong></>}
+                {!allDetailed && <span style={{ color: INK_FAINT }}> · {!detailed ? 'details pending' : `${detailed}/${genTasks.length} detailed`}</span>}
               </p>
             )}
             {tasks.length > 0 && (
@@ -411,14 +479,14 @@ function ProjectTasksScoped({ session, projectId, filterSlot }: { session: Sessi
                   <span style={{ fontWeight: 600 }}>Start date</span>
                   <input
                     type="date"
-                    value={startISO ? startISO.slice(0, 10) : ''}
+                    value={(startISO ?? '').slice(0, 10)}
                     onChange={(e) => e.target.value && setStartDate(e.target.value)}
                     style={{ fontSize: 12.5, fontFamily: 'inherit', color: INK, background: '#fff', border: `1px solid ${LINE}`, borderRadius: 8, padding: '5px 9px', outline: 'none', cursor: 'pointer' }}
                   />
                 </label>
                 <span style={{ fontSize: 12.5, color: INK_FAINT }}>
                   {totalDays} working day{totalDays === 1 ? '' : 's'}
-                  {projFinish ? <> · finishes <strong style={{ color: TERRA, fontWeight: 600 }}>{fmtDate(projFinish)}</strong></> : ' · set a start date to schedule'}
+                  {projFinish ? <> · finishes <strong style={{ color: TERRA, fontWeight: 600 }}>{fmtDate(projFinish as Date)}</strong></> : ' · set a start date to schedule'}
                 </span>
               </div>
             )}
@@ -434,17 +502,37 @@ function ProjectTasksScoped({ session, projectId, filterSlot }: { session: Sessi
             )}
           </div>
           {tasks.length > 0 && (
-            <button
-              onClick={() => setShowAdd(true)}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 13, fontWeight: 600, color: INK, background: '#fff', border: `1px solid ${LINE}`, borderRadius: 10, padding: '8px 14px', cursor: 'pointer', boxShadow: '0 1px 2px rgba(34,26,19,0.04)' }}
-            >
-              <span style={{ fontSize: 16, lineHeight: 1, color: TERRA, marginTop: -1 }}>+</span> Add task
-            </button>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              {/* View toggle — List (operational: QC, owners, dates) vs Sequence (engine timeline) */}
+              <div style={{ display: 'inline-flex', background: '#fff', border: `1px solid ${LINE}`, borderRadius: 10, padding: 2 }}>
+                {(['list', 'sequence'] as const).map((v) => (
+                  <button key={v} onClick={() => setView(v)}
+                    style={{ fontSize: 12.5, fontWeight: 600, padding: '6px 12px', borderRadius: 8, border: 'none', cursor: 'pointer',
+                      background: view === v ? TERRA : 'transparent', color: view === v ? '#fff' : INK_SOFT, textTransform: 'capitalize' }}>
+                    {v}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setShowAdd(true)}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 13, fontWeight: 600, color: INK, background: '#fff', border: `1px solid ${LINE}`, borderRadius: 10, padding: '8px 14px', cursor: 'pointer', boxShadow: '0 1px 2px rgba(34,26,19,0.04)' }}
+              >
+                <span style={{ fontSize: 16, lineHeight: 1, color: TERRA, marginTop: -1 }}>+</span> Add task
+              </button>
+            </div>
           )}
         </div>
 
+        {/* ── SEQUENCE VIEW — the engine timeline (dry-run; renders the ProjectVM, computes nothing).
+            Wrapped in the SAME TaskCtx so the drawer's shared TaskDetail uses the page's mutations. ── */}
+        {view === 'sequence' && tasks.length > 0 && (
+          <TaskCtx.Provider value={taskCtx}>
+            <div style={{ marginTop: 20 }}><ProjectSequence projectId={projectId} /></div>
+          </TaskCtx.Provider>
+        )}
+
         {/* ── project-level QC progress ───────────────────────────────────── */}
-        {proj.total > 0 && (
+        {view === 'list' && proj.total > 0 && (
           <div style={{ marginTop: 18, background: '#fff', border: `1px solid ${LINE}`, borderRadius: 14, padding: '14px 16px' }}>
             <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 9 }}>
               <span style={{ fontSize: 12.5, fontWeight: 700, color: INK, letterSpacing: '0.02em' }}>Site progress</span>
@@ -482,15 +570,50 @@ function ProjectTasksScoped({ session, projectId, filterSlot }: { session: Sessi
         )}
 
         {/* Platform-UI narration entry — confirmation-back shows right here (Part 1, UI channel) */}
-        {ordered.length > 0 && <NarrationComposer projectId={projectId} onLogged={refetchTasks} />}
+        {view === 'list' && ordered.length > 0 && <NarrationComposer projectId={projectId} onLogged={refetchTasks} />}
 
-        {/* ── the plan — flat, in construction (seq_no) order; drag to reorder ──── */}
-        {ordered.length > 0 && (
+        {/* ── the plan — grouped into PHASES (construction order); done/future collapse, current opens ──── */}
+        {view === 'list' && ordered.length > 0 && (
           <TaskCtx.Provider value={taskCtx}>
-            <div style={{ marginTop: 24, background: '#fff', borderRadius: 18, border: `1px solid ${LINE}`, overflow: 'hidden' }}>
-              {ordered.map((t) => (
-                <TaskRow key={t.task_id} task={t} expanded={expanded.has(t.task_id)} onToggle={() => toggleTask(t.task_id)} anim={anim} drag={drag} sched={schedule.get(t.task_id)} atRisk={atRiskByTask[t.task_id]} onDismissRisk={dismissRisk} />
-              ))}
+            <div style={{ marginTop: 22, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {phaseGroups.map((g, idx) => {
+                const open = phaseIsOpen(g, idx)
+                const pct = Math.round((g.done / g.total) * 100)
+                const isCurrent = idx === currentPhaseIdx
+                const chip = g.allDone ? { label: 'Done', c: SAGE }
+                  : g.active > 0 ? { label: `${g.active} active`, c: TERRA }
+                  : isCurrent ? { label: 'Up next', c: TERRA }
+                  : { label: 'Upcoming', c: INK_FAINT }
+                return (
+                  <div key={g.phase} style={{ background: '#fff', border: `1px solid ${isCurrent && !g.allDone ? `${TERRA}40` : LINE}`, borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 2px rgba(34,26,19,0.03)' }}>
+                    <button onClick={() => togglePhase(g, idx)}
+                      style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '13px 16px', background: isCurrent && !g.allDone ? `${TERRA}08` : 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
+                      <span style={{ fontSize: 14, color: INK_FAINT, transition: 'transform .2s', transform: open ? 'rotate(90deg)' : 'none', flexShrink: 0 }}>›</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+                          <span style={{ fontFamily: SERIF, fontSize: 17, fontWeight: 600, color: g.allDone ? INK_SOFT : INK, letterSpacing: '-0.01em' }}>{titleCase(g.phase)}</span>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: chip.c, background: 'rgba(34,26,19,0.045)', border: `1px solid ${LINE}`, borderRadius: 999, padding: '2px 8px' }}>
+                            <span style={{ width: 5, height: 5, borderRadius: '50%', background: chip.c }} />{chip.label}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 6, flexWrap: 'wrap' }}>
+                          <div style={{ width: 120, height: 5, borderRadius: 99, background: 'rgba(34,26,19,0.08)', overflow: 'hidden', flexShrink: 0 }}>
+                            <div style={{ width: `${pct}%`, height: '100%', background: g.allDone ? SAGE : TERRA, transition: 'width .35s ease' }} />
+                          </div>
+                          <span style={{ fontSize: 11.5, color: INK_FAINT }}>{g.done}/{g.total} done{g.start ? ` · ${fmtDate(g.start)}–${fmtDate(g.end!)}` : ''}</span>
+                        </div>
+                      </div>
+                    </button>
+                    {open && (
+                      <div style={{ borderTop: `1px solid ${LINE}` }}>
+                        {g.items.map((t) => (
+                          <TaskRow key={t.task_id} task={t} expanded={expanded.has(t.task_id)} onToggle={() => toggleTask(t.task_id)} anim={anim} drag={drag} sched={schedule.get(t.task_id)} atRisk={atRiskByTask[t.task_id]} onDismissRisk={dismissRisk} onInsertAfter={(tk) => { setAddAfter({ afterId: tk.task_id, floor: tk.floor_label }); setShowAdd(true) }} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </TaskCtx.Provider>
         )}
@@ -507,6 +630,7 @@ function ProjectTasksScoped({ session, projectId, filterSlot }: { session: Sessi
           </button>
         )}
       </div>
+      )}
 
       {/* site-owner (supervisor) picker — the site-level assignment tasks inherit */}
       {siteOwnerPick && (
@@ -527,14 +651,21 @@ function ProjectTasksScoped({ session, projectId, filterSlot }: { session: Sessi
       )}
 
       {showAdd && project && (
-        <Modal title="Add a task" onClose={() => setShowAdd(false)}>
+        <Modal title={addAfter ? 'Insert a task here' : 'Add a task'} onClose={() => { setShowAdd(false); setAddAfter(null) }}>
           <AddTaskForm
             projectId={projectId}
             orgId={(project.org_id as string) ?? ''}
             levelOptions={levelOptions}
             nextSeq={nextSeq}
-            onClose={() => setShowAdd(false)}
-            onAdded={() => { setShowAdd(false); refetchTasks() }}
+            prefillFloor={addAfter?.floor ?? null}
+            onClose={() => { setShowAdd(false); setAddAfter(null) }}
+            onAdded={async (newId) => {
+              setShowAdd(false)
+              const target = addAfter
+              setAddAfter(null)
+              await queryClient.invalidateQueries({ queryKey: ['project_tasks_v2', projectId] })
+              if (target && newId) placeAfter(newId, target.afterId)
+            }}
           />
         </Modal>
       )}
@@ -558,60 +689,170 @@ export default function ProjectTasks({ session }: { session: Session }) {
 
 function GlobalTaskManager({ session }: { session: Session }) {
   const { orgId } = useAuth()
-  const [picked, setPicked] = useState('')
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const [pickedState, setPicked] = useState('')
+  const prefetch = useCallback((id: string) => prefetchProjectQueries(queryClient, id), [queryClient])
 
-  const { data: projects = [] } = useQuery({
+  const { data: projects = [], isLoading } = useQuery({
+    // RLS already scopes projects to the user's org(s); match the rest of the app (BriklayRail,
+    // Logbook) and DON'T gate on a possibly-undefined orgId — that was hiding real projects.
     queryKey: ['tm_projects', orgId],
     queryFn: async () => {
-      const { data } = await supabase.from('projects').select('project_id, name').eq('org_id', orgId).eq('status', 'Active').order('name')
+      const { data, error } = await supabase.from('projects').select('project_id, name').eq('status', 'Active').order('name')
+      if (error) { console.error('tm_projects:', error.message); return [] as { project_id: string; name: string }[] }
       return (data ?? []) as { project_id: string; name: string }[]
     },
-    enabled: !!orgId,
   })
 
-  const filter = (
-    <div>
-      <p style={{ fontSize: 11, fontWeight: 700, color: TERRA, letterSpacing: '0.12em', textTransform: 'uppercase', margin: '0 0 9px' }}>Across every site</p>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        {projects.map((p) => (
-          <ProjectChip key={p.project_id} label={p.name} on={picked === p.project_id} onClick={() => setPicked(p.project_id)} />
-        ))}
-      </div>
+  // Open straight into a project — auto-select the first one (no chooser wizard). The side rail
+  // stays available to switch. A manual pick (pickedState) overrides.
+  const picked = pickedState || projects[0]?.project_id || ''
+
+  return (
+    <div style={{ minHeight: '100vh', background: DARK_CANVAS, position: 'relative' }}>
+      <style>{KEYFRAMES}</style>
+      {/* the chosen project's sequence renders behind the floating side switcher */}
+      {picked && <ProjectTasksScoped key={picked} session={session} projectId={picked} filterSlot={<span />} />}
+      {/* the side switcher (compact name scroller) + add-project; the full chooser only appears if
+          there are no projects yet. */}
+      <ProjectSelector projects={projects} picked={picked} loading={isLoading} onPick={setPicked} onPrefetch={prefetch} onAdd={() => navigate('/projects/new')} />
     </div>
   )
-
-  if (!picked) {
-    return (
-      <div style={{ minHeight: '100vh', background: CREAM }}>
-        <div className="mx-auto w-full max-w-[880px] lg:max-w-[1040px] xl:max-w-[1200px]" style={{ padding: '32px 24px 120px' }}>
-          {filter}
-          <h1 style={{ fontFamily: SERIF, fontSize: 34, fontWeight: 600, color: INK, margin: '14px 0 0', letterSpacing: '-0.01em' }}>Task Manager</h1>
-          <p style={{ fontSize: 14.5, lineHeight: 1.55, color: INK_SOFT, margin: '8px 0 0', maxWidth: 460 }}>
-            {projects.length === 0
-              ? 'No active projects yet — create one to plan its tasks.'
-              : 'Choose a project above to manage its construction task plan.'}
-          </p>
-        </div>
-      </div>
-    )
-  }
-
-  // Remount per project (key) so per-project state (enrich flags, expanded rows) resets cleanly.
-  return <ProjectTasksScoped key={picked} session={session} projectId={picked} filterSlot={filter} />
 }
 
-// project filter chip — the GLOBAL-context selector (hidden when scoped inside a project).
-// Mirrors Site Desk's site chips so the two cross-project surfaces read identically.
-function ProjectChip({ label, on, onClick }: { label: string; on: boolean; onClick: () => void }) {
+// ── PROJECT SELECTOR — names only, no cards. Two states sharing one element, with a subtle morph:
+//    CENTRE (nothing chosen): a vertical, scroll-reactive column of project names (the centred one
+//    lifts + brightens, neighbours recede — the floor-timeline's depth language, vertical). Picking
+//    one fades this away as the COMPACT selector glides into the top-left corner. Reopen to switch.
+function ProjectSelector({ projects, picked, loading = false, onPick, onPrefetch, onAdd }: {
+  projects: { project_id: string; name: string }[]; picked: string; loading?: boolean
+  onPick: (id: string) => void; onPrefetch?: (id: string) => void; onAdd: () => void
+}) {
+  const EASE = 'cubic-bezier(.22,.61,.36,1)'
+  // the full chooser only shows when there's genuinely nothing selected and nothing loading (i.e. an
+  // empty org). With projects present we open straight into one, so this stays hidden.
+  const showChooser = !picked && !loading
+
   return (
-    <button onClick={onClick} style={{
-      display: 'inline-flex', alignItems: 'center', padding: '6px 13px', borderRadius: 999, cursor: 'pointer',
-      border: `1px solid ${on ? INK : LINE}`, background: on ? INK : '#fff', color: on ? CREAM : INK_SOFT,
-      fontSize: 13, fontWeight: on ? 600 : 500, maxWidth: 240, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-    }}>
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
-    </button>
+    <>
+      {/* CENTRE chooser — only for the no-projects-yet state */}
+      <div className="proj-centre" style={{
+        zIndex: showChooser ? 60 : 5, display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center', padding: '0 16px',
+        opacity: showChooser ? 1 : 0, transform: showChooser ? 'none' : 'scale(.96) translateY(-18px)',
+        pointerEvents: showChooser ? 'auto' : 'none', transition: `opacity .5s ease, transform .55s ${EASE}`,
+      }}>
+        <p style={{ fontSize: 11, fontWeight: 700, color: TERRA, letterSpacing: '0.16em', textTransform: 'uppercase', margin: 0 }}>Across every site</p>
+        {projects.length > 0
+          ? <NameScroller projects={projects} picked={picked} onPick={onPick} onPrefetch={onPrefetch} />
+          : <p style={{ color: '#a8a6a3', fontSize: 14, margin: '24px 0' }}>No active projects yet.</p>}
+        <button onClick={onAdd} style={{ marginTop: 4, fontSize: 13, fontWeight: 600, color: '#a8a6a3', background: 'transparent', border: '1px solid #34343c', borderRadius: 999, padding: '9px 18px', cursor: 'pointer' }}>+ New project</button>
+      </div>
+
+      {/* SIDE scroller — the SAME scrolling name column, smaller, parked top-left. Keep scrolling /
+          tapping to switch projects without leaving the sequence. Glides in after a pick. */}
+      {picked && projects.length > 0 && (
+        <div className="proj-side" style={{
+          opacity: picked ? 1 : 0, transform: picked ? 'none' : 'translateX(-16px)',
+          transition: `opacity .55s .12s ease, transform .6s .12s ${EASE}`,
+        }}>
+          <p style={{ fontSize: 9, fontWeight: 700, color: TERRA, letterSpacing: '0.16em', textTransform: 'uppercase', margin: '0 0 2px 12px' }}>Project</p>
+          <NameScroller projects={projects} picked={picked} onPick={onPick} onPrefetch={onPrefetch} compact />
+        </div>
+      )}
+
+      {/* add-project, floating quietly over the sequence (top-right); brightens on hover */}
+      {picked && (
+        <button className="addproj-hot proj-add" onClick={onAdd} title="New project"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 12.5, fontWeight: 600, color: '#f4f3f1', background: 'rgba(25,25,29,.7)', border: '1px solid #34343c', borderRadius: 999, padding: '8px 14px', cursor: 'pointer', backdropFilter: 'blur(8px)' }}>
+          <span style={{ fontSize: 15, color: TERRA, marginTop: -1 }}>+</span> New project
+        </button>
+      )}
+    </>
   )
+}
+
+// The scrollable column of project NAMES — depth-painted by distance from centre. Used full-size as
+// the centre chooser, and `compact` as the small top-left side rail (auto-centres the selected one).
+function NameScroller({ projects, picked, onPick, onPrefetch, compact = false }: {
+  projects: { project_id: string; name: string }[]; picked: string
+  onPick: (id: string) => void; onPrefetch?: (id: string) => void; compact?: boolean
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const itemRefs = useRef<(HTMLDivElement | null)[]>([])
+  const [centerIdx, setCenterIdx] = useState(() => { const i = projects.findIndex((p) => p.project_id === picked); return i < 0 ? 0 : i })
+
+  // depth paint (visual only — never setState here)
+  const paint = useCallback(() => {
+    const c = scrollRef.current
+    if (!c) return
+    const mid = c.scrollTop + c.clientHeight / 2
+    itemRefs.current.forEach((el) => {
+      if (!el) return
+      const d = Math.min(1, Math.abs((el.offsetTop + el.offsetHeight / 2) - mid) / (c.clientHeight * 0.42))
+      const k = 1 - d
+      el.style.opacity = (0.16 + 0.84 * k).toFixed(3)
+      el.style.transform = `scale(${(0.8 + 0.2 * k).toFixed(3)})`   // same depth as the master slider
+      el.style.color = k > 0.62 ? '#f4f3f1' : '#6c6a68'
+    })
+  }, [])
+  const trackCenter = useCallback(() => {
+    const c = scrollRef.current
+    if (!c) return
+    const mid = c.scrollTop + c.clientHeight / 2
+    let best = 0, bd = 1e9
+    itemRefs.current.forEach((el, i) => { if (!el) return; const dd = Math.abs((el.offsetTop + el.offsetHeight / 2) - mid); if (dd < bd) { bd = dd; best = i } })
+    setCenterIdx((prev) => (prev === best ? prev : best))
+  }, [])
+  const scrollToIdx = (i: number) => {
+    const c = scrollRef.current, el = itemRefs.current[i]
+    if (c && el) c.scrollTo({ top: el.offsetTop + el.offsetHeight / 2 - c.clientHeight / 2, behavior: 'smooth' })
+  }
+
+  // bring the selected project to centre (compact rail); paint once. No setState here.
+  useEffect(() => {
+    const c = scrollRef.current
+    if (compact && c && picked) {
+      const i = projects.findIndex((p) => p.project_id === picked)
+      const el = itemRefs.current[i]
+      if (el) c.scrollTop = el.offsetTop + el.offsetHeight / 2 - c.clientHeight / 2
+    }
+    paint()
+  }, [paint, picked, projects, compact])
+  // warm the cache for the centred project so picking it (scroll or click) shows tasks instantly
+  useEffect(() => { const p = projects[centerIdx]; if (p) onPrefetch?.(p.project_id) }, [centerIdx, projects, onPrefetch])
+
+  const ARROW = `${compact ? 0.5 : 1}`
+  return (
+    <div style={{ position: 'relative', width: compact ? 'clamp(150px, 24vw, 210px)' : '100%', maxWidth: compact ? undefined : 520 }}>
+      {centerIdx > 0 && (
+        <button onClick={() => scrollToIdx(centerIdx - 1)} aria-label="Previous project" style={{ ...arrowChip, top: -2, opacity: ARROW }}>▲</button>
+      )}
+      <div ref={scrollRef} onScroll={() => { paint(); trackCenter() }} style={{
+        width: '100%', height: compact ? 'min(52vh, 400px)' : 'min(56vh, 440px)', overflowY: 'auto', scrollSnapType: 'y mandatory',
+        // height-based padding (NOT % — that resolves against WIDTH) so the first/last names can scroll
+        // to centre, exactly like the main chooser. This is what makes the side rail scroll properly.
+        padding: compact ? 'min(26vh, 190px) 0' : '24vh 0', textAlign: compact ? 'left' : 'center', scrollbarWidth: 'none',
+        WebkitMaskImage: 'linear-gradient(180deg,transparent,#000 26%,#000 74%,transparent)', maskImage: 'linear-gradient(180deg,transparent,#000 26%,#000 74%,transparent)',
+      }}>
+        {projects.map((p, i) => (
+          <div key={p.project_id} ref={(el) => { itemRefs.current[i] = el }} className="proj-name" onClick={() => onPick(p.project_id)} onMouseEnter={() => onPrefetch?.(p.project_id)}
+            style={{ scrollSnapAlign: 'center', cursor: 'pointer', padding: compact ? '8px 12px' : '12px 14px', fontFamily: SERIF, fontSize: compact ? 'clamp(15px, 3vw, 19px)' : 'clamp(22px, 5vw, 30px)', fontWeight: compact && p.project_id === picked ? 600 : 500, letterSpacing: '-0.01em', willChange: 'transform, opacity', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {p.name}
+          </div>
+        ))}
+      </div>
+      {centerIdx < projects.length - 1 && (
+        <button onClick={() => scrollToIdx(centerIdx + 1)} aria-label="Next project" style={{ ...arrowChip, bottom: -2, opacity: ARROW }}>▼</button>
+      )}
+    </div>
+  )
+}
+const arrowChip: CSSProperties = {
+  position: 'absolute', left: '50%', transform: 'translateX(-50%)', zIndex: 2, width: 26, height: 26, borderRadius: '50%',
+  border: '1px solid #34343c', background: 'rgba(20,20,24,0.66)', backdropFilter: 'blur(6px)', color: '#a8a6a3',
+  fontSize: 9, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
 }
 
 // ── empty state — beautiful set-up card ──────────────────────────────────────
@@ -668,13 +909,16 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 }
 
 // ── manual add-task form (name + level + status, appended as source='manual') ─
-function AddTaskForm({ projectId, orgId, levelOptions, nextSeq, onClose, onAdded }: {
+function AddTaskForm({ projectId, orgId, levelOptions, nextSeq, prefillFloor, onClose, onAdded }: {
   projectId: string; orgId: string
   levelOptions: { value: string; label: string }[]
-  nextSeq: number; onClose: () => void; onAdded: () => void
+  nextSeq: number; prefillFloor?: string | null; onClose: () => void; onAdded: (newId?: string) => void
 }) {
   const [name, setName] = useState('')
-  const [level, setLevel] = useState(levelOptions[0]?.value ?? '__sitewide__')
+  // when inserting after a hovered task, default to that task's floor so it lands in the right place
+  const [level, setLevel] = useState(
+    (prefillFloor && levelOptions.some((l) => l.value === prefillFloor) ? prefillFloor : levelOptions[0]?.value) ?? '__sitewide__',
+  )
   const [status, setStatus] = useState<'not_started' | 'active' | 'done'>('not_started')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -683,7 +927,7 @@ function AddTaskForm({ projectId, orgId, levelOptions, nextSeq, onClose, onAdded
     if (!name.trim()) return
     setBusy(true); setError('')
     const floor_label = level === '__sitewide__' ? null : level
-    const { error: e } = await supabase.from('site_tasks').insert({
+    const { data, error: e } = await supabase.from('site_tasks').insert({
       org_id: orgId,
       project_id: projectId,
       phase: 'custom',
@@ -694,9 +938,9 @@ function AddTaskForm({ projectId, orgId, levelOptions, nextSeq, onClose, onAdded
       seq_no: nextSeq,
       status,
       source: 'manual',
-    })
+    }).select('task_id').single()
     if (e) { setError(e.message); setBusy(false); return }
-    onAdded()
+    onAdded(data?.task_id)
   }
 
   const fieldStyle: CSSProperties = { width: '100%', fontSize: 14.5, color: INK, background: '#fff', border: `1px solid ${LINE}`, borderRadius: 10, padding: '11px 13px', outline: 'none' }
@@ -749,10 +993,8 @@ interface DragApi {
   start: (id: string) => void; over: (id: string) => void; drop: (id: string) => void; end: () => void
 }
 
-const metaTag: CSSProperties = { fontSize: 11, fontWeight: 500, color: INK_FAINT, background: 'rgba(34,26,19,0.05)', padding: '1px 7px', borderRadius: 6, whiteSpace: 'nowrap' }
-
 // ── one task row — flat sequence list, drag-handle reorder, expand for QC + diary ──
-function TaskRow({ task, expanded, onToggle, anim, drag, sched, atRisk, onDismissRisk }: { task: Task; expanded: boolean; onToggle: () => void; anim: Anim; drag: DragApi; sched?: { start: Date; end: Date }; atRisk?: { id: string; title: string }[]; onDismissRisk?: (issueId: string, taskId: string) => void }) {
+function TaskRow({ task, expanded, onToggle, anim, drag, sched, atRisk, onDismissRisk, onInsertAfter }: { task: Task; expanded: boolean; onToggle: () => void; anim: Anim; drag: DragApi; sched?: { start: Date; end: Date }; atRisk?: { id: string; title: string }[]; onDismissRisk?: (issueId: string, taskId: string) => void; onInsertAfter?: (task: Task) => void }) {
   const ctx = useContext(TaskCtx)
   const qc = [...(task.site_task_qc ?? [])].sort((a, b) => a.seq - b.seq)
   const p = qcProgress(qc)
@@ -760,7 +1002,6 @@ function TaskRow({ task, expanded, onToggle, anim, drag, sched, atRisk, onDismis
   const pending = !isManual && !task.description && qc.length === 0
   const where = whereLabel(task.floor_label, task.unit_label)
   const dur = Math.max(1, task.duration_days ?? DEFAULT_DURATION)
-  const [ownerPick, setOwnerPick] = useState(false)
 
   const isDragging = drag.draggingId === task.task_id
   const isOver = drag.overId === task.task_id && drag.draggingId !== task.task_id
@@ -774,6 +1015,7 @@ function TaskRow({ task, expanded, onToggle, anim, drag, sched, atRisk, onDismis
   const subAnim: CSSProperties = { animation: `siteSubIn 220ms ease ${subDelay}ms backwards` }
 
   return (
+    <div className="task-wrap">
     <div
       onDragOver={(e) => { e.preventDefault(); drag.over(task.task_id) }}
       onDrop={(e) => { e.preventDefault(); drag.drop(task.task_id) }}
@@ -846,332 +1088,27 @@ function TaskRow({ task, expanded, onToggle, anim, drag, sched, atRisk, onDismis
           ) : null
         )}
 
-        {/* expanded: description + owner + QC (with provenance) + activity timeline + image shell + diary */}
+        {/* expanded: the SHARED task detail (description + owner + QC + activity + image + diary).
+            Same component the Sequence view opens as a right drawer — one task surface, two entries. */}
         {expanded && (
           <div style={{ marginTop: 8 }}>
-            {pending ? (
-              <PendingSubtext mode={anim.pendingMode} />
-            ) : task.description ? (
-              <p style={{ fontSize: 13, lineHeight: 1.55, color: INK_SOFT, margin: 0 }}>{task.description}</p>
-            ) : null}
-
-            {/* owner — INHERITS the site owner (supervisor) by default; editable per task (override) */}
-            {ctx && (() => {
-              const isOverride = task.owner_source === 'manual' && !!task.owner_id
-              const effId = isOverride ? task.owner_id! : (ctx.supervisorId ?? ctx.principalId)
-              const tag = isOverride ? 'chosen' : ctx.supervisorId ? 'site default' : ctx.principalId ? 'default' : ''
-              return (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 12 }}>
-                  <span style={{ fontSize: 10.5, fontWeight: 700, color: INK_FAINT, letterSpacing: '0.07em', textTransform: 'uppercase' }}>Owner</span>
-                  <button onClick={() => setOwnerPick(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, background: '#fff', border: `1px solid ${LINE}`, borderRadius: 999, padding: '4px 10px 4px 4px', cursor: 'pointer' }}>
-                    {effId ? <MemberAvatar name={ctx.ownerName(effId)} size={20} /> : <span style={{ width: 20, height: 20, borderRadius: '50%', border: `1.5px dashed ${INK_FAINT}` }} />}
-                    <span style={{ fontSize: 12.5, fontWeight: 600, color: effId ? INK : INK_SOFT }}>{effId ? ctx.ownerName(effId) : 'Unassigned'}</span>
-                    {tag && <span style={{ fontSize: 10, color: INK_FAINT }}>({tag})</span>}
-                  </button>
-                  {ownerPick && (
-                    <UserPicker orgId={ctx.orgId} currentId={effId ?? null} title="Owner for this task"
-                      onPick={(id) => { ctx.setOwner(task.task_id, id); setOwnerPick(false) }} onClose={() => setOwnerPick(false)} />
-                  )}
-                </div>
-              )
-            })()}
-
-            {qc.length > 0 && ctx && <QcList qc={qc} taskId={task.task_id} setQc={ctx.setQc} />}
-            <ActivityTimeline task={task} qc={qc} />
-            <ImageShell task={task} />
-            {ctx && <TaskComments taskId={task.task_id} orgId={ctx.orgId} authorId={ctx.authorId} authorName={ctx.authorName} />}
+            <TaskDetail task={task} sched={sched} />
           </div>
         )}
       </div>
     </div>
-  )
-}
-
-// relative time ("2h ago"); used by QC provenance + timeline.
-function timeAgo(iso: string | null | undefined): string {
-  if (!iso) return ''
-  const ms = Date.now() - new Date(iso).getTime()
-  if (isNaN(ms)) return ''
-  const m = Math.round(ms / 60000)
-  if (m < 1) return 'just now'
-  if (m < 60) return `${m}m ago`
-  const h = Math.round(m / 60)
-  if (h < 24) return `${h}h ago`
-  const d = Math.round(h / 24)
-  return `${d}d ago`
-}
-
-// ── activity timeline — system-generated narration events, weighted ──────────
-function ActivityTimeline({ task, qc }: { task: Task; qc: QcRow[] }) {
-  const events: { weight: 'high' | 'low'; text: string; at: string | null; narrationId: string | null }[] = []
-  for (const e of task.status_history ?? []) {
-    if (e.source === 'narration' || e.status) {
-      events.push({ weight: 'high', text: e.status ? `→ ${e.status.replace('_', ' ')}` : 'updated', at: e.at ?? null, narrationId: e.narration_id ?? null })
-    }
-  }
-  for (const q of qc) {
-    if (q.qc_status === 'confirmed' && q.answer) {
-      events.push({ weight: 'high', text: `QC confirmed — ${q.answer}`, at: q.answered_at ?? null, narrationId: q.source_narration_id ?? null })
-    }
-  }
-  events.sort((a, b) => (new Date(b.at ?? 0).getTime()) - (new Date(a.at ?? 0).getTime()))
-  return (
-    <div style={{ marginTop: 14 }}>
-      <div style={{ fontSize: 10.5, fontWeight: 700, color: INK_FAINT, letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 6 }}>Activity</div>
-      {events.length === 0 ? (
-        <p style={{ fontSize: 12.5, color: INK_FAINT, margin: 0, fontStyle: 'italic' }}>No site updates yet — narration will appear here.</p>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-          {events.map((ev, i) => (
-            <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, marginTop: 5, background: ev.weight === 'high' ? TERRA : INK_FAINT }} />
-              <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: ev.weight === 'high' ? INK : INK_SOFT, fontWeight: ev.weight === 'high' ? 500 : 400 }}>
-                {ev.text}
-                {ev.narrationId && <span style={{ fontSize: 11, color: INK_FAINT }}> · from narration</span>}
-              </span>
-              <span style={{ fontSize: 11, color: INK_FAINT, whiteSpace: 'nowrap' }}>{timeAgo(ev.at)}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── image artifact area — SHELL ONLY (vision extraction is the next block) ────
-function ImageShell({ task }: { task: Task & { image_url?: string | null } }) {
-  const url = task.image_url ?? null
-  return (
-    <div style={{ marginTop: 14 }}>
-      <div style={{ fontSize: 10.5, fontWeight: 700, color: INK_FAINT, letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 6 }}>Site photo</div>
-      {url ? (
-        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-          <img src={url} alt="site" style={{ width: 96, height: 96, objectFit: 'cover', borderRadius: 12, border: `1px solid ${LINE}` }} />
-          <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: INK_FAINT, fontStyle: 'italic' }}>Extraction &amp; resolution will appear here.</div>
-        </div>
-      ) : (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 64, borderRadius: 12, border: `1.5px dashed ${LINE}`, color: INK_FAINT, fontSize: 12.5 }}>
-          No photo yet
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── per-task duration stepper + computed dates (adjacent schedule cell) ───────
-function ScheduleCell({ sched, dur, onChange }: { sched?: { start: Date; end: Date }; dur: number; onChange: (d: number) => void }) {
-  const btn: CSSProperties = { width: 20, height: 20, borderRadius: 6, border: `1px solid ${LINE}`, background: '#fff', color: INK_SOFT, fontSize: 13, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0 }
-  return (
-    <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, minWidth: 92 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-        <button onClick={() => onChange(dur - 1)} disabled={dur <= 1} aria-label="Decrease duration" style={{ ...btn, opacity: dur <= 1 ? 0.4 : 1, cursor: dur <= 1 ? 'default' : 'pointer' }}>−</button>
-        <span style={{ fontSize: 12.5, fontWeight: 700, color: INK, fontVariantNumeric: 'tabular-nums', minWidth: 28, textAlign: 'center' }}>{dur}d</span>
-        <button onClick={() => onChange(dur + 1)} aria-label="Increase duration" style={{ ...btn, cursor: 'pointer' }}>+</button>
-      </div>
-      {sched && <span style={{ fontSize: 10.5, color: INK_FAINT, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{fmtDate(sched.start)} → {fmtDate(sched.end)}</span>}
-    </div>
-  )
-}
-
-// ── QC progress helpers ──────────────────────────────────────────────────────
-const FAIL = '#B2402A'
-interface QcProgress { total: number; passed: number; failed: number; pending: number; done: boolean }
-function qcProgress(qc: QcRow[]): QcProgress {
-  const total = qc.length
-  const passed = qc.filter((q) => q.qc_status === 'confirmed').length
-  const failed = qc.filter((q) => q.qc_status === 'failed').length
-  return { total, passed, failed, pending: total - passed - failed, done: total > 0 && passed === total }
-}
-
-/** Small SVG ring: sage arc for passed/total; red accent if any check failed. */
-function ProgressRing({ p, size = 18, stroke = 2.5 }: { p: QcProgress; size?: number; stroke?: number }) {
-  const r = (size - stroke) / 2
-  const c = 2 * Math.PI * r
-  const frac = p.total ? p.passed / p.total : 0
-  const color = p.failed > 0 ? FAIL : p.done ? SAGE : TERRA
-  return (
-    <svg width={size} height={size} style={{ transform: 'rotate(-90deg)', flexShrink: 0 }}>
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={LINE} strokeWidth={stroke} />
-      {frac > 0 && (
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke}
-          strokeDasharray={c} strokeDashoffset={c * (1 - frac)} strokeLinecap="round" style={{ transition: 'stroke-dashoffset 240ms ease' }} />
-      )}
-    </svg>
-  )
-}
-
-/** Compact "ring + 2/3" chip shown on a task row when it has QC. */
-function QcProgressChip({ p }: { p: QcProgress }) {
-  const color = p.failed > 0 ? FAIL : p.done ? SAGE : INK_FAINT
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
-      <ProgressRing p={p} />
-      <span style={{ fontSize: 11.5, fontWeight: 700, color, fontVariantNumeric: 'tabular-nums' }}>{p.passed}/{p.total}</span>
-    </span>
-  )
-}
-
-// ── interactive QC checklist (Yes / No per check) ────────────────────────────
-function QcList({ qc, taskId, setQc }: { qc: QcRow[]; taskId: string; setQc: TaskCtxValue['setQc'] }) {
-  const p = qcProgress(qc)
-  return (
-    <div style={{ marginTop: 12 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-        <span style={{ fontSize: 10.5, fontWeight: 700, color: INK_FAINT, letterSpacing: '0.07em', textTransform: 'uppercase' }}>Quality checks</span>
-        <span style={{ fontSize: 11, fontWeight: 600, color: p.failed > 0 ? FAIL : p.done ? SAGE : INK_FAINT }}>
-          {p.passed}/{p.total} passed{p.failed > 0 ? ` · ${p.failed} failed` : ''}
-        </span>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column' }}>
-        {qc.map((q) => (
-          <div key={q.id} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', padding: '8px 0', borderTop: `1px solid ${LINE}` }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <span style={{ fontSize: 13, lineHeight: 1.45, color: q.qc_status === 'failed' ? FAIL : INK }}>{q.question}</span>
-              {q.is_critical && <span style={{ marginLeft: 8, fontSize: 9, fontWeight: 800, color: TERRA, letterSpacing: '0.06em' }}>CRITICAL</span>}
-              {/* provenance: an answered QC shows what confirmed it + when (from narration) */}
-              {q.qc_status === 'confirmed' && q.answer && (
-                <div style={{ marginTop: 3, fontSize: 11.5, color: SAGE }}>
-                  ✓ {q.answer}
-                  {(q.source_narration_id || q.answered_at) && (
-                    <span style={{ color: INK_FAINT }}> — {q.source_narration_id ? 'from narration' : 'logged'}{q.answered_at ? ` · ${timeAgo(q.answered_at)}` : ''}</span>
-                  )}
-                </div>
-              )}
-            </div>
-            <YesNo
-              value={q.qc_status}
-              onYes={() => setQc(taskId, q.id, q.qc_status === 'confirmed' ? null : 'confirmed')}
-              onNo={() => setQc(taskId, q.id, q.qc_status === 'failed' ? null : 'failed')}
-            />
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function YesNo({ value, onYes, onNo }: { value: QcStatus; onYes: () => void; onNo: () => void }) {
-  const yes = value === 'confirmed'
-  const no = value === 'failed'
-  const base: CSSProperties = { fontSize: 12, fontWeight: 600, padding: '5px 15px', borderRadius: 999, cursor: 'pointer', border: '1px solid', transition: 'all 140ms', lineHeight: 1 }
-  return (
-    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-      <button onClick={onYes} aria-pressed={yes}
-        style={{ ...base, background: yes ? SAGE : 'transparent', borderColor: yes ? SAGE : LINE, color: yes ? '#fff' : INK_SOFT }}>Yes</button>
-      <button onClick={onNo} aria-pressed={no}
-        style={{ ...base, background: no ? FAIL : 'transparent', borderColor: no ? FAIL : LINE, color: no ? '#fff' : INK_SOFT }}>No</button>
-    </div>
-  )
-}
-
-// ── per-task comment diary (append-only, unlimited) ──────────────────────────
-interface CommentRow { id: string; body: string; author_name: string | null; created_at: string }
-function TaskComments({ taskId, orgId, authorId, authorName }: { taskId: string; orgId: string; authorId: string; authorName: string }) {
-  const queryClient = useQueryClient()
-  const { data: comments = [] } = useQuery({
-    queryKey: ['site_task_comments', taskId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('site_task_comments')
-        .select('id, body, author_name, created_at')
-        .eq('task_id', taskId)
-        .order('created_at', { ascending: true })
-      if (error) throw error
-      return (data ?? []) as CommentRow[]
-    },
-  })
-  const [text, setText] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  async function add() {
-    const body = text.trim()
-    if (!body || busy) return
-    setBusy(true)
-    const { error } = await supabase.from('site_task_comments').insert({
-      task_id: taskId, org_id: orgId, author_id: authorId || null, author_name: authorName || null, body,
-    })
-    setBusy(false)
-    if (!error) { setText(''); queryClient.invalidateQueries({ queryKey: ['site_task_comments', taskId] }) }
-  }
-
-  return (
-    <div style={{ marginTop: 14, borderTop: `1px solid ${LINE}`, paddingTop: 12 }}>
-      <div style={{ fontSize: 10.5, fontWeight: 700, color: INK_FAINT, letterSpacing: '0.07em', textTransform: 'uppercase', marginBottom: 10 }}>
-        Diary{comments.length > 0 ? ` · ${comments.length}` : ''}
-      </div>
-      {comments.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 11, marginBottom: 12 }}>
-          {comments.map((c) => (
-            <div key={c.id} style={{ display: 'flex', gap: 10 }}>
-              <span style={{ flexShrink: 0, width: 26, height: 26, borderRadius: '50%', background: `${TERRA}14`, color: TERRA, fontSize: 10.5, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {(c.author_name ?? '?').trim().slice(0, 1).toUpperCase() || '?'}
-              </span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                  <span style={{ fontSize: 12.5, fontWeight: 700, color: INK }}>{c.author_name ?? 'Someone'}</span>
-                  <span style={{ fontSize: 11, color: INK_FAINT }}>{fmtWhen(c.created_at)}</span>
-                </div>
-                <p style={{ fontSize: 13, lineHeight: 1.5, color: INK_SOFT, margin: '2px 0 0', whiteSpace: 'pre-wrap' }}>{c.body}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); add() } }}
-          placeholder="Add a note to the diary…"
-          rows={1}
-          style={{ flex: 1, resize: 'vertical', minHeight: 38, fontSize: 13, fontFamily: 'inherit', lineHeight: 1.5, color: INK, background: '#fff', border: `1px solid ${LINE}`, borderRadius: 10, padding: '9px 12px', outline: 'none', boxSizing: 'border-box' }}
-        />
-        <button
-          onClick={add}
-          disabled={busy || !text.trim()}
-          style={{ flexShrink: 0, fontSize: 13, fontWeight: 600, color: '#fff', background: TERRA, border: 'none', borderRadius: 10, padding: '9px 16px', cursor: busy || !text.trim() ? 'default' : 'pointer', opacity: busy || !text.trim() ? 0.5 : 1 }}
-        >
-          {busy ? '…' : 'Post'}
+    {/* hover-to-insert: a quiet "add task here" that reveals between rows; a created task lands here */}
+    {onInsertAfter && (
+      <div className="ins-aff">
+        <button onClick={() => onInsertAfter(task)}
+          style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '0 16px', background: 'transparent', border: 'none', cursor: 'pointer', height: '100%' }}>
+          <span style={{ flex: 1, height: 1, background: `${TERRA}40` }} />
+          <span style={{ fontSize: 11, fontWeight: 600, color: TERRA, whiteSpace: 'nowrap' }}>+ Add task here</span>
+          <span style={{ flex: 1, height: 1, background: `${TERRA}40` }} />
         </button>
       </div>
+    )}
     </div>
   )
 }
 
-function fmtWhen(iso: string): string {
-  return new Date(iso).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
-}
-
-function StatusNode({ status }: { status: string }) {
-  const base = { width: 11, height: 11, borderRadius: '50%', marginTop: 4, zIndex: 1, background: '#fff', boxShadow: '0 0 0 2px #fff' } as const
-  if (status === 'done') return <span style={{ ...base, background: SAGE }} />
-  if (status === 'active') return <span style={{ ...base, background: TERRA }} />
-  return <span style={{ ...base, border: `1.5px solid ${INK_FAINT}` }} />
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const cfg = status === 'done' ? { c: SAGE, t: 'Done' } : status === 'active' ? { c: TERRA, t: 'Active' } : { c: INK_FAINT, t: 'Not started' }
-  return <span style={{ fontSize: 10.5, fontWeight: 700, color: cfg.c, letterSpacing: '0.03em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{cfg.t}</span>
-}
-
-function PendingSubtext({ mode }: { mode: 'shimmer' | 'unavailable' }) {
-  // After enrich settles, a still-pending task says so quietly instead of shimmering forever.
-  if (mode === 'unavailable') {
-    return (
-      <p style={{ fontSize: 12.5, color: INK_FAINT, margin: 0, fontStyle: 'italic' }} aria-label="details unavailable">
-        Details unavailable
-      </p>
-    )
-  }
-  // Shaped like the real description + critical-QC line, so it reads as a fill, not a swap.
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }} aria-label="details pending">
-      <span className="animate-pulse" style={{ height: 9, width: '82%', borderRadius: 4, background: 'rgba(34,26,19,0.06)' }} />
-      <span className="animate-pulse" style={{ height: 9, width: '58%', borderRadius: 4, background: 'rgba(34,26,19,0.06)' }} />
-    </div>
-  )
-}
-
-function chip(color: string): CSSProperties {
-  return { fontSize: 10, fontWeight: 700, color, background: `${color}14`, padding: '2px 8px', borderRadius: 999, letterSpacing: '0.03em' }
-}

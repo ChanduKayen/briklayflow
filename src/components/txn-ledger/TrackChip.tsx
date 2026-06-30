@@ -39,7 +39,7 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
   const [chosenOneTime, setChosenOneTime] = useState(!!txn.is_one_time);
   const [busy, setBusy] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
-  const [pos, setPos] = useState<{ top: number; left?: number; right: number }>({ top: 0, right: 0 });
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; left?: number; right?: number; maxH: number }>({ top: 0, right: 0, maxH: 480 });
 
   const kind: Kind = txn.stakeholders?.type === 'Vendor' ? 'PO' : 'WO';
 
@@ -59,12 +59,22 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Place the panel so it is ALWAYS fully on-screen: below the chip when there's room, otherwise flip
+  // above; cap maxHeight to the available space (internal scroll) so it never floats off the viewport.
   const computePos = () => {
     const el = btnRef.current; if (!el) return null;
     const r = el.getBoundingClientRect();
     const mob = window.innerWidth < 640;
-    const top = Math.max(8, Math.min(r.bottom + 6, window.innerHeight - 180));
-    return mob ? { top, left: 8, right: 8 } : { top, right: Math.max(8, window.innerWidth - r.right) };
+    const M = 8;
+    const side: { left?: number; right?: number } = mob ? { left: 8, right: 8 } : { right: Math.max(8, window.innerWidth - r.right) };
+    const spaceBelow = window.innerHeight - r.bottom - M;
+    const spaceAbove = r.top - M;
+    if (spaceBelow >= 220 || spaceBelow >= spaceAbove) {
+      const top = Math.min(r.bottom + 6, window.innerHeight - 140);
+      return { top, ...side, maxH: Math.max(160, window.innerHeight - top - M) };
+    }
+    const bottom = Math.max(M, window.innerHeight - r.top + 6);
+    return { bottom, ...side, maxH: Math.max(160, window.innerHeight - bottom - M) };
   };
   const toggle = () => { if (!open) { const p = computePos(); if (p) setPos(p); } setOpen((o) => !o); };
   const close = () => setOpen(false);
@@ -160,7 +170,7 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
-            style={{ position: 'fixed', top: pos.top, left: pos.left, right: pos.right, zIndex: 9999, width: pos.left === undefined ? 'min(94vw, 480px)' : undefined, maxHeight: '85vh', overflowY: 'auto', background: V.surface, border: `1px solid ${V.line}`, boxShadow: '0 24px 60px rgba(30,26,21,0.22)' }}
+            style={{ position: 'fixed', top: pos.top, bottom: pos.bottom, left: pos.left, right: pos.right, zIndex: 9999, width: pos.left === undefined ? 'min(94vw, 480px)' : undefined, maxHeight: pos.maxH, overflowY: 'auto', background: V.surface, border: `1px solid ${V.line}`, boxShadow: '0 24px 60px rgba(30,26,21,0.22)' }}
           >
             {kind === 'WO'
               ? <ContractHub txn={txn} onClose={close} onLinked={onLinked} />

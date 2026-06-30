@@ -38,7 +38,7 @@ function isExcludedFromSpent(cat: string) {
 }
 
 function genTxnId() {
-  return `TXN-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+  return `TXN-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
 }
 
 // ── AnimatedNumber ────────────────────────────────────────────────────────────
