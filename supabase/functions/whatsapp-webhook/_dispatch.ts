@@ -34,7 +34,7 @@ export type DispatchCtx = {
   orgId: string
   interactiveId: string | null   // Sprint 5: id of a tapped LIST row / reply button
   flowResponse?: Record<string, unknown> | null   // decoded WhatsApp Flow completion (nfm_reply.response_json)
-  image?: { base64: string; mime: string; caption: string }   // payment-image -> agent vision extraction
+  image?: { base64: string; mime: string; caption: string; storagePath?: string | null }   // payment-image -> agent vision extraction; storagePath (rough-entry-media) → siteops attachment
   firstTouch?: boolean   // Sprint 6: member's first-ever contact -> orient / welcome
   dormant?: boolean      // Sprint 6: returning after a long gap -> welcome-back prefix
 }

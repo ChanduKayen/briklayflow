@@ -10,6 +10,7 @@ import { send } from '../_format.ts'
 import { resolveProject, planItemProjects, type ProjectRef, type ItemPlan } from '../_resolve.ts'
 import { openConversation, closeConversation, type ConvoRow } from '../_conversation.ts'
 import { decompose, callLLM, safeParse, type SiteItem } from '../_siteops_extract.ts'
+import { decomposeImage } from '../_siteops_vision.ts'
 import {
   routeItems, applyProgress, buildConfirm, buildMultiConfirm, parseWhen,
   type RouteCtx, type RouteOutcome, type SiteTaskRow, type OrgMember,
@@ -30,6 +31,9 @@ export type SiteopsCtx = {
   orgId: string
   wamid: string
   lang: 'en' | 'te' | 'te-en' | 'hi'
+  // Present when the inbound message is an image the router sent to SITEOPS. `storagePath` is the
+  // ALREADY-uploaded object (rough-entry-media) from _normalize's storeMedia — we link it, never re-upload.
+  image?: { base64: string; mime: string; caption: string; storagePath?: string | null }
 }
 
 const TASK_COLS = 'task_id, phase, trade, floor_label, unit_label, name, status, node_key, task_type_id, owner_id, owner_source'
@@ -143,6 +147,20 @@ async function ownerCtx(supabase: SiteopsCtx['supabase'], orgId: string, project
     loadMembers(supabase, orgId), loadSupervisor(supabase, projectId), findPrincipal(supabase, orgId),
   ])
   return { members, supervisorId, principalId }
+}
+
+/** Link the inbound photo (already stored in rough-entry-media by _normalize — NOT re-uploaded) to a
+ *  created SiteOps object, as one row in the shared attachments table. Best-effort: never blocks the
+ *  route. bucket/object_path (not a url) — a signed URL is minted at read time. */
+async function attachImage(ctx: SiteopsCtx, parentType: 'problem' | 'todo' | 'site_task', parentId: string): Promise<void> {
+  const img = ctx.image
+  if (!img?.storagePath) return
+  const { error } = await ctx.supabase.from('attachments').insert({
+    org_id: ctx.orgId, parent_type: parentType, parent_id: parentId, role: 'creation',
+    bucket: 'rough-entry-media', object_path: img.storagePath,
+    caption: img.caption?.trim() || null, created_by: null,
+  })
+  if (error) console.error('[siteops:attach] insert failed:', error.message)
 }
 
 const fmtDay = (d: Date) => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
@@ -406,10 +424,14 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
   const projects: ProjectRef[] = ((projRows ?? []) as { project_id: string; name: string }[]).map((p) => ({ id: p.project_id, name: p.name }))
   const projectNames = projects.map((p) => p.name)
 
-  // STAGE 1 — decompose. Empty/unreadable from non-empty input surfaces, never silently drops.
+  // STAGE 1 — decompose. From an IMAGE, run the strong vision pass on the actual bytes (mirrors
+  // decompose, same shape) instead of the thin routing description; from text, the usual decompose.
+  // Everything downstream (routeItems → create*) is identical either way.
   let decomposed
   try {
-    decomposed = await decompose(text, projectNames)
+    decomposed = ctx.image?.base64
+      ? await decomposeImage(ctx.image.base64, ctx.image.mime, ctx.image.caption, projectNames)
+      : await decompose(text, projectNames)
   } catch {
     await say(`Didn't catch a site update in that — try again if you meant to send one.`)
     return
@@ -488,6 +510,15 @@ async function finishRoute(ctx: SiteopsCtx, projectId: string, projectName: stri
   const rc: RouteCtx = { supabase: ctx.supabase, orgId: ctx.orgId, projectId, byLabel: ctx.from, ...oc, narrationId, now: new Date(), vmNodeKeys }
 
   const out = await routeItems(rc, tasks, items)
+
+  // Image evidence: when this route came from an image, link the ALREADY-stored photo (rough-entry-media,
+  // never re-uploaded) to each object the route CREATED — AFTER create so a failed create leaves no orphan
+  // attachment (each id/taskId is guarded). role='creation' (Step 3's answer path sets 'answer').
+  if (ctx.image?.storagePath) {
+    for (const p of out.problems) if (p.id) await attachImage(ctx, 'problem', p.id)
+    for (const t of out.todos) if (t.id) await attachImage(ctx, 'todo', t.id)
+    for (const pr of out.progress) if (pr.taskId) await attachImage(ctx, 'site_task', pr.taskId)
+  }
 
   // STAGE 2c — disambiguation (need-to-ask): one pending question, mirroring AWAIT_PROJECT.
   if (out.ambiguous.length) {

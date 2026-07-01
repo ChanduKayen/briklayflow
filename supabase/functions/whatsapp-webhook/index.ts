@@ -408,7 +408,10 @@ async function processJob(
   const lockKey = messageId || from
   await acquireSenderLock(supabase, from, lockKey)
   try {
-    await dispatch({ supabase, from, senderName, registered, wamid: messageId, orgId, interactiveId, flowResponse, image: norm.image, firstTouch, dormant }, norm.text)
+    // thread the ALREADY-stored media path (from _normalize's storeMedia) alongside the image so the
+    // siteops branch can attach it without re-uploading. Payment path ignores storagePath (unchanged).
+    const dispatchImage = norm.image ? { ...norm.image, storagePath: norm.attachments?.[0]?.storage_path ?? null } : undefined
+    await dispatch({ supabase, from, senderName, registered, wamid: messageId, orgId, interactiveId, flowResponse, image: dispatchImage, firstTouch, dormant }, norm.text)
     if (jobId) await markJob(supabase, jobId, 'WRITTEN')
   } catch (e) {
     console.error('[wa-webhook] processing error:', e)
