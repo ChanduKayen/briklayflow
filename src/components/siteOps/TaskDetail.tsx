@@ -16,7 +16,7 @@
 import { createContext, useContext, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
-import { useSignedDocUrl } from '../../lib/storage'
+import { useSignedDocUrl, useSignedBucketUrl } from '../../lib/storage'
 import { X, MapPin, Wrench, Timer, Minus, Plus, Camera, ArrowUp, ChevronRight, User } from 'lucide-react'
 import { UserPicker, type OrgMember } from './UserPicker'
 import { INK, INK_SOFT, INK_FAINT, TERRA, SAGE, LINE, FAIL, DEFAULT_DURATION, fmtDate, timeAgo } from './taskTokens'
@@ -217,6 +217,37 @@ export function useTaskNotes(taskId: string) {
   })
 }
 
+export interface AttachRow { id: string; bucket: string; object_path: string; caption: string | null; role: string; created_at: string }
+
+/** Task-parented photos from the shared polymorphic `attachments` table (WhatsApp captures land here,
+ *  role='creation'; the answer-evidence path writes role='answer'). SCOPED ON BOTH parent columns —
+ *  parent_type='site_task' AND this task's id — so a task's feed shows ITS OWN photos, not the org's:
+ *  org-scoped RLS alone would leak every task's captures into every task's feed. */
+export function useTaskAttachments(taskId: string) {
+  return useQuery({
+    queryKey: ['task_attachments', taskId],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('attachments')
+        .select('id, bucket, object_path, caption, role, created_at')
+        .eq('parent_type', 'site_task').eq('parent_id', taskId)
+        .order('created_at', { ascending: true })
+      if (error) throw error
+      return (data ?? []) as AttachRow[]
+    },
+  })
+}
+
+/** A photo held as bucket+object_path (attachments table, private rough-entry-media) — signs on read. */
+function AttachThumb({ bucket, path }: { bucket: string; path: string }) {
+  const url = useSignedBucketUrl(bucket, path)
+  return (
+    <a href={url ?? undefined} target="_blank" rel="noopener noreferrer"
+      style={{ display: 'block', width: 132, height: 100, borderRadius: 10, overflow: 'hidden', border: `1px solid ${LINE}`, background: '#0001' }}>
+      {url ? <img src={url} alt="site" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ display: 'block', width: '100%', height: '100%' }} className="animate-pulse" />}
+    </a>
+  )
+}
+
 function MediaThumb({ stored }: { stored: string }) {
   const url = useSignedDocUrl(stored)
   return (
@@ -231,7 +262,8 @@ function MediaThumb({ stored }: { stored: string }) {
 //    confirmed QC fold into a single chronological thread (newest first), each tagged by source.
 //    Compose a note or attach a photo at the top; everything else flows in from the site.
 type NoteUpdate = { id: string; k: 'wa' | 'note' | 'photo' | 'status' | 'qc'; at: string | null; text: string; who?: string | null }
-type Update = NoteUpdate | { id: string; k: 'chip'; at: string | null; obj: LinkedObject }
+type AttachUpdate = { id: string; k: 'attach'; at: string | null; bucket: string; path: string; caption: string | null; role: string }
+type Update = NoteUpdate | AttachUpdate | { id: string; k: 'chip'; at: string | null; obj: LinkedObject }
 
 // What decompose() returns per item (the classify suggestion the user confirms/corrects). Kept
 // loose on the client — the edge fn owns the real SiteItem shape; we forward it back verbatim on spawn.
@@ -413,6 +445,28 @@ function UpdateCard({ u }: { u: NoteUpdate }) {
   )
 }
 
+// a task photo from the attachments table (WhatsApp capture). role='answer' means it replied to a
+// chase — tag it so evidence reads as evidence; 'creation' is a plain site photo.
+function AttachCard({ u }: { u: AttachUpdate }) {
+  const isAnswer = u.role === 'answer'
+  return (
+    <article className="bb-entry" style={{ display: 'flex', gap: 12, padding: '13px 15px', background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 14 }}>
+      <div style={{ width: 32, height: 32, borderRadius: 30, flexShrink: 0, display: 'grid', placeItems: 'center', background: C.sageSoft, color: C.sageDeep, border: '1px solid rgba(110,139,99,.25)' }}>
+        <Camera size={15} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 4, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: C.ink }}>{isAnswer ? 'Reply photo' : 'Site photo'}</span>
+          <span className="bb-mono" style={{ fontSize: 9, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: C.sageDeep, background: C.sageSoft, border: '1px solid rgba(110,139,99,.22)', padding: '1px 6px', borderRadius: 20 }}>WhatsApp</span>
+          <span className="bb-mono" style={{ fontSize: 10.5, color: C.faint, marginLeft: 'auto' }}>{u.at ? timeAgo(u.at) : ''}</span>
+        </div>
+        <AttachThumb bucket={u.bucket} path={u.path} />
+        {u.caption && <p style={{ margin: '6px 0 0', fontSize: 13.5, color: C.ink2, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{u.caption}</p>}
+      </div>
+    </article>
+  )
+}
+
 // ── THE shared task-detail panel (faithful to the reference design; every field wired) ──
 export default function TaskDetail({ task, engine, showStatusControl = false, onClose }: {
   task: Task
@@ -432,6 +486,8 @@ export default function TaskDetail({ task, engine, showStatusControl = false, on
   const fileRef = useRef<HTMLInputElement>(null)
   const { data: comments = [] } = useTaskNotes(task.task_id)
   const { data: narrations = [] } = useTaskNarrations(task)
+  // Task-parented photos (WhatsApp captures) from the shared attachments table — scoped to THIS task.
+  const { data: attachments = [] } = useTaskAttachments(task.task_id)
   // Live Snag/Issue objects linked to this task + their follow-up glances (the chips).
   const { data: linkedObjects = [] } = useTaskLinkedObjects(task.task_id)
   const { data: followStates = {} } = useLinkedFollowStates(task.task_id, linkedObjects)
@@ -510,6 +566,7 @@ export default function TaskDetail({ task, engine, showStatusControl = false, on
     ...comments.filter((c) => !spawnedCommentIds.has(c.id)).map((c): Update => ({ id: c.id, k: isImageUrl(c.body) ? 'photo' : 'note', at: c.created_at, text: c.body, who: c.author_name })),
     ...(task.status_history ?? []).filter((e) => e.status).map((e, i): Update => ({ id: 'st' + i + (e.at ?? ''), k: 'status' as const, at: e.at ?? null, text: `Marked ${String(e.status).replace(/_/g, ' ')}` })),
     ...qc.filter((q) => q.qc_status === 'confirmed' && q.answer).map((q): Update => ({ id: 'qc' + q.id, k: 'qc' as const, at: q.answered_at ?? null, text: q.answer as string })),
+    ...attachments.map((a): Update => ({ id: 'att' + a.id, k: 'attach' as const, at: a.created_at, bucket: a.bucket, path: a.object_path, caption: a.caption, role: a.role })),
     ...linkedObjects.map((o): Update => ({ id: 'chip' + o.id, k: 'chip' as const, at: o.created_at, obj: o })),
   ].sort((a, b) => new Date(b.at ?? 0).getTime() - new Date(a.at ?? 0).getTime())
 
@@ -617,6 +674,7 @@ export default function TaskDetail({ task, engine, showStatusControl = false, on
             ? <p style={{ fontSize: 13.5, color: C.faint, fontStyle: 'italic', margin: 0 }}>No updates yet — WhatsApp messages, notes and photos appear here.</p>
             : <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>{updates.map((u) => u.k === 'chip'
                 ? <TaskFeedChip key={u.id} obj={u.obj} ownerName={ctx?.ownerName ?? (() => 'Unassigned')} followState={followStates[u.obj.id]} onQuickAction={quickAction} busy={spawning} />
+                : u.k === 'attach' ? <AttachCard key={u.id} u={u} />
                 : <UpdateCard key={u.id} u={u} />)}</div>}
         </section>
       </div>
