@@ -416,12 +416,14 @@ export async function extractTransactionFromImage(
 }
 
 /** The model's OWN amount confidence ("high"/"low"), a reconcile signal only. */
-function llmAmountConf(p: Record<string, unknown>): 'HIGH' | 'LOW' | null {
+// exported for the S0 characterization gate (pure; no behavior change).
+export function llmAmountConf(p: Record<string, unknown>): 'HIGH' | 'LOW' | null {
   const v = typeof p.amount_confidence === 'string' ? p.amount_confidence.toLowerCase() : null
   return v === 'high' ? 'HIGH' : v === 'low' ? 'LOW' : null
 }
 
-function normalizeTxn(p: Record<string, unknown>): TxnExtract {
+// exported for the S0 characterization gate (pure; no behavior change).
+export function normalizeTxn(p: Record<string, unknown>): TxnExtract {
   const num = (v: unknown) => (typeof v === 'number' && isFinite(v) ? v : null)
   const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null)
   const enumv = <T extends string>(v: unknown, allow: T[]) => (typeof v === 'string' && allow.includes(v as T) ? (v as T) : null)

@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test:engine": "node src/lib/siteOps/engine/__tests__/run-tests.mjs",
-    "test:auth": "node src/lib/auth/__tests__/run-tests.mjs"
+    "test:auth": "node src/lib/auth/__tests__/run-tests.mjs",
+    "test:extract": "node supabase/functions/whatsapp-webhook/__tests__/run-tests.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.4",
