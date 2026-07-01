@@ -8,9 +8,18 @@ import React, {
 } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
-import { supabase } from '../supabase'
+import { supabase, coalescedRefresh } from '../supabase'
 import { resolveAuthDestination, type MembershipContext } from './resolver'
 import { LOGIN_ROUTE } from './routes'
+import { parseStoredSession, isExpired, needsRefresh, backoffDelay, type StoredSessionInfo } from './refreshPolicy'
+
+// S3 — resume/refresh tuning. Freshness is computed on demand from expires_at (never from a timer
+// that may have frozen while backgrounded); we refresh proactively once within REFRESH_MARGIN_SEC.
+const REFRESH_MARGIN_SEC = 60
+const REVALIDATE_DEBOUNCE_MS = 400
+const REFRESH_BASE_MS = 1_000
+const REFRESH_MAX_MS = 30_000
+const MAX_REFRESH_ATTEMPTS = 5
 
 // ── Membership cache (localStorage) ──────────────────────────────
 const CACHE_KEY = 'briklay_membership_ctx'
@@ -28,25 +37,22 @@ function clearCtxCache() {
   localStorage.removeItem(CACHE_KEY)
 }
 
-// S1-2: read the persisted Supabase session SYNCHRONOUSLY from localStorage — no lock, no network,
+// S1-2/S3: read the persisted Supabase session SYNCHRONOUSLY from localStorage — no lock, no network,
 // cannot hang. supabase.auth.getSession() acquires the gotrue auth lock and can stall behind an
 // in-flight signOut()/refresh (that stall left the app on a blank splash after a rail sign-out).
-// The logout redirect must be pure navigation, never gated on something that can hang (ticket Step 3),
-// so the spurious-SIGNED_OUT guard re-syncs straight from storage instead of calling getSession().
-function storedSessionStillValid(): boolean {
+// The logout redirect must be pure navigation, never gated on something that can hang, so both the
+// spurious-SIGNED_OUT guard and the resume path re-sync straight from storage. Parsing is delegated
+// to the pure, table-tested parseStoredSession so "expired access token" and "recoverable session
+// (refresh token present)" are distinguished — the mobile trap the old check conflated.
+function readStoredSession(): StoredSessionInfo | null {
   try {
     for (const key of Object.keys(localStorage)) {
       if (key.startsWith('sb-') && key.endsWith('-auth-token')) {
-        const raw = localStorage.getItem(key)
-        if (!raw) return false
-        const parsed = JSON.parse(raw)
-        const expiresAt = parsed?.expires_at ?? parsed?.currentSession?.expires_at ?? parsed?.session?.expires_at
-        // No parseable expiry but a token blob is present → treat as still-valid (don't tear down).
-        return typeof expiresAt === 'number' ? expiresAt * 1000 > Date.now() : true
+        return parseStoredSession(localStorage.getItem(key))
       }
     }
-  } catch { /* unreadable storage → fall through to "no valid session" */ }
-  return false
+  } catch { /* unreadable storage → treat as no session */ }
+  return null
 }
 
 // ── Auth state machine ────────────────────────────────────────────
@@ -217,14 +223,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (event === 'SIGNED_OUT') {
           const explicit = explicitSignOutRef.current
           explicitSignOutRef.current = false
-          // S1-2 Step 2/3: a NON-explicit SIGNED_OUT is gotrue-initiated (refresh failure). A transient
-          // network failure must never end a valid session — confirm the session is truly gone first,
-          // reading storage SYNCHRONOUSLY (never getSession(), which can hang on the auth lock).
+          // A NON-explicit SIGNED_OUT is gotrue-initiated. GOVERNING INVARIANT (S3): sign out ONLY on a
+          // positively-identified dead refresh token — every other failure keeps the session. Read storage
+          // SYNCHRONOUSLY (never getSession(), which can hang on the auth lock).
           if (!explicit) {
-            if (storedSessionStillValid()) {
-              console.warn('[auth:logout] IGNORED spurious SIGNED_OUT — valid session still in storage (transient/cross-tab)')
-              return // keep the app mounted; do NOT tear down a valid session
+            const online = typeof navigator === 'undefined' || navigator.onLine !== false
+            const stored = readStoredSession()
+            // S3: offline can NEVER prove a token is dead — a network-induced SIGNED_OUT (mobile background
+            // → offline → gotrue gives up) must keep the session; the online listener revalidates on reconnect.
+            if (!online) {
+              console.warn('[auth:logout] IGNORED — net:offline (network-induced SIGNED_OUT, keeping session)')
+              return
             }
+            // S3: an EXPIRED access token with a refresh token still present is RECOVERABLE, not dead — do not
+            // conflate "access token expired" (routine on mobile resume) with "session dead". If it truly is
+            // dead, the next protected request 401s → 401-retry refresh → gotrue re-emits SIGNED_OUT with storage
+            // cleared, and we tear down then, with proof.
+            if (stored && (stored.hasRefreshToken || !isExpired(stored.expiresAt, Date.now()))) {
+              console.warn('[auth:logout] IGNORED spurious SIGNED_OUT — session recoverable in storage (transient/cross-tab)')
+              return // keep the app mounted; do NOT tear down a recoverable session
+            }
+            // Online AND nothing recoverable in storage → gotrue positively removed the session → dead token.
             console.warn('[auth:logout] forced — reason: refresh_failed_or_expired (non-explicit SIGNED_OUT)')
           } else {
             console.log('[auth:logout] explicit user sign-out')
@@ -241,6 +260,72 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => subscription.unsubscribe()
   }, [runResolver])
+
+  // ── S3: resume + network revalidation ─────────────────────────────
+  // Mobile browsers freeze JS (and auth-js's refresh ticker) while backgrounded, so a resumed tab
+  // can hold an expired access token that no timer will renew. On every RESUME signal — foreground,
+  // bfcache restore, and reconnect — recompute freshness ON DEMAND from expires_at and, if within
+  // margin, drive a refresh through the single lock-coalesced entry (coalescedRefresh → auth-js
+  // refreshSession → Web Lock). No parallel ticker; we only add trigger signals + bounded backoff.
+  useEffect(() => {
+    let disposed = false
+    let debounceTimer: number | null = null
+    let backoffTimer: number | null = null
+    let attempt = 0
+    // Opaque read so TS can't (wrongly) narrow navigator.onLine across the await below — its value
+    // genuinely changes when the network drops mid-refresh.
+    const offline = () => navigator.onLine === false
+
+    const runRefresh = async (trigger: string) => {
+      if (disposed || offline()) return // pause attempts while offline — they can only fail
+      console.log(`[auth:refresh] resume_refresh trigger=${trigger}`)
+      const fresh = await coalescedRefresh() // classifies + logs its own failure; never tears down here
+      if (disposed) return
+      if (fresh?.access_token) { attempt = 0; return }
+      // Failure → bounded exponential backoff while online. If it was a genuinely dead token,
+      // auth-js has already emitted SIGNED_OUT and the handler tears down; this backoff then no-ops.
+      if (offline()) return
+      if (attempt >= MAX_REFRESH_ATTEMPTS) {
+        attempt = 0
+        console.warn('[auth:refresh] backoff exhausted — waiting for next resume/online')
+        return
+      }
+      const delay = backoffDelay(attempt++, REFRESH_BASE_MS, REFRESH_MAX_MS)
+      if (backoffTimer) clearTimeout(backoffTimer)
+      backoffTimer = window.setTimeout(() => runRefresh('backoff'), delay)
+    }
+
+    const revalidate = (trigger: string) => {
+      if (disposed) return
+      // Debounce: foreground + pageshow + online often fire together on a single resume.
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = window.setTimeout(() => {
+        const stored = readStoredSession()
+        if (!stored) return // unauthenticated — nothing to revalidate
+        if (needsRefresh(stored.expiresAt, Date.now(), REFRESH_MARGIN_SEC)) runRefresh(trigger)
+      }, REVALIDATE_DEBOUNCE_MS)
+    }
+
+    const onVisible = () => { if (document.visibilityState === 'visible') revalidate('visible') }
+    const onPageShow = (e: PageTransitionEvent) => { if (e.persisted) revalidate('bfcache') } // iOS bfcache restore
+    const onOnline = () => { console.log('[auth:net] net:online'); attempt = 0; revalidate('online') }
+    const onOffline = () => { console.log('[auth:net] net:offline'); if (backoffTimer) clearTimeout(backoffTimer) }
+
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('pageshow', onPageShow)
+    window.addEventListener('online', onOnline)
+    window.addEventListener('offline', onOffline)
+
+    return () => {
+      disposed = true
+      if (debounceTimer) clearTimeout(debounceTimer)
+      if (backoffTimer) clearTimeout(backoffTimer)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('pageshow', onPageShow)
+      window.removeEventListener('online', onOnline)
+      window.removeEventListener('offline', onOffline)
+    }
+  }, [])
 
   // ── Navigation effect ─────────────────────────────────────────────
   useEffect(() => {

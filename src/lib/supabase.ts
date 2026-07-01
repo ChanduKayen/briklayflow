@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { classifyRefreshError } from './auth/refreshPolicy';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -37,16 +38,12 @@ function shortRoute(url: string): string {
   return i >= 0 ? url.slice(i) : url.replace(/^https?:\/\/[^/]+/, '');
 }
 
-const timeoutFetch: typeof fetch = (input, init) => {
-  const url = urlOf(input);
-  // Never time out uploads/downloads, edge functions, or AUTH TOKEN REFRESH (S1-2).
-  if (url.includes('/storage/') || url.includes('/functions/') || url.includes('/auth/')) return fetch(input, init);
-
+// Timeout-bounded fetch for a single /rest/ request (the S1-1 watchdog). Extracted so the
+// S3 401-retry can reuse the exact same bounding for its one retry attempt.
+function boundedFetch(input: RequestInfo | URL, init: RequestInit | undefined, url: string): Promise<Response> {
   const ctrl = new AbortController();
   const started = Date.now();
   const timer = setTimeout(() => {
-    // S1-2 Step 5: log which route was cut and how long it ran, so a legitimately-slow query being
-    // aborted becomes visible in logs (data-driven threshold) instead of via a frustrated user.
     console.warn(`[fetch:timeout] aborted after ${Date.now() - started}ms — ${shortRoute(url)}`);
     try { ctrl.abort(new DOMException('Request timed out — the connection stalled.', 'TimeoutError')); }
     catch { ctrl.abort(); }
@@ -60,8 +57,82 @@ const timeoutFetch: typeof fetch = (input, init) => {
   }
 
   return fetch(input, { ...init, signal: ctrl.signal }).finally(() => clearTimeout(timer));
+}
+
+// ── header helpers for the S3 401-retry ──────────────────────────────────
+function hasBearer(init: RequestInit | undefined): boolean {
+  try { return new Headers(init?.headers as HeadersInit | undefined).has('authorization'); }
+  catch { return false; }
+}
+function withBearer(init: RequestInit | undefined, token: string): RequestInit {
+  const headers = new Headers(init?.headers as HeadersInit | undefined);
+  headers.set('Authorization', `Bearer ${token}`);
+  return { ...init, headers };
+}
+function isOnline(): boolean {
+  return typeof navigator === 'undefined' || navigator.onLine !== false;
+}
+
+const timeoutFetch: typeof fetch = async (input, init) => {
+  const url = urlOf(input);
+  // Never time out uploads/downloads, edge functions, or AUTH TOKEN REFRESH (S1-2).
+  if (url.includes('/storage/') || url.includes('/functions/') || url.includes('/auth/')) return fetch(input, init);
+
+  const res = await boundedFetch(input, init, url);
+
+  // ── S3 401-retry safety net ──────────────────────────────────────────
+  // On mobile resume the access token can be expired before auth-js's (visibility-gated,
+  // frozen-while-backgrounded) auto-refresh catches up → the protected request 401s. Do ONE
+  // lock-coalesced refresh and retry the request once with the fresh token. A refresh FLAP here
+  // must NOT log out — coalescedRefresh classifies the failure and never tears the session down
+  // (sign-out, if the token is genuinely dead, remains auth-js's SIGNED_OUT → the AuthProvider
+  // handler). Only fires for authenticated /rest/ calls while online, exactly once (the retry
+  // calls boundedFetch directly, so it can't recurse into another 401-retry).
+  if (res.status === 401 && hasBearer(init) && isOnline()) {
+    const fresh = await coalescedRefresh();
+    if (fresh?.access_token) {
+      console.log('[auth:event] 401-retry — refreshed, retrying /rest request once');
+      return boundedFetch(input, withBearer(init, fresh.access_token), url);
+    }
+  }
+  return res;
 };
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   global: { fetch: timeoutFetch },
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// S3 — the single app-level refresh entry point.
+//
+// HARD RULE: never create a second refresh path that races the existing one. This does NOT
+// spin its own ticker — it calls auth-js's own refreshSession(), which coalesces across tabs via
+// the navigator Web Lock. On top of that, `inFlightRefresh` collapses concurrent same-tab callers
+// (a burst of 401s + a resume-revalidate) into ONE refresh so we never rotate the refresh token
+// more than once. Both the 401-retry above and the AuthProvider resume path go through here.
+// A failure is classified (fail-safe: only a positively-dead token is a sign-out) and logged, but
+// teardown is left to auth-js's SIGNED_OUT so there is a single sign-out path.
+// ─────────────────────────────────────────────────────────────────────────
+let inFlightRefresh: Promise<{ access_token: string } | null> | null = null;
+
+export function coalescedRefresh(): Promise<{ access_token: string } | null> {
+  if (!inFlightRefresh) {
+    inFlightRefresh = supabase.auth
+      .refreshSession()
+      .then(({ data, error }) => {
+        if (error) {
+          const d = classifyRefreshError(error, isOnline());
+          console.warn(`[auth:refresh] classify:${d.reason} action=${d.action}`);
+          return null;
+        }
+        return data.session ? { access_token: data.session.access_token } : null;
+      })
+      .catch((err) => {
+        const d = classifyRefreshError(err, isOnline());
+        console.warn(`[auth:refresh] classify:${d.reason} action=${d.action}`);
+        return null;
+      })
+      .finally(() => { inFlightRefresh = null; });
+  }
+  return inFlightRefresh;
+}
