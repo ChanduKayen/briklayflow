@@ -149,18 +149,26 @@ async function ownerCtx(supabase: SiteopsCtx['supabase'], orgId: string, project
   return { members, supervisorId, principalId }
 }
 
-/** Link the inbound photo (already stored in rough-entry-media by _normalize — NOT re-uploaded) to a
- *  created SiteOps object, as one row in the shared attachments table. Best-effort: never blocks the
- *  route. bucket/object_path (not a url) — a signed URL is minted at read time. */
-async function attachImage(ctx: SiteopsCtx, parentType: 'problem' | 'todo' | 'site_task', parentId: string): Promise<void> {
-  const img = ctx.image
-  if (!img?.storagePath) return
+/** Link a stored photo (rough-entry-media, NOT re-uploaded — bucket/object_path, signed URL minted at
+ *  read time) to a SiteOps object as one row in the shared attachments table. Best-effort: never blocks
+ *  the route. role='creation' (fresh capture) or 'answer' (evidence replying to a chase). */
+async function attachImage(
+  ctx: SiteopsCtx, parentType: 'problem' | 'todo' | 'site_task', parentId: string,
+  storagePath: string, caption: string | null, role: 'creation' | 'answer',
+): Promise<void> {
   const { error } = await ctx.supabase.from('attachments').insert({
-    org_id: ctx.orgId, parent_type: parentType, parent_id: parentId, role: 'creation',
-    bucket: 'rough-entry-media', object_path: img.storagePath,
-    caption: img.caption?.trim() || null, created_by: null,
+    org_id: ctx.orgId, parent_type: parentType, parent_id: parentId, role,
+    bucket: 'rough-entry-media', object_path: storagePath, caption: caption?.trim() || null, created_by: null,
   })
   if (error) console.error('[siteops:attach] insert failed:', error.message)
+}
+
+/** A chase-reply PHOTO → attach it as ANSWER evidence to the chased issue/snag AND write the
+ *  "replied with a photo" line to its followup_events — the SAME stream the task-feed chip reads
+ *  (useTrailStates), so the loop closes VISIBLY. Never spawns a fresh object (decision (a)). */
+async function answerWithPhoto(ctx: SiteopsCtx, item: { kind: 'issue' | 'todo'; id: string; orgId: string }, storagePath: string, caption: string | null): Promise<void> {
+  await attachImage(ctx, item.kind === 'issue' ? 'problem' : 'todo', item.id, storagePath, caption, 'answer')
+  await trailEvent(ctx, item, 'reply_received', `Replied with a photo${caption?.trim() ? ` — "${caption.trim()}"` : ''}`, await senderUserId(ctx))
 }
 
 const fmtDay = (d: Date) => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
@@ -338,13 +346,36 @@ async function handleBatchReply(
     }
   }
 
-  // nothing touched the batch → let runSiteops route it as a fresh narration
-  if (!resolutions.length && !collision) return false
+  // STEP 3 — a chase-reply PHOTO is evidence for the item(s) it resolved. Attach + trail, never fresh.
+  const photo = ctx.image?.storagePath ? { sp: ctx.image.storagePath, cap: ctx.image.caption ?? null } : null
+  if (photo) for (const r of resolutions) await answerWithPhoto(ctx, r.item, photo.sp, photo.cap)
+
+  // nothing touched the batch → normally route fresh. But a chase-reply PHOTO must NEVER spawn a fresh
+  // object (decision (a)): single-item batch → it's about that item; multi-item → ask which, carrying the
+  // photo so the pick attaches it. Text is unchanged (returns false → runSiteops routes fresh).
+  if (!resolutions.length && !collision) {
+    if (!photo) return false
+    if (batch.items.length === 1) {
+      await answerWithPhoto(ctx, batch.items[0], photo.sp, photo.cap)
+      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Added your photo to *${shortLabel(batch.items[0].title)}*.` }, meta)
+      return true
+    }
+    const cands = batch.items.map((it) => ({ id: it.id, kind: it.kind, orgId: it.orgId, projectName: it.projectName, title: it.title, cause: it.cause }))
+    await openConversation(ctx.supabase, {
+      orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
+      pendingQuestion: 'which item is this photo about',
+      slots: { kind: 'siteops_photo_pick', candidates: cands, image: { storagePath: photo.sp, caption: photo.cap } },
+      lastMessageId: ctx.wamid,
+    })
+    await send(ctx.supabase, ctx.from, { kind: 'list', body: `Which is this photo about?`, button: 'Pick', rows: cands.slice(0, 10).map((c, i) => ({ id: `pick:${i + 1}`, title: shortLabel(c.title).slice(0, 24) })) }, meta)
+    return true
+  }
 
   // route the genuinely-new pieces (interruption "…also 3rd floor slab done"). Site = a named
   // site, else the batch's site when it's single-project; ambiguous progress parks (no nested pick).
+  // A PHOTO never routes leftovers fresh (decision (a)) — its evidence attaches to the resolved item(s).
   let leftoverLine = ''
-  if (leftovers.length) leftoverLine = await routeLeftovers(ctx, text, leftovers, topProjectHint, batch, projects, narrationId)
+  if (leftovers.length && !photo) leftoverLine = await routeLeftovers(ctx, text, leftovers, topProjectHint, batch, projects, narrationId)
 
   const parts = resolutions.map((r) => readbackPart(r.item, r.verdict))
   const head = parts.length ? `Got it — ${parts.join(' · ')}` : 'Got it'
@@ -362,7 +393,7 @@ async function handleBatchReply(
     await openConversation(ctx.supabase, {
       orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
       pendingQuestion: `which site: ${collision.piece.text}`,
-      slots: { kind: 'siteops_batch_collision', status: collision.status, piece_text: collision.piece.text, candidates: cands },
+      slots: { kind: 'siteops_batch_collision', status: collision.status, piece_text: collision.piece.text, candidates: cands, image: photo ? { storagePath: photo.sp, caption: photo.cap } : null },
       lastMessageId: ctx.wamid,
     })
     const sites = collision.items.map((it) => it.projectName)
@@ -515,9 +546,10 @@ async function finishRoute(ctx: SiteopsCtx, projectId: string, projectName: stri
   // never re-uploaded) to each object the route CREATED — AFTER create so a failed create leaves no orphan
   // attachment (each id/taskId is guarded). role='creation' (Step 3's answer path sets 'answer').
   if (ctx.image?.storagePath) {
-    for (const p of out.problems) if (p.id) await attachImage(ctx, 'problem', p.id)
-    for (const t of out.todos) if (t.id) await attachImage(ctx, 'todo', t.id)
-    for (const pr of out.progress) if (pr.taskId) await attachImage(ctx, 'site_task', pr.taskId)
+    const sp = ctx.image.storagePath, cap = ctx.image.caption ?? null
+    for (const p of out.problems) if (p.id) await attachImage(ctx, 'problem', p.id, sp, cap, 'creation')
+    for (const t of out.todos) if (t.id) await attachImage(ctx, 'todo', t.id, sp, cap, 'creation')
+    for (const pr of out.progress) if (pr.taskId) await attachImage(ctx, 'site_task', pr.taskId, sp, cap, 'creation')
   }
 
   // STAGE 2c — disambiguation (need-to-ask): one pending question, mirroring AWAIT_PROJECT.
@@ -684,10 +716,32 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
     const actorId = await senderUserId(ctx)
     const item: BatchItem = { kind: chosen.kind, id: chosen.id, orgId: chosen.orgId, projectId: null, projectName: chosen.projectName, title: chosen.title, taskName: null, cause: chosen.cause }
     const verdict = await applyBatchResolution(ctx, item, slots.status ?? 'still_open', slots.piece_text ?? text, cadenceMap, actorId, now)
+    // STEP 3: if the colliding message was a PHOTO (carried in slots), attach it to the chosen item now.
+    const cimg = slots.image as { storagePath?: string; caption?: string | null } | null
+    if (cimg?.storagePath) await answerWithPhoto(ctx, { kind: item.kind, id: item.id, orgId: item.orgId }, cimg.storagePath, cimg.caption ?? null)
     const batch = await getOpenBatch(ctx.supabase, ctx.orgId, ctx.from)
     if (batch) await dropBatchItems(ctx.supabase, batch, [chosen.id])
     await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site update' })
     await send(ctx.supabase, ctx.from, { kind: 'text', body: `${readbackPart(item, verdict)} — ${chosen.projectName}` }, meta)
+    return
+  }
+
+  // ── STEP 3: multi-item chase reply was a PHOTO with no clear match → supervisor picks which item
+  //    it's about; attach the carried photo to that item (never fresh). ──
+  if (slots.kind === 'siteops_photo_pick') {
+    const cands = (slots.candidates ?? []) as { id: string; kind: 'issue' | 'todo'; orgId: string; title: string }[]
+    const img = (slots.image ?? {}) as { storagePath?: string; caption?: string | null }
+    const t = text.trim().toLowerCase()
+    const m = text.match(/(\d+)/)
+    const idx = m ? parseInt(m[1], 10) - 1 : cands.findIndex((c) => shortLabel(c.title).toLowerCase().includes(t) && t.length >= 3)
+    const chosen = idx >= 0 && idx < cands.length ? cands[idx] : null
+    if (!chosen || !img.storagePath) {
+      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Reply with the number of the item this photo is about.` }, meta)
+      return
+    }
+    await answerWithPhoto(ctx, { kind: chosen.kind, id: chosen.id, orgId: chosen.orgId }, img.storagePath, img.caption ?? null)
+    await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'photo attached' })
+    await send(ctx.supabase, ctx.from, { kind: 'text', body: `Added your photo to *${shortLabel(chosen.title)}*.` }, meta)
     return
   }
 
