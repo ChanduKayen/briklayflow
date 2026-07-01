@@ -91,12 +91,12 @@ async function loadDueTodos(supabase: SB, today: string): Promise<RawTodo[]> {
   const todos = (data ?? []) as RawTodo[]
   if (!todos.length) return []
   // to-dos have no chase clock to advance, so dedup on the trail: skip ones
-  // already chased since midnight (UTC) — one nudge per day, not per tick.
+  // already chased since IST midnight — one nudge per IST day, not per tick.
   const { data: ev } = await supabase.from('followup_events')
     .select('todo_id')
     .in('todo_id', todos.map((t) => t.id))
     .eq('type', 'chase_sent')
-    .gte('created_at', `${today}T00:00:00Z`)
+    .gte('created_at', `${today}T00:00:00+05:30`)
   const chased = new Set((ev ?? []).map((e: { todo_id: string }) => e.todo_id))
   return todos.filter((t) => !chased.has(t.id))
 }
@@ -108,7 +108,10 @@ serve(async (req) => {
   const preview = new URL(req.url).searchParams.get('preview') === '1'
   const supabase = createClient(SUPABASE_URL, SUPABASE_SVC_KEY, { auth: { autoRefreshToken: false, persistSession: false } })
   const now = new Date()
-  const today = now.toISOString().slice(0, 10)
+  // Todos are date-grained: compute "today" on the IST calendar (UTC+5:30) so a due_date of
+  // "01 Jul" is due at IST midnight, not 05:30 IST. Issues use next_followup_at (timestamptz,
+  // absolute) and are compared with now() directly, so they need no offset.
+  const today = new Date(now.getTime() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10)
 
   const dueIssues = await loadDueIssues(supabase, now)
   const dueTodos = await loadDueTodos(supabase, today)
@@ -259,7 +262,7 @@ serve(async (req) => {
     await upsertOpenBatch(supabase, orgId ?? '', phone, dig.items.map(toBatchItem))
     for (const it of dig.items) {
       if (it.escalated) await recordEscalation(supabase, it)
-      await recordChase(supabase, it)
+      await recordChase(supabase, it, dig.name)
       if (it.kind === 'issue') await advanceIssue(supabase, it, now, await cadenceFor(it.orgId))
     }
   }
@@ -335,14 +338,17 @@ async function recordEscalation(supabase: SB, it: ChaseItem): Promise<void> {
   if (error) console.error('[chase] recordEscalation:', error)
 }
 
-/** Append a `chase_sent` event to the item's trail (B1), system actor. */
-async function recordChase(supabase: SB, it: ChaseItem): Promise<void> {
+/** Append a `chase_sent` event to the item's trail (B1), system actor. Names the RECIPIENT
+ *  (the digest owner — for a normal chase that's the assignee, self included; for an escalated
+ *  item it's whoever it was chased up to) so the activity log reads "Follow-up sent to {name}". */
+async function recordChase(supabase: SB, it: ChaseItem, recipientName: string | null): Promise<void> {
+  const to = (recipientName ?? '').trim().split(/\s+/)[0] || 'the owner'
   const { error } = await supabase.from('followup_events').insert({
     org_id: it.orgId,
     problem_id: it.kind === 'issue' ? it.id : null,
     todo_id: it.kind === 'todo' ? it.id : null,
     type: 'chase_sent',
-    body: `Follow-up sent — "${promptFor(it)}"`,
+    body: `Follow-up sent to ${to} — "${promptFor(it)}"`,
     actor_kind: 'system',
     actor_id: null,
   })
