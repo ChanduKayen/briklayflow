@@ -365,7 +365,8 @@ export interface ProblemResult { id: string | null; title: string; cause: string
 async function insertProblem(supabase: SB, fullRow: Record<string, unknown>): Promise<string | null> {
   let res = await supabase.from('problems').insert(fullRow).select('id').single()
   if (res.error) {
-    const { deadline: _d, impact: _i, ...base } = fullRow
+    // degrade if a not-yet-applied column is present (deadline/impact, or the S note-provenance cols)
+    const { deadline: _d, impact: _i, source_note_id: _sn, source_note_kind: _sk, ...base } = fullRow
     res = await supabase.from('problems').insert(base).select('id').single()
   }
   if (res.error) console.error('[siteops] problem insert failed:', res.error.message)
@@ -399,6 +400,9 @@ export async function createProblem(c: RouteCtx, item: SiteItem, taskId: string 
 
   const id = await insertProblem(c.supabase, {
     org_id: c.orgId, project_id: c.projectId, task_id: taskId, source_narration_id: c.narrationId,
+    // note→object provenance: a WhatsApp narration IS the note. Lets the task feed hide the raw
+    // narration and show the live chip (mark-and-hide). UI spawns stamp 'comment' post-create.
+    source_note_id: c.narrationId, source_note_kind: c.narrationId ? 'narration' : null,
     cause, title: item.text, owner_id: ownerId, owner_source: 'auto', status: 'OPEN',
     next_followup_at: nextFollowupAt, deadline, impact,
   })
@@ -416,9 +420,13 @@ export async function createTodo(c: RouteCtx, item: SiteItem, taskId: string | n
   const due = parseWhen(item.date_hint, c.now)
   const owner = resolveOwner(item.owner_hint, c.members, c.supervisorId, c.principalId)
   const row = { org_id: c.orgId, project_id: c.projectId, task_id: taskId, text: item.text, owner_id: owner, due_date: due ? due.toISOString().slice(0, 10) : null, status: 'OPEN' }
-  const { data, error } = await c.supabase.from('todos').insert(row).select('id').single()
-  if (error) console.error('[siteops] todo insert failed:', error.message)
-  const newId = data?.id ?? null
+  // note→object provenance (mark-and-hide): the narration IS the note. Degrade if the S columns
+  // aren't applied yet (retry without them) so snag creation never breaks pre-migration.
+  const withProv = { ...row, source_note_id: c.narrationId, source_note_kind: c.narrationId ? 'narration' : null }
+  let ins = await c.supabase.from('todos').insert(withProv).select('id').single()
+  if (ins.error) ins = await c.supabase.from('todos').insert(row).select('id').single()
+  if (ins.error) console.error('[siteops] todo insert failed:', ins.error.message)
+  const newId = ins.data?.id ?? null
   if (newId && owner && owner !== c.principalId) {
     try { await notifyAssigneeAtCreation(c, { kind: 'todo', itemId: newId, ownerId: owner, title: item.text, due: row.due_date, cause: null }) }
     catch (e) { console.error('[siteops] assign notify failed:', (e as Error).message) }

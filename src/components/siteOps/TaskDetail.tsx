@@ -20,6 +20,7 @@ import { useSignedDocUrl } from '../../lib/storage'
 import { X, MapPin, Wrench, Timer, Minus, Plus, Camera, ArrowUp, ChevronRight, User } from 'lucide-react'
 import { UserPicker, type OrgMember } from './UserPicker'
 import { INK, INK_SOFT, INK_FAINT, TERRA, SAGE, LINE, FAIL, DEFAULT_DURATION, fmtDate, timeAgo } from './taskTokens'
+import { useTaskLinkedObjects, useLinkedFollowStates, TaskFeedChip, type LinkedObject } from './TaskFeedChip'
 
 const isImageUrl = (s: string) => /\.(jpe?g|png|gif|webp|heic|avif)(\?|$)/i.test(s) || /\/storage\/v1\/object\//.test(s)
 
@@ -229,7 +230,12 @@ function MediaThumb({ stored }: { stored: string }) {
 // ── UPDATES — the task's one living log. WhatsApp site messages, notes, photos, status changes and
 //    confirmed QC fold into a single chronological thread (newest first), each tagged by source.
 //    Compose a note or attach a photo at the top; everything else flows in from the site.
-type Update = { id: string; k: 'wa' | 'note' | 'photo' | 'status' | 'qc'; at: string | null; text: string; who?: string | null }
+type NoteUpdate = { id: string; k: 'wa' | 'note' | 'photo' | 'status' | 'qc'; at: string | null; text: string; who?: string | null }
+type Update = NoteUpdate | { id: string; k: 'chip'; at: string | null; obj: LinkedObject }
+
+// What decompose() returns per item (the classify suggestion the user confirms/corrects). Kept
+// loose on the client — the edge fn owns the real SiteItem shape; we forward it back verbatim on spawn.
+type ClassifiedItem = { type: 'progress' | 'issue' | 'todo'; text: string; cause?: string | null; owner_hint?: string | null; date_hint?: string | null }
 
 
 const LBL: CSSProperties = { fontSize: 10.5, fontWeight: 700, color: INK_FAINT, letterSpacing: '0.07em', textTransform: 'uppercase' }
@@ -382,7 +388,7 @@ function DetailRow({ icon, label, children }: { icon: ReactNode; label: string; 
 }
 
 // one update card — the PERSON leads (who sent it); WhatsApp is a quiet badge, not the headline.
-function UpdateCard({ u }: { u: Update }) {
+function UpdateCard({ u }: { u: NoteUpdate }) {
   const sys = u.k === 'status' || u.k === 'qc'
   const who = (u.who ?? '').trim() || (u.k === 'wa' ? 'Site team' : 'Note')
   const head = u.k === 'status' ? 'Status update' : u.k === 'qc' ? 'Quality check' : who
@@ -426,6 +432,12 @@ export default function TaskDetail({ task, engine, showStatusControl = false, on
   const fileRef = useRef<HTMLInputElement>(null)
   const { data: comments = [] } = useTaskNotes(task.task_id)
   const { data: narrations = [] } = useTaskNarrations(task)
+  // Live Snag/Issue objects linked to this task + their follow-up glances (the chips).
+  const { data: linkedObjects = [] } = useTaskLinkedObjects(task.task_id)
+  const { data: followStates = {} } = useLinkedFollowStates(task.task_id, linkedObjects)
+  // Pending classification suggestion for the just-added note (user confirms/corrects — never implicit).
+  const [pending, setPending] = useState<{ noteId: string; item: ClassifiedItem; suggest: 'issue' | 'todo' } | null>(null)
+  const [spawning, setSpawning] = useState(false)
 
   const isOverride = task.owner_source === 'manual' && !!task.owner_id
   const effOwner = ctx ? (isOverride ? task.owner_id! : (ctx.supervisorId ?? ctx.principalId)) : null
@@ -438,11 +450,40 @@ export default function TaskDetail({ task, engine, showStatusControl = false, on
   const fill = STATUS_FILL[rowStatus]
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['site_task_comments', task.task_id] })
+  const invalidateObjects = () => queryClient.invalidateQueries({ queryKey: ['task_linked_objects', task.task_id] })
   async function post() {
     const body = text.trim(); if (!body || busy || !ctx) return
     setBusy(true)
-    const { error } = await supabase.from('site_task_comments').insert({ task_id: task.task_id, org_id: ctx.orgId, author_id: ctx.authorId || null, author_name: ctx.authorName || null, body })
-    setBusy(false); if (!error) { setText(''); invalidate() }
+    // capture-first: the note is saved immediately, so classification is best-effort and never loses it.
+    const { data: inserted, error } = await supabase.from('site_task_comments')
+      .insert({ task_id: task.task_id, org_id: ctx.orgId, author_id: ctx.authorId || null, author_name: ctx.authorName || null, body })
+      .select('id').single()
+    setBusy(false)
+    if (error || !inserted) return
+    setText(''); invalidate()
+    // Route the note through the SAME classifier (decompose) as WhatsApp. If it looks like a snag/issue,
+    // surface a suggestion the user confirms — so issues never get silently filed as notes.
+    try {
+      const { data } = await supabase.functions.invoke('siteops-note', { body: { action: 'classify', text: body, task_id: task.task_id } })
+      const items = ((data as { items?: ClassifiedItem[] })?.items ?? [])
+      const hit = items.find((it) => it.type === 'issue') ?? items.find((it) => it.type === 'todo')
+      if (hit && (hit.type === 'issue' || hit.type === 'todo')) setPending({ noteId: inserted.id, item: hit, suggest: hit.type === 'issue' ? 'issue' : 'todo' })
+    } catch { /* best-effort — the note is already saved as a plain note */ }
+  }
+  async function confirmSpawn(type: 'issue' | 'todo') {
+    if (!pending) return
+    setSpawning(true)
+    try {
+      await supabase.functions.invoke('siteops-note', { body: {
+        action: 'spawn', task_id: task.task_id,
+        note_id: pending.noteId, note_kind: 'comment', type, item: pending.item,
+      } })
+    } finally { setSpawning(false); setPending(null); invalidateObjects(); invalidate() }
+  }
+  async function quickAction(o: LinkedObject) {
+    if (o.kind === 'issue') await supabase.from('problems').update({ status: 'RESOLVED', next_followup_at: null }).eq('id', o.id)
+    else await supabase.from('todos').update({ status: 'DONE' }).eq('id', o.id)
+    invalidateObjects()
   }
   async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]; e.target.value = ''
@@ -459,11 +500,17 @@ export default function TaskDetail({ task, engine, showStatusControl = false, on
     setUploading(false)
   }
 
+  // Mark-and-hide: a note (UI comment or WhatsApp narration) that became a Snag/Issue is shown AS the
+  // chip, not as a raw feed line — one thing in the feed, not "note" + "created from note".
+  const spawnedCommentIds = new Set(linkedObjects.filter((o) => o.source_note_kind === 'comment' && o.source_note_id).map((o) => o.source_note_id as string))
+  const spawnedNarrationIds = new Set(linkedObjects.filter((o) => o.source_note_kind === 'narration' && o.source_note_id).map((o) => o.source_note_id as string))
+
   const updates: Update[] = [
-    ...narrations.map((n) => ({ id: 'wa' + n.id, k: 'wa' as const, at: n.created_at, text: n.raw_text, who: n.sender_name })),
-    ...comments.map((c): Update => ({ id: c.id, k: isImageUrl(c.body) ? 'photo' : 'note', at: c.created_at, text: c.body, who: c.author_name })),
-    ...(task.status_history ?? []).filter((e) => e.status).map((e, i) => ({ id: 'st' + i + (e.at ?? ''), k: 'status' as const, at: e.at ?? null, text: `Marked ${String(e.status).replace(/_/g, ' ')}` })),
-    ...qc.filter((q) => q.qc_status === 'confirmed' && q.answer).map((q) => ({ id: 'qc' + q.id, k: 'qc' as const, at: q.answered_at ?? null, text: q.answer as string })),
+    ...narrations.filter((n) => !spawnedNarrationIds.has(n.id)).map((n): Update => ({ id: 'wa' + n.id, k: 'wa' as const, at: n.created_at, text: n.raw_text, who: n.sender_name })),
+    ...comments.filter((c) => !spawnedCommentIds.has(c.id)).map((c): Update => ({ id: c.id, k: isImageUrl(c.body) ? 'photo' : 'note', at: c.created_at, text: c.body, who: c.author_name })),
+    ...(task.status_history ?? []).filter((e) => e.status).map((e, i): Update => ({ id: 'st' + i + (e.at ?? ''), k: 'status' as const, at: e.at ?? null, text: `Marked ${String(e.status).replace(/_/g, ' ')}` })),
+    ...qc.filter((q) => q.qc_status === 'confirmed' && q.answer).map((q): Update => ({ id: 'qc' + q.id, k: 'qc' as const, at: q.answered_at ?? null, text: q.answer as string })),
+    ...linkedObjects.map((o): Update => ({ id: 'chip' + o.id, k: 'chip' as const, at: o.created_at, obj: o })),
   ].sort((a, b) => new Date(b.at ?? 0).getTime() - new Date(a.at ?? 0).getTime())
 
   return (
@@ -568,7 +615,9 @@ export default function TaskDetail({ task, engine, showStatusControl = false, on
           </div>
           {updates.length === 0
             ? <p style={{ fontSize: 13.5, color: C.faint, fontStyle: 'italic', margin: 0 }}>No updates yet — WhatsApp messages, notes and photos appear here.</p>
-            : <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>{updates.map((u) => <UpdateCard key={u.id} u={u} />)}</div>}
+            : <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>{updates.map((u) => u.k === 'chip'
+                ? <TaskFeedChip key={u.id} obj={u.obj} ownerName={ctx?.ownerName ?? (() => 'Unassigned')} followState={followStates[u.obj.id]} onQuickAction={quickAction} busy={spawning} />
+                : <UpdateCard key={u.id} u={u} />)}</div>}
         </section>
       </div>
 
@@ -576,6 +625,25 @@ export default function TaskDetail({ task, engine, showStatusControl = false, on
       {ctx && (
         <div style={{ borderTop: `1px solid ${C.hair}`, background: 'rgba(246,241,232,.92)', backdropFilter: 'blur(8px)', padding: '14px 22px 18px' }}>
           <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onPickFile} style={{ display: 'none' }} />
+          {/* classify → confirm: the note is already saved; the user files it as a Snag/Issue (AI pre-picks). */}
+          {pending && (
+            <div style={{ marginBottom: 10, padding: '10px 12px', borderRadius: 12, background: '#FBECE3', border: `1px solid ${C.terra}44`, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12.5, color: C.ink, flex: 1, minWidth: 150 }}>
+                This looks like {pending.suggest === 'issue' ? 'an Issue' : 'a Snag'} — file it so it gets followed up?
+              </span>
+              {(['issue', 'todo'] as const).map((t) => {
+                const on = (t === 'issue') === (pending.suggest === 'issue')
+                return (
+                  <button key={t} disabled={spawning} onClick={() => confirmSpawn(t)}
+                    style={{ fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 8, cursor: 'pointer', opacity: spawning ? 0.6 : 1,
+                      background: on ? C.terra : C.surface, color: on ? '#fff' : C.ink2, border: on ? 'none' : `1px solid ${C.hair}` }}>
+                    {t === 'issue' ? 'Make Issue' : 'Make Snag'}
+                  </button>
+                )
+              })}
+              <button disabled={spawning} onClick={() => setPending(null)} style={{ fontSize: 12, color: C.faint, background: 'transparent', border: 'none', cursor: 'pointer' }}>Keep as note</button>
+            </div>
+          )}
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10 }}>
             <button aria-label="Attach a site photo" onClick={() => fileRef.current?.click()} disabled={uploading} className="bb-tap" style={{ width: 46, height: 46, borderRadius: 13, flexShrink: 0, display: 'grid', placeItems: 'center', color: uploading ? C.faint : C.ink2, background: C.surface, border: `1px solid ${C.hair}` }}><Camera size={19} /></button>
             <div style={{ flex: 1, background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 14, padding: '5px 6px 5px 14px', display: 'flex', alignItems: 'flex-end', gap: 8 }}>
