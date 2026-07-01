@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import type { Session } from '@supabase/supabase-js';
 import { IconClockHour4, IconBuildingEstate } from '@tabler/icons-react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../lib/auth/AuthProvider';
 
 function timeAgo(iso: string): string {
   const diff  = Date.now() - new Date(iso).getTime();
@@ -17,6 +18,7 @@ function timeAgo(iso: string): string {
 
 export default function Pending({ session }: { session: Session }) {
   const navigate = useNavigate();
+  const { signOut } = useAuth();
   const [orgName,    setOrgName]    = useState<string>('your organization');
   const [createdAt,  setCreatedAt]  = useState<string | null>(null);
   const [refreshMsg, setRefreshMsg] = useState<string | null>(null);
@@ -88,7 +90,7 @@ export default function Pending({ session }: { session: Session }) {
     }
   };
 
-  const handleSignOut = () => supabase.auth.signOut();
+  const handleSignOut = () => signOut(); // S1-2 Part B: explicit sign-out through the wrapper
 
   if (suspended) {
     return (

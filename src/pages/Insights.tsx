@@ -26,6 +26,7 @@ import { useOrgId } from '../lib/auth/AuthProvider';
 import { getCostCode } from '../lib/costCodes';
 import { deriveDirection, payeeLabel } from '../lib/transactions';
 import { PageSkeleton } from '../components/SkeletonLoader';
+import { useQueryGate } from '../components/QueryGate';
 
 // ── palette ──────────────────────────────────────────────────────────────────
 const INK = '#0b1c30';
@@ -104,7 +105,7 @@ export default function Insights() {
   const setShowExplore = (v: boolean) => patchParams({ x: v ? '1' : null });
   const [expandedCat, setExpandedCat] = useState<CatKey | null>(null);
 
-  const { data: txns, isLoading } = useQuery({
+  const { data: txns, isLoading, isError, refetch } = useQuery({
     queryKey: ['insights_txns', orgId],
     enabled: !!orgId,
     queryFn: async () => {
@@ -233,7 +234,10 @@ export default function Insights() {
 
   const showDelta = period !== 'all' && agg.prevOut > 0;
   const deltaPct = showDelta ? ((agg.out - agg.prevOut) / agg.prevOut) * 100 : 0;
-  const empty = !isLoading && agg.out === 0 && agg.inn === 0;
+  // S1-2 Step 4: the relogin landing goes through the S1-1 gate — skeleton → retry card on a hang or
+  // error, never a blank perpetual spinner. On success (data present, incl. stale cache) → identical render.
+  const gate = useQueryGate({ isLoading, isError, hasData: txns !== undefined, refetch, skeleton: <PageSkeleton />, label: 'your dashboard' });
+  const empty = !gate && agg.out === 0 && agg.inn === 0;
 
   return (
     <div className="mobile-main-pb" style={{ padding: 24, maxWidth: 1080, margin: '0 auto', fontFamily: 'Manrope, sans-serif' }}>
@@ -257,7 +261,7 @@ export default function Insights() {
         </div>
       </div>
 
-      {isLoading && <PageSkeleton />}
+      {gate}
 
       {empty && (
         <div style={{ ...card, textAlign: 'center', padding: 48, color: FAINT }}>
@@ -266,7 +270,7 @@ export default function Insights() {
         </div>
       )}
 
-      {!isLoading && !empty && showExplore && (
+      {!gate && !empty && showExplore && (
         <div className="ins-fade">
           <button onClick={() => setShowExplore(false)}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 14, padding: '6px 4px', border: 'none', background: 'transparent', cursor: 'pointer', color: INK_SOFT, fontSize: 13, fontWeight: 600, fontFamily: 'Manrope, sans-serif' }}>
@@ -276,7 +280,7 @@ export default function Insights() {
         </div>
       )}
 
-      {!isLoading && !empty && !showExplore && (
+      {!gate && !empty && !showExplore && (
         <>
           {/* ── KPI band ── */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 14, marginBottom: 14 }}>

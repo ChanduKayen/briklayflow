@@ -122,7 +122,7 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
   const location = useLocation();
   const navigate = useNavigate();
   const { data: profile } = useUserProfile(session.user.id);
-  const { orgId } = useAuth();
+  const { orgId, signOut } = useAuth();
   const role: Role = profile?.role ?? '';
 
   // ── Secondary-nav contexts — BOTH the in-project nav and the Site Management hub use the same
@@ -151,7 +151,10 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
     if (signingOut) return;
     setSigningOut(true);
     try { clearPersistedCache(); } catch { /* private mode */ }
-    try { await supabase.auth.signOut(); } catch { setSigningOut(false); }
+    // S1-2 Part B: sign out through the AuthProvider wrapper so the SIGNED_OUT handler sees this as an
+    // EXPLICIT sign-out — logged as explicit (not misclassified as refresh_failed) and taking the pure
+    // navigation path, never the storage re-check.
+    try { await signOut(); } catch { setSigningOut(false); }
   };
   // Brand wordmark: "Briklay." collapses to "B." — the terracotta dot rides the
   // closing letters home to the B. Measure "riklay" so the dot travels exactly.

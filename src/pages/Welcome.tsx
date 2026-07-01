@@ -21,6 +21,7 @@
  */
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { LOGIN_ROUTE } from '../lib/auth/routes';
 import { ArrowRight, AlertCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/auth/AuthProvider';
@@ -130,7 +131,7 @@ export default function Welcome() {
             Confirmation links last a short while, and each one works once. Sign in to get a fresh link sent to your inbox.
           </p>
           <button
-            onClick={() => navigate('/login')}
+            onClick={() => navigate(LOGIN_ROUTE)}
             className="inline-flex items-center justify-center gap-2 mt-8 w-full py-3 rounded-xl font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#BC4B27]"
             style={{ background: terraGrad, color: '#fff', fontSize: 'clamp(0.9rem, 0.85rem + 0.3vw, 1rem)' }}
           >

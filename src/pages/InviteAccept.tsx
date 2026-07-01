@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { LOGIN_ROUTE } from '../lib/auth/routes';
+import { useAuth } from '../lib/auth/AuthProvider';
 import type { Session } from '@supabase/supabase-js';
 import { IconAlertTriangle, IconCircleCheck, IconLoader2 } from '@tabler/icons-react';
 import { supabase } from '../lib/supabase';
@@ -219,6 +221,7 @@ type AcceptInviteResult = {
 
 export default function InviteAccept({ session, token }: Props) {
   const navigate   = useNavigate();
+  const { signOut } = useAuth();
   const validated  = useRef(false);
   const [state, setState] = useState<PageState>({ phase: 'validating' });
 
@@ -263,7 +266,7 @@ export default function InviteAccept({ session, token }: Props) {
     if (!session?.user) {
       // Not logged in — redirect to login with return URL.
       // After sign-in, the redirect param brings them back here.
-      navigate(`/login?redirect=/invite/${token}`);
+      navigate(`${LOGIN_ROUTE}?redirect=/invite/${token}`);
       return;
     }
 
@@ -303,11 +306,11 @@ export default function InviteAccept({ session, token }: Props) {
   };
 
   const handleDeclinedSignOut = async () => {
-    await supabase.auth.signOut();
-    navigate('/login', { replace: true });
+    await signOut(); // S1-2 Part B: explicit sign-out through the wrapper (handler redirects to LOGIN_ROUTE)
+    navigate(LOGIN_ROUTE, { replace: true });
   };
 
-  const handleSignOut = () => supabase.auth.signOut();
+  const handleSignOut = () => signOut(); // S1-2 Part B: explicit sign-out through the wrapper
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-background px-margin-mobile">

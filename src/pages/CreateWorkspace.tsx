@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { LOGIN_ROUTE } from '../lib/auth/routes';
 import type { Session } from '@supabase/supabase-js';
 import { IconCircleCheck, IconCircleX, IconLoader2 } from '@tabler/icons-react';
 import { supabase } from '../lib/supabase';
@@ -188,7 +189,7 @@ export default function CreateWorkspace({ session }: { session: Session }) {
 
         <p className="text-[11px] text-on-surface-variant text-center mt-6">
           Already have an invite?{' '}
-          <Link to="/login" className="hover:text-on-surface transition-colors">
+          <Link to={LOGIN_ROUTE} className="hover:text-on-surface transition-colors">
             Sign in with a different account
           </Link>
         </p>

@@ -17,6 +17,7 @@ import { StartOnWhatsAppButton } from '../components/day-book/StartOnWhatsApp';
 import { ShortcutTicker } from '../components/ShortcutTicker';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { PageSkeleton } from '../components/SkeletonLoader';
+import { useQueryGate } from '../components/QueryGate';
 import { deriveDirection, isNotLinked, resolveAnchor, isGeneralExpense, payeeLabel, type TxnAnchor, type TxnDirection } from '../lib/transactions';
 import { V, font, serif, nums, terraGrad } from '../components/txn-ledger/ledgerTokens';
 import { DirMedallion, Amount, AnchorChip, FilterChip, FlowBar } from '../components/txn-ledger/LedgerAtoms';
@@ -318,7 +319,7 @@ export default function Ledger({ session }: { session: Session }) {
     'Material Supply', 'PO Advance', 'PO Settlement', 'Transport & Handling',
     'Site Overhead', 'Labour Welfare', 'Tools & Equipment', 'Professional Fees', 'Utilities', 'Other'];
 
-  const { data: ledger, isLoading } = useQuery({
+  const { data: ledger, isLoading, isError, refetch } = useQuery({
     queryKey: ['ledger'],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -333,6 +334,13 @@ export default function Ledger({ session }: { session: Session }) {
   // resolves loosely — but it lets the helpers below take a named type, not bare `any`.
   type LedgerRow = NonNullable<typeof ledger>[number];
   type TxnAlloc = NonNullable<LedgerRow['txn_allocations']>[number];
+
+  // S1-2 Step 4: the transactions landing (/ → /ledger, also the retry card's "Home" target) inherits the
+  // S1-1 gate — skeleton → retry card on a hung/failed load post-relogin, never a blank perpetual spinner.
+  const ledgerGate = useQueryGate({
+    isLoading, isError, hasData: ledger !== undefined, refetch,
+    skeleton: <div className="mt-7"><PageSkeleton /></div>, label: 'your ledger',
+  });
 
   // The distinct WO/PO ids referenced by the visible ledger's allocations. These
   // key the order-info query so the chip can show a title + burn-down instead of a
@@ -1138,9 +1146,7 @@ export default function Ledger({ session }: { session: Session }) {
         </BottomSheet>
 
         {/* the day-book */}
-        {isLoading ? (
-          <div className="mt-7"><PageSkeleton /></div>
-        ) : visibleDays.length === 0 ? (
+        {ledgerGate ? ledgerGate : visibleDays.length === 0 ? (
           (ledger?.length ?? 0) === 0 ? (
             // nothing filed yet anywhere — teach how the ledger fills itself
             <LedgerEmpty

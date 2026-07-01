@@ -1,6 +1,7 @@
 import React, { createContext, lazy, Suspense, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from './lib/auth/AuthProvider';
+import { LOGIN_ROUTE } from './lib/auth/routes';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
 import { Routes, Route, Navigate, useNavigate, Link, useLocation } from 'react-router-dom';
 import TeamAccess from './components/team/TeamAccess';
@@ -72,7 +73,8 @@ import OnboardingWizard from './components/OnboardingWizard';
 import Pending from './pages/Pending';
 import Welcome from './pages/Welcome';
 import CreateWorkspace from './pages/CreateWorkspace';
-import Login from './pages/Login';
+// S1-2 Part B: the standalone <Login> screen is retired — every unauthenticated path now
+// resolves to the Landing screen (via LOGIN_ROUTE), so the old surface is unreachable.
 import Landing from './pages/Landing';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
@@ -110,6 +112,10 @@ export function useSignOut() { return useContext(SignOutContext); }
 function SignOutOverlay({ onDismiss }: { onDismiss: () => void }) {
   const [fade, setFade]       = useState<'in' | 'visible' | 'out'>('in');
   const [showMark, setShowMark] = useState(false);
+  // S1-2 Part B: sign out through the AuthProvider wrapper (not supabase.auth.signOut directly) so the
+  // SIGNED_OUT handler sees explicitSignOutRef=true — a user sign-out is logged as explicit, not
+  // misclassified as refresh_failed, and skips the spurious-logout getSession() round-trip.
+  const { signOut } = useAuth();
 
   useEffect(() => {
     const ts = [
@@ -122,7 +128,7 @@ function SignOutOverlay({ onDismiss }: { onDismiss: () => void }) {
       // doesn't hydrate the previous user's data.
       setTimeout(() => {
         clearPersistedCache();
-        supabase.auth.signOut().catch(() => {});
+        signOut().catch(() => {});
       }, 700),
       // Begin dissolve
       setTimeout(() => { setShowMark(false); setFade('out'); }, 900),
@@ -351,13 +357,13 @@ function App() {
 
   if (location.pathname === '/pending') {
     if (!routerReady) return null;
-    if (!session) return <Navigate to="/login" replace />;
+    if (!session) return <Navigate to={LOGIN_ROUTE} replace />;
     return <Pending session={session} />;
   }
 
   if (location.pathname === '/create-workspace') {
     if (!routerReady) return null;
-    if (!session) return <Navigate to="/login" replace />;
+    if (!session) return <Navigate to={LOGIN_ROUTE} replace />;
     return <CreateWorkspace session={session} />;
   }
 
@@ -377,8 +383,11 @@ function App() {
 
   if (authState.status === 'unauthenticated') {
     const p = location.pathname;
-    if (p === '/' || p === '/login') return <Landing />;
-    return <Login />;
+    if (p === '/' || p === LOGIN_ROUTE) return <Landing />;
+    // S1-2 Part B: consolidate EVERY other unauthenticated path onto the single login route so an
+    // involuntary signout on a deep route (e.g. /ledger) can never surface the retired Login screen —
+    // even a forgotten reference or a stale-bundle tab lands on the current login surface.
+    return <Navigate to={LOGIN_ROUTE} replace />;
   }
   
   // Guard against rendering the main app layout when we are supposed to redirect
