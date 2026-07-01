@@ -1,4 +1,4 @@
-// ItemsTable — the ONE surface for Issues & To-dos (a project's /issues page and the cross-site
+// ItemsTable — the ONE surface for Issues & Snags (a project's /issues page and the cross-site
 // Site Desk both render this exact component). An elegant CARD FEED:
 //   • COLLAPSED card carries the glance: serif title, assignee, due, the live follow-up SUMMARY,
 //     and the LATEST log line (the most recent reply / status / chase).
@@ -40,7 +40,7 @@ export interface DeskProblem {
   deadline?: string | null
   impact?: ImpactSuggestion | null
 }
-export interface DeskTodo {
+export interface DeskSnag {
   id: string; text: string; owner_id: string | null; due_date: string | null
   status: 'OPEN' | 'DONE'; task_id: string | null; project_id?: string | null; created_at: string
 }
@@ -74,12 +74,12 @@ interface NRow {
   kind: 'issue' | 'todo'
   id: string; title: string; projectId: string | null; ownerId: string | null
   whenIso: string | null; done: boolean; createdAt: string
-  problem?: DeskProblem; todo?: DeskTodo
+  problem?: DeskProblem; snag?: DeskSnag
 }
 
 export interface ItemsTableProps {
   issues: DeskProblem[]
-  todos: DeskTodo[]
+  snags: DeskSnag[]
   orgId: string
   actorId: string | null
   followStates?: Record<string, FollowState>
@@ -88,8 +88,8 @@ export interface ItemsTableProps {
   showSite?: boolean
   projName?: (id: string | null) => string
   onPatchProblem: (id: string, patch: Partial<DeskProblem>, threadEvent?: string, eventType?: ThreadEntry['type']) => void
-  onPatchTodo: (id: string, patch: Partial<DeskTodo>) => void
-  onToggleTodo: (t: DeskTodo) => void
+  onPatchSnag: (id: string, patch: Partial<DeskSnag>) => void
+  onToggleSnag: (t: DeskSnag) => void
   onDismissImpact?: (id: string) => void
   emptyLabel?: string
 }
@@ -101,12 +101,12 @@ function earliestThreat(p?: DeskProblem | null): number | null {
 }
 
 export default function ItemsTable(props: ItemsTableProps) {
-  const { issues, todos, emptyLabel } = props
+  const { issues, snags, emptyLabel } = props
   const [showArchive, setShowArchive] = useState(false)
 
   const norm: NRow[] = [
     ...issues.map((p): NRow => ({ kind: 'issue', id: p.id, title: p.title, projectId: p.project_id ?? null, ownerId: p.owner_id, whenIso: p.next_followup_at, done: p.status === 'RESOLVED', createdAt: p.created_at, problem: p })),
-    ...todos.map((t): NRow => ({ kind: 'todo', id: t.id, title: t.text, projectId: t.project_id ?? null, ownerId: t.owner_id, whenIso: t.due_date, done: t.status === 'DONE', createdAt: t.created_at, todo: t })),
+    ...snags.map((t): NRow => ({ kind: 'todo', id: t.id, title: t.text, projectId: t.project_id ?? null, ownerId: t.owner_id, whenIso: t.due_date, done: t.status === 'DONE', createdAt: t.created_at, snag: t })),
   ]
   const byNewest = (a: NRow, b: NRow) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   const esc = (r: NRow) => (props.followStates?.[r.id]?.escalated ? 1 : 0)
@@ -154,7 +154,7 @@ export default function ItemsTable(props: ItemsTableProps) {
 }
 
 // ── one card ──────────────────────────────────────────────────────────────────
-function Row({ r, index, orgId, actorId, followStates, ownerName, taskNames, showSite, projName, onPatchProblem, onPatchTodo, onToggleTodo, onDismissImpact }:
+function Row({ r, index, orgId, actorId, followStates, ownerName, taskNames, showSite, projName, onPatchProblem, onPatchSnag, onToggleSnag, onDismissImpact }:
   ItemsTableProps & { r: NRow; index: number }) {
   const [open, setOpen] = useState(false)
   const [pick, setPick] = useState(false)
@@ -165,14 +165,14 @@ function Row({ r, index, orgId, actorId, followStates, ownerName, taskNames, sho
   const { overdue } = whenInfo(r.whenIso, r.done)
 
   const tone = isIssue ? (overdue ? FAIL : p ? STATUS_COLOR[p.status] : TERRA) : (r.done ? SAGE : INK_GHOST)
-  const blocking = r.todo?.task_id ?? p?.task_id
+  const blocking = r.snag?.task_id ?? p?.task_id
   const blockingName = blocking ? taskNames[blocking] : undefined
   const fu = deriveFollowup(r, fs)
 
   const assign = (id: string | null) => {
     const prev = r.ownerId
     if (isIssue && p) onPatchProblem(p.id, { owner_id: id, owner_source: id ? 'manual' : 'auto' }, id ? `Assignee → ${ownerName(id)}` : 'Assignee cleared')
-    else if (r.todo) onPatchTodo(r.todo.id, { owner_id: id })
+    else if (r.snag) onPatchSnag(r.snag.id, { owner_id: id })
     if (id && id !== prev) {
       const who = ownerName(id)
       setAssignNote({ text: `Notifying ${who}…`, ok: true })
@@ -206,9 +206,9 @@ function Row({ r, index, orgId, actorId, followStates, ownerName, taskNames, sho
     }
     setTimeout(() => onPatchProblem(p.id, { status: 'RESOLVED', next_followup_at: null }, `Resolved — “${note}”`, 'system'), 1250)
   }
-  // TO-DO → strike-through, then "to-do closed", then file it.
-  const markTodoDone = () => { setPhase('striking'); setTimeout(() => onToggleTodo(r.todo!), 850) }
-  const onTodoToggle = () => { if (r.done) onToggleTodo(r.todo!); else markTodoDone() }
+  // SNAG → strike-through, then "snag closed", then file it.
+  const markSnagDone = () => { setPhase('striking'); setTimeout(() => onToggleSnag(r.snag!), 850) }
+  const onSnagToggle = () => { if (r.done) onToggleSnag(r.snag!); else markSnagDone() }
 
   return (
     <div ref={cardRef} className={`it-card${overdue ? ' it-overdue' : ''}${open ? ' it-open' : ''}${phase ? ' it-leaving' : ''}`} style={{ animationDelay: `${Math.min(index, 12) * 28}ms` }}>
@@ -231,7 +231,7 @@ function Row({ r, index, orgId, actorId, followStates, ownerName, taskNames, sho
                 <span className="material-symbols-outlined" style={{ fontSize: 16 }}>{overdue ? 'priority_high' : 'warning'}</span>
               </span>
             ) : (
-              <button onClick={onTodoToggle} aria-label="Toggle done" className="it-check"
+              <button onClick={onSnagToggle} aria-label="Toggle done" className="it-check"
                 style={{ borderColor: (r.done || phase === 'striking') ? SAGE : INK_GHOST, background: (r.done || phase === 'striking') ? SAGE : '#fff' }}>
                 {(r.done || phase === 'striking') && <span className="material-symbols-outlined" style={{ fontSize: 14, color: '#fff' }}>check</span>}
               </button>
@@ -252,7 +252,7 @@ function Row({ r, index, orgId, actorId, followStates, ownerName, taskNames, sho
               </span>
               {isIssue && p
                 ? <StatusPill status={p.status} />
-                : <span className="it-typetag" style={{ color: INK_FAINT, borderColor: LINE }}>To-do</span>}
+                : <span className="it-typetag" style={{ color: INK_FAINT, borderColor: LINE }}>Snag</span>}
               <span className="it-chev" onClick={(e) => { e.stopPropagation(); setOpen((o) => !o) }} style={{ transform: open ? 'rotate(180deg)' : 'none' }}>
                 <span className="material-symbols-outlined" style={{ fontSize: 20 }}>expand_more</span>
               </span>
@@ -270,7 +270,7 @@ function Row({ r, index, orgId, actorId, followStates, ownerName, taskNames, sho
           </div>
 
           {phase === 'striking' && (
-            <div className="it-closed"><span className="material-symbols-outlined" style={{ fontSize: 14 }}>task_alt</span> To-do closed</div>
+            <div className="it-closed"><span className="material-symbols-outlined" style={{ fontSize: 14 }}>task_alt</span> Snag closed</div>
           )}
 
           {isIssue && p?.impact?.implication && (
@@ -291,7 +291,7 @@ function Row({ r, index, orgId, actorId, followStates, ownerName, taskNames, sho
         {open && (
           isIssue && p
             ? <IssueDetail p={p} assignee={assigneeBlock} blockingName={blockingName} projectId={r.projectId} orgId={orgId} actorId={actorId} ownerName={ownerName} onPatchProblem={onPatchProblem} onResolve={resolveIssue} />
-            : <TodoDetail t={r.todo!} assignee={assigneeBlock} blockingName={blockingName} projectId={r.projectId} orgId={orgId} actorId={actorId} ownerName={ownerName} onToggleTodo={onTodoToggle} onPatchTodo={onPatchTodo} />
+            : <SnagDetail t={r.snag!} assignee={assigneeBlock} blockingName={blockingName} projectId={r.projectId} orgId={orgId} actorId={actorId} ownerName={ownerName} onToggleSnag={onSnagToggle} onPatchSnag={onPatchSnag} />
         )}
       </div>
 
@@ -482,12 +482,12 @@ function IssueDetail({ p, assignee, blockingName, projectId, orgId, actorId, own
   )
 }
 
-// ── TO-DO detail — lighter, same 3-zone frame ─────────────────────────────────
-function TodoDetail({ t, assignee, blockingName, projectId, orgId, actorId, ownerName, onToggleTodo, onPatchTodo }: {
-  t: DeskTodo; assignee: ReactNode; blockingName?: string; projectId: string | null
+// ── SNAG detail — lighter, same 3-zone frame ─────────────────────────────────
+function SnagDetail({ t, assignee, blockingName, projectId, orgId, actorId, ownerName, onToggleSnag, onPatchSnag }: {
+  t: DeskSnag; assignee: ReactNode; blockingName?: string; projectId: string | null
   orgId: string; actorId: string | null; ownerName: (id: string | null) => string
-  onToggleTodo: (t: DeskTodo) => void
-  onPatchTodo: ItemsTableProps['onPatchTodo']
+  onToggleSnag: (t: DeskSnag) => void
+  onPatchSnag: ItemsTableProps['onPatchSnag']
 }) {
   const qc = useQueryClient()
   const { data: events = [], isLoading } = useItemTrail('todo', t.id, true)
@@ -498,7 +498,7 @@ function TodoDetail({ t, assignee, blockingName, projectId, orgId, actorId, owne
         <Section title="Information">
           {assignee}
           <KeyVal label="Status">
-            <button onClick={() => onToggleTodo(t)} className="it-todo-toggle" style={{ color: t.status === 'DONE' ? SAGE_SOFT : CREAM_SOFT, borderColor: t.status === 'DONE' ? softBorder(SAGE) : D_LINE, background: t.status === 'DONE' ? softBg(SAGE) : D_FIELD }}>
+            <button onClick={() => onToggleSnag(t)} className="it-snag-toggle" style={{ color: t.status === 'DONE' ? SAGE_SOFT : CREAM_SOFT, borderColor: t.status === 'DONE' ? softBorder(SAGE) : D_LINE, background: t.status === 'DONE' ? softBg(SAGE) : D_FIELD }}>
               <span className="material-symbols-outlined" style={{ fontSize: 15 }}>{t.status === 'DONE' ? 'task_alt' : 'radio_button_unchecked'}</span>{t.status === 'DONE' ? 'Done' : 'Mark done'}
             </button>
           </KeyVal>
@@ -526,7 +526,7 @@ function TodoDetail({ t, assignee, blockingName, projectId, orgId, actorId, owne
 
       {taskPick && projectId && (
         <TaskPicker projectId={projectId} currentTaskId={t.task_id}
-          onPick={(tid) => { onPatchTodo(t.id, { task_id: tid }); setTaskPick(false) }}
+          onPick={(tid) => { onPatchSnag(t.id, { task_id: tid }); setTaskPick(false) }}
           onClose={() => setTaskPick(false)} />
       )}
     </>
@@ -758,7 +758,7 @@ const CSS = `
 .it-causesel option { color:#221A13; }
 .it-pickbtn { display:inline-flex; align-items:center; gap:6px; font-size:13px; font-weight:500; color:${CREAM}; padding:4px 10px; border:1px solid ${D_LINE}; border-radius:9px; background:${D_FIELD}; cursor:pointer; transition:border-color .15s, box-shadow .15s; }
 .it-pickbtn:hover { border-color:rgba(243,234,219,.3); box-shadow:0 3px 12px -4px rgba(0,0,0,.5); }
-.it-todo-toggle { display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600; padding:5px 12px; border:1px solid; border-radius:999px; cursor:pointer; }
+.it-snag-toggle { display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600; padding:5px 12px; border:1px solid; border-radius:999px; cursor:pointer; }
 .it-link { color:${ACCENT}; font-weight:600; text-decoration:none; }
 .it-link:hover { text-decoration:underline; text-underline-offset:2px; }
 

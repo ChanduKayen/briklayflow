@@ -1,4 +1,4 @@
-// Task picker — link an issue/to-do to the specific task it blocks (or keep it project-wide).
+// Task picker — link an issue/snag to the specific task it blocks (or keep it project-wide).
 // Mirrors UserPicker's modal so the two feel like one family. Lists the project's tasks
 // (searchable) rather than navigating away to the task plan.
 

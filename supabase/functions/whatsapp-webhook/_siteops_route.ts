@@ -516,7 +516,7 @@ function itemLines(progress: ProgressResult[], problems: ProblemResult[], todos:
     lines.push(`⚠️ Issue — ${pr.title}${impact}${pr.followupAt ? `, by ${fmtDay(pr.followupAt)}` : ''}`)
   }
   for (const td of todos) {
-    lines.push(`📋 To-do — ${td.text}${td.dueDate ? `, ${fmtDay(td.dueDate)}` : ''}`)
+    lines.push(`📋 Snag — ${td.text}${td.dueDate ? `, ${fmtDay(td.dueDate)}` : ''}`)
   }
   return lines
 }
@@ -565,7 +565,7 @@ export function buildConfirm(parts: {
 
   if (md && base) {
     const orient = hasProgress && hasFollow
-      ? 'Task updates are in your Task Manager; issues & to-dos are tracked on your Site Desk.'
+      ? 'Task updates are in your Task Manager; issues & snags are tracked on your Site Desk.'
       : hasProgress ? 'Logged in your Task Manager.'
       : 'Tracked on your Site Desk for follow-up.'
     const lns: string[] = []
@@ -625,9 +625,9 @@ export function buildMultiConfirm(sections: ConfirmSection[], opts: {
   const base = opts.appBase?.trim()
 
   const orient = hasProgress && hasFollow
-    ? 'Task updates are in each site’s Task Manager; issues & to-dos are tracked together on your Site Desk.'
+    ? 'Task updates are in each site’s Task Manager; issues & snags are tracked together on your Site Desk.'
     : hasProgress ? 'Task updates are in each site’s Task Manager.'
-    : 'Issues & to-dos are tracked on your Site Desk.'
+    : 'Issues & snags are tracked on your Site Desk.'
   out.push('', ital(orient))
   if (md && base && hasFollow) out.push(`${bold('Site Desk')} — ${base}/site-desk`)
 

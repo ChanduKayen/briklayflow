@@ -315,7 +315,7 @@ function App() {
   }, [appProfile?.onboarding_done, session?.user?.id]);
 
   // Warm the Site Management chunks once the main page is up + the browser is idle — so opening
-  // Task Manager / To-dos & Issues / Follow-up Rules is instant, not gated on a lazy import at
+  // Task Manager / Snags & Issues / Follow-up Rules is instant, not gated on a lazy import at
   // click time. Vite dedupes: these import() calls just prime the same chunks lazy() will use.
   useEffect(() => {
     if (!session?.user?.id) return;
@@ -472,7 +472,7 @@ function App() {
               / onboarding / invite flows that still send users to /dashboard land here. */}
           <Route path="/dashboard" element={<Navigate to="/insights" replace />} />
           <Route path="/logbook" element={<Logbook session={session} />} />
-          {/* Site Desk — cross-project Issues & To-dos rollup; deep-link target of a
+          {/* Site Desk — cross-project Issues & Snags rollup; deep-link target of a
               multi-project WhatsApp narration. */}
           <Route path="/site-desk" element={<SiteDesk session={session} />} />
           {/* Global Task Manager — the org-level mount; ProjectTasks shows a project filter here
@@ -948,7 +948,7 @@ function MoreNavSheet({
     { path: base,                icon: IconLayoutGrid,      label: 'Overview',        show: true },
     { path: `${base}/tasks`,           icon: IconClipboardList, label: 'Task Manager', show: true },
     { path: `${base}/issues?view=issues`, icon: IconCircleDot,  label: 'Issues',       show: true },
-    { path: `${base}/issues?view=todos`,  icon: IconClipboardList, label: 'To-dos',    show: true },
+    { path: `${base}/issues?view=snags`,  icon: IconClipboardList, label: 'Snags',    show: true },
     { path: `${base}/inventory`, icon: IconFiles,           label: 'Inventory',       show: true },
     { path: `${base}/boqs`,      icon: IconClipboardList,   label: 'BOQs',            show: true },
     { path: `${base}/inward`,    icon: IconShoppingBag,     label: 'Inward Register', show: true },

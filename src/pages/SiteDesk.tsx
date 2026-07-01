@@ -1,11 +1,12 @@
-// Site Desk — the cross-project rollup of Issues & To-dos. The per-project page (ProjectIssues)
+// Site Desk — the cross-project rollup of Issues & Snags. The per-project page (ProjectIssues)
 // answers "what's open on THIS site"; the Desk answers a principal's real morning question —
 // "across ALL my sites, what needs me, soonest-bleeding first". It is also the deep-link target
 // of a MULTI-project WhatsApp narration (one message that touched several sites).
 //
 // It renders the SAME tabular surface as ProjectIssues (the shared ItemsTable) so the two can
 // never drift — extended with a Site column + a site filter for the cross-project context.
-// Issues ride high (rail/bold/expand/overdue wash); to-dos recede (checkbox/muted/ghost tag).
+// Issues ride high (rail/bold/expand/overdue wash); snags recede (checkbox/muted/ghost tag).
+// NB: the store is still the `todos` table / kind 'todo' (hidden impl detail) — label is "Snag".
 
 import { useState, useMemo, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -14,7 +15,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth/AuthProvider'
 import { PageSkeleton } from '../components/SkeletonLoader'
 import { useOrgMembers } from '../components/siteOps/UserPicker'
-import ItemsTable, { type DeskProblem, type DeskTodo, type ThreadEntry } from '../components/siteOps/ItemsTable'
+import ItemsTable, { type DeskProblem, type DeskSnag, type ThreadEntry } from '../components/siteOps/ItemsTable'
 import { appendEvent, legacyToFollowupType, trailKey, useTrailStates } from '../lib/siteOps/followup'
 
 const CREAM = '#FBF9F6', INK = '#221A13', INK_SOFT = 'rgba(34,26,19,0.55)', INK_FAINT = 'rgba(34,26,19,0.34)'
@@ -58,19 +59,19 @@ export default function SiteDesk({ session }: { session: Session }) {
     enabled: !!orgId,
     refetchInterval: 20000,
   })
-  const { data: todos = [] } = useQuery({
-    queryKey: ['desk_todos', orgId],
+  const { data: snags = [] } = useQuery({
+    queryKey: ['desk_snags', orgId],
     queryFn: async () => {
       const { data, error } = await supabase.from('todos')
         .select('id, text, owner_id, due_date, status, task_id, project_id, created_at').eq('org_id', orgId)
       if (error) throw error
-      return (data ?? []) as DeskTodo[]
+      return (data ?? []) as DeskSnag[]
     },
     enabled: !!orgId,
     refetchInterval: 20000,
   })
   // Per-item follow-up state (from the trail) for the row indicator — batch-loaded.
-  const { data: followStates = {} } = useTrailStates(orgId ?? 'all', problems.map((p) => p.id), todos.map((t) => t.id))
+  const { data: followStates = {} } = useTrailStates(orgId ?? 'all', problems.map((p) => p.id), snags.map((t) => t.id))
   const { data: taskNames = {} } = useQuery({
     queryKey: ['desk_task_names', orgId],
     queryFn: async () => {
@@ -90,7 +91,7 @@ export default function SiteDesk({ session }: { session: Session }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'problems', filter: `org_id=eq.${orgId}` },
         () => qc.invalidateQueries({ queryKey: ['desk_problems', orgId] }))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'todos', filter: `org_id=eq.${orgId}` },
-        () => qc.invalidateQueries({ queryKey: ['desk_todos', orgId] }))
+        () => qc.invalidateQueries({ queryKey: ['desk_snags', orgId] }))
       .subscribe()
     return () => { supabase.removeChannel(ch) }
   }, [orgId, qc])
@@ -115,14 +116,14 @@ export default function SiteDesk({ session }: { session: Session }) {
         .then(() => qc.invalidateQueries({ queryKey: trailKey('issue', id) }))
     }
   }
-  function patchTodo(id: string, patch: Partial<DeskTodo>) {
-    qc.setQueryData(['desk_todos', orgId], (old: DeskTodo[] | undefined) => old?.map((x) => (x.id === id ? { ...x, ...patch } : x)))
-    supabase.from('todos').update(patch).eq('id', id).then(({ error }) => { if (error) qc.invalidateQueries({ queryKey: ['desk_todos', orgId] }) })
+  function patchSnag(id: string, patch: Partial<DeskSnag>) {
+    qc.setQueryData(['desk_snags', orgId], (old: DeskSnag[] | undefined) => old?.map((x) => (x.id === id ? { ...x, ...patch } : x)))
+    supabase.from('todos').update(patch).eq('id', id).then(({ error }) => { if (error) qc.invalidateQueries({ queryKey: ['desk_snags', orgId] }) })
   }
-  function toggleTodo(t: DeskTodo) {
+  function toggleSnag(t: DeskSnag) {
     const next = t.status === 'DONE' ? 'OPEN' : 'DONE'
-    qc.setQueryData(['desk_todos', orgId], (old: DeskTodo[] | undefined) => old?.map((x) => (x.id === t.id ? { ...x, status: next } : x)))
-    supabase.from('todos').update({ status: next }).eq('id', t.id).then(({ error }) => { if (error) qc.invalidateQueries({ queryKey: ['desk_todos', orgId] }) })
+    qc.setQueryData(['desk_snags', orgId], (old: DeskSnag[] | undefined) => old?.map((x) => (x.id === t.id ? { ...x, status: next } : x)))
+    supabase.from('todos').update({ status: next }).eq('id', t.id).then(({ error }) => { if (error) qc.invalidateQueries({ queryKey: ['desk_snags', orgId] }) })
     if (orgId) {
       void appendEvent({ kind: 'todo', id: t.id, orgId, type: 'status_changed', body: next === 'DONE' ? 'Marked done' : 'Reopened', actorId: session.user.id })
         .then(() => qc.invalidateQueries({ queryKey: trailKey('todo', t.id) }))
@@ -132,7 +133,7 @@ export default function SiteDesk({ session }: { session: Session }) {
   if (isLoading) return <PageSkeleton />
 
   const totalOpen = problems.filter((p) => p.status !== 'RESOLVED').length
-  const totalTodos = todos.filter((t) => t.status !== 'DONE').length
+  const totalSnags = snags.filter((t) => t.status !== 'DONE').length
   const sitesWithOpen = Object.keys(openCountBySite).length
 
   return (
@@ -149,7 +150,7 @@ export default function SiteDesk({ session }: { session: Session }) {
           <div style={{ display: 'flex', gap: 22, marginTop: 16, flexWrap: 'wrap' }}>
             <Stat n={totalOpen} label={`open issue${totalOpen === 1 ? '' : 's'}`} sub={`on ${sitesWithOpen} site${sitesWithOpen === 1 ? '' : 's'}`} />
             <Stat n={overdueCount} label="overdue" tone={overdueCount ? FAIL : undefined} />
-            <Stat n={totalTodos} label={`to-do${totalTodos === 1 ? '' : 's'}`} />
+            <Stat n={totalSnags} label={`snag${totalSnags === 1 ? '' : 's'}`} />
           </div>
         </div>
       </div>
@@ -165,13 +166,13 @@ export default function SiteDesk({ session }: { session: Session }) {
         </div>
 
         <ItemsTable
-          issues={bySite(problems)} todos={bySite(todos)} orgId={orgId ?? ''} actorId={session.user.id}
+          issues={bySite(problems)} snags={bySite(snags)} orgId={orgId ?? ''} actorId={session.user.id}
           followStates={followStates}
           ownerName={ownerName} taskNames={taskNames}
           showSite={site === 'all'} projName={projName}
-          onPatchProblem={patchProblem} onPatchTodo={patchTodo} onToggleTodo={toggleTodo}
+          onPatchProblem={patchProblem} onPatchSnag={patchSnag} onToggleSnag={toggleSnag}
           onDismissImpact={(id) => patchProblem(id, { impact: null }, 'Impact suggestion dismissed')}
-          emptyLabel={site === 'all' ? 'No open issues or to-dos — every site is clear.' : 'Nothing open on this site.'}
+          emptyLabel={site === 'all' ? 'No open issues or snags — every site is clear.' : 'Nothing open on this site.'}
         />
       </div>
     </div>

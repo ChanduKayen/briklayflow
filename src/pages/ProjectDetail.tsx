@@ -638,7 +638,7 @@ export default function ProjectDetail({ session }: { session: Session }) {
         <NavTile href={`/projects/${projectId}/boqs`} icon="format_list_numbered" label="BOQs" color="#2563eb" />
         <NavTile href={`/projects/${projectId}/inward`} icon="local_shipping" label="Inward Register" color="#059669" />
         <NavTile href={`/projects/${projectId}/issues?view=issues`} icon="warning" label="Issues" color="#C8603A" />
-        <NavTile href={`/projects/${projectId}/issues?view=todos`} icon="task_alt" label="To-dos" color="#5E8157" />
+        <NavTile href={`/projects/${projectId}/issues?view=snags`} icon="task_alt" label="Snags" color="#5E8157" />
       </div>
 
       {/* ── Recent activity ─────────────────────────────────────────────── */}

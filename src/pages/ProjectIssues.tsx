@@ -1,8 +1,11 @@
-// Surfacing UI — a project's Issues & To-dos on ONE tabular surface. Issues and to-dos share
+// Surfacing UI — a project's Issues & Snags on ONE tabular surface. Issues and snags share
 // the SAME row structure (the shared ItemsTable, also used by the cross-site Site Desk), with
 // priority carried by weight: issues ride high (coloured rail, bold, expandable thread, overdue
-// wash), to-dos recede (checkbox, muted, ghost tag). Each issue links back to its source task +
+// wash), snags recede (checkbox, muted, ghost tag). Each issue links back to its source task +
 // narration (one-system). Sorted bleeding-first by the table's priority ladder.
+//
+// NB: the underlying store is still the `todos` table / `todo_id` column / followup kind 'todo'
+// (a hidden impl detail) — only the user-facing/app label is "Snag".
 
 import { useEffect } from 'react'
 import { useParams, useSearchParams, Link } from 'react-router-dom'
@@ -11,23 +14,24 @@ import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { PageSkeleton } from '../components/SkeletonLoader'
 import { useOrgMembers } from '../components/siteOps/UserPicker'
-import ItemsTable, { type DeskProblem, type DeskTodo, type ThreadEntry } from '../components/siteOps/ItemsTable'
+import ItemsTable, { type DeskProblem, type DeskSnag, type ThreadEntry } from '../components/siteOps/ItemsTable'
 import { appendEvent, legacyToFollowupType, trailKey, useTrailStates } from '../lib/siteOps/followup'
 
 const CREAM = '#FBF9F6', INK = '#221A13', INK_SOFT = 'rgba(34,26,19,0.55)'
 const TERRA = '#C8603A', LINE = 'rgba(34,26,19,0.10)'
 const SERIF = "'Playfair Display', Georgia, serif"
 
-type View = 'all' | 'issues' | 'todos'
+type View = 'all' | 'issues' | 'snags'
 
 export default function ProjectIssues({ session }: { session: Session }) {
   const { projectId = '' } = useParams<{ projectId: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
-  // The navbar's two first-class entries (Issues / To-dos) deep-link here with ?view=; the
+  // The navbar's two first-class entries (Issues / Snags) deep-link here with ?view=; the
   // segmented control below switches between them. Both ride the SAME surface (ItemsTable),
-  // so issues and to-dos never live on separate pages — only filtered views of one desk.
+  // so issues and snags never live on separate pages — only filtered views of one desk.
+  // Legacy `?view=todos` deep-links (pre-rename WhatsApp/bookmarks) still resolve to the snags view.
   const rawView = searchParams.get('view')
-  const view: View = rawView === 'todos' ? 'todos' : rawView === 'issues' ? 'issues' : 'all'
+  const view: View = (rawView === 'snags' || rawView === 'todos') ? 'snags' : rawView === 'issues' ? 'issues' : 'all'
   const setView = (v: View) => setSearchParams(v === 'all' ? {} : { view: v }, { replace: true })
   const qc = useQueryClient()
 
@@ -58,19 +62,19 @@ export default function ProjectIssues({ session }: { session: Session }) {
     enabled: !!projectId,
     refetchInterval: 20000,
   })
-  const { data: todos = [] } = useQuery({
-    queryKey: ['project_todos', projectId],
+  const { data: snags = [] } = useQuery({
+    queryKey: ['project_snags', projectId],
     queryFn: async () => {
       const { data, error } = await supabase.from('todos')
         .select('id, text, owner_id, due_date, status, task_id, project_id, created_at').eq('project_id', projectId)
       if (error) throw error
-      return (data ?? []) as DeskTodo[]
+      return (data ?? []) as DeskSnag[]
     },
     enabled: !!projectId,
     refetchInterval: 20000,
   })
   // Per-item follow-up state (from the trail) for the row indicator — batch-loaded.
-  const { data: followStates = {} } = useTrailStates(projectId, problems.map((p) => p.id), todos.map((t) => t.id))
+  const { data: followStates = {} } = useTrailStates(projectId, problems.map((p) => p.id), snags.map((t) => t.id))
   const { data: taskNames = {} } = useQuery({
     queryKey: ['project_task_names', projectId],
     queryFn: async () => {
@@ -82,7 +86,7 @@ export default function ProjectIssues({ session }: { session: Session }) {
     enabled: !!projectId,
   })
 
-  // Live: a WhatsApp narration that creates a problem/to-do (INSERT) or an edit elsewhere (UPDATE)
+  // Live: a WhatsApp narration that creates a problem/snag (INSERT) or an edit elsewhere (UPDATE)
   // lands without a manual reload. Needs problems/todos in the realtime publication (migration
   // 20260626000005); the 20s poll above is the fallback until that's applied.
   useEffect(() => {
@@ -92,7 +96,7 @@ export default function ProjectIssues({ session }: { session: Session }) {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'problems', filter: `project_id=eq.${projectId}` },
         () => qc.invalidateQueries({ queryKey: ['project_problems', projectId] }))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'todos', filter: `project_id=eq.${projectId}` },
-        () => qc.invalidateQueries({ queryKey: ['project_todos', projectId] }))
+        () => qc.invalidateQueries({ queryKey: ['project_snags', projectId] }))
       .subscribe()
     return () => { supabase.removeChannel(ch) }
   }, [projectId, qc])
@@ -110,14 +114,14 @@ export default function ProjectIssues({ session }: { session: Session }) {
         .then(() => qc.invalidateQueries({ queryKey: trailKey('issue', id) }))
     }
   }
-  function patchTodo(id: string, patch: Partial<DeskTodo>) {
-    qc.setQueryData(['project_todos', projectId], (old: DeskTodo[] | undefined) => old?.map((x) => (x.id === id ? { ...x, ...patch } : x)))
-    supabase.from('todos').update(patch).eq('id', id).then(({ error }) => { if (error) qc.invalidateQueries({ queryKey: ['project_todos', projectId] }) })
+  function patchSnag(id: string, patch: Partial<DeskSnag>) {
+    qc.setQueryData(['project_snags', projectId], (old: DeskSnag[] | undefined) => old?.map((x) => (x.id === id ? { ...x, ...patch } : x)))
+    supabase.from('todos').update(patch).eq('id', id).then(({ error }) => { if (error) qc.invalidateQueries({ queryKey: ['project_snags', projectId] }) })
   }
-  function toggleTodo(t: DeskTodo) {
+  function toggleSnag(t: DeskSnag) {
     const next = t.status === 'DONE' ? 'OPEN' : 'DONE'
-    qc.setQueryData(['project_todos', projectId], (old: DeskTodo[] | undefined) => old?.map((x) => (x.id === t.id ? { ...x, status: next } : x)))
-    supabase.from('todos').update({ status: next }).eq('id', t.id).then(({ error }) => { if (error) qc.invalidateQueries({ queryKey: ['project_todos', projectId] }) })
+    qc.setQueryData(['project_snags', projectId], (old: DeskSnag[] | undefined) => old?.map((x) => (x.id === t.id ? { ...x, status: next } : x)))
+    supabase.from('todos').update({ status: next }).eq('id', t.id).then(({ error }) => { if (error) qc.invalidateQueries({ queryKey: ['project_snags', projectId] }) })
     if (orgId) {
       void appendEvent({ kind: 'todo', id: t.id, orgId, type: 'status_changed', body: next === 'DONE' ? 'Marked done' : 'Reopened', actorId: session.user.id })
         .then(() => qc.invalidateQueries({ queryKey: trailKey('todo', t.id) }))
@@ -127,16 +131,16 @@ export default function ProjectIssues({ session }: { session: Session }) {
   if (isLoading) return <PageSkeleton />
 
   const openIssues = problems.filter((p) => p.status !== 'RESOLVED').length
-  const openTodos = todos.filter((t) => t.status !== 'DONE').length
+  const openSnags = snags.filter((t) => t.status !== 'DONE').length
 
-  // View scopes the SAME desk: 'issues' hides to-dos, 'todos' hides issues, 'all' shows both.
-  const shownIssues = view === 'todos' ? [] : problems
-  const shownTodos = view === 'issues' ? [] : todos
+  // View scopes the SAME desk: 'issues' hides snags, 'snags' hides issues, 'all' shows both.
+  const shownIssues = view === 'snags' ? [] : problems
+  const shownSnags = view === 'issues' ? [] : snags
   const emptyLabel = view === 'issues' ? 'No issues — nothing is blocking work.'
-    : view === 'todos' ? 'No to-dos — nothing pending.'
-    : 'No issues or to-dos — site is clear.'
+    : view === 'snags' ? 'No snags — nothing pending.'
+    : 'No issues or snags — site is clear.'
 
-  const heading = view === 'issues' ? 'Issues' : view === 'todos' ? 'To-dos' : 'Issues & To-dos'
+  const heading = view === 'issues' ? 'Issues' : view === 'snags' ? 'Snags' : 'Issues & Snags'
 
   return (
     <div style={{ minHeight: '100vh', background: CREAM }}>
@@ -144,15 +148,15 @@ export default function ProjectIssues({ session }: { session: Session }) {
         <Link to={`/projects/${projectId}`} style={{ fontSize: 13, color: INK_SOFT, textDecoration: 'none', fontWeight: 500 }}>‹ {project?.name ?? 'Project'}</Link>
         <h1 style={{ fontFamily: SERIF, fontSize: 34, fontWeight: 600, color: INK, margin: '10px 0 0' }}>{heading}</h1>
         <p style={{ fontSize: 14, color: INK_SOFT, margin: '6px 0 18px' }}>
-          {openIssues} open issue{openIssues === 1 ? '' : 's'} · {openTodos} to-do{openTodos === 1 ? '' : 's'}
+          {openIssues} open issue{openIssues === 1 ? '' : 's'} · {openSnags} snag{openSnags === 1 ? '' : 's'}
         </p>
 
-        {/* segmented control — All / Issues / To-dos (mirrors the two navbar entries) */}
+        {/* segmented control — All / Issues / Snags (mirrors the two navbar entries) */}
         <div style={{ display: 'inline-flex', gap: 2, padding: 3, background: '#fff', border: `1px solid ${LINE}`, borderRadius: 11, marginBottom: 20 }}>
-          {(['all', 'issues', 'todos'] as View[]).map((v) => {
+          {(['all', 'issues', 'snags'] as View[]).map((v) => {
             const on = view === v
-            const label = v === 'all' ? 'All' : v === 'issues' ? 'Issues' : 'To-dos'
-            const n = v === 'issues' ? openIssues : v === 'todos' ? openTodos : openIssues + openTodos
+            const label = v === 'all' ? 'All' : v === 'issues' ? 'Issues' : 'Snags'
+            const n = v === 'issues' ? openIssues : v === 'snags' ? openSnags : openIssues + openSnags
             return (
               <button key={v} onClick={() => setView(v)} style={{
                 display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
@@ -167,10 +171,10 @@ export default function ProjectIssues({ session }: { session: Session }) {
         </div>
 
         <ItemsTable
-          issues={shownIssues} todos={shownTodos} orgId={orgId ?? ''} actorId={session.user.id}
+          issues={shownIssues} snags={shownSnags} orgId={orgId ?? ''} actorId={session.user.id}
           followStates={followStates}
           ownerName={ownerName} taskNames={taskNames}
-          onPatchProblem={patchProblem} onPatchTodo={patchTodo} onToggleTodo={toggleTodo}
+          onPatchProblem={patchProblem} onPatchSnag={patchSnag} onToggleSnag={toggleSnag}
           onDismissImpact={(id) => patchProblem(id, { impact: null }, 'Impact suggestion dismissed')}
           emptyLabel={emptyLabel}
         />

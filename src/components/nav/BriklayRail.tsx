@@ -226,7 +226,7 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
       items: ([
         can(role !== 'supervisor') && { route: '/ledger', label: 'Transactions', icon: IconArrowsExchange, accent: true },
         { route: '/logbook', label: 'Day book', node: <DayBookIcon />, badge: inbox },
-        // Site Management — clicking enters its own secondary nav (Task Manager / To-dos & Issues /
+        // Site Management — clicking enters its own secondary nav (Task Manager / Snags & Issues /
         // Follow-up Rules); /site-desk is the hub's landing page.
         { route: '/site-desk', label: 'Site management', icon: IconAlertTriangle },
         can(role !== 'supervisor') && { route: '/billing', label: 'Client billing', icon: IconFileInvoice, badge: billOverdue },
@@ -259,10 +259,10 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
   const projItems: Item[] = inProject ? [
     { route: projBase, label: 'Overview', icon: IconLayoutGrid },
     { route: `${projBase}/tasks`, label: 'Task Manager', icon: IconChecklist },
-    // Issues + To-dos are first-class, distinct entries (P1.3) — both ride the same surface,
-    // scoped by ?view=. Issues ride heavy (cause/timing/thread); to-dos light (checkable).
+    // Issues + Snags are first-class, distinct entries (P1.3) — both ride the same surface,
+    // scoped by ?view=. Issues ride heavy (cause/timing/thread); snags light (checkable).
     { route: `${projBase}/issues?view=issues`, label: 'Issues', icon: IconAlertTriangle },
-    { route: `${projBase}/issues?view=todos`, label: 'To-dos', icon: IconListCheck },
+    { route: `${projBase}/issues?view=snags`, label: 'Snags', icon: IconListCheck },
     { route: `${projBase}/transactions`, label: 'Transactions', icon: IconArrowsExchange },
     { route: `${projBase}/work-orders`, label: 'Contracts', icon: IconClipboardList },
     { route: `${projBase}/purchase-orders`, label: 'Purchase orders', icon: IconShoppingBag },
@@ -274,7 +274,7 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
   // ── Site Management secondary navbar — the items shown in the second column (see inSiteMgmt). ──
   const siteMgmtItems: Item[] = [
     { route: '/tasks', label: 'Task Manager', icon: IconChecklist },
-    { route: '/site-desk', label: 'To-dos & Issues', icon: IconAlertTriangle },
+    { route: '/site-desk', label: 'Snags & Issues', icon: IconAlertTriangle },
     ...(role === 'principal' || role === 'management'
       ? [{ route: '/follow-up-rules', label: 'Follow-up Rules', icon: IconBell } as Item]
       : []),
@@ -493,7 +493,7 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
   );
 }
 
-// Active-state for in-project sub-nav, query-aware so the split Issues/To-dos entries (which
+// Active-state for in-project sub-nav, query-aware so the split Issues/Snags entries (which
 // share the /issues pathname and differ only by ?view=) highlight independently. A bare /issues
 // visit (no view) reads as the default 'all' and highlights Issues.
 function projItemActive(route: string, projBase: string, location: { pathname: string; search: string }): boolean {
