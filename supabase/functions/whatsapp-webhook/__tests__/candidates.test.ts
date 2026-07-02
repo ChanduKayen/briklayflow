@@ -2,7 +2,8 @@
 // (chase precedence, widen-on-empty, floor/trade narrowing, cap). No DB, no network.
 
 import { suite, test, expect } from './harness'
-import { prefilterCandidates, groundingLabels, type Candidate } from '../_siteops_candidates.ts'
+import { prefilterCandidates, groundingLabels, loadCandidates, type Candidate } from '../_siteops_candidates.ts'
+import type { BatchItem } from '../_siteops_batch.ts'
 
 let seq = 0
 function mk(p: Partial<Candidate>): Candidate {
@@ -44,6 +45,35 @@ suite('siteops candidates — prefilter', () => {
     const plaster = mk({ id: 'plaster', tradeText: 'plastering' })
     const out = prefilterCandidates([slab, plaster], 'plastering done')   // plaster group matches only 'plaster'
     expect(ids(out)).toEqual(['plaster'])
+  })
+})
+
+suite('siteops candidates — loadCandidates project scope (Fix Y)', () => {
+  // Minimal chainable supabase mock — every DB query resolves to no rows, so the output is exactly
+  // the (scoped) chase precedence set. Each from() returns a fresh thenable chain.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sb: any = { from: () => { const q: any = { select: () => q, eq: () => q, neq: () => q, then: (r: (v: unknown) => void) => r({ data: [] }) }; return q } }
+  const bi = (p: Partial<BatchItem>): BatchItem => ({
+    kind: p.kind ?? 'issue', id: p.id ?? 'x', orgId: 'o', projectId: p.projectId ?? null,
+    projectName: p.projectName ?? '', title: p.title ?? 'item', taskName: null, cause: null,
+  })
+
+  test('keeps only chases on the grounded project; drops cross-project and null-project chases', async () => {
+    const chase = [
+      bi({ id: 'here', projectId: 'P1', projectName: 'ASM Elite', title: 'cement short' }),
+      bi({ id: 'other', projectId: 'P2', projectName: 'Other site', title: 'masons absent' }),
+      bi({ id: 'nullp', projectId: null, title: 'call inspector', kind: 'todo' }),
+    ]
+    const out = await loadCandidates(sb, 'o', 'P1', chase)
+    expect(out.length).toBe(1)
+    expect(out[0].id).toBe('here')
+    expect(out[0].chased).toBe(true)
+  })
+
+  test('a batch with no chase on this project contributes nothing (photo would route fresh)', async () => {
+    const chase = [bi({ id: 'other', projectId: 'P2', projectName: 'Other site' })]
+    const out = await loadCandidates(sb, 'o', 'P1', chase)
+    expect(out.length).toBe(0)
   })
 })
 

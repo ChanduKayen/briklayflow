@@ -415,12 +415,24 @@ async function handleBatchReply(
   // photo so the pick attaches it. Text is unchanged (returns false → runSiteops routes fresh).
   if (!resolutions.length && !collision) {
     if (!photo) return false
-    if (batch.items.length === 1) {
-      await answerWithPhoto(ctx, batch.items[0], photo.sp, photo.cap)
-      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Added your photo to *${shortLabel(batch.items[0].title)}*.` }, meta)
+    // FIX X — PROJECT-SCOPE the chase-photo interaction. The batch is SENDER-scoped (getOpenBatch keys on
+    // org+sender only), so batch.items spans every site the sender has an open chase on. A freshly CAPTIONED
+    // photo for a site with NO open chase was being hijacked into a "which of your chases is this?" pick over
+    // unrelated cross-project items. Resolve the caption's project and scope the batch to it:
+    //   • caption names a project with ZERO open chases → NOT a chase reply → route it FRESH (return false).
+    //     This deliberately overrides decision (a) for this case: a captioned photo for a chase-free site is
+    //     by definition a new update, not a reply, so a real fresh object is correct — not a mis-pick.
+    //   • no project signal at all (uncaptioned / unknown site) → fall back to the whole batch (the honest
+    //     ambiguous case — the photo genuinely might be answering one of the open chases).
+    const pre = await resolveProject(ctx.supabase, ctx.orgId, { narration: ctx.image?.caption ?? '', nameHint: topProjectHint })
+    const scoped = pre.projectId ? batch.items.filter((it) => it.projectId === pre.projectId) : batch.items
+    if (pre.projectId && !scoped.length) return false   // captioned for a chase-free site → route fresh
+    if (scoped.length === 1) {
+      await answerWithPhoto(ctx, scoped[0], photo.sp, photo.cap)
+      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Added your photo to *${shortLabel(scoped[0].title)}*.` }, meta)
       return true
     }
-    const cands = batch.items.map((it) => ({ id: it.id, kind: it.kind, orgId: it.orgId, projectName: it.projectName, title: it.title, cause: it.cause }))
+    const cands = scoped.map((it) => ({ id: it.id, kind: it.kind, orgId: it.orgId, projectName: it.projectName, title: it.title, cause: it.cause }))
     await openConversation(ctx.supabase, {
       orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
       pendingQuestion: 'which item is this photo about',

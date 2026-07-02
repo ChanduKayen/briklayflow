@@ -2,8 +2,9 @@
 //
 // One place that assembles what an inbound site photo could plausibly be ABOUT, so the vision pass
 // reads the image IN CONTEXT (grounded) instead of blind. The set spans every OPEN thing on the
-// resolved project — tasks, issues (problems), snags (todos) — PLUS every item in the sender's
-// pending chase batch (we must never drop the thing we just asked about).
+// resolved project — tasks, issues (problems), snags (todos) — PLUS the sender's pending chase items
+// THAT BELONG TO THIS PROJECT (we must never drop the thing we just asked about; but a chase on a
+// DIFFERENT site is not this photo's context — the batch is sender-scoped, so we scope it here).
 //
 //   • CHASE PRECEDENCE — chased items rank TOP of the set (a strong prior, not a lock). They are
 //     never dropped by the lexical narrowing or the cap. Consuming the chase is decided LATER
@@ -44,10 +45,15 @@ export async function loadCandidates(
   supabase: SB, orgId: string, projectId: string, chaseItems: BatchItem[] = [],
 ): Promise<Candidate[]> {
   const out: Candidate[] = []
-  const chasedIds = new Set(chaseItems.map((c) => c.id))
+  // FIX Y — the chase batch is SENDER-scoped, not project-scoped (getOpenBatch keys on org+sender only),
+  // so it spans every site the sender has an open chase on. Only chases ON THIS project belong in THIS
+  // project's grounding — a cross-project (or unknown-project) chase is noise that would pull the vision
+  // read toward the wrong work. Scope the precedence set to the grounded project.
+  const scopedChase = chaseItems.filter((c) => c.projectId === projectId)
+  const chasedIds = new Set(scopedChase.map((c) => c.id))
 
   // CHASE first — the thing we asked about ranks top of the set (a strong prior, not a lock).
-  for (const c of chaseItems) {
+  for (const c of scopedChase) {
     out.push({
       kind: c.kind === 'issue' ? 'issue' : 'todo', id: c.id, node_key: null,
       label: c.title, floor: null, unit: null, tradeText: `${c.title} ${c.taskName ?? ''}`, chased: true,
