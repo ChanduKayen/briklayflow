@@ -33,6 +33,9 @@ export type DispatchCtx = {
   wamid: string
   orgId: string
   interactiveId: string | null   // Sprint 5: id of a tapped LIST row / reply button
+  quotedWamid?: string | null    // wamid of a quoted/replied-to message (Cloud API context.id) — the PRIMARY
+                                 // association signal for SiteOps photo↔text (a reply binds deterministically,
+                                 // even after the association window lapsed). Consumed by the siteops flow.
   flowResponse?: Record<string, unknown> | null   // decoded WhatsApp Flow completion (nfm_reply.response_json)
   image?: { base64: string; mime: string; caption: string; storagePath?: string | null }   // payment-image -> agent vision extraction; storagePath (rough-entry-media) → siteops attachment
   firstTouch?: boolean   // Sprint 6: member's first-ever contact -> orient / welcome

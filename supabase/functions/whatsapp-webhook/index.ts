@@ -395,6 +395,11 @@ async function processJob(
   const interactiveId: string | null =
     message?.interactive?.list_reply?.id ?? message?.interactive?.button_reply?.id ?? null
 
+  // wamid of a quoted/replied-to message (Cloud API `context.id`). The PRIMARY association signal for
+  // the SiteOps photo flow: a text that REPLIES-TO a photo binds to it deterministically, window or not.
+  // Derived here alongside interactiveId (same message-shape source), threaded via DispatchCtx.
+  const quotedWamid: string | null = message?.context?.id ?? null
+
   // WhatsApp Flow completion: a terminal flow returns interactive.nfm_reply with a
   // JSON-encoded response_json (the screen's complete payload). Decode it here; the
   // dispatcher binds it to the OPEN conversation (terminal flows echo no flow_token).
@@ -411,7 +416,7 @@ async function processJob(
     // thread the ALREADY-stored media path (from _normalize's storeMedia) alongside the image so the
     // siteops branch can attach it without re-uploading. Payment path ignores storagePath (unchanged).
     const dispatchImage = norm.image ? { ...norm.image, storagePath: norm.attachments?.[0]?.storage_path ?? null } : undefined
-    await dispatch({ supabase, from, senderName, registered, wamid: messageId, orgId, interactiveId, flowResponse, image: dispatchImage, firstTouch, dormant }, norm.text)
+    await dispatch({ supabase, from, senderName, registered, wamid: messageId, orgId, interactiveId, quotedWamid, flowResponse, image: dispatchImage, firstTouch, dormant }, norm.text)
     if (jobId) await markJob(supabase, jobId, 'WRITTEN')
   } catch (e) {
     console.error('[wa-webhook] processing error:', e)
