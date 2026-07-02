@@ -12,6 +12,7 @@ import { openConversation, closeConversation, type ConvoRow } from '../_conversa
 import { decompose, callLLM, safeParse, type SiteItem } from '../_siteops_extract.ts'
 import { decomposeImage } from '../_siteops_vision.ts'
 import { loadCandidates, prefilterCandidates, groundingLabels } from '../_siteops_candidates.ts'
+import { decideAssociation, isBareAffirmation, photoRelatedness, type AssocVerdict } from '../_siteops_assoc.ts'
 import {
   routeItems, applyProgress, buildConfirm, buildMultiConfirm, parseWhen,
   type RouteCtx, type RouteOutcome, type SiteTaskRow, type OrgMember,
@@ -191,6 +192,14 @@ export async function commitInterruptedSiteops(ctx: SiteopsCtx, convo: ConvoRow)
   const objectPath = image?.storagePath ?? null
   const closeClean = () => closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'parked to place' })
 
+  // STEP 2 — a siteops_photo ENRICHMENT WINDOW carries NO unresolved work: its objects already exist and
+  // were read back; the window is pure enrich-opportunity. Interrupting it (a SECOND photo, or an
+  // unrelated message routed fresh) must NOT fabricate a phantom siteops_unplaced row for an
+  // already-placed thing — that would pollute the "to place" queue with non-actionable cards. Close CLEAN
+  // (handled), no park. (It carries no observation and no photo path, so it would reach the clean close
+  // below anyway; explicit here so a future slots change can't accidentally route it into a park.)
+  if (kind === 'siteops_photo') { await closeClean(); return '' }
+
   // Nothing recoverable to preserve (e.g. an answer-evidence pick with no photo carried) → close cleanly, no phantom row.
   if (observation == null && !objectPath) { await closeClean(); return '' }
 
@@ -222,13 +231,18 @@ const fmtDay = (d: Date) => d.toLocaleDateString('en-IN', { day: '2-digit', mont
 const shortLabel = (title: string) => title.trim().split(/\s+/).slice(0, 3).join(' ')
 
 /** Append one trail event (B1) for a batch item. actorId present → a human reply. */
-async function trailEvent(ctx: SiteopsCtx, item: { kind: 'issue' | 'todo'; id: string; orgId: string }, type: string, body: string, actorId: string | null): Promise<void> {
-  await ctx.supabase.from('followup_events').insert({
+async function trailEvent(ctx: SiteopsCtx, item: { kind: 'issue' | 'todo'; id: string; orgId: string }, type: string, body: string, actorId: string | null, pendingReanalysis = false): Promise<void> {
+  const row = {
     org_id: item.orgId,
     problem_id: item.kind === 'issue' ? item.id : null,
     todo_id: item.kind === 'todo' ? item.id : null,
     type, body, actor_kind: actorId ? 'user' : 'system', actor_id: actorId ?? null,
-  })
+  }
+  // pending_reanalysis marks a pre-Step-3 enrichment so rich re-analyze can harvest it later. Degrade if
+  // the column isn't applied yet (capture-first: a trail write must never fail the flow).
+  let ins = await ctx.supabase.from('followup_events').insert(pendingReanalysis ? { ...row, pending_reanalysis: true } : row)
+  if (ins.error && pendingReanalysis) ins = await ctx.supabase.from('followup_events').insert(row)
+  if (ins.error) console.error('[siteops:trail] insert failed:', ins.error.message)
 }
 /** The replying supervisor's user_id (for trail attribution), or null. */
 async function senderUserId(ctx: SiteopsCtx): Promise<string | null> {
@@ -592,9 +606,12 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
 /**
  * Route a resolved project's items → write + confirm, OR open a task-disambiguation pick if a
  * progress item is ambiguous. Shared by the fresh path and the project-followup resume (so a
- * project pick chains naturally into a floor pick). Returns true if it left a pending pick open.
+ * project pick chains naturally into a floor pick). Returns what it left OPEN for the sender's next
+ * message: 'pick' (a task disambiguation), 'window' (a siteops_photo enrichment window), or null (clean
+ * completion — nothing open; the caller may close). Callers gating on `!result` to close still work:
+ * null is falsy, 'pick'/'window' are truthy — never close the window we just opened.
  */
-async function finishRoute(ctx: SiteopsCtx, projectId: string, projectName: string | null, items: SiteItem[], narrationId: string | null): Promise<boolean> {
+async function finishRoute(ctx: SiteopsCtx, projectId: string, projectName: string | null, items: SiteItem[], narrationId: string | null): Promise<'pick' | 'window' | null> {
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
   const vmNodeKeys = await materializeProjectTasks(ctx, projectId)
   const { data: taskRows } = await ctx.supabase.from('site_tasks').select(TASK_COLS).eq('project_id', projectId)
@@ -647,7 +664,7 @@ async function finishRoute(ctx: SiteopsCtx, projectId: string, projectName: stri
         description: [c.floor ? (`${c.floor}`) : 'Site-wide', c.unit].filter(Boolean).join(' · '),
       })),
     }, meta)
-    return true   // left a task pick open
+    return 'pick'   // left a task pick open
   }
 
   // confirm (names the site so the sender can catch a mis-attribution). A single task update gets a
@@ -655,7 +672,35 @@ async function finishRoute(ctx: SiteopsCtx, projectId: string, projectName: stri
   await sendTaskConfirm(ctx, meta, projectName, projectId, {
     progress: out.progress, problems: out.problems, todos: out.todos, parked: out.parked.length,
   })
-  return false
+
+  // STEP 2 — ENRICHMENT WINDOW (images only). The photo is floored + read back above; now hold an OPEN
+  // siteops_photo convo (~90s) so a follow-up TEXT (or a quoted-reply) ENRICHES these SAME objects rather
+  // than creating a twin. Event-driven: the next message resumes via dispatch → classifyPhotoFollowup; no
+  // timer/cron. photo→text ONLY here — text→photo is the known one-directional gap (see the dispatch
+  // predicate). Opens only when the photo actually created object(s) to enrich.
+  if (ctx.image?.storagePath) {
+    const object_refs = [
+      ...out.problems.filter((p) => p.id).map((p) => ({ kind: 'problem', id: p.id as string })),
+      ...out.todos.filter((t) => t.id).map((t) => ({ kind: 'todo', id: t.id as string })),
+      ...out.progress.filter((pr) => pr.taskId).map((pr) => ({ kind: 'site_task', id: pr.taskId })),
+    ]
+    if (object_refs.length) {
+      const holdMs = Number(Deno.env.get('WA_SITEOPS_PHOTO_HOLD_MS') ?? '90000')
+      const extract = [...out.problems.map((p) => p.title), ...out.todos.map((t) => t.text), ...out.progress.map((pr) => pr.taskName)].filter(Boolean).join(' · ')
+      await openConversation(ctx.supabase, {
+        orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
+        pendingQuestion: 'photo enrichment window',
+        slots: {
+          kind: 'siteops_photo', object_refs, project_id: projectId, photo_wamid: ctx.wamid,
+          hold_until: new Date(Date.now() + holdMs).toISOString(),
+          label: shortLabel(extract || 'the photo'), extract, narration_id: narrationId,
+        },
+        lastMessageId: ctx.wamid,
+      })
+      return 'window'
+    }
+  }
+  return null
 }
 
 /** Route ONE project's items → write + return its outcome (no send; the multi confirm composes). */
@@ -750,11 +795,62 @@ Return ONLY JSON: {"answering": true|false}. true = an attempt to answer it (eve
   } catch { return 'answer' }
 }
 
+/** STEP 2 — the PURE steering decision for a text arriving while a siteops_photo window is OPEN. related →
+ *  enrich (dispatch routes ANSWERS_PENDING → the branch in answerSiteops); unrelated → route fresh
+ *  (dispatch reclassifies; the interruption block closes the window clean); noop → bare affirmation, close
+ *  clean. No DB, no LLM — relatedness is conservative lexical overlap (see _siteops_assoc). */
+export function classifyPhotoFollowup(convo: ConvoRow, text: string, quotedWamid: string | null, nowMs: number): AssocVerdict {
+  const slots = (convo.slots_so_far ?? {}) as Record<string, unknown>
+  const holdUntil = typeof slots.hold_until === 'string' ? Date.parse(slots.hold_until) : 0
+  const extract = `${slots.label ?? ''} ${slots.extract ?? ''}`
+  return decideAssociation({
+    withinHold: Number.isFinite(holdUntil) && holdUntil > nowMs,
+    bareAffirmation: isBareAffirmation(text),
+    quotedMatchesHeld: !!quotedWamid && quotedWamid === slots.photo_wamid,
+    relatedness: photoRelatedness(extract, text),
+  })
+}
+
+/** STEP 2 — on the UNCERTAIN→unrelated fail-safe, stamp the held photo objects with a
+ *  possible_photo_followup note (pending_reanalysis) so Step 3's dedup can reunite the pair. Best-effort;
+ *  never blocks the fresh re-route. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function stampPossibleFollowup(supabase: any, orgId: string, convo: ConvoRow, text: string): Promise<void> {
+  const refs = ((convo.slots_so_far as Record<string, unknown>)?.object_refs ?? []) as { kind: string; id: string }[]
+  for (const r of refs) {
+    if (r.kind !== 'problem' && r.kind !== 'todo') continue
+    const row = { org_id: orgId, problem_id: r.kind === 'problem' ? r.id : null, todo_id: r.kind === 'todo' ? r.id : null, type: 'possible_photo_followup', body: text.slice(0, 500), actor_kind: 'system', actor_id: null }
+    let ins = await supabase.from('followup_events').insert({ ...row, pending_reanalysis: true })
+    if (ins.error) ins = await supabase.from('followup_events').insert(row)
+    if (ins.error) console.error('[siteops:followup-stamp] insert failed:', ins.error.message)
+  }
+}
+
 /** Resume a pending SITEOPS follow-up — a project pick OR a task disambiguation. */
 export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoRow): Promise<void> {
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const slots = (convo.slots_so_far ?? {}) as any
+
+  // ── STEP 2: enrichment-window resume. We only reach here (ANSWERS_PENDING) when dispatch judged the
+  //    follow-up RELATED to the just-logged photo (classifyPhotoFollowup); unrelated/noop are handled at
+  //    the dispatch layer, never here. CONSERVATIVE merge: trail the text as a description on each held
+  //    issue/todo (the activity feed shows "description added"), stamped pending_reanalysis so Step 3 can
+  //    harvest it — NO re-typing / no new observations (that needs Step 3 dedup). One ack, then close. ──
+  if (slots.kind === 'siteops_photo') {
+    const refs = (slots.object_refs ?? []) as { kind: 'problem' | 'todo' | 'site_task'; id: string }[]
+    const actorId = await senderUserId(ctx)
+    let trailed = 0
+    for (const r of refs) {
+      if (r.kind === 'problem' || r.kind === 'todo') {
+        await trailEvent(ctx, { kind: r.kind === 'problem' ? 'issue' : 'todo', id: r.id, orgId: ctx.orgId }, 'description_added', text.slice(0, 500), actorId, true)
+        trailed++
+      }
+    }
+    await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'photo + note' })
+    await send(ctx.supabase, ctx.from, { kind: 'text', body: trailed ? `Added your note to what I logged from the photo. 👍` : `Noted with the photo. 👍` }, meta)
+    return
+  }
 
   // ── B3 same-cause collision → the supervisor named the site for the held item ──
   if (slots.kind === 'siteops_batch_collision') {

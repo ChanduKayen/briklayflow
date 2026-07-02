@@ -5,12 +5,13 @@
 
 import { routeMessage } from './_router.ts'
 import {
-  getRouterView, openConversation, abandonConversation, logRouterDecision, type ConvoRow,
+  getRouterView, openConversation, closeConversation, abandonConversation, logRouterDecision, type ConvoRow,
 } from './_conversation.ts'
 import { agentFor } from './_registry.ts'
 import { runTransaction, retryBatchEntries, type TxnCtx } from './_agents/transaction.ts'   // direct: the replay path
 import { startVendorFlow } from './_agents/procurement.ts'   // direct: vendor-Flow test trigger
 import { runConcierge } from './_agents/concierge.ts'   // direct: first-touch orientation
+import { classifyPhotoFollowup, stampPossibleFollowup } from './_agents/siteops.ts'   // STEP 2: photo enrichment-window steering
 import { send, sendNow } from './_format.ts'
 import * as M from './_messages.ts'
 import type { Lang } from './_messages.ts'
@@ -182,6 +183,35 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
   // pending exists for a chase reply and this predicate cannot fire on it — the role='answer' path stands.
   if (decision === 'ANSWERS_PENDING' && ctx.image && pending?.agent === 'SITEOPS') {
     decision = 'NEW_INTENT'; intentAgent = 'SITEOPS'
+  }
+
+  // ── STEP 2: a TEXT arriving while a siteops_photo ENRICHMENT WINDOW is open. Steer it, reusing existing
+  //    machinery rather than a new interaction:
+  //      RELATED   → answer (enrich the same objects); then answerSiteops closes the window.
+  //      NOOP      → a bare "ok"/"haan" (readback ack) → close the window clean, no re-route.
+  //      UNRELATED → (incl. uncertain + expired — the chosen fail-safe) re-classify FRESH so it reaches its
+  //                  REAL agent ("send 50 bags cement" → procurement), stamp possible_photo_followup for
+  //                  Step 3, and let the interruption block below close the window via SITEOPS
+  //                  commitInterrupted (clean, NO park — the objects already exist). This is the COMMON
+  //                  path for busy senders, so it must re-dispatch through the router, never runSiteops.
+  //    A PHOTO during the window is handled by the image predicate above (NEW_INTENT → its own window).
+  if (view.open && !ctx.image && !isInteractiveReply && pending?.agent === 'SITEOPS'
+      && (pending.slots as { kind?: string })?.kind === 'siteops_photo') {
+    const verdict = classifyPhotoFollowup(view.open as ConvoRow, text, ctx.quotedWamid ?? null, Date.now())
+    if (verdict === 'noop') {
+      await closeConversation(supabase, { orgId, sender: from, lastActionSummary: 'photo logged' })
+      return
+    }
+    if (verdict === 'related') {
+      decision = 'ANSWERS_PENDING'   // → SITEOPS.answer enriches the held objects, then closes the window
+    } else {
+      await stampPossibleFollowup(supabase, orgId, view.open as ConvoRow, text)
+      const fresh = await routeMessage({ text, pending: null, lingering })   // classify as if no window existed
+      decision = fresh.decision
+      intentAgent = fresh.intent_agent
+      // fall through: not ANSWERS_PENDING → the interruption block closes the window (commitInterrupted →
+      // siteops_photo → clean, no park) → the message routes to its true agent via the switch below.
+    }
   }
 
   const chosenAgent =

@@ -1,29 +1,57 @@
-// STEP 2 — association decision matrix. Pure gate for _siteops_assoc.decideAssociation.
+// STEP 2 — association steering. Pure gate for _siteops_assoc: the decision matrix, the conservative
+// lexical relatedness scorer, and the bare-affirmation detector. Includes the two paths the whole seam
+// exists to protect: "send 50 bags cement" during an open window → unrelated (routes fresh, untouched),
+// and "honeycombing 2nd floor" → related (enriches the photo's object).
 
 import { suite, test, expect } from './harness'
-import { decideAssociation, type Relatedness } from '../_siteops_assoc.ts'
+import { decideAssociation, photoRelatedness, isBareAffirmation, type AssocInput } from '../_siteops_assoc.ts'
 
-const d = (quotedMatchesHeld: boolean, withinHold: boolean, relatedness: Relatedness) =>
-  decideAssociation({ quotedMatchesHeld, withinHold, relatedness })
+const d = (p: Partial<AssocInput>) => decideAssociation({
+  withinHold: p.withinHold ?? true, bareAffirmation: p.bareAffirmation ?? false,
+  quotedMatchesHeld: p.quotedMatchesHeld ?? false, relatedness: p.relatedness ?? 'unrelated',
+})
 
 suite('siteops association — decideAssociation', () => {
-  test('quoted-reply is PRIMARY: related even after the hold lapsed, whatever the extract says', () => {
-    expect(d(true, false, 'unrelated')).toBe('related')
-    expect(d(true, false, 'unknown')).toBe('related')
-    expect(d(true, true, 'unrelated')).toBe('related')
+  test('expiry FIRST: an expired window routes fresh, whatever the other signals say', () => {
+    expect(d({ withinHold: false, relatedness: 'related' })).toBe('unrelated')
+    expect(d({ withinHold: false, quotedMatchesHeld: true })).toBe('unrelated')
   })
 
-  test('no reply + hold lapsed → unrelated (never reach back into an item they did not point at)', () => {
-    expect(d(false, false, 'related')).toBe('unrelated')
-    expect(d(false, false, 'unknown')).toBe('unrelated')
+  test('bare affirmation within hold → noop (close clean, never a merge or a re-route)', () => {
+    expect(d({ bareAffirmation: true, relatedness: 'related' })).toBe('noop')
   })
 
-  test('within hold: a confident extract read is trusted either way', () => {
-    expect(d(false, true, 'related')).toBe('related')
-    expect(d(false, true, 'unrelated')).toBe('unrelated')
+  test('quoted-reply within hold is related; positive overlap is related', () => {
+    expect(d({ quotedMatchesHeld: true, relatedness: 'unrelated' })).toBe('related')
+    expect(d({ relatedness: 'related' })).toBe('related')
   })
 
-  test('within hold but the extract cannot tell → ASK (one cheap question, not a wrong merge)', () => {
-    expect(d(false, true, 'unknown')).toBe('ask')
+  test('within hold, no reply, no overlap (incl. uncertain) → unrelated (the fail-safe)', () => {
+    expect(d({ relatedness: 'unrelated' })).toBe('unrelated')
+  })
+})
+
+suite('siteops association — conservative lexical relatedness', () => {
+  const PHOTO = 'Second floor slab honeycomb crack near column'
+
+  test('a real DESCRIPTION overlaps the photo extract → related', () => {
+    expect(photoRelatedness(PHOTO, 'honeycombing 2nd floor slab')).toBe('related')   // trade: slab
+    expect(photoRelatedness(PHOTO, 'that crack near the column is bad')).toBe('related')   // token: crack/column
+  })
+
+  test('a genuine SEPARATE message does not overlap → unrelated (routes fresh untouched)', () => {
+    expect(photoRelatedness(PHOTO, 'send 50 bags cement to the site')).toBe('unrelated')
+    expect(photoRelatedness(PHOTO, 'pay Ramu 5000 for tiles')).toBe('unrelated')
+  })
+
+  test('trade SYNONYMS still count (brick ≡ block ≡ masonry)', () => {
+    expect(photoRelatedness('ground floor blockwork walls', 'brick work looks uneven')).toBe('related')
+  })
+})
+
+suite('siteops association — bare affirmation detector', () => {
+  test('acknowledgements match (English + code-mix), real updates do not', () => {
+    for (const s of ['ok', 'okay', 'done', 'haan', 'sari', '👍', 'yes', 'noted', 'thanks']) expect(isBareAffirmation(s)).toBe(true)
+    for (const s of ['honeycombing', 'slab done 2nd floor', 'crack near column', 'send cement']) expect(isBareAffirmation(s)).toBe(false)
   })
 })
