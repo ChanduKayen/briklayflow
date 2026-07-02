@@ -11,6 +11,7 @@ import { resolveProject, planItemProjects, type ProjectRef, type ItemPlan } from
 import { openConversation, closeConversation, type ConvoRow } from '../_conversation.ts'
 import { decompose, callLLM, safeParse, type SiteItem } from '../_siteops_extract.ts'
 import { decomposeImage } from '../_siteops_vision.ts'
+import { loadCandidates, prefilterCandidates, groundingLabels } from '../_siteops_candidates.ts'
 import {
   routeItems, applyProgress, buildConfirm, buildMultiConfirm, parseWhen,
   type RouteCtx, type RouteOutcome, type SiteTaskRow, type OrgMember,
@@ -503,10 +504,28 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
   // STAGE 1 — decompose. From an IMAGE, run the strong vision pass on the actual bytes (mirrors
   // decompose, same shape) instead of the thin routing description; from text, the usual decompose.
   // Everything downstream (routeItems → create*) is identical either way.
+  // STEP 1 GROUNDING (images only) — resolve the site from the CAPTION up-front so the vision pass reads
+  // the photo against THIS project's OPEN work + pending chases (loadCandidates → prefilter), not blind
+  // (spec: the caption is the strongest signal). HONEST LIMIT: an uncaptioned / unknown-site photo can't
+  // be grounded — nothing to resolve on — so the pass then runs ungrounded and the post-vision
+  // resolveProject below still asks "which site?" exactly as today. Grounding sharpens the read; it is a
+  // bonus, never a blocker (any failure here just yields no hints).
+  let groundingHints: string[] = []
+  if (ctx.image?.base64) {
+    try {
+      const pre = await resolveProject(ctx.supabase, ctx.orgId, { narration: ctx.image.caption ?? '', nameHint: null })
+      if (pre.projectId) {
+        const cands = await loadCandidates(ctx.supabase, ctx.orgId, pre.projectId, batch?.items ?? [])
+        groundingHints = groundingLabels(prefilterCandidates(cands, ctx.image.caption ?? ''))
+        console.log(`[siteops:ground] project=${pre.projectId} candidates=${cands.length} shortlist=${groundingHints.length}`)
+      }
+    } catch (e) { console.error('[siteops:ground] skipped:', (e as Error).message) }
+  }
+
   let decomposed
   try {
     decomposed = ctx.image?.base64
-      ? await decomposeImage(ctx.image.base64, ctx.image.mime, ctx.image.caption, projectNames)
+      ? await decomposeImage(ctx.image.base64, ctx.image.mime, ctx.image.caption, projectNames, groundingHints)
       : await decompose(text, projectNames)
   } catch {
     await say(`Didn't catch a site update in that — try again if you meant to send one.`)

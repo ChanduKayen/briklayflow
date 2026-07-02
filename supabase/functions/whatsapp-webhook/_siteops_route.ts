@@ -90,7 +90,7 @@ export function floorFromHint(hint: string | null): string | null {
 }
 /** Unit ("Unit A") from a hint, or null. Accepts both letters ("unit a") and numbers ("unit 1" → A,
  *  "unit 2" → B) — supervisors say either, while the engine names units by letter. */
-function unitFromHint(hint: string | null): string | null {
+export function unitFromHint(hint: string | null): string | null {
   if (!hint) return null
   const h = hint.toLowerCase()
   const letter = h.match(/\bunit\s*([a-z])\b/)
@@ -118,7 +118,7 @@ const TRADE_GROUPS: string[][] = [
 ]
 /** Which trade groups a free-text string mentions (by index). Works for BOTH a message hint and a
  *  task's "name + trade" label, so the two can be matched as sets. */
-function tradeGroups(s: string | null): number[] {
+export function tradeGroups(s: string | null): number[] {
   if (!s) return []
   const h = s.toLowerCase()
   const out: number[] = []
