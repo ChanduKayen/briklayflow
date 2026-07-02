@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS public.siteops_unplaced (
 
   -- what landed here + why it couldn't place. `reason` is the producer: the pick
   -- kind it was parked from, or 'floor' (image flow: mapped nothing, observed nothing).
-  reason         text NOT NULL CHECK (reason IN ('disambig', 'project', 'photo_pick', 'batch_collision', 'floor')),
+  reason         text NOT NULL CHECK (reason IN ('disambig', 'typed_pick', 'project', 'photo_pick', 'batch_collision', 'floor')),
   observation    jsonb,                    -- the SiteItem / {items:[...]} that couldn't be placed (null for pure-evidence rows)
   candidates     jsonb,                    -- the shortlist it was ambiguous over — reused to rank the one-tap placement later
 
@@ -44,6 +44,13 @@ CREATE TABLE IF NOT EXISTS public.siteops_unplaced (
 
   narration_id   uuid REFERENCES public.site_narrations(id) ON DELETE SET NULL,
   sender_number  text,
+
+  -- The wamid of the QUESTION message (the pick we sent) this row was parked from.
+  -- LATE-ANSWER RECOVERY (Step 5): a quoted-reply whose Cloud-API context.id matches this
+  -- locates the parked row and applies the answer as a placement — parked = recoverable, not
+  -- shelved. Spent now (spend-the-line) though it stays NULL until Step 4 captures outbound
+  -- send wamids (today send() stores only the inbound wamid); the column is the durable hook.
+  question_wamid text,
 
   -- lifecycle: an INBOX to be emptied. placed → what it became (for the queue's action + audit).
   status             text NOT NULL DEFAULT 'unplaced' CHECK (status IN ('unplaced', 'placed', 'dismissed')),

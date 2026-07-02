@@ -11,7 +11,8 @@ import { resolveProject, planItemProjects, type ProjectRef, type ItemPlan } from
 import { openConversation, closeConversation, type ConvoRow } from '../_conversation.ts'
 import { decompose, callLLM, safeParse, type SiteItem } from '../_siteops_extract.ts'
 import { decomposeImage } from '../_siteops_vision.ts'
-import { loadCandidates, prefilterCandidates, groundingLabels } from '../_siteops_candidates.ts'
+import { loadCandidates, prefilterCandidates, groundingLabels, type Candidate } from '../_siteops_candidates.ts'
+import { planPhotoItems, resolveTypedPick, type PickCandidate } from '../_siteops_attach.ts'
 import { decideAssociation, isBareAffirmation, photoRelatedness, type AssocVerdict } from '../_siteops_assoc.ts'
 import {
   routeItems, applyProgress, buildConfirm, buildMultiConfirm, parseWhen,
@@ -173,6 +174,17 @@ async function answerWithPhoto(ctx: SiteopsCtx, item: { kind: 'issue' | 'todo'; 
   await trailEvent(ctx, item, 'reply_received', `Replied with a photo${caption?.trim() ? ` — "${caption.trim()}"` : ''}`, await senderUserId(ctx))
 }
 
+/** STEP 3 ATTACH axis — a fresh photo item matched an EXISTING open item: attach the photo as evidence
+ *  to it (no twin). issue/todo get role='answer' + a reply_received trail (answerWithPhoto); a task gets
+ *  role='creation' evidence (photos never CREATE tasks, but can document one). Best-effort. */
+async function attachExistingEvidence(ctx: SiteopsCtx, target: { kind: string; id: string }, storagePath: string, caption: string | null): Promise<void> {
+  if (target.kind === 'issue' || target.kind === 'todo') {
+    await answerWithPhoto(ctx, { kind: target.kind, id: target.id, orgId: ctx.orgId }, storagePath, caption)
+  } else if (target.kind === 'task') {
+    await attachImage(ctx, 'site_task', target.id, storagePath, caption, 'creation')
+  }
+}
+
 /** Interrupt (registry contract — mirrors TRANSACTION/PROCUREMENT commitInterrupted): a new message
  *  interrupted an OPEN SITEOPS pick. The pick exists BECAUSE classification was ambiguous, so we must
  *  NOT auto-commit a probably-wrong guess (that chases the wrong person) AND must NOT silently drop the
@@ -184,9 +196,12 @@ export async function commitInterruptedSiteops(ctx: SiteopsCtx, convo: ConvoRow)
   const slots = (convo.slots_so_far ?? {}) as Record<string, unknown>
   const kind = typeof slots.kind === 'string' ? slots.kind : null
   const image = (slots.image ?? null) as { storagePath?: string; caption?: string | null } | null
-  // Fresh-observation picks carry the item(s); answer-evidence picks carry only the photo.
+  // Fresh-observation picks carry the item(s); answer-evidence picks carry only the photo. The typed
+  // pick (Step 3) carries BOTH — a held SiteItem to create-if-new AND the photo — so it must preserve
+  // the observation, not just the photo (else the interpretation half is silently dropped on interrupt).
   const observation =
     kind === 'siteops_disambig' ? (slots.item ?? null)
+    : kind === 'siteops_typed_pick' ? (slots.item ?? null)
     : kind === 'siteops_project' ? (Array.isArray(slots.items) && slots.items.length ? { items: slots.items } : null)
     : null
   const objectPath = image?.storagePath ?? null
@@ -204,6 +219,7 @@ export async function commitInterruptedSiteops(ctx: SiteopsCtx, convo: ConvoRow)
   if (observation == null && !objectPath) { await closeClean(); return '' }
 
   const reason = kind === 'siteops_disambig' ? 'disambig'
+    : kind === 'siteops_typed_pick' ? 'typed_pick'
     : kind === 'siteops_project' ? 'project'
     : kind === 'siteops_photo_pick' ? 'photo_pick'
     : kind === 'siteops_batch_collision' ? 'batch_collision'
@@ -213,7 +229,7 @@ export async function commitInterruptedSiteops(ctx: SiteopsCtx, convo: ConvoRow)
     project_id: (slots.project_id as string | null) ?? null,
     reason,
     observation,
-    candidates: slots.candidates ?? null,
+    candidates: slots.candidates ?? slots.shortlist ?? null,   // typed pick stores the shortlist — keep it to rank the later placement
     bucket: objectPath ? 'rough-entry-media' : null,
     object_path: objectPath,
     caption: image?.caption ?? (typeof slots.piece_text === 'string' ? slots.piece_text : null),
@@ -633,7 +649,28 @@ async function finishRoute(ctx: SiteopsCtx, projectId: string, projectName: stri
   const oc = await ownerCtx(ctx.supabase, ctx.orgId, projectId)
   const rc: RouteCtx = { supabase: ctx.supabase, orgId: ctx.orgId, projectId, byLabel: ctx.from, ...oc, narrationId, now: new Date(), vmNodeKeys }
 
-  const out = await routeItems(rc, tasks, items)
+  // STEP 3 — ATTACH axis (images only). Before ROUTE creates fresh objects, test each issue/todo item
+  // against the project's OPEN items: a re-photo of a known item ATTACHES evidence (no twin); a new one
+  // OBSERVES (falls through to ROUTE → create fresh); an ambiguous one opens the grounded TYPED pick
+  // below. Lexical + pure (planPhotoItems), ask-on-any-doubt. progress items stay on the task axis
+  // untouched. Candidates are project-scoped (loadCandidates, no chase set needed here).
+  let items2 = items
+  let candsForPick: Candidate[] = []
+  const attachAcks: string[] = []
+  let typedPick: { item: SiteItem; shortlist: Candidate[] } | null = null
+  if (ctx.image?.storagePath) {
+    candsForPick = await loadCandidates(ctx.supabase, ctx.orgId, projectId, [])
+    const plan = planPhotoItems(candsForPick, items)
+    for (const a of plan.attaches) {
+      await attachExistingEvidence(ctx, a.target, ctx.image.storagePath, ctx.image.caption ?? null)
+      attachAcks.push(shortLabel(a.target.label))
+    }
+    typedPick = plan.asks[0] ?? null
+    items2 = plan.rest
+    console.log(`[siteops:attach] project=${projectId} attach=${plan.attaches.length} ask=${plan.asks.length} observe/route=${plan.rest.length}`)
+  }
+
+  const out = await routeItems(rc, tasks, items2)
 
   // Image evidence: when this route came from an image, link the ALREADY-stored photo (rough-entry-media,
   // never re-uploaded) to each object the route CREATED — AFTER create so a failed create leaves no orphan
@@ -643,6 +680,44 @@ async function finishRoute(ctx: SiteopsCtx, projectId: string, projectName: stri
     for (const p of out.problems) if (p.id) await attachImage(ctx, 'problem', p.id, sp, cap, 'creation')
     for (const t of out.todos) if (t.id) await attachImage(ctx, 'todo', t.id, sp, cap, 'creation')
     for (const pr of out.progress) if (pr.taskId) await attachImage(ctx, 'site_task', pr.taskId, sp, cap, 'creation')
+  }
+
+  // STEP 3 — evidence attached to EXISTING item(s): a terse ack, independent of the ROUTE confirm below.
+  if (attachAcks.length) {
+    await send(ctx.supabase, ctx.from, { kind: 'text', body: `Added your photo to *${attachAcks.join('*, *')}*.` }, meta)
+  }
+
+  // STEP 3 — the grounded TYPED pick: an ambiguous photo item — is it one of these open items, or new?
+  // Reuses the AWAIT_PROJECT mechanism (openConversation → answerSiteops). Rows are the typed shortlist
+  // (kind-tagged) + a trailing "None — it's new". Resolved in answerSiteops (attach vs observe-create).
+  // Takes precedence over the task disambig below — one pick at a time (both are rare together).
+  if (typedPick) {
+    const shortlist: PickCandidate[] = typedPick.shortlist.map((c) => ({ kind: c.kind, id: c.id, label: c.label }))
+    const full: PickCandidate[] = candsForPick.map((c) => ({ kind: c.kind, id: c.id, label: c.label }))
+    const confirm = buildConfirm({
+      site: projectName, progress: out.progress, problems: out.problems, todos: out.todos,
+      parked: out.parked.length, pendingPick: 1, ownerLabel: 'you', projectId, appBase: APP_BASE,
+    })
+    await openConversation(ctx.supabase, {
+      orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
+      pendingQuestion: `which item: ${typedPick.item.text}`,
+      slots: {
+        kind: 'siteops_typed_pick', project_id: projectId, project_name: projectName,
+        item: typedPick.item, shortlist, full, narration_id: narrationId,
+        image: ctx.image?.storagePath ? { storagePath: ctx.image.storagePath, caption: ctx.image.caption ?? null } : null,
+      },
+      lastMessageId: ctx.wamid,
+    })
+    await send(ctx.supabase, ctx.from, {
+      kind: 'list',
+      body: `${confirm}\n\nIs this photo about one of these open items, or something new?`,
+      button: 'Pick',
+      rows: [
+        ...shortlist.map((c, i) => ({ id: `pick:${i + 1}`, title: shortLabel(c.label).slice(0, 24), description: `[${c.kind}]` })),
+        { id: `pick:${shortlist.length + 1}`, title: "None — it's new" },
+      ],
+    }, meta)
+    return 'pick'
   }
 
   // STAGE 2c — disambiguation (need-to-ask): one pending question, mirroring AWAIT_PROJECT.
@@ -678,6 +753,11 @@ async function finishRoute(ctx: SiteopsCtx, projectId: string, projectName: stri
     }, meta)
     return 'pick'   // left a task pick open
   }
+
+  // STEP 3 — PURE-ATTACH terminal: every photo item attached to an existing item and nothing was left to
+  // route. The attach ack already went out; a "got your update, logged" confirm here would be redundant
+  // (and there are no created objects for an enrichment window). Done.
+  if (ctx.image?.storagePath && attachAcks.length && !items2.length) return null
 
   // confirm (names the site so the sender can catch a mis-attribution). A single task update gets a
   // tappable "View task" button straight to that task.
@@ -914,6 +994,43 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
     await answerWithPhoto(ctx, { kind: chosen.kind, id: chosen.id, orgId: chosen.orgId }, img.storagePath, img.caption ?? null)
     await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'photo attached' })
     await send(ctx.supabase, ctx.from, { kind: 'text', body: `Added your photo to *${shortLabel(chosen.title)}*.` }, meta)
+    return
+  }
+
+  // ── STEP 3: grounded TYPED pick resume — attach the photo to a chosen existing item, or (None/new)
+  //    create the held item fresh (observe). Typed-answer full-set fallback lives in resolveTypedPick. ──
+  if (slots.kind === 'siteops_typed_pick') {
+    const shortlist = (slots.shortlist ?? []) as PickCandidate[]
+    const full = (slots.full ?? []) as PickCandidate[]
+    const img = (slots.image ?? {}) as { storagePath?: string; caption?: string | null }
+    const storedItem = slots.item as SiteItem
+    const d = resolveTypedPick(shortlist, full, text)
+    if (d.kind === 'none') {
+      if (await judgePending('is this photo about one of those open items, or something new?', text) === 'letgo') {
+        await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'photo' })
+        await send(ctx.supabase, ctx.from, { kind: 'text', body: `Left it for now — send it again if you'd like it logged.` }, meta)
+        return
+      }
+      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Reply with the number, or *new* if it's not one of those.` }, meta)
+      return
+    }
+    if (d.kind === 'attach') {
+      if (img.storagePath) await attachExistingEvidence(ctx, { kind: d.target.kind, id: d.target.id }, img.storagePath, img.caption ?? null)
+      await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'photo attached' })
+      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Added your photo to *${shortLabel(d.target.label)}*.` }, meta)
+      return
+    }
+    // observe — create the held item fresh, attach the photo as creation evidence, confirm.
+    const out = await routeGroup(ctx, slots.project_id, [storedItem], slots.narration_id ?? null)
+    if (img.storagePath) {
+      for (const p of out.problems) if (p.id) await attachImage(ctx, 'problem', p.id, img.storagePath, img.caption ?? null, 'creation')
+      for (const t of out.todos) if (t.id) await attachImage(ctx, 'todo', t.id, img.storagePath, img.caption ?? null, 'creation')
+      for (const pr of out.progress) if (pr.taskId) await attachImage(ctx, 'site_task', pr.taskId, img.storagePath, img.caption ?? null, 'creation')
+    }
+    await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site update' })
+    await sendTaskConfirm(ctx, meta, slots.project_name ?? null, slots.project_id, {
+      progress: out.progress, problems: out.problems, todos: out.todos, parked: out.parked.length,
+    })
     return
   }
 
