@@ -180,12 +180,39 @@ RULES
 - Nothing in the list fits → empty list, ask null.
 Output STRICT JSON ONLY: {"task_numbers": number[], "ask": string|null}. When "ask" is set, "task_numbers" must be the candidate numbers you're choosing between.`
 
+/** Narrow the task list to a plausible shortlist BEFORE the resolver LLM sees it, using the SAME lexical
+ *  floor/unit/trade signal resolveTask uses — so the model chooses from a short, answerable set instead of
+ *  the whole project (the 277-task dump that produced junk 8-way picks). CONSERVATIVE + WIDEN-ON-EMPTY:
+ *  narrows only on a real floor/trade signal, and any empty narrowing falls back to the full set — the
+ *  lexical filter never silently excludes a task the LLM's semantics (synonyms, Telugu/Hindi) would catch. */
+function prefilterTasks(tasks: SiteTaskRow[], item: SiteItem): SiteTaskRow[] {
+  const floor = floorFromHint(item.task_hint)
+  const unit = unitFromHint(item.task_hint)
+  const trades = tradeGroups(item.task_hint)
+  if (!floor && trades.length === 0) return tasks   // no usable signal (vague hint) → don't narrow; the LLM handles/asks
+  const tradeOk = (t: SiteTaskRow) => trades.length === 0 || tradeGroups(`${t.name} ${t.trade}`).some((g) => trades.includes(g))
+  const floorOk = (t: SiteTaskRow) => !floor || t.floor_label === floor
+  const unitOk = (t: SiteTaskRow) => !unit || t.unit_label === unit
+  const tiers = [
+    tasks.filter((t) => floorOk(t) && unitOk(t) && tradeOk(t)),   // tightest: floor ∧ unit ∧ trade
+    tasks.filter((t) => floorOk(t) && tradeOk(t)),                // relax unit
+    floor ? tasks.filter((t) => floorOk(t)) : [],                 // floor alone (only when a floor was named)
+    trades.length ? tasks.filter((t) => tradeOk(t)) : [],         // trade alone (only when a trade was named)
+  ]
+  for (const tier of tiers) if (tier.length) return tier
+  return tasks   // a signal was present but matched nothing anywhere → widen fully rather than exclude the answer
+}
+
 export async function resolveTaskLLM(tasks: SiteTaskRow[], item: SiteItem): Promise<TaskResolution> {
   if (!tasks.length) return { kind: 'parked' }
   const OPENAI = Deno.env.get('OPENAI_API_KEY')
   const ANTHROPIC = Deno.env.get('ANTHROPIC_API_KEY')
-  if (!OPENAI && !ANTHROPIC) return resolveTask(tasks, item)   // no model → deterministic fallback
-  const list = tasks.map((t, i) => `${i + 1}. ${t.floor_label ?? 'site-wide'} · ${t.unit_label ?? '-'} · ${t.name}`).join('\n')
+  if (!OPENAI && !ANTHROPIC) return resolveTask(tasks, item)   // no model → deterministic fallback (self-filters)
+  // Pre-filter to a short, answerable candidate set so the model isn't dumped the whole project (277 tasks
+  // → junk picks). Indices below map into `cands`, not `tasks`, so all number-handling uses cands.
+  const cands = prefilterTasks(tasks, item)
+  if (cands.length !== tasks.length) console.log(`[siteops:prefilter] ${tasks.length} → ${cands.length} cands (floor=${floorFromHint(item.task_hint) ?? '-'} trades=${tradeGroups(item.task_hint).length}) hint="${item.task_hint ?? ''}"`)
+  const list = cands.map((t, i) => `${i + 1}. ${t.floor_label ?? 'site-wide'} · ${t.unit_label ?? '-'} · ${t.name}`).join('\n')
   const user = `UPDATE: "${item.text}"${item.task_hint ? `\nKEY PHRASE: "${item.task_hint}"` : ''}\n\nTASKS (number. floor · unit · name):\n${list}`
   const ctrl = new AbortController()
   const tmo = setTimeout(() => ctrl.abort(), 12000)
@@ -211,10 +238,10 @@ export async function resolveTaskLLM(tasks: SiteTaskRow[], item: SiteItem): Prom
   try { parsed = JSON.parse(raw.replace(/^```json\n?|\n?```$/g, '').trim()) } catch { /* */ }
   if (!parsed) return resolveTask(tasks, item)   // garbled / no response → deterministic fallback
   const nums = [...new Set((Array.isArray(parsed.task_numbers) ? parsed.task_numbers : [])
-    .map((n) => Number(n)).filter((n) => Number.isInteger(n) && n >= 1 && n <= tasks.length))]
+    .map((n) => Number(n)).filter((n) => Number.isInteger(n) && n >= 1 && n <= cands.length))]
   const ask = typeof parsed.ask === 'string' && parsed.ask.trim() ? parsed.ask.trim() : null
-  const picked = nums.map((n) => tasks[n - 1])
-  if (ask) return { kind: 'ambiguous', candidates: picked.length ? picked.slice(0, 8) : tasks.slice(0, 8), question: ask }
+  const picked = nums.map((n) => cands[n - 1])
+  if (ask) return { kind: 'ambiguous', candidates: picked.length ? picked.slice(0, 8) : cands.slice(0, 8), question: ask }
   if (picked.length === 1) return { kind: 'attached', task: picked[0] }
   if (picked.length > 1) return { kind: 'attached_all', tasks: picked }
   return { kind: 'parked' }
