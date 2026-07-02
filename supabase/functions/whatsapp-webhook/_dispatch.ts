@@ -11,7 +11,7 @@ import { agentFor } from './_registry.ts'
 import { runTransaction, retryBatchEntries, type TxnCtx } from './_agents/transaction.ts'   // direct: the replay path
 import { startVendorFlow } from './_agents/procurement.ts'   // direct: vendor-Flow test trigger
 import { runConcierge } from './_agents/concierge.ts'   // direct: first-touch orientation
-import { classifyPhotoFollowup, stampPossibleFollowup } from './_agents/siteops.ts'   // STEP 2: photo enrichment-window steering
+import { classifyPhotoFollowup, stampPossibleFollowup, handleQuotedReply } from './_agents/siteops.ts'   // STEP 2/4b: photo window + readback-correction steering
 import { send, sendNow } from './_format.ts'
 import * as M from './_messages.ts'
 import type { Lang } from './_messages.ts'
@@ -155,6 +155,13 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
   const lang = d.reply_language
   // The uniform agent context (carries language + the tapped interactive id + any Flow payload).
   const actx: TxnCtx = { supabase, from, senderName: ctx.senderName, orgId, wamid, lang, interactiveId: ctx.interactiveId, flowResponse: ctx.flowResponse ?? null, image: ctx.image }
+
+  // ── STEP 4b: a QUOTED-REPLY to one of OUR sent messages (context.id ∈ wa_message_map, Step 4a). A
+  //    reply to a task READBACK is an authoritative correction — resolve the mapped objects and apply
+  //    the edit, PREEMPTING normal routing. The map keys OUTBOUND wamids, so this never fires on a reply
+  //    to the user's own photo (the enrichment window matches the INBOUND photo wamid below). Only a
+  //    text reply carries a correction; a photo reply stays a fresh observation (handled downstream).
+  if (ctx.quotedWamid && !ctx.image && await handleQuotedReply(actx, text, ctx.quotedWamid)) return
 
   // An INTERACTIVE reply (button tap / list pick / Flow completion) against an OPEN
   // conversation is, by construction, an ANSWER to what we asked — never a fresh

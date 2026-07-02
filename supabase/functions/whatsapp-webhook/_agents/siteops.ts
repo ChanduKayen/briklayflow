@@ -14,6 +14,8 @@ import { decomposeImage } from '../_siteops_vision.ts'
 import { loadCandidates, prefilterCandidates, groundingLabels, type Candidate } from '../_siteops_candidates.ts'
 import { planPhotoItems, resolveTypedPick, type PickCandidate } from '../_siteops_attach.ts'
 import type { CaptureRef } from '../_wa_message_map.ts'
+import { distillSignal } from '../_siteops_reanalyze.ts'
+import { planCorrection } from '../_siteops_correct.ts'
 import { decideAssociation, isBareAffirmation, photoRelatedness, type AssocVerdict } from '../_siteops_assoc.ts'
 import {
   routeItems, applyProgress, buildConfirm, buildMultiConfirm, parseWhen,
@@ -928,6 +930,70 @@ export async function stampPossibleFollowup(supabase: any, orgId: string, convo:
     if (ins.error) ins = await supabase.from('followup_events').insert(row)
     if (ins.error) console.error('[siteops:followup-stamp] insert failed:', ins.error.message)
   }
+}
+
+/** STEP 4b — a QUOTED-REPLY to one of our SENT messages, resolved via wa_message_map (Step 4a). Today
+ *  the only mapped consumer is a task READBACK: the reply is an authoritative CORRECTION of what we
+ *  logged. Returns TRUE if it handled the message (dispatch then stops); FALSE if the wamid isn't ours
+ *  / isn't a readback (normal routing continues). The map keys OUTBOUND wamids, so this can't fire on a
+ *  reply to the user's own photo (the enrichment window matches the INBOUND photo wamid). */
+export async function handleQuotedReply(ctx: SiteopsCtx, text: string, quotedWamid: string): Promise<boolean> {
+  const { data } = await ctx.supabase.from('wa_message_map')
+    .select('ref_kind, project_id, object_refs').eq('outbound_wamid', quotedWamid).maybeSingle()
+  if (!data || data.ref_kind !== 'readback') return false
+  await correctReadback(ctx, text, (data.object_refs ?? []) as { kind: string; id: string }[])
+  return true
+}
+
+/** Apply an authoritative field CORRECTION (cause / deadline) to the objects a readback named. Reuses
+ *  the text extractor (decompose) + distillSignal; planCorrection OVERWRITES (the user is fixing THIS).
+ *  A bare "ok" quoting the readback is a confirmation, not a correction. site_task refs are skipped — a
+ *  progress correction is re-association / QC (heavier; not 4b). */
+async function correctReadback(ctx: SiteopsCtx, text: string, refs: { kind: string; id: string }[]): Promise<void> {
+  const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
+  if (isBareAffirmation(text)) { await send(ctx.supabase, ctx.from, { kind: 'text', body: 'Got it 👍' }, meta); return }
+
+  let items: SiteItem[] = []
+  try { items = (await decompose(text)).items } catch { items = [] }
+  const sig = distillSignal(items)
+  const now = new Date()
+  const changed = new Set<string>()
+  let sawEditable = false
+  for (const r of refs) {
+    if (r.kind !== 'problem' && r.kind !== 'todo') continue   // site_task = progress axis; not 4b
+    sawEditable = true
+    const kind: 'issue' | 'todo' = r.kind === 'problem' ? 'issue' : 'todo'
+    const res = kind === 'issue'
+      ? await ctx.supabase.from('problems').select('cause, deadline').eq('id', r.id).maybeSingle()
+      : await ctx.supabase.from('todos').select('due_date').eq('id', r.id).maybeSingle()
+    const row = res.data as Record<string, string | null> | null
+    if (!row) continue
+    const plan = planCorrection(
+      { kind, cause: kind === 'issue' ? (row.cause ?? null) : null, deadline: kind === 'issue' ? (row.deadline ?? null) : (row.due_date ?? null) },
+      sig, now,
+    )
+    if (!plan.changed) continue
+    if (kind === 'issue') {
+      const upd: Record<string, string> = {}
+      if (plan.updates.cause) upd.cause = plan.updates.cause
+      if (plan.updates.deadline) upd.deadline = plan.updates.deadline
+      await ctx.supabase.from('problems').update(upd).eq('id', r.id)
+    } else if (plan.updates.deadline) {
+      await ctx.supabase.from('todos').update({ due_date: plan.updates.deadline }).eq('id', r.id)
+    }
+    await ctx.supabase.from('followup_events').insert({
+      org_id: ctx.orgId, problem_id: kind === 'issue' ? r.id : null, todo_id: kind === 'todo' ? r.id : null,
+      type: 'status_changed', body: `Corrected — ${Object.entries(plan.updates).map(([k, v]) => `${k} → ${v}`).join(', ')}`,
+      actor_kind: 'user', actor_id: await senderUserId(ctx),
+    })
+    for (const k of Object.keys(plan.updates)) changed.add(k === 'deadline' ? (kind === 'todo' ? 'due date' : 'deadline') : 'cause')
+  }
+  const body = changed.size
+    ? `Fixed — updated the ${[...changed].join(' & ')}. 👍`
+    : sawEditable
+      ? `Noted — I couldn't spot a change to make from that. Tell me the cause or the due date and I'll correct it.`
+      : `Noted 👍`
+  await send(ctx.supabase, ctx.from, { kind: 'text', body }, meta)
 }
 
 /** Resume a pending SITEOPS follow-up — a project pick OR a task disambiguation. */
