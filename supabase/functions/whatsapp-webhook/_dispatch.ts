@@ -167,6 +167,19 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
   if (batchOpen && !ctx.firstTouch && !QUERY_RE.test(text) && (decision === 'CHITCHAT' || decision === 'AMBIGUOUS')) {
     decision = 'NEW_INTENT'; intentAgent = 'SITEOPS'
   }
+  // An IMAGE can't answer a SITEOPS pick. Every open SITEOPS wa_conversation pick asks for a CHOICE —
+  // "which task?" / "which project?" / "which item is this photo about?" / "which site?" — answered by a
+  // number or a name, never by a photo. So a photo arriving while a SITEOPS pick is open is a NEW
+  // observation, not that pick's answer; the router only shunted it ANSWERS_PENDING off the thin one-line
+  // describeImage text, which can't tell answer from new. Route it NEW_INTENT so it grounded-classifies
+  // fresh in runSiteops (where project + candidate context lives), and let the interrupt block below PARK
+  // the open pick (SITEOPS commitInterrupted → siteops_unplaced) instead of orphaning the photo as an
+  // answer it structurally cannot be. Chase-reply photos are UNAFFECTED BY CONSTRUCTION: a chase lives in
+  // chase_batches, consulted only when `pending` is null (see getOpenBatch above), so no wa_conversation
+  // pending exists for a chase reply and this predicate cannot fire on it — the role='answer' path stands.
+  if (decision === 'ANSWERS_PENDING' && ctx.image && pending?.agent === 'SITEOPS') {
+    decision = 'NEW_INTENT'; intentAgent = 'SITEOPS'
+  }
 
   const chosenAgent =
     decision === 'ANSWERS_PENDING' ? (pending?.agent ?? 'CONCIERGE')
