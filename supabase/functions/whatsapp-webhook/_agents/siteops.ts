@@ -171,6 +171,51 @@ async function answerWithPhoto(ctx: SiteopsCtx, item: { kind: 'issue' | 'todo'; 
   await trailEvent(ctx, item, 'reply_received', `Replied with a photo${caption?.trim() ? ` — "${caption.trim()}"` : ''}`, await senderUserId(ctx))
 }
 
+/** Interrupt (registry contract — mirrors TRANSACTION/PROCUREMENT commitInterrupted): a new message
+ *  interrupted an OPEN SITEOPS pick. The pick exists BECAUSE classification was ambiguous, so we must
+ *  NOT auto-commit a probably-wrong guess (that chases the wrong person) AND must NOT silently drop the
+ *  observation. PARK it: write the raw observation and/or photo evidence + the candidate shortlist into
+ *  siteops_unplaced (the "to place" store), close the conversation CLEANLY (CLOSED = handled, not the
+ *  raw ABANDONED that dropped the item before), and return a one-line ack the dispatcher folds into the
+ *  interrupting message's reply. The item survives; the interpretation was best-effort. */
+export async function commitInterruptedSiteops(ctx: SiteopsCtx, convo: ConvoRow): Promise<string> {
+  const slots = (convo.slots_so_far ?? {}) as Record<string, unknown>
+  const kind = typeof slots.kind === 'string' ? slots.kind : null
+  const image = (slots.image ?? null) as { storagePath?: string; caption?: string | null } | null
+  // Fresh-observation picks carry the item(s); answer-evidence picks carry only the photo.
+  const observation =
+    kind === 'siteops_disambig' ? (slots.item ?? null)
+    : kind === 'siteops_project' ? (Array.isArray(slots.items) && slots.items.length ? { items: slots.items } : null)
+    : null
+  const objectPath = image?.storagePath ?? null
+  const closeClean = () => closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'parked to place' })
+
+  // Nothing recoverable to preserve (e.g. an answer-evidence pick with no photo carried) → close cleanly, no phantom row.
+  if (observation == null && !objectPath) { await closeClean(); return '' }
+
+  const reason = kind === 'siteops_disambig' ? 'disambig'
+    : kind === 'siteops_project' ? 'project'
+    : kind === 'siteops_photo_pick' ? 'photo_pick'
+    : kind === 'siteops_batch_collision' ? 'batch_collision'
+    : 'floor'
+  const { error } = await ctx.supabase.from('siteops_unplaced').insert({
+    org_id: ctx.orgId,
+    project_id: (slots.project_id as string | null) ?? null,
+    reason,
+    observation,
+    candidates: slots.candidates ?? null,
+    bucket: objectPath ? 'rough-entry-media' : null,
+    object_path: objectPath,
+    caption: image?.caption ?? (typeof slots.piece_text === 'string' ? slots.piece_text : null),
+    narration_id: (slots.narration_id as string | null) ?? null,
+    sender_number: ctx.from,
+    created_by: null,
+  })
+  if (error) console.error('[siteops:park] siteops_unplaced insert failed:', error.message)
+  await closeClean()
+  return objectPath ? `Kept that photo to place later.` : `Kept your earlier note to place later.`
+}
+
 const fmtDay = (d: Date) => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
 /** First few words of an item's title — the short label for the readback line. */
 const shortLabel = (title: string) => title.trim().split(/\s+/).slice(0, 3).join(' ')
@@ -510,7 +555,7 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
     await openConversation(ctx.supabase, {
       orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
       pendingQuestion: 'which project?',
-      slots: { kind: 'siteops_project', items: decomposed.items, candidates: pickList, narration_id: narrationId },
+      slots: { kind: 'siteops_project', items: decomposed.items, candidates: pickList, narration_id: narrationId, image: ctx.image?.storagePath ? { storagePath: ctx.image.storagePath, caption: ctx.image.caption ?? null } : null },
       lastMessageId: ctx.wamid,
     })
     await send(ctx.supabase, ctx.from, {
@@ -570,7 +615,7 @@ async function finishRoute(ctx: SiteopsCtx, projectId: string, projectName: stri
     await openConversation(ctx.supabase, {
       orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
       pendingQuestion: `which task: ${first.item.text}`,
-      slots: { kind: 'siteops_disambig', project_id: projectId, project_name: projectName, item: first.item, candidates, narration_id: narrationId },
+      slots: { kind: 'siteops_disambig', project_id: projectId, project_name: projectName, item: first.item, candidates, narration_id: narrationId, image: ctx.image?.storagePath ? { storagePath: ctx.image.storagePath, caption: ctx.image.caption ?? null } : null },
       lastMessageId: ctx.wamid,
     })
     await send(ctx.supabase, ctx.from, {
@@ -653,7 +698,7 @@ async function runMulti(ctx: SiteopsCtx, items: SiteItem[], plan: ItemPlan, proj
     await openConversation(ctx.supabase, {
       orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
       pendingQuestion: 'which project?',
-      slots: { kind: 'siteops_project', items: pendingItems, candidates, narration_id: narrationId },
+      slots: { kind: 'siteops_project', items: pendingItems, candidates, narration_id: narrationId, image: ctx.image?.storagePath ? { storagePath: ctx.image.storagePath, caption: ctx.image.caption ?? null } : null },
       lastMessageId: ctx.wamid,
     })
     const confirm = buildMultiConfirm(sections, { appBase: APP_BASE })

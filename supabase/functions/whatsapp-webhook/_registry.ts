@@ -15,7 +15,7 @@ import type { TxnCtx } from './_agents/transaction.ts'
 import { runTransactionMessage, answerTransaction, commitInterrupted } from './_agents/transaction.ts'
 import { runProcurementMessage, answerProcurement, commitInterruptedProc } from './_agents/procurement.ts'
 import { runConcierge } from './_agents/concierge.ts'
-import { runSiteops, answerSiteops } from './_agents/siteops.ts'
+import { runSiteops, answerSiteops, commitInterruptedSiteops } from './_agents/siteops.ts'
 
 // The uniform turn context the dispatcher hands any agent. (The transaction agent's
 // TxnCtx already carries exactly these fields, so it consumes this directly.)
@@ -71,6 +71,9 @@ const SITEOPS: AgentDef = {
   intent: 'SITEOPS',
   run: (ctx, text, opts) => runSiteops(ctx, text, { prefix: opts.prefix }),
   answer: (ctx, text, convo) => answerSiteops(ctx, text, convo),
+  // Interrupt: PARK the ambiguous observation to siteops_unplaced (never auto-commit a guess, never
+  // drop) and close CLEANLY — replaces the raw abandonConversation that silently dropped the item.
+  commitInterrupted: (ctx, convo) => commitInterruptedSiteops(ctx, convo),
 }
 
 export const AGENTS: Record<string, AgentDef> = { TRANSACTION, CONCIERGE, PROCUREMENT, SITEOPS }
