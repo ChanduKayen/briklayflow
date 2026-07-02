@@ -224,7 +224,7 @@ export async function callLLM(system: string, user: string): Promise<string> {
         signal: ctrl.signal, method: 'POST',
         headers: { Authorization: `Bearer ${OPENAI}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: EXTRACT_MODEL_OPENAI, max_tokens: 1200, temperature: 0,
+          model: EXTRACT_MODEL_OPENAI, max_completion_tokens: 1200, temperature: 0,
           response_format: { type: 'json_object' },
           messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
         }),

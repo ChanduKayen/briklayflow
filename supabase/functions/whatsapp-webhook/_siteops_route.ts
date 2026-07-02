@@ -195,7 +195,7 @@ export async function resolveTaskLLM(tasks: SiteTaskRow[], item: SiteItem): Prom
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
         signal: ctrl.signal, method: 'POST',
         headers: { Authorization: `Bearer ${OPENAI}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: Deno.env.get('WA_SITEOPS_MODEL') ?? 'gpt-4.1', max_tokens: 300, temperature: 0, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: RESOLVE_SYSTEM }, { role: 'user', content: user }] }),
+        body: JSON.stringify({ model: Deno.env.get('WA_SITEOPS_MODEL') ?? 'gpt-4.1', max_completion_tokens: 300, temperature: 0, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: RESOLVE_SYSTEM }, { role: 'user', content: user }] }),
       })
       if (res.ok) raw = (await res.json()).choices?.[0]?.message?.content ?? ''
     } else if (ANTHROPIC) {
@@ -271,7 +271,7 @@ export async function matchQc(qc: QcRow[], statements: string[], taskName: strin
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
         signal: ctrl.signal, method: 'POST',
         headers: { Authorization: `Bearer ${OPENAI}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: Deno.env.get('WA_SITEOPS_MODEL') ?? 'gpt-4.1', max_tokens: 400, temperature: 0, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: QC_MATCH_SYSTEM }, { role: 'user', content: user }] }),
+        body: JSON.stringify({ model: Deno.env.get('WA_SITEOPS_MODEL') ?? 'gpt-4.1', max_completion_tokens: 400, temperature: 0, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: QC_MATCH_SYSTEM }, { role: 'user', content: user }] }),
       })
       if (res.ok) raw = (await res.json()).choices?.[0]?.message?.content ?? ''
     } else if (ANTHROPIC) {

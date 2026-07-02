@@ -103,7 +103,7 @@ async function callLLM(system: string, user: string): Promise<string> {
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
         signal: ctrl.signal, method: 'POST',
         headers: { Authorization: `Bearer ${OPENAI}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, max_tokens: 600, temperature: 0, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
+        body: JSON.stringify({ model, max_completion_tokens: 600, temperature: 0, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] }),
       })
       if (res.ok) return (await res.json()).choices?.[0]?.message?.content ?? ''
     } else if (ANTHROPIC) {

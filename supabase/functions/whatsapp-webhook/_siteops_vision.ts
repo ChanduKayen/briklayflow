@@ -61,7 +61,7 @@ async function callVision(base64: string, mime: string, caption: string | null, 
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${OPENAI}` },
         body: JSON.stringify({
-          model: OPENAI_MODEL, temperature: 0, max_tokens: 700,
+          model: OPENAI_MODEL, temperature: 0, max_completion_tokens: 700,
           response_format: { type: 'json_object' },
           messages: [
             { role: 'system', content: SYSTEM },
