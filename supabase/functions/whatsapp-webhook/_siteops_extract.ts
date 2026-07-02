@@ -11,6 +11,12 @@
 const EXTRACT_MODEL_OPENAI = Deno.env.get('WA_SITEOPS_MODEL') ?? 'gpt-4.1'
 const EXTRACT_MODEL_ANTHROPIC = Deno.env.get('WA_SITEOPS_MODEL_ANTHROPIC') ?? 'claude-sonnet-4-20250514'
 
+// GPT-5.x reasoning models reject any `temperature` other than the default 1 (a hard 400); gpt-4.x/4o
+// accept temperature:0 for deterministic extraction. Spread this into an OpenAI body so the param is
+// present only when the model tolerates it — lets WA_SITEOPS_MODEL be set to a GPT-5.x id without 400ing.
+export const openaiTemp = (model: string): { temperature?: number } =>
+  /^gpt-5/i.test(model) ? {} : { temperature: 0 }
+
 export type SiteItemType = 'progress' | 'issue' | 'todo'
 
 // The fixed cause vocabulary (Phase 2.1) — mirrors the cause_taxonomy seed. Keys are the CONTRACT
@@ -224,7 +230,7 @@ export async function callLLM(system: string, user: string): Promise<string> {
         signal: ctrl.signal, method: 'POST',
         headers: { Authorization: `Bearer ${OPENAI}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: EXTRACT_MODEL_OPENAI, max_completion_tokens: 1200, temperature: 0,
+          model: EXTRACT_MODEL_OPENAI, max_completion_tokens: 1200, ...openaiTemp(EXTRACT_MODEL_OPENAI),
           response_format: { type: 'json_object' },
           messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
         }),

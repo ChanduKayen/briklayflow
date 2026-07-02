@@ -61,7 +61,9 @@ async function callVision(base64: string, mime: string, caption: string | null, 
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${OPENAI}` },
         body: JSON.stringify({
-          model: OPENAI_MODEL, temperature: 0, max_completion_tokens: 700,
+          // NOTE: GPT-5.x (the WA_SITEOPS_IMAGE_MODEL family) rejects any temperature other than the
+          // default 1 — sending temperature:0 400s. Omit it entirely rather than force determinism.
+          model: OPENAI_MODEL, max_completion_tokens: 700,
           response_format: { type: 'json_object' },
           messages: [
             { role: 'system', content: SYSTEM },

@@ -6,7 +6,7 @@
 // All DB access is via an injected supabase client (works against the real client or a
 // test mock), mirroring the rest of the webhook.
 
-import type { SiteItem } from './_siteops_extract.ts'
+import { openaiTemp, type SiteItem } from './_siteops_extract.ts'
 import { loadCadenceMap, computeBlockedTaskEnd, computeTiming, type CadenceMap } from './_siteops_timing.ts'
 import { computeImpact, type ImpactResult } from './_siteops_impact.ts'
 import { notifyOwnerAssignment, ownerPhone } from './_siteops_assign.ts'
@@ -210,6 +210,7 @@ export async function resolveTaskLLM(tasks: SiteTaskRow[], item: SiteItem): Prom
   if (!OPENAI && !ANTHROPIC) return resolveTask(tasks, item)   // no model → deterministic fallback (self-filters)
   // Pre-filter to a short, answerable candidate set so the model isn't dumped the whole project (277 tasks
   // → junk picks). Indices below map into `cands`, not `tasks`, so all number-handling uses cands.
+  const model = Deno.env.get('WA_SITEOPS_MODEL') ?? 'gpt-4.1'
   const cands = prefilterTasks(tasks, item)
   if (cands.length !== tasks.length) console.log(`[siteops:prefilter] ${tasks.length} → ${cands.length} cands (floor=${floorFromHint(item.task_hint) ?? '-'} trades=${tradeGroups(item.task_hint).length}) hint="${item.task_hint ?? ''}"`)
   const list = cands.map((t, i) => `${i + 1}. ${t.floor_label ?? 'site-wide'} · ${t.unit_label ?? '-'} · ${t.name}`).join('\n')
@@ -222,7 +223,7 @@ export async function resolveTaskLLM(tasks: SiteTaskRow[], item: SiteItem): Prom
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
         signal: ctrl.signal, method: 'POST',
         headers: { Authorization: `Bearer ${OPENAI}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: Deno.env.get('WA_SITEOPS_MODEL') ?? 'gpt-4.1', max_completion_tokens: 300, temperature: 0, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: RESOLVE_SYSTEM }, { role: 'user', content: user }] }),
+        body: JSON.stringify({ model, max_completion_tokens: 300, ...openaiTemp(model), response_format: { type: 'json_object' }, messages: [{ role: 'system', content: RESOLVE_SYSTEM }, { role: 'user', content: user }] }),
       })
       if (res.ok) raw = (await res.json()).choices?.[0]?.message?.content ?? ''
     } else if (ANTHROPIC) {
@@ -289,6 +290,7 @@ export async function matchQc(qc: QcRow[], statements: string[], taskName: strin
   if (!qc.length || !statements.length) return []
   const OPENAI = Deno.env.get('OPENAI_API_KEY')
   const ANTHROPIC = Deno.env.get('ANTHROPIC_API_KEY')
+  const model = Deno.env.get('WA_SITEOPS_MODEL') ?? 'gpt-4.1'
   const user = `TASK: ${taskName}\nQC CHECKS:\n${qc.map((q) => `- [${q.id}] ${q.question}`).join('\n')}\n\nSTATEMENTS STATED BY SUPERVISOR:\n${statements.map((s) => `- ${s}`).join('\n')}`
   const ctrl = new AbortController()
   const t = setTimeout(() => ctrl.abort(), 12000)
@@ -298,7 +300,7 @@ export async function matchQc(qc: QcRow[], statements: string[], taskName: strin
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
         signal: ctrl.signal, method: 'POST',
         headers: { Authorization: `Bearer ${OPENAI}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: Deno.env.get('WA_SITEOPS_MODEL') ?? 'gpt-4.1', max_completion_tokens: 400, temperature: 0, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: QC_MATCH_SYSTEM }, { role: 'user', content: user }] }),
+        body: JSON.stringify({ model, max_completion_tokens: 400, ...openaiTemp(model), response_format: { type: 'json_object' }, messages: [{ role: 'system', content: QC_MATCH_SYSTEM }, { role: 'user', content: user }] }),
       })
       if (res.ok) raw = (await res.json()).choices?.[0]?.message?.content ?? ''
     } else if (ANTHROPIC) {
