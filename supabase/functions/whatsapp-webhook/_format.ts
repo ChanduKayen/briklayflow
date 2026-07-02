@@ -5,6 +5,8 @@
 // outbound inherits durability + backoff + TTL. The drainer POSTs it as-is.
 // (Typing indicators are NOT durable -- see sendTypingIndicator, sent inline.)
 
+import type { CaptureRef } from './_wa_message_map.ts'
+
 const WA_ACCESS_TOKEN    = Deno.env.get('WA_ACCESS_TOKEN')!
 const WA_PHONE_NUMBER_ID = Deno.env.get('WA_PHONE_NUMBER_ID')!
 
@@ -123,9 +125,12 @@ export async function send(
   supabase: any,
   to: string,
   msg: OutMessage,
-  opts: { org_id?: string | null; wamid?: string | null; dedup_key?: string | null } = {},
+  // STEP 4a — `capture` (optional): a ref the drainer stamps into wa_message_map once it learns this
+  // message's outbound wamid, so a later reaction/quoted-reply can resolve back to it. Only readbacks/
+  // picks set it; every other send is byte-identical to before.
+  opts: { org_id?: string | null; wamid?: string | null; dedup_key?: string | null; capture?: CaptureRef | null } = {},
 ): Promise<void> {
-  const row = {
+  const base = {
     org_id: opts.org_id ?? null,
     target: to,
     payload: msg,                         // OutMessage (traceability/debug)
@@ -133,9 +138,13 @@ export async function send(
     wamid: opts.wamid ?? null,
     dedup_key: opts.dedup_key ?? null,
   }
-  const { error } = opts.dedup_key
-    ? await supabase.from('outbox').upsert(row, { onConflict: 'dedup_key', ignoreDuplicates: true })
-    : await supabase.from('outbox').insert(row)
+  const row = opts.capture ? { ...base, capture_ref: opts.capture } : base
+  const enqueue = (r: typeof base | (typeof base & { capture_ref: CaptureRef })) => opts.dedup_key
+    ? supabase.from('outbox').upsert(r, { onConflict: 'dedup_key', ignoreDuplicates: true })
+    : supabase.from('outbox').insert(r)
+  let { error } = await enqueue(row)
+  // Degrade if capture_ref isn't migrated yet — the MESSAGE must still send (capture is a bonus).
+  if (error && opts.capture) ({ error } = await enqueue(base))
   if (error) console.error('[format] send/enqueue error:', error)
 }
 

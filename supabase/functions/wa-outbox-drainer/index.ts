@@ -6,6 +6,7 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { parseSentWamid, buildMapRow } from '../whatsapp-webhook/_wa_message_map.ts'
 
 const SUPABASE_URL         = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!  // DB access only
@@ -15,8 +16,9 @@ const WA_PHONE_NUMBER_ID   = Deno.env.get('WA_PHONE_NUMBER_ID')!
 
 const BATCH = 20
 
-/** POST a pre-rendered WhatsApp Cloud API body as-is. Returns {ok, error}. */
-async function postToMeta(body: unknown): Promise<{ ok: boolean; error?: string }> {
+/** POST a pre-rendered WhatsApp Cloud API body as-is. Returns {ok, error, wamid?}. The wamid is the
+ *  OUTBOUND message id WhatsApp assigns (response messages[0].id) — Step 4a captures it for the map. */
+async function postToMeta(body: unknown): Promise<{ ok: boolean; error?: string; wamid?: string | null }> {
   try {
     const res = await fetch(
       `https://graph.facebook.com/v18.0/${WA_PHONE_NUMBER_ID}/messages`,
@@ -32,7 +34,7 @@ async function postToMeta(body: unknown): Promise<{ ok: boolean; error?: string 
     if (!res.ok) {
       return { ok: false, error: `meta ${res.status}: ${bodyText.slice(0, 300)}` }
     }
-    return { ok: true }
+    return { ok: true, wamid: parseSentWamid(bodyText) }
   } catch (e) {
     return { ok: false, error: (e as Error)?.message ?? String(e) }
   }
@@ -82,10 +84,21 @@ serve(async (req) => {
     }
 
     if (result.ok) {
+      // CRITICAL PATH — mark SENT. Unchanged from before: never gated on the wamid-capture below, so a
+      // capture failure can NEVER re-send (idempotency) or stall the row.
       await supabase.from('outbox')
         .update({ status: 'SENT', sent_at: new Date().toISOString(), updated_at: new Date().toISOString() })
         .eq('id', row.id)
       sent++
+      // STEP 4a — best-effort outbound-wamid capture: write the durable wamid→object map row when this
+      // message carried a capture_ref (a readback / pick). Fully separate from the SENT update above;
+      // any error here (unmigrated column/table) is swallowed — it must never affect send success.
+      const mapRow = buildMapRow(row.org_id ?? null, row.capture_ref ?? null, result.wamid ?? null)
+      if (mapRow) {
+        const { error: mapErr } = await supabase.from('wa_message_map')
+          .upsert(mapRow, { onConflict: 'outbound_wamid', ignoreDuplicates: true })
+        if (mapErr) console.warn('[drainer] wa_message_map write skipped:', mapErr.message)
+      }
     } else if (row.attempts >= row.max_attempts) {
       await supabase.from('outbox')
         .update({ status: 'FAILED', last_error: result.error, updated_at: new Date().toISOString() })

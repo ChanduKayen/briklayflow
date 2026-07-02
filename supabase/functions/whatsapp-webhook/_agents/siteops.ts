@@ -13,6 +13,7 @@ import { decompose, callLLM, safeParse, type SiteItem } from '../_siteops_extrac
 import { decomposeImage } from '../_siteops_vision.ts'
 import { loadCandidates, prefilterCandidates, groundingLabels, type Candidate } from '../_siteops_candidates.ts'
 import { planPhotoItems, resolveTypedPick, type PickCandidate } from '../_siteops_attach.ts'
+import type { CaptureRef } from '../_wa_message_map.ts'
 import { decideAssociation, isBareAffirmation, photoRelatedness, type AssocVerdict } from '../_siteops_assoc.ts'
 import {
   routeItems, applyProgress, buildConfirm, buildMultiConfirm, parseWhen,
@@ -121,15 +122,18 @@ async function sendTaskConfirm(
   site: string | null,
   projectId: string,
   outc: { progress: ProgressResult[]; problems: ProblemResult[]; todos: TodoResult[]; parked: number },
+  // STEP 4a — capture the readback's outbound wamid against the objects it confirms (Step 4b/5 resolve
+  // a later reaction / quoted-reply back to them). Undefined → send unchanged.
+  capture?: CaptureRef,
 ): Promise<void> {
   const single = outc.progress.length === 1 && outc.problems.length === 0 && outc.todos.length === 0 ? outc.progress[0] : null
   const base = { site, progress: outc.progress, problems: outc.problems, todos: outc.todos, parked: outc.parked, pendingPick: 0, ownerLabel: 'you', projectId, appBase: APP_BASE }
   if (single?.nodeKey && APP_BASE) {
     const url = `${APP_BASE}/projects/${projectId}/tasks?task=${encodeURIComponent(single.nodeKey)}`
-    await send(ctx.supabase, ctx.from, { kind: 'cta', body: buildConfirm({ ...base, ctaMode: true }), cta: { text: 'View task', url } }, meta)
+    await send(ctx.supabase, ctx.from, { kind: 'cta', body: buildConfirm({ ...base, ctaMode: true }), cta: { text: 'View task', url } }, { ...meta, capture })
     return
   }
-  await send(ctx.supabase, ctx.from, { kind: 'text', body: buildConfirm(base) }, meta)
+  await send(ctx.supabase, ctx.from, { kind: 'text', body: buildConfirm(base) }, { ...meta, capture })
 }
 
 async function findPrincipal(supabase: SiteopsCtx['supabase'], orgId: string): Promise<string | null> {
@@ -760,10 +764,18 @@ async function finishRoute(ctx: SiteopsCtx, projectId: string, projectName: stri
   if (ctx.image?.storagePath && attachAcks.length && !items2.length) return null
 
   // confirm (names the site so the sender can catch a mis-attribution). A single task update gets a
-  // tappable "View task" button straight to that task.
+  // tappable "View task" button straight to that task. STEP 4a — carry a `readback` capture so the
+  // drainer maps this confirm's outbound wamid to the objects it names.
+  const readbackRefs = [
+    ...out.problems.filter((p) => p.id).map((p) => ({ kind: 'problem', id: p.id as string })),
+    ...out.todos.filter((t) => t.id).map((t) => ({ kind: 'todo', id: t.id as string })),
+    ...out.progress.filter((pr) => pr.taskId).map((pr) => ({ kind: 'site_task', id: pr.taskId as string })),
+  ]
+  const readbackCapture: CaptureRef | undefined = readbackRefs.length
+    ? { ref_kind: 'readback', project_id: projectId, object_refs: readbackRefs } : undefined
   await sendTaskConfirm(ctx, meta, projectName, projectId, {
     progress: out.progress, problems: out.problems, todos: out.todos, parked: out.parked.length,
-  })
+  }, readbackCapture)
 
   // STEP 2 — ENRICHMENT WINDOW (images only). The photo is floored + read back above; now hold an OPEN
   // siteops_photo convo (~90s) so a follow-up TEXT (or a quoted-reply) ENRICHES these SAME objects rather
