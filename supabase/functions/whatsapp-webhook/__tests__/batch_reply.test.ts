@@ -5,7 +5,7 @@
 // a LOCK; no message is ever eaten.
 
 import { suite, test, expect } from './harness'
-import { classifyReplyFragment, type BatchItem } from '../_siteops_batch.ts'
+import { classifyReplyFragment, scopeBatchToProject, type BatchItem } from '../_siteops_batch.ts'
 
 let seq = 0
 const item = (p: Partial<BatchItem>): BatchItem => {
@@ -51,5 +51,27 @@ suite('siteops batch-reply — classifyReplyFragment (no message eaten)', () => 
     const batch = [item({ id: 'water', title: 'waterlogging in basement' }), item({ id: 'cement', title: 'cement short' })]
     const v = classifyReplyFragment({ text: 'waterlogging cleared now' }, batch, { singleFragment: true, hasObservation: true })
     expect(v).toEqual({ kind: 'match', index: 0 })
+  })
+})
+
+suite('siteops batch-reply — scopeBatchToProject (Fix 2, the ASM Elite matrix)', () => {
+  const batch = [item({ id: 'a', projectId: 'Y', projectName: 'Aiswarya' }), item({ id: 'b', projectId: 'Y', projectName: 'Aiswarya' }), item({ id: 'c', projectId: 'Z', projectName: 'Other' })]
+
+  test('captioned message for a CHASE-FREE project X (Y & Z have chases) → routeFresh', () => {
+    const r = scopeBatchToProject(batch, 'X')
+    expect(r.scoped).toEqual([])
+    expect(r.routeFresh).toBe(true)   // not a chase reply → runSiteops routes it fresh
+  })
+
+  test('message resolving to project Y → matches WITHIN Y only (no cross-project collision)', () => {
+    const r = scopeBatchToProject(batch, 'Y')
+    expect(r.scoped.map((i) => i.id)).toEqual(['a', 'b'])
+    expect(r.routeFresh).toBe(false)
+  })
+
+  test('no project signal (uncaptioned / unnamed) → whole batch, honest ambiguous', () => {
+    const r = scopeBatchToProject(batch, null)
+    expect(r.scoped.length).toBe(3)
+    expect(r.routeFresh).toBe(false)
   })
 })

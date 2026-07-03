@@ -26,7 +26,7 @@ import {
 } from '../_siteops_route.ts'
 import { loadCadenceMap, type CadenceMap } from '../_siteops_timing.ts'
 import {
-  getOpenBatch, dropBatchItems, classifyReplyFragment, interpretStatus,
+  getOpenBatch, dropBatchItems, classifyReplyFragment, scopeBatchToProject, interpretStatus,
   type OpenBatch, type BatchItem,
 } from '../_siteops_batch.ts'
 // The engine, bundled for Deno — used to materialise a project's full task set on first WhatsApp touch.
@@ -415,10 +415,17 @@ async function handleBatchReply(
   const cadenceMap = await loadCadenceMap(ctx.supabase, ctx.orgId)
   const actorId = await senderUserId(ctx)
 
+  // FIX 2 — PROJECT-SCOPE the batch (extends Fix X from the photo branch to all types). Resolve the
+  // message's project (caption for images, named site / hint for text) and match only within it; a
+  // message resolving to a CHASE-FREE project isn't a chase reply → route it fresh.
+  const pre = await resolveProject(ctx.supabase, ctx.orgId, { narration: ctx.image?.caption ?? text, nameHint: topProjectHint })
+  const { scoped, routeFresh } = scopeBatchToProject(batch.items, pre.projectId)
+  if (routeFresh) return false
+
   if (allClear) {
-    for (let i = 0; i < batch.items.length; i++) {
-      const v = await applyBatchResolution(ctx, batch.items[i], 'resolved', text, cadenceMap, actorId, now)
-      resolutions.push({ item: batch.items[i], verdict: v }); matchedIdx.add(i)
+    for (let i = 0; i < scoped.length; i++) {
+      const v = await applyBatchResolution(ctx, scoped[i], 'resolved', text, cadenceMap, actorId, now)
+      resolutions.push({ item: scoped[i], verdict: v }); matchedIdx.add(i)
     }
   } else {
     // Sort each fragment into "answers a chase" vs "new observation" via the PURE classifier (see
@@ -426,15 +433,15 @@ async function handleBatchReply(
     // reply is a bare ack or a substantive observation.
     const signals = { singleFragment: frags.length === 1, hasObservation: pieces.length > 0 }
     for (const piece of frags) {
-      const m = classifyReplyFragment(piece, batch.items, signals)
+      const m = classifyReplyFragment(piece, scoped, signals)
       if (m.kind === 'match') {
         if (matchedIdx.has(m.index)) continue
         matchedIdx.add(m.index)
         const status = interpretStatus(piece.text)
-        const v = await applyBatchResolution(ctx, batch.items[m.index], status, piece.text, cadenceMap, actorId, now)
-        resolutions.push({ item: batch.items[m.index], verdict: v })
+        const v = await applyBatchResolution(ctx, scoped[m.index], status, piece.text, cadenceMap, actorId, now)
+        resolutions.push({ item: scoped[m.index], verdict: v })
       } else if (m.kind === 'collision' && !collision) {
-        collision = { piece, items: m.indexes.map((i) => batch.items[i]), status: interpretStatus(piece.text) }
+        collision = { piece, items: m.indexes.map((i) => scoped[i]), status: interpretStatus(piece.text) }
       } else if (m.kind === 'collision') {
         // a second collision in one message is rare — leave it in the batch for next cycle
       } else {
@@ -452,18 +459,9 @@ async function handleBatchReply(
   // photo so the pick attaches it. Text is unchanged (returns false → runSiteops routes fresh).
   if (!resolutions.length && !collision) {
     if (!photo) return false
-    // FIX X — PROJECT-SCOPE the chase-photo interaction. The batch is SENDER-scoped (getOpenBatch keys on
-    // org+sender only), so batch.items spans every site the sender has an open chase on. A freshly CAPTIONED
-    // photo for a site with NO open chase was being hijacked into a "which of your chases is this?" pick over
-    // unrelated cross-project items. Resolve the caption's project and scope the batch to it:
-    //   • caption names a project with ZERO open chases → NOT a chase reply → route it FRESH (return false).
-    //     This deliberately overrides decision (a) for this case: a captioned photo for a chase-free site is
-    //     by definition a new update, not a reply, so a real fresh object is correct — not a mis-pick.
-    //   • no project signal at all (uncaptioned / unknown site) → fall back to the whole batch (the honest
-    //     ambiguous case — the photo genuinely might be answering one of the open chases).
-    const pre = await resolveProject(ctx.supabase, ctx.orgId, { narration: ctx.image?.caption ?? '', nameHint: topProjectHint })
-    const scoped = pre.projectId ? batch.items.filter((it) => it.projectId === pre.projectId) : batch.items
-    if (pre.projectId && !scoped.length) return false   // captioned for a chase-free site → route fresh
+    // Chase-photo interaction over the PROJECT-SCOPED set (scoping already done at the top; a captioned
+    // photo for a chase-free project already returned false via routeFresh). Single scoped chase → attach;
+    // no project signal → the whole batch (the honest ambiguous case) → ask which.
     if (scoped.length === 1) {
       await answerWithPhoto(ctx, scoped[0], photo.sp, photo.cap)
       await send(ctx.supabase, ctx.from, { kind: 'text', body: `Added your photo to *${shortLabel(scoped[0].title)}*.` }, meta)
@@ -496,21 +494,26 @@ async function handleBatchReply(
   let closed = false
   if (resolvedIds.length) ({ closed } = await dropBatchItems(ctx.supabase, batch, resolvedIds))
 
-  // GENUINE COLLISION → everything else is already resolved/dropped; ask ONLY about the collider.
+  // GENUINE COLLISION → the fragment matched several same-subject chases (now within one project, post
+  // Fix-2 scoping). Ask which — WITH a "None — it's new" exit so a genuinely-new observation isn't
+  // trapped onto a chase (the residual the Fix X review flagged: don't rebuild the trap one level down).
   if (collision) {
-    const cands = collision.items.map((it) => ({ id: it.id, kind: it.kind, orgId: it.orgId, projectName: it.projectName, title: it.title, cause: it.cause }))
+    const cands = collision.items.map((it) => ({ id: it.id, kind: it.kind, orgId: it.orgId, projectId: it.projectId, projectName: it.projectName, title: it.title, cause: it.cause }))
+    const projectId = pre.projectId ?? cands[0]?.projectId ?? null
     await openConversation(ctx.supabase, {
       orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
-      pendingQuestion: `which site: ${collision.piece.text}`,
-      slots: { kind: 'siteops_batch_collision', status: collision.status, piece_text: collision.piece.text, candidates: cands, image: photo ? { storagePath: photo.sp, caption: photo.cap } : null },
+      pendingQuestion: `which item: ${collision.piece.text}`,
+      slots: { kind: 'siteops_batch_collision', status: collision.status, piece_text: collision.piece.text, candidates: cands, project_id: projectId, narration_id: narrationId, image: photo ? { storagePath: photo.sp, caption: photo.cap } : null },
       lastMessageId: ctx.wamid,
     })
-    const sites = collision.items.map((it) => it.projectName)
     await send(ctx.supabase, ctx.from, {
       kind: 'list',
-      body: `${head}${extra}\n\n"${shortLabel(collision.piece.text)}" — which site? ${sites.join(' or ')}?`,
-      button: 'Pick site',
-      rows: cands.slice(0, 10).map((c, i) => ({ id: `pick:${i + 1}`, title: c.projectName.slice(0, 24) })),
+      body: `${head}${extra}\n\n"${shortLabel(collision.piece.text)}" — which of these, or is it new?`,
+      button: 'Pick',
+      rows: [
+        ...cands.slice(0, 9).map((c, i) => ({ id: `pick:${i + 1}`, title: shortLabel(c.title).slice(0, 24), description: c.projectName.slice(0, 24) })),
+        { id: `pick:${Math.min(cands.length, 9) + 1}`, title: "None — it's new" },
+      ],
     }, meta)
     return true
   }
@@ -1131,21 +1134,44 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
 
   // ── B3 same-cause collision → the supervisor named the site for the held item ──
   if (slots.kind === 'siteops_batch_collision') {
-    const cands = (slots.candidates ?? []) as { id: string; kind: 'issue' | 'todo'; orgId: string; projectName: string; title: string; cause: string | null }[]
+    const cands = (slots.candidates ?? []) as { id: string; kind: 'issue' | 'todo'; orgId: string; projectId?: string | null; projectName: string; title: string; cause: string | null }[]
     const t = text.trim().toLowerCase()
     const m = text.match(/(\d+)/)
-    const idx = m ? parseInt(m[1], 10) - 1
-      : cands.findIndex((c) => { const n = c.projectName.toLowerCase(); return n === t || (n.includes(t) && t.length >= 3) || (t.includes(n.split(/\s+/)[0]) && n.length >= 3) })
+    const num = m ? parseInt(m[1], 10) : null
+    // FIX 2 — the "None — it's new" row (past the candidate count) or a typed new/none → route the piece
+    // FRESH to the project; never force a genuinely-new observation onto a chase.
+    if ((num !== null && num > cands.length) || (num === null && /\b(new|none|different|separate|fresh)\b/i.test(text))) {
+      const pid = (slots.project_id as string | null) ?? cands[0]?.projectId ?? null
+      const pieceText = (slots.piece_text as string | null) ?? text
+      await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site update' })
+      if (!pid) {
+        await send(ctx.supabase, ctx.from, { kind: 'text', body: `Got it — send that as a new update with the site and I'll log it.` }, meta)
+        return
+      }
+      const dec = await decompose(pieceText).catch(() => ({ items: [] as SiteItem[], project_hint: null }))
+      const items = dec.items.length ? dec.items
+        : [{ type: 'issue', text: pieceText, task_hint: null, qc_statements: [], cause: 'other', cause_reason: null, owner_hint: null, date_hint: null, project_hint: null } as SiteItem]
+      const out = await routeGroup(ctx, pid, items, (slots.narration_id as string | null) ?? null)
+      const cimg = slots.image as { storagePath?: string; caption?: string | null } | null
+      if (cimg?.storagePath) {
+        for (const p of out.problems) if (p.id) await attachImage(ctx, 'problem', p.id, cimg.storagePath, cimg.caption ?? null, 'creation')
+        for (const td of out.todos) if (td.id) await attachImage(ctx, 'todo', td.id, cimg.storagePath, cimg.caption ?? null, 'creation')
+      }
+      const n = out.problems.length + out.todos.length + out.progress.length
+      await send(ctx.supabase, ctx.from, { kind: 'text', body: n ? `Logged as new — *${shortLabel(pieceText)}*. 👍` : `Noted 👍` }, meta)
+      return
+    }
+    const idx = num !== null ? num - 1
+      : cands.findIndex((c) => shortLabel(c.title).toLowerCase().includes(t) && t.length >= 3)
     const chosen = idx >= 0 && idx < cands.length ? cands[idx] : null
     if (!chosen) {
-      const sites = cands.map((c) => c.projectName).join(' or ')
-      if (await judgePending(`which site is "${slots.piece_text ?? 'this'}" — ${sites}?`, text) === 'letgo') {
+      if (await judgePending(`which of these is "${slots.piece_text ?? 'this'}" about, or is it new?`, text) === 'letgo') {
         // bail — the item stays in the batch and gets re-asked next cycle
         await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site update' })
         await send(ctx.supabase, ctx.from, { kind: 'text', body: `No problem — I'll check back on it next time.` }, meta)
         return
       }
-      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Which site — reply with the number or the site name, or *skip* to leave it.` }, meta)
+      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Reply with the number, or say *new* if it's a separate thing.` }, meta)
       return
     }
     const now = new Date()

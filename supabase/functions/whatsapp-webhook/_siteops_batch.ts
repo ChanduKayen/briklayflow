@@ -167,6 +167,20 @@ export type FragmentVerdict =
  * fragment; `hasObservation` = the decompose pass found a substantive site item (a real observation, not
  * a bare ack). PURE.
  */
+/**
+ * FIX 2 — project-scope the sender's batch. The batch is SENDER-scoped (spans every site the sender is
+ * chased on), so a message that resolves to a project must only match/collide with chases ON that project
+ * — extending Fix X from the photo branch to all message types. PURE.
+ *   • projectId null (no site named / caption unresolved) → the whole batch (the honest ambiguous case).
+ *   • projectId names a project WITH chases → just that project's items.
+ *   • projectId names a CHASE-FREE project → routeFresh: the message isn't a chase reply at all.
+ */
+export function scopeBatchToProject(items: BatchItem[], projectId: string | null): { scoped: BatchItem[]; routeFresh: boolean } {
+  if (!projectId) return { scoped: items, routeFresh: false }
+  const scoped = items.filter((it) => it.projectId === projectId)
+  return { scoped, routeFresh: scoped.length === 0 }
+}
+
 export function classifyReplyFragment(
   piece: { text: string; task_hint?: string | null; project_hint?: string | null },
   items: BatchItem[],
