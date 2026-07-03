@@ -15,7 +15,9 @@ export interface CaptureRef {
   ref_kind: CaptureRefKind
   convo_id?: string | null
   project_id?: string | null
-  object_refs?: { kind: string; id: string }[] | null
+  // `event` (optional) binds a ref to a SPECIFIC event — the v2 undo carries the resolve's followup_events
+  // id here so a "Not resolved" tap reopens only that resolve (stale-safe). jsonb persists the extra field.
+  object_refs?: { kind: string; id: string; event?: string }[] | null
 }
 
 export interface MapRow {
@@ -24,7 +26,7 @@ export interface MapRow {
   ref_kind: string
   convo_id: string | null
   project_id: string | null
-  object_refs: { kind: string; id: string }[] | null
+  object_refs: { kind: string; id: string; event?: string }[] | null
 }
 
 /**

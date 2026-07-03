@@ -276,7 +276,9 @@ const fmtDay = (d: Date) => d.toLocaleDateString('en-IN', { day: '2-digit', mont
 const shortLabel = (title: string) => title.trim().split(/\s+/).slice(0, 3).join(' ')
 
 /** Append one trail event (B1) for a batch item. actorId present → a human reply. */
-async function trailEvent(ctx: SiteopsCtx, item: { kind: 'issue' | 'todo'; id: string; orgId: string }, type: string, body: string, actorId: string | null, pendingReanalysis = false): Promise<void> {
+// Returns the inserted followup_events id (or null on failure) — the v2 executor binds a resolve's undo to
+// this id (active_resolve_event). Additive: every other caller ignores the return.
+async function trailEvent(ctx: SiteopsCtx, item: { kind: 'issue' | 'todo'; id: string; orgId: string }, type: string, body: string, actorId: string | null, pendingReanalysis = false): Promise<string | null> {
   const row = {
     org_id: item.orgId,
     problem_id: item.kind === 'issue' ? item.id : null,
@@ -285,9 +287,10 @@ async function trailEvent(ctx: SiteopsCtx, item: { kind: 'issue' | 'todo'; id: s
   }
   // pending_reanalysis marks a pre-Step-3 enrichment so rich re-analyze can harvest it later. Degrade if
   // the column isn't applied yet (capture-first: a trail write must never fail the flow).
-  let ins = await ctx.supabase.from('followup_events').insert(pendingReanalysis ? { ...row, pending_reanalysis: true } : row)
-  if (ins.error && pendingReanalysis) ins = await ctx.supabase.from('followup_events').insert(row)
-  if (ins.error) console.error('[siteops:trail] insert failed:', ins.error.message)
+  let ins = await ctx.supabase.from('followup_events').insert(pendingReanalysis ? { ...row, pending_reanalysis: true } : row).select('id').single()
+  if (ins.error && pendingReanalysis) ins = await ctx.supabase.from('followup_events').insert(row).select('id').single()
+  if (ins.error) { console.error('[siteops:trail] insert failed:', ins.error.message); return null }
+  return ins.data?.id ?? null
 }
 /** The replying supervisor's user_id (for trail attribution), or null. */
 async function senderUserId(ctx: SiteopsCtx): Promise<string | null> {
@@ -335,7 +338,7 @@ async function judgeResolution(issue: { title: string; cause: string | null }, r
 async function applyBatchResolution(
   ctx: SiteopsCtx, item: BatchItem, status: 'resolved' | 'still_open' | 'unknown',
   replyText: string, cadenceMap: CadenceMap, actorId: string | null, now: Date,
-  opts: { bareAck?: boolean; force?: 'resolve' | 'addressing'; reason?: string } = {},
+  opts: { bareAck?: boolean; force?: 'resolve' | 'addressing'; reason?: string; out?: { resolveEvent?: string } } = {},
 ): Promise<'resolved' | 'open'> {
   // The bare-ack fast path (cardinality, no LLM): trail it as `bare_ack` so the feed shows WHY the chase
   // advanced, and NEVER consult the judge — an ack is engagement, never closure, so it can only ADDRESS.
@@ -362,8 +365,11 @@ async function applyBatchResolution(
   if (resolved) {
     const note = reason || replyText.trim().slice(0, 140)
     if (item.kind === 'issue') {
-      await ctx.supabase.from('problems').update({ status: 'RESOLVED', next_followup_at: null }).eq('id', item.id)
-      await trailEvent(ctx, item, 'status_changed', note ? `Resolved — ${note}` : 'Resolved — confirmed by reply', actorId)
+      // Trail FIRST so its id exists as the FK target, then stamp it as the ACTIVE resolve — the undo binds
+      // to this exact event, so a later re-resolve (new event) makes a stale old undo no-op.
+      const eid = await trailEvent(ctx, item, 'status_changed', note ? `Resolved — ${note}` : 'Resolved — confirmed by reply', actorId)
+      await ctx.supabase.from('problems').update({ status: 'RESOLVED', next_followup_at: null, active_resolve_event: eid }).eq('id', item.id)
+      if (opts.out) opts.out.resolveEvent = eid ?? undefined
     } else {
       await ctx.supabase.from('todos').update({ status: 'DONE' }).eq('id', item.id)
       await trailEvent(ctx, item, 'status_changed', note ? `Done — “${note}”` : 'Done — confirmed by reply', actorId)
@@ -465,12 +471,15 @@ export async function handleUndoResolve(ctx: SiteopsCtx, quotedWamid: string): P
 export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex: ExecCtx): Promise<TerminalOutcome[]> {
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
   const outcomes: TerminalOutcome[] = []
+  const resolvedRefs: { kind: string; id: string; event: string }[] = []   // resolved ISSUES → the undo binding
   for (const t of terminals) {
     try {
       if (t.kind === 'object_updated') {
         const item = ex.itemsById.get(t.update.target_id)
         if (!item) throw new Error(`no candidate for ${t.update.target_id}`)
-        await applyBatchResolution(ctx, item, t.applied === 'resolve' ? 'resolved' : 'still_open', t.update.reason, ex.cadenceMap, ex.actorId, ex.now, { force: t.applied, reason: t.update.reason })
+        const out: { resolveEvent?: string } = {}
+        await applyBatchResolution(ctx, item, t.applied === 'resolve' ? 'resolved' : 'still_open', t.update.reason, ex.cadenceMap, ex.actorId, ex.now, { force: t.applied, reason: t.update.reason, out })
+        if (t.applied === 'resolve' && item.kind === 'issue' && out.resolveEvent) resolvedRefs.push({ kind: 'issue', id: item.id, event: out.resolveEvent })
         outcomes.push({ terminal: t, status: 'ok', label: shortLabel(item.title) })
       } else if (t.kind === 'object_created') {
         const proj = await resolveProject(ctx.supabase, ctx.orgId, { nameHint: t.item.project_hint })
@@ -495,7 +504,16 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
     }
   }
   assertAllApplied(terminals, outcomes)   // effect-side no-drop: N terminals → N outcomes (ok|failed), or throw
-  await send(ctx.supabase, ctx.from, { kind: 'text', body: composeReadback(outcomes) }, meta)
+
+  // ONE combined readback. When a resolve landed, it goes as a BUTTONS message with the one-tap "Not
+  // resolved" undo, capturing the resolved issues + their event ids — 4a maps the outbound wamid to those
+  // refs so a tap resolves back to the exact resolve (handleUndoResolve). No resolve → plain text.
+  const body = composeReadback(outcomes)
+  if (resolvedRefs.length) {
+    await send(ctx.supabase, ctx.from, { kind: 'buttons', body, buttons: [{ id: 'siteops_undo', title: 'Not resolved' }] }, { ...meta, capture: { ref_kind: 'readback', object_refs: resolvedRefs } })
+  } else {
+    await send(ctx.supabase, ctx.from, { kind: 'text', body }, meta)
+  }
   return outcomes
 }
 

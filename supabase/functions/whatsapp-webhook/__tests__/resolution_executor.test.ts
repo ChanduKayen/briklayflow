@@ -57,4 +57,23 @@ suite('siteops resolution v2 — executor applyTerminals (effects, honest readba
     expect(outcomes.length).toBe(2)
     expect(outcomes.filter((o) => o.status === 'failed').length).toBe(1)
   })
+
+  // 2b-OUTBOUND LINKAGE — the seam that arms undo, pinned as CONNECTED (tested separately, they'd both
+  // pass while undo is dead in prod). After a resolve terminal: (a) the issue is stamped with a resolve
+  // event, AND (b) the outbound is a BUTTONS message with the "Not resolved" button whose capture object_refs
+  // carry the SAME event id. Event-set AND button-carries-it, or the round-trip can't complete.
+  test('(OB-linkage) resolve → active_resolve_event stamped AND undo button carries the SAME event', async () => {
+    const fake = fakeSupabase({ projects: [{ project_id: 'P1', name: 'ASM Elite' }] })
+    await applyTerminals(ctxFor(fake), [tUpdateResolve('iss-water')], execCtx(new Map([['iss-water', waterItem]])))
+
+    // (a) the issue carries a resolve-event stamp
+    const stamped = fake.writesTo('problems').find((w) => w.op === 'update' && w.payload?.status === 'RESOLVED')?.payload?.active_resolve_event
+    expect(typeof stamped === 'string' && stamped.length > 0).toBe(true)
+    // (b) the outbound is a buttons message with the undo button, capturing the SAME event
+    const ob = fake.writesTo('outbox')[0]
+    expect(ob.payload?.payload?.kind).toBe('buttons')
+    expect((ob.payload?.payload?.buttons ?? []).some((b: { id: string }) => b.id === 'siteops_undo')).toBe(true)
+    const refs = (ob.payload?.capture_ref?.object_refs ?? []) as { kind: string; id: string; event?: string }[]
+    expect(refs.some((r) => r.kind === 'issue' && r.id === 'iss-water' && r.event === stamped)).toBe(true)   // LINKAGE
+  })
 })
