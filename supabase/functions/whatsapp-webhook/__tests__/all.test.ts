@@ -8,6 +8,7 @@ import './message_map.test';
 import './correct.test';
 import './verbs.test';
 import './lateanswer.test';
+import './batch_reply.test';
 import { runAll } from './harness';
 
 await runAll();

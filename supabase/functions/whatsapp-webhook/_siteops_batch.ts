@@ -152,6 +152,37 @@ export function interpretStatus(text: string): ReplyStatus {
   return 'unknown'
 }
 
+// ── reply-fragment routing (the batch-vs-fresh decision) ─────────────────────
+// The crux the message-eating regression lives in. For each fragment of a reply that arrives while a
+// chase batch is open, decide: does it ANSWER a chase item (which), COLLIDE across same-cause items, or
+// is it a NEW OBSERVATION (leftover → route fresh, NEVER consume empty)? Extracted PURE so the text path
+// finally has the payment-gate treatment (see __tests__/batch_reply.test.ts).
+export type FragmentVerdict =
+  | { kind: 'match'; index: number }        // answers batch item[index]
+  | { kind: 'collision'; indexes: number[] }
+  | { kind: 'leftover' }                     // new observation → route fresh
+
+/**
+ * Classify ONE reply fragment against the open batch. `singleFragment` = the whole message was one
+ * fragment; `hasObservation` = the decompose pass found a substantive site item (a real observation, not
+ * a bare ack). PURE.
+ */
+export function classifyReplyFragment(
+  piece: { text: string; task_hint?: string | null; project_hint?: string | null },
+  items: BatchItem[],
+  signals: { singleFragment: boolean; hasObservation: boolean },
+): FragmentVerdict {
+  // CURRENT behaviour: a lone-chase batch force-matches a single-fragment message OR any status-worded
+  // reply — which is what EATS a substantive new observation sent while one chase is open. Fix 1 gates
+  // this on the message carrying NO observation. (Characterization now; the gate pins it.)
+  const force = items.length === 1 && (signals.singleFragment || interpretStatus(piece.text) !== 'unknown')
+  if (force) return { kind: 'match', index: 0 }
+  const m = matchPieceToBatch(piece, items)
+  if (m.kind === 'unique') return { kind: 'match', index: m.index }
+  if (m.kind === 'collision') return { kind: 'collision', indexes: m.indexes }
+  return { kind: 'leftover' }
+}
+
 // ── batch state (chase_batches) ─────────────────────────────────────────────
 const BATCH_COLS = 'id, items'
 

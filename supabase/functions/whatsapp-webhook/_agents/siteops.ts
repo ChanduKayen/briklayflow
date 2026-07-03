@@ -26,7 +26,7 @@ import {
 } from '../_siteops_route.ts'
 import { loadCadenceMap, type CadenceMap } from '../_siteops_timing.ts'
 import {
-  getOpenBatch, dropBatchItems, matchPieceToBatch, interpretStatus,
+  getOpenBatch, dropBatchItems, classifyReplyFragment, interpretStatus,
   type OpenBatch, type BatchItem,
 } from '../_siteops_batch.ts'
 // The engine, bundled for Deno — used to materialise a project's full task set on first WhatsApp touch.
@@ -421,16 +421,13 @@ async function handleBatchReply(
       resolutions.push({ item: batch.items[i], verdict: v }); matchedIdx.add(i)
     }
   } else {
-    // ONE pending item + a SINGLE-fragment reply → it's about that item, attach it even if
-    // we can't classify the status word (terse / non-English replies). The reply is recorded
-    // (interpretStatus then decides resolve vs keep-open). Multi-fragment → match per piece.
-    const singleAnswer = batch.items.length === 1 && frags.length === 1
+    // Sort each fragment into "answers a chase" vs "new observation" via the PURE classifier (see
+    // _siteops_batch). singleFragment/hasObservation carry the pipeline's own signal about whether this
+    // reply is a bare ack or a substantive observation.
+    const signals = { singleFragment: frags.length === 1, hasObservation: pieces.length > 0 }
     for (const piece of frags) {
-      const m = (singleAnswer || (batch.items.length === 1 && interpretStatus(piece.text) !== 'unknown'))
-        ? { kind: 'unique' as const, index: 0 }
-        : matchPieceToBatch(piece, batch.items)
-
-      if (m.kind === 'unique') {
+      const m = classifyReplyFragment(piece, batch.items, signals)
+      if (m.kind === 'match') {
         if (matchedIdx.has(m.index)) continue
         matchedIdx.add(m.index)
         const status = interpretStatus(piece.text)
