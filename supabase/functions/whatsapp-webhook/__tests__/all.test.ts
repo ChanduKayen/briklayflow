@@ -7,6 +7,7 @@ import './reanalyze.test';
 import './message_map.test';
 import './correct.test';
 import './verbs.test';
+import './lateanswer.test';
 import { runAll } from './harness';
 
 await runAll();

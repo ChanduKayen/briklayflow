@@ -17,6 +17,7 @@ import type { CaptureRef } from '../_wa_message_map.ts'
 import { distillSignal } from '../_siteops_reanalyze.ts'
 import { planCorrection } from '../_siteops_correct.ts'
 import { classifyReaction, isRetraction } from '../_siteops_verbs.ts'
+import { reconstructParkedSlots, type ParkedRow } from '../_siteops_lateanswer.ts'
 import { decideAssociation, isBareAffirmation, photoRelatedness, type AssocVerdict } from '../_siteops_assoc.ts'
 import {
   routeItems, applyProgress, buildConfirm, buildMultiConfirm, parseWhen,
@@ -44,6 +45,12 @@ export type SiteopsCtx = {
 }
 
 const TASK_COLS = 'task_id, phase, trade, floor_label, unit_label, name, status, node_key, task_type_id, owner_id, owner_source'
+
+/** STEP 5b — the capture a pick send carries so the drainer maps its outbound wamid to THIS convo. At
+ *  park time (commitInterrupted) we look the wamid up by convo_id and store it as the parked row's
+ *  question_wamid, so a later quoted-reply to the question can recover the parked pick. */
+const pickCapture = (convoId: string | null, projectId: string | null): CaptureRef | undefined =>
+  convoId ? { ref_kind: 'pick', convo_id: convoId, project_id: projectId } : undefined
 
 /** Prefer engine rows (with node_key) over legacy flat rows and dedup by node_key — so the agent
  *  matches/updates exactly the rows the UI's engine Sequence view reads, with no duplicate candidates
@@ -231,7 +238,7 @@ export async function commitInterruptedSiteops(ctx: SiteopsCtx, convo: ConvoRow)
     : kind === 'siteops_photo_pick' ? 'photo_pick'
     : kind === 'siteops_batch_collision' ? 'batch_collision'
     : 'floor'
-  const { error } = await ctx.supabase.from('siteops_unplaced').insert({
+  const { data: ins, error } = await ctx.supabase.from('siteops_unplaced').insert({
     org_id: ctx.orgId,
     project_id: (slots.project_id as string | null) ?? null,
     reason,
@@ -243,8 +250,18 @@ export async function commitInterruptedSiteops(ctx: SiteopsCtx, convo: ConvoRow)
     narration_id: (slots.narration_id as string | null) ?? null,
     sender_number: ctx.from,
     created_by: null,
-  })
+  }).select('id').single()
   if (error) console.error('[siteops:park] siteops_unplaced insert failed:', error.message)
+  // STEP 5b — stamp the PARKED row with the pick question's OUTBOUND wamid (learned via the Step 4a map,
+  // keyed on this convo), so a later quoted-reply to that question recovers the park. Best-effort: the
+  // map row may not exist yet (fast interrupt before the drainer ran) and question_wamid may be
+  // unmigrated — neither can be allowed to fail the park (the observation must survive regardless).
+  if (ins?.id) {
+    try {
+      const { data: m } = await ctx.supabase.from('wa_message_map').select('outbound_wamid').eq('convo_id', convo.id).maybeSingle()
+      if (m?.outbound_wamid) await ctx.supabase.from('siteops_unplaced').update({ question_wamid: m.outbound_wamid }).eq('id', ins.id)
+    } catch (e) { console.warn('[siteops:park] question_wamid stamp skipped:', (e as Error).message) }
+  }
   await closeClean()
   return objectPath ? `Kept that photo to place later.` : `Kept your earlier note to place later.`
 }
@@ -705,7 +722,7 @@ async function finishRoute(ctx: SiteopsCtx, projectId: string, projectName: stri
       site: projectName, progress: out.progress, problems: out.problems, todos: out.todos,
       parked: out.parked.length, pendingPick: 1, ownerLabel: 'you', projectId, appBase: APP_BASE,
     })
-    await openConversation(ctx.supabase, {
+    const convoId = await openConversation(ctx.supabase, {
       orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
       pendingQuestion: `which item: ${typedPick.item.text}`,
       slots: {
@@ -723,7 +740,7 @@ async function finishRoute(ctx: SiteopsCtx, projectId: string, projectName: stri
         ...shortlist.map((c, i) => ({ id: `pick:${i + 1}`, title: shortLabel(c.label).slice(0, 24), description: `[${c.kind}]` })),
         { id: `pick:${shortlist.length + 1}`, title: "None — it's new" },
       ],
-    }, meta)
+    }, { ...meta, capture: pickCapture(convoId, projectId) })
     return 'pick'
   }
 
@@ -742,7 +759,7 @@ async function finishRoute(ctx: SiteopsCtx, projectId: string, projectName: stri
       parked: out.parked.length + extraParked, pendingPick: 1, ownerLabel: 'you',
       projectId, appBase: APP_BASE,
     })
-    await openConversation(ctx.supabase, {
+    const convoId = await openConversation(ctx.supabase, {
       orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
       pendingQuestion: `which task: ${first.item.text}`,
       slots: { kind: 'siteops_disambig', project_id: projectId, project_name: projectName, item: first.item, candidates, narration_id: narrationId, image: ctx.image?.storagePath ? { storagePath: ctx.image.storagePath, caption: ctx.image.caption ?? null } : null },
@@ -757,7 +774,7 @@ async function finishRoute(ctx: SiteopsCtx, projectId: string, projectName: stri
         title: c.name.slice(0, 24),
         description: [c.floor ? (`${c.floor}`) : 'Site-wide', c.unit].filter(Boolean).join(' · '),
       })),
-    }, meta)
+    }, { ...meta, capture: pickCapture(convoId, projectId) })
     return 'pick'   // left a task pick open
   }
 
@@ -939,6 +956,14 @@ export async function stampPossibleFollowup(supabase: any, orgId: string, convo:
  *  / isn't a readback (normal routing continues). The map keys OUTBOUND wamids, so this can't fire on a
  *  reply to the user's own photo (the enrichment window matches the INBOUND photo wamid). */
 export async function handleQuotedReply(ctx: SiteopsCtx, text: string, quotedWamid: string): Promise<boolean> {
+  // STEP 5b — LATE ANSWER: a quoted-reply to a PARKED pick's original question (context.id ===
+  // siteops_unplaced.question_wamid). Recover the park and place it before anything else. The select
+  // tolerates an unmigrated question_wamid column (error → skip → fall through).
+  const parkedRes = await ctx.supabase.from('siteops_unplaced')
+    .select('id, reason, observation, candidates, project_id, object_path, caption, narration_id')
+    .eq('question_wamid', quotedWamid).eq('status', 'unplaced').maybeSingle()
+  if (!parkedRes.error && parkedRes.data) { await placeLateAnswer(ctx, text, parkedRes.data as ParkedRow & { id: string }); return true }
+
   const { data } = await ctx.supabase.from('wa_message_map')
     .select('ref_kind, project_id, object_refs').eq('outbound_wamid', quotedWamid).maybeSingle()
   if (!data || data.ref_kind !== 'readback') return false
@@ -1005,6 +1030,29 @@ async function confirmRefs(supabase: SiteopsCtx['supabase'], orgId: string, refs
       type: 'comment', body: 'Confirmed by sender 👍', actor_kind: 'user', actor_id: null,
     })
   }
+}
+
+/** STEP 5b — place a recovered parked pick: rebuild the resume slots, RE-OPEN the convo with them, and
+ *  route the late answer through the SAME answerSiteops branch it would have hit live; then mark the
+ *  parked row placed. Delegating (not re-implementing) keeps the placement logic single-sourced. */
+async function placeLateAnswer(ctx: SiteopsCtx, text: string, parked: ParkedRow & { id: string }): Promise<void> {
+  const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
+  const slots = reconstructParkedSlots(parked)
+  if (!slots) {   // an evidence-only park (no pending choice) — nothing to re-answer; leave it queued.
+    await send(ctx.supabase, ctx.from, { kind: 'text', body: `That one's on your to-place list — open it in the app to sort it.` }, meta)
+    return
+  }
+  // Re-open the pick as a live convo so answerSiteops drives AND closes it through the normal lifecycle.
+  await openConversation(ctx.supabase, {
+    orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS', pendingQuestion: 'late answer', slots, lastMessageId: ctx.wamid,
+  })
+  const convo = {
+    id: '', org_id: ctx.orgId, sender_number: ctx.from, owning_agent: 'SITEOPS', status: 'OPEN',
+    pending_question: 'late answer', slots_so_far: slots, staged_entry_id: null,
+    last_action_summary: null, opened_at: '', closed_at: null, purge_at: null, last_message_id: ctx.wamid,
+  } as ConvoRow
+  await answerSiteops(ctx, text, convo)
+  await ctx.supabase.from('siteops_unplaced').update({ status: 'placed', resolved_at: new Date().toISOString() }).eq('id', parked.id)
 }
 
 /** Apply an authoritative field CORRECTION (cause / deadline) to the objects a readback named. Reuses

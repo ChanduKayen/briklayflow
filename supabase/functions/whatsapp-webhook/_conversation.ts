@@ -48,7 +48,8 @@ export async function getRouterView(supabase: any, orgId: string, sender: string
   return { open: null, lingering: null, state: 'FRESH' }
 }
 
-/** Open (or update the single OPEN) conversation for this sender. */
+/** Open (or update the single OPEN) conversation for this sender. Returns the convo id (Step 4a/5b:
+ *  a pick send captures it so its outbound wamid can later be mapped back to this conversation). */
 export async function openConversation(
   supabase: any,
   c: {
@@ -56,7 +57,7 @@ export async function openConversation(
     pendingQuestion: string; slots?: Record<string, unknown>
     stagedEntryId?: string | null; lastMessageId?: string | null
   },
-): Promise<void> {
+): Promise<string | null> {
   const { data: existing } = await supabase
     .from('wa_conversations')
     .select('id')
@@ -69,10 +70,15 @@ export async function openConversation(
     slots_so_far: c.slots ?? {}, staged_entry_id: c.stagedEntryId ?? null,
     last_message_id: c.lastMessageId ?? null,
   }
-  const { error } = existing
-    ? await supabase.from('wa_conversations').update(patch).eq('id', existing.id)
-    : await supabase.from('wa_conversations').insert({ ...patch, opened_at: new Date().toISOString() })
-  if (error) console.error('[convo] openConversation error:', error)
+  if (existing) {
+    const { error } = await supabase.from('wa_conversations').update(patch).eq('id', existing.id)
+    if (error) console.error('[convo] openConversation error:', error)
+    return existing.id
+  }
+  const { data, error } = await supabase.from('wa_conversations')
+    .insert({ ...patch, opened_at: new Date().toISOString() }).select('id').single()
+  if (error) { console.error('[convo] openConversation error:', error); return null }
+  return data?.id ?? null
 }
 
 /** Close the conversation (lingering, with purge_at) -- transaction staged/done. */
