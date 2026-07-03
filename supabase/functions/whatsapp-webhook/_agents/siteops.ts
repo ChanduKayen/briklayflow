@@ -27,7 +27,7 @@ import {
 import { loadCadenceMap, type CadenceMap } from '../_siteops_timing.ts'
 import {
   getOpenBatch, dropBatchItems, classifyReplyFragment, scopeBatchToProject, interpretStatus,
-  routeEmptyDecompose,
+  routeEmptyDecompose, isBareAck,
   type OpenBatch, type BatchItem,
 } from '../_siteops_batch.ts'
 // The engine, bundled for Deno — used to materialise a project's full task set on first WhatsApp touch.
@@ -331,14 +331,19 @@ async function judgeResolution(issue: { title: string; cause: string | null }, r
 async function applyBatchResolution(
   ctx: SiteopsCtx, item: BatchItem, status: 'resolved' | 'still_open' | 'unknown',
   replyText: string, cadenceMap: CadenceMap, actorId: string | null, now: Date,
+  opts: { bareAck?: boolean } = {},
 ): Promise<'resolved' | 'open'> {
-  await trailEvent(ctx, item, 'reply_received', replyText.slice(0, 180), actorId)
+  // The bare-ack fast path (cardinality, no LLM): trail it as `bare_ack` so the feed shows WHY the chase
+  // advanced, and NEVER consult the judge — an ack is engagement, never closure, so it can only ADDRESS.
+  await trailEvent(ctx, item, opts.bareAck ? 'bare_ack' : 'reply_received', replyText.slice(0, 180), actorId)
 
   // ISSUES → LLM judgment (with reason); fall back to the keyword status if the model is
-  // unavailable. TO-DOS → keyword strike-off.
+  // unavailable. TO-DOS → keyword strike-off. A bare ack skips the judge entirely (deterministic ADDRESSING).
   let resolved: boolean
   let reason = ''
-  if (item.kind === 'issue') {
+  if (opts.bareAck) {
+    resolved = false                       // an ack advances, never closes — RESOLVE stays behind the model
+  } else if (item.kind === 'issue') {
     const judged = await judgeResolution({ title: item.title, cause: item.cause }, replyText)
     resolved = judged ? judged.resolved : status === 'resolved'
     reason = judged?.reason ?? ''
@@ -423,7 +428,12 @@ async function handleBatchReply(
   const { scoped, routeFresh } = scopeBatchToProject(batch.items, pre.projectId)
   if (routeFresh) return false
 
-  if (allClear) {
+  if (isBareAck(text) && scoped.length === 1) {
+    // THE FAST PATH (cardinality, not meaning) — a recognised bare ack + exactly ONE open chase → that
+    // chase, ADDRESSING, deterministically, no LLM. One referent + zero content = nothing to interpret.
+    const v = await applyBatchResolution(ctx, scoped[0], 'still_open', text, cadenceMap, actorId, now, { bareAck: true })
+    resolutions.push({ item: scoped[0], verdict: v }); matchedIdx.add(0)
+  } else if (allClear) {
     for (let i = 0; i < scoped.length; i++) {
       const v = await applyBatchResolution(ctx, scoped[i], 'resolved', text, cadenceMap, actorId, now)
       resolutions.push({ item: scoped[i], verdict: v }); matchedIdx.add(i)

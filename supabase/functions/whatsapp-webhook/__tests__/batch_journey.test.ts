@@ -135,6 +135,42 @@ suite('siteops empty-decompose JOURNEY — state combinations', () => {
   })
 })
 
+suite('siteops empty-decompose JOURNEY — bare-ack fast path (cardinality, no LLM)', () => {
+  // The sari ruling, wired: a recognised bare ack + EXACTLY ONE open chase → that chase ADDRESSING,
+  // deterministically, no model call, trailed `bare_ack`. RESOLVE stays behind the model (ack ≠ closure),
+  // so the chase advances but never closes, and the batch stays open. Discriminator: a `bare_ack` trail —
+  // absent on the pre-fast-path force-match path (which trails reply_received/status_changed).
+  test('(FP1) "sari" + lone open chase → ADDRESSING via bare_ack, not resolved, batch stays open', async () => {
+    const fake = fakeSupabase(loneChaseSeed())
+    await runSiteops(ctxFor(fake), 'sari')
+
+    expect(fake.trail().some((r) => r.type === 'bare_ack')).toBe(true)                 // fast-path marker
+    const probUpd = fake.writesTo('problems').filter((w) => w.op === 'update')
+    expect(probUpd.some((w) => w.payload?.status === 'ADDRESSING')).toBe(true)         // advanced
+    expect(probUpd.some((w) => w.payload?.status === 'RESOLVED')).toBe(false)          // never closed on an ack
+    expect(fake.writesTo('chase_batches').some((w) => w.op === 'update' && w.payload?.status === 'CLOSED')).toBe(false)
+  })
+
+  // Guard: MULTI-item batch + bare ack is genuinely ambiguous → NOT fast-pathed (no bare_ack trail); it
+  // falls through to the normal path (→ the model, which correctly declines).
+  test('(FP2) "sari" + MULTI-item batch → NOT fast-pathed (no bare_ack trail)', async () => {
+    const items: BatchItem[] = [
+      { kind: 'issue', id: 'water', orgId: ORG, projectId: 'proj-asm', projectName: 'ASM Elite', title: 'waterlogging', taskName: null, cause: 'weather' },
+      { kind: 'issue', id: 'cement', orgId: ORG, projectId: 'proj-asm', projectName: 'ASM Elite', title: 'cement short', taskName: null, cause: 'material' },
+    ]
+    const fake = fakeSupabase({ ...loneChaseSeed(), chase_batches: [{ id: 'batch-1', items }], problems: { water: { status: 'OPEN' }, cement: { status: 'OPEN' } } })
+    await runSiteops(ctxFor(fake), 'sari')
+    expect(fake.trail().some((r) => r.type === 'bare_ack')).toBe(false)
+  })
+
+  // Guard: a CONTENTFUL message on a lone chase is not a bare ack → not fast-pathed (no bare_ack trail).
+  test('(FP3) contentful "cement short" + lone chase → NOT fast-pathed (no bare_ack trail)', async () => {
+    const fake = fakeSupabase(loneChaseSeed())
+    await runSiteops(ctxFor(fake), 'cement short tomorrow')
+    expect(fake.trail().some((r) => r.type === 'bare_ack')).toBe(false)
+  })
+})
+
 suite('siteops cross-script match (Defect B — standing spec, expected-red)', () => {
   // TEST 2 — SKIPPED until Defect B (LLM-match-on-lexical-miss) lands. matchPieceToBatch tokenises on
   // /[a-z0-9]+/ (ASCII only), so a Telugu-script reply yields ZERO subject tokens and can never key-match a

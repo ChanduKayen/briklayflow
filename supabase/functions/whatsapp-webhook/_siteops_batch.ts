@@ -181,6 +181,37 @@ export function scopeBatchToProject(items: BatchItem[], projectId: string | null
   return { scoped, routeFresh: scoped.length === 0 }
 }
 
+// ── the ONE deterministic fast path (cardinality, NOT meaning) ───────────────
+// A bare ack ("sari"/"ok"/"haan"/👍) carries no matchable content — the model honestly grades it both-false
+// (the live lane proved this stable, 6/6). But bounced back "didn't catch" to a supervisor who just
+// acknowledged your chase is the stranded-ack failure. Against EXACTLY ONE open chase there is nothing to
+// interpret: one referent, zero content = the one referent. So a recognised bare ack + a single open chase
+// → that chase, ADDRESSING (an ack is engagement, never closure). This is NOT the deleted meaning-heuristic
+// (token-matching decided MEANING and is dead): "which of one thing does a contentless ack refer to"
+// decides nothing. Guarded tight so it can't grow into a meaning-decider: the ack list is a CONSERVATIVE
+// whitelist (anything with a noun/second clause is not a bare ack → the model); closure words (done/sorted/
+// cleared) are DELIBERATELY excluded so RESOLVE stays behind the model's closure_explicit gate; and the
+// single-open-chase condition is enforced by the caller. Multi-chase + bare ack is genuinely ambiguous →
+// the model (which correctly says both-false).
+const ACK_WORDS = new Set([
+  'ok', 'okay', 'okk', 'k', 'kk', 'sari', 'saree', 'sare', 'avunu', 'haan', 'han', 'ha', 'haa',
+  'thik', 'theek', 'achha', 'accha', 'acha', 'ji', 'fine', 'alright', 'noted', 'sure', 'yes', 'yep', 'yeah',
+])
+const ACK_HONORIFIC = new Set(['sir', 'anna', 'bro', 'na', 'madam', 'maam'])   // NB: 'ji' is an ack word, not stripped
+const ACK_EMOJI_RE = /[\u{1F44D}\u{1F64F}✓✅]/u   // 👍 🙏 ✓ ✅
+/** A CONSERVATIVE bare-acknowledgement (engagement, never closure). Whitelist only — a miss goes to the
+ *  model (safe), a false-positive would fast-path a real message (unsafe), so bias to false. PURE. */
+export function isBareAck(text: string): boolean {
+  const raw = (text ?? '').trim()
+  if (!raw) return false
+  const stripped = raw.replace(/[\u{1F44D}\u{1F64F}✓✅\s.!,]+/gu, '')
+  if (stripped === '') return ACK_EMOJI_RE.test(raw)   // only ack-emoji + punctuation
+  const words = raw.toLowerCase().replace(/[\u{1F44D}\u{1F64F}✓✅.!,]+/gu, ' ')
+    .split(/\s+/).filter(Boolean).filter((w) => !ACK_HONORIFIC.has(w))
+  if (!words.length || words.length > 2) return false   // >2 tokens = carries content → the model
+  return words.every((w) => ACK_WORDS.has(w))
+}
+
 // ── the empty-decompose SEAM (Defect A) ──────────────────────────────────────
 // WHERE an EMPTY / UNREADABLE decompose goes. decompose renders a TERSE or NON-ENGLISH chase answer
 // ("sari" = ok, "waterlogging ఇష్యూ రిసాల్వ్డ్" = resolved) to ZERO items — legitimately, by its own

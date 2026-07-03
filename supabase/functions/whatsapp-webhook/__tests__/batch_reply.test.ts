@@ -5,7 +5,7 @@
 // a LOCK; no message is ever eaten.
 
 import { suite, test, expect } from './harness'
-import { classifyReplyFragment, scopeBatchToProject, type BatchItem } from '../_siteops_batch.ts'
+import { classifyReplyFragment, scopeBatchToProject, isBareAck, type BatchItem } from '../_siteops_batch.ts'
 
 let seq = 0
 const item = (p: Partial<BatchItem>): BatchItem => {
@@ -51,6 +51,22 @@ suite('siteops batch-reply — classifyReplyFragment (no message eaten)', () => 
     const batch = [item({ id: 'water', title: 'waterlogging in basement' }), item({ id: 'cement', title: 'cement short' })]
     const v = classifyReplyFragment({ text: 'waterlogging cleared now' }, batch, { singleFragment: true, hasObservation: true })
     expect(v).toEqual({ kind: 'match', index: 0 })
+  })
+})
+
+suite('siteops batch-reply — isBareAck (cardinality fast-path guard, conservative)', () => {
+  // engagement acks (with optional honorific / punctuation / emoji) → true
+  test('recognised bare acks → true', () => {
+    for (const t of ['sari', 'ok', 'OK', 'okay', 'haan', 'ha', 'thik', 'ji', 'sari sir', 'ok ji', 'noted', '👍', 'ok 👍', '🙏', 'sari.']) {
+      expect(isBareAck(t)).toBe(true)
+    }
+  })
+  // anything with content, a second clause, or a CLOSURE word → false (goes to the model; RESOLVE stays
+  // behind closure_explicit). Closure words are deliberately NOT acks.
+  test('content / closure words / multi-clause → false (to the model)', () => {
+    for (const t of ['cement short', 'sari tiles broke', 'done', 'sorted', 'cleared', 'waterlogging resolved', 'ok cement short tomorrow', '']) {
+      expect(isBareAck(t)).toBe(false)
+    }
   })
 })
 
