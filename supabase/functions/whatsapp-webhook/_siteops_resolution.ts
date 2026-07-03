@@ -62,7 +62,9 @@ export interface ResolutionContext {
 export type Terminal =
   | { kind: 'object_created'; item: ObserveItem; as: 'classified' | 'note'; upgradeOffer: boolean; reason: string }
   | { kind: 'object_updated'; update: AttachUpdate; applied: 'resolve' | 'addressing'; undo: boolean; readback: string; reason: string }
-  | { kind: 'question_asked'; about: 'which_item' | 'which_project'; ref: string | null; reason: string }
+  // carries its SOURCE so the executor can open the right pick AND the resume validates against exactly the
+  // offered set (which_item → the update being confirmed; which_project → the new item awaiting a site).
+  | { kind: 'question_asked'; about: 'which_item' | 'which_project'; ref: string | null; update?: AttachUpdate; item?: ObserveItem; reason: string }
   | { kind: 'queued_as_evidence'; reason: string }
   | { kind: 'acked_didnt_catch'; contract: ResolutionContract; reason: string }
 
@@ -74,10 +76,10 @@ export type Terminal =
 // resolve onto something we didn't offer.
 function planUpdate(u: AttachUpdate, ctx: ResolutionContext): Terminal {
   if (!ctx.candidateIds.has(u.target_id)) {
-    return { kind: 'question_asked', about: 'which_item', ref: u.target_id, reason: `target ${u.target_id} not in candidate set — cannot touch state on an un-offered referent` }
+    return { kind: 'question_asked', about: 'which_item', ref: u.target_id, update: u, reason: `target ${u.target_id} not in candidate set — cannot touch state on an un-offered referent` }
   }
   if (u.confidence === 'low') {
-    return { kind: 'question_asked', about: 'which_item', ref: u.target_id, reason: `low confidence on ${u.target_id} — ask (pick-one w/ "it's new")` }
+    return { kind: 'question_asked', about: 'which_item', ref: u.target_id, update: u, reason: `low confidence on ${u.target_id} — ask (pick-one w/ "it's new")` }
   }
   if (u.confidence === 'med') {
     return { kind: 'object_updated', update: u, applied: 'addressing', undo: false, readback: 'named the match — wrong item? tap', reason: `med confidence — ${u.reason} — ADDRESSING only, never resolve` }
@@ -98,7 +100,7 @@ function planUpdate(u: AttachUpdate, ctx: ResolutionContext): Terminal {
 // the caller's concern (the model won't emit a task in Axis 1); here we only create issue/snag notes.
 function planObserve(it: ObserveItem): Terminal {
   if (!it.project_hint) {
-    return { kind: 'question_asked', about: 'which_project', ref: it.detail, reason: `new ${it.kind} with no resolvable site — ask which project` }
+    return { kind: 'question_asked', about: 'which_project', ref: it.detail, item: it, reason: `new ${it.kind} with no resolvable site — ask which project` }
   }
   const as = it.confidence === 'high' ? 'classified' : 'note'
   return { kind: 'object_created', item: it, as, upgradeOffer: as === 'note', reason: `${it.confidence} — create ${it.kind} as ${as}` }

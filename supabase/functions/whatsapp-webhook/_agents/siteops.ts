@@ -468,6 +468,48 @@ export async function handleUndoResolve(ctx: SiteopsCtx, quotedWamid: string): P
   return true   // we handled the undo tap (a stale/idempotent no-op is still "handled")
 }
 
+// question_asked → open the pick through an EXISTING proven resume, storing exactly the offered set in the
+// conversation slots (same-set-in / same-set-validated-out — the conversation twin of the planner's
+// candidate-membership guard). which_item confirms a LOW/un-offered update (→ ADDRESSING on confirm; RESOLVE
+// stays behind the model); which_project sites a new item. Both carry the "None — it's new" / project-pick
+// escapes the resumes already implement.
+async function askResolutionQuestion(ctx: SiteopsCtx, t: Extract<Terminal, { kind: 'question_asked' }>, ex: ExecCtx): Promise<void> {
+  const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
+  if (t.about === 'which_item' && t.update) {
+    const item = ex.itemsById.get(t.update.target_id)
+    if (!item) return
+    const cand = { id: item.id, kind: item.kind, orgId: item.orgId, projectId: item.projectId, projectName: item.projectName, title: item.title, cause: item.cause }
+    await openConversation(ctx.supabase, {
+      orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
+      pendingQuestion: `confirm ${shortLabel(item.title)}`,
+      slots: { kind: 'siteops_batch_collision', status: 'still_open', piece_text: t.update.reason, candidates: [cand], project_id: item.projectId ?? null, narration_id: ex.narrationId, image: null },
+      lastMessageId: ctx.wamid,
+    })
+    // ladder context in the prompt — the question IS a pre-consequence readback (what confirm does).
+    await send(ctx.supabase, ctx.from, {
+      kind: 'list',
+      body: `Is this about *${shortLabel(item.title)}*? Confirming marks it addressed — or is it new?`,
+      button: 'Pick',
+      rows: [{ id: 'pick:1', title: shortLabel(item.title).slice(0, 24) }, { id: 'pick:2', title: "None — it's new" }],
+    }, meta)
+    return
+  }
+  if (t.about === 'which_project' && t.item) {
+    const { data: projRows } = await ctx.supabase.from('projects').select('project_id, name').eq('org_id', ctx.orgId).eq('status', 'Active')
+    const cands = ((projRows ?? []) as { project_id: string; name: string }[]).map((p) => ({ id: p.project_id, name: p.name }))
+    await openConversation(ctx.supabase, {
+      orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
+      pendingQuestion: 'which project?',
+      slots: { kind: 'siteops_project', items: [toSiteItem(t.item)], candidates: cands, narration_id: ex.narrationId, image: null },
+      lastMessageId: ctx.wamid,
+    })
+    await send(ctx.supabase, ctx.from, {
+      kind: 'list', body: `Which project is *${shortLabel(t.item.detail)}* for?`, button: 'Pick project',
+      rows: cands.slice(0, 10).map((c, i) => ({ id: `pick:${i + 1}`, title: c.name.slice(0, 24) })),
+    }, meta)
+  }
+}
+
 export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex: ExecCtx): Promise<TerminalOutcome[]> {
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
   const outcomes: TerminalOutcome[] = []
@@ -489,9 +531,17 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
         outcomes.push({ terminal: t, status: 'ok', label: shortLabel(t.item.detail) })
       } else if (t.kind === 'acked_didnt_catch') {
         outcomes.push({ terminal: t, status: 'ok', label: '' })   // no state effect; the readback IS the ack
+      } else if (t.kind === 'question_asked') {
+        // Open the pick through the PROVEN resume, storing exactly the offered set in slots (so the answer
+        // validates against what was asked, never a re-load). Sends its own interactive message.
+        await askResolutionQuestion(ctx, t, ex)
+        outcomes.push({ terminal: t, status: 'ok', label: terminalLabel(t) })
+      } else if (t.kind === 'queued_as_evidence') {
+        // Honest STRUCTURAL park (five-part): durable row + a DISTINCT parked_reason so Step 6 can tell an
+        // image awaiting placement from a text obs that couldn't be sited. Near-miss lands in Phase 3.
+        await parkObservation(ctx, 'photo evidence', 'evidence_await_placement', ex.narrationId)
+        outcomes.push({ terminal: t, status: 'ok', label: 'photo' })
       } else {
-        // question_asked / queued_as_evidence are wired in the chase-adoption / image commits. Until then,
-        // NEVER drop: park so the observation survives, and report failed so the readback is honest.
         await parkObservation(ctx, terminalObservation(t), 'v2_unhandled_terminal', ex.narrationId)
         outcomes.push({ terminal: t, status: 'failed', label: terminalLabel(t) })
       }
@@ -505,14 +555,17 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
   }
   assertAllApplied(terminals, outcomes)   // effect-side no-drop: N terminals → N outcomes (ok|failed), or throw
 
-  // ONE combined readback. When a resolve landed, it goes as a BUTTONS message with the one-tap "Not
-  // resolved" undo, capturing the resolved issues + their event ids — 4a maps the outbound wamid to those
-  // refs so a tap resolves back to the exact resolve (handleUndoResolve). No resolve → plain text.
-  const body = composeReadback(outcomes)
-  if (resolvedRefs.length) {
-    await send(ctx.supabase, ctx.from, { kind: 'buttons', body, buttons: [{ id: 'siteops_undo', title: 'Not resolved' }] }, { ...meta, capture: { ref_kind: 'readback', object_refs: resolvedRefs } })
-  } else {
-    await send(ctx.supabase, ctx.from, { kind: 'text', body }, meta)
+  // ONE combined readback for the NON-question terminals (questions already sent their own pick). When a
+  // resolve landed it goes as a BUTTONS message with the one-tap "Not resolved" undo, capturing the resolved
+  // issues + their event ids — 4a maps the outbound wamid to those refs (handleUndoResolve). No resolve →
+  // text. If every terminal was a question, the picks ARE the reply — no combined readback.
+  if (outcomes.some((o) => o.terminal.kind !== 'question_asked')) {
+    const body = composeReadback(outcomes)
+    if (resolvedRefs.length) {
+      await send(ctx.supabase, ctx.from, { kind: 'buttons', body, buttons: [{ id: 'siteops_undo', title: 'Not resolved' }] }, { ...meta, capture: { ref_kind: 'readback', object_refs: resolvedRefs } })
+    } else {
+      await send(ctx.supabase, ctx.from, { kind: 'text', body }, meta)
+    }
   }
   return outcomes
 }

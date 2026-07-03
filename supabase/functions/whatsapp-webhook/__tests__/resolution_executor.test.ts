@@ -6,7 +6,7 @@
 
 import { suite, test, expect } from './harness'
 import { fakeSupabase, type Seed } from './fake_supabase'
-import { applyTerminals, type ExecCtx } from '../_agents/siteops.ts'
+import { applyTerminals, answerSiteops, type ExecCtx } from '../_agents/siteops.ts'
 import type { Terminal, AttachUpdate } from '../_siteops_resolution.ts'
 import type { BatchItem } from '../_siteops_batch.ts'
 
@@ -75,5 +75,64 @@ suite('siteops resolution v2 — executor applyTerminals (effects, honest readba
     expect((ob.payload?.payload?.buttons ?? []).some((b: { id: string }) => b.id === 'siteops_undo')).toBe(true)
     const refs = (ob.payload?.capture_ref?.object_refs ?? []) as { kind: string; id: string; event?: string }[]
     expect(refs.some((r) => r.kind === 'issue' && r.id === 'iss-water' && r.event === stamped)).toBe(true)   // LINKAGE
+  })
+})
+
+suite('siteops resolution v2 — executor 2c (question_asked wiring + evidence structural park)', () => {
+  const tQItem = (target_id: string): Terminal => ({ kind: 'question_asked', about: 'which_item', ref: target_id, update: upd({ target_id, confidence: 'low' }), reason: '' })
+  const tQProject = (detail: string): Terminal => ({ kind: 'question_asked', about: 'which_project', ref: detail, item: { kind: 'issue', detail, location: null, project_hint: null, confidence: 'high' }, reason: '' })
+  const tEvidence = (): Terminal => ({ kind: 'queued_as_evidence', reason: '' })
+
+  // A LOW update → a confirm-or-new pick, wired through the PROVEN siteops_batch_collision resume: the
+  // conversation stores exactly the offered candidate, and the prompt carries the ladder's consequence.
+  test('(Q-item) question_asked(which_item) → opens siteops_batch_collision w/ the offered target + "it\'s new"', async () => {
+    const fake = fakeSupabase({ projects: [{ project_id: 'P1', name: 'ASM Elite' }] })
+    await applyTerminals(ctxFor(fake), [tQItem('iss-water')], execCtx(new Map([['iss-water', waterItem]])))
+
+    const convo = fake.writesTo('wa_conversations')[0]
+    expect(convo.payload?.slots_so_far?.kind).toBe('siteops_batch_collision')
+    expect((convo.payload?.slots_so_far?.candidates ?? []).some((c: { id: string }) => c.id === 'iss-water')).toBe(true)
+    const list = fake.writesTo('outbox').find((w) => w.payload?.payload?.kind === 'list')
+    expect((list?.payload?.payload?.rows ?? []).some((r: { title: string }) => /it's new/i.test(r.title))).toBe(true)
+    expect(/confirming marks it addressed/i.test(list?.payload?.payload?.body ?? '')).toBe(true)   // ladder context
+  })
+
+  // A new item with no resolvable site → which_project, wired through the proven siteops_project resume,
+  // holding the observe item so the pick routes it fresh.
+  test('(Q-project) question_asked(which_project) → opens siteops_project holding the item', async () => {
+    const fake = fakeSupabase({ projects: [{ project_id: 'P1', name: 'ASM Elite' }, { project_id: 'P2', name: 'Lakshmi' }] })
+    await applyTerminals(ctxFor(fake), [tQProject('crack in slab')], execCtx())
+
+    const convo = fake.writesTo('wa_conversations')[0]
+    expect(convo.payload?.slots_so_far?.kind).toBe('siteops_project')
+    expect((convo.payload?.slots_so_far?.items ?? []).length).toBe(1)
+  })
+
+  // queued_as_evidence → the honest STRUCTURAL park (five-part: durable row + a DISTINCT parked_reason so
+  // Step 6 can tell image-awaiting-placement from text-unsited; near-miss populated in Phase 3). Not a fail.
+  test('(EV-park) queued_as_evidence → siteops_unplaced(evidence_await_placement) + honest evidence reply', async () => {
+    const fake = fakeSupabase({})
+    await applyTerminals(ctxFor(fake), [tEvidence()], execCtx())
+
+    const park = fake.writesTo('siteops_unplaced')
+    expect(park.length).toBe(1)
+    expect(park[0].payload?.reason).toBe('evidence_await_placement')      // distinct from text_unsited
+    expect(fake.outbox().some((b) => /photo saved as evidence/i.test(b))).toBe(true)
+  })
+
+  // SLOTS-STALENESS pin — the conversation-level twin of the candidate-membership guard. The resume must
+  // validate a pick against the OFFERED set (slots.candidates), not a freshly-loaded set that shifted
+  // between question and answer. Cheap documentation that the proven resume already does slots-not-reload.
+  test('(Q-stale) answer validates against the OFFERED slots, not a re-load', async () => {
+    const fake = fakeSupabase({ problems: { 'iss-offered': { status: 'OPEN' } } })
+    const convo = {
+      id: 'c1', org_id: ORG, sender_number: '919900000000', status: 'OPEN', owning_agent: 'SITEOPS',
+      pending_question: 'which item', staged_entry_id: null, last_message_id: null,
+      slots_so_far: { kind: 'siteops_batch_collision', status: 'still_open', piece_text: 'that thing', project_id: 'P1', candidates: [{ id: 'iss-offered', kind: 'issue', orgId: ORG, projectName: 'ASM Elite', title: 'waterlogging', cause: null }] },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any
+    await answerSiteops(ctxFor(fake), '1', convo)   // pick #1 → the OFFERED candidate, from slots
+
+    expect(fake.writesTo('problems').some((w) => w.op === 'update' && w.filters.some(([k, v]) => k === 'id' && v === 'iss-offered'))).toBe(true)
   })
 })
