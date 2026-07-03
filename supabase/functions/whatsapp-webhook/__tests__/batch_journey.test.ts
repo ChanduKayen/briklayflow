@@ -78,6 +78,63 @@ suite('siteops empty-decompose JOURNEY (reachability — Defect A)', () => {
   })
 })
 
+// STATE-COMBINATION JOURNEYS — the systemic close the ASM Elite postmortem asked for: now that the
+// harness exists, the reachability matrix is cheap. First tranche below covers the seam's decline branch,
+// the no-eat guarantee under the new wiring, and the resolve-and-close path. (Still to fill as the harness
+// grows: pending-pick recovery via answerSiteops, and the image modality — both distinct entry points.)
+suite('siteops empty-decompose JOURNEY — state combinations', () => {
+  // The OTHER seam branch, end-to-end: an empty/unreadable message with NO open batch is a genuine
+  // non-update → "didn't catch", and touches no chase.
+  test('(J4) empty decompose + NO open batch → "didn\'t catch", no chase touched', async () => {
+    const seed: Seed = { ...loneChaseSeed(), chase_batches: [] }   // no open batch
+    const fake = fakeSupabase(seed)
+    await runSiteops(ctxFor(fake), 'కొంచెం రాంగ్ మెసేజ్')
+
+    expect(fake.outbox().some((b) => /Didn't catch/i.test(b))).toBe(true)
+    expect(fake.trail().length).toBe(0)
+  })
+
+  // NO-EAT under the new wiring: an empty reply that matches NOTHING in a MULTI-item batch (the lone-chase
+  // shortcut does not apply, cross-script match misses) is DECLINED — handleBatchReply returns false and
+  // runSiteops falls through to "didn't catch". Critically: no problems update, no batch close, no trail —
+  // the message is never consumed onto a chase it didn't answer.
+  test('(J5) empty decompose + multi-item batch, no match → declined, zero partial writes', async () => {
+    const items: BatchItem[] = [
+      { kind: 'issue', id: 'water', orgId: ORG, projectId: 'proj-asm', projectName: 'ASM Elite', title: 'waterlogging in basement', taskName: null, cause: 'weather' },
+      { kind: 'issue', id: 'cement', orgId: ORG, projectId: 'proj-asm', projectName: 'ASM Elite', title: 'cement short', taskName: null, cause: 'material' },
+    ]
+    const fake = fakeSupabase({
+      ...loneChaseSeed(),
+      chase_batches: [{ id: 'batch-1', items }],
+      problems: { water: { status: 'OPEN' }, cement: { status: 'OPEN' } },
+    })
+    await runSiteops(ctxFor(fake), 'ఏదో ఒక మెసేజ్')   // Telugu, matches neither chase by ASCII tokens
+
+    expect(fake.outbox().some((b) => /Didn't catch/i.test(b))).toBe(true)   // declined, not consumed
+    expect(fake.trail().length).toBe(0)                                     // no chase touched
+    expect(fake.writesTo('problems').filter((w) => w.op === 'update').length).toBe(0)   // no re-time/advance
+    expect(fake.writesTo('chase_batches').filter((w) => w.op === 'update').length).toBe(0) // batch untouched
+  })
+
+  // RESOLVE-AND-CLOSE: a to-do chase + a keyword-clear ack ("done") resolves the item (todos→DONE) and
+  // closes the emptied batch. Exercises the todo branch (no LLM judge) and dropBatchItems, complementing
+  // tests 1/3 which exercise the issue kept-open advance.
+  test('(J6) "done" ack + lone open TODO chase → resolves it and closes the batch', async () => {
+    const todo: BatchItem = { kind: 'todo', id: 'todo-1', orgId: ORG, projectId: 'proj-asm', projectName: 'ASM Elite', title: 'call the inspector', taskName: null, cause: null }
+    const fake = fakeSupabase({
+      ...loneChaseSeed(),
+      chase_batches: [{ id: 'batch-1', items: [todo] }],
+      todos: { 'todo-1': { status: 'OPEN' } },
+    })
+    await runSiteops(ctxFor(fake), 'done')
+
+    expect(fake.trail().some((r) => r.todo_id === 'todo-1')).toBe(true)                       // chase touched
+    expect(fake.writesTo('todos').some((w) => w.op === 'update' && w.payload?.status === 'DONE')).toBe(true)
+    expect(fake.writesTo('chase_batches').some((w) => w.op === 'update' && w.payload?.status === 'CLOSED')).toBe(true)
+    expect(fake.outbox().some((b) => /Didn't catch/i.test(b))).toBe(false)
+  })
+})
+
 suite('siteops cross-script match (Defect B — standing spec, expected-red)', () => {
   // TEST 2 — SKIPPED until Defect B (LLM-match-on-lexical-miss) lands. matchPieceToBatch tokenises on
   // /[a-z0-9]+/ (ASCII only), so a Telugu-script reply yields ZERO subject tokens and can never key-match a
