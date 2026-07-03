@@ -34,6 +34,7 @@ import {
   composeReadback, assertAllApplied,
   type Terminal, type TerminalOutcome,
 } from '../_siteops_resolution.ts'
+import { resolveInbound } from '../_siteops_resolution_llm.ts'
 // The engine, bundled for Deno — used to materialise a project's full task set on first WhatsApp touch.
 import { buildProjectVM } from '../../_shared/siteops-engine.js'
 
@@ -584,7 +585,50 @@ function readbackPart(item: BatchItem, verdict: 'resolved' | 'open'): string {
  * per item. Returns TRUE if it consumed the message; FALSE if NOTHING matched
  * the batch (then runSiteops routes it fresh, leaving the batch open).
  */
+// ── v2 ADOPTION — the unified engine IS the chase-reply path ──────────────────────────────────────────
+// handleBatchReply resolves an open-chase reply by ONE model call (resolveInbound: the message graded
+// against the full candidate set, chased ranked top) → executeResolution's authoritative terminals →
+// applyTerminals. Kept IN FRONT of the model: the bare-ack fast path (cardinality, no LLM). A model failure
+// PARKS (no-miss) and leaves the batch untouched. The old match+judge core is `handleBatchReplyLegacy`
+// below — PHYSICALLY PRESENT but UNREACHABLE (one hardcoded route, no runtime toggle); PHASE 4 is its
+// executioner (delete it + matchPieceToBatch + ASCII tokens + standalone judgeResolution).
 async function handleBatchReply(
+  ctx: SiteopsCtx, text: string, _pieces: SiteItem[], _topProjectHint: string | null,
+  batch: OpenBatch, _projects: ProjectRef[], narrationId: string | null,
+  callModel: (system: string, user: string) => Promise<string> = callLLM,
+): Promise<boolean> {
+  const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
+  const now = new Date()
+  const cadenceMap = await loadCadenceMap(ctx.supabase, ctx.orgId)
+  const actorId = await senderUserId(ctx)
+
+  // FAST PATH (cardinality, not meaning) — a recognised bare ack + exactly ONE open chase → that chase,
+  // ADDRESSING, no LLM. One referent + zero content = nothing to interpret.
+  if (isBareAck(text) && batch.items.length === 1) {
+    const v = await applyBatchResolution(ctx, batch.items[0], 'still_open', text, cadenceMap, actorId, now, { bareAck: true })
+    await send(ctx.supabase, ctx.from, { kind: 'text', body: `Got it — ${readbackPart(batch.items[0], v)}` }, meta)
+    return true
+  }
+
+  // UNIFIED RESOLUTION — one call, then apply the terminals. A park (model down / unreadable) is honest +
+  // leaves the batch untouched; otherwise the executor auto-resolves (+undo), creates, asks, or acks.
+  const rc = { supabase: ctx.supabase, orgId: ctx.orgId, from: ctx.from }
+  const say = (body: string) => send(ctx.supabase, ctx.from, { kind: 'text', body }, meta)
+  const image = ctx.image?.storagePath ? { storagePath: ctx.image.storagePath, caption: ctx.image.caption ?? null } : null
+  const res = await resolveInbound(rc, { message: text, image, narrationId }, batch, say, callModel)
+  if (res.kind === 'parked') return true   // parked + honest reply; the chase batch is UNTOUCHED (no eat, no half-mutation)
+  const itemsById = new Map(batch.items.map((i) => [i.id, i]))
+  const outcomes = await applyTerminals(ctx, res.terminals, { itemsById, cadenceMap, actorId, now, narrationId })
+  // batch bookkeeping the executor doesn't own: drop RESOLVED chased items, close the batch when empty.
+  const resolvedIds = outcomes
+    .filter((o): o is TerminalOutcome & { terminal: Extract<Terminal, { kind: 'object_updated' }> } => o.terminal.kind === 'object_updated' && o.terminal.applied === 'resolve' && o.status === 'ok')
+    .map((o) => o.terminal.update.target_id)
+  if (resolvedIds.length) await dropBatchItems(ctx.supabase, batch, resolvedIds)
+  return true
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- UNREACHABLE (Phase 4 executioner); kept for one bisectable revert of the adoption flip.
+async function handleBatchReplyLegacy(
   ctx: SiteopsCtx, text: string, pieces: SiteItem[], topProjectHint: string | null,
   batch: OpenBatch, projects: ProjectRef[], narrationId: string | null,
 ): Promise<boolean> {
@@ -739,7 +783,7 @@ async function routeLeftovers(
   return bits.length ? `· also ${bits.join(', ')}` : ''
 }
 
-export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?: string } = {}): Promise<void> {
+export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?: string; callModel?: (system: string, user: string) => Promise<string> } = {}): Promise<void> {
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
   const say = (body: string) => send(ctx.supabase, ctx.from, { kind: 'text', body: opts.prefix ? `${opts.prefix}\n\n${body}` : body }, meta)
 
@@ -799,7 +843,7 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
   // then, and when there's no open batch at all, "didn't catch" is the honest answer.
   if (!decomposed) {
     if (routeEmptyDecompose(!!(batch && batch.items.length)) === 'batch' && batch) {
-      const consumed = await handleBatchReply(ctx, text, [], null, batch, projects, narrationId)
+      const consumed = await handleBatchReply(ctx, text, [], null, batch, projects, narrationId, opts.callModel)
       if (consumed) return
     }
     await say(`Didn't catch a site update in that — try again if you meant to send one.`)
@@ -810,7 +854,7 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
   // Consumes the message when something matched; otherwise falls through to fresh routing (the
   // batch stays open in the background — an interruption is never a mode error).
   if (batch && batch.items.length) {
-    const consumed = await handleBatchReply(ctx, text, decomposed.items, decomposed.project_hint, batch, projects, narrationId)
+    const consumed = await handleBatchReply(ctx, text, decomposed.items, decomposed.project_hint, batch, projects, narrationId, opts.callModel)
     if (consumed) return
   }
 

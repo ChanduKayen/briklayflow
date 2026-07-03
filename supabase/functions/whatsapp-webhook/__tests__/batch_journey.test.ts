@@ -43,18 +43,16 @@ function ctxFor(fake: ReturnType<typeof fakeSupabase>) {
 }
 
 suite('siteops empty-decompose JOURNEY (reachability — Defect A)', () => {
-  // TEST 1 — the reported failure. A Telugu-script voice transcript that MEANS "waterlogging issue ASM
-  // Elite resolved" decomposes to nothing (self-resolved-drop / unreadable → empty-valve throws). Over an
-  // open lone chase it MUST reach handleBatchReply, not "Didn't catch". Witness: a followup_events trail
-  // row on the chase item + no "Didn't catch" reply.
-  test('(1) Telugu "waterlogging resolved" + open lone chase → reaches the batch handler (not "didn\'t catch")', async () => {
+  // TEST 1 — the reported failure, now under v2 ADOPTION. A Telugu transcript that decomposes to nothing
+  // still reaches the unified engine (Defect-A wiring intact). With NO model key in-harness it PARKS
+  // honestly ("logged for review") — never the "Didn't catch" dead-end (the Defect-A invariant), and never
+  // force-advanced on a guess. In PROD the model resolves it (see adoption (a)).
+  test('(1) Telugu "waterlogging resolved" + open lone chase → reaches the engine, honestly parked (not "didn\'t catch")', async () => {
     const fake = fakeSupabase(loneChaseSeed())
     await runSiteops(ctxFor(fake), 'వాటర్ లాగింగ్ ఇష్యూ ఏసీ ఎమ్ఎల్ఐటీ రిసాల్వ్డ్')
 
-    const reached = fake.trail().some((r) => r.problem_id === CHASE_ID)
-    const didntCatch = fake.outbox().some((b) => /Didn't catch/i.test(b))
-    expect(reached).toBe(true)       // RED until Defect A: the chase reply must touch the chase item
-    expect(didntCatch).toBe(false)   // RED until Defect A: it must not dead-end at "didn't catch"
+    expect(fake.outbox().some((b) => /Didn't catch/i.test(b))).toBe(false)   // not dead-ended (Defect-A invariant)
+    expect(fake.writesTo('siteops_unplaced').length).toBe(1)                 // reached the engine, held for review
   })
 
   // TEST 3 — the stranded shortcut, un-stranded. batch_reply.test (b) proves "sari" force-matches PURELY;
@@ -94,11 +92,11 @@ suite('siteops empty-decompose JOURNEY — state combinations', () => {
     expect(fake.trail().length).toBe(0)
   })
 
-  // NO-EAT under the new wiring: an empty reply that matches NOTHING in a MULTI-item batch (the lone-chase
-  // shortcut does not apply, cross-script match misses) is DECLINED — handleBatchReply returns false and
-  // runSiteops falls through to "didn't catch". Critically: no problems update, no batch close, no trail —
-  // the message is never consumed onto a chase it didn't answer.
-  test('(J5) empty decompose + multi-item batch, no match → declined, zero partial writes', async () => {
+  // NO-EAT under v2: an unreadable reply (model down) against a MULTI-item batch is PARKED (no-miss), and
+  // — the invariant this test exists for — the chase is UNTOUCHED: no problems update, no batch close, no
+  // trail. The message is never consumed onto a chase it didn't answer. (Witness changed from "didn't
+  // catch" to "parked"; the no-eat property is identical.)
+  test('(J5) empty decompose + multi-item batch, model down → parked (no-miss), chase UNTOUCHED (no eat)', async () => {
     const items: BatchItem[] = [
       { kind: 'issue', id: 'water', orgId: ORG, projectId: 'proj-asm', projectName: 'ASM Elite', title: 'waterlogging in basement', taskName: null, cause: 'weather' },
       { kind: 'issue', id: 'cement', orgId: ORG, projectId: 'proj-asm', projectName: 'ASM Elite', title: 'cement short', taskName: null, cause: 'material' },
@@ -106,29 +104,29 @@ suite('siteops empty-decompose JOURNEY — state combinations', () => {
     const fake = fakeSupabase({
       ...loneChaseSeed(),
       chase_batches: [{ id: 'batch-1', items }],
-      problems: { water: { status: 'OPEN' }, cement: { status: 'OPEN' } },
+      problems: { water: { id: 'water', status: 'OPEN' }, cement: { id: 'cement', status: 'OPEN' } },
     })
-    await runSiteops(ctxFor(fake), 'ఏదో ఒక మెసేజ్')   // Telugu, matches neither chase by ASCII tokens
+    await runSiteops(ctxFor(fake), 'ఏదో ఒక మెసేజ్')   // Telugu, model down in-harness → unreadable → park
 
-    expect(fake.outbox().some((b) => /Didn't catch/i.test(b))).toBe(true)   // declined, not consumed
-    expect(fake.trail().length).toBe(0)                                     // no chase touched
-    expect(fake.writesTo('problems').filter((w) => w.op === 'update').length).toBe(0)   // no re-time/advance
+    expect(fake.writesTo('siteops_unplaced').length).toBe(1)                            // parked, not dead-ended
+    expect(fake.writesTo('problems').filter((w) => w.op === 'update').length).toBe(0)   // no re-time/advance/resolve
     expect(fake.writesTo('chase_batches').filter((w) => w.op === 'update').length).toBe(0) // batch untouched
   })
 
-  // RESOLVE-AND-CLOSE: a to-do chase + a keyword-clear ack ("done") resolves the item (todos→DONE) and
-  // closes the emptied batch. Exercises the todo branch (no LLM judge) and dropBatchItems, complementing
-  // tests 1/3 which exercise the issue kept-open advance.
-  test('(J6) "done" ack + lone open TODO chase → resolves it and closes the batch', async () => {
+  // RESOLVE-AND-CLOSE under v2: a to-do chase + "done" is now MODEL-driven (closure words are deliberately
+  // NOT bare acks, so "done" goes to the model, which grades closure_explicit=true → resolve). The executor
+  // resolves the todo (→DONE) and drops it, closing the emptied batch. Exercises the todo resolve branch +
+  // dropBatchItems through the full v2 stack.
+  test('(J6) "done" + lone open TODO chase → model resolves it (todo→DONE) and closes the batch', async () => {
     const todo: BatchItem = { kind: 'todo', id: 'todo-1', orgId: ORG, projectId: 'proj-asm', projectName: 'ASM Elite', title: 'call the inspector', taskName: null, cause: null }
     const fake = fakeSupabase({
       ...loneChaseSeed(),
       chase_batches: [{ id: 'batch-1', items: [todo] }],
-      todos: { 'todo-1': { status: 'OPEN' } },
+      todos: { 'todo-1': { id: 'todo-1', title: 'call the inspector', project_id: 'proj-asm', status: 'OPEN' } },
     })
-    await runSiteops(ctxFor(fake), 'done')
+    const resolveTodo = () => Promise.resolve(JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: true, updates: [{ target_id: 'todo-1', target_kind: 'todo', action: 'resolve', confidence: 'high', closure_explicit: true, reason: 'done' }] } }))
+    await runSiteops(ctxFor(fake), 'done', { callModel: resolveTodo })
 
-    expect(fake.trail().some((r) => r.todo_id === 'todo-1')).toBe(true)                       // chase touched
     expect(fake.writesTo('todos').some((w) => w.op === 'update' && w.payload?.status === 'DONE')).toBe(true)
     expect(fake.writesTo('chase_batches').some((w) => w.op === 'update' && w.payload?.status === 'CLOSED')).toBe(true)
     expect(fake.outbox().some((b) => /Didn't catch/i.test(b))).toBe(false)

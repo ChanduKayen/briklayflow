@@ -177,10 +177,14 @@ export async function resolveInbound(
   input: InboundInput,
   batch: { items: BatchItem[] } | null,
   send: (body: string) => Promise<void>,
+  callModel: (system: string, user: string) => Promise<string> = callLLM,   // injectable for end-to-end tests; default is the real client
 ): Promise<ResolveOutcome> {
   const candidates = await buildCandidateSet(ctx.supabase, ctx.orgId, batch)
   const isImage = !!input.image
-  const raw = await callLLM(RESOLUTION_SYSTEM, buildResolutionUser(candidates, input.message))
+  // A hard model failure/timeout must PARK, never propagate — callLLM already returns '' on failure, but
+  // guard callModel too so the no-miss guarantee holds whatever the client does.
+  let raw = ''
+  try { raw = await callModel(RESOLUTION_SYSTEM, buildResolutionUser(candidates, input.message)) } catch { raw = '' }
   const disp = disposeRawResponse(raw, new Set(candidates.map((c) => c.id)), isImage)
 
   if (disp.kind === 'terminals') return { kind: 'disposed', terminals: disp.terminals, candidates }
