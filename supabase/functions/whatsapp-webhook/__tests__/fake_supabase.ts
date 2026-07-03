@@ -58,20 +58,22 @@ function datasetFor(table: string, filters: [string, unknown][], seed: Seed): Ro
       const row = (seed.user_profiles ?? []).find((r) => r.id === id) ?? (seed.user_profiles ?? [])[0]
       return row ? [row] : []
     }
+    // problems/todos/site_tasks: keyed by id when filtered (.eq('id'|'task_id')); else the whole
+    // collection (a list select — buildCandidateSet loads by org/project, no id filter).
     case 'problems': {
       const id = eqVal(filters, 'id')
-      const row = seed.problems?.[id as string]
-      return row ? [row] : []
+      if (id !== undefined) { const row = seed.problems?.[id as string]; return row ? [row] : [] }
+      return Object.values(seed.problems ?? {})
     }
     case 'todos': {
       const id = eqVal(filters, 'id')
-      const row = seed.todos?.[id as string]
-      return row ? [row] : []
+      if (id !== undefined) { const row = seed.todos?.[id as string]; return row ? [row] : [] }
+      return Object.values(seed.todos ?? {})
     }
     case 'site_tasks': {
       const id = eqVal(filters, 'task_id')
-      const row = seed.site_tasks?.[id as string]
-      return row ? [row] : []
+      if (id !== undefined) { const row = seed.site_tasks?.[id as string]; return row ? [row] : [] }
+      return Object.values(seed.site_tasks ?? {})
     }
     default:                      return []   // write-target / unseeded tables select empty
   }

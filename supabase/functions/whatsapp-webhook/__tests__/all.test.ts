@@ -11,6 +11,7 @@ import './lateanswer.test';
 import './batch_reply.test';
 import './batch_journey.test';
 import './resolution.test';
+import './resolution_llm.test';
 import { runAll } from './harness';
 
 await runAll();
