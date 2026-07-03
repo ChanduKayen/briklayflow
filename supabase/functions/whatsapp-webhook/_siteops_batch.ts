@@ -172,11 +172,13 @@ export function classifyReplyFragment(
   items: BatchItem[],
   signals: { singleFragment: boolean; hasObservation: boolean },
 ): FragmentVerdict {
-  // CURRENT behaviour: a lone-chase batch force-matches a single-fragment message OR any status-worded
-  // reply — which is what EATS a substantive new observation sent while one chase is open. Fix 1 gates
-  // this on the message carrying NO observation. (Characterization now; the gate pins it.)
-  const force = items.length === 1 && (signals.singleFragment || interpretStatus(piece.text) !== 'unknown')
-  if (force) return { kind: 'match', index: 0 }
+  // FIX 1 — chase precedence is a PRIOR, not a LOCK. Force-match the lone open chase ONLY for a BARE
+  // reply — one that decompose found NO substantive observation in ("sari"/"done"/"haan", the terse
+  // non-English acks the shortcut was legitimately built for). A message carrying a real observation
+  // ("tiles broken, blocking work") must EARN its chase match by content below, and on no match fall
+  // through to `leftover` (routed fresh) — never be eaten. This uses work the pipeline already did: the
+  // decompose pass tells us whether the message was an ack or an observation.
+  if (items.length === 1 && !signals.hasObservation) return { kind: 'match', index: 0 }
   const m = matchPieceToBatch(piece, items)
   if (m.kind === 'unique') return { kind: 'match', index: m.index }
   if (m.kind === 'collision') return { kind: 'collision', indexes: m.indexes }

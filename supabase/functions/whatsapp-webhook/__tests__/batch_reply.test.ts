@@ -20,13 +20,13 @@ suite('siteops batch-reply — classifyReplyFragment (no message eaten)', () => 
   // (a) THE REGRESSION: a fresh substantive observation ("tiles broken, blocking work") arrives while an
   //     UNRELATED single-item chase (waterlogging) is open. It must NOT be force-matched to the chase —
   //     it must route fresh (leftover) so the blocker gets created and the chase is left untouched.
-  //     CHARACTERIZATION (current code, BUGGY): the observation is force-matched ('match') and EATEN.
-  //     Fix 1 (next commit) flips both the gate condition AND this assertion to 'leftover'.
-  test('(a) fresh observation + unrelated single-item batch → [BUG: eaten; Fix 1 → leftover]', () => {
+  //     FIX 1: the observation is NOT force-matched — it routes fresh (leftover), the blocker gets
+  //     created, and the waterlogging chase is left untouched. The eat is now permanently unshippable.
+  test('(a) fresh observation + unrelated single-item batch → leftover (routes fresh, chase untouched)', () => {
     const batch = [item({ id: 'water', title: 'waterlogging in basement', cause: 'weather' })]
     const tiles = { text: 'tiles broken on first floor, blocking all work', task_hint: 'first floor' }
     const v = classifyReplyFragment(tiles, batch, { singleFragment: true, hasObservation: true })
-    expect(v.kind).toBe('match')   // ← BUG pinned: currently eaten. Fix 1 changes this to 'leftover'.
+    expect(v.kind).toBe('leftover')
   })
 
   // (b) THE LEGITIMATE SHORTCUT: a terse non-English ack ("sari" = ok) decomposes to NOTHING
