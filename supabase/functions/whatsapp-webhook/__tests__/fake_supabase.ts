@@ -24,6 +24,7 @@ export interface Seed {
   user_profiles?: Row[]
   cause_taxonomy?: Row[]
   follow_up_rules?: Row[]
+  wa_message_map?: Row[]                     // outbound_wamid → object_refs (4a spine; undo resolves via this)
   site_narration_id?: string                // id returned by the capture-first insert().select('id').single()
 }
 
@@ -53,6 +54,10 @@ function datasetFor(table: string, filters: [string, unknown][], seed: Seed): Ro
     case 'cause_taxonomy':        return seed.cause_taxonomy ?? []
     case 'follow_up_rules':       return seed.follow_up_rules ?? []
     case 'wa_registered_numbers': return seed.wa_registered_numbers ?? []
+    case 'wa_message_map': {
+      const w = eqVal(filters, 'outbound_wamid')
+      return (seed.wa_message_map ?? []).filter((r) => w === undefined || r.outbound_wamid === w)
+    }
     case 'user_profiles': {
       const id = eqVal(filters, 'id')
       const row = (seed.user_profiles ?? []).find((r) => r.id === id) ?? (seed.user_profiles ?? [])[0]

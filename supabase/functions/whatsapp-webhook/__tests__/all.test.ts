@@ -13,6 +13,7 @@ import './batch_journey.test';
 import './resolution.test';
 import './resolution_llm.test';
 import './resolution_executor.test';
+import './resolution_undo.test';
 import { runAll } from './harness';
 
 await runAll();

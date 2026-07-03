@@ -432,6 +432,36 @@ async function parkObservation(ctx: SiteopsCtx, observation: string, reason: str
   })
 }
 
+// ── UNDO (Layer 2b) — the one-tap safety mechanism that EARNS the auto-resolve rung ──────────────────
+// A supervisor taps "Not resolved" on a resolve readback → the reply-to's context.id (quotedWamid) resolves
+// back through the 4a wa_message_map to the SPECIFIC issue + resolve event this readback was for. Reopen
+// ONLY if that resolve is still the active one (problems.active_resolve_event === the bound event id):
+//   • idempotent — already-open (active null) → no-op.
+//   • BOUNDED to its event — a later legitimate re-resolve overwrote active_resolve_event (E1→E2), so the
+//     stale old button no-ops and can't clobber the correct re-resolution. Never a blind "reopen issue X".
+export async function handleUndoResolve(ctx: SiteopsCtx, quotedWamid: string): Promise<boolean> {
+  const { data: map } = await ctx.supabase.from('wa_message_map').select('object_refs').eq('outbound_wamid', quotedWamid).maybeSingle()
+  const refs = ((map?.object_refs ?? []) as { kind: string; id: string; event?: string }[]).filter((r) => r.kind === 'issue' && r.event)
+  if (!refs.length) return false   // not an undo-able readback → let the dispatcher fall through
+
+  const actorId = await senderUserId(ctx)
+  const now = new Date()
+  let reopened = 0
+  for (const r of refs) {
+    const { data: prob } = await ctx.supabase.from('problems').select('status, active_resolve_event').eq('id', r.id).maybeSingle()
+    // BOUNDED + stale-safe: reopen ONLY if THIS resolve is still the active one. A later re-resolve
+    // overwrote active_resolve_event (E1→E2), a prior reopen nulled it, or the row is gone → no-op. Never
+    // a blind "reopen issue X" — that would clobber a since-correct re-resolution.
+    if (!prob || prob.active_resolve_event !== r.event) continue
+    const next = new Date(now.getTime() + 86_400_000).toISOString()   // back on the chase tomorrow
+    await ctx.supabase.from('problems').update({ status: 'ADDRESSING', active_resolve_event: null, next_followup_at: next }).eq('id', r.id)
+    await trailEvent(ctx, { kind: 'issue', id: r.id, orgId: ctx.orgId }, 'reopened', 'Reopened — you tapped “Not resolved”', actorId)
+    reopened++
+  }
+  if (reopened) await send(ctx.supabase, ctx.from, { kind: 'text', body: 'Reopened — back on the chase.' }, { org_id: ctx.orgId, wamid: ctx.wamid })
+  return true   // we handled the undo tap (a stale/idempotent no-op is still "handled")
+}
+
 export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex: ExecCtx): Promise<TerminalOutcome[]> {
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
   const outcomes: TerminalOutcome[] = []

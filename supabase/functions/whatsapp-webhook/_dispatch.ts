@@ -11,7 +11,7 @@ import { agentFor } from './_registry.ts'
 import { runTransaction, retryBatchEntries, type TxnCtx } from './_agents/transaction.ts'   // direct: the replay path
 import { startVendorFlow } from './_agents/procurement.ts'   // direct: vendor-Flow test trigger
 import { runConcierge } from './_agents/concierge.ts'   // direct: first-touch orientation
-import { classifyPhotoFollowup, stampPossibleFollowup, handleQuotedReply } from './_agents/siteops.ts'   // STEP 2/4b: photo window + readback-correction steering
+import { classifyPhotoFollowup, stampPossibleFollowup, handleQuotedReply, handleUndoResolve, type SiteopsCtx } from './_agents/siteops.ts'   // STEP 2/4b: photo window + readback-correction steering; 2b: undo
 import { send, sendNow } from './_format.ts'
 import * as M from './_messages.ts'
 import type { Lang } from './_messages.ts'
@@ -161,6 +161,14 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
   //    the edit, PREEMPTING normal routing. The map keys OUTBOUND wamids, so this never fires on a reply
   //    to the user's own photo (the enrichment window matches the INBOUND photo wamid below). Only a
   //    text reply carries a correction; a photo reply stays a fresh observation (handled downstream).
+  // v2 UNDO (2b) — a "Not resolved" tap on a resolve readback. The tap carries interactiveId='siteops_undo'
+  // + quotedWamid (the readback's wamid); resolve back through the 4a map to that specific resolve event and
+  // reopen it (bounded to the event, idempotent, stale-safe). Preempts normal routing.
+  if (ctx.interactiveId === 'siteops_undo' && ctx.quotedWamid) {
+    const sctx: SiteopsCtx = { supabase, from, orgId, wamid, lang }
+    if (await handleUndoResolve(sctx, ctx.quotedWamid)) return
+  }
+
   if (ctx.quotedWamid && !ctx.image && await handleQuotedReply(actx, text, ctx.quotedWamid)) return
 
   // An INTERACTIVE reply (button tap / list pick / Flow completion) against an OPEN
