@@ -18,8 +18,11 @@ export type NormalizedMessage = {
   sender: string                 // wa id, country-code format
   wamid: string
   text: string                   // routable text -- populated for ALL types
-  source_type: 'text' | 'interactive' | 'image' | 'voice' | 'unsupported'
+  source_type: 'text' | 'interactive' | 'image' | 'voice' | 'reaction' | 'unsupported'
   attachments: { media_id: string; mime: string; storage_path?: string }[]
+  // STEP 5 — an inbound reaction (👍/👎 on one of OUR messages). message_id is the OUTBOUND wamid it
+  // reacted to (resolved via wa_message_map), emoji is '' when the reaction was REMOVED.
+  reaction?: { message_id: string; emoji: string }
   // Payment-image vision payload: the router classifies on `text` (the cheap description);
   // if it lands on the Transaction agent, the agent extracts straight from this image.
   image?: { base64: string; mime: string; caption: string }
@@ -117,6 +120,16 @@ export async function normalize(
       console.error('[normalize] voice handling failed:', e)
       return { ...base, text: '', source_type: 'voice',
                attachments: [{ media_id: mediaId, mime }] }
+    }
+  }
+
+  // ── reaction -> surface the target wamid + emoji (STEP 5: reactions-as-confirm / retract) ────
+  // Previously fell through to 'unsupported' (the user got a "can't handle that" reply for a 👍). Now
+  // carried through so the reaction handler can resolve it against wa_message_map.
+  if (type === 'reaction') {
+    return {
+      ...base, text: '', source_type: 'reaction',
+      reaction: { message_id: message.reaction?.message_id ?? '', emoji: message.reaction?.emoji ?? '' },
     }
   }
 

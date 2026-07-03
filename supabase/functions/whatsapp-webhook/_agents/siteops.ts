@@ -16,6 +16,7 @@ import { planPhotoItems, resolveTypedPick, type PickCandidate } from '../_siteop
 import type { CaptureRef } from '../_wa_message_map.ts'
 import { distillSignal } from '../_siteops_reanalyze.ts'
 import { planCorrection } from '../_siteops_correct.ts'
+import { classifyReaction, isRetraction } from '../_siteops_verbs.ts'
 import { decideAssociation, isBareAffirmation, photoRelatedness, type AssocVerdict } from '../_siteops_assoc.ts'
 import {
   routeItems, applyProgress, buildConfirm, buildMultiConfirm, parseWhen,
@@ -941,8 +942,69 @@ export async function handleQuotedReply(ctx: SiteopsCtx, text: string, quotedWam
   const { data } = await ctx.supabase.from('wa_message_map')
     .select('ref_kind, project_id, object_refs').eq('outbound_wamid', quotedWamid).maybeSingle()
   if (!data || data.ref_kind !== 'readback') return false
-  await correctReadback(ctx, text, (data.object_refs ?? []) as { kind: string; id: string }[])
+  const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
+  const refs = (data.object_refs ?? []) as { kind: string; id: string }[]
+  // STEP 5 — RETRACTION ("ignore that" / "wrong photo") wins over a field correction: the user is
+  // undoing the log, not editing it. Dismiss (never hard-delete — the evidence stays).
+  if (isRetraction(text)) {
+    const n = await dismissRefs(ctx.supabase, ctx.orgId, refs)
+    await send(ctx.supabase, ctx.from, { kind: 'text', body: n ? `Dismissed — pulled ${n} item${n > 1 ? 's' : ''} back out (the photo/record stays). 👍` : `Noted 👍` }, meta)
+    return true
+  }
+  await correctReadback(ctx, text, refs)
   return true
+}
+
+/** STEP 5 — an inbound REACTION on one of our sent messages (resolved via wa_message_map). A positive
+ *  reaction on a task READBACK confirms it (a trail touch, no state change — resolution stays explicit);
+ *  a 👎 retracts (dismiss). Unmapped / unclassified → silently ignored (a reaction is never an error). */
+export async function handleReaction(supabase: SiteopsCtx['supabase'], p: { orgId: string; from: string; reaction: { message_id: string; emoji: string } }): Promise<void> {
+  const intent = classifyReaction(p.reaction.emoji)
+  if (intent === 'neutral' || !p.reaction.message_id) return
+  const { data } = await supabase.from('wa_message_map')
+    .select('ref_kind, object_refs').eq('outbound_wamid', p.reaction.message_id).maybeSingle()
+  if (!data || data.ref_kind !== 'readback') return
+  const refs = (data.object_refs ?? []) as { kind: string; id: string }[]
+  if (intent === 'retract') {
+    const n = await dismissRefs(supabase, p.orgId, refs)
+    if (n) await send(supabase, p.from, { kind: 'text', body: `Dismissed — pulled ${n} item${n > 1 ? 's' : ''} back out (the record stays). 👍` }, { org_id: p.orgId })
+    return
+  }
+  await confirmRefs(supabase, p.orgId, refs)   // positive → a quiet confirmation touch on the trail
+}
+
+/** Flip mapped issue/todo refs to the terminal DISMISSED state + trail it. Evidence (attachments) is
+ *  untouched. site_task refs are skipped — a task is structural, not a per-item log to retract. Returns
+ *  how many were dismissed. */
+async function dismissRefs(supabase: SiteopsCtx['supabase'], orgId: string, refs: { kind: string; id: string }[]): Promise<number> {
+  let n = 0
+  for (const r of refs) {
+    let err: { message: string } | null = null
+    if (r.kind === 'problem') ({ error: err } = await supabase.from('problems').update({ status: 'DISMISSED' }).eq('id', r.id))
+    else if (r.kind === 'todo') ({ error: err } = await supabase.from('todos').update({ status: 'DISMISSED' }).eq('id', r.id))
+    else continue
+    // Don't claim a dismissal we didn't land (e.g. the DISMISSED status isn't migrated yet, or the row
+    // is gone) — the ack degrades to a plain "Noted" rather than a false "Dismissed".
+    if (err) { console.error('[siteops:dismiss] failed:', err.message); continue }
+    await supabase.from('followup_events').insert({
+      org_id: orgId, problem_id: r.kind === 'problem' ? r.id : null, todo_id: r.kind === 'todo' ? r.id : null,
+      type: 'status_changed', body: 'Dismissed by user (retraction) — evidence kept', actor_kind: 'user', actor_id: null,
+    })
+    n++
+  }
+  return n
+}
+
+/** A positive reaction on a readback → a quiet 'comment' confirmation on each mapped issue/todo. No
+ *  state change: a 👍 means "logged right", not "resolved" (resolution stays an explicit action). */
+async function confirmRefs(supabase: SiteopsCtx['supabase'], orgId: string, refs: { kind: string; id: string }[]): Promise<void> {
+  for (const r of refs) {
+    if (r.kind !== 'problem' && r.kind !== 'todo') continue
+    await supabase.from('followup_events').insert({
+      org_id: orgId, problem_id: r.kind === 'problem' ? r.id : null, todo_id: r.kind === 'todo' ? r.id : null,
+      type: 'comment', body: 'Confirmed by sender 👍', actor_kind: 'user', actor_id: null,
+    })
+  }
 }
 
 /** Apply an authoritative field CORRECTION (cause / deadline) to the objects a readback named. Reuses

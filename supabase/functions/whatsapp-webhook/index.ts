@@ -12,6 +12,7 @@ import {
 import { send, sendTypingIndicator } from './_format.ts'
 import { normalize } from './_normalize.ts'
 import { dispatch } from './_dispatch.ts'
+import { handleReaction } from './_agents/siteops.ts'   // STEP 5: reactions-as-confirm / retract
 import { runConcierge } from './_agents/concierge.ts'
 import * as M from './_messages.ts'
 
@@ -375,6 +376,15 @@ async function processJob(
       org_id: orgId, sender: from, wamid: messageId, text: '',
       source_type: 'unsupported' as const, attachments: [], timestamp: new Date().toISOString(),
     }
+  }
+
+  // STEP 5 — a REACTION (👍/👎 on one of our sent messages) resolves against wa_message_map, not the
+  // text router. Handled here and terminated; a positive reaction confirms, a 👎 retracts. An unmapped
+  // or unclassified reaction is silently ignored (never the old "unsupported" reply).
+  if (norm.source_type === 'reaction') {
+    if (norm.reaction) await handleReaction(supabase, { orgId, from, reaction: norm.reaction })
+    if (jobId) await markJob(supabase, jobId, 'WRITTEN')
+    return
   }
 
   // Graceful terminal replies that don't enter the legacy dispatch (still terminal + reply).

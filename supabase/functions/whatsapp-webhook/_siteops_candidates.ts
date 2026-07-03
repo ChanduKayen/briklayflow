@@ -66,10 +66,11 @@ export async function loadCandidates(
       supabase.from('site_tasks')
         .select('task_id, name, trade, floor_label, unit_label, status, node_key')
         .eq('project_id', projectId).neq('status', 'done'),
-      // OPEN issues — anything not RESOLVED (OPEN + ADDRESSING).
+      // OPEN issues — anything not RESOLVED (OPEN + ADDRESSING); a DISMISSED (retracted) issue is
+      // terminal and must not be offered as a candidate.
       supabase.from('problems')
         .select('id, title, cause, status')
-        .eq('org_id', orgId).eq('project_id', projectId).neq('status', 'RESOLVED'),
+        .eq('org_id', orgId).eq('project_id', projectId).neq('status', 'RESOLVED').neq('status', 'DISMISSED'),
       // OPEN snags (DB-honest: todos).
       supabase.from('todos')
         .select('id, text, status')

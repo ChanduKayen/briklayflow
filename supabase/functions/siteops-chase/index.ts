@@ -70,6 +70,7 @@ async function loadDueIssues(supabase: SB, now: Date): Promise<RawIssue[]> {
   const BASE = 'id, org_id, project_id, task_id, title, cause, owner_id, next_followup_at, created_at'
   const q = (cols: string) => supabase.from('problems').select(cols)
     .neq('status', 'RESOLVED')
+    .neq('status', 'DISMISSED')   // STEP 5: a retracted issue is terminal — never chase it
     .not('owner_id', 'is', null)
     .not('next_followup_at', 'is', null)
     .lte('next_followup_at', now.toISOString())
