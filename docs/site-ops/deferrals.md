@@ -45,6 +45,22 @@ language-capable), invoked ONLY when lexical matching misses AND a batch is open
 
 ---
 
+## Discipline — RED-FIRST is mandatory wherever WIRING exists
+
+Standing rule (from the v2 arc): tests are written and seen RED before the code, at every step that has a
+wiring layer — 1b onward, every step. The wiring layer is exactly where this month's bugs lived (the
+empty-decompose dead-end passed a 94-green pure gate). A pure, fully-specified function (e.g. the v2
+enforcement planner) earns an exception — its tests ARE the spec, there's no wiring to be unreachable — and
+that exception must be FLAGGED, not slipped. Recorded miss: Phase 1b's tests were written after the module;
+the fail→park test was discriminating so coverage held, but the sequence was wrong. No 1b–4 wiring step
+qualifies for the pure exception.
+
+## D4 — v2 candidate-set scale cap (deferred, tracked)
+
+`buildCandidateSet` offers open tasks+issues+todos across ALL the sender's active projects (no meaning
+pre-filter, by design). If the open set grows large, a cap belongs here — by **recency/cardinality, never
+by meaning** (a meaning filter reintroduces the deleted heuristic). Not built; flagged in the code.
+
 ## D3 — Journey matrix, remaining cells (test debt, tracked)
 
 The journey harness (`__tests__/fake_supabase.ts`) now exists; the reachability matrix the ASM Elite
