@@ -9,6 +9,7 @@ import './correct.test';
 import './verbs.test';
 import './lateanswer.test';
 import './batch_reply.test';
+import './batch_journey.test';
 import { runAll } from './harness';
 
 await runAll();
