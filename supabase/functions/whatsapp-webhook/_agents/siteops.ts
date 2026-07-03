@@ -30,6 +30,10 @@ import {
   routeEmptyDecompose, isBareAck,
   type OpenBatch, type BatchItem,
 } from '../_siteops_batch.ts'
+import {
+  composeReadback, assertAllApplied,
+  type Terminal, type TerminalOutcome,
+} from '../_siteops_resolution.ts'
 // The engine, bundled for Deno — used to materialise a project's full task set on first WhatsApp touch.
 import { buildProjectVM } from '../../_shared/siteops-engine.js'
 
@@ -331,17 +335,21 @@ async function judgeResolution(issue: { title: string; cause: string | null }, r
 async function applyBatchResolution(
   ctx: SiteopsCtx, item: BatchItem, status: 'resolved' | 'still_open' | 'unknown',
   replyText: string, cadenceMap: CadenceMap, actorId: string | null, now: Date,
-  opts: { bareAck?: boolean } = {},
+  opts: { bareAck?: boolean; force?: 'resolve' | 'addressing'; reason?: string } = {},
 ): Promise<'resolved' | 'open'> {
   // The bare-ack fast path (cardinality, no LLM): trail it as `bare_ack` so the feed shows WHY the chase
   // advanced, and NEVER consult the judge — an ack is engagement, never closure, so it can only ADDRESS.
   await trailEvent(ctx, item, opts.bareAck ? 'bare_ack' : 'reply_received', replyText.slice(0, 180), actorId)
 
   // ISSUES → LLM judgment (with reason); fall back to the keyword status if the model is
-  // unavailable. TO-DOS → keyword strike-off. A bare ack skips the judge entirely (deterministic ADDRESSING).
+  // unavailable. TO-DOS → keyword strike-off. A bare ack skips the judge (deterministic ADDRESSING).
+  // opts.force — the v2 EXECUTOR applies a decision the LADDER already made; it must NOT re-judge (a second
+  // LLM call that could contradict the terminal), so force honors resolve/addressing verbatim.
   let resolved: boolean
-  let reason = ''
-  if (opts.bareAck) {
+  let reason = opts.reason ?? ''
+  if (opts.force) {
+    resolved = opts.force === 'resolve'
+  } else if (opts.bareAck) {
     resolved = false                       // an ack advances, never closes — RESOLVE stays behind the model
   } else if (item.kind === 'issue') {
     const judged = await judgeResolution({ title: item.title, cause: item.cause }, replyText)
@@ -384,6 +392,81 @@ async function applyBatchResolution(
     await ctx.supabase.from('todos').update({ due_date: when.toISOString().slice(0, 10) }).eq('id', item.id)
   }
   return 'open'
+}
+
+// ── v2 EXECUTOR (Layer 2a) — apply the AUTHORITATIVE terminals, capture REAL outcomes, one honest reply ──
+// executeResolution decided; this applies. Each terminal → its effect via the EXISTING machinery, wrapped
+// to capture ok/failed, then ONE combined readback (composeReadback). NO effect is ever dropped: a failed
+// object_created (and any not-yet-wired kind) PARKS to siteops_unplaced so "saved for review" in the reply
+// is TRUE — honest-reply AND actually-preserved, never the eat wearing an apology. The ladder already
+// judged, so object_updated applies with `force` (no re-judge). assertAllApplied backs the no-drop.
+// (The undo button on a resolve readback is Layer 2b; here the readback is plain text.)
+export interface ExecCtx {
+  itemsById: Map<string, BatchItem>       // candidate/batch items by id, to resolve an update's target
+  cadenceMap: CadenceMap
+  actorId: string | null
+  now: Date
+  narrationId: string | null
+}
+
+function toSiteItem(it: { kind: 'issue' | 'snag'; detail: string; location: string | null; project_hint: string | null }): SiteItem {
+  return { type: 'issue', text: it.detail, task_hint: it.location, qc_statements: [], cause: 'other', cause_reason: null, owner_hint: null, date_hint: null, project_hint: it.project_hint }
+}
+function terminalLabel(t: Terminal): string {
+  if (t.kind === 'object_created') return shortLabel(t.item.detail)
+  if (t.kind === 'object_updated') return t.update.target_id
+  if (t.kind === 'queued_as_evidence') return 'photo'
+  if (t.kind === 'question_asked') return 'question'
+  return ''
+}
+function terminalObservation(t: Terminal): string {
+  if (t.kind === 'object_created') return t.item.detail
+  if (t.kind === 'object_updated') return `update ${t.update.target_id}: ${t.update.reason}`
+  return t.kind
+}
+async function parkObservation(ctx: SiteopsCtx, observation: string, reason: string, narrationId: string | null): Promise<void> {
+  await ctx.supabase.from('siteops_unplaced').insert({
+    org_id: ctx.orgId, project_id: null, reason, observation,
+    candidates: null, bucket: null, object_path: null, caption: null,
+    narration_id: narrationId, sender_number: ctx.from, created_by: null,
+  })
+}
+
+export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex: ExecCtx): Promise<TerminalOutcome[]> {
+  const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
+  const outcomes: TerminalOutcome[] = []
+  for (const t of terminals) {
+    try {
+      if (t.kind === 'object_updated') {
+        const item = ex.itemsById.get(t.update.target_id)
+        if (!item) throw new Error(`no candidate for ${t.update.target_id}`)
+        await applyBatchResolution(ctx, item, t.applied === 'resolve' ? 'resolved' : 'still_open', t.update.reason, ex.cadenceMap, ex.actorId, ex.now, { force: t.applied, reason: t.update.reason })
+        outcomes.push({ terminal: t, status: 'ok', label: shortLabel(item.title) })
+      } else if (t.kind === 'object_created') {
+        const proj = await resolveProject(ctx.supabase, ctx.orgId, { nameHint: t.item.project_hint })
+        if (!proj.projectId) throw new Error('project unresolved')
+        const out = await routeGroup(ctx, proj.projectId, [toSiteItem(t.item)], ex.narrationId)
+        if (out.progress.length + out.problems.length + out.todos.length === 0) throw new Error('nothing created')
+        outcomes.push({ terminal: t, status: 'ok', label: shortLabel(t.item.detail) })
+      } else if (t.kind === 'acked_didnt_catch') {
+        outcomes.push({ terminal: t, status: 'ok', label: '' })   // no state effect; the readback IS the ack
+      } else {
+        // question_asked / queued_as_evidence are wired in the chase-adoption / image commits. Until then,
+        // NEVER drop: park so the observation survives, and report failed so the readback is honest.
+        await parkObservation(ctx, terminalObservation(t), 'v2_unhandled_terminal', ex.narrationId)
+        outcomes.push({ terminal: t, status: 'failed', label: terminalLabel(t) })
+      }
+    } catch (e) {
+      console.error('[siteops:exec] terminal failed:', t.kind, (e as Error).message)
+      // A FAILED effect must land somewhere recoverable — park it, so "saved for review" in the readback is
+      // true and the observation isn't an eat wearing an apology. Best-effort; the outcome is still recorded.
+      await parkObservation(ctx, terminalObservation(t), 'v2_effect_failed', ex.narrationId).catch(() => {})
+      outcomes.push({ terminal: t, status: 'failed', label: terminalLabel(t) })
+    }
+  }
+  assertAllApplied(terminals, outcomes)   // effect-side no-drop: N terminals → N outcomes (ok|failed), or throw
+  await send(ctx.supabase, ctx.from, { kind: 'text', body: composeReadback(outcomes) }, meta)
+  return outcomes
 }
 
 /** "cement ✓ resolved" / "masons still open (will check back)" — one readback part. */
