@@ -27,6 +27,7 @@ import {
 import { loadCadenceMap, type CadenceMap } from '../_siteops_timing.ts'
 import {
   getOpenBatch, dropBatchItems, classifyReplyFragment, scopeBatchToProject, interpretStatus,
+  routeEmptyDecompose,
   type OpenBatch, type BatchItem,
 } from '../_siteops_batch.ts'
 // The engine, bundled for Deno — used to materialise a project's full task set on first WhatsApp touch.
@@ -588,12 +589,25 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
     } catch (e) { console.error('[siteops:ground] skipped:', (e as Error).message) }
   }
 
-  let decomposed
+  let decomposed: { items: SiteItem[]; project_hint: string | null } | null = null
   try {
     decomposed = ctx.image?.base64
       ? await decomposeImage(ctx.image.base64, ctx.image.mime, ctx.image.caption, projectNames, groundingHints)
       : await decompose(text, projectNames)
   } catch {
+    decomposed = null
+  }
+
+  // EMPTY / UNREADABLE decompose (Defect A seam). A terse or non-English CHASE ANSWER decomposes to
+  // nothing by design — over an OPEN batch it is the reply the chase is waiting for, so route it to
+  // handleBatchReply (frags falls back to the whole line; a lone chase force-matches) rather than
+  // dead-ending. handleBatchReply returns false when nothing matched (no content to route fresh from) →
+  // then, and when there's no open batch at all, "didn't catch" is the honest answer.
+  if (!decomposed) {
+    if (routeEmptyDecompose(!!(batch && batch.items.length)) === 'batch' && batch) {
+      const consumed = await handleBatchReply(ctx, text, [], null, batch, projects, narrationId)
+      if (consumed) return
+    }
     await say(`Didn't catch a site update in that — try again if you meant to send one.`)
     return
   }

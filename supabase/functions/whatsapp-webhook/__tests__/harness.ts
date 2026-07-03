@@ -3,7 +3,7 @@
 // Node with a tiny Deno shim. Keeps the payment characterization gate provable in isolation.
 
 type Fn = () => void | Promise<void>;
-interface Case { suite: string; name: string; fn: Fn }
+interface Case { suite: string; name: string; fn: Fn | null; skip?: boolean; reason?: string }
 
 const cases: Case[] = [];
 let currentSuite = '(root)';
@@ -15,9 +15,22 @@ export function suite(name: string, body: () => void): void {
   currentSuite = prev;
 }
 
-export function test(name: string, fn: Fn): void {
-  cases.push({ suite: currentSuite, name, fn });
+interface TestFn {
+  (name: string, fn: Fn): void;
+  // A test that is deliberately NOT run — a standing spec for a fix that hasn't landed. It reports as
+  // "○ skipped" and never fails the gate, so a known-red spec (e.g. Defect B's cross-script match) can
+  // live in the suite as executable documentation without turning the gate's signal red. `reason` is
+  // printed so the skip is loud, not silent. Un-skip (test.skip → test) when the fix lands.
+  skip: (name: string, reason: string, fn?: Fn) => void;
 }
+
+export const test = ((name: string, fn: Fn): void => {
+  cases.push({ suite: currentSuite, name, fn });
+}) as TestFn;
+
+test.skip = (name: string, reason: string, _fn?: Fn): void => {
+  cases.push({ suite: currentSuite, name, fn: null, skip: true, reason });
+};
 
 function fmt(v: unknown): string {
   if (typeof v === 'string') return JSON.stringify(v);
@@ -38,11 +51,16 @@ export function expect<T>(actual: T) {
 }
 
 export async function runAll(): Promise<void> {
-  let pass = 0, fail = 0;
+  let pass = 0, fail = 0, skip = 0;
   let lastSuite = '';
   const failures: string[] = [];
   for (const c of cases) {
     if (c.suite !== lastSuite) { console.log(`\n● ${c.suite}`); lastSuite = c.suite; }
+    if (c.skip || !c.fn) {
+      skip++;
+      console.log(`  ○ ${c.name} (skipped — ${c.reason ?? 'no reason given'})`);
+      continue;
+    }
     try {
       await c.fn();
       pass++;
@@ -54,7 +72,8 @@ export async function runAll(): Promise<void> {
       failures.push(`${c.suite} › ${c.name}: ${msg}`);
     }
   }
-  console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed, ${cases.length} total`);
+  const skipNote = skip ? `, ${skip} skipped` : '';
+  console.log(`\n${'='.repeat(60)}\n${pass} passed, ${fail} failed${skipNote}, ${cases.length} total`);
   if (fail > 0) {
     console.log('\nFAILURES:');
     for (const f of failures) console.log('  - ' + f);

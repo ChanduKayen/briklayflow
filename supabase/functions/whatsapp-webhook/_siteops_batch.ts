@@ -181,6 +181,26 @@ export function scopeBatchToProject(items: BatchItem[], projectId: string | null
   return { scoped, routeFresh: scoped.length === 0 }
 }
 
+// ── the empty-decompose SEAM (Defect A) ──────────────────────────────────────
+// WHERE an EMPTY / UNREADABLE decompose goes. decompose renders a TERSE or NON-ENGLISH chase answer
+// ("sari" = ok, "waterlogging ఇష్యూ రిసాల్వ్డ్" = resolved) to ZERO items — legitimately, by its own
+// empty-valve + self-resolved-drop rules. That empty result is NOT junk when a chase is OPEN: it is the
+// very reply the batch is waiting for, and MUST reach handleBatchReply (which force-matches a lone chase
+// or, finding nothing, routes leftovers fresh), NEVER dead-end at "didn't catch". With NO open batch, an
+// empty decompose really is an unreadable/contentless message → "didn't catch" is correct.
+//
+// This is a ONE-LINE decision, but it was the load-bearing gap: Fix 1's force-match shortcut + the frags
+// fallback were built to receive `pieces:[]`, yet the wiring above them dead-ended the empty case before
+// handleBatchReply ever saw it — so the pure gate was green while the integration was broken. Extracted
+// PURE so the JOURNEY gate (batch_journey.test) can pin that this decision is actually REACHED.
+export type EmptyDecomposeRoute = 'batch' | 'didnt_catch'
+export function routeEmptyDecompose(hasOpenBatch: boolean): EmptyDecomposeRoute {
+  // Defect A: `return hasOpenBatch ? 'batch' : 'didnt_catch'`. Landing behavior-preserving first
+  // (always 'didnt_catch', == today) so the wiring diff and the fix diff stay separable + reviewable.
+  void hasOpenBatch
+  return 'didnt_catch'
+}
+
 export function classifyReplyFragment(
   piece: { text: string; task_hint?: string | null; project_hint?: string | null },
   items: BatchItem[],
