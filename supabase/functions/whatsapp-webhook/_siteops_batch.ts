@@ -195,10 +195,12 @@ export function scopeBatchToProject(items: BatchItem[], projectId: string | null
 // PURE so the JOURNEY gate (batch_journey.test) can pin that this decision is actually REACHED.
 export type EmptyDecomposeRoute = 'batch' | 'didnt_catch'
 export function routeEmptyDecompose(hasOpenBatch: boolean): EmptyDecomposeRoute {
-  // Defect A: `return hasOpenBatch ? 'batch' : 'didnt_catch'`. Landing behavior-preserving first
-  // (always 'didnt_catch', == today) so the wiring diff and the fix diff stay separable + reviewable.
-  void hasOpenBatch
-  return 'didnt_catch'
+  // An open batch means an empty decompose is (very likely) the terse/foreign chase answer the batch is
+  // waiting for → hand it to handleBatchReply, which force-matches a lone chase or, matching nothing,
+  // returns false so runSiteops still falls through to the honest "didn't catch". No open batch → there
+  // is nothing to answer → "didn't catch" outright. No-eat is preserved: an unmatched empty message is
+  // never consumed, it is declined.
+  return hasOpenBatch ? 'batch' : 'didnt_catch'
 }
 
 export function classifyReplyFragment(
