@@ -29,11 +29,17 @@ export interface ObserveItem {
 // Axis 2 — ATTACH. A grounded match onto an EXISTING candidate. `target_id` MUST be a member of the
 // candidate set the call was given; the model reads closure vs progress into `action`, but the ladder
 // (code) gates whether that action is allowed to LAND.
+//
+// `confidence` and `closure_explicit` are INDEPENDENT judgments — the rubric's top rung is HIGH referent
+// AND explicit closure language, ANDed because they fail independently: "that thing is sorted" against a
+// lone chase is an unambiguous referent (HIGH) with VAGUE closure. Folding them would let that auto-
+// resolve and silently kill the chase — the exact case the ladder exists to stop. So both ride the wire.
 export interface AttachUpdate {
   target_id: string
   target_kind: 'task' | 'issue' | 'todo'
   action: 'progress' | 'addressing' | 'resolve'
   confidence: Confidence
+  closure_explicit: boolean   // did the reply use EXPLICIT closure language (not just a clear referent)?
   reason: string
 }
 
@@ -61,9 +67,11 @@ export type Terminal =
   | { kind: 'acked_didnt_catch'; contract: ResolutionContract; reason: string }
 
 // ── THE LADDER (per update) — gates the ACTION, never the trail ──────────────
-// HIGH + explicit closure (action=resolve) → RESOLVE + undo. HIGH + progress → ADDRESSING + re-time.
-// MED → ADDRESSING, NEVER resolve (readback names the match). LOW → ASK (uncertainty never touches state).
-// An unknown target_id (model invented/stale) → ASK: the model cannot resolve onto something we didn't offer.
+// HIGH + resolve + closure_explicit → RESOLVE + undo. HIGH + resolve + !closure_explicit → ADDRESSING
+// (clear referent, vague closure — advance, never close). HIGH + progress → ADDRESSING + re-time.
+// MED → ADDRESSING, NEVER resolve (even with explicit closure — an uncertain referent may not be closed).
+// LOW → ASK (uncertainty never touches state). Unknown target_id (invented/stale) → ASK: the model cannot
+// resolve onto something we didn't offer.
 function planUpdate(u: AttachUpdate, ctx: ResolutionContext): Terminal {
   if (!ctx.candidateIds.has(u.target_id)) {
     return { kind: 'question_asked', about: 'which_item', ref: u.target_id, reason: `target ${u.target_id} not in candidate set — cannot touch state on an un-offered referent` }
@@ -74,9 +82,14 @@ function planUpdate(u: AttachUpdate, ctx: ResolutionContext): Terminal {
   if (u.confidence === 'med') {
     return { kind: 'object_updated', update: u, applied: 'addressing', undo: false, readback: 'named the match — wrong item? tap', reason: `med confidence — ${u.reason} — ADDRESSING only, never resolve` }
   }
-  // HIGH — trust the model's closure read, but only HIGH earns a resolve.
-  const applied = u.action === 'resolve' ? 'resolve' : 'addressing'
-  return { kind: 'object_updated', update: u, applied, undo: applied === 'resolve', readback: applied === 'resolve' ? 'resolved — undo?' : 'addressing', reason: `high confidence — ${u.reason}` }
+  // HIGH — a resolve lands ONLY with explicit closure language (the rubric's AND). A clear referent with
+  // vague closure ("that thing is sorted") ADVANCES, never closes — a wrong RESOLVE silently kills a chase.
+  const applied = (u.action === 'resolve' && u.closure_explicit) ? 'resolve' : 'addressing'
+  return {
+    kind: 'object_updated', update: u, applied, undo: applied === 'resolve',
+    readback: applied === 'resolve' ? 'resolved — undo?' : 'addressing',
+    reason: applied === 'resolve' ? `high + explicit closure — ${u.reason}` : `high referent, vague/no closure — advance not close — ${u.reason}`,
+  }
 }
 
 // ── THE LADDER (per new item) — never dropped: create, or ask-for-site ───────
