@@ -8,8 +8,8 @@
 
 import { suite, test, expect } from './harness'
 import {
-  executeResolution, assertNoDrop,
-  type ResolutionContract, type ResolutionContext, type Terminal, type AttachUpdate,
+  executeResolution, assertNoDrop, composeReadback, assertAllApplied,
+  type ResolutionContract, type ResolutionContext, type Terminal, type AttachUpdate, type TerminalOutcome,
 } from '../_siteops_resolution.ts'
 
 const base = (over: Partial<ResolutionContract> = {}): ResolutionContract => ({
@@ -123,6 +123,53 @@ suite('siteops resolution v2 — enforcement (prod failures as pins)', () => {
   // Both false + image → queued_as_evidence (cautious: a photo is never dropped, never force-created).
   test('both false + image → queued_as_evidence', () => {
     expect(kinds(executeResolution(base(), ctx([], true)))).toEqual(['queued_as_evidence'])
+  })
+})
+
+suite('siteops resolution v2 — combined readback (one message, consequence-ordered, partial-honest)', () => {
+  const updResolve = (label: string, status: 'ok' | 'failed' = 'ok'): TerminalOutcome => ({
+    terminal: { kind: 'object_updated', update: upd({ target_id: 't' }), applied: 'resolve', undo: true, readback: '', reason: '' }, status, label,
+  })
+  const created = (label: string, status: 'ok' | 'failed' = 'ok'): TerminalOutcome => ({
+    terminal: { kind: 'object_created', item: { kind: 'issue', detail: label, location: null, project_hint: 'P', confidence: 'high' }, as: 'classified', upgradeOffer: false, reason: '' }, status, label,
+  })
+
+  // both-axes success — ONE reply, resolve FIRST (consequence), then the new item. Note the outcomes are
+  // passed in axis order (created before resolve); the composer must re-order by consequence.
+  test('both-axes success → "Got it — ✓ X resolved · logged new: Y" (resolve ordered first)', () => {
+    const out = composeReadback([created('tiles broke'), updResolve('waterlogging')])
+    expect(out).toBe('Got it — ✓ waterlogging resolved · logged new: tiles broke')
+  })
+
+  // both-axes PARTIAL failure — the resolve landed, the create failed. The reply tells the truth about
+  // BOTH, never all-or-nothing.
+  test('both-axes partial (create failed) → truthful about both halves', () => {
+    const out = composeReadback([updResolve('waterlogging'), created('tiles broke', 'failed')])
+    expect(out).toBe('Got it — ✓ waterlogging resolved · ⚠️ couldn\'t log tiles broke — saved for review')
+  })
+
+  test('lone didnt-catch → bare sentence, no "Got it" wrapper', () => {
+    const t: Terminal = { kind: 'acked_didnt_catch', contract: base(), reason: '' }
+    expect(composeReadback([{ terminal: t, status: 'ok', label: '' }])).toBe("Didn't catch a site update in that — try again if you meant to send one.")
+  })
+})
+
+suite('siteops resolution v2 — assertAllApplied (effect-side no-drop BITES)', () => {
+  test('3 terminals but 2 outcomes → throws', () => {
+    const terms: Terminal[] = [
+      { kind: 'object_updated', update: upd({ target_id: 'a' }), applied: 'resolve', undo: true, readback: '', reason: '' },
+      { kind: 'object_created', item: { kind: 'issue', detail: 'x', location: null, project_hint: 'P', confidence: 'high' }, as: 'classified', upgradeOffer: false, reason: '' },
+      { kind: 'queued_as_evidence', reason: '' },
+    ]
+    const outs: TerminalOutcome[] = [{ terminal: terms[0], status: 'ok', label: 'a' }, { terminal: terms[1], status: 'ok', label: 'x' }]
+    let threw = false
+    try { assertAllApplied(terms, outs) } catch { threw = true }
+    expect(threw).toBe(true)
+  })
+  test('equal counts → does not throw', () => {
+    const terms: Terminal[] = [{ kind: 'queued_as_evidence', reason: '' }]
+    assertAllApplied(terms, [{ terminal: terms[0], status: 'ok', label: '' }])
+    expect(true).toBe(true)
   })
 })
 

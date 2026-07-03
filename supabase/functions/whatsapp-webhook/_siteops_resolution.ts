@@ -131,6 +131,71 @@ export function executeResolution(c: ResolutionContract, ctx: ResolutionContext)
   return terminals
 }
 
+// ── THE COMBINED READBACK (one supervisor message → one reply) ───────────────
+// A message that produced several terminals gets ONE reply, composed from what ACTUALLY terminated —
+// per-terminal, not from what the planner intended. Two rules the single-terminal case doesn't need:
+//   • PARTIAL-FAILURE HONEST — if the resolve landed but the create failed, the reply says BOTH truthfully
+//     ("✓ X resolved · ⚠️ couldn't log Y — saved for review"), never an all-or-nothing claim that lies
+//     about half the message. Each line reflects that terminal's real `status`.
+//   • ORDERED BY CONSEQUENCE, not by axis — the RESOLVE first (the state change that stops a chase), then
+//     the new item (the thing that starts one). "Resolved X · logged new Y" reads as a verifiable status.
+// Questions are their own interactive message (sent by the executor), so they're excluded here.
+export interface TerminalOutcome {
+  terminal: Terminal
+  status: 'ok' | 'failed'
+  label: string            // short human label of the object/finding, for the reply line
+}
+
+// consequence rank: resolve (stops a chase) → addressing → created (starts one) → evidence → didnt-catch.
+function consequenceRank(o: TerminalOutcome): number {
+  const t = o.terminal
+  if (t.kind === 'object_updated') return t.applied === 'resolve' ? 0 : 1
+  if (t.kind === 'object_created') return 2
+  if (t.kind === 'queued_as_evidence') return 3
+  if (t.kind === 'acked_didnt_catch') return 5
+  return 4   // question_asked — excluded below, ranked between for safety
+}
+
+function readbackLine(o: TerminalOutcome): string | null {
+  const t = o.terminal
+  const failed = o.status === 'failed'
+  switch (t.kind) {
+    case 'object_updated':
+      if (t.applied === 'resolve') return failed ? `⚠️ couldn't resolve ${o.label} — saved for review` : `✓ ${o.label} resolved`
+      return failed ? `⚠️ couldn't update ${o.label} — saved for review` : `${o.label} — on it, will check back`
+    case 'object_created':
+      return failed ? `⚠️ couldn't log ${o.label} — saved for review` : `logged new: ${o.label}`
+    case 'queued_as_evidence':
+      return failed ? `⚠️ couldn't save the photo — saved for review` : `photo saved as evidence`
+    case 'acked_didnt_catch':
+      return `Didn't catch a site update in that — try again if you meant to send one.`
+    case 'question_asked':
+      return null   // asked as its own interactive message, not a readback line
+  }
+}
+
+/** Compose the single reply from the terminals' REAL outcomes (consequence-ordered, partial-failure-honest).
+ *  PURE. A lone didn't-catch returns its bare sentence; anything else is "Got it — <line · line>". */
+export function composeReadback(outcomes: TerminalOutcome[]): string {
+  const ordered = outcomes
+    .filter((o) => o.terminal.kind !== 'question_asked')
+    .map((o, i) => ({ o, i }))
+    .sort((a, b) => consequenceRank(a.o) - consequenceRank(b.o) || a.i - b.i)
+    .map((x) => x.o)
+  const lines = ordered.map(readbackLine).filter((l): l is string => !!l)
+  if (!lines.length) return 'Got it'
+  if (lines.length === 1 && ordered[0].terminal.kind === 'acked_didnt_catch') return lines[0]
+  return `Got it — ${lines.join(' · ')}`
+}
+
+/** Executor-level no-drop — EVERY terminal must produce exactly one outcome (ok or failed); a missing one
+ *  is a dropped effect. Throws (tested to bite): the effect-side twin of assertNoDrop's planner-side check. */
+export function assertAllApplied(terminals: Terminal[], outcomes: TerminalOutcome[]): void {
+  if (outcomes.length !== terminals.length) {
+    throw new Error(`executor invariant violated: ${terminals.length} terminals but ${outcomes.length} outcomes — an effect was DROPPED`)
+  }
+}
+
 // ── THE ASSERTION — "no code path may drop a found item", made real ──────────
 // Verifies the planner accounted for every found input. A found update must yield an object_updated OR a
 // question_asked; a found item an object_created OR a question_asked; both-false must yield exactly one
