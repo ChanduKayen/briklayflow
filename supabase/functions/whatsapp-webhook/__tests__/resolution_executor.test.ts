@@ -120,6 +120,20 @@ suite('siteops resolution v2 — executor 2c (question_asked wiring + evidence s
     expect(fake.outbox().some((b) => /photo saved as evidence/i.test(b))).toBe(true)
   })
 
+  // AUDIT #7 — the evidence park must carry THE EVIDENCE. queued_as_evidence exists to hold a photo that
+  // couldn't be placed; a park row without bucket/object_path is the eat wearing a receipt — the row says
+  // "photo saved" while the photo is unfindable. When the inbound carried an image, the park carries it.
+  test('(EV-evidence) queued_as_evidence park carries bucket + object_path — the photo is FINDABLE', async () => {
+    const fake = fakeSupabase({})
+    const ctx = { ...ctxFor(fake), image: { base64: 'zz', mime: 'image/jpeg', caption: 'store room', storagePath: 'wa_x_1.jpg' } }
+    await applyTerminals(ctx, [tEvidence()], execCtx())
+
+    const park = fake.writesTo('siteops_unplaced')[0]
+    expect(park?.payload?.bucket).toBe('rough-entry-media')
+    expect(park?.payload?.object_path).toBe('wa_x_1.jpg')
+    expect(park?.payload?.caption).toBe('store room')
+  })
+
   // SLOTS-STALENESS pin — the conversation-level twin of the candidate-membership guard. The resume must
   // validate a pick against the OFFERED set (slots.candidates), not a freshly-loaded set that shifted
   // between question and answer. Cheap documentation that the proven resume already does slots-not-reload.
@@ -174,6 +188,18 @@ suite('siteops resolution v2 — DEFECT 2 + non-batch-target held park', () => {
     expect(park[0].payload?.candidates?.target_id).toBe(UUID)     // replayable: the target
     expect(park[0].payload?.candidates?.update?.action).toBe('resolve')   // replayable: the update payload
     expect(park[0].payload?.candidates?.label).toBe('tiles not arrived')  // human label, not the uuid
+  })
+
+  // AUDIT #4 — executor parks must carry THE project when the unit resolved one (ExecCtx.projectId).
+  // A park with project_id null when the site was KNOWN makes the replay re-ask what we already knew —
+  // the same context-drop as the pending_stage2 landmine, one layer down.
+  test('(D2-project) executor park stamps the known project onto the row', async () => {
+    const fake = fakeSupabase({})
+    await applyTerminals(ctxFor(fake), [tUpdateResolve(UUID)], { ...execCtx(new Map(), new Map([[UUID, 'tiles not arrived']])), projectId: 'P1' })
+
+    const park = fake.writesTo('siteops_unplaced')[0]
+    expect(park?.payload?.reason).toBe('non_batch_target')
+    expect(park?.payload?.project_id).toBe('P1')
   })
 
   // The invariant, pinned to BITE: even with NO label available for the target, a raw uuid may never appear in

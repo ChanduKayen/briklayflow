@@ -17,6 +17,7 @@ import './resolution_executor.test';
 import './resolution_undo.test';
 import './adoption.test';
 import './singular_unit.test';
+import './image_batch.test';
 import { runAll } from './harness';
 
 await runAll();

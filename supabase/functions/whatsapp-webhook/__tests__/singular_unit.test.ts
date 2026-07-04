@@ -124,6 +124,9 @@ suite('siteops singular-first — Stage-1 acceptance journeys (a–g)', () => {
     const slots = convoW?.payload?.slots_so_far
     expect(Array.isArray(slots?.items) && slots.items.length > 0).toBe(true)   // the question CARRIES the observation
     expect(slots?.text).toBe('transformer not working')                        // E2: raw text rides the slots
+    // AUDIT #2 — the observation must ride the question's TEXT too ("the question CARRIES the extracted
+    // observation"), not just the slots: the supervisor must see WHAT is being sited before picking.
+    expect(fake.outbox().some((b) => /which project/i.test(b) && b.includes('transformer not working'))).toBe(true)
     expect(resolutionCalls(calls).length).toBe(0)                              // ask FIRST — the one call waits
 
     const preDecomposes = decomposeCalls(calls).length
@@ -219,6 +222,10 @@ suite('siteops singular-first — Stage-1 acceptance journeys (a–g)', () => {
     const park = fake.writesTo('siteops_unplaced').find((w) => w.payload?.reason === 'pending_stage2')
     expect(!!park).toBe(true)
     expect(JSON.stringify(park?.payload?.observation ?? '').includes('transformer')).toBe(true)
+    // AUDIT #3 — the park must carry THE resolved project (the narration's shared site), else Stage 2
+    // inherits projectless fragments and re-asks what the unit already knew. Per-item hints in the
+    // observation still override at replay for a genuinely multi-site narration.
+    expect(park?.payload?.project_id).toBe('P2')
     // ONE reply, both truths
     expect(fake.outbox().some((b) => /resolved|tiles/i.test(b) && /saved for review/i.test(b))).toBe(true)
     // the unrelated ASM chase untouched
