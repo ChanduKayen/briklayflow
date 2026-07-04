@@ -273,8 +273,16 @@ export async function commitInterruptedSiteops(ctx: SiteopsCtx, convo: ConvoRow)
 }
 
 const fmtDay = (d: Date) => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
-/** First few words of an item's title — the short label for the readback line. */
+/** First few words of an item's title — for PICK ROWS and question labels (UI-truncated anyway). */
 const shortLabel = (title: string) => title.trim().split(/\s+/).slice(0, 3).join(' ')
+/** READBACK-facing label: the (near-)full title, capped by LENGTH, never by word count. Probe C2: the
+ *  3-word cut turned "bathroom tiles not fixed correctly" + "resolved" into "✓ bathroom tiles not
+ *  resolved" — a truth inversion. Truncation may shorten a label; it may never negate the sentence.
+ *  composeReadback quotes these, so the reader parses the label as the item's NAME. */
+const readbackLabel = (title: string) => {
+  const t = title.trim()
+  return t.length <= 60 ? t : `${t.slice(0, 59).trimEnd()}…`
+}
 
 /** Append one trail event (B1) for a batch item. actorId present → a human reply. */
 // Returns the inserted followup_events id (or null on failure) — the v2 executor binds a resolve's undo to
@@ -430,7 +438,7 @@ function toSiteItem(it: { kind: 'issue' | 'snag'; detail: string; location: stri
 // open batch) and fall back to a generic phrase, but NEVER to `target_id`. terminalObservation (the durable
 // park record, machine-facing) keeps the id; this (human-facing) one must not.
 function terminalLabel(t: Terminal, labelById?: Map<string, string>): string {
-  if (t.kind === 'object_created') return shortLabel(t.item.detail)
+  if (t.kind === 'object_created') return readbackLabel(t.item.detail)
   if (t.kind === 'object_updated') {
     const l = labelById?.get(t.update.target_id)
     return l && l.trim() ? l : 'that item'
@@ -559,7 +567,7 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
         // photo never spawns a fresh object) — attach + trail, the role='answer' path the flip had dropped.
         if (ctx.image?.storagePath) await answerWithPhoto(ctx, { kind: item.kind, id: item.id, orgId: item.orgId }, ctx.image.storagePath, ctx.image.caption ?? null)
         if (t.applied === 'resolve' && item.kind === 'issue' && out.resolveEvent) resolvedRefs.push({ kind: 'issue', id: item.id, event: out.resolveEvent })
-        outcomes.push({ terminal: t, status: 'ok', label: shortLabel(item.title) })
+        outcomes.push({ terminal: t, status: 'ok', label: readbackLabel(item.title) })
       } else if (t.kind === 'object_created') {
         // the item's own named project wins (cross-script hint the string-match missed); else THE project
         // the unit resolved — "no match → CREATE" must land on the message's site, never nowhere.
@@ -576,7 +584,7 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
           for (const td of out.todos) if (td.id) await attachImage(ctx, 'todo', td.id, sp, cap, 'creation')
           for (const pr of out.progress) if (pr.taskId) await attachImage(ctx, 'site_task', pr.taskId, sp, cap, 'creation')
         }
-        outcomes.push({ terminal: t, status: 'ok', label: shortLabel(t.item.detail) })
+        outcomes.push({ terminal: t, status: 'ok', label: readbackLabel(t.item.detail) })
       } else if (t.kind === 'acked_didnt_catch') {
         outcomes.push({ terminal: t, status: 'ok', label: '' })   // no state effect; the readback IS the ack
       } else if (t.kind === 'question_asked') {
@@ -619,10 +627,11 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
   return outcomes
 }
 
-/** "cement ✓ resolved" / "masons still open (will check back)" — one readback part. */
+/** "“cement short”✓ resolved" / "“masons absent” still open (will check back)" — one readback part.
+ *  Quoted, length-capped labels (readbackLabel) — a word-count cut can invert the sentence (probe C2). */
 function readbackPart(item: BatchItem, verdict: 'resolved' | 'open'): string {
-  if (verdict === 'resolved') return `${shortLabel(item.title)} ✓ ${item.kind === 'todo' ? 'done' : 'resolved'}`
-  return `${shortLabel(item.title)} still open (will check back)`
+  if (verdict === 'resolved') return `“${readbackLabel(item.title)}” ✓ ${item.kind === 'todo' ? 'done' : 'resolved'}`
+  return `“${readbackLabel(item.title)}” still open (will check back)`
 }
 
 /**
@@ -668,7 +677,7 @@ async function handleBatchReply(
   const itemsById = new Map(batch.items.map((i) => [i.id, i]))
   // Human labels for EVERY offered candidate (not just the open batch) — so a FAILED readback names the item
   // even when the target was a candidate outside this batch. Never a uuid reaches a human. (See terminalLabel.)
-  const labelById = new Map(res.candidates.map((c) => [c.id, shortLabel(c.title ?? '')]))
+  const labelById = new Map(res.candidates.map((c) => [c.id, readbackLabel(c.title ?? '')]))
   const outcomes = await applyTerminals(ctx, res.terminals, { itemsById, labelById, cadenceMap, actorId, now, narrationId })
   // batch bookkeeping the executor doesn't own: drop RESOLVED chased items, close the batch when empty.
   const resolvedIds = outcomes
@@ -895,7 +904,7 @@ async function runSingularUnit(ctx: SiteopsCtx, u: {
       projectName: c.project_name ?? null, title: c.title, taskName: null, cause: 'other',
     } as BatchItem)
   }
-  const labelById = new Map(res.candidates.map((c) => [c.id, shortLabel(c.title ?? '')]))
+  const labelById = new Map(res.candidates.map((c) => [c.id, readbackLabel(c.title ?? '')]))
   const outcomes = await applyTerminals(ctx, res.terminals, {
     itemsById, labelById, cadenceMap, actorId, now,
     narrationId: u.narrationId, projectId: u.projectId, readbackSuffix: restLine,
@@ -1017,9 +1026,14 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
     }
 
     // THE project resolved. Chases ON it → the unit (same-project batch items rank ⭐; cross-project
-    // invisibility by construction). Chase-free → the proven fresh flow; the batch never routes.
+    // invisibility by construction). EMPTY vision → the unit too (probe D1): the engine grades the
+    // caption text + image against THE project's candidates, and nothing-confident lands as the evidence
+    // park (object_path + project carried) — NEVER finishRoute([])'s false "got your update, logged"
+    // receipt over an empty route. Chase-free WITH items → the proven fresh flow (attach axis, evidence
+    // links, enrichment window); the batch never routes.
+    console.log(`[siteops:vision] items=${items.length} project_hint=${decomposed?.project_hint ?? 'null'} project=${projectId}`)
     const chasesHere = (batch?.items ?? []).some((b) => b.projectId === projectId)
-    if (chasesHere && batch) {
+    if (!items.length || chasesHere) {
       await runSingularUnit(ctx, {
         projectId,
         text: items.length >= 2 ? first!.text : text,   // compound → the FIRST fragment (interim rule, text-path twin)

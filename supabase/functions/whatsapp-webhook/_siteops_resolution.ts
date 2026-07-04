@@ -162,15 +162,18 @@ function consequenceRank(o: TerminalOutcome): number {
   return 4   // question_asked — excluded below, ranked between for safety
 }
 
+// Labels are QUOTED in every line that names an item (probe C2): the reader must parse the label as the
+// item's NAME, never as part of the sentence — an unquoted truncated title ("bathroom tiles not") followed
+// by "resolved" read as its own negation. Label WIDTH is the caller's job (readbackLabel, length-capped).
 function readbackLine(o: TerminalOutcome): string | null {
   const t = o.terminal
   const failed = o.status === 'failed'
   switch (t.kind) {
     case 'object_updated':
-      if (t.applied === 'resolve') return failed ? `⚠️ couldn't resolve ${o.label} — saved for review` : `✓ ${o.label} resolved`
-      return failed ? `⚠️ couldn't update ${o.label} — saved for review` : `${o.label} — on it, will check back`
+      if (t.applied === 'resolve') return failed ? `⚠️ couldn't resolve “${o.label}” — saved for review` : `✓ “${o.label}” resolved`
+      return failed ? `⚠️ couldn't update “${o.label}” — saved for review` : `“${o.label}” — on it, will check back`
     case 'object_created':
-      return failed ? `⚠️ couldn't log ${o.label} — saved for review` : `logged new: ${o.label}`
+      return failed ? `⚠️ couldn't log “${o.label}” — saved for review` : `logged new: “${o.label}”`
     case 'queued_as_evidence':
       return failed ? `⚠️ couldn't save the photo — saved for review` : `photo saved as evidence`
     case 'acked_didnt_catch':
@@ -186,7 +189,7 @@ function readbackLine(o: TerminalOutcome): string | null {
 function heldClause(o: TerminalOutcome): string {
   const t = o.terminal
   const verb = t.kind === 'object_updated' && t.applied === 'resolve' ? 'resolve' : 'update'
-  return `${verb} ${o.label}`
+  return `${verb} “${o.label}”`
 }
 
 /** Compose the single reply from the terminals' REAL outcomes (consequence-ordered, partial-failure-honest).
