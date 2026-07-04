@@ -144,7 +144,11 @@ export function executeResolution(c: ResolutionContract, ctx: ResolutionContext)
 // Questions are their own interactive message (sent by the executor), so they're excluded here.
 export interface TerminalOutcome {
   terminal: Terminal
-  status: 'ok' | 'failed'
+  // 'ok' effect landed · 'failed' effect errored (parked, read back as ⚠️ … saved for review) · 'held' the
+  // executor UNDERSTOOD the update but can't act on it yet (a valid candidate outside this batch — the fresh
+  // path owns it, unadopted). 'held' is NOT a failure — it reads back as understood-but-held, and its row is
+  // parked distinguished (non_batch_target) for later replay.
+  status: 'ok' | 'failed' | 'held'
   label: string            // short human label of the object/finding, for the reply line
 }
 
@@ -176,17 +180,29 @@ function readbackLine(o: TerminalOutcome): string | null {
   }
 }
 
+// UNDERSTOOD-BUT-HELD clause for one held update: "resolve tiles not arrived" / "update the transformer".
+// Multiple held updates share ONE "couldn't … yet — saved for review" wrapper (see composeReadback) — the
+// message is "I heard you, both true, holding them" — a categorically different thing than "⚠️ … failed".
+function heldClause(o: TerminalOutcome): string {
+  const t = o.terminal
+  const verb = t.kind === 'object_updated' && t.applied === 'resolve' ? 'resolve' : 'update'
+  return `${verb} ${o.label}`
+}
+
 /** Compose the single reply from the terminals' REAL outcomes (consequence-ordered, partial-failure-honest).
- *  PURE. A lone didn't-catch returns its bare sentence; anything else is "Got it — <line · line>". */
+ *  PURE. Held updates (understood but not applicable yet) group into ONE "couldn't … yet — saved for review"
+ *  clause, distinct from a ⚠️ failure. A lone didn't-catch returns its bare sentence; else "Got it — <…>". */
 export function composeReadback(outcomes: TerminalOutcome[]): string {
   const ordered = outcomes
     .filter((o) => o.terminal.kind !== 'question_asked')
     .map((o, i) => ({ o, i }))
     .sort((a, b) => consequenceRank(a.o) - consequenceRank(b.o) || a.i - b.i)
     .map((x) => x.o)
-  const lines = ordered.map(readbackLine).filter((l): l is string => !!l)
+  const held = ordered.filter((o) => o.status === 'held')
+  const lines = ordered.filter((o) => o.status !== 'held').map(readbackLine).filter((l): l is string => !!l)
+  if (held.length) lines.push(`couldn't ${held.map(heldClause).join(' or ')} yet — saved for review`)
   if (!lines.length) return 'Got it'
-  if (lines.length === 1 && ordered[0].terminal.kind === 'acked_didnt_catch') return lines[0]
+  if (lines.length === 1 && ordered.length === 1 && ordered[0].terminal.kind === 'acked_didnt_catch') return lines[0]
   return `Got it — ${lines.join(' · ')}`
 }
 

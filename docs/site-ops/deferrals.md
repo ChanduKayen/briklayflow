@@ -68,3 +68,49 @@ postmortem specced (open batch × open window × pending pick × modality) is ch
 lone-chase resolve (kept-open + resolve-and-close), no-batch decline, multi-item no-eat. **Still to add:**
 pending-pick recovery via `answerSiteops` (a different entry point than `runSiteops`), and the image
 modality (photo-as-chase-answer). Extend the harness's `datasetFor`/seed surface as those land.
+
+## D5 — Engine entry: an open batch is a PRIOR on interpretation, never a ROUTER (Phase 3, opening move)
+
+**Surfaced:** the live probe `"సౌందర్య సైట్ లోకి టైల్స్ వచ్చాయి. అలాగే ట్రాన్స్ఫర్మర్ పని చేయట్లేదు"` (tiles
+arrived at Soundharya + transformer not working). A **compound fresh narration** — one existing issue to
+resolve (tiles) plus a **brand-new** issue (transformer) — arrived while an **unrelated** chase batch was
+open. Because a batch was open, `runSiteops` force-routed the whole message through `handleBatchReply`, whose
+`resolveInbound` graded it against the full candidate set and produced two `object_updated` terminals onto
+items **outside** the batch. Both then hit the executor's batch-scoped `itemsById` and could not be applied.
+
+**The pattern (name it):** *batch-captures-fresh* — an open batch treated as a **lock on routing** rather than
+a **prior on interpretation**. This is now the **third** distinct layer it has surfaced at: (1) `handleBatchReply`'s
+original force-match, (2) the photo-orphan hijack (open-convo answer-shunt), (3) here, at the v2 engine's
+entry. `convo:FRESH` measuring the *conversation* dimension while `chase_batches` silently gates *routing* is
+the same orthogonal-state trap the empty-decompose investigation opened on.
+
+**Why deferred (not patched on this branch):** fixing it means deciding *when an open batch captures a message
+at the engine entry* — which is precisely Phase 3's fresh-path adoption question. Pulling that decision into a
+tail-of-Phase-2 hotfix is exactly the condition that has produced every red-first slip. Held to Phase 3.
+
+**Phase-2 honest scope, shipped instead (this branch):** a non-batch target is parked **distinguished**
+(`siteops_unplaced.reason = 'non_batch_target'`, replay payload in `candidates`) and read back as
+**understood-but-held** ("couldn't resolve X yet — saved for review"), never as a ⚠️ failure and never
+surfacing the raw uuid. The rows are mechanically re-playable once Phase 3 lands. (Executor Defect-2 suite.)
+
+**Phase-3 acceptance — CASE ONE (red-first, two commits):** compound fresh narration + unrelated open batch →
+the resolve lands on the (non-batch) matched issue, the new item is created as a fresh issue, and the open
+chase is left untouched. The open batch ranks its chased items top (a prior — the candidate set already does
+this) but never captures the message into batch-only execution.
+
+**What reopens it:** Phase 3 kickoff. Reframes fresh-path adoption from "the fresh path adopts the engine" to
+"the engine's entry point decides batch-context vs fresh-context correctly."
+
+## Landmine — v2 park reasons vs. the `siteops_unplaced.reason` CHECK (fixed by ALTER 20260703000002)
+
+The v2 engine parks with `llm_unreadable` / `evidence_await_placement` / `v2_effect_failed` /
+`v2_unhandled_terminal` / `non_batch_target`, none of which were in the CHECK on `siteops_unplaced.reason`
+(`20260702000000`, only the conversation-era pick reasons). The table IS applied (confirmed: re-running
+20260702000000 errors `42710: policy … already exists`) — it's just EMPTY, because every v2 park violates the
+CHECK: the INSERT throws and the executor's best-effort `.catch(() => {})` swallows it, so the row is silently
+dropped — "saved for review" was a lie for all v2 parks (conversation-era reasons, which ARE in the list,
+parked fine). The offline gate stayed green because the test fake does not enforce CHECKs — a
+pure-green-while-broken trap. Fix: a SEPARATE idempotent ALTER (`20260703000002`) drops + re-adds the
+constraint with the full set — NOT an edit of the applied base migration (which wouldn't change prod and
+re-running it errors on the policy). **Reminder for the fake:** it should learn to enforce column CHECKs for
+the park table, or this class recurs invisibly.

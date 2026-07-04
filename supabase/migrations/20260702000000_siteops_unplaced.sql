@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS public.siteops_unplaced (
 
   -- what landed here + why it couldn't place. `reason` is the producer: the pick
   -- kind it was parked from, or 'floor' (image flow: mapped nothing, observed nothing).
+  -- NOTE: this migration is APPLIED; the v2 park reasons are added by 20260703000002 (ALTER), not here.
   reason         text NOT NULL CHECK (reason IN ('disambig', 'typed_pick', 'project', 'photo_pick', 'batch_collision', 'floor')),
   observation    jsonb,                    -- the SiteItem / {items:[...]} that couldn't be placed (null for pure-evidence rows)
   candidates     jsonb,                    -- the shortlist it was ambiguous over — reused to rank the one-tap placement later

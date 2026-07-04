@@ -12,7 +12,7 @@ import type { BatchItem } from '../_siteops_batch.ts'
 
 const ORG = 'org-1'
 const ctxFor = (fake: ReturnType<typeof fakeSupabase>) => ({ supabase: fake, from: '919900000000', orgId: ORG, wamid: 'w-1', lang: 'te' as const })
-const execCtx = (itemsById: Map<string, BatchItem> = new Map()): ExecCtx => ({ itemsById, cadenceMap: new Map(), actorId: null, now: new Date('2026-07-03T00:00:00Z'), narrationId: 'narr-1' })
+const execCtx = (itemsById: Map<string, BatchItem> = new Map(), labelById: Map<string, string> = new Map()): ExecCtx => ({ itemsById, labelById, cadenceMap: new Map(), actorId: null, now: new Date('2026-07-03T00:00:00Z'), narrationId: 'narr-1' })
 
 const waterItem: BatchItem = { kind: 'issue', id: 'iss-water', orgId: ORG, projectId: 'P1', projectName: 'ASM Elite', title: 'waterlogging in basement', taskName: null, cause: 'other' }
 const upd = (o: Partial<AttachUpdate> & { target_id: string }): AttachUpdate => ({ target_kind: 'issue', action: 'resolve', confidence: 'high', closure_explicit: true, reason: 'done', ...o })
@@ -134,5 +134,75 @@ suite('siteops resolution v2 — executor 2c (question_asked wiring + evidence s
     await answerSiteops(ctxFor(fake), '1', convo)   // pick #1 → the OFFERED candidate, from slots
 
     expect(fake.writesTo('problems').some((w) => w.op === 'update' && w.filters.some(([k, v]) => k === 'id' && v === 'iss-offered'))).toBe(true)
+  })
+})
+
+// DEFECT 2 + the NON-BATCH-TARGET distinguished park. The live probe: the model correctly matched a valid
+// candidate OUTSIDE the open batch (itemsById miss). The old code threw → generic catch → 'v2_effect_failed'
+// park + a readback that surfaced the raw target uuid ("⚠️ couldn't resolve 70b8c0c7-… — saved for review").
+// Two fixes pinned here: (1) a terminal outcome may NEVER surface a raw id to a human — the label resolves
+// from the candidate-title snapshot, else a generic phrase, never the uuid; (2) a non-batch target is not a
+// FAILURE — it's UNDERSTOOD-BUT-HELD, parked DISTINGUISHED ('non_batch_target') with a replayable payload so
+// Phase 3's fresh path can re-apply it, and read back as "couldn't … yet", not "⚠️ … failed".
+suite('siteops resolution v2 — DEFECT 2 + non-batch-target held park', () => {
+  const UUID = '70b8c0c7-c4ab-43de-b441-796ca9e830c8'
+  const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+
+  // The live-probe shape: a resolve on a candidate that isn't in the open batch → held, parked distinguished,
+  // and the readback names the item from the label map — NEVER the target uuid — and says HELD, not failed.
+  test('(D2-label) non-batch resolve → understood-but-held readback names the item, not the uuid', async () => {
+    const fake = fakeSupabase({})
+    // itemsById is EMPTY (target is outside the batch → the non_batch_target path); labelById carries the
+    // candidate title, exactly as handleBatchReply now builds it from res.candidates.
+    await applyTerminals(ctxFor(fake), [tUpdateResolve(UUID)], execCtx(new Map(), new Map([[UUID, 'tiles not arrived']])))
+
+    const reply = fake.outbox().find((b) => /saved for review/i.test(b)) ?? ''
+    expect(/couldn't resolve tiles not arrived yet — saved for review/i.test(reply)).toBe(true)
+    expect(/⚠️/.test(reply)).toBe(false)                        // HELD, not a ⚠️ failure
+    expect(UUID_RE.test(reply)).toBe(false)
+  })
+
+  // The distinguished, REPLAYABLE park: reason 'non_batch_target' (not the generic 'v2_effect_failed'), and
+  // the update payload + label ride in `candidates` so Phase 3 can mechanically re-apply the row.
+  test('(D2-park) non-batch resolve → siteops_unplaced(non_batch_target) carrying the replay payload', async () => {
+    const fake = fakeSupabase({})
+    await applyTerminals(ctxFor(fake), [tUpdateResolve(UUID)], execCtx(new Map(), new Map([[UUID, 'tiles not arrived']])))
+
+    const park = fake.writesTo('siteops_unplaced')
+    expect(park.length).toBe(1)
+    expect(park[0].payload?.reason).toBe('non_batch_target')
+    expect(park[0].payload?.candidates?.target_id).toBe(UUID)     // replayable: the target
+    expect(park[0].payload?.candidates?.update?.action).toBe('resolve')   // replayable: the update payload
+    expect(park[0].payload?.candidates?.label).toBe('tiles not arrived')  // human label, not the uuid
+  })
+
+  // The invariant, pinned to BITE: even with NO label available for the target, a raw uuid may never appear in
+  // ANY readback line. Regex guard over the entire outbox; the label falls back to a generic phrase.
+  test('(D2-nouuid) label unavailable → falls back to "that item", zero uuids across all readbacks', async () => {
+    const fake = fakeSupabase({})
+    await applyTerminals(ctxFor(fake), [tUpdateResolve(UUID)], execCtx(new Map(), new Map()))
+
+    const reply = fake.outbox().find((b) => /saved for review/i.test(b)) ?? ''
+    expect(/couldn't resolve that item yet — saved for review/i.test(reply)).toBe(true)
+    expect(fake.outbox().every((b) => !UUID_RE.test(b))).toBe(true)
+  })
+
+  // The compound live-probe message: TWO valid non-batch targets (tiles resolve + transformer update) → ONE
+  // combined understood-but-held readback grouping both under a single "saved for review", both parked, both
+  // named, no uuid. This is the exact trace shape (two `no candidate` targets).
+  test('(D2-compound) two non-batch targets → one grouped held readback, both parked, no uuid', async () => {
+    const XFMR = 'f9f1660e-4384-418e-b3fe-1c330bd9fc57'
+    const fake = fakeSupabase({})
+    const labels = new Map([[UUID, 'tiles not arrived'], [XFMR, 'transformer not working']])
+    await applyTerminals(
+      ctxFor(fake),
+      [tUpdateResolve(UUID), { kind: 'object_updated', update: upd({ target_id: XFMR, action: 'addressing' }), applied: 'addressing', undo: false, readback: '', reason: '' }],
+      execCtx(new Map(), labels),
+    )
+
+    const reply = fake.outbox().find((b) => /saved for review/i.test(b)) ?? ''
+    expect(/couldn't resolve tiles not arrived or update transformer not working yet — saved for review/i.test(reply)).toBe(true)
+    expect(fake.writesTo('siteops_unplaced').length).toBe(2)   // both parked, neither dropped
+    expect(fake.outbox().every((b) => !UUID_RE.test(b))).toBe(true)
   })
 })

@@ -410,6 +410,8 @@ async function applyBatchResolution(
 // (The undo button on a resolve readback is Layer 2b; here the readback is plain text.)
 export interface ExecCtx {
   itemsById: Map<string, BatchItem>       // candidate/batch items by id, to resolve an update's target
+  labelById: Map<string, string>          // human title for EVERY offered candidate (not just batch items) —
+                                          // a FAILED outcome's readback label resolves here, NEVER from the uuid
   cadenceMap: CadenceMap
   actorId: string | null
   now: Date
@@ -419,9 +421,16 @@ export interface ExecCtx {
 function toSiteItem(it: { kind: 'issue' | 'snag'; detail: string; location: string | null; project_hint: string | null }): SiteItem {
   return { type: 'issue', text: it.detail, task_hint: it.location, qc_statements: [], cause: 'other', cause_reason: null, owner_hint: null, date_hint: null, project_hint: it.project_hint }
 }
-function terminalLabel(t: Terminal): string {
+// The human label for a terminal's readback line. RULE: a terminal outcome may NEVER surface a raw id to a
+// human — for an update we look the target up in the candidate-title map (all offered candidates, not just the
+// open batch) and fall back to a generic phrase, but NEVER to `target_id`. terminalObservation (the durable
+// park record, machine-facing) keeps the id; this (human-facing) one must not.
+function terminalLabel(t: Terminal, labelById?: Map<string, string>): string {
   if (t.kind === 'object_created') return shortLabel(t.item.detail)
-  if (t.kind === 'object_updated') return t.update.target_id
+  if (t.kind === 'object_updated') {
+    const l = labelById?.get(t.update.target_id)
+    return l && l.trim() ? l : 'that item'
+  }
   if (t.kind === 'queued_as_evidence') return 'photo'
   if (t.kind === 'question_asked') return 'question'
   return ''
@@ -431,10 +440,13 @@ function terminalObservation(t: Terminal): string {
   if (t.kind === 'object_updated') return `update ${t.update.target_id}: ${t.update.reason}`
   return t.kind
 }
-async function parkObservation(ctx: SiteopsCtx, observation: string, reason: string, narrationId: string | null): Promise<void> {
+// `replay` (→ the jsonb `candidates` column) carries the structured payload a distinguished park needs so a
+// later phase can act on the row mechanically — e.g. a non_batch_target park stores the update + its label so
+// Phase 3's fresh path can re-apply it. Null for the plain "couldn't place" parks.
+async function parkObservation(ctx: SiteopsCtx, observation: string, reason: string, narrationId: string | null, replay: unknown = null): Promise<void> {
   await ctx.supabase.from('siteops_unplaced').insert({
     org_id: ctx.orgId, project_id: null, reason, observation,
-    candidates: null, bucket: null, object_path: null, caption: null,
+    candidates: replay, bucket: null, object_path: null, caption: null,
     narration_id: narrationId, sender_number: ctx.from, created_by: null,
   })
 }
@@ -519,7 +531,18 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
     try {
       if (t.kind === 'object_updated') {
         const item = ex.itemsById.get(t.update.target_id)
-        if (!item) throw new Error(`no candidate for ${t.update.target_id}`)
+        if (!item) {
+          // NON-BATCH TARGET — the model correctly matched a valid offered candidate that isn't in THIS open
+          // batch (it belongs to the fresh path, which isn't adopted yet — Phase 3). This is not a failure of
+          // anything: the executor is correctly detecting "not mine to apply." Park it as a DISTINGUISHED,
+          // mechanically-replayable row (the update + its label ride in `candidates`) and read it back as
+          // UNDERSTOOD-BUT-HELD, never as failed. When Phase 3 lands, these rows re-apply.
+          await parkObservation(ctx, terminalObservation(t), 'non_batch_target', ex.narrationId, {
+            target_id: t.update.target_id, target_kind: t.update.target_kind, label: terminalLabel(t, ex.labelById), update: t.update,
+          })
+          outcomes.push({ terminal: t, status: 'held', label: terminalLabel(t, ex.labelById) })
+          continue
+        }
         const out: { resolveEvent?: string } = {}
         await applyBatchResolution(ctx, item, t.applied === 'resolve' ? 'resolved' : 'still_open', t.update.reason, ex.cadenceMap, ex.actorId, ex.now, { force: t.applied, reason: t.update.reason, out })
         if (t.applied === 'resolve' && item.kind === 'issue' && out.resolveEvent) resolvedRefs.push({ kind: 'issue', id: item.id, event: out.resolveEvent })
@@ -536,7 +559,7 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
         // Open the pick through the PROVEN resume, storing exactly the offered set in slots (so the answer
         // validates against what was asked, never a re-load). Sends its own interactive message.
         await askResolutionQuestion(ctx, t, ex)
-        outcomes.push({ terminal: t, status: 'ok', label: terminalLabel(t) })
+        outcomes.push({ terminal: t, status: 'ok', label: terminalLabel(t, ex.labelById) })
       } else if (t.kind === 'queued_as_evidence') {
         // Honest STRUCTURAL park (five-part): durable row + a DISTINCT parked_reason so Step 6 can tell an
         // image awaiting placement from a text obs that couldn't be sited. Near-miss lands in Phase 3.
@@ -544,14 +567,14 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
         outcomes.push({ terminal: t, status: 'ok', label: 'photo' })
       } else {
         await parkObservation(ctx, terminalObservation(t), 'v2_unhandled_terminal', ex.narrationId)
-        outcomes.push({ terminal: t, status: 'failed', label: terminalLabel(t) })
+        outcomes.push({ terminal: t, status: 'failed', label: terminalLabel(t, ex.labelById) })
       }
     } catch (e) {
       console.error('[siteops:exec] terminal failed:', t.kind, (e as Error).message)
       // A FAILED effect must land somewhere recoverable — park it, so "saved for review" in the readback is
       // true and the observation isn't an eat wearing an apology. Best-effort; the outcome is still recorded.
       await parkObservation(ctx, terminalObservation(t), 'v2_effect_failed', ex.narrationId).catch(() => {})
-      outcomes.push({ terminal: t, status: 'failed', label: terminalLabel(t) })
+      outcomes.push({ terminal: t, status: 'failed', label: terminalLabel(t, ex.labelById) })
     }
   }
   assertAllApplied(terminals, outcomes)   // effect-side no-drop: N terminals → N outcomes (ok|failed), or throw
@@ -618,7 +641,10 @@ async function handleBatchReply(
   const res = await resolveInbound(rc, { message: text, image, narrationId }, batch, say, callModel)
   if (res.kind === 'parked') return true   // parked + honest reply; the chase batch is UNTOUCHED (no eat, no half-mutation)
   const itemsById = new Map(batch.items.map((i) => [i.id, i]))
-  const outcomes = await applyTerminals(ctx, res.terminals, { itemsById, cadenceMap, actorId, now, narrationId })
+  // Human labels for EVERY offered candidate (not just the open batch) — so a FAILED readback names the item
+  // even when the target was a candidate outside this batch. Never a uuid reaches a human. (See terminalLabel.)
+  const labelById = new Map(res.candidates.map((c) => [c.id, shortLabel(c.title ?? '')]))
+  const outcomes = await applyTerminals(ctx, res.terminals, { itemsById, labelById, cadenceMap, actorId, now, narrationId })
   // batch bookkeeping the executor doesn't own: drop RESOLVED chased items, close the batch when empty.
   const resolvedIds = outcomes
     .filter((o): o is TerminalOutcome & { terminal: Extract<Terminal, { kind: 'object_updated' }> } => o.terminal.kind === 'object_updated' && o.terminal.applied === 'resolve' && o.status === 'ok')
