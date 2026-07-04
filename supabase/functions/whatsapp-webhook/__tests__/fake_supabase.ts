@@ -10,6 +10,14 @@
 // traverse an unanticipated call without crashing (capture-first: never fail the journey on a stray read).
 //
 // Reused across journeys — extend datasetFor/insertReturnFor here rather than per-test.
+//
+// CHECK ENFORCEMENT (Phase 0 go-order step 2, a GATE): every write is judged against the database's enum
+// CHECK constraints, PARSED FROM THE MIGRATION FILES (check_constraints.ts — never hand-copied). A write
+// that violates a CHECK returns { error: { code: '23514' } } and is NOT recorded — prod truth, not
+// recorder truth. Both landmines (v2 park reasons, bare_ack) were prod-CHECK-rejected while this fake
+// recorded them green; that class is now structurally impossible to miss offline.
+
+import { loadEnumChecks, checkViolation, type TableChecks } from './check_constraints'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = any
@@ -89,8 +97,20 @@ function insertReturnFor(table: string, seed: Seed): Row {
   return { id: `${table}-1` }
 }
 
-export function fakeSupabase(seed: Seed = {}): FakeSupabase {
+// Parsed once per process (the migrations don't change under a running gate).
+let DEFAULT_CHECKS: TableChecks | null = null
+const defaultChecks = (): TableChecks => (DEFAULT_CHECKS ??= loadEnumChecks())
+
+export interface FakeOpts {
+  /** Override the enum-CHECK set (default: parsed from ALL migrations). Tests pin a HISTORICAL constraint
+   *  via loadEnumChecks({ before: '<stamp>' }) to prove a landmine was real — the pre-fix insert must FAIL
+   *  in the fake exactly as it failed in prod. */
+  checks?: TableChecks
+}
+
+export function fakeSupabase(seed: Seed = {}, opts: FakeOpts = {}): FakeSupabase {
   const writes: Write[] = []
+  const checks = opts.checks ?? defaultChecks()
 
   function builder(table: string) {
     const filters: [string, unknown][] = []
@@ -98,10 +118,15 @@ export function fakeSupabase(seed: Seed = {}): FakeSupabase {
     let payload: Row = null
     let single = false
 
-    const resolve = (): { data: Row; error: null } => {
+    const resolve = (): { data: Row; error: { code: string; message: string } | null } => {
       if (op === 'select') {
         const rows = datasetFor(table, filters, seed)
         return { data: single ? (rows[0] ?? null) : rows, error: null }
+      }
+      // CHECK enforcement — a violating row is REJECTED (error returned, write not recorded), like postgres.
+      for (const row of Array.isArray(payload) ? payload : [payload]) {
+        const v = row && checkViolation(checks, table, row)
+        if (v) return { data: null, error: { code: '23514', message: `new row for relation "${table}" violates check constraint "${v.name}"` } }
       }
       writes.push({ table, op, payload, filters })
       // insert().select('…').single() returns a row (e.g. the new narration id); bare writes return null.

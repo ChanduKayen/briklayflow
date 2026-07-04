@@ -1,4 +1,5 @@
 // Aggregator — import every *.test module (they register via the harness) then run.
+import './check_enforcement.test';
 import './extract.characterization.test';
 import './candidates.test';
 import './assoc.test';
