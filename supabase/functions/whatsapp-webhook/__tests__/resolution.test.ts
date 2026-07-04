@@ -138,14 +138,14 @@ suite('siteops resolution v2 — combined readback (one message, consequence-ord
   // passed in axis order (created before resolve); the composer must re-order by consequence.
   test('both-axes success → "Got it — ✓ X resolved · logged new: Y" (resolve ordered first)', () => {
     const out = composeReadback([created('tiles broke'), updResolve('waterlogging')])
-    expect(out).toBe('Got it — ✓ waterlogging resolved · logged new: tiles broke')
+    expect(out).toBe('Got it — ✓ “waterlogging” resolved · logged new: “tiles broke”')
   })
 
   // both-axes PARTIAL failure — the resolve landed, the create failed. The reply tells the truth about
   // BOTH, never all-or-nothing.
   test('both-axes partial (create failed) → truthful about both halves', () => {
     const out = composeReadback([updResolve('waterlogging'), created('tiles broke', 'failed')])
-    expect(out).toBe('Got it — ✓ waterlogging resolved · ⚠️ couldn\'t log tiles broke — saved for review')
+    expect(out).toBe('Got it — ✓ “waterlogging” resolved · ⚠️ couldn\'t log “tiles broke” — saved for review')
   })
 
   test('lone didnt-catch → bare sentence, no "Got it" wrapper', () => {

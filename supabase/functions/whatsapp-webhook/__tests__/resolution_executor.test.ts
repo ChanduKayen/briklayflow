@@ -39,7 +39,7 @@ suite('siteops resolution v2 — executor applyTerminals (effects, honest readba
     expect(park.length).toBe(1)
     expect(park[0].payload?.reason).toBe('v2_effect_failed')
     expect(park[0].payload?.observation).toBe('tiles broke')                 // preserved, not dropped
-    expect(fake.outbox().some((b) => /couldn't log tiles broke — saved for review/i.test(b))).toBe(true)
+    expect(fake.outbox().some((b) => /couldn't log “tiles broke” — saved for review/i.test(b))).toBe(true)
   })
 
   // PARTIAL FAILURE in one message: resolve lands, create fails. The ONE reply tells the truth about BOTH,
@@ -51,8 +51,8 @@ suite('siteops resolution v2 — executor applyTerminals (effects, honest readba
     expect(fake.writesTo('problems').some((w) => w.op === 'update' && w.payload?.status === 'RESOLVED')).toBe(true)
     expect(fake.writesTo('siteops_unplaced').length).toBe(1)                  // the failed half parked
     const reply = fake.outbox().find((b) => /Got it/i.test(b)) ?? ''
-    expect(/✓ waterlogging in basement resolved/.test(reply)).toBe(true)      // resolve first
-    expect(/⚠️ couldn't log tiles broke — saved for review/.test(reply)).toBe(true)
+    expect(/✓ “waterlogging in basement” resolved/.test(reply)).toBe(true)      // resolve first
+    expect(/⚠️ couldn't log “tiles broke” — saved for review/.test(reply)).toBe(true)
     // assertAllApplied did NOT throw: a failed-but-parked terminal is ACCOUNTED, not vanished.
     expect(outcomes.length).toBe(2)
     expect(outcomes.filter((o) => o.status === 'failed').length).toBe(1)
@@ -171,7 +171,7 @@ suite('siteops resolution v2 — DEFECT 2 + non-batch-target held park', () => {
     await applyTerminals(ctxFor(fake), [tUpdateResolve(UUID)], execCtx(new Map(), new Map([[UUID, 'tiles not arrived']])))
 
     const reply = fake.outbox().find((b) => /saved for review/i.test(b)) ?? ''
-    expect(/couldn't resolve tiles not arrived yet — saved for review/i.test(reply)).toBe(true)
+    expect(/couldn't resolve “tiles not arrived” yet — saved for review/i.test(reply)).toBe(true)
     expect(/⚠️/.test(reply)).toBe(false)                        // HELD, not a ⚠️ failure
     expect(UUID_RE.test(reply)).toBe(false)
   })
@@ -209,7 +209,7 @@ suite('siteops resolution v2 — DEFECT 2 + non-batch-target held park', () => {
     await applyTerminals(ctxFor(fake), [tUpdateResolve(UUID)], execCtx(new Map(), new Map()))
 
     const reply = fake.outbox().find((b) => /saved for review/i.test(b)) ?? ''
-    expect(/couldn't resolve that item yet — saved for review/i.test(reply)).toBe(true)
+    expect(/couldn't resolve “that item” yet — saved for review/i.test(reply)).toBe(true)
     expect(fake.outbox().every((b) => !UUID_RE.test(b))).toBe(true)
   })
 
@@ -227,8 +227,37 @@ suite('siteops resolution v2 — DEFECT 2 + non-batch-target held park', () => {
     )
 
     const reply = fake.outbox().find((b) => /saved for review/i.test(b)) ?? ''
-    expect(/couldn't resolve tiles not arrived or update transformer not working yet — saved for review/i.test(reply)).toBe(true)
+    expect(/couldn't resolve “tiles not arrived” or update “transformer not working” yet — saved for review/i.test(reply)).toBe(true)
     expect(fake.writesTo('siteops_unplaced').length).toBe(2)   // both parked, neither dropped
     expect(fake.outbox().every((b) => !UUID_RE.test(b))).toBe(true)
+  })
+})
+
+// PROBE FINDINGS C1/C2 (live 2026-07-05) — readback labels must be TRUTH-PRESERVING. shortLabel's 3-word
+// truncation composed with the word "resolved" inverted a live reply: title "bathroom tiles not fixed
+// correctly" → label "bathroom tiles not" → "✓ bathroom tiles not resolved" — the supervisor read the
+// OPPOSITE of what happened. Readback-facing labels use the (near-)full title, QUOTED, capped by length —
+// truncation may shorten, it may never negate.
+suite('siteops resolution v2 — readback labels are truth-preserving (probe C1/C2)', () => {
+  const tilesNotFixed: BatchItem = { kind: 'issue', id: 'iss-tiles2', orgId: ORG, projectId: 'P1', projectName: 'ASM Elite', title: 'bathroom tiles not fixed correctly', taskName: null, cause: 'rework' }
+
+  // THE P2 INVERSION, pinned to bite: a resolved issue whose title carries "not" at the old truncation
+  // boundary must read back with the full quoted title — and must NEVER render the phrase "not resolved".
+  test('(C2) resolve on "…not fixed correctly" → full quoted title, NEVER reads "not resolved"', async () => {
+    const fake = fakeSupabase({ projects: [{ project_id: 'P1', name: 'ASM Elite' }] })
+    await applyTerminals(ctxFor(fake), [tUpdateResolve('iss-tiles2')], execCtx(new Map([['iss-tiles2', tilesNotFixed]])))
+
+    const reply = fake.outbox().find((b) => /resolved/i.test(b)) ?? ''
+    expect(reply.includes('“bathroom tiles not fixed correctly”')).toBe(true)
+    expect(/not resolved/i.test(reply)).toBe(false)   // the inversion, structurally impossible
+  })
+
+  // THE P1 TRUNCATION: a created item's readback names the observation, not its first three words.
+  test('(C1) create readback carries the full detail, quoted — not a 3-word stub', async () => {
+    const fake = fakeSupabase({ projects: [{ project_id: 'P1', name: 'ASM Elite' }] })
+    await applyTerminals(ctxFor(fake), [tCreate('The transformer is not working in BSR Enclave.', 'ASM Elite')], execCtx())
+
+    const reply = fake.outbox().find((b) => /logged new/i.test(b)) ?? ''
+    expect(reply.includes('logged new: “The transformer is not working in BSR Enclave.”')).toBe(true)
   })
 })

@@ -156,6 +156,30 @@ suite('siteops image-under-batch — audit-#1 acceptance journeys (h–l)', () =
     expect(fake.writesTo('problems').length).toBe(0)
   })
 
+  // (m) PROBE-P4 DEFECT (D1): UNREADABLE photo + RESOLVED project + chase-free. The parity cell the h–l
+  // board missed: finishRoute([]) sent "got your update, logged" while logging NOTHING and dropping the
+  // photo (zero attachments, zero parks — the eat wearing a receipt, live 2026-07-05). Target: the unit
+  // runs (caption text + image against THE project's candidates); nothing confident → the evidence park,
+  // carrying object_path AND project_id. Never a "logged" receipt over an empty route.
+  test('(m) unreadable photo + resolved chase-free project → evidence park w/ path+project, never a false "logged" receipt', async () => {
+    const fake = fakeSupabase(seed())   // batch on ASM (P1); the photo names Soundharya (P2) — chase-free
+    const calls: Call[] = []
+    await runSiteops(imgCtx(fake, 'Soundharya corridor'), 'Soundharya corridor -- corridor under construction', {
+      callModel: imgModel(calls, { vision: '', resolve: R_BOTH_FALSE }),
+    })
+    expect(fake.outbox().some((b) => /got your update, logged/i.test(b))).toBe(false)   // the false receipt is dead
+    const park = fake.writesTo('siteops_unplaced')[0]
+    expect(park?.payload?.object_path).toBe(PHOTO)      // the evidence survives, findable
+    expect(park?.payload?.project_id).toBe('P2')        // …and sited
+    expect(fake.outbox().some((b) => /photo saved as evidence/i.test(b))).toBe(true)    // honest terminal
+    expect(fake.writesTo('problems').length).toBe(0)
+    expect(fake.writesTo('chase_batches').length).toBe(0)
+    const rc = resolutionCalls(calls)
+    expect(rc.length).toBe(1)                            // the unit ran, once
+    expect(rc[0].user.includes('iss-tiles')).toBe(true)  // …scoped to THE project
+    expect(rc[0].user.includes('iss-water')).toBe(false)
+  })
+
   // (l) UNREADABLE photo + no site signal + multi-project batch: the FLOOR case — the evidence parks WITH
   // its object_path (never lost), an honest reply goes out, the batch is untouched, and no model call is
   // made over multi-project candidates.
