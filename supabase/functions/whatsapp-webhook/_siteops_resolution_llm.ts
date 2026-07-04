@@ -30,34 +30,38 @@ const OPEN_ISSUE = new Set(['OPEN', 'ADDRESSING'])
 const DONE_TASK = new Set(['DONE', 'COMPLETE', 'COMPLETED', 'CLOSED'])
 
 /**
- * Build the candidate set for ONE call: open issues + todos + tasks across the sender's ACTIVE projects,
- * with chased items (the open batch) flagged and ranked first. Project resolution lives INSIDE the model
- * call (the model picks target_id / project_hint), so we deliberately offer candidates across ALL active
- * projects — no upstream scoreName pre-filter that would silently drop a cross-script mention.
+ * Build the candidate set for ONE call. SINGULAR UNIT (projectId given): the set is THAT project's open
+ * issues + todos + tasks ONLY — cross-project invisibility BY CONSTRUCTION (journey (e) asserts the
+ * prompt's contents; the transformer wrong-match was this filter's absence). A chase batch contributes
+ * only its same-project items as ⭐ chased — ranked first, a PRIOR, never a lock.
+ * Legacy (projectId null): all active projects, unchanged (the unreachable chase-path shell).
  * (Scale note: a recency/cardinality cap belongs here if the open set grows large — NEVER a meaning filter.)
  */
-export async function buildCandidateSet(supabase: SB, orgId: string, batch: { items: BatchItem[] } | null): Promise<Candidate[]> {
+export async function buildCandidateSet(supabase: SB, orgId: string, batch: { items: BatchItem[] } | null, projectId: string | null = null): Promise<Candidate[]> {
   const { data: projRows } = await supabase.from('projects').select('project_id, name').eq('org_id', orgId).eq('status', 'Active')
   const projects = (projRows ?? []) as { project_id: string; name: string }[]
   const nameById = new Map(projects.map((p) => [p.project_id, p.name]))
   const activeIds = new Set(projects.map((p) => p.project_id))
   const chasedIds = new Set((batch?.items ?? []).map((i) => i.id))
+  // THE-project scope: out-of-project rows never enter the set (the DB filter is best-effort; this
+  // JS filter is the guarantee the journeys assert against).
+  const inScope = (pid: string | null) => (projectId ? pid === projectId : !(pid && !activeIds.has(pid)))
 
   const { data: probRows } = await supabase.from('problems').select('id, title, project_id, status').eq('org_id', orgId)
   const { data: todoRows } = await supabase.from('todos').select('id, title, project_id, status').eq('org_id', orgId)
-  const { data: taskRows } = await supabase.from('site_tasks').select('task_id, name, project_id, status').in('project_id', [...activeIds])
+  const { data: taskRows } = await supabase.from('site_tasks').select('task_id, name, project_id, status').in('project_id', projectId ? [projectId] : [...activeIds])
 
   const cands: Candidate[] = []
   for (const p of (probRows ?? []) as { id: string; title: string; project_id: string | null; status: string }[]) {
-    if (!OPEN_ISSUE.has(p.status) || (p.project_id && !activeIds.has(p.project_id))) continue
+    if (!OPEN_ISSUE.has(p.status) || !inScope(p.project_id)) continue
     cands.push({ id: p.id, kind: 'issue', title: p.title, project_id: p.project_id, project_name: nameById.get(p.project_id ?? '') ?? null, chased: chasedIds.has(p.id) })
   }
   for (const t of (todoRows ?? []) as { id: string; title: string; project_id: string | null; status: string }[]) {
-    if (t.status === 'DONE' || (t.project_id && !activeIds.has(t.project_id))) continue
+    if (t.status === 'DONE' || !inScope(t.project_id)) continue
     cands.push({ id: t.id, kind: 'todo', title: t.title, project_id: t.project_id, project_name: nameById.get(t.project_id ?? '') ?? null, chased: chasedIds.has(t.id) })
   }
   for (const t of (taskRows ?? []) as { task_id: string; name: string; project_id: string | null; status: string }[]) {
-    if (DONE_TASK.has(t.status)) continue
+    if (DONE_TASK.has(t.status) || !inScope(t.project_id)) continue
     cands.push({ id: t.task_id, kind: 'task', title: t.name, project_id: t.project_id, project_name: nameById.get(t.project_id ?? '') ?? null, chased: chasedIds.has(t.task_id) })
   }
   // chased first (prior, not lock), otherwise stable insertion order.
@@ -68,7 +72,7 @@ export async function buildCandidateSet(supabase: SB, orgId: string, batch: { it
 export const RESOLUTION_SYSTEM = `You resolve ONE inbound site message (English, Telugu, Hindi, or code-mixed "Tenglish"; text or a voice transcript) against a construction supervisor's OPEN work. Read MEANING, never keywords, and never across a negation.
 
 Answer BOTH questions, always, as STRICT JSON ONLY:
-{"issue_snag_found":{"found":bool,"items":[{"kind":"issue|snag","detail":"...","location":"floor/unit or null","project_hint":"the project this NEW item is on, resolved by MEANING against the candidate projects, or null if genuinely unclear","confidence":"high|med|low"}]},"update_found":{"found":bool,"updates":[{"target_id":"an id from CANDIDATES below","target_kind":"task|issue|todo","action":"progress|addressing|resolve","confidence":"high|med|low","closure_explicit":bool,"reason":"one short grounded sentence"}]}}
+{"issue_snag_found":{"found":bool,"items":[{"kind":"issue|snag","detail":"...","location":"floor/unit or null","project_hint":"the project this NEW item is on ONLY if the message NAMES one (CANDIDATES already belong to the message's project — do not guess another), else null","confidence":"high|med|low"}]},"update_found":{"found":bool,"updates":[{"target_id":"an id from CANDIDATES below","target_kind":"task|issue|todo","action":"progress|addressing|resolve","confidence":"high|med|low","closure_explicit":bool,"reason":"one short grounded sentence"}]}}
 
 TWO AXES (a single message can set BOTH — "waterlogging fixed, tiles broke" = one resolve + one new issue):
 - update_found = the message reports on something that ALREADY EXISTS in CANDIDATES (progress, now-addressing, or resolved). target_id MUST be an id from CANDIDATES — never invent one. A re-report of a known problem is an update on that item, NOT a new issue.
@@ -156,6 +160,8 @@ export interface ResolveInboundCtx {
   supabase: SB
   orgId: string
   from: string
+  /** THE project (singular unit): scopes the candidate set to this project only. Absent → legacy all-projects. */
+  projectId?: string | null
 }
 export interface InboundInput {
   message: string                                   // text or voice transcript (caption for an image)
@@ -179,7 +185,7 @@ export async function resolveInbound(
   send: (body: string) => Promise<void>,
   callModel: (system: string, user: string) => Promise<string> = callLLM,   // injectable for end-to-end tests; default is the real client
 ): Promise<ResolveOutcome> {
-  const candidates = await buildCandidateSet(ctx.supabase, ctx.orgId, batch)
+  const candidates = await buildCandidateSet(ctx.supabase, ctx.orgId, batch, ctx.projectId ?? null)
   const isImage = !!input.image
   // A hard model failure/timeout must PARK, never propagate — callLLM already returns '' on failure, but
   // guard callModel too so the no-miss guarantee holds whatever the client does.

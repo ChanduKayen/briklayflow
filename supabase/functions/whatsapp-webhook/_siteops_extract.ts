@@ -263,13 +263,15 @@ export async function callLLM(system: string, user: string): Promise<string> {
  * transaction extractor. resolveProject's string match then becomes a safety net, not the
  * primary resolver, which is what let oblique mentions ("shyam gaari site") slip to null/no-match.
  */
-export async function decompose(narration: string, knownProjects: string[] = []): Promise<DecomposeResult> {
+export async function decompose(narration: string, knownProjects: string[] = [], call: (system: string, user: string) => Promise<string> = callLLM): Promise<DecomposeResult> {
   const text = (narration ?? '').trim()
   if (!text) return { items: [], project_hint: null }
 
   const system = DECOMPOSE_SYSTEM.replace('{{KNOWN_PROJECTS}}', renderKnownProjects(knownProjects))
   const user = `<narration>\n${text}\n</narration>`
-  const raw = await callLLM(system, user)
+  // `call` is injectable so the singular unit's ONE model door (opts.callModel) covers decompose too —
+  // journey (d)'s "LLM never called" is only assertable if every call flows through the counted door.
+  const raw = await call(system, user)
   const parsed = safeParse(raw)
   if (!parsed) throw new Error('decompose: unreadable model response')
 
