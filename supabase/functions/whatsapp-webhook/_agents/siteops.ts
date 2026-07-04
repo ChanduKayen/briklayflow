@@ -27,7 +27,7 @@ import {
 import { loadCadenceMap, type CadenceMap } from '../_siteops_timing.ts'
 import {
   getOpenBatch, dropBatchItems, classifyReplyFragment, scopeBatchToProject, interpretStatus,
-  routeEmptyDecompose, isBareAck,
+  isBareAck,
   type OpenBatch, type BatchItem,
 } from '../_siteops_batch.ts'
 import {
@@ -447,10 +447,16 @@ function terminalObservation(t: Terminal): string {
 // `replay` (→ the jsonb `candidates` column) carries the structured payload a distinguished park needs so a
 // later phase can act on the row mechanically — e.g. a non_batch_target park stores the update + its label so
 // Phase 3's fresh path can re-apply it. Null for the plain "couldn't place" parks.
-async function parkObservation(ctx: SiteopsCtx, observation: string, reason: string, narrationId: string | null, replay: unknown = null): Promise<void> {
+// AUDIT #4/#7 — a park must carry every piece of context the flow already holds: THE resolved project
+// (else the replay re-asks what we knew) and the inbound photo's bucket/object_path (else "photo saved"
+// names an unfindable photo — the eat wearing a receipt).
+async function parkObservation(ctx: SiteopsCtx, observation: string, reason: string, narrationId: string | null, replay: unknown = null, opts: { projectId?: string | null } = {}): Promise<void> {
   await ctx.supabase.from('siteops_unplaced').insert({
-    org_id: ctx.orgId, project_id: null, reason, observation,
-    candidates: replay, bucket: null, object_path: null, caption: null,
+    org_id: ctx.orgId, project_id: opts.projectId ?? null, reason, observation,
+    candidates: replay,
+    bucket: ctx.image?.storagePath ? 'rough-entry-media' : null,
+    object_path: ctx.image?.storagePath ?? null,
+    caption: ctx.image?.caption?.trim() || null,
     narration_id: narrationId, sender_number: ctx.from, created_by: null,
   })
 }
@@ -543,12 +549,15 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
           // UNDERSTOOD-BUT-HELD, never as failed. When Phase 3 lands, these rows re-apply.
           await parkObservation(ctx, terminalObservation(t), 'non_batch_target', ex.narrationId, {
             target_id: t.update.target_id, target_kind: t.update.target_kind, label: terminalLabel(t, ex.labelById), update: t.update,
-          })
+          }, { projectId: ex.projectId ?? null })
           outcomes.push({ terminal: t, status: 'held', label: terminalLabel(t, ex.labelById) })
           continue
         }
         const out: { resolveEvent?: string } = {}
         await applyBatchResolution(ctx, item, t.applied === 'resolve' ? 'resolved' : 'still_open', t.update.reason, ex.cadenceMap, ex.actorId, ex.now, { force: t.applied, reason: t.update.reason, out })
+        // A photo riding an update is ANSWER EVIDENCE for the item it updates (decision (a): a chase-reply
+        // photo never spawns a fresh object) — attach + trail, the role='answer' path the flip had dropped.
+        if (ctx.image?.storagePath) await answerWithPhoto(ctx, { kind: item.kind, id: item.id, orgId: item.orgId }, ctx.image.storagePath, ctx.image.caption ?? null)
         if (t.applied === 'resolve' && item.kind === 'issue' && out.resolveEvent) resolvedRefs.push({ kind: 'issue', id: item.id, event: out.resolveEvent })
         outcomes.push({ terminal: t, status: 'ok', label: shortLabel(item.title) })
       } else if (t.kind === 'object_created') {
@@ -559,6 +568,14 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
         if (!pid) throw new Error('project unresolved')
         const out = await routeGroup(ctx, pid, [toSiteItem(t.item)], ex.narrationId)
         if (out.progress.length + out.problems.length + out.todos.length === 0) throw new Error('nothing created')
+        // Image evidence rides the create (finishRoute's twin): link the ALREADY-stored photo to each
+        // object this terminal created — after create, so a failed create leaves no orphan attachment.
+        if (ctx.image?.storagePath) {
+          const sp = ctx.image.storagePath, cap = ctx.image.caption ?? null
+          for (const p of out.problems) if (p.id) await attachImage(ctx, 'problem', p.id, sp, cap, 'creation')
+          for (const td of out.todos) if (td.id) await attachImage(ctx, 'todo', td.id, sp, cap, 'creation')
+          for (const pr of out.progress) if (pr.taskId) await attachImage(ctx, 'site_task', pr.taskId, sp, cap, 'creation')
+        }
         outcomes.push({ terminal: t, status: 'ok', label: shortLabel(t.item.detail) })
       } else if (t.kind === 'acked_didnt_catch') {
         outcomes.push({ terminal: t, status: 'ok', label: '' })   // no state effect; the readback IS the ack
@@ -569,18 +586,19 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
         outcomes.push({ terminal: t, status: 'ok', label: terminalLabel(t, ex.labelById) })
       } else if (t.kind === 'queued_as_evidence') {
         // Honest STRUCTURAL park (five-part): durable row + a DISTINCT parked_reason so Step 6 can tell an
-        // image awaiting placement from a text obs that couldn't be sited. Near-miss lands in Phase 3.
-        await parkObservation(ctx, 'photo evidence', 'evidence_await_placement', ex.narrationId)
+        // image awaiting placement from a text obs that couldn't be sited. The row carries the photo's
+        // bucket/object_path (parkObservation reads ctx.image) so the evidence is FINDABLE (audit #7).
+        await parkObservation(ctx, 'photo evidence', 'evidence_await_placement', ex.narrationId, null, { projectId: ex.projectId ?? null })
         outcomes.push({ terminal: t, status: 'ok', label: 'photo' })
       } else {
-        await parkObservation(ctx, terminalObservation(t), 'v2_unhandled_terminal', ex.narrationId)
+        await parkObservation(ctx, terminalObservation(t), 'v2_unhandled_terminal', ex.narrationId, null, { projectId: ex.projectId ?? null })
         outcomes.push({ terminal: t, status: 'failed', label: terminalLabel(t, ex.labelById) })
       }
     } catch (e) {
       console.error('[siteops:exec] terminal failed:', t.kind, (e as Error).message)
       // A FAILED effect must land somewhere recoverable — park it, so "saved for review" in the readback is
       // true and the observation isn't an eat wearing an apology. Best-effort; the outcome is still recorded.
-      await parkObservation(ctx, terminalObservation(t), 'v2_effect_failed', ex.narrationId).catch(() => {})
+      await parkObservation(ctx, terminalObservation(t), 'v2_effect_failed', ex.narrationId, null, { projectId: ex.projectId ?? null }).catch(() => {})
       outcomes.push({ terminal: t, status: 'failed', label: terminalLabel(t, ex.labelById) })
     }
   }
@@ -615,13 +633,13 @@ function readbackPart(item: BatchItem, verdict: 'resolved' | 'open'): string {
  * per item. Returns TRUE if it consumed the message; FALSE if NOTHING matched
  * the batch (then runSiteops routes it fresh, leaving the batch open).
  */
-// ── v2 ADOPTION — the unified engine IS the chase-reply path ──────────────────────────────────────────
-// handleBatchReply resolves an open-chase reply by ONE model call (resolveInbound: the message graded
-// against the full candidate set, chased ranked top) → executeResolution's authoritative terminals →
-// applyTerminals. Kept IN FRONT of the model: the bare-ack fast path (cardinality, no LLM). A model failure
-// PARKS (no-miss) and leaves the batch untouched. The old match+judge core is `handleBatchReplyLegacy`
-// below — PHYSICALLY PRESENT but UNREACHABLE (one hardcoded route, no runtime toggle); PHASE 4 is its
-// executioner (delete it + matchPieceToBatch + ASCII tokens + standalone judgeResolution).
+// ── v2 ADOPTION shell — UNREACHABLE since the image path joined the unit (audit #1) ──────────────────
+// handleBatchReply was the adoption-era chase-reply engine (ONE resolveInbound over the LEGACY all-projects
+// candidate set → terminals → applyTerminals). The text path left it at the singular-first restructure; the
+// image path left it when it went project-first — so, like its match+judge twin below, it is PHYSICALLY
+// PRESENT but UNREACHABLE, kept for one bisectable revert. PHASE 4 is the executioner for BOTH (plus
+// matchPieceToBatch + ASCII tokens + standalone judgeResolution + buildCandidateSet's projectId-null mode).
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- UNREACHABLE (Phase 4 executioner); kept for one bisectable revert.
 async function handleBatchReply(
   ctx: SiteopsCtx, text: string, _pieces: SiteItem[], _topProjectHint: string | null,
   batch: OpenBatch, _projects: ProjectRef[], narrationId: string | null,
@@ -840,10 +858,13 @@ async function runSingularUnit(ctx: SiteopsCtx, u: {
   const actorId = await senderUserId(ctx)
 
   // interim pending_stage2 park FIRST — no-drop holds even if the unit itself parks below.
+  // AUDIT #3 — the row carries THE resolved project (the narration's shared site) so Stage 2's replay
+  // inherits sited fragments; a per-item project_hint inside the observation still overrides at replay
+  // for a genuinely multi-site narration (the decompose contract's carry-forward shape).
   let restLine = ''
   if (u.rest.length) {
     await ctx.supabase.from('siteops_unplaced').insert({
-      org_id: ctx.orgId, project_id: null, reason: 'pending_stage2',
+      org_id: ctx.orgId, project_id: u.projectId, reason: 'pending_stage2',
       observation: { items: u.rest }, candidates: null, bucket: null, object_path: null, caption: null,
       narration_id: u.narrationId, sender_number: ctx.from, created_by: null,
     })
@@ -924,9 +945,13 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
   const projects: ProjectRef[] = ((projRows ?? []) as { project_id: string; name: string }[]).map((p) => ({ id: p.project_id, name: p.name }))
   const projectNames = projects.map((p) => p.name)
 
-  // ── IMAGE PATH — unchanged this commit (Stage-2 scope). The vision decompose, chase-photo evidence
-  // interactions (STEP 2/3) and the "photos never create tasks" machinery all live on the proven flow;
-  // dragging images through the unit now would be scope riding along. Logged for Stage 2.
+  // ── IMAGE PATH — PROJECT-FIRST (audit #1). The adoption flip left the old shape gated on the batch:
+  // handleBatchReply (which never returns false) consumed EVERY image from a chased sender with the legacy
+  // all-projects candidate set — the Fix-X image-hijack, re-broken. The image path now mirrors the text
+  // ladder: resolve THE project FIRST → multi-project files per-site → chases ON that project run the
+  // SINGULAR UNIT (batch a ⭐ prior; the photo rides the terminals) → a chase-free project routes FRESH
+  // through the proven image machinery (attach axis, evidence links, enrichment window) with the batch
+  // INVISIBLE. The batch is never a gate, never a router.
   if (ctx.image?.base64) {
     // STEP 1 GROUNDING — resolve the site from the CAPTION up-front so the vision pass reads the photo
     // against THIS project's OPEN work + pending chases; failure just yields no hints (bonus, not blocker).
@@ -942,37 +967,70 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
 
     let decomposed: { items: SiteItem[]; project_hint: string | null } | null = null
     try {
-      decomposed = await decomposeImage(ctx.image.base64, ctx.image.mime, ctx.image.caption, projectNames, groundingHints)
+      decomposed = await decomposeImage(ctx.image.base64, ctx.image.mime, ctx.image.caption, projectNames, groundingHints, opts.callModel)
     } catch {
       decomposed = null
     }
+    const items = decomposed?.items ?? []
+    const first = items[0] ?? null
 
-    if (!decomposed) {
-      if (routeEmptyDecompose(!!(batch && batch.items.length)) === 'batch' && batch) {
-        const consumed = await handleBatchReply(ctx, text, [], null, batch, projects, narrationId, opts.callModel)
-        if (consumed) return
-      }
-      await say(`Didn't catch a site update in that — try again if you meant to send one.`)
-      return
-    }
-    if (batch && batch.items.length) {
-      const consumed = await handleBatchReply(ctx, text, decomposed.items, decomposed.project_hint, batch, projects, narrationId, opts.callModel)
-      if (consumed) return
-    }
-    const plan = planItemProjects(decomposed.items.map((it) => it.project_hint), projects)
+    // MULTI-project image narration files per-site (journey precedent: the txn agent's shape). Reached
+    // BEFORE any batch consult — a message naming several sites was never a single chase's reply.
+    const plan = planItemProjects(items.map((it) => it.project_hint), projects)
     if (plan.isMulti) {
-      await runMulti(ctx, decomposed.items, plan, projects, narrationId)
+      await runMulti(ctx, items, plan, projects, narrationId)
       return
     }
-    const proj = await resolveProject(ctx.supabase, ctx.orgId, { narration: text, nameHint: decomposed.project_hint })
+
+    // RESOLVE THE PROJECT (ask-first ladder, the text path's twin): the item's/vision's named project →
+    // caption string-match safety net → the open batch as a PRIOR (single-site batches only) → ASK FIRST.
+    const nameHint = first?.project_hint ?? decomposed?.project_hint ?? null
+    const proj = await resolveProject(ctx.supabase, ctx.orgId, { narration: ctx.image.caption || text, nameHint })
+    let projectId: string | null = proj.projectId
+    let via: string = proj.via
+    if (!projectId && batch && batch.items.length) {
+      const pids = [...new Set(batch.items.map((b) => b.projectId).filter(Boolean))] as string[]
+      if (pids.length === 1) { projectId = pids[0]; via = 'auto' }
+    }
     await ctx.supabase.from('site_narrations').update({
-      project_id: proj.projectId, decomposed: decomposed.items, resolved_project_via: proj.via,
+      project_id: projectId, decomposed: items, resolved_project_via: projectId ? via : 'unresolved',
     }).eq('id', narrationId)
-    if (!proj.projectId) {
-      await askProjectFirst(ctx, meta, proj, decomposed.items, null, narrationId)   // legacy slots (no text) → finishRoute resume
+
+    if (!projectId) {
+      if (!items.length) {
+        // FLOOR (mapped nothing, observed nothing, no site): the photo is EVIDENCE and must survive —
+        // park it WITH its object_path (never the text path's "didn't catch", which would drop it).
+        if (ctx.image.storagePath) {
+          await ctx.supabase.from('siteops_unplaced').insert({
+            org_id: ctx.orgId, project_id: null, reason: 'floor', observation: null,
+            candidates: null, bucket: 'rough-entry-media', object_path: ctx.image.storagePath,
+            caption: ctx.image.caption?.trim() || null, narration_id: narrationId, sender_number: ctx.from, created_by: null,
+          })
+          await say(`Couldn't read that photo — kept it on your to-place list so it isn't lost.`)
+          return
+        }
+        await say(`Didn't catch a site update in that — try again if you meant to send one.`)
+        return
+      }
+      await askProjectFirst(ctx, meta, proj, items, null, narrationId)   // legacy slots (no text) → finishRoute resume, photo carried
       return
     }
-    await finishRoute(ctx, proj.projectId, proj.projectName, decomposed.items, narrationId)
+
+    // THE project resolved. Chases ON it → the unit (same-project batch items rank ⭐; cross-project
+    // invisibility by construction). Chase-free → the proven fresh flow; the batch never routes.
+    const chasesHere = (batch?.items ?? []).some((b) => b.projectId === projectId)
+    if (chasesHere && batch) {
+      await runSingularUnit(ctx, {
+        projectId,
+        text: items.length >= 2 ? first!.text : text,   // compound → the FIRST fragment (interim rule, text-path twin)
+        rest: items.slice(1),
+        batch, narrationId,
+        callModel: opts.callModel ?? callLLM,
+      })
+      return
+    }
+    const projectName = proj.projectName ?? projects.find((p) => p.id === projectId)?.name ?? null
+    await finishRoute(ctx, projectId, projectName, items, narrationId)
     return
   }
 
@@ -1032,11 +1090,14 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
 async function askProjectFirst(ctx: SiteopsCtx, meta: Record<string, unknown>, proj: any, items: SiteItem[], text: string | null, narrationId: string | null): Promise<void> {
   const ambiguous = proj.nameTried && proj.matches.length > 1
   const pickList = ambiguous ? proj.matches : proj.candidates
+  // AUDIT #2 — the question CARRIES the observation in its TEXT (not just the slots): the supervisor must
+  // see WHAT is being sited before picking, or a stale question reads as a context-free "which project?".
+  const obs = items[0]?.text ? `"${items[0].text}"${items.length > 1 ? ` (+${items.length - 1} more)` : ''}` : 'your site note'
   const body = ambiguous
-    ? `You said "${proj.nameTried}" — a few projects match. Which one?`
+    ? `You said "${proj.nameTried}" — a few projects match. Which one is ${obs} for?`
     : proj.nameTried
-      ? `I couldn't find a project called "${proj.nameTried}". Which one is it?`
-      : `Got your site note — which project is it for?`
+      ? `I couldn't find a project called "${proj.nameTried}". Which project is ${obs} for?`
+      : `Got ${obs} — which project is it for?`
   await openConversation(ctx.supabase, {
     orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
     pendingQuestion: 'which project?',

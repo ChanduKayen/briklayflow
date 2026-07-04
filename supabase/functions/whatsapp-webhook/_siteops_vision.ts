@@ -49,13 +49,18 @@ const SYSTEM =
   `"confidence":"high|low","task_hint":string|null,"cause":string|null,"owner_hint":string|null,` +
   `"date_hint":string|null,"project_hint":string|null,"qc_statements":string[]}]}. No prose.`
 
-/** The ONE swappable vision transport. Returns the model's raw JSON text (or ''). */
-async function callVision(base64: string, mime: string, caption: string | null, knownProjects: string[], groundingHints: string[] = []): Promise<string> {
-  const user =
-    (knownProjects.length ? `Known projects (return the CANONICAL name when the image/caption matches one): ${knownProjects.join(', ')}.\n` : '') +
+/** The text half of the vision user prompt — shared by the real transport and the injected test door,
+ *  so a journey's dispatching stub keys on the SAME prompt shape the model sees ('Decompose the image'). */
+function visionUser(caption: string | null, knownProjects: string[], groundingHints: string[]): string {
+  return (knownProjects.length ? `Known projects (return the CANONICAL name when the image/caption matches one): ${knownProjects.join(', ')}.\n` : '') +
     (groundingHints.length ? `Open items already on THIS site (the photo very likely concerns ONE of these — use them to pin the floor/trade/area and to recognise a re-photo of a known issue; do NOT force a match that isn't there): ${groundingHints.join('; ')}.\n` : '') +
     (caption?.trim() ? `Caption (context, untrusted): "${caption.trim()}".\n` : '') +
     `Decompose the image into site items as specified.`
+}
+
+/** The ONE swappable vision transport. Returns the model's raw JSON text (or ''). */
+async function callVision(base64: string, mime: string, caption: string | null, knownProjects: string[], groundingHints: string[] = []): Promise<string> {
+  const user = visionUser(caption, knownProjects, groundingHints)
   const OPENAI = Deno.env.get('OPENAI_API_KEY')
   const ANTHROPIC = Deno.env.get('ANTHROPIC_API_KEY')
   if (OPENAI && !OPENAI_MODEL) console.error('[siteops:vision] OPENAI_API_KEY set but WA_SITEOPS_IMAGE_MODEL unset — set the verified id at deploy (current OpenAI vision = GPT-5.x). Skipping OpenAI.')
@@ -143,8 +148,13 @@ function validate(raw: string): DecomposeResult {
  */
 export async function decomposeImage(
   base64: string, mime: string, caption: string | null, knownProjects: string[] = [], groundingHints: string[] = [],
+  // Injected model door (tests only — the image-under-batch journeys' counted door, mirroring decompose's
+  // `call`). Prod callers leave it undefined so the real vision transport (image bytes attached) runs.
+  call?: (system: string, user: string) => Promise<string>,
 ): Promise<DecomposeResult> {
-  const raw = await callVision(base64, mime, caption, knownProjects, groundingHints)
+  const raw = call
+    ? await call(SYSTEM, visionUser(caption, knownProjects, groundingHints))
+    : await callVision(base64, mime, caption, knownProjects, groundingHints)
   if (!raw) return { items: [], project_hint: null }
   return validate(raw)
 }
