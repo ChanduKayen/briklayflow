@@ -16,6 +16,7 @@ import { useAuth } from '../lib/auth/AuthProvider'
 import { PageSkeleton } from '../components/SkeletonLoader'
 import { useOrgMembers } from '../components/siteOps/UserPicker'
 import ItemsTable, { type DeskProblem, type DeskSnag, type ThreadEntry } from '../components/siteOps/ItemsTable'
+import UnplacedQueue, { type UnplacedRow } from '../components/siteOps/UnplacedQueue'
 import { appendEvent, legacyToFollowupType, trailKey, useTrailStates } from '../lib/siteOps/followup'
 
 const CREAM = '#FBF9F6', INK = '#221A13', INK_SOFT = 'rgba(34,26,19,0.55)', INK_FAINT = 'rgba(34,26,19,0.34)'
@@ -70,6 +71,21 @@ export default function SiteDesk({ session }: { session: Session }) {
     enabled: !!orgId,
     refetchInterval: 20000,
   })
+  // The "To place" queue — every honest WhatsApp park (siteops_unplaced, status='unplaced'). Until this
+  // surface existed the parks were durable but invisible, so "saved for review" read as a silent drop.
+  const { data: unplaced = [] } = useQuery({
+    queryKey: ['desk_unplaced', orgId],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('siteops_unplaced')
+        .select('id, project_id, reason, observation, candidates, bucket, object_path, caption, sender_number, created_at')
+        .eq('org_id', orgId).eq('status', 'unplaced').order('created_at', { ascending: false })
+      if (error) throw error
+      return (data ?? []) as UnplacedRow[]
+    },
+    enabled: !!orgId,
+    refetchInterval: 20000,
+  })
+
   // Per-item follow-up state (from the trail) for the row indicator — batch-loaded.
   const { data: followStates = {} } = useTrailStates(orgId ?? 'all', problems.map((p) => p.id), snags.map((t) => t.id))
   const { data: taskNames = {} } = useQuery({
@@ -92,6 +108,8 @@ export default function SiteDesk({ session }: { session: Session }) {
         () => qc.invalidateQueries({ queryKey: ['desk_problems', orgId] }))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'todos', filter: `org_id=eq.${orgId}` },
         () => qc.invalidateQueries({ queryKey: ['desk_snags', orgId] }))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'siteops_unplaced', filter: `org_id=eq.${orgId}` },
+        () => qc.invalidateQueries({ queryKey: ['desk_unplaced', orgId] }))
       .subscribe()
     return () => { supabase.removeChannel(ch) }
   }, [orgId, qc])
@@ -115,6 +133,13 @@ export default function SiteDesk({ session }: { session: Session }) {
       void appendEvent({ kind: 'issue', id, orgId, type: legacyToFollowupType(eventType), body: threadEvent, actorId: session.user.id })
         .then(() => qc.invalidateQueries({ queryKey: trailKey('issue', id) }))
     }
+  }
+  // Dismiss an unplaced park (handled outside / no longer needed). Optimistic; the row itself is
+  // never deleted — status flips to 'dismissed' so the park stays auditable.
+  function dismissUnplaced(row: UnplacedRow) {
+    qc.setQueryData(['desk_unplaced', orgId], (old: UnplacedRow[] | undefined) => old?.filter((r) => r.id !== row.id))
+    supabase.from('siteops_unplaced').update({ status: 'dismissed', resolved_at: new Date().toISOString() }).eq('id', row.id)
+      .then(({ error }) => { if (error) qc.invalidateQueries({ queryKey: ['desk_unplaced', orgId] }) })
   }
   function patchSnag(id: string, patch: Partial<DeskSnag>) {
     qc.setQueryData(['desk_snags', orgId], (old: DeskSnag[] | undefined) => old?.map((x) => (x.id === id ? { ...x, ...patch } : x)))
@@ -151,6 +176,7 @@ export default function SiteDesk({ session }: { session: Session }) {
             <Stat n={totalOpen} label={`open issue${totalOpen === 1 ? '' : 's'}`} sub={`on ${sitesWithOpen} site${sitesWithOpen === 1 ? '' : 's'}`} />
             <Stat n={overdueCount} label="overdue" tone={overdueCount ? FAIL : undefined} />
             <Stat n={totalSnags} label={`snag${totalSnags === 1 ? '' : 's'}`} />
+            <Stat n={unplaced.length} label="to place" tone={unplaced.length ? TERRA : undefined} />
           </div>
         </div>
       </div>
@@ -164,6 +190,8 @@ export default function SiteDesk({ session }: { session: Session }) {
               on={site === p.project_id} onClick={() => setSite(p.project_id)} />
           ))}
         </div>
+
+        <UnplacedQueue rows={bySite(unplaced)} projName={(id) => (id ? projName(id) : 'Site unknown')} onDismiss={dismissUnplaced} />
 
         <ItemsTable
           issues={bySite(problems)} snags={bySite(snags)} orgId={orgId ?? ''} actorId={session.user.id}
