@@ -85,6 +85,46 @@ suite('siteops resolution v2 — buildCandidateSet (open items, chased ranked to
     expect(cands[0].chased).toBe(true)
     expect(cands.some((c) => c.id === 'iss-done' || c.id === 'tk-done')).toBe(false)
   })
+
+  // LIVE FAILURE (columns, 2026-07-05): the set offered FLAT legacy task rows (node_key null) alongside
+  // their engine twins, the model targeted a flat "Columns", and the VM-guardrail correctly REFUSED the
+  // write — so every task update held. The model can only mis-target what we offer: task candidates must
+  // be ENGINE-VISIBLE only (node_key rows, deduped), exactly the rows applyProgress may write —
+  // buildCandidateSet mirrors the agent's engineTasks preference, per project.
+  test('task candidates are ENGINE-VISIBLE only — flat duplicates of engine rows are never offered', async () => {
+    const fake = fakeSupabase({
+      projects: [{ project_id: 'P1', name: 'ASM Elite' }],
+      site_tasks: {
+        'tk-flat': { task_id: 'tk-flat', name: 'Columns', project_id: 'P1', status: 'not_started', node_key: null },
+        'tk-eng': { task_id: 'tk-eng', name: 'Columns', project_id: 'P1', status: 'not_started', node_key: 'stilt/columns', floor_label: 'Stilt' },
+      },
+    })
+    const ids = (await buildCandidateSet(fake, 'org-1', null, 'P1')).filter((c) => c.kind === 'task').map((c) => c.id)
+    expect(ids.includes('tk-eng')).toBe(true)
+    expect(ids.includes('tk-flat')).toBe(false)
+  })
+
+  // …but a STACK-LESS project (no engine rows at all) still offers its flat tasks — there, writes are
+  // legitimately unguarded and flat rows are the only identity that exists.
+  test('a stack-less project (no engine rows) still offers its flat tasks', async () => {
+    const fake = fakeSupabase({
+      projects: [{ project_id: 'P1', name: 'ASM Elite' }],
+      site_tasks: { 'tk-flat': { task_id: 'tk-flat', name: 'Boundary wall', project_id: 'P1', status: 'not_started', node_key: null } },
+    })
+    const ids = (await buildCandidateSet(fake, 'org-1', null, 'P1')).filter((c) => c.kind === 'task').map((c) => c.id)
+    expect(ids).toEqual(['tk-flat'])
+  })
+
+  // Five floors of "Columns" are indistinguishable without the floor — the candidate TITLE must carry it,
+  // or the model cannot honor "stilt floor columns" and picks a floor at random.
+  test('task candidate titles carry the floor label', async () => {
+    const fake = fakeSupabase({
+      projects: [{ project_id: 'P1', name: 'ASM Elite' }],
+      site_tasks: { 'tk-eng': { task_id: 'tk-eng', name: 'Columns', project_id: 'P1', status: 'not_started', node_key: 'stilt/columns', floor_label: 'Stilt' } },
+    })
+    const cands = await buildCandidateSet(fake, 'org-1', null, 'P1')
+    expect(cands.find((c) => c.id === 'tk-eng')?.title).toBe('Columns — Stilt')
+  })
 })
 
 suite('siteops resolution v2 — resolveInbound fail→park (no-miss survives the model down)', () => {
