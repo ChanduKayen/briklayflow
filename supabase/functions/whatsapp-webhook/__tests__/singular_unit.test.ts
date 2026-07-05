@@ -71,6 +71,10 @@ const R_RESOLVE_TILES = JSON.stringify({
   issue_snag_found: { found: false, items: [] },
   update_found: { found: true, updates: [{ target_id: 'iss-tiles', target_kind: 'issue', action: 'resolve', confidence: 'high', closure_explicit: true, reason: 'tiles arrived' }] },
 })
+const R_TASK_PROGRESS = JSON.stringify({
+  issue_snag_found: { found: false, items: [] },
+  update_found: { found: true, updates: [{ target_id: 'task-slab', target_kind: 'task', action: 'progress', confidence: 'high', closure_explicit: false, reason: 'ground floor slab pour done' }] },
+})
 
 suite('siteops singular-first — Stage-1 acceptance journeys (a–g)', () => {
   // (a) THE MASTERY CASE (D5 CASE ONE, create half): a fresh issue for Soundharya arrives while an
@@ -199,6 +203,29 @@ suite('siteops singular-first — Stage-1 acceptance journeys (a–g)', () => {
     await runSiteops(ctxFor(fake), 'Soundharya transformer emiti', { callModel: () => Promise.resolve('') })
     expect(fake.writesTo('siteops_unplaced').some((w) => w.payload?.reason === 'llm_unreadable')).toBe(true)
     expect(fake.outbox().some((b) => /logged it for review/i.test(b))).toBe(true)
+  })
+
+  // (n) STAGE 2 (1/N) — the task-progress gap closes end-to-end: "slab pour done" against an offered OPEN
+  // TASK applies via applyProgress (the probe-P5 / columns case, twice-hit live) — task written, "✓ …
+  // updated" readback, NO understood-but-held park. The highest-frequency component kind finally lands.
+  test('(n) "slab pour done" → task candidate offered, applyProgress writes it, ✓ updated readback, no held park', async () => {
+    const fake = fakeSupabase(seed({
+      chase_batches: [],
+      site_tasks: { 'task-slab': { task_id: 'task-slab', name: 'Slab Pour', project_id: 'P2', status: 'not_started', floor_label: 'Ground', unit_label: null, node_key: null, task_type_id: null, owner_id: null, owner_source: null, phase: null, trade: null } },
+    }))
+    const calls: Call[] = []
+    await runSiteops(ctxFor(fake), 'Soundharya lo ground floor slab pour done', {
+      callModel: unitModel(calls, {
+        decompose: DEC('Soundharya', [{ type: 'progress', text: 'ground floor slab pour done' }]),
+        resolve: R_TASK_PROGRESS,
+      }),
+    })
+    const rc = resolutionCalls(calls)
+    expect(rc.length).toBe(1)
+    expect(rc[0].user.includes('task-slab | task')).toBe(true)   // the task WAS offered — now it must land
+    expect(fake.writesTo('site_tasks').some((w) => w.op === 'update')).toBe(true)
+    expect(fake.outbox().some((b) => /✓ “Slab Pour \(Ground\)” updated/.test(b))).toBe(true)
+    expect(fake.writesTo('siteops_unplaced').length).toBe(0)     // no more understood-but-held
   })
 
   // (g) INTERIM COMPOUND RULE: first item through the unit; the rest parked HONESTLY as pending_stage2

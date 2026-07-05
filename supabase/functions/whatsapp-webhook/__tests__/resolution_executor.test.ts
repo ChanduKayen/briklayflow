@@ -233,6 +233,55 @@ suite('siteops resolution v2 — DEFECT 2 + non-batch-target held park', () => {
   })
 })
 
+// STAGE 2 (1/N) — applyProgress IN THE EXECUTOR. The spec: an update maps against THAT project's open
+// tasks + issues + snags. Issues/todos applied; TASK targets parked understood-but-held (probes P5 +
+// "columns aipoyayi" — twice in one day). Now: a HIGH-confidence task update APPLIES via the proven
+// applyProgress (VM-guardrail intact); MED/LOW task targets stay held/asked (no soft rung exists for a
+// task — applying IS the state change, so uncertainty keeps holding). Plus a silent-drop fix: an
+// un-sendable which_item question (target not in itemsById) must PARK + read back, never vanish as 'ok'.
+suite('siteops resolution v2 — executor task updates (Stage 2 applyProgress)', () => {
+  const slabTask = { task_id: 'task-slab', name: 'Slab Pour', project_id: 'P1', status: 'not_started', floor_label: 'Ground', unit_label: null, node_key: null, task_type_id: null, owner_id: null, owner_source: null, phase: null, trade: null }
+  const taskSeed = (): Seed => ({ projects: [{ project_id: 'P1', name: 'ASM Elite' }], site_tasks: { 'task-slab': slabTask } })
+  const tTaskUpdate = (confidence: 'high' | 'med' = 'high'): Terminal => ({
+    kind: 'object_updated',
+    update: upd({ target_id: 'task-slab', target_kind: 'task', action: 'progress', confidence, closure_explicit: false, reason: 'stilt floor columns / slab pour completed' }),
+    applied: 'addressing', undo: false, readback: '', reason: '',
+  })
+
+  // (T1) THE GAP CLOSES: a HIGH task update writes the task (via applyProgress) and reads back "✓ … updated"
+  // — no more understood-but-held park for the highest-frequency component on a working site.
+  test('(T1) HIGH task update → site_tasks written via applyProgress, "✓ … updated" readback, NO held park', async () => {
+    const fake = fakeSupabase(taskSeed())
+    await applyTerminals(ctxFor(fake), [tTaskUpdate('high')], { ...execCtx(), projectId: 'P1' })
+
+    expect(fake.writesTo('site_tasks').some((w) => w.op === 'update')).toBe(true)
+    expect(fake.outbox().some((b) => /✓ “Slab Pour \(Ground\)” updated/.test(b))).toBe(true)
+    expect(fake.writesTo('siteops_unplaced').length).toBe(0)
+  })
+
+  // (T2) MED task target → still held (uncertainty may not move a task), parked replayable w/ project.
+  test('(T2) MED task update → understood-but-held park, task untouched', async () => {
+    const fake = fakeSupabase(taskSeed())
+    await applyTerminals(ctxFor(fake), [tTaskUpdate('med')], { ...execCtx(), projectId: 'P1' })
+
+    expect(fake.writesTo('site_tasks').length).toBe(0)
+    const park = fake.writesTo('siteops_unplaced')[0]
+    expect(park?.payload?.reason).toBe('non_batch_target')
+    expect(fake.outbox().some((b) => /saved for review/i.test(b))).toBe(true)
+  })
+
+  // (T3) SILENT-DROP FIX, pinned to bite: a which_item question whose target isn't in itemsById used to
+  // return without sending ANYTHING (outcome 'ok', no message, no park). Now: park + honest readback.
+  test('(T3) un-sendable which_item question → parks + honest reply, never a silent ok', async () => {
+    const fake = fakeSupabase({})
+    const q: Terminal = { kind: 'question_asked', about: 'which_item', ref: 'ghost-id', update: upd({ target_id: 'ghost-id', confidence: 'low' }), reason: '' }
+    await applyTerminals(ctxFor(fake), [q], execCtx())
+
+    expect(fake.writesTo('siteops_unplaced').length).toBe(1)          // the observation survives
+    expect(fake.outbox().some((b) => /saved for review/i.test(b))).toBe(true)   // and the sender is told
+  })
+})
+
 // PROBE FINDINGS C1/C2 (live 2026-07-05) — readback labels must be TRUTH-PRESERVING. shortLabel's 3-word
 // truncation composed with the word "resolved" inverted a live reply: title "bathroom tiles not fixed
 // correctly" → label "bathroom tiles not" → "✓ bathroom tiles not resolved" — the supervisor read the
