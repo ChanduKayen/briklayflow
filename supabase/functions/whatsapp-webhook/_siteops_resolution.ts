@@ -170,6 +170,8 @@ function readbackLine(o: TerminalOutcome): string | null {
   const failed = o.status === 'failed'
   switch (t.kind) {
     case 'object_updated':
+      // TASK targets speak progress, not chase-speak: "✓ … updated" (a task is work, not an issue to chase).
+      if (t.update.target_kind === 'task') return failed ? `⚠️ couldn't update “${o.label}” — saved for review` : `✓ “${o.label}” updated`
       if (t.applied === 'resolve') return failed ? `⚠️ couldn't resolve “${o.label}” — saved for review` : `✓ “${o.label}” resolved`
       return failed ? `⚠️ couldn't update “${o.label}” — saved for review` : `“${o.label}” — on it, will check back`
     case 'object_created':
@@ -179,7 +181,9 @@ function readbackLine(o: TerminalOutcome): string | null {
     case 'acked_didnt_catch':
       return `Didn't catch a site update in that — try again if you meant to send one.`
     case 'question_asked':
-      return null   // asked as its own interactive message, not a readback line
+      // A SENT question is its own interactive message (no readback line). An UN-SENT one (executor
+      // couldn't open the pick) was parked — say so, never silence (the T3 silent-drop fix).
+      return o.status === 'ok' ? null : `⚠️ couldn't place “${o.label}” — saved for review`
   }
 }
 
@@ -197,7 +201,7 @@ function heldClause(o: TerminalOutcome): string {
  *  clause, distinct from a ⚠️ failure. A lone didn't-catch returns its bare sentence; else "Got it — <…>". */
 export function composeReadback(outcomes: TerminalOutcome[]): string {
   const ordered = outcomes
-    .filter((o) => o.terminal.kind !== 'question_asked')
+    .filter((o) => o.terminal.kind !== 'question_asked' || o.status !== 'ok')   // sent questions are their own message; un-sent ones must be told
     .map((o, i) => ({ o, i }))
     .sort((a, b) => consequenceRank(a.o) - consequenceRank(b.o) || a.i - b.i)
     .map((x) => x.o)

@@ -433,6 +433,32 @@ export interface ExecCtx {
 function toSiteItem(it: { kind: 'issue' | 'snag'; detail: string; location: string | null; project_hint: string | null }): SiteItem {
   return { type: 'issue', text: it.detail, task_hint: it.location, qc_statements: [], cause: 'other', cause_reason: null, owner_hint: null, date_hint: null, project_hint: it.project_hint }
 }
+
+/** STAGE 2 (1/N) — apply a HIGH-confidence update onto an offered OPEN TASK via the PROVEN applyProgress
+ *  (VM-guardrail intact; a photo rides as creation evidence). Returns the readback label on success;
+ *  null → the caller's understood-but-held park stands (row gone / VM-refused / no project) — honest,
+ *  replayable, visible in the queue. MED/LOW task targets never reach here: no soft rung exists for a
+ *  task (applying IS the state change), so uncertainty keeps holding. */
+async function applyTaskUpdate(ctx: SiteopsCtx, t: Extract<Terminal, { kind: 'object_updated' }>, ex: ExecCtx): Promise<string | null> {
+  const { data: rows } = await ctx.supabase.from('site_tasks').select(`${TASK_COLS}, project_id`).eq('task_id', t.update.target_id)
+  const task = (rows ?? [])[0] as (SiteTaskRow & { project_id?: string | null }) | undefined
+  if (!task) return null
+  const projectId = task.project_id ?? ex.projectId ?? null
+  if (!projectId) return null
+  const vmKeys = await materializeProjectTasks(ctx, projectId)
+  const oc = await ownerCtx(ctx.supabase, ctx.orgId, projectId)
+  // vmNodeKeys: an EMPTY fold-set means the VM couldn't be built (stack-less project) — the guardrail's
+  // own "absent → can't judge → proceed" case, so pass undefined rather than refuse every write.
+  const rc: RouteCtx = {
+    supabase: ctx.supabase, orgId: ctx.orgId, projectId, byLabel: ctx.from, ...oc,
+    narrationId: ex.narrationId, now: ex.now, vmNodeKeys: vmKeys.size ? vmKeys : undefined,
+  }
+  const item: SiteItem = { type: 'progress', text: t.update.reason, task_hint: null, qc_statements: [], cause: null, cause_reason: null, owner_hint: null, date_hint: null, project_hint: null }
+  const res = await applyProgress(rc, task, item)
+  if (!res.visibleInVM) return null   // GUARDRAIL: never a false "✓ updated" onto a row the UI can't render
+  if (ctx.image?.storagePath) await attachImage(ctx, 'site_task', task.task_id, ctx.image.storagePath, ctx.image.caption ?? null, 'creation')
+  return readbackLabel(`${task.name}${task.floor_label ? ` (${task.floor_label})` : ''}`)
+}
 // The human label for a terminal's readback line. RULE: a terminal outcome may NEVER surface a raw id to a
 // human — for an update we look the target up in the candidate-title map (all offered candidates, not just the
 // open batch) and fall back to a generic phrase, but NEVER to `target_id`. terminalObservation (the durable
@@ -444,12 +470,17 @@ function terminalLabel(t: Terminal, labelById?: Map<string, string>): string {
     return l && l.trim() ? l : 'that item'
   }
   if (t.kind === 'queued_as_evidence') return 'photo'
-  if (t.kind === 'question_asked') return 'question'
+  if (t.kind === 'question_asked') {
+    if (t.update) { const l = labelById?.get(t.update.target_id); return l && l.trim() ? l : 'that item' }
+    if (t.item) return readbackLabel(t.item.detail)
+    return 'question'
+  }
   return ''
 }
 function terminalObservation(t: Terminal): string {
   if (t.kind === 'object_created') return t.item.detail
   if (t.kind === 'object_updated') return `update ${t.update.target_id}: ${t.update.reason}`
+  if (t.kind === 'question_asked') return t.update ? `update ${t.update.target_id}: ${t.update.reason}` : (t.item?.detail ?? t.kind)
   return t.kind
 }
 // `replay` (→ the jsonb `candidates` column) carries the structured payload a distinguished park needs so a
@@ -504,11 +535,13 @@ export async function handleUndoResolve(ctx: SiteopsCtx, quotedWamid: string): P
 // candidate-membership guard). which_item confirms a LOW/un-offered update (→ ADDRESSING on confirm; RESOLVE
 // stays behind the model); which_project sites a new item. Both carry the "None — it's new" / project-pick
 // escapes the resumes already implement.
-async function askResolutionQuestion(ctx: SiteopsCtx, t: Extract<Terminal, { kind: 'question_asked' }>, ex: ExecCtx): Promise<void> {
+// Returns whether a question was actually SENT — an un-sendable one (target not in itemsById, unknown
+// `about`) must be handled by the caller as a park + honest readback, never a silent 'ok' (T3 fix).
+async function askResolutionQuestion(ctx: SiteopsCtx, t: Extract<Terminal, { kind: 'question_asked' }>, ex: ExecCtx): Promise<boolean> {
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
   if (t.about === 'which_item' && t.update) {
     const item = ex.itemsById.get(t.update.target_id)
-    if (!item) return
+    if (!item) return false
     const cand = { id: item.id, kind: item.kind, orgId: item.orgId, projectId: item.projectId, projectName: item.projectName, title: item.title, cause: item.cause }
     await openConversation(ctx.supabase, {
       orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
@@ -523,7 +556,7 @@ async function askResolutionQuestion(ctx: SiteopsCtx, t: Extract<Terminal, { kin
       button: 'Pick',
       rows: [{ id: 'pick:1', title: shortLabel(item.title).slice(0, 24) }, { id: 'pick:2', title: "None — it's new" }],
     }, meta)
-    return
+    return true
   }
   if (t.about === 'which_project' && t.item) {
     const { data: projRows } = await ctx.supabase.from('projects').select('project_id, name').eq('org_id', ctx.orgId).eq('status', 'Active')
@@ -538,7 +571,9 @@ async function askResolutionQuestion(ctx: SiteopsCtx, t: Extract<Terminal, { kin
       kind: 'list', body: `Which project is *${shortLabel(t.item.detail)}* for?`, button: 'Pick project',
       rows: cands.slice(0, 10).map((c, i) => ({ id: `pick:${i + 1}`, title: c.name.slice(0, 24) })),
     }, meta)
+    return true
   }
+  return false
 }
 
 export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex: ExecCtx): Promise<TerminalOutcome[]> {
@@ -550,6 +585,12 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
       if (t.kind === 'object_updated') {
         const item = ex.itemsById.get(t.update.target_id)
         if (!item) {
+          // STAGE 2 — a HIGH-confidence TASK target applies first-class (the probe-P5 gap): the third of
+          // the spec's three kinds ("tasks + issues + snags") finally lands instead of holding.
+          if (t.update.target_kind === 'task' && t.update.confidence === 'high') {
+            const label = await applyTaskUpdate(ctx, t, ex)
+            if (label) { outcomes.push({ terminal: t, status: 'ok', label }); continue }
+          }
           // NON-BATCH TARGET — the model correctly matched a valid offered candidate that isn't in THIS open
           // batch (it belongs to the fresh path, which isn't adopted yet — Phase 3). This is not a failure of
           // anything: the executor is correctly detecting "not mine to apply." Park it as a DISTINGUISHED,
@@ -590,8 +631,17 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
       } else if (t.kind === 'question_asked') {
         // Open the pick through the PROVEN resume, storing exactly the offered set in slots (so the answer
         // validates against what was asked, never a re-load). Sends its own interactive message.
-        await askResolutionQuestion(ctx, t, ex)
-        outcomes.push({ terminal: t, status: 'ok', label: terminalLabel(t, ex.labelById) })
+        // T3 FIX — an UN-SENDABLE question (target not in itemsById / unknown about) used to vanish as a
+        // silent 'ok': no message, no park, green invariant. Now it parks replayable + reads back honestly.
+        const sent = await askResolutionQuestion(ctx, t, ex)
+        if (sent) {
+          outcomes.push({ terminal: t, status: 'ok', label: terminalLabel(t, ex.labelById) })
+        } else {
+          await parkObservation(ctx, terminalObservation(t), t.update ? 'non_batch_target' : 'v2_unhandled_terminal', ex.narrationId,
+            t.update ? { target_id: t.update.target_id, target_kind: t.update.target_kind, label: terminalLabel(t, ex.labelById), update: t.update } : null,
+            { projectId: ex.projectId ?? null })
+          outcomes.push({ terminal: t, status: 'failed', label: terminalLabel(t, ex.labelById) })
+        }
       } else if (t.kind === 'queued_as_evidence') {
         // Honest STRUCTURAL park (five-part): durable row + a DISTINCT parked_reason so Step 6 can tell an
         // image awaiting placement from a text obs that couldn't be sited. The row carries the photo's
@@ -616,7 +666,7 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
   // resolve landed it goes as a BUTTONS message with the one-tap "Not resolved" undo, capturing the resolved
   // issues + their event ids — 4a maps the outbound wamid to those refs (handleUndoResolve). No resolve →
   // text. If every terminal was a question, the picks ARE the reply — no combined readback.
-  if (outcomes.some((o) => o.terminal.kind !== 'question_asked')) {
+  if (outcomes.some((o) => o.terminal.kind !== 'question_asked' || o.status !== 'ok')) {
     const body = composeReadback(outcomes) + (ex.readbackSuffix ?? '')
     if (resolvedRefs.length) {
       await send(ctx.supabase, ctx.from, { kind: 'buttons', body, buttons: [{ id: 'siteops_undo', title: 'Not resolved' }] }, { ...meta, capture: { ref_kind: 'readback', object_refs: resolvedRefs } })
