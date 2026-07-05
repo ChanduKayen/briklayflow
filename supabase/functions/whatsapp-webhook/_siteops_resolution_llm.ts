@@ -49,7 +49,7 @@ export async function buildCandidateSet(supabase: SB, orgId: string, batch: { it
 
   const { data: probRows } = await supabase.from('problems').select('id, title, project_id, status').eq('org_id', orgId)
   const { data: todoRows } = await supabase.from('todos').select('id, title, project_id, status').eq('org_id', orgId)
-  const { data: taskRows } = await supabase.from('site_tasks').select('task_id, name, project_id, status').in('project_id', projectId ? [projectId] : [...activeIds])
+  const { data: taskRows } = await supabase.from('site_tasks').select('task_id, name, project_id, status, node_key, floor_label').in('project_id', projectId ? [projectId] : [...activeIds])
 
   const cands: Candidate[] = []
   for (const p of (probRows ?? []) as { id: string; title: string; project_id: string | null; status: string }[]) {
@@ -60,9 +60,27 @@ export async function buildCandidateSet(supabase: SB, orgId: string, batch: { it
     if (t.status === 'DONE' || !inScope(t.project_id)) continue
     cands.push({ id: t.id, kind: 'todo', title: t.title, project_id: t.project_id, project_name: nameById.get(t.project_id ?? '') ?? null, chased: chasedIds.has(t.id) })
   }
-  for (const t of (taskRows ?? []) as { task_id: string; name: string; project_id: string | null; status: string }[]) {
-    if (DONE_TASK.has(t.status) || !inScope(t.project_id)) continue
-    cands.push({ id: t.task_id, kind: 'task', title: t.name, project_id: t.project_id, project_name: nameById.get(t.project_id ?? '') ?? null, chased: chasedIds.has(t.task_id) })
+  // TASKS — ENGINE-VISIBLE identities only (the buildCandidateSet twin of the agent's engineTasks, per
+  // project): node_key rows deduped by node_key; flat legacy rows offered ONLY where a project has no
+  // engine rows at all (stack-less — there, writes are legitimately unguarded). LIVE LESSON (columns,
+  // 2026-07-05): offering flat duplicates let the model target a row the VM-guardrail must refuse, so
+  // every task update held — the model can only mis-target what we offer. Titles carry the floor
+  // ("Columns — Stilt"): five floors of identical names are untargetable without it.
+  type TaskRow = { task_id: string; name: string; project_id: string | null; status: string; node_key?: string | null; floor_label?: string | null }
+  const openTasks = ((taskRows ?? []) as TaskRow[]).filter((t) => !DONE_TASK.has(t.status) && inScope(t.project_id))
+  const tasksByProject = new Map<string, TaskRow[]>()
+  for (const t of openTasks) {
+    const k = t.project_id ?? ''
+    tasksByProject.set(k, [...(tasksByProject.get(k) ?? []), t])
+  }
+  for (const rows of tasksByProject.values()) {
+    const engine = [...new Map(rows.filter((t) => t.node_key).map((t) => [t.node_key as string, t])).values()]
+    for (const t of (engine.length ? engine : rows)) {
+      cands.push({
+        id: t.task_id, kind: 'task', title: `${t.name}${t.floor_label ? ` — ${t.floor_label}` : ''}`,
+        project_id: t.project_id, project_name: nameById.get(t.project_id ?? '') ?? null, chased: chasedIds.has(t.task_id),
+      })
+    }
   }
   // chased first (prior, not lock), otherwise stable insertion order.
   return cands.map((c, i) => ({ c, i })).sort((a, b) => (Number(b.c.chased) - Number(a.c.chased)) || (a.i - b.i)).map((x) => x.c)
