@@ -33,6 +33,7 @@ export interface Seed {
   cause_taxonomy?: Row[]
   follow_up_rules?: Row[]
   wa_message_map?: Row[]                     // outbound_wamid → object_refs (4a spine; undo resolves via this)
+  wa_conversations?: Row[]                   // T1 sweeper journeys: OPEN convos the sweep selects
   site_narration_id?: string                // id returned by the capture-first insert().select('id').single()
 }
 
@@ -64,7 +65,17 @@ function datasetFor(table: string, filters: [string, unknown][], seed: Seed): Ro
     case 'wa_registered_numbers': return seed.wa_registered_numbers ?? []
     case 'wa_message_map': {
       const w = eqVal(filters, 'outbound_wamid')
-      return (seed.wa_message_map ?? []).filter((r) => w === undefined || r.outbound_wamid === w)
+      const c = eqVal(filters, 'convo_id')
+      return (seed.wa_message_map ?? [])
+        .filter((r) => w === undefined || r.outbound_wamid === w)
+        .filter((r) => c === undefined || r.convo_id === c)
+    }
+    // T1 sweeper: ALL eq filters applied generically — the sweep's owning_agent/status selection and the
+    // close/abandon helpers' org+sender+status lookups must discriminate (j2/j3 depend on it).
+    case 'wa_conversations': {
+      let rows = seed.wa_conversations ?? []
+      for (const [k, v] of filters) rows = rows.filter((r) => r[k] === v)
+      return rows
     }
     case 'user_profiles': {
       const id = eqVal(filters, 'id')

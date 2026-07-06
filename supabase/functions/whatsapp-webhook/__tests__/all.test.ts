@@ -19,6 +19,7 @@ import './adoption.test';
 import './singular_unit.test';
 import './image_batch.test';
 import './guardrail.test';
+import './convo_sweep.test';
 import { runAll } from './harness';
 
 await runAll();
