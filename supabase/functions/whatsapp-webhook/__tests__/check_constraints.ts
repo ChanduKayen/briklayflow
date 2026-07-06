@@ -32,7 +32,10 @@ function findMigrationsDir(): string {
   throw new Error('check_constraints: supabase/migrations not found walking up from cwd — run the gate from the repo root')
 }
 
-const stripLineComments = (sql: string) => sql.split('\n').map((l) => l.replace(/--.*$/, '')).join('\n')
+// NOTE: no `$` anchor — on a CRLF-checked-out file every line carries a trailing `\r`, and JS `.`
+// does not match `\r`, so an anchored `/--.*$/` never fires and commented-out ROLLBACK SQL leaks
+// into the fold (the 2026-07-06 red gate: the rollback comments "un-applied" 20260704000000/1).
+const stripLineComments = (sql: string) => sql.split('\n').map((l) => l.replace(/--.*/, '')).join('\n')
 
 /** Balanced-paren scan for the expression inside `CHECK ( … )` starting at checkIdx. */
 function checkExprAt(text: string, checkIdx: number): { expr: string; end: number } | null {
