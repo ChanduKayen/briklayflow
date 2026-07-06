@@ -29,6 +29,12 @@ export interface SiteTaskRow {
 }
 export interface OrgMember { id: string; name: string }
 
+/** Normalized task-name identity, shared by every twin check (candidate set ↔ VM guardrail). A flat
+ *  (node_key-null) row whose normalized name equals a VM row's is a DUPLICATE (invisible, refused);
+ *  one with no such twin is a real one-off identity (manual Task-Manager rows). One definition — the
+ *  offer rule and the write rule must never drift apart. */
+export const normTaskName = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+
 // A NAMED owner: does the narration's owner_hint resolve to a specific member? (Used both
 // for owner resolution and to tell a "named hand-off" apart from a default assignment.)
 export function matchOwnerHint(ownerHint: string | null, members: OrgMember[]): string | null {
@@ -330,7 +336,8 @@ export interface RouteCtx {
   supabase: SB; orgId: string; projectId: string; byLabel: string
   members: OrgMember[]; supervisorId: string | null; principalId: string | null
   narrationId: string | null; now: Date
-  vmNodeKeys?: Set<string>   // the project's current VM fold-id set — for the visibleInVM check at writes
+  vmNodeKeys?: Set<string>    // the project's current VM fold-id set — for the visibleInVM check at writes
+  vmTaskNames?: Set<string>   // normalized VM task labels — the TWIN check for flat (node_key-null) rows
 }
 /** Map a user id to a display name (for confirm lines). */
 export function ownerName(c: RouteCtx, id: string | null): string {
@@ -344,11 +351,14 @@ export interface ProgressResult { taskId: string; taskName: string; floor: strin
 export async function applyProgress(c: RouteCtx, task: SiteTaskRow, item: SiteItem): Promise<ProgressResult> {
   const statusFrom = task.status
   const statusTo = statusFromProgress(item.text, statusFrom)
-  // GUARDRAIL (Step 3): only write to the SAME identity the UI overlay renders. If we have the VM
-  // fold-set and the target isn't in it, this write would be invisible — we REFUSE it and return
-  // visibleInVM=false, so Stage 4 can never emit a false "✓ logged" (silent data loss). The caller
-  // re-asks / parks honestly instead. (When vmNodeKeys is absent we can't judge → proceed, unguarded.)
-  const visibleInVM = !!(task.node_key && c.vmNodeKeys?.has(task.node_key))
+  // GUARDRAIL (Step 3, twin-aware): an ENGINE row must be the SAME identity the UI overlay renders
+  // (node_key ∈ VM) — a miss would be an invisible write, REFUSED so Stage 4 can never emit a false
+  // "✓ logged". A FLAT row (no node_key) is refused ONLY when it NAME-TWINS a VM row (the columns
+  // duplicate); a flat one-off with no twin ("Parking deck & markings", manual Task-Manager rows) is
+  // rendered by the list view, so its write is real and may land — the parking lesson (2026-07-05).
+  // (When vmNodeKeys is absent we can't judge → proceed, unguarded.)
+  const flatTwin = !task.node_key && !!c.vmTaskNames?.has(normTaskName(task.name))
+  const visibleInVM = task.node_key ? !!c.vmNodeKeys?.has(task.node_key) : !flatTwin
   console.log(`[siteops:dbg:write] task_id=${task.task_id} node_key=${task.node_key ?? 'NULL'} task_type_id=${task.task_type_id ?? '-'} status=${statusFrom}->${statusTo} visibleInVM=${visibleInVM}`)
   if (c.vmNodeKeys && !visibleInVM) {
     console.error(`[siteops:GUARDRAIL] REFUSED write to non-VM-visible row task_id=${task.task_id} node_key=${task.node_key ?? 'NULL'} — not confirming as logged`)

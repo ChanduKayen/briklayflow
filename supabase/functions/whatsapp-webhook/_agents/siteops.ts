@@ -20,7 +20,7 @@ import { classifyReaction, isRetraction } from '../_siteops_verbs.ts'
 import { reconstructParkedSlots, type ParkedRow } from '../_siteops_lateanswer.ts'
 import { decideAssociation, isBareAffirmation, photoRelatedness, type AssocVerdict } from '../_siteops_assoc.ts'
 import {
-  routeItems, applyProgress, buildConfirm, buildMultiConfirm, parseWhen,
+  routeItems, applyProgress, buildConfirm, buildMultiConfirm, parseWhen, normTaskName,
   type RouteCtx, type RouteOutcome, type SiteTaskRow, type OrgMember,
   type ConfirmSection, type ProgressResult, type ProblemResult, type TodoResult,
 } from '../_siteops_route.ts'
@@ -58,13 +58,16 @@ const TASK_COLS = 'task_id, phase, trade, floor_label, unit_label, name, status,
 const pickCapture = (convoId: string | null, projectId: string | null): CaptureRef | undefined =>
   convoId ? { ref_kind: 'pick', convo_id: convoId, project_id: projectId } : undefined
 
-/** Prefer engine rows (with node_key) over legacy flat rows and dedup by node_key — so the agent
- *  matches/updates exactly the rows the UI's engine Sequence view reads, with no duplicate candidates
- *  and no updates landing on a no-node_key row the UI ignores. Falls back to all rows for stack-less
- *  projects that have no engine tasks. */
+/** APPLIABLE task identities: engine rows (node_key, deduped) PLUS flat one-offs with no engine
+ *  NAME-TWIN — a flat duplicate of an engine row stays invisible (the columns lesson: its write can't
+ *  render in the Sequence overlay), but a manual one-off ("Parking deck & markings") is a real
+ *  Task-Manager row with no engine identity at all (the parking lesson). Falls back to all rows for
+ *  stack-less projects that have no engine tasks. Twin rule mirrors buildCandidateSet + the guardrail. */
 function engineTasks(rows: SiteTaskRow[]): SiteTaskRow[] {
   const engine = [...new Map(rows.filter((t) => t.node_key).map((t) => [t.node_key as string, t])).values()]
-  return engine.length > 0 ? engine : rows
+  if (!engine.length) return rows
+  const engineNames = new Set(engine.map((t) => normTaskName(t.name)))
+  return [...engine, ...rows.filter((t) => !t.node_key && !engineNames.has(normTaskName(t.name)))]
 }
 
 /**
@@ -73,10 +76,12 @@ function engineTasks(rows: SiteTaskRow[]): SiteTaskRow[] {
  * Idempotent — inserts ONLY the node_keys that don't exist yet, mirroring the UI's materialise shape.
  * Best-effort: a failure never blocks the message (matching falls back to whatever rows are present).
  */
-async function materializeProjectTasks(ctx: SiteopsCtx, projectId: string): Promise<Set<string>> {
-  // Returns the project's CURRENT VM fold-id set (every node_key the UI overlay can render). The
-  // write path uses it for the `visibleInVM` check (Step-1 diagnostic / Step-3 guardrail).
+async function materializeProjectTasks(ctx: SiteopsCtx, projectId: string): Promise<{ keys: Set<string>; names: Set<string> }> {
+  // Returns the project's CURRENT VM fold-id set (every node_key the UI overlay can render) PLUS the
+  // normalized VM task labels (the flat-row TWIN check). The write path uses both for the `visibleInVM`
+  // check (Step-1 diagnostic / Step-3 guardrail, twin-aware since the parking lesson).
   const vmKeys = new Set<string>()
+  const vmNames = new Set<string>()
   try {
     let pr = await ctx.supabase.from('projects')
       .select('org_id, name, construction_stack, has_common_areas, common_systems, suppressed_tasks').eq('project_id', projectId).maybeSingle()
@@ -84,7 +89,7 @@ async function materializeProjectTasks(ctx: SiteopsCtx, projectId: string): Prom
       .select('org_id, name, construction_stack, has_common_areas').eq('project_id', projectId).maybeSingle()
     const project = pr.data
     const stack = project?.construction_stack
-    if (!stack) { console.log(`[siteops:materialize] project=${projectId} HAS NO construction_stack — cannot generate tasks`); return vmKeys }
+    if (!stack) { console.log(`[siteops:materialize] project=${projectId} HAS NO construction_stack — cannot generate tasks`); return { keys: vmKeys, names: vmNames } }
     const { data: existing } = await ctx.supabase.from('site_tasks').select('node_key, status').eq('project_id', projectId)
     const completion = new Map<string, 'active' | 'done'>()
     const seen = new Set<string>()
@@ -99,6 +104,7 @@ async function materializeProjectTasks(ctx: SiteopsCtx, projectId: string): Prom
     const rows: Record<string, unknown>[] = []
     for (const f of vm.floors) for (const b of f.blocks) for (const t of b.tasks) {
       vmKeys.add(t.nodeKey)
+      vmNames.add(normTaskName(t.label))
       if (seen.has(t.nodeKey)) continue
       seen.add(t.nodeKey)
       rows.push({
@@ -116,7 +122,7 @@ async function materializeProjectTasks(ctx: SiteopsCtx, projectId: string): Prom
   } catch (e) {
     console.error('[siteops:materialize] ENGINE/BUILD ERROR:', (e as Error).message, (e as Error).stack)
   }
-  return vmKeys
+  return { keys: vmKeys, names: vmNames }
 }
 
 // Web app ORIGIN for the deep links in the confirm. Same env the transaction agent uses
@@ -420,6 +426,8 @@ export interface ExecCtx {
   itemsById: Map<string, BatchItem>       // candidate/batch items by id, to resolve an update's target
   labelById: Map<string, string>          // human title for EVERY offered candidate (not just batch items) —
                                           // a FAILED outcome's readback label resolves here, NEVER from the uuid
+  candById?: Map<string, ExecCandidate>   // EVERY offered candidate (all kinds) — resolves TASK which_item
+                                          // asks and the place_photo shortlist (ids → pick rows)
   cadenceMap: CadenceMap
   actorId: string | null
   now: Date
@@ -429,6 +437,9 @@ export interface ExecCtx {
   readbackSuffix?: string                 // appended to the combined readback (e.g. the interim
                                           // pending_stage2 truth: "· 1 more saved for review")
 }
+
+// the executor's slim view of an offered candidate (built from res.candidates in the caller).
+export interface ExecCandidate { kind: 'task' | 'issue' | 'todo'; title: string; projectId: string | null; projectName: string | null }
 
 function toSiteItem(it: { kind: 'issue' | 'snag'; detail: string; location: string | null; project_hint: string | null }): SiteItem {
   return { type: 'issue', text: it.detail, task_hint: it.location, qc_statements: [], cause: 'other', cause_reason: null, owner_hint: null, date_hint: null, project_hint: it.project_hint }
@@ -440,23 +451,33 @@ function toSiteItem(it: { kind: 'issue' | 'snag'; detail: string; location: stri
  *  replayable, visible in the queue. MED/LOW task targets never reach here: no soft rung exists for a
  *  task (applying IS the state change), so uncertainty keeps holding. */
 async function applyTaskUpdate(ctx: SiteopsCtx, t: Extract<Terminal, { kind: 'object_updated' }>, ex: ExecCtx): Promise<string | null> {
-  const { data: rows } = await ctx.supabase.from('site_tasks').select(`${TASK_COLS}, project_id`).eq('task_id', t.update.target_id)
+  const label = await applyTaskProgressById(ctx, t.update.target_id, t.update.reason, ex.narrationId, ex.now, ex.projectId ?? null)
+  if (label && ctx.image?.storagePath) await attachImage(ctx, 'site_task', t.update.target_id, ctx.image.storagePath, ctx.image.caption ?? null, 'creation')
+  return label
+}
+
+/** The by-id core of a task progress write — shared by the executor (HIGH updates) and the collision
+ *  resume (a confirmed med/low task pick). Loads the row, builds the twin-aware guardrail context, and
+ *  applies via the proven applyProgress. Returns the readback label, or null when the row is gone / the
+ *  guardrail refused / no project — the caller parks honestly. Photo attachment is the CALLER's step
+ *  (executor: ctx.image; resume: slots.image). */
+async function applyTaskProgressById(ctx: SiteopsCtx, taskId: string, text: string, narrationId: string | null, now: Date, fallbackProjectId: string | null): Promise<string | null> {
+  const { data: rows } = await ctx.supabase.from('site_tasks').select(`${TASK_COLS}, project_id`).eq('task_id', taskId)
   const task = (rows ?? [])[0] as (SiteTaskRow & { project_id?: string | null }) | undefined
   if (!task) return null
-  const projectId = task.project_id ?? ex.projectId ?? null
+  const projectId = task.project_id ?? fallbackProjectId
   if (!projectId) return null
-  const vmKeys = await materializeProjectTasks(ctx, projectId)
+  const vm = await materializeProjectTasks(ctx, projectId)
   const oc = await ownerCtx(ctx.supabase, ctx.orgId, projectId)
   // vmNodeKeys: an EMPTY fold-set means the VM couldn't be built (stack-less project) — the guardrail's
   // own "absent → can't judge → proceed" case, so pass undefined rather than refuse every write.
   const rc: RouteCtx = {
     supabase: ctx.supabase, orgId: ctx.orgId, projectId, byLabel: ctx.from, ...oc,
-    narrationId: ex.narrationId, now: ex.now, vmNodeKeys: vmKeys.size ? vmKeys : undefined,
+    narrationId, now, vmNodeKeys: vm.keys.size ? vm.keys : undefined, vmTaskNames: vm.keys.size ? vm.names : undefined,
   }
-  const item: SiteItem = { type: 'progress', text: t.update.reason, task_hint: null, qc_statements: [], cause: null, cause_reason: null, owner_hint: null, date_hint: null, project_hint: null }
+  const item: SiteItem = { type: 'progress', text, task_hint: null, qc_statements: [], cause: null, cause_reason: null, owner_hint: null, date_hint: null, project_hint: null }
   const res = await applyProgress(rc, task, item)
   if (!res.visibleInVM) return null   // GUARDRAIL: never a false "✓ updated" onto a row the UI can't render
-  if (ctx.image?.storagePath) await attachImage(ctx, 'site_task', task.task_id, ctx.image.storagePath, ctx.image.caption ?? null, 'creation')
   return readbackLabel(`${task.name}${task.floor_label ? ` (${task.floor_label})` : ''}`)
 }
 // The human label for a terminal's readback line. RULE: a terminal outcome may NEVER surface a raw id to a
@@ -471,6 +492,7 @@ function terminalLabel(t: Terminal, labelById?: Map<string, string>): string {
   }
   if (t.kind === 'queued_as_evidence') return 'photo'
   if (t.kind === 'question_asked') {
+    if (t.about === 'place_photo') return 'photo'
     if (t.update) { const l = labelById?.get(t.update.target_id); return l && l.trim() ? l : 'that item' }
     if (t.item) return readbackLabel(t.item.detail)
     return 'question'
@@ -489,13 +511,16 @@ function terminalObservation(t: Terminal): string {
 // AUDIT #4/#7 — a park must carry every piece of context the flow already holds: THE resolved project
 // (else the replay re-asks what we knew) and the inbound photo's bucket/object_path (else "photo saved"
 // names an unfindable photo — the eat wearing a receipt).
-async function parkObservation(ctx: SiteopsCtx, observation: string, reason: string, narrationId: string | null, replay: unknown = null, opts: { projectId?: string | null } = {}): Promise<void> {
+async function parkObservation(ctx: SiteopsCtx, observation: string, reason: string, narrationId: string | null, replay: unknown = null, opts: { projectId?: string | null; image?: { storagePath?: string | null; caption?: string | null } | null } = {}): Promise<void> {
+  // opts.image overrides ctx.image for RESUME-side parks: the answer message carries no image — the
+  // photo lives in the conversation slots, and the park must still carry it (findable, audit #7).
+  const img = opts.image ?? ctx.image ?? null
   await ctx.supabase.from('siteops_unplaced').insert({
     org_id: ctx.orgId, project_id: opts.projectId ?? null, reason, observation,
     candidates: replay,
-    bucket: ctx.image?.storagePath ? 'rough-entry-media' : null,
-    object_path: ctx.image?.storagePath ?? null,
-    caption: ctx.image?.caption?.trim() || null,
+    bucket: img?.storagePath ? 'rough-entry-media' : null,
+    object_path: img?.storagePath ?? null,
+    caption: img?.caption?.trim() || null,
     narration_id: narrationId, sender_number: ctx.from, created_by: null,
   })
 }
@@ -541,7 +566,31 @@ async function askResolutionQuestion(ctx: SiteopsCtx, t: Extract<Terminal, { kin
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
   if (t.about === 'which_item' && t.update) {
     const item = ex.itemsById.get(t.update.target_id)
-    if (!item) return false
+    if (!item) {
+      // TASK target (the parking lesson): tasks never live in itemsById (issues/todos only) — resolve it
+      // through candById and open the SAME proven collision pick; the resume's task branch applies the
+      // confirm via applyProgress. The photo (if any) rides the slots so the confirm can attach it.
+      const c = ex.candById?.get(t.update.target_id)
+      if (c?.kind !== 'task') return false
+      const cand = { id: t.update.target_id, kind: 'task', orgId: ctx.orgId, projectId: c.projectId ?? ex.projectId ?? null, projectName: c.projectName ?? '', title: c.title, cause: null }
+      await openConversation(ctx.supabase, {
+        orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
+        pendingQuestion: `confirm ${shortLabel(c.title)}`,
+        slots: {
+          kind: 'siteops_batch_collision', status: 'still_open', piece_text: t.update.reason, candidates: [cand],
+          project_id: c.projectId ?? ex.projectId ?? null, narration_id: ex.narrationId,
+          image: ctx.image?.storagePath ? { storagePath: ctx.image.storagePath, caption: ctx.image.caption ?? null } : null,
+        },
+        lastMessageId: ctx.wamid,
+      })
+      await send(ctx.supabase, ctx.from, {
+        kind: 'list',
+        body: `Is this about *${shortLabel(c.title)}*? Confirming logs it as progress — or is it new?`,
+        button: 'Pick',
+        rows: [{ id: 'pick:1', title: shortLabel(c.title).slice(0, 24) }, { id: 'pick:2', title: "None — it's new" }],
+      }, meta)
+      return true
+    }
     const cand = { id: item.id, kind: item.kind, orgId: item.orgId, projectId: item.projectId, projectName: item.projectName, title: item.title, cause: item.cause }
     await openConversation(ctx.supabase, {
       orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
@@ -555,6 +604,38 @@ async function askResolutionQuestion(ctx: SiteopsCtx, t: Extract<Terminal, { kin
       body: `Is this about *${shortLabel(item.title)}*? Confirming marks it addressed — or is it new?`,
       button: 'Pick',
       rows: [{ id: 'pick:1', title: shortLabel(item.title).slice(0, 24) }, { id: 'pick:2', title: "None — it's new" }],
+    }, meta)
+    return true
+  }
+  // ASK-BEFORE-EVIDENCE: an unplaced photo with lexically-near candidates → the PROVEN typed pick
+  // (attach-on-pick / evidence-park-on-"none"), photo riding the slots. Un-sendable (no mapping, no
+  // stored photo) → false, and the caller falls back to the evidence park — the floor never moves.
+  if (t.about === 'place_photo') {
+    const shortlist = (t.shortlistIds ?? [])
+      .map((id) => ({ id, c: ex.candById?.get(id) }))
+      .filter((x): x is { id: string; c: ExecCandidate } => !!x.c)
+      .map((x) => ({ kind: x.c.kind, id: x.id, label: x.c.title }))
+      .slice(0, 9)   // slots shortlist === sent rows, so "None" (= length + 1) resolves to observe
+    if (!shortlist.length || !ctx.image?.storagePath) return false
+    const full = [...(ex.candById ?? new Map<string, ExecCandidate>())].map(([id, c]) => ({ kind: c.kind, id, label: c.title }))
+    await openConversation(ctx.supabase, {
+      orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
+      pendingQuestion: 'place photo',
+      slots: {
+        kind: 'siteops_typed_pick', project_id: ex.projectId ?? null, item: null,
+        shortlist, full, narration_id: ex.narrationId,
+        image: { storagePath: ctx.image.storagePath, caption: ctx.image.caption ?? null },
+      },
+      lastMessageId: ctx.wamid,
+    })
+    await send(ctx.supabase, ctx.from, {
+      kind: 'list',
+      body: `Got the photo — is it about one of these, or something new?`,
+      button: 'Pick',
+      rows: [
+        ...shortlist.map((c, i) => ({ id: `pick:${i + 1}`, title: shortLabel(c.label).slice(0, 24), description: `[${c.kind}]` })),
+        { id: `pick:${shortlist.length + 1}`, title: 'None — just save it' },
+      ],
     }, meta)
     return true
   }
@@ -636,6 +717,11 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
         const sent = await askResolutionQuestion(ctx, t, ex)
         if (sent) {
           outcomes.push({ terminal: t, status: 'ok', label: terminalLabel(t, ex.labelById) })
+        } else if (t.about === 'place_photo') {
+          // un-sendable placement pick → the evidence FLOOR (distinct park, photo carried); the readback
+          // line for a failed place_photo is the honest "photo saved as evidence", never a ⚠️.
+          await parkObservation(ctx, 'photo evidence', 'evidence_await_placement', ex.narrationId, null, { projectId: ex.projectId ?? null })
+          outcomes.push({ terminal: t, status: 'failed', label: 'photo' })
         } else {
           await parkObservation(ctx, terminalObservation(t), t.update ? 'non_batch_target' : 'v2_unhandled_terminal', ex.narrationId,
             t.update ? { target_id: t.update.target_id, target_kind: t.update.target_kind, label: terminalLabel(t, ex.labelById), update: t.update } : null,
@@ -955,8 +1041,11 @@ async function runSingularUnit(ctx: SiteopsCtx, u: {
     } as BatchItem)
   }
   const labelById = new Map(res.candidates.map((c) => [c.id, readbackLabel(c.title ?? '')]))
+  // candById spans EVERY offered candidate, all kinds — resolves TASK which_item asks (med/low task
+  // targets ask, never hold) and maps the place_photo shortlist ids to pick rows.
+  const candById = new Map<string, ExecCandidate>(res.candidates.map((c) => [c.id, { kind: c.kind, title: c.title, projectId: c.project_id, projectName: c.project_name }]))
   const outcomes = await applyTerminals(ctx, res.terminals, {
-    itemsById, labelById, cadenceMap, actorId, now,
+    itemsById, labelById, candById, cadenceMap, actorId, now,
     narrationId: u.narrationId, projectId: u.projectId, readbackSuffix: restLine,
   })
   // batch bookkeeping: only CHASED items ride the batch — drop the resolved ∩ batch, close when empty.
@@ -1186,13 +1275,13 @@ async function askProjectFirst(ctx: SiteopsCtx, meta: Record<string, unknown>, p
  */
 async function finishRoute(ctx: SiteopsCtx, projectId: string, projectName: string | null, items: SiteItem[], narrationId: string | null): Promise<'pick' | 'window' | null> {
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
-  const vmNodeKeys = await materializeProjectTasks(ctx, projectId)
+  const vm = await materializeProjectTasks(ctx, projectId)
   const { data: taskRows } = await ctx.supabase.from('site_tasks').select(TASK_COLS).eq('project_id', projectId)
   const rawRows = (taskRows ?? []) as SiteTaskRow[]
   const tasks = engineTasks(rawRows)
-  console.log(`[siteops:dbg:load] project=${projectId} rawRows=${rawRows.length} engineRows=${rawRows.filter((t) => t.node_key).length} flatRows=${rawRows.filter((t) => !t.node_key).length} usedForMatch=${tasks.length} vmNodeKeys=${vmNodeKeys.size}`)
+  console.log(`[siteops:dbg:load] project=${projectId} rawRows=${rawRows.length} engineRows=${rawRows.filter((t) => t.node_key).length} flatRows=${rawRows.filter((t) => !t.node_key).length} usedForMatch=${tasks.length} vmNodeKeys=${vm.keys.size}`)
   const oc = await ownerCtx(ctx.supabase, ctx.orgId, projectId)
-  const rc: RouteCtx = { supabase: ctx.supabase, orgId: ctx.orgId, projectId, byLabel: ctx.from, ...oc, narrationId, now: new Date(), vmNodeKeys }
+  const rc: RouteCtx = { supabase: ctx.supabase, orgId: ctx.orgId, projectId, byLabel: ctx.from, ...oc, narrationId, now: new Date(), vmNodeKeys: vm.keys, vmTaskNames: vm.names }
 
   // STEP 3 — ATTACH axis (images only). Before ROUTE creates fresh objects, test each issue/todo item
   // against the project's OPEN items: a re-photo of a known item ATTACHES evidence (no twin); a new one
@@ -1350,13 +1439,13 @@ async function finishRoute(ctx: SiteopsCtx, projectId: string, projectName: stri
 
 /** Route ONE project's items → write + return its outcome (no send; the multi confirm composes). */
 async function routeGroup(ctx: SiteopsCtx, projectId: string, items: SiteItem[], narrationId: string | null): Promise<RouteOutcome> {
-  const vmNodeKeys = await materializeProjectTasks(ctx, projectId)
+  const vm = await materializeProjectTasks(ctx, projectId)
   const { data: taskRows } = await ctx.supabase.from('site_tasks').select(TASK_COLS).eq('project_id', projectId)
   const rawRows = (taskRows ?? []) as SiteTaskRow[]
   const tasks = engineTasks(rawRows)
-  console.log(`[siteops:dbg:load] (multi) project=${projectId} rawRows=${rawRows.length} engineRows=${rawRows.filter((t) => t.node_key).length} flatRows=${rawRows.filter((t) => !t.node_key).length} usedForMatch=${tasks.length} vmNodeKeys=${vmNodeKeys.size}`)
+  console.log(`[siteops:dbg:load] (multi) project=${projectId} rawRows=${rawRows.length} engineRows=${rawRows.filter((t) => t.node_key).length} flatRows=${rawRows.filter((t) => !t.node_key).length} usedForMatch=${tasks.length} vmNodeKeys=${vm.keys.size}`)
   const oc = await ownerCtx(ctx.supabase, ctx.orgId, projectId)
-  const rc: RouteCtx = { supabase: ctx.supabase, orgId: ctx.orgId, projectId, byLabel: ctx.from, ...oc, narrationId, now: new Date(), vmNodeKeys }
+  const rc: RouteCtx = { supabase: ctx.supabase, orgId: ctx.orgId, projectId, byLabel: ctx.from, ...oc, narrationId, now: new Date(), vmNodeKeys: vm.keys, vmTaskNames: vm.names }
   return await routeItems(rc, tasks, items)
 }
 
@@ -1655,7 +1744,7 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
 
   // ── B3 same-cause collision → the supervisor named the site for the held item ──
   if (slots.kind === 'siteops_batch_collision') {
-    const cands = (slots.candidates ?? []) as { id: string; kind: 'issue' | 'todo'; orgId: string; projectId?: string | null; projectName: string; title: string; cause: string | null }[]
+    const cands = (slots.candidates ?? []) as { id: string; kind: 'issue' | 'todo' | 'task'; orgId: string; projectId?: string | null; projectName: string; title: string; cause: string | null }[]
     const t = text.trim().toLowerCase()
     const m = text.match(/(\d+)/)
     const num = m ? parseInt(m[1], 10) : null
@@ -1693,6 +1782,25 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
         return
       }
       await send(ctx.supabase, ctx.from, { kind: 'text', body: `Reply with the number, or say *new* if it's a separate thing.` }, meta)
+      return
+    }
+    // A TASK confirm (the parking lesson): the supervisor confirmed a med/low task match — apply the
+    // progress via the proven by-id core (twin-aware guardrail intact), attach the carried photo, and
+    // read back "updated". A refused/gone row parks honestly — never a silent close.
+    if (chosen.kind === 'task') {
+      const pieceText = (slots.piece_text as string | null) ?? text
+      const narrId = (slots.narration_id as string | null) ?? null
+      const projId = (slots.project_id as string | null) ?? chosen.projectId ?? null
+      const label = await applyTaskProgressById(ctx, chosen.id, pieceText, narrId, new Date(), projId)
+      const cimg = slots.image as { storagePath?: string; caption?: string | null } | null
+      if (label && cimg?.storagePath) await attachImage(ctx, 'site_task', chosen.id, cimg.storagePath, cimg.caption ?? null, 'creation')
+      await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site update' })
+      if (label) {
+        await send(ctx.supabase, ctx.from, { kind: 'text', body: `✓ “${label}” updated — ${chosen.projectName}` }, meta)
+      } else {
+        await parkObservation(ctx, `update ${chosen.id}: ${pieceText}`, 'v2_effect_failed', narrId, null, { projectId: projId, image: cimg })
+        await send(ctx.supabase, ctx.from, { kind: 'text', body: `Couldn't update “${shortLabel(chosen.title)}” just now — saved it for review so nothing's lost.` }, meta)
+      }
       return
     }
     const now = new Date()
@@ -1753,6 +1861,14 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
       return
     }
     // observe — create the held item fresh, attach the photo as creation evidence, confirm.
+    // A place_photo pick holds NO item (the model found nothing to create) — "None — just save it"
+    // lands the photo on the honest evidence park (photo carried from slots), never a routeGroup crash.
+    if (!storedItem) {
+      await parkObservation(ctx, 'photo evidence', 'evidence_await_placement', (slots.narration_id as string | null) ?? null, null, { projectId: (slots.project_id as string | null) ?? null, image: img })
+      await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'photo parked' })
+      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Saved the photo to your to-place list. 👍` }, meta)
+      return
+    }
     const out = await routeGroup(ctx, slots.project_id, [storedItem], slots.narration_id ?? null)
     if (img.storagePath) {
       for (const p of out.problems) if (p.id) await attachImage(ctx, 'problem', p.id, img.storagePath, img.caption ?? null, 'creation')
@@ -1832,12 +1948,12 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
     return
   }
 
-  const vmNodeKeys = await materializeProjectTasks(ctx, slots.project_id)
+  const vm = await materializeProjectTasks(ctx, slots.project_id)
   const { data: taskRows } = await ctx.supabase.from('site_tasks').select(TASK_COLS).eq('task_id', chosen.task_id)
   const task = (taskRows ?? [])[0] as SiteTaskRow | undefined
-  console.log(`[siteops:dbg:resume-pick] task_id=${chosen.task_id} node_key=${task?.node_key ?? 'NULL'} visibleInVM=${!!(task?.node_key && vmNodeKeys.has(task.node_key))}`)
+  console.log(`[siteops:dbg:resume-pick] task_id=${chosen.task_id} node_key=${task?.node_key ?? 'NULL'} visibleInVM=${!!(task?.node_key && vm.keys.has(task.node_key))}`)
   const oc = await ownerCtx(ctx.supabase, ctx.orgId, slots.project_id)
-  const rc: RouteCtx = { supabase: ctx.supabase, orgId: ctx.orgId, projectId: slots.project_id, byLabel: ctx.from, ...oc, narrationId: slots.narration_id ?? null, now: new Date(), vmNodeKeys }
+  const rc: RouteCtx = { supabase: ctx.supabase, orgId: ctx.orgId, projectId: slots.project_id, byLabel: ctx.from, ...oc, narrationId: slots.narration_id ?? null, now: new Date(), vmNodeKeys: vm.keys, vmTaskNames: vm.names }
 
   await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site update' })
   if (!task) {

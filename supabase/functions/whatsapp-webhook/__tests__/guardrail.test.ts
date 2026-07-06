@@ -11,7 +11,6 @@ import { suite, test, expect } from './harness'
 import { fakeSupabase } from './fake_supabase'
 import { applyProgress, type RouteCtx } from '../_siteops_route.ts'
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mkRc = (fake: ReturnType<typeof fakeSupabase>, over: Partial<RouteCtx> = {}): RouteCtx => ({
   supabase: fake, orgId: 'org-1', projectId: 'P1', byLabel: '919900000000',
   members: [], supervisorId: null, principalId: null, narrationId: 'narr-1', now: new Date('2026-07-06T00:00:00Z'),

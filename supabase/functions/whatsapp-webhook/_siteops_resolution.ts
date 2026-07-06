@@ -53,6 +53,8 @@ export interface ResolutionContext {
   candidateIds: Set<string>   // the exact target_ids the call was given — an update targeting anything
                               // else is an INVENTED referent and may never touch state (→ ASK).
   isImage: boolean            // modality — a photo with nothing confident is queued as evidence, cautiously.
+  nearCandidateIds?: string[] // lexical near-misses (caller-computed, candidate members) — a both-false
+                              // IMAGE with near candidates ASKS placement (place_photo) before it parks.
 }
 
 // ── THE TERMINALS (the authoritative, auditable outcomes) ────────────────────
@@ -63,8 +65,9 @@ export type Terminal =
   | { kind: 'object_created'; item: ObserveItem; as: 'classified' | 'note'; upgradeOffer: boolean; reason: string }
   | { kind: 'object_updated'; update: AttachUpdate; applied: 'resolve' | 'addressing'; undo: boolean; readback: string; reason: string }
   // carries its SOURCE so the executor can open the right pick AND the resume validates against exactly the
-  // offered set (which_item → the update being confirmed; which_project → the new item awaiting a site).
-  | { kind: 'question_asked'; about: 'which_item' | 'which_project'; ref: string | null; update?: AttachUpdate; item?: ObserveItem; reason: string }
+  // offered set (which_item → the update being confirmed; which_project → the new item awaiting a site;
+  // place_photo → an unplaced photo with lexically-near candidates, shortlistIds carrying the offer).
+  | { kind: 'question_asked'; about: 'which_item' | 'which_project' | 'place_photo'; ref: string | null; update?: AttachUpdate; item?: ObserveItem; shortlistIds?: string[]; reason: string }
   | { kind: 'queued_as_evidence'; reason: string }
   | { kind: 'acked_didnt_catch'; contract: ResolutionContract; reason: string }
 
@@ -80,6 +83,11 @@ function planUpdate(u: AttachUpdate, ctx: ResolutionContext): Terminal {
   }
   if (u.confidence === 'low') {
     return { kind: 'question_asked', about: 'which_item', ref: u.target_id, update: u, reason: `low confidence on ${u.target_id} — ask (pick-one w/ "it's new")` }
+  }
+  // MED on a TASK asks (the parking lesson): a task has NO soft rung — applying IS the state change, and
+  // the old path could only hold it silently. Uncertainty on a task routes to the supervisor, not a park.
+  if (u.confidence === 'med' && u.target_kind === 'task') {
+    return { kind: 'question_asked', about: 'which_item', ref: u.target_id, update: u, reason: `med confidence on TASK ${u.target_id} — no soft rung for a task, ask instead of holding` }
   }
   if (u.confidence === 'med') {
     return { kind: 'object_updated', update: u, applied: 'addressing', undo: false, readback: 'named the match — wrong item? tap', reason: `med confidence — ${u.reason} — ADDRESSING only, never resolve` }
@@ -122,9 +130,13 @@ export function executeResolution(c: ResolutionContract, ctx: ResolutionContext)
   for (const it of c.issue_snag_found.found ? c.issue_snag_found.items : []) terminals.push(planObserve(it))
 
   if (terminals.length === 0) {
+    // ASK-BEFORE-EVIDENCE: a both-false image with lexically-NEAR candidates asks placement first —
+    // the evidence park stays the floor (no near candidates, or the executor can't send the pick).
     terminals.push(
       ctx.isImage
-        ? { kind: 'queued_as_evidence', reason: 'image with no confident update or creation — queue as evidence, decide later' }
+        ? (ctx.nearCandidateIds?.length
+            ? { kind: 'question_asked', about: 'place_photo', ref: null, shortlistIds: ctx.nearCandidateIds, reason: 'image with nothing confident but near candidates — ask placement before parking' }
+            : { kind: 'queued_as_evidence', reason: 'image with no confident update or creation — queue as evidence, decide later' })
         : { kind: 'acked_didnt_catch', contract: c, reason: 'no issue/snag found and no update found on a non-image input' },
     )
   }
@@ -182,8 +194,12 @@ function readbackLine(o: TerminalOutcome): string | null {
       return `Didn't catch a site update in that — try again if you meant to send one.`
     case 'question_asked':
       // A SENT question is its own interactive message (no readback line). An UN-SENT one (executor
-      // couldn't open the pick) was parked — say so, never silence (the T3 silent-drop fix).
-      return o.status === 'ok' ? null : `⚠️ couldn't place “${o.label}” — saved for review`
+      // couldn't open the pick) was parked — say so, never silence (the T3 silent-drop fix). An un-sent
+      // place_photo fell back to the evidence park, which IS the honest terminal — never a ⚠️ over a
+      // photo that was in fact saved.
+      if (o.status === 'ok') return null
+      if (t.about === 'place_photo') return `photo saved as evidence`
+      return `⚠️ couldn't place “${o.label}” — saved for review`
   }
 }
 

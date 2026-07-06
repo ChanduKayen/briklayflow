@@ -7,6 +7,7 @@
 // for the caller (Phase 2/3) to apply.
 
 import { callLLM } from './_siteops_extract.ts'
+import { normTaskName } from './_siteops_route.ts'
 import {
   executeResolution,
   type ResolutionContract, type ObserveItem, type AttachUpdate, type Confidence, type Terminal,
@@ -60,12 +61,15 @@ export async function buildCandidateSet(supabase: SB, orgId: string, batch: { it
     if (t.status === 'DONE' || !inScope(t.project_id)) continue
     cands.push({ id: t.id, kind: 'todo', title: t.title, project_id: t.project_id, project_name: nameById.get(t.project_id ?? '') ?? null, chased: chasedIds.has(t.id) })
   }
-  // TASKS — ENGINE-VISIBLE identities only (the buildCandidateSet twin of the agent's engineTasks, per
-  // project): node_key rows deduped by node_key; flat legacy rows offered ONLY where a project has no
-  // engine rows at all (stack-less — there, writes are legitimately unguarded). LIVE LESSON (columns,
-  // 2026-07-05): offering flat duplicates let the model target a row the VM-guardrail must refuse, so
-  // every task update held — the model can only mis-target what we offer. Titles carry the floor
-  // ("Columns — Stilt"): five floors of identical names are untargetable without it.
+  // TASKS — APPLIABLE identities only, per project: engine rows (node_key, deduped) PLUS flat one-offs
+  // with NO engine NAME-TWIN. LIVE LESSON (columns, 2026-07-05): offering flat DUPLICATES of engine rows
+  // let the model target a row the VM-guardrail must refuse, so every task update held — the model can
+  // only mis-target what we offer. LIVE LESSON (parking, 2026-07-05, same day): dropping ALL flat rows
+  // also dropped manual one-off tasks ("Parking deck & markings") that have no engine identity at all —
+  // the model can't match what we never show it. The twin rule keeps both lessons: a flat row is a real
+  // identity iff no engine row in its project shares its (normalized) name; the guardrail (vmTaskNames)
+  // enforces the same rule at the write. Titles carry the floor ("Columns — Stilt"): five floors of
+  // identical names are untargetable without it.
   type TaskRow = { task_id: string; name: string; project_id: string | null; status: string; node_key?: string | null; floor_label?: string | null }
   const openTasks = ((taskRows ?? []) as TaskRow[]).filter((t) => !DONE_TASK.has(t.status) && inScope(t.project_id))
   const tasksByProject = new Map<string, TaskRow[]>()
@@ -75,7 +79,9 @@ export async function buildCandidateSet(supabase: SB, orgId: string, batch: { it
   }
   for (const rows of tasksByProject.values()) {
     const engine = [...new Map(rows.filter((t) => t.node_key).map((t) => [t.node_key as string, t])).values()]
-    for (const t of (engine.length ? engine : rows)) {
+    const engineNames = new Set(engine.map((t) => normTaskName(t.name)))
+    const flats = engine.length ? rows.filter((t) => !t.node_key && !engineNames.has(normTaskName(t.name))) : []
+    for (const t of (engine.length ? [...engine, ...flats] : rows)) {
       cands.push({
         id: t.task_id, kind: 'task', title: `${t.name}${t.floor_label ? ` — ${t.floor_label}` : ''}`,
         project_id: t.project_id, project_name: nameById.get(t.project_id ?? '') ?? null, chased: chasedIds.has(t.task_id),
@@ -87,9 +93,21 @@ export async function buildCandidateSet(supabase: SB, orgId: string, batch: { it
 }
 
 // ── near candidates (lexical shortlist for the place_photo ask) ──────────────
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+// Token overlap between the message (caption + vision one-liner) and candidate titles — PURE, meaning-
+// free, and deliberately conservative: an empty result keeps the evidence-park floor; it must never
+// return "the whole set" on no signal (that would turn every unplaced photo into a quiz). Latin tokens
+// only (≥4 chars, stopworded) — a pure-Telugu caption simply doesn't fire the ask, and the floor stands.
+const NEAR_STOP = new Set(['with', 'this', 'that', 'from', 'have', 'area', 'site', 'work', 'floor', 'under', 'near', 'over', 'image', 'photo', 'visible', 'tools', 'materials'])
+const nearTokens = (s: string): string[] => ((s.toLowerCase().match(/[a-z]{4,}/g) ?? []).filter((w) => !NEAR_STOP.has(w)))
 export function nearCandidateIds(cands: Candidate[], message: string, cap = 3): string[] {
-  return []   // RED scaffold — implemented in the fix commit
+  const msg = new Set(nearTokens(message))
+  if (!msg.size) return []
+  return cands
+    .map((c, i) => ({ id: c.id, i, score: nearTokens(c.title).reduce((n, w) => n + (msg.has(w) ? 1 : 0), 0) }))
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score || a.i - b.i)
+    .slice(0, cap)
+    .map((x) => x.id)
 }
 
 // ── the prompt ───────────────────────────────────────────────────────────────
@@ -104,7 +122,9 @@ TWO AXES (a single message can set BOTH — "waterlogging fixed, tiles broke" = 
 
 CANDIDATES are the supervisor's open items; ⭐ marks items you are actively chasing (a PRIOR — likely but NOT a lock; a message can be about anything).
 
-confidence (per finding): high = UNAMBIGUOUS referent; med = probable but not certain; low = a guess. These gate what the system does, so be honest — low is safe, a wrong high is not.
+confidence (per finding): high = UNAMBIGUOUS referent; med = probable but not certain; low = a guess. These gate what the system does — high applies, med advances softly, low only ASKS the supervisor — so low is SAFE, a wrong high is not. If the message plausibly relates to a candidate but you are not sure, return the update with confidence low — do NOT return found:false. Reserve found:false for content genuinely unrelated to every candidate.
+
+The message may be a photo's caption plus an automatic description of what the photo shows ("<caption> -- <description>"). A photo of work in a candidate's area usually REPORTS PROGRESS on that candidate (action "progress", closure_explicit false) — grade it like any other report.
 closure_explicit (updates): true ONLY if the words EXPLICITLY say the problem is done/fixed/cleared/resolved/arrived/settled. "sorted"/"that's handled"/vague acks → false. This is INDEPENDENT of confidence: a clear referent with vague closure is confidence:high, closure_explicit:false.
 
 If the message reports NOTHING about existing work and NO new problem (a greeting, a bare ack, chit-chat) → both found:false, empty arrays. NEVER invent a finding.
@@ -173,10 +193,10 @@ export type Disposition =
  * enforcement planner; an invalid/absent one is a PARK (never a guessed contract). Split out pure so both
  * the reject→park and the valid→terminals paths are provable without the model.
  */
-export function disposeRawResponse(raw: string, candidateIds: Set<string>, isImage: boolean): Disposition {
+export function disposeRawResponse(raw: string, candidateIds: Set<string>, isImage: boolean, nearIds: string[] = []): Disposition {
   const contract = validateContract(raw)
   if (!contract) return { kind: 'park', reason: 'llm_unreadable' }
-  return { kind: 'terminals', terminals: executeResolution(contract, { candidateIds, isImage }) }
+  return { kind: 'terminals', terminals: executeResolution(contract, { candidateIds, isImage, nearCandidateIds: nearIds }) }
 }
 
 // ── the orchestrator (I/O shell) ─────────────────────────────────────────────
@@ -215,7 +235,9 @@ export async function resolveInbound(
   // guard callModel too so the no-miss guarantee holds whatever the client does.
   let raw = ''
   try { raw = await callModel(RESOLUTION_SYSTEM, buildResolutionUser(candidates, input.message)) } catch { raw = '' }
-  const disp = disposeRawResponse(raw, new Set(candidates.map((c) => c.id)), isImage)
+  // near-misses for the place_photo ask (images only): lexical, conservative, empty on no signal.
+  const near = isImage ? nearCandidateIds(candidates, input.message) : []
+  const disp = disposeRawResponse(raw, new Set(candidates.map((c) => c.id)), isImage, near)
 
   if (disp.kind === 'terminals') return { kind: 'disposed', terminals: disp.terminals, candidates }
 
