@@ -16,6 +16,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { decompose } from '../whatsapp-webhook/_siteops_extract.ts'
+import { sweepStaleSiteopsConvos, type SweepResult } from '../whatsapp-webhook/_siteops_sweep.ts'
 import {
   decideHarvest, distillSignal, planEnrichmentMerge,
   type PendingEvent, type HarvestObject, type HarvestType,
@@ -45,12 +46,21 @@ serve(async (req) => {
   const preview = new URL(req.url).searchParams.get('preview') === '1'
   const now = new Date()
 
-  // No AI key → we cannot re-decompose; leave the markers PENDING (do not clear) for a run that can.
-  if (!Deno.env.get('OPENAI_API_KEY') && !Deno.env.get('ANTHROPIC_API_KEY')) {
-    return json({ ran_at: now.toISOString(), preview, harvested: 0, note: 'no AI key — markers left pending' })
+  const supabase: SB = createClient(SUPABASE_URL, SUPABASE_SVC_KEY)
+
+  // T1 — SITEOPS stale-convo sweep rides this hourly tick (abandon→park @SITEOPS_CONVO_TTL_HOURS).
+  // BEFORE the AI-key gate: the sweep needs no model. Skipped on preview (a dry run must not mutate),
+  // and WRAPPED — reanalyze now does two jobs, and the added one may never endanger the harvest.
+  let sweep: SweepResult | { error: string } | null = null
+  if (!preview) {
+    try { sweep = await sweepStaleSiteopsConvos(supabase, { now }) }
+    catch (e) { sweep = { error: (e as Error).message }; console.error('[reanalyze:sweep] failed (harvest unaffected):', (e as Error).message) }
   }
 
-  const supabase: SB = createClient(SUPABASE_URL, SUPABASE_SVC_KEY)
+  // No AI key → we cannot re-decompose; leave the markers PENDING (do not clear) for a run that can.
+  if (!Deno.env.get('OPENAI_API_KEY') && !Deno.env.get('ANTHROPIC_API_KEY')) {
+    return json({ ran_at: now.toISOString(), preview, sweep, harvested: 0, note: 'no AI key — markers left pending' })
+  }
 
   const { data: events } = await supabase.from('followup_events')
     .select('id, type, problem_id, todo_id, body, org_id')
@@ -111,7 +121,7 @@ serve(async (req) => {
     results.push({ id: e.id!, type: e.type!, action: decision.action, applied })
   }
 
-  return json({ ran_at: now.toISOString(), preview, harvested: results.length, results })
+  return json({ ran_at: now.toISOString(), preview, sweep, harvested: results.length, results })
 })
 
 function json(b: unknown, status = 200): Response {

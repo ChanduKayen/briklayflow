@@ -9,6 +9,7 @@
 import { send } from '../_format.ts'
 import { resolveProject, planItemProjects, type ProjectRef, type ItemPlan } from '../_resolve.ts'
 import { openConversation, closeConversation, type ConvoRow } from '../_conversation.ts'
+import { parkConvoObservation } from '../_siteops_sweep.ts'
 import { decompose, callLLM, safeParse, type SiteItem } from '../_siteops_extract.ts'
 import { decomposeImage } from '../_siteops_vision.ts'
 import { loadCandidates, prefilterCandidates, groundingLabels, type Candidate } from '../_siteops_candidates.ts'
@@ -219,63 +220,15 @@ async function attachExistingEvidence(ctx: SiteopsCtx, target: { kind: string; i
  *  raw ABANDONED that dropped the item before), and return a one-line ack the dispatcher folds into the
  *  interrupting message's reply. The item survives; the interpretation was best-effort. */
 export async function commitInterruptedSiteops(ctx: SiteopsCtx, convo: ConvoRow): Promise<string> {
-  const slots = (convo.slots_so_far ?? {}) as Record<string, unknown>
-  const kind = typeof slots.kind === 'string' ? slots.kind : null
-  const image = (slots.image ?? null) as { storagePath?: string; caption?: string | null } | null
-  // Fresh-observation picks carry the item(s); answer-evidence picks carry only the photo. The typed
-  // pick (Step 3) carries BOTH — a held SiteItem to create-if-new AND the photo — so it must preserve
-  // the observation, not just the photo (else the interpretation half is silently dropped on interrupt).
-  const observation =
-    kind === 'siteops_disambig' ? (slots.item ?? null)
-    : kind === 'siteops_typed_pick' ? (slots.item ?? null)
-    : kind === 'siteops_project' ? (Array.isArray(slots.items) && slots.items.length ? { items: slots.items } : null)
-    : null
-  const objectPath = image?.storagePath ?? null
-  const closeClean = () => closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'parked to place' })
-
-  // STEP 2 — a siteops_photo ENRICHMENT WINDOW carries NO unresolved work: its objects already exist and
-  // were read back; the window is pure enrich-opportunity. Interrupting it (a SECOND photo, or an
-  // unrelated message routed fresh) must NOT fabricate a phantom siteops_unplaced row for an
-  // already-placed thing — that would pollute the "to place" queue with non-actionable cards. Close CLEAN
-  // (handled), no park. (It carries no observation and no photo path, so it would reach the clean close
-  // below anyway; explicit here so a future slots change can't accidentally route it into a park.)
-  if (kind === 'siteops_photo') { await closeClean(); return '' }
-
-  // Nothing recoverable to preserve (e.g. an answer-evidence pick with no photo carried) → close cleanly, no phantom row.
-  if (observation == null && !objectPath) { await closeClean(); return '' }
-
-  const reason = kind === 'siteops_disambig' ? 'disambig'
-    : kind === 'siteops_typed_pick' ? 'typed_pick'
-    : kind === 'siteops_project' ? 'project'
-    : kind === 'siteops_photo_pick' ? 'photo_pick'
-    : kind === 'siteops_batch_collision' ? 'batch_collision'
-    : 'floor'
-  const { data: ins, error } = await ctx.supabase.from('siteops_unplaced').insert({
-    org_id: ctx.orgId,
-    project_id: (slots.project_id as string | null) ?? null,
-    reason,
-    observation,
-    candidates: slots.candidates ?? slots.shortlist ?? null,   // typed pick stores the shortlist — keep it to rank the later placement
-    bucket: objectPath ? 'rough-entry-media' : null,
-    object_path: objectPath,
-    caption: image?.caption ?? (typeof slots.piece_text === 'string' ? slots.piece_text : null),
-    narration_id: (slots.narration_id as string | null) ?? null,
-    sender_number: ctx.from,
-    created_by: null,
-  }).select('id').single()
-  if (error) console.error('[siteops:park] siteops_unplaced insert failed:', error.message)
-  // STEP 5b — stamp the PARKED row with the pick question's OUTBOUND wamid (learned via the Step 4a map,
-  // keyed on this convo), so a later quoted-reply to that question recovers the park. Best-effort: the
-  // map row may not exist yet (fast interrupt before the drainer ran) and question_wamid may be
-  // unmigrated — neither can be allowed to fail the park (the observation must survive regardless).
-  if (ins?.id) {
-    try {
-      const { data: m } = await ctx.supabase.from('wa_message_map').select('outbound_wamid').eq('convo_id', convo.id).maybeSingle()
-      if (m?.outbound_wamid) await ctx.supabase.from('siteops_unplaced').update({ question_wamid: m.outbound_wamid }).eq('id', ins.id)
-    } catch (e) { console.warn('[siteops:park] question_wamid stamp skipped:', (e as Error).message) }
-  }
-  await closeClean()
-  return objectPath ? `Kept that photo to place later.` : `Kept your earlier note to place later.`
+  // THIN WRAPPER (T1): the park itself is the shared core in _siteops_sweep.ts — the ONE
+  // siteops_unplaced insert site, also driven by the stale-convo sweeper (which ABANDONs; the
+  // interrupt closes CLEAN — CLOSED = handled, not the raw ABANDONED that dropped the item before).
+  // The kind→reason map, the payload mapping (incl. the collision piece_text and unit-project text
+  // fixes), the enrichment-window no-park rule, and the question_wamid stamp all live in the core.
+  const out = await parkConvoObservation(ctx.supabase, convo)
+  await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'parked to place' })
+  if (!out.parked) return ''
+  return out.objectPath ? `Kept that photo to place later.` : `Kept your earlier note to place later.`
 }
 
 const fmtDay = (d: Date) => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
