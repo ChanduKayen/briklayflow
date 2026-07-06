@@ -124,6 +124,35 @@ suite('siteops resolution v2 — enforcement (prod failures as pins)', () => {
   test('both false + image → queued_as_evidence', () => {
     expect(kinds(executeResolution(base(), ctx([], true)))).toEqual(['queued_as_evidence'])
   })
+
+  // THE PARKING LESSON (live 2026-07-05) — a MED task target used to land object_updated(addressing),
+  // which the executor can only HOLD (no soft rung exists for a task: applying IS the state change).
+  // The design is "unconfident → ASK": a med task target asks the pick, exactly like low. Issues/todos
+  // keep their med→addressing soft rung (unchanged above).
+  test('MED + TASK target → question_asked(which_item), never a held object_updated', () => {
+    const c = base({ update_found: { found: true, updates: [upd({ target_id: 'tk-park', target_kind: 'task', action: 'progress', confidence: 'med', closure_explicit: false, reason: 'probably the parking task' })] } })
+    const t = executeResolution(c, ctx(['tk-park']))
+    expect(t.length).toBe(1)
+    expect(t[0].kind).toBe('question_asked')
+    expect(t[0].kind === 'question_asked' && t[0].about).toBe('which_item')
+    expect(t[0].kind === 'question_asked' && t[0].update?.target_id).toBe('tk-park')
+  })
+
+  // ASK-BEFORE-EVIDENCE — both-false + image with NEAR candidates (lexical overlap computed by the
+  // caller, passed in ctx) → ONE place_photo question carrying the shortlist, NOT a silent evidence
+  // park. The park remains the floor when nothing is near (test above) or the pick can't be sent.
+  test('both false + image + near candidates → question_asked(place_photo) carrying the shortlist', () => {
+    const t = executeResolution(base(), { candidateIds: new Set(['tk-park']), isImage: true, nearCandidateIds: ['tk-park'] })
+    expect(t.length).toBe(1)
+    expect(t[0].kind).toBe('question_asked')
+    expect(t[0].kind === 'question_asked' && t[0].about).toBe('place_photo')
+    expect(t[0].kind === 'question_asked' && t[0].shortlistIds).toEqual(['tk-park'])
+  })
+
+  test('both false + image + EMPTY near list → queued_as_evidence (the floor stands)', () => {
+    const t = executeResolution(base(), { candidateIds: new Set(['tk-park']), isImage: true, nearCandidateIds: [] })
+    expect(kinds(t)).toEqual(['queued_as_evidence'])
+  })
 })
 
 suite('siteops resolution v2 — combined readback (one message, consequence-ordered, partial-honest)', () => {
@@ -151,6 +180,13 @@ suite('siteops resolution v2 — combined readback (one message, consequence-ord
   test('lone didnt-catch → bare sentence, no "Got it" wrapper', () => {
     const t: Terminal = { kind: 'acked_didnt_catch', contract: base(), reason: '' }
     expect(composeReadback([{ terminal: t, status: 'ok', label: '' }])).toBe("Didn't catch a site update in that — try again if you meant to send one.")
+  })
+
+  // An UN-SENDABLE place_photo pick fell back to the evidence park (executor) — the readback must say the
+  // honest terminal ("photo saved as evidence"), never "couldn't place 'photo'" over a photo that IS saved.
+  test('un-sendable place_photo pick → the honest evidence line, not a ⚠️ failure', () => {
+    const t: Terminal = { kind: 'question_asked', about: 'place_photo', ref: null, shortlistIds: ['x'], reason: '' }
+    expect(composeReadback([{ terminal: t, status: 'failed', label: 'photo' }])).toBe('Got it — photo saved as evidence')
   })
 })
 

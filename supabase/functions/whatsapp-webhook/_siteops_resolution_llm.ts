@@ -86,6 +86,12 @@ export async function buildCandidateSet(supabase: SB, orgId: string, batch: { it
   return cands.map((c, i) => ({ c, i })).sort((a, b) => (Number(b.c.chased) - Number(a.c.chased)) || (a.i - b.i)).map((x) => x.c)
 }
 
+// ── near candidates (lexical shortlist for the place_photo ask) ──────────────
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function nearCandidateIds(cands: Candidate[], message: string, cap = 3): string[] {
+  return []   // RED scaffold — implemented in the fix commit
+}
+
 // ── the prompt ───────────────────────────────────────────────────────────────
 export const RESOLUTION_SYSTEM = `You resolve ONE inbound site message (English, Telugu, Hindi, or code-mixed "Tenglish"; text or a voice transcript) against a construction supervisor's OPEN work. Read MEANING, never keywords, and never across a negation.
 

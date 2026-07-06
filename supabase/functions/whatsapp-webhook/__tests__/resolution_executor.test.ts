@@ -280,6 +280,112 @@ suite('siteops resolution v2 — executor task updates (Stage 2 applyProgress)',
     expect(fake.writesTo('siteops_unplaced').length).toBe(1)          // the observation survives
     expect(fake.outbox().some((b) => /saved for review/i.test(b))).toBe(true)   // and the sender is told
   })
+
+  // (T4) MED/LOW TASK targets ASK (the parking lesson): a which_item question on a TASK target — tasks are
+  // never in itemsById (issue/todo only) — resolves through candById and opens the PROVEN collision pick
+  // with the task candidate. No park, no held, no silence: the supervisor gets the question.
+  test('(T4) which_item on a TASK target → collision pick opens with the task candidate, no park', async () => {
+    const fake = fakeSupabase({ projects: [{ project_id: 'P1', name: 'The Pride' }] })
+    const q: Terminal = {
+      kind: 'question_asked', about: 'which_item', ref: 'tk-park',
+      update: upd({ target_id: 'tk-park', target_kind: 'task', action: 'progress', confidence: 'med', closure_explicit: false, reason: 'newly tiled parking area' }), reason: '',
+    }
+    const ex: ExecCtx = {
+      ...execCtx(new Map(), new Map([['tk-park', 'Parking deck & markings']])), projectId: 'P1',
+      candById: new Map([['tk-park', { kind: 'task', title: 'Parking deck & markings', projectId: 'P1', projectName: 'The Pride' }]]),
+    }
+    await applyTerminals(ctxFor(fake), [q], ex)
+
+    const convo = fake.writesTo('wa_conversations')[0]
+    expect(convo?.payload?.slots_so_far?.kind).toBe('siteops_batch_collision')
+    const cand = (convo?.payload?.slots_so_far?.candidates ?? [])[0]
+    expect(cand?.kind).toBe('task')
+    expect(cand?.id).toBe('tk-park')
+    expect(fake.writesTo('siteops_unplaced').length).toBe(0)          // asked, not parked
+    const list = fake.writesTo('outbox').find((w) => w.payload?.payload?.kind === 'list')
+    expect((list?.payload?.payload?.rows ?? []).some((r: { title: string }) => /it's new/i.test(r.title))).toBe(true)
+  })
+
+  // (T5) …and the ANSWER lands: picking the task in the collision resume applies the progress via the
+  // proven applyProgress (guardrail intact), attaches the carried photo, and reads back "updated".
+  test('(T5) collision pick answered with the TASK → site_tasks written + photo attached + "updated" reply', async () => {
+    const fake = fakeSupabase({
+      projects: [{ project_id: 'P1', name: 'The Pride' }],
+      site_tasks: { 'tk-park': { task_id: 'tk-park', name: 'Parking deck & markings', project_id: 'P1', status: 'not_started', floor_label: null, unit_label: null, node_key: null, task_type_id: null } },
+    })
+    const convo = {
+      id: 'c1', org_id: ORG, sender_number: '919900000000', status: 'OPEN', owning_agent: 'SITEOPS',
+      pending_question: 'confirm parking', staged_entry_id: null, last_message_id: null,
+      slots_so_far: {
+        kind: 'siteops_batch_collision', status: 'still_open', piece_text: 'newly tiled parking area', project_id: 'P1',
+        narration_id: 'narr-1', image: { storagePath: 'wa_x.jpg', caption: 'The pride parking' },
+        candidates: [{ id: 'tk-park', kind: 'task', orgId: ORG, projectId: 'P1', projectName: 'The Pride', title: 'Parking deck & markings', cause: null }],
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any
+    await answerSiteops(ctxFor(fake), '1', convo)
+
+    expect(fake.writesTo('site_tasks').some((w) => w.op === 'update')).toBe(true)
+    expect(fake.writesTo('attachments').some((w) => w.payload?.parent_type === 'site_task' && w.payload?.parent_id === 'tk-park' && w.payload?.object_path === 'wa_x.jpg')).toBe(true)
+    expect(fake.outbox().some((b) => /updated/i.test(b))).toBe(true)
+  })
+})
+
+// ASK-BEFORE-EVIDENCE (the parking lesson, executor half) — a place_photo question opens the PROVEN
+// siteops_typed_pick carrying the photo (attach-on-pick / park-on-"none"); the evidence park remains the
+// FLOOR: an un-sendable pick falls back to it with the honest "photo saved as evidence" line.
+suite('siteops resolution v2 — executor place_photo (ask-before-evidence)', () => {
+  const tPlace = (ids: string[]): Terminal => ({ kind: 'question_asked', about: 'place_photo', ref: null, shortlistIds: ids, reason: '' })
+  const imgCtx = (fake: ReturnType<typeof fakeSupabase>) => ({ ...ctxFor(fake), image: { base64: 'zz', mime: 'image/jpeg', caption: 'The pride parking', storagePath: 'wa_x.jpg' } })
+  const parkCand = new Map([['tk-park', { kind: 'task' as const, title: 'Parking deck & markings', projectId: 'P1' as string | null, projectName: 'The Pride' as string | null }]])
+
+  test('(PP1) place_photo → typed_pick opens carrying the photo + "None — just save it"; NO park yet', async () => {
+    const fake = fakeSupabase({ projects: [{ project_id: 'P1', name: 'The Pride' }] })
+    await applyTerminals(imgCtx(fake), [tPlace(['tk-park'])], { ...execCtx(), projectId: 'P1', candById: parkCand })
+
+    const convo = fake.writesTo('wa_conversations')[0]
+    expect(convo?.payload?.slots_so_far?.kind).toBe('siteops_typed_pick')
+    expect(convo?.payload?.slots_so_far?.image?.storagePath).toBe('wa_x.jpg')     // the photo rides the pick
+    expect((convo?.payload?.slots_so_far?.shortlist ?? [])[0]?.id).toBe('tk-park')
+    const list = fake.writesTo('outbox').find((w) => w.payload?.payload?.kind === 'list')
+    expect((list?.payload?.payload?.rows ?? []).some((r: { title: string }) => /just save it/i.test(r.title))).toBe(true)
+    expect(fake.writesTo('siteops_unplaced').length).toBe(0)                      // ask first — park only on "none"/interrupt
+    expect(fake.outbox().some((b) => /photo saved as evidence/i.test(b))).toBe(false)
+  })
+
+  test('(PP2) un-sendable place_photo (no candidate mapping) → evidence park + honest "photo saved as evidence"', async () => {
+    const fake = fakeSupabase({ projects: [{ project_id: 'P1', name: 'The Pride' }] })
+    await applyTerminals(imgCtx(fake), [tPlace(['tk-ghost'])], { ...execCtx(), projectId: 'P1' })   // no candById
+
+    const park = fake.writesTo('siteops_unplaced')[0]
+    expect(park?.payload?.reason).toBe('evidence_await_placement')
+    expect(park?.payload?.object_path).toBe('wa_x.jpg')                            // the floor carries the photo
+    expect(fake.outbox().some((b) => /photo saved as evidence/i.test(b))).toBe(true)
+  })
+
+  // "None — just save it" on a place_photo pick: the typed_pick resume holds NO observe item (item null) —
+  // it must park the photo honestly (evidence_await_placement, path carried), never crash into routeGroup.
+  test('(PP3) typed_pick answered "none/new" with NO held item → evidence park + honest reply', async () => {
+    const fake = fakeSupabase({ projects: [{ project_id: 'P1', name: 'The Pride' }] })
+    const convo = {
+      id: 'c1', org_id: ORG, sender_number: '919900000000', status: 'OPEN', owning_agent: 'SITEOPS',
+      pending_question: 'place photo', staged_entry_id: null, last_message_id: null,
+      slots_so_far: {
+        kind: 'siteops_typed_pick', project_id: 'P1', project_name: 'The Pride', item: null, narration_id: 'narr-1',
+        shortlist: [{ kind: 'task', id: 'tk-park', label: 'Parking deck & markings' }],
+        full: [{ kind: 'task', id: 'tk-park', label: 'Parking deck & markings' }],
+        image: { storagePath: 'wa_x.jpg', caption: 'The pride parking' },
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any
+    await answerSiteops(ctxFor(fake), '2', convo)   // row 2 = "None — just save it" (shortlist.length + 1)
+
+    const park = fake.writesTo('siteops_unplaced')[0]
+    expect(park?.payload?.reason).toBe('evidence_await_placement')
+    expect(park?.payload?.object_path).toBe('wa_x.jpg')
+    expect(park?.payload?.project_id).toBe('P1')
+    expect(fake.outbox().length > 0).toBe(true)     // honest ack, never silence
+  })
 })
 
 // PROBE FINDINGS C1/C2 (live 2026-07-05) — readback labels must be TRUTH-PRESERVING. shortLabel's 3-word

@@ -18,6 +18,7 @@ import './resolution_undo.test';
 import './adoption.test';
 import './singular_unit.test';
 import './image_batch.test';
+import './guardrail.test';
 import { runAll } from './harness';
 
 await runAll();

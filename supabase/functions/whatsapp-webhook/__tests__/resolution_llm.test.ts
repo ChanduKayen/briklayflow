@@ -8,6 +8,7 @@ import { suite, test, expect } from './harness'
 import { fakeSupabase, type Seed } from './fake_supabase'
 import {
   validateContract, disposeRawResponse, buildCandidateSet, resolveInbound,
+  nearCandidateIds, RESOLUTION_SYSTEM, type Candidate,
 } from '../_siteops_resolution_llm.ts'
 
 const validRaw = (over = ''): string => over || JSON.stringify({
@@ -115,6 +116,26 @@ suite('siteops resolution v2 — buildCandidateSet (open items, chased ranked to
     expect(ids).toEqual(['tk-flat'])
   })
 
+  // THE PARKING LESSON (live 2026-07-05) — "The pride parking" photo could never match "Parking deck &
+  // markings": the engine-only rule dropped EVERY flat row from a project that has engine rows, including
+  // one-off manual Task-Manager tasks that have no engine identity at all. The model can't match what we
+  // never show it. Rule: engine rows PLUS flat rows with NO engine name-twin in the same project; a flat
+  // twin of an engine row stays invisible (the columns duplicate stays dead).
+  test('a flat ONE-OFF with no engine name-twin IS offered alongside engine rows', async () => {
+    const fake = fakeSupabase({
+      projects: [{ project_id: 'P1', name: 'The Pride' }],
+      site_tasks: {
+        'tk-eng': { task_id: 'tk-eng', name: 'Columns', project_id: 'P1', status: 'not_started', node_key: 'stilt/columns', floor_label: 'Stilt' },
+        'tk-flat-dup': { task_id: 'tk-flat-dup', name: 'Columns', project_id: 'P1', status: 'not_started', node_key: null },
+        'tk-park': { task_id: 'tk-park', name: 'Parking deck & markings', project_id: 'P1', status: 'not_started', node_key: null },
+      },
+    })
+    const tasks = (await buildCandidateSet(fake, 'org-1', null, 'P1')).filter((c) => c.kind === 'task')
+    expect(tasks.some((c) => c.id === 'tk-park')).toBe(true)        // the one-off is a real identity
+    expect(tasks.some((c) => c.id === 'tk-flat-dup')).toBe(false)   // the twin is still never offered
+    expect(tasks.find((c) => c.id === 'tk-park')?.title).toBe('Parking deck & markings')
+  })
+
   // Five floors of "Columns" are indistinguishable without the floor — the candidate TITLE must carry it,
   // or the model cannot honor "stilt floor columns" and picks a floor at random.
   test('task candidate titles carry the floor label', async () => {
@@ -127,7 +148,67 @@ suite('siteops resolution v2 — buildCandidateSet (open items, chased ranked to
   })
 })
 
+suite('siteops resolution v2 — nearCandidateIds (lexical shortlist for the place_photo ask)', () => {
+  const cand = (id: string, title: string): Candidate => ({ id, kind: 'task', title, project_id: 'P1', project_name: 'The Pride', chased: false })
+
+  test('caption tokens hit the candidate title: "parking" → Parking deck & markings', () => {
+    const cands = [cand('tk-col', 'Columns — Stilt'), cand('tk-park', 'Parking deck & markings')]
+    const near = nearCandidateIds(cands, 'The pride parking -- Newly tiled parking area with tools and materials visible.')
+    expect(near).toEqual(['tk-park'])
+  })
+  test('no lexical overlap → empty (the evidence floor stands; never the whole set)', () => {
+    const cands = [cand('tk-col', 'Columns — Stilt'), cand('iss-t', 'tiles not arrived at site')]
+    expect(nearCandidateIds(cands, 'Soundharya corridor -- corridor under construction')).toEqual([])
+  })
+  test('capped and score-ordered', () => {
+    const cands = [cand('a', 'parking gate'), cand('b', 'parking deck markings'), cand('c', 'parking ramp'), cand('d', 'parking wall'), cand('e', 'plaster')]
+    const near = nearCandidateIds(cands, 'parking deck markings done')
+    expect(near.length <= 3).toBe(true)
+    expect(near[0]).toBe('b')   // highest overlap first
+  })
+})
+
+suite('siteops resolution v2 — prompt calibration (low is SAFE, false means UNRELATED)', () => {
+  // The prompt's caution and the ladder's caution must not STACK: the ladder makes low safe by
+  // construction (low only asks), so the prompt must SAY so, or borderline matches fall through both.
+  test('RESOLUTION_SYSTEM teaches the ladder: low only asks — low is SAFE', () => {
+    expect(/low only ASKS|low is SAFE/i.test(RESOLUTION_SYSTEM)).toBe(true)
+  })
+  test('RESOLUTION_SYSTEM reserves found:false for genuinely unrelated content', () => {
+    expect(/genuinely unrelated/i.test(RESOLUTION_SYSTEM)).toBe(true)
+  })
+  test('RESOLUTION_SYSTEM explains the photo-caption message shape', () => {
+    expect(/photo/i.test(RESOLUTION_SYSTEM)).toBe(true)
+  })
+})
+
 suite('siteops resolution v2 — resolveInbound fail→park (no-miss survives the model down)', () => {
+  // THE LIVE TRACE, end-to-end through the shell: captioned progress photo, model returns both-false,
+  // "Parking deck & markings" is lexically near → the disposition is a place_photo QUESTION, not the
+  // silent evidence park.
+  test('image + both-false + near flat one-off → disposed place_photo carrying the shortlist', async () => {
+    const fake = fakeSupabase({
+      projects: [{ project_id: 'P1', name: 'The Pride' }],
+      site_tasks: {
+        'tk-eng': { task_id: 'tk-eng', name: 'Columns', project_id: 'P1', status: 'not_started', node_key: 'stilt/columns', floor_label: 'Stilt' },
+        'tk-park': { task_id: 'tk-park', name: 'Parking deck & markings', project_id: 'P1', status: 'not_started', node_key: null },
+      },
+    })
+    const bothFalse = JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: false, updates: [] } })
+    const out = await resolveInbound(
+      { supabase: fake, orgId: 'org-1', from: '919900000000', projectId: 'P1' },
+      { message: 'The pride parking -- Newly tiled parking area with tools and materials visible.', image: { storagePath: 'wa_x.jpg', caption: 'The pride parking' } },
+      null,
+      async () => {},
+      async () => bothFalse,
+    )
+    expect(out.kind).toBe('disposed')
+    const t = out.kind === 'disposed' ? out.terminals[0] : null
+    expect(t?.kind).toBe('question_asked')
+    expect(t?.kind === 'question_asked' && t.about).toBe('place_photo')
+    expect(t?.kind === 'question_asked' && (t.shortlistIds ?? []).includes('tk-park')).toBe(true)
+  })
+
   test('unreadable model response → siteops_unplaced (parked_reason) + honest reply, nothing lost', async () => {
     const fake = fakeSupabase({ projects: [{ project_id: 'P1', name: 'ASM Elite' }] })
     const sent: string[] = []
