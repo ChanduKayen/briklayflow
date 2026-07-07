@@ -386,6 +386,8 @@ export interface ExecCtx {
                                           // the item carries no resolvable project_hint (spec: no match → CREATE)
   readbackSuffix?: string                 // appended to the combined readback (e.g. the interim
                                           // pending_stage2 truth: "· 1 more saved for review")
+  assumedSite?: string                    // T8b — the ASSUMED project name (batch prior, via='auto'); disclosed so a
+                                          // silent wrong adoption becomes visible/correctable (clause 4).
 }
 
 // the executor's slim view of an offered candidate (built from res.candidates in the caller).
@@ -733,7 +735,16 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
   // issues + their event ids — 4a maps the outbound wamid to those refs (handleUndoResolve). No resolve →
   // text. If every terminal was a question, the picks ARE the reply — no combined readback.
   if (outcomes.some((o) => o.terminal.kind !== 'question_asked' || o.status !== 'ok')) {
-    const body = composeReadback(outcomes) + (ex.readbackSuffix ?? '')
+    // T8c-2 (clause 5) UNDERSTOOD-FIRST — a compound where fragment-1 was a MISS but the rest was SAVED must
+    // lead with what we held (the saved rest), not the miss. composeReadback would put the lone didn't-catch
+    // first and append the saved suffix; reorder that one case so the understood part leads.
+    const loneMiss = outcomes.length === 1 && outcomes[0].terminal.kind === 'acked_didnt_catch' && outcomes[0].status === 'ok'
+    let body = (loneMiss && ex.readbackSuffix)
+      ? `Got it —${ex.readbackSuffix.replace(/^ ·/, '')} · didn't catch anything else in that`
+      : composeReadback(outcomes) + (ex.readbackSuffix ?? '')
+    // T8b (clause 4) — DISCLOSE a batch-ASSUMED project so a wrong adoption is visible and correctable
+    // (there's no project-correction tap yet — reuse the fresh path: "send it again with the site").
+    if (ex.assumedSite) body += ` · logged at *${ex.assumedSite}* (assumed from your open chase) — wrong site? send it again with the site`
     if (resolvedRefs.length) {
       await send(ctx.supabase, ctx.from, { kind: 'buttons', body, buttons: [{ id: 'siteops_undo', title: 'Not resolved' }] }, { ...meta, capture: { ref_kind: 'readback', object_refs: resolvedRefs } })
     } else {
@@ -998,6 +1009,7 @@ async function runSingularUnit(ctx: SiteopsCtx, u: {
   batch: OpenBatch | null
   narrationId: string | null
   callModel: (system: string, user: string) => Promise<string>
+  assumedSite?: string   // T8b — the project NAME when it was ASSUMED from a single-site batch (via='auto'); disclosed in the readback.
 }): Promise<void> {
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
   const now = new Date()
@@ -1048,7 +1060,7 @@ async function runSingularUnit(ctx: SiteopsCtx, u: {
   const candById = new Map<string, ExecCandidate>(res.candidates.map((c) => [c.id, { kind: c.kind, title: c.title, projectId: c.project_id, projectName: c.project_name }]))
   const outcomes = await applyTerminals(ctx, res.terminals, {
     itemsById, labelById, candById, cadenceMap, actorId, now,
-    narrationId: u.narrationId, projectId: u.projectId, readbackSuffix: restLine,
+    narrationId: u.narrationId, projectId: u.projectId, readbackSuffix: restLine, assumedSite: u.assumedSite,
   })
   // batch bookkeeping: only CHASED items ride the batch — drop the resolved ∩ batch, close when empty.
   const resolvedIds = outcomes
@@ -1191,6 +1203,7 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
       rest: items.slice(1),
       batch, narrationId,
       callModel: opts.callModel ?? callLLM,
+      assumedSite: via === 'auto' ? (projects.find((p) => p.id === projectId)?.name ?? undefined) : undefined,   // T8b disclosure
     })
     return
   }
@@ -1243,6 +1256,7 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
     text: items.length >= 2 ? first!.text : text,   // compound → the FIRST fragment's text (never let the model re-find the parked rest)
     rest, batch, narrationId,
     callModel: opts.callModel ?? callLLM,
+    assumedSite: via === 'auto' ? (projects.find((p) => p.id === projectId)?.name ?? undefined) : undefined,   // T8b disclosure
   })
 }
 

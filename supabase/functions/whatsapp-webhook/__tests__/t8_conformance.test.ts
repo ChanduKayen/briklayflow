@@ -32,7 +32,6 @@ const model = (stubs: { decompose?: string; resolve?: string }) =>
 const DEC = (projectHint: string | null, items: { type: string; text: string; project_hint?: string | null }[]) =>
   JSON.stringify({ project_hint: projectHint, items: items.map((i) => ({ type: i.type, text: i.text, task_hint: null, qc_statements: [], cause: null, cause_reason: null, owner_hint: null, date_hint: null, project_hint: i.project_hint ?? projectHint })) })
 const R_RESOLVE = JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: true, updates: [{ target_id: 'iss-water', target_kind: 'issue', action: 'resolve', confidence: 'high', closure_explicit: true, reason: 'cleared' }] } })
-const R_CREATE = JSON.stringify({ issue_snag_found: { found: true, items: [{ kind: 'issue', detail: 'new crack on 2F', location: null, project_hint: null, confidence: 'high' }] }, update_found: { found: false, updates: [] } })
 const R_BOTH_FALSE = JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: false, updates: [] } })
 
 suite('siteops T8 — park hints, batch disclosure, understood-first', () => {
@@ -53,8 +52,9 @@ suite('siteops T8 — park hints, batch disclosure, understood-first', () => {
   // The readback must DISCLOSE the assumption so a wrong adoption is visible and correctable.
   test('(j2) batch-assumed project → readback discloses the assumed site (not silent)', async () => {
     const fake = fakeSupabase(seed())   // single-site batch on ASM Elite (P1)
-    await runSiteops(ctxFor(fake), 'there is a new crack', {   // names no project → adopted from the batch
-      callModel: model({ decompose: DEC(null, [{ type: 'issue', text: 'new crack' }]), resolve: R_CREATE }),
+    // names no project → sited to the batch's project (via='auto'); the reply must disclose the assumption.
+    await runSiteops(ctxFor(fake), 'waterlogging is fixed now', {
+      callModel: model({ decompose: DEC(null, [{ type: 'progress', text: 'waterlogging fixed' }]), resolve: R_RESOLVE }),
     })
     const reply = fake.outbox().join(' ')
     expect(/ASM Elite/.test(reply)).toBe(true)                 // the assumed site is NAMED
