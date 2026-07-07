@@ -1585,7 +1585,9 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
     // a visible number → that offered row (display order == stored order), a typed label → the matching item
     // (shortlist == full here), "new"/none → a fresh observation. No positional index into a re-ranked list,
     // no bare-integer demand — the heuristic the sprint sequence deleted, gone from this resume too.
-    const picks: PickCandidate[] = cands.map((c) => ({ kind: c.kind, id: c.id, label: shortLabel(c.title) }))
+    // label = the FULL title (NOT shortLabel) so resolveTypedPick matches a natural answer against the whole
+    // name — "Fourth floor" resolves "Wiring — Fourth floor", which the 3-token display label had truncated.
+    const picks: PickCandidate[] = cands.map((c) => ({ kind: c.kind, id: c.id, label: c.title }))
     const picked = resolveTypedPick(picks, picks, text)
     if (picked.kind === 'observe') {
       // "new"/none → route the piece FRESH to the project; never force a genuinely-new observation onto a chase.

@@ -148,3 +148,65 @@ suite('siteops — Bug 1 REAL fix: ONE which_item emitter (near-floor AND ladder
     expect(/num - 1/.test(resume)).toBe(false)
   })
 })
+
+// ── typed-answer resolution: a NATURAL answer resolves by MEANING against the stored list ────────────────
+// The composer + offered-list + NUMBER resolution all work; the residual is that a typed label
+// ("Fourth floor") didn't resolve — resolveTypedPick matched only whole-phrase substring against the
+// shortLabel-TRUNCATED label ("Wiring — Fourth", "floor" dropped). Fix: match the FULL title by whole-phrase
+// containment OR shared-token overlap, UNIQUE-winner only; an ambiguous / no-match answer still re-prompts
+// (never mis-resolves, never eats), and a BARE number still resolves positionally (display == resolution).
+const cand = (id: string, title: string) => ({ id, kind: 'issue' as const, orgId: ORG, projectId: 'P1', projectName: 'ASM Elite', title, cause: null })
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const collSlots = (cands: any[]) => ({ kind: 'siteops_batch_collision', status: 'still_open', piece_text: 'wiring done', project_id: 'P1', narration_id: 'narr-1', image: null, candidates: cands })
+const fourFloors = () => [cand('w-first', 'Wiring — First floor'), cand('w-second', 'Wiring — Second floor'), cand('w-third', 'Wiring — Third floor'), cand('w-fourth', 'Wiring — Fourth floor')]
+const floorSeed = (): Seed => ({
+  projects: [{ project_id: 'P1', name: 'ASM Elite' }],
+  problems: Object.fromEntries(fourFloors().map((c) => [c.id, { id: c.id, title: c.title, project_id: 'P1', status: 'OPEN' }])),
+  wa_registered_numbers: [{ user_id: 'u1', phone_number: SENDER, is_active: true }],
+  user_profiles: [{ id: 'u1', name: 'Ramesh' }],
+  site_narration_id: 'narr-1',
+})
+
+suite('siteops — Bug 1 typed-answer resolution (natural answer resolves by meaning; guards hold)', () => {
+  // j5 (THE RESIDUAL, RED today) — "Fourth floor" shares the distinctive token "Fourth" with "Wiring —
+  // Fourth floor" but is not a whole-phrase substring of the truncated label → currently misses.
+  test('(j5) natural answer "Fourth floor" → "Wiring — Fourth floor" by meaning', async () => {
+    const fake = fakeSupabase(floorSeed())
+    await answerSiteops(ctxFor(fake), 'Fourth floor', convoOf(collSlots(fourFloors())))
+    expect(addressed(fake, 'w-fourth')).toBe(true)
+    expect(addressed(fake, 'w-first')).toBe(false)     // resolved by meaning, not an arbitrary/positional guess
+  })
+
+  // j5b (number path survives) — a BARE number still resolves positionally: display == resolution.
+  test('(j5b) bare number "4" → the FOURTH stored item (regression guard)', async () => {
+    const fake = fakeSupabase(floorSeed())
+    await answerSiteops(ctxFor(fake), '4', convoOf(collSlots(fourFloors())))
+    expect(addressed(fake, 'w-fourth')).toBe(true)
+    expect(addressed(fake, 'w-first')).toBe(false)
+  })
+
+  // j6 (ambiguity → SAFE-FAILURE) — "floor" fits ALL four equally → NOT resolved, the sender is re-prompted.
+  // Never an arbitrary pick, never an eat. Pins that loosening the match did not create a mis-resolution.
+  test('(j6) ambiguous "floor" (shared by all) → not resolved, re-prompts', async () => {
+    const fake = fakeSupabase(floorSeed())
+    await answerSiteops(ctxFor(fake), 'floor', convoOf(collSlots(fourFloors())))
+    expect(fake.writesTo('problems').some((w) => w.op === 'update' && w.payload?.status === 'ADDRESSING')).toBe(false)
+    expect(fake.outbox().some((b) => /reply with the item/i.test(b))).toBe(true)
+  })
+
+  // j7 (numeric guard) — a digit-BEARING natural answer resolves by LABEL, not by the first-digit-anywhere
+  // positional hijack. "Phase 2 panel" must land on "Wiring — Phase 2 panel", not the 2nd stored item.
+  test('(j7) digit-bearing answer "Phase 2 panel" → resolves by label, not positional index', async () => {
+    const cands = [cand('w-a', 'Wiring — Main board'), cand('w-b', 'Wiring — Riser conduit'), cand('w-phase2', 'Wiring — Phase 2 panel')]
+    const fake = fakeSupabase({
+      projects: [{ project_id: 'P1', name: 'ASM Elite' }],
+      problems: Object.fromEntries(cands.map((c) => [c.id, { id: c.id, title: c.title, project_id: 'P1', status: 'OPEN' }])),
+      wa_registered_numbers: [{ user_id: 'u1', phone_number: SENDER, is_active: true }],
+      user_profiles: [{ id: 'u1', name: 'Ramesh' }],
+      site_narration_id: 'narr-1',
+    })
+    await answerSiteops(ctxFor(fake), 'Phase 2 panel', convoOf(collSlots(cands)))
+    expect(addressed(fake, 'w-phase2')).toBe(true)
+    expect(addressed(fake, 'w-b')).toBe(false)         // NOT stored[1] — the old /(\d+)/ first-digit hijack is gone
+  })
+})
