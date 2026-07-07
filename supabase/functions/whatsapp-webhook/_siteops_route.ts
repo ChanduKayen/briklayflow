@@ -408,8 +408,9 @@ export interface ProblemResult { id: string | null; title: string; cause: string
 async function insertProblem(supabase: SB, fullRow: Record<string, unknown>): Promise<string | null> {
   let res = await supabase.from('problems').insert(fullRow).select('id').single()
   if (res.error) {
-    // degrade if a not-yet-applied column is present (deadline/impact, or the S note-provenance cols)
-    const { deadline: _d, impact: _i, source_note_id: _sn, source_note_kind: _sk, ...base } = fullRow
+    // degrade if a not-yet-applied column is present (deadline/impact, the S note-provenance cols, or the
+    // T6 kind/confidence cols) — a missing column must never cost us the issue; the DB default fills it.
+    const { deadline: _d, impact: _i, source_note_id: _sn, source_note_kind: _sk, kind: _k, confidence: _cf, ...base } = fullRow
     res = await supabase.from('problems').insert(base).select('id').single()
   }
   if (res.error) console.error('[siteops] problem insert failed:', res.error.message)
@@ -446,7 +447,9 @@ export async function createProblem(c: RouteCtx, item: SiteItem, taskId: string 
     // note→object provenance: a WhatsApp narration IS the note. Lets the task feed hide the raw
     // narration and show the live chip (mark-and-hide). UI spawns stamp 'comment' post-create.
     source_note_id: c.narrationId, source_note_kind: c.narrationId ? 'narration' : null,
-    cause, title: item.text, owner_id: ownerId, owner_source: 'auto', status: 'OPEN',
+    // T6 — record the planner's KIND (clause 3 fidelity); default 'issue' for decompose/vision items and
+    // any legacy caller that carries no subtype.
+    cause, title: item.text, kind: item.kind ?? 'issue', owner_id: ownerId, owner_source: 'auto', status: 'OPEN',
     next_followup_at: nextFollowupAt, deadline, impact,
   })
   // Ping the assignee NOW (auto or named) — unless they're the sender or the principal.

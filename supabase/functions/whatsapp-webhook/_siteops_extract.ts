@@ -32,6 +32,10 @@ const CAUSE_KEY_SET = new Set<string>(VALID_CAUSE_KEYS)
 export interface SiteItem {
   type: SiteItemType
   text: string                  // the atomic statement
+  // ISSUE SUBTYPE (resolution bridge only): the planner's kind — 'issue' vs 'snag' — carried through
+  // toSiteItem → createProblem so the SAME `problems` row records WHICH it is (clause 3 kind fidelity).
+  // Absent on decompose/vision items (they classify via `type`); createProblem defaults it to 'issue'.
+  kind?: 'issue' | 'snag'
   task_hint: string | null      // floor/trade/unit mentioned, or null
   qc_statements: string[]       // progress only: specific checkable facts STATED (not invented)
   // ISSUES ONLY (progress/todo always null): a constrained cause_key from the taxonomy or 'other'.
