@@ -525,6 +525,42 @@ export async function handleUndoResolve(ctx: SiteopsCtx, quotedWamid: string): P
   return true   // we handled the undo tap (a stale/idempotent no-op is still "handled")
 }
 
+// ── the ONE which_item composer (clause 2 + clause 5 — de-dup) ───────────────────────────────────────────
+// EVERY candidate-pick question routes through here: the near-floor both-false ask, the ladder's LOW-
+// confidence / MED-task ask, and the legacy collision copy. Canonicalizes the near-floor's correct impl:
+//  • clause 5 — ONE composed, NUMBERED text message (never one interactive list per candidate: that was the
+//    fan-out — "Wiring done at asm" → five number-less messages).
+//  • clause 2 — the offered list is FROZEN into the siteops_batch_collision slots at ask-time, in the SAME
+//    order the message NUMBERS it, so display index == stored index == what resolveTypedPick resolves against
+//    (never re-derived from the reply). The proven collision resume is the SOLE resolve path.
+// `update` threads the ladder's held verdict (T3 sole-authority) for a SINGLE-target ask; a multi-candidate
+// ask has no single verdict → verdict-less slot → the resume forces ADDRESSING on confirm (the safe floor).
+type CollisionCand = { id: string; kind: 'issue' | 'todo' | 'task'; orgId: string; projectId: string | null; projectName: string; title: string; cause: string | null }
+async function askItemPick(ctx: SiteopsCtx, meta: { org_id: string; wamid: string }, a: {
+  candidates: CollisionCand[]; pieceText: string; projectId: string | null; narrationId: string | null
+  image: { storagePath: string; caption: string | null } | null
+  update?: AttachUpdate | null; prefix?: string
+}): Promise<void> {
+  const cands = a.candidates.slice(0, 9)
+  await openConversation(ctx.supabase, {
+    orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
+    pendingQuestion: 'which item?',
+    slots: {
+      kind: 'siteops_batch_collision', status: 'still_open', piece_text: a.pieceText,
+      candidates: cands, project_id: a.projectId, narration_id: a.narrationId, image: a.image,
+      ...(a.update ? { update: a.update } : {}),
+    },
+    lastMessageId: ctx.wamid,
+  })
+  const listLines = cands.map((c, i) => `${i + 1}. ${shortLabel(c.title)}`).join('\n')
+  const piece = shortLabel(a.pieceText)
+  const head = a.prefix ? `${a.prefix}\n\n` : ''
+  await send(ctx.supabase, ctx.from, {
+    kind: 'text',
+    body: `${head}${piece ? `"${piece}" — ` : ''}which of these is it about?\n${listLines}\n\nReply with the item, or say *new* if it's something else.`,
+  }, meta)
+}
+
 // question_asked → open the pick through an EXISTING proven resume, storing exactly the offered set in the
 // conversation slots (same-set-in / same-set-validated-out — the conversation twin of the planner's
 // candidate-membership guard). which_item confirms a LOW/un-offered update — the confirm upgrades WHICH
@@ -536,83 +572,10 @@ export async function handleUndoResolve(ctx: SiteopsCtx, quotedWamid: string): P
 // `about`) must be handled by the caller as a park + honest readback, never a silent 'ok' (T3 fix).
 async function askResolutionQuestion(ctx: SiteopsCtx, t: Extract<Terminal, { kind: 'question_asked' }>, ex: ExecCtx): Promise<boolean> {
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
-  // B FLOOR (clause 4) — both-false + lexically-NEAR candidates: ask which item the terse update was about,
-  // from the near shortlist. Verdict-less collision slots (no held `update`) → the resume forces ADDRESSING
-  // on confirm; "None — it's new" routes fresh. Reuses the proven collision pick; candById resolves ids.
-  if (t.about === 'which_item' && t.shortlistIds?.length && !t.update) {
-    const cands = t.shortlistIds
-      .map((id) => ({ id, c: ex.candById?.get(id) }))
-      .filter((x): x is { id: string; c: ExecCandidate } => !!x.c)
-      .slice(0, 9)
-      .map((x) => ({ id: x.id, kind: x.c.kind, orgId: ctx.orgId, projectId: x.c.projectId ?? ex.projectId ?? null, projectName: x.c.projectName ?? '', title: x.c.title, cause: null }))
-    if (!cands.length) return false   // can't resolve the shortlist → caller parks + honest readback
-    await openConversation(ctx.supabase, {
-      orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
-      pendingQuestion: 'which item?',
-      slots: { kind: 'siteops_batch_collision', status: 'still_open', piece_text: ex.message ?? '', candidates: cands, project_id: ex.projectId ?? null, narration_id: ex.narrationId, image: null },
-      lastMessageId: ctx.wamid,
-    })
-    // ONE composed message (clause 5 — one readback), NOT one per candidate. The offered list is NUMBERED so
-    // the visible index matches the STORED order the resume resolves against (display == resolution), and we
-    // invite a natural answer — the item name OR "new" — never a bare-integer demand (the deleted heuristic).
-    const listLines = cands.map((c, i) => `${i + 1}. ${shortLabel(c.title)}`).join('\n')
-    const piece = shortLabel(ex.message ?? '')
-    await send(ctx.supabase, ctx.from, {
-      kind: 'text',
-      body: `${piece ? `"${piece}" — ` : ''}which of these is it about?\n${listLines}\n\nReply with the item, or say *new* if it's something else.`,
-    }, meta)
-    return true
-  }
-  if (t.about === 'which_item' && t.update) {
-    const item = ex.itemsById.get(t.update.target_id)
-    if (!item) {
-      // TASK target (the parking lesson): tasks never live in itemsById (issues/todos only) — resolve it
-      // through candById and open the SAME proven collision pick; the resume's task branch applies the
-      // confirm via applyProgress. The photo (if any) rides the slots so the confirm can attach it.
-      const c = ex.candById?.get(t.update.target_id)
-      if (c?.kind !== 'task') return false
-      const cand = { id: t.update.target_id, kind: 'task', orgId: ctx.orgId, projectId: c.projectId ?? ex.projectId ?? null, projectName: c.projectName ?? '', title: c.title, cause: null }
-      await openConversation(ctx.supabase, {
-        orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
-        pendingQuestion: `confirm ${shortLabel(c.title)}`,
-        slots: {
-          kind: 'siteops_batch_collision', status: 'still_open', piece_text: t.update.reason, candidates: [cand],
-          project_id: c.projectId ?? ex.projectId ?? null, narration_id: ex.narrationId,
-          image: ctx.image?.storagePath ? { storagePath: ctx.image.storagePath, caption: ctx.image.caption ?? null } : null,
-          // T3 — carry the ladder's held verdict into the slots (uniform with the issue/todo opener). The
-          // task confirm branch applies via applyProgress and doesn't read it back; stamped so no reader
-          // assumes the two collision slot shapes differ.
-          update: t.update,
-        },
-        lastMessageId: ctx.wamid,
-      })
-      await send(ctx.supabase, ctx.from, {
-        kind: 'list',
-        body: `Is this about *${shortLabel(c.title)}*? Confirming logs it as progress — or is it new?`,
-        button: 'Pick',
-        rows: [{ id: 'pick:1', title: shortLabel(c.title).slice(0, 24) }, { id: 'pick:2', title: "None — it's new" }],
-      }, meta)
-      return true
-    }
-    const cand = { id: item.id, kind: item.kind, orgId: item.orgId, projectId: item.projectId, projectName: item.projectName, title: item.title, cause: item.cause }
-    await openConversation(ctx.supabase, {
-      orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
-      pendingQuestion: `confirm ${shortLabel(item.title)}`,
-      // T3 — thread the ladder's HELD verdict (the AttachUpdate) into the slots so the confirm resume
-      // re-enters the ONE authority (executeResolution) instead of re-judging. The confirm upgrades WHICH
-      // item; closure_explicit rides verbatim so the ladder still gates WHETHER it resolves.
-      slots: { kind: 'siteops_batch_collision', status: 'still_open', piece_text: t.update.reason, candidates: [cand], project_id: item.projectId ?? null, narration_id: ex.narrationId, image: null, update: t.update },
-      lastMessageId: ctx.wamid,
-    })
-    // ladder context in the prompt — the question IS a pre-consequence readback (what confirm does).
-    await send(ctx.supabase, ctx.from, {
-      kind: 'list',
-      body: `Is this about *${shortLabel(item.title)}*? Confirming marks it addressed — or is it new?`,
-      button: 'Pick',
-      rows: [{ id: 'pick:1', title: shortLabel(item.title).slice(0, 24) }, { id: 'pick:2', title: "None — it's new" }],
-    }, meta)
-    return true
-  }
+  // which_item is NOT handled here — every candidate-pick ask routes through the ONE composer (askItemPick),
+  // AGGREGATED across terminals in applyTerminals so N low-confidence updates ask ONCE, not N times (the
+  // fan-out). This function now handles only place_photo + which_project (a photo placement / a new item's
+  // site — not an item-candidate pick).
   // ASK-BEFORE-EVIDENCE: an unplaced photo with lexically-near candidates → the PROVEN typed pick
   // (attach-on-pick / evidence-park-on-"none"), photo riding the slots. Un-sendable (no mapping, no
   // stored photo) → false, and the caller falls back to the evidence park — the floor never moves.
@@ -668,6 +631,54 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
   const outcomes: TerminalOutcome[] = []
   const resolvedRefs: { kind: string; id: string; event: string }[] = []   // resolved ISSUES → the undo binding
   const createdRefs: { kind: 'problem' | 'todo'; id: string; label: string }[] = []   // image-created objects → the enrichment window (T5 Gap C)
+
+  // ── which_item asks: ONE aggregated pick, never one message per terminal (the fan-out) ─────────────────
+  // Every which_item question the ladder produced (LOW-confidence updates, MED-task targets, the both-false
+  // near floor) resolves the SAME way — pick one offered item or "new". Collect them into ONE numbered
+  // message via the shared composer; a target that resolves to no offered candidate still PARKS honestly (T3
+  // no-silent-drop). N low-confidence updates on one message → ONE question, not N. The composer freezes the
+  // offered order into slots (display == resolution), so the loop below must SKIP these (handled here).
+  const wiQs = terminals.filter((t): t is Extract<Terminal, { kind: 'question_asked' }> => t.kind === 'question_asked' && t.about === 'which_item')
+  if (wiQs.length) {
+    const seen = new Set<string>()
+    const cands: CollisionCand[] = []
+    for (const q of wiQs) {
+      for (const id of q.update ? [q.update.target_id] : (q.shortlistIds ?? [])) {
+        if (seen.has(id)) continue
+        const item = ex.itemsById.get(id)
+        const c = ex.candById?.get(id)
+        const kind = (item?.kind ?? c?.kind) as 'issue' | 'todo' | 'task' | undefined
+        if (!kind) continue   // target resolves to no offered candidate → not askable; parked in the else below
+        seen.add(id)
+        cands.push({
+          id, kind, orgId: ctx.orgId,
+          projectId: item?.projectId ?? c?.projectId ?? ex.projectId ?? null,
+          projectName: item?.projectName ?? c?.projectName ?? '',
+          title: item?.title ?? c?.title ?? '', cause: item?.cause ?? null,
+        })
+      }
+    }
+    if (cands.length) {
+      // carry the held verdict ONLY for a single-target ask (T3 sole-authority thread); a multi-candidate ask
+      // has no single verdict → verdict-less slot forces ADDRESSING on confirm (the conservative floor).
+      const single = wiQs.length === 1 && cands.length === 1 ? (wiQs[0].update ?? null) : null
+      const image = ctx.image?.storagePath ? { storagePath: ctx.image.storagePath, caption: ctx.image.caption ?? null } : null
+      await askItemPick(ctx, meta, {
+        candidates: cands, pieceText: ex.message ?? cands[0].title,
+        projectId: ex.projectId ?? cands[0].projectId ?? null, narrationId: ex.narrationId, image, update: single,
+      })
+      for (const q of wiQs) outcomes.push({ terminal: q, status: 'ok', label: terminalLabel(q, ex.labelById) })
+    } else {
+      // NONE resolvable → the T3 floor: park each honestly (never a silent drop); the readback tells the sender.
+      for (const q of wiQs) {
+        await parkObservation(ctx, terminalObservation(q), q.update ? 'non_batch_target' : 'v2_unhandled_terminal', ex.narrationId,
+          q.update ? { target_id: q.update.target_id, target_kind: q.update.target_kind, label: terminalLabel(q, ex.labelById), update: q.update } : null,
+          { projectId: ex.projectId ?? null })
+        outcomes.push({ terminal: q, status: 'failed', label: terminalLabel(q, ex.labelById) })
+      }
+    }
+  }
+
   for (const t of terminals) {
     try {
       if (t.kind === 'object_updated') {
@@ -730,6 +741,7 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
         }
         outcomes.push({ terminal: t, status: 'ok', label: '' })   // no state effect; the readback IS the ack
       } else if (t.kind === 'question_asked') {
+        if (t.about === 'which_item') continue   // ALL which_item asks are AGGREGATED into one composer above
         // Open the pick through the PROVEN resume, storing exactly the offered set in slots (so the answer
         // validates against what was asked, never a re-load). Sends its own interactive message.
         // T3 FIX — an UN-SENDABLE question (target not in itemsById / unknown about) used to vanish as a
@@ -984,23 +996,16 @@ async function handleBatchReplyLegacy(
   // Fix-2 scoping). Ask which — WITH a "None — it's new" exit so a genuinely-new observation isn't
   // trapped onto a chase (the residual the Fix X review flagged: don't rebuild the trap one level down).
   if (collision) {
-    const cands = collision.items.map((it) => ({ id: it.id, kind: it.kind, orgId: it.orgId, projectId: it.projectId, projectName: it.projectName, title: it.title, cause: it.cause }))
-    const projectId = pre.projectId ?? cands[0]?.projectId ?? null
-    await openConversation(ctx.supabase, {
-      orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
-      pendingQuestion: `which item: ${collision.piece.text}`,
-      slots: { kind: 'siteops_batch_collision', status: collision.status, piece_text: collision.piece.text, candidates: cands, project_id: projectId, narration_id: narrationId, image: photo ? { storagePath: photo.sp, caption: photo.cap } : null },
-      lastMessageId: ctx.wamid,
+    // De-dup — the legacy collision routes through the SAME shared composer as every other which_item ask
+    // (one numbered message, offered list frozen into slots, resolveTypedPick resolves it). It leads with the
+    // readback of what this reply DID catch (the head/extra), then asks.
+    const cands: CollisionCand[] = collision.items.map((it) => ({ id: it.id, kind: it.kind, orgId: it.orgId, projectId: it.projectId ?? null, projectName: it.projectName, title: it.title, cause: it.cause }))
+    await askItemPick(ctx, meta, {
+      candidates: cands, pieceText: collision.piece.text,
+      projectId: pre.projectId ?? cands[0]?.projectId ?? null, narrationId,
+      image: photo ? { storagePath: photo.sp, caption: photo.cap } : null,
+      prefix: `${head}${extra}`.trim() || undefined,
     })
-    await send(ctx.supabase, ctx.from, {
-      kind: 'list',
-      body: `${head}${extra}\n\n"${shortLabel(collision.piece.text)}" — which of these, or is it new?`,
-      button: 'Pick',
-      rows: [
-        ...cands.slice(0, 9).map((c, i) => ({ id: `pick:${i + 1}`, title: shortLabel(c.title).slice(0, 24), description: c.projectName.slice(0, 24) })),
-        { id: `pick:${Math.min(cands.length, 9) + 1}`, title: "None — it's new" },
-      ],
-    }, meta)
     return true
   }
 

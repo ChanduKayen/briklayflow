@@ -35,6 +35,7 @@ import './reconnect_chain.test';
 import './clause_a1_abbrev.test';
 import './clause1_media_thread.test';
 import './bug1_which_item_reuse.test';
+import './bug1_fanout_dedup.test';
 import './singular_unit.test';
 import './image_batch.test';
 import './guardrail.test';

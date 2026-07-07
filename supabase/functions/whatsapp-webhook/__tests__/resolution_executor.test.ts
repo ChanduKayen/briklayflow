@@ -84,17 +84,20 @@ suite('siteops resolution v2 — executor 2c (question_asked wiring + evidence s
   const tEvidence = (): Terminal => ({ kind: 'queued_as_evidence', reason: '' })
 
   // A LOW update → a confirm-or-new pick, wired through the PROVEN siteops_batch_collision resume: the
-  // conversation stores exactly the offered candidate, and the prompt carries the ladder's consequence.
-  test('(Q-item) question_asked(which_item) → opens siteops_batch_collision w/ the offered target + "it\'s new"', async () => {
+  // conversation stores exactly the offered candidate, threading the held verdict (T3), and the ask is the
+  // ONE shared composer (askItemPick) — a NUMBERED text message inviting the item or "new", never a
+  // number-less interactive list (the fan-out/corruption emitter this de-dup deleted).
+  test('(Q-item) question_asked(which_item) → opens siteops_batch_collision w/ the offered target + held verdict', async () => {
     const fake = fakeSupabase({ projects: [{ project_id: 'P1', name: 'ASM Elite' }] })
     await applyTerminals(ctxFor(fake), [tQItem('iss-water')], execCtx(new Map([['iss-water', waterItem]])))
 
     const convo = fake.writesTo('wa_conversations')[0]
     expect(convo.payload?.slots_so_far?.kind).toBe('siteops_batch_collision')
     expect((convo.payload?.slots_so_far?.candidates ?? []).some((c: { id: string }) => c.id === 'iss-water')).toBe(true)
-    const list = fake.writesTo('outbox').find((w) => w.payload?.payload?.kind === 'list')
-    expect((list?.payload?.payload?.rows ?? []).some((r: { title: string }) => /it's new/i.test(r.title))).toBe(true)
-    expect(/confirming marks it addressed/i.test(list?.payload?.payload?.body ?? '')).toBe(true)   // ladder context
+    expect(convo.payload?.slots_so_far?.update?.target_id).toBe('iss-water')   // T3 held verdict threaded (single target)
+    const ask = fake.outbox().find((b) => /which of these is it about/i.test(b)) ?? ''
+    expect(/1\.\s*waterlogging in basement/i.test(ask)).toBe(true)             // NUMBERED, offered order
+    expect(/\bnew\b/i.test(ask)).toBe(true)                                    // the "it's new" escape, natural answer
   })
 
   // A new item with no resolvable site → which_project, wired through the proven siteops_project resume,
@@ -302,8 +305,9 @@ suite('siteops resolution v2 — executor task updates (Stage 2 applyProgress)',
     expect(cand?.kind).toBe('task')
     expect(cand?.id).toBe('tk-park')
     expect(fake.writesTo('siteops_unplaced').length).toBe(0)          // asked, not parked
-    const list = fake.writesTo('outbox').find((w) => w.payload?.payload?.kind === 'list')
-    expect((list?.payload?.payload?.rows ?? []).some((r: { title: string }) => /it's new/i.test(r.title))).toBe(true)
+    const ask = fake.outbox().find((b) => /which of these is it about/i.test(b)) ?? ''
+    expect(/1\.\s*Parking deck &/i.test(ask)).toBe(true)              // the task candidate, numbered
+    expect(/\bnew\b/i.test(ask)).toBe(true)
   })
 
   // (T5) …and the ANSWER lands: picking the task in the collision resume applies the progress via the
