@@ -44,9 +44,10 @@ const imgModel = (calls: Call[], stubs: { vision?: string; resolve?: string }) =
 const resolutionCalls = (calls: Call[]) => calls.filter((c) => c.user.startsWith('CANDIDATES:'))
 const VIS = (items: { type: string; text: string }[]) =>
   JSON.stringify({ project_hint: null, items: items.map((i) => ({ type: i.type, text: i.text, confidence: 'high', task_hint: null, cause: i.type === 'issue' ? 'other' : null, cause_reason: null, owner_hint: null, date_hint: null, project_hint: null, qc_statements: [] })) })
-// the picked project is the unit's projectId → project_hint null falls back to it (create on the pick).
-const R_CREATE = (detail: string) => JSON.stringify({
-  issue_snag_found: { found: true, items: [{ kind: 'issue', detail, location: null, project_hint: null, confidence: 'high' }] },
+// the resume NAMES the picked project in the grading message, so the model returns its project_hint (mirrors
+// singular_unit (c)'s R_NEW_TRANSFORMER) → planObserve creates on the pick instead of re-asking which_project.
+const R_CREATE = (detail: string, projectHint: string) => JSON.stringify({
+  issue_snag_found: { found: true, items: [{ kind: 'issue', detail, location: null, project_hint: projectHint, confidence: 'high' }] },
   update_found: { found: false, updates: [] },
 })
 
@@ -68,9 +69,9 @@ suite('siteops T5 sub-step 4 — the siteops_project resume joins the unit (Haza
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const convo = { id: 'c1', org_id: ORG, sender_number: SENDER, status: 'OPEN', owning_agent: 'SITEOPS', pending_question: 'which project?', staged_entry_id: null, last_message_id: null, slots_so_far: slots } as any
     const calls: Call[] = []
-    await answerSiteops(textCtx(fake), 'Soundharya', convo, { callModel: imgModel(calls, { resolve: R_CREATE('wall crack near stairs') }) })
+    await answerSiteops(textCtx(fake), 'Soundharya', convo, { callModel: imgModel(calls, { resolve: R_CREATE('wall crack near stairs', 'Soundharya') }) })
 
-    // the object lands on the picked project (green today AND after — the create was never the gap)
+    // the object lands on the picked project
     expect(fake.writesTo('problems').some((w) => w.op === 'insert' && w.payload?.project_id === 'P2')).toBe(true)
     // RED until the cutover — the carried photo (slots.image) must attach to the created object.
     expect(fake.writesTo('attachments').some((w) => w.payload?.object_path === PHOTO && w.payload?.parent_type === 'problem')).toBe(true)

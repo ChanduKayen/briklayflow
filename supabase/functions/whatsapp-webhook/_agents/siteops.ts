@@ -1907,29 +1907,33 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
     if (slots.narration_id) {
       await ctx.supabase.from('site_narrations').update({ project_id: chosen.id, resolved_project_via: 'selected' }).eq('id', slots.narration_id)
     }
-    // UNIT-STYLE slots (they carry the raw `text` — E2): run the REMAINDER of the singular unit against
-    // the PICKED project — its candidates, one resolveInbound, apply/create under the enforcement floor.
+    // T5 sub-step 4 — the project pick runs the SINGULAR UNIT for BOTH slot shapes (finishRoute retired
+    // here). The picked project's candidates, one resolveInbound, apply/create under the enforcement floor.
     // No re-extraction (the stored decomposition IS the extraction; journey (c) counts the calls).
-    // Legacy slots (no text: parked-row reconstructions, runMulti holds, executor which_project picks)
-    // keep the proven finishRoute create path.
-    if (typeof slots.text === 'string') {
-      const storedItems = (slots.items ?? []) as SiteItem[]
-      const storedFirst = storedItems[0] ?? null
-      const batch = await getOpenBatch(ctx.supabase, ctx.orgId, ctx.from)
-      await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site update' })
-      await runSingularUnit(ctx, {
-        projectId: chosen.id,
-        text: storedItems.length >= 2 ? storedFirst!.text : slots.text,
-        rest: storedItems.slice(1),
-        batch,
-        narrationId: slots.narration_id ?? null,
-        callModel: opts.callModel ?? callLLM,
-      })
-      return
-    }
-    const awaiting = await finishRoute(ctx, chosen.id, chosen.name, (slots.items ?? []) as SiteItem[], slots.narration_id ?? null)
-    // finishRoute reuses the OPEN convo when it opens a task pick; otherwise we're done.
-    if (!awaiting) await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site update' })
+    //   • UNIT-STYLE slots (E2) carry the raw `text` → that is the message.
+    //   • LEGACY slots (image-no-project, runMulti holds, executor which_project, parked reconstructions)
+    //     carry only the decomposed items → the first item's text is the message, and the carried photo
+    //     (slots.image) is RE-HYDRATED onto the ctx so it RIDES the unit's terminals (attach on create,
+    //     answer-evidence on update) instead of being dropped — finishRoute read ctx.image, null at resume.
+    const storedItems = (slots.items ?? []) as SiteItem[]
+    const storedFirst = storedItems[0] ?? null
+    const rawMsg = storedItems.length >= 2 ? storedFirst!.text : (typeof slots.text === 'string' ? slots.text : (storedFirst?.text ?? text))
+    // The project is ALREADY picked — NAME it in the grading message so the ladder creates on it. planObserve
+    // asks which_project on a null project_hint; a legacy image message (a vision one-liner, no site named —
+    // that is why we asked) would otherwise make the model return null and RE-ASK the project we just picked.
+    const msg = `${chosen.name}: ${rawMsg}`
+    const pimg = (slots.image ?? null) as { storagePath?: string; caption?: string | null } | null
+    const rctx: SiteopsCtx = pimg?.storagePath ? { ...ctx, image: { base64: '', mime: '', caption: pimg.caption ?? '', storagePath: pimg.storagePath } } : ctx
+    const batch = await getOpenBatch(ctx.supabase, ctx.orgId, ctx.from)
+    await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site update' })
+    await runSingularUnit(rctx, {
+      projectId: chosen.id,
+      text: msg,
+      rest: storedItems.slice(1),
+      batch,
+      narrationId: slots.narration_id ?? null,
+      callModel: opts.callModel ?? callLLM,
+    })
     return
   }
 
