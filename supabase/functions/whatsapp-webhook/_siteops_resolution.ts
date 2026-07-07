@@ -137,7 +137,12 @@ export function executeResolution(c: ResolutionContract, ctx: ResolutionContext)
         ? (ctx.nearCandidateIds?.length
             ? { kind: 'question_asked', about: 'place_photo', ref: null, shortlistIds: ctx.nearCandidateIds, reason: 'image with nothing confident but near candidates — ask placement before parking' }
             : { kind: 'queued_as_evidence', reason: 'image with no confident update or creation — queue as evidence, decide later' })
-        : { kind: 'acked_didnt_catch', contract: c, reason: 'no issue/snag found and no update found on a non-image input' },
+        // B FLOOR (clause 4) — a TEXT both-false with lexically-NEAR candidates is very likely a terse update
+        // the model under-detected. Uncertainty must become a QUESTION, never a silent miss: ask which item
+        // (the near shortlist). Only a genuinely-unrelated both-false is the honest didn't-catch.
+        : (ctx.nearCandidateIds?.length
+            ? { kind: 'question_asked', about: 'which_item', ref: null, shortlistIds: ctx.nearCandidateIds, reason: 'both-false but lexically-near candidates — ask which item, never a silent miss' }
+            : { kind: 'acked_didnt_catch', contract: c, reason: 'no issue/snag found and no update found on a non-image input' }),
     )
   }
 

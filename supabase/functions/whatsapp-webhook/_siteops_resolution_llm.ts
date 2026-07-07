@@ -235,8 +235,10 @@ export async function resolveInbound(
   // guard callModel too so the no-miss guarantee holds whatever the client does.
   let raw = ''
   try { raw = await callModel(RESOLUTION_SYSTEM, buildResolutionUser(candidates, input.message)) } catch { raw = '' }
-  // near-misses for the place_photo ask (images only): lexical, conservative, empty on no signal.
-  const near = isImage ? nearCandidateIds(candidates, input.message) : []
+  // near-misses (lexical, conservative, empty on no signal): the place_photo ask for images AND — the B
+  // floor (clause 4) — the which_item ask for TEXT when the model returned both-false but a candidate is
+  // lexically near (an unsure update must become a QUESTION, never a silent miss). No longer image-gated.
+  const near = nearCandidateIds(candidates, input.message)
   const disp = disposeRawResponse(raw, new Set(candidates.map((c) => c.id)), isImage, near)
 
   if (disp.kind === 'terminals') return { kind: 'disposed', terminals: disp.terminals, candidates }

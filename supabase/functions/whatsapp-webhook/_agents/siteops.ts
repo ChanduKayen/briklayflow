@@ -397,6 +397,8 @@ export interface ExecCtx {
                                           // pending_stage2 truth: "· 1 more saved for review")
   assumedSite?: string                    // T8b — the ASSUMED project name (batch prior, via='auto'); disclosed so a
                                           // silent wrong adoption becomes visible/correctable (clause 4).
+  message?: string                        // B floor — the raw inbound message, so a near-candidate which_item ask
+                                          // carries it as the collision piece_text (trail/apply on confirm).
 }
 
 // the executor's slim view of an offered candidate (built from res.candidates in the caller).
@@ -534,6 +536,31 @@ export async function handleUndoResolve(ctx: SiteopsCtx, quotedWamid: string): P
 // `about`) must be handled by the caller as a park + honest readback, never a silent 'ok' (T3 fix).
 async function askResolutionQuestion(ctx: SiteopsCtx, t: Extract<Terminal, { kind: 'question_asked' }>, ex: ExecCtx): Promise<boolean> {
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
+  // B FLOOR (clause 4) — both-false + lexically-NEAR candidates: ask which item the terse update was about,
+  // from the near shortlist. Verdict-less collision slots (no held `update`) → the resume forces ADDRESSING
+  // on confirm; "None — it's new" routes fresh. Reuses the proven collision pick; candById resolves ids.
+  if (t.about === 'which_item' && t.shortlistIds?.length && !t.update) {
+    const cands = t.shortlistIds
+      .map((id) => ({ id, c: ex.candById?.get(id) }))
+      .filter((x): x is { id: string; c: ExecCandidate } => !!x.c)
+      .slice(0, 9)
+      .map((x) => ({ id: x.id, kind: x.c.kind, orgId: ctx.orgId, projectId: x.c.projectId ?? ex.projectId ?? null, projectName: x.c.projectName ?? '', title: x.c.title, cause: null }))
+    if (!cands.length) return false   // can't resolve the shortlist → caller parks + honest readback
+    await openConversation(ctx.supabase, {
+      orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
+      pendingQuestion: 'which item?',
+      slots: { kind: 'siteops_batch_collision', status: 'still_open', piece_text: ex.message ?? '', candidates: cands, project_id: ex.projectId ?? null, narration_id: ex.narrationId, image: null },
+      lastMessageId: ctx.wamid,
+    })
+    await send(ctx.supabase, ctx.from, {
+      kind: 'list', body: `Did you mean one of these — or is it something new?`, button: 'Pick',
+      rows: [
+        ...cands.map((c, i) => ({ id: `pick:${i + 1}`, title: shortLabel(c.title).slice(0, 24) })),
+        { id: `pick:${cands.length + 1}`, title: "None — it's new" },
+      ],
+    }, meta)
+    return true
+  }
   if (t.about === 'which_item' && t.update) {
     const item = ex.itemsById.get(t.update.target_id)
     if (!item) {
@@ -1069,7 +1096,7 @@ async function runSingularUnit(ctx: SiteopsCtx, u: {
   const candById = new Map<string, ExecCandidate>(res.candidates.map((c) => [c.id, { kind: c.kind, title: c.title, projectId: c.project_id, projectName: c.project_name }]))
   const outcomes = await applyTerminals(ctx, res.terminals, {
     itemsById, labelById, candById, cadenceMap, actorId, now,
-    narrationId: u.narrationId, projectId: u.projectId, readbackSuffix: restLine, assumedSite: u.assumedSite,
+    narrationId: u.narrationId, projectId: u.projectId, readbackSuffix: restLine, assumedSite: u.assumedSite, message: u.text,
   })
   // batch bookkeeping: only CHASED items ride the batch — drop the resolved ∩ batch, close when empty.
   const resolvedIds = outcomes
