@@ -19,6 +19,7 @@ import './adoption.test';
 import './double_authority.test';
 import './done_demotion.test';
 import './image_rephoto_ladder.test';
+import './image_enrichment_window.test';
 import './singular_unit.test';
 import './image_batch.test';
 import './guardrail.test';
