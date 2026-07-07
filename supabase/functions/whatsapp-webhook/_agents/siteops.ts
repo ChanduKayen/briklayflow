@@ -627,6 +627,7 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
   const outcomes: TerminalOutcome[] = []
   const resolvedRefs: { kind: string; id: string; event: string }[] = []   // resolved ISSUES → the undo binding
+  const createdRefs: { kind: 'problem' | 'todo'; id: string; label: string }[] = []   // image-created objects → the enrichment window (T5 Gap C)
   for (const t of terminals) {
     try {
       if (t.kind === 'object_updated') {
@@ -671,6 +672,10 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
           for (const p of out.problems) if (p.id) await attachImage(ctx, 'problem', p.id, sp, cap, 'creation')
           for (const td of out.todos) if (td.id) await attachImage(ctx, 'todo', td.id, sp, cap, 'creation')
           for (const pr of out.progress) if (pr.taskId) await attachImage(ctx, 'site_task', pr.taskId, sp, cap, 'creation')
+          // T5 Gap C — remember the CREATED objects so the enrichment window can hold over them (below). Only
+          // problems/todos: the window resume enriches those (site_task refs are skipped by the resume).
+          for (const p of out.problems) if (p.id) createdRefs.push({ kind: 'problem', id: p.id, label: p.title })
+          for (const td of out.todos) if (td.id) createdRefs.push({ kind: 'todo', id: td.id, label: td.text })
         }
         outcomes.push({ terminal: t, status: 'ok', label: readbackLabel(t.item.detail) })
       } else if (t.kind === 'acked_didnt_catch') {
@@ -725,6 +730,28 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
     } else {
       await send(ctx.supabase, ctx.from, { kind: 'text', body }, meta)
     }
+  }
+
+  // STEP 2 — ENRICHMENT WINDOW (images only), ported from finishRoute into the ONE pipeline (T5 Gap C). When
+  // an image CREATED object(s), hold an OPEN siteops_photo convo (~90s) so a follow-up TEXT (or quoted reply)
+  // ENRICHES these SAME objects rather than twinning them (dispatch → classifyPhotoFollowup → the
+  // siteops_photo resume). Event-driven, no timer. Guard: never when a pick is already pending (one open
+  // convo per sender) — the pick owns the slot.
+  const pickPending = outcomes.some((o) => o.terminal.kind === 'question_asked' && o.status === 'ok')
+  if (ctx.image?.storagePath && createdRefs.length && !pickPending) {
+    const holdMs = Number(Deno.env.get('WA_SITEOPS_PHOTO_HOLD_MS') ?? '90000')
+    const extract = createdRefs.map((r) => r.label).filter(Boolean).join(' · ')
+    await openConversation(ctx.supabase, {
+      orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
+      pendingQuestion: 'photo enrichment window',
+      slots: {
+        kind: 'siteops_photo', object_refs: createdRefs.map((r) => ({ kind: r.kind, id: r.id })),
+        project_id: ex.projectId ?? null, photo_wamid: ctx.wamid,
+        hold_until: new Date(Date.now() + holdMs).toISOString(),
+        label: shortLabel(extract || 'the photo'), extract, narration_id: ex.narrationId,
+      },
+      lastMessageId: ctx.wamid,
+    })
   }
   return outcomes
 }
