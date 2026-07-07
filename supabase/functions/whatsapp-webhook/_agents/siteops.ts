@@ -552,12 +552,14 @@ async function askResolutionQuestion(ctx: SiteopsCtx, t: Extract<Terminal, { kin
       slots: { kind: 'siteops_batch_collision', status: 'still_open', piece_text: ex.message ?? '', candidates: cands, project_id: ex.projectId ?? null, narration_id: ex.narrationId, image: null },
       lastMessageId: ctx.wamid,
     })
+    // ONE composed message (clause 5 — one readback), NOT one per candidate. The offered list is NUMBERED so
+    // the visible index matches the STORED order the resume resolves against (display == resolution), and we
+    // invite a natural answer — the item name OR "new" — never a bare-integer demand (the deleted heuristic).
+    const listLines = cands.map((c, i) => `${i + 1}. ${shortLabel(c.title)}`).join('\n')
+    const piece = shortLabel(ex.message ?? '')
     await send(ctx.supabase, ctx.from, {
-      kind: 'list', body: `Did you mean one of these — or is it something new?`, button: 'Pick',
-      rows: [
-        ...cands.map((c, i) => ({ id: `pick:${i + 1}`, title: shortLabel(c.title).slice(0, 24) })),
-        { id: `pick:${cands.length + 1}`, title: "None — it's new" },
-      ],
+      kind: 'text',
+      body: `${piece ? `"${piece}" — ` : ''}which of these is it about?\n${listLines}\n\nReply with the item, or say *new* if it's something else.`,
     }, meta)
     return true
   }
@@ -1573,12 +1575,15 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
   // ── B3 same-cause collision → the supervisor named the site for the held item ──
   if (slots.kind === 'siteops_batch_collision') {
     const cands = (slots.candidates ?? []) as { id: string; kind: 'issue' | 'todo' | 'task'; orgId: string; projectId?: string | null; projectName: string; title: string; cause: string | null }[]
-    const t = text.trim().toLowerCase()
-    const m = text.match(/(\d+)/)
-    const num = m ? parseInt(m[1], 10) : null
-    // FIX 2 — the "None — it's new" row (past the candidate count) or a typed new/none → route the piece
-    // FRESH to the project; never force a genuinely-new observation onto a chase.
-    if ((num !== null && num > cands.length) || (num === null && /\b(new|none|different|separate|fresh)\b/i.test(text))) {
+    // Resolve the reply BY MEANING against the STORED offered list — clause 2 (validate against the offered
+    // list, never re-derive from the reply). resolveTypedPick is the SAME resolver the typed-pick ask uses:
+    // a visible number → that offered row (display order == stored order), a typed label → the matching item
+    // (shortlist == full here), "new"/none → a fresh observation. No positional index into a re-ranked list,
+    // no bare-integer demand — the heuristic the sprint sequence deleted, gone from this resume too.
+    const picks: PickCandidate[] = cands.map((c) => ({ kind: c.kind, id: c.id, label: shortLabel(c.title) }))
+    const picked = resolveTypedPick(picks, picks, text)
+    if (picked.kind === 'observe') {
+      // "new"/none → route the piece FRESH to the project; never force a genuinely-new observation onto a chase.
       const pid = (slots.project_id as string | null) ?? cands[0]?.projectId ?? null
       const pieceText = (slots.piece_text as string | null) ?? text
       await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site update' })
@@ -1599,9 +1604,7 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
       await send(ctx.supabase, ctx.from, { kind: 'text', body: n ? `Logged as new — *${shortLabel(pieceText)}*. 👍` : `Noted 👍` }, meta)
       return
     }
-    const idx = num !== null ? num - 1
-      : cands.findIndex((c) => shortLabel(c.title).toLowerCase().includes(t) && t.length >= 3)
-    const chosen = idx >= 0 && idx < cands.length ? cands[idx] : null
+    const chosen = picked.kind === 'attach' ? cands.find((c) => c.id === picked.target.id) ?? null : null
     if (!chosen) {
       if (await judgePending(`which of these is "${slots.piece_text ?? 'this'}" about, or is it new?`, text) === 'letgo') {
         // bail — the item stays in the batch and gets re-asked next cycle
@@ -1609,7 +1612,7 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
         await send(ctx.supabase, ctx.from, { kind: 'text', body: `No problem — I'll check back on it next time.` }, meta)
         return
       }
-      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Reply with the number, or say *new* if it's a separate thing.` }, meta)
+      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Reply with the item, or say *new* if it's a separate thing.` }, meta)
       return
     }
     // A TASK confirm (the parking lesson): the supervisor confirmed a med/low task match — apply the
