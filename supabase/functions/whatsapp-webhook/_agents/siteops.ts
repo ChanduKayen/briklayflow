@@ -676,6 +676,15 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
         }
         outcomes.push({ terminal: t, status: 'ok', label: readbackLabel(t.item.detail) })
       } else if (t.kind === 'acked_didnt_catch') {
+        // T7 (clause 6) — a BOTH-FALSE miss must be AUDITABLE, not in-memory: persist the resolution
+        // verdict onto the narration it belongs to so a reviewer can query "why did we miss this" after
+        // the fact (the contract shows the ladder found nothing; raw_text + decomposed already sit here).
+        // Best-effort: a verdict write must never fail the ack.
+        if (ex.narrationId) {
+          const { error } = await ctx.supabase.from('site_narrations')
+            .update({ miss_verdict: { reason: t.reason, contract: t.contract } }).eq('id', ex.narrationId)
+          if (error) console.error('[siteops:miss-verdict] persist failed:', error.message)
+        }
         outcomes.push({ terminal: t, status: 'ok', label: '' })   // no state effect; the readback IS the ack
       } else if (t.kind === 'question_asked') {
         // Open the pick through the PROVEN resume, storing exactly the offered set in slots (so the answer
@@ -1144,6 +1153,8 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
           await say(`Couldn't read that photo — kept it on your to-place list so it isn't lost.`)
           return
         }
+        // T7 (clause 6) — an unreadable image with no evidence to park is still a miss; record it.
+        if (narrationId) await ctx.supabase.from('site_narrations').update({ miss_verdict: { reason: 'nothing_extracted' } }).eq('id', narrationId)
         await say(`Didn't catch a site update in that — try again if you meant to send one.`)
         return
       }
@@ -1202,6 +1213,8 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
   if (!projectId) {
     if (!decomposed) {
       // TRUE contentless cell: nothing extracted, no name, no chase context → the honest didn't-catch.
+      // T7 (clause 6) — record the miss uniformly so `miss_verdict IS NOT NULL` finds EVERY miss in one query.
+      if (narrationId) await ctx.supabase.from('site_narrations').update({ miss_verdict: { reason: 'nothing_extracted' } }).eq('id', narrationId)
       await say(`Didn't catch a site update in that — try again if you meant to send one.`)
       return
     }
