@@ -404,7 +404,11 @@ function toSiteItem(it: { kind: 'issue' | 'snag'; detail: string; location: stri
  *  replayable, visible in the queue. MED/LOW task targets never reach here: no soft rung exists for a
  *  task (applying IS the state change), so uncertainty keeps holding. */
 async function applyTaskUpdate(ctx: SiteopsCtx, t: Extract<Terminal, { kind: 'object_updated' }>, ex: ExecCtx): Promise<string | null> {
-  const label = await applyTaskProgressById(ctx, t.update.target_id, t.update.reason, ex.narrationId, ex.now, ex.projectId ?? null)
+  // T2 — terminal task closure is the LADDER's alone (Hazard 3 / clause-4). Authorize applyProgress to
+  // write 'done' ONLY when the ladder ruled a resolve; an ADDRESSING verdict advances the task, never
+  // closes it — even if the reason text happens to carry a "done"/"completed" word (the regex no longer
+  // overrides the ladder).
+  const label = await applyTaskProgressById(ctx, t.update.target_id, t.update.reason, ex.narrationId, ex.now, ex.projectId ?? null, t.applied === 'resolve')
   if (label && ctx.image?.storagePath) await attachImage(ctx, 'site_task', t.update.target_id, ctx.image.storagePath, ctx.image.caption ?? null, 'creation')
   return label
 }
@@ -414,7 +418,7 @@ async function applyTaskUpdate(ctx: SiteopsCtx, t: Extract<Terminal, { kind: 'ob
  *  applies via the proven applyProgress. Returns the readback label, or null when the row is gone / the
  *  guardrail refused / no project — the caller parks honestly. Photo attachment is the CALLER's step
  *  (executor: ctx.image; resume: slots.image). */
-async function applyTaskProgressById(ctx: SiteopsCtx, taskId: string, text: string, narrationId: string | null, now: Date, fallbackProjectId: string | null): Promise<string | null> {
+async function applyTaskProgressById(ctx: SiteopsCtx, taskId: string, text: string, narrationId: string | null, now: Date, fallbackProjectId: string | null, closureAuthorized = false): Promise<string | null> {
   const { data: rows } = await ctx.supabase.from('site_tasks').select(`${TASK_COLS}, project_id`).eq('task_id', taskId)
   const task = (rows ?? [])[0] as (SiteTaskRow & { project_id?: string | null }) | undefined
   if (!task) return null
@@ -429,7 +433,7 @@ async function applyTaskProgressById(ctx: SiteopsCtx, taskId: string, text: stri
     narrationId, now, vmNodeKeys: vm.keys.size ? vm.keys : undefined, vmTaskNames: vm.keys.size ? vm.names : undefined,
   }
   const item: SiteItem = { type: 'progress', text, task_hint: null, qc_statements: [], cause: null, cause_reason: null, owner_hint: null, date_hint: null, project_hint: null }
-  const res = await applyProgress(rc, task, item)
+  const res = await applyProgress(rc, task, item, { closureAuthorized })
   if (!res.visibleInVM) return null   // GUARDRAIL: never a false "✓ updated" onto a row the UI can't render
   return readbackLabel(`${task.name}${task.floor_label ? ` (${task.floor_label})` : ''}`)
 }

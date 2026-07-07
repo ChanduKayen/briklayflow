@@ -277,9 +277,13 @@ export function parseWhen(hint: string | null, base: Date): Date | null {
 
 const DONE_RE = /\b(done|finished|completed|complete|cast|poured|laid|over|ayipoyindi|ayopoindi|aindi|ipoyindi)\b/i
 const STARTED_RE = /\b(started|starting|ongoing|in progress|going on|begun|begin)\b/i
-/** Map a progress statement to the status it implies. */
-export function statusFromProgress(text: string, current: string): string {
-  if (DONE_RE.test(text)) return 'done'
+/** Map a progress statement to the status it implies. TERMINAL closure ('done') is the LADDER's call
+ *  alone (clause 4, Hazard 3): a bare "done"/"cast"/"poured" from this word-list is PROGRESS — it advances
+ *  the task, it NEVER terminally closes it, unless the caller passes `closureAuthorized` (only
+ *  applyTaskUpdate does, and only when the ladder ruled applied==='resolve'). An already-done task is left
+ *  done (no unauthorized regress). */
+export function statusFromProgress(text: string, current: string, closureAuthorized = false): string {
+  if (DONE_RE.test(text)) return closureAuthorized ? 'done' : (current === 'done' ? 'done' : 'active')
   if (STARTED_RE.test(text)) return 'active'
   return current === 'not_started' ? 'active' : current
 }
@@ -348,9 +352,9 @@ export function ownerName(c: RouteCtx, id: string | null): string {
 export interface ProgressResult { taskId: string; taskName: string; floor: string | null; unit: string | null; statusFrom: string; statusTo: string; qcConfirmed: { question: string; answer: string }[]; nodeKey: string | null; visibleInVM: boolean }
 
 /** progress → update task status + status_history, answer QC only where explicit. */
-export async function applyProgress(c: RouteCtx, task: SiteTaskRow, item: SiteItem): Promise<ProgressResult> {
+export async function applyProgress(c: RouteCtx, task: SiteTaskRow, item: SiteItem, opts: { closureAuthorized?: boolean } = {}): Promise<ProgressResult> {
   const statusFrom = task.status
-  const statusTo = statusFromProgress(item.text, statusFrom)
+  const statusTo = statusFromProgress(item.text, statusFrom, opts.closureAuthorized)
   // GUARDRAIL (Step 3, twin-aware): an ENGINE row must be the SAME identity the UI overlay renders
   // (node_key ∈ VM) — a miss would be an invisible write, REFUSED so Stage 4 can never emit a false
   // "✓ logged". A FLAT row (no node_key) is refused ONLY when it NAME-TWINS a VM row (the columns

@@ -54,7 +54,6 @@ const taskSeed = (): Seed => ({
   projects: [{ project_id: 'P1', name: 'ASM Elite' }],
   site_tasks: { 'tk-slab': { task_id: 'tk-slab', name: 'Slab Pour', project_id: 'P1', status: 'not_started', floor_label: 'Ground', unit_label: null, node_key: null, task_type_id: null, owner_id: null, owner_source: null, phase: null, trade: null } },
 })
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const tTask = (applied: 'resolve' | 'addressing', action: 'progress' | 'resolve', closure_explicit: boolean, reason: string): Terminal => ({
   kind: 'object_updated',
   update: { target_id: 'tk-slab', target_kind: 'task', action, confidence: 'high', closure_explicit, reason },
