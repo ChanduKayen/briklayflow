@@ -18,6 +18,7 @@ import './resolution_undo.test';
 import './adoption.test';
 import './double_authority.test';
 import './done_demotion.test';
+import './image_rephoto_ladder.test';
 import './singular_unit.test';
 import './image_batch.test';
 import './guardrail.test';
