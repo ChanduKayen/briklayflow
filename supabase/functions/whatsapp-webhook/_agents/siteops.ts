@@ -8,6 +8,7 @@
 
 import { send } from '../_format.ts'
 import { resolveProject, type ProjectRef } from '../_resolve.ts'
+import { distinctiveTokens } from '../_match.ts'
 import { openConversation, closeConversation, type ConvoRow } from '../_conversation.ts'
 import { parkConvoObservation } from '../_siteops_sweep.ts'
 import { decompose, callLLM, safeParse, type SiteItem } from '../_siteops_extract.ts'
@@ -229,6 +230,14 @@ export async function commitInterruptedSiteops(ctx: SiteopsCtx, convo: ConvoRow)
 }
 
 const fmtDay = (d: Date) => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
+/** A2 (clause 2) — does the message REFERENCE a project (even a partial/abbrev we couldn't resolve)? A
+ *  distinctive token of any project name appearing in the text = a placeable site message → ASK which site
+ *  rather than silently miss it. Genuine junk/greeting (no project token) is an honest didn't-catch. Reuses
+ *  the matcher's distinctiveTokens (filler-stripped) so "at asm" hits "ASM Elite" but "site is clean" won't. */
+function mentionsProjectToken(text: string, projects: ProjectRef[]): boolean {
+  const proj = new Set(projects.flatMap((p) => distinctiveTokens(p.name)).filter((w) => w.length >= 3))
+  return proj.size ? distinctiveTokens(text).some((t) => t.length >= 3 && proj.has(t)) : false
+}
 /** First few words of an item's title — for PICK ROWS and question labels (UI-truncated anyway). */
 const shortLabel = (title: string) => title.trim().split(/\s+/).slice(0, 3).join(' ')
 /** READBACK-facing label: the (near-)full title, capped by LENGTH, never by word count. Probe C2: the
@@ -1238,9 +1247,15 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
   }).eq('id', narrationId)
 
   if (!projectId) {
-    if (!decomposed) {
-      // TRUE contentless cell: nothing extracted, no name, no chase context → the honest didn't-catch.
-      // T7 (clause 6) — record the miss uniformly so `miss_verdict IS NOT NULL` finds EVERY miss in one query.
+    // A2 (clause 2 — ask-first floor). ASK "which site?" for any CONTENT-bearing message; only a genuinely
+    // TRIVIAL one (a bare ack / empty) is an honest didn't-catch. A closure/update ("water problem solved")
+    // yields NO new observation, so decompose throws → decomposed=null — but it IS content, and the RAW text
+    // carried into the ask lets the resume run resolveInbound (which handles updates). Never eat a message we
+    // merely couldn't place; the didn't-catch verdict belongs AFTER the site is known (resolveInbound), not
+    // here. (decomposed truthy = we already have items; !decomposed + non-trivial = a closure we still ask.)
+    if (!decomposed && !mentionsProjectToken(text, projects)) {
+      // TRUE contentless cell: nothing decomposed AND no project referenced → junk/greeting → the honest
+      // didn't-catch. T7 (clause 6) — record it so `miss_verdict IS NOT NULL` finds EVERY miss in one query.
       if (narrationId) await ctx.supabase.from('site_narrations').update({ miss_verdict: { reason: 'nothing_extracted' } }).eq('id', narrationId)
       await say(`Didn't catch a site update in that — try again if you meant to send one.`)
       return

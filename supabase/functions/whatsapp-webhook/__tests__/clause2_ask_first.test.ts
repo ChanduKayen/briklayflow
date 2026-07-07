@@ -20,7 +20,7 @@ const seed = (): Seed => ({
 const ctxFor = (fake: ReturnType<typeof fakeSupabase>) => ({ supabase: fake, from: SENDER, orgId: ORG, wamid: 'w-1', lang: 'te' as const })
 // decompose stub returns EMPTY items → decompose throws → decomposed=null (the closure/update case: nothing
 // NEW to observe, yet the message HAS content).
-const emptyDecompose = () => (_s: string, _u: string): Promise<string> => Promise.resolve(JSON.stringify({ project_hint: null, items: [] }))
+const emptyDecompose = () => (): Promise<string> => Promise.resolve(JSON.stringify({ project_hint: null, items: [] }))
 
 suite('siteops — clause 2 ask-first floor (content + unresolved project → ASK, never silent miss)', () => {
   // (j1) RED — a colloquial closure with an unresolvable site: decompose extracts nothing, but the message

@@ -49,7 +49,7 @@ function tokenize(s: string): string[] {
   return s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim().split(/\s+/).filter(Boolean)
 }
 /** Content tokens with filler removed; falls back to all tokens if everything was filler. */
-function distinctiveTokens(s: string): string[] {
+export function distinctiveTokens(s: string): string[] {
   const t = tokenize(s).filter((w) => !FILLER.has(w))
   return t.length ? t : tokenize(s)
 }
