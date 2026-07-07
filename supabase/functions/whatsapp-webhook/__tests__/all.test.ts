@@ -33,6 +33,7 @@ import './clause2_ask_first.test';
 import './clause4_near_ask.test';
 import './reconnect_chain.test';
 import './clause_a1_abbrev.test';
+import './clause1_media_thread.test';
 import './singular_unit.test';
 import './image_batch.test';
 import './guardrail.test';

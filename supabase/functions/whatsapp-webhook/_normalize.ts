@@ -29,6 +29,24 @@ export type NormalizedMessage = {
   timestamp: string
 }
 
+/**
+ * Derive the dispatcher's media payloads from a normalized message — the ONE place the ALREADY-stored media
+ * path is threaded onward so the agent attaches it without re-uploading (clause 1: evidence stays findable).
+ *   • a payment IMAGE carries its stored path so the siteops branch attaches the photo, not a re-upload.
+ *   • a VOICE note's stored audio rides through so siteops records it as findable evidence on the narration.
+ * PURE — extracted from index.ts's handler so the threading is pinnable offline. This is a REGRESSION-PRONE
+ * seam: audio was once dropped here (only images were threaded), which is exactly what the pin now forbids.
+ */
+export function deriveDispatchMedia(norm: NormalizedMessage): {
+  image?: { base64: string; mime: string; caption: string; storagePath: string | null }
+  audio?: { storagePath: string; mime: string }
+} {
+  const image = norm.image ? { ...norm.image, storagePath: norm.attachments?.[0]?.storage_path ?? null } : undefined
+  const audioPath = norm.source_type === 'voice' ? norm.attachments?.[0]?.storage_path : undefined
+  const audio = audioPath ? { storagePath: audioPath, mime: norm.attachments?.[0]?.mime ?? 'audio/ogg' } : undefined
+  return { image, audio }
+}
+
 /** Normalize one inbound WhatsApp message into the common envelope. */
 export async function normalize(
   supabase: any,

@@ -10,7 +10,7 @@ import {
   WriteCommitFailed,
 } from './_spine.ts'
 import { send, sendTypingIndicator } from './_format.ts'
-import { normalize } from './_normalize.ts'
+import { normalize, deriveDispatchMedia } from './_normalize.ts'
 import { dispatch } from './_dispatch.ts'
 import { handleReaction } from './_agents/siteops.ts'   // STEP 5: reactions-as-confirm / retract
 import { runConcierge } from './_agents/concierge.ts'
@@ -423,13 +423,10 @@ async function processJob(
   const lockKey = messageId || from
   await acquireSenderLock(supabase, from, lockKey)
   try {
-    // thread the ALREADY-stored media path (from _normalize's storeMedia) alongside the image so the
-    // siteops branch can attach it without re-uploading. Payment path ignores storagePath (unchanged).
-    const dispatchImage = norm.image ? { ...norm.image, storagePath: norm.attachments?.[0]?.storage_path ?? null } : undefined
-    // T7 (clause 1) — a VOICE note's stored audio path rides through too, so siteops records it as findable
-    // evidence on the narration (previously dropped here: only images were threaded).
-    const audioPath = norm.source_type === 'voice' ? norm.attachments?.[0]?.storage_path : undefined
-    const dispatchAudio = audioPath ? { storagePath: audioPath, mime: norm.attachments?.[0]?.mime ?? 'audio/ogg' } : undefined
+    // thread the ALREADY-stored media path (from _normalize's storeMedia) alongside the image/voice so the
+    // siteops branch attaches it without re-uploading (clause 1: evidence findable). Payment path ignores
+    // storagePath (unchanged). PURE + pinned — see deriveDispatchMedia (clause1_media_thread.test.ts).
+    const { image: dispatchImage, audio: dispatchAudio } = deriveDispatchMedia(norm)
     await dispatch({ supabase, from, senderName, registered, wamid: messageId, orgId, interactiveId, quotedWamid, flowResponse, image: dispatchImage, audio: dispatchAudio, firstTouch, dormant }, norm.text)
     if (jobId) await markJob(supabase, jobId, 'WRITTEN')
   } catch (e) {
