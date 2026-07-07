@@ -32,8 +32,8 @@ import {
   type OpenBatch, type BatchItem,
 } from '../_siteops_batch.ts'
 import {
-  composeReadback, assertAllApplied,
-  type Terminal, type TerminalOutcome,
+  composeReadback, assertAllApplied, executeResolution,
+  type Terminal, type TerminalOutcome, type AttachUpdate,
 } from '../_siteops_resolution.ts'
 import { resolveInbound } from '../_siteops_resolution_llm.ts'
 // The engine, bundled for Deno — used to materialise a project's full task set on first WhatsApp touch.
@@ -287,10 +287,10 @@ RULES:
 - Replies may be in English, Telugu, Hindi, or a mix — understand the meaning, not just keywords.
 Reply ONLY with JSON: {"resolved": true|false, "reason": "<one short sentence a site manager would read, grounded in the reply>"}.`
 
-async function judgeResolution(issue: { title: string; cause: string | null }, reply: string): Promise<{ resolved: boolean; reason: string } | null> {
+async function judgeResolution(issue: { title: string; cause: string | null }, reply: string, callModel: (system: string, user: string) => Promise<string> = callLLM): Promise<{ resolved: boolean; reason: string } | null> {
   try {
     const user = `Issue: "${issue.title}" (cause: ${issue.cause ?? 'other'}).\nAssignee's reply: "${reply.slice(0, 400)}".\nIs the issue resolved?`
-    const parsed = safeParse(await callLLM(JUDGE_SYSTEM, user)) as { resolved?: unknown; reason?: unknown } | null
+    const parsed = safeParse(await callModel(JUDGE_SYSTEM, user)) as { resolved?: unknown; reason?: unknown } | null
     if (!parsed || typeof parsed.resolved !== 'boolean') return null
     return { resolved: parsed.resolved, reason: typeof parsed.reason === 'string' ? parsed.reason.trim().slice(0, 200) : '' }
   } catch { return null }
@@ -306,7 +306,7 @@ async function judgeResolution(issue: { title: string; cause: string | null }, r
 async function applyBatchResolution(
   ctx: SiteopsCtx, item: BatchItem, status: 'resolved' | 'still_open' | 'unknown',
   replyText: string, cadenceMap: CadenceMap, actorId: string | null, now: Date,
-  opts: { bareAck?: boolean; force?: 'resolve' | 'addressing'; reason?: string; out?: { resolveEvent?: string } } = {},
+  opts: { bareAck?: boolean; force?: 'resolve' | 'addressing'; reason?: string; out?: { resolveEvent?: string }; callModel?: (system: string, user: string) => Promise<string> } = {},
 ): Promise<'resolved' | 'open'> {
   // The bare-ack fast path (cardinality, no LLM): trail it as `bare_ack` so the feed shows WHY the chase
   // advanced, and NEVER consult the judge — an ack is engagement, never closure, so it can only ADDRESS.
@@ -323,7 +323,7 @@ async function applyBatchResolution(
   } else if (opts.bareAck) {
     resolved = false                       // an ack advances, never closes — RESOLVE stays behind the model
   } else if (item.kind === 'issue') {
-    const judged = await judgeResolution({ title: item.title, cause: item.cause }, replyText)
+    const judged = await judgeResolution({ title: item.title, cause: item.cause }, replyText, opts.callModel)
     resolved = judged ? judged.resolved : status === 'resolved'
     reason = judged?.reason ?? ''
   } else {
@@ -510,9 +510,11 @@ export async function handleUndoResolve(ctx: SiteopsCtx, quotedWamid: string): P
 
 // question_asked → open the pick through an EXISTING proven resume, storing exactly the offered set in the
 // conversation slots (same-set-in / same-set-validated-out — the conversation twin of the planner's
-// candidate-membership guard). which_item confirms a LOW/un-offered update (→ ADDRESSING on confirm; RESOLVE
-// stays behind the model); which_project sites a new item. Both carry the "None — it's new" / project-pick
-// escapes the resumes already implement.
+// candidate-membership guard). which_item confirms a LOW/un-offered update — the confirm upgrades WHICH
+// item; the ladder still gates WHETHER it resolves (closure_explicit rides in `update` for the resume to
+// re-run — T3 sole-authority), so a no-closure confirm → ADDRESSING, an explicit-closure one → RESOLVE.
+// which_project sites a new item. Both carry the "None — it's new" / project-pick escapes the resumes
+// already implement.
 // Returns whether a question was actually SENT — an un-sendable one (target not in itemsById, unknown
 // `about`) must be handled by the caller as a park + honest readback, never a silent 'ok' (T3 fix).
 async function askResolutionQuestion(ctx: SiteopsCtx, t: Extract<Terminal, { kind: 'question_asked' }>, ex: ExecCtx): Promise<boolean> {
@@ -533,6 +535,10 @@ async function askResolutionQuestion(ctx: SiteopsCtx, t: Extract<Terminal, { kin
           kind: 'siteops_batch_collision', status: 'still_open', piece_text: t.update.reason, candidates: [cand],
           project_id: c.projectId ?? ex.projectId ?? null, narration_id: ex.narrationId,
           image: ctx.image?.storagePath ? { storagePath: ctx.image.storagePath, caption: ctx.image.caption ?? null } : null,
+          // T3 — carry the ladder's held verdict into the slots (uniform with the issue/todo opener). The
+          // task confirm branch applies via applyProgress and doesn't read it back; stamped so no reader
+          // assumes the two collision slot shapes differ.
+          update: t.update,
         },
         lastMessageId: ctx.wamid,
       })
@@ -548,7 +554,10 @@ async function askResolutionQuestion(ctx: SiteopsCtx, t: Extract<Terminal, { kin
     await openConversation(ctx.supabase, {
       orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
       pendingQuestion: `confirm ${shortLabel(item.title)}`,
-      slots: { kind: 'siteops_batch_collision', status: 'still_open', piece_text: t.update.reason, candidates: [cand], project_id: item.projectId ?? null, narration_id: ex.narrationId, image: null },
+      // T3 — thread the ladder's HELD verdict (the AttachUpdate) into the slots so the confirm resume
+      // re-enters the ONE authority (executeResolution) instead of re-judging. The confirm upgrades WHICH
+      // item; closure_explicit rides verbatim so the ladder still gates WHETHER it resolves.
+      slots: { kind: 'siteops_batch_collision', status: 'still_open', piece_text: t.update.reason, candidates: [cand], project_id: item.projectId ?? null, narration_id: ex.narrationId, image: null, update: t.update },
       lastMessageId: ctx.wamid,
     })
     // ladder context in the prompt — the question IS a pre-consequence readback (what confirm does).
@@ -1760,7 +1769,22 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
     const cadenceMap = await loadCadenceMap(ctx.supabase, ctx.orgId)
     const actorId = await senderUserId(ctx)
     const item: BatchItem = { kind: chosen.kind, id: chosen.id, orgId: chosen.orgId, projectId: null, projectName: chosen.projectName, title: chosen.title, taskName: null, cause: chosen.cause }
-    const verdict = await applyBatchResolution(ctx, item, slots.status ?? 'still_open', slots.piece_text ?? text, cadenceMap, actorId, now)
+    // T3 — the LADDER is the SOLE authority. The confirm upgrades WHICH item (target fixed, match → high),
+    // never WHETHER it closed. Re-enter the one authority (executeResolution) with the held update so the
+    // ladder rules the disposition; passing its verdict as `force` skips judgeResolution's re-judge. A
+    // verdict-less slot (pre-T3 stamp / fossil) carries no held update → FORCE ADDRESSING: no stored
+    // closure_explicit is no proof of closure, and a confirm never answers "is it closed" (Q1).
+    const held = slots.update as AttachUpdate | null | undefined
+    const applied: 'resolve' | 'addressing' = held
+      ? (executeResolution(
+          { issue_snag_found: { found: false, items: [] }, update_found: { found: true, updates: [{ ...held, target_id: chosen.id, confidence: 'high' }] } },
+          { candidateIds: new Set([chosen.id]), isImage: false },
+        ).find((tt): tt is Extract<Terminal, { kind: 'object_updated' }> => tt.kind === 'object_updated')?.applied ?? 'addressing')
+      : 'addressing'
+    const verdict = await applyBatchResolution(
+      ctx, item, applied === 'resolve' ? 'resolved' : 'still_open', slots.piece_text ?? text, cadenceMap, actorId, now,
+      { force: applied, reason: held?.reason ?? (slots.piece_text as string | null) ?? '', callModel: opts.callModel },
+    )
     // STEP 3: if the colliding message was a PHOTO (carried in slots), attach it to the chosen item now.
     const cimg = slots.image as { storagePath?: string; caption?: string | null } | null
     if (cimg?.storagePath) await answerWithPhoto(ctx, { kind: item.kind, id: item.id, orgId: item.orgId }, cimg.storagePath, cimg.caption ?? null)

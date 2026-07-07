@@ -57,7 +57,7 @@ const convoWith = (slots: any) => ({ id: 'c1', org_id: ORG, sender_number: SENDE
 // the injection-door count AND miswrites the status, making the double-authority visibly bite.
 function judgeSpy() {
   let calls = 0
-  const callModel = (_s: string, _u: string) => { calls++; return Promise.resolve(JSON.stringify({ resolved: true, reason: 'spy would close it' })) }
+  const callModel = () => { calls++; return Promise.resolve(JSON.stringify({ resolved: true, reason: 'spy would close it' })) }
   return { callModel, calls: () => calls }
 }
 
