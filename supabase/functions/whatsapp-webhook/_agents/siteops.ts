@@ -7,13 +7,13 @@
 // the dispatcher's ANSWERS_PENDING → answer()), not a new interaction.
 
 import { send } from '../_format.ts'
-import { resolveProject, type ProjectRef, type ItemPlan } from '../_resolve.ts'
+import { resolveProject, type ProjectRef } from '../_resolve.ts'
 import { openConversation, closeConversation, type ConvoRow } from '../_conversation.ts'
 import { parkConvoObservation } from '../_siteops_sweep.ts'
 import { decompose, callLLM, safeParse, type SiteItem } from '../_siteops_extract.ts'
 import { decomposeImage } from '../_siteops_vision.ts'
-import { loadCandidates, prefilterCandidates, groundingLabels, type Candidate } from '../_siteops_candidates.ts'
-import { planPhotoItems, resolveTypedPick, type PickCandidate } from '../_siteops_attach.ts'
+import { loadCandidates, prefilterCandidates, groundingLabels } from '../_siteops_candidates.ts'
+import { resolveTypedPick, type PickCandidate } from '../_siteops_attach.ts'
 import type { CaptureRef } from '../_wa_message_map.ts'
 import { distillSignal } from '../_siteops_reanalyze.ts'
 import { planCorrection } from '../_siteops_correct.ts'
@@ -21,9 +21,9 @@ import { classifyReaction, isRetraction } from '../_siteops_verbs.ts'
 import { reconstructParkedSlots, type ParkedRow } from '../_siteops_lateanswer.ts'
 import { decideAssociation, isBareAffirmation, photoRelatedness, type AssocVerdict } from '../_siteops_assoc.ts'
 import {
-  routeItems, applyProgress, buildConfirm, buildMultiConfirm, parseWhen, normTaskName,
+  routeItems, applyProgress, buildConfirm, parseWhen, normTaskName,
   type RouteCtx, type RouteOutcome, type SiteTaskRow, type OrgMember,
-  type ConfirmSection, type ProgressResult, type ProblemResult, type TodoResult,
+  type ProgressResult, type ProblemResult, type TodoResult,
 } from '../_siteops_route.ts'
 import { loadCadenceMap, type CadenceMap } from '../_siteops_timing.ts'
 import {
@@ -52,12 +52,6 @@ export type SiteopsCtx = {
 }
 
 const TASK_COLS = 'task_id, phase, trade, floor_label, unit_label, name, status, node_key, task_type_id, owner_id, owner_source'
-
-/** STEP 5b — the capture a pick send carries so the drainer maps its outbound wamid to THIS convo. At
- *  park time (commitInterrupted) we look the wamid up by convo_id and store it as the parked row's
- *  question_wamid, so a later quoted-reply to the question can recover the parked pick. */
-const pickCapture = (convoId: string | null, projectId: string | null): CaptureRef | undefined =>
-  convoId ? { ref_kind: 'pick', convo_id: convoId, project_id: projectId } : undefined
 
 /** APPLIABLE task identities: engine rows (node_key, deduped) PLUS flat one-offs with no engine
  *  NAME-TWIN — a flat duplicate of an engine row stays invisible (the columns lesson: its write can't
@@ -1150,7 +1144,7 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
         await say(`Didn't catch a site update in that — try again if you meant to send one.`)
         return
       }
-      await askProjectFirst(ctx, meta, proj, items, null, narrationId)   // legacy slots (no text) → finishRoute resume, photo carried
+      await askProjectFirst(ctx, meta, proj, items, null, narrationId)   // legacy slots (no text) → unit resume on pick, photo carried
       return
     }
 
@@ -1224,7 +1218,7 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
 
 /** The ask-first project question (shared by the unit and the legacy image path). The list we SHOW is the
  *  list we STORE (pickList) so the reply maps to the same row in answerSiteops. `text` non-null marks
- *  unit-style slots (E2): the resume runs the singular unit's remainder; null = legacy finishRoute resume. */
+ *  unit-style slots (E2): the resume runs the singular unit's remainder; null = legacy slots, unit resume on pick. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function askProjectFirst(ctx: SiteopsCtx, meta: Record<string, unknown>, proj: any, items: SiteItem[], text: string | null, narrationId: string | null): Promise<void> {
   const ambiguous = proj.nameTried && proj.matches.length > 1
@@ -1251,179 +1245,6 @@ async function askProjectFirst(ctx: SiteopsCtx, meta: Record<string, unknown>, p
   }, meta)
 }
 
-/**
- * Route a resolved project's items → write + confirm, OR open a task-disambiguation pick if a
- * progress item is ambiguous. Shared by the fresh path and the project-followup resume (so a
- * project pick chains naturally into a floor pick). Returns what it left OPEN for the sender's next
- * message: 'pick' (a task disambiguation), 'window' (a siteops_photo enrichment window), or null (clean
- * completion — nothing open; the caller may close). Callers gating on `!result` to close still work:
- * null is falsy, 'pick'/'window' are truthy — never close the window we just opened.
- */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- DEAD since T5 sub-steps 3-4 (the image path + siteops_project resume run the unit); retires in sub-step 6's Phase-4 axe.
-async function finishRoute(ctx: SiteopsCtx, projectId: string, projectName: string | null, items: SiteItem[], narrationId: string | null): Promise<'pick' | 'window' | null> {
-  const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
-  const vm = await materializeProjectTasks(ctx, projectId)
-  const { data: taskRows } = await ctx.supabase.from('site_tasks').select(TASK_COLS).eq('project_id', projectId)
-  const rawRows = (taskRows ?? []) as SiteTaskRow[]
-  const tasks = engineTasks(rawRows)
-  console.log(`[siteops:dbg:load] project=${projectId} rawRows=${rawRows.length} engineRows=${rawRows.filter((t) => t.node_key).length} flatRows=${rawRows.filter((t) => !t.node_key).length} usedForMatch=${tasks.length} vmNodeKeys=${vm.keys.size}`)
-  const oc = await ownerCtx(ctx.supabase, ctx.orgId, projectId)
-  const rc: RouteCtx = { supabase: ctx.supabase, orgId: ctx.orgId, projectId, byLabel: ctx.from, ...oc, narrationId, now: new Date(), vmNodeKeys: vm.keys, vmTaskNames: vm.names }
-
-  // STEP 3 — ATTACH axis (images only). Before ROUTE creates fresh objects, test each issue/todo item
-  // against the project's OPEN items: a re-photo of a known item ATTACHES evidence (no twin); a new one
-  // OBSERVES (falls through to ROUTE → create fresh); an ambiguous one opens the grounded TYPED pick
-  // below. Lexical + pure (planPhotoItems), ask-on-any-doubt. progress items stay on the task axis
-  // untouched. Candidates are project-scoped (loadCandidates, no chase set needed here).
-  let items2 = items
-  let candsForPick: Candidate[] = []
-  const attachAcks: string[] = []
-  let typedPick: { item: SiteItem; shortlist: Candidate[] } | null = null
-  if (ctx.image?.storagePath) {
-    candsForPick = await loadCandidates(ctx.supabase, ctx.orgId, projectId, [])
-    const plan = planPhotoItems(candsForPick, items)
-    for (const a of plan.attaches) {
-      await attachExistingEvidence(ctx, a.target, ctx.image.storagePath, ctx.image.caption ?? null)
-      attachAcks.push(shortLabel(a.target.label))
-    }
-    typedPick = plan.asks[0] ?? null
-    items2 = plan.rest
-    console.log(`[siteops:attach] project=${projectId} attach=${plan.attaches.length} ask=${plan.asks.length} observe/route=${plan.rest.length}`)
-  }
-
-  const out = await routeItems(rc, tasks, items2)
-
-  // Image evidence: when this route came from an image, link the ALREADY-stored photo (rough-entry-media,
-  // never re-uploaded) to each object the route CREATED — AFTER create so a failed create leaves no orphan
-  // attachment (each id/taskId is guarded). role='creation' (Step 3's answer path sets 'answer').
-  if (ctx.image?.storagePath) {
-    const sp = ctx.image.storagePath, cap = ctx.image.caption ?? null
-    for (const p of out.problems) if (p.id) await attachImage(ctx, 'problem', p.id, sp, cap, 'creation')
-    for (const t of out.todos) if (t.id) await attachImage(ctx, 'todo', t.id, sp, cap, 'creation')
-    for (const pr of out.progress) if (pr.taskId) await attachImage(ctx, 'site_task', pr.taskId, sp, cap, 'creation')
-  }
-
-  // STEP 3 — evidence attached to EXISTING item(s): a terse ack, independent of the ROUTE confirm below.
-  if (attachAcks.length) {
-    await send(ctx.supabase, ctx.from, { kind: 'text', body: `Added your photo to *${attachAcks.join('*, *')}*.` }, meta)
-  }
-
-  // STEP 3 — the grounded TYPED pick: an ambiguous photo item — is it one of these open items, or new?
-  // Reuses the AWAIT_PROJECT mechanism (openConversation → answerSiteops). Rows are the typed shortlist
-  // (kind-tagged) + a trailing "None — it's new". Resolved in answerSiteops (attach vs observe-create).
-  // Takes precedence over the task disambig below — one pick at a time (both are rare together).
-  if (typedPick) {
-    const shortlist: PickCandidate[] = typedPick.shortlist.map((c) => ({ kind: c.kind, id: c.id, label: c.label }))
-    const full: PickCandidate[] = candsForPick.map((c) => ({ kind: c.kind, id: c.id, label: c.label }))
-    const confirm = buildConfirm({
-      site: projectName, progress: out.progress, problems: out.problems, todos: out.todos,
-      parked: out.parked.length, pendingPick: 1, ownerLabel: 'you', projectId, appBase: APP_BASE,
-    })
-    const convoId = await openConversation(ctx.supabase, {
-      orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
-      pendingQuestion: `which item: ${typedPick.item.text}`,
-      slots: {
-        kind: 'siteops_typed_pick', project_id: projectId, project_name: projectName,
-        item: typedPick.item, shortlist, full, narration_id: narrationId,
-        image: ctx.image?.storagePath ? { storagePath: ctx.image.storagePath, caption: ctx.image.caption ?? null } : null,
-      },
-      lastMessageId: ctx.wamid,
-    })
-    await send(ctx.supabase, ctx.from, {
-      kind: 'list',
-      body: `${confirm}\n\nIs this photo about one of these open items, or something new?`,
-      button: 'Pick',
-      rows: [
-        ...shortlist.map((c, i) => ({ id: `pick:${i + 1}`, title: shortLabel(c.label).slice(0, 24), description: `[${c.kind}]` })),
-        { id: `pick:${shortlist.length + 1}`, title: "None — it's new" },
-      ],
-    }, { ...meta, capture: pickCapture(convoId, projectId) })
-    return 'pick'
-  }
-
-  // STAGE 2c — disambiguation (need-to-ask): one pending question, mirroring AWAIT_PROJECT.
-  if (out.ambiguous.length) {
-    const first = out.ambiguous[0]
-    const extraParked = out.ambiguous.length - 1   // ask about the first; the rare extras park
-    // store node_key with each candidate (engine identity) so the resume writes the overlay-visible row.
-    const candidates = first.candidates.map((t) => ({
-      task_id: t.task_id, node_key: t.node_key ?? null, name: t.name, floor: t.floor_label, unit: t.unit_label,
-    }))
-    const ask = first.question ?? `Which task is "${first.item.text}"?`   // the resolver's exact ask, naming the real choices
-    const confirm = buildConfirm({
-      site: projectName,
-      progress: out.progress, problems: out.problems, todos: out.todos,
-      parked: out.parked.length + extraParked, pendingPick: 1, ownerLabel: 'you',
-      projectId, appBase: APP_BASE,
-    })
-    const convoId = await openConversation(ctx.supabase, {
-      orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
-      pendingQuestion: `which task: ${first.item.text}`,
-      slots: { kind: 'siteops_disambig', project_id: projectId, project_name: projectName, item: first.item, candidates, narration_id: narrationId, image: ctx.image?.storagePath ? { storagePath: ctx.image.storagePath, caption: ctx.image.caption ?? null } : null },
-      lastMessageId: ctx.wamid,
-    })
-    await send(ctx.supabase, ctx.from, {
-      kind: 'list',
-      body: `${confirm}\n\n${ask}`,
-      button: 'Pick task',
-      rows: candidates.slice(0, 10).map((c, i) => ({
-        id: `pick:${i + 1}`,
-        title: c.name.slice(0, 24),
-        description: [c.floor ? (`${c.floor}`) : 'Site-wide', c.unit].filter(Boolean).join(' · '),
-      })),
-    }, { ...meta, capture: pickCapture(convoId, projectId) })
-    return 'pick'   // left a task pick open
-  }
-
-  // STEP 3 — PURE-ATTACH terminal: every photo item attached to an existing item and nothing was left to
-  // route. The attach ack already went out; a "got your update, logged" confirm here would be redundant
-  // (and there are no created objects for an enrichment window). Done.
-  if (ctx.image?.storagePath && attachAcks.length && !items2.length) return null
-
-  // confirm (names the site so the sender can catch a mis-attribution). A single task update gets a
-  // tappable "View task" button straight to that task. STEP 4a — carry a `readback` capture so the
-  // drainer maps this confirm's outbound wamid to the objects it names.
-  const readbackRefs = [
-    ...out.problems.filter((p) => p.id).map((p) => ({ kind: 'problem', id: p.id as string })),
-    ...out.todos.filter((t) => t.id).map((t) => ({ kind: 'todo', id: t.id as string })),
-    ...out.progress.filter((pr) => pr.taskId).map((pr) => ({ kind: 'site_task', id: pr.taskId as string })),
-  ]
-  const readbackCapture: CaptureRef | undefined = readbackRefs.length
-    ? { ref_kind: 'readback', project_id: projectId, object_refs: readbackRefs } : undefined
-  await sendTaskConfirm(ctx, meta, projectName, projectId, {
-    progress: out.progress, problems: out.problems, todos: out.todos, parked: out.parked.length,
-  }, readbackCapture)
-
-  // STEP 2 — ENRICHMENT WINDOW (images only). The photo is floored + read back above; now hold an OPEN
-  // siteops_photo convo (~90s) so a follow-up TEXT (or a quoted-reply) ENRICHES these SAME objects rather
-  // than creating a twin. Event-driven: the next message resumes via dispatch → classifyPhotoFollowup; no
-  // timer/cron. photo→text ONLY here — text→photo is the known one-directional gap (see the dispatch
-  // predicate). Opens only when the photo actually created object(s) to enrich.
-  if (ctx.image?.storagePath) {
-    const object_refs = [
-      ...out.problems.filter((p) => p.id).map((p) => ({ kind: 'problem', id: p.id as string })),
-      ...out.todos.filter((t) => t.id).map((t) => ({ kind: 'todo', id: t.id as string })),
-      ...out.progress.filter((pr) => pr.taskId).map((pr) => ({ kind: 'site_task', id: pr.taskId })),
-    ]
-    if (object_refs.length) {
-      const holdMs = Number(Deno.env.get('WA_SITEOPS_PHOTO_HOLD_MS') ?? '90000')
-      const extract = [...out.problems.map((p) => p.title), ...out.todos.map((t) => t.text), ...out.progress.map((pr) => pr.taskName)].filter(Boolean).join(' · ')
-      await openConversation(ctx.supabase, {
-        orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
-        pendingQuestion: 'photo enrichment window',
-        slots: {
-          kind: 'siteops_photo', object_refs, project_id: projectId, photo_wamid: ctx.wamid,
-          hold_until: new Date(Date.now() + holdMs).toISOString(),
-          label: shortLabel(extract || 'the photo'), extract, narration_id: narrationId,
-        },
-        lastMessageId: ctx.wamid,
-      })
-      return 'window'
-    }
-  }
-  return null
-}
-
 /** Route ONE project's items → write + return its outcome (no send; the multi confirm composes). */
 async function routeGroup(ctx: SiteopsCtx, projectId: string, items: SiteItem[], narrationId: string | null): Promise<RouteOutcome> {
   const vm = await materializeProjectTasks(ctx, projectId)
@@ -1434,73 +1255,6 @@ async function routeGroup(ctx: SiteopsCtx, projectId: string, items: SiteItem[],
   const oc = await ownerCtx(ctx.supabase, ctx.orgId, projectId)
   const rc: RouteCtx = { supabase: ctx.supabase, orgId: ctx.orgId, projectId, byLabel: ctx.from, ...oc, narrationId, now: new Date(), vmNodeKeys: vm.keys, vmTaskNames: vm.names }
   return await routeItems(rc, tasks, items)
-}
-
-/**
- * MULTI-PROJECT narration — file each item against its OWN site, then confirm grouped by project.
- * Mirrors the transaction agent's multi-project handling (per-item project, one grouped receipt).
- * Capture-first: every confidently-sited item is written immediately; the ONE follow-up we ask is
- * the project pick for leftover items whose site couldn't be determined (the mis-file guard the
- * user called out — never silently attach an unprojected item to the first site).
- *
- * Task-level floor disambiguation is NOT chained across sites here (that would stack picks): a
- * task-ambiguous progress item parks (surfaced in the confirm, recoverable from the stored
- * narration). The single-project path keeps its task pick — only the multi path trades it away.
- */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- DEAD since T5 sub-step 5 (images compound-park, no fan-out); retires with buildMultiConfirm in sub-step 6's Phase-4 axe.
-async function runMulti(ctx: SiteopsCtx, items: SiteItem[], plan: ItemPlan, projects: ProjectRef[], narrationId: string | null): Promise<void> {
-  const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
-  // The narration spans several sites, so the audit row carries no single project_id.
-  await ctx.supabase.from('site_narrations').update({ project_id: null, decomposed: items, resolved_project_via: 'multi' }).eq('id', narrationId)
-
-  // Group items by resolved project, preserving first-appearance order (carry-forward order).
-  const groups = new Map<string, { project: ProjectRef; items: SiteItem[] }>()
-  for (let i = 0; i < items.length; i++) {
-    const pid = plan.assignment[i]
-    if (!pid) continue
-    const project = plan.projectsById.get(pid)
-    if (!project) continue
-    const g = groups.get(pid) ?? { project, items: [] }
-    g.items.push(items[i])
-    groups.set(pid, g)
-  }
-
-  // File each group (capture-first). ambiguous progress folds into the parked count (surfaced).
-  const sections: ConfirmSection[] = []
-  for (const { project, items: gItems } of groups.values()) {
-    const out = await routeGroup(ctx, project.id, gItems, narrationId)
-    sections.push({
-      projectName: project.name, projectId: project.id,
-      progress: out.progress, problems: out.problems, todos: out.todos,
-      parked: out.parked.length + out.ambiguous.length,
-    })
-  }
-
-  const pendingItems = plan.pendingIdxs.map((i) => items[i])
-  if (pendingItems.length) {
-    // Leftover items (ambiguous mention, or none-named-before-them) → ONE project pick, reusing the
-    // AWAIT_PROJECT mechanism. The reply resumes in answerSiteops (siteops_project) → finishRoute.
-    const candidates = projects.map((p) => ({ id: p.id, name: p.name }))
-    await openConversation(ctx.supabase, {
-      orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
-      pendingQuestion: 'which project?',
-      slots: { kind: 'siteops_project', items: pendingItems, candidates, narration_id: narrationId, image: ctx.image?.storagePath ? { storagePath: ctx.image.storagePath, caption: ctx.image.caption ?? null } : null },
-      lastMessageId: ctx.wamid,
-    })
-    const confirm = buildMultiConfirm(sections, { appBase: APP_BASE })
-    const texts = pendingItems.map((it) => `"${it.text}"`).join(', ')
-    const body = sections.length
-      ? `${confirm}\n\nOne more — which project for ${texts}?`
-      : `Which project for ${texts}?`
-    await send(ctx.supabase, ctx.from, {
-      kind: 'list', body, button: 'Pick project',
-      rows: candidates.slice(0, 10).map((c, i) => ({ id: `pick:${i + 1}`, title: c.name.slice(0, 24) })),
-    }, meta)
-    return
-  }
-
-  // No leftovers — send the one grouped, per-project confirmation.
-  await send(ctx.supabase, ctx.from, { kind: 'text', body: buildMultiConfirm(sections, { appBase: APP_BASE }) }, meta)
 }
 
 // "answer-or-let-go" — given the question the assistant asked and the user's reply, judge (LLM,
