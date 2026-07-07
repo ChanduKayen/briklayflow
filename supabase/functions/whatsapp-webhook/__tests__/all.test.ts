@@ -31,6 +31,7 @@ import './voice_audio_findable.test';
 import './t8_conformance.test';
 import './clause2_ask_first.test';
 import './clause4_near_ask.test';
+import './reconnect_chain.test';
 import './singular_unit.test';
 import './image_batch.test';
 import './guardrail.test';
