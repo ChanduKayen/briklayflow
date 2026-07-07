@@ -23,6 +23,7 @@ import './image_enrichment_window.test';
 import './image_project_pick_unit.test';
 import './image_multi_compound.test';
 import './problem_kind.test';
+import './problem_note.test';
 import './singular_unit.test';
 import './image_batch.test';
 import './guardrail.test';
