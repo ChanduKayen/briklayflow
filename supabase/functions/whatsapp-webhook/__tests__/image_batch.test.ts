@@ -80,10 +80,11 @@ const R_BOTH_FALSE = JSON.stringify({
 })
 
 suite('siteops image-under-batch — audit-#1 acceptance journeys (h–l)', () => {
-  // (h) THE RE-BROKEN FIX-X CASE: a fresh photo for Soundharya arrives while a chase batch is open on ASM
-  // Elite. The batch must be INVISIBLE (chase-free project → route fresh), the photo must ride the created
-  // object, and the other project's items must never be offered to any model call.
-  test('(h) fresh photo at Soundharya + batch on ASM → created at Soundharya w/ photo linked, batch invisible', async () => {
+  // (h) THE RE-BROKEN FIX-X CASE, re-pointed to the T5 cutover: a fresh photo for Soundharya arrives while a
+  // chase batch is open on ASM Elite. Post-cutover the chase-free project runs THE UNIT (not finishRoute):
+  // the batch is INVISIBLE, the photo rides the created object, and the LADDER runs ONCE scoped to THE
+  // project — the other project's items never reach any model call.
+  test('(h) fresh photo at Soundharya + batch on ASM → UNIT creates at Soundharya w/ photo linked, batch invisible', async () => {
     const fake = fakeSupabase(seed())
     const calls: Call[] = []
     await runSiteops(imgCtx(fake, 'Soundharya lift pit'), 'Soundharya lift pit -- flooded pit in photo', {
@@ -98,8 +99,11 @@ suite('siteops image-under-batch — audit-#1 acceptance journeys (h–l)', () =
     // the ASM chase is untouched — not consumed, not mutated
     expect(fake.writesTo('problems').some((w) => w.op === 'update')).toBe(false)
     expect(fake.writesTo('chase_batches').length).toBe(0)
-    // and NO model call ever saw the other project's items (the all-projects set is dead)
-    expect(resolutionCalls(calls).every((c) => !c.user.includes('iss-water') && !c.user.includes('iss-tfmr-asm'))).toBe(true)
+    // the UNIT (ladder) ran ONCE, project-scoped — the other project's items never reached any model call.
+    const rc = resolutionCalls(calls)
+    expect(rc.length).toBe(1)
+    expect(rc[0].user.includes('iss-water')).toBe(false)
+    expect(rc[0].user.includes('iss-tfmr-asm')).toBe(false)
   })
 
   // (i) a photo ABOUT the chased project runs the unit: candidates = THAT project only, its chase ⭐ top;

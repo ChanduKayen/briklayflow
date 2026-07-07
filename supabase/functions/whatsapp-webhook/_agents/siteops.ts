@@ -1157,26 +1157,22 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
       return
     }
 
-    // THE project resolved. Chases ON it → the unit (same-project batch items rank ⭐; cross-project
-    // invisibility by construction). EMPTY vision → the unit too (probe D1): the engine grades the
-    // caption text + image against THE project's candidates, and nothing-confident lands as the evidence
-    // park (object_path + project carried) — NEVER finishRoute([])'s false "got your update, logged"
-    // receipt over an empty route. Chase-free WITH items → the proven fresh flow (attach axis, evidence
-    // links, enrichment window); the batch never routes.
+    // THE project resolved → THE ONE PIPELINE (T5 cutover, clause-1). Every resolved-project image runs the
+    // SINGULAR UNIT — the second engine (finishRoute/routeItems/DONE_RE/buildConfirm) is retired here. The
+    // unit grades the caption text + image against THE project's candidates: a re-photo of an open item is
+    // an update component → ADDRESSING + answer-evidence (Gap A); a new observation creates (photo rides the
+    // create) and opens the enrichment window (Gap C, ported); nothing-confident lands as the evidence park,
+    // never finishRoute([])'s false "logged" receipt. Same-project chases rank ⭐; cross-project items are
+    // invisible by construction. Compound images take the FIRST fragment; the rest park pending_stage2,
+    // uniform with the text path (Gap B — Stage 2 replaces the park with the per-project loop).
     console.log(`[siteops:vision] items=${items.length} project_hint=${decomposed?.project_hint ?? 'null'} project=${projectId}`)
-    const chasesHere = (batch?.items ?? []).some((b) => b.projectId === projectId)
-    if (!items.length || chasesHere) {
-      await runSingularUnit(ctx, {
-        projectId,
-        text: items.length >= 2 ? first!.text : text,   // compound → the FIRST fragment (interim rule, text-path twin)
-        rest: items.slice(1),
-        batch, narrationId,
-        callModel: opts.callModel ?? callLLM,
-      })
-      return
-    }
-    const projectName = proj.projectName ?? projects.find((p) => p.id === projectId)?.name ?? null
-    await finishRoute(ctx, projectId, projectName, items, narrationId)
+    await runSingularUnit(ctx, {
+      projectId,
+      text: items.length >= 2 ? first!.text : text,   // compound → the FIRST fragment (interim rule, text-path twin)
+      rest: items.slice(1),
+      batch, narrationId,
+      callModel: opts.callModel ?? callLLM,
+    })
     return
   }
 
