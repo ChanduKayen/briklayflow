@@ -25,6 +25,7 @@ import './image_multi_compound.test';
 import './problem_kind.test';
 import './problem_note.test';
 import './object_created_park.test';
+import './compound_partial_fail.test';
 import './singular_unit.test';
 import './image_batch.test';
 import './guardrail.test';
