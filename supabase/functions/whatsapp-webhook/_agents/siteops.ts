@@ -7,7 +7,7 @@
 // the dispatcher's ANSWERS_PENDING → answer()), not a new interaction.
 
 import { send } from '../_format.ts'
-import { resolveProject, planItemProjects, type ProjectRef, type ItemPlan } from '../_resolve.ts'
+import { resolveProject, type ProjectRef, type ItemPlan } from '../_resolve.ts'
 import { openConversation, closeConversation, type ConvoRow } from '../_conversation.ts'
 import { parkConvoObservation } from '../_siteops_sweep.ts'
 import { decompose, callLLM, safeParse, type SiteItem } from '../_siteops_extract.ts'
@@ -1115,13 +1115,10 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
     const items = decomposed?.items ?? []
     const first = items[0] ?? null
 
-    // MULTI-project image narration files per-site (journey precedent: the txn agent's shape). Reached
-    // BEFORE any batch consult — a message naming several sites was never a single chase's reply.
-    const plan = planItemProjects(items.map((it) => it.project_hint), projects)
-    if (plan.isMulti) {
-      await runMulti(ctx, items, plan, projects, narrationId)
-      return
-    }
+    // T5 sub-step 5 (Gap B) — images no longer FAN OUT per-site (runMulti retired). A multi-site photo takes
+    // the FIRST fragment through the unit and parks the rest pending_stage2 (runSingularUnit's `rest`),
+    // uniform with the text path's interim compound rule. Stage 2 restores the per-project loop for BOTH
+    // modalities at once — images must not fan out differently.
 
     // RESOLVE THE PROJECT (ask-first ladder, the text path's twin): the item's/vision's named project →
     // caption string-match safety net → the open batch as a PRIOR (single-site batches only) → ASK FIRST.
@@ -1262,6 +1259,7 @@ async function askProjectFirst(ctx: SiteopsCtx, meta: Record<string, unknown>, p
  * completion — nothing open; the caller may close). Callers gating on `!result` to close still work:
  * null is falsy, 'pick'/'window' are truthy — never close the window we just opened.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- DEAD since T5 sub-steps 3-4 (the image path + siteops_project resume run the unit); retires in sub-step 6's Phase-4 axe.
 async function finishRoute(ctx: SiteopsCtx, projectId: string, projectName: string | null, items: SiteItem[], narrationId: string | null): Promise<'pick' | 'window' | null> {
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
   const vm = await materializeProjectTasks(ctx, projectId)
@@ -1449,6 +1447,7 @@ async function routeGroup(ctx: SiteopsCtx, projectId: string, items: SiteItem[],
  * task-ambiguous progress item parks (surfaced in the confirm, recoverable from the stored
  * narration). The single-project path keeps its task pick — only the multi path trades it away.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- DEAD since T5 sub-step 5 (images compound-park, no fan-out); retires with buildMultiConfirm in sub-step 6's Phase-4 axe.
 async function runMulti(ctx: SiteopsCtx, items: SiteItem[], plan: ItemPlan, projects: ProjectRef[], narrationId: string | null): Promise<void> {
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
   // The narration spans several sites, so the audit row carries no single project_id.
