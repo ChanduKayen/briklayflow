@@ -21,6 +21,7 @@ import './done_demotion.test';
 import './image_rephoto_ladder.test';
 import './image_enrichment_window.test';
 import './image_project_pick_unit.test';
+import './image_multi_compound.test';
 import './singular_unit.test';
 import './image_batch.test';
 import './guardrail.test';
