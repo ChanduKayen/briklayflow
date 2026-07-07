@@ -60,8 +60,13 @@ function scoreName(q: string, name: string): number {
   if (sn === q) return 1.0
   if ((sn.includes(q) && q.length >= 3) || (q.includes(sn) && sn.length >= 3)) return 0.9
   if (sn.split(/\s+/)[0] === q.split(/\s+/)[0] && q.length > 2) return 0.8
+  // Exact full-initialism ("SRC" ↔ "Sri Raghavendra Constructions") is a STRUCTURAL match — every initial
+  // lines up, not a coincidental token — so it earns the PROJECT auto band (a supervisor typing a site's
+  // initials should resolve, not be re-asked). Two sites sharing initials still both land 'auto' → the
+  // ambiguous-auto path disambiguates (never a silent guess). Payee auto (0.95) is untouched: for people an
+  // initialism stays 'confirm' (buttons) — attributing money to the wrong person needs near-exact.
   const abbr = initials(name); const qClean = q.replace(/\s+/g, '').toUpperCase()
-  if (abbr === qClean && qClean.length >= 2) return 0.75
+  if (abbr === qClean && qClean.length >= 2) return 0.85
   if (sn.split(/\s+/).some((w) => w.startsWith(q) && q.length >= 3)) return 0.7
   // Distinctive-token overlap — only for NAME-LIKE queries (<=4 content tokens), so a whole
   // narration scanned for an embedded name can't loose-match on a single coincidental word

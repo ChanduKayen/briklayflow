@@ -32,6 +32,7 @@ import './t8_conformance.test';
 import './clause2_ask_first.test';
 import './clause4_near_ask.test';
 import './reconnect_chain.test';
+import './clause_a1_abbrev.test';
 import './singular_unit.test';
 import './image_batch.test';
 import './guardrail.test';
