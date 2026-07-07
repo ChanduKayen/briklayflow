@@ -29,6 +29,7 @@ import './compound_partial_fail.test';
 import './miss_verdict.test';
 import './voice_audio_findable.test';
 import './t8_conformance.test';
+import './clause2_ask_first.test';
 import './singular_unit.test';
 import './image_batch.test';
 import './guardrail.test';
