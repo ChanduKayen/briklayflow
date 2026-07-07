@@ -49,6 +49,7 @@ export type TxnCtx = {
   interactiveId: string | null   // id of a tapped LIST row / reply button (kept for parity)
   flowResponse?: Record<string, unknown> | null   // decoded nfm_reply.response_json (WhatsApp Flow completion)
   image?: { base64: string; mime: string; caption: string }   // present for payment images -> vision extraction
+  audio?: { storagePath: string; mime: string }   // present for a VOICE note -> siteops records it as findable evidence (T7)
 }
 
 const fmtNum = (n: number) => '₹' + n.toLocaleString('en-IN')

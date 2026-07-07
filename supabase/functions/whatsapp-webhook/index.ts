@@ -426,7 +426,11 @@ async function processJob(
     // thread the ALREADY-stored media path (from _normalize's storeMedia) alongside the image so the
     // siteops branch can attach it without re-uploading. Payment path ignores storagePath (unchanged).
     const dispatchImage = norm.image ? { ...norm.image, storagePath: norm.attachments?.[0]?.storage_path ?? null } : undefined
-    await dispatch({ supabase, from, senderName, registered, wamid: messageId, orgId, interactiveId, quotedWamid, flowResponse, image: dispatchImage, firstTouch, dormant }, norm.text)
+    // T7 (clause 1) — a VOICE note's stored audio path rides through too, so siteops records it as findable
+    // evidence on the narration (previously dropped here: only images were threaded).
+    const audioPath = norm.source_type === 'voice' ? norm.attachments?.[0]?.storage_path : undefined
+    const dispatchAudio = audioPath ? { storagePath: audioPath, mime: norm.attachments?.[0]?.mime ?? 'audio/ogg' } : undefined
+    await dispatch({ supabase, from, senderName, registered, wamid: messageId, orgId, interactiveId, quotedWamid, flowResponse, image: dispatchImage, audio: dispatchAudio, firstTouch, dormant }, norm.text)
     if (jobId) await markJob(supabase, jobId, 'WRITTEN')
   } catch (e) {
     console.error('[wa-webhook] processing error:', e)

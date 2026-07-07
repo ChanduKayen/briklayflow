@@ -49,6 +49,9 @@ export type SiteopsCtx = {
   // Present when the inbound message is an image the router sent to SITEOPS. `storagePath` is the
   // ALREADY-uploaded object (rough-entry-media) from _normalize's storeMedia — we link it, never re-upload.
   image?: { base64: string; mime: string; caption: string; storagePath?: string | null }
+  // Present when the inbound was a VOICE note: the ALREADY-stored audio (rough-entry-media). We record it
+  // as an attachment on the narration so the source audio stays FINDABLE (clause 1), never re-upload.
+  audio?: { storagePath: string; mime: string }
 }
 
 const TASK_COLS = 'task_id, phase, trade, floor_label, unit_label, name, status, node_key, task_type_id, owner_id, owner_source'
@@ -1071,6 +1074,17 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
   let ins = await ctx.supabase.from('site_narrations').insert({ ...base, sender_name: await senderName(ctx) }).select('id').single()
   if (ins.error) ins = await ctx.supabase.from('site_narrations').insert(base).select('id').single()
   const narrationId: string | null = ins.data?.id ?? null
+
+  // T7 (clause 1) — a VOICE note's audio is already in the bucket; RECORD it as an attachment on this
+  // narration so the source stays FINDABLE (a transcript miss must not orphan the audio). Best-effort,
+  // after the narration exists; the CHECK admits parent_type='site_narration'.
+  if (ctx.audio?.storagePath && narrationId) {
+    const { error } = await ctx.supabase.from('attachments').insert({
+      org_id: ctx.orgId, parent_type: 'site_narration', parent_id: narrationId, role: 'creation',
+      bucket: 'rough-entry-media', object_path: ctx.audio.storagePath, caption: null, created_by: null,
+    })
+    if (error) console.error('[siteops:audio-attach] insert failed:', error.message)
+  }
 
   // FAST PATH (cardinality, not meaning) — BEFORE any model call, decompose included (journey (d): "sari"
   // must cost ZERO model calls, or the fast path quietly defeats its own reason for existing — the

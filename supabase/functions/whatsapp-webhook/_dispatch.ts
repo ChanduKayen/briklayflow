@@ -39,6 +39,7 @@ export type DispatchCtx = {
                                  // even after the association window lapsed). Consumed by the siteops flow.
   flowResponse?: Record<string, unknown> | null   // decoded WhatsApp Flow completion (nfm_reply.response_json)
   image?: { base64: string; mime: string; caption: string; storagePath?: string | null }   // payment-image -> agent vision extraction; storagePath (rough-entry-media) → siteops attachment
+  audio?: { storagePath: string; mime: string }   // VOICE note's already-stored audio (rough-entry-media) → siteops records it findable (T7 clause 1)
   firstTouch?: boolean   // Sprint 6: member's first-ever contact -> orient / welcome
   dormant?: boolean      // Sprint 6: returning after a long gap -> welcome-back prefix
 }
@@ -154,7 +155,7 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
   const d = await routeMessage({ text, pending, lingering })
   const lang = d.reply_language
   // The uniform agent context (carries language + the tapped interactive id + any Flow payload).
-  const actx: TxnCtx = { supabase, from, senderName: ctx.senderName, orgId, wamid, lang, interactiveId: ctx.interactiveId, flowResponse: ctx.flowResponse ?? null, image: ctx.image }
+  const actx: TxnCtx = { supabase, from, senderName: ctx.senderName, orgId, wamid, lang, interactiveId: ctx.interactiveId, flowResponse: ctx.flowResponse ?? null, image: ctx.image, audio: ctx.audio }
 
   // ── STEP 4b: a QUOTED-REPLY to one of OUR sent messages (context.id ∈ wa_message_map, Step 4a). A
   //    reply to a task READBACK is an authoritative correction — resolve the mapped objects and apply
