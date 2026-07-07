@@ -432,7 +432,11 @@ export async function createProblem(c: RouteCtx, item: SiteItem, taskId: string 
   const blockedTaskEnd = await computeBlockedTaskEnd(c.supabase, taskId)   // L3 (soft/derived; null → pure L2)
   const t = computeTiming({ cause, userDate, blockedTaskEnd, now: c.now, cadenceMap }) // soft firmness (this codebase)
   const ownerId = resolveOwner(item.owner_hint, c.members, c.supervisorId, c.principalId)   // named → supervisor → principal
-  const nextFollowupAt = t.nextFollowupAt ? t.nextFollowupAt.toISOString() : null
+  // T6 NOTE FLOOR (clause 4): a low/med new item is a NOTE — recorded + visible, but NOT chased. Reuse the
+  // scheduler's null semantics (next_followup_at null → never woken) rather than a new gate field; only a
+  // HIGH-confidence item gets the computed chase clock.
+  const confidence = item.confidence ?? 'high'
+  const nextFollowupAt = (confidence === 'high' && t.nextFollowupAt) ? t.nextFollowupAt.toISOString() : null
   const deadline = t.deadline ? t.deadline.toISOString().slice(0, 10) : null   // a target DAY
 
   // ── Phase 2.3 IMPACT GATE ── real cause + scheduled task + imminent work. Anything else: no LLM.
@@ -447,9 +451,9 @@ export async function createProblem(c: RouteCtx, item: SiteItem, taskId: string 
     // note→object provenance: a WhatsApp narration IS the note. Lets the task feed hide the raw
     // narration and show the live chip (mark-and-hide). UI spawns stamp 'comment' post-create.
     source_note_id: c.narrationId, source_note_kind: c.narrationId ? 'narration' : null,
-    // T6 — record the planner's KIND (clause 3 fidelity); default 'issue' for decompose/vision items and
-    // any legacy caller that carries no subtype.
-    cause, title: item.text, kind: item.kind ?? 'issue', owner_id: ownerId, owner_source: 'auto', status: 'OPEN',
+    // T6 — record the planner's KIND (clause 3) + CONFIDENCE (clause 4); default 'issue'/'high' for
+    // decompose/vision items and any legacy caller that carries no subtype (the pre-T6 behaviour).
+    cause, title: item.text, kind: item.kind ?? 'issue', confidence, owner_id: ownerId, owner_source: 'auto', status: 'OPEN',
     next_followup_at: nextFollowupAt, deadline, impact,
   })
   // Ping the assignee NOW (auto or named) — unless they're the sender or the principal.

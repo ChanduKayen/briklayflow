@@ -36,6 +36,10 @@ export interface SiteItem {
   // toSiteItem → createProblem so the SAME `problems` row records WHICH it is (clause 3 kind fidelity).
   // Absent on decompose/vision items (they classify via `type`); createProblem defaults it to 'issue'.
   kind?: 'issue' | 'snag'
+  // DISPOSAL CONFIDENCE (resolution bridge only): the ladder's grade of a NEW item. createProblem RECORDS
+  // it and GATES the chase — high → scheduled; low/med → a NOTE (next_followup_at null, not chased) with
+  // an upgrade offer (clause 4 floor). Absent → 'high' (the pre-T6 default: everything was a full issue).
+  confidence?: 'high' | 'med' | 'low'
   task_hint: string | null      // floor/trade/unit mentioned, or null
   qc_statements: string[]       // progress only: specific checkable facts STATED (not invented)
   // ISSUES ONLY (progress/todo always null): a constrained cause_key from the taxonomy or 'other'.

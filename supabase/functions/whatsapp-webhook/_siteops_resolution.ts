@@ -187,7 +187,10 @@ function readbackLine(o: TerminalOutcome): string | null {
       if (t.applied === 'resolve') return failed ? `⚠️ couldn't resolve “${o.label}” — saved for review` : `✓ “${o.label}” resolved`
       return failed ? `⚠️ couldn't update “${o.label}” — saved for review` : `“${o.label}” — on it, will check back`
     case 'object_created':
-      return failed ? `⚠️ couldn't log “${o.label}” — saved for review` : `logged new: “${o.label}”`
+      if (failed) return `⚠️ couldn't log “${o.label}” — saved for review`
+      // T6 note floor (clause 4): a low/med item is logged but NOT chased — surface the upgrade offer so the
+      // human can promote it to a tracked issue. A high-confidence (classified) create reads back as usual.
+      return t.upgradeOffer ? `logged as a possible issue: “${o.label}” — confirm to track` : `logged new: “${o.label}”`
     case 'queued_as_evidence':
       return failed ? `⚠️ couldn't save the photo — saved for review` : `photo saved as evidence`
     case 'acked_didnt_catch':

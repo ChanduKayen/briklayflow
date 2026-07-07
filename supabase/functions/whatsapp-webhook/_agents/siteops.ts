@@ -389,9 +389,10 @@ export interface ExecCtx {
 export interface ExecCandidate { kind: 'task' | 'issue' | 'todo'; title: string; projectId: string | null; projectName: string | null }
 
 function toSiteItem(it: { kind: 'issue' | 'snag'; detail: string; location: string | null; project_hint: string | null }): SiteItem {
-  // T6 — the planner's KIND rides through to the row (clause 3). `type` stays 'issue' so routeItems routes
-  // it to createProblem (issue AND snag are the SAME `problems` table); `kind` records which it actually is.
-  return { type: 'issue', kind: it.kind, text: it.detail, task_hint: it.location, qc_statements: [], cause: 'other', cause_reason: null, owner_hint: null, date_hint: null, project_hint: it.project_hint }
+  // T6 — the planner's KIND + CONFIDENCE ride through to the row (clauses 3 + 4). `type` stays 'issue' so
+  // routeItems routes it to createProblem (issue AND snag are the SAME `problems` table); `kind` records
+  // which it actually is; `confidence` gates the chase (createProblem holds a low/med note un-scheduled).
+  return { type: 'issue', kind: it.kind, confidence: it.confidence, text: it.detail, task_hint: it.location, qc_statements: [], cause: 'other', cause_reason: null, owner_hint: null, date_hint: null, project_hint: it.project_hint }
 }
 
 /** STAGE 2 (1/N) — apply a HIGH-confidence update onto an offered OPEN TASK via the PROVEN applyProgress
