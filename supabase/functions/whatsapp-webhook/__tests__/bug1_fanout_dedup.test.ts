@@ -209,4 +209,22 @@ suite('siteops — Bug 1 typed-answer resolution (natural answer resolves by mea
     expect(addressed(fake, 'w-phase2')).toBe(true)
     expect(addressed(fake, 'w-b')).toBe(false)         // NOT stored[1] — the old /(\d+)/ first-digit hijack is gone
   })
+
+  // j8 (LIVE probe residual, RED) — supervisors type the floor as a NUMERAL ordinal ("4th floor"), which the
+  // word-token matcher couldn't bridge to "Wiring — Fourth floor" ("4th" != "fourth"), and "floor" alone is
+  // ambiguous. Ordinal/numeral normalization (4th <-> fourth) makes the distinctive floor token match.
+  test('(j8) numeral ordinal "4th floor" → "Wiring — Fourth floor"', async () => {
+    const fake = fakeSupabase(floorSeed())
+    await answerSiteops(ctxFor(fake), '4th floor', convoOf(collSlots(fourFloors())))
+    expect(addressed(fake, 'w-fourth')).toBe(true)
+    expect(addressed(fake, 'w-first')).toBe(false)
+  })
+
+  // j8b — a bare numeral ordinal with no "floor" word still resolves by the distinctive ordinal token.
+  test('(j8b) "2nd" → the Second-floor item (ordinal token, not positional)', async () => {
+    const fake = fakeSupabase(floorSeed())
+    await answerSiteops(ctxFor(fake), '2nd', convoOf(collSlots(fourFloors())))
+    expect(addressed(fake, 'w-second')).toBe(true)
+    expect(addressed(fake, 'w-first')).toBe(false)
+  })
 })

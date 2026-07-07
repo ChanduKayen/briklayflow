@@ -50,7 +50,16 @@ export function resolveTypedPick(
 // candidate title. The best candidate wins ONLY if its score is ≥1 AND strictly greater than every other's;
 // a tie is AMBIGUOUS → no pick (the caller re-prompts). Conservative by design: no stemming, no fuzzy match,
 // no cross-candidate leakage — it must never turn a vague reply into a confident wrong attach.
-const pickTokens = (s: string): Set<string> => new Set((s.toLowerCase().match(/[a-z0-9]{3,}/g) ?? []))
+// ordinal/numeral normalization — supervisors name a floor as a WORD ("fourth"), a NUMERAL ordinal ("4th"),
+// or a bare number; the matcher must treat them as the SAME distinctive token so "4th floor" resolves
+// "Wiring — Fourth floor" (the LIVE probe residual). Maps both forms to one canonical marker per rank.
+const ORDINAL: Record<string, string> = {
+  first: 'ord1', '1st': 'ord1', second: 'ord2', '2nd': 'ord2', third: 'ord3', '3rd': 'ord3',
+  fourth: 'ord4', '4th': 'ord4', fifth: 'ord5', '5th': 'ord5', sixth: 'ord6', '6th': 'ord6',
+  seventh: 'ord7', '7th': 'ord7', eighth: 'ord8', '8th': 'ord8', ninth: 'ord9', '9th': 'ord9',
+  tenth: 'ord10', '10th': 'ord10', eleventh: 'ord11', '11th': 'ord11', twelfth: 'ord12', '12th': 'ord12',
+}
+const pickTokens = (s: string): Set<string> => new Set((s.toLowerCase().match(/[a-z0-9]{3,}/g) ?? []).map((w) => ORDINAL[w] ?? w))
 export function bestTokenOverlap(text: string, cands: PickCandidate[]): PickCandidate | null {
   const q = pickTokens(text)
   if (!q.size) return null
