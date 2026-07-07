@@ -17,6 +17,7 @@ import './resolution_executor.test';
 import './resolution_undo.test';
 import './adoption.test';
 import './double_authority.test';
+import './done_demotion.test';
 import './singular_unit.test';
 import './image_batch.test';
 import './guardrail.test';
