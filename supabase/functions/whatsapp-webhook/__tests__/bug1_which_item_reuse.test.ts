@@ -31,13 +31,17 @@ const seed = (): Seed => ({
 })
 const DEC = JSON.stringify({ project_hint: null, items: [{ type: 'progress', text: 'slab done', task_hint: null, qc_statements: [], cause: null, cause_reason: null, owner_hint: null, date_hint: null, project_hint: null }] })
 const R_BOTH_FALSE = JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: false, updates: [] } })
+// The ask is now driven by the model's MEANING-ranked nearest (med), not by lexical token overlap — the belt
+// that used to surface these three is image-only since 2026-07-09. Offered order == stored order == resolved.
+const near = (id: string) => ({ target_id: id, target_kind: 'issue', plausibility: 'med', action: 'progress', closure_explicit: false, reason: 'same slab work' })
+const R_NEAREST = JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: false, updates: [], nearest: [near('iss-first'), near('iss-ground'), near('iss-second')] } })
 const model = (dec: string, resolve: string) => (_s: string, user: string): Promise<string> =>
   Promise.resolve(user.startsWith('CANDIDATES:') ? resolve : dec)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const convoOf = (slots: any): any => ({ id: 'c1', org_id: ORG, sender_number: SENDER, status: 'OPEN', owning_agent: 'SITEOPS', pending_question: 'which item?', staged_entry_id: null, last_message_id: null, slots_so_far: slots })
 // run the ask, return the frozen offered-list slots the resume will validate against.
 async function ask(fake: ReturnType<typeof fakeSupabase>): Promise<Record<string, unknown>> {
-  await runSiteops(ctxFor(fake), 'slab done', { callModel: model(DEC, R_BOTH_FALSE) })
+  await runSiteops(ctxFor(fake), 'slab done', { callModel: model(DEC, R_NEAREST) })
   const conv = fake.writesTo('wa_conversations').find((w) => w.payload?.slots_so_far?.kind === 'siteops_batch_collision')
   if (!conv) throw new Error('no which_item convo opened')
   return conv.payload.slots_so_far
@@ -52,7 +56,7 @@ suite('siteops — Bug 1: near-candidate which_item reuses typed-pick (offered-l
     const fake = fakeSupabase(seed())
     const slots = await ask(fake)
     const offered = (slots.candidates as { id: string }[])
-    await answerSiteops(ctxFor(fake), '1', convoOf(slots), { callModel: model(DEC, R_BOTH_FALSE) })
+    await answerSiteops(ctxFor(fake), '1', convoOf(slots), { callModel: model(DEC, R_NEAREST) })
     expect(addressed(fake, offered[0].id)).toBe(true)     // offered[0] is 'iss-first' — the FIRST offered row
     expect(offered[0].id).toBe('iss-first')
   })
@@ -74,17 +78,17 @@ suite('siteops — Bug 1: near-candidate which_item reuses typed-pick (offered-l
   test('(j3) "Slab — Ground" (natural, not a number) resolves to that offered item', async () => {
     const fake = fakeSupabase(seed())
     const slots = await ask(fake)
-    await answerSiteops(ctxFor(fake), 'Slab — Ground', convoOf(slots), { callModel: model(DEC, R_BOTH_FALSE) })
+    await answerSiteops(ctxFor(fake), 'Slab — Ground', convoOf(slots), { callModel: model(DEC, R_NEAREST) })
     expect(addressed(fake, 'iss-ground')).toBe(true)
     expect(addressed(fake, 'iss-first')).toBe(false)      // resolved by name, not by a positional guess
   })
 
   // j4 (guard) — near ABSENT (an unrelated observation) → honest didn't-catch, no which_item ask (unchanged).
-  test('(j4) both-false with no near candidate → didn-t-catch, no ask', async () => {
-    const fake = fakeSupabase(seed())
+  test('(j4) both-false with an EMPTY nearest → guidance, no ask', async () => {
+    const fake = fakeSupabase({ ...seed(), site_tasks: { 'tk-1': { task_id: 'tk-1', name: 'Slab', project_id: 'P1', status: 'PENDING' } } })
     const decUnrelated = JSON.stringify({ project_hint: null, items: [{ type: 'progress', text: 'weather is nice', task_hint: null, qc_statements: [], cause: null, cause_reason: null, owner_hint: null, date_hint: null, project_hint: null }] })
     await runSiteops(ctxFor(fake), 'weather is nice today', { callModel: model(decUnrelated, R_BOTH_FALSE) })
     expect(fake.writesTo('wa_conversations').some((w) => w.payload?.slots_so_far?.kind === 'siteops_batch_collision')).toBe(false)
-    expect(fake.outbox().some((b) => /Didn't catch/i.test(b))).toBe(true)
+    expect(fake.outbox().some((b) => /nothing updated/i.test(b))).toBe(true)
   })
 })

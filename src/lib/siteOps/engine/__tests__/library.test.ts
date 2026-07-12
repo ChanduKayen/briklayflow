@@ -15,13 +15,17 @@ suite('M1 library', () => {
   })
 
   test('snapshot counts are stable', () => {
-    expect(LIBRARY.taskTypes.size).toBe(56) // 34 + 8 groundwork + 14 opt-in common-area types
+    // 56 → 69: `beams` + `slab` retired for the real floor cycle (shutter → rebar → pour, +3), and the
+    // 12 stages the legacy expander tracked and the engine did not (site_marking, plinth_slab, riser,
+    // putty, window_grill, fixture, decorative, external_paint, terrace_waterproof, terrace_finish,
+    // stair_finish, snagging) authored in. See library.ts "THE FLOOR CYCLE".
+    expect(LIBRARY.taskTypes.size).toBe(69)
     expect(LIBRARY.freedomSets.size).toBe(5)
   })
 
   // ── the dozen spot-check edges ──
-  test('slab → blockwork is IMPOSSIBLE / structural', () => {
-    const e = predEdge('blockwork', 'slab')!
+  test('floor_pour → blockwork is IMPOSSIBLE / structural', () => {
+    const e = predEdge('blockwork', 'floor_pour')!
     expect(e.nature).toBe('IMPOSSIBLE'); expect(e.reason).toBe('structural')
   })
   test('conduit → plaster is DESTRUCTIVE / concealment', () => {
@@ -36,12 +40,15 @@ suite('M1 library', () => {
     const e = predEdge('conduit', 'blockwork')!
     expect(e.nature).toBe('DESTRUCTIVE'); expect(e.reason).toBe('concealment')
   })
-  test('columns → beams → slab IMPOSSIBLE / structural chain', () => {
-    expect(predEdge('beams', 'columns')!.nature).toBe('IMPOSSIBLE')
-    expect(predEdge('slab', 'beams')!.nature).toBe('IMPOSSIBLE')
+  // THE FLOOR CYCLE (2026-07-11) — beams and the slab are shuttered, reinforced and poured as ONE
+  // monolithic operation. The chain is now columns → shutter → rebar → pour, every link IMPOSSIBLE.
+  test('columns → shutter → rebar → pour IMPOSSIBLE / structural chain', () => {
+    expect(predEdge('floor_shutter', 'columns')!.nature).toBe('IMPOSSIBLE')
+    expect(predEdge('floor_rebar', 'floor_shutter')!.nature).toBe('IMPOSSIBLE')
+    expect(predEdge('floor_pour', 'floor_rebar')!.nature).toBe('IMPOSSIBLE')
   })
-  test('slab → columns cross-floor (-1) IMPOSSIBLE', () => {
-    const e = predEdge('columns', 'slab')!
+  test('floor_pour → columns cross-floor (-1) IMPOSSIBLE', () => {
+    const e = predEdge('columns', 'floor_pour')!
     expect(e.scope.kind).toBe('cross_floor')
     expect((e.scope as { delta: number }).delta).toBe(-1)
   })
@@ -52,8 +59,8 @@ suite('M1 library', () => {
     expect(e.scope.kind).toBe('cross_floor')
     expect((e.scope as { delta: number }).delta).toBe(1)
   })
-  test('slab → shuttering_removal is a curing-time wait', () => {
-    const e = predEdge('shuttering_removal', 'slab')!
+  test('floor_pour → shuttering_removal is a curing-time wait', () => {
+    const e = predEdge('shuttering_removal', 'floor_pour')!
     expect(e.reason).toBe('curing_time')
   })
   test('waterproof → screed DESTRUCTIVE / concealment', () => {
@@ -71,8 +78,8 @@ suite('M1 library', () => {
     expect(predEdge('door_frame', 'blockwork')!.nature).toBe('IMPOSSIBLE')
     expect(predEdge('window_frame', 'blockwork')!.nature).toBe('IMPOSSIBLE')
   })
-  test('Gap-1: ceiling_frame gains slab (IMPOSSIBLE/structural) + blockwork (DESTRUCTIVE) preds', () => {
-    const slabE = predEdge('ceiling_frame', 'slab')!
+  test('Gap-1: ceiling_frame gains floor_pour (IMPOSSIBLE/structural) + blockwork (DESTRUCTIVE) preds', () => {
+    const slabE = predEdge('ceiling_frame', 'floor_pour')!
     expect(slabE.nature).toBe('IMPOSSIBLE'); expect(slabE.reason).toBe('structural')
     expect(predEdge('ceiling_frame', 'blockwork')!.nature).toBe('DESTRUCTIVE')
   })

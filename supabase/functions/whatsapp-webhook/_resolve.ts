@@ -25,11 +25,14 @@ export type ProjectResolution = {
   projectName: string | null
   via: ResolvedVia
   candidates: { id: string; name: string }[]   // active projects, for triage / "which project?"
-  // When unresolved AND a name WAS given: nameTried is that name (so the follow-up can say
-  // "couldn't find X" instead of a blank "which project?"), and matches are the loosely-
-  // matched buildings when the name is genuinely AMBIGUOUS (two share the token) — show those.
+  // When unresolved AND a name WAS given: nameTried is that name so the follow-up can say
+  // "couldn't find X" instead of a blank "which project?".
   nameTried: string | null
-  matches: { id: string; name: string }[]
+  // The roster ranked by match confidence against the hint (best first) — the pre-sorted "which
+  // project?" ask list, so the likeliest site is row 1 for free. This is the transaction agent's
+  // "suggest the nearest" behaviour expressed as an ORDERING, not a separate confirm band.
+  suggestions: { id: string; name: string }[]
+  matches: { id: string; name: string }[]       // retained (always []) for back-compat readers
 }
 
 export type ResolveOpts = {
@@ -49,116 +52,39 @@ export async function resolveProject(supabase: any, orgId: string, opts: Resolve
   const candidates = projects.map((p) => ({ id: p.project_id, name: p.name }))
   const base = { candidates, nameTried: null as string | null, matches: [] as { id: string; name: string }[] }
 
-  // 1) NAMED — explicit hint first, then a scan of the raw narration. We score ALL projects
-  //    (not just the best) so a name that hits exactly one auto-band project resolves, while a
-  //    name that hits SEVERAL is disambiguated rather than silently bound to a guess.
+  // 1) NAMED — mirror the transaction agent: score against the hint (then the raw narration as a
+  //    safety net) and TAKE THE SINGLE BEST AUTO-band match. No ambiguous-auto ask — a tie takes
+  //    the top of the ranking, exactly like matchProject in the txn agent. Below auto, we never
+  //    substitute a guess: we keep the ranked list for the ask and fall through to PARK.
+  let suggestions = candidates   // default (no usable hint) → roster order
   for (const cand of [opts.nameHint, opts.narration]) {
     if (!cand || !cand.trim()) continue
-    const autos = scoreProjects(cand, projects).filter((s) => s.band === 'auto')
-    if (autos.length === 1) {
-      return { ...base, projectId: autos[0].id, projectName: autos[0].name, via: 'named' }
+    const scored = scoreProjects(cand, projects)                 // sorted best-first, banded
+    const ranked = scored.map((s) => ({ id: s.id, name: s.name }))
+    if (scored[0]?.band === 'auto') {
+      return { ...base, projectId: scored[0].id, projectName: scored[0].name, via: 'named', suggestions: ranked }
     }
-    // An EXPLICIT name (not a raw-narration scan) that matches several buildings is a real
-    // ambiguity — surface those matches and ask, rather than scanning on or parking blank.
-    if (autos.length > 1 && cand === opts.nameHint) {
-      return {
-        ...base, projectId: null, projectName: null, via: 'unresolved',
-        nameTried: cand.trim(), matches: autos.map((a) => ({ id: a.id, name: a.name })),
-      }
-    }
+    if (cand === opts.nameHint) suggestions = ranked            // keep the hint's ranking for the ask
   }
 
   // 2) SELECTED — platform current-project context (the multi-project seam).
   if (opts.selectedProjectId) {
     const sel = projects.find((p) => p.project_id === opts.selectedProjectId)
-    if (sel) return { ...base, projectId: sel.project_id, projectName: sel.name, via: 'selected' }
+    if (sel) return { ...base, projectId: sel.project_id, projectName: sel.name, via: 'selected', suggestions }
   }
 
   // 3) AUTO — new-org convenience ONLY: exactly one active project.
   if (projects.length === 1) {
-    return { ...base, projectId: projects[0].project_id, projectName: projects[0].name, via: 'auto' }
+    return { ...base, projectId: projects[0].project_id, projectName: projects[0].name, via: 'auto', suggestions }
   }
 
-  // 4) PARK — unresolved; never misattribute. If a name WAS given but matched nothing, carry it
-  //    so the follow-up says "couldn't find <name>" instead of a blank "which project?".
+  // 4) PARK — unresolved; never misattribute. Carry the tried name + the ranked suggestions.
   const nameTried = opts.nameHint?.trim() || null
-  return { ...base, projectId: null, projectName: null, via: 'unresolved', nameTried }
+  return { ...base, projectId: null, projectName: null, via: 'unresolved', nameTried, suggestions }
 }
 
-// ── MULTI-PROJECT: per-item resolution + grouping ────────────────────────────
-// The transaction agent handles multi-project messages by carrying a project PER ITEM
-// (each entry resolves its own project, with a shared site propagated to entries that
-// don't name one). Site-ops mirrors that here: one narration can name two-plus sites, so
-// each decomposed item resolves to its OWN project, and items group by their project.
-//
-// resolveHint is the per-item analogue of resolveProject's NAMED step — one hint string,
-// reusing the SAME proven scoreProjects matcher (no new matching logic). planItemProjects
-// then groups the items, applying the site-ops-specific rules the txn agent doesn't need:
-//   • carry-forward — an item with no site of its own inherits the nearest PRECEDING item's
-//     site (the "nearest-mentioned" project), never the first-named one blindly.
-//   • a leading item with no site (none named before it) → PENDING (disambiguate, don't guess).
-//   • an explicit hint that matches SEVERAL buildings → PENDING (ambiguous, don't guess).
-
+// ── MULTI-PROJECT: a narration can name two-plus sites. The grouping + Stage-2 loop lives in the
+// agent now (resolveGroups in _agents/siteops.ts): each decomposed item resolves its OWN site via
+// resolveProject (with carry-forward), items group by project, and the singular unit runs per group.
+// ProjectRef is the shared roster shape the agent passes around.
 export type ProjectRef = { id: string; name: string }
-
-export type HintResolution =
-  | { kind: 'one'; project: ProjectRef }
-  | { kind: 'many'; matches: ProjectRef[] }
-  | { kind: 'none' }
-
-/** Resolve ONE project hint against the roster via the proven scoreProjects matcher. */
-export function resolveHint(hint: string | null, projects: ProjectRef[]): HintResolution {
-  if (!hint || !hint.trim()) return { kind: 'none' }
-  const rows = projects.map((p) => ({ project_id: p.id, name: p.name }))
-  const autos = scoreProjects(hint, rows).filter((s) => s.band === 'auto')
-  if (autos.length === 1) return { kind: 'one', project: { id: autos[0].id, name: autos[0].name } }
-  if (autos.length > 1) return { kind: 'many', matches: autos.map((a) => ({ id: a.id, name: a.name })) }
-  return { kind: 'none' }
-}
-
-export type ItemPlan = {
-  isMulti: boolean                       // 2+ distinct projects (or 1 + an ambiguous mention) named
-  assignment: (string | null)[]          // per item → resolved project id, or null when PENDING
-  projectsById: Map<string, ProjectRef>  // id → ref, for every assigned project (group ordering)
-  pendingIdxs: number[]                   // items needing a project pick (ambiguous / leading-null)
-}
-
-/**
- * Plan which project each item belongs to, from its per-item hint. PURE — the agent uses this
- * ONLY in the multi-project branch; single-project narrations keep the existing resolveProject
- * path untouched (zero regression). Order of items is the narration order (carry-forward depends
- * on it). `hints` is each item's project_hint (null when the item named no site of its own).
- */
-export function planItemProjects(hints: (string | null)[], projects: ProjectRef[]): ItemPlan {
-  const resolved = hints.map((h) => resolveHint(h, projects))
-  const distinct = new Set<string>()
-  let anyMany = false
-  for (const r of resolved) {
-    if (r.kind === 'one') distinct.add(r.project.id)
-    else if (r.kind === 'many') anyMany = true
-  }
-  // Multi when two-plus distinct sites are named, OR one site plus an ambiguous mention (which
-  // must be disambiguated, not silently folded into the one resolved site → that would mis-file).
-  const isMulti = distinct.size + (anyMany ? 1 : 0) >= 2
-
-  const assignment: (string | null)[] = new Array(hints.length).fill(null)
-  const projectsById = new Map<string, ProjectRef>()
-  const pendingIdxs: number[] = []
-  let lastProject: ProjectRef | null = null
-
-  for (let i = 0; i < resolved.length; i++) {
-    const r = resolved[i]
-    if (r.kind === 'one') {
-      assignment[i] = r.project.id
-      projectsById.set(r.project.id, r.project)
-      lastProject = r.project
-    } else if (r.kind === 'many') {
-      pendingIdxs.push(i)                         // ambiguous explicit hint — ask
-    } else if (lastProject) {
-      assignment[i] = lastProject.id              // carry-forward to the nearest preceding site
-    } else {
-      pendingIdxs.push(i)                          // leading item, no site yet — ask (never guess)
-    }
-  }
-  return { isMulti, assignment, projectsById, pendingIdxs }
-}

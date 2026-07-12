@@ -12,6 +12,7 @@
 // The default mode is unchanged.
 
 import { send } from '../_format.ts'
+import { renderHistory, type Turn } from '../_history.ts'
 
 const APP_LINK    = 'briklayflow.vercel.app/logbook'
 // A CTA button needs a real https URL; the env may be set without a scheme, so normalise.
@@ -38,6 +39,9 @@ export type ConciergeCtx = {
   wamid: string
   text: string
   language: 'en' | 'te' | 'te-en' | 'hi'
+  // The recent turns of this thread (assistant turns trusted, user turns fenced). This is how the concierge
+  // knows we chased the supervisor this morning — so a bare "ok" gets the teaching reply, not a blank "Okay."
+  history?: Turn[]
   lingering?: { last_action_summary: string } | null
   prefix?: string               // consolidated-interrupt: acknowledgment of a just-committed A
   mode?: ConciergeMode          // default 'default'
@@ -96,6 +100,17 @@ Read the room and respond to the FEELING, not just the words:
 
 Only if they ASK what you can do (or are clearly stuck): say in a sentence that you log site payments and expenses to the Day Book for the owner to approve — a line like "Ramu 5000 cash", a bill photo, or a voice note all work.
 
+THE ACKNOWLEDGEMENT CASE (important). Sometimes HISTORY shows we asked the user about open site work — a
+follow-up on issues or to-dos — and their reply just acknowledges it ("ok", "sari", "haan", "done", "👍").
+An acknowledgement is not an answer: it names nothing, so nothing has been updated, and you must NOT pretend
+otherwise. Do NOT list their open items back at them, do NOT ask them to pick one, and do NOT ask a question
+at all — you are not managing their site work.
+Instead, warmly accept the acknowledgement and show them, by EXAMPLE, the shape of a message that would
+actually update something: naming the thing out loud. Something like — 'Just say it out loud when a job's
+done, like "municipal water issue is resolved" or "tiles laid on the fourth floor", and I'll take care of it.'
+Use an example drawn from what we asked about in HISTORY when there is one, phrased plainly as an EXAMPLE and
+never as a statement that it IS resolved. Two or three short lines. Never a list, never a question.
+
 ${SECURITY}
 
 ${FORMATTING}
@@ -143,6 +158,7 @@ function userContent(ctx: ConciergeCtx): string {
     lines.push(`returning: ${ctx.prospect?.firstTouch === false}`)
   } else if ((ctx.mode ?? 'default') === 'default') {
     lines.push(`JUST_SAVED: ${ctx.lingering?.last_action_summary ?? 'none'}`)
+    lines.push(`HISTORY (oldest first):\n${renderHistory(ctx.history ?? [])}`)
   }
   return lines.join('\n') + `\n\n<user_message>\n${ctx.text}\n</user_message>`
 }

@@ -36,9 +36,12 @@ suite('siteops T7 concern A — miss durability (clause 6: auditable both-false 
   // D1 already holds (capture-first, :1062); this documents the floor, never regress it.
   test('(j1) contentless miss → site_narrations row EXISTS (the miss is not eaten)', async () => {
     const fake = fakeSupabase(seed())
-    await runSiteops(ctxFor(fake), 'asdfgh zxcvbn qwerty')   // no model → decompose throws → honest didn't-catch
+    // the model READ it and found nothing (valid JSON, zero items) — the honest didn't-catch. A model that
+    // says nothing at all is an OUTAGE and parks instead (decompose_failure.test), never blaming the sender.
+    const emptyExtraction = () => Promise.resolve(JSON.stringify({ project_hint: null, items: [] }))
+    await runSiteops(ctxFor(fake), 'asdfgh zxcvbn qwerty', { callModel: emptyExtraction })
     expect(fake.writesTo('site_narrations').some((w) => w.op === 'insert')).toBe(true)
-    expect(fake.outbox().some((b) => /Didn't catch/i.test(b))).toBe(true)
+    expect(fake.outbox().some((b) => /nothing updated/i.test(b))).toBe(true)
   })
 
   // j2 (RED flip) — a BOTH-FALSE miss: decompose extracted a progress item and a project resolved, yet the

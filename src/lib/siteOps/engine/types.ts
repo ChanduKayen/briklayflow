@@ -67,11 +67,33 @@ export interface Cohesion {
   note: string
 }
 
+// ── QUALITY CONTROL (authored per TYPE, 2026-07-11) ──────────────────────────
+// A QC check is a CHECKABLE FACT about this kind of work — never vague praise ("looks good" answers
+// nothing). Exactly 3 per authored type, exactly 1 critical (the DB's site_task_qc_one_critical partial
+// unique index is the hard backstop; validateLibrary is the soft one).
+//
+// WHY IT LIVES HERE, not in a generation step: QC used to be produced by an LLM enrich pass fired from a
+// browser page-visit, which meant a task's checks existed only if a human happened to open the right page
+// at the right moment — and any task created afterwards (by the engine, or by the WhatsApp materializer
+// mid-conversation) had none, forever. A property of a task TYPE belongs with the task type, next to its
+// constraint edges. Authored here, coverage is structural: a type without checks fails the validator.
+//
+// PHRASED FOR A PHOTO where the work allows it. These checks are what the vision pass grades a site photo
+// against — "are the cover blocks under the slab steel?" is answerable from a picture; "was the concrete
+// mix design approved?" is not. The photo-answerable check is the one that earns its place.
+export interface QcCheck {
+  question: string
+  is_critical: boolean
+}
+
 export interface TaskType {
   id: TaskTypeId
   label: string
   trade: string
   layer: Layer
+  /** The 3 authored QC checks (1 critical). Absent only on user-classified tasks, which have no
+   *  authored type — an honest gap, not a silent one (they carry no checks and claim none). */
+  qc?: QcCheck[]
   instancing: Instancing
   appliesTo: ZoneKind[] // which zone kinds instantiate this (per_zone); informational for per_floor/building
   seq: SeqEdge[]

@@ -1,10 +1,8 @@
-// SPRINT 2 · T5 — IMAGES JOIN THE SINGULAR UNIT. Sub-step 5 (Gap B ruling): images STOP fanning out
-// per-project (runMulti) and instead COMPOUND-PARK — first fragment through the unit, the rest parked
-// pending_stage2 — exactly like the text path. One pipeline, one compound rule; Stage 2 restores the
-// per-project loop for BOTH modalities at once (don't make images fan out differently).
-//
-// RED-FIRST (flips when the isMulti/runMulti branch is removed): today a multi-site image runs runMulti,
-// which files BOTH items per-site via routeGroup (no ladder, no pending_stage2 park).
+// SPRINT 2 · T5 → STAGE 2 — IMAGES JOIN THE PER-PROJECT LOOP. The compound-park interim (first fragment
+// through the unit, the rest parked pending_stage2) is REPLACED by the Stage-2 loop: a multi-site photo
+// splits into per-project groups and each item runs its OWN unit on its OWN site — through the ladder, no
+// pending_stage2 park. This is the end-state the interim comment promised ("Stage 2 restores the per-
+// project loop for BOTH modalities at once"). One pipeline, one loop, text and image alike.
 
 import { suite, test, expect } from './harness'
 import { fakeSupabase, type Seed } from './fake_supabase'
@@ -28,16 +26,24 @@ const imgCtx = (fake: ReturnType<typeof fakeSupabase>, caption: string) => ({
 })
 
 interface Call { system: string; user: string }
-const imgModel = (calls: Call[], stubs: { vision?: string; resolve?: string }) =>
+// Content-aware resolve stub: each per-project group grades its OWN item, so the two sites get two
+// distinct creates (the stub keys on the message text the group loop passes to resolveInbound).
+const R_CREATE = (detail: string, project_hint: string) => JSON.stringify({
+  issue_snag_found: { found: true, items: [{ kind: 'issue', detail, location: null, project_hint, confidence: 'high' }] },
+  update_found: { found: false, updates: [] },
+})
+const imgModel = (calls: Call[], stubs: { vision?: string }) =>
   (system: string, user: string): Promise<string> => {
     calls.push({ system, user })
-    if (user.startsWith('CANDIDATES:')) return Promise.resolve(stubs.resolve ?? '')
+    if (user.startsWith('CANDIDATES:')) {
+      return Promise.resolve(/transformer/i.test(user) ? R_CREATE('transformer down', 'ASM Elite') : R_CREATE('tiles broke', 'Soundharya'))
+    }
     if (user.includes('Decompose the image')) return Promise.resolve(stubs.vision ?? '')
     return Promise.resolve('')
   }
 const resolutionCalls = (calls: Call[]) => calls.filter((c) => c.user.startsWith('CANDIDATES:'))
 
-// two items on TWO distinct sites — the multi-project shape that runMulti fans out today.
+// two items on TWO distinct sites — the multi-project shape the Stage-2 loop fans out per-site.
 const VIS_MULTI = JSON.stringify({
   project_hint: null,
   items: [
@@ -45,29 +51,24 @@ const VIS_MULTI = JSON.stringify({
     { type: 'issue', text: 'transformer down', confidence: 'high', task_hint: null, cause: 'other', cause_reason: null, owner_hint: null, date_hint: null, project_hint: 'ASM Elite', qc_statements: [] },
   ],
 })
-const R_CREATE_TILES = JSON.stringify({
-  issue_snag_found: { found: true, items: [{ kind: 'issue', detail: 'tiles broke', location: null, project_hint: 'Soundharya', confidence: 'high' }] },
-  update_found: { found: false, updates: [] },
-})
 
-suite('siteops T5 sub-step 5 — multi-project images compound-park, not fan out (Gap B / clause-1)', () => {
-  test('(multi) two-site photo → FIRST item runs the unit; the SECOND parks pending_stage2 (uniform with text)', async () => {
+suite('siteops T5 → Stage 2 — multi-project images run the per-project loop (no compound-park)', () => {
+  test('(multi) two-site photo → EACH item runs its own unit on its own site; both created, no pending_stage2', async () => {
     const fake = fakeSupabase(seed())
     const calls: Call[] = []
     await runSiteops(imgCtx(fake, ''), 'site photos', {
-      callModel: imgModel(calls, { vision: VIS_MULTI, resolve: R_CREATE_TILES }),
+      callModel: imgModel(calls, { vision: VIS_MULTI }),
     })
 
-    // RED until the fan-out is removed — the UNIT (ladder) runs ONCE over the first fragment's project.
+    // the UNIT (ladder) runs ONCE PER GROUP — two sites, two resolution calls.
     const rc = resolutionCalls(calls)
-    expect(rc.length).toBe(1)
-    expect(rc[0].user.includes('Soundharya') || rc[0].user.includes('tiles')).toBe(true)
+    expect(rc.length).toBe(2)
 
-    // RED until removed — the SECOND site's item parks pending_stage2 (never a per-site fan-out create).
-    expect(fake.writesTo('siteops_unplaced').some((w) => w.payload?.reason === 'pending_stage2' && JSON.stringify(w.payload?.observation ?? '').includes('transformer'))).toBe(true)
+    // each item lands on its OWN site — the per-project fan-out, through the ladder.
+    expect(fake.writesTo('problems').some((w) => w.op === 'insert' && w.payload?.project_id === 'P2')).toBe(true)   // tiles → Soundharya
+    expect(fake.writesTo('problems').some((w) => w.op === 'insert' && w.payload?.project_id === 'P1')).toBe(true)   // transformer → ASM Elite
 
-    // the first item lands on its site (guard); the second is NOT created anywhere (it parked).
-    expect(fake.writesTo('problems').some((w) => w.op === 'insert' && w.payload?.project_id === 'P2')).toBe(true)
-    expect(fake.writesTo('problems').some((w) => w.op === 'insert' && w.payload?.project_id === 'P1')).toBe(false)
+    // no compound-park anymore — the loop owns every item.
+    expect(fake.writesTo('siteops_unplaced').some((w) => w.payload?.reason === 'pending_stage2')).toBe(false)
   })
 })

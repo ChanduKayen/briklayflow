@@ -519,3 +519,63 @@ export function mProcComplete(
   const body = [head, flags.join('\n')].filter(Boolean).join('\n\n')
   return { kind: 'text', body }
 }
+
+// ── Agent-agnostic pending-question credibility (2026-07-11) ──────────────────
+// A question we asked can be interrupted by a new turn. The dispatcher STASHES it, handles the turn, then
+// RE-SURFACES it (with a Dismiss button) or DROPS it with a notice. These are the strings for that lifecycle.
+// They are AGENT-NEUTRAL on purpose — the same copy serves a SiteOps "which project?" and a Procurement
+// "which vendor?" — so the machinery never has to know which agent asked.
+
+/** Pre-promise folded into a NEW_INTENT reply: we'll handle this, then come back to the open question. */
+export function pendingReturnAck(lang: Lang): string {
+  return pick(lang, { en: "Got it — I'll take care of this, then come back to my earlier question." })
+}
+
+/** Soft preamble when a reply was too unclear to act on, before we re-show the open question. */
+export function pendingUnclearLead(lang: Lang): string {
+  return pick(lang, { en: "I didn't quite catch that." })
+}
+
+/** Lead-in above the re-surfaced question. */
+export function pendingResurfaceLead(lang: Lang): string {
+  return pick(lang, { en: 'Back to my earlier question:' })
+}
+
+/** Footer under the re-surfaced question — reply to answer, or tap the Dismiss button to let it go. */
+export function pendingResurfaceFooter(lang: Lang): string {
+  return pick(lang, { en: 'Reply to answer, or tap *Dismiss* to leave it.' })
+}
+
+/** The Dismiss reply-button title (WhatsApp caps titles at 20 chars). */
+export function pendingDismissLabel(lang: Lang): string {
+  return pick(lang, { en: 'Dismiss' })
+}
+
+/** Acknowledgement after the user TAPS Dismiss — set aside, not recorded, resend anytime (Q1: drop + tell). */
+export function pendingDismissedAck(lang: Lang): OutMessage {
+  return { kind: 'text', body: pick(lang, { en: "No problem — I've set that aside. Send it again whenever you like. 👍" }) }
+}
+
+/** Nudge when a held question is DEFERRED behind the new turn's own question — held, NOT dropped. It rides
+ *  along and re-surfaces once this is sorted. `subject` is a short echo of what the held question was about. */
+export function pendingDeferredNudge(lang: Lang, subject: string | null): OutMessage {
+  const about = subject ? ` about "${subject}"` : ''
+  return { kind: 'text', body: pick(lang, { en: `(Still holding my earlier question${about} — I'll come back to it once this is sorted. 👍)` }) }
+}
+
+/**
+ * RETIRED, NOT DROPPED (the 30-minute rule, 2026-07-11). A question that has gone unanswered for half an
+ * hour, while the sender kept messaging about other things, is a question he has decided not to answer. We
+ * stop asking. What he told us is NOT lost — it is parked, in full, in the review list — and saying that is
+ * the difference between letting go and eating it.
+ */
+export function pendingRetiredNotice(lang: Lang, subject: string | null): OutMessage {
+  const about = subject ? ` about "${subject}"` : ''
+  return {
+    kind: 'text',
+    body: pick(lang, {
+      en: `My earlier question${about} has been open a while, so I've set it aside — nothing was changed for it. ` +
+        `It's saved in your review list, and you can tell me about it again any time. 👍`,
+    }),
+  }
+}

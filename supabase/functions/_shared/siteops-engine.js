@@ -13,7 +13,7 @@ var TASK_TYPES = [
   // (GF columns onward) hangs off `foundation`, the final pour, via the columns→foundation edge (R6).
   {
     id: "ground_clearance",
-    label: "Ground clearance",
+    label: "Site \u2014 ground clearance",
     trade: "civil",
     layer: "structure",
     instancing: "building",
@@ -22,17 +22,29 @@ var TASK_TYPES = [
     // the master start — site work precedes it (out of scope)
   },
   {
-    id: "excavation",
-    label: "Excavation",
+    // NEW (2026-07-11) — the legacy expander tracked "Site Marking / Setting Out" and the engine did not,
+    // so a supervisor reporting "marking done" had nothing to land on. Setting out happens on cleared
+    // ground and gates the dig: you cannot excavate to a grid you have not set out.
+    id: "site_marking",
+    label: "Site \u2014 marking / setting out",
     trade: "civil",
     layer: "structure",
     instancing: "building",
     appliesTo: [],
-    seq: [{ pred: "ground_clearance", nature: "IMPOSSIBLE", reason: "structural", scope: BW, note: "clear the site before digging" }]
+    seq: [{ pred: "ground_clearance", nature: "IMPOSSIBLE", reason: "structural", scope: BW, note: "set the grid out on cleared ground" }]
+  },
+  {
+    id: "excavation",
+    label: "Site \u2014 excavation",
+    trade: "civil",
+    layer: "structure",
+    instancing: "building",
+    appliesTo: [],
+    seq: [{ pred: "site_marking", nature: "IMPOSSIBLE", reason: "structural", scope: BW, note: "dig to the set-out grid" }]
   },
   {
     id: "pcc_bed",
-    label: "PCC bed (footing base)",
+    label: "Foundation \u2014 PCC bed (footing base)",
     trade: "civil",
     layer: "structure",
     instancing: "building",
@@ -41,7 +53,7 @@ var TASK_TYPES = [
   },
   {
     id: "footing",
-    label: "Footings",
+    label: "Foundation \u2014 footings",
     trade: "civil",
     layer: "structure",
     instancing: "building",
@@ -50,7 +62,7 @@ var TASK_TYPES = [
   },
   {
     id: "footing_column",
-    label: "Footing columns (to plinth)",
+    label: "Foundation \u2014 footing columns (to plinth)",
     trade: "civil",
     layer: "structure",
     instancing: "building",
@@ -59,7 +71,7 @@ var TASK_TYPES = [
   },
   {
     id: "backfill",
-    label: "Backfilling & compaction",
+    label: "Foundation \u2014 backfilling & compaction",
     trade: "civil",
     layer: "structure",
     instancing: "building",
@@ -68,7 +80,7 @@ var TASK_TYPES = [
   },
   {
     id: "plinth_beam",
-    label: "Plinth beams",
+    label: "Plinth \u2014 beams",
     trade: "civil",
     layer: "structure",
     instancing: "building",
@@ -77,7 +89,7 @@ var TASK_TYPES = [
   },
   {
     id: "plinth_fill",
-    label: "Plinth filling & compaction",
+    label: "Plinth \u2014 filling & compaction",
     trade: "civil",
     layer: "structure",
     instancing: "building",
@@ -85,17 +97,29 @@ var TASK_TYPES = [
     seq: [{ pred: "plinth_beam", nature: "IMPOSSIBLE", reason: "structural", scope: BW, note: "fill and compact inside the plinth" }]
   },
   {
-    id: "foundation",
-    label: "Foundation",
+    // NEW (2026-07-11) — the legacy expander tracked "Plinth Slab" and the engine went straight from the
+    // fill to the mass-concrete bed, so the ground-floor deck itself had no task. It is cast ON the
+    // compacted fill and is what the ground floor stands on.
+    id: "plinth_slab",
+    label: "Plinth \u2014 slab",
     trade: "civil",
     layer: "structure",
     instancing: "building",
     appliesTo: [],
-    seq: [{ pred: "plinth_fill", nature: "IMPOSSIBLE", reason: "structural", scope: BW, note: "mass-concrete / anti-termite bed \u2014 substructure complete" }]
+    seq: [{ pred: "plinth_fill", nature: "IMPOSSIBLE", reason: "structural", scope: BW, note: "the ground-floor deck, cast on the compacted fill" }]
+  },
+  {
+    id: "foundation",
+    label: "Foundation \u2014 mass concrete",
+    trade: "civil",
+    layer: "structure",
+    instancing: "building",
+    appliesTo: [],
+    seq: [{ pred: "plinth_slab", nature: "IMPOSSIBLE", reason: "structural", scope: BW, note: "mass-concrete / anti-termite bed \u2014 substructure complete" }]
   },
   {
     id: "columns",
-    label: "Columns",
+    label: "Frame \u2014 columns",
     trade: "civil",
     layer: "structure",
     instancing: "per_floor",
@@ -103,54 +127,74 @@ var TASK_TYPES = [
     seq: [
       // R6 Foundation → Columns(GF). Scope same-zone in sheet; foundation is a building singleton,
       // so this links every columns node to it. Harmless on upper floors (already gated via the
-      // slab chain below) and truthful: all columns ultimately rest on the foundation.
+      // pour chain below) and truthful: all columns ultimately rest on the foundation.
       { pred: "foundation", nature: "IMPOSSIBLE", reason: "structural", scope: SZ, note: "GF anchors to foundation" },
-      // R5 Slab(floor) → Columns(floor+1): my columns need the deck below to stand on.
-      { pred: "slab", nature: "IMPOSSIBLE", reason: "structural", scope: CF(-1), note: "deck to stand on" }
+      // R5 Pour(floor) → Columns(floor+1): my columns need the deck below to stand on.
+      { pred: "floor_pour", nature: "IMPOSSIBLE", reason: "structural", scope: CF(-1), note: "deck to stand on" }
     ]
   },
+  // ── THE FLOOR CYCLE (rebuilt 2026-07-11, FOUNDER-RULED "Option A") ────────────────────────────────
+  // The library used to carry `beams` and `slab` as two separately-cast tasks (R3/R4: "no beam without
+  // column", "slab rests on beams"). That is not how an RCC floor is built: the beams and the slab are
+  // shuttered together, reinforced together, and poured MONOLITHICALLY in one pour. Two cast tasks for
+  // one pour meant a supervisor's "slab poured" fit two rows and distinguished neither — and it left the
+  // stages he actually reports ("shuttering done", "steel tied", "pour tomorrow") with nothing to land on.
+  // Replaced by the real cycle: shutter → reinforce → pour → (cure) → de-prop.
   {
-    id: "beams",
-    label: "Beams",
+    id: "floor_shutter",
+    label: "Frame \u2014 shuttering (beams & slab)",
     trade: "civil",
     layer: "structure",
     instancing: "per_floor",
     appliesTo: [],
     seq: [
-      { pred: "columns", nature: "IMPOSSIBLE", reason: "structural", scope: SF, note: "no beam without column" }
-      // R3
+      { pred: "columns", nature: "IMPOSSIBLE", reason: "structural", scope: SF, note: "formwork spans between the cast columns" }
+      // was R3
     ]
   },
   {
-    id: "slab",
-    label: "Slab",
+    id: "floor_rebar",
+    label: "Frame \u2014 reinforcement (beams & slab)",
     trade: "civil",
     layer: "structure",
     instancing: "per_floor",
     appliesTo: [],
     seq: [
-      { pred: "beams", nature: "IMPOSSIBLE", reason: "structural", scope: SF, note: "slab rests on beams" }
-      // R4
+      { pred: "floor_shutter", nature: "IMPOSSIBLE", reason: "structural", scope: SF, note: "steel is tied into the formwork" }
+    ]
+  },
+  {
+    id: "floor_pour",
+    label: "Frame \u2014 slab & beam pour",
+    trade: "civil",
+    layer: "structure",
+    instancing: "per_floor",
+    appliesTo: [],
+    seq: [
+      // The gate the whole QC story hangs off: once this is poured, everything below it is buried. A
+      // missed cover block or an untied lap is permanent here — this is the moment a photo is worth most.
+      { pred: "floor_rebar", nature: "IMPOSSIBLE", reason: "structural", scope: SF, note: "never pour over unfinished steel \u2014 cover blocks, laps and cages are checked HERE or never" }
+      // was R4
     ],
     conceals: []
     // structural; concealment handled by finishes
   },
   {
     id: "shuttering_removal",
-    label: "Shuttering removal (de-prop)",
+    label: "Frame \u2014 de-propping (shuttering removal)",
     trade: "civil",
     layer: "structure",
     instancing: "per_floor",
     appliesTo: [],
     seq: [
-      // R7 Slab → Shuttering-removal. Sheet nature = "CURING-WAIT": encoded DESTRUCTIVE +
+      // R7 Pour → Shuttering-removal. Sheet nature = "CURING-WAIT": encoded DESTRUCTIVE +
       // reason curing_time (de-propping green concrete ruins the slab; it is a TIME gate).
-      { pred: "slab", nature: "DESTRUCTIVE", reason: "curing_time", scope: SF, note: "cure before de-prop (~time, not a trade)" }
+      { pred: "floor_pour", nature: "DESTRUCTIVE", reason: "curing_time", scope: SF, note: "cure before de-prop (~time, not a trade)" }
     ]
   },
   {
     id: "blockwork",
-    label: "Blockwork (walls)",
+    label: "Wall \u2014 blockwork",
     trade: "masonry",
     layer: "structure",
     instancing: "per_floor",
@@ -158,7 +202,7 @@ var TASK_TYPES = [
     isGateway: true,
     // once a floor's walls are up, the whole services freedom-set fans out
     seq: [
-      { pred: "slab", nature: "IMPOSSIBLE", reason: "structural", scope: SF, note: "walls need the deck" },
+      { pred: "floor_pour", nature: "IMPOSSIBLE", reason: "structural", scope: SF, note: "walls need the deck" },
       // R9
       // R8 Shuttering-removal → Blockwork: "no work under a propped slab" (FLAG-1, FOUNDER-RULED).
       // A slab's props stand on the floor BELOW it, so while slab@(F+1) is propped/curing those
@@ -174,7 +218,7 @@ var TASK_TYPES = [
   // ════════ SERVICES (muscle) — per_zone unless noted ════════
   {
     id: "conduit",
-    label: "Electrical conduiting",
+    label: "Electrical \u2014 conduiting (1st fix)",
     trade: "electrical",
     layer: "services",
     instancing: "per_zone",
@@ -189,7 +233,7 @@ var TASK_TYPES = [
   },
   {
     id: "in_wall_plumbing",
-    label: "In-wall plumbing",
+    label: "Plumbing \u2014 in-wall lines (chases & sleeves)",
     trade: "plumbing",
     layer: "services",
     instancing: "per_zone",
@@ -206,7 +250,7 @@ var TASK_TYPES = [
   },
   {
     id: "plumb_rough",
-    label: "Plumbing rough-in",
+    label: "Plumbing \u2014 floor rough-in",
     trade: "plumbing",
     layer: "services",
     instancing: "per_zone",
@@ -225,7 +269,7 @@ var TASK_TYPES = [
   },
   {
     id: "pressure_test",
-    label: "Pressure test",
+    label: "Plumbing \u2014 pressure test",
     trade: "plumbing",
     layer: "services",
     instancing: "per_zone",
@@ -236,8 +280,22 @@ var TASK_TYPES = [
     ]
   },
   {
+    // NEW (2026-07-11) — the legacy expander tracked "Vertical Plumbing Risers" and the engine had only
+    // the per-floor rough-in. The risers are the vertical spine every floor's rough-in ties into; a
+    // supervisor reporting "risers done" had nowhere to land it.
+    id: "riser",
+    label: "Plumbing \u2014 vertical risers",
+    trade: "plumbing",
+    layer: "services",
+    instancing: "building",
+    appliesTo: ["shaft", "common"],
+    seq: [
+      { pred: "foundation", nature: "IMPOSSIBLE", reason: "structural", scope: BW, note: "the risers rise from the substructure through the shafts" }
+    ]
+  },
+  {
     id: "wiring",
-    label: "Wiring (wire pulling)",
+    label: "Electrical \u2014 wire pulling (2nd fix)",
     trade: "electrical",
     layer: "services",
     instancing: "per_zone",
@@ -250,7 +308,7 @@ var TASK_TYPES = [
   },
   {
     id: "switchboard",
-    label: "Switchboards / DB",
+    label: "Electrical \u2014 switchboards / DB",
     trade: "electrical",
     layer: "services",
     instancing: "per_zone",
@@ -263,7 +321,7 @@ var TASK_TYPES = [
   },
   {
     id: "door_frame",
-    label: "Door frames",
+    label: "Door \u2014 frames",
     trade: "carpentry",
     layer: "services",
     instancing: "per_zone",
@@ -282,7 +340,7 @@ var TASK_TYPES = [
   },
   {
     id: "window_frame",
-    label: "Window frames",
+    label: "Window \u2014 frames",
     trade: "carpentry",
     layer: "services",
     instancing: "per_zone",
@@ -299,7 +357,7 @@ var TASK_TYPES = [
   },
   {
     id: "ceiling_frame",
-    label: "False-ceiling frame",
+    label: "Ceiling \u2014 false-ceiling frame",
     trade: "ceiling",
     layer: "services",
     instancing: "per_zone",
@@ -310,13 +368,13 @@ var TASK_TYPES = [
     // and its perimeter channel anchors to the walls — it cannot exist before the floor's
     // structure, and not meaningfully before blockwork. Two edges added:
     seq: [
-      { pred: "slab", nature: "IMPOSSIBLE", reason: "structural", scope: SZ, note: "false ceiling hangs from the slab soffit" },
+      { pred: "floor_pour", nature: "IMPOSSIBLE", reason: "structural", scope: SZ, note: "the ceiling hangs from the slab soffit \u2014 the floor above must be poured" },
       { pred: "blockwork", nature: "DESTRUCTIVE", reason: "logistics", scope: SZ, note: "perimeter channel anchors to the walls \u2014 framing before walls means redoing the perimeter" }
     ]
   },
   {
     id: "overhead_service",
-    label: "Overhead services (in ceiling void)",
+    label: "Ceiling \u2014 overhead services (in the void)",
     trade: "mep",
     layer: "services",
     instancing: "per_zone",
@@ -331,7 +389,7 @@ var TASK_TYPES = [
   },
   {
     id: "void_wiring",
-    label: "Ceiling void-wiring",
+    label: "Ceiling \u2014 void wiring",
     trade: "electrical",
     layer: "services",
     instancing: "per_zone",
@@ -352,7 +410,7 @@ var TASK_TYPES = [
   // ════════ FINISHES (skin) — per_zone unless noted ════════
   {
     id: "plaster",
-    label: "Plastering",
+    label: "Wall \u2014 internal plaster",
     trade: "plaster",
     layer: "finishes",
     instancing: "per_zone",
@@ -371,8 +429,23 @@ var TASK_TYPES = [
     ]
   },
   {
+    // NEW (2026-07-11) — the legacy expander tracked "Wall Putty" and the engine went straight from
+    // plaster to paint. Putty is its own stage, its own crew and its own defect class (a painted wall
+    // over bad putty has to be redone), so a "putty done" report needs a row of its own.
+    id: "putty",
+    label: "Wall \u2014 putty",
+    trade: "painting",
+    layer: "finishes",
+    instancing: "per_zone",
+    appliesTo: ["dry", "wet", "balcony", "common"],
+    concealedBy: ["paint"],
+    seq: [
+      { pred: "plaster", nature: "DESTRUCTIVE", reason: "quality", scope: SZ, note: "putty needs a plastered surface" }
+    ]
+  },
+  {
     id: "waterproof",
-    label: "Waterproofing",
+    label: "Wet area \u2014 waterproofing",
     trade: "waterproofing",
     layer: "finishes",
     instancing: "per_zone",
@@ -386,7 +459,7 @@ var TASK_TYPES = [
   },
   {
     id: "screed",
-    label: "Screed / leveling",
+    label: "Floor \u2014 screed / leveling",
     trade: "flooring",
     layer: "finishes",
     instancing: "per_zone",
@@ -400,7 +473,7 @@ var TASK_TYPES = [
   },
   {
     id: "floor_tile",
-    label: "Floor tiling",
+    label: "Floor \u2014 tiling",
     trade: "tiling",
     layer: "finishes",
     instancing: "per_zone",
@@ -415,7 +488,7 @@ var TASK_TYPES = [
   },
   {
     id: "wall_tile",
-    label: "Wall tiling / dado",
+    label: "Wall \u2014 tiling / dado",
     trade: "tiling",
     layer: "finishes",
     instancing: "per_zone",
@@ -427,14 +500,17 @@ var TASK_TYPES = [
   },
   {
     id: "paint",
-    label: "Painting",
+    label: "Wall \u2014 internal paint",
     trade: "painting",
     layer: "finishes",
     instancing: "per_zone",
     appliesTo: ["dry", "wet", "balcony", "common"],
     freedomSet: "room_finishing",
+    conceals: ["putty"],
     seq: [
-      { pred: "plaster", nature: "DESTRUCTIVE", reason: "quality", scope: SZ, note: "paint needs plastered surface" },
+      // R23 re-pointed (2026-07-11): paint goes over PUTTY, which goes over plaster. The plaster gate
+      // still holds transitively — putty cannot precede it — so no constraint is lost.
+      { pred: "putty", nature: "DESTRUCTIVE", reason: "quality", scope: SZ, note: "paint needs a puttied surface" },
       // R23
       { pred: "floor_tile", nature: "WEAK_PREF", reason: "quality", scope: SZ, note: "or paint-then-floor; protect either way" }
       // R26
@@ -442,7 +518,7 @@ var TASK_TYPES = [
   },
   {
     id: "switchplate",
-    label: "Switchplates / faceplates",
+    label: "Electrical \u2014 switchplates (final fix)",
     trade: "electrical",
     layer: "finishes",
     instancing: "per_zone",
@@ -456,7 +532,7 @@ var TASK_TYPES = [
   },
   {
     id: "ceiling_board",
-    label: "Ceiling boarding",
+    label: "Ceiling \u2014 boarding",
     trade: "ceiling",
     layer: "finishes",
     instancing: "per_zone",
@@ -469,7 +545,7 @@ var TASK_TYPES = [
   },
   {
     id: "pop_finish",
-    label: "POP / ceiling finish",
+    label: "Ceiling \u2014 POP finish",
     trade: "ceiling",
     layer: "finishes",
     instancing: "per_zone",
@@ -482,7 +558,7 @@ var TASK_TYPES = [
   },
   {
     id: "sanitary",
-    label: "Sanitaryware / fittings",
+    label: "Plumbing \u2014 sanitaryware & fittings (final fix)",
     trade: "plumbing",
     layer: "finishes",
     instancing: "per_zone",
@@ -498,7 +574,7 @@ var TASK_TYPES = [
   },
   {
     id: "door_shutter",
-    label: "Door shutters",
+    label: "Door \u2014 shutters",
     trade: "carpentry",
     layer: "finishes",
     instancing: "per_zone",
@@ -510,10 +586,54 @@ var TASK_TYPES = [
       // R32
     ]
   },
+  {
+    // NEW (2026-07-11) — "Window Grills" from the legacy set. The engine had window FRAMES only; the
+    // grill is a separate item, fitted much later, by a different trade.
+    id: "window_grill",
+    label: "Window \u2014 grills",
+    trade: "carpentry",
+    layer: "finishes",
+    instancing: "per_zone",
+    appliesTo: ["dry", "wet", "balcony", "common"],
+    freedomSet: "skin_fittings",
+    hostedBy: ["window_frame"],
+    seq: [
+      { pred: "window_frame", nature: "IMPOSSIBLE", reason: "logistics", scope: SZ, note: "the grill fixes to the window frame" }
+    ]
+  },
+  {
+    // NEW (2026-07-11) — "Fixtures" from the legacy set: lights, fans, fittings. The FINAL electrical
+    // fix. The skin_fittings freedom set already named it in a comment ("sheet also lists light
+    // fixtures (no task-type yet)") — now it exists.
+    id: "fixture",
+    label: "Electrical \u2014 fixtures (lights, fans)",
+    trade: "electrical",
+    layer: "finishes",
+    instancing: "per_zone",
+    appliesTo: ["dry", "wet", "balcony", "common"],
+    freedomSet: "skin_fittings",
+    hostedBy: ["wiring"],
+    seq: [
+      { pred: "wiring", nature: "IMPOSSIBLE", reason: "logistics", scope: SZ, note: "a fixture needs its wire" },
+      { pred: "paint", nature: "STRONG_PREF", reason: "quality", scope: SZ, note: "fit after paint \u2014 painting around a fitted light ruins both" }
+    ]
+  },
+  {
+    // NEW (2026-07-11) — "Decorative Installations" from the legacy set (cladding, panelling, feature work).
+    id: "decorative",
+    label: "Decorative installations",
+    trade: "finishing",
+    layer: "finishes",
+    instancing: "per_zone",
+    appliesTo: ["dry", "common"],
+    seq: [
+      { pred: "paint", nature: "STRONG_PREF", reason: "quality", scope: SZ, note: "decorative work lands on finished surfaces" }
+    ]
+  },
   // ════════ COMMON / EXTERNAL / LONG-LEAD — building / external ════════
   {
     id: "external_structure",
-    label: "External / fa\xE7ade structure",
+    label: "External \u2014 fa\xE7ade structure",
     trade: "civil",
     layer: "structure",
     instancing: "building",
@@ -522,7 +642,7 @@ var TASK_TYPES = [
   },
   {
     id: "facade_plaster",
-    label: "Fa\xE7ade plaster",
+    label: "External \u2014 fa\xE7ade plaster",
     trade: "plaster",
     layer: "finishes",
     instancing: "building",
@@ -534,8 +654,52 @@ var TASK_TYPES = [
     ]
   },
   {
+    // NEW (2026-07-11) — "External Painting" from the legacy set. The engine had ONE generic `paint`,
+    // which is the internal job: a different crew, different material, different weather window, and a
+    // different defect class. A bare generic that swallows both is exactly the ambiguity we are removing.
+    id: "external_paint",
+    label: "External \u2014 fa\xE7ade paint",
+    trade: "painting",
+    layer: "finishes",
+    instancing: "building",
+    appliesTo: ["external"],
+    freedomSet: "common_stream",
+    seq: [
+      { pred: "facade_plaster", nature: "DESTRUCTIVE", reason: "quality", scope: BW, note: "paint needs the plastered fa\xE7ade" }
+    ]
+  },
+  {
+    // NEW (2026-07-11) — "Terrace Waterproofing" from the legacy set. `waterproof` is the WET-AREA job
+    // (per zone, bathrooms/balconies). The terrace is a building-wide job at a different moment, and it
+    // is the single most expensive thing on the building to get wrong.
+    id: "terrace_waterproof",
+    label: "Terrace \u2014 waterproofing",
+    trade: "waterproofing",
+    layer: "finishes",
+    instancing: "building",
+    appliesTo: ["external"],
+    concealedBy: ["terrace_finish"],
+    seq: [
+      { pred: "floor_pour", nature: "IMPOSSIBLE", reason: "structural", scope: BW, note: "the terrace slab must be cast first" }
+    ]
+  },
+  {
+    // NEW (2026-07-11) — "Terrace Finishing" from the legacy set: the screed/tile layer that BURIES the
+    // waterproofing. Once this is down, a membrane defect is invisible until it leaks into the top floor.
+    id: "terrace_finish",
+    label: "Terrace \u2014 finishing",
+    trade: "flooring",
+    layer: "finishes",
+    instancing: "building",
+    appliesTo: ["external"],
+    conceals: ["terrace_waterproof"],
+    seq: [
+      { pred: "terrace_waterproof", nature: "DESTRUCTIVE", reason: "concealment", scope: BW, note: "the finish buries the membrane \u2014 never cover an untested one" }
+    ]
+  },
+  {
     id: "lift_shaft",
-    label: "Lift-shaft structure",
+    label: "Lift \u2014 shaft structure",
     trade: "civil",
     layer: "structure",
     instancing: "building",
@@ -544,7 +708,7 @@ var TASK_TYPES = [
   },
   {
     id: "lift_mechanism",
-    label: "Lift mechanism",
+    label: "Lift \u2014 mechanism",
     trade: "lift",
     layer: "services",
     instancing: "building",
@@ -558,7 +722,7 @@ var TASK_TYPES = [
   },
   {
     id: "site_grade",
-    label: "Site grading",
+    label: "Site \u2014 grading",
     trade: "civil",
     layer: "structure",
     instancing: "building",
@@ -567,7 +731,7 @@ var TASK_TYPES = [
   },
   {
     id: "site_development",
-    label: "Site development",
+    label: "Site \u2014 development",
     trade: "civil",
     layer: "finishes",
     instancing: "building",
@@ -584,7 +748,7 @@ var TASK_TYPES = [
   // `foundation`), run parallel to each other and to the unit work, and surface as one "Common areas"
   // stage in the timeline. Anchors are deliberately light — these are managed as a parallel stream.
   { id: "ca_parking", label: "Parking deck & markings", trade: "civil", layer: "structure", instancing: "building", appliesTo: [], seq: [{ pred: "foundation", nature: "IMPOSSIBLE", reason: "structural", scope: BW, note: "built on the substructure" }] },
-  { id: "ca_stair", label: "Common staircase", trade: "civil", layer: "structure", instancing: "building", appliesTo: [], seq: [{ pred: "foundation", nature: "IMPOSSIBLE", reason: "structural", scope: BW, note: "rises from the substructure" }] },
+  { id: "ca_stair", label: "Common staircase \u2014 structure", trade: "civil", layer: "structure", instancing: "building", appliesTo: [], seq: [{ pred: "foundation", nature: "IMPOSSIBLE", reason: "structural", scope: BW, note: "rises from the substructure" }] },
   { id: "ca_ugt", label: "Underground sump / tank", trade: "civil", layer: "structure", instancing: "building", appliesTo: [], seq: [{ pred: "foundation", nature: "IMPOSSIBLE", reason: "structural", scope: BW, note: "cast with the substructure" }] },
   { id: "ca_stp", label: "Sewage treatment plant (STP)", trade: "civil", layer: "structure", instancing: "building", appliesTo: [], seq: [{ pred: "foundation", nature: "IMPOSSIBLE", reason: "structural", scope: BW, note: "below-grade plant" }] },
   { id: "ca_compound", label: "Compound wall & gate", trade: "civil", layer: "structure", instancing: "building", appliesTo: [], seq: [{ pred: "foundation", nature: "IMPOSSIBLE", reason: "structural", scope: BW, note: "site boundary" }] },
@@ -596,8 +760,365 @@ var TASK_TYPES = [
   { id: "ca_solar", label: "Rooftop solar", trade: "electrical", layer: "services", instancing: "building", appliesTo: [], seq: [{ pred: "foundation", nature: "IMPOSSIBLE", reason: "structural", scope: BW, note: "roof-mounted PV" }] },
   { id: "ca_borewell", label: "Borewell", trade: "plumbing", layer: "services", instancing: "building", appliesTo: [], seq: [{ pred: "foundation", nature: "IMPOSSIBLE", reason: "structural", scope: BW, note: "water source" }] },
   { id: "ca_corridor", label: "Corridor & lobby finishes", trade: "finishing", layer: "finishes", instancing: "building", appliesTo: [], seq: [{ pred: "ca_stair", nature: "STRONG_PREF", reason: "logistics", scope: BW, note: "finish after the common structure" }] },
-  { id: "ca_landscaping", label: "Landscaping & hardscape", trade: "landscaping", layer: "finishes", instancing: "building", appliesTo: [], seq: [{ pred: "ca_compound", nature: "STRONG_PREF", reason: "logistics", scope: BW, note: "near handover, inside the boundary" }] }
+  { id: "ca_landscaping", label: "Landscaping & hardscape", trade: "landscaping", layer: "finishes", instancing: "building", appliesTo: [], seq: [{ pred: "ca_compound", nature: "STRONG_PREF", reason: "logistics", scope: BW, note: "near handover, inside the boundary" }] },
+  // NEW (2026-07-11) — the two closing stages the legacy expander had and the engine did not.
+  // `ca_stair` is the staircase STRUCTURE (civil); its finishing is a separate, much later job.
+  { id: "stair_finish", label: "Common staircase \u2014 finishing", trade: "finishing", layer: "finishes", instancing: "building", appliesTo: [], seq: [{ pred: "ca_stair", nature: "IMPOSSIBLE", reason: "structural", scope: BW, note: "finish the staircase that exists" }] },
+  // Snagging is anchored SOFT on purpose: it is a WALK of whatever is finished. A hard gate on every
+  // finishing type would make it unavailable until the last zone in the building is done — the opposite
+  // of how a snag list is actually built (you start walking as units complete).
+  { id: "snagging", label: "Snagging & handover", trade: "finishing", layer: "finishes", instancing: "building", appliesTo: [], seq: [
+    { pred: "paint", nature: "STRONG_PREF", reason: "quality", scope: BW, note: "walk the finished units" },
+    { pred: "sanitary", nature: "STRONG_PREF", reason: "quality", scope: BW, note: "fittings in before the walk" }
+  ] }
 ];
+var QC = {
+  ground_clearance: [
+    { question: "The full building footprint plus working margin is cleared \u2014 no vegetation, rubble or old foundations left in it", is_critical: true },
+    { question: "Topsoil is stripped and stockpiled separately, not mixed into the spoil", is_critical: false },
+    { question: "An access route for material vehicles is established and passable", is_critical: false }
+  ],
+  site_marking: [
+    { question: "Grid lines and building corners are marked against the approved drawing, with reference pillars/offsets that survive the dig", is_critical: true },
+    { question: "Setback distances to every boundary match the sanctioned plan", is_critical: false },
+    { question: "The benchmark level (datum) is fixed on site and recorded", is_critical: false }
+  ],
+  excavation: [
+    { question: "The excavation reaches the drawing's depth AND firm strata at every footing \u2014 no footing sitting on loose fill", is_critical: true },
+    { question: "Pit sides are stable or shored, and the pit bottom is clean of loose soil", is_critical: false },
+    { question: "Pit dimensions match the footing size plus working space", is_critical: false }
+  ],
+  pcc_bed: [
+    { question: "PCC covers the full footing area and is levelled to the marked level \u2014 no steel will rest on bare earth", is_critical: true },
+    { question: "PCC thickness matches the drawing", is_critical: false },
+    { question: "The PCC has hardened before reinforcement is placed on it", is_critical: false }
+  ],
+  footing: [
+    { question: "Cover blocks are in place under and around the footing steel \u2014 no bar is touching the PCC or the earth", is_critical: true },
+    { question: "Bar size, spacing and mesh match the drawing", is_critical: false },
+    { question: "The footing is poured in one continuous operation and compacted \u2014 no honeycombing at the edges", is_critical: false }
+  ],
+  footing_column: [
+    { question: "Starter bars are held plumb at the correct grid position, with the drawing's lap length", is_critical: true },
+    { question: "The starter cage is tied and boxed square before the pour", is_critical: false },
+    { question: "Concrete at the kicker is compacted \u2014 no honeycombing where the column leaves the footing", is_critical: false }
+  ],
+  backfill: [
+    { question: "Backfill is placed and compacted in LAYERS \u2014 not tipped in one lift", is_critical: true },
+    { question: "The fill material carries no debris, wood or organic matter", is_critical: false },
+    { question: "Fill is raised evenly on both sides of the footing so nothing is pushed out of line", is_critical: false }
+  ],
+  plinth_beam: [
+    { question: "Cover blocks are under and around the plinth-beam steel on every face \u2014 no bar against the earth or the shutter", is_critical: true },
+    { question: "The beam is cast at the marked level and ties every column at plinth", is_critical: false },
+    { question: "The beam faces are compacted and free of honeycombing", is_critical: false }
+  ],
+  plinth_fill: [
+    { question: "The fill is compacted in layers up to the underside of the slab \u2014 no soft spots or voids", is_critical: true },
+    { question: "Anti-termite treatment is applied where specified, before the fill is closed", is_critical: false },
+    { question: "The finished fill is level across the whole plinth", is_critical: false }
+  ],
+  plinth_slab: [
+    { question: "Cover blocks are under the slab mesh \u2014 the steel is nowhere resting on the fill", is_critical: true },
+    { question: "Slab thickness and mesh match the drawing", is_critical: false },
+    { question: "The finished slab is level, with no ponding", is_critical: false }
+  ],
+  foundation: [
+    { question: "The mass-concrete / anti-termite bed is continuous across the plinth \u2014 no gaps at the edges", is_critical: true },
+    { question: "Levels are checked against the benchmark before the superstructure starts", is_critical: false },
+    { question: "Every substructure item below is complete and signed off", is_critical: false }
+  ],
+  columns: [
+    { question: "Cover blocks are on EVERY face of the column steel \u2014 no bar visible against the shutter", is_critical: true },
+    { question: "Lap length and lap position match the drawing, and laps are staggered", is_critical: false },
+    { question: "The column is plumb and boxed square; the base is compacted with no honeycombing", is_critical: false }
+  ],
+  floor_shutter: [
+    { question: "Props stand on a firm base, are braced, and the formwork is levelled to the slab soffit line", is_critical: true },
+    { question: "Shutter joints are tight \u2014 no gaps that will bleed slurry out of the pour", is_critical: false },
+    { question: "Shutter faces are cleaned and oiled before any steel is laid on them", is_critical: false }
+  ],
+  floor_rebar: [
+    { question: "Cover blocks are under ALL slab and beam steel \u2014 no bar is resting directly on the shuttering", is_critical: true },
+    { question: "Bar size, spacing and lap length match the drawing; laps are staggered and tied", is_critical: false },
+    { question: "Conduits and sleeves are laid in and tied down before the pour, so they cannot float", is_critical: false }
+  ],
+  floor_pour: [
+    { question: "The beams and slab are poured in ONE continuous operation \u2014 no cold joint anywhere in the deck", is_critical: true },
+    { question: "The concrete is vibrated/compacted and the surface levelled to the marked level", is_critical: false },
+    { question: "Curing is started within the specified time and kept up (ponding or wet covering)", is_critical: false }
+  ],
+  shuttering_removal: [
+    { question: "The concrete has cured the FULL specified period before any prop comes out", is_critical: true },
+    { question: "Props are struck in the correct order \u2014 no span is de-propped suddenly", is_critical: false },
+    { question: "The soffit is inspected after de-prop: no honeycombing, no sagging, no exposed steel", is_critical: false }
+  ],
+  blockwork: [
+    { question: "Walls are plumb and in line with the grid, with the first course on a clean, level bed", is_critical: true },
+    { question: "Joints are fully filled with mortar and the blocks are wetted before laying", is_critical: false },
+    { question: "Door and window openings are at the drawing's size and position", is_critical: false }
+  ],
+  conduit: [
+    { question: "Chases are cut without cutting through reinforcement or into a structural member", is_critical: true },
+    { question: "Conduits run to the drawing's switch and point positions and are fixed so plaster cannot move them", is_critical: false },
+    { question: "Junction and switch boxes are set flush and level with the finished wall line", is_critical: false }
+  ],
+  in_wall_plumbing: [
+    { question: "Chases are cut without cutting into a structural member", is_critical: true },
+    { question: "Concealed runs are fixed and supported in the chase \u2014 no crushed sections, no sharp bends", is_critical: false },
+    { question: "Every open pipe end is capped so debris cannot enter before the fittings go on", is_critical: false }
+  ],
+  plumb_rough: [
+    { question: "Rough-in positions match the sanitaryware layout \u2014 centre distances for the WC, basin and mixer", is_critical: true },
+    { question: "Waste lines are laid to the specified fall towards the drain", is_critical: false },
+    { question: "All open ends are capped before anything is concealed", is_critical: false }
+  ],
+  pressure_test: [
+    { question: "The line held the specified test pressure for the specified duration with NO drop", is_critical: true },
+    { question: "The test covered every line in the zone, including the concealed runs", is_critical: false },
+    { question: "Nothing was concealed before the test passed, and the result is recorded", is_critical: false }
+  ],
+  riser: [
+    { question: "Risers are plumb and bracketed at the specified spacing, supported at every floor", is_critical: true },
+    { question: "Riser size and material match the drawing", is_critical: false },
+    { question: "The riser is pressure-tested before the shaft is closed up", is_critical: false }
+  ],
+  door_frame: [
+    { question: "The frame is plumb, square and set at the correct finished-floor height", is_critical: true },
+    { question: "The frame is anchored with the specified hold-fasts into the masonry", is_critical: false },
+    { question: "The gap between frame and masonry is packed solid \u2014 no voids at the reveal", is_critical: false }
+  ],
+  window_frame: [
+    { question: "The frame is plumb and square, set to the drawing's sill level", is_critical: true },
+    { question: "The frame is anchored into the masonry and sealed at the reveal against water ingress", is_critical: false },
+    { question: "A drip or sill slope is provided so water runs away from the opening", is_critical: false }
+  ],
+  ceiling_frame: [
+    { question: "Hangers are anchored into the slab soffit itself \u2014 never into plaster or a service", is_critical: true },
+    { question: "The grid is level across the whole room, checked against the finished ceiling line", is_critical: false },
+    { question: "The perimeter channel is fixed to the walls all round, level and straight", is_critical: false }
+  ],
+  overhead_service: [
+    { question: "Every service in the void is complete AND tested before the ceiling can be boarded", is_critical: true },
+    { question: "Services are supported independently \u2014 nothing hangs off the ceiling grid", is_critical: false },
+    { question: "Access is left where a fitting will have to be reached later", is_critical: false }
+  ],
+  void_wiring: [
+    { question: "Void wiring is complete and tested before the ceiling is closed", is_critical: true },
+    { question: "Wiring in the void is run in conduit or otherwise protected \u2014 never loose across the grid", is_critical: false },
+    { question: "Light-point positions in the void match the ceiling layout", is_critical: false }
+  ],
+  wiring: [
+    { question: "Every circuit is tested for continuity and insulation before the board is energised", is_critical: true },
+    { question: "Wire size matches the circuit load and the colour code is respected", is_critical: false },
+    { question: "There are no joints inside the conduit runs \u2014 terminations only at boxes", is_critical: false }
+  ],
+  switchboard: [
+    { question: "The board is earthed, the circuits are labelled, and the MCB ratings match the circuits they protect", is_critical: true },
+    { question: "The board is fixed plumb at the specified height and is accessible", is_critical: false },
+    { question: "Incoming and outgoing cables are dressed and terminated tight", is_critical: false }
+  ],
+  plaster: [
+    { question: "The surface is plumb and true to a straight-edge, and sounds solid when tapped \u2014 no hollow patches", is_critical: true },
+    { question: "Junctions where masonry meets concrete are meshed before plastering", is_critical: false },
+    { question: "The plaster is kept wet and cured for the specified period", is_critical: false }
+  ],
+  putty: [
+    { question: "The surface is smooth and true \u2014 no waves, ridges or sanding marks visible under a raking light", is_critical: true },
+    { question: "Putty is applied only on a fully cured, dry plaster surface", is_critical: false },
+    { question: "The specified number of coats is applied, each sanded before the next", is_critical: false }
+  ],
+  waterproof: [
+    { question: "The membrane is CONTINUOUS \u2014 turned up the wall to the specified height, through every corner and around every pipe penetration", is_critical: true },
+    { question: "A pond test was held for the specified duration with no leak below", is_critical: false },
+    { question: "The membrane is undamaged when the screed goes over it", is_critical: false }
+  ],
+  screed: [
+    { question: "The falls are correct \u2014 water runs to the drain with no ponding anywhere", is_critical: true },
+    { question: "The screed is bonded \u2014 no hollow sound when tapped", is_critical: false },
+    { question: "The screed level leaves the right thickness for the tile and the finished-floor level", is_critical: false }
+  ],
+  floor_tile: [
+    { question: "No hollow tiles \u2014 every tile is fully bedded (tap test)", is_critical: true },
+    { question: "Joints are straight and even, and lippage between tiles is within tolerance", is_critical: false },
+    { question: "Wet-area floors fall to the drain, and the level matches at the door threshold", is_critical: false }
+  ],
+  wall_tile: [
+    { question: "No hollow tiles, and the tiles are plumb with joints lining through with the floor", is_critical: true },
+    { question: "Cut tiles are placed at the least visible position, with clean cut edges", is_critical: false },
+    { question: "Tiling reaches the specified dado height and is cut cleanly around every penetration", is_critical: false }
+  ],
+  paint: [
+    { question: "Coverage is even under a raking light \u2014 no patches, brush marks or roller lines", is_critical: true },
+    { question: "The specified number of coats is applied on a dry, puttied surface", is_critical: false },
+    { question: "Cut-ins are clean \u2014 no paint on switches, frames or floors", is_critical: false }
+  ],
+  switchplate: [
+    { question: "Every switch and socket is tested live and its circuit is labelled", is_critical: true },
+    { question: "Plates sit flush and level on the finished wall, fully covering the box", is_critical: false },
+    { question: "There is no wall damage or paint marking around the plate", is_critical: false }
+  ],
+  ceiling_board: [
+    { question: "The void was signed off \u2014 services complete and TESTED \u2014 before the boarding closed it", is_critical: true },
+    { question: "Board joints fall on the grid and are staggered, with screws set below the surface", is_critical: false },
+    { question: "Cut-outs for lights and services are clean and at the layout's positions", is_critical: false }
+  ],
+  pop_finish: [
+    { question: "The finished surface is level and true \u2014 no sagging, no visible joints, no corner cracks", is_critical: true },
+    { question: "Corners and edges are straight and sharp", is_critical: false },
+    { question: "Cut-outs around every fitting are neat", is_critical: false }
+  ],
+  sanitary: [
+    { question: "Every fitting is leak-tested after installation \u2014 supply AND waste", is_critical: true },
+    { question: "Fittings are level, at the drawing's height, and firmly anchored", is_critical: false },
+    { question: "Sealing at every wall junction is complete and clean", is_critical: false }
+  ],
+  door_shutter: [
+    { question: "The shutter opens, closes and latches freely \u2014 no binding anywhere in its swing", is_critical: true },
+    { question: "Gaps around the shutter are even, with the bottom clearance suiting the finished floor", is_critical: false },
+    { question: "All hardware \u2014 hinges, lock, stopper \u2014 is fitted and working", is_critical: false }
+  ],
+  window_grill: [
+    { question: "The grill is anchored into the structure, not merely into the frame \u2014 it cannot be prised out", is_critical: true },
+    { question: "The grill is square and level, with welds ground clean", is_critical: false },
+    { question: "The grill is primed and coated against rust before handover", is_critical: false }
+  ],
+  fixture: [
+    { question: "Every fixture is tested live and works \u2014 light, fan speed, switch", is_critical: true },
+    { question: "Each fixture is fixed to a proper anchor \u2014 a fan hooks into the slab hook, never into the ceiling board", is_critical: false },
+    { question: "Positions match the lighting layout, with no paint marks or damage on the fitting", is_critical: false }
+  ],
+  decorative: [
+    { question: "Fixings go into a proper substrate and the installation is secure", is_critical: true },
+    { question: "Alignment and level are true, with consistent joints", is_critical: false },
+    { question: "Adjacent finished surfaces are protected \u2014 no damage to paint or flooring", is_critical: false }
+  ],
+  external_structure: [
+    { question: "External structural elements are plumb and as per drawing, with no honeycombing or exposed steel on the outer face", is_critical: true },
+    { question: "Drip courses and edges are formed where specified", is_critical: false },
+    { question: "Any embedded fixings for the fa\xE7ade are in place before the finish goes on", is_critical: false }
+  ],
+  facade_plaster: [
+    { question: "The external plaster is crack-free and solid to the tap \u2014 no hollow patches to fall away later", is_critical: true },
+    { question: "Drip grooves are formed above openings so water cannot track back into the wall", is_critical: false },
+    { question: "The plaster is kept wet and cured \u2014 external plaster dries fast and cracks if it is not", is_critical: false }
+  ],
+  external_paint: [
+    { question: "The surface is fully sealed \u2014 primer plus the specified coats, with no thin or patchy areas", is_critical: true },
+    { question: "Cracks and gaps are filled and primed before painting", is_critical: false },
+    { question: "Painted in suitable weather \u2014 no runs, no lap marks", is_critical: false }
+  ],
+  terrace_waterproof: [
+    { question: "The membrane is CONTINUOUS \u2014 turned up at every parapet and sealed around every penetration", is_critical: true },
+    { question: "A flood test was held for the specified duration with no leak into the floor below", is_critical: false },
+    { question: "Falls run to the outlets \u2014 no ponding anywhere on the terrace", is_critical: false }
+  ],
+  terrace_finish: [
+    { question: "The finish was laid only AFTER the flood test passed, and the membrane is undamaged beneath it", is_critical: true },
+    { question: "The falls to the outlets are maintained in the finished surface", is_critical: false },
+    { question: "The parapet junction and every outlet are sealed and clear", is_critical: false }
+  ],
+  lift_shaft: [
+    { question: "Shaft plumb and dimensions are within the lift supplier's tolerance, top to bottom", is_critical: true },
+    { question: "Pit depth and headroom match the supplier's drawing", is_critical: false },
+    { question: "The shaft is clean and dry, and no service crosses it", is_critical: false }
+  ],
+  lift_mechanism: [
+    { question: "The lift is commissioned and load-tested by the supplier, with the certificate on record", is_critical: true },
+    { question: "Door interlocks, emergency stop and the alarm are all tested working", is_critical: false },
+    { question: "The machine room / control panel is complete and accessible", is_critical: false }
+  ],
+  site_grade: [
+    { question: "Finished levels drain AWAY from the building on every side", is_critical: true },
+    { question: "Filled areas are compacted, not left loose", is_critical: false },
+    { question: "Levels match the approved site plan", is_critical: false }
+  ],
+  site_development: [
+    { question: "External drainage, paving and boundary work drain away from the structure and hold their level", is_critical: true },
+    { question: "No settlement or ponding shows after the first rain or water test", is_critical: false },
+    { question: "All debris and temporary works are removed from the site", is_critical: false }
+  ],
+  ca_parking: [
+    { question: "The deck falls to its drains \u2014 no ponding \u2014 and the surface is non-slip", is_critical: true },
+    { question: "Bay markings and drive lanes match the approved layout and its dimensions", is_critical: false },
+    { question: "Headroom clearance meets the drawing at every point, including under beams", is_critical: false }
+  ],
+  ca_stair: [
+    { question: "Every riser and tread in a flight is EQUAL \u2014 there is no odd step", is_critical: true },
+    { question: "Landing levels and headroom match the drawing", is_critical: false },
+    { question: "The soffit is free of honeycombing and exposed steel", is_critical: false }
+  ],
+  ca_ugt: [
+    { question: "The tank holds water \u2014 leak-tested with no seepage through the walls or base", is_critical: true },
+    { question: "The internal finish is smooth and suitable for potable water where it stores drinking water", is_critical: false },
+    { question: "Cover, ventilation and access are provided and sealed against contamination", is_critical: false }
+  ],
+  ca_stp: [
+    { question: "The plant is commissioned and tested to its design flow, with the certificate on record", is_critical: true },
+    { question: "The tanks are leak-tested watertight BEFORE backfilling", is_critical: false },
+    { question: "Inlet and outlet levels and connections match the drawing", is_critical: false }
+  ],
+  ca_compound: [
+    { question: "The wall is plumb on a proper foundation, with movement joints at the specified spacing", is_critical: true },
+    { question: "The gate is plumb, swings or slides freely, and is anchored to a proper post", is_critical: false },
+    { question: "The coping sheds water clear of the wall face", is_critical: false }
+  ],
+  ca_lift: [
+    { question: "The lift is commissioned, load-tested and safety-tested by the supplier, with the certificate on record", is_critical: true },
+    { question: "Shaft, pit and headroom met the supplier's requirement before installation began", is_critical: false },
+    { question: "Landing doors align and interlock at every floor", is_critical: false }
+  ],
+  ca_transformer: [
+    { question: "The transformer is commissioned and tested by the licensed agency, with the statutory approvals on record", is_critical: true },
+    { question: "Earthing is complete and tested to the specified resistance", is_critical: false },
+    { question: "The enclosure is secure, ventilated, and clear of stored material", is_critical: false }
+  ],
+  ca_generator: [
+    { question: "The DG is load-tested and the changeover to mains works automatically", is_critical: true },
+    { question: "Earthing and exhaust routing are complete and compliant", is_critical: false },
+    { question: "Fuel storage and the acoustic enclosure meet the specified norms", is_critical: false }
+  ],
+  ca_oht: [
+    { question: "The tank holds water \u2014 leak-tested with no seepage through the base or walls", is_critical: true },
+    { question: "The pump set delivers to every floor at the design pressure", is_critical: false },
+    { question: "Overflow, vent and cleaning access are all provided", is_critical: false }
+  ],
+  ca_fire: [
+    { question: "The system is commissioned, pressure-tested and approved by the fire authority", is_critical: true },
+    { question: "The pumps start automatically on a pressure drop and the alarm sounds on every floor", is_critical: false },
+    { question: "Sprinkler and hydrant coverage matches the approved fire drawing", is_critical: false }
+  ],
+  ca_solar: [
+    { question: "The array is commissioned and generating, with the inverter/meter reading verified", is_critical: true },
+    { question: "The mounting is anchored WITHOUT penetrating the terrace waterproofing", is_critical: false },
+    { question: "Cabling is UV-protected and routed clear of walkways", is_critical: false }
+  ],
+  ca_borewell: [
+    { question: "The yield is tested and recorded, and the water is tested for potability", is_critical: true },
+    { question: "The casing is sealed at the top so surface water cannot enter the bore", is_critical: false },
+    { question: "The pump is set at the correct depth and delivers to the tank", is_critical: false }
+  ],
+  ca_corridor: [
+    { question: "Floor, wall and ceiling finishes run continuous and level through the corridor \u2014 no lippage at the joints", is_critical: true },
+    { question: "Lighting and any emergency signage are working", is_critical: false },
+    { question: "No damage to the finishes has been left by the trades that followed", is_critical: false }
+  ],
+  stair_finish: [
+    { question: "Every riser and tread is EQUAL after finishing \u2014 the finish has not created an odd step", is_critical: true },
+    { question: "The nosing is consistent and the surface is non-slip", is_critical: false },
+    { question: "The handrail is anchored securely and set at the specified height", is_critical: false }
+  ],
+  ca_landscaping: [
+    { question: "Levels drain away from the structure \u2014 no water is trapped against the building", is_critical: true },
+    { question: "Paving is laid to fall and does not rock underfoot", is_critical: false },
+    { question: "Planting and irrigation are complete, with no debris left in the soil", is_critical: false }
+  ],
+  snagging: [
+    { question: "Every snag on the list is closed AND re-inspected \u2014 nothing is signed off untouched", is_critical: true },
+    { question: "All services are tested working at handover \u2014 water, power, drainage, lift", is_critical: false },
+    { question: "The unit is cleaned, and all protection and debris are removed", is_critical: false }
+  ]
+};
 var FREEDOM_SETS = [
   {
     id: "muscle_followers",
@@ -622,8 +1143,8 @@ var FREEDOM_SETS = [
   {
     id: "skin_fittings",
     label: "Skin-phase fittings",
-    members: ["switchplate", "sanitary", "door_shutter"],
-    // sheet also lists light fixtures (no task-type yet)
+    members: ["switchplate", "sanitary", "door_shutter", "fixture", "window_grill"],
+    // `fixture` IS the sheet's light fixtures — authored 2026-07-11
     earliestAfter: null,
     latestBefore: null,
     scope: "per_zone",
@@ -641,7 +1162,7 @@ var FREEDOM_SETS = [
   {
     id: "common_stream",
     label: "Common-area stream vs unit work",
-    members: ["facade_plaster", "site_development"],
+    members: ["facade_plaster", "external_paint", "site_development"],
     earliestAfter: null,
     latestBefore: null,
     scope: "building_wide",
@@ -651,6 +1172,7 @@ var FREEDOM_SETS = [
 var CANONICAL_SEQUENCE = [
   // foundation / groundwork (substructure) — the first stage, building singletons
   "ground_clearance",
+  "site_marking",
   "excavation",
   "pcc_bed",
   "footing",
@@ -658,11 +1180,13 @@ var CANONICAL_SEQUENCE = [
   "backfill",
   "plinth_beam",
   "plinth_fill",
+  "plinth_slab",
   "foundation",
-  // structure (bones)
+  // structure (bones) — the floor cycle: shutter → reinforce → pour → cure/de-prop → walls
   "columns",
-  "beams",
-  "slab",
+  "floor_shutter",
+  "floor_rebar",
+  "floor_pour",
   "shuttering_removal",
   "blockwork",
   // services (muscle) — wall services, then ceiling-void services
@@ -670,6 +1194,7 @@ var CANONICAL_SEQUENCE = [
   "in_wall_plumbing",
   "plumb_rough",
   "pressure_test",
+  "riser",
   "door_frame",
   "window_frame",
   "wiring",
@@ -677,8 +1202,9 @@ var CANONICAL_SEQUENCE = [
   "ceiling_frame",
   "overhead_service",
   "void_wiring",
-  // finishes (skin) — plaster → wet-floor stack → tiling → ceiling finish → paint → fittings
+  // finishes (skin) — plaster → putty → wet-floor stack → tiling → ceiling finish → paint → fittings
   "plaster",
+  "putty",
   "waterproof",
   "screed",
   "floor_tile",
@@ -689,9 +1215,15 @@ var CANONICAL_SEQUENCE = [
   "switchplate",
   "sanitary",
   "door_shutter",
+  "window_grill",
+  "fixture",
+  "decorative",
   // common / external / long-lead
   "external_structure",
   "facade_plaster",
+  "external_paint",
+  "terrace_waterproof",
+  "terrace_finish",
   "lift_shaft",
   "lift_mechanism",
   "site_grade",
@@ -710,7 +1242,10 @@ var CANONICAL_SEQUENCE = [
   "ca_solar",
   "ca_borewell",
   "ca_corridor",
-  "ca_landscaping"
+  "stair_finish",
+  "ca_landscaping",
+  // the closing stage
+  "snagging"
 ];
 function canonicalRank(lib = LIBRARY) {
   const m = /* @__PURE__ */ new Map();
@@ -720,7 +1255,7 @@ function canonicalRank(lib = LIBRARY) {
   return m;
 }
 function buildLibrary() {
-  const taskTypes = new Map(TASK_TYPES.map((t) => [t.id, t]));
+  const taskTypes = new Map(TASK_TYPES.map((t) => [t.id, { ...t, qc: QC[t.id] ?? [] }]));
   const freedomSets = new Map(FREEDOM_SETS.map((f) => [f.id, f]));
   return { taskTypes, freedomSets };
 }
@@ -744,6 +1279,14 @@ function validateLibrary(lib = LIBRARY) {
       if (!ids.has(m)) issues.push({ kind: "unknown_member", detail: `freedomSet ${f.id} \u2192 unknown member '${m}'` });
     for (const a of [f.earliestAfter, f.latestBefore])
       if (a && !ids.has(a)) issues.push({ kind: "unknown_anchor", detail: `freedomSet ${f.id} \u2192 unknown anchor '${a}'` });
+  }
+  for (const t of ids.values()) {
+    const qc = t.qc ?? [];
+    if (qc.length !== 3) issues.push({ kind: "qc_count", detail: `task-type '${t.id}' has ${qc.length} QC checks (need exactly 3)` });
+    const crit = qc.filter((q) => q.is_critical).length;
+    if (crit !== 1) issues.push({ kind: "qc_critical", detail: `task-type '${t.id}' has ${crit} critical QC checks (need exactly 1)` });
+    for (const q of qc)
+      if (!q.question.trim()) issues.push({ kind: "qc_empty", detail: `task-type '${t.id}' has an empty QC question` });
   }
   const cycle = findAbstractCycle(lib);
   if (cycle) issues.push({ kind: "cycle", detail: `authored cycle: ${cycle.join(" \u2192 ")}` });
@@ -1286,7 +1829,7 @@ function slugifyTaskId(text) {
 }
 function gatewayAnchor(layer) {
   if (layer === "structure")
-    return { pred: "slab", nature: SAFE_NATURE, reason: "structural", scope: { kind: "same_floor" }, note: "loose: after the floor structure (needs review)" };
+    return { pred: "floor_pour", nature: SAFE_NATURE, reason: "structural", scope: { kind: "same_floor" }, note: "loose: after the floor structure (needs review)" };
   return { pred: "blockwork", nature: SAFE_NATURE, reason: "logistics", scope: { kind: "same_zone" }, note: "loose: after blockwork gateway (needs review)" };
 }
 function validateClassification(raw, ctx, lib = LIBRARY, confidenceThreshold = 0.55) {
@@ -1513,13 +2056,40 @@ async function persistGraph(supabase, project, graph) {
     const { error } = await supabase.from("site_tasks").update({ seq_no: u.seq_no }).eq("task_id", u.task_id);
     if (error) throw new Error(`update seq_no for ${u.task_id}: ${error.message}`);
   }
+  const qcInserted = await fanOutQc(supabase, project);
   return {
     inserted: plan.toInsert.length,
     updated: plan.toUpdateSeq.length,
     deleted: plan.toDeleteIds.length,
     keptManual: plan.keptManual,
-    keptManualOrder: plan.keptManualOrder
+    keptManualOrder: plan.keptManualOrder,
+    qcInserted
   };
+}
+async function fanOutQc(supabase, project, lib = LIBRARY) {
+  const { data: tasks, error: tErr } = await supabase.from("site_tasks").select("task_id, task_type_id, site_task_qc(task_id)").eq("project_id", project.project_id);
+  if (tErr) throw new Error(`load tasks for QC fan-out: ${tErr.message}`);
+  const rows = tasks ?? [];
+  if (!rows.length) return 0;
+  const hasQc = new Set(rows.filter((r) => (r.site_task_qc?.length ?? 0) > 0).map((r) => r.task_id));
+  const toInsert = [];
+  for (const t of rows) {
+    if (hasQc.has(t.task_id)) continue;
+    const type = t.task_type_id ? lib.taskTypes.get(t.task_type_id) : void 0;
+    for (const [i, q] of (type?.qc ?? []).entries()) {
+      toInsert.push({
+        task_id: t.task_id,
+        org_id: project.org_id,
+        question: q.question,
+        is_critical: q.is_critical,
+        seq: i + 1
+      });
+    }
+  }
+  if (!toInsert.length) return 0;
+  const { error } = await supabase.from("site_task_qc").insert(toInsert);
+  if (error) throw new Error(`insert QC: ${error.message}`);
+  return toInsert.length;
 }
 
 // src/lib/siteOps/engine/viewModel.ts

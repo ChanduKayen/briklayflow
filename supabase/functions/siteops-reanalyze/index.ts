@@ -16,7 +16,8 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { decompose } from '../whatsapp-webhook/_siteops_extract.ts'
-import { sweepStaleSiteopsConvos, type SweepResult } from '../whatsapp-webhook/_siteops_sweep.ts'
+import { sweepStaleSiteopsConvos, flushAbandonedHeldReadbacks, type SweepResult } from '../whatsapp-webhook/_siteops_sweep.ts'
+import { send } from '../whatsapp-webhook/_format.ts'
 import {
   decideHarvest, distillSignal, planEnrichmentMerge,
   type PendingEvent, type HarvestObject, type HarvestType,
@@ -55,6 +56,15 @@ serve(async (req) => {
   if (!preview) {
     try { sweep = await sweepStaleSiteopsConvos(supabase, { now }) }
     catch (e) { sweep = { error: (e as Error).message }; console.error('[reanalyze:sweep] failed (harvest unaffected):', (e as Error).message) }
+  }
+
+  // C2 — the 2-min HELD-FLUSH also rides this tick as an HOURLY BELT (the dedicated 2-min cron hits
+  // siteops-held-flush; this ensures an abandoned held summary is delivered even if that cron isn't scheduled).
+  // Idempotent (it abandons the convo), so the two drivers can't double-flush. Skipped on preview; wrapped.
+  if (!preview) {
+    try {
+      await flushAbandonedHeldReadbacks(supabase, (to, body, org) => send(supabase, to, { kind: 'text', body }, { org_id: org }), { now })
+    } catch (e) { console.error('[reanalyze:held-flush] failed (harvest unaffected):', (e as Error).message) }
   }
 
   // No AI key → we cannot re-decompose; leave the markers PENDING (do not clear) for a run that can.

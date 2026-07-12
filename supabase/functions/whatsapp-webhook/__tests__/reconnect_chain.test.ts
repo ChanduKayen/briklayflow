@@ -22,6 +22,9 @@ const emptyDec = JSON.stringify({ project_hint: null, items: [] })
 const decProgress = JSON.stringify({ project_hint: null, items: [progress('transformer resolved')] })
 const R_RESOLVE = (id: string) => JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: true, updates: [{ target_id: id, target_kind: 'issue', action: 'resolve', confidence: 'high', closure_explicit: true, reason: 'cleared' }] } })
 const R_BOTH_FALSE = JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: false, updates: [] } })
+// The recall floor is the model's MEANING-ranked nearest now (med asks; low/[] do not). The lexical belt that
+// used to raise this ask on shared spelling is image-only since 2026-07-09.
+const R_NEAREST_MED = JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: false, updates: [], nearest: [{ target_id: 'iss-tfmr', target_kind: 'issue', plausibility: 'med', action: 'progress', closure_explicit: false, reason: 'same subject: the transformer' }] } })
 const model = (dec: string, resolve: string) => (_s: string, user: string): Promise<string> =>
   Promise.resolve(user.startsWith('CANDIDATES:') ? resolve : dec)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -49,7 +52,7 @@ suite('siteops — reconnection chain (ask → answer → apply, end-to-end)', (
     const tfmrBI = { kind: 'issue' as const, id: 'iss-tfmr', orgId: ORG, projectId: 'P1', projectName: 'ASM Elite', title: 'transformer humming near the gate', taskName: null, cause: 'other' }
     const seed: Seed = { ...base(), projects: [{ project_id: 'P1', name: 'ASM Elite' }], problems: { 'iss-tfmr': { id: 'iss-tfmr', title: 'transformer humming near the gate', project_id: 'P1', status: 'OPEN' } }, chase_batches: [{ id: 'b1', items: [tfmrBI] }] }
     const fake = fakeSupabase(seed)
-    await runSiteops(ctxFor(fake), 'transformer resolved', { callModel: model(decProgress, R_BOTH_FALSE) })
+    await runSiteops(ctxFor(fake), 'transformer resolved', { callModel: model(decProgress, R_NEAREST_MED) })
 
     const conv = fake.writesTo('wa_conversations').find((w) => w.payload?.slots_so_far?.kind === 'siteops_batch_collision')
     expect(!!conv).toBe(true)                                        // asked (step-2 floor)

@@ -16,9 +16,9 @@
 // Requires the additive columns in migration 20260628000000 (node_key, task_type_id, zone_id,
 // placement_source, order_source, needs_review, binding).
 
-import type { ConcreteGraph, NodeId, TaskNode } from './types'
+import type { ConcreteGraph, NodeId, TaskNode, Library } from './types'
 import { buildAdjacency } from './instantiate'
-import { isHardNature } from './library'
+import { isHardNature, LIBRARY } from './library'
 
 // ── row shapes ───────────────────────────────────────────────────────────────
 /** The subset of an existing site_tasks row reconciliation cares about. */
@@ -136,7 +136,10 @@ export function reconcile(existing: ExistingRow[], fresh: PersistRow[]): Reconci
 }
 
 // ── integration write (injected client; RLS-scoped) ──────────────────────────
-export interface WriteResult { inserted: number; updated: number; deleted: number; keptManual: number; keptManualOrder: number }
+export interface WriteResult { inserted: number; updated: number; deleted: number; keptManual: number; keptManualOrder: number; qcInserted: number }
+
+/** One authored QC check, fanned out onto a task instance (which owns the answer slot). */
+export interface QcInsertRow { task_id: string; org_id: string; question: string; is_critical: boolean; seq: number }
 
 /**
  * Persist (or re-reconcile) a project's site_tasks from an already-instantiated graph.
@@ -173,13 +176,73 @@ export async function persistGraph(
     if (error) throw new Error(`update seq_no for ${u.task_id}: ${error.message}`)
   }
 
+  const qcInserted = await fanOutQc(supabase, project)
+
   return {
     inserted: plan.toInsert.length,
     updated: plan.toUpdateSeq.length,
     deleted: plan.toDeleteIds.length,
     keptManual: plan.keptManual,
     keptManualOrder: plan.keptManualOrder,
+    qcInserted,
   }
+}
+
+/**
+ * QC FAN-OUT — every task in the project ends up holding its TYPE's authored checks.
+ *
+ * This is the door QC coverage hangs off, and it is deliberately the SAME door that creates tasks: the
+ * setup wizard, the Sequence view and the WhatsApp materializer all reach persistGraph, so there is no
+ * path that can produce a task without its checks. (The old design generated QC from a browser page-visit,
+ * so a task's checks existed only if a human happened to open the right page at the right moment — and
+ * anything created afterwards had none, forever.)
+ *
+ * TOP-UP, NEVER REPLACE. It inserts checks only for tasks that hold NONE. It never deletes and never
+ * rewrites, so a check a supervisor has already ANSWERED — its `answer`, `qc_status`, `answered_at` and
+ * the `source_narration_id` linking it to the WhatsApp message that confirmed it — can't be destroyed by
+ * a re-run. That also makes this its own backfill: run it over an old project and the missing checks
+ * appear, the answered ones stay exactly as they were.
+ *
+ * A user-classified task (task_type_id `user_*`) has no authored type, so it gets no checks. That is an
+ * honest gap, not a silent one: it claims no QC rather than inventing some.
+ */
+export async function fanOutQc(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- browser or service-role client
+  supabase: any,
+  project: { project_id: string; org_id: string },
+  lib: Library = LIBRARY,
+): Promise<number> {
+  // ONE read, with the QC EMBEDDED. Reading the two tables separately meant filtering the QC by
+  // `.in('task_id', [...])` over every task in the project — several hundred uuids in a GET query string,
+  // a URL long enough to be rejected in front of the database. The embed asks the same question in one
+  // round trip and one short URL, and this runs on every WhatsApp turn.
+  const { data: tasks, error: tErr } = await supabase
+    .from('site_tasks')
+    .select('task_id, task_type_id, site_task_qc(task_id)')
+    .eq('project_id', project.project_id)
+  if (tErr) throw new Error(`load tasks for QC fan-out: ${tErr.message}`)
+
+  const rows = (tasks ?? []) as { task_id: string; task_type_id: string | null; site_task_qc?: unknown[] }[]
+  if (!rows.length) return 0
+
+  const hasQc = new Set(rows.filter((r) => (r.site_task_qc?.length ?? 0) > 0).map((r) => r.task_id))
+
+  const toInsert: QcInsertRow[] = []
+  for (const t of rows) {
+    if (hasQc.has(t.task_id)) continue                       // already holds checks — never touched
+    const type = t.task_type_id ? lib.taskTypes.get(t.task_type_id) : undefined
+    for (const [i, q] of (type?.qc ?? []).entries()) {
+      toInsert.push({
+        task_id: t.task_id, org_id: project.org_id,
+        question: q.question, is_critical: q.is_critical, seq: i + 1,
+      })
+    }
+  }
+  if (!toInsert.length) return 0
+
+  const { error } = await supabase.from('site_task_qc').insert(toInsert)
+  if (error) throw new Error(`insert QC: ${error.message}`)
+  return toInsert.length
 }
 
 /** Build a CompletionState-free helper for callers that only have row statuses (UI bridge). */

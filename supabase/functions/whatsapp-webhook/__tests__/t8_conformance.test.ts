@@ -21,6 +21,9 @@ const seed = (over: Partial<Seed> = {}): Seed => ({
   chase_batches: [{ id: 'b1', items: [waterBI] }],
   wa_registered_numbers: [{ user_id: 'u1', phone_number: SENDER, is_active: true }],
   user_profiles: [{ id: 'u1', name: 'Ramesh' }],
+  // This site HAS a task list, so an unplaceable progress fragment is a genuine miss ('nothing updated'),
+  // not the honest "I don't track tasks for this site" answer (acked_untracked_work).
+  site_tasks: { 'tk-1': { task_id: 'tk-1', name: 'Slab', project_id: 'P1', status: 'PENDING' } },
   site_narration_id: 'narr-1',
   ...over,
 })
@@ -33,19 +36,30 @@ const DEC = (projectHint: string | null, items: { type: string; text: string; pr
   JSON.stringify({ project_hint: projectHint, items: items.map((i) => ({ type: i.type, text: i.text, task_hint: null, qc_statements: [], cause: null, cause_reason: null, owner_hint: null, date_hint: null, project_hint: i.project_hint ?? projectHint })) })
 const R_RESOLVE = JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: true, updates: [{ target_id: 'iss-water', target_kind: 'issue', action: 'resolve', confidence: 'high', closure_explicit: true, reason: 'cleared' }] } })
 const R_BOTH_FALSE = JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: false, updates: [] } })
+const R_CREATE = (detail: string, project_hint: string) => JSON.stringify({ issue_snag_found: { found: true, items: [{ kind: 'issue', detail, location: null, project_hint, confidence: 'high' }] }, update_found: { found: false, updates: [] } })
+// Content-aware stub: the Stage-2 loop grades EACH fragment on its own site, so the stub answers per item.
+// Key on the MESSAGE portion only (the candidate list also mentions "waterlogging", which must not match).
+const modelPer = (decompose: string) => (system: string, user: string): Promise<string> => {
+  if (!user.startsWith('CANDIDATES:')) return Promise.resolve(decompose)
+  const msg = user.split('MESSAGE:')[1] ?? ''
+  if (/waterlog/i.test(msg)) return Promise.resolve(R_RESOLVE)
+  if (/crack/i.test(msg)) return Promise.resolve(R_CREATE('crack on 2F', 'ASM Elite'))
+  if (/transformer/i.test(msg)) return Promise.resolve(R_CREATE('transformer down', 'ASM Elite'))
+  if (/tiles/i.test(msg)) return Promise.resolve(R_CREATE('tiles broke', 'Soundharya'))
+  return Promise.resolve(R_BOTH_FALSE)
+}
 
 suite('siteops T8 — park hints, batch disclosure, understood-first', () => {
-  // j1 (GREEN GUARD, T8a) — a compound spanning two sites: fragment-1 runs at its site, the rest parks with
-  // ITS OWN project hint (not fragment-1's, not null) so Stage-2 replay sites it correctly.
-  test('(j1) compound multi-site → parked rest fragment keeps its OWN project hint', async () => {
+  // j1 (STAGE 2, was T8a) — a compound spanning two sites: EACH fragment runs at its OWN site (the per-
+  // project loop), not one-runs-rest-parks. tiles → Soundharya, transformer → ASM Elite; no pending_stage2.
+  test('(j1) compound multi-site → each fragment lands on its OWN site (no compound-park)', async () => {
     const fake = fakeSupabase(seed({ chase_batches: [] }))
     await runSiteops(ctxFor(fake), 'tiles broke at Soundharya and transformer down at ASM Elite', {
-      callModel: model({ decompose: DEC(null, [{ type: 'issue', text: 'tiles broke', project_hint: 'Soundharya' }, { type: 'issue', text: 'transformer down', project_hint: 'ASM Elite' }]), resolve: R_BOTH_FALSE }),
+      callModel: modelPer(DEC(null, [{ type: 'issue', text: 'tiles broke', project_hint: 'Soundharya' }, { type: 'issue', text: 'transformer down', project_hint: 'ASM Elite' }])),
     })
-    const park = fake.writesTo('siteops_unplaced').find((w) => w.payload?.reason === 'pending_stage2')
-    const items = park?.payload?.observation?.items ?? []
-    expect(items.length).toBe(1)
-    expect(items[0]?.project_hint).toBe('ASM Elite')   // the transformer's OWN site, not Soundharya (fragment-1's)
+    expect(fake.writesTo('problems').some((w) => w.op === 'insert' && w.payload?.project_id === 'P2')).toBe(true)   // tiles → Soundharya
+    expect(fake.writesTo('problems').some((w) => w.op === 'insert' && w.payload?.project_id === 'P1')).toBe(true)   // transformer → ASM Elite (its OWN site)
+    expect(fake.writesTo('siteops_unplaced').some((w) => w.payload?.reason === 'pending_stage2')).toBe(false)
   })
 
   // j2 (RED, T8b) — an UNNAMED message on a single-site batch is sited to that batch's project (via='auto').
@@ -61,28 +75,28 @@ suite('siteops T8 — park hints, batch disclosure, understood-first', () => {
     expect(/assumed|wrong site/i.test(reply)).toBe(true)       // …and flagged as an assumption, correctable
   })
 
-  // j3 (GREEN GUARD, T8c-1) — a compound where fragment-1 is UNDERSTOOD and the rest is saved: BOTH surface
-  // in the readback (the rest is never silently dropped).
-  test('(j3) compound understood + rest → readback discloses both (rest not dropped)', async () => {
+  // j3 (STAGE 2, was T8c-1) — a same-site compound: fragment-1 is UNDERSTOOD (resolve) and fragment-2 is a
+  // NEW item — BOTH are HANDLED (the rest is processed on its own, never silently dropped).
+  test('(j3) compound understood + new item → both handled (resolve + create, rest not dropped)', async () => {
     const fake = fakeSupabase(seed())
     await runSiteops(ctxFor(fake), 'waterlogging cleared and new crack on 2F', {
-      callModel: model({ decompose: DEC('ASM Elite', [{ type: 'progress', text: 'waterlogging cleared' }, { type: 'issue', text: 'crack on 2F' }]), resolve: R_RESOLVE }),
+      callModel: modelPer(DEC('ASM Elite', [{ type: 'progress', text: 'waterlogging cleared' }, { type: 'issue', text: 'crack on 2F' }])),
     })
     const reply = fake.outbox().join(' ')
-    expect(/resolved/i.test(reply)).toBe(true)                 // the understood half
-    expect(/saved for review/i.test(reply)).toBe(true)        // the rest half — disclosed, not eaten
+    expect(/resolved/i.test(reply)).toBe(true)                                                    // the understood half
+    expect(fake.writesTo('problems').some((w) => w.op === 'insert' && /crack/i.test(String(w.payload?.title ?? '')))).toBe(true)   // the rest — created, not eaten
+    expect(fake.writesTo('problems').some((w) => w.op === 'update' && w.payload?.status === 'RESOLVED')).toBe(true)
   })
 
-  // j4 (RED, T8c-2) — a compound where fragment-1 is a MISS and the rest is saved: lead with what was
-  // saved/understood, then the miss (clause 5). Today it's miss-first.
-  test('(j4) compound miss + saved rest → understood/saved leads, miss last', async () => {
+  // j4 (STAGE 2, was T8c-2) — a compound where fragment-1 is a MISS and fragment-2 is a real item: the
+  // real item is still HANDLED on its own (no-drop across the loop), and the miss is surfaced honestly.
+  test('(j4) compound miss + real rest → the real fragment is handled, the miss surfaced (no-drop)', async () => {
     const fake = fakeSupabase(seed())
     await runSiteops(ctxFor(fake), 'hmmm and new crack on 2F', {
-      callModel: model({ decompose: DEC('ASM Elite', [{ type: 'progress', text: 'hmmm' }, { type: 'issue', text: 'crack on 2F' }]), resolve: R_BOTH_FALSE }),
+      callModel: modelPer(DEC('ASM Elite', [{ type: 'progress', text: 'hmmm' }, { type: 'issue', text: 'crack on 2F' }])),
     })
     const reply = fake.outbox().join(' ')
-    expect(/saved for review/i.test(reply)).toBe(true)
-    // understood-first: the saved rest appears BEFORE the didn't-catch miss.
-    expect(reply.search(/saved for review/i) < reply.search(/didn'?t catch/i)).toBe(true)
+    expect(/couldn't place/i.test(reply)).toBe(true)                                              // the miss is surfaced honestly (short clause in a combined readback)
+    expect(fake.writesTo('problems').some((w) => w.op === 'insert' && /crack/i.test(String(w.payload?.title ?? '')))).toBe(true)   // the real fragment — handled, never dropped
   })
 })

@@ -25,7 +25,11 @@ export type NormalizedMessage = {
   reaction?: { message_id: string; emoji: string }
   // Payment-image vision payload: the router classifies on `text` (the cheap description);
   // if it lands on the Transaction agent, the agent extracts straight from this image.
-  image?: { base64: string; mime: string; caption: string }
+  // `description` — our own read of the pixels (describeImage). It travels ALONGSIDE the caption, not glued
+  // to it: the agent needs to know whose claim is whose (the sender's words vs ours), and the ` -- ` mush in
+  // `text` cannot say. It is a real signal — a floor chalked on a wall, a board in the frame — and the
+  // agent used to discard it entirely whenever a caption existed. See _siteops_media.ts.
+  image?: { base64: string; mime: string; caption: string; description?: string | null }
   timestamp: string
 }
 
@@ -38,7 +42,7 @@ export type NormalizedMessage = {
  * seam: audio was once dropped here (only images were threaded), which is exactly what the pin now forbids.
  */
 export function deriveDispatchMedia(norm: NormalizedMessage): {
-  image?: { base64: string; mime: string; caption: string; storagePath: string | null }
+  image?: { base64: string; mime: string; caption: string; description?: string | null; storagePath: string | null }
   audio?: { storagePath: string; mime: string }
 } {
   const image = norm.image ? { ...norm.image, storagePath: norm.attachments?.[0]?.storage_path ?? null } : undefined
@@ -95,7 +99,7 @@ export async function normalize(
         text: text || 'Image received',
         source_type: 'image',
         attachments: [{ media_id: mediaId, mime, storage_path }],
-        image: { base64: b64, mime, caption },
+        image: { base64: b64, mime, caption, description },
       }
     } catch (e) {
       console.error('[normalize] image handling failed:', e)

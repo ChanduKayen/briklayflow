@@ -378,6 +378,16 @@ async function processJob(
     }
   }
 
+  // HISTORY BACKFILL — the audit row above was written BEFORE normalize, so a voice note logged its
+  // content as null (`message.text?.body`) and an image logged only its caption. The router reads this
+  // table as the conversation; a null turn is a hole in it. Stamp the transcript / vision text now that
+  // we have it. Best-effort, keyed on the UNIQUE wamid; never fails the turn.
+  if (messageId && norm.text && !message.text?.body) {
+    const { error } = await supabase.from('wa_message_log')
+      .update({ content: norm.text }).eq('wa_message_id', messageId)
+    if (error) console.error('[wa-webhook] history backfill failed:', error.message)
+  }
+
   // STEP 5 — a REACTION (👍/👎 on one of our sent messages) resolves against wa_message_map, not the
   // text router. Handled here and terminated; a positive reaction confirms, a 👎 retracts. An unmapped
   // or unclassified reaction is silently ignored (never the old "unsupported" reply).
@@ -430,7 +440,8 @@ async function processJob(
     await dispatch({ supabase, from, senderName, registered, wamid: messageId, orgId, interactiveId, quotedWamid, flowResponse, image: dispatchImage, audio: dispatchAudio, firstTouch, dormant }, norm.text)
     if (jobId) await markJob(supabase, jobId, 'WRITTEN')
   } catch (e) {
-    console.error('[wa-webhook] processing error:', e)
+    console.error(`[wa-webhook] processing error: wamid=${messageId} from=${from} msg=${(e as Error)?.message ?? String(e)}`)
+    console.error('[wa-webhook] processing error stack:', (e as Error)?.stack ?? e)
     if (jobId) {
       if (e instanceof WriteCommitFailed) {
         // The agent already sent the EXPLICIT failure message (with replay) inline.

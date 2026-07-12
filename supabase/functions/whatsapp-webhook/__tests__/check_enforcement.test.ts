@@ -41,7 +41,7 @@ suite('fake CHECK enforcement — constraints parsed from migrations (the fake s
 
   test('(reason) pending_stage2 + the v2 five admitted; an off-enum reason rejects', async () => {
     const fake = fakeSupabase()
-    const ok = ['pending_stage2', 'non_batch_target', 'llm_unreadable', 'project']
+    const ok = ['pending_stage2', 'non_batch_target', 'llm_unreadable', 'project', 'decompose_failed']
     for (const reason of ok) {
       const res = await fake.from('siteops_unplaced').insert({ org_id: 'o1', reason, observation: { items: [] }, sender_number: '91x' })
       expect(res.error).toBeNull()
@@ -64,13 +64,15 @@ suite('fake CHECK enforcement — constraints parsed from migrations (the fake s
     expect(res.error).toBeNull()
   })
 
-  test('(parser: drop+re-add fold) final reason set = base six + v2 five + pending_stage2', () => {
+  // The re-ADD folds: each new migration must carry the WHOLE accumulated set forward. This is the guard —
+  // a migration that silently drops a value (its parks would bounce, its observations vanish) fails here.
+  test('(parser: drop+re-add fold) final reason set = base six + v2 five + pending_stage2 + decompose_failed', () => {
     const c = loadEnumChecks().get('siteops_unplaced')?.get('siteops_unplaced_reason_check')
     expect(!!c).toBe(true)
     for (const v of ['disambig', 'typed_pick', 'project', 'photo_pick', 'batch_collision', 'floor',
       'llm_unreadable', 'evidence_await_placement', 'v2_effect_failed', 'v2_unhandled_terminal', 'non_batch_target',
-      'pending_stage2']) expect(c!.values.has(v)).toBe(true)
-    expect(c!.values.size).toBe(12)
+      'pending_stage2', 'decompose_failed']) expect(c!.values.has(v)).toBe(true)
+    expect(c!.values.size).toBe(13)
   })
 
   test('(parser: inline + nullable forms) followup actor_kind and qc_status parsed from CREATE TABLE', () => {

@@ -89,11 +89,26 @@ suite('M5 persist', () => {
 
   test('persistGraph drives a fake client with the right calls', async () => {
     const calls: string[] = []
+    // the fan-out re-reads site_tasks (task_id, task_type_id) after the insert, so the fake serves the
+    // tasks it was just given; site_task_qc starts empty.
+    const inserted: Record<string, unknown>[] = []
     const fake = {
-      from() {
+      from(table: string) {
         return {
-          select() { return { eq() { return Promise.resolve({ data: [], error: null }) } } },
-          insert(rows: unknown[]) { calls.push(`insert:${(rows as unknown[]).length}`); return Promise.resolve({ error: null }) },
+          select() {
+            return {
+              eq() {
+                // 1st call: existing rows (none). Post-insert: the tasks we just wrote.
+                const data = table === 'site_tasks' ? inserted.map((r, i) => ({ task_id: `t${i}`, task_type_id: r.task_type_id, node_key: r.node_key, source: r.source, order_source: r.order_source, seq_no: r.seq_no, site_task_qc: [] })) : []
+                return Promise.resolve({ data, error: null })
+              },
+            }
+          },
+          insert(rows: unknown[]) {
+            calls.push(`insert:${table}:${(rows as unknown[]).length}`)
+            if (table === 'site_tasks') inserted.push(...(rows as Record<string, unknown>[]))
+            return Promise.resolve({ error: null })
+          },
           delete() { return { in() { calls.push('delete'); return Promise.resolve({ error: null }) } } },
           update() { return { eq() { calls.push('update'); return Promise.resolve({ error: null }) } } },
         }
@@ -101,8 +116,10 @@ suite('M5 persist', () => {
     }
     const G = instantiate(stackToGeometry({ levels: [{ label: 'Ground', kind: 'habitable', zones: [{ use: 'habitable', units: 1 }] }] }))
     const res = await persistGraph(fake, { project_id: 'p1', org_id: 'o1' }, G)
-    expect(res.inserted).toBe(G.nodes.size)
     expect(res.deleted).toBe(0)
-    expect(calls.some((c) => c.startsWith('insert:'))).toBeTruthy()
+    expect(calls.some((c) => c.startsWith('insert:site_tasks:'))).toBeTruthy()
+    // THE FAN-OUT: every task written got its type's 3 authored checks, at the same door.
+    expect(res.qcInserted).toBe(res.inserted * 3)
+    expect(calls.some((c) => c.startsWith('insert:site_task_qc:'))).toBeTruthy()
   })
 })

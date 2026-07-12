@@ -1,20 +1,17 @@
 // JOURNEY GATE — the testing corollary to the ASM Elite postmortem: a PURE test pins a DECISION; only a
-// JOURNEY test pins that the decision is REACHED. batch_reply.test proves classifyReplyFragment in
-// isolation (the terse-ack force-match is green there) — yet in prod a bare "sari" and a Telugu
-// "waterlogging resolved" both bounced off "Didn't catch a site update", because decompose renders them
-// to zero items and runSiteops dead-ended the empty case BEFORE handleBatchReply ever saw it. The pure
-// gate was green while the wiring was broken. These tests drive the REAL runSiteops over a fake supabase
-// (no LLM key in-harness → decompose throws exactly as the empty-valve does in prod) and assert the chase
-// reply actually reaches the batch handler and touches the chase item.
+// JOURNEY test pins that the decision is REACHED. These drive the REAL runSiteops over a fake supabase
+// (no LLM key in-harness → decompose throws exactly as the empty-valve does in prod).
 //
-// RED FIRST (intentional): tests 1, 3 and the seam micro-test are RED against the behavior-preserving
-// seam extraction and go GREEN when Defect A flips routeEmptyDecompose. Their red state IS the artifact —
-// it documents that today's 94-green gate was lying by omission about this path.
+// HISTORY (2026-07-09): this file was born pinning the bare-ack shortcut — that a terse "sari" against a
+// lone chase should reach the batch handler and advance the item. That whole path is now deleted. An
+// acknowledgement NAMES nothing, so it acts on nothing: the router hands it to the concierge, which shows
+// the supervisor how to name the work. What survives here are the journeys that were never about acks —
+// no-eat under a model failure, and resolve-and-close on a message that does name its referent.
 
 import { suite, test, expect } from './harness'
 import { fakeSupabase, type Seed } from './fake_supabase'
 import { runSiteops } from '../_agents/siteops.ts'
-import { routeEmptyDecompose, classifyReplyFragment, type BatchItem } from '../_siteops_batch.ts'
+import type { BatchItem } from '../_siteops_batch.ts'
 
 const SENDER = '919900000000'
 const ORG = 'org-1'
@@ -51,29 +48,13 @@ suite('siteops empty-decompose JOURNEY (reachability — Defect A)', () => {
     const fake = fakeSupabase(loneChaseSeed())
     await runSiteops(ctxFor(fake), 'వాటర్ లాగింగ్ ఇష్యూ ఏసీ ఎమ్ఎల్ఐటీ రిసాల్వ్డ్')
 
-    expect(fake.outbox().some((b) => /Didn't catch/i.test(b))).toBe(false)   // not dead-ended (Defect-A invariant)
+    expect(fake.outbox().some((b) => /nothing updated/i.test(b))).toBe(false)   // not dead-ended (Defect-A invariant)
     expect(fake.writesTo('siteops_unplaced').length).toBe(1)                 // reached the engine, held for review
   })
 
-  // TEST 3 — the stranded shortcut, un-stranded. batch_reply.test (b) proves "sari" force-matches PURELY;
-  // this proves it actually resolves the chase END-TO-END. Its red is the proof that the isolated green
-  // was lying by omission.
-  test('(3) bare "sari" ack + open lone chase → reaches the batch handler (shortcut un-stranded)', async () => {
-    const fake = fakeSupabase(loneChaseSeed())
-    await runSiteops(ctxFor(fake), 'sari')
-
-    const reached = fake.trail().some((r) => r.problem_id === CHASE_ID)
-    const didntCatch = fake.outbox().some((b) => /Didn't catch/i.test(b))
-    expect(reached).toBe(true)       // RED until Defect A
-    expect(didntCatch).toBe(false)   // RED until Defect A
-  })
-
-  // The pure seam under those journeys — the one-line decision Defect A flips. Asserting the DESIRED value
-  // so it is RED now (seam returns the behavior-preserving constant) and GREEN when the fix lands.
-  test('(seam) routeEmptyDecompose(open batch) → "batch" (empty reply reaches the chase, not "didn\'t catch")', () => {
-    expect(routeEmptyDecompose(true)).toBe('batch')    // RED until Defect A (currently 'didnt_catch')
-    expect(routeEmptyDecompose(false)).toBe('didnt_catch')
-  })
+  // DELETED (2026-07-09) — test (3) 'bare "sari" ack reaches the batch handler', and the (seam) test for
+  // routeEmptyDecompose. Both pinned the shortcut that made an ack resolve a chase. The batch handler and
+  // the seam are deleted; an ack is no longer a site update. See router_referent.test.ts.
 })
 
 // STATE-COMBINATION JOURNEYS — the systemic close the ASM Elite postmortem asked for: now that the
@@ -83,12 +64,16 @@ suite('siteops empty-decompose JOURNEY (reachability — Defect A)', () => {
 suite('siteops empty-decompose JOURNEY — state combinations', () => {
   // The OTHER seam branch, end-to-end: an empty/unreadable message with NO open batch is a genuine
   // non-update → "didn't catch", and touches no chase.
+  // The model READ it and found no site content (valid JSON, zero items) — that is an answer, not an outage,
+  // and it is the only thing that may be answered with "nothing updated". An UNREADABLE response (a dead
+  // model) parks instead; see decompose_failure.test.
   test('(J4) empty decompose + NO open batch → "didn\'t catch", no chase touched', async () => {
     const seed: Seed = { ...loneChaseSeed(), chase_batches: [] }   // no open batch
     const fake = fakeSupabase(seed)
-    await runSiteops(ctxFor(fake), 'కొంచెం రాంగ్ మెసేజ్')
+    const emptyExtraction = () => Promise.resolve(JSON.stringify({ project_hint: null, items: [] }))
+    await runSiteops(ctxFor(fake), 'కొంచెం రాంగ్ మెసేజ్', { callModel: emptyExtraction })
 
-    expect(fake.outbox().some((b) => /Didn't catch/i.test(b))).toBe(true)
+    expect(fake.outbox().some((b) => /nothing updated/i.test(b))).toBe(true)
     expect(fake.trail().length).toBe(0)
   })
 
@@ -117,75 +102,32 @@ suite('siteops empty-decompose JOURNEY — state combinations', () => {
   // NOT bare acks, so "done" goes to the model, which grades closure_explicit=true → resolve). The executor
   // resolves the todo (→DONE) and drops it, closing the emptied batch. Exercises the todo resolve branch +
   // dropBatchItems through the full v2 stack.
-  test('(J6) "done" + lone open TODO chase → model resolves it (todo→DONE) and closes the batch', async () => {
+  test('(J6) "inspector call is done" + lone open TODO chase → model resolves it (todo→DONE), closes the batch', async () => {
     const todo: BatchItem = { kind: 'todo', id: 'todo-1', orgId: ORG, projectId: 'proj-asm', projectName: 'ASM Elite', title: 'call the inspector', taskName: null, cause: null }
     const fake = fakeSupabase({
       ...loneChaseSeed(),
       chase_batches: [{ id: 'batch-1', items: [todo] }],
-      todos: { 'todo-1': { id: 'todo-1', title: 'call the inspector', project_id: 'proj-asm', status: 'OPEN' } },
+      todos: { 'todo-1': { id: 'todo-1', text: 'call the inspector', project_id: 'proj-asm', status: 'OPEN' } },
     })
     const resolveTodo = () => Promise.resolve(JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: true, updates: [{ target_id: 'todo-1', target_kind: 'todo', action: 'resolve', confidence: 'high', closure_explicit: true, reason: 'done' }] } }))
-    await runSiteops(ctxFor(fake), 'done', { callModel: resolveTodo })
+    // NB: the message NAMES the to-do. A bare "done" no longer reaches SiteOps at all (referent rule).
+    await runSiteops(ctxFor(fake), 'inspector call is done', { callModel: resolveTodo })
 
     expect(fake.writesTo('todos').some((w) => w.op === 'update' && w.payload?.status === 'DONE')).toBe(true)
     expect(fake.writesTo('chase_batches').some((w) => w.op === 'update' && w.payload?.status === 'CLOSED')).toBe(true)
-    expect(fake.outbox().some((b) => /Didn't catch/i.test(b))).toBe(false)
+    expect(fake.outbox().some((b) => /nothing updated/i.test(b))).toBe(false)
   })
 })
 
-suite('siteops empty-decompose JOURNEY — bare-ack fast path (cardinality, no LLM)', () => {
-  // The sari ruling, wired: a recognised bare ack + EXACTLY ONE open chase → that chase ADDRESSING,
-  // deterministically, no model call, trailed `bare_ack`. RESOLVE stays behind the model (ack ≠ closure),
-  // so the chase advances but never closes, and the batch stays open. Discriminator: a `bare_ack` trail —
-  // absent on the pre-fast-path force-match path (which trails reply_received/status_changed).
-  test('(FP1) "sari" + lone open chase → ADDRESSING via bare_ack, not resolved, batch stays open', async () => {
-    const fake = fakeSupabase(loneChaseSeed())
-    await runSiteops(ctxFor(fake), 'sari')
+// DELETED (2026-07-09) — the bare-ack fast-path suite (FP1/FP2/FP3). The path it pinned is gone: an
+// acknowledgement names nothing, so it no longer advances a chase item to ADDRESSING, no longer re-times
+// the chase, and no longer writes a `bare_ack` trail row. `sari` never reaches SiteOps at all now — the
+// router reads the conversation and hands it to the concierge, which shows the supervisor how to name the
+// work. What replaces these: the routing contract in router_referent.test.ts.
 
-    expect(fake.trail().some((r) => r.type === 'bare_ack')).toBe(true)                 // fast-path marker
-    const probUpd = fake.writesTo('problems').filter((w) => w.op === 'update')
-    expect(probUpd.some((w) => w.payload?.status === 'ADDRESSING')).toBe(true)         // advanced
-    expect(probUpd.some((w) => w.payload?.status === 'RESOLVED')).toBe(false)          // never closed on an ack
-    expect(fake.writesTo('chase_batches').some((w) => w.op === 'update' && w.payload?.status === 'CLOSED')).toBe(false)
-  })
 
-  // Guard: MULTI-item batch + bare ack is genuinely ambiguous → NOT fast-pathed (no bare_ack trail); it
-  // falls through to the normal path (→ the model, which correctly declines).
-  test('(FP2) "sari" + MULTI-item batch → NOT fast-pathed (no bare_ack trail)', async () => {
-    const items: BatchItem[] = [
-      { kind: 'issue', id: 'water', orgId: ORG, projectId: 'proj-asm', projectName: 'ASM Elite', title: 'waterlogging', taskName: null, cause: 'weather' },
-      { kind: 'issue', id: 'cement', orgId: ORG, projectId: 'proj-asm', projectName: 'ASM Elite', title: 'cement short', taskName: null, cause: 'material' },
-    ]
-    const fake = fakeSupabase({ ...loneChaseSeed(), chase_batches: [{ id: 'batch-1', items }], problems: { water: { status: 'OPEN' }, cement: { status: 'OPEN' } } })
-    await runSiteops(ctxFor(fake), 'sari')
-    expect(fake.trail().some((r) => r.type === 'bare_ack')).toBe(false)
-  })
-
-  // Guard: a CONTENTFUL message on a lone chase is not a bare ack → not fast-pathed (no bare_ack trail).
-  test('(FP3) contentful "cement short" + lone chase → NOT fast-pathed (no bare_ack trail)', async () => {
-    const fake = fakeSupabase(loneChaseSeed())
-    await runSiteops(ctxFor(fake), 'cement short tomorrow')
-    expect(fake.trail().some((r) => r.type === 'bare_ack')).toBe(false)
-  })
-})
-
-suite('siteops cross-script match (Defect B — standing spec, expected-red)', () => {
-  // TEST 2 — SKIPPED until Defect B (LLM-match-on-lexical-miss) lands. matchPieceToBatch tokenises on
-  // /[a-z0-9]+/ (ASCII only), so a Telugu-script reply yields ZERO subject tokens and can never key-match a
-  // Latin chase title. In a MULTI-item batch the lone-chase shortcut doesn't apply, so this is where the
-  // cross-script gap bites: "waterlogging రిసాల్వ్డ్" cannot pick the waterlogging item out of several and
-  // falls to 'leftover'. This is the spec Defect B must satisfy; kept as executable documentation, not a
-  // failing run, so the gate signal stays clean. Un-skip when option (b) lands.
-  test.skip(
-    '(2) Telugu "waterlogging resolved" + MULTI-item batch → matches the waterlogging chase (needs Defect B)',
-    'blocked on Defect B: LLM-match-on-lexical-miss; matchPieceToBatch is ASCII-only today',
-    () => {
-      const batch: BatchItem[] = [
-        { kind: 'issue', id: 'water', orgId: ORG, projectId: 'P', projectName: 'ASM Elite', title: 'waterlogging in basement', taskName: null, cause: 'weather' },
-        { kind: 'issue', id: 'cement', orgId: ORG, projectId: 'P', projectName: 'ASM Elite', title: 'cement short', taskName: null, cause: 'material' },
-      ]
-      const v = classifyReplyFragment({ text: 'వాటర్ లాగింగ్ రిసాల్వ్డ్' }, batch, { singleFragment: true, hasObservation: true })
-      expect(v).toEqual({ kind: 'match', index: 0 })
-    },
-  )
-})
+// DELETED (2026-07-09) — the cross-script suite, a skipped standing spec for 'Defect B': matchPieceToBatch
+// tokenised on /[a-z0-9]+/, so a Telugu-script reply produced ZERO tokens and could never key-match a Latin
+// chase title. That defect is not fixed; its cause is deleted. Reply-matching by SPELLING is gone — the
+// resolution model matches a reply to the ⭐-ranked candidates by MEANING, in any script, which is what the
+// spec was asking someone to hand-write. See resolution_llm.test.ts.

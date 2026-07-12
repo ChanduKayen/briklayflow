@@ -25,6 +25,49 @@ export type OutMessage =
   | { kind: 'flow'; body: string; flowId: string; cta: string; screen: string
       data: Record<string, unknown>; flowToken: string; draft?: boolean; header?: string; footer?: string }
 
+// ── CONVERSATION HISTORY (the router's context) ───────────────────────────────
+// Every outbound message the system produces — from EVERY edge function — passes through send() or
+// sendNow(). That makes this the one place an assistant turn can be recorded, so the router can read the
+// conversation instead of guessing at it from a one-line summary.
+//
+// WHY (2026-07-09): `wa_message_log.direction` has always admitted 'OUT'; nothing ever wrote one. So the
+// router could not see that we had just asked the supervisor about five open items, and a bare "ok" was
+// reasoned about as "bare affirmation, nothing pending → chitchat". The compensating hacks (a chase-batch
+// routing override, three hand-maintained ack word-lists) all existed to paper over that one missing fact.
+// The chase digest itself rides send() from siteops-chase, so logging here captures the question we asked.
+//
+// Best-effort: a history write must NEVER fail a send (capture-first). It is context, not payload.
+
+/** The human-readable body of an OutMessage — what a reader of the transcript would see. */
+export function outMessageText(msg: OutMessage): string | null {
+  switch (msg.kind) {
+    case 'text': case 'buttons': case 'list': case 'cta': case 'flow': return msg.body
+    case 'template': return `[template: ${msg.name}]`
+    case 'reaction': return null   // a ✓-react is not a conversational turn
+  }
+}
+
+/** wa_message_log.message_type for an OutMessage (CHECK-admitted since 20260620000003). */
+function outMessageType(msg: OutMessage): string {
+  return msg.kind === 'text' ? 'text' : msg.kind === 'reaction' ? 'reaction' : 'interactive'
+}
+
+/** Record an assistant turn. Never throws; never blocks the send. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function logOutbound(supabase: any, to: string, msg: OutMessage): Promise<void> {
+  const content = outMessageText(msg)
+  if (content === null) return                    // reactions/typing are not turns
+  try {
+    const { error } = await supabase.from('wa_message_log').insert({
+      phone_number: to, direction: 'OUT', message_type: outMessageType(msg),
+      content, media_url: null,
+    })
+    if (error) console.error('[format] history log error:', error.message)
+  } catch (e) {
+    console.error('[format] history log threw (ignored):', (e as Error)?.message ?? e)
+  }
+}
+
 /** Render an OutMessage to the WhatsApp Cloud API request body for `to`. */
 export function renderToWhatsApp(to: string, msg: OutMessage): Record<string, unknown> {
   const base = { messaging_product: 'whatsapp', recipient_type: 'individual', to }
@@ -146,6 +189,9 @@ export async function send(
   // Degrade if capture_ref isn't migrated yet — the MESSAGE must still send (capture is a bonus).
   if (error && opts.capture) ({ error } = await enqueue(base))
   if (error) console.error('[format] send/enqueue error:', error)
+  // Record the assistant turn for the router's history. Logged at ENQUEUE (intent order), not at drain:
+  // the drainer's delivery order is the same, and a row that failed to enqueue is not a turn we had.
+  if (!error) await logOutbound(supabase, to, msg)
 }
 
 /**
@@ -155,7 +201,8 @@ export async function send(
  * nonsense. Best-effort: never throws into the caller (a failed ack must not fail the
  * job; the real confirmation still goes through the durable path).
  */
-export async function sendNow(to: string, msg: OutMessage): Promise<void> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function sendNow(supabase: any, to: string, msg: OutMessage): Promise<void> {
   try {
     const res = await fetch(`https://graph.facebook.com/v18.0/${WA_PHONE_NUMBER_ID}/messages`, {
       method: 'POST',
@@ -166,6 +213,8 @@ export async function sendNow(to: string, msg: OutMessage): Promise<void> {
   } catch (e) {
     console.warn('[format] sendNow failed (ignored):', (e as Error)?.message ?? e)
   }
+  // An instant ack is still a turn the supervisor saw — it belongs in the history the router reads.
+  await logOutbound(supabase, to, msg)
 }
 
 /**

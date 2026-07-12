@@ -57,10 +57,10 @@ suite('VM buildProjectVM', () => {
     expect(g.indexOf('conduit') > g.indexOf('blockwork')).toBeTruthy()      // conduit chased into walls
   })
 
-  test('(c) a blocked task carries the right why + reason (columns after Foundation — structural)', () => {
+  test('(c) a blocked task carries the right why + reason (columns after Foundation — mass concrete — structural)', () => {
     const cols = VM.floors.find((f) => f.name === 'Ground')!.blocks[0].tasks.find((t) => t.taskType === 'columns')!
     expect(cols.status).toBe('blocked')
-    expect(cols.why?.[0].afterLabel).toBe('Foundation')
+    expect(cols.why?.[0].afterLabel).toBe('Foundation — mass concrete')
     expect(cols.why?.[0].reason).toBe('structural')
   })
 

@@ -296,8 +296,17 @@ HARD RULE: vague praise ("looks good", "done properly", "work is fine") NEVER co
 Output STRICT JSON: {"answers":[{"id":"<qc id>","answer":"<the exact statement that confirms it>"}]}. Include ONLY confirmed QCs. Empty if none clearly match.`
 
 /** Returns the QC rows to confirm (id + the answer text). Conservative; [] when no key/empty. */
-export async function matchQc(qc: QcRow[], statements: string[], taskName: string): Promise<{ id: string; answer: string }[]> {
+export async function matchQc(
+  qc: QcRow[], statements: string[], taskName: string,
+  // THE INJECTED DOOR (2026-07-11). This function reached for env keys and fetched directly, so it could
+  // not be exercised offline — and a matcher nobody can test is how it stayed silently dead for weeks
+  // (the executor was passing it an empty statement list on every single message). Prod leaves this
+  // undefined and the real transport below runs, unchanged.
+  call?: (system: string, user: string) => Promise<string>,
+): Promise<{ id: string; answer: string }[]> {
   if (!qc.length || !statements.length) return []
+  const user0 = `TASK: ${taskName}\nQC CHECKS:\n${qc.map((q) => `- [${q.id}] ${q.question}`).join('\n')}\n\nSTATEMENTS STATED BY SUPERVISOR:\n${statements.map((st) => `- ${st}`).join('\n')}`
+  if (call) return parseQcAnswers(await call(QC_MATCH_SYSTEM, user0), qc)
   const OPENAI = Deno.env.get('OPENAI_API_KEY')
   const ANTHROPIC = Deno.env.get('ANTHROPIC_API_KEY')
   const model = Deno.env.get('WA_SITEOPS_MODEL') ?? 'gpt-4.1'
@@ -322,8 +331,14 @@ export async function matchQc(qc: QcRow[], statements: string[], taskName: strin
       if (res.ok) raw = (await res.json()).content?.[0]?.text ?? ''
     }
   } catch { /* fall through to [] */ } finally { clearTimeout(t) }
+  return parseQcAnswers(raw, qc)
+}
+
+/** The matcher's response → confirmed (id, answer) pairs. PURE, and the membership guard is here: an id
+ *  the call never OFFERED is an invented referent and is dropped, exactly as the resolver's is. */
+function parseQcAnswers(raw: string, qc: QcRow[]): { id: string; answer: string }[] {
   try {
-    const parsed = JSON.parse(raw.replace(/^```json\n?|\n?```$/g, '').trim())
+    const parsed = JSON.parse((raw ?? '').replace(/^```json\n?|\n?```$/g, '').trim())
     const ans = Array.isArray(parsed?.answers) ? parsed.answers : []
     const valid = new Set(qc.map((q) => q.id))
     const clean = ans.filter((a: { id?: string; answer?: string }) => a && valid.has(a.id!) && typeof a.answer === 'string' && a.answer.trim())
@@ -342,6 +357,8 @@ export interface RouteCtx {
   narrationId: string | null; now: Date
   vmNodeKeys?: Set<string>    // the project's current VM fold-id set — for the visibleInVM check at writes
   vmTaskNames?: Set<string>   // normalized VM task labels — the TWIN check for flat (node_key-null) rows
+  /** The QC matcher's model door (tests inject; prod leaves it undefined and the real transport runs). */
+  callQc?: (system: string, user: string) => Promise<string>
 }
 /** Map a user id to a display name (for confirm lines). */
 export function ownerName(c: RouteCtx, id: string | null): string {
@@ -371,7 +388,7 @@ export async function applyProgress(c: RouteCtx, task: SiteTaskRow, item: SiteIt
   // QC answering (restraint)
   const { data: qcRows } = await c.supabase.from('site_task_qc').select('id, question, is_critical, seq, qc_status').eq('task_id', task.task_id)
   const qc = (qcRows ?? []) as QcRow[]
-  const confirmed = await matchQc(qc, item.qc_statements, task.name)
+  const confirmed = await matchQc(qc, item.qc_statements, task.name, c.callQc)
   for (const a of confirmed) {
     // provenance: which narration answered it + when (the UI shows "✓ … — from narration, 2h ago")
     const { error } = await c.supabase.from('site_task_qc').update({
@@ -410,7 +427,7 @@ async function insertProblem(supabase: SB, fullRow: Record<string, unknown>): Pr
   if (res.error) {
     // degrade if a not-yet-applied column is present (deadline/impact, the S note-provenance cols, or the
     // T6 kind/confidence cols) — a missing column must never cost us the issue; the DB default fills it.
-    const { deadline: _d, impact: _i, source_note_id: _sn, source_note_kind: _sk, kind: _k, confidence: _cf, ...base } = fullRow
+    const { deadline: _d, impact: _i, source_note_id: _sn, source_note_kind: _sk, kind: _k, confidence: _cf, is_planned: _ip, ...base } = fullRow
     res = await supabase.from('problems').insert(base).select('id').single()
   }
   if (res.error) console.error('[siteops] problem insert failed:', res.error.message)
@@ -454,7 +471,7 @@ export async function createProblem(c: RouteCtx, item: SiteItem, taskId: string 
     // T6 — record the planner's KIND (clause 3) + CONFIDENCE (clause 4); default 'issue'/'high' for
     // decompose/vision items and any legacy caller that carries no subtype (the pre-T6 behaviour).
     cause, title: item.text, kind: item.kind ?? 'issue', confidence, owner_id: ownerId, owner_source: 'auto', status: 'OPEN',
-    next_followup_at: nextFollowupAt, deadline, impact,
+    next_followup_at: nextFollowupAt, deadline, impact, is_planned: item.planned ?? false,   // #1 — planned/to-do snag flag
   })
   // Ping the assignee NOW (auto or named) — unless they're the sender or the principal.
   if (id && ownerId && ownerId !== c.principalId) {

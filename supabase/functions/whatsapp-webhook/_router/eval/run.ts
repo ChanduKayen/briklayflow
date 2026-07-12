@@ -13,6 +13,7 @@ type Case = {
   id: string
   text: string
   pending?: { agent: string; question: string; slots?: Record<string, unknown> } | null
+  history?: { role: 'user' | 'assistant'; text: string; at: string }[]
   lingering?: { last_action_summary: string } | null
   expect: { decision: string; intent_agent?: string | null }
 }
@@ -31,7 +32,7 @@ const confusion: Record<string, Record<string, number>> = {}
 for (const d of DECISIONS) { confusion[d] = {}; for (const a of DECISIONS) confusion[d][a] = 0 }
 
 for (const c of cases) {
-  const res = await routeMessage({ text: c.text, pending: c.pending ?? null, lingering: c.lingering ?? null })
+  const res = await routeMessage({ text: c.text, pending: c.pending ?? null, history: c.history, lingering: c.lingering ?? null })
   const expDec = c.expect.decision
   const decOk = res.decision === expDec
   const agentOk = c.expect.intent_agent === undefined || (res.intent_agent ?? null) === (c.expect.intent_agent ?? null)

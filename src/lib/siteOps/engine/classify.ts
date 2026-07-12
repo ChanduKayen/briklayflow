@@ -121,7 +121,7 @@ export function slugifyTaskId(text: string): TaskTypeId {
 // free. Mirrors the extraction "other" valve.
 function gatewayAnchor(layer: Layer): { pred: TaskTypeId; nature: Nature; reason: Reason; scope: Scope; note: string } {
   if (layer === 'structure')
-    return { pred: 'slab', nature: SAFE_NATURE, reason: 'structural', scope: { kind: 'same_floor' }, note: 'loose: after the floor structure (needs review)' }
+    return { pred: 'floor_pour', nature: SAFE_NATURE, reason: 'structural', scope: { kind: 'same_floor' }, note: 'loose: after the floor structure (needs review)' }
   // services + finishes fan out after blockwork (the gateway)
   return { pred: 'blockwork', nature: SAFE_NATURE, reason: 'logistics', scope: { kind: 'same_zone' }, note: 'loose: after blockwork gateway (needs review)' }
 }

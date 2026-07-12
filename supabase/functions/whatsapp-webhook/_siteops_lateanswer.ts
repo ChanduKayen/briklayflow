@@ -40,7 +40,18 @@ export function reconstructParkedSlots(p: ParkedRow): Record<string, unknown> | 
         ? (p.observation as { items: unknown }).items : []
       return { kind: 'siteops_project', items, candidates, ...base }
     }
+    // THE which_item PICK (#8, 2026-07-11). It parks as batch_collision and used to land in `default` — so a
+    // pick that was never answered live could never be answered at all. That was tolerable while picks only
+    // expired after 24h; with the 30-minute pending TTL, "answered ten minutes after we set it aside" is the
+    // normal case. The park carries what the live slots carried: the supervisor's piece + the offered set.
+    case 'batch_collision': {
+      const obs = (p.observation ?? null) as { piece_text?: unknown; candidates?: unknown } | null
+      const piece = typeof obs?.piece_text === 'string' ? obs.piece_text.trim() : ''
+      if (!piece) return null   // no question to re-ask (an evidence-only collision) — never a phantom pick
+      const offered = (Array.isArray(candidates) && candidates.length ? candidates : obs?.candidates) ?? []
+      return { kind: 'siteops_batch_collision', status: 'still_open', piece_text: piece, candidates: offered, ...base }
+    }
     default:
-      return null   // floor / photo_pick / batch_collision — no pending choice to re-apply
+      return null   // floor / photo_pick — no pending choice to re-apply
   }
 }

@@ -64,10 +64,17 @@ export async function openConversation(
     .eq('org_id', c.orgId).eq('sender_number', c.sender).eq('status', 'OPEN')
     .limit(1).maybeSingle()
 
+  // WHEN THIS QUESTION WAS FIRST ASKED — stamped ONCE, into the slots, and carried by every re-open.
+  // `opened_at` cannot serve: a re-surface (and a drain) re-opens the row and would renew the lease, so an
+  // interrupted question could be kept alive forever and never age out. If the caller's slots already carry
+  // the stamp (a re-surface replays them verbatim), it stands; only a genuinely NEW question starts a clock.
+  const slots = { ...(c.slots ?? {}) } as Record<string, unknown>
+  if (typeof slots.first_asked_at !== 'string') slots.first_asked_at = new Date().toISOString()
+
   const patch = {
     org_id: c.orgId, sender_number: c.sender, owning_agent: c.owningAgent,
     status: 'OPEN', pending_question: c.pendingQuestion,
-    slots_so_far: c.slots ?? {}, staged_entry_id: c.stagedEntryId ?? null,
+    slots_so_far: slots, staged_entry_id: c.stagedEntryId ?? null,
     last_message_id: c.lastMessageId ?? null,
   }
   if (existing) {

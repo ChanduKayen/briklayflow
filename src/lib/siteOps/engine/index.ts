@@ -15,7 +15,7 @@ export {
   type ClassifyContext, type ClassifierLLM, type ClassifierLLMOutput, type ClassifiedTask,
 } from './classify'
 export {
-  reconcile, toPersistRows, persistGraph,
+  reconcile, toPersistRows, persistGraph, fanOutQc,
   type ExistingRow, type PersistRow, type ReconcilePlan, type WriteResult,
 } from './persist'
 export {

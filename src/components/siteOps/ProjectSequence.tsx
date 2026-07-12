@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
-import { buildProjectVM, LIBRARY } from '../../lib/siteOps/engine'
+import { buildProjectVM, LIBRARY, fanOutQc } from '../../lib/siteOps/engine'
 import { inferUnitNames, type NameFloor } from '../../lib/siteOps/unitNaming'
 import type { BlockVM, FloorVM, ProjectVM, TaskVM } from '../../lib/siteOps/engine'
 import TaskDetail, { type Task, type EngineCtx } from './TaskDetail'
@@ -788,7 +788,20 @@ function TaskDrawer({ sel, floorName, projectId, orgId, initialRow, onClose }: {
         source: 'generated', placement_source: 'authored',
       }).select(RICH).single()
       r = (ins.data as Task | null) ?? null
-      if (r) { queryClient.invalidateQueries({ queryKey: ['project_tasks_v2', projectId] }); queryClient.invalidateQueries({ queryKey: ['seq_task_status', projectId] }) }
+      if (r) {
+        // THE THIRD DOOR (2026-07-11). A task materialized HERE is a task like any other, and it must carry
+        // its type's authored QC checks — a row created by clicking a node in the sequence had none, so the
+        // whole services/finishes half of a project could exist without a single check on it. fanOutQc is a
+        // project-scoped TOP-UP (it only inserts for tasks holding none, and never rewrites an answered
+        // check), so calling it here is safe, idempotent, and also repairs anything an older path missed.
+        try {
+          await fanOutQc(supabase, { project_id: projectId, org_id: orgId })
+        } catch (e) {
+          console.error('[siteops] QC fan-out failed for materialized row:', (e as Error).message)
+        }
+        queryClient.invalidateQueries({ queryKey: ['project_tasks_v2', projectId] })
+        queryClient.invalidateQueries({ queryKey: ['seq_task_status', projectId] })
+      }
     }
     return r
   }, [projectId, orgId, floorName, queryClient])

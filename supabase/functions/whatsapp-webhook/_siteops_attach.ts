@@ -14,7 +14,7 @@ export interface PickCandidate { kind: string; id: string; label: string }
  */
 export function resolveTypedPick(
   shortlist: PickCandidate[], full: PickCandidate[], text: string,
-): { kind: 'attach'; target: PickCandidate } | { kind: 'observe' } | { kind: 'none' } {
+): { kind: 'attach'; target: PickCandidate } | { kind: 'observe' } | { kind: 'park' } | { kind: 'none' } {
   const t = text.trim().toLowerCase()
   // A reply that is JUST a number is a positional pick into the shortlist (display order == stored order).
   // Anchored to a BARE integer so a natural answer that merely CONTAINS a digit ("Phase 2 panel") is
@@ -22,7 +22,10 @@ export function resolveTypedPick(
   const m = t.match(/^(\d+)$/)
   if (m) {
     const n = parseInt(m[1], 10)
-    if (n === shortlist.length + 1) return { kind: 'observe' }        // the "None — it's new" row
+    if (n === shortlist.length + 1) return { kind: 'observe' }        // "It's something else" — log it as new
+    // "None of these" — the right row may simply not EXIST (the fifth-floor wiring task that was never
+    // created). Creating a duplicate is the wrong repair; save it for review and change nothing.
+    if (n === shortlist.length + 2) return { kind: 'park' }
     if (n >= 1 && n <= shortlist.length) return { kind: 'attach', target: shortlist[n - 1] }
     return { kind: 'none' }
   }
@@ -42,7 +45,10 @@ export function resolveTypedPick(
     const tok = bestTokenOverlap(text, full.length ? full : shortlist)
     if (tok) return { kind: 'attach', target: tok }
   }
-  if (/\b(new|fresh|none|different|another|separate)\b/i.test(text)) return { kind: 'observe' }
+  // "none of these" is not "it's new": the first says the offered list is wrong, the second says the work is
+  // new. Only the second may create a row.
+  if (/\bnone\b/i.test(text)) return { kind: 'park' }
+  if (/\b(new|fresh|different|another|separate)\b/i.test(text)) return { kind: 'observe' }
   return { kind: 'none' }
 }
 

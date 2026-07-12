@@ -47,9 +47,30 @@ suite('siteops lateanswer — reconstructParkedSlots', () => {
     expect(reconstructParkedSlots(row({ reason: 'disambig' }))?.image).toBeNull()
   })
 
+  // #8 (2026-07-11) — THE which_item PICK IS RE-ANSWERABLE. It parks as batch_collision and used to return
+  // null here, so a retired pick could never be answered late. With the 30-minute pending TTL that stops
+  // being an edge case: the supervisor answers "the first one" ten minutes after we set the question aside,
+  // and the answer has to land. The parked row carries everything the live pick's slots did.
+  test('batch_collision → siteops_batch_collision slots (piece_text + the offered candidates)', () => {
+    const cands = [{ id: 'iss-w', kind: 'issue', title: 'wiring broke' }]
+    const s = reconstructParkedSlots(row({
+      reason: 'batch_collision', observation: { piece_text: 'wiring done', candidates: cands },
+      candidates: cands, project_id: 'P1', narration_id: 'narr-1',
+    }))
+    expect(s?.kind).toBe('siteops_batch_collision')
+    expect(s?.status).toBe('still_open')
+    expect(s?.piece_text).toBe('wiring done')
+    expect(s?.candidates).toEqual(cands)
+    expect(s?.project_id).toBe('P1')
+  })
+
+  test('a batch_collision with no piece_text carries no question → null (never a phantom pick)', () => {
+    expect(reconstructParkedSlots(row({ reason: 'batch_collision' }))).toBeNull()
+    expect(reconstructParkedSlots(row({ reason: 'batch_collision', observation: { piece_text: '  ' } }))).toBeNull()
+  })
+
   test('evidence-only / floor parks → null (nothing to re-answer)', () => {
     expect(reconstructParkedSlots(row({ reason: 'photo_pick' }))).toBeNull()
-    expect(reconstructParkedSlots(row({ reason: 'batch_collision' }))).toBeNull()
     expect(reconstructParkedSlots(row({ reason: 'floor' }))).toBeNull()
   })
 })

@@ -29,6 +29,52 @@ suite('siteops resolution v2 — executor applyTerminals (effects, honest readba
     expect(fake.outbox().some((b) => /resolved/i.test(b))).toBe(true)
   })
 
+  // ── BLOCKED (the negative report) ─────────────────────────────────────────────────────────────────────
+  // "municipal water still not here" against the open issue: the blocker lands on the TRAIL, the status is
+  // UNTOUCHED (never advanced to ADDRESSING — a blocker is the opposite of "being handled"), and the next
+  // chase is pulled in. We deliberately write NO 'escalated' event: in this schema that means "pushed UP to
+  // the supervisor / principal", which would be a lie about a report the supervisor just made themselves.
+  test('(B1) blocked issue → blocker_noted trail + chase pulled in + status NEVER advanced', async () => {
+    const fake = fakeSupabase({ projects: [{ project_id: 'P1', name: 'ASM Elite' }] })
+    const t: Terminal = { kind: 'object_updated', update: upd({ target_id: 'iss-water', action: 'blocked', confidence: 'high', closure_explicit: false, reason: 'still no municipal water' }), applied: 'blocked', undo: false, readback: '', reason: '' }
+    await applyTerminals(ctxFor(fake), [t], execCtx(new Map([['iss-water', waterItem]])))
+
+    expect(fake.trail().some((e) => e.type === 'blocker_noted')).toBe(true)
+    expect(fake.trail().some((e) => e.type === 'escalated')).toBe(false)       // never a fabricated escalation
+    const upds = fake.writesTo('problems').filter((w) => w.op === 'update')
+    expect(upds.some((w) => w.payload?.next_followup_at)).toBe(true)           // chased sooner
+    expect(upds.some((w) => w.payload?.status)).toBe(false)                    // status untouched (no ADDRESSING, no RESOLVED)
+    expect(fake.outbox().some((b) => /still open/i.test(b))).toBe(true)
+  })
+
+  // The live case: a chased 📋 to-do reported not-done. To-dos carry no chase clock, so the trail event IS
+  // the record — and the to-do must NOT be marked DONE.
+  test('(B2) blocked todo → blocker_noted trail, never DONE', async () => {
+    const fake = fakeSupabase({ projects: [{ project_id: 'P1', name: 'ASM Elite' }] })
+    const tile: BatchItem = { kind: 'todo', id: 'td-tiles', orgId: ORG, projectId: 'P1', projectName: 'ASM Elite', title: 'tiles to be laid by day after tomorrow', taskName: null, cause: null }
+    const t: Terminal = { kind: 'object_updated', update: upd({ target_id: 'td-tiles', target_kind: 'todo', action: 'blocked', confidence: 'high', closure_explicit: false, reason: 'tiles not yet laid' }), applied: 'blocked', undo: false, readback: '', reason: '' }
+    await applyTerminals(ctxFor(fake), [t], execCtx(new Map([['td-tiles', tile]])))
+
+    expect(fake.trail().some((e) => e.type === 'blocker_noted' && e.todo_id === 'td-tiles')).toBe(true)
+    expect(fake.writesTo('todos').some((w) => w.payload?.status === 'DONE')).toBe(false)
+  })
+
+  // A blocked TASK has no followup_events home (the one-parent CHECK is problem XOR todo), so it lands as a
+  // system comment — and applyProgress is NEVER reached (it would advance work the message says hasn't started).
+  test('(B3) blocked task → site_task_comments row, task status untouched', async () => {
+    const fake = fakeSupabase({
+      projects: [{ project_id: 'P1', name: 'ASM Elite' }],
+      site_tasks: { 'tk-tile': { task_id: 'tk-tile', name: 'Floor tiling', project_id: 'P1', status: 'PENDING', floor_label: 'Fourth' } },
+    })
+    const t: Terminal = { kind: 'object_updated', update: upd({ target_id: 'tk-tile', target_kind: 'task', action: 'blocked', confidence: 'med', closure_explicit: false, reason: 'tiles not yet laid' }), applied: 'blocked', undo: false, readback: '', reason: '' }
+    await applyTerminals(ctxFor(fake), [t], execCtx())   // tasks are not batch items → itemsById empty
+
+    const c = fake.writesTo('site_task_comments')
+    expect(c.length).toBe(1)
+    expect(/^Blocked — tiles not yet laid/.test(c[0].payload?.body ?? '')).toBe(true)
+    expect(fake.writesTo('site_tasks').some((w) => w.op === 'update')).toBe(false)   // never advanced
+  })
+
   // A FAILED object_created (project unresolvable) must PARK to siteops_unplaced AND read back honestly —
   // "saved for review" is true because the observation actually survives.
   test('(E2) object_created fails → parked to siteops_unplaced + honest "couldn\'t log … saved for review"', async () => {

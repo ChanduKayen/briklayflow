@@ -24,7 +24,7 @@ const wet = (tid: string, floor = 'Ground') => nodeOf(tid, floor, 'wet')
 
 // the hard-pred chain leading to a Ground-floor zone's blockwork being done
 const blockworkDoneGround = (): NodeId[] => [
-  'foundation', 'columns@Ground', 'beams@Ground', 'slab@Ground', 'shuttering_removal@Ground', 'blockwork@Ground',
+  'foundation', 'columns@Ground', 'floor_shutter@Ground', 'floor_rebar@Ground', 'floor_pour@Ground', 'shuttering_removal@Ground', 'blockwork@Ground',
 ]
 
 suite('M3 evaluate', () => {
@@ -33,7 +33,7 @@ suite('M3 evaluate', () => {
     expect(ev.availability('ground_clearance')).toBe('available') // the master start of the build
     expect(ev.availability('foundation')).toBe('blocked')         // now gated by the substructure chain
     expect(ev.availability('columns@Ground')).toBe('blocked')
-    expect(ev.whyMessage('columns@Ground')).toBe('after Foundation — structural')
+    expect(ev.whyMessage('columns@Ground')).toBe('after Foundation — mass concrete — structural')
   })
 
   test('plaster blocked AFTER conduit (concealment); becomes available once conduit done', () => {
@@ -61,10 +61,10 @@ suite('M3 evaluate', () => {
     expect(ev.why(dry('door_frame'))[0].taskTypeId).toBe('blockwork')
     expect(ev.why(dry('door_frame'))[0].nature).toBe('IMPOSSIBLE')
   })
-  test('Gap-1: ceiling_frame BLOCKED on a bare floor; needs slab + blockwork', () => {
+  test('Gap-1: ceiling_frame BLOCKED on a bare floor; needs the pour + blockwork', () => {
     const ev0 = new Evaluator(G, stateOf({ done: ['foundation'] }))
     expect(ev0.availability(dry('ceiling_frame'))).toBe('blocked')
-    // once blockwork (hence slab) is done → available
+    // once blockwork (hence the pour) is done → available
     const ev1 = new Evaluator(G, stateOf({ done: blockworkDoneGround() }))
     expect(ev1.availability(dry('ceiling_frame'))).toBe('available')
   })

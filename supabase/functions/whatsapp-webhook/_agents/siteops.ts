@@ -10,9 +10,11 @@ import { send } from '../_format.ts'
 import { resolveProject, type ProjectRef } from '../_resolve.ts'
 import { distinctiveTokens } from '../_match.ts'
 import { openConversation, closeConversation, type ConvoRow } from '../_conversation.ts'
+import { combineReadbacks, composePhotoAck, type HeldReadback } from '../_siteops_readback.ts'
 import { parkConvoObservation } from '../_siteops_sweep.ts'
-import { decompose, callLLM, safeParse, type SiteItem } from '../_siteops_extract.ts'
-import { decomposeImage } from '../_siteops_vision.ts'
+import { decompose, callLLM, safeParse, DecomposeUnreadable, VALID_CAUSE_KEYS, structureFromText, type SiteItem } from '../_siteops_extract.ts'
+import { decomposeImage, applyMediaStructure, mergeSameScene } from '../_siteops_vision.ts'
+import { mediaComposite, humanizeInbound, type MediaParts } from '../_siteops_media.ts'
 import { loadCandidates, prefilterCandidates, groundingLabels } from '../_siteops_candidates.ts'
 import { resolveTypedPick, type PickCandidate } from '../_siteops_attach.ts'
 import type { CaptureRef } from '../_wa_message_map.ts'
@@ -28,17 +30,16 @@ import {
 } from '../_siteops_route.ts'
 import { loadCadenceMap, type CadenceMap } from '../_siteops_timing.ts'
 import {
-  getOpenBatch, dropBatchItems, classifyReplyFragment, scopeBatchToProject, interpretStatus,
-  isBareAck,
+  getOpenBatch, dropBatchItems,
   type OpenBatch, type BatchItem,
 } from '../_siteops_batch.ts'
 import {
-  composeReadback, assertAllApplied, executeResolution,
-  type Terminal, type TerminalOutcome, type AttachUpdate,
+  composeReadback, assertAllApplied, executeResolution, NOTHING_TO_UPDATE, COULDNT_READ_THAT, ALREADY_LOGGED,
+  type Terminal, type TerminalOutcome, type AttachUpdate, type StructureSlot,
 } from '../_siteops_resolution.ts'
 import { resolveInbound } from '../_siteops_resolution_llm.ts'
 // The engine, bundled for Deno — used to materialise a project's full task set on first WhatsApp touch.
-import { buildProjectVM } from '../../_shared/siteops-engine.js'
+import { buildProjectVM, instantiate, stackToGeometry, persistGraph } from '../../_shared/siteops-engine.js'
 
 export type SiteopsCtx = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -47,9 +48,15 @@ export type SiteopsCtx = {
   orgId: string
   wamid: string
   lang: 'en' | 'te' | 'te-en' | 'hi'
+  // The id of a tapped LIST row / reply button (the dispatcher's AgentCtx has always carried it; SiteOps only
+  // started needing it when the item pick became a list). A pick row's id is its POSITION (`pick:N`), so a tap
+  // resolves positionally against the frozen offered list — never by re-parsing the row's human title.
+  interactiveId?: string | null
   // Present when the inbound message is an image the router sent to SITEOPS. `storagePath` is the
   // ALREADY-uploaded object (rough-entry-media) from _normalize's storeMedia — we link it, never re-upload.
-  image?: { base64: string; mime: string; caption: string; storagePath?: string | null }
+  // `description` — OUR read of the pixels (the router's describeImage). It is a signal in its own right (a
+  // floor chalked on a wall, a board in the frame) and was being dropped whenever a caption existed.
+  image?: { base64: string; mime: string; caption: string; description?: string | null; storagePath?: string | null }
   // Present when the inbound was a VOICE note: the ALREADY-stored audio (rough-entry-media). We record it
   // as an attachment on the narration so the source audio stays FINDABLE (clause 1), never re-upload.
   audio?: { storagePath: string; mime: string }
@@ -75,7 +82,28 @@ function engineTasks(rows: SiteTaskRow[]): SiteTaskRow[] {
  * Idempotent — inserts ONLY the node_keys that don't exist yet, mirroring the UI's materialise shape.
  * Best-effort: a failure never blocks the message (matching falls back to whatever rows are present).
  */
-async function materializeProjectTasks(ctx: SiteopsCtx, projectId: string): Promise<{ keys: Set<string>; names: Set<string> }> {
+/** A per-applyTerminals cache of the project VM. See VmMemo. */
+export type VmMemo = Map<string, Promise<{ keys: Set<string>; names: Set<string> }>>
+
+/**
+ * The project's VM fold-id set. TWO DB reads plus a full buildProjectVM — and it was rebuilt for EVERY task
+ * write. A collective sweep ("all 10 fixtures done") rebuilt it ten times, once per sibling.
+ *
+ * `memo` caches it for the lifetime of ONE applyTerminals call, which is the exact scope where it is provably
+ * safe: every target the call writes to ALREADY EXISTS as a site_tasks row, so its node_key is already in the
+ * VM before any of our writes land. We deliberately do NOT cache across the turn — the VM is built from task
+ * STATUSES, and completing a task can unlock new nodes, so a turn-wide cache could refuse a later legitimate
+ * write. Cheap where it is safe; absent where it is not.
+ */
+async function materializeProjectTasks(ctx: SiteopsCtx, projectId: string, memo?: VmMemo): Promise<{ keys: Set<string>; names: Set<string> }> {
+  const hit = memo?.get(projectId)
+  if (hit) return hit
+  const p = materializeProjectTasksUncached(ctx, projectId)
+  memo?.set(projectId, p)
+  return p
+}
+
+async function materializeProjectTasksUncached(ctx: SiteopsCtx, projectId: string): Promise<{ keys: Set<string>; names: Set<string> }> {
   // Returns the project's CURRENT VM fold-id set (every node_key the UI overlay can render) PLUS the
   // normalized VM task labels (the flat-row TWIN check). The write path uses both for the `visibleInVM`
   // check (Step-1 diagnostic / Step-3 guardrail, twin-aware since the parking lesson).
@@ -100,24 +128,28 @@ async function materializeProjectTasks(ctx: SiteopsCtx, projectId: string): Prom
       hasCommonAreas: !!project?.has_common_areas, hasExternalWorks: !!project?.has_common_areas,
       commonSystems: project?.common_systems ?? [], suppressedTasks: project?.suppressed_tasks ?? [],
     })
-    const rows: Record<string, unknown>[] = []
     for (const f of vm.floors) for (const b of f.blocks) for (const t of b.tasks) {
       vmKeys.add(t.nodeKey)
       vmNames.add(normTaskName(t.label))
-      if (seen.has(t.nodeKey)) continue
-      seen.add(t.nodeKey)
-      rows.push({
-        org_id: project.org_id, project_id: projectId, node_key: t.nodeKey, task_type_id: t.taskType,
-        name: t.label, trade: t.trade, phase: t.layer,
-        floor_label: f.name, unit_label: t.nodeKey.includes('/') ? (b.name === 'Whole floor' ? null : b.name) : null,
-        seq_no: t.seqNo, status: 'not_started', source: 'generated', placement_source: 'authored',
-      })
     }
-    if (rows.length) {
-      const { error } = await ctx.supabase.from('site_tasks').insert(rows)
-      if (error) console.error('[siteops:materialize] insert FAILED:', error.message)
-    }
-    console.log(`[siteops:materialize] project=${projectId} existingRows=${(existing ?? []).length} vmNodeKeys=${vmKeys.size} inserted=${rows.length}`)
+    // ── ONE DOOR (2026-07-11) ──────────────────────────────────────────────────────────────────────
+    // This used to hand-roll its own INSERT — a second implementation of persist that wrote a SUBSET of
+    // the columns (no binding, no zone_id, no order_source, no needs_review). A webhook-born row was
+    // therefore not the same row a wizard-born one was, and nothing said so: it surfaced later as a null
+    // `binding` when the UI tried to render "why is this blocked". Now every path that creates tasks —
+    // the setup wizard, the Sequence view, and this — goes through the engine's own persistGraph, so a
+    // row is the same row whoever made it.
+    //
+    // SAFE TO RECONCILE MID-CONVERSATION: reconcile() never deletes a row without a node_key (the legacy
+    // expander rows are `keptManual`), and never deletes a manual or human-reordered row. What it DOES
+    // retire is an obsolete AUTHORED row — which is exactly right after a library change: the old
+    // `beams@Ground` / `slab@Ground` rows go, the floor-cycle rows arrive, no human action needed.
+    const geometry = stackToGeometry(stack, {
+      hasCommonAreas: !!project?.has_common_areas, hasExternalWorks: !!project?.has_common_areas,
+      commonSystems: project?.common_systems ?? [], suppressedTasks: project?.suppressed_tasks ?? [],
+    })
+    const res = await persistGraph(ctx.supabase, { project_id: projectId, org_id: project.org_id }, instantiate(geometry))
+    console.log(`[siteops:materialize] project=${projectId} existingRows=${(existing ?? []).length} vmNodeKeys=${vmKeys.size} inserted=${res.inserted} retired=${res.deleted} keptManual=${res.keptManual}`)
   } catch (e) {
     console.error('[siteops:materialize] ENGINE/BUILD ERROR:', (e as Error).message, (e as Error).stack)
   }
@@ -223,6 +255,13 @@ export async function commitInterruptedSiteops(ctx: SiteopsCtx, convo: ConvoRow)
   // interrupt closes CLEAN — CLOSED = handled, not the raw ABANDONED that dropped the item before).
   // The kind→reason map, the payload mapping (incl. the collision piece_text and unit-project text
   // fixes), the enrichment-window no-park rule, and the question_wamid stamp all live in the core.
+  // STEP C1 — NO SILENT DROP on interruption: if this ask was HOLDING a resolved summary, flush it FIRST
+  // (the sure items land), then park the pending item and let the caller run the new intent. The parked item
+  // is named by the returned note ("Kept your earlier note…"), so nothing is dropped and the user is told.
+  const held = ((convo.slots_so_far ?? {}) as { held_readback?: HeldReadback }).held_readback ?? null
+  if (held?.entries?.length) {
+    await send(ctx.supabase, ctx.from, { kind: 'text', body: combineReadbacks(held.entries) }, { org_id: ctx.orgId, wamid: ctx.wamid })
+  }
   const out = await parkConvoObservation(ctx.supabase, convo)
   await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'parked to place' })
   if (!out.parked) return ''
@@ -239,7 +278,11 @@ function mentionsProjectToken(text: string, projects: ProjectRef[]): boolean {
   return proj.size ? distinctiveTokens(text).some((t) => t.length >= 3 && proj.has(t)) : false
 }
 /** First few words of an item's title — for PICK ROWS and question labels (UI-truncated anyway). */
-const shortLabel = (title: string) => title.trim().split(/\s+/).slice(0, 3).join(' ')
+// NEVER TRUNCATE what we show a human. This was `shortLabel` — a 3-WORD cut that rendered "wiring completed
+// for the entire apartment except the fifth floor" as "ASM Elite: fifth", and (probe C2) turned "bathroom
+// tiles not fixed correctly" + "resolved" into "✓ bathroom tiles not resolved" — a truth inversion. A
+// WhatsApp text message holds 4096 characters: there was nothing to save and a sentence to lose.
+const fullText = (title: string) => title.trim()
 /** READBACK-facing label: the (near-)full title, capped by LENGTH, never by word count. Probe C2: the
  *  3-word cut turned "bathroom tiles not fixed correctly" + "resolved" into "✓ bathroom tiles not
  *  resolved" — a truth inversion. Truncation may shorten a label; it may never negate the sentence.
@@ -281,26 +324,10 @@ async function senderName(ctx: SiteopsCtx): Promise<string | null> {
   return data?.name ?? null
 }
 
-// Deeper per-message JUDGE — given the issue + the assignee's reply, decide whether it's
-// truly RESOLVED or still alive, with a one-line REASON shown in the UI as the why. Reuses
-// the same LLM client as decompose; conservative (keep-open when unsure); understands
-// non-English replies the keyword layer can't.
-const JUDGE_SYSTEM = `You decide whether a construction-site ISSUE is now RESOLVED, based on the assignee's reply.
-RULES:
-- RESOLVED only if the reply clearly says the problem is fixed / cleared / done / delivered / arrived / settled.
-- KEEP OPEN if the reply is progress-but-not-done, a promise or ETA, a blocker, a question, or unclear.
-- Be conservative: when in doubt, KEEP OPEN — never wrongly close an issue.
-- Replies may be in English, Telugu, Hindi, or a mix — understand the meaning, not just keywords.
-Reply ONLY with JSON: {"resolved": true|false, "reason": "<one short sentence a site manager would read, grounded in the reply>"}.`
-
-async function judgeResolution(issue: { title: string; cause: string | null }, reply: string, callModel: (system: string, user: string) => Promise<string> = callLLM): Promise<{ resolved: boolean; reason: string } | null> {
-  try {
-    const user = `Issue: "${issue.title}" (cause: ${issue.cause ?? 'other'}).\nAssignee's reply: "${reply.slice(0, 400)}".\nIs the issue resolved?`
-    const parsed = safeParse(await callModel(JUDGE_SYSTEM, user)) as { resolved?: unknown; reason?: unknown } | null
-    if (!parsed || typeof parsed.resolved !== 'boolean') return null
-    return { resolved: parsed.resolved, reason: typeof parsed.reason === 'string' ? parsed.reason.trim().slice(0, 200) : '' }
-  } catch { return null }
-}
+// DELETED (2026-07-09): judgeResolution + JUDGE_SYSTEM — a SECOND LLM opinion on "is this issue resolved?",
+// asked after the resolution ladder had already ruled. Its only live caller was the chase-reply engine, and
+// the executor had long passed `force` precisely so the judge would NOT re-decide and contradict the
+// terminal. With the engine gone, so is the second opinion: executeResolution is the sole authority.
 
 /**
  * Apply a reply to ONE batch item: log the reply, then either RESOLVE it, or keep
@@ -309,32 +336,22 @@ async function judgeResolution(issue: { title: string; cause: string | null }, r
  * (the UI's "why"); to-dos keep the simple keyword strike-off. Always appends to the
  * item's trail (B1). Returns the resolved/open verdict.
  */
+// The LADDER is now the SOLE authority: every caller has already decided, so `applied` is REQUIRED and this
+// function only executes it. The old signature carried a keyword `status`, a `bareAck` flag, and a re-judging
+// `callModel` — all reachable only from the deleted chase-reply engines. Deleting them removes the last place
+// a second opinion could contradict the terminal that produced it.
 async function applyBatchResolution(
-  ctx: SiteopsCtx, item: BatchItem, status: 'resolved' | 'still_open' | 'unknown',
+  ctx: SiteopsCtx, item: BatchItem, applied: 'resolve' | 'addressing' | 'blocked',
   replyText: string, cadenceMap: CadenceMap, actorId: string | null, now: Date,
-  opts: { bareAck?: boolean; force?: 'resolve' | 'addressing'; reason?: string; out?: { resolveEvent?: string }; callModel?: (system: string, user: string) => Promise<string> } = {},
-): Promise<'resolved' | 'open'> {
-  // The bare-ack fast path (cardinality, no LLM): trail it as `bare_ack` so the feed shows WHY the chase
-  // advanced, and NEVER consult the judge — an ack is engagement, never closure, so it can only ADDRESS.
-  await trailEvent(ctx, item, opts.bareAck ? 'bare_ack' : 'reply_received', replyText.slice(0, 180), actorId)
+  opts: { reason?: string; out?: { resolveEvent?: string } } = {},
+): Promise<'resolved' | 'open' | 'blocked'> {
+  // A BLOCKED report trails as `blocker_noted` — the enum's own words: "a reply/comment naming a blocker;
+  // item stays open, re-times". The UI already renders it (amber "Blocker") and counts it as the owner
+  // having answered; nothing on the WhatsApp path had ever written one.
+  await trailEvent(ctx, item, applied === 'blocked' ? 'blocker_noted' : 'reply_received', replyText.slice(0, 180), actorId)
 
-  // ISSUES → LLM judgment (with reason); fall back to the keyword status if the model is
-  // unavailable. TO-DOS → keyword strike-off. A bare ack skips the judge (deterministic ADDRESSING).
-  // opts.force — the v2 EXECUTOR applies a decision the LADDER already made; it must NOT re-judge (a second
-  // LLM call that could contradict the terminal), so force honors resolve/addressing verbatim.
-  let resolved: boolean
-  let reason = opts.reason ?? ''
-  if (opts.force) {
-    resolved = opts.force === 'resolve'
-  } else if (opts.bareAck) {
-    resolved = false                       // an ack advances, never closes — RESOLVE stays behind the model
-  } else if (item.kind === 'issue') {
-    const judged = await judgeResolution({ title: item.title, cause: item.cause }, replyText, opts.callModel)
-    resolved = judged ? judged.resolved : status === 'resolved'
-    reason = judged?.reason ?? ''
-  } else {
-    resolved = status === 'resolved'
-  }
+  const resolved = applied === 'resolve'
+  const reason = opts.reason ?? ''
 
   if (resolved) {
     const note = reason || replyText.trim().slice(0, 140)
@@ -349,6 +366,25 @@ async function applyBatchResolution(
       await trailEvent(ctx, item, 'status_changed', note ? `Done — “${note}”` : 'Done — confirmed by reply', actorId)
     }
     return 'resolved'
+  }
+
+  // BLOCKED — the supervisor says it has NOT happened. Status is UNTOUCHED (never advanced to ADDRESSING:
+  // a blocker is the opposite of "being handled"), the blocker is already on the trail above, and the next
+  // chase is PULLED IN so the item comes back sooner rather than on its lazy cadence. That earlier chase IS
+  // the priority raise — we deliberately do NOT write an `escalated` event, which in this schema means "no
+  // resolution, pushed UP to the supervisor / principal" and would be a lie about a report the supervisor
+  // just made themselves.
+  if (applied === 'blocked') {
+    const stated = parseWhen(replyText, now)
+    if (item.kind === 'issue') {
+      // a stated date wins ("tiles by Friday"); else chase on the next tick.
+      const next = stated && stated.getTime() > now.getTime() ? stated : now
+      await ctx.supabase.from('problems').update({ next_followup_at: next.toISOString() }).eq('id', item.id)
+    } else if (stated) {
+      // to-dos carry no chase clock — only a due_date, which the chase reads. A stated date re-dates it.
+      await ctx.supabase.from('todos').update({ due_date: stated.toISOString().slice(0, 10) }).eq('id', item.id)
+    }
+    return 'blocked'
   }
 
   // kept alive — re-time the next chase (to a stated date, else the cause cadence)
@@ -381,6 +417,12 @@ async function applyBatchResolution(
 // is TRUE — honest-reply AND actually-preserved, never the eat wearing an apology. The ladder already
 // judged, so object_updated applies with `force` (no re-judge). assertAllApplied backs the no-drop.
 // (The undo button on a resolve readback is Layer 2b; here the readback is plain text.)
+/** The QC thread: what the sender STATED, and the door the strict matcher grades it through. */
+export interface QcThread {
+  statements: string[]
+  call?: (system: string, user: string) => Promise<string>
+}
+
 export interface ExecCtx {
   itemsById: Map<string, BatchItem>       // candidate/batch items by id, to resolve an update's target
   labelById: Map<string, string>          // human title for EVERY offered candidate (not just batch items) —
@@ -399,16 +441,90 @@ export interface ExecCtx {
                                           // silent wrong adoption becomes visible/correctable (clause 4).
   message?: string                        // B floor — the raw inbound message, so a near-candidate which_item ask
                                           // carries it as the collision piece_text (trail/apply on confirm).
+  // BATCHED READBACK (opt-in) — when a sink is present, applyTerminals COLLECTS its readback body + resolved
+  // refs into it instead of sending, so runSiteops emits ONE combined reply for a whole compound/multi-project
+  // message (asks still fire inline). Absent (every direct caller / the resume path) → send immediately, as before.
+  readbackSink?: ReadbackSink
+  projectName?: string | null             // the project a collected body belongs to — labels the combined reply
+  // SERIALIZED ASKS (opt-in) — when a queue is present, applyTerminals ENQUEUES its which_item ask instead of
+  // sending it. applyTerminals already aggregates the asks WITHIN one call; the fan-out was ACROSS calls — the
+  // Stage-2 loop runs one applyTerminals per decomposed item, and each ask called openConversation, which
+  // upserts the ONE open conversation per (org, sender). LIVE FAILURE (2026-07-09): a 5-item voice note asked
+  // three which_item questions; the sender saw all three, but only the last was answerable — the first two were
+  // silently overwritten. runSiteops owns the queue and drains it one ask at a time (the which_project cursor).
+  askQueue?: PendingItemAsk[]
+  // ONE ASK CURSOR (2026-07-11). A which_project terminal used to open its pick INLINE from inside
+  // applyTerminals while the which_item asks waited in askQueue — and the drain's openConversation then
+  // upserted over it. LIVE FAILURE: a 9-item note asked "which project is *tie gunny bags* for?" and then a
+  // "tiles being laid — which one?" pick; the sender answered the PROJECT question, the answer landed on the
+  // TILES pick, and it was meaning-matched into a wrong "Floor tiling (First) updated". With this queue the
+  // project ask is DEFERRED too; runSiteops asks exactly one thing (the project first — a site is a
+  // prerequisite for everything else — carrying the item asks in its slots). Absent → inline, as before.
+  projectAskQueue?: PendingProjectAsk[]
+  /** Per-call project-VM cache — a collective sweep must not rebuild the VM once per swept task. */
+  vmMemo?: VmMemo
+  /** STEP A — the checkable FACTS this item stated ("poured continuous, no cold joint"), positionally the
+   *  ones decompose/vision found for the message being applied, plus the QC matcher's model door. Without
+   *  them the strict matcher has nothing to match and every task's checks stay pending forever. */
+  qc?: QcThread
+  /** THE IDEMPOTENCY FLOOR — `<target>:<action>` keys already applied THIS TURN. Owned by the unit loop so it
+   *  spans every decomposed item's applyTerminals call: the same row + the same action is written once and
+   *  read back once, however many items named it. Absent → applyTerminals scopes it to its own call. */
+  appliedTargets?: Set<string>
+}
+
+/** One deferred which_item ask, JSON-serializable so the REMAINDER can ride the open pick's slots
+ *  (`pending_item_asks`) and be drained by its answer — the same cursor `pending_groups` uses. */
+/** One deferred which_project ask — a new item the resolver could not site. runSiteops turns it into an
+ *  AskGroup (the proven `siteops_project` pick), so it drains through the SAME cursor as an unresolved
+ *  decompose group and cannot open a second conversation. */
+export interface PendingProjectAsk {
+  item: SiteItem
+  narrationId: string | null
+}
+
+export interface PendingItemAsk {
+  candidates: CollisionCand[]
+  pieceText: string
+  /** GAP 1 — the checkable FACTS the message/photo stated. They ride the ask so the ANSWER can apply them:
+   *  the moment we learn which task it was is exactly the moment the evidence becomes usable, and it was
+   *  being thrown away there. */
+  qcStatements?: string[]
+  projectId: string | null
+  narrationId: string | null
+  image: { storagePath: string; caption: string | null } | null
+  update: AttachUpdate | null
+  fork: boolean
+  /** A fact the supervisor needs BEFORE he can answer, printed above the choices — today, "this site has no
+   *  floor cellar; the floors it has are …". Rides the drain cursor like everything else the ask needs. */
+  preamble?: string | null
+}
+
+// A per-turn pool of readback bodies (one per applyTerminals call that produced one) + the resolved refs for
+// the optional undo. runSiteops owns it and flushes ONE message at the end.
+export interface ReadbackSink {
+  entries: { project: string | null; body: string }[]
+  resolvedRefs: { kind: string; id: string; event: string }[]
+  // STEP C1 — set by askItemPick when a which_item ask is opened this turn: the ask's slots + question, so
+  // flushOrHoldReadback can STASH the held summary onto that same conversation (the resume folds it) without
+  // re-reading the row. Captured at finally, so it holds whatever resolved BEFORE or AFTER the ask.
+  askSlots?: Record<string, unknown>
+  askQuestion?: { pendingQuestion: string; lastMessageId: string | null }
 }
 
 // the executor's slim view of an offered candidate (built from res.candidates in the caller).
 export interface ExecCandidate { kind: 'task' | 'issue' | 'todo'; title: string; projectId: string | null; projectName: string | null }
 
-function toSiteItem(it: { kind: 'issue' | 'snag'; detail: string; location: string | null; project_hint: string | null }): SiteItem {
+function toSiteItem(it: { kind: 'issue' | 'snag'; detail: string; location: string | null; project_hint: string | null; confidence?: 'high' | 'med' | 'low'; planned?: boolean; due_date?: string | null; cause?: string | null; owner?: string | null }): SiteItem {
   // T6 — the planner's KIND + CONFIDENCE ride through to the row (clauses 3 + 4). `type` stays 'issue' so
   // routeItems routes it to createProblem (issue AND snag are the SAME `problems` table); `kind` records
   // which it actually is; `confidence` gates the chase (createProblem holds a low/med note un-scheduled).
-  return { type: 'issue', kind: it.kind, confidence: it.confidence, text: it.detail, task_hint: it.location, qc_statements: [], cause: 'other', cause_reason: null, owner_hint: null, date_hint: null, project_hint: it.project_hint }
+  // #1 — PLANNED work rides `planned`, and its DEADLINE rides date_hint (createProblem parses it → the L1
+  // user date → problems.deadline + the chase clock). The old hard-coded date_hint:null dropped deadlines.
+  // NO-INFO-LOSS — CAUSE (clamped to the taxonomy → drives cadence/impact) and OWNER ("tell Ramesh") now
+  // ride through instead of the old hard-coded 'other'/null that silently dropped them.
+  const cause = it.cause && (VALID_CAUSE_KEYS as readonly string[]).includes(it.cause) ? it.cause : 'other'
+  return { type: 'issue', kind: it.kind, confidence: it.confidence, planned: it.planned, text: it.detail, task_hint: it.location, qc_statements: [], cause, cause_reason: null, owner_hint: it.owner ?? null, date_hint: it.due_date ?? null, project_hint: it.project_hint }
 }
 
 /** STAGE 2 (1/N) — apply a HIGH-confidence update onto an offered OPEN TASK via the PROVEN applyProgress
@@ -421,9 +537,98 @@ async function applyTaskUpdate(ctx: SiteopsCtx, t: Extract<Terminal, { kind: 'ob
   // write 'done' ONLY when the ladder ruled a resolve; an ADDRESSING verdict advances the task, never
   // closes it — even if the reason text happens to carry a "done"/"completed" word (the regex no longer
   // overrides the ladder).
-  const label = await applyTaskProgressById(ctx, t.update.target_id, t.update.reason, ex.narrationId, ex.now, ex.projectId ?? null, t.applied === 'resolve')
+  const label = await applyTaskProgressById(ctx, t.update.target_id, t.update.reason, ex.narrationId, ex.now, ex.projectId ?? null, t.applied === 'resolve', ex.vmMemo, ex.qc)
   if (label && ctx.image?.storagePath) await attachImage(ctx, 'site_task', t.update.target_id, ctx.image.storagePath, ctx.image.caption ?? null, 'creation')
   return label
+}
+
+/**
+ * A BLOCKED report against a TASK. `followup_events` has a one-parent CHECK (problem_id XOR todo_id), so a
+ * task's blocker cannot live there — it lands as a system comment on the task, which is where a task's
+ * human notes already live. The task's STATUS is untouched: "tiles not yet laid" must never advance the
+ * tiling task. Returns the readback label, or null when the row is gone (the caller parks honestly).
+ */
+async function applyTaskBlockedById(ctx: SiteopsCtx, taskId: string, text: string): Promise<string | null> {
+  const { data: rows } = await ctx.supabase.from('site_tasks').select('task_id, name, floor_label, unit_label').eq('task_id', taskId)
+  const task = (rows ?? [])[0] as { task_id: string; name: string; floor_label?: string | null; unit_label?: string | null } | undefined
+  if (!task) return null
+  const { error } = await ctx.supabase.from('site_task_comments').insert({
+    task_id: taskId, org_id: ctx.orgId, author_id: null, author_name: null,
+    body: `Blocked — ${text.slice(0, 180)}`,
+  })
+  if (error) { console.error('[siteops:task-blocked] comment insert failed:', error.message); return null }
+  return readbackLabel([task.name, task.floor_label].filter(Boolean).join(' — '))
+}
+
+// ── STEP B/C — THE QUALITY AXIS ──────────────────────────────────────────────────────────────────────
+// Every task carries the authored QC checks of its TYPE (engine library → persistGraph fan-out). These two
+// functions are the whole quality axis for a photo:
+//
+//   loadQcChecks    — show the vision pass the checks for the work it is looking at. This is what turns
+//                     "find problems in this photo" (which yields nitpicks — unpainted walls, debris, work
+//                     that is simply not finished yet) into "does this photo settle a check the org already
+//                     decided matters". Relevance is INHERITED from the checklist, never invented.
+//   applyQcFailures — a contradicted check IS the issue. Code disposes: we already know the check, its task
+//                     and whether it is critical, so nothing is left for a model to infer.
+export interface QcCheckRef { id: string; taskId: string; question: string; critical: boolean; taskLabel: string }
+
+/** The open checks for the shortlisted work, as prompt lines + the map a failure is disposed through.
+ *  Best-effort: on any error the photo is still read, just without the quality axis. */
+async function loadQcChecks(ctx: SiteopsCtx, shortlist: { kind: string; id: string; label: string }[]): Promise<{ lines: string[]; byId: Map<string, QcCheckRef> }> {
+  const byId = new Map<string, QcCheckRef>()
+  const lines: string[] = []
+  const taskIds = shortlist.filter((c) => c.kind === 'task').map((c) => c.id)
+  if (!taskIds.length) return { lines, byId }
+  const labelOf = new Map(shortlist.map((c) => [c.id, c.label]))
+  const { data, error } = await ctx.supabase.from('site_task_qc')
+    .select('id, task_id, question, is_critical, qc_status').in('task_id', taskIds)
+  if (error) { console.error('[siteops:qc] load failed:', error.message); return { lines, byId } }
+  for (const r of ((data ?? []) as { id: string; task_id: string; question: string; is_critical: boolean; qc_status: string | null }[])) {
+    if (r.qc_status === 'confirmed') continue   // already answered — never ask the photo to re-prove it
+    const taskLabel = labelOf.get(r.task_id) ?? ''
+    byId.set(r.id, { id: r.id, taskId: r.task_id, question: r.question, critical: !!r.is_critical, taskLabel })
+    lines.push(`[qc:${r.id}]${r.is_critical ? '[C]' : ''} ${r.question}${taskLabel ? ` — ${taskLabel}` : ''}`)
+  }
+  return { lines, byId }
+}
+
+/** A check the photo CONTRADICTS. Mark it failed (the photo's own words as the evidence, and the narration
+ *  that saw it as the provenance), and raise the finding — CHASED when the failed check is critical, a
+ *  visible NOTE when it is not. The photo rides the created row as evidence. */
+async function applyQcFailures(
+  ctx: SiteopsCtx, failures: SiteItem[], qcById: Map<string, QcCheckRef>,
+  projectId: string | null, narrationId: string | null, sink?: ReadbackSink,
+): Promise<void> {
+  if (!projectId) return
+  for (const f of failures) {
+    const check = qcById.get(f.qc_failed as string)
+    if (!check) continue
+    // The check now says what the photo showed. The answer text is OUR observation and the narration id is
+    // the provenance — exactly the shape a confirmation records, so the trail reads the same either way.
+    const { error } = await ctx.supabase.from('site_task_qc').update({
+      qc_status: 'failed', answer: f.text, source_narration_id: narrationId, answered_at: new Date().toISOString(),
+    }).eq('id', check.id)
+    if (error) console.error('[siteops:qc:fail] check update failed:', error.message)
+
+    // CRITICAL → a tracked, chased issue. Otherwise a NOTE: recorded and visible, never chased at anyone.
+    // (createProblem gates the chase clock on exactly this `confidence` — high schedules, med/low does not.)
+    const item: SiteItem = {
+      type: 'issue', kind: 'issue', confidence: check.critical ? 'high' : 'med',
+      text: f.text, task_hint: f.task_hint, structure: f.structure ?? null, qc_statements: [],
+      cause: 'rework', cause_reason: `fails a quality check on ${check.taskLabel || 'this work'}: ${check.question}`,
+      owner_hint: f.owner_hint ?? null, date_hint: null, project_hint: null,
+    }
+    const out = await routeGroup(ctx, projectId, [item], narrationId)
+    if (ctx.image?.storagePath) {
+      for (const pr of out.problems) if (pr.id) await attachImage(ctx, 'problem', pr.id, ctx.image.storagePath, ctx.image.caption ?? null, 'creation')
+    }
+    console.log(`[siteops:qc:fail] check=${check.id} critical=${check.critical} task=${JSON.stringify(check.taskLabel)} -> ${check.critical ? 'chased issue' : 'note'}`)
+    const body = check.critical
+      ? `⚠️ *A quality check failed* — ${check.question}\n_${f.text}_\nLogged as an issue and being chased.`
+      : `A quality check didn't pass — ${check.question}\n_${f.text}_\nLogged for review (not chased).`
+    if (sink) sink.entries.push({ project: null, body })
+    else await send(ctx.supabase, ctx.from, { kind: 'text', body }, { org_id: ctx.orgId, wamid: ctx.wamid })
+  }
 }
 
 /** The by-id core of a task progress write — shared by the executor (HIGH updates) and the collision
@@ -431,21 +636,26 @@ async function applyTaskUpdate(ctx: SiteopsCtx, t: Extract<Terminal, { kind: 'ob
  *  applies via the proven applyProgress. Returns the readback label, or null when the row is gone / the
  *  guardrail refused / no project — the caller parks honestly. Photo attachment is the CALLER's step
  *  (executor: ctx.image; resume: slots.image). */
-async function applyTaskProgressById(ctx: SiteopsCtx, taskId: string, text: string, narrationId: string | null, now: Date, fallbackProjectId: string | null, closureAuthorized = false): Promise<string | null> {
+async function applyTaskProgressById(ctx: SiteopsCtx, taskId: string, text: string, narrationId: string | null, now: Date, fallbackProjectId: string | null, closureAuthorized = false, memo?: VmMemo, qc?: QcThread): Promise<string | null> {
   const { data: rows } = await ctx.supabase.from('site_tasks').select(`${TASK_COLS}, project_id`).eq('task_id', taskId)
   const task = (rows ?? [])[0] as (SiteTaskRow & { project_id?: string | null }) | undefined
   if (!task) return null
   const projectId = task.project_id ?? fallbackProjectId
   if (!projectId) return null
-  const vm = await materializeProjectTasks(ctx, projectId)
-  const oc = await ownerCtx(ctx.supabase, ctx.orgId, projectId)
+  const [vm, oc] = await Promise.all([materializeProjectTasks(ctx, projectId, memo), ownerCtx(ctx.supabase, ctx.orgId, projectId)])
   // vmNodeKeys: an EMPTY fold-set means the VM couldn't be built (stack-less project) — the guardrail's
   // own "absent → can't judge → proceed" case, so pass undefined rather than refuse every write.
   const rc: RouteCtx = {
     supabase: ctx.supabase, orgId: ctx.orgId, projectId, byLabel: ctx.from, ...oc,
     narrationId, now, vmNodeKeys: vm.keys.size ? vm.keys : undefined, vmTaskNames: vm.keys.size ? vm.names : undefined,
+    callQc: qc?.call,
   }
-  const item: SiteItem = { type: 'progress', text, task_hint: null, qc_statements: [], cause: null, cause_reason: null, owner_hint: null, date_hint: null, project_hint: null }
+  // STEP A (2026-07-11) — THE STATEMENTS REACH THE APPLY. This built its SiteItem with a hard-coded
+  // `qc_statements: []`, and matchQc opens with `if (!statements.length) return []` — so the strict QC
+  // matcher returned empty on every message ever sent, for text and image alike. The extractor pulled
+  // "poured continuous, no cold joint" out of the message and the executor dropped it on the floor. The
+  // whole QC-answering feature was inert. The statements the item carried now travel with it.
+  const item: SiteItem = { type: 'progress', text, task_hint: null, qc_statements: qc?.statements ?? [], cause: null, cause_reason: null, owner_hint: null, date_hint: null, project_hint: null }
   const res = await applyProgress(rc, task, item, { closureAuthorized })
   if (!res.visibleInVM) return null   // GUARDRAIL: never a false "✓ updated" onto a row the UI can't render
   return readbackLabel(`${task.name}${task.floor_label ? ` (${task.floor_label})` : ''}`)
@@ -536,29 +746,176 @@ export async function handleUndoResolve(ctx: SiteopsCtx, quotedWamid: string): P
 // `update` threads the ladder's held verdict (T3 sole-authority) for a SINGLE-target ask; a multi-candidate
 // ask has no single verdict → verdict-less slot → the resume forces ADDRESSING on confirm (the safe floor).
 type CollisionCand = { id: string; kind: 'issue' | 'todo' | 'task'; orgId: string; projectId: string | null; projectName: string; title: string; cause: string | null }
+
+// ── THE PICK'S LIST ROWS (2026-07-11) ─────────────────────────────────────────────────────────────────────
+// Meta's HARD caps: 10 rows per list, 24 chars per row title, 72 per row description. The pick was TEXT-only
+// because of the 24 — a cut label lies ("bathroom tiles not" + "resolved" read as its own negation). The way
+// through is not to truncate less; it is to stop making the row the place where meaning lives:
+//   • the BODY still prints every candidate in full (unchanged) — that is the truth the supervisor reads;
+//   • the row TITLE carries only the DIFFERENTIATOR — the one thing that tells these rows apart;
+//   • the DESCRIPTION carries the full label, so the task name AND its floor · unit are on every row.
+// Two rows are always spoken for ("something else" / "none of these"), so a pick of more than 8 candidates
+// cannot fit: it falls back to the TEXT list rather than drop a row inside the cap (→ null).
+const LIST_MAX_CANDS = 8
+const cut = (s: string, n: number) => (s.length <= n ? s : `${s.slice(0, n - 1).trimEnd()}…`)
+/** "Floor tiling — First · Unit A" → { name: "Floor tiling", loc: "First · Unit A" } (loc '' when unsuffixed). */
+const splitLabel = (title: string): { name: string; loc: string } => {
+  const i = title.indexOf(' — ')
+  return i > 0 ? { name: title.slice(0, i), loc: title.slice(i + 3) } : { name: title, loc: '' }
+}
+type PickRow = { id: string; title: string; description?: string }
+function pickRows(cands: CollisionCand[], multiKind: boolean): PickRow[] | null {
+  if (!cands.length || cands.length > LIST_MAX_CANDS) return null
+  const parts = cands.map((c) => splitLabel(c.title))
+  // WHICH AXIS is this pick? Same place, different work (the tiling tie) → the WORK is the differentiator.
+  // Same work, different places (five floors of wiring) → the FLOOR · UNIT is. Neither → fall back to the name.
+  const sameLoc = parts.every((p) => p.loc && p.loc === parts[0].loc)
+  const sameName = parts.every((p) => p.name === parts[0].name)
+  const rows: PickRow[] = cands.map((c, i) => {
+    const p = parts[i]
+    const differentiator = sameLoc ? p.name : (sameName && p.loc ? p.loc : p.name)
+    return {
+      id: `pick:${i + 1}`,                                   // POSITIONAL — display order IS stored order
+      title: cut(differentiator, 24),
+      description: cut(`${c.title}${multiKind ? `  [${c.kind}]` : ''}`, 72),
+    }
+  })
+  // The escapes keep their numbers (resolveTypedPick reads length+1 / length+2), so a tap and a typed number
+  // mean exactly the same thing.
+  rows.push({ id: `pick:${cands.length + 1}`, title: 'It’s something else', description: 'Log it as a new item' })
+  rows.push({ id: `pick:${cands.length + 2}`, title: 'None of these', description: 'Save for review — change nothing' })
+  return rows
+}
+/**
+ * THE which_item QUESTION, IN WORDS. Extracted so the message we SEND and the body we STORE (slots.ask_body,
+ * replayed verbatim by a re-surface) are the same string by construction — a re-render can drift, and did:
+ * the live re-surface dropped the piece, both escape options and the drain counter.
+ *
+ * NOTHING IS TRUNCATED. The supervisor cannot pick what they cannot read, and a cut label lies: the 3-word
+ * `shortLabel` once rendered "wiring completed for the entire apartment except the fifth floor" as
+ * "ASM Elite: fifth", and a 3-word cut of "bathroom tiles not fixed correctly" + "resolved" read as
+ * "✓ bathroom tiles not resolved" — a truth inversion (probe C2). The candidate titles carry their
+ * "— Floor · Unit" tail because that is the only thing that tells same-name rows apart. This is a plain TEXT
+ * message, so WhatsApp imposes no per-row cap (interactive LIST rows are capped at 24 chars by Meta — which
+ * is exactly why picks are not sent as lists).
+ */
+function composeItemPickBody(
+  a: { pieceText: string; pending?: PendingItemAsk[]; preamble?: string | null },
+  cands: CollisionCand[], multiKind: boolean, tappable: boolean,
+): string {
+  const listLines = cands.map((c, i) => `${i + 1}. ${c.title}${multiKind ? `  [${c.kind}]` : ''}`).join('\n')
+  // The drain is serialized, so say so: without this a 3-ask turn reads as one question and two lost updates.
+  const more = a.pending?.length ? `\n\n(${a.pending.length} more to sort out after this.)` : ''
+  // EXPLAIN WHAT EVERY CHOICE DOES. 'new' creates a fresh item; 'none' must NOT — when the right row is simply
+  // missing (the fifth-floor wiring task that does not exist), creating a duplicate is the wrong repair, so it
+  // is saved for review and nothing changes.
+  const nOther = cands.length + 1
+  const nNone = cands.length + 2
+  // WHOSE WORDS ARE WHOSE. A photo's piece is the marked composite (caption + our description). Quoting the
+  // whole thing under "You said" put OUR description in the sender's mouth — live, he was shown
+  // "You said: … — Ceiling installation framework visible at the construction site", which he never said.
+  const { said, seen } = humanizeInbound(a.pieceText)
+  const heard = said
+    ? `You said:\n"${said}"${seen ? `\n\nFrom the photo, I can see: ${seen}` : ''}`
+    : `About this photo — what I can see:\n"${seen ?? a.pieceText}"`
+  // THE PREAMBLE — a fact he must know to answer ("this site has no floor cellar"). It sits between what we
+  // heard and what we're asking, because it is the REASON we're asking.
+  const why = a.preamble?.trim() ? `${a.preamble.trim()}\n\n` : ''
+  return `${heard}\n\n${why}` +
+    `Which of these is it about? ${tappable ? 'Tap one below' : 'Reply with the number'} and I'll update that one:\n${listLines}\n\n` +
+    `${nOther}. It's something else — I'll log it as a new item\n` +
+    `${nNone}. None of these — I'll save it for review and change nothing\n\n` +
+    `Or just name the work, for example "${cands[0]?.title ?? 'wiring on the fourth floor'}".${more}`
+}
+
 async function askItemPick(ctx: SiteopsCtx, meta: { org_id: string; wamid: string }, a: {
   candidates: CollisionCand[]; pieceText: string; projectId: string | null; narrationId: string | null
   image: { storagePath: string; caption: string | null } | null
-  update?: AttachUpdate | null; prefix?: string
+  qcStatements?: string[]
+  update?: AttachUpdate | null; prefix?: string; fork?: boolean; sink?: ReadbackSink; preamble?: string | null
+  /** id → where this row came from ('model_nearest' | 'lexical_belt' | 'structural_sibling'), for the log. */
+  provenance?: Record<string, string>
+  // THE DRAIN CURSOR — the which_item asks still owed after this one. They ride THIS pick's slots and are
+  // asked, one at a time, by its answer (finishItemAsk). `heldEntries`/`heldRefs` thread the readback summary
+  // accumulated so far across the drain, so the fold lands on the LAST answer — the which_project twin.
+  pending?: PendingItemAsk[]
+  heldEntries?: { project: string | null; body: string }[]
+  heldRefs?: { kind: string; id: string; event: string }[]
 }): Promise<void> {
-  const cands = a.candidates.slice(0, 9)
+  // STEP 4 — the KIND FORK. A pick that spans MORE THAN ONE kind (a wiring TASK next to a wiring-broke ISSUE —
+  // "is it the work or the defect?") tags each row with its [kind] so the two are distinguishable. When that
+  // cross-kind pick is a PURE MEANING fork (`fork` — no location/floor-pin component) it is also capped to 2
+  // (+ new) so it stays a glance-and-tap. A SINGLE-kind pick (five same-name floors — the location axis) or a
+  // mixed-axis pick keeps the full list (cap 9). The sliced list is FROZEN into slots, so display == stored ==
+  // resolved either way.
+  const multiKind = new Set(a.candidates.map((c) => c.kind)).size > 1
+  const cands = a.candidates.slice(0, multiKind && a.fork ? 2 : 9)
+  const rows = pickRows(cands, multiKind)   // null → too many for a WhatsApp list; the TEXT pick stands
+  const askBody = composeItemPickBody(a, cands, multiKind, !!rows)   // the question, in the words it is asked in
+  const slots = {
+    kind: 'siteops_batch_collision', status: 'still_open', piece_text: a.pieceText,
+    candidates: cands, project_id: a.projectId, narration_id: a.narrationId, image: a.image,
+    // GAP 1 — the QC evidence rides the question. Frozen here with the offered list, applied by the answer.
+    ...(a.qcStatements?.length ? { qc_statements: a.qcStatements } : {}),
+    // THE QUESTION, VERBATIM (2026-07-11). A re-surface used to RE-RENDER the question from the stored
+    // question string + candidate names — which silently dropped the "You said …" piece, the "It's something
+    // else" / "None of these" escapes, and the "(N more to sort out)" counter. The supervisor was shown a
+    // stump of the question he was being asked to answer. Store what we asked; replay exactly that.
+    ask_body: askBody,
+    ...(a.update ? { update: a.update } : {}),
+    ...(a.pending?.length ? { pending_item_asks: a.pending } : {}),
+    ...(a.heldEntries?.length ? { held_readback: { entries: a.heldEntries, resolvedRefs: a.heldRefs ?? [] } satisfies HeldReadback } : {}),
+  }
   await openConversation(ctx.supabase, {
     orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
-    pendingQuestion: 'which item?',
-    slots: {
-      kind: 'siteops_batch_collision', status: 'still_open', piece_text: a.pieceText,
-      candidates: cands, project_id: a.projectId, narration_id: a.narrationId, image: a.image,
-      ...(a.update ? { update: a.update } : {}),
-    },
-    lastMessageId: ctx.wamid,
+    pendingQuestion: 'which item?', slots, lastMessageId: ctx.wamid,
   })
-  const listLines = cands.map((c, i) => `${i + 1}. ${shortLabel(c.title)}`).join('\n')
-  const piece = shortLabel(a.pieceText)
-  const head = a.prefix ? `${a.prefix}\n\n` : ''
-  await send(ctx.supabase, ctx.from, {
-    kind: 'text',
-    body: `${head}${piece ? `"${piece}" — ` : ''}which of these is it about?\n${listLines}\n\nReply with the item, or say *new* if it's something else.`,
-  }, meta)
+  // STEP C1 — record the opened ask on the sink so flushOrHoldReadback can STASH the turn's resolved summary
+  // onto THIS conversation (the resume folds it into one readback), holding it until the ask is answered.
+  if (a.sink) { a.sink.askSlots = slots; a.sink.askQuestion = { pendingQuestion: 'which item?', lastMessageId: ctx.wamid } }
+  // NOTHING IS TRUNCATED. The supervisor cannot pick what they cannot read, and a cut label lies: the 3-word
+  // `shortLabel` once rendered "wiring completed for the entire apartment except the fifth floor" as
+  // "ASM Elite: fifth", and a 3-word cut of "bathroom tiles not fixed correctly" + "resolved" read as
+  // "✓ bathroom tiles not resolved" — a truth inversion (probe C2). The candidate titles carry their
+  // "— Floor · Unit" tail because that is the only thing that tells same-name rows apart. This is a plain TEXT
+  // message, so WhatsApp imposes no per-row cap (interactive LIST rows are capped at 24 chars by Meta — which
+  // is exactly why picks are not sent as lists).
+  // The LIST is a tap-shortcut over the SAME body — every candidate is still printed above it, in full, so a
+  // 24-char row title can never be the only place a fact appears. Too many rows for Meta's cap → text, whole.
+  // The turn-specific prefix (a welcome) leads the message but is NOT part of the question, so it never rides
+  // the slots: a question replayed an hour later must not re-greet the sender.
+  const body = a.prefix ? `${a.prefix}\n\n${askBody}` : askBody
+  await send(ctx.supabase, ctx.from, rows
+    ? { kind: 'list', body, button: 'Pick the work', rows }
+    : { kind: 'text', body }, meta)
+
+  // WHY THESE N ROWS — the provenance of every offered row and, crucially, what the cap DROPPED. Without the
+  // dropped list a live "which of these?" cannot be explained: we could not tell whether the right floor was
+  // ranked out or never existed.
+  const srcOf = (id: string) => (a.update?.target_id === id ? 'model_pick' : a.provenance?.[id] ?? 'shortlist')
+  console.log(`[siteops:ask:compose] piece=${JSON.stringify(a.pieceText)} axis=${a.fork ? 'meaning(fork)' : 'meaning/location'} multiKind=${multiKind} cap=${multiKind && a.fork ? 2 : 9}`)
+  console.log(`[siteops:ask:offered] ${JSON.stringify(cands.map((c) => ({ id: c.id, kind: c.kind, label: c.title, src: srcOf(c.id) })))}`)
+  const dropped = a.candidates.slice(cands.length)
+  if (dropped.length) console.log(`[siteops:ask:dropped] cap removed ${dropped.length}: ${JSON.stringify(dropped.map((c) => ({ id: c.id, label: c.title, src: srcOf(c.id) })))}`)
+}
+
+/**
+ * THE ITEM-ASK DRAIN. Ask the FIRST owed which_item question and carry the REST in its slots, so the answer
+ * asks the next (finishItemAsk). Mirrors askProjectGroups' `pending_groups` cursor exactly. Returns true when
+ * a question went out — the caller must then NOT flush its readback (the ask holds it).
+ */
+async function drainItemAsks(
+  ctx: SiteopsCtx, meta: { org_id: string; wamid: string }, queue: PendingItemAsk[],
+  opts: { sink?: ReadbackSink; heldEntries?: { project: string | null; body: string }[]; heldRefs?: { kind: string; id: string; event: string }[] } = {},
+): Promise<boolean> {
+  if (!queue.length) return false
+  const [first, ...rest] = queue
+  console.log(`[siteops:ask:drain] asking 1 of ${queue.length} which_item asks (${rest.length} queued)`)
+  await askItemPick(ctx, meta, {
+    ...first, update: first.update ?? null, pending: rest,
+    sink: opts.sink, heldEntries: opts.heldEntries, heldRefs: opts.heldRefs,
+  })
+  return true
 }
 
 // question_asked → open the pick through an EXISTING proven resume, storing exactly the offered set in the
@@ -602,13 +959,20 @@ async function askResolutionQuestion(ctx: SiteopsCtx, t: Extract<Terminal, { kin
       body: `Got the photo — is it about one of these, or something new?`,
       button: 'Pick',
       rows: [
-        ...shortlist.map((c, i) => ({ id: `pick:${i + 1}`, title: shortLabel(c.label).slice(0, 24), description: `[${c.kind}]` })),
+        ...shortlist.map((c, i) => ({ id: `pick:${i + 1}`, title: fullText(c.label).slice(0, 24), description: `[${c.kind}]` })),
         { id: `pick:${shortlist.length + 1}`, title: 'None — just save it' },
       ],
     }, meta)
     return true
   }
   if (t.about === 'which_project' && t.item) {
+    // SERIALIZED — inside a queued turn this ask WAITS (runSiteops asks it first, carrying the item asks in
+    // its slots). Opening it here would clobber, or be clobbered by, the item drain: openConversation upserts
+    // the ONE open conversation per (org, sender). Deferred is still SENT — just by the single cursor.
+    if (ex.projectAskQueue) {
+      ex.projectAskQueue.push({ item: toSiteItem(t.item), narrationId: ex.narrationId })
+      return true
+    }
     const { data: projRows } = await ctx.supabase.from('projects').select('project_id, name').eq('org_id', ctx.orgId).eq('status', 'Active')
     const cands = ((projRows ?? []) as { project_id: string; name: string }[]).map((p) => ({ id: p.project_id, name: p.name }))
     await openConversation(ctx.supabase, {
@@ -618,7 +982,7 @@ async function askResolutionQuestion(ctx: SiteopsCtx, t: Extract<Terminal, { kin
       lastMessageId: ctx.wamid,
     })
     await send(ctx.supabase, ctx.from, {
-      kind: 'list', body: `Which project is *${shortLabel(t.item.detail)}* for?`, button: 'Pick project',
+      kind: 'list', body: `Which project is *${fullText(t.item.detail)}* for?`, button: 'Pick project',
       rows: cands.slice(0, 10).map((c, i) => ({ id: `pick:${i + 1}`, title: c.name.slice(0, 24) })),
     }, meta)
     return true
@@ -628,6 +992,8 @@ async function askResolutionQuestion(ctx: SiteopsCtx, t: Extract<Terminal, { kin
 
 export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex: ExecCtx): Promise<TerminalOutcome[]> {
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
+  ex.vmMemo ??= new Map()   // scoped to THIS call (see materializeProjectTasks)
+  console.log(`[siteops:apply] project=${ex.projectName ?? ex.projectId ?? '-'} terminals=${JSON.stringify(terminals.map((t) => t.kind === 'object_updated' && t.collectiveTargetIds?.length ? `${t.kind}×${t.collectiveTargetIds.length}` : t.kind))}`)
   const outcomes: TerminalOutcome[] = []
   const resolvedRefs: { kind: string; id: string; event: string }[] = []   // resolved ISSUES → the undo binding
   const createdRefs: { kind: 'problem' | 'todo'; id: string; label: string }[] = []   // image-created objects → the enrichment window (T5 Gap C)
@@ -643,7 +1009,10 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
     const seen = new Set<string>()
     const cands: CollisionCand[] = []
     for (const q of wiQs) {
-      for (const id of q.update ? [q.update.target_id] : (q.shortlistIds ?? [])) {
+      // A shortlist (the structural-pin ask, the near-floor both-false ask) offers ITS FULL residual set; a
+      // bare single-target ask (low-confidence / med-task) offers just that target + "new". Prefer the
+      // shortlist when present so a structural which_item never collapses to the model's (unpinned) pick.
+      for (const id of (q.shortlistIds?.length ? q.shortlistIds : (q.update ? [q.update.target_id] : []))) {
         if (seen.has(id)) continue
         const item = ex.itemsById.get(id)
         const c = ex.candById?.get(id)
@@ -663,10 +1032,20 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
       // has no single verdict → verdict-less slot forces ADDRESSING on confirm (the conservative floor).
       const single = wiQs.length === 1 && cands.length === 1 ? (wiQs[0].update ?? null) : null
       const image = ctx.image?.storagePath ? { storagePath: ctx.image.storagePath, caption: ctx.image.caption ?? null } : null
-      await askItemPick(ctx, meta, {
-        candidates: cands, pieceText: ex.message ?? cands[0].title,
-        projectId: ex.projectId ?? cands[0].projectId ?? null, narrationId: ex.narrationId, image, update: single,
-      })
+      // STEP 4 — cap the cross-kind fork to 2 ONLY when EVERY contributing ask is the MEANING axis. A location
+      // component (same-name floor pin) present → keep the full list so no floor is truncated (fork=false).
+      const fork = wiQs.every((q) => (q.axis ?? 'meaning') === 'meaning')
+      // A preamble is a fact about THIS site's structure ("no floor cellar"), so it holds for every ask folded
+      // into this one pick. Take the first that carries one — there is at most one structure per narration.
+      const preamble = wiQs.find((q) => q.preamble)?.preamble ?? null
+      const ask: PendingItemAsk = {
+        candidates: cands, pieceText: ex.message ?? cands[0].title, qcStatements: ex.qc?.statements ?? [],
+        projectId: ex.projectId ?? cands[0].projectId ?? null, narrationId: ex.narrationId, image, update: single, fork, preamble,
+      }
+      // SERIALIZED — with a queue, this ask waits its turn (the caller drains one at a time). Without one
+      // (the direct/resume callers), it goes out inline exactly as before.
+      if (ex.askQueue) ex.askQueue.push(ask)
+      else await askItemPick(ctx, meta, { ...ask, sink: ex.readbackSink })
       for (const q of wiQs) outcomes.push({ terminal: q, status: 'ok', label: terminalLabel(q, ex.labelById) })
     } else {
       // NONE resolvable → the T3 floor: park each honestly (never a silent drop); the readback tells the sender.
@@ -679,13 +1058,54 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
     }
   }
 
+  // THE IDEMPOTENCY FLOOR (live probe, 2026-07-11). One row, one action, ONE write and ONE readback line —
+  // however many times the message named it. An over-decomposed photo ("the frame is boarded at the front /
+  // the frame is still exposed at the rear") produces two updates that pin to the SAME row; applying twice
+  // writes the row twice and tells the sender twice that it was updated, which reads as two separate reports
+  // that never happened. The set is TURN-scoped (ex.appliedTargets, owned by the unit loop) so it also holds
+  // ACROSS the per-item applyTerminals calls, not just within one.
+  const appliedOnce = (ex.appliedTargets ??= new Set<string>())
+  const applyKey = (t: Extract<Terminal, { kind: 'object_updated' }>) =>
+    `${t.collectiveTargetIds?.length ? [...t.collectiveTargetIds].sort().join(',') : t.update.target_id}:${t.applied}`
+
   for (const t of terminals) {
     try {
       if (t.kind === 'object_updated') {
+        const key = applyKey(t)
+        if (appliedOnce.has(key)) {
+          console.log(`[siteops:apply:dup] ${key} — already applied this turn; not written again, not read back twice`)
+          outcomes.push({ terminal: t, status: 'duplicate', label: terminalLabel(t, ex.labelById) })
+          continue
+        }
+        appliedOnce.add(key)
+        // #2 COLLECTIVE — an explicit "all" swept the residual same-name tasks; apply the shared verdict to
+        // EVERY one and read back ONE combined line. (Tasks only; no undo — consistent with today's task
+        // updates, and the undo is not mandatory in this setting.)
+        if (t.collectiveTargetIds?.length) {
+          const succeeded: string[] = []
+          for (const id of t.collectiveTargetIds) {
+            // a collective BLOCKED ("none of the ceilings are done") records the blocker on every residual
+            // sibling — it must never reach applyProgress, which would advance them all.
+            const label = t.applied === 'blocked'
+              ? await applyTaskBlockedById(ctx, id, t.update.reason)
+              : await applyTaskProgressById(ctx, id, t.update.reason, ex.narrationId, ex.now, ex.projectId ?? null, t.applied === 'resolve', ex.vmMemo, ex.qc)
+            if (label) succeeded.push(id)
+          }
+          const baseName = (ex.candById?.get(t.update.target_id)?.title ?? ex.labelById.get(t.update.target_id) ?? 'tasks').split(' — ')[0]
+          console.log(`[siteops:collective] name=${JSON.stringify(baseName)} targets=${t.collectiveTargetIds.length} applied=${succeeded.length}`)
+          outcomes.push({ terminal: { ...t, collectiveTargetIds: succeeded.length ? succeeded : t.collectiveTargetIds }, status: succeeded.length ? 'ok' : 'failed', label: baseName })
+          continue
+        }
         const item = ex.itemsById.get(t.update.target_id)
         if (!item) {
           // STAGE 2 — a HIGH-confidence TASK target applies first-class (the probe-P5 gap): the third of
           // the spec's three kinds ("tasks + issues + snags") finally lands instead of holding.
+          // A BLOCKED task lands at med too (it changes no status, so it needs no high-confidence gate) and
+          // must never route through applyTaskUpdate → applyProgress.
+          if (t.update.target_kind === 'task' && t.applied === 'blocked') {
+            const label = await applyTaskBlockedById(ctx, t.update.target_id, t.update.reason)
+            if (label) { outcomes.push({ terminal: t, status: 'ok', label }); continue }
+          }
           if (t.update.target_kind === 'task' && t.update.confidence === 'high') {
             const label = await applyTaskUpdate(ctx, t, ex)
             if (label) { outcomes.push({ terminal: t, status: 'ok', label }); continue }
@@ -702,7 +1122,7 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
           continue
         }
         const out: { resolveEvent?: string } = {}
-        await applyBatchResolution(ctx, item, t.applied === 'resolve' ? 'resolved' : 'still_open', t.update.reason, ex.cadenceMap, ex.actorId, ex.now, { force: t.applied, reason: t.update.reason, out })
+        await applyBatchResolution(ctx, item, t.applied, t.update.reason, ex.cadenceMap, ex.actorId, ex.now, { reason: t.update.reason, out })
         // A photo riding an update is ANSWER EVIDENCE for the item it updates (decision (a): a chase-reply
         // photo never spawns a fresh object) — attach + trail, the role='answer' path the flip had dropped.
         if (ctx.image?.storagePath) await answerWithPhoto(ctx, { kind: item.kind, id: item.id, orgId: item.orgId }, ctx.image.storagePath, ctx.image.caption ?? null)
@@ -729,6 +1149,24 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
           for (const td of out.todos) if (td.id) createdRefs.push({ kind: 'todo', id: td.id, label: td.text })
         }
         outcomes.push({ terminal: t, status: 'ok', label: readbackLabel(t.item.detail) })
+      } else if (t.kind === 'acked_untracked_work') {
+        // The work is real; we hold no task list to tick off. Audit it exactly like a miss (the reviewer wants
+        // to know WHY nothing landed), but the reply is an honest explanation, not "didn't catch".
+        if (ex.narrationId) {
+          const { error } = await ctx.supabase.from('site_narrations')
+            .update({ miss_verdict: { reason: t.reason, contract: t.contract } }).eq('id', ex.narrationId)
+          if (error) console.error('[siteops:miss-verdict] persist failed:', error.message)
+        }
+        outcomes.push({ terminal: t, status: 'ok', label: '' })   // no state effect; the narration IS the note
+      } else if (t.kind === 'acked_no_place') {
+        // A task named a floor/unit we couldn't place (no such floor, or the floor exists but the task isn't
+        // tracked there). No wrong write; audit it, and the readback shows the real structure / points to the app.
+        if (ex.narrationId) {
+          const { error } = await ctx.supabase.from('site_narrations')
+            .update({ miss_verdict: { reason: t.reason, contract: t.contract } }).eq('id', ex.narrationId)
+          if (error) console.error('[siteops:miss-verdict] persist failed:', error.message)
+        }
+        outcomes.push({ terminal: t, status: 'ok', label: '' })   // no state effect; the narration IS the note
       } else if (t.kind === 'acked_didnt_catch') {
         // T7 (clause 6) — a BOTH-FALSE miss must be AUDITABLE, not in-memory: persist the resolution
         // verdict onto the narration it belongs to so a reviewer can query "why did we miss this" after
@@ -784,7 +1222,9 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
   // resolve landed it goes as a BUTTONS message with the one-tap "Not resolved" undo, capturing the resolved
   // issues + their event ids — 4a maps the outbound wamid to those refs (handleUndoResolve). No resolve →
   // text. If every terminal was a question, the picks ARE the reply — no combined readback.
-  if (outcomes.some((o) => o.terminal.kind !== 'question_asked' || o.status !== 'ok')) {
+  // (a 'duplicate' is silent — the fact is already on a line the sender has been sent; a turn whose ONLY
+  // outcomes are duplicates and sent questions has nothing new to read back.)
+  if (outcomes.some((o) => o.status !== 'duplicate' && (o.terminal.kind !== 'question_asked' || o.status !== 'ok'))) {
     // T8c-2 (clause 5) UNDERSTOOD-FIRST — a compound where fragment-1 was a MISS but the rest was SAVED must
     // lead with what we held (the saved rest), not the miss. composeReadback would put the lone didn't-catch
     // first and append the saved suffix; reorder that one case so the understood part leads.
@@ -795,7 +1235,12 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
     // T8b (clause 4) — DISCLOSE a batch-ASSUMED project so a wrong adoption is visible and correctable
     // (there's no project-correction tap yet — reuse the fresh path: "send it again with the site").
     if (ex.assumedSite) body += ` · logged at *${ex.assumedSite}* (assumed from your open chase) — wrong site? send it again with the site`
-    if (resolvedRefs.length) {
+    if (ex.readbackSink) {
+      // BATCHED — collect for the ONE combined reply runSiteops flushes (asks already went out inline).
+      console.log(`[siteops:readback:collect] project=${ex.projectName ?? '-'} body=${JSON.stringify(body.slice(0, 200))}`)
+      ex.readbackSink.entries.push({ project: ex.projectName ?? null, body })
+      for (const r of resolvedRefs) ex.readbackSink.resolvedRefs.push(r)
+    } else if (resolvedRefs.length) {
       await send(ctx.supabase, ctx.from, { kind: 'buttons', body, buttons: [{ id: 'siteops_undo', title: 'Not resolved' }] }, { ...meta, capture: { ref_kind: 'readback', object_refs: resolvedRefs } })
     } else {
       await send(ctx.supabase, ctx.from, { kind: 'text', body }, meta)
@@ -818,7 +1263,7 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
         kind: 'siteops_photo', object_refs: createdRefs.map((r) => ({ kind: r.kind, id: r.id })),
         project_id: ex.projectId ?? null, photo_wamid: ctx.wamid,
         hold_until: new Date(Date.now() + holdMs).toISOString(),
-        label: shortLabel(extract || 'the photo'), extract, narration_id: ex.narrationId,
+        label: fullText(extract || 'the photo'), extract, narration_id: ex.narrationId,
       },
       lastMessageId: ctx.wamid,
     })
@@ -828,191 +1273,20 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
 
 /** "“cement short”✓ resolved" / "“masons absent” still open (will check back)" — one readback part.
  *  Quoted, length-capped labels (readbackLabel) — a word-count cut can invert the sentence (probe C2). */
-function readbackPart(item: BatchItem, verdict: 'resolved' | 'open'): string {
+function readbackPart(item: BatchItem, verdict: 'resolved' | 'open' | 'blocked'): string {
   if (verdict === 'resolved') return `“${readbackLabel(item.title)}” ✓ ${item.kind === 'todo' ? 'done' : 'resolved'}`
+  if (verdict === 'blocked') return `⏳ “${readbackLabel(item.title)}” still open — noted, chasing sooner`
   return `“${readbackLabel(item.title)}” still open (will check back)`
 }
 
-/**
- * B3 — REPLY HANDLING. The open batch is a patient context; this sorts each
- * decomposed piece of the supervisor's message into "answers an open chase"
- * (resolve/re-time + trail) vs "new narration" (route normally), handles a
- * genuine same-cause collision with ONE targeted site question, and confirms
- * per item. Returns TRUE if it consumed the message; FALSE if NOTHING matched
- * the batch (then runSiteops routes it fresh, leaving the batch open).
- */
-// ── v2 ADOPTION shell — UNREACHABLE since the image path joined the unit (audit #1) ──────────────────
-// handleBatchReply was the adoption-era chase-reply engine (ONE resolveInbound over the LEGACY all-projects
-// candidate set → terminals → applyTerminals). The text path left it at the singular-first restructure; the
-// image path left it when it went project-first — so, like its match+judge twin below, it is PHYSICALLY
-// PRESENT but UNREACHABLE, kept for one bisectable revert. PHASE 4 is the executioner for BOTH (plus
-// matchPieceToBatch + ASCII tokens + standalone judgeResolution + buildCandidateSet's projectId-null mode).
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- UNREACHABLE (Phase 4 executioner); kept for one bisectable revert.
-async function handleBatchReply(
-  ctx: SiteopsCtx, text: string, _pieces: SiteItem[], _topProjectHint: string | null,
-  batch: OpenBatch, _projects: ProjectRef[], narrationId: string | null,
-  callModel: (system: string, user: string) => Promise<string> = callLLM,
-): Promise<boolean> {
-  const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
-  const now = new Date()
-  const cadenceMap = await loadCadenceMap(ctx.supabase, ctx.orgId)
-  const actorId = await senderUserId(ctx)
+// PHASE 4 EXECUTED (2026-07-09). Deleted here: handleBatchReply + handleBatchReplyLegacy — the adoption-era
+// chase-reply engines, UNREACHABLE since the text path went singular-first and the image path went
+// project-first, and kept only "for one bisectable revert". They were the sole consumers of the reply
+// word-lists (isBareAck / interpretStatus / classifyReplyFragment / matchPieceToBatch) and of the
+// standalone judgeResolution. A chase reply is now an ordinary inbound message: the router reads the
+// conversation, and the batch is what siteops always claimed it was in its own comments — a ⭐ candidate
+// prior, never a router.
 
-  // FAST PATH (cardinality, not meaning) — a recognised bare ack + exactly ONE open chase → that chase,
-  // ADDRESSING, no LLM. One referent + zero content = nothing to interpret.
-  if (isBareAck(text) && batch.items.length === 1) {
-    const v = await applyBatchResolution(ctx, batch.items[0], 'still_open', text, cadenceMap, actorId, now, { bareAck: true })
-    await send(ctx.supabase, ctx.from, { kind: 'text', body: `Got it — ${readbackPart(batch.items[0], v)}` }, meta)
-    return true
-  }
-
-  // UNIFIED RESOLUTION — one call, then apply the terminals. A park (model down / unreadable) is honest +
-  // leaves the batch untouched; otherwise the executor auto-resolves (+undo), creates, asks, or acks.
-  const rc = { supabase: ctx.supabase, orgId: ctx.orgId, from: ctx.from }
-  const say = (body: string) => send(ctx.supabase, ctx.from, { kind: 'text', body }, meta)
-  const image = ctx.image?.storagePath ? { storagePath: ctx.image.storagePath, caption: ctx.image.caption ?? null } : null
-  const res = await resolveInbound(rc, { message: text, image, narrationId }, batch, say, callModel)
-  if (res.kind === 'parked') return true   // parked + honest reply; the chase batch is UNTOUCHED (no eat, no half-mutation)
-  const itemsById = new Map(batch.items.map((i) => [i.id, i]))
-  // Human labels for EVERY offered candidate (not just the open batch) — so a FAILED readback names the item
-  // even when the target was a candidate outside this batch. Never a uuid reaches a human. (See terminalLabel.)
-  const labelById = new Map(res.candidates.map((c) => [c.id, readbackLabel(c.title ?? '')]))
-  const outcomes = await applyTerminals(ctx, res.terminals, { itemsById, labelById, cadenceMap, actorId, now, narrationId })
-  // batch bookkeeping the executor doesn't own: drop RESOLVED chased items, close the batch when empty.
-  const resolvedIds = outcomes
-    .filter((o): o is TerminalOutcome & { terminal: Extract<Terminal, { kind: 'object_updated' }> } => o.terminal.kind === 'object_updated' && o.terminal.applied === 'resolve' && o.status === 'ok')
-    .map((o) => o.terminal.update.target_id)
-  if (resolvedIds.length) await dropBatchItems(ctx.supabase, batch, resolvedIds)
-  return true
-}
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- UNREACHABLE (Phase 4 executioner); kept for one bisectable revert of the adoption flip.
-async function handleBatchReplyLegacy(
-  ctx: SiteopsCtx, text: string, pieces: SiteItem[], topProjectHint: string | null,
-  batch: OpenBatch, projects: ProjectRef[], narrationId: string | null,
-): Promise<boolean> {
-  const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
-  const now = new Date()
-
-  // a terse "sorted"/"done" decomposes to nothing — treat the whole line as one piece
-  const frags = pieces.length ? pieces : [{ text, task_hint: null, project_hint: null } as unknown as SiteItem]
-
-  // ALL-clear shortcut: "all done", "everything sorted" → resolve the whole batch
-  const allClear = /\b(all|everything|sab)\b/i.test(text) && /\b(done|sorted|sortd|resolved|cleared|finished|complete)\b/i.test(text)
-
-  const resolutions: { item: BatchItem; verdict: 'resolved' | 'open' }[] = []
-  const leftovers: SiteItem[] = []
-  let collision: { piece: SiteItem; items: BatchItem[]; status: 'resolved' | 'still_open' | 'unknown' } | null = null
-  const matchedIdx = new Set<number>()
-
-  const cadenceMap = await loadCadenceMap(ctx.supabase, ctx.orgId)
-  const actorId = await senderUserId(ctx)
-
-  // FIX 2 — PROJECT-SCOPE the batch (extends Fix X from the photo branch to all types). Resolve the
-  // message's project (caption for images, named site / hint for text) and match only within it; a
-  // message resolving to a CHASE-FREE project isn't a chase reply → route it fresh.
-  const pre = await resolveProject(ctx.supabase, ctx.orgId, { narration: ctx.image?.caption ?? text, nameHint: topProjectHint })
-  const { scoped, routeFresh } = scopeBatchToProject(batch.items, pre.projectId)
-  if (routeFresh) return false
-
-  if (isBareAck(text) && scoped.length === 1) {
-    // THE FAST PATH (cardinality, not meaning) — a recognised bare ack + exactly ONE open chase → that
-    // chase, ADDRESSING, deterministically, no LLM. One referent + zero content = nothing to interpret.
-    const v = await applyBatchResolution(ctx, scoped[0], 'still_open', text, cadenceMap, actorId, now, { bareAck: true })
-    resolutions.push({ item: scoped[0], verdict: v }); matchedIdx.add(0)
-  } else if (allClear) {
-    for (let i = 0; i < scoped.length; i++) {
-      const v = await applyBatchResolution(ctx, scoped[i], 'resolved', text, cadenceMap, actorId, now)
-      resolutions.push({ item: scoped[i], verdict: v }); matchedIdx.add(i)
-    }
-  } else {
-    // Sort each fragment into "answers a chase" vs "new observation" via the PURE classifier (see
-    // _siteops_batch). singleFragment/hasObservation carry the pipeline's own signal about whether this
-    // reply is a bare ack or a substantive observation.
-    const signals = { singleFragment: frags.length === 1, hasObservation: pieces.length > 0 }
-    for (const piece of frags) {
-      const m = classifyReplyFragment(piece, scoped, signals)
-      if (m.kind === 'match') {
-        if (matchedIdx.has(m.index)) continue
-        matchedIdx.add(m.index)
-        const status = interpretStatus(piece.text)
-        const v = await applyBatchResolution(ctx, scoped[m.index], status, piece.text, cadenceMap, actorId, now)
-        resolutions.push({ item: scoped[m.index], verdict: v })
-      } else if (m.kind === 'collision' && !collision) {
-        collision = { piece, items: m.indexes.map((i) => scoped[i]), status: interpretStatus(piece.text) }
-      } else if (m.kind === 'collision') {
-        // a second collision in one message is rare — leave it in the batch for next cycle
-      } else {
-        leftovers.push(piece)
-      }
-    }
-  }
-
-  // STEP 3 — a chase-reply PHOTO is evidence for the item(s) it resolved. Attach + trail, never fresh.
-  const photo = ctx.image?.storagePath ? { sp: ctx.image.storagePath, cap: ctx.image.caption ?? null } : null
-  if (photo) for (const r of resolutions) await answerWithPhoto(ctx, r.item, photo.sp, photo.cap)
-
-  // nothing touched the batch → normally route fresh. But a chase-reply PHOTO must NEVER spawn a fresh
-  // object (decision (a)): single-item batch → it's about that item; multi-item → ask which, carrying the
-  // photo so the pick attaches it. Text is unchanged (returns false → runSiteops routes fresh).
-  if (!resolutions.length && !collision) {
-    if (!photo) return false
-    // Chase-photo interaction over the PROJECT-SCOPED set (scoping already done at the top; a captioned
-    // photo for a chase-free project already returned false via routeFresh). Single scoped chase → attach;
-    // no project signal → the whole batch (the honest ambiguous case) → ask which.
-    if (scoped.length === 1) {
-      await answerWithPhoto(ctx, scoped[0], photo.sp, photo.cap)
-      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Added your photo to *${shortLabel(scoped[0].title)}*.` }, meta)
-      return true
-    }
-    const cands = scoped.map((it) => ({ id: it.id, kind: it.kind, orgId: it.orgId, projectName: it.projectName, title: it.title, cause: it.cause }))
-    await openConversation(ctx.supabase, {
-      orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
-      pendingQuestion: 'which item is this photo about',
-      slots: { kind: 'siteops_photo_pick', candidates: cands, image: { storagePath: photo.sp, caption: photo.cap } },
-      lastMessageId: ctx.wamid,
-    })
-    await send(ctx.supabase, ctx.from, { kind: 'list', body: `Which is this photo about?`, button: 'Pick', rows: cands.slice(0, 10).map((c, i) => ({ id: `pick:${i + 1}`, title: shortLabel(c.title).slice(0, 24) })) }, meta)
-    return true
-  }
-
-  // route the genuinely-new pieces (interruption "…also 3rd floor slab done"). Site = a named
-  // site, else the batch's site when it's single-project; ambiguous progress parks (no nested pick).
-  // A PHOTO never routes leftovers fresh (decision (a)) — its evidence attaches to the resolved item(s).
-  let leftoverLine = ''
-  if (leftovers.length && !photo) leftoverLine = await routeLeftovers(ctx, text, leftovers, topProjectHint, batch, projects, narrationId)
-
-  const parts = resolutions.map((r) => readbackPart(r.item, r.verdict))
-  const head = parts.length ? `Got it — ${parts.join(' · ')}` : 'Got it'
-  const extra = leftoverLine ? `\n${leftoverLine}` : ''
-
-  // Drop RESOLVED items from the batch (in BOTH paths — a collision must not strand them).
-  // A still-open re-timed item stays in the batch; a collider stays for the pending ask below.
-  const resolvedIds = resolutions.filter((r) => r.verdict === 'resolved').map((r) => r.item.id)
-  let closed = false
-  if (resolvedIds.length) ({ closed } = await dropBatchItems(ctx.supabase, batch, resolvedIds))
-
-  // GENUINE COLLISION → the fragment matched several same-subject chases (now within one project, post
-  // Fix-2 scoping). Ask which — WITH a "None — it's new" exit so a genuinely-new observation isn't
-  // trapped onto a chase (the residual the Fix X review flagged: don't rebuild the trap one level down).
-  if (collision) {
-    // De-dup — the legacy collision routes through the SAME shared composer as every other which_item ask
-    // (one numbered message, offered list frozen into slots, resolveTypedPick resolves it). It leads with the
-    // readback of what this reply DID catch (the head/extra), then asks.
-    const cands: CollisionCand[] = collision.items.map((it) => ({ id: it.id, kind: it.kind, orgId: it.orgId, projectId: it.projectId ?? null, projectName: it.projectName, title: it.title, cause: it.cause }))
-    await askItemPick(ctx, meta, {
-      candidates: cands, pieceText: collision.piece.text,
-      projectId: pre.projectId ?? cands[0]?.projectId ?? null, narrationId,
-      image: photo ? { storagePath: photo.sp, caption: photo.cap } : null,
-      prefix: `${head}${extra}`.trim() || undefined,
-    })
-    return true
-  }
-
-  const tail = closed ? `\n\nAll caught up 👍` : ''
-  await send(ctx.supabase, ctx.from, { kind: 'text', body: `${head}${extra}${tail}` }, meta)
-  return true
-}
 
 /** Route new-narration pieces surfaced inside a batch reply. Returns a one-line summary. */
 async function routeLeftovers(
@@ -1047,70 +1321,278 @@ async function routeLeftovers(
  */
 async function runSingularUnit(ctx: SiteopsCtx, u: {
   projectId: string
-  text: string
-  rest: SiteItem[]
+  messages: string[]     // one grading message per decomposed item of THIS project group (Stage-2 loop)
+  // What decompose called each message ('progress' | 'issue' | 'todo'), positionally aligned with `messages`.
+  // A PROGRESS report needs a task to land on; on a site with no task list that deserves an honest sentence,
+  // not a quiz. This is decompose's classification finally reaching the resolver instead of being discarded.
+  itemTypes?: (('progress' | 'issue' | 'todo') | null)[]
+  // Decompose's per-item STRUCTURE slot (where the work is), positionally aligned with `messages`. The model
+  // never sees a floor; code pins the physical task row from this. Absent → the pin asks over the type's rows.
+  structures?: (StructureSlot | null)[]
+  // STEP A — the CHECKABLE FACTS each item stated ("poured continuous, no cold joint"), positionally aligned
+  // with `messages`. These are what the strict QC matcher grades the task's authored checks against; without
+  // them every check stays pending forever, however clearly the supervisor stated it.
+  qcStatements?: (string[] | null)[]
   batch: OpenBatch | null
   narrationId: string | null
   callModel: (system: string, user: string) => Promise<string>
-  assumedSite?: string   // T8b — the project NAME when it was ASSUMED from a single-site batch (via='auto'); disclosed in the readback.
+  assumedSite?: string   // T8b — the project NAME when ASSUMED from a single-site batch (via='auto'); disclosed once.
+  sink?: ReadbackSink    // batched readback pool (runSiteops owns it); absent → applyTerminals sends inline.
+  askQueue?: PendingItemAsk[]   // serialized which_item asks (runSiteops owns it); absent → asks fire inline.
+  projectAskQueue?: PendingProjectAsk[]   // serialized which_project asks (same cursor; see ExecCtx).
+  projectName?: string | null   // this group's project name — labels its lines in a multi-project combined reply.
+  context?: string | null   // FIX B — the WHOLE narration these items were split from (background for each resolveInbound).
+  // When present, the chased ids this group RESOLVED are pushed here instead of being dropped from the batch
+  // immediately. dropBatchItems rewrites `items` from the CALLER'S in-memory snapshot, so two groups sharing
+  // one `batch` object each write "everything except my own resolves" — and the second resurrects the first's.
+  // (That is a live bug today, sequential or not: a multi-project chase reply loses one project's strike-offs.)
+  // The caller collects across groups and drops ONCE. Absent → this unit drops its own (single-group callers).
+  resolvedOut?: string[]
 }): Promise<void> {
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
   const now = new Date()
   const cadenceMap = await loadCadenceMap(ctx.supabase, ctx.orgId)
   const actorId = await senderUserId(ctx)
 
-  // interim pending_stage2 park FIRST — no-drop holds even if the unit itself parks below.
-  // AUDIT #3 — the row carries THE resolved project (the narration's shared site) so Stage 2's replay
-  // inherits sited fragments; a per-item project_hint inside the observation still overrides at replay
-  // for a genuinely multi-site narration (the decompose contract's carry-forward shape).
-  let restLine = ''
-  if (u.rest.length) {
-    await ctx.supabase.from('siteops_unplaced').insert({
-      org_id: ctx.orgId, project_id: u.projectId, reason: 'pending_stage2',
-      observation: { items: u.rest }, candidates: null, bucket: null, object_path: null, caption: null,
-      narration_id: u.narrationId, sender_number: ctx.from, created_by: null,
-    })
-    restLine = ` · ${u.rest.length} more saved for review`
-  }
-
   // the batch as a PRIOR: only its same-project items reach the set (⭐); a batch on another project is
   // invisible — by construction, not by guard (journeys a/b/e assert the prompt's contents).
   const scopedBatchItems = (u.batch?.items ?? []).filter((b) => b.projectId === u.projectId)
   const rankBatch = scopedBatchItems.length ? { items: scopedBatchItems } : null
+  const batchById = new Map((u.batch?.items ?? []).map((i) => [i.id, i]))
 
-  const rc = { supabase: ctx.supabase, orgId: ctx.orgId, from: ctx.from, projectId: u.projectId }
+  // projectName rides along: this unit's site is SETTLED (decompose named it, the group resolved it), so a new
+  // item the model forgets to site is created HERE, not sent back as "which project is this for?".
+  const rc = { supabase: ctx.supabase, orgId: ctx.orgId, from: ctx.from, projectId: u.projectId, projectName: u.projectName ?? null }
   const say = (body: string) => send(ctx.supabase, ctx.from, { kind: 'text', body }, meta)
   const image = ctx.image?.storagePath ? { storagePath: ctx.image.storagePath, caption: ctx.image.caption ?? null } : null
-  const res = await resolveInbound(rc, { message: u.text, image, narrationId: u.narrationId }, rankBatch, say, u.callModel)
-  if (res.kind === 'parked') return   // honest five-part park; nothing touched
 
-  // itemsById spans EVERY offered issue/todo candidate — an update onto THE project's open work applies
-  // first-class, chased or not. Chased items keep their full batch shape (cause → cadence); non-chased
-  // candidates get a minimal shape (default cadence). The held-park in applyTerminals remains the safety
-  // net for a target outside the offered set (stale/foreign — should be impossible post-validation).
-  const batchById = new Map((u.batch?.items ?? []).map((i) => [i.id, i]))
-  const itemsById = new Map<string, BatchItem>()
-  for (const c of res.candidates) {
-    if (c.kind !== 'issue' && c.kind !== 'todo') continue
-    itemsById.set(c.id, batchById.get(c.id) ?? {
-      kind: c.kind, id: c.id, orgId: ctx.orgId, projectId: c.project_id ?? u.projectId,
-      projectName: c.project_name ?? null, title: c.title, taskName: null, cause: 'other',
-    } as BatchItem)
+  // STAGE-2 LOOP — recurse over THIS project's items (a single narration = one message; a same-project
+  // compound = N). Each item is one resolveInbound over THE project's candidate set → apply per the ladder.
+  // The photo rides the FIRST message only (no duplicate attach). No pending_stage2 park: the loop OWNS
+  // every item now — a per-item model failure still parks itself inside resolveInbound.
+  console.log(`[siteops:unit] project=${u.projectName ?? u.projectId} messages=${u.messages.length} batchPrior=${scopedBatchItems.length} batched=${!!u.sink}`)
+  const resolvedIds: string[] = []
+  // ONE row, ONE action, once — across every item of this unit (see ExecCtx.appliedTargets).
+  const appliedTargets = new Set<string>()
+  for (let mi = 0; mi < u.messages.length; mi++) {
+    const res = await resolveInbound(rc, { message: u.messages[mi], image: mi === 0 ? image : null, narrationId: u.narrationId, context: u.context ?? null, itemType: u.itemTypes?.[mi] ?? null, structure: u.structures?.[mi] ?? null }, rankBatch, say, u.callModel)
+    if (res.kind === 'parked') { console.log(`[siteops:unit:msg] i=${mi} → PARKED (${res.reason})`); continue }   // honest five-part park; nothing touched for this item
+
+    // itemsById spans EVERY offered issue/todo candidate — an update onto THE project's open work applies
+    // first-class, chased or not. Chased items keep their full batch shape; non-chased get a minimal one.
+    const itemsById = new Map<string, BatchItem>()
+    for (const c of res.candidates) {
+      if (c.kind !== 'issue' && c.kind !== 'todo') continue
+      itemsById.set(c.id, batchById.get(c.id) ?? {
+        kind: c.kind, id: c.id, orgId: ctx.orgId, projectId: c.project_id ?? u.projectId,
+        projectName: c.project_name ?? null, title: c.title, taskName: null, cause: 'other',
+      } as BatchItem)
+    }
+    const labelById = new Map(res.candidates.map((c) => [c.id, readbackLabel(c.title ?? '')]))
+    const candById = new Map<string, ExecCandidate>(res.candidates.map((c) => [c.id, { kind: c.kind, title: c.title, projectId: c.project_id, projectName: c.project_name }]))
+    // TASK candidates are TYPES; the pin retargets to a physical ROW id (for the apply) or offers row ids (for
+    // a location which_item ask). Those row ids must resolve to a human label + a candidate, so add every row.
+    for (const c of res.candidates) {
+      if (c.kind !== 'task' || !c.rows?.length) continue
+      for (const r of c.rows) {
+        labelById.set(r.id, readbackLabel(r.title))
+        candById.set(r.id, { kind: 'task', title: r.title, projectId: c.project_id, projectName: c.project_name })
+      }
+    }
+    const outcomes = await applyTerminals(ctx, res.terminals, {
+      itemsById, labelById, candById, cadenceMap, actorId, now,
+      narrationId: u.narrationId, projectId: u.projectId, assumedSite: mi === 0 ? u.assumedSite : undefined, message: u.messages[mi],
+      readbackSink: u.sink, projectName: u.projectName, askQueue: u.askQueue, projectAskQueue: u.projectAskQueue,
+      appliedTargets,
+      qc: { statements: u.qcStatements?.[mi] ?? [], call: u.callModel },
+    })
+    console.log(`[siteops:unit:msg] i=${mi} outcomes=${JSON.stringify(outcomes.map((o) => ({ k: o.terminal.kind, s: o.status, l: (o.label ?? '').slice(0, 40) })))}`)
+    for (const o of outcomes) {
+      const tt = o.terminal
+      if (tt.kind === 'object_updated' && tt.applied === 'resolve' && o.status === 'ok' && batchById.has(tt.update.target_id)) {
+        resolvedIds.push(tt.update.target_id)
+      }
+    }
   }
-  const labelById = new Map(res.candidates.map((c) => [c.id, readbackLabel(c.title ?? '')]))
-  // candById spans EVERY offered candidate, all kinds — resolves TASK which_item asks (med/low task
-  // targets ask, never hold) and maps the place_photo shortlist ids to pick rows.
-  const candById = new Map<string, ExecCandidate>(res.candidates.map((c) => [c.id, { kind: c.kind, title: c.title, projectId: c.project_id, projectName: c.project_name }]))
-  const outcomes = await applyTerminals(ctx, res.terminals, {
-    itemsById, labelById, candById, cadenceMap, actorId, now,
-    narrationId: u.narrationId, projectId: u.projectId, readbackSuffix: restLine, assumedSite: u.assumedSite, message: u.text,
-  })
-  // batch bookkeeping: only CHASED items ride the batch — drop the resolved ∩ batch, close when empty.
-  const resolvedIds = outcomes
-    .filter((o): o is TerminalOutcome & { terminal: Extract<Terminal, { kind: 'object_updated' }> } => o.terminal.kind === 'object_updated' && o.terminal.applied === 'resolve' && o.status === 'ok')
-    .map((o) => o.terminal.update.target_id)
-    .filter((id) => batchById.has(id))
-  if (resolvedIds.length && u.batch) await dropBatchItems(ctx.supabase, u.batch, resolvedIds)
+  // batch bookkeeping: drop resolved ∩ batch across ALL items, close when empty. With `resolvedOut` the caller
+  // owns the single drop (see the field's note) — otherwise this unit is the only writer and drops its own.
+  if (u.resolvedOut) u.resolvedOut.push(...resolvedIds)
+  else if (resolvedIds.length && u.batch) await dropBatchItems(ctx.supabase, u.batch, resolvedIds)
+}
+
+// ── THE COMBINED READBACK (one reply for a whole compound/multi-project message) ──────────────────────────
+// Each applyTerminals call pushed its composed body (+ project) to the sink; here we emit ONE message. A
+// SINGLE entry is sent verbatim — identical to the un-batched path, undo button and all (so the common case
+// is unchanged). MULTIPLE entries are stripped of their "Got it —" wrappers and joined; when they span more
+// than one project each line is prefixed with its site (so an ASM line can't read as a Soundharya line). The
+// undo is NOT attached to a multi-entry reply — an "all-or-nothing" undo over a batch is not wanted here.
+// combineReadbacks + HeldReadback now live in ../_siteops_readback.ts (SHARED with the sweep's held-flush).
+// STEP A — the IMMEDIATE receipt ack. Sent as soon as decompose knows the count, BEFORE the (sequential,
+// multi-model-call) resolve loop, so a compound message doesn't sit in a long silence. A batch names the
+// count and pre-frames the possible clarifying asks; a single message gets a lighter "got your message".
+// A decompose failure (count 0) degrades to the single ack — never promises a count we couldn't parse.
+//
+// AN IMAGE GETS MORE THAN A RECEIPT. Pass `seen` (the grounded vision items) and the ack becomes the
+// CONFIRMATION: what we read out of the photo, quoted back beside the caption, before the resolve loop
+// writes anything — so a misread is caught by the one person who was standing there. See composePhotoAck.
+// It degrades to the plain count ack whenever the photo yielded nothing to show.
+async function sendReceiptAck(
+  ctx: SiteopsCtx, meta: { org_id: string; wamid: string }, itemCount: number,
+  seen?: { items: SiteItem[]; caption: string | null },
+): Promise<void> {
+  const photo = seen ? composePhotoAck(seen.items, seen.caption) : null
+  const body = photo ?? (itemCount > 1
+    ? `✅ Got your message — I've picked out *${itemCount} updates*. Reviewing each now; I'll confirm back and check with you if anything needs clarifying.`
+    : `✅ Got your message — taking a look now…`)
+  await send(ctx.supabase, ctx.from, { kind: 'text', body }, meta)
+}
+
+// STEP C1 — HOLD-and-FOLD. When some items resolved this turn AND a which_item ask is now OPEN, stash the
+// resolved summary onto that ask's conversation (held_readback) instead of flushing mid-turn; the resume
+// FOLDS it with the answer into ONE readback (finishItemAsk). No open collision ask → flush now (unchanged).
+// The interrupt (commitInterruptedSiteops) and sweep paths flush a held summary, so the hold never drops it.
+async function flushOrHoldReadback(ctx: SiteopsCtx, sink: ReadbackSink, meta: { org_id: string; wamid: string }): Promise<void> {
+  // A which_item ask was opened this turn (askSlots set) AND items resolved → re-open THAT conversation with the
+  // resolved summary stashed as held_readback; the resume folds it into ONE readback. No ask, or nothing
+  // resolved → flush now (unchanged). Re-open (not read-modify-write) because openConversation upserts by sender.
+  if (sink.entries.length && sink.askSlots) {
+    await openConversation(ctx.supabase, {
+      orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
+      pendingQuestion: sink.askQuestion?.pendingQuestion ?? 'which item?',
+      slots: { ...sink.askSlots, held_readback: { entries: sink.entries, resolvedRefs: sink.resolvedRefs } satisfies HeldReadback },
+      lastMessageId: sink.askQuestion?.lastMessageId ?? ctx.wamid,
+    })
+    console.log(`[siteops:readback:hold] entries=${sink.entries.length} stashed on the open which_item ask`)
+    return
+  }
+  await flushReadback(ctx, sink, meta)
+}
+
+/**
+ * STEP C1 — the which_item resume's terminal step: emit the resume's readback, FOLDING any held batch summary
+ * into ONE combined reply (no held → the answer's own line verbatim; bare held → flushed).
+ * THE DRAIN: if more item asks are owed, ask the NEXT one instead and thread the accumulated readback onto it,
+ * so the fold lands on the LAST answer. Every exit of the pick resume goes through here — an unanswered ask
+ * can never be stranded by the answer to another one.
+ */
+async function finishItemAsk(
+  ctx: SiteopsCtx, meta: { org_id: string; wamid: string }, slots: Record<string, unknown>,
+  entry: { project: string | null; body: string } | null,
+): Promise<void> {
+  const pending = (slots.pending_item_asks ?? []) as PendingItemAsk[]
+  const held = (slots.held_readback ?? null) as HeldReadback | null
+  const entries = [...(held?.entries ?? []), ...(entry ? [entry] : [])]
+  if (pending.length) {
+    await drainItemAsks(ctx, meta, pending, { heldEntries: entries, heldRefs: held?.resolvedRefs ?? [] })
+    return
+  }
+  if (entries.length) await send(ctx.supabase, ctx.from, { kind: 'text', body: combineReadbacks(entries) }, meta)
+}
+
+async function flushReadback(ctx: SiteopsCtx, sink: ReadbackSink, meta: Record<string, unknown>): Promise<void> {
+  if (!sink.entries.length) { console.log('[siteops:readback:flush] nothing to send (entries=0)'); return }
+  const body = combineReadbacks(sink.entries)
+  console.log(`[siteops:readback:flush] entries=${sink.entries.length} resolves=${sink.resolvedRefs.length} body=${JSON.stringify(body.slice(0, 400))}`)
+  // A single entry keeps its undo button (an issue resolve is one-tap reversible); a batched reply does not.
+  if (sink.entries.length === 1 && sink.resolvedRefs.length) {
+    await send(ctx.supabase, ctx.from, { kind: 'buttons', body, buttons: [{ id: 'siteops_undo', title: 'Not resolved' }] }, { ...meta, capture: { ref_kind: 'readback', object_refs: sink.resolvedRefs } })
+  } else {
+    await send(ctx.supabase, ctx.from, { kind: 'text', body }, meta)
+  }
+}
+
+// ── THE PROJECT-GROUP ARRAY (multi-project → recurse per site) ────────────────────────────────────────
+// One decompose → an ORDERED array of per-project groups. SINGLE-project = array-of-one. Each item's site
+// resolves via resolveProject (the txn-style banded matcher); an item with no site of its own carries
+// forward the nearest preceding site (belt on decompose's own carry-forward). Items on the same resolved
+// project group together (shared candidate set); unresolved items group by tried name so one ask covers
+// them. A single-site OPEN batch adopts an otherwise-unresolved lone group (the prior, disclosed via='auto').
+interface ProjectGroup {
+  projectId: string | null
+  nameTried: string | null
+  suggestions: { id: string; name: string }[]
+  items: SiteItem[]
+  via: string
+  assumedSite?: string
+}
+async function resolveGroups(ctx: SiteopsCtx, decomposed: { items: SiteItem[]; project_hint: string | null } | null, projects: ProjectRef[], batch: OpenBatch | null, rawText: string): Promise<ProjectGroup[]> {
+  const items = decomposed?.items ?? []
+  if (!items.length) return []
+  const topHint = decomposed?.project_hint ?? null
+
+  // effective per-item hint with code carry-forward (nearest preceding named site, else the top-level hint)
+  const effHints: (string | null)[] = []
+  let carried: string | null = topHint
+  for (const it of items) {
+    const h = it.project_hint ?? topHint ?? carried
+    if (it.project_hint) carried = it.project_hint
+    effHints.push(h)
+  }
+
+  // resolve each DISTINCT hint once (the DB round-trip is per unique site, not per item)
+  const cache = new Map<string, { projectId: string | null; nameTried: string | null; suggestions: { id: string; name: string }[]; via: string }>()
+  const resolveOne = async (h: string | null) => {
+    const key = h ?? '\0'
+    const hit = cache.get(key)
+    if (hit) return hit
+    const r = await resolveProject(ctx.supabase, ctx.orgId, { narration: rawText, nameHint: h })
+    const out = { projectId: r.projectId, nameTried: r.nameTried ?? h ?? null, suggestions: r.suggestions ?? projects.map((p) => ({ id: p.id, name: p.name })), via: r.via as string }
+    cache.set(key, out)
+    return out
+  }
+
+  // group by resolved projectId (or by tried-name bucket when unresolved), preserving first-appearance order
+  const groups: ProjectGroup[] = []
+  const byKey = new Map<string, ProjectGroup>()
+  for (let i = 0; i < items.length; i++) {
+    const r = await resolveOne(effHints[i])
+    const key = r.projectId ?? `?${r.nameTried ?? effHints[i] ?? ''}`
+    let g = byKey.get(key)
+    if (!g) { g = { projectId: r.projectId, nameTried: r.nameTried, suggestions: r.suggestions, items: [], via: r.via }; byKey.set(key, g); groups.push(g) }
+    g.items.push(items[i])
+  }
+
+  // single unresolved group + a SINGLE-site open batch → adopt it (the batch prior, disclosed via='auto')
+  if (groups.length === 1 && !groups[0].projectId && batch?.items?.length) {
+    const pids = [...new Set(batch.items.map((b) => b.projectId).filter(Boolean))] as string[]
+    if (pids.length === 1) {
+      groups[0].projectId = pids[0]; groups[0].via = 'auto'
+      groups[0].assumedSite = projects.find((p) => p.id === pids[0])?.name
+    }
+  }
+  return groups
+}
+
+// ── THE DUPLICATE-NARRATION GUARD ────────────────────────────────────────────────────────────────────────
+// Two sends of the same voice note are one report. Matched on MEANING-neutral normalisation (case, spacing
+// and punctuation drift between two transcriptions of the same audio is not a new message), inside a short
+// window, and ONLY against a narration we actually handled — `decomposed` holds items. A narration that
+// FAILED (decompose_failed) or that the model read and found nothing in is not "handled": re-sending it is a
+// retry or a rephrase, and both must run.
+const DUP_WINDOW_MIN = 30
+const normNarration = (s: string): string =>
+  (s ?? '').toLowerCase().replace(/[.,!?;:"'()।]/g, '').replace(/\s+/g, ' ').trim()
+
+async function recentDuplicateNarration(ctx: SiteopsCtx, text: string): Promise<{ id: string; ageMins: number } | null> {
+  const want = normNarration(text)
+  if (!want) return null
+  // Recent narrations for the org; the window and the comparison are done here (a normalised match is not a
+  // SQL equality). Best-effort — a read failure must never block a real message.
+  const { data, error } = await ctx.supabase
+    .from('site_narrations').select('id, raw_text, decomposed, created_at, miss_verdict')
+    .eq('org_id', ctx.orgId).order('created_at', { ascending: false }).limit(20)
+  if (error) { console.error('[siteops:duplicate] lookup failed (continuing):', error.message); return null }
+
+  const now = Date.now()
+  for (const r of (data ?? []) as { id: string; raw_text: string; decomposed: unknown; created_at: string; miss_verdict: unknown }[]) {
+    const ageMs = now - new Date(r.created_at).getTime()
+    if (!(ageMs >= 0 && ageMs < DUP_WINDOW_MIN * 60_000)) continue
+    if (normNarration(r.raw_text) !== want) continue
+    const handled = Array.isArray(r.decomposed) && r.decomposed.length > 0
+    if (!handled) continue     // a failed or empty narration → a re-send is a retry, not a duplicate
+    return { id: r.id, ageMins: Math.round(ageMs / 60_000) }
+  }
+  return null
 }
 
 export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?: string; callModel?: (system: string, user: string) => Promise<string> } = {}): Promise<void> {
@@ -1122,6 +1604,18 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
   // execution died with the singular-first restructure (D5 batch-captures-fresh, Phase-0 E1).
   const batch = await getOpenBatch(ctx.supabase, ctx.orgId, ctx.from)
 
+  // A RE-SEND IS NOT NEW INFORMATION (2026-07-11). The supervisor re-sent his voice note; we had already
+  // logged its contents, so its own sentences now matched the rows they had created, and we asked him which
+  // of his own items he meant. Recognise the repeat and say so — before anything is captured, modelled or
+  // matched. Only a narration we actually HANDLED counts: a re-send after a failure is a RETRY, and the
+  // retry is the whole point of "send it again whenever you like".
+  const dup = await recentDuplicateNarration(ctx, text)
+  if (dup) {
+    console.log(`[siteops:duplicate] same narration as ${dup.id} (${dup.ageMins}m ago) — acknowledged, not re-run`)
+    await say(ALREADY_LOGGED)
+    return
+  }
+
   // Capture-first: persist the raw narration immediately so nothing is ever lost. Stamp the sender's
   // name so the task feed shows who sent it; fall back without the column if the migration isn't applied
   // yet (capture-first must never fail on a missing column).
@@ -1129,6 +1623,7 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
   let ins = await ctx.supabase.from('site_narrations').insert({ ...base, sender_name: await senderName(ctx) }).select('id').single()
   if (ins.error) ins = await ctx.supabase.from('site_narrations').insert(base).select('id').single()
   const narrationId: string | null = ins.data?.id ?? null
+  console.log(`[siteops:entry] wamid=${ctx.wamid} narration=${narrationId} image=${!!ctx.image?.base64} audio=${!!ctx.audio?.storagePath} batch=${batch?.items?.length ?? 0} text=${JSON.stringify((text ?? '').slice(0, 200))}`)
 
   // T7 (clause 1) — a VOICE note's audio is already in the bucket; RECORD it as an attachment on this
   // narration so the source stays FINDABLE (a transcript miss must not orphan the audio). Best-effort,
@@ -1141,17 +1636,19 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
     if (error) console.error('[siteops:audio-attach] insert failed:', error.message)
   }
 
-  // FAST PATH (cardinality, not meaning) — BEFORE any model call, decompose included (journey (d): "sari"
-  // must cost ZERO model calls, or the fast path quietly defeats its own reason for existing — the
-  // ratified E1 ordering refinement). A recognised bare ack + exactly ONE open chase → that chase,
-  // ADDRESSING, deterministically, trailed bare_ack. RESOLVE stays behind the model (ack ≠ closure).
-  if (!ctx.image?.base64 && isBareAck(text) && batch && batch.items.length === 1) {
-    const cadenceMap = await loadCadenceMap(ctx.supabase, ctx.orgId)
-    const actorId = await senderUserId(ctx)
-    const v = await applyBatchResolution(ctx, batch.items[0], 'still_open', text, cadenceMap, actorId, new Date(), { bareAck: true })
-    await say(`Got it — ${readbackPart(batch.items[0], v)}`)
-    return
-  }
+  // DELETED (2026-07-09) — the bare-ack FAST PATH. `isBareAck(text) && batch.items.length === 1` advanced
+  // the lone chased item to ADDRESSING, re-timed its next chase, and wrote a `status_changed` trail row,
+  // all without a model call. Two things were wrong with it.
+  //
+  // It ACTED ON AN ACKNOWLEDGEMENT. "ok" names nothing; it agrees that a question was asked. Converting that
+  // into a state change moved real work and — because `status_changed` resets `unansweredStreak` — wiped the
+  // escalation clock on an item nobody had touched. (The trail even has a `bare_ack` type that IS excluded
+  // from that streak: the intent was right, and the same function defeated it.)
+  //
+  // And it depended on a word list, which is unmaintainable across en/te/hi/Tenglish/native script and cannot
+  // fail loudly. The rule now: SITEOPS acts only on a message that NAMES its referent. An acknowledgement
+  // reaches the concierge, which shows the supervisor what a naming message looks like. Nothing moves until
+  // they say what changed.
 
   // Roster for project resolution: hand the extractor the org's active project NAMES so it
   // returns the CANONICAL project (semantic match), mirroring the transaction agent. Then
@@ -1160,6 +1657,27 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
   const { data: projRows } = await ctx.supabase.from('projects').select('project_id, name').eq('org_id', ctx.orgId).eq('status', 'Active')
   const projects: ProjectRef[] = ((projRows ?? []) as { project_id: string; name: string }[]).map((p) => ({ id: p.project_id, name: p.name }))
   const projectNames = projects.map((p) => p.name)
+
+  // BATCHED READBACK — one combined reply for a whole compound/multi-project message. Every runSingularUnit
+  // COLLECTS its readback into this sink instead of sending; the finally flushes ONE message after all groups
+  // ran and all asks fired. Fast path / ask-only / park exits populate nothing → the flush is a no-op there.
+  const sink: ReadbackSink = { entries: [], resolvedRefs: [] }
+  // SERIALIZED ASKS — every runSingularUnit ENQUEUES its which_item asks here instead of sending them; after
+  // all groups have run, exactly ONE ask goes out and the rest ride its slots (the drain cursor). Without this
+  // pool each ask overwrote the last one's conversation, so only the final question was answerable.
+  const askQueue: PendingItemAsk[] = []
+  // …and the which_project asks a UNIT raised (a new item the resolver could not site). They ride the SAME
+  // cursor as an unresolved decompose group — asked first, carrying the item asks — so no ask can clobber
+  // another (see PendingProjectAsk).
+  const projectAskQueue: PendingProjectAsk[] = []
+  const pname = (id: string | null | undefined): string | null => projects.find((p) => p.id === id)?.name ?? null
+  // A unit's deferred which_project ask, in the shape askProjectGroups speaks (the proven siteops_project pick).
+  const projAskGroup = (a: PendingProjectAsk): AskGroup => ({
+    messages: [a.item.text], nameTried: a.item.project_hint ?? null,
+    candidates: projects.map((p) => ({ id: p.id, name: p.name })),
+    specs: [{ text: a.item.text, type: 'issue', structure: a.item.structure ?? null }],
+  })
+  try {
 
   // ── IMAGE PATH — PROJECT-FIRST (audit #1). The adoption flip left the old shape gated on the batch:
   // handleBatchReply (which never returns false) consumed EVERY image from a chased sender with the legacy
@@ -1172,169 +1690,418 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
     // STEP 1 GROUNDING — resolve the site from the CAPTION up-front so the vision pass reads the photo
     // against THIS project's OPEN work + pending chases; failure just yields no hints (bonus, not blocker).
     let groundingHints: string[] = []
+    // STEP B — the authored QC checks for the shortlisted work, and the map code disposes a FAILURE through.
+    let qcChecks: string[] = []
+    let qcById = new Map<string, QcCheckRef>()
+    let groundedProjectId: string | null = null
     try {
       const pre = await resolveProject(ctx.supabase, ctx.orgId, { narration: ctx.image.caption ?? '', nameHint: null })
       if (pre.projectId) {
+        groundedProjectId = pre.projectId
         const cands = await loadCandidates(ctx.supabase, ctx.orgId, pre.projectId, batch?.items ?? [])
-        groundingHints = groundingLabels(prefilterCandidates(cands, ctx.image.caption ?? ''))
-        console.log(`[siteops:ground] project=${pre.projectId} candidates=${cands.length} shortlist=${groundingHints.length}`)
+        const shortlist = prefilterCandidates(cands, ctx.image.caption ?? '')
+        groundingHints = groundingLabels(shortlist)
+        const qc = await loadQcChecks(ctx, shortlist)
+        qcChecks = qc.lines
+        qcById = qc.byId
+        console.log(`[siteops:ground] project=${pre.projectId} candidates=${cands.length} shortlist=${groundingHints.length} qcChecks=${qcChecks.length}`)
       }
     } catch (e) { console.error('[siteops:ground] skipped:', (e as Error).message) }
 
+    // BOTH SIGNALS, EACH LABELLED. The caption is the sender's; the description is ours. `caption || text`
+    // used to drop our read of the photo the moment he typed anything — so a floor visible only in the frame
+    // never reached the resolver at all. See _siteops_media.ts.
+    const mediaParts: MediaParts = { caption: ctx.image.caption ?? null, description: ctx.image.description ?? null }
+
     let decomposed: { items: SiteItem[]; project_hint: string | null } | null = null
     try {
-      decomposed = await decomposeImage(ctx.image.base64, ctx.image.mime, ctx.image.caption, projectNames, groundingHints, opts.callModel)
-    } catch {
+      decomposed = await decomposeImage(ctx.image.base64, ctx.image.mime, ctx.image.caption, projectNames, groundingHints, qcChecks, opts.callModel)
+      // THE SILENT VISION NO-OP (live probe, 2026-07-11 23:01). This catch swallowed EVERYTHING, and
+      // validate() folds a JSON-parse failure into `{items: []}`. So three completely different events —
+      // the model errored, the model spoke and we couldn't read it, and the photo genuinely showed nothing
+      // — were indistinguishable in the logs. The whole image path hangs off this call; when it returns
+      // empty we degrade to the text path, quote our own auto-description back at the sender as HIS words,
+      // and lose the floor. A probe could not be diagnosed. Say which one happened.
+      console.log(`[siteops:vision:in] items=${decomposed?.items?.length ?? 0} hints=${groundingHints.length} qcChecks=${qcChecks.length} caption=${JSON.stringify(ctx.image.caption ?? '')}`)
+      if (!decomposed?.items?.length) {
+        console.error(`[siteops:vision:EMPTY] the vision pass returned NO items — model failure, unreadable response, or a genuinely empty photo. mime=${ctx.image.mime} bytes~${ctx.image.base64.length} model=${Deno.env.get('WA_SITEOPS_IMAGE_MODEL') ?? '(unset!)'}`)
+      }
+    } catch (e) {
       decomposed = null
+      console.error('[siteops:vision:THREW]', (e as Error).message, (e as Error).stack)
     }
-    const items = decomposed?.items ?? []
-    const first = items[0] ?? null
+    // BOTH HALVES, EACH LABELLED — computed HERE, not after the no-items branch. When vision returns nothing
+    // the fallback used to grade on the router's ` -- ` mush, which (a) hid whose words were whose and (b) got
+    // quoted straight back at the sender as "You said: …" — with OUR auto-description inside it. Live, 23:01.
+    const imgRawText = mediaComposite(mediaParts) || text
+
+    // THE CODE FLOOR — the floor the caption (then the model, then the photo) names, on every item. Without
+    // it the pin runs blind and offers every row of every matching type on every floor (the live 9-row
+    // ceiling pick), when one floor leaves exactly one row and no question at all.
+    // The structured items REPLACE the decomposed set — the groups (and therefore the pin) read from there.
+    const items = applyMediaStructure(decomposed?.items ?? [], mediaParts)
+    if (decomposed) decomposed = { ...decomposed, items }
+
+    // ── STEP C — A CONTRADICTED CHECK *IS* THE ISSUE (code disposes) ─────────────────────────────────
+    // We already know the check, the task it belongs to and whether it is CRITICAL, so there is nothing
+    // left to infer: handling it here (rather than posting it through the resolver) both gets the
+    // severity right and stops the resolver creating a SECOND, duplicate issue for the same defect.
+    //   · critical check contradicted → a tracked, CHASED issue (the pour is about to bury it)
+    //   · anything else               → a visible NOTE, recorded and never chased
+    // An invented check id fails the membership guard and the item falls through to the normal path —
+    // a check the model was never shown can never be marked failed.
+    const qcFailures = items.filter((it) => it.qc_failed && qcById.has(it.qc_failed))
+    const unitItems = items.filter((it) => !(it.qc_failed && qcById.has(it.qc_failed)))
+    if (decomposed) decomposed = { ...decomposed, items: unitItems }
+    // STEP A (IMAGE) — read the observation BACK before the resolve loop writes anything. The words are ours,
+    // not his; he is the only one who can catch a misread, and only if we show him what we saw.
+    await sendReceiptAck(ctx, meta, items.length, { items, caption: ctx.image.caption ?? null })
+    if (qcFailures.length) {
+      await applyQcFailures(ctx, qcFailures, qcById, groundedProjectId, narrationId, sink)
+    }
 
     // T5 sub-step 5 (Gap B) — images no longer FAN OUT per-site (runMulti retired). A multi-site photo takes
     // the FIRST fragment through the unit and parks the rest pending_stage2 (runSingularUnit's `rest`),
     // uniform with the text path's interim compound rule. Stage 2 restores the per-project loop for BOTH
     // modalities at once — images must not fan out differently.
 
-    // RESOLVE THE PROJECT (ask-first ladder, the text path's twin): the item's/vision's named project →
-    // caption string-match safety net → the open batch as a PRIOR (single-site batches only) → ASK FIRST.
-    const nameHint = first?.project_hint ?? decomposed?.project_hint ?? null
-    const proj = await resolveProject(ctx.supabase, ctx.orgId, { narration: ctx.image.caption || text, nameHint })
-    let projectId: string | null = proj.projectId
-    let via: string = proj.via
-    if (!projectId && batch && batch.items.length) {
-      const pids = [...new Set(batch.items.map((b) => b.projectId).filter(Boolean))] as string[]
-      if (pids.length === 1) { projectId = pids[0]; via = 'auto' }
-    }
-    await ctx.supabase.from('site_narrations').update({
-      project_id: projectId, decomposed: items, resolved_project_via: projectId ? via : 'unresolved',
-    }).eq('id', narrationId)
-
-    if (!projectId) {
-      if (!items.length) {
-        // FLOOR (mapped nothing, observed nothing, no site): the photo is EVIDENCE and must survive —
-        // park it WITH its object_path (never the text path's "didn't catch", which would drop it).
-        if (ctx.image.storagePath) {
-          await ctx.supabase.from('siteops_unplaced').insert({
-            org_id: ctx.orgId, project_id: null, reason: 'floor', observation: null,
-            candidates: null, bucket: 'rough-entry-media', object_path: ctx.image.storagePath,
-            caption: ctx.image.caption?.trim() || null, narration_id: narrationId, sender_number: ctx.from, created_by: null,
-          })
-          await say(`Couldn't read that photo — kept it on your to-place list so it isn't lost.`)
-          return
-        }
-        // T7 (clause 6) — an unreadable image with no evidence to park is still a miss; record it.
-        if (narrationId) await ctx.supabase.from('site_narrations').update({ miss_verdict: { reason: 'nothing_extracted' } }).eq('id', narrationId)
-        await say(`Didn't catch a site update in that — try again if you meant to send one.`)
+    // NO ITEMS AT ALL — resolve THE site from the caption first. A RESOLVED project runs the unit on the
+    // vision line so the both-false image lands as the evidence park WITH its project (audit #1), never a
+    // false receipt. Only a genuinely UNSITED photo floor-parks (project null, path kept); no photo → miss.
+    if (!unitItems.length && qcFailures.length) return   // the photo's whole content WAS the QC failure — handled
+    if (!items.length) {
+      const proj = await resolveProject(ctx.supabase, ctx.orgId, { narration: ctx.image.caption || text, nameHint: null })
+      let pid = proj.projectId; let via: string = proj.via; let assumed: string | undefined
+      if (!pid && batch?.items?.length) {
+        const pids = [...new Set(batch.items.map((b) => b.projectId).filter(Boolean))] as string[]
+        if (pids.length === 1) { pid = pids[0]; via = 'auto'; assumed = projects.find((p) => p.id === pid)?.name }
+      }
+      await ctx.supabase.from('site_narrations').update({ project_id: pid, decomposed: items, resolved_project_via: pid ? via : 'unresolved' }).eq('id', narrationId)
+      if (pid) {
+        // Grade on the MARKED COMPOSITE (his caption + our read, each attributed), never the ` -- ` mush —
+        // and carry the CAPTION's own structure so a floor he named survives a vision failure.
+        await runSingularUnit(ctx, {
+          projectId: pid, messages: [imgRawText], batch, narrationId, callModel: opts.callModel ?? callLLM,
+          assumedSite: via === 'auto' ? assumed : undefined, sink, projectName: pname(pid),
+          structures: [structureFromText(ctx.image.caption ?? '')],
+        })
         return
       }
-      await askProjectFirst(ctx, meta, proj, items, null, narrationId)   // legacy slots (no text) → unit resume on pick, photo carried
+      // CLAUSE 2, FOR THE IMAGE PATH (live probe, 2026-07-11). Vision read nothing from the pixels — but the
+      // CAPTION is the sender's own words, and if it NAMES a site we merely failed to score, this is a
+      // placeable message, not an unreadable one. ASK WHICH SITE, with the photo and the caption riding the
+      // pick — exactly the rule the text path applies twenty lines below. Without it, "ASM Stilt floor" (a
+      // site AND a floor, in his own words) was answered "Couldn't read that photo — kept it on your to-place
+      // list", which was true of the pixels and false of the message: nothing was pending, so his next message
+      // had no question to answer and the work was never tracked.
+      const said = ctx.image.caption?.trim() ?? ''
+      if (said && mentionsProjectToken(said, projects)) {
+        await askProjectGroups(ctx, meta, [{
+          messages: [said], nameTried: proj.nameTried,
+          candidates: proj.suggestions ?? projects.map((p) => ({ id: p.id, name: p.name })),
+          // …and the caption's OWN structure ("stilt floor" — the code floor reads it with no model at all)
+          // rides the pick, so the resume PINS the row instead of re-asking a floor he already named.
+          specs: [{ text: said, type: null, structure: structureFromText(said) }],
+        }], narrationId, { storagePath: ctx.image.storagePath ?? null, caption: ctx.image.caption ?? null })
+        return
+      }
+      // Nothing said and nothing read: the photo really is unreadable, and there is no question to ask. Park it
+      // (never lost) and say so honestly.
+      if (ctx.image.storagePath) {
+        await ctx.supabase.from('siteops_unplaced').insert({
+          org_id: ctx.orgId, project_id: null, reason: 'floor', observation: null,
+          candidates: null, bucket: 'rough-entry-media', object_path: ctx.image.storagePath,
+          caption: ctx.image.caption?.trim() || null, narration_id: narrationId, sender_number: ctx.from, created_by: null,
+        })
+        await say(`Couldn't read that photo — kept it on your to-place list so it isn't lost.`)
+        return
+      }
+      if (narrationId) await ctx.supabase.from('site_narrations').update({ miss_verdict: { reason: 'nothing_extracted' } }).eq('id', narrationId)
+      await say(NOTHING_TO_UPDATE)
       return
     }
 
-    // THE project resolved → THE ONE PIPELINE (T5 cutover, clause-1). Every resolved-project image runs the
-    // SINGULAR UNIT — the second engine (finishRoute/routeItems/DONE_RE/buildConfirm) is retired here. The
-    // unit grades the caption text + image against THE project's candidates: a re-photo of an open item is
-    // an update component → ADDRESSING + answer-evidence (Gap A); a new observation creates (photo rides the
-    // create) and opens the enrichment window (Gap C, ported); nothing-confident lands as the evidence park,
-    // never finishRoute([])'s false "logged" receipt. Same-project chases rank ⭐; cross-project items are
-    // invisible by construction. Compound images take the FIRST fragment; the rest park pending_stage2,
-    // uniform with the text path (Gap B — Stage 2 replaces the park with the per-project loop).
-    console.log(`[siteops:vision] items=${items.length} project_hint=${decomposed?.project_hint ?? 'null'} project=${projectId}`)
-    await runSingularUnit(ctx, {
-      projectId,
-      text: items.length >= 2 ? first!.text : text,   // compound → the FIRST fragment (interim rule, text-path twin)
-      rest: items.slice(1),
-      batch, narrationId,
-      callModel: opts.callModel ?? callLLM,
-      assumedSite: via === 'auto' ? (projects.find((p) => p.id === projectId)?.name ?? undefined) : undefined,   // T8b disclosure
-    })
+    // RESOLVE + RUN — the STAGE-2 per-project loop, image twin of the text path. Group by site (the caption
+    // is the resolution hint), record narration provenance, run every RESOLVED group through the SINGULAR
+    // UNIT (the photo rides the first message), and serialize UNRESOLVED groups into which_project asks
+    // carrying the photo. finishRoute/routeItems are retired here — one pipeline for both modalities.
+    // THE MARKED COMPOSITE — the message the resolver reads. Both halves, each attributed. (`caption || text`
+    // discarded the photo's own evidence whenever a caption existed; the bare ` -- ` mush the router builds
+    // hid whose claim was whose, and got quoted back to the sender as HIS words.) No caption and no
+    // description → fall back to whatever the router had.
+    const rawGroups = await resolveGroups(ctx, decomposed, projects, batch, imgRawText)
+    // `single` is judged on what the photo ACTUALLY yielded (before the merge): one observation still grades on
+    // the marked composite (caption + our read), exactly as before. Two observations of one scene grade on the
+    // MERGED bullets, which say more than the composite's thin routing description does.
+    const single = rawGroups.length === 1 && rawGroups[0].items.length === 1
+    // ONE PHOTO IS ONE SCENE — two halves of the same ceiling are one thought, not two questions. Applied per
+    // GROUP (a merge across sites would be a merge across places, which is what the key already forbids).
+    // The ack above already showed every bullet: what we SAW is reported in full; only the ASK is one.
+    const groups = rawGroups.map((g) => ({ ...g, items: mergeSameScene(g.items) }))
+    const soleProject = groups.length === 1 ? groups[0].projectId : null
+    await ctx.supabase.from('site_narrations').update({
+      project_id: soleProject, decomposed: items,
+      resolved_project_via: soleProject ? groups[0].via : (groups.length > 1 ? 'multi' : 'unresolved'),
+    }).eq('id', narrationId)
+
+    // A single-observation photo is graded on the MARKED COMPOSITE — the sender's caption and our read of the
+    // image, each labelled — not on the router's ` -- ` mush (which said neither whose words were whose nor,
+    // when a caption existed, anything about the photo at all).
+    const imsg = (g: ProjectGroup) => (single ? [imgRawText] : g.items.map((it) => it.text))
+    const pimg = ctx.image.storagePath ? { storagePath: ctx.image.storagePath, caption: ctx.image.caption ?? null } : null
+    console.log(`[siteops:vision] items=${items.length} groups=${groups.length} resolved=${groups.filter((g) => g.projectId).length}`)
+    // The image path keeps its groups SEQUENTIAL: the same photo rides every group, and concurrent attachment
+    // writes for one storage object are not worth the risk for a modality that rarely spans sites.
+    const imgResolvedIds: string[] = []
+    for (const g of groups.filter((x) => x.projectId)) {
+      await runSingularUnit(ctx, {
+        projectId: g.projectId!, messages: imsg(g), batch, narrationId,
+        callModel: opts.callModel ?? callLLM, assumedSite: g.via === 'auto' ? g.assumedSite : undefined,
+        sink, askQueue, projectAskQueue, projectName: pname(g.projectId), context: imgRawText, itemTypes: g.items.map((it) => (it.type === 'progress' || it.type === 'issue' || it.type === 'todo' ? it.type : null)), structures: g.items.map((it) => it.structure ?? null),
+        qcStatements: g.items.map((it) => it.qc_statements ?? []),
+        resolvedOut: imgResolvedIds,
+      })
+    }
+    // ONE strike-off (see the text path): a per-group drop rewrites `items` from a stale in-memory snapshot.
+    if (imgResolvedIds.length && batch) await dropBatchItems(ctx.supabase, batch, imgResolvedIds)
+    const unresolved = groups.filter((x) => !x.projectId)
+    // the project ask goes first and carries any owed item asks (one ask cursor per turn — see the text twin).
+    // the decomposition rides the ask here too — a photo's caption names a floor as often as a text does,
+    // and the resume's pin is just as blind without it (the text twin, same bug).
+    const imgProjectAsks: AskGroup[] = [
+      ...unresolved.map((g) => ({
+        messages: imsg(g), nameTried: g.nameTried, candidates: g.suggestions, narration: imgRawText,
+        specs: g.items.map((it, i) => ({
+          text: imsg(g)[i] ?? it.text,
+          type: (it.type === 'progress' || it.type === 'issue' || it.type === 'todo' ? it.type : null),
+          structure: it.structure ?? null,
+        })),
+      })),
+      ...projectAskQueue.map(projAskGroup),
+    ]
+    if (imgProjectAsks.length) {
+      await askProjectGroups(ctx, meta, imgProjectAsks, narrationId, pimg, { sink, pendingItemAsks: askQueue })
+    } else {
+      await drainItemAsks(ctx, meta, askQueue, { sink })
+    }
     return
   }
 
-  // ── TEXT: THE SINGULAR UNIT (owner's design, Stage 1) ─────────────────────────────────────────────
-  // decompose = normalizer/splitter/project-hint source (interim, E5 — dies in Phase 4), flowing through
-  // the SAME injected caller as the resolution call: one counted model door.
+  // ── TEXT: THE STAGE-2 PER-PROJECT LOOP (single = array-of-one) ────────────────────────────────────
+  // decompose = normalizer/splitter/project-hint source (one counted model door). Then group by site and
+  // recurse the singular unit per group; unresolved groups serialize into which_project asks.
   let decomposed: { items: SiteItem[]; project_hint: string | null } | null = null
+  let modelDied: DecomposeUnreadable | null = null
   try {
-    decomposed = await decompose(text, projectNames, opts.callModel ?? callLLM)
-  } catch {
+    // NO `?? callLLM` HERE. Passing the raw client made decompose's OWN door — the longer leash and the
+    // budget sized for a nine-item narration — dead code: every voice note ran on the 15s/1200-token default
+    // meant for a one-line payment text, and was cut off or timed out. Absent ⇒ decompose owns its door.
+    decomposed = await decompose(text, projectNames, opts.callModel)
+  } catch (e) {
     decomposed = null
+    if (e instanceof DecomposeUnreadable) modelDied = e   // OUR outage, not "there was nothing in the message"
+    console.error('[siteops:decompose:threw]', (e as Error).message)
+  }
+
+  // THE MODEL DIED — park and say so, and go no further. Everything below this line assumes decompose spoke:
+  // the raw-text fallback would run a nine-fact, three-site narration through the unit as ONE message, and
+  // the didn't-catch terminal would tell the supervisor HE was unclear. Both are lies about an outage of
+  // ours. The park is the same no-drop floor resolveInbound gives its own model failures.
+  if (modelDied) {
+    await parkObservation(ctx, text, 'decompose_failed', narrationId, null, {
+      projectId: null,
+      image: ctx.image?.storagePath ? { storagePath: ctx.image.storagePath, caption: ctx.image.caption ?? null } : null,
+    })
+    if (narrationId) {
+      // WHICH failure — 'no_response' (timeout / rate-limit / dead endpoint) vs 'unparseable' (the model
+      // spoke and we could not read it — usually OUR token cap cutting it off). They need opposite fixes,
+      // and the miss_verdict is where a reviewer finds out which one happened, after the fact.
+      await ctx.supabase.from('site_narrations')
+        .update({ miss_verdict: { reason: 'decompose_failed', cause: modelDied.cause } }).eq('id', narrationId)
+    }
+    console.log(`[siteops:decompose] MODEL DIED (${modelDied.cause}) — parked decompose_failed, nothing resolved`)
+    await say(COULDNT_READ_THAT)
+    return
   }
   const items = decomposed?.items ?? []
-  const first = items[0] ?? null
-  const rest = items.slice(1)   // INTERIM COMPOUND RULE: the unit takes the first; these park pending_stage2
+  // `slot` (the structure) is printed because WITHOUT IT NO TASK CAN BE PINNED — and a floor decompose never
+  // extracted looks identical, from the outside, to a floor that was dropped in transit. They need opposite
+  // fixes. The live 3-tiling probe could not be diagnosed without this line.
+  console.log(`[siteops:decompose] items=${items.length} ${JSON.stringify(items.map((it) => ({ type: it.type, hint: it.project_hint, slot: it.structure ?? null, text: (it.text ?? '').slice(0, 60) })))}`)
+  await sendReceiptAck(ctx, meta, items.length)   // STEP A — ack now (count known), before the resolve loop
+  const groups = await resolveGroups(ctx, decomposed, projects, batch, text)
+  console.log(`[siteops:groups] count=${groups.length} resolved=${groups.filter((g) => g.projectId).length} ${JSON.stringify(groups.map((g) => ({ project: g.projectId ? (pname(g.projectId) ?? g.projectId) : `?${g.nameTried ?? ''}`, items: g.items.length, via: g.via })))}`)
 
-  // RESOLVE THE PROJECT (ask-first ladder): the item's/narration's named project → string-match safety
-  // net → the open batch as a PRIOR (an unnamed message from a sender we're actively chasing is
-  // presumptively about that thread's site — single-site batches only, a mixed batch can't say which)
-  // → ASK FIRST. Never guess across projects; never load multi-project candidates as a fallback.
-  const nameHint = first?.project_hint ?? decomposed?.project_hint ?? null
-  const proj = await resolveProject(ctx.supabase, ctx.orgId, { narration: text, nameHint })
-  let projectId: string | null = proj.projectId
-  let via: string = proj.via
-  if (!projectId && batch && batch.items.length) {
-    const pids = [...new Set(batch.items.map((b) => b.projectId).filter(Boolean))] as string[]
-    if (pids.length === 1) { projectId = pids[0]; via = 'auto' }
-  }
-  await ctx.supabase.from('site_narrations').update({
-    project_id: projectId, decomposed: items, resolved_project_via: projectId ? via : 'unresolved',
-  }).eq('id', narrationId)
-
-  if (!projectId) {
-    // A2 (clause 2 — ask-first floor). ASK "which site?" for any CONTENT-bearing message; only a genuinely
-    // TRIVIAL one (a bare ack / empty) is an honest didn't-catch. A closure/update ("water problem solved")
-    // yields NO new observation, so decompose throws → decomposed=null — but it IS content, and the RAW text
-    // carried into the ask lets the resume run resolveInbound (which handles updates). Never eat a message we
-    // merely couldn't place; the didn't-catch verdict belongs AFTER the site is known (resolveInbound), not
-    // here. (decomposed truthy = we already have items; !decomposed + non-trivial = a closure we still ask.)
-    if (!decomposed && !mentionsProjectToken(text, projects)) {
-      // TRUE contentless cell: nothing decomposed AND no project referenced → junk/greeting → the honest
-      // didn't-catch. T7 (clause 6) — record it so `miss_verdict IS NOT NULL` finds EVERY miss in one query.
-      if (narrationId) await ctx.supabase.from('site_narrations').update({ miss_verdict: { reason: 'nothing_extracted' } }).eq('id', narrationId)
-      await say(`Didn't catch a site update in that — try again if you meant to send one.`)
+  if (!groups.length) {
+    // decompose produced NO items (a closure like "tiles arrived" yields no NEW item, or the model was down).
+    // Resolve THE site from the raw text and RUN it: a resolved project → runSingularUnit([text]) so
+    // resolveInbound grades the update (or parks llm_unreadable on a model failure). Only a genuinely
+    // unsited, content-bearing note ASKS; a truly trivial one is the honest didn't-catch. Never eat a note.
+    const proj = await resolveProject(ctx.supabase, ctx.orgId, { narration: text, nameHint: null })
+    let pid = proj.projectId; let via: string = proj.via; let assumed: string | undefined
+    if (!pid && batch?.items?.length) {
+      const pids = [...new Set(batch.items.map((b) => b.projectId).filter(Boolean))] as string[]
+      if (pids.length === 1) { pid = pids[0]; via = 'auto'; assumed = projects.find((p) => p.id === pid)?.name }
+    }
+    await ctx.supabase.from('site_narrations').update({ project_id: pid, decomposed: items, resolved_project_via: pid ? via : 'unresolved' }).eq('id', narrationId)
+    if (pid) {
+      await runSingularUnit(ctx, { projectId: pid, messages: [text], batch, narrationId, callModel: opts.callModel ?? callLLM, assumedSite: via === 'auto' ? assumed : undefined, sink, projectName: pname(pid) })
       return
     }
-    // ASK-FIRST (E2): the question CARRIES the observation AND the raw text, so the resume runs the
-    // REMAINDER of the unit from slots — no re-extraction, validated against the OFFERED list.
-    await askProjectFirst(ctx, meta, proj, items, text, narrationId)
+    if (!decomposed && !mentionsProjectToken(text, projects)) {
+      if (narrationId) await ctx.supabase.from('site_narrations').update({ miss_verdict: { reason: 'nothing_extracted' } }).eq('id', narrationId)
+      await say(NOTHING_TO_UPDATE)
+      return
+    }
+    await askProjectGroups(ctx, meta, [{ messages: [text], nameTried: proj.nameTried, candidates: proj.suggestions ?? projects.map((p) => ({ id: p.id, name: p.name })) }], narrationId, null)
     return
   }
 
-  await runSingularUnit(ctx, {
-    projectId,
-    text: items.length >= 2 ? first!.text : text,   // compound → the FIRST fragment's text (never let the model re-find the parked rest)
-    rest, batch, narrationId,
-    callModel: opts.callModel ?? callLLM,
-    assumedSite: via === 'auto' ? (projects.find((p) => p.id === projectId)?.name ?? undefined) : undefined,   // T8b disclosure
-  })
+  // NARRATION provenance: a single-group narration records its site (or 'unresolved'); a genuine multi-
+  // project narration is 'multi' (per-group project_id lands on each object at apply time).
+  const soleProject = groups.length === 1 ? groups[0].projectId : null
+  await ctx.supabase.from('site_narrations').update({
+    project_id: soleProject, decomposed: items,
+    resolved_project_via: soleProject ? groups[0].via : (groups.length > 1 ? 'multi' : 'unresolved'),
+  }).eq('id', narrationId)
+
+  // SINGLE narration + SINGLE item → the raw text is the message (faithful, unsplit). Any compound/multi →
+  // each item's own text. Run every RESOLVED group now; serialize the UNRESOLVED into which_project asks.
+  const singleItem = groups.length === 1 && groups[0].items.length === 1
+  const msgsOf = (g: ProjectGroup) => (singleItem ? [text] : g.items.map((it) => it.text))
+  // decompose's TYPE for each fragment, positionally aligned with the messages above. A single, unsplit
+  // narration still carries its one item's type — the whole point is that the resolver stops guessing what
+  // kind of statement it is looking at.
+  const typesOf = (g: ProjectGroup): (('progress' | 'issue' | 'todo') | null)[] =>
+    g.items.map((it) => (it.type === 'progress' || it.type === 'issue' || it.type === 'todo' ? it.type : null))
+  // decompose's STRUCTURE slot per fragment (where the work is). Positionally aligned with the messages.
+  const structuresOf = (g: ProjectGroup): (StructureSlot | null)[] => g.items.map((it) => it.structure ?? null)
+  // STEP A — the checkable FACTS each item stated; the strict QC matcher grades the task's authored checks
+  // against these. They were extracted all along and thrown away at the apply.
+  const qcOf = (g: ProjectGroup): string[][] => g.items.map((it) => it.qc_statements ?? [])
+  // The same two facts, PACKED for a which_project ask's slots (the resume has no decompose to re-run — and
+  // must not: re-extracting would be a second model call AND a second chance to read the message differently).
+  // `messages` is passed in because the single-item path sends the RAW text, not the item's split text.
+  const specsOf = (g: ProjectGroup, messages: string[]): AskItemSpec[] =>
+    g.items.map((it, i) => ({ text: messages[i] ?? it.text, type: typesOf(g)[i] ?? null, structure: it.structure ?? null }))
+
+  // PROJECT GROUPS RUN CONCURRENTLY. Different projects touch DISJOINT rows — different site_tasks, problems
+  // and todos — so there is nothing to serialize between them. On the live 5-item probe a group cost ~1.4s of
+  // candidate loading plus ~2s per item of model time; two sites paid that twice, in series, for nothing.
+  //
+  // ORDER IS PRESERVED WHERE IT IS OBSERVABLE. Each group fills its OWN sink and ask queue, and they are
+  // merged back in GROUP order after every group finishes — never in completion order. The readback's per-site
+  // sections and the ask drain both depend on that: the drain's contract is that the offered order is the
+  // stored order.
+  const resolvedGroups = groups.filter((x) => x.projectId)
+  const perGroup = await Promise.all(resolvedGroups.map(async (g) => {
+    const gSink: ReadbackSink = { entries: [], resolvedRefs: [] }
+    const gAsks: PendingItemAsk[] = []
+    const gProjAsks: PendingProjectAsk[] = []
+    const gResolved: string[] = []
+    await runSingularUnit(ctx, {
+      projectId: g.projectId!, messages: msgsOf(g), batch, narrationId,
+      callModel: opts.callModel ?? callLLM, assumedSite: g.via === 'auto' ? g.assumedSite : undefined,
+      sink: gSink, askQueue: gAsks, projectAskQueue: gProjAsks,
+      projectName: pname(g.projectId), context: text, itemTypes: typesOf(g), structures: structuresOf(g),
+      qcStatements: qcOf(g),
+      resolvedOut: gResolved,
+    })
+    return { gSink, gAsks, gProjAsks, gResolved }
+  }))
+  const groupResolvedIds: string[] = []
+  for (const r of perGroup) {
+    sink.entries.push(...r.gSink.entries)
+    sink.resolvedRefs.push(...r.gSink.resolvedRefs)
+    askQueue.push(...r.gAsks)
+    projectAskQueue.push(...r.gProjAsks)
+    groupResolvedIds.push(...r.gResolved)
+  }
+  // ONE strike-off for the whole turn. dropBatchItems rewrites `items` from the caller's in-memory snapshot,
+  // so a per-group call would write "everything except MY resolves" and resurrect its sibling's strike-offs.
+  if (groupResolvedIds.length && batch) await dropBatchItems(ctx.supabase, batch, groupResolvedIds)
+  const unresolved = groups.filter((x) => !x.projectId)
+  // ONE ask cursor per turn. Every which_project ask — an unresolved decompose GROUP, or one a resolved
+  // group's unit raised on an item it could not site — goes out FIRST (a site is a prerequisite for anything
+  // else), carrying the owed which_item asks in its slots; its resume drains them. Opening two would clobber:
+  // openConversation upserts the single OPEN conversation per (org, sender).
+  // STEP C2c — pass the sink so a which_project ask also HOLDS the turn's resolved summary (folded on answer).
+  const projectAsks: AskGroup[] = [
+    ...unresolved.map((g) => ({
+      messages: msgsOf(g), nameTried: g.nameTried, candidates: g.suggestions,
+      specs: specsOf(g, msgsOf(g)), narration: text,     // the decomposition rides the ask → the resume is not blind
+    })),
+    ...projectAskQueue.map(projAskGroup),
+  ]
+  if (projectAsks.length) {
+    await askProjectGroups(ctx, meta, projectAsks, narrationId, null, { sink, pendingItemAsks: askQueue })
+  } else {
+    // DRAIN — ask the first owed which_item question; the rest ride its slots. The sink is threaded so
+    // flushOrHoldReadback HOLDS this turn's summary on the ask instead of sending it alongside.
+    await drainItemAsks(ctx, meta, askQueue, { sink })
+  }
+
+  } finally {
+    // ONE combined reply for everything that resolved this turn (asks already went out inline). STEP C1/C2c —
+    // if a which_item OR which_project ask is open, HOLD the summary on it (the resume folds it into one readback).
+    await flushOrHoldReadback(ctx, sink, meta)
+  }
 }
 
-/** The ask-first project question (shared by the unit and the legacy image path). The list we SHOW is the
- *  list we STORE (pickList) so the reply maps to the same row in answerSiteops. `text` non-null marks
- *  unit-style slots (E2): the resume runs the singular unit's remainder; null = legacy slots, unit resume on pick. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function askProjectFirst(ctx: SiteopsCtx, meta: Record<string, unknown>, proj: any, items: SiteItem[], text: string | null, narrationId: string | null): Promise<void> {
-  const ambiguous = proj.nameTried && proj.matches.length > 1
-  const pickList = ambiguous ? proj.matches : proj.candidates
-  // AUDIT #2 — the question CARRIES the observation in its TEXT (not just the slots): the supervisor must
+/** THE ASK — serialized across groups (the drain cursor). Ask "which project?" for the FIRST unresolved
+ *  group and carry the REMAINING groups in the pick's slots, so the answer resumes the drain
+ *  (answerSiteops → siteops_project). The list SHOWN is the list STORED (pre-sorted by match confidence, so
+ *  the likeliest site is row 1). The observation rides the body AND the slots (`messages`), so the resume
+ *  runs the singular unit's remainder from slots — no re-extraction, validated against the OFFERED list. */
+// THE DECOMPOSITION RIDES THE ASK (2026-07-11). `messages` alone was never enough: decompose also learned WHAT
+// each fragment is (progress/issue/todo) and WHERE the work is (the structure slot — the ONLY place a floor or
+// unit is captured). The resume re-ran the unit with neither, so on every project-disambiguated message the
+// task pin had no floor, the untracked-work terminal couldn't fire, and the full-narration background was gone.
+// `specs` carries them, positionally aligned with `messages`; `narration` is the raw message (the context
+// block). Both are plain JSON — they ride the conversation slots and come back on the answer.
+interface AskItemSpec { text: string; type: 'progress' | 'issue' | 'todo' | null; structure: StructureSlot | null }
+interface AskGroup { messages: string[]; nameTried: string | null; candidates: { id: string; name: string }[]; specs?: AskItemSpec[]; narration?: string | null }
+async function askProjectGroups(
+  ctx: SiteopsCtx, meta: Record<string, unknown>, groups: AskGroup[], narrationId: string | null,
+  image?: { storagePath?: string | null; caption?: string | null } | null,
+  // STEP C2c — `sink`: record this which_project ask so flushOrHoldReadback HOLDS the turn's resolved summary
+  // onto it (like askItemPick). `heldEntries`: carry an already-accumulated held summary forward across the
+  // drain (a serialized which_project resume re-asks the next group and threads held so the fold lands last).
+  // `pendingItemAsks`: which_item asks owed from THIS turn's resolved groups. Only ONE conversation can be
+  // open per sender, so they ride the project pick's slots and drain after it resolves.
+  opts: { sink?: ReadbackSink; heldEntries?: { project: string | null; body: string }[]; pendingItemAsks?: PendingItemAsk[] } = {},
+): Promise<void> {
+  const g = groups[0]
+  const pending = groups.slice(1)
+  // AUDIT #2 — the question CARRIES the observation in its TEXT, not just the slots: the supervisor must
   // see WHAT is being sited before picking, or a stale question reads as a context-free "which project?".
-  const obs = items[0]?.text ? `"${items[0].text}"${items.length > 1 ? ` (+${items.length - 1} more)` : ''}` : 'your site note'
-  const body = ambiguous
-    ? `You said "${proj.nameTried}" — a few projects match. Which one is ${obs} for?`
-    : proj.nameTried
-      ? `I couldn't find a project called "${proj.nameTried}". Which project is ${obs} for?`
-      : `Got ${obs} — which project is it for?`
+  const obs = g.messages[0] ? `"${g.messages[0]}"${g.messages.length > 1 ? ` (+${g.messages.length - 1} more)` : ''}` : 'your site note'
+  const body = g.nameTried
+    ? `I couldn't find a project called "${g.nameTried}". Which project is ${obs} for?`
+    : `Got ${obs} — which project is it for?`
+  const pickList = g.candidates.slice(0, 10)
+  const img = image?.storagePath ? { storagePath: image.storagePath, caption: image.caption ?? null } : null
+  const slots = {
+    kind: 'siteops_project', messages: g.messages, candidates: pickList, nameTried: g.nameTried,
+    pending_groups: pending, narration_id: narrationId, image: img,
+    ask_body: body,   // the question as ASKED — a re-surface replays it, never a re-render (see askItemPick)
+    // THE DECOMPOSITION — what each message IS and WHERE its work is, so the resume resolves with the same
+    // knowledge the fresh path had. Without these the pin runs blind (see AskItemSpec).
+    ...(g.specs?.length ? { items: g.specs } : {}),
+    ...(g.narration ? { narration_text: g.narration } : {}),
+    ...(opts.pendingItemAsks?.length ? { pending_item_asks: opts.pendingItemAsks } : {}),
+    ...(opts.heldEntries?.length ? { held_readback: { entries: opts.heldEntries, resolvedRefs: [] } satisfies HeldReadback } : {}),
+  }
   await openConversation(ctx.supabase, {
     orgId: ctx.orgId, sender: ctx.from, owningAgent: 'SITEOPS',
-    pendingQuestion: 'which project?',
-    slots: { kind: 'siteops_project', items, ...(text !== null ? { text } : {}), candidates: pickList, narration_id: narrationId, image: ctx.image?.storagePath ? { storagePath: ctx.image.storagePath, caption: ctx.image.caption ?? null } : null },
-    lastMessageId: ctx.wamid,
+    pendingQuestion: 'which project?', slots, lastMessageId: ctx.wamid,
   })
+  if (opts.sink) { opts.sink.askSlots = slots; opts.sink.askQuestion = { pendingQuestion: 'which project?', lastMessageId: ctx.wamid } }
   await send(ctx.supabase, ctx.from, {
     kind: 'list',
     body,
     button: 'Pick project',
-    rows: pickList.slice(0, 10).map((c: { name: string }, i: number) => ({ id: `pick:${i + 1}`, title: c.name.slice(0, 24) })),
+    rows: pickList.map((c: { name: string }, i: number) => ({ id: `pick:${i + 1}`, title: c.name.slice(0, 24) })),
   }, meta)
 }
 
@@ -1350,19 +2117,12 @@ async function routeGroup(ctx: SiteopsCtx, projectId: string, items: SiteItem[],
   return await routeItems(rc, tasks, items)
 }
 
-// "answer-or-let-go" — given the question the assistant asked and the user's reply, judge (LLM,
-// language-agnostic, by MEANING) whether they're trying to ANSWER it or want to LET IT GO. Only
-// consulted AFTER a real pick fails to match, so an honest misroute never traps the user.
-async function judgePending(question: string, reply: string): Promise<'answer' | 'letgo'> {
-  try {
-    const sys = `You decide whether a user's WhatsApp reply is TRYING TO ANSWER a specific question the assistant asked, or wants to LET IT GO — i.e. they decline, dismiss it, say it isn't relevant, or change the subject. Replies may be English, Telugu, Hindi, or a code-mix; judge by MEANING, not keywords.
-Return ONLY JSON: {"answering": true|false}. true = an attempt to answer it (even vague / misspelled / partial); false = declining / not-for-this / off-topic.`
-    const user = `The assistant asked: "${question}"\nThe user replied: "${reply.slice(0, 300)}"\nAre they trying to answer that question?`
-    const parsed = safeParse(await callLLM(sys, user)) as { answering?: unknown } | null
-    if (!parsed || typeof parsed.answering !== 'boolean') return 'answer'   // unsure → keep helping (never wrongly drop a real answer)
-    return parsed.answering ? 'answer' : 'letgo'
-  } catch { return 'answer' }
-}
+// DELETED (2026-07-11): judgePending — the "answer-or-let-go" LLM guess consulted after a pick failed to
+// match. Both its outcomes lost the message ('letgo' dropped it, 'answer' nagged), and guessing the user's
+// intent from a single reply is exactly what the AGENT-AGNOSTIC pending-credibility design removes: a
+// non-matching reply is simply NOT AN ANSWER (return 'not_an_answer'), and the DISPATCHER decides the
+// pending question's fate uniformly — re-surface with a Dismiss button, or drop with a notice. Dismissal is
+// a structural button tap, never a meaning-guess. Nothing to maintain, nothing to mis-judge.
 
 /** STEP 2 — the PURE steering decision for a text arriving while a siteops_photo window is OPEN. related →
  *  enrich (dispatch routes ANSWERS_PENDING → the branch in answerSiteops); unrelated → route fresh
@@ -1552,7 +2312,15 @@ async function correctReadback(ctx: SiteopsCtx, text: string, refs: { kind: stri
 }
 
 /** Resume a pending SITEOPS follow-up — a project pick OR a task disambiguation. */
-export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoRow, opts: { callModel?: (system: string, user: string) => Promise<string> } = {}): Promise<void> {
+/**
+ * 'not_an_answer' — the reply resolved to NONE of the frozen offered list, so it was never an answer to our
+ * question. The pending piece is parked (nothing dropped) and the DISPATCHER re-classifies the message as a
+ * fresh turn. Anything else returns void ('handled'). The dispatcher owns re-entry so siteops never has to
+ * import _dispatch (which imports siteops) — a return value, not a cycle.
+ */
+export type AnswerVerdict = 'not_an_answer' | void
+
+export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoRow, opts: { callModel?: (system: string, user: string) => Promise<string> } = {}): Promise<AnswerVerdict> {
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const slots = (convo.slots_so_far ?? {}) as any
@@ -1588,7 +2356,28 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
     // label = the FULL title (NOT shortLabel) so resolveTypedPick matches a natural answer against the whole
     // name — "Fourth floor" resolves "Wiring — Fourth floor", which the 3-token display label had truncated.
     const picks: PickCandidate[] = cands.map((c) => ({ kind: c.kind, id: c.id, label: c.title }))
-    const picked = resolveTypedPick(picks, picks, text)
+    // A TAP is unambiguous by construction — the row carries its POSITION as its id (`pick:N`), and the stored
+    // order is the displayed order. Resolve it as that number and skip the text matcher entirely: a row TITLE
+    // is a human label, never a resolution key. It cannot be one: the tiling tie's third row is the bare word
+    // "Tiling", which is a substring of "Floor tiling" AND "Wall tiling / dado" — matching that text would be
+    // ambiguous (correctly) and re-prompt a supervisor who had already answered.
+    const tapped = /^pick:(\d+)$/.exec((ctx.interactiveId ?? '').trim())?.[1] ?? null
+    const picked = resolveTypedPick(picks, picks, tapped ?? text)
+    // "None of these" — the offered list is wrong, and the right row may not EXIST (the fifth-floor wiring
+    // task nobody created). Creating a duplicate would be the wrong repair, so the piece is saved for review
+    // and NOTHING changes. This is the option every pick now spells out.
+    if (picked.kind === 'park') {
+      const pieceText = (slots.piece_text as string | null) ?? text
+      await parkObservation(ctx, pieceText, 'disambig', (slots.narration_id as string | null) ?? null, null,
+        { projectId: (slots.project_id as string | null) ?? null, image: (slots.image ?? null) as { storagePath?: string; caption?: string | null } | null })
+      await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'saved for review' })
+      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Understood — I've changed nothing and saved it for review:
+"${pieceText}"
+
+` + `If the right task isn't set up yet, add it in the app and tell me again.` }, meta)
+      await finishItemAsk(ctx, meta, slots, null)
+      return
+    }
     if (picked.kind === 'observe') {
       // "new"/none → route the piece FRESH to the project; never force a genuinely-new observation onto a chase.
       const pid = (slots.project_id as string | null) ?? cands[0]?.projectId ?? null
@@ -1596,6 +2385,7 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
       await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site update' })
       if (!pid) {
         await send(ctx.supabase, ctx.from, { kind: 'text', body: `Got it — send that as a new update with the site and I'll log it.` }, meta)
+        await finishItemAsk(ctx, meta, slots, null)   // still move the cursor — the other asks are not this one's fault
         return
       }
       const dec = await decompose(pieceText).catch(() => ({ items: [] as SiteItem[], project_hint: null }))
@@ -1608,19 +2398,26 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
         for (const td of out.todos) if (td.id) await attachImage(ctx, 'todo', td.id, cimg.storagePath, cimg.caption ?? null, 'creation')
       }
       const n = out.problems.length + out.todos.length + out.progress.length
-      await send(ctx.supabase, ctx.from, { kind: 'text', body: n ? `Logged as new — *${shortLabel(pieceText)}*. 👍` : `Noted 👍` }, meta)
+      await finishItemAsk(ctx, meta, slots, { project: null, body: n ? `Logged as new — *${fullText(pieceText)}*. 👍` : `Noted 👍` })
       return
     }
     const chosen = picked.kind === 'attach' ? cands.find((c) => c.id === picked.target.id) ?? null : null
     if (!chosen) {
-      if (await judgePending(`which of these is "${slots.piece_text ?? 'this'}" about, or is it new?`, text) === 'letgo') {
-        // bail — the item stays in the batch and gets re-asked next cycle
-        await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site update' })
-        await send(ctx.supabase, ctx.from, { kind: 'text', body: `No problem — I'll check back on it next time.` }, meta)
-        return
-      }
-      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Reply with the item, or say *new* if it's a separate thing.` }, meta)
-      return
+      // NOT AN ANSWER. The offered list is FROZEN and it just told us this reply resolves to none of it —
+      // that is a fact, not something to ask a model about. `judgePending` used to guess here, and both of
+      // its branches lost the message: 'letgo' replied "No problem" and dropped it, the other nagged.
+      //
+      // LIVE FAILURE (2026-07-09): with a which_item ask open, "రాజుకి పాతికి వేలు ఇచ్చాను" (I gave Raju
+      // twenty-five thousand) was routed ANSWERS_PENDING/SITEOPS by the router, failed to match any offered
+      // item — correctly — and was then answered "No problem — I'll check back on it next time." A ₹25,000
+      // payment, gone. Two slab-completion reports went the same way.
+      //
+      // AGENT-AGNOSTIC PENDING CREDIBILITY (2026-07-11): the answer handler does NOTHING here but report the
+      // fact. It does NOT park, close, or touch state. The DISPATCHER owns the pending question's fate — it
+      // stashes P, handles this message as a fresh turn, then RE-SURFACES P (with a Dismiss button) or DROPS
+      // it with a notice if the fresh turn raised its own question. Same uniform machinery for every agent.
+      console.log(`[siteops:pick:not-an-answer] piece=${JSON.stringify(slots.piece_text ?? '')} reply=${JSON.stringify(text)} → dispatcher stashes + re-surfaces`)
+      return 'not_an_answer'
     }
     // A TASK confirm (the parking lesson): the supervisor confirmed a med/low task match — apply the
     // progress via the proven by-id core (twin-aware guardrail intact), attach the carried photo, and
@@ -1629,15 +2426,30 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
       const pieceText = (slots.piece_text as string | null) ?? text
       const narrId = (slots.narration_id as string | null) ?? null
       const projId = (slots.project_id as string | null) ?? chosen.projectId ?? null
-      const label = await applyTaskProgressById(ctx, chosen.id, pieceText, narrId, new Date(), projId)
+      // A confirmed BLOCKED pick records the blocker; it must NEVER reach applyProgress. The held verdict says
+      // which — "tiles not yet laid → that one" confirms the TARGET, never that the work happened.
+      const heldTask = slots.update as AttachUpdate | null | undefined
+      const blocked = heldTask?.action === 'blocked'
+      // GAP 1 — the checkable facts the ORIGINAL message stated ride the slots; apply them here, where we
+      // finally know WHICH task they belong to. Without this the ask path silently discarded every piece of
+      // QC evidence — and the ask path is the one an ambiguous photo of slab steel always takes.
+      const qcStatements = (slots.qc_statements as string[] | undefined) ?? []
+      const label = blocked
+        ? await applyTaskBlockedById(ctx, chosen.id, heldTask?.reason || pieceText)
+        : await applyTaskProgressById(ctx, chosen.id, pieceText, narrId, new Date(), projId, false, undefined,
+            { statements: qcStatements, call: opts.callModel ?? callLLM })
       const cimg = slots.image as { storagePath?: string; caption?: string | null } | null
       if (label && cimg?.storagePath) await attachImage(ctx, 'site_task', chosen.id, cimg.storagePath, cimg.caption ?? null, 'creation')
       await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site update' })
       if (label) {
-        await send(ctx.supabase, ctx.from, { kind: 'text', body: `✓ “${label}” updated — ${chosen.projectName}` }, meta)
+        const body = blocked
+          ? `⏳ “${label}” still open — noted, chasing sooner — ${chosen.projectName}`
+          : `✓ “${label}” updated — ${chosen.projectName}`
+        await finishItemAsk(ctx, meta, slots, { project: chosen.projectName, body })
       } else {
         await parkObservation(ctx, `update ${chosen.id}: ${pieceText}`, 'v2_effect_failed', narrId, null, { projectId: projId, image: cimg })
-        await send(ctx.supabase, ctx.from, { kind: 'text', body: `Couldn't update “${shortLabel(chosen.title)}” just now — saved it for review so nothing's lost.` }, meta)
+        await send(ctx.supabase, ctx.from, { kind: 'text', body: `Couldn't update “${fullText(chosen.title)}” just now — saved it for review so nothing's lost.` }, meta)
+        await finishItemAsk(ctx, meta, slots, null)   // a failed effect still moves the cursor — never strand the rest
       }
       return
     }
@@ -1647,19 +2459,20 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
     const item: BatchItem = { kind: chosen.kind, id: chosen.id, orgId: chosen.orgId, projectId: null, projectName: chosen.projectName, title: chosen.title, taskName: null, cause: chosen.cause }
     // T3 — the LADDER is the SOLE authority. The confirm upgrades WHICH item (target fixed, match → high),
     // never WHETHER it closed. Re-enter the one authority (executeResolution) with the held update so the
-    // ladder rules the disposition; passing its verdict as `force` skips judgeResolution's re-judge. A
+    // ladder rules the disposition and the executor simply applies it (there is no second opinion). A
     // verdict-less slot (pre-T3 stamp / fossil) carries no held update → FORCE ADDRESSING: no stored
     // closure_explicit is no proof of closure, and a confirm never answers "is it closed" (Q1).
+    // A held BLOCKED verdict survives the confirm: the pick fixed WHICH item, not whether the work happened.
     const held = slots.update as AttachUpdate | null | undefined
-    const applied: 'resolve' | 'addressing' = held
+    const applied: 'resolve' | 'addressing' | 'blocked' = held
       ? (executeResolution(
           { issue_snag_found: { found: false, items: [] }, update_found: { found: true, updates: [{ ...held, target_id: chosen.id, confidence: 'high' }] } },
           { candidateIds: new Set([chosen.id]), isImage: false },
         ).find((tt): tt is Extract<Terminal, { kind: 'object_updated' }> => tt.kind === 'object_updated')?.applied ?? 'addressing')
       : 'addressing'
     const verdict = await applyBatchResolution(
-      ctx, item, applied === 'resolve' ? 'resolved' : 'still_open', slots.piece_text ?? text, cadenceMap, actorId, now,
-      { force: applied, reason: held?.reason ?? (slots.piece_text as string | null) ?? '', callModel: opts.callModel },
+      ctx, item, applied, slots.piece_text ?? text, cadenceMap, actorId, now,
+      { reason: held?.reason ?? (slots.piece_text as string | null) ?? '' },
     )
     // STEP 3: if the colliding message was a PHOTO (carried in slots), attach it to the chosen item now.
     const cimg = slots.image as { storagePath?: string; caption?: string | null } | null
@@ -1667,7 +2480,7 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
     const batch = await getOpenBatch(ctx.supabase, ctx.orgId, ctx.from)
     if (batch) await dropBatchItems(ctx.supabase, batch, [chosen.id])
     await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site update' })
-    await send(ctx.supabase, ctx.from, { kind: 'text', body: `${readbackPart(item, verdict)} — ${chosen.projectName}` }, meta)
+    await finishItemAsk(ctx, meta, slots, { project: chosen.projectName, body: `${readbackPart(item, verdict)} — ${chosen.projectName}` })
     return
   }
 
@@ -1678,15 +2491,19 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
     const img = (slots.image ?? {}) as { storagePath?: string; caption?: string | null }
     const t = text.trim().toLowerCase()
     const m = text.match(/(\d+)/)
-    const idx = m ? parseInt(m[1], 10) - 1 : cands.findIndex((c) => shortLabel(c.title).toLowerCase().includes(t) && t.length >= 3)
+    const idx = m ? parseInt(m[1], 10) - 1 : cands.findIndex((c) => fullText(c.title).toLowerCase().includes(t) && t.length >= 3)
     const chosen = idx >= 0 && idx < cands.length ? cands[idx] : null
-    if (!chosen || !img.storagePath) {
+    if (!chosen) {
+      // Not one of the offered items → not an answer. Dispatcher stashes P + re-surfaces/drops (agent-agnostic).
+      return 'not_an_answer'
+    }
+    if (!img.storagePath) {
       await send(ctx.supabase, ctx.from, { kind: 'text', body: `Reply with the number of the item this photo is about.` }, meta)
       return
     }
     await answerWithPhoto(ctx, { kind: chosen.kind, id: chosen.id, orgId: chosen.orgId }, img.storagePath, img.caption ?? null)
     await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'photo attached' })
-    await send(ctx.supabase, ctx.from, { kind: 'text', body: `Added your photo to *${shortLabel(chosen.title)}*.` }, meta)
+    await send(ctx.supabase, ctx.from, { kind: 'text', body: `Added your photo to *${fullText(chosen.title)}*.` }, meta)
     return
   }
 
@@ -1699,18 +2516,13 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
     const storedItem = slots.item as SiteItem
     const d = resolveTypedPick(shortlist, full, text)
     if (d.kind === 'none') {
-      if (await judgePending('is this photo about one of those open items, or something new?', text) === 'letgo') {
-        await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'photo' })
-        await send(ctx.supabase, ctx.from, { kind: 'text', body: `Left it for now — send it again if you'd like it logged.` }, meta)
-        return
-      }
-      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Reply with the number, or *new* if it's not one of those.` }, meta)
-      return
+      // Resolves to none of the offered items → not an answer. Dispatcher stashes P + re-surfaces/drops.
+      return 'not_an_answer'
     }
     if (d.kind === 'attach') {
       if (img.storagePath) await attachExistingEvidence(ctx, { kind: d.target.kind, id: d.target.id }, img.storagePath, img.caption ?? null)
       await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'photo attached' })
-      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Added your photo to *${shortLabel(d.target.label)}*.` }, meta)
+      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Added your photo to *${fullText(d.target.label)}*.` }, meta)
       return
     }
     // observe — create the held item fresh, attach the photo as creation evidence, confirm.
@@ -1738,51 +2550,66 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
   // ── project pick → route the STORED decomposition against the chosen project ──
   if (slots.kind === 'siteops_project') {
     const candidates = (slots.candidates ?? []) as { id: string; name: string }[]
+    const pending = (slots.pending_groups ?? []) as AskGroup[]
     const t = text.trim().toLowerCase()
     const m = text.match(/(\d+)/)
     const idx = m ? parseInt(m[1], 10) - 1
       : candidates.findIndex((c) => { const n = c.name.toLowerCase(); return n === t || (n.includes(t) && t.length >= 3) || (t.includes(n) && n.length >= 3) })
     const chosen = idx >= 0 && idx < candidates.length ? candidates[idx] : null
     if (!chosen) {
-      // Not a project pick — judge whether they're answering or want out; never trap a misroute.
-      if (await judgePending('which project is this site note for?', text) === 'letgo') {
-        await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'note dropped' })
-        await send(ctx.supabase, ctx.from, { kind: 'text', body: `No worries — I've left that out. If it's a site note, just send it again with the site name. 👍` }, meta)
-        return
-      }
-      await send(ctx.supabase, ctx.from, { kind: 'text', body: `I didn't catch the project — reply with its number or name, or *skip* if it's not a site note.` }, meta)
-      return
+      // Not a project pick → not an answer. The answer handler touches NOTHING: the DISPATCHER stashes this
+      // convo (its slots — incl. the pending_groups drain — ride the closed row) and RE-SURFACES it after the
+      // fresh turn, or DROPS it with a notice if that turn raised its own question. No judgePending guess.
+      return 'not_an_answer'
     }
     if (slots.narration_id) {
       await ctx.supabase.from('site_narrations').update({ project_id: chosen.id, resolved_project_via: 'selected' }).eq('id', slots.narration_id)
     }
-    // T5 sub-step 4 — the project pick runs the SINGULAR UNIT for BOTH slot shapes (finishRoute retired
-    // here). The picked project's candidates, one resolveInbound, apply/create under the enforcement floor.
-    // No re-extraction (the stored decomposition IS the extraction; journey (c) counts the calls).
-    //   • UNIT-STYLE slots (E2) carry the raw `text` → that is the message.
-    //   • LEGACY slots (image-no-project, runMulti holds, executor which_project, parked reconstructions)
-    //     carry only the decomposed items → the first item's text is the message, and the carried photo
-    //     (slots.image) is RE-HYDRATED onto the ctx so it RIDES the unit's terminals (attach on create,
-    //     answer-evidence on update) instead of being dropped — finishRoute read ctx.image, null at resume.
-    const storedItems = (slots.items ?? []) as SiteItem[]
-    const storedFirst = storedItems[0] ?? null
-    const rawMsg = storedItems.length >= 2 ? storedFirst!.text : (typeof slots.text === 'string' ? slots.text : (storedFirst?.text ?? text))
-    // The project is ALREADY picked — NAME it in the grading message so the ladder creates on it. planObserve
-    // asks which_project on a null project_hint; a legacy image message (a vision one-liner, no site named —
-    // that is why we asked) would otherwise make the model return null and RE-ASK the project we just picked.
-    const msg = `${chosen.name}: ${rawMsg}`
+    // The project is ALREADY picked — run its message(s) through the SINGULAR UNIT, NAMING the project in
+    // each so a CREATE (planObserve asks which_project on a null project_hint) lands on the picked site
+    // instead of re-asking. The carried photo (slots.image) is RE-HYDRATED onto the ctx so it RIDES the
+    // unit's terminals. No re-extraction — the stored messages ARE the observation (journey (c) counts calls).
+    // Back-compat: an in-flight LEGACY convo (pre-Stage-2) carries slots.items/slots.text, not messages.
+    // THE DECOMPOSITION, restored. `specs` (new) carries each message's TYPE and STRUCTURE slot; without it the
+    // pin has no floor and re-asks a question the supervisor already answered. A legacy in-flight convo (opened
+    // before this shipped) has no specs and degrades to exactly the old behaviour — never a crash, just blind.
+    // NB `slots.items` is the LEGACY SiteItem[] shape (pre-Stage-2 convos); `specs` rides `slots.items` too but
+    // is distinguished by carrying `structure`/`type` — read it defensively.
+    const specs = ((slots.items ?? []) as AskItemSpec[]).filter((s) => s && typeof s.text === 'string' && ('structure' in s || 'type' in s))
+    const rawMsgs = specs.length ? specs.map((s) => s.text)
+      : ((slots.messages ?? null) as string[] | null)
+      ?? [typeof slots.text === 'string' ? slots.text : (((slots.items ?? []) as SiteItem[])[0]?.text ?? text)]
+    const named = rawMsgs.map((mm) => `${chosen.name}: ${mm}`)
     const pimg = (slots.image ?? null) as { storagePath?: string; caption?: string | null } | null
     const rctx: SiteopsCtx = pimg?.storagePath ? { ...ctx, image: { base64: '', mime: '', caption: pimg.caption ?? '', storagePath: pimg.storagePath } } : ctx
     const batch = await getOpenBatch(ctx.supabase, ctx.orgId, ctx.from)
     await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site update' })
+    // STEP C2c — run THIS group into a sink (batched) so its outcome FOLDS with any held summary instead of
+    // sending inline; carry the accumulated summary forward across the drain, flushing only when it's the last.
+    const held = ((slots.held_readback ?? null) as HeldReadback | null)
+    const rsink: ReadbackSink = { entries: [], resolvedRefs: [] }
+    // item asks owed from EARLIER groups ride the slots; this group may add its own. Both drain below.
+    const itemAsks = [...((slots.pending_item_asks ?? []) as PendingItemAsk[])]
     await runSingularUnit(rctx, {
-      projectId: chosen.id,
-      text: msg,
-      rest: storedItems.slice(1),
-      batch,
-      narrationId: slots.narration_id ?? null,
-      callModel: opts.callModel ?? callLLM,
+      projectId: chosen.id, messages: named, batch,
+      narrationId: slots.narration_id ?? null, callModel: opts.callModel ?? callLLM,
+      sink: rsink, askQueue: itemAsks, projectName: chosen.name,
+      // …and the resume resolves with everything the fresh path knew: WHERE the work is (the pin), WHAT each
+      // fragment is (the honest untracked-work terminal), and the WHOLE narration as background.
+      context: ((slots.narration_text ?? null) as string | null) ?? rawMsgs.join(' '),
+      itemTypes: specs.length ? specs.map((s) => s.type ?? null) : undefined,
+      structures: specs.length ? specs.map((s) => s.structure ?? null) : undefined,
     })
+    const acc = [...(held?.entries ?? []), ...rsink.entries]
+    if (pending.length) {
+      // DRAIN — ask the next unresolved group, threading the accumulated summary so the fold lands on the LAST
+      // answer, and carrying the item asks forward (a site is a prerequisite; items are sorted out after).
+      await askProjectGroups(ctx, meta, pending, slots.narration_id ?? null, null, { heldEntries: acc, pendingItemAsks: itemAsks })
+    } else if (await drainItemAsks(ctx, meta, itemAsks, { heldEntries: acc, heldRefs: rsink.resolvedRefs })) {
+      // every project is sited; now sort out the ambiguous items, one question at a time (the ask holds `acc`).
+    } else if (acc.length) {
+      await send(ctx.supabase, ctx.from, { kind: 'text', body: combineReadbacks(acc) }, meta)
+    }
     return
   }
 
@@ -1796,13 +2623,8 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
   const pickIdx = m ? parseInt(m[1], 10) - 1 : candidates.findIndex((c) => c.name.toLowerCase() === text.trim().toLowerCase())
   const chosen = pickIdx >= 0 ? candidates[pickIdx] : null
   if (!chosen) {
-    if (await judgePending('which task is this update about?', text) === 'letgo') {
-      await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site update' })
-      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Left that one for now — send it again with the floor/task if you'd like it logged.` }, meta)
-      return
-    }
-    await send(ctx.supabase, ctx.from, { kind: 'text', body: `Reply with the number of the task, or *skip* to leave it.` }, meta)
-    return
+    // Not one of the offered tasks → not an answer. Dispatcher stashes P + re-surfaces/drops (agent-agnostic).
+    return 'not_an_answer'
   }
 
   const vm = await materializeProjectTasks(ctx, slots.project_id)

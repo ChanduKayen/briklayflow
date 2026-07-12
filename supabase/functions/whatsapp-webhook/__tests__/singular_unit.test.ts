@@ -48,6 +48,12 @@ const unitModel = (calls: Call[], stubs: { decompose?: string; resolve?: string 
     calls.push({ system, user })
     return Promise.resolve(user.startsWith('<narration>') ? (stubs.decompose ?? '') : (stubs.resolve ?? ''))
   }
+// An EMPTY extraction is not a dead model. The stub's `''` default means "the model said nothing" — an
+// OUTAGE, which now parks (decompose_failed) instead of falling through to the raw-text unit run. A
+// narration that decomposes to NOTHING (a closure like "tiles arrived" spawns no new item) says so in valid
+// JSON, and that is what keeps the fallback alive. The two were the same string here, which is exactly the
+// conflation the live 12:50 failure was made of.
+const DEC_EMPTY = (project_hint: string | null = null) => JSON.stringify({ project_hint, items: [] })
 const resolutionCalls = (calls: Call[]) => calls.filter((c) => c.user.startsWith('CANDIDATES:'))
 const decomposeCalls = (calls: Call[]) => calls.filter((c) => c.user.startsWith('<narration>'))
 
@@ -71,9 +77,10 @@ const R_RESOLVE_TILES = JSON.stringify({
   issue_snag_found: { found: false, items: [] },
   update_found: { found: true, updates: [{ target_id: 'iss-tiles', target_kind: 'issue', action: 'resolve', confidence: 'high', closure_explicit: true, reason: 'tiles arrived' }] },
 })
+// The model targets the task TYPE id (never a row); ONE 'Slab Pour' row means the pin applies it.
 const R_TASK_PROGRESS = JSON.stringify({
   issue_snag_found: { found: false, items: [] },
-  update_found: { found: true, updates: [{ target_id: 'task-slab', target_kind: 'task', action: 'progress', confidence: 'high', closure_explicit: false, reason: 'ground floor slab pour done' }] },
+  update_found: { found: true, updates: [{ target_id: 'type:P2:slab pour', target_kind: 'task', action: 'progress', confidence: 'high', closure_explicit: false, reason: 'ground floor slab pour done' }] },
 })
 
 suite('siteops singular-first — Stage-1 acceptance journeys (a–g)', () => {
@@ -103,7 +110,7 @@ suite('siteops singular-first — Stage-1 acceptance journeys (a–g)', () => {
     const fake = fakeSupabase(seed({ chase_batches: [{ id: 'batch-2', items: [tilesBI] }] }))
     const calls: Call[] = []
     await runSiteops(ctxFor(fake), 'tiles arrived at Soundharya', {
-      callModel: unitModel(calls, { decompose: '', resolve: R_RESOLVE_TILES }),   // a resolution statement decomposes to nothing — the unit still runs
+      callModel: unitModel(calls, { decompose: DEC_EMPTY('Soundharya'), resolve: R_RESOLVE_TILES }),   // a resolution statement decomposes to nothing — the unit still runs
     })
     expect(fake.writesTo('problems').some((w) => w.op === 'update' && w.payload?.status === 'RESOLVED' && w.filters.some(([k, v]) => k === 'id' && v === 'iss-tiles'))).toBe(true)
     expect(fake.writesTo('problems').some((w) => typeof w.payload?.active_resolve_event === 'string')).toBe(true)
@@ -126,8 +133,8 @@ suite('siteops singular-first — Stage-1 acceptance journeys (a–g)', () => {
     const convoW = fake.writesTo('wa_conversations').find((w) => w.payload?.slots_so_far?.kind === 'siteops_project')
     expect(!!convoW).toBe(true)
     const slots = convoW?.payload?.slots_so_far
-    expect(Array.isArray(slots?.items) && slots.items.length > 0).toBe(true)   // the question CARRIES the observation
-    expect(slots?.text).toBe('transformer not working')                        // E2: raw text rides the slots
+    expect(Array.isArray(slots?.messages) && slots.messages.length > 0).toBe(true)   // the question CARRIES the observation
+    expect(slots?.messages?.[0]).toBe('transformer not working')                     // Stage-2: the grading message rides the slots
     // AUDIT #2 — the observation must ride the question's TEXT too ("the question CARRIES the extracted
     // observation"), not just the slots: the supervisor must see WHAT is being sited before picking.
     expect(fake.outbox().some((b) => /which project/i.test(b) && b.includes('transformer not working'))).toBe(true)
@@ -162,15 +169,17 @@ suite('siteops singular-first — Stage-1 acceptance journeys (a–g)', () => {
     expect(JSON.stringify(park?.payload?.observation ?? '').includes('transformer')).toBe(true)
   })
 
-  // (d) the cardinality fast path survives the restructure — and now provably guards ALL model calls:
-  // the injected callModel sees NOTHING (decompose included).
-  test('(d) bare "sari" + lone chase → fast path, the model is NEVER called (not even decompose)', async () => {
+  // (d) THE ACK CONTRACT (2026-07-09). This test used to pin the cardinality fast path: "sari" + a lone chase
+  // advanced the item deterministically, with ZERO model calls. Cheap, and wrong — an acknowledgement names
+  // nothing, and it was moving state and resetting the escalation clock on work nobody had touched.
+  // Now: an ack costs one router call (which happens upstream, for every message anyway) and moves nothing.
+  // The word list that recognised "sari" is deleted with it — see _siteops_batch's grave marker.
+  test('(d) bare "sari" + lone chase → the chase is UNTOUCHED (no advance, no trail)', async () => {
     const fake = fakeSupabase(seed())
     const calls: Call[] = []
     await runSiteops(ctxFor(fake), 'sari', { callModel: unitModel(calls, {}) })
-    expect(calls.length).toBe(0)
-    expect(fake.writesTo('problems').some((w) => w.op === 'update' && w.payload?.status === 'ADDRESSING')).toBe(true)
-    expect(fake.trail().some((r) => r.type === 'bare_ack')).toBe(true)
+    expect(fake.writesTo('problems').filter((w) => w.op === 'update').length).toBe(0)
+    expect(fake.trail().length).toBe(0)
   })
 
   // (e) THE STRUCTURAL GUARANTEE: cross-project bait is IMPOSSIBLE because it is never offered.
@@ -190,19 +199,23 @@ suite('siteops singular-first — Stage-1 acceptance journeys (a–g)', () => {
   })
 
   // (f) the enforcement floor stands: model down → five-part park + honest reply, batch untouched.
-  test('(f1) model down + open chase → llm_unreadable park, honest reply, batch untouched', async () => {
+  // WITNESS CHANGED (2026-07-11): a dead model now parks at DECOMPOSE (decompose_failed) — the first door it
+  // fails at — instead of running the raw narration through the unit to be parked by the resolver one call
+  // later. Same three invariants: parked (no drop), honest reply, chase untouched.
+  test('(f1) model down + open chase → decompose_failed park, honest reply, batch untouched', async () => {
     const fake = fakeSupabase(seed())
     await runSiteops(ctxFor(fake), 'Soundharya emiti idi', { callModel: () => Promise.resolve('') })
-    expect(fake.writesTo('siteops_unplaced').some((w) => w.payload?.reason === 'llm_unreadable')).toBe(true)
-    expect(fake.outbox().some((b) => /logged it for review/i.test(b))).toBe(true)
+    expect(fake.writesTo('siteops_unplaced').some((w) => w.payload?.reason === 'decompose_failed')).toBe(true)
+    expect(fake.outbox().some((b) => /couldn't read that/i.test(b))).toBe(true)
+    expect(fake.outbox().some((b) => /couldn't tell which work you meant/i.test(b))).toBe(false)   // never the user's fault
     expect(fake.writesTo('problems').some((w) => w.op === 'update')).toBe(false)
     expect(fake.writesTo('chase_batches').some((w) => w.op === 'update')).toBe(false)
   })
   test('(f2) model down, NO batch → still a PARK, never a bare "didn\'t catch" drop', async () => {
     const fake = fakeSupabase(seed({ chase_batches: [] }))
     await runSiteops(ctxFor(fake), 'Soundharya transformer emiti', { callModel: () => Promise.resolve('') })
-    expect(fake.writesTo('siteops_unplaced').some((w) => w.payload?.reason === 'llm_unreadable')).toBe(true)
-    expect(fake.outbox().some((b) => /logged it for review/i.test(b))).toBe(true)
+    expect(fake.writesTo('siteops_unplaced').some((w) => w.payload?.reason === 'decompose_failed')).toBe(true)
+    expect(fake.outbox().some((b) => /couldn't read that/i.test(b))).toBe(true)
   })
 
   // (n) STAGE 2 (1/N) — the task-progress gap closes end-to-end: "slab pour done" against an offered OPEN
@@ -222,40 +235,40 @@ suite('siteops singular-first — Stage-1 acceptance journeys (a–g)', () => {
     })
     const rc = resolutionCalls(calls)
     expect(rc.length).toBe(1)
-    expect(rc[0].user.includes('task-slab | task')).toBe(true)   // the task WAS offered — now it must land
+    expect(rc[0].user.includes('type:P2:slab pour | task')).toBe(true)   // the task TYPE WAS offered — now it must land
     expect(fake.writesTo('site_tasks').some((w) => w.op === 'update')).toBe(true)
     expect(fake.outbox().some((b) => /✓ “Slab Pour \(Ground\)” updated/.test(b))).toBe(true)
     expect(fake.writesTo('siteops_unplaced').length).toBe(0)     // no more understood-but-held
   })
 
-  // (g) INTERIM COMPOUND RULE: first item through the unit; the rest parked HONESTLY as pending_stage2
-  // (full fragment payload, replayable by Stage 2's loop), ONE combined readback telling both truths.
-  // Never wrong-match a second item to handle it.
-  test('(g) compound → first item resolves via the unit, second parks pending_stage2 with payload, one honest readback', async () => {
-    const fake = fakeSupabase(seed())   // unrelated ASM chase open — must stay untouched throughout
+  // (g) STAGE-2 COMPOUND LOOP: a same-site compound runs BOTH fragments through the unit — first resolves
+  // its open issue, second creates its new one — no pending_stage2 park, no drop. (Replaces the interim
+  // "first runs, rest parks" rule.) The unrelated ASM chase stays untouched throughout.
+  test('(g) compound (same site) → BOTH fragments run the unit: first resolves, second creates (no park)', async () => {
+    const fake = fakeSupabase(seed())
     const calls: Call[] = []
-    await runSiteops(ctxFor(fake), 'Soundharya lo tiles vacchayi, transformer not working', {
-      callModel: unitModel(calls, {
-        decompose: DEC(null, [
+    const cm = (system: string, user: string): Promise<string> => {
+      calls.push({ system, user })
+      if (!user.startsWith('CANDIDATES:')) {
+        return Promise.resolve(DEC(null, [
           { type: 'progress', text: 'tiles arrived at site', project_hint: 'Soundharya' },
           { type: 'issue', text: 'transformer not working', project_hint: 'Soundharya' },
-        ]),
-        resolve: R_RESOLVE_TILES,
-      }),
-    })
+        ]))
+      }
+      // Fix B: the whole narration now rides EVERY fragment's prompt as background, so discriminate on the
+      // atomic MESSAGE (the item being resolved), not the full user string (which contains "transformer" for both).
+      const msg = user.split('MESSAGE:\n').pop() ?? user
+      return Promise.resolve(/transformer/i.test(msg) ? R_NEW_TRANSFORMER : R_RESOLVE_TILES)
+    }
+    await runSiteops(ctxFor(fake), 'Soundharya lo tiles vacchayi, transformer not working', { callModel: cm })
     // first fragment ran the unit: tiles matched its own open issue → ladder RESOLVE
     expect(fake.writesTo('problems').some((w) => w.op === 'update' && w.payload?.status === 'RESOLVED' && w.filters.some(([k, v]) => k === 'id' && v === 'iss-tiles'))).toBe(true)
-    // second fragment parked distinguished + replayable — never wrong-matched, never dropped
-    const park = fake.writesTo('siteops_unplaced').find((w) => w.payload?.reason === 'pending_stage2')
-    expect(!!park).toBe(true)
-    expect(JSON.stringify(park?.payload?.observation ?? '').includes('transformer')).toBe(true)
-    // AUDIT #3 — the park must carry THE resolved project (the narration's shared site), else Stage 2
-    // inherits projectless fragments and re-asks what the unit already knew. Per-item hints in the
-    // observation still override at replay for a genuinely multi-site narration.
-    expect(park?.payload?.project_id).toBe('P2')
-    // ONE reply, both truths
-    expect(fake.outbox().some((b) => /resolved|tiles/i.test(b) && /saved for review/i.test(b))).toBe(true)
+    // second fragment PROCESSED on its own site (created), never parked, never dropped
+    expect(fake.writesTo('problems').some((w) => w.op === 'insert' && w.payload?.project_id === 'P2')).toBe(true)
+    expect(fake.writesTo('siteops_unplaced').some((w) => w.payload?.reason === 'pending_stage2')).toBe(false)
+    // two resolution calls — one per fragment (the loop ran both)
+    expect(resolutionCalls(calls).length).toBe(2)
     // the unrelated ASM chase untouched
-    expect(fake.writesTo('problems').some((w) => w.filters.some(([k, v]) => k === 'id' && v === 'iss-water'))).toBe(false)
+    expect(fake.writesTo('problems').some((w) => w.op === 'update' && w.filters.some(([k, v]) => k === 'id' && v === 'iss-water'))).toBe(false)
   })
 })

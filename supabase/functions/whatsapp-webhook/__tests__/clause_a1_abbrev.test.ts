@@ -26,7 +26,7 @@ const model = (hint: string) => (_s: string, user: string): Promise<string> =>
 const asked = (fake: ReturnType<typeof fakeSupabase>) => fake.writesTo('wa_conversations').some((w) => w.payload?.slots_so_far?.kind === 'siteops_project')
 const resolvedTo = (fake: ReturnType<typeof fakeSupabase>, pid: string) => fake.writesTo('site_narrations').some((w) => w.op === 'update' && w.payload?.project_id === pid)
 
-suite('siteops — A1 abbreviation resolution (exact initialism resolves; ambiguous initials ask)', () => {
+suite('siteops — A1 abbreviation resolution (exact initialism resolves; ties take the single best)', () => {
   // (abbrev) exactly one project has initials SRC → the initialism resolves to it; the snag lands on it, no ask.
   test('(abbrev) "SRC" → resolves to the sole SRC project, create lands there, no which-site ask', async () => {
     const seed: Seed = { ...base(), projects: [{ project_id: 'P-src', name: 'Sri Raghavendra Constructions' }, { project_id: 'P-asm', name: 'ASM Elite' }, { project_id: 'P-snd', name: 'Soundharya Residency' }] }
@@ -38,15 +38,16 @@ suite('siteops — A1 abbreviation resolution (exact initialism resolves; ambigu
     expect(fake.writesTo('problems').some((w) => w.op === 'insert' && w.payload?.project_id === 'P-src')).toBe(true)   // create landed on it
   })
 
-  // (guard) two projects share the initials SRC → genuinely ambiguous → ASK, never silently guess one.
-  test('(guard) "SRC" with two SRC projects → ambiguous → asks, resolves to neither', async () => {
+  // (guard) two projects share the initials SRC → the txn-style single-best match takes the TOP-ranked one
+  // (first at the tied score); the ask is reserved for genuinely-unresolvable hints (below auto), NOT for two
+  // auto matches. ambiguous-auto was deleted with the project-resolution redesign (matchProject single-best).
+  test('(guard) "SRC" with two SRC projects → single-best resolves to the top match, no ambiguous ask', async () => {
     const seed: Seed = { ...base(), projects: [{ project_id: 'P-src', name: 'Sri Raghavendra Constructions' }, { project_id: 'P-src2', name: 'Sai Ram Colony' }] }
     const fake = fakeSupabase(seed)
     await runSiteops(ctxFor(fake), 'SRC — slab honeycombing on 2nd floor', { callModel: model('SRC') })
 
-    expect(asked(fake)).toBe(true)                           // disambiguate
-    expect(resolvedTo(fake, 'P-src')).toBe(false)
-    expect(resolvedTo(fake, 'P-src2')).toBe(false)
-    expect(fake.writesTo('problems').some((w) => w.op === 'insert')).toBe(false)   // nothing created on a guess
+    expect(asked(fake)).toBe(false)                          // no ambiguous-auto ask — single best wins
+    expect(resolvedTo(fake, 'P-src')).toBe(true)             // the top-ranked SRC match
+    expect(fake.writesTo('problems').some((w) => w.op === 'insert' && w.payload?.project_id === 'P-src')).toBe(true)
   })
 })

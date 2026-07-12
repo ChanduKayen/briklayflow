@@ -25,6 +25,7 @@ const model = (json: string) => () => Promise.resolve(json)
 const RESOLVE = JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: true, updates: [{ target_id: 'iss-water', target_kind: 'issue', action: 'resolve', confidence: 'high', closure_explicit: true, reason: 'resolved' }] } })
 const NEWISSUE = JSON.stringify({ issue_snag_found: { found: true, items: [{ kind: 'issue', detail: 'tiles broken blocking work', location: 'first floor', project_hint: 'ASM Elite', confidence: 'high' }] }, update_found: { found: false, updates: [] } })
 const BOTH = JSON.stringify({ issue_snag_found: { found: true, items: [{ kind: 'issue', detail: 'tiles broke', location: null, project_hint: 'ASM Elite', confidence: 'high' }] }, update_found: { found: true, updates: [{ target_id: 'iss-water', target_kind: 'issue', action: 'resolve', confidence: 'high', closure_explicit: true, reason: 'fixed' }] } })
+const BOTHFALSE = JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: false, updates: [], nearest: [] } })
 const LOW = JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: true, updates: [{ target_id: 'iss-water', target_kind: 'issue', action: 'resolve', confidence: 'low', closure_explicit: false, reason: 'maybe' }] } })
 
 suite('siteops resolution v2 — ADOPTION end-to-end through runSiteops', () => {
@@ -46,14 +47,19 @@ suite('siteops resolution v2 — ADOPTION end-to-end through runSiteops', () => 
     expect(fake.writesTo('problems').some((w) => w.op === 'insert') || fake.writesTo('siteops_unplaced').length > 0).toBe(true)
   })
 
-  // (c) sari → the fast path fires, the LLM is NEVER called.
-  test('(c) bare "sari" → fast path (LLM never called), chase ADDRESSING via bare_ack', async () => {
+  // (c) THE ACK CONTRACT (2026-07-09). "sari" names nothing, so nothing may move. The fast path that used to
+  // advance the lone chase to ADDRESSING — and reset its escalation clock — is deleted; so is the word list
+  // that recognised the word. In prod this message never reaches SiteOps at all (the router reads the
+  // conversation and hands it to the concierge). Driving runSiteops directly is the harsher test: even here,
+  // with a model that WANTS to resolve, an ack must not touch the chase.
+  test('(c) bare "sari" → the chase is UNTOUCHED (no advance, no bare_ack, no resolve)', async () => {
     const fake = fakeSupabase(baseSeed())
-    let called = false
-    await runSiteops(ctxFor(fake), 'sari', { callModel: () => { called = true; return Promise.resolve(RESOLVE) } })
-    expect(called).toBe(false)
-    expect(fake.writesTo('problems').some((w) => w.op === 'update' && w.payload?.status === 'ADDRESSING')).toBe(true)
-    expect(fake.trail().some((r) => r.type === 'bare_ack')).toBe(true)
+    await runSiteops(ctxFor(fake), 'sari', { callModel: model(BOTHFALSE) })
+
+    expect(fake.writesTo('problems').filter((w) => w.op === 'update').length).toBe(0)   // never advanced/resolved
+    expect(fake.trail().length).toBe(0)                                                 // no bare_ack, no status_changed
+    expect(fake.writesTo('chase_batches').filter((w) => w.op === 'update').length).toBe(0)
+    expect(fake.outbox().some((b) => /nothing updated/i.test(b))).toBe(true)            // the supportive guidance
   })
 
   // (d) both-axes → one combined readback, both effects real (resolve + create/park).
@@ -76,11 +82,14 @@ suite('siteops resolution v2 — ADOPTION end-to-end through runSiteops', () => 
   // (f) MODEL-DOWN composed with LIVE batch state — the seam adoption newly creates. callLLM fails mid-
   // chase-reply → PARK per the five-part contract → honest reply → the chase batch is IDENTICAL before/
   // after (no eat, no half-mutation, no force-advance).
+  // WITNESS CHANGED (2026-07-11): a dead model parks at the FIRST door it fails at — decompose — so the
+  // reason is decompose_failed and the reply is the honest "my end had a hiccup", not a hint that the
+  // supervisor was unclear. The no-eat invariants below are the point of this test and are unchanged.
   test('(f) model down → parked + honest reply, chase batch UNTOUCHED', async () => {
     const fake = fakeSupabase(baseSeed())
     await runSiteops(ctxFor(fake), 'వాటర్ లాగింగ్ ఏదో ఒకటి', { callModel: model('') })
-    expect(fake.writesTo('siteops_unplaced').some((w) => w.payload?.reason === 'llm_unreadable')).toBe(true)
-    expect(fake.outbox().some((b) => /logged it for review/i.test(b))).toBe(true)
+    expect(fake.writesTo('siteops_unplaced').some((w) => w.payload?.reason === 'decompose_failed')).toBe(true)
+    expect(fake.outbox().some((b) => /couldn't read that/i.test(b))).toBe(true)
     expect(fake.writesTo('problems').some((w) => w.op === 'update')).toBe(false)      // batch item untouched
     expect(fake.writesTo('chase_batches').some((w) => w.op === 'update')).toBe(false) // batch not dropped/closed
   })
@@ -98,5 +107,70 @@ suite('siteops resolution v2 — ADOPTION end-to-end through runSiteops', () => 
     const convo = { id: 'c1', org_id: ORG, sender_number: SENDER, status: 'OPEN', owning_agent: 'SITEOPS', pending_question: 'confirm', staged_entry_id: null, last_message_id: null, slots_so_far: slots } as any
     await answerSiteops(ctxFor(fake), '1', convo)   // pick the offered item
     expect(fake.writesTo('problems').some((w) => w.op === 'update' && w.filters.some(([k, v]) => k === 'id' && v === 'iss-water'))).toBe(true)
+  })
+})
+
+// LIVE FAILURE (2026-07-09): a 5-item voice note produced THREE which_item asks. applyTerminals aggregates the
+// asks WITHIN one call, but the Stage-2 loop calls it once per decomposed item — and every ask ran
+// openConversation, which upserts the ONE open conversation per (org, sender). The supervisor saw three
+// questions; answering any of them resolved the LAST one. Asks are now SERIALIZED behind a drain cursor: one
+// question out, the remainder carried in its slots, the answer asks the next — the which_project pattern.
+suite('siteops — which_item asks SERIALIZE across a compound message (the drain cursor)', () => {
+  // call 1 = decompose (two items) → calls 2,3 = one resolveInbound per item, each LOW → each wants an ask.
+  const script = (...rs: string[]) => { let i = 0; return () => Promise.resolve(rs[Math.min(i++, rs.length - 1)]) }
+  const DECOMPOSE_2 = JSON.stringify({ items: [{ type: 'progress', text: 'tiles not yet laid' }, { type: 'progress', text: 'ceilings not yet complete' }], project_hint: 'ASM Elite' })
+  const lowOn = (id: string) => JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: true, updates: [{ target_id: id, target_kind: 'issue', action: 'blocked', confidence: 'low', closure_explicit: false, reason: 'maybe' }] } })
+  const twoAskSeed = (): Seed => ({
+    ...baseSeed(),
+    problems: {
+      'iss-water': { id: 'iss-water', title: 'waterlogging in basement', project_id: 'P1', status: 'OPEN' },
+      'iss-cement': { id: 'iss-cement', title: 'cement short', project_id: 'P1', status: 'OPEN' },
+    },
+  })
+  const convosOpened = (fake: ReturnType<typeof fakeSupabase>) =>
+    fake.writesTo('wa_conversations').filter((w) => w.payload?.slots_so_far?.kind === 'siteops_batch_collision')
+
+  test('two ambiguous items → ONE question sent, the second carried in its slots (never clobbered)', async () => {
+    const fake = fakeSupabase(twoAskSeed())
+    await runSiteops(ctxFor(fake), 'tiles not yet laid, ceilings not yet complete', { callModel: script(DECOMPOSE_2, lowOn('iss-water'), lowOn('iss-cement')) })
+
+    const opened = convosOpened(fake)
+    expect(opened.length).toBe(1)                                              // exactly ONE ask conversation
+    const slots = opened[0].payload?.slots_so_far
+    expect((slots?.pending_item_asks ?? []).length).toBe(1)                    // the other ask is QUEUED, not lost
+    // the sender is told more are coming — a serialized drain must not read as a stalled conversation
+    expect(fake.outbox().some((b) => /1 more to sort out/.test(b))).toBe(true)
+  })
+
+  test('answering the first ask asks the SECOND (the drain advances)', async () => {
+    const fake = fakeSupabase(twoAskSeed())
+    await runSiteops(ctxFor(fake), 'tiles not yet laid, ceilings not yet complete', { callModel: script(DECOMPOSE_2, lowOn('iss-water'), lowOn('iss-cement')) })
+    const slots = convosOpened(fake)[0].payload?.slots_so_far
+    const before = convosOpened(fake).length
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const convo = { id: 'c1', org_id: ORG, sender_number: SENDER, status: 'OPEN', owning_agent: 'SITEOPS', pending_question: 'which item?', staged_entry_id: null, last_message_id: null, slots_so_far: slots } as any
+    await answerSiteops(ctxFor(fake), '1', convo)
+
+    const after = convosOpened(fake)
+    expect(after.length).toBe(before + 1)                                      // the NEXT ask went out
+    const next = after[after.length - 1].payload?.slots_so_far
+    expect(next?.piece_text).toBe('ceilings not yet complete')                 // …and it is the queued one
+    expect((next?.pending_item_asks ?? []).length).toBe(0)                     // cursor exhausted
+  })
+
+  // The blocked verdict must survive the confirm: picking "which item" fixes the TARGET, never whether the
+  // work happened. Without this, confirming "tiles not yet laid → that one" would mark the item addressed.
+  test('confirming a BLOCKED ask records a blocker — never an advance', async () => {
+    const fake = fakeSupabase(twoAskSeed())
+    await runSiteops(ctxFor(fake), 'tiles not yet laid, ceilings not yet complete', { callModel: script(DECOMPOSE_2, lowOn('iss-water'), lowOn('iss-cement')) })
+    const slots = convosOpened(fake)[0].payload?.slots_so_far
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const convo = { id: 'c1', org_id: ORG, sender_number: SENDER, status: 'OPEN', owning_agent: 'SITEOPS', pending_question: 'which item?', staged_entry_id: null, last_message_id: null, slots_so_far: slots } as any
+    await answerSiteops(ctxFor(fake), '1', convo)
+
+    expect(fake.trail().some((e) => e.type === 'blocker_noted')).toBe(true)
+    expect(fake.writesTo('problems').some((w) => w.op === 'update' && w.payload?.status)).toBe(false)   // never ADDRESSING/RESOLVED
   })
 })

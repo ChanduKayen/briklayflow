@@ -32,9 +32,11 @@ suite('M2 instantiate', () => {
     expect(drift).toBe(0)
   })
 
-  test('per-floor structural nodes: 5 types × 4 floors = 20', () => {
+  // 6 per-floor types since the floor cycle was rebuilt (2026-07-11): columns, shuttering, reinforcement,
+  // pour, de-propping, blockwork — `beams` + `slab` retired into the monolithic pour.
+  test('per-floor structural nodes: 6 types × 4 floors = 24', () => {
     const perFloor = [...G.nodes.values()].filter((n) => n.zoneId === null && n.floorLabel !== null)
-    expect(perFloor).toHaveLength(20)
+    expect(perFloor).toHaveLength(24)
   })
 
   test('exactly one foundation singleton; no lift/façade by default', () => {
@@ -46,23 +48,25 @@ suite('M2 instantiate', () => {
   test('total node/edge/bundle counts are stable (snapshot)', () => {
     // locked from first observed run; a change here flags a deliberate library/geometry change.
     // G+3 × 2 units × (dry+wet+balcony) zones, full library.
-    expect(G.nodes.size).toBe(397) // 389 + 8 foundation/groundwork building singletons
-    // 506 + 8 (the linear groundwork chain: each substructure node ← its single predecessor).
-    expect(G.edges.length).toBe(514)
+    // 397 → 489 (2026-07-11): the floor cycle replaced 2 per-floor types with 3 (+1 per floor), and 12
+    // new task-types were authored in (the stages the legacy expander tracked and the engine did not).
+    expect(G.nodes.size).toBe(489)
+    expect(G.edges.length).toBe(658)   // 514 + the new types' edges + the extra floor-cycle links
     expect(G.bundles.length).toBe(40)
   })
 
   // ── (b) the structural frame ladder: columns→beams→slab, deck rule columns(F+1) after slab(F) ──
-  test('frame races up: columns → beams → slab per floor, slab(F) before columns(F+1)', () => {
+  test('frame races up: columns → shutter → rebar → pour per floor, pour(F) before columns(F+1)', () => {
     const floors = ['Ground', 'First', 'Second', 'Third']
-    let prevSlab = 0
+    let prevPour = 0
     for (const f of floors) {
-      const c = seq(`columns@${f}`), b = seq(`beams@${f}`), s = seq(`slab@${f}`)
-      if (!(c < b && b < s))
-        throw new Error(`frame ladder broke within ${f}: columns=${c} beams=${b} slab=${s}`)
-      if (!(prevSlab < c))
-        throw new Error(`floor ${f} columns=${c} not after the deck below (prev slab=${prevSlab})`)
-      prevSlab = s
+      const c = seq(`columns@${f}`), sh = seq(`floor_shutter@${f}`)
+      const rb = seq(`floor_rebar@${f}`), po = seq(`floor_pour@${f}`)
+      if (!(c < sh && sh < rb && rb < po))
+        throw new Error(`frame ladder broke within ${f}: columns=${c} shutter=${sh} rebar=${rb} pour=${po}`)
+      if (!(prevPour < c))
+        throw new Error(`floor ${f} columns=${c} not after the deck below (prev pour=${prevPour})`)
+      prevPour = po
     }
     expect(true).toBe(true)
   })

@@ -30,7 +30,7 @@ suite('siteops — clause 2 ask-first floor (content + unresolved project → AS
     await runSiteops(ctxFor(fake), 'water problem solved at asm', { callModel: emptyDecompose() })
 
     const askedProject = fake.writesTo('wa_conversations').some((w) => w.payload?.slots_so_far?.kind === 'siteops_project')
-    const didntCatch = fake.outbox().some((b) => /Didn't catch/i.test(b))
+    const didntCatch = fake.outbox().some((b) => /nothing updated/i.test(b))
     expect(askedProject).toBe(true)          // clause 2 — we ask where, never eat a placeable message
     expect(didntCatch).toBe(false)
   })
@@ -42,7 +42,7 @@ suite('siteops — clause 2 ask-first floor (content + unresolved project → AS
     await runSiteops(ctxFor(fake), 'ok', { callModel: emptyDecompose() })
 
     const askedProject = fake.writesTo('wa_conversations').some((w) => w.payload?.slots_so_far?.kind === 'siteops_project')
-    const didntCatch = fake.outbox().some((b) => /Didn't catch/i.test(b))
+    const didntCatch = fake.outbox().some((b) => /nothing updated/i.test(b))
     expect(askedProject).toBe(false)
     expect(didntCatch).toBe(true)
   })

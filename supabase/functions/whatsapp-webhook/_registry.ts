@@ -11,6 +11,7 @@
 // agent." Conversation-state machinery stays in _dispatch.ts.
 
 import type { ConvoRow } from './_conversation.ts'
+import type { Turn } from './_history.ts'
 import type { TxnCtx } from './_agents/transaction.ts'
 import { runTransactionMessage, answerTransaction, commitInterrupted } from './_agents/transaction.ts'
 import { runProcurementMessage, answerProcurement, commitInterruptedProc } from './_agents/procurement.ts'
@@ -24,6 +25,7 @@ export type AgentCtx = TxnCtx
 export type TurnOpts = {
   prefix?: string                 // consolidated-interrupt ack to fold into the reply
   lingering?: ConvoRow | null     // most-recent CLOSED convo (reference resolution)
+  history?: Turn[]                // the recent turns of this thread — what the router read (concierge uses it)
 }
 
 export type AgentDef = {
@@ -31,7 +33,9 @@ export type AgentDef = {
   // NEW_INTENT entry: the agent's own understanding + deterministic policy.
   run(ctx: AgentCtx, text: string, opts: TurnOpts): Promise<void>
   // ANSWERS_PENDING resume — only agents that leave a pending question implement this.
-  answer?(ctx: AgentCtx, text: string, convo: ConvoRow): Promise<void>
+  // Returns 'not_an_answer' when the reply resolves to NONE of the frozen offered list: the agent has parked
+  // its pending piece, and the DISPATCHER re-classifies the message as a fresh turn. Everything else is void.
+  answer?(ctx: AgentCtx, text: string, convo: ConvoRow): Promise<'not_an_answer' | void>
   // Interrupt: commit current state, return an ack folded into the interrupting reply.
   commitInterrupted?(ctx: AgentCtx, convo: ConvoRow): Promise<string>
 }
@@ -41,6 +45,7 @@ function conciergeRun(ctx: AgentCtx, text: string, opts: TurnOpts): Promise<void
   return runConcierge(ctx.supabase, {
     from: ctx.from, orgId: ctx.orgId, wamid: ctx.wamid, text, language: ctx.lang,
     lingering: opts.lingering ? { last_action_summary: opts.lingering.last_action_summary ?? '' } : null,
+    history: opts.history,
     prefix: opts.prefix,
   })
 }
@@ -70,7 +75,7 @@ const PROCUREMENT: AgentDef = {
 const SITEOPS: AgentDef = {
   intent: 'SITEOPS',
   run: (ctx, text, opts) => runSiteops(ctx, text, { prefix: opts.prefix }),
-  answer: (ctx, text, convo) => answerSiteops(ctx, text, convo),
+  answer: (ctx, text, convo) => answerSiteops(ctx, text, convo),   // may return 'not_an_answer' → dispatcher re-routes
   // Interrupt: PARK the ambiguous observation to siteops_unplaced (never auto-commit a guess, never
   // drop) and close CLEANLY — replaces the raw abandonConversation that silently dropped the item.
   commitInterrupted: (ctx, convo) => commitInterruptedSiteops(ctx, convo),

@@ -69,8 +69,19 @@ serve(async (req) => {
     })
   }
 
+  // ORDER IS THE POINT. outbox_claim returns the batch in FIFO order (`seq`), and this loop POSTs it
+  // sequentially — so a turn's messages land in the order the agent said them. The sort is a BELT, not the
+  // braces: it costs nothing and it means a future change to the RPC (or a row from before `seq` was added)
+  // cannot silently re-order a conversation. Live, a re-surfaced question overtook the reply it was meant to
+  // follow, and a promise to come back arrived after we had already come back.
+  const ordered = [...((rows ?? []) as any[])].sort((a, b) => {
+    const s = Number(a.seq ?? 0) - Number(b.seq ?? 0)
+    if (s !== 0) return s
+    return String(a.created_at ?? '').localeCompare(String(b.created_at ?? ''))
+  })
+
   let sent = 0, failed = 0, retried = 0
-  for (const row of (rows ?? []) as any[]) {
+  for (const row of ordered) {
     // Prefer the pre-rendered body (any message type, from send()); fall back to
     // the legacy text-render path for rows that only carry { type:'text', text }
     // (watchdog / job-failure enqueues).

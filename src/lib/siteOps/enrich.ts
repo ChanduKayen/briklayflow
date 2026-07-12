@@ -142,27 +142,27 @@ export function planFanOut(
 export interface EnrichReport { calls: number; tradesEnriched: number; instances: number; qcRows: number }
 
 /**
- * Write one batch of (phase,trade) enrichments with replace discipline, scoped to the tasks
- * the enrich map covers: replace those tasks' QC, then set their descriptions. QC is written
- * BEFORE the description so a description-update realtime event always arrives after its QC is
- * already in the DB. Delete-then-insert is the clean replace — no duplicate, no orphan, no
- * second critical (the site_task_qc_one_critical partial unique index is the hard backstop on
- * the insert). Re-runnable; never touches structure or source='manual'.
+ * Write one batch of (phase,trade) enrichments: the task DESCRIPTIONS only.
+ *
+ * QC IS NO LONGER WRITTEN HERE (2026-07-11). It used to delete-then-insert this project's QC on every
+ * run, which was safe only while QC was a write-once artefact of project birth. Two things ended that:
+ *
+ *   · QC is now AUTHORED PER TASK TYPE in the engine library and fanned out by persistGraph, so every
+ *     task holds its checks from the moment it exists — there is nothing here left to generate. (It was
+ *     also keyed by (phase, trade), which meant "Ceiling — boarding" and "Ceiling — POP finish" shared
+ *     one set of questions: QC that cannot distinguish the two tasks it belongs to.)
+ *   · The delete half was a live data-loss hazard: a re-run would have destroyed an ANSWERED check —
+ *     its answer text, its qc_status, and the source_narration_id linking it to the WhatsApp message
+ *     that confirmed it. Exactly the evidence the whole QC feature exists to accumulate.
+ *
+ * Re-runnable; never touches structure, QC, or source='manual'.
  */
 async function writeEnrichment(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- browser or service-role client
   supabase: any, projectId: string, orgId: string,
   tasks: TaskRow[], enrich: Map<string, TradeEnrichment>,
 ): Promise<{ instances: number; qcRows: number }> {
-  const { qcRows, enrichedTaskIds, descByKey } = planFanOut(tasks, orgId, enrich)
-  if (enrichedTaskIds.length) {
-    const { error } = await supabase.from('site_task_qc').delete().in('task_id', enrichedTaskIds)
-    if (error) throw new Error(`replace QC (delete): ${error.message}`)
-  }
-  if (qcRows.length) {
-    const { error } = await supabase.from('site_task_qc').insert(qcRows)
-    if (error) throw new Error(`insert QC: ${error.message}`)
-  }
+  const { enrichedTaskIds, descByKey } = planFanOut(tasks, orgId, enrich)
   // descriptions: one update per (phase,trade), not per instance
   for (const [key, description] of descByKey) {
     const [phase, trade] = key.split('::')
@@ -170,7 +170,7 @@ async function writeEnrichment(
       .eq('project_id', projectId).eq('phase', phase).eq('trade', trade).eq('source', 'generated')
     if (error) throw new Error(`set description for ${key}: ${error.message}`)
   }
-  return { instances: enrichedTaskIds.length, qcRows: qcRows.length }
+  return { instances: enrichedTaskIds.length, qcRows: 0 }
 }
 
 /**

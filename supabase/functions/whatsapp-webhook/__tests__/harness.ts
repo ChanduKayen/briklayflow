@@ -32,9 +32,25 @@ test.skip = (name: string, reason: string, _fn?: Fn): void => {
   cases.push({ suite: currentSuite, name, fn: null, skip: true, reason });
 };
 
+// A Set and a Map both JSON.stringify to "{}" — so `expect(new Set(['a'])).toEqual(new Set(['b']))` used to
+// compare "{}" with "{}" and PASS. Every Set assertion in the suite was vacuous (found 2026-07-11 while the
+// type-tie shortlist was red: an assertion that cannot fail is not a test). Normalize collections into a
+// stable, comparable shape BEFORE stringifying — a Set is order-insensitive (sorted), a Map is by key.
+function norm(v: unknown): unknown {
+  if (v instanceof Set) return { __set: [...v].map(norm).map((x) => JSON.stringify(x)).sort() };
+  if (v instanceof Map) return { __map: [...v.entries()].map(([k, x]) => [k, norm(x)] as const).sort((a, b) => String(a[0]).localeCompare(String(b[0]))) };
+  if (Array.isArray(v)) return v.map(norm);
+  if (v && typeof v === 'object') {
+    const o: Record<string, unknown> = {};
+    for (const k of Object.keys(v as Record<string, unknown>).sort()) o[k] = norm((v as Record<string, unknown>)[k]);
+    return o;
+  }
+  return v;
+}
+
 function fmt(v: unknown): string {
   if (typeof v === 'string') return JSON.stringify(v);
-  try { return JSON.stringify(v); } catch { return String(v); }
+  try { return JSON.stringify(norm(v)); } catch { return String(v); }
 }
 
 export function expect<T>(actual: T) {
@@ -43,7 +59,7 @@ export function expect<T>(actual: T) {
       if (!Object.is(actual, expected)) throw new Error(`expected ${fmt(expected)} but got ${fmt(actual)}`);
     },
     toEqual(expected: unknown) {
-      if (JSON.stringify(actual) !== JSON.stringify(expected))
+      if (JSON.stringify(norm(actual)) !== JSON.stringify(norm(expected)))
         throw new Error(`deep-equal failed\n   expected ${fmt(expected)}\n   got      ${fmt(actual)}`);
     },
     toBeNull() { if (actual !== null) throw new Error(`expected null but got ${fmt(actual)}`); },

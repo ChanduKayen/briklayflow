@@ -50,7 +50,10 @@ const nearSeed = (): Seed => ({
   site_narration_id: 'narr-1',
 })
 const DEC_SLAB = JSON.stringify({ project_hint: 'ASM Elite', items: [{ type: 'progress', text: 'slab done', task_hint: null, qc_statements: [], cause: null, cause_reason: null, owner_hint: null, date_hint: null, project_hint: 'ASM Elite' }] })
-const BOTH_FALSE = JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: false, updates: [] } })
+// The near-floor ask is raised by the model's MEANING-ranked nearest (med) now; the lexical belt that used to
+// raise it on token overlap is image-only since 2026-07-09. Offered order == stored order == resolved order.
+const nr = (id: string) => ({ target_id: id, target_kind: 'issue', plausibility: 'med', action: 'progress', closure_explicit: false, reason: 'same slab work' })
+const BOTH_FALSE = JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: false, updates: [], nearest: [nr('iss-first'), nr('iss-ground'), nr('iss-second')] } })
 
 // ── ladder LOW-confidence emitter ("Wiring done at asm" shape: N low-conf candidate updates on one piece) ─
 const wireSeed = (): Seed => ({
@@ -130,7 +133,7 @@ suite('siteops — Bug 1 REAL fix: ONE which_item emitter (near-floor AND ladder
     const src = readFileSync('supabase/functions/whatsapp-webhook/_agents/siteops.ts', 'utf8')
 
     // ONE composer — the numbered-message signature exists exactly once (inside askItemPick).
-    expect((src.match(/which of these is it about\?/g) ?? []).length).toBe(1)
+    expect((src.match(/which of these is it about\?/gi) ?? []).length).toBe(1)
     expect(/async function askItemPick\b/.test(src)).toBe(true)
 
     // askResolutionQuestion no longer emits a which_item ask — every which_item ask routes through the
@@ -185,13 +188,22 @@ suite('siteops — Bug 1 typed-answer resolution (natural answer resolves by mea
     expect(addressed(fake, 'w-first')).toBe(false)
   })
 
-  // j6 (ambiguity → SAFE-FAILURE) — "floor" fits ALL four equally → NOT resolved, the sender is re-prompted.
-  // Never an arbitrary pick, never an eat. Pins that loosening the match did not create a mis-resolution.
-  test('(j6) ambiguous "floor" (shared by all) → not resolved, re-prompts', async () => {
+  // j6 — an ambiguous reply ("floor", shared by all four) resolves to NONE of the frozen offered list. That is
+  // not something to guess about: it is not an answer. Under the AGENT-AGNOSTIC pending-credibility design
+  // (2026-07-11) the answer handler does NOTHING here except return the verdict — it neither parks nor closes
+  // nor touches domain state. The DISPATCHER owns the pending question's fate: it stashes P, handles the fresh
+  // turn, then RE-SURFACES P (with a Dismiss button) or DROPS it with a notice if the new turn raised its own
+  // question. So the offered pick is left completely untouched here.
+  //
+  // This replaces the old nag ("Reply with the item, or say *new*"). The nag's sibling branch — judgePending
+  // → "No problem — I'll check back on it next time." — is what answered a ₹25,000 payment on 2026-07-09.
+  test('(j6) ambiguous "floor" (shared by all) → not an answer: nothing touched, dispatcher owns re-surface', async () => {
     const fake = fakeSupabase(floorSeed())
-    await answerSiteops(ctxFor(fake), 'floor', convoOf(collSlots(fourFloors())))
+    const verdict = await answerSiteops(ctxFor(fake), 'floor', convoOf(collSlots(fourFloors())))
+    expect(verdict).toBe('not_an_answer')
     expect(fake.writesTo('problems').some((w) => w.op === 'update' && w.payload?.status === 'ADDRESSING')).toBe(false)
-    expect(fake.outbox().some((b) => /reply with the item/i.test(b))).toBe(true)
+    expect(fake.writesTo('siteops_unplaced').length).toBe(0)   // agent parks NOTHING — the dispatcher re-surfaces/drops
+    expect(fake.writesTo('wa_conversations').some((w) => w.payload?.status === 'CLOSED')).toBe(false)   // P left OPEN for the dispatcher to stash
   })
 
   // j7 (numeric guard) — a digit-BEARING natural answer resolves by LABEL, not by the first-digit-anywhere

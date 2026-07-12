@@ -24,6 +24,7 @@
 // human reply survives (the 22-minute lesson cut both ways).
 
 import { abandonConversation, type ConvoRow } from './_conversation.ts'
+import { combineReadbacks, type HeldReadback } from './_siteops_readback.ts'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SB = any
@@ -47,9 +48,13 @@ export function convoParkRow(convo: ConvoRow): Record<string, unknown> | null {
   const observation =
     kind === 'siteops_disambig' ? (slots.item ?? null)
     : kind === 'siteops_typed_pick' ? (slots.item ?? null)
-    : kind === 'siteops_project' ? (Array.isArray(slots.items) && slots.items.length
-        ? { items: slots.items, ...(typeof slots.text === 'string' ? { text: slots.text } : {}) }
-        : null)
+    : kind === 'siteops_project' ? (Array.isArray(slots.messages) && slots.messages.length
+        // Stage-2: the ask carries the group's grading MESSAGES (+ any un-drained pending groups) so the
+        // replay can resume the whole set. Back-compat: an in-flight legacy convo carried {items,text}.
+        ? { messages: slots.messages, ...(Array.isArray(slots.pending_groups) && slots.pending_groups.length ? { pending_groups: slots.pending_groups } : {}) }
+        : (Array.isArray(slots.items) && slots.items.length
+            ? { items: slots.items, ...(typeof slots.text === 'string' ? { text: slots.text } : {}) }
+            : null))
     : kind === 'siteops_batch_collision' ? (typeof slots.piece_text === 'string' && slots.piece_text.trim()
         ? { piece_text: slots.piece_text, candidates: slots.candidates ?? null }
         : null)
@@ -144,5 +149,58 @@ export async function sweepStaleSiteopsConvos(
     }
   }
   if (res.checked) console.log(`[siteops:sweep] ttl=${ttlHours}h checked=${res.checked} parked=${res.parked} abandoned=${res.abandoned} failures=${res.failures}`)
+  return res
+}
+
+export interface HeldFlushResult { checked: number; flushed: number; parked: number; failures: number }
+
+/** STEP C2a — the 2-MINUTE HELD-FLUSH. A batch that HELD its resolved summary behind a which_item ask (C1)
+ *  and got no reply must not wait the 24h abandon sweep to hear "your other items landed". This flushes any
+ *  OPEN siteops convo carrying a `held_readback` idle > idleMinutes: SEND what's SURE + NAME the pending as
+ *  saved-for-review, PARK the pending item (replayable), and ABANDON the convo. A LONE ask (no held summary)
+ *  is untouched — a bare question deserves the full 24h TTL, and the sweep owns it. NO SILENT DROP.
+ *  `send` is injected (supabase-agnostic) so the flush is provable without the outbox/WA layer. */
+export async function flushAbandonedHeldReadbacks(
+  supabase: SB,
+  send: (to: string, body: string, orgId: string) => Promise<void>,
+  opts: { now?: Date; idleMinutes?: number } = {},
+): Promise<HeldFlushResult> {
+  const now = opts.now ?? new Date()
+  const idleMin = opts.idleMinutes && opts.idleMinutes > 0 ? opts.idleMinutes : 2
+  const cutoff = now.getTime() - idleMin * 60_000
+  const res: HeldFlushResult = { checked: 0, flushed: 0, parked: 0, failures: 0 }
+
+  let held: ConvoRow[] = []
+  try {
+    const { data } = await supabase.from('wa_conversations').select('*').eq('owning_agent', 'SITEOPS').eq('status', 'OPEN')
+    held = ((data ?? []) as ConvoRow[]).filter((c) => {
+      const h = (c.slots_so_far as { held_readback?: HeldReadback })?.held_readback
+      return !!h?.entries?.length && !!c.opened_at && new Date(c.opened_at).getTime() < cutoff
+    })
+  } catch (e) {
+    console.error('[siteops:held-flush] select failed:', (e as Error).message)
+    return res
+  }
+
+  for (const c of held) {
+    res.checked++
+    try {
+      const slots = (c.slots_so_far ?? {}) as { held_readback?: HeldReadback; piece_text?: string }
+      const h = slots.held_readback as HeldReadback
+      // the SURE items + a line NAMING the pending piece as saved-for-review (never a silent drop).
+      const piece = typeof slots.piece_text === 'string' && slots.piece_text.trim() ? slots.piece_text.trim() : null
+      const entries = [...h.entries, ...(piece ? [{ project: null, body: `⏳ still had a question on “${piece}” — saved it for review so it's not lost` }] : [])]
+      await send(c.sender_number, combineReadbacks(entries), c.org_id)
+      res.flushed++
+      // park the pending item (the SAME core the interrupt + 24h sweep use), then abandon so it stops intercepting.
+      const out = await parkConvoObservation(supabase, c)
+      if (out.parked) res.parked++
+      await abandonConversation(supabase, c.org_id, c.sender_number)
+    } catch (e) {
+      res.failures++
+      console.error(`[siteops:held-flush] convo ${c.id} failed (continuing):`, (e as Error).message)
+    }
+  }
+  if (res.checked) console.log(`[siteops:held-flush] idle=${idleMin}m checked=${res.checked} flushed=${res.flushed} parked=${res.parked} failures=${res.failures}`)
   return res
 }

@@ -1,11 +1,17 @@
-// CONSTITUTIONAL RECONNECTION · B code-floor (clause 4 / FLOOR — candidate-unsure → QUESTION, never silent
-// miss). The deployed model collapses a terse update ("transformer resolved") to update_found:false despite
-// an open "transformer humming" candidate. The prompt already says "return low, not false" — the MODEL
-// disobeys, and model-disobedience isn't offline-testable. The DURABLE fix is a CODE floor independent of the
-// model: when resolveInbound returns both-false BUT lexically-near candidates exist, open a which_item ask
-// ("did you mean X?") instead of acked_didnt_catch. Reuses nearCandidateIds (was image-only).
+// THE RECALL FLOOR (clause 4) — candidate-unsure → QUESTION, never a silent miss.
 //
-// RED-FIRST: inject both-false + a near candidate → today a silent didn't-catch; after the floor, a pick.
+// It used to be a CODE floor: both-false + a LEXICALLY-near candidate (raw token overlap) → ask. That fired on
+// shared spelling, and the live probe (2026-07-09) showed the cost — "transformer arranged" was offered
+// "Arrange for aggregate (kankara) and sand" (shared "arrange"), and "…except fifth floor" was offered four
+// floors that were not the fifth (shared "wiring"). A wrong "did you mean X?" costs the supervisor several
+// messages AND traps the thread, so it is worse than a clean miss.
+//
+// The floor is now the MODEL's `nearest`, judged by MEANING, and only `plausibility: "med"` asks. `low` and `[]`
+// fall through to NOTHING_TO_UPDATE, which tells the supervisor exactly how to name the work. The lexical belt
+// survives on the IMAGE path only.
+//
+// THE TRADE, stated plainly: this trusts the model to return a med nearest for a real match. If it returns
+// both-false with nothing, we no longer manufacture a question out of word overlap — we say we didn't place it.
 
 import { suite, test, expect } from './harness'
 import { fakeSupabase, type Seed } from './fake_supabase'
@@ -29,27 +35,41 @@ const model = (dec: string, resolve: string) => (_s: string, user: string): Prom
 // returns BOTH-FALSE (the deployed model's miss). "transformer" overlaps the "transformer humming" candidate.
 const DEC = JSON.stringify({ project_hint: null, items: [{ type: 'progress', text: 'transformer resolved', task_hint: null, qc_statements: [], cause: null, cause_reason: null, owner_hint: null, date_hint: null, project_hint: null }] })
 const R_BOTH_FALSE = JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: false, updates: [] } })
+// The model names its meaning-ranked nearest: same subject (the transformer), so it would BET on it → med.
+const R_NEAREST_MED = JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: false, updates: [], nearest: [{ target_id: 'iss-tfmr', target_kind: 'issue', plausibility: 'med', action: 'resolve', closure_explicit: true, reason: 'same subject: the transformer' }] } })
+// A guess it would not bet on → low → no ask (the supervisor is shown how to name it instead).
+const R_NEAREST_LOW = JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: false, updates: [], nearest: [{ target_id: 'iss-tfmr', target_kind: 'issue', plausibility: 'low', action: 'progress', closure_explicit: false, reason: 'may relate to the transformer' }] } })
 
 suite('siteops — clause 4 near-candidate floor (both-false + near → ASK which item, never silent miss)', () => {
-  test('(near) both-false with a lexically-near candidate → which_item ask opens (not acked_didnt_catch)', async () => {
+  test('(near) both-false + a MED nearest → which_item ask opens (not acked_didnt_catch)', async () => {
     const fake = fakeSupabase(seed())
-    await runSiteops(ctxFor(fake), 'transformer resolved', { callModel: model(DEC, R_BOTH_FALSE) })
+    await runSiteops(ctxFor(fake), 'transformer resolved', { callModel: model(DEC, R_NEAREST_MED) })
 
     const askedItem = fake.writesTo('wa_conversations').some((w) => w.payload?.slots_so_far?.kind === 'siteops_batch_collision')
-    const didntCatch = fake.outbox().some((b) => /Didn't catch/i.test(b))
+    const didntCatch = fake.outbox().some((b) => /nothing updated/i.test(b))
     expect(askedItem).toBe(true)          // uncertainty → a QUESTION about the near candidate
     expect(didntCatch).toBe(false)        // NOT a silent miss
   })
 
-  // guard — both-false with NO near candidate (genuinely unrelated) is still an honest didn't-catch.
-  test('(guard) both-false with no near candidate → honest didn-t-catch', async () => {
-    const fake = fakeSupabase(seed())
+  // guard — both-false with an EMPTY nearest is an honest miss, and the reply teaches how to name the work.
+  test('(guard) both-false with no nearest → honest guidance, no ask', async () => {
+    const fake = fakeSupabase({ ...seed(), site_tasks: { 'tk-1': { task_id: 'tk-1', name: 'Slab', project_id: 'P1', status: 'PENDING' } } })
     const decUnrelated = JSON.stringify({ project_hint: null, items: [{ type: 'progress', text: 'weather is nice', task_hint: null, qc_statements: [], cause: null, cause_reason: null, owner_hint: null, date_hint: null, project_hint: null }] })
     await runSiteops(ctxFor(fake), 'weather is nice today', { callModel: model(decUnrelated, R_BOTH_FALSE) })
 
     const askedItem = fake.writesTo('wa_conversations').some((w) => w.payload?.slots_so_far?.kind === 'siteops_batch_collision')
-    const didntCatch = fake.outbox().some((b) => /Didn't catch/i.test(b))
+    const didntCatch = fake.outbox().some((b) => /nothing updated/i.test(b))
     expect(askedItem).toBe(false)
     expect(didntCatch).toBe(true)
+  })
+
+  // A LOW nearest is a guess. It must NOT ask — that is how "may relate to arranging materials" became a
+  // question about kankara and sand.
+  test('(low) both-false + a LOW nearest → NO ask; the guidance instead', async () => {
+    const fake = fakeSupabase({ ...seed(), site_tasks: { 'tk-1': { task_id: 'tk-1', name: 'Slab', project_id: 'P1', status: 'PENDING' } } })
+    await runSiteops(ctxFor(fake), 'transformer resolved', { callModel: model(DEC, R_NEAREST_LOW) })
+
+    expect(fake.writesTo('wa_conversations').some((w) => w.payload?.slots_so_far?.kind === 'siteops_batch_collision')).toBe(false)
+    expect(fake.outbox().some((b) => /nothing updated/i.test(b))).toBe(true)
   })
 })
