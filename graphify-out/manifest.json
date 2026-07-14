@@ -1196,8 +1196,8 @@
     "hash": "ebb50f4c37f89a3bf4e790f66b3429ea"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\_dispatch.ts": {
-    "mtime": 1784016232.924908,
-    "hash": "1b42f2d443ca9ba2616ad82154db1c43"
+    "mtime": 1784035814.1748936,
+    "hash": "8407d75e783a4311d4b88c6a3bf492b9"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\_extract.ts": {
     "mtime": 1782912783.3831522,
@@ -1224,8 +1224,8 @@
     "hash": "1d98bc07839d23a1abc426a554562945"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\_messages.ts": {
-    "mtime": 1784033578.10354,
-    "hash": "e01062bce1abfc09e4f0057481399f97"
+    "mtime": 1784036688.589536,
+    "hash": "39ae7fe5eba4d323cccdcacebd39c9f0"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\_normalize.ts": {
     "mtime": 1784016232.9299858,
@@ -1388,8 +1388,8 @@
     "hash": "c9e51730e9958546dbccf4d18b960db2"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\__tests__\\all.test.ts": {
-    "mtime": 1784033454.1697714,
-    "hash": "4ca48b672d9b2a78eeb96012f784dfaf"
+    "mtime": 1784036537.729507,
+    "hash": "aeaf4e08a443fa52c000336f6166e956"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\__tests__\\ask_list_ui.test.ts": {
     "mtime": 1784031063.6304479,
@@ -1582,6 +1582,10 @@
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\__tests__\\money_card.test.ts": {
     "mtime": 1784033578.7001429,
     "hash": "50958087ed46eebe4b8b22bd3a52eb73"
+  },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\__tests__\\money_single.test.ts": {
+    "mtime": 1784036785.4829278,
+    "hash": "a7e912e64233b9974839b3d41495d6ad"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\__tests__\\multiproject_loop.test.ts": {
     "mtime": 1783569268.888751,
