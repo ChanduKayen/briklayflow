@@ -2651,3 +2651,91 @@ main:has(.desk-root) { padding-bottom: 0; }
   .desk-root .pc-title, .desk-portal .pc-title { font-size: 23px; }
   .desk-root .rail .entry, .desk-portal .rail .entry { padding-left: 22px; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════════
+   THE EDGE OF THE LIST — the fade, and the mark that falls.
+
+   The desk's lists ended at the fold with a clean, confident edge: a card border, a hairline, a
+   finished-looking thing. A finished edge is a full stop, and people stop reading at full stops. There
+   were eleven more tasks under it.
+
+   TWO SIGNALS, AND THEY ARE NOT THE SAME SIGNAL.
+
+     .se-fade   a STATE — "there is more". It lives exactly as long as that is true and dies the instant
+                you reach the end. It answers "have I seen it all?" at a glance, permanently, without
+                anyone having to remember anything.
+
+     .se-cue    a HINT — "you can scroll". It shows only before the first scroll and leaves the moment
+                you make one, because the only thing it had to teach, you just learnt. A hint that stays
+                after it has been taken is a nag.
+
+   THE MARK IS THE ARROW. Briklay's mark is a descending form; it already points down. So the cue is the
+   brand, moving the way the brand is shaped — no chevron bolted underneath, no word "scroll". The motion
+   is the sentence. It falls, slowly, and eases back — the rhythm of something being poured, not of a
+   notification demanding a tap.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════════ */
+
+.desk-root .scroll-edge {
+  /* ZERO-TALL. It cannot be allowed to lengthen the column it is measuring — a fade that is the reason
+     the fade is needed is a very good way to lose an afternoon. */
+  position: sticky; bottom: 0; height: 0; z-index: 5;
+  pointer-events: none;                    /* the row underneath must still be clickable: nothing is
+                                              on top of it, as far as the reader is concerned */
+}
+
+/* THE FADE. The paper takes the list back, rather than a line cutting it off. It is weighted to the
+   bottom (opaque only in the last third) so it never dims a row you are trying to read — it only ever
+   dissolves the one that is already half gone. */
+.desk-root .se-fade {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 104px;
+  background: linear-gradient(
+    to top,
+    var(--bg) 0%,
+    var(--bg) 18%,
+    color-mix(in srgb, var(--bg) 55%, transparent) 58%,
+    color-mix(in srgb, var(--bg) 0%, transparent) 100%
+  );
+  opacity: 0;
+  transition: opacity .45s cubic-bezier(.2, .8, .3, 1);
+}
+.desk-root .se-fade.on { opacity: 1; }
+
+/* THE CUE. Small, quiet, and centred on the column — not on the page, because the column is what scrolls.
+   It sits ABOVE the fade's opaque foot so it reads as resting on the paper rather than sinking into it. */
+.desk-root .se-cue {
+  position: absolute; left: 0; right: 0; bottom: 16px;
+  display: flex; justify-content: center;
+  color: var(--ink-3);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .5s cubic-bezier(.2, .8, .3, 1), transform .5s cubic-bezier(.2, .8, .3, 1);
+}
+.desk-root .se-cue.on {
+  opacity: .55;
+  transform: none;
+  animation: se-fall 2.4s cubic-bezier(.4, 0, .2, 1) infinite;
+}
+
+/* IT FALLS, AND IT WAITS. Most of the cycle is the pause — the motion is a gesture made once and then
+   held, which is what makes it read as an invitation instead of a pulse. A 4px drop: enough for the eye
+   to catch in peripheral vision, not enough to ask for attention it has not earned. */
+@keyframes se-fall {
+  0%, 55%  { transform: translateY(0);    opacity: .55; }
+  72%      { transform: translateY(4px);  opacity: .8; }
+  88%      { transform: translateY(1px);  opacity: .62; }
+  100%     { transform: translateY(0);    opacity: .55; }
+}
+
+/* A cue that MOVES is the whole point of the cue — so when motion is refused, the mark simply stays,
+   quietly, and the fade does the work. It is never removed: the person who turned motion off still needs
+   to know the list continues. */
+@media (prefers-reduced-motion: reduce) {
+  .desk-root .se-cue.on { animation: none; }
+  .desk-root .se-fade, .desk-root .se-cue { transition: none; }
+}
+
+/* Below the two-column breakpoint the list IS the page, the mobile tab bar owns the bottom of the
+   screen, and a fade under it would be a smudge behind a toolbar. The page's own scrollbar says enough. */
+@media (max-width: 919px) {
+  .desk-root .scroll-edge { display: none; }
+}

@@ -26,6 +26,7 @@ import {
 } from '../lib/desk/derive'
 import { PlanSetup } from '../components/desk/PlanSetup'
 import { HeaderTabs, ScopePicker, SettingsGear, Sheet, SupervisorPill, UndoToast, type ToastState } from '../components/desk/Chrome'
+import { useScrollCue } from '../components/desk/ScrollCue'
 import { DetailBar, DetailContent, type Mode } from '../components/desk/Detail'
 import {
   PendingView, ProblemControls, ProblemList,
@@ -156,6 +157,12 @@ export default function SiteDeskV2({
    * under it, it frosts, because now it is a layer above the page and has to say so.
    * (rAF-throttled: scroll must never be the thing that stutters.) */
   const [lifted, setLifted] = useState(false)
+
+  /* THE EDGE OF EACH LIST. A list that runs under the fold has to say so — the desk's lists ended at the
+     bottom of the window with a clean card border, and a clean edge is a full stop. One per scrolling
+     column; the pinned card beside them has nothing to do with it. */
+  const planCue = useScrollCue()
+  const listCue = useScrollCue()
   useEffect(() => {
     let queued = false
     const onScroll = () => {
@@ -780,7 +787,7 @@ export default function SiteDeskV2({
                   onRef={gotoRef}
                 />
 
-                <div className="plan-col">
+                <div className="plan-col" ref={planCue.ref}>
                   {/* SAY WHAT THE COLUMN IS. "Fourth · Flat Unit A" is a breadcrumb, and a breadcrumb
                       above a list of tasks makes you work out for yourself what you are looking at. */}
                   <div className="col-cap">
@@ -832,6 +839,7 @@ export default function SiteDeskV2({
                       />
                     )}
                   </div>
+                  {planCue.cue}
                 </div>
                 <div className="panel-col">
                   {/* .pin holds the caption AND the card together for the whole scroll — the column
@@ -874,7 +882,7 @@ export default function SiteDeskV2({
                 travel with it: tabs and rows move as one thing, and the card — which the scroll has no
                 business touching — is pinned from the top of the frame and whole in it. */}
             <div className="workspace">
-              <div className="list-col">
+              <div className="list-col" ref={listCue.ref}>
                 <ProblemControls
                   segment={segment} setSegment={setSegment}
                   sortBy={sortBy} setSort={setSortBy}
@@ -895,6 +903,7 @@ export default function SiteDeskV2({
                     onOpen={openDetail} onSwipeClose={swipeClose}
                   />
                 )}
+                {listCue.cue}
               </div>
 
               {/* ONE SCROLLBAR, AND THE ONLY THING IT MOVES IS THE LIST.
