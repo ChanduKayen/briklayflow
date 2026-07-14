@@ -1417,6 +1417,11 @@
 .desk-root .qc-chip.warn { color: var(--ask); background: var(--ask-soft); }
 
 /* ---------- Controls ---------- */
+/* THE LIST'S COLUMN. The controls live in it now (they are the LIST's controls — they name what it is
+   showing and how it is sorted, and nothing on the card answers to them), so tabs and rows travel as one
+   thing while the card stays pinned. min-width:0 because a grid column will happily refuse to shrink
+   below its content and push the card off the screen. */
+.desk-root .list-col { min-width: 0; }
 .desk-root .controls { display: flex; flex-direction: column; gap: 10px; padding-bottom: 14px; }
 .desk-root .ctl-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .desk-root .seg { display: flex; gap: 2px; background: var(--fill); border-radius: 9px; padding: 2px; }

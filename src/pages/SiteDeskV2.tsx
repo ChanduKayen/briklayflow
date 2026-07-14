@@ -862,15 +862,25 @@ export default function SiteDeskV2({
         {/* ================= PROBLEMS ================= */}
         {tab === 'problems' && (
           <>
-            <ProblemControls
-              segment={segment} setSegment={setSegment}
-              sortBy={sortBy} setSort={setSortBy}
-              kindF={kindF} setKind={setKindF}
-              pendingCount={pending.length}
-            />
+            {/* ══ THE CONTROLS BELONG TO THE LIST ═══════════════════════════════════════════════════
+                They used to sit ABOVE the grid, spanning both columns — so Pending·Open·Sorted was a
+                page-level banner, and the card's column began underneath it. Two things followed, and
+                both were wrong: the tabs scrolled away on their own while the list they govern stayed,
+                and the card started a whole control-bar lower than the top of the frame it had to fit
+                into.
 
+                They are the LIST's controls. They name what it is showing and how it is sorted, and
+                nothing on the right-hand card answers to them. So they live in the list's column and
+                travel with it: tabs and rows move as one thing, and the card — which the scroll has no
+                business touching — is pinned from the top of the frame and whole in it. */}
             <div className="workspace">
-              <div>
+              <div className="list-col">
+                <ProblemControls
+                  segment={segment} setSegment={setSegment}
+                  sortBy={sortBy} setSort={setSortBy}
+                  kindF={kindF} setKind={setKindF}
+                  pendingCount={pending.length}
+                />
                 {segment === 'pending' ? (
                   <PendingView
                     items={pending}
