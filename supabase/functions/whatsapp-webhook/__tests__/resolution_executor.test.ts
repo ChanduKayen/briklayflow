@@ -19,6 +19,10 @@ const upd = (o: Partial<AttachUpdate> & { target_id: string }): AttachUpdate => 
 const tUpdateResolve = (target_id: string): Terminal => ({ kind: 'object_updated', update: upd({ target_id }), applied: 'resolve', undo: true, readback: '', reason: '' })
 const tCreate = (detail: string, project_hint: string | null): Terminal => ({ kind: 'object_created', item: { kind: 'issue', detail, location: null, project_hint, confidence: 'high' }, as: 'classified', upgradeOffer: false, reason: '' })
 
+/** The pick's ROWS — where the candidates live now that the body no longer reprints them. */
+const pickList = (fake: ReturnType<typeof fakeSupabase>): { rows: { id: string; title: string; description?: string }[] } | undefined =>
+  fake.writesTo('outbox').map((w) => w.payload?.payload).find((p) => p?.kind === 'list')
+
 suite('siteops resolution v2 — executor applyTerminals (effects, honest readback, failed-parks)', () => {
   // object_updated resolve → the issue is RESOLVED (via force — NO re-judge) and the reply confirms it.
   test('(E1) object_updated resolve → problems RESOLVED + "✓ … resolved" readback', async () => {
@@ -77,7 +81,7 @@ suite('siteops resolution v2 — executor applyTerminals (effects, honest readba
 
   // A FAILED object_created (project unresolvable) must PARK to siteops_unplaced AND read back honestly —
   // "saved for review" is true because the observation actually survives.
-  test('(E2) object_created fails → parked to siteops_unplaced + honest "couldn\'t log … saved for review"', async () => {
+  test('(E2) object_created fails → parked + an honest failure notice that names Review', async () => {
     const fake = fakeSupabase({ projects: [] })   // no projects → resolveProject null → create throws → park
     await applyTerminals(ctxFor(fake), [tCreate('tiles broke', 'ASM Elite')], execCtx())
 
@@ -85,7 +89,9 @@ suite('siteops resolution v2 — executor applyTerminals (effects, honest readba
     expect(park.length).toBe(1)
     expect(park[0].payload?.reason).toBe('v2_effect_failed')
     expect(park[0].payload?.observation).toBe('tiles broke')                 // preserved, not dropped
-    expect(fake.outbox().some((b) => /couldn't log “tiles broke” — saved for review/i.test(b))).toBe(true)
+    const told = fake.outbox().find((b) => /Couldn't log “tiles broke”/i.test(b)) ?? ''
+    expect(told.includes('⏸')).toBe(true)                                  // Babai's limbo, not a site hazard
+    expect(/Recorded in \*Review\* · Briklay — nothing's lost\./.test(told)).toBe(true)   // …and WHERE it went
   })
 
   // PARTIAL FAILURE in one message: resolve lands, create fails. The ONE reply tells the truth about BOTH,
@@ -98,7 +104,9 @@ suite('siteops resolution v2 — executor applyTerminals (effects, honest readba
     expect(fake.writesTo('siteops_unplaced').length).toBe(1)                  // the failed half parked
     const reply = fake.outbox().find((b) => /Got it/i.test(b)) ?? ''
     expect(/✓ “waterlogging in basement” resolved/.test(reply)).toBe(true)      // resolve first
-    expect(/⚠️ couldn't log “tiles broke” — saved for review/.test(reply)).toBe(true)
+    expect(/⏸ Couldn't log “tiles broke”/.test(reply)).toBe(true)
+    // ONE destination line for the whole message, naming BOTH homes this turn wrote to.
+    expect(/Recorded in \*Problems & Review\* · Briklay/.test(reply)).toBe(true)
     // assertAllApplied did NOT throw: a failed-but-parked terminal is ACCOUNTED, not vanished.
     expect(outcomes.length).toBe(2)
     expect(outcomes.filter((o) => o.status === 'failed').length).toBe(1)
@@ -141,9 +149,10 @@ suite('siteops resolution v2 — executor 2c (question_asked wiring + evidence s
     expect(convo.payload?.slots_so_far?.kind).toBe('siteops_batch_collision')
     expect((convo.payload?.slots_so_far?.candidates ?? []).some((c: { id: string }) => c.id === 'iss-water')).toBe(true)
     expect(convo.payload?.slots_so_far?.update?.target_id).toBe('iss-water')   // T3 held verdict threaded (single target)
-    const ask = fake.outbox().find((b) => /which of these is it about/i.test(b)) ?? ''
-    expect(/1\.\s*waterlogging in basement/i.test(ask)).toBe(true)             // NUMBERED, offered order
-    expect(/\bnew\b/i.test(ask)).toBe(true)                                    // the "it's new" escape, natural answer
+    expect(fake.outbox().some((b) => b.includes('❓'))).toBe(true)              // the question went out…
+    const rows = pickList(fake)!.rows                                          // …and the candidate is IN it
+    expect(/waterlogging in basement/i.test(rows[0].description ?? '')).toBe(true)
+    expect(/\bnew\b/i.test(rows[1].title)).toBe(true)                          // the "it's new" escape
   })
 
   // A new item with no resolvable site → which_project, wired through the proven siteops_project resume,
@@ -221,7 +230,7 @@ suite('siteops resolution v2 — DEFECT 2 + non-batch-target held park', () => {
 
     const reply = fake.outbox().find((b) => /saved for review/i.test(b)) ?? ''
     expect(/couldn't resolve “tiles not arrived” yet — saved for review/i.test(reply)).toBe(true)
-    expect(/⚠️/.test(reply)).toBe(false)                        // HELD, not a ⚠️ failure
+    expect(/⏸ Couldn't/.test(reply)).toBe(false)              // HELD ("couldn't … YET"), not a ⏸ failure
     expect(UUID_RE.test(reply)).toBe(false)
   })
 
@@ -327,7 +336,8 @@ suite('siteops resolution v2 — executor task updates (Stage 2 applyProgress)',
     await applyTerminals(ctxFor(fake), [q], execCtx())
 
     expect(fake.writesTo('siteops_unplaced').length).toBe(1)          // the observation survives
-    expect(fake.outbox().some((b) => /saved for review/i.test(b))).toBe(true)   // and the sender is told
+    const told = fake.outbox().find((b) => /Couldn't place/i.test(b)) ?? ''     // …and the sender is TOLD
+    expect(/Recorded in \*Review\* · Briklay — nothing's lost\./.test(told)).toBe(true)
   })
 
   // (T4) MED/LOW TASK targets ASK (the parking lesson): a which_item question on a TASK target — tasks are
@@ -351,9 +361,10 @@ suite('siteops resolution v2 — executor task updates (Stage 2 applyProgress)',
     expect(cand?.kind).toBe('task')
     expect(cand?.id).toBe('tk-park')
     expect(fake.writesTo('siteops_unplaced').length).toBe(0)          // asked, not parked
-    const ask = fake.outbox().find((b) => /which of these is it about/i.test(b)) ?? ''
-    expect(/1\.\s*Parking deck &/i.test(ask)).toBe(true)              // the task candidate, numbered
-    expect(/\bnew\b/i.test(ask)).toBe(true)
+    expect(fake.outbox().some((b) => b.includes('❓'))).toBe(true)
+    const rows = pickList(fake)!.rows
+    expect(/Parking deck &/.test(rows[0].description ?? '')).toBe(true)   // the task candidate, offered
+    expect(/\bnew\b/i.test(rows[1].title)).toBe(true)
   })
 
   // (T5) …and the ANSWER lands: picking the task in the collision resume applies the progress via the

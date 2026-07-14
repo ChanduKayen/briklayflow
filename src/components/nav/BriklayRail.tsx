@@ -24,14 +24,15 @@ import {
   IconChevronDown, IconChevronLeft, IconDots,
   IconSettings, IconLogout,
   IconBox, IconListNumbers, IconTruck, IconLoader2, IconChecklist, IconAlertTriangle,
-  IconListCheck, IconBell, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand,
+  IconListCheck, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand,
 } from '@tabler/icons-react';
 import { supabase } from '../../lib/supabase';
 import { clearPersistedCache } from '../../lib/queryClient';
+import { SITE_DESK_ENABLED } from '../../lib/desk/flag';
 import { useAuth } from '../../lib/auth/AuthProvider';
 import { useUserProfile } from '../../App';
 import { WhatsAppGlyph } from '../day-book/atoms';
-import { V, N, font, serif, nums, RAIL_W, RAIL_OPEN, PANEL_W, NAV_ANIM, SITE_MGMT_ROUTES } from './navTokens';
+import { V, N, font, serif, nums, RAIL_W, RAIL_OPEN, PANEL_W, NAV_ANIM } from './navTokens';
 
 type Role = string;
 
@@ -131,8 +132,9 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
   const projMatch = location.pathname.match(/^\/projects\/([^/]+)/);
   const activeProjectId = projMatch?.[1];
   const inProject = !!(activeProjectId && activeProjectId !== 'new');
-  const inSiteMgmt = SITE_MGMT_ROUTES.some(r => location.pathname === r || location.pathname.startsWith(r + '/'));
-  const inSecondary = inProject || inSiteMgmt;
+  // Site Management (the hub, its three doors and its secondary navbar) is gone. The desk is the
+  // building it was a lobby for, and it owns its own full width — it needs no second column.
+  const inSecondary = inProject;
 
   const [hovered, setHovered] = useState(false);
   // In a secondary-nav context the rail width is the user's toggle (railExpanded: full 220 / spine
@@ -210,8 +212,10 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
   const { data: projects = [] } = useQuery({
     queryKey: ['sidebar_projects'],
     queryFn: async () => {
-      const { data } = await supabase.from('projects').select('project_id, name').eq('status', 'Active').order('name');
-      return (data ?? []) as { project_id: string; name: string }[];
+      // project_code decides whether this project can have a Site Desk at all: every ref the desk
+      // mints (CHAK-14) is numbered from it, so a project without one has nothing to address.
+      const { data } = await supabase.from('projects').select('project_id, name, project_code').eq('status', 'Active').order('name');
+      return (data ?? []) as { project_id: string; name: string; project_code: string | null }[];
     },
     staleTime: 10 * 60 * 1000,
   });
@@ -226,9 +230,18 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
       items: ([
         can(role !== 'supervisor') && { route: '/ledger', label: 'Transactions', icon: IconArrowsExchange, accent: true },
         { route: '/logbook', label: 'Day book', node: <DayBookIcon />, badge: inbox },
-        // Site Management — clicking enters its own secondary nav (Task Manager / Snags & Issues /
-        // Follow-up Rules); /site-desk is the hub's landing page.
-        { route: '/site-desk', label: 'Site management', icon: IconAlertTriangle },
+        /**
+         * SITE MANAGEMENT IS GONE, AND THE DESK IS WHAT IT WAS TRYING TO BE.
+         *
+         * It was a HUB — a nav entry whose only job was to open another nav, offering three doors
+         * (Task Manager · Snags & Issues · Follow-up Rules) into one building. The desk is that
+         * building: its Plan tab is the task manager, its Problems tab is the snags and the issues in
+         * the one number space they always shared, and the follow-up rules live behind its own settings
+         * gear, which is where a rule belongs.
+         *
+         * A menu that leads to a menu is a menu nobody needed.
+         */
+        SITE_DESK_ENABLED && { route: '/desk', label: 'Site Desk', icon: IconLayoutGrid },
         can(role !== 'supervisor') && { route: '/billing', label: 'Client billing', icon: IconFileInvoice, badge: billOverdue },
         { route: '/insights', label: 'Insights', icon: IconChartPie },
       ].filter(Boolean) as Item[]),
@@ -256,44 +269,59 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
   const activeProj = projects.find(p => p.project_id === activeProjectId);
   const projName = activeProj?.name ?? '…';
   const projBase = `/projects/${activeProjectId}`;
+  /**
+   * THE SITE DESK REPLACES THREE ENTRIES.
+   *
+   * Task Manager, Issues and Snags were three doors into the same building. The desk's Plan tab IS the
+   * task manager — the same rows, the same engine, sequenced and gated — and its Problems tab is the
+   * issues and the snags together, in the one number space they have always shared (CHAK-14 is a task,
+   * CHAK-21 is a snag; a ref alone resolves to exactly one row).
+   *
+   * The tiles on the project overview were repointed and this was not, so the old three stayed on the
+   * rail — which is the half of the change anybody actually navigates by.
+   *
+   * NO CODE, NO DESK: the desk numbers its rows from the project's short code, so a project without one
+   * keeps the three original entries rather than being shown a door with no room behind it.
+   */
+  const canDesk = SITE_DESK_ENABLED && !!activeProj?.project_code;
   const projItems: Item[] = inProject ? [
-    { route: projBase, label: 'Overview', icon: IconLayoutGrid },
-    { route: `${projBase}/tasks`, label: 'Task Manager', icon: IconChecklist },
-    // Issues + Snags are first-class, distinct entries (P1.3) — both ride the same surface,
-    // scoped by ?view=. Issues ride heavy (cause/timing/thread); snags light (checkable).
-    { route: `${projBase}/issues?view=issues`, label: 'Issues', icon: IconAlertTriangle },
-    { route: `${projBase}/issues?view=snags`, label: 'Snags', icon: IconListCheck },
+    /**
+     * THE DESK IS THE FRONT DOOR, and the Overview is gone.
+     *
+     * The Overview was a lobby: a page you passed through on the way to the page you wanted. Nine tiles
+     * and a summary — of work that lived one click deeper. Opening a project should put you in front of
+     * the work, so it does.
+     *
+     * Its one irreplaceable job (editing the project itself) is at the BOTTOM of this list, as Project
+     * settings, where a settings page belongs.
+     */
+    ...(canDesk
+      ? [{ route: `${projBase}/desk/plan`, label: 'Site Desk', icon: IconLayoutGrid }]
+      : [
+        { route: projBase, label: 'Overview', icon: IconLayoutGrid },
+        { route: `${projBase}/tasks`, label: 'Task Manager', icon: IconChecklist },
+        // Issues + Snags rode the same surface, scoped by ?view= — heavy vs light.
+        { route: `${projBase}/issues?view=issues`, label: 'Issues', icon: IconAlertTriangle },
+        { route: `${projBase}/issues?view=snags`, label: 'Snags', icon: IconListCheck },
+      ]),
     { route: `${projBase}/transactions`, label: 'Transactions', icon: IconArrowsExchange },
     { route: `${projBase}/work-orders`, label: 'Contracts', icon: IconClipboardList },
     { route: `${projBase}/purchase-orders`, label: 'Purchase orders', icon: IconShoppingBag },
     { route: `${projBase}/inventory`, label: 'Inventory', icon: IconBox },
     { route: `${projBase}/boqs`, label: 'BOQs', icon: IconListNumbers },
     { route: `${projBase}/inward`, label: 'Inward register', icon: IconTruck },
+    // The project itself — its name, its site, its dates, its supervisor. Last, because you set it once.
+    ...(canDesk ? [{ route: `${projBase}/settings`, label: 'Project settings', icon: IconSettings }] : []),
   ] : [];
 
-  // ── Site Management secondary navbar — the items shown in the second column (see inSiteMgmt). ──
-  const siteMgmtItems: Item[] = [
-    { route: '/tasks', label: 'Task Manager', icon: IconChecklist },
-    { route: '/site-desk', label: 'Snags & Issues', icon: IconAlertTriangle },
-    ...(role === 'principal' || role === 'management'
-      ? [{ route: '/follow-up-rules', label: 'Follow-up Rules', icon: IconBell } as Item]
-      : []),
-  ];
-
-  // ── secondary navbar config — one panel, two contexts (project / Site Management) ──
+  // ── secondary navbar — ONE context now: a project. (Site Management, the hub whose only job was to
+  //    open another nav, is deleted; the desk replaced every door it had.) ──
   const panelCfg = inProject
     ? {
         backTo: '/projects', backLabel: 'All projects',
         chip: initials(projName) as React.ReactNode, title: projName, subtitle: 'Active project',
         items: projItems, isItemActive: (route: string) => projItemActive(route, projBase, location),
         footer: null as string | null,
-      }
-    : inSiteMgmt
-    ? {
-        backTo: role === 'supervisor' ? '/projects' : '/ledger', backLabel: 'Menu',
-        chip: <IconChecklist size={17} strokeWidth={1.7} /> as React.ReactNode, title: 'Site Management', subtitle: 'Across every site',
-        items: siteMgmtItems, isItemActive: (route: string) => isActive(route),
-        footer: 'Plan work, track issues, and tune how follow-ups are chased — across all your sites.' as string | null,
       }
     : null;
 
@@ -388,7 +416,7 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
                 {!open && i > 0 && <div style={{ height: 16 }} />}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {s.items.map(it => (
-                    <RailItem key={it.route} item={it} open={open} active={it.route === '/site-desk' ? inSiteMgmt : isActive(it.route)} onNavigate={close} />
+                    <RailItem key={it.route} item={it} open={open} active={isActive(it.route)} onNavigate={close} />
                   ))}
                 </div>
               </div>

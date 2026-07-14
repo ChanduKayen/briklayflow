@@ -56,9 +56,9 @@ export const PANEL_W = 224;   // contextual secondary panel
 /** Routes that show a secondary navbar (the second column): the Site Management hub AND any
  *  in-project page. On these the rail collapses to its spine and the App shell reserves
  *  RAIL_W + PANEL_W. Kept here so the rail's collapse and the content margin read from ONE place. */
-export const SITE_MGMT_ROUTES = ['/tasks', '/site-desk', '/follow-up-rules'];
+/** The ONE secondary-nav context left: inside a project. (Site Management is deleted — the desk owns
+ *  its own full width and needs no second column.) */
 export function isSecondaryNavRoute(pathname: string): boolean {
-  if (SITE_MGMT_ROUTES.some((r) => pathname === r || pathname.startsWith(r + '/'))) return true;
   // in a specific project (/projects/:id/…) — but not the list (/projects) or the wizard (/projects/new)
   const m = pathname.match(/^\/projects\/([^/]+)/);
   return !!(m && m[1] !== 'new');

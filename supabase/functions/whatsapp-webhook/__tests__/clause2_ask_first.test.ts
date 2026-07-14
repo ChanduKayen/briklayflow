@@ -4,6 +4,7 @@
 // _siteops_extract.ts:292) → decomposed=null → the `!decomposed` branch fired "didn't catch" BEFORE
 // ask-first, silently dropping a placeable message. RED until ask-first precedes didn't-catch on content.
 
+import { mentionsNothingToUpdate } from '../_siteops_resolution.ts'
 import { suite, test, expect } from './harness'
 import { fakeSupabase, type Seed } from './fake_supabase'
 import { runSiteops } from '../_agents/siteops.ts'
@@ -30,7 +31,7 @@ suite('siteops — clause 2 ask-first floor (content + unresolved project → AS
     await runSiteops(ctxFor(fake), 'water problem solved at asm', { callModel: emptyDecompose() })
 
     const askedProject = fake.writesTo('wa_conversations').some((w) => w.payload?.slots_so_far?.kind === 'siteops_project')
-    const didntCatch = fake.outbox().some((b) => /nothing updated/i.test(b))
+    const didntCatch = fake.outbox().some((b) => mentionsNothingToUpdate(b))
     expect(askedProject).toBe(true)          // clause 2 — we ask where, never eat a placeable message
     expect(didntCatch).toBe(false)
   })
@@ -42,7 +43,7 @@ suite('siteops — clause 2 ask-first floor (content + unresolved project → AS
     await runSiteops(ctxFor(fake), 'ok', { callModel: emptyDecompose() })
 
     const askedProject = fake.writesTo('wa_conversations').some((w) => w.payload?.slots_so_far?.kind === 'siteops_project')
-    const didntCatch = fake.outbox().some((b) => /nothing updated/i.test(b))
+    const didntCatch = fake.outbox().some((b) => mentionsNothingToUpdate(b))
     expect(askedProject).toBe(false)
     expect(didntCatch).toBe(true)
   })

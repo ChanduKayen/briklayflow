@@ -14,9 +14,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
-import { buildProjectVM, LIBRARY, fanOutQc } from '../../lib/siteOps/engine'
+import { buildProjectVM, LIBRARY, fanOutQc, geometryOptionsOf, STAGE_LABEL } from '../../lib/siteOps/engine'
 import { inferUnitNames, type NameFloor } from '../../lib/siteOps/unitNaming'
-import type { BlockVM, FloorVM, ProjectVM, TaskVM } from '../../lib/siteOps/engine'
+import type { AmenityVM, BlockVM, FloorVM, ProjectVM, TaskVM } from '../../lib/siteOps/engine'
 import TaskDetail, { type Task, type EngineCtx } from './TaskDetail'
 
 // ── scoped stylesheet (the approved design; every selector under `.sov`) ──────
@@ -172,6 +172,28 @@ const CSS = `
 .sov-applybar .au{font-size:11.5px;color:#6c6a68;margin-top:1px}
 .sov-applybar button{font-family:inherit;font-size:12.5px;font-weight:600;padding:8px 14px;border-radius:9px;cursor:pointer;border:none;margin-left:7px}
 .sov-applybar .apply{background:#e0734a;color:#fff}.sov-applybar .dismiss{background:transparent;color:#a8a6a3;border:1px solid #34343c}
+/* the trade pass ('2nd fix'), split out of the name and rendered as a chip beside it */
+.sov .tph{margin-left:7px;font-size:9.5px;font-weight:500;color:var(--mut);background:var(--surf2);border:1px solid var(--line);border-radius:5px;padding:1px 5px;vertical-align:middle;white-space:nowrap}
+/* amenities — the same rows, indexed by system instead of by floor */
+.sov .amn{margin-top:26px;border-top:1px solid var(--line);padding-top:18px}
+.sov .amn-h{font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.12em;margin-bottom:10px}
+.sov .amn-sys{border-bottom:1px solid var(--line)}
+.sov .amn-row{display:flex;align-items:center;gap:12px;width:100%;padding:11px 2px;background:none;border:none;cursor:pointer;font-family:inherit;text-align:left}
+.sov .amn-n{flex:0 0 150px;font-size:13px;color:var(--ink);font-weight:500}
+.sov .amn-bar{flex:1;height:4px;border-radius:3px;background:var(--surf2);overflow:hidden}
+.sov .amn-bar i{display:block;height:100%;background:var(--done);border-radius:3px;transition:width .35s ease}
+.sov .amn-pc{flex:0 0 38px;text-align:right;font-size:11.5px;color:var(--mut);font-variant-numeric:tabular-nums}
+.sov .amn-c{flex:0 0 12px;color:var(--mut);font-size:15px}
+.sov .amn-tasks{padding:2px 2px 12px 12px}
+.sov .amn-t{display:flex;align-items:center;gap:9px;padding:5px 0;font-size:12.5px}
+.sov .amn-td{flex:0 0 6px;height:6px;border-radius:50%;background:var(--mut)}
+.sov .amn-t.st-done .amn-td{background:var(--done)}
+.sov .amn-t.st-active .amn-td{background:var(--accent)}
+.sov .amn-t.st-available .amn-td{background:var(--serv)}
+.sov .amn-tl{flex:1;color:var(--ink2)}
+.sov .amn-t.st-done .amn-tl{color:var(--mut);text-decoration:line-through}
+.sov .amn-tf{font-size:10.5px;color:var(--mut);background:var(--surf2);border-radius:5px;padding:2px 6px}
+.sov .amn-ts{flex:0 0 66px;text-align:right;font-size:10.5px;color:var(--mut);text-transform:capitalize}
 `
 
 const STCLS: Record<string, string> = { done: 't-done', active: 't-active', available: 't-available', blocked: 't-blocked' }
@@ -221,11 +243,11 @@ export function prefetchProjectQueries(qc: QueryClient, projectId: string) {
   qc.prefetchQuery({
     queryKey: ['seq_project', projectId], ...opts,
     queryFn: async () => {
-      const sel = 'name, construction_stack, has_common_areas, common_systems, suppressed_tasks, unit_labels, org_id'
+      const sel = 'name, construction_stack, has_common_areas, common_systems, suppressed_tasks, unit_labels, amenity_levels, org_id'
       let res = await supabase.from('projects').select(sel).eq('project_id', projectId).single()
       if (res.error) res = await supabase.from('projects').select('name, construction_stack, has_common_areas, org_id').eq('project_id', projectId).single()
       if (res.error) throw res.error
-      return res.data as { name?: string; construction_stack?: unknown; has_common_areas?: boolean; common_systems?: string[]; suppressed_tasks?: string[]; unit_labels?: Record<string, string[]>; org_id?: string }
+      return res.data as { name?: string; construction_stack?: unknown; has_common_areas?: boolean; common_systems?: string[]; suppressed_tasks?: string[]; unit_labels?: Record<string, string[]>; amenity_levels?: Record<string, string>; org_id?: string }
     },
   })
   qc.prefetchQuery({
@@ -248,15 +270,60 @@ export function prefetchProjectQueries(qc: QueryClient, projectId: string) {
   })
 }
 
+/** The VM's synthetic stages — named, not floor-numbered ("Foundation", not "Foundation Floor"). */
+const SYNTHETIC_STAGES = new Set(Object.values(STAGE_LABEL))   // the engine names its stages (stages.ts) - not us
+
+/**
+ * The amenities panel: one row per SYSTEM, expandable into its components.
+ *
+ * A lift used to be a single task called "Lift (shaft & cabin)" — so a supervisor could not report a
+ * landing door on the third floor, and the lift showed 0% until someone flipped the whole thing done.
+ * It is now shaft ×N + mechanism + landing door ×N + commissioning, and this is where you read it as
+ * one system. Each line is a real, reportable task.
+ */
+function Amenities({ amenities }: { amenities: AmenityVM[] }) {
+  const [open, setOpen] = useState<string | null>(null)
+  return (
+    <div className="amn">
+      <div className="amn-h">Amenities &amp; common systems</div>
+      {amenities.map((a) => {
+        const isOpen = open === a.system
+        return (
+          <div key={a.system} className="amn-sys">
+            <button className="amn-row" onClick={() => setOpen(isOpen ? null : a.system)}>
+              <span className="amn-n">{a.label}</span>
+              <span className="amn-bar"><i style={{ width: `${a.pc}%` }} /></span>
+              <span className="amn-pc">{a.pc}%</span>
+              <span className="amn-c">{isOpen ? '⌄' : '›'}</span>
+            </button>
+            {isOpen && (
+              <div className="amn-tasks">
+                {a.tasks.map((t) => (
+                  <div key={t.nodeKey} className={`amn-t st-${t.status}`}>
+                    <span className="amn-td" />
+                    <span className="amn-tl">{t.label}{t.phase && <span className="tph">{t.phase}</span>}</span>
+                    {t.floorLabel && <span className="amn-tf">{t.floorLabel}</span>}
+                    <span className="amn-ts">{t.status}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 export default function ProjectSequence({ projectId, headerSlot }: { projectId: string; headerSlot?: React.ReactNode }) {
   const { data: project, isLoading: pLoading } = useQuery({
     queryKey: ['seq_project', projectId],
     queryFn: async () => {
-      const sel = 'name, construction_stack, has_common_areas, common_systems, suppressed_tasks, unit_labels, org_id'
+      const sel = 'name, construction_stack, has_common_areas, common_systems, suppressed_tasks, unit_labels, amenity_levels, org_id'
       let res = await supabase.from('projects').select(sel).eq('project_id', projectId).single()
       if (res.error) res = await supabase.from('projects').select('name, construction_stack, has_common_areas, org_id').eq('project_id', projectId).single()
       if (res.error) throw res.error
-      return res.data as { name?: string; construction_stack?: unknown; has_common_areas?: boolean; common_systems?: string[]; suppressed_tasks?: string[]; unit_labels?: Record<string, string[]>; org_id?: string }
+      return res.data as { name?: string; construction_stack?: unknown; has_common_areas?: boolean; common_systems?: string[]; suppressed_tasks?: string[]; unit_labels?: Record<string, string[]>; amenity_levels?: Record<string, string>; org_id?: string }
     },
     enabled: !!projectId,
   })
@@ -291,12 +358,12 @@ export default function ProjectSequence({ projectId, headerSlot }: { projectId: 
     if (!stack?.levels?.length) return null
     const state = new Map<string, 'not_started' | 'active' | 'done'>()
     for (const r of statusRows) if (r.node_key && (r.status === 'active' || r.status === 'done')) state.set(r.node_key, r.status)
+    // ONE DOOR: the geometry options come from the ROW, via the engine (geometryOptionsOf) — never
+    // hand-assembled here. Five call sites used to build this bag by hand and the wizard's copy disagreed.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- jsonb stack ↔ ConstructionStack
     return buildProjectVM(projectId, stack as any, state, {
       name: project?.name ?? projectId, dryRun: true,
-      hasCommonAreas: !!project?.has_common_areas, hasExternalWorks: !!project?.has_common_areas,
-      commonSystems: project?.common_systems ?? [],
-      suppressedTasks: project?.suppressed_tasks ?? [],
+      ...geometryOptionsOf(project),
     })
   }, [projectId, project, statusRows])
 
@@ -550,7 +617,7 @@ function SequenceView({ vm, rowByKey, headerSlot, orgId }: { vm: ProjectVM; rowB
             <div className="hint">the building rising, left to right · move across to focus a stage</div>
           </div>
 
-          <div className="fd-h"><span className="fd-name">{floor && (floor.name === 'Foundation' || floor.name === 'Common areas') ? floor.name : `${floor?.name} Floor`}</span><span className="fd-blocks">{floor && floor.blocks.length > 1 ? `${floor.blocks.length} blocks` : ''}</span></div>
+          <div className="fd-h"><span className="fd-name">{floor && SYNTHETIC_STAGES.has(floor.name) ? floor.name : `${floor?.name} Floor`}</span><span className="fd-blocks">{floor && floor.blocks.length > 1 ? `${floor.blocks.length} blocks` : ''}</span></div>
           <div>
             {floor?.blocks.map((b, bi) => {
               // a fully-done block collapses to a quiet summary row (click to reopen)
@@ -593,6 +660,12 @@ function SequenceView({ vm, rowByKey, headerSlot, orgId }: { vm: ProjectVM; rowB
               </div>
             )}
           </div>
+
+          {/* AMENITIES, BY SYSTEM — the same rows the floors above already carry, re-indexed. The
+              elevation answers "what's happening on the third floor?"; this answers "how far along is
+              the lift?", which a floor-keyed view can never answer, because a lift is spread across
+              every floor plus two floorless steps. Same node_key, so nothing can drift. */}
+          {vm.amenities.length > 0 && <Amenities amenities={vm.amenities} />}
         </div>
         <div className="sov-verdict" ref={vdRef} />
       </div>
@@ -710,7 +783,7 @@ function TaskRow({ t, onOpen, onDragStart, onDragOverTask, onDropTask, onDragEnd
       onDrop={(e) => { e.preventDefault(); onDropTask(t.taskType) }}
       onDragEnd={onDragEnd}>
       <span className="grip">⠿</span><span className="node"><span className="ring" /></span>
-      <span className="tn">{t.label}{t.needsReview && <span className="trv">REVIEW</span>}</span><span className="tg" />
+      <span className="tn">{t.label}{t.phase && <span className="tph">{t.phase}</span>}{t.needsReview && <span className="trv">REVIEW</span>}</span><span className="tg" />
       {t.status === 'blocked' && t.why?.length ? <span className="taf">after <b>{t.why[0].afterLabel}</b></span> : null}
       <span className="ttr">{t.trade}</span>
       {onSuppress && <button className="task-x" title="Not applicable here — hide from this project"

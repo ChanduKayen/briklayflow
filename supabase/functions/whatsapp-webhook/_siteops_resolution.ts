@@ -12,8 +12,14 @@
 // evidence/park) and the LLM-failure park path; executeResolution only DECIDES, so the decision is
 // provable offline against hand-authored contract fixtures (the enforcement calibration tier).
 
+import { tradeGroups, tradeMismatch } from './_siteops_trades.ts'
+import { G, type Home } from './_voice.ts'
+
 // ── THE CONTRACT (what the model returns; advisory) ──────────────────────────
 export type Confidence = 'high' | 'med' | 'low'
+
+/** The reply language. The pure planner owns the readback strings, so it owns the language they are in. */
+export type Lang = 'en' | 'te' | 'te-en' | 'hi'
 
 // Axis 1 — OBSERVE. A new issue/snag the message reports. `project_hint` is the model's project pick
 // (LOCKED: project resolution folds INTO the one call — no upstream scoreName heuristic); null when the
@@ -366,12 +372,73 @@ function planTaskUpdate(u: AttachUpdate, ctx: ResolutionContext, contract: Resol
   return landTask({ ...u, target_id: v.rowId }, ctx, rows, [v.rowId])
 }
 
+/**
+ * The tasks of the trade HE named, at the place HE named — the options an ask should actually offer.
+ *
+ * Built from the same two facts the pin uses: `taskRowsByType` (every open row of every offered type) and
+ * `structure` (the floor/unit the message states). We keep the types whose trade overlaps the message's, and
+ * from each we keep the rows that match the stated floor/unit. Rows only — the ask offers rows, because a row
+ * is the only thing a human can read and a writer can write to.
+ *
+ * Returns [] when it can name nothing better, and the caller then offers what it offered before: this may
+ * only ever ADD options, never take one away.
+ */
+function sameTradeAlternatives(ctx: ResolutionContext, chosenTypeId: string): string[] {
+  const said = tradeGroups(ctx.message ?? null)
+  if (!said.length || !ctx.taskRowsByType?.size) return []
+
+  const slot = ctx.structure ?? null
+  const floorWanted = slot?.floor ? canonFloor(slot.floor) : null
+  const unitWanted = slot?.unit ? canonUnit(slot.unit) : null
+
+  const out: string[] = []
+  for (const [typeId, rows] of ctx.taskRowsByType) {
+    if (typeId === chosenTypeId) continue                       // the model's own pick is added by the caller
+    if (!rows.length) continue
+    const task = tradeGroups(rows[0].name)
+    if (!task.length || !said.some((g) => task.includes(g))) continue   // a different trade — not an option
+    for (const r of rows) {
+      if (floorWanted && canonFloor(r.floor ?? '') !== floorWanted) continue
+      if (unitWanted && canonUnit(r.unit ?? '') !== unitWanted) continue
+      out.push(r.id)
+    }
+  }
+  return out
+}
+
 /** 3) THE LADDER for a PINNED task. `u.target_id` is a ROW id here; `pinned` is what an ask would offer;
  *  `collectiveIds` (all-quantifier only) is the swept set. LOW never touches state — it asks over the pinned
  *  row(s), so the confirm lands on something a writer can actually write to. */
 function landTask(u: AttachUpdate, ctx: ResolutionContext, rows: TaskRowRef[], pinned: string[], collectiveIds?: string[]): Terminal {
-  if (u.confidence === 'low') {
-    return { kind: 'question_asked', about: 'which_item', axis: 'meaning', ref: u.target_id, update: u, shortlistIds: pinned, reason: `low confidence on task "${rows[0].name}" — ask (pick-one w/ "it's new")` }
+  // ── THE TRADE GUARD (2026-07-13) ────────────────────────────────────────────────────────────────────
+  // He said "electrical chases made for 2nd floor Unit B". The model picked "Plumbing — in-wall lines
+  // (chases & sleeves)" — and SAID SO in its own reason: "…most closely matches the in-wall lines (chases
+  // & sleeves) task, though it is labeled as plumbing". It matched on the word "chases", which appears in
+  // exactly one label in the whole library, and that label is the wrong trade.
+  //
+  // That is not "low confidence about WHICH ROW". It is the wrong TASK, and the two must not be treated the
+  // same, because they need different questions. A wrong-trade pick is a fact we can check in code: the
+  // message names a trade, the task belongs to another, and the sets are disjoint.
+  const wrongTrade = tradeMismatch(ctx.message ?? null, rows[0]?.name ?? null)
+
+  if (u.confidence === 'low' || wrongTrade) {
+    // ── AND THE ASK MUST OFFER SOMETHING HE CAN SAY YES TO ───────────────────────────────────────────
+    // The shortlist used to be `pinned` — the rows of the model's OWN pick. So on a low-confidence guess we
+    // offered him exactly the thing we were unsure about, and nothing else. Live, that was ONE option:
+    // "Plumbing — in-wall lines … — Second · Unit B", and "it's new". He had no way to say "electrical".
+    // Being unsure is precisely when the alternatives matter.
+    //
+    // So offer the SAME-TRADE tasks at the SAME place, with the model's pick alongside them. If we can name
+    // no better alternative we fall back to `pinned` — never fewer options than before.
+    const alts = sameTradeAlternatives(ctx, u.target_id)
+    const shortlist = alts.length ? [...new Set([...alts, ...pinned])] : pinned
+    return {
+      kind: 'question_asked', about: 'which_item', axis: 'meaning', ref: u.target_id, update: u,
+      shortlistIds: shortlist,
+      reason: wrongTrade
+        ? `WRONG TRADE: the message names a different trade from task "${rows[0].name}" — ask over the ${shortlist.length} same-trade option(s), never write across trades`
+        : `low confidence on task "${rows[0].name}" — ask over ${shortlist.length} option(s) (pick-one w/ "it's new")`,
+    }
   }
   // BLOCKED — the negative report, on the pinned row(s). Never advances, never closes.
   if (u.action === 'blocked') {
@@ -609,13 +676,58 @@ export interface TerminalOutcome {
  * say that, say plainly that nothing changed, and show the shape of a message that would work. Examples, never
  * a demand — no list to pick from, no question to answer, nothing left pending. The next message stands alone.
  */
-export const NOTHING_TO_UPDATE =
-  `Noted 👍 — nothing updated, since I couldn't tell which work you meant.\n\n` +
-  `I only change something when you name it. Just say it plainly:\n` +
-  `• "municipal water issue is resolved"\n` +
-  `• "tiles laid on the fourth floor"\n` +
-  `• "ceilings still pending"\n\n` +
-  `A photo or a voice note works the same way.`
+// ── AND THEN IT BECAME A LECTURE (2026-07-13) ───────────────────────────────────────────────────────────
+// All of the above is right, and the message it produced was still wrong. It ran to five lines, three worked
+// examples and a postscript — and it fired EVERY time we failed to place a fragment, including inside a
+// COMBINED readback where other things had landed perfectly well. Live, he got this:
+//
+//     Here's where everything landed 👇
+//     Noted 👍 — nothing updated, since I couldn't tell which work you meant.
+//     I only change something when you name it. Just say it plainly:
+//     • "municipal water issue is resolved"     ← a tutorial
+//     • "tiles laid on the fourth floor"        ← he has sent us forty of these
+//     • "ceilings still pending"
+//     A photo or a voice note works the same way.
+//     Got it — logged new: "plumbing guards not removed"
+//
+// A man who has been using this for weeks does not need to be taught the format, in English, every time we
+// fail to understand him — and teaching him in the same breath as reporting a success reads as noise, not
+// help. The FACT is what he needs: nothing changed, and here is the part I could not place. Say it once, say
+// it short, and say it in his language.
+//
+// (The examples were not useless — they were just in the wrong place. They belong in onboarding, once, not
+// stapled to every miss forever.)
+export function nothingToUpdate(lang: Lang = 'en'): string {
+  if (lang === 'te' || lang === 'te-en') return `అర్థమైంది 👍 — కానీ ఏ పని గురించో తెలియక ఏమీ మార్చలేదు. పని పేరు చెప్తే మారుస్తాను.`
+  if (lang === 'hi') return `समझ गया 👍 — पर कौन सा काम है पता न चलने से कुछ नहीं बदला। काम का नाम बताइए।`
+  return `Noted 👍 — nothing updated, because I couldn't tell which work you meant. Name the work and I'll update it.`
+}
+
+/** The English form, kept as a constant for the identity check in _siteops_readback (see isMiss). */
+export const NOTHING_TO_UPDATE = nothingToUpdate('en')
+
+/** Is this readback body the "couldn't place it" message, in ANY language? The combined readback collapses it
+ *  to a single clause, and it did so by comparing the body against the English constant — which would have
+ *  silently stopped matching the moment the message was translated, letting the long form leak back into
+ *  every multi-item reply. Identity by MEANING, not by one language's string. */
+export function isNothingToUpdate(body: string): boolean {
+  return body === nothingToUpdate('en') || body === nothingToUpdate('te') || body === nothingToUpdate('hi')
+}
+
+/**
+ * DID WE TELL HIM WE COULDN'T PLACE IT — anywhere in this body, in any language, in either form?
+ *
+ * Two different questions live here and they must not be confused:
+ *   · isNothingToUpdate  — "is this body EXACTLY that message?" — what the combined readback asks before it
+ *     collapses the long form into one clause. Equality, or it would swallow a body that merely mentions it.
+ *   · this one           — "did the supervisor get told?" — what a TEST asks. A readback body routinely gains
+ *     a suffix ("· logged at *Soundharya* — wrong site?"), and a MULTI-item reply collapses the whole message
+ *     into MISS_CLAUSE. Both still say the thing. Containment, and both forms count.
+ */
+export function mentionsNothingToUpdate(body: string): boolean {
+  if (body.includes(MISS_CLAUSE)) return true                                    // the collapsed one-clause form
+  return (['en', 'te', 'hi'] as const).some((l) => body.includes(nothingToUpdate(l)))
+}
 
 /** The same fact as NOTHING_TO_UPDATE, as ONE clause, for a combined readback that also has things to report. */
 export const MISS_CLAUSE = `one part I couldn't place — nothing updated for it`
@@ -667,9 +779,30 @@ export const UNTRACKED_CLAUSE = `saved to the site's notes — no task list to t
  * the same truth introduces a question, so his next message ("save it to stilt floor") has something to land on.
  */
 export function noSuchStructure(dimension: 'floor' | 'unit', named: string, present: string[]): string {
-  const list = present.length ? present.join(', ') : `none set up yet`
-  return `This site has no ${dimension} “${named}”. The ${dimension}s it has: ${list}.\n\n` +
-    `If that ${dimension} should exist, add it in the app and I'll track work there.`
+  /**
+   * ══ THE TRUST FLIP — §1.3 ═══════════════════════════════════════════════════════════════════════
+   *
+   * It said: "This site has no floor 'First'. The floors it has: Ground. If that floor should exist,
+   * add it in the app and I'll track work there."
+   *
+   * Two things wrong with that, and they compound:
+   *
+   *   1. IT TOLD A BUILDER HIS SITE WAS WRONG. He is standing on the first floor. He can see it. A tool
+   *      that contradicts the man who is physically there has lost the argument before it started — and
+   *      the gap is not in his building, it is in OUR MODEL of his building. So the system owns it:
+   *      "I don't have a *1st floor* for this site — only Ground." The same fact, and now it is our
+   *      problem to fix rather than his to be corrected about.
+   *
+   *   2. "ADD IT IN THE APP" IS A DEAD END. It is homework, handed to a man holding a phone in one hand
+   *      and a site in the other. He will not do it — he will put the phone away, and the update is
+   *      lost. The line is gone. (The premium fix — an "➕ Add 1st floor & file there" row, which
+   *      believes him — is a WRITE, and this pass is copy. See escapeRows in siteops.ts.)
+   */
+  const list = present.length ? present.join(', ') : 'none set up yet'
+  const what = named.trim()
+  return present.length
+    ? `I don't have a *${what}* ${dimension} for this site — only ${list}.`
+    : `I don't have any ${dimension}s set up for this site yet, so I can't place *${what}*.`
 }
 
 /**
@@ -705,13 +838,35 @@ function consequenceRank(o: TerminalOutcome): number {
 function readbackLine(o: TerminalOutcome): string | null {
   const t = o.terminal
   const failed = o.status === 'failed'
+
+  /**
+   * ══ TYPE 5 · THE FAILURE LINE — ⏸, NOT ⚠️, AND NO DOUBLE REASSURANCE ══════════════════════════════
+   *
+   * Two things were wrong with it, and both are about a mark meaning one thing.
+   *
+   *   · THE GLYPH WAS A LIE. ⚠️ means THE SITE has a problem — a crack, a blocker, something a builder must
+   *     act on. A write that failed on OUR side is not that. It is Babai's limbo, which is ⏸, and it has a
+   *     named home (Review). Using ⚠️ for both put "the slab has cracked" and "my database call timed out"
+   *     under the same mark, which is how a warning glyph stops being read at all.
+   *
+   *   · "— SAVED FOR REVIEW" WAS SAID TWICE. Every one of these lines carried its own reassurance, and the
+   *     message now ends with `Recorded in *Review* · Briklay — nothing's lost`, which says it once, with a
+   *     button on it. The spec's order is deliberate: reason, then destination, then reassurance — LAST. A
+   *     reassurance that arrives before the reader has finished reading the bad news is the machine
+   *     comforting itself.
+   *
+   * So the line states the failure and stops. The destination line (homesOf → Review) carries where it went,
+   * and composeConfirmation carries the button that opens it.
+   */
+  const cantDo = (verb: string, label: string) => `${G.held} Couldn't ${verb} “${label}”`
+
   switch (t.kind) {
     case 'object_updated':
       // BLOCKED — the negative report. It must never borrow the progress vocabulary ("✓ … updated") or the
       // chase-speak of an advance ("on it"): the supervisor just told us the work has NOT happened. Read it
       // back as what it is, and say the consequence (we chase sooner) so the report visibly did something.
       if (t.applied === 'blocked') {
-        if (failed) return `⚠️ couldn't note the blocker on “${o.label}” — saved for review`
+        if (failed) return cantDo('note the blocker on', o.label)
         const n = t.collectiveTargetIds?.length ?? 0
         return n ? `⏳ all ${n} “${o.label}” still open — noted, chasing sooner`
                  : `⏳ “${o.label}” still open — noted, chasing sooner`
@@ -720,19 +875,19 @@ function readbackLine(o: TerminalOutcome): string | null {
       // line per task. o.label is the shared task name; the count is the swept set.
       if (t.collectiveTargetIds?.length) {
         const n = t.collectiveTargetIds.length
-        return failed ? `⚠️ couldn't update all “${o.label}” — saved for review` : `✓ marked all ${n} “${o.label}” ${t.applied === 'resolve' ? 'done' : 'updated'}`
+        return failed ? cantDo('update all', o.label) : `✓ marked all ${n} “${o.label}” ${t.applied === 'resolve' ? 'done' : 'updated'}`
       }
       // TASK targets speak progress, not chase-speak: "✓ … updated" (a task is work, not an issue to chase).
-      if (t.update.target_kind === 'task') return failed ? `⚠️ couldn't update “${o.label}” — saved for review` : `✓ “${o.label}” updated`
-      if (t.applied === 'resolve') return failed ? `⚠️ couldn't resolve “${o.label}” — saved for review` : `✓ “${o.label}” resolved`
-      return failed ? `⚠️ couldn't update “${o.label}” — saved for review` : `“${o.label}” — on it, will check back`
+      if (t.update.target_kind === 'task') return failed ? cantDo('update', o.label) : `✓ “${o.label}” updated`
+      if (t.applied === 'resolve') return failed ? cantDo('resolve', o.label) : `✓ “${o.label}” resolved`
+      return failed ? cantDo('update', o.label) : `“${o.label}” — on it, will check back`
     case 'object_created':
-      if (failed) return `⚠️ couldn't log “${o.label}” — saved for review`
+      if (failed) return cantDo('log', o.label)
       // T6 note floor (clause 4): a low/med item is logged but NOT chased — surface the upgrade offer so the
       // human can promote it to a tracked issue. A high-confidence (classified) create reads back as usual.
       return t.upgradeOffer ? `logged as a possible issue: “${o.label}” — confirm to track` : `logged new: “${o.label}”`
     case 'queued_as_evidence':
-      return failed ? `⚠️ couldn't save the photo — saved for review` : `photo saved as evidence`
+      return failed ? `${G.held} Couldn't save the photo` : `photo saved as evidence`
     case 'acked_untracked_work':
       // Combined readback: one clause. The full explanation is the LONE-outcome reply (see below).
       return UNTRACKED_CLAUSE
@@ -746,11 +901,11 @@ function readbackLine(o: TerminalOutcome): string | null {
     case 'question_asked':
       // A SENT question is its own interactive message (no readback line). An UN-SENT one (executor
       // couldn't open the pick) was parked — say so, never silence (the T3 silent-drop fix). An un-sent
-      // place_photo fell back to the evidence park, which IS the honest terminal — never a ⚠️ over a
-      // photo that was in fact saved.
+      // place_photo fell back to the evidence park, which IS the honest terminal — never a failure notice
+      // over a photo that was in fact saved.
       if (o.status === 'ok') return null
       if (t.about === 'place_photo') return `photo saved as evidence`
-      return `⚠️ couldn't place “${o.label}” — saved for review`
+      return cantDo('place', o.label)
   }
 }
 
@@ -766,7 +921,7 @@ function heldClause(o: TerminalOutcome): string {
 /** Compose the single reply from the terminals' REAL outcomes (consequence-ordered, partial-failure-honest).
  *  PURE. Held updates (understood but not applicable yet) group into ONE "couldn't … yet — saved for review"
  *  clause, distinct from a ⚠️ failure. A lone didn't-catch returns its bare sentence; else "Got it — <…>". */
-export function composeReadback(outcomes: TerminalOutcome[]): string {
+export function composeReadback(outcomes: TerminalOutcome[], lang: Lang = 'en'): string {
   const ordered = outcomes
     .filter((o) => o.status !== 'duplicate')                                    // the same fact, already on a line above
     .filter((o) => o.terminal.kind !== 'question_asked' || o.status !== 'ok')   // sent questions are their own message; un-sent ones must be told
@@ -781,11 +936,67 @@ export function composeReadback(outcomes: TerminalOutcome[]): string {
   // would bury whatever else landed, so the combined path uses the one-clause forms above.
   if (lines.length === 1 && ordered.length === 1) {
     const only = ordered[0].terminal
-    if (only.kind === 'acked_didnt_catch') return NOTHING_TO_UPDATE
+    if (only.kind === 'acked_didnt_catch') return nothingToUpdate(lang)
     if (only.kind === 'acked_untracked_work') return only.coverage === 'none' ? NO_TASK_LIST : ALL_TASKS_DONE
     if (only.kind === 'acked_no_place') return noPlaceReply(only)
   }
   return `Got it — ${lines.join(' · ')}`
+}
+
+/**
+ * ══ TYPE 5 · WHERE IT LANDED — read off the WRITES, never off the prose ══════════════════════════════
+ *
+ * The destination line ("Recorded in *Tasks* · Briklay") is the only proof he has that a WhatsApp message
+ * became a row in his app. Which makes it the one line that must never be decorative: if it appears under
+ * a message that wrote nothing, it is the system claiming a write it did not make, and the day he checks
+ * and finds nothing there is the day the line stops meaning anything at all.
+ *
+ * So it is computed from the OUTCOMES — the same objects composeReadback reads — and not sniffed out of
+ * the composed sentence. A didn't-catch, an untracked-work ack, an all-tasks-done ack: these wrote NO row,
+ * and they return no home, and so they carry no destination line.
+ *
+ *   task update         → Tasks
+ *   issue/todo update   → Problems
+ *   a new issue/snag    → Problems
+ *   failed · held · parked · un-sent question · photo-as-evidence → Review
+ *
+ * REVIEW IS A REAL HOME, not an apology. Something we could not place still WENT somewhere, it is visible,
+ * and the line says so — which is the whole difference between "saved for review" as a fact and as a
+ * platitude.
+ */
+export function homesOf(outcomes: TerminalOutcome[]): Home[] {
+  const homes = new Set<Home>()
+  for (const o of outcomes) {
+    if (o.status === 'duplicate') continue                  // the same fact, already counted on a line above
+    if (o.status === 'failed' || o.status === 'held') { homes.add('Review'); continue }
+
+    const t = o.terminal
+    switch (t.kind) {
+      case 'object_updated':
+        homes.add(t.update.target_kind === 'task' ? 'Tasks' : 'Problems')
+        break
+      case 'object_created':
+        homes.add('Problems')
+        break
+      case 'queued_as_evidence':
+        homes.add('Review')
+        break
+      case 'question_asked':
+        // A SENT question wrote nothing yet — it is still a question, and it carries no destination line.
+        // An UN-SENT one was parked, and the park IS a write, into Review.
+        if (o.status !== 'ok') homes.add('Review')
+        break
+      case 'acked_no_place':
+        homes.add('Review')
+        break
+      case 'acked_didnt_catch':
+      case 'acked_untracked_work':
+        break                                               // NOTHING was written. Say nothing about where.
+    }
+  }
+  // A stable order, so the same two homes never render two different ways: Tasks, Problems, then Review.
+  const order: Home[] = ['Day Book', 'Tasks', 'Problems', 'Review']
+  return order.filter((h) => homes.has(h))
 }
 
 /** Executor-level no-drop — EVERY terminal must produce exactly one outcome (ok or failed); a missing one

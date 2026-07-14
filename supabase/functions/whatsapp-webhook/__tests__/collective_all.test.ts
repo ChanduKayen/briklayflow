@@ -43,6 +43,6 @@ suite('siteops #2 — explicit "all" sweeps every matching task, one combined re
     // ONE combined readback, not three lines; and NO disambiguation ask
     const out = fake.outbox()
     expect(out.some((b) => /marked all 3/i.test(b))).toBe(true)
-    expect(out.some((b) => /which of these is it about/i.test(b))).toBe(false)
+    expect(out.some((b) => b.includes('❓'))).toBe(false)
   })
 })

@@ -41,7 +41,8 @@ import './guardrail.test';
 import './convo_sweep.test';
 import './floor_unit_disambiguation.test';
 import './multiproject_loop.test';
-import './planned_snag.test';
+import './planned_snag.test'
+import './problem_place.test';
 import './collective_all.test';
 import './cause_owner.test';
 import './batched_readback.test';
@@ -71,6 +72,15 @@ import './issue_floor.test';
 import './qc_answering.test';
 import './qc_vision.test';
 import './qc_pick_resume.test';
+import './materialize_guard.test';
+import './pick_llm.test';
+import './trade_guard.test';
+import './ack_order.test';
+import './reconcile_before_read.test';
+import './offer_only_live_rows.test';
+import './one_road.test';
+import './confirmation.test';
+import './money_card.test';
 import { runAll } from './harness';
 
 await runAll();

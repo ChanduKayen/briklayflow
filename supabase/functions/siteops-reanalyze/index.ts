@@ -63,7 +63,7 @@ serve(async (req) => {
   // Idempotent (it abandons the convo), so the two drivers can't double-flush. Skipped on preview; wrapped.
   if (!preview) {
     try {
-      await flushAbandonedHeldReadbacks(supabase, (to, body, org) => send(supabase, to, { kind: 'text', body }, { org_id: org }), { now })
+      await flushAbandonedHeldReadbacks(supabase, (to, msg, org) => send(supabase, to, msg, { org_id: org }), { now })
     } catch (e) { console.error('[reanalyze:held-flush] failed (harvest unaffected):', (e as Error).message) }
   }
 

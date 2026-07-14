@@ -27,19 +27,11 @@ const stripComments = (s: string) =>
   s.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => l.replace(/\/\/.*/, '')).join('\n')
 
 // ── #4 — the question comes back as it was asked ─────────────────────────────────────────────────────────
-const ASK_BODY = `You said:
-"tiles being laid"
+const ASK_BODY = `❓ You said: _"tiles being laid"_
 
-Which of these is it about? Tap one below and I'll update that one:
-1. Tiling — Ground
-2. Floor tiling — First
+Which work is this?
 
-3. It's something else — I'll log it as a new item
-4. None of these — I'll save it for review and change nothing
-
-Or just name the work, for example "Tiling — Ground".
-
-(2 more to sort out after this.)`
+2 more to sort out after this.`
 
 suite('pending — a re-surfaced question is the question, not a summary of it', () => {
   test('(V1) ask_body is replayed verbatim: the piece, both escapes and the drain counter all survive', () => {
@@ -47,9 +39,8 @@ suite('pending — a re-surfaced question is the question, not a summary of it',
 
     expect(b.includes('You said:')).toBe(true)
     expect(b.includes('"tiles being laid"')).toBe(true)
-    expect(b.includes("It's something else")).toBe(true)          // the escapes were invisible before…
-    expect(b.includes('None of these')).toBe(true)
-    expect(b.includes('(2 more to sort out after this.)')).toBe(true)   // …as was the fact that 2 more were owed
+    expect(b.includes('Which work is this?')).toBe(true)          // the QUESTION comes back, not a summary of it
+    expect(b.includes('2 more to sort out after this.')).toBe(true)   // …as does the fact that 2 more are owed
     expect(b.includes('Back to my earlier question')).toBe(true)  // the lead
     expect(/Dismiss/.test(b)).toBe(true)                          // …and the footer still frame it
   })

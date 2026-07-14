@@ -36,9 +36,9 @@ suite('siteops — Step C1: held readback (hold-and-fold, no silent drop)', () =
   test('batch (auto-create + ask) → turn-1 HOLDS the resolved summary (no mid-turn flush), ask still sent', async () => {
     const fake = fakeSupabase(seed())
     await runSiteops(ctxFor(fake), 'slab crack, wiring done', { callModel: model })
-    expect(fake.outbox().some((b) => /which of these/i.test(b))).toBe(true)          // the ask went out
+    expect(fake.outbox().some((b) => b.includes('❓'))).toBe(true)          // the ask went out
     expect(fake.outbox().some((b) => /logged new/i.test(b))).toBe(false)             // resolved summary HELD, not flushed
-    expect(fake.outbox().some((b) => /everything landed/i.test(b))).toBe(false)
+    expect(fake.outbox().some((b) => /updates? filed*/i.test(b))).toBe(false)
     // the resolved summary is stashed on the open ask conversation
     expect(!!collisionSlots(fake)?.held_readback).toBe(true)
   })
@@ -48,7 +48,7 @@ suite('siteops — Step C1: held readback (hold-and-fold, no silent drop)', () =
     await runSiteops(ctxFor(fake), 'slab crack, wiring done', { callModel: model })
     const slots = collisionSlots(fake)
     await answerSiteops(ctxFor(fake), '1', convoOf(slots), { callModel: model })
-    const combined = fake.outbox().find((b) => /everything landed/i.test(b)) ?? ''
+    const combined = fake.outbox().find((b) => /updates? filed*/i.test(b)) ?? ''
     expect(/slab crack/i.test(combined)).toBe(true)      // the HELD auto-resolved item
     expect(/wiring/i.test(combined)).toBe(true)          // the answered item
   })

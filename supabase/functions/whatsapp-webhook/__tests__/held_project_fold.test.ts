@@ -44,7 +44,7 @@ suite('siteops — Step C2c: held fold across the which_project ask', () => {
     await runSiteops(ctxFor(fake), 'ASM lo slab crack, ghost site lo cement short', { callModel: model })
     const slots = projectSlots(fake)
     await answerSiteops(ctxFor(fake), '2', convoOf(slots), { callModel: model })   // pick Soundharya (P2)
-    const combined = fake.outbox().find((b) => /everything landed/i.test(b)) ?? ''
+    const combined = fake.outbox().find((b) => /updates? filed*/i.test(b)) ?? ''
     expect(/slab crack/i.test(combined)).toBe(true)      // the HELD auto-resolved item
     expect(/cement short/i.test(combined)).toBe(true)    // the now-sited item
   })

@@ -5,7 +5,7 @@ import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { PageSkeleton } from '../components/SkeletonLoader'
 import { useQueryGate } from '../components/QueryGate'
-import ConstructionConfig from '../components/siteOps/ConstructionConfig'
+import { PlanSetup } from '../components/desk/PlanSetup'
 import ProjectSequence, { prefetchProjectQueries } from '../components/siteOps/ProjectSequence'
 import { UserPicker, useOrgMembers, MemberAvatar } from '../components/siteOps/UserPicker'
 import { NarrationComposer } from '../components/siteOps/NarrationComposer'
@@ -116,8 +116,8 @@ function ProjectTasksScoped({ session, projectId, filterSlot }: { session: Sessi
     queryFn: async () => {
       // Rich select carries the Block-A-UI layers (owner, history, QC provenance, duration).
       // If those columns aren't migrated yet, fall back to the base shape so the page keeps working.
-      const RICH = 'task_id, task_no, phase, trade, floor_label, unit_label, name, description, seq_no, status, source, duration_days, owner_id, owner_source, status_history, updated_at, node_key, task_type_id, site_task_qc(id, question, is_critical, seq, qc_status, answer, answered_at, source_narration_id)'
-      const BASE = 'task_id, task_no, phase, trade, floor_label, unit_label, name, description, seq_no, status, source, site_task_qc(id, question, is_critical, seq, qc_status)'
+      const RICH = 'task_id, task_no, phase, trade_phase, trade, floor_label, unit_label, name, description, seq_no, status, source, duration_days, owner_id, owner_source, status_history, updated_at, node_key, task_type_id, site_task_qc(id, question, is_critical, seq, qc_status, answer, answered_at, source_narration_id)'
+      const BASE = 'task_id, task_no, phase, trade_phase, trade, floor_label, unit_label, name, description, seq_no, status, source, site_task_qc(id, question, is_critical, seq, qc_status)'
       const q = (cols: string) => supabase.from('site_tasks').select(cols).eq('project_id', projectId).order('seq_no').order('task_no')
       let res: { data: unknown; error: { message: string } | null } = await q(RICH)
       if (res.error) res = await q(BASE)
@@ -640,8 +640,8 @@ function ProjectTasksScoped({ session, projectId, filterSlot }: { session: Sessi
 
       {/* ── modals ───────────────────────────────────────────────────── */}
       {showSetup && project && (
-        <Modal title="Set up the task plan" onClose={() => setShowSetup(false)}>
-          <ConstructionConfig
+        <Modal title="Set up the task plan" onClose={() => setShowSetup(false)} wide>
+          <PlanSetup
             projectId={projectId}
             projectType={(project.project_type as string) ?? 'Residential'}
             onComplete={() => { setShowSetup(false); firedRef.current = false; refetchTasks() }}
@@ -883,7 +883,9 @@ function EmptyState({ hasStack, onSetUp }: { hasStack: boolean; onSetUp: () => v
 }
 
 // ── lightweight centered modal (matches the page's self-styled aesthetic) ─────
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+/** `wide` is for the plan-setup card: a form BESIDE a drawing needs the room, and at 460px the
+ *  drawing gets cropped. Everything else stays a narrow column, which is what a column wants. */
+function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', h)
@@ -896,7 +898,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{ width: '100%', maxWidth: 460, maxHeight: '90vh', overflowY: 'auto', background: CREAM, borderRadius: 22, border: `1px solid ${LINE}`, boxShadow: '0 24px 64px rgba(34,26,19,0.28)', padding: 24, animation: 'siteSettle 220ms cubic-bezier(.16,1,.3,1)' }}
+        style={{ width: '100%', maxWidth: wide ? 960 : 460, maxHeight: '90vh', overflowY: 'auto', background: CREAM, borderRadius: 22, border: `1px solid ${LINE}`, boxShadow: '0 24px 64px rgba(34,26,19,0.28)', padding: 24, animation: 'siteSettle 220ms cubic-bezier(.16,1,.3,1)' }}
       >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
           <h2 style={{ fontFamily: SERIF, fontSize: 21, fontWeight: 600, color: INK, margin: 0 }}>{title}</h2>
@@ -1050,6 +1052,9 @@ function TaskRow({ task, expanded, onToggle, anim, drag, sched, atRisk, onDismis
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button onClick={onToggle} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left' }}>
             <span style={{ fontSize: 14.5, fontWeight: 600, color: INK, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{task.name}</span>
+            {/* the trade pass, beside the name rather than inside it — the list used to read as a column
+                of parentheticals ("… (1st fix)", "… (2nd fix)", "… (final fix)") */}
+            {task.trade_phase && <span style={chip(INK_FAINT)}>{task.trade_phase}</span>}
             {isManual && <span style={chip(INK_FAINT)}>Added</span>}
           </button>
           {p.total > 0 && <QcProgressChip p={p} />}

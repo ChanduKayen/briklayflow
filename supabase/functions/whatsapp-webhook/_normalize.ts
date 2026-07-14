@@ -280,13 +280,45 @@ function sarvamLang(iso?: string): string {
 // confuse acoustically-close Indian languages (Telugu <-> Tamil), so set the prior.
 const STT_LOCALE_PRIOR = (Deno.env.get('WA_STT_LANGUAGE') ?? '').trim()
 
-// Domain priming -- a SAMPLE of expected vocabulary (names + payment words), NOT an
-// instruction. Whisper/Sarvam use the prompt as context to bias spelling; instruction-y
-// prompts hurt recognition. The transcript stays in the speaker's native script -- the
-// extractor handles understanding + English output -- so this stays a clean natural phrase.
+// DOMAIN PRIMING -- a SAMPLE of the world this speaker is talking about, NOT an instruction and NOT a
+// classifier. Whisper/Sarvam read the prompt as CONTEXT to bias spelling and word choice; instruction-y
+// prompts hurt recognition. The transcript stays in the speaker's native script -- the extractor handles
+// understanding + English output -- so this stays a clean, natural description of the domain.
+//
+// ── WHY THIS GREW (live failure, 2026-07-13) ────────────────────────────────────────────────────────────
+// It used to describe ONLY payments: "Construction site payments... cash, UPI, advance, cement, mestri."
+// But transcription happens BEFORE routing -- we cannot know whether a voice note is a payment or a site
+// report until it has been transcribed -- so every site report was being transcribed by a model primed to
+// hear money words. It duly heard them.
+//
+// The supervisor said "ఎలక్ట్రికల్ గాడులు తీసాం" (we cut the electrical CHASES). It came back as
+// "ఎలక్ట్రికల్ గార్డలు తీసాం" -- గాడులు (chases) heard as గార్డలు (guards) -- and the meaning inverted with
+// it: for a chase, "తీసాం" is CUT; for a guard, it is REMOVED. The extractor then faithfully reported
+// "electrical guards removed", which is not a thing, and the negation that followed became an invented
+// issue on his site.
+//
+// A transcriber cannot spell a word it has never been told exists. So this now describes BOTH halves of
+// what a site supervisor actually talks about -- the money AND the work -- because he sends both down the
+// same WhatsApp line, and we do not get to know which is coming.
+//
+// It is a SAMPLE, not a word-list to match against: nothing downstream reads these words, and no routing
+// decision is made from them. Adding a word here can only help the transcriber spell it; it can never make
+// a message be treated as a payment or a site report. That is the router's job, on the text, afterwards.
 const STT_PROMPT =
-  'Construction site payments in Kakinada, Andhra Pradesh. Worker and vendor names like ' +
-  'Ramu, Suresh, Lakshmi, Ravi, Subramanyam. Amounts in rupees: cash, UPI, advance, cement, plastering, mestri.'
+  'A construction site supervisor in Kakinada, Andhra Pradesh, speaking to his office on WhatsApp. ' +
+  'He reports two kinds of thing, often in the same message. ' +
+  // — the money half (unchanged in substance; this is what the prompt used to be)
+  'MONEY: payments to workers and vendors, in rupees — cash, UPI, advance, bill, quotation. ' +
+  'Names like Ramu, Suresh, Lakshmi, Ravi, Subramanyam, and the mestri (mason foreman). ' +
+  // — the work half (new; the whole reason this failed)
+  'THE WORK: what was built today, what went wrong, what is pending. He speaks in Telugu with the English ' +
+  'trade words a site actually uses — గాడులు (chases, the grooves cut into a wall for conduit or pipe), ' +
+  'కండ్యూట్ (conduit), వైరింగ్ (wiring), కరెంట్ (electrical), ప్లంబింగ్ (plumbing), పైపులు (pipes), ' +
+  'స్లాబ్ (slab), షట్టరింగ్ (shuttering), క్యూరింగ్ (curing), ప్లాస్టరింగ్ (plastering), పుట్టీ (putty), ' +
+  'టైల్స్ (tiles), వాటర్‌ప్రూఫింగ్ (waterproofing), సీలింగ్ (ceiling), లిఫ్ట్ (lift), ' +
+  'first fix, second fix, final fix. ' +
+  'He names floors and units — ground, stilt, first, second, third floor, Unit A, Unit B — and says whether ' +
+  'work is done (అయిపోయింది), pending (ఇంకా కాలేదు), or not the one he means (కాదు).'
 
 /**
  * Resolve the spoken language for transcription, best signal first:

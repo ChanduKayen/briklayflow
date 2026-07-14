@@ -69,7 +69,7 @@ const listOf = (fake: ReturnType<typeof fakeSupabase>): any =>
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   fake.writesTo('outbox').map((w: any) => w.payload?.payload).find((p: any) => p?.kind === 'list')
 const textPick = (fake: ReturnType<typeof fakeSupabase>) =>
-  fake.outbox().find((b) => /which of these is it about/i.test(b)) ?? ''
+  fake.outbox().find((b) => b.includes('❓')) ?? ''
 
 suite('siteops — the item pick as a WhatsApp LIST', () => {
   test('(UI1) a 3-way tie → an interactive LIST: 3 rows + 2 escapes, each row naming the WORK and the floor · unit', async () => {
@@ -92,8 +92,11 @@ suite('siteops — the item pick as a WhatsApp LIST', () => {
     }
     // ids are positional — display order IS resolution order
     expect(list.rows.map((r: { id: string }) => r.id)).toEqual(['pick:1', 'pick:2', 'pick:3', 'pick:4', 'pick:5'])
-    // THE BODY IS STILL THE TRUTH: the full, untruncated lines survive above the list
-    expect(/Wall tiling \/ dado — First · Unit A/.test(list.body)).toBe(true)
+    // THE BODY DOES NOT REPRINT THE ROWS — the P1 duplicate print. The candidates appear ONCE, in the rows,
+    // where they are tappable; the body asks the question and nothing else. (rowTitle() made that safe: the
+    // title no longer truncates, so the body is not needed as the place a full name can be read.)
+    expect(/Wall tiling \/ dado/.test(list.body)).toBe(false)
+    expect(/Which work is this\?/.test(list.body)).toBe(true)   // same place, different work → the WORK axis
   })
 
   test('(UI2) a LOCATION pick (one task, four floors) → the floor · unit is the row title, the work the description', async () => {
@@ -104,6 +107,9 @@ suite('siteops — the item pick as a WhatsApp LIST', () => {
     expect(list.rows[0].title).toBe('First · Unit A')             // what tells them apart
     expect(list.rows[3].title).toBe('Fourth · Unit A')
     expect(list.rows[0].description).toBe('Wiring (wire pulling) — First · Unit A')
+    // …and the QUESTION follows the same axis. "Which work is this?" over five floors of the one job is a
+    // non-sequitur: the answer he'd give is already true of every row.
+    expect(/Where should this go\?/.test(list.body)).toBe(true)
   })
 
   test('(UI3) more than 8 candidates → TEXT pick (never a silently dropped row inside a 10-row cap)', async () => {

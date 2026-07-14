@@ -74,7 +74,7 @@ suite('siteops — the QC evidence survives the which_item question (gap 1)', ()
     await runSiteops(ctx(fake), 'second floor steel work done, cover blocks in', { callModel: model })
 
     // the tie asked, and nothing was applied yet
-    expect(fake.outbox().some((b) => /Which of these is it about/i.test(b))).toBe(true)
+    expect(fake.outbox().some((b) => b.includes('❓'))).toBe(true)
     expect(qcUpdates(fake).length).toBe(0)
 
     // the statements were carried INTO the open pick's slots — they are what the answer will apply

@@ -9,6 +9,7 @@
 // composed numbered text). j1/j3 pin the corrected resolution (display number == stored item == resolved
 // item; a natural label resolves). j4 guards the near-absent path (unchanged didn't-catch).
 
+import { mentionsNothingToUpdate } from '../_siteops_resolution.ts'
 import { suite, test, expect } from './harness'
 import { fakeSupabase, type Seed } from './fake_supabase'
 import { runSiteops, answerSiteops } from '../_agents/siteops.ts'
@@ -61,17 +62,31 @@ suite('siteops — Bug 1: near-candidate which_item reuses typed-pick (offered-l
     expect(offered[0].id).toBe('iss-first')
   })
 
-  // j2 (one message, the format RED) — the question is ONE composed TEXT message that NUMBERS the offered
-  // list (visible index == stored index), not an interactive list with no numbers and not N messages.
-  test('(j2) the which_item question is ONE composed, numbered message', async () => {
+  // j2 (ONE message) — the invariant that mattered was never the numbering, it was the ONENESS: the ask is
+  // a single composed message whose OFFERED ORDER is the order the answer resolves against. It used to prove
+  // that by numbering the candidates in the body — and that body-print is exactly the duplicate that made the
+  // live message unreadable, because the interactive rows carried the same three lines again underneath it.
+  //
+  // So the proof moves to where the candidates now live: the ROWS. Display order == stored order, still
+  // provable, and now provable on the thing the supervisor actually taps.
+  test('(j2) the which_item question is ONE message, and its rows are the offered order', async () => {
     const fake = fakeSupabase(seed())
-    await ask(fake)
-    const qs = fake.outbox().filter((b) => /which of these/i.test(b))
+    const slots = await ask(fake)
+    const qs = fake.outbox().filter((b) => b.includes('❓'))
     expect(qs.length).toBe(1)                                 // ONE message, not one-per-candidate
-    expect(/1\.\s*Slab — First/.test(qs[0])).toBe(true)       // visible number bound to the first offered item
-    expect(/2\.\s*Slab — Ground/.test(qs[0])).toBe(true)
-    expect(/3\.\s*Slab — Second/.test(qs[0])).toBe(true)
-    expect(/\bnew\b/i.test(qs[0])).toBe(true)                 // natural-answer exit, not integer-only
+
+    const list = fake.writesTo('outbox').map((w) => w.payload?.payload).find((p) => p?.kind === 'list')
+    expect(!!list).toBe(true)
+    // 3 candidates + the two escapes, and the ids are positional — row N is stored candidate N
+    expect(list.rows.map((r: { id: string }) => r.id)).toEqual(['pick:1', 'pick:2', 'pick:3', 'pick:4', 'pick:5'])
+    expect((slots.candidates as { title: string }[]).map((c) => c.title))
+      .toEqual(['Slab — First floor', 'Slab — Ground floor', 'Slab — Second floor'])
+    expect(list.rows[0].title).toBe('First floor')            // same work, different places → the LOCATION axis
+    expect(list.rows[2].title).toBe('Second floor')
+    expect(/\bnew\b/i.test(list.rows[3].title)).toBe(true)    // the natural-answer exit, not integer-only
+
+    // THE BODY DOES NOT REPRINT THEM. One fact, one place on screen.
+    expect(/Slab — Ground floor/.test(qs[0])).toBe(false)
   })
 
   // j3 (natural answer) — a typed item name (not a number) resolves by MEANING via resolveTypedPick.
@@ -89,6 +104,6 @@ suite('siteops — Bug 1: near-candidate which_item reuses typed-pick (offered-l
     const decUnrelated = JSON.stringify({ project_hint: null, items: [{ type: 'progress', text: 'weather is nice', task_hint: null, qc_statements: [], cause: null, cause_reason: null, owner_hint: null, date_hint: null, project_hint: null }] })
     await runSiteops(ctxFor(fake), 'weather is nice today', { callModel: model(decUnrelated, R_BOTH_FALSE) })
     expect(fake.writesTo('wa_conversations').some((w) => w.payload?.slots_so_far?.kind === 'siteops_batch_collision')).toBe(false)
-    expect(fake.outbox().some((b) => /nothing updated/i.test(b))).toBe(true)
+    expect(fake.outbox().some((b) => mentionsNothingToUpdate(b))).toBe(true)
   })
 })

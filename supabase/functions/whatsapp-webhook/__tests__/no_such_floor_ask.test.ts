@@ -119,10 +119,18 @@ const seed = (): Seed => ({
       ],
     },
   }],
+  // The node_keys are the engine's REAL ones for this stack (`floor_tile@<Floor>/unit`), not invented
+  // handles. They used to read `flooring@Stilt` — a key the library has never generated — and the VM
+  // guardrail (node_key ∈ VM) should have refused every write onto them. It did not, because the fake
+  // could not see `projects.org_id` (added by a DO-block loop, invisible to the column parser), so
+  // materialize read the project as NULL, built an EMPTY VM, and the guardrail disabled itself — its
+  // documented "absent → can't judge → proceed" case. The guardrail was therefore never once exercised by a
+  // journey. Now that the parser sees the column, an invented key is refused here exactly as in prod.
+  // (The NAME stays 'Flooring': the guardrail keys off node_key, and the narrative reads better.)
   site_tasks: {
-    'tk-stilt': { task_id: 'tk-stilt', project_id: 'P1', name: 'Flooring', trade: 'finishes', floor_label: 'Stilt', unit_label: null, status: 'open', node_key: 'flooring@Stilt' },
-    'tk-ground': { task_id: 'tk-ground', project_id: 'P1', name: 'Flooring', trade: 'finishes', floor_label: 'Ground', unit_label: null, status: 'open', node_key: 'flooring@Ground' },
-    'tk-first': { task_id: 'tk-first', project_id: 'P1', name: 'Flooring', trade: 'finishes', floor_label: 'First', unit_label: null, status: 'open', node_key: 'flooring@First' },
+    'tk-stilt': { task_id: 'tk-stilt', project_id: 'P1', name: 'Flooring', trade: 'finishes', floor_label: 'Stilt', unit_label: null, status: 'open', node_key: 'floor_tile@Stilt/unit' },
+    'tk-ground': { task_id: 'tk-ground', project_id: 'P1', name: 'Flooring', trade: 'finishes', floor_label: 'Ground', unit_label: null, status: 'open', node_key: 'floor_tile@Ground/unit' },
+    'tk-first': { task_id: 'tk-first', project_id: 'P1', name: 'Flooring', trade: 'finishes', floor_label: 'First', unit_label: null, status: 'open', node_key: 'floor_tile@First/unit' },
   },
   problems: {},
   chase_batches: [],
@@ -158,6 +166,14 @@ const model = (_s: string, user: string): Promise<string> =>
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const convoOf = (slots: any): any => ({ id: 'c1', org_id: ORG, sender_number: SENDER, status: 'OPEN', owning_agent: 'SITEOPS', pending_question: 'which item?', staged_entry_id: null, last_message_id: null, slots_so_far: slots })
 
+// A WRITE ONTO THE WORK — a task's STATE moving. Not every touch of the site_tasks table is one: since the
+// project is now reconciled before it is read (2026-07-13), the ENGINE also writes here — it lays down the
+// rows the library generates and re-sequences the ones it already had. Those are the generator keeping the
+// list true, and they say nothing about the supervisor's report. What these tests mean by "no wrong write"
+// is that nothing MOVED A TASK — so look for the status, which is the only thing a narration ever sets.
+const stateWrites = (fake: ReturnType<typeof fakeSupabase>) =>
+  fake.writesTo('site_tasks').filter((w) => w.op === 'update' && !!w.payload && (!!w.payload.status || !!w.payload.status_history))
+
 suite('siteops — the live cellar journey: photo → ask → "save it to stilt floor" lands the work', () => {
   test('(J1) a photo captioned "ASM Cellar flooring" OPENS a pick (state pending), never a dead end', async () => {
     const fake = fakeSupabase(seed())
@@ -170,10 +186,10 @@ suite('siteops — the live cellar journey: photo → ask → "save it to stilt 
     expect(new Set(ids)).toEqual(new Set(['tk-stilt', 'tk-ground', 'tk-first']))
     expect(slots.image?.storagePath).toBe(PHOTO)                          // the photo rides the pick
     // the honest sentence survives, now as the question's preamble
-    const q = fake.outbox().find((b) => /which of these/i.test(b)) ?? ''
+    const q = fake.outbox().find((b) => b.includes('❓')) ?? ''
     expect(/cellar/i.test(q)).toBe(true)
     expect(/stilt/i.test(q)).toBe(true)
-    expect(fake.writesTo('site_tasks').some((w) => w.op === 'update')).toBe(false)   // still no wrong write
+    expect(stateWrites(fake).length).toBe(0)                              // still no wrong write
   })
 
   test('(J2) "Save it to stilt floor" resolves the open pick → the Stilt row is updated, the photo attached', async () => {
@@ -183,7 +199,7 @@ suite('siteops — the live cellar journey: photo → ask → "save it to stilt 
 
     await answerSiteops(textCtx(fake), 'Save it to stilt floor', convoOf(slots), { callModel: model })
 
-    const updated = fake.writesTo('site_tasks').filter((w) => w.op === 'update')
+    const updated = stateWrites(fake)
     expect(updated.some((w) => w.filters.some(([k, v]) => k === 'task_id' && v === 'tk-stilt'))).toBe(true)
     expect(updated.some((w) => w.filters.some(([k, v]) => k === 'task_id' && (v === 'tk-ground' || v === 'tk-first')))).toBe(false)
     // the photo the whole exchange was about lands on the row it was about
@@ -199,7 +215,7 @@ suite('siteops — the live cellar journey: photo → ask → "save it to stilt 
 
     await answerSiteops(textCtx(fake), 'none of these', convoOf(slots), { callModel: model })
 
-    expect(fake.writesTo('site_tasks').some((w) => w.op === 'update')).toBe(false)
+    expect(stateWrites(fake).length).toBe(0)
     expect(fake.writesTo('siteops_unplaced').length > 0).toBe(true)
   })
 })

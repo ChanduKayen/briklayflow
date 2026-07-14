@@ -32,7 +32,7 @@ const seed = (): Seed => ({
   site_narration_id: 'narr-1',
 })
 
-const pickMsg = (fake: ReturnType<typeof fakeSupabase>) => fake.outbox().find((b) => /which of these/i.test(b)) ?? ''
+const pickMsg = (fake: ReturnType<typeof fakeSupabase>) => fake.outbox().find((b) => b.includes('❓')) ?? ''
 
 suite('siteops — Step 4: the cross-kind fork is unreachable after the task-pin redesign', () => {
   // DELETED (2026-07-11): the two cross-kind fork journeys. They drove a which_item pick spanning an ISSUE and

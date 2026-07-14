@@ -9,7 +9,7 @@ import {
   releaseSenderLock,
   WriteCommitFailed,
 } from './_spine.ts'
-import { send, sendTypingIndicator } from './_format.ts'
+import { send, sendNow, keepTyping } from './_format.ts'
 import { normalize, deriveDispatchMedia } from './_normalize.ts'
 import { dispatch } from './_dispatch.ts'
 import { handleReaction } from './_agents/siteops.ts'   // STEP 5: reactions-as-confirm / retract
@@ -362,8 +362,36 @@ async function processJob(
 ): Promise<void> {
   const { message, from, senderName, registered, messageId, jobId, orgId, firstTouch, dormant } = inbound
 
-  // Typing indicator: inline, best-effort, fire-and-forget. Never affects the job.
-  if (messageId) sendTypingIndicator(messageId).catch(() => {})
+  // ── THE MEDIA ACK, AT ONCE (2026-07-13) ──────────────────────────────────────────────────────────────
+  // The agent acks (TRANSACTION / PROCUREMENT / SITEOPS) all fire from the DISPATCHER — which runs after
+  // transcription and after the router. Measured on a live voice note: STT 5.4s + router 4.8s, so the "got
+  // it" landed **ten seconds** after he stopped speaking. That is not an acknowledgement. That is a delayed
+  // reaction, and he has already looked at the screen twice.
+  //
+  // A voice note or a photo needs nothing computed to be acknowledged honestly. We do not yet know what he
+  // said, which site he meant, or even which agent will own the turn — and this claims none of it. It claims
+  // the one thing that is true of a voice note whatever it turns out to be about: it arrived, and we are
+  // listening to it. Sent DIRECTLY (sendNow), because a queued ack drained ten seconds later is not an ack.
+  //
+  // A TEXT message does not get one: the dispatcher's agent ack is only ~5s behind, and it can say something
+  // specific ("recording your transaction…") because by then we know what it IS. Naming the agent beats
+  // beating it by four seconds.
+  const mediaKind: 'voice' | 'image' | null =
+    message?.type === 'audio' ? 'voice' : message?.type === 'image' ? 'image' : null
+  if (mediaKind && registered) {
+    // No transcript yet, so no detected language — use the deployment's regional prior, which is exactly what
+    // WA_STT_LANGUAGE is for. The ack is emoji-led and three words long precisely because it is a guess.
+    const prior = (Deno.env.get('WA_STT_LANGUAGE') ?? '').trim()
+    const lang = (prior === 'te' || prior === 'hi' ? prior : 'en') as 'en' | 'te' | 'hi'
+    void sendNow(supabase, from, M.mMediaAck(lang, mediaKind))
+  }
+
+  // TYPING, FOR AS LONG AS WE ARE THINKING. WhatsApp expires a typing indicator after 25s, and a SiteOps
+  // voice turn runs longer than that — so a single fire-and-forget left the supervisor watching "typing…"
+  // stop before the answer arrived, which reads as "he gave up". keepTyping re-arms until we stop it.
+  // Stopped on EVERY exit: the finally below, and each early return above it (reaction / unsupported /
+  // unclear voice). A timer left running in an edge isolate would re-arm against a message we answered.
+  const stopTyping = keepTyping(messageId)
 
   // Normalize every inbound type to the common envelope (image->vision now,
   // voice->transcribe via Sarvam/Whisper). Failure -> treat as unsupported.
@@ -394,6 +422,7 @@ async function processJob(
   if (norm.source_type === 'reaction') {
     if (norm.reaction) await handleReaction(supabase, { orgId, from, reaction: norm.reaction })
     if (jobId) await markJob(supabase, jobId, 'WRITTEN')
+    stopTyping()
     return
   }
 
@@ -401,6 +430,7 @@ async function processJob(
   if (norm.source_type === 'unsupported') {
     await send(supabase, from, M.mUnsupported('en'), { org_id: orgId, wamid: messageId })
     if (jobId) await markJob(supabase, jobId, 'WRITTEN')
+    stopTyping()
     return
   }
   if (norm.source_type === 'voice' && !norm.text.trim()) {
@@ -408,6 +438,7 @@ async function processJob(
     // don't claim "coming soon". (See _normalize: the only empty path now is a real miss.)
     await send(supabase, from, M.mVoiceUnclear('en'), { org_id: orgId, wamid: messageId })
     if (jobId) await markJob(supabase, jobId, 'WRITTEN')
+    stopTyping()
     return
   }
 
@@ -457,6 +488,7 @@ async function processJob(
       }
     }
   } finally {
+    stopTyping()
     await releaseSenderLock(supabase, from, lockKey)
   }
 }

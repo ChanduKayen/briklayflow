@@ -1,0 +1,226 @@
+/* PLAN SETUP — the reference stylesheet (plan-setup-v6.html), copied not reinterpreted.
+ *
+ * SCOPED TO .psetup, and its tokens live there too. It mounts inside two very different hosts — the
+ * Site Desk (its own scoped world) and the app's Tailwind chrome — so it must carry everything it
+ * needs and leak nothing: the button reset, the type, the tokens. `all: revert` on its buttons wins
+ * back the ground both hosts' resets take, without touching anything outside this card.
+ *
+ * Values are the reference's, to the decimal. Motion timings are the reference's, to the ms.
+ */
+
+.psetup {
+  --bg: #f7f6f4; --surface: #fff;
+  --line: #eceae6; --line-soft: #f1efec;
+  --ink: #211d18; --ink-2: #6b645c; --ink-3: #a29a91;
+  --green: #3c6e53; --green-soft: #eef4f0; --green-line: #cfe0d5;
+  --fill: #f4f3f0;
+  --t-hover: .16s cubic-bezier(.3, .7, .4, 1);
+  --t-morph: .32s cubic-bezier(.4, 0, .2, 1);
+  --t-settle: .4s cubic-bezier(.2, .8, .3, 1);
+
+  font-family: "Inter", -apple-system, system-ui, sans-serif;
+  color: var(--ink);
+  font-size: 14px; line-height: 1.5; font-feature-settings: "tnum";
+  width: 100%; max-width: 880px; margin: 0 auto; text-align: left;
+}
+.psetup *, .psetup *::before, .psetup *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* THE HOST'S BUTTON RESET DOES NOT REACH IN HERE — and the specificity here is load-bearing.
+ *
+ * This must be WEAKER than the card's own button rules (.psetup .gen, .psetup .segx button, …) and
+ * STRONGER than nothing else. I briefly wrote it as `.psetup.psetup button` (0,2,1) to out-rank the
+ * desk's `.desk-root button` (0,1,1) — and it then out-ranked `.psetup .gen` (0,2,0) too, so
+ * `all: revert` stripped the generate button back to a bare <button>. A reset that beats the styles
+ * it exists to protect is not a reset.
+ *
+ * So the reset stays at (0,1,1), below every component rule, and the desk is kept out a different
+ * way: the wrapper wears `.desk-legacy`, the boundary desk.css already honours (`:not(:where(
+ * .desk-legacy *))`). Tailwind's preflight is element-level, so this out-ranks it anywhere else. */
+.psetup button {
+  all: revert;
+  font-family: inherit; cursor: pointer; border: none; background: none; color: inherit;
+  font-size: inherit; text-align: left; padding: 0; margin: 0;
+}
+.psetup button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 8px; }
+
+.psetup .card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 20px;
+  padding: 26px clamp(20px, 4vw, 32px) 24px;
+}
+.psetup .card-head { font-size: 15px; color: var(--ink-2); line-height: 1.55; margin-bottom: 20px; max-width: 56ch; }
+.psetup .card-head b { color: var(--ink); font-weight: 600; }
+/* THE SPLIT, AND ITS BOUNDARIES.
+ *
+ * The reference is a standalone page, so a hard `1fr 340px` and a 760px breakpoint were enough. This
+ * card mounts inside a modal, a wizard and the Site Desk — three hosts of three different widths —
+ * so the media query, which asks about the WINDOW, was asking the wrong question: a 960px window can
+ * still hand this card a 600px slot. Container queries ask the right one — how much room do I have —
+ * and the fallback below keeps the answer sane where they are unsupported.
+ *
+ * minmax(0, …) on the form column: without it a long readback line sets the column's minimum width
+ * and the whole grid overflows its card instead of wrapping. That is the classic grid blow-out. */
+.psetup { container-type: inline-size; }
+.psetup .split {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 340px); gap: 24px; align-items: center;
+}
+@container (max-width: 700px) {
+  .psetup .split { grid-template-columns: minmax(0, 1fr); }
+  .psetup .preview { order: -1; margin: 0 auto; }      /* the building leads when it is stacked */
+}
+/* no container queries: fall back to the window, the reference's own rule */
+@supports not (container-type: inline-size) {
+  @media (max-width: 760px) {
+    .psetup .split { grid-template-columns: minmax(0, 1fr); }
+    .psetup .preview { order: -1; margin: 0 auto; }
+  }
+}
+/* very narrow (a phone, the modal on a small screen): the two steppers stop fighting for one line */
+@container (max-width: 380px) {
+  .psetup .row2 { grid-template-columns: 1fr; }
+  .psetup .podgrid { grid-template-columns: 1fr; }
+}
+.psetup .qlabel { font-size: 12.5px; font-weight: 600; margin-bottom: 8px; color: var(--ink-2); }
+
+/* parking segmented */
+.psetup .segx { position: relative; display: flex; background: var(--fill); border-radius: 11px; padding: 3px; }
+.psetup .segx .thumb {
+  position: absolute; top: 3px; bottom: 3px; left: 0; width: 0; background: var(--ink); border-radius: 8px;
+  transition: left var(--t-settle), width var(--t-settle);
+}
+.psetup .segx button {
+  position: relative; z-index: 1; flex: 1; text-align: center; padding: 9px 8px; min-height: 40px; border-radius: 8px;
+  font-size: 13px; font-weight: 500; color: var(--ink-2); transition: color var(--t-morph);
+}
+.psetup .segx button.on { color: #fff; font-weight: 600; }
+.psetup .seghint { font-size: 11.5px; color: var(--ink-3); margin-top: 6px; min-height: 16px; }
+
+/* steppers */
+.psetup .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 18px; }
+.psetup .stepbox { display: flex; align-items: center; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.psetup .stepbox button {
+  width: 46px; height: 46px; display: flex; align-items: center; justify-content: center; font-size: 19px; color: var(--ink-2);
+  transition: background var(--t-hover), color var(--t-hover), transform .09s ease-out;
+}
+.psetup .stepbox button:hover { background: var(--fill); color: var(--ink); }
+.psetup .stepbox button:active { transform: scale(.9); }
+.psetup .stepbox button:disabled { opacity: .3; cursor: not-allowed; }
+.psetup .stepnum { flex: 1; text-align: center; font-size: 21px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.psetup .stepnum.tick { animation: ps-numpop .3s cubic-bezier(.3, 1.6, .4, 1); }
+@keyframes ps-numpop { 35% { transform: scale(1.16); } }
+.psetup .stephint { font-size: 11.5px; color: var(--ink-3); margin-top: 5px; min-height: 16px; }
+
+/* the scene */
+.psetup .preview { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.psetup #scene { width: 100%; max-width: 340px; display: block; }
+.psetup #scene text { font-family: "Inter", sans-serif; font-size: 8.5px; font-weight: 600; letter-spacing: .09em; fill: var(--ink-3); }
+.psetup .bcap { font-size: 11.5px; color: var(--ink-3); text-align: center; min-height: 18px; }
+.psetup .bcap b { color: var(--ink-2); font-weight: 600; }
+
+/* readback + popover */
+.psetup .readback {
+  margin-top: 20px; padding: 14px 16px; border-radius: 12px; background: var(--fill);
+  font-size: 13.5px; color: var(--ink-2); line-height: 1.6; position: relative;
+}
+.psetup .readback b { color: var(--ink); font-weight: 600; }
+.psetup .readback .amline.pulse { animation: ps-linepulse .8s ease-out; }
+@keyframes ps-linepulse { 0% { color: var(--green); } 100% { color: inherit; } }
+.psetup .adjust {
+  font-weight: 600; color: var(--ink); text-decoration: underline; text-underline-offset: 3px;
+  transition: color var(--t-hover);
+}
+.psetup .adjust:hover { color: var(--green); }
+.psetup .pod {
+  position: absolute; left: 12px; right: 12px; bottom: calc(100% + 8px); z-index: 40;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: 0 16px 48px -12px rgba(33, 29, 24, .22); padding: 18px 20px 16px;
+  transform-origin: bottom left; opacity: 0; transform: scale(.97) translateY(4px); pointer-events: none;
+  transition: opacity .2s ease, transform .24s cubic-bezier(.3, .9, .35, 1.05);
+}
+.psetup .pod.open { opacity: 1; transform: none; pointer-events: auto; }
+.psetup .podgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px 20px; }
+.psetup .glabel { font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 5px; }
+.psetup .gcol { display: flex; flex-direction: column; gap: 2px; }
+.psetup .am {
+  display: flex; align-items: center; gap: 9px; width: 100%; font-size: 13px; color: var(--ink-2);
+  padding: 6px 7px; border-radius: 8px;
+  transition: background var(--t-hover), color var(--t-hover);
+}
+.psetup .am:hover { background: #fbfaf9; color: var(--ink); }
+.psetup .ambox {
+  flex: none; width: 17px; height: 17px; border-radius: 6px; border: 1.5px solid var(--line); background: var(--surface);
+  display: flex; align-items: center; justify-content: center;
+  transition: background var(--t-morph), border-color var(--t-morph);
+}
+.psetup .am.on { color: var(--ink); }
+.psetup .am.on .ambox { background: var(--green); border-color: var(--green); }
+.psetup .ambox svg { width: 10px; height: 10px; }
+.psetup .ambox path {
+  fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 20; stroke-dashoffset: 20;
+}
+.psetup .am.on .ambox path { animation: ps-draw .3s cubic-bezier(.4, 0, .2, 1) .04s forwards; }
+@keyframes ps-draw { to { stroke-dashoffset: 0; } }
+.psetup .am .tag {
+  margin-left: auto; font-size: 9.5px; font-weight: 600; letter-spacing: .05em; color: var(--ink-3);
+  text-transform: uppercase; opacity: 0; transition: opacity var(--t-hover);
+}
+.psetup .am.auto .tag { opacity: 1; }
+.psetup .podfoot {
+  display: flex; align-items: center; margin-top: 12px; padding-top: 10px;
+  border-top: 1px solid var(--line-soft); font-size: 12px; color: var(--ink-3);
+}
+.psetup .podfoot .reset { margin-left: auto; color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+
+/* generate */
+.psetup .gen {
+  position: relative; width: 100%; height: 52px; border-radius: 14px; overflow: hidden; margin-top: 14px;
+  display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 600;
+  background: var(--ink); color: #fff;
+  transition: background var(--t-morph), box-shadow var(--t-hover), transform .09s ease-out;
+}
+.psetup .gen:hover { box-shadow: 0 10px 26px -12px rgba(33, 29, 24, .45); }
+.psetup .gen:active { transform: scale(.99); }
+.psetup .gen.done { background: var(--green); }
+.psetup .gen .layer {
+  display: inline-flex; align-items: center; gap: 9px;
+  transition: opacity .18s ease, transform .22s cubic-bezier(.3, .8, .4, 1);
+}
+.psetup .gen .layer.ghost { position: absolute; opacity: 0; transform: translateY(9px); }
+.psetup .gen.loading .layer.l-rest,
+.psetup .gen.done .layer.l-rest { opacity: 0; transform: translateY(-9px); position: absolute; }
+.psetup .gen.loading .layer.l-load { position: static; opacity: 1; transform: none; }
+.psetup .gen.done .layer.l-done { position: static; opacity: 1; transform: none; }
+.psetup .spin { width: 17px; height: 17px; }
+.psetup .spin circle {
+  fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-dasharray: 32 44;
+  transform-origin: center; animation: ps-spinr .8s linear infinite;
+}
+@keyframes ps-spinr { to { transform: rotate(360deg); } }
+.psetup .check { width: 17px; height: 17px; }
+.psetup .check path {
+  fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round;
+  stroke-dasharray: 20; stroke-dashoffset: 20;
+}
+.psetup .gen.done .check path { animation: ps-draw2 .32s cubic-bezier(.4, 0, .2, 1) .1s forwards; }
+@keyframes ps-draw2 { to { stroke-dashoffset: 0; } }
+.psetup .loadword { min-width: 160px; text-align: left; }
+.psetup .aftergen {
+  display: flex; justify-content: center; margin-top: 10px; opacity: 0; transform: translateY(6px);
+  transition: opacity .4s ease .3s, transform .4s ease .3s; pointer-events: none; min-height: 34px;
+}
+.psetup .aftergen.show { opacity: 1; transform: none; pointer-events: auto; }
+.psetup .aftergen button {
+  font-size: 13.5px; font-weight: 600; color: var(--ink); padding: 8px 18px; border-radius: 10px;
+  transition: background var(--t-hover);
+}
+.psetup .aftergen button:hover { background: var(--fill); }
+
+/* OURS: a refused write says what happened. The reference's generate could never fail; ours can. */
+.psetup .perr {
+  margin-top: 10px; padding: 10px 12px; border-radius: 10px;
+  background: #fbefe9; color: #8f3318; font-size: 12.5px; line-height: 1.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .psetup *, .psetup *::before, .psetup *::after { animation: none !important; transition: none !important; }
+}

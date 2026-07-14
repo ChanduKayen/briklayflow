@@ -72,16 +72,21 @@ const DEC_WIRE = JSON.stringify({ project_hint: 'ASM Elite', items: [{ type: 'pr
 const u = (id: string) => ({ target_id: id, target_kind: 'issue', action: 'progress', confidence: 'low', closure_explicit: false, reason: 'wiring done — which floor?' })
 const LADDER_LOW = JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: true, updates: [u('w-first'), u('w-second'), u('w-third')] } })
 
+/** The pick's ROWS — where the candidates live now that the body no longer reprints them. */
+const pickList = (fake: ReturnType<typeof fakeSupabase>): { rows: { id: string; title: string; description?: string }[] } | undefined =>
+  fake.writesTo('outbox').map((w) => w.payload?.payload).find((p) => p?.kind === 'list')
+
 suite('siteops — Bug 1 REAL fix: ONE which_item emitter (near-floor AND ladder), no fan-out, offered-list resolution', () => {
   // j1 (near-floor) — the already-fixed emitter still holds the shared invariants: ONE numbered message,
   // "2" → the SECOND offered item (display == resolution), a natural label resolves by meaning.
   test('(j1) near-floor: ONE numbered message; "2" → stored[1]; a natural label resolves', async () => {
     const fake = fakeSupabase(nearSeed())
     await runSiteops(ctxFor(fake), 'slab done', { callModel: model(DEC_SLAB, BOTH_FALSE) })
-    const asks = fake.outbox().filter((b) => /which of these|is this about/i.test(b))
+    const asks = fake.outbox().filter((b) => b.includes('❓'))
     expect(asks.length).toBe(1)
-    expect(/1\.\s*Slab — First/.test(asks[0])).toBe(true)
-    expect(/2\.\s*Slab — Ground/.test(asks[0])).toBe(true)
+    // the OFFERED ORDER is the rows' order — the body no longer reprints them (the duplicate-print P1)
+    const rows = pickList(fake)!.rows
+    expect(rows.slice(0, 2).map((r) => r.description)).toEqual(['Slab — First floor', 'Slab — Ground floor'])
 
     const slots = askConvo(fake)
     const offered = slots.candidates as { id: string }[]
@@ -96,13 +101,13 @@ suite('siteops — Bug 1 REAL fix: ONE which_item emitter (near-floor AND ladder
   test('(j2) ladder low-conf: N candidates → ONE composed numbered message (not N)', async () => {
     const fake = fakeSupabase(wireSeed())
     await runSiteops(ctxFor(fake), 'wiring done at asm', { callModel: model(DEC_WIRE, LADDER_LOW) })
-    const asks = fake.outbox().filter((b) => /which of these|is this about/i.test(b))
+    const asks = fake.outbox().filter((b) => b.includes('❓'))
     expect(asks.length).toBe(1)                                  // RED today: THREE messages, one per low-conf update
-    expect(/which of these is it about/i.test(asks[0])).toBe(true)
-    expect(/1\.\s*Wiring — First/.test(asks[0])).toBe(true)      // numbered — the number-less list is gone
-    expect(/2\.\s*Wiring — Second/.test(asks[0])).toBe(true)
-    expect(/3\.\s*Wiring — Third/.test(asks[0])).toBe(true)
-    expect(/\bnew\b/i.test(asks[0])).toBe(true)
+    expect(/Which one is it\?|Which work is this\?|Where should this go\?/.test(asks[0])).toBe(true)
+    const rows = pickList(fake)!.rows                            // ONE list, three candidates, in offered order
+    expect(rows.slice(0, 3).map((r) => r.description))
+      .toEqual(['Wiring — First floor', 'Wiring — Second floor', 'Wiring — Third floor'])
+    expect(/\bnew\b/i.test(rows[3].title)).toBe(true)            // the "it's new" escape
   })
 
   // j2b (ladder resolution by NUMBER) — "2" resolves to the SECOND stored candidate: display == resolution.
@@ -132,8 +137,10 @@ suite('siteops — Bug 1 REAL fix: ONE which_item emitter (near-floor AND ladder
   test('(j4) exactly ONE which_item composer and ONE resolve path (no second sender, no re-derive)', () => {
     const src = readFileSync('supabase/functions/whatsapp-webhook/_agents/siteops.ts', 'utf8')
 
-    // ONE composer — the numbered-message signature exists exactly once (inside askItemPick).
-    expect((src.match(/which of these is it about\?/gi) ?? []).length).toBe(1)
+    // ONE composer — the question sentences exist in exactly one place (the axis map inside
+    // composeItemPickBody), and exactly one call site builds an item pick's body.
+    expect((src.match(/Which work is this\?/g) ?? []).length).toBe(1)
+    expect((src.match(/composeItemPickBody\(/g) ?? []).length).toBe(2)   // the definition + its ONE caller
     expect(/async function askItemPick\b/.test(src)).toBe(true)
 
     // askResolutionQuestion no longer emits a which_item ask — every which_item ask routes through the

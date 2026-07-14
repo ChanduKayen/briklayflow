@@ -93,15 +93,18 @@ suite('siteops resolution v2 — buildCandidateSet (open items, chased ranked to
       'iss-1': { id: 'iss-1', title: 'waterlogging', project_id: 'P1', status: 'OPEN' },
       'iss-2': { id: 'iss-2', title: 'cement short', project_id: 'P1', status: 'OPEN' },
       'iss-done': { id: 'iss-done', title: 'old', project_id: 'P1', status: 'RESOLVED' },
+      // A TO-DO IS A ROW IN HERE NOW (20260713000001): kind='snag', is_planned. It used to live in
+      // `todos` — a second store the portal could not read, so an item closed in the Desk went on
+      // being chased on WhatsApp forever. One store is the fix, and this seed IS the fix.
+      'td-1': { id: 'td-1', title: 'call inspector', project_id: 'P1', status: 'OPEN', kind: 'snag', is_planned: true },
     },
-    todos: { 'td-1': { id: 'td-1', text: 'call inspector', project_id: 'P1', status: 'OPEN' } },
     site_tasks: {
       'tk-1': { task_id: 'tk-1', name: '2F slab', project_id: 'P1', status: 'PENDING' },
       'tk-done': { task_id: 'tk-done', name: 'done task', project_id: 'P1', status: 'DONE' },
     },
   }
 
-  test('loads open issues+todos+tasks, excludes resolved/done, ranks the chased item first', async () => {
+  test('loads open issues+snags+tasks from ONE store, excludes resolved/done, ranks the chased item first', async () => {
     const fake = fakeSupabase(seed)
     const batch = { items: [{ kind: 'issue' as const, id: 'iss-2', orgId: 'org-1', projectId: 'P1', projectName: 'ASM Elite', title: 'cement short', taskName: null, cause: null }] }
     const cands = await buildCandidateSet(fake, 'org-1', batch)
@@ -114,16 +117,20 @@ suite('siteops resolution v2 — buildCandidateSet (open items, chased ranked to
     expect(cands.some((c) => c.rows?.some((r) => r.id === 'tk-done'))).toBe(false)   // done row excluded
   })
 
-  // LIVE FAILURE (todos.title, 2026-07-09): this read `todos.title`; the column is `todos.text`. PostgREST
-  // rejected the select, the code discarded `error`, and to-dos read as "none" — so the four chased 📋 items
-  // in a live chase reply were invisible and five real updates resolved to nothing. Pin the CONTENT, not just
-  // the id: a `title` read would surface the row with an undefined title and still pass an id-only assert.
-  test('a to-do candidate carries its text (the column is `text`, not `title`)', async () => {
+  // TWO LIVE FAILURES, ONE ROOT: a to-do was a row in ANOTHER TABLE.
+  //   · 2026-07-09 — this read `todos.title`; the column was `todos.text`. PostgREST rejected the
+  //     select, the code discarded `error`, and to-dos read as "none": four chased items were
+  //     invisible and five real updates resolved to nothing.
+  //   · 2026-07-13 — the Site Desk could not see `todos` AT ALL, so an item closed in the portal was
+  //     chased by WhatsApp forever. Nothing the founder clicked could ever stop it.
+  // Both die the same way: there is one item store. A to-do is a problems row, it is loaded by the
+  // same query as everything else, and it carries its title like everything else.
+  test('a to-do is loaded from `problems` like any other item, and carries its title', async () => {
     const fake = fakeSupabase(seed)
     const cands = await buildCandidateSet(fake, 'org-1', null)
     const td = cands.find((c) => c.id === 'td-1')
-    expect(td?.kind).toBe('todo')
     expect(td?.title).toBe('call inspector')
+    expect(td?.project_id).toBe('P1')
   })
 
   // A candidate load that ERRORS must never read as "the org has none" — a partial set grounds the model on

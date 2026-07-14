@@ -13,6 +13,7 @@
 // THE TRADE, stated plainly: this trusts the model to return a med nearest for a real match. If it returns
 // both-false with nothing, we no longer manufacture a question out of word overlap — we say we didn't place it.
 
+import { mentionsNothingToUpdate } from '../_siteops_resolution.ts'
 import { suite, test, expect } from './harness'
 import { fakeSupabase, type Seed } from './fake_supabase'
 import { runSiteops } from '../_agents/siteops.ts'
@@ -46,7 +47,7 @@ suite('siteops — clause 4 near-candidate floor (both-false + near → ASK whic
     await runSiteops(ctxFor(fake), 'transformer resolved', { callModel: model(DEC, R_NEAREST_MED) })
 
     const askedItem = fake.writesTo('wa_conversations').some((w) => w.payload?.slots_so_far?.kind === 'siteops_batch_collision')
-    const didntCatch = fake.outbox().some((b) => /nothing updated/i.test(b))
+    const didntCatch = fake.outbox().some((b) => mentionsNothingToUpdate(b))
     expect(askedItem).toBe(true)          // uncertainty → a QUESTION about the near candidate
     expect(didntCatch).toBe(false)        // NOT a silent miss
   })
@@ -58,7 +59,7 @@ suite('siteops — clause 4 near-candidate floor (both-false + near → ASK whic
     await runSiteops(ctxFor(fake), 'weather is nice today', { callModel: model(decUnrelated, R_BOTH_FALSE) })
 
     const askedItem = fake.writesTo('wa_conversations').some((w) => w.payload?.slots_so_far?.kind === 'siteops_batch_collision')
-    const didntCatch = fake.outbox().some((b) => /nothing updated/i.test(b))
+    const didntCatch = fake.outbox().some((b) => mentionsNothingToUpdate(b))
     expect(askedItem).toBe(false)
     expect(didntCatch).toBe(true)
   })
@@ -70,6 +71,6 @@ suite('siteops — clause 4 near-candidate floor (both-false + near → ASK whic
     await runSiteops(ctxFor(fake), 'transformer resolved', { callModel: model(DEC, R_NEAREST_LOW) })
 
     expect(fake.writesTo('wa_conversations').some((w) => w.payload?.slots_so_far?.kind === 'siteops_batch_collision')).toBe(false)
-    expect(fake.outbox().some((b) => /nothing updated/i.test(b))).toBe(true)
+    expect(fake.outbox().some((b) => mentionsNothingToUpdate(b))).toBe(true)
   })
 })

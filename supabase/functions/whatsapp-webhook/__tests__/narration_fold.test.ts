@@ -139,6 +139,6 @@ suite('siteops — the epoxy narration end to end (one thought → one row, no q
     })
 
     expect(fake.writesTo('problems').filter((w) => w.op === 'insert').length).toBe(1)
-    expect(fake.outbox().filter((b) => /Which of these is it about/i.test(b)).length).toBe(0)
+    expect(fake.outbox().filter((b) => b.includes('❓')).length).toBe(0)
   })
 })

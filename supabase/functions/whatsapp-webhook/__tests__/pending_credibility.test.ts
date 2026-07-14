@@ -95,13 +95,35 @@ suite('dispatch — the credibility flow is wired (source guards)', () => {
   const d = raw('_dispatch.ts')
   const dd = stripComments(d)
 
-  test('a Dismiss TAP is handled structurally, before the interactive-reply binding, and drops + tells', () => {
+  test('a Dismiss TAP is handled structurally, before the answer is ROUTED, and drops + tells', () => {
+    // THE INVARIANT: a `pending_dismiss` tap must never be mistaken for an ANSWER to the question it is
+    // dismissing. It short-circuits — closes the conversation, says so, and returns — before anything
+    // routes on `decision`.
+    //
+    // This used to pin the tap against the literal `isInteractiveReply) ? 'ANSWERS_PENDING'`, i.e. the line
+    // that BINDS an interactive reply to the pending question. That binding moved above the router when the
+    // router stopped being consulted for a tap at all (2026-07-13: a tap is a structural fact, and paying a
+    // 5-second LLM call to be told so — then discarding its answer — was pure latency). The binding being
+    // computed earlier changes nothing: the dismiss still returns first, and that is the fact worth pinning.
+    // So pin THAT: the tap is handled before `decision` is ever used to route.
     const tap = dd.indexOf("ctx.interactiveId === 'pending_dismiss'")
-    const bind = dd.indexOf("isInteractiveReply) ? 'ANSWERS_PENDING'")
+    const routes = dd.indexOf("if (decision === 'ANSWERS_PENDING')")
     expect(tap > 0).toBe(true)
-    expect(bind > 0).toBe(true)
-    expect(tap < bind).toBe(true)                                   // the tap wins before "interactive ⇒ answer"
+    expect(routes > 0).toBe(true)
+    expect(tap < routes).toBe(true)                                 // the tap wins before the answer is routed
     expect(dd.includes('pendingDismissedAck')).toBe(true)           // …and tells the user (Q1: drop + tell)
+  })
+
+  test('an interactive reply to an open question does NOT consult the router', () => {
+    // A tap on a row of a list WE sent, against a question WE have open, is a fact — not a sentence to be
+    // classified. ANSWERS_PENDING routes by the DB's owning agent, never by the LLM's intent_agent, so the
+    // router's answer was being computed and then thrown away. It is NOT the deleted lexical short-circuit
+    // returning: nothing here guesses at meaning from words.
+    expect(dd.includes('structuralAnswer')).toBe(true)
+    const structural = dd.indexOf('const structuralAnswer')
+    const route = dd.indexOf('await routeMessage({ text, pending, history })')
+    expect(structural > 0).toBe(true)
+    expect(structural < route).toBe(true)                           // decided before the router is even offered
   })
 
   test('a non-answer stashes P (agent no longer parks/closes on its behalf)', () => {

@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom';
 import { useAuth } from './lib/auth/AuthProvider';
 import { LOGIN_ROUTE } from './lib/auth/routes';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
+import { SITE_DESK_ENABLED } from './lib/desk/flag';
+import { useDeskPreload } from './lib/desk/live';
 import { Routes, Route, Navigate, useNavigate, Link, useLocation } from 'react-router-dom';
 import TeamAccess from './components/team/TeamAccess';
 import { supabase } from './lib/supabase';
@@ -34,10 +36,13 @@ const WorkOrders = lazy(() => import('./pages/WorkOrders'));
 const WorkOrderDetail = lazy(() => import('./pages/WorkOrderDetail'));
 const ProjectDetail = lazy(() => import('./pages/ProjectDetail'));
 const Projects = lazy(() => import('./pages/Projects'));
-const ProjectTransactions = lazy(() => import('./pages/ProjectTransactions'));
 const ProjectTasks = lazy(() => import('./pages/ProjectTasks'));
 const ProjectIssues = lazy(() => import('./pages/ProjectIssues'));
-const SiteDesk = lazy(() => import('./pages/SiteDesk'));
+// Site Desk v30 — behind SITE_DESK_ENABLED. The old pages above stay routable until parity sign-off.
+const SiteDeskV2 = lazy(() => import('./pages/SiteDeskV2'));
+const ProjectDesk = lazy(() => import('./pages/ProjectDesk'));
+const ProjectLedger = lazy(() => import('./pages/ProjectLedger'));
+const ProjectHome = lazy(() => import('./pages/ProjectDesk').then((m) => ({ default: m.ProjectHome })));
 const ProjectWorkOrders = lazy(() => import('./pages/ProjectWorkOrders'));
 const ProjectPurchaseOrders = lazy(() => import('./pages/ProjectPurchaseOrders'));
 const ProjectInventory = lazy(() => import('./pages/ProjectInventory'));
@@ -232,6 +237,20 @@ function App() {
   const { authState } = useAuth();
   const location = useLocation();
   const queryClient = useQueryClient();
+
+  /**
+   * THE SITE DESK IS ALREADY THERE WHEN YOU GET THERE.
+   *
+   * Its route is a lazy chunk and its data is one large read (every project, problem, task, QC row,
+   * narration and a signed URL per photo). Both used to start on the click, so opening the desk meant
+   * watching a skeleton while the thing you came to do was still being fetched — and both are perfectly
+   * well known in advance.
+   *
+   * So they are fetched on IDLE, once we know who you are: it never competes with the page in front of
+   * you, and by the time you reach for the desk it is warm. (Prefetch is a no-op if it is already
+   * cached, so this can never double-fetch.)
+   */
+  useDeskPreload(authState.status === 'authenticated' ? authState.context.orgId : null);
   const [session, setSession] = useState<Session | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [showMoreSheet, setShowMoreSheet] = useState(false);
@@ -472,12 +491,29 @@ function App() {
               / onboarding / invite flows that still send users to /dashboard land here. */}
           <Route path="/dashboard" element={<Navigate to="/insights" replace />} />
           <Route path="/logbook" element={<Logbook session={session} />} />
-          {/* Site Desk — cross-project Issues & Snags rollup; deep-link target of a
-              multi-project WhatsApp narration. */}
-          <Route path="/site-desk" element={<SiteDesk session={session} />} />
-          {/* Global Task Manager — the org-level mount; ProjectTasks shows a project filter here
-              and hides it inside a specific project (context-aware, P1.4). */}
-          <Route path="/tasks" element={<ProjectTasks session={session} />} />
+          {/* ── THE SITE MANAGEMENT HUB IS DELETED ────────────────────────────────────────
+              /site-desk (the old Issues & Snags rollup) and /tasks (the old global task manager)
+              were two doors into the same building; the Site Desk is the building. Both redirect,
+              so every WhatsApp deep link, notification and bookmark ever sent still lands somewhere
+              true — at the same work, on the better surface. Follow-up Rules keeps its own address
+              (it is a settings page, and the desk's gear points straight at it). */}
+          <Route path="/site-desk" element={<Navigate to="/desk/all/problems" replace />} />
+
+          {/* ── SITE DESK v30 (feature-flagged) ──────────────────────────────────────────
+              Registered ONLY when the flag is on, so with it off the portal is byte-identical
+              to what it was: no route, no nav entry, old pages untouched.
+              The static /desk/settings/chasing must precede the :site param routes — it mounts
+              the EXISTING Follow-up Rules page unchanged (restyle is out of scope). */}
+          {SITE_DESK_ENABLED && (
+            <>
+              <Route path="/desk" element={<Navigate to="/desk/all/problems" replace />} />
+              <Route path="/desk/settings/chasing" element={<FollowUpRules session={session} />} />
+              <Route path="/desk/:site/problems" element={<SiteDeskV2 session={session} tab="problems" />} />
+              <Route path="/desk/:site/problems/:ref" element={<SiteDeskV2 session={session} tab="problems" />} />
+              <Route path="/desk/:site/plan" element={<SiteDeskV2 session={session} tab="plan" />} />
+            </>
+          )}
+          <Route path="/tasks" element={<Navigate to="/desk/all/plan" replace />} />
           <Route path="/ledger" element={<Ledger session={session} />} />
           <Route path="/ledger/new" element={<NewTransaction session={session} />} />
           <Route path="/ledger/:txnId" element={<TransactionDetail session={session} />} />
@@ -489,8 +525,14 @@ function App() {
           <Route path="/billing/:billId" element={<BillDetail session={session} />} />
           <Route path="/projects" element={<Projects session={session} />} />
           <Route path="/projects/new" element={<NewProjectWizard session={session} />} />
-          <Route path="/projects/:projectId" element={<ProjectDetail session={session} />} />
-          <Route path="/projects/:projectId/transactions" element={<ProjectTransactions session={session} />} />
+          {/* A PROJECT OPENS ON ITS WORK, not on a lobby. ProjectHome sends you to the Site Desk;
+              a project with no site code (which cannot have a desk) still gets the old overview. */}
+          <Route path="/projects/:projectId" element={<ProjectHome session={session} />} />
+          {/* The overview's one irreplaceable job — editing the project — lives on as its settings. */}
+          <Route path="/projects/:projectId/settings" element={<ProjectDetail session={session} />} />
+          {/* THE SAME LEDGER, locked to this project. The old ProjectTransactions table is retired —
+              one book of account, so a figure reads the same wherever you open it. */}
+          <Route path="/projects/:projectId/transactions" element={<ProjectLedger session={session} />} />
           <Route path="/projects/:projectId/tasks" element={<ProjectTasks session={session} />} />
           <Route path="/projects/:projectId/issues" element={<ProjectIssues session={session} />} />
           <Route path="/projects/:projectId/work-orders" element={<ProjectWorkOrders session={session} />} />
@@ -498,6 +540,21 @@ function App() {
           <Route path="/projects/:projectId/inventory" element={<ProjectInventory session={session} />} />
           <Route path="/projects/:projectId/boqs" element={<ProjectBOQs session={session} />} />
           <Route path="/projects/:projectId/inward" element={<ProjectInward session={session} />} />
+
+          {/* ── THE SITE DESK, INSIDE THE PROJECT ─────────────────────────────────────────────
+              The same page as /desk, locked to this project. The site is IMPLIED by the address, so
+              it is not repeated in it: /projects/PRJ-X/desk/problems/CHAK-14, not …/desk/chak/… .
+              The old /projects/:id/tasks and /issues routes are kept alive — WhatsApp confirmations
+              and older notifications still link straight at them — but nothing in the UI points there
+              any more. */}
+          {SITE_DESK_ENABLED && (
+            <>
+              <Route path="/projects/:projectId/desk" element={<Navigate to="plan" replace />} />
+              <Route path="/projects/:projectId/desk/plan" element={<ProjectDesk session={session} tab="plan" />} />
+              <Route path="/projects/:projectId/desk/problems" element={<ProjectDesk session={session} tab="problems" />} />
+              <Route path="/projects/:projectId/desk/problems/:ref" element={<ProjectDesk session={session} tab="problems" />} />
+            </>
+          )}
           <Route path="/stakeholders" element={<Stakeholders session={session} />} />
           <Route path="/stakeholders/:stakeholderId" element={<StakeholderDetail session={session} />} />
           <Route path="/orders" element={<Orders session={session} />} />

@@ -97,6 +97,6 @@ suite('siteops — the which_project resume carries the decomposition (structure
     const touched = fake.writesTo('site_tasks').flatMap((w) => w.filters.filter(([k]) => k === 'task_id').map(([, v]) => v))
     expect(touched.includes('ft-1a')).toBe(true)
     expect(touched.includes('ft-2a')).toBe(false)
-    expect(fake.outbox().some((b) => /which of these is it about/i.test(b))).toBe(false)
+    expect(fake.outbox().some((b) => b.includes('❓'))).toBe(false)
   })
 })

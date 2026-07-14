@@ -88,7 +88,7 @@ const model = (calls: Call[], resolveRaw: string) => (system: string, user: stri
   return Promise.resolve('')
 }
 const resolutionCalls = (calls: Call[]) => calls.filter((c) => c.user.startsWith('CANDIDATES:'))
-const asks = (fake: ReturnType<typeof fakeSupabase>) => fake.outbox().filter((b) => /Which of these is it about/i.test(b))
+const asks = (fake: ReturnType<typeof fakeSupabase>) => fake.outbox().filter((b) => b.includes('❓'))
 
 // ── THE MERGE, as a pure function (no model, no network) ─────────────────────────────────────────────────
 const item = (text: string, floor: string | null, type: SiteItem['type'] = 'progress'): SiteItem => ({
@@ -184,7 +184,7 @@ suite('siteops — the ceiling photo asks ONCE (the live 18:23 probe)', () => {
   test('(J2) the ack still shows BOTH bullets — what we SAW is reported in full; only the ASK is one', async () => {
     const fake = fakeSupabase(seed())
     await runSiteops(imgCtx(fake), `${CAPTION} -- ${DESCRIPTION}`, { callModel: model([], R_TIE) })
-    const ack = fake.outbox().find((b) => /Got your photo/.test(b)) ?? ''
+    const ack = fake.outbox().find((b) => /I see:/.test(b)) ?? ''
     expect(ack.includes('front corridor section')).toBe(true)
     expect(ack.includes('rear section')).toBe(true)
   })

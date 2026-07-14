@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import { SITE_DESK_ENABLED } from '../lib/desk/flag';
 import { UserPicker, useOrgMembers, MemberAvatar } from '../components/siteOps/UserPicker';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
@@ -630,15 +631,32 @@ export default function ProjectDetail({ session }: { session: Session }) {
 
       {/* ── Nav tiles ───────────────────────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10, marginBottom: 24 }}>
-        <NavTile href={`/projects/${projectId}/tasks`} icon="checklist" label="Task Manager" color="#C8603A" />
+        {/* ══ THE SITE DESK REPLACES THREE TILES ═══════════════════════════════════════════════
+            Task Manager, Issues and Snags were three doors into the same building. The desk's Plan
+            tab IS the task manager — the same rows, the same engine, but sequenced, gated and
+            draggable — and its Problems tab is the issues and the snags together, in the one number
+            space they have always shared (CHAK-14 is a task, CHAK-21 is a snag; a ref alone resolves
+            to exactly one row). Three tiles that opened three views of one site are now one tile that
+            opens the site.
+
+            NO CODE, NO TILE. The desk numbers everything it tracks from the project's short code, so
+            a project without one has nothing to address its rows with. Rather than hang a door on a
+            wall with no room behind it, there is no door. */}
+        {SITE_DESK_ENABLED && project?.project_code
+          ? <NavTile href={`/projects/${projectId}/desk/plan`} icon="dashboard" label="Site Desk" color="#C8603A" />
+          : (
+            <>
+              <NavTile href={`/projects/${projectId}/tasks`} icon="checklist" label="Task Manager" color="#C8603A" />
+              <NavTile href={`/projects/${projectId}/issues?view=issues`} icon="warning" label="Issues" color="#C8603A" />
+              <NavTile href={`/projects/${projectId}/issues?view=snags`} icon="task_alt" label="Snags" color="#5E8157" />
+            </>
+          )}
         <NavTile href={`/projects/${projectId}/transactions`} icon="swap_horiz" label="Transactions" count={uniqueTxns.length} />
         <NavTile href={`/projects/${projectId}/work-orders`} icon="assignment" label="Contracts" count={workOrders.length} />
         <NavTile href={`/projects/${projectId}/purchase-orders`} icon="shopping_bag" label="Purchase Orders" count={purchaseOrders.length} />
         <NavTile href={`/projects/${projectId}/inventory`} icon="inventory_2" label="Inventory" color="#7c3aed" />
         <NavTile href={`/projects/${projectId}/boqs`} icon="format_list_numbered" label="BOQs" color="#2563eb" />
         <NavTile href={`/projects/${projectId}/inward`} icon="local_shipping" label="Inward Register" color="#059669" />
-        <NavTile href={`/projects/${projectId}/issues?view=issues`} icon="warning" label="Issues" color="#C8603A" />
-        <NavTile href={`/projects/${projectId}/issues?view=snags`} icon="task_alt" label="Snags" color="#5E8157" />
       </div>
 
       {/* ── Recent activity ─────────────────────────────────────────────── */}

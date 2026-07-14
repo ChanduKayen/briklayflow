@@ -286,7 +286,10 @@ suite('siteops resolution v2 — combined readback (one message, consequence-ord
   // BOTH, never all-or-nothing.
   test('both-axes partial (create failed) → truthful about both halves', () => {
     const out = composeReadback([updResolve('waterlogging'), created('tiles broke', 'failed')])
-    expect(out).toBe('Got it — ✓ “waterlogging” resolved · ⚠️ couldn\'t log “tiles broke” — saved for review')
+    // The failure is ⏸ (Babai's limbo), not ⚠️ (the SITE has a problem), and it no longer carries its
+    // own "saved for review": composeConfirmation ends the message with `Recorded in *Review* · Briklay
+    // — nothing's lost`, which says it once, LAST, with a button on it.
+    expect(out).toBe(`Got it — ✓ “waterlogging” resolved · ⏸ Couldn't log “tiles broke”`)
   })
 
   test('lone didnt-catch → bare sentence, no "Got it" wrapper', () => {

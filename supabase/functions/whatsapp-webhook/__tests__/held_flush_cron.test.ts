@@ -6,6 +6,7 @@
 import { suite, test, expect } from './harness'
 import { fakeSupabase, type Seed } from './fake_supabase'
 import { flushAbandonedHeldReadbacks } from '../_siteops_sweep.ts'
+import type { OutMessage } from '../_format.ts'
 import type { ConvoRow } from '../_conversation.ts'
 
 const ORG = 'org-1'
@@ -23,8 +24,15 @@ const convo = (over: Partial<ConvoRow> & { slots_so_far?: Record<string, unknown
 } as ConvoRow)
 const heldCollisionSlots = { kind: 'siteops_batch_collision', status: 'still_open', piece_text: 'wiring done', candidates: [{ id: 'iss-w', kind: 'issue', title: 'wiring broke' }], project_id: 'P1', narration_id: 'narr-1', image: null, held_readback: held }
 
-type Sent = { to: string; body: string; org: string }
-const spy = () => { const sent: Sent[] = []; return { send: (to: string, body: string, org: string) => { sent.push({ to, body, org }); return Promise.resolve() }, sent } }
+type Sent = { to: string; body: string; org: string; msg: OutMessage }
+const spy = () => {
+  const sent: Sent[] = []
+  const send = (to: string, msg: OutMessage, org: string) => {
+    sent.push({ to, org, msg, body: 'body' in msg ? msg.body : '' })
+    return Promise.resolve()
+  }
+  return { send, sent }
+}
 const parks = (fake: ReturnType<typeof fakeSupabase>) => fake.writesTo('siteops_unplaced').filter((w) => w.op === 'insert')
 const abandons = (fake: ReturnType<typeof fakeSupabase>) => fake.writesTo('wa_conversations').filter((w) => w.op === 'update' && w.payload?.status === 'ABANDONED')
 

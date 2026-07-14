@@ -28,6 +28,15 @@ export interface ExistingRow {
   source: 'generated' | 'manual'
   order_source: 'auto' | 'manual'
   seq_no: number
+  // THE ENGINE-AUTHORED FIELDS, as the row currently holds them. Reconcile compares these against what the
+  // library says NOW and refreshes the ones that drifted (see toRefresh). Optional: a caller that has not
+  // selected them simply gets no refresh, rather than a spurious one.
+  binding?: BindingMeta[] | null
+  name?: string | null
+  trade?: string | null
+  phase?: string | null
+  trade_phase?: string | null
+  system?: string | null
 }
 
 /** A row ready to INSERT (task_no/status are DB defaults). */
@@ -48,6 +57,13 @@ export interface PersistRow {
   order_source: 'auto'
   needs_review: boolean
   binding: BindingMeta[]
+  /** The amenity system this row belongs to (null for core building work). Lets the task list and the
+   *  amenities view group the SAME rows by system without a second task tree. */
+  system: string | null
+  /** The trade pass ('2nd fix'). Split OUT of `name` so the list reads clean; the resolver re-attaches
+   *  it, because "second fix is done" must still land on the right row. NOT `phase` — that column holds
+   *  the layer (structure/services/finishes). */
+  trade_phase: string | null
 }
 
 /** Immediate hard predecessor metadata, persisted so `why` renders without recomputing the graph. */
@@ -85,6 +101,8 @@ export function toPersistRows(
       order_source: 'auto',
       needs_review: !!n.needsReview,
       binding,
+      system: n.system ?? null,
+      trade_phase: n.phase ?? null,
     })
   }
   return rows.sort((a, b) => a.seq_no - b.seq_no)
@@ -95,8 +113,33 @@ export interface ReconcilePlan {
   toInsert: PersistRow[]                       // fresh nodes not already present
   toUpdateSeq: { task_id: string; seq_no: number }[]  // auto rows whose seq the topo changed
   toDeleteIds: string[]                        // obsolete authored-auto rows (manual NEVER included)
+  /**
+   * THE ROWS TRACK THE LIBRARY (2026-07-13). Engine-authored fields on an EXISTING row that no longer say
+   * what the library says. `binding` is the one that bites: it holds a row's hard predecessors, and it is
+   * the only thing the desk reads to decide whether a task can start (fromDb takes binding[0]; derive.ts
+   * calls a task with no predecessor "Ready - can start now").
+   *
+   * It was written at INSERT and never again. So when fifteen task types that could start on bare ground
+   * were corrected, every project that already existed would have gone on offering the facade of a building
+   * with no columns: the fix, invisible in the one place a human looks. A row is not a snapshot of what the
+   * library said the day it was born. It is a projection of what the library says NOW.
+   *
+   * The HUMAN's fields are not in here and never will be: status, owner, task_no, a hand-dragged seq_no, a
+   * manual row. A refresh that quietly reset someone's progress would be far worse than the bug it fixes.
+   */
+  toRefresh: { task_id: string; patch: RefreshPatch }[]
   keptManual: number                           // source='manual' rows preserved untouched
   keptManualOrder: number                      // order_source='manual' rows whose seq we did NOT touch
+}
+
+/** Exactly the columns the ENGINE owns on a generated row. Nothing else may ever appear here. */
+export interface RefreshPatch {
+  binding?: BindingMeta[]
+  name?: string
+  trade?: string
+  phase?: string
+  trade_phase?: string | null
+  system?: string | null
 }
 
 export function reconcile(existing: ExistingRow[], fresh: PersistRow[]): ReconcilePlan {
@@ -107,11 +150,30 @@ export function reconcile(existing: ExistingRow[], fresh: PersistRow[]): Reconci
 
   const toInsert: PersistRow[] = []
   const toUpdateSeq: { task_id: string; seq_no: number }[] = []
+  const toRefresh: { task_id: string; patch: RefreshPatch }[] = []
   let keptManualOrder = 0
+
+  // Has an engine-authored field drifted from what the library now says? `binding` compares by VALUE: its
+  // order is the graph's, and a re-ordered dependency list is the same dependency list.
+  const bindingKey = (b: BindingMeta[] | null | undefined): string =>
+    JSON.stringify([...(b ?? [])].map((x) => [x.node_key, x.nature, x.reason]).sort())
 
   for (const row of fresh) {
     const prior = existingByKey.get(row.node_key)
     if (!prior) { toInsert.push(row); continue }
+
+    // THE ENGINE'S OWN FIELDS, refreshed when (and only when) they differ. A MANUAL row is never touched:
+    // the engine does not own a human's task, whatever key it happens to carry.
+    if (prior.source !== 'manual') {
+      const patch: RefreshPatch = {}
+      if (prior.binding !== undefined && bindingKey(prior.binding) !== bindingKey(row.binding)) patch.binding = row.binding
+      if (prior.name !== undefined && prior.name !== row.name) patch.name = row.name
+      if (prior.trade !== undefined && prior.trade !== row.trade) patch.trade = row.trade
+      if (prior.phase !== undefined && prior.phase !== row.phase) patch.phase = row.phase
+      if (prior.trade_phase !== undefined && (prior.trade_phase ?? null) !== (row.trade_phase ?? null)) patch.trade_phase = row.trade_phase
+      if (prior.system !== undefined && (prior.system ?? null) !== (row.system ?? null)) patch.system = row.system
+      if (Object.keys(patch).length) toRefresh.push({ task_id: prior.task_id, patch })
+    }
     if (prior.order_source === 'manual') {
       // a human dragged this — its seq is sticky; the engine must not re-default it.
       keptManualOrder++
@@ -132,11 +194,11 @@ export function reconcile(existing: ExistingRow[], fresh: PersistRow[]): Reconci
     toDeleteIds.push(row.task_id)                                  // authored-auto + obsolete → delete
   }
 
-  return { toInsert, toUpdateSeq, toDeleteIds, keptManual, keptManualOrder }
+  return { toInsert, toUpdateSeq, toDeleteIds, toRefresh, keptManual, keptManualOrder }
 }
 
 // ── integration write (injected client; RLS-scoped) ──────────────────────────
-export interface WriteResult { inserted: number; updated: number; deleted: number; keptManual: number; keptManualOrder: number; qcInserted: number }
+export interface WriteResult { inserted: number; updated: number; refreshed: number; deleted: number; keptManual: number; keptManualOrder: number; qcInserted: number }
 
 /** One authored QC check, fanned out onto a task instance (which owns the answer slot). */
 export interface QcInsertRow { task_id: string; org_id: string; question: string; is_critical: boolean; seq: number }
@@ -156,7 +218,7 @@ export async function persistGraph(
 
   const { data: existing, error: eErr } = await supabase
     .from('site_tasks')
-    .select('task_id, node_key, source, order_source, seq_no')
+    .select('task_id, node_key, source, order_source, seq_no, binding, name, trade, phase, trade_phase, system')
     .eq('project_id', project.project_id)
   if (eErr) throw new Error(`load existing tasks: ${eErr.message}`)
 
@@ -175,12 +237,19 @@ export async function persistGraph(
     const { error } = await supabase.from('site_tasks').update({ seq_no: u.seq_no }).eq('task_id', u.task_id)
     if (error) throw new Error(`update seq_no for ${u.task_id}: ${error.message}`)
   }
+  // ...and the engine-authored fields the library has since changed (ReconcilePlan.toRefresh). Without this
+  // a library change reaches NEW rows only, and every project that already exists keeps the old plan forever.
+  for (const u of plan.toRefresh) {
+    const { error } = await supabase.from('site_tasks').update(u.patch).eq('task_id', u.task_id)
+    if (error) throw new Error(`refresh authored fields for ${u.task_id}: ${error.message}`)
+  }
 
   const qcInserted = await fanOutQc(supabase, project)
 
   return {
     inserted: plan.toInsert.length,
     updated: plan.toUpdateSeq.length,
+    refreshed: plan.toRefresh.length,
     deleted: plan.toDeleteIds.length,
     keptManual: plan.keptManual,
     keptManualOrder: plan.keptManualOrder,

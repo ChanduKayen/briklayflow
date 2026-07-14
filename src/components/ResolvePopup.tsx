@@ -7,6 +7,7 @@ import { useSnackbar } from './Snackbar';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import { ImageLightbox } from './ImageLightbox';
 import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
+import { fileRoughEntry } from './day-book/fileEntry';
 
 // ── Walnut-ledger palette (mirrors NewTransaction.tsx) ──────────────────────────
 // Warm cream canvas, walnut ink, terracotta accent for money-out, sage for money-in.
@@ -30,6 +31,9 @@ const VNUMS = { fontVariantNumeric: 'tabular-nums' as const };
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 type PayeeState = 'A' | 'B' | 'C' | 'confirmed';
+
+/** The four things the editor can ask about. `only` narrows the popup to a subset of them. */
+export type GapKey = 'amount' | 'payee' | 'description' | 'project';
 
 // Names read better title-cased — capitalise the first letter of each word as the
 // owner types, without fighting intentional caps elsewhere (e.g. "McRavi" stays).
@@ -66,10 +70,38 @@ function sortByPayeeSimilarity(list: any[], rawName: string): any[] {
 
 // ── Inline Create Stakeholder Form ────────────────────────────────────────────
 
-function CreateStakeholderForm({
-  defaultName,
-  onCreated,
-  onCancel,
+/**
+ * NEW PARTY — A CONVERSATION, IN THE ROW ITSELF.
+ *
+ * ══ WHAT WAS WRONG WITH IT ═════════════════════════════════════════════════════════════════════
+ *
+ * It was a form: a panel with a name, three pills, a trade select, a phone box and a Create button.
+ * Then it became a worse thing — the same form with the pills alone, which nobody reads as a QUESTION.
+ * Three small grey capsules do not ask you anything. They sit there looking like labels, and a man with
+ * a phone in one hand and a site in front of him has no reason to believe he is meant to press one. An
+ * affordance that has to be explained is not an affordance.
+ *
+ * ══ WHAT IT IS NOW ═════════════════════════════════════════════════════════════════════════════
+ *
+ * Each step is a QUESTION, in words, above answers you would obviously press — a row apiece, each one
+ * saying what it MEANS on a building site. Nobody has to guess what a chip is for.
+ *
+ *   "Who is Raju to you?"    Worker — labour on your site: mason, carpenter, helper
+ *                            Vendor — supplies you material or services
+ *                            Client — the customer who pays you
+ *
+ *   "What kind of worker?"   a box you TYPE into, that narrows ninety trades to the one you meant.
+ *                            The old select made you hunt a wall of optgroups; this lets you say
+ *                            "mas" and be done. And if your trade is not in our list, what you typed
+ *                            IS the trade — you know your site better than the list does.
+ *
+ *   ✓ "Raju added to your contacts · Mason"    — and only THEN does the payment file.
+ *
+ * A CLIENT has no trade, so a client is never asked for one. There is no Create button anywhere,
+ * because by the time the last answer lands there is nothing left to decide.
+ */
+function NewPartyRow({
+  defaultName, onCreated, onCancel,
 }: {
   defaultName: string;
   onCreated: (id: string, name: string) => void;
@@ -79,107 +111,194 @@ function CreateStakeholderForm({
   const { show: showSnackbar } = useSnackbar();
   const orgId = useOrgId();
   const [name, setName] = useState(capitalizeWords(defaultName));
+  const [step, setStep] = useState<'type' | 'trade' | 'done'>('type');
   const [type, setType] = useState<'Worker' | 'Vendor' | 'Client'>('Worker');
-  const [category, setCategory] = useState('');
-  const [categoryOther, setCategoryOther] = useState('');
-  const [phone, setPhone] = useState('');
+  const [q, setQ] = useState('');
   const [creating, setCreating] = useState(false);
+  const [made, setMade] = useState<{ name: string; trade: string } | null>(null);
 
-  const create = async () => {
+  const TYPES = [
+    { t: 'Worker' as const, what: 'Labour on your site — mason, carpenter, helper' },
+    { t: 'Vendor' as const, what: 'Supplies you material or services' },
+    { t: 'Client' as const, what: 'The customer who pays you' },
+  ];
+
+  const create = async (trade: string) => {
     if (!name.trim() || creating) return;
     setCreating(true);
     try {
       const newId = `STK-${Math.floor(1000 + Math.random() * 9000)}`;
-      const trade = category === OTHER_TRADE ? (categoryOther.trim() || 'Other') : category;
       const { data, error } = await supabase.from('stakeholders').insert([{
-        stakeholder_id: newId,
-        name: name.trim(),
-        type,
-        category: trade || type,
-        contact: phone.trim() || null,
-        org_id: orgId,
+        stakeholder_id: newId, name: name.trim(), type,
+        category: trade || type, contact: null, org_id: orgId,
       }]).select().single();
       if (error) throw error;
       qc.invalidateQueries({ queryKey: ['stakeholders'] });
-      onCreated(data.stakeholder_id, data.name);
+
+      /**
+       * HE IS IN THE BOOK NOW, AND THAT IS WORTH A SECOND.
+       *
+       * The row used to say "Adding Raju…" in small green text and then just become something else. A
+       * new person entering your business is not a loading message. So the row settles into a ticked
+       * sage line that names him and what he is — one beat of "that is done" — and only then does the
+       * payment go on. It is the courtesy a good clerk shows: he writes the name, turns the page round
+       * so you can see it, and then takes your money.
+       */
+      setMade({ name: data.name, trade: trade || type });
+      setStep('done');
+      window.setTimeout(() => onCreated(data.stakeholder_id, data.name), 1150);
     } catch (err: any) {
       showSnackbar(err.message || 'Failed to create stakeholder', { type: 'error' });
-    } finally {
       setCreating(false);
     }
   };
 
-  return (
-    <div className="mt-2 p-3 rounded-xl space-y-2" style={{ background: VOICE.askWash, border: `1px solid ${VOICE.outLine}` }}>
-      <p className="text-[11px] font-semibold" style={{ color: VOICE.accentDeep }}>New Stakeholder</p>
-      <input
-        type="text"
-        value={name}
-        onChange={(e) => setName(capitalizeWords(e.target.value))}
-        placeholder="Full name"
-        autoFocus
-        autoCapitalize="words"
-        className="w-full text-[13px] px-2.5 py-1.5 rounded-lg outline-none transition-colors"
-        style={{ border: `1px solid ${VOICE.line}`, background: VOICE.surface, color: VOICE.user }}
-      />
-      <div className="flex gap-1.5">
-        {(['Worker', 'Vendor', 'Client'] as const).map(t => (
-          <button key={t} type="button" onClick={() => { setType(t); setCategory(''); setCategoryOther(''); }}
-            className="px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors"
-            style={type === t
-              ? { background: VOICE.walnut, color: VOICE.ivory }
-              : { background: VOICE.field, color: VOICE.system }}
-          >{t}</button>
-        ))}
+  /* ── created: the celebration, such as it should be — small, certain, and over ── */
+  if (step === 'done' && made) {
+    return (
+      <div className="rounded-xl px-3 py-3 db-drop" style={{ background: VOICE.confirmWash, border: `1px solid ${VOICE.innLine}` }}>
+        <div className="flex items-center gap-2.5">
+          <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 db-pop" style={{ background: VOICE.confirm }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+              <path className="db-draw" d="M5 12.5l4.5 4.5L19 7" stroke="#fff" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </span>
+          <span className="min-w-0">
+            <span className="block text-[13.5px] font-semibold truncate" style={{ color: VOICE.user }}>
+              {made.name} added to your contacts
+            </span>
+            <span className="block text-[11.5px]" style={{ color: VOICE.confirm }}>{made.trade}</span>
+          </span>
+        </div>
       </div>
-      {type !== 'Client' && (
-        <select
-          value={category}
-          onChange={(e) => { setCategory(e.target.value); setCategoryOther(''); }}
-          className="w-full text-[13px] px-2.5 py-1.5 rounded-lg outline-none transition-colors appearance-none"
-          style={{ border: `1px solid ${VOICE.line}`, background: VOICE.surface, color: category ? VOICE.user : VOICE.systemFaint }}
-        >
-          <option value="">Trade / category…</option>
-          {(type === 'Worker' ? WORKER_TRADE_GROUPS : VENDOR_TRADE_GROUPS).map(g => (
-            <optgroup key={g.group} label={g.group}>
-              {g.trades.map(tr => <option key={tr} value={tr}>{tr}</option>)}
-            </optgroup>
-          ))}
-        </select>
-      )}
-      {type !== 'Client' && category === OTHER_TRADE && (
+    );
+  }
+
+  const groups = type === 'Worker' ? WORKER_TRADE_GROUPS : VENDOR_TRADE_GROUPS;
+  const needle = q.trim().toLowerCase();
+  const hits = groups
+    .map((g) => ({ group: g.group, trades: g.trades.filter((t) => t !== OTHER_TRADE && (!needle || t.toLowerCase().includes(needle))) }))
+    .filter((g) => g.trades.length);
+
+  return (
+    <div className="rounded-xl px-3 py-3" style={{ background: VOICE.askWash, border: `1px solid ${VOICE.outLine}` }}>
+      {/* WHO — always there, always editable, exactly where the search box was */}
+      <div className="flex items-center gap-2 min-w-0 pb-2.5 mb-2.5" style={{ borderBottom: `1px solid ${VOICE.outLine}` }}>
+        <span className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-[12px] font-bold" style={{ background: VOICE.walnut, color: VOICE.ivory }}>
+          {name.trim() ? name.trim()[0].toUpperCase() : '+'}
+        </span>
         <input
           type="text"
-          value={categoryOther}
-          onChange={(e) => setCategoryOther(e.target.value)}
+          value={name}
+          onChange={(e) => setName(capitalizeWords(e.target.value))}
+          placeholder="Full name"
           autoFocus
-          placeholder="Specify trade…"
-          className="w-full text-[13px] px-2.5 py-1.5 rounded-lg outline-none transition-colors"
-          style={{ border: `1px solid ${VOICE.line}`, background: VOICE.surface, color: VOICE.user }}
+          autoCapitalize="words"
+          className="min-w-0 flex-1 text-[14px] font-semibold bg-transparent outline-none"
+          style={{ color: VOICE.user }}
         />
-      )}
-      <input
-        type="tel"
-        value={phone}
-        onChange={(e) => setPhone(e.target.value)}
-        placeholder="Phone (optional)"
-        className="w-full text-[13px] px-2.5 py-1.5 rounded-lg outline-none transition-colors"
-        style={{ border: `1px solid ${VOICE.line}`, background: VOICE.surface, color: VOICE.user }}
-      />
-      <div className="flex gap-2 pt-1">
-        <button type="button" onClick={onCancel}
-          className="flex-1 py-1.5 rounded-lg text-[12px] transition-colors"
-          style={{ border: `1px solid ${VOICE.line}`, color: VOICE.system }}>
-          Cancel
-        </button>
-        <button type="button" onClick={create} disabled={!name.trim() || creating}
-          className="flex-1 py-1.5 rounded-lg text-[12px] font-semibold transition-colors"
-          style={name.trim() && !creating
-            ? { background: VOICE.walnut, color: VOICE.ivory }
-            : { background: VOICE.field, color: VOICE.systemFaint, cursor: 'not-allowed' }}>
-          {creating ? 'Creating…' : 'Create & Select'}
+        <button type="button" onClick={onCancel} className="shrink-0 text-[11px] hover:underline" style={{ color: VOICE.system }}>
+          cancel
         </button>
       </div>
+
+      {/* STEP 1 — WHO IS HE TO YOU? A question, with answers anyone would know to press. */}
+      {step === 'type' && (
+        <>
+          <p className="text-[12px] font-semibold mb-2" style={{ color: VOICE.accentDeep }}>
+            Who is {name.trim() || 'this'} to you?
+          </p>
+          <div className="space-y-1.5">
+            {TYPES.map(({ t, what }) => (
+              <button
+                key={t}
+                type="button"
+                disabled={!name.trim() || creating}
+                onClick={() => {
+                  setType(t);
+                  setQ('');
+                  if (t === 'Client') void create('Client'); else setStep('trade');
+                }}
+                className="group w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-all duration-150 disabled:opacity-40 hover:shadow-sm"
+                style={{ background: VOICE.surface, border: `1px solid ${VOICE.line}` }}
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[13.5px] font-semibold" style={{ color: VOICE.user }}>{t}</span>
+                  <span className="block text-[11.5px] leading-snug" style={{ color: VOICE.systemFaint }}>{what}</span>
+                </span>
+                <span className="material-symbols-outlined text-[18px] shrink-0 transition-transform group-hover:translate-x-0.5" style={{ color: VOICE.accentDeep }}>
+                  arrow_forward
+                </span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* STEP 2 — WHICH TRADE? You TYPE it. Ninety trades is a wall to hunt through and two words to
+          say, so it is a box you can say them into and the list narrows as you do. */}
+      {step === 'trade' && (
+        <>
+          <div className="flex items-center gap-2 mb-2">
+            <button
+              type="button"
+              onClick={() => { setStep('type'); setQ(''); }}
+              className="shrink-0 inline-flex items-center text-[11px]"
+              style={{ color: VOICE.system }}
+            >
+              <span className="material-symbols-outlined text-[14px]">chevron_left</span>{type}
+            </button>
+            <p className="text-[12px] font-semibold" style={{ color: VOICE.accentDeep }}>
+              What kind of {type.toLowerCase()}?
+            </p>
+          </div>
+
+          <input
+            type="text"
+            autoFocus
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder={type === 'Worker' ? 'Type a trade — mason, plumber, painter…' : 'Type what they supply — cement, steel, tiles…'}
+            className="w-full text-[13.5px] px-3 py-2 rounded-lg outline-none mb-2"
+            style={{ border: `1px solid ${VOICE.line}`, background: VOICE.surface, color: VOICE.user }}
+          />
+
+          <div className="space-y-2 overflow-y-auto" style={{ maxHeight: 190 }}>
+            {hits.map((g) => (
+              <div key={g.group}>
+                <p className="text-[9.5px] font-bold tracking-wider uppercase mb-1" style={{ color: VOICE.faint }}>{g.group}</p>
+                <div className="space-y-1">
+                  {g.trades.map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      disabled={creating}
+                      onClick={() => void create(t)}
+                      className="w-full text-left px-3 py-2 rounded-lg text-[13px] font-medium transition-colors hover:bg-white disabled:opacity-40"
+                      style={{ background: VOICE.surface, border: `1px solid ${VOICE.line}`, color: VOICE.user }}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+
+            {/* Nothing matched — then what he typed IS the trade. He knows his site better than our list. */}
+            {needle && hits.length === 0 && (
+              <button
+                type="button"
+                disabled={creating}
+                onClick={() => void create(capitalizeWords(q.trim()))}
+                className="w-full text-left px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-colors disabled:opacity-40"
+                style={{ background: VOICE.surface, border: `1px solid ${VOICE.outLine}`, color: VOICE.accentDeep }}
+              >
+                Use &ldquo;{capitalizeWords(q.trim())}&rdquo;
+              </button>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -191,11 +310,31 @@ interface Props {
   onClose: () => void;
   onUpdated: (entry: RoughEntry) => void;
   session: Session;
+  /**
+   * ONE CARD, TWO ERRANDS.
+   *
+   * Undefined (the EDIT button) → every field. You came to change something that is already there and
+   * wrong, so you must be able to see all of it.
+   *
+   * A list (the APPROVE button) → ONLY the fields in it, which are exactly the ones we do not have.
+   * There is no reason to re-present the amount, the payee and the date, already correct, as a column
+   * of filled-in boxes for a man to scroll past and re-approve. He said those things once. The screen's
+   * whole job is the part he has not said.
+   *
+   * It is the SAME popup either way — same card, same field, same voice. It simply does not ask
+   * questions it already knows the answer to.
+   */
+  only?: GapKey[];
 }
 
-export function ResolvePopup({ entry, onClose, onUpdated }: Props) {
+export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
   const qc = useQueryClient();
   const { show: showSnackbar } = useSnackbar();
+  const orgId = useOrgId();
+
+  /** Confirm mode asks ONLY what is missing. Edit mode asks everything. */
+  const confirmMode = !!only;
+  const show = (k: GapKey) => !only || only.includes(k);
 
   const ai = entry.ai_extracted;
 
@@ -270,18 +409,49 @@ export function ResolvePopup({ entry, onClose, onUpdated }: Props) {
     },
   });
 
-  // ── Sync payee after stakeholders load ─────────────────────────────────────
+  /**
+   * ══ THE AI'S IDS ARE GUESSES. VERIFY THEM, OR THE DATABASE WILL. ══════════════════════════════
+   *
+   * `ai_extracted.payee_id` / `.project_id` are strings the extractor wrote into a jsonb blob. They
+   * are not foreign keys and nothing has ever checked them. This editor seeded its own state straight
+   * from them — so a project id the AI had ASSEMBLED from a name ("PRJ-ASM-ELITE", which is the exact
+   * shape a real one takes: the convention is PRJ-<slug>) arrived here looking perfectly resolved. The
+   * project field showed as filled, `mandatoryFilled` went true, nothing was asked, and the very first
+   * thing in the whole path to notice it named NOTHING was the foreign key, at the moment of writing:
+   *
+   *     txn_allocations violates foreign key constraint … Key (project_id)=(PRJ-ASM-ELITE)
+   *     is not present in table "projects". (23503)
+   *
+   * So: the moment the real lists land, an id that names no row is CLEARED. It is not a key — it is a
+   * heard name in a key's clothes — and clearing it turns a crash at the end into a question at the
+   * start, which is the only place a question is any use.
+   */
   const hasPreselected = useRef(false);
   useEffect(() => {
     if (hasPreselected.current || !stakeholders.length || !ai.payee_id) return;
+    hasPreselected.current = true;
     const match = stakeholders.find((s) => s.stakeholder_id === ai.payee_id);
     if (match) {
       setPayeeId(match.stakeholder_id);
       setPayeeName(match.name);
       setPayeeSearch(match.name);
-      hasPreselected.current = true;
+    } else {
+      // the AI named somebody who is not in the contact book. Ask.
+      setPayeeId('');
+      setPayeeName('');
+      setPayeeSearch(ai.payee_name || ai.payee_raw || '');
+      setPayeeState('C');
     }
-  }, [stakeholders, ai.payee_id]);
+  }, [stakeholders, ai.payee_id, ai.payee_name, ai.payee_raw]);
+
+  const projectChecked = useRef(false);
+  // The check can only run once the real list has ARRIVED, so it is an effect by nature — there is no
+  // render at which we could have known this. Guarded by a ref: it fires once, on the first real list.
+  useEffect(() => {
+    if (projectChecked.current || !projects.length || !ai.project_id) return;
+    projectChecked.current = true;
+    if (!projects.some((p) => p.project_id === ai.project_id)) setProjectId('');
+  }, [projects, ai.project_id]);
 
   const isWhatsApp = entry.source.startsWith('WHATSAPP');
 
@@ -318,7 +488,10 @@ export function ResolvePopup({ entry, onClose, onUpdated }: Props) {
     (s) => s.name.toLowerCase().includes(payeeSearch.toLowerCase())
   );
 
-  const mandatoryFilled = !!payeeId && !!amount && Number(amount) > 0 && !!description.trim() && !!projectId;
+  // THE REMARK IS NOT MANDATORY. Payee + site + amount is a complete transaction — who, where, how
+  // much. The remark is a note ON it, and a ledger that refuses to record a payment because nobody
+  // typed "cement" is a ledger arguing with its own owner.
+  const mandatoryFilled = !!payeeId && !!amount && Number(amount) > 0 && !!projectId;
   const missingPayee = !payeeId;
   const missingAmount = !amount || Number(amount) <= 0;
   const missingDescription = !description.trim();
@@ -357,7 +530,6 @@ export function ResolvePopup({ entry, onClose, onUpdated }: Props) {
   const nextGap: { label: string; key: GapKey } | null = (() => {
     if (!amountResolved) return { label: 'Enter the amount', key: 'amount' };
     if (!payeeResolved) return { label: payeeState === 'B' ? 'Confirm the payee' : 'Add the payee', key: 'payee' };
-    if (!descriptionResolved) return { label: 'Add a remark', key: 'description' };
     if (!projectResolved) return { label: 'Choose a project', key: 'project' };
     return null;
   })();
@@ -378,6 +550,80 @@ export function ResolvePopup({ entry, onClose, onUpdated }: Props) {
   useEffect(() => {
     setTimeout(() => document.getElementById('resolve-amount-input')?.focus({ preventScroll: true }), 120);
   }, []);
+
+  /**
+   * APPROVE & FILE — what the CONFIRM mode's button does.
+   *
+   * Edit only ever SAVES corrections back onto the entry (below); the filing happens when the owner
+   * taps Approve on the card. But in confirm mode he HAS tapped Approve — this popup only exists
+   * because of it — so the button at the bottom of it must finish the job he started, not send him
+   * back to the card to press the same thing twice.
+   *
+   * It writes the corrections, then files through the ONE write path the whole Day Book uses
+   * (fileRoughEntry), so a transaction filed from here and one filed from the card are the same record.
+   */
+  const [autoFile, setAutoFile] = useState(false);
+
+  /**
+   * THE THREE STATES OF AN APPROVAL.
+   *
+   *   ask     — "Approving this transaction. We need two details from you."   (the information state)
+   *   filing  — the write is in flight. Named, not spun at: he is watching his money move.
+   *   filed   — it landed, and we say where it landed, and only THEN do we leave.
+   *
+   * The middle one is not decoration. A payment going into the books is the single most consequential
+   * thing this app does, and a screen that simply blinks out has told him nothing about whether it
+   * worked. The success state is the receipt, and it is what earns the right to close.
+   */
+  const [approval, setApproval] = useState<'ask' | 'filing' | 'filed'>('ask');
+
+  const handleApprove = useCallback(async () => {
+    if (posting || !mandatoryFilled) return;
+    setPosting(true);
+    setApproval('filing');
+    try {
+      const projectName = projects.find((p) => p.project_id === projectId)?.name ?? ai.project_name ?? null;
+      const nextAi = {
+        ...ai,
+        payee_id: payeeId || null, payee_name: payeeName || null,
+        amount: Number(amount), project_id: projectId || null, project_name: projectName,
+        description: description.trim(), mode,
+      };
+      const { data: updatedEntry } = await supabase.from('rough_entries')
+        .update({ ai_extracted: nextAi }).eq('id', entry.id).select().single();
+
+      await fileRoughEntry(updatedEntry as RoughEntry, orgId ?? '', {
+        payeeId, projectId, amount: Number(amount), description: description.trim(),
+      });
+
+      // IT LANDED. Say so, hold it for a beat, and only then step out of the way — and hand the card
+      // back its own moment (the fly-off), so an entry approved from here leaves the list exactly as
+      // one approved on the card does. Two ways in, one way out.
+      setApproval('filed');
+      window.setTimeout(() => {
+        qc.invalidateQueries({ queryKey: ['inbox_badge'] });
+        onUpdated({ ...(updatedEntry as RoughEntry), status: 'POSTED' } as RoughEntry);
+        onClose();
+      }, 900);
+    } catch (err: any) {
+      showSnackbar(err.message || 'Failed to file', { type: 'error' });
+      setApproval('ask');
+      setPosting(false);
+    }
+  }, [posting, mandatoryFilled, projects, projectId, ai, payeeId, payeeName, amount, description, mode, entry, orgId, qc, onUpdated, onClose, showSnackbar]);
+
+  /**
+   * "THEN CONFIRM AUTO." When adding the payee was the LAST thing standing between this payment and
+   * the ledger, picking his trade files it. There is nothing left to ask, so there is nothing left to
+   * press — a button whose only possible use is to agree with you is a button that should not exist.
+   */
+  const autoFired = useRef(false);
+  useEffect(() => {
+    if (!autoFile || autoFired.current) return;
+    if (!confirmMode || !mandatoryFilled) return;
+    autoFired.current = true;                 // once, and never again on a re-render
+    void handleApprove();
+  }, [autoFile, confirmMode, mandatoryFilled, handleApprove]);
 
   // ── Save action — Edit just records the owner's corrections back onto the entry so
   // the Day Book card reflects them. It does NOT file the transaction; that happens
@@ -457,6 +703,8 @@ export function ResolvePopup({ entry, onClose, onUpdated }: Props) {
     onClose, handleSave, handleDismiss,
     payeeRef, advanceAfter, nextGap, goToGap,
     payeeState, setPayeeState,
+    show, confirmMode, only, approval, handleApprove,
+    armAutoFile: () => setAutoFile(true),
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -552,6 +800,12 @@ interface ContentProps {
   nextGap: { label: string; key: 'amount' | 'payee' | 'description' | 'project' } | null;
   goToGap: () => void;
   payeeState: PayeeState; setPayeeState: (v: PayeeState) => void;
+  show: (k: GapKey) => boolean;
+  confirmMode: boolean;
+  only?: GapKey[];
+  approval: 'ask' | 'filing' | 'filed';
+  handleApprove: () => void;
+  armAutoFile: () => void;
 }
 
 function PopupContents({
@@ -563,13 +817,14 @@ function PopupContents({
   projectId, setProjectId, projectRef, projects,
   mode, setMode,
   isWhatsApp,
-  missingPayee, missingAmount, missingDescription, missingProject,
+  missingPayee, missingAmount, missingProject,
   payeeUnmatched, projectUnmatched,
   posting,
   showDismissConfirm, setShowDismissConfirm,
   onClose, handleSave, handleDismiss,
   payeeRef, advanceAfter, nextGap, goToGap,
   payeeState, setPayeeState,
+  show, confirmMode, only, approval, handleApprove, armAutoFile,
 }: ContentProps) {
   const payeeDropRef    = useRef<HTMLDivElement>(null);
   const [showCreateStkForm, setShowCreateStkForm] = useState(false);
@@ -618,6 +873,50 @@ function PopupContents({
     color: VOICE.user,
   });
 
+  /**
+   * THE APPROVAL AND SUCCESS STATES.
+   *
+   * The questions do not fade out and the buttons do not go grey — the sheet simply BECOMES the thing
+   * that is happening. Filing is a sentence, not a spinner in a corner ("Filing to your books" — the
+   * money is going somewhere, and it says where). And it landed is a drawn tick and a place: "In your
+   * books." He is watching money move; he gets told, in words, that it arrived.
+   */
+  if (approval !== 'ask') {
+    const filed = approval === 'filed';
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center px-6 py-16 text-center">
+        <div
+          className="w-14 h-14 rounded-full flex items-center justify-center mb-5"
+          style={{ background: filed ? VOICE.confirmWash : VOICE.field }}
+        >
+          {filed ? (
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" className="db-pop">
+              <path className="db-draw" d="M5 12.5l4.5 4.5L19 7" stroke={VOICE.confirm} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          ) : (
+            <span className="w-6 h-6 border-2 rounded-full animate-spin" style={{ borderColor: 'rgba(154,142,128,.28)', borderTopColor: VOICE.walnut }} />
+          )}
+        </div>
+
+        <h2 style={{ fontFamily: VOICE.serif, fontSize: 22, fontWeight: 600, color: filed ? VOICE.confirm : VOICE.user }}>
+          {filed ? 'Filed' : 'Filing to your books'}
+        </h2>
+        <p className="mt-1.5 text-[13.5px]" style={{ color: VOICE.system }}>
+          {filed
+            ? 'It is in your ledger. You can find it in Transactions.'
+            : 'Recording the payment and its project allocation.'}
+        </p>
+
+        {amount !== '' && (
+          <p className="mt-4 text-[15px] font-semibold" style={{ color: VOICE.user, fontFamily: VOICE.serif, ...VNUMS }}>
+            ₹{Number(amount).toLocaleString('en-IN')}
+            {payeeName && <span className="font-normal text-[13px]" style={{ color: VOICE.systemFaint }}> · {payeeName}</span>}
+          </p>
+        )}
+      </div>
+    );
+  }
+
   return (
     <>
       {/* ── Sticky header (compact) ── */}
@@ -656,7 +955,53 @@ function PopupContents({
       {/* ── Fields ── */}
       <div className="px-4 pt-5 pb-2 space-y-7">
 
-        {/* 1. Amount — dark walnut "ledger" hero card (signature element) */}
+        {/* ═══ CONFIRM MODE — THE INFORMATION STATE ═══════════════════════════════════════════════
+            He pressed Approve. He is not here to re-enter a transaction; he is here because we could
+            not finish one. So the popup opens by SAYING SO — what it is about to do, on what, and what
+            it needs from him — and then it asks. Nothing else.
+
+            The great walnut amount card does not belong in this errand. It is the hero of the EDITOR,
+            where the figure is the thing you came to change. Here the figure is settled; leading with a
+            60px number would be shouting a fact nobody disputed, and pushing the actual questions below
+            the fold to do it. It becomes one line of subtext — the receipt he is approving — and the
+            questions get the room. */}
+        {confirmMode && (
+          <div className="db-drop">
+            <h2 style={{ fontFamily: VOICE.serif, fontSize: 22, fontWeight: 600, letterSpacing: '-0.2px', color: VOICE.user }}>
+              Approving this transaction
+            </h2>
+            <p className="mt-1.5 text-[13.5px]" style={{ color: VOICE.system }}>
+              Before it goes into your books, we need {(only?.length ?? 0) === 1 ? 'one detail' : `${only?.length} details`} from you.
+            </p>
+
+            {/* THE RECEIPT — everything already settled, stated once, quietly. It is context, not a
+                field: he said these things, and being asked to look at them again is not respect. */}
+            <div className="mt-3.5 flex flex-wrap items-baseline gap-x-2 gap-y-1 px-3 py-2.5 rounded-xl"
+                 style={{ background: VOICE.cream2, border: `1px solid ${VOICE.line}` }}>
+              {!show('amount') && amount !== '' && (
+                <span className="text-[14px] font-semibold" style={{ color: VOICE.user, fontFamily: VOICE.serif, ...VNUMS }}>
+                  ₹{Number(amount).toLocaleString('en-IN')}
+                </span>
+              )}
+              {!show('payee') && payeeName && (
+                <span className="text-[12.5px]" style={{ color: VOICE.userSoft }}>to <b style={{ color: VOICE.user }}>{payeeName}</b></span>
+              )}
+              {!show('project') && projectId && (
+                <span className="text-[12.5px]" style={{ color: VOICE.userSoft }}>
+                  · {projects.find((p: any) => p.project_id === projectId)?.name}
+                </span>
+              )}
+              {description.trim() && (
+                <span className="text-[12.5px]" style={{ color: VOICE.systemFaint }}>· {description.trim()}</span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* 1. Amount — the dark walnut "ledger" hero. The EDITOR's signature element, and the editor's
+            alone: it is here because the amount is the thing you most often came to change. Confirm mode
+            has no business with it unless the amount is the very thing that is missing. */}
+        {(!confirmMode || show('amount')) && (
         <div
           className="relative overflow-hidden"
           onClick={() => document.getElementById('resolve-amount-input')?.focus()}
@@ -704,7 +1049,10 @@ function PopupContents({
           </div>
         </div>
 
+        )}
+
         {/* 2. Payee */}
+        {show('payee') && (
         <div id="resolve-payee-field" style={{ scrollMarginTop: 24 }}>
           <FieldQuestion text="Who are you paying?" missing={missingPayee && payeeState !== 'B'} />
 
@@ -779,8 +1127,22 @@ function PopupContents({
             </div>
           )}
 
-          {/* STATE C — search + dropdown */}
-          {payeeState === 'C' && (
+          {/* STATE C — search + dropdown.
+              ...or, once "add" is tapped, THE SAME ROW becomes the new-party question (NewPartyRow).
+              It REPLACES the field; it does not open beneath it. Nothing is pushed down the page, and
+              there is never a form and a search box on screen at once arguing about which one you meant. */}
+          {payeeState === 'C' && (showCreateStkForm ? (
+            <NewPartyRow
+              defaultName={ai.payee_raw || payeeSearch}
+              onCreated={(id, name) => {
+                selectPayee(id, name);
+                setShowCreateStkForm(false);
+                // If he was the last thing missing, adding him files the payment. "Then confirm auto."
+                armAutoFile();
+              }}
+              onCancel={() => setShowCreateStkForm(false)}
+            />
+          ) : (
             <>
               {ai.payee_raw && (ai.payee_unmatched || payeeUnmatched) && (
                 <p className="text-[11px] font-medium mb-1.5 flex items-center gap-1" style={{ color: VOICE.accentDeep }}>
@@ -899,20 +1261,17 @@ function PopupContents({
                 })()}
               </div>
 
-              {showCreateStkForm && (
-                <CreateStakeholderForm
-                  defaultName={ai.payee_raw || payeeSearch}
-                  onCreated={(id, name) => { selectPayee(id, name); setShowCreateStkForm(false); }}
-                  onCancel={() => setShowCreateStkForm(false)}
-                />
-              )}
             </>
-          )}
+          ))}
         </div>
+        )}
 
-        {/* 3. Description */}
+        {/* 3. Description — the REMARK. Optional now, so confirm mode never asks for it: it is a note
+            on the payment, not a condition of it. Edit mode still offers it, because a note you want
+            to write is a perfectly good reason to open the editor. */}
+        {show('description') && (
         <div>
-          <FieldQuestion text="What was this for?" missing={missingDescription} />
+          <FieldQuestion text="What was this for?" missing={false} />
           <input
             id="resolve-description-input"
             type="text"
@@ -920,11 +1279,13 @@ function PopupContents({
             onChange={(e) => setDescription(e.target.value)}
             placeholder="What was this payment for?"
             className="w-full text-[13px] px-2.5 py-2 rounded-lg outline-none transition-colors"
-            style={fieldStyle(missingDescription ? 'missing' : description.trim() ? 'filled' : 'idle')}
+            style={fieldStyle(description.trim() ? 'filled' : 'idle')}
           />
         </div>
+        )}
 
         {/* 4. Project */}
+        {show('project') && (
         <div>
           <FieldQuestion text="Which project is this for?" missing={missingProject && !projectUnmatched} />
           <select
@@ -964,8 +1325,10 @@ function PopupContents({
             <div className="mt-1.5"><span className="inline-flex items-center gap-1 text-[11px]" style={{ color: VOICE.accentDeep }}><span className="w-1.5 h-1.5 rounded-full" style={{ background: VOICE.accentSoft }} /> Pick a project</span></div>
           )}
         </div>
+        )}
 
-        {/* 5. Mode */}
+        {/* 5. Mode — never a gap (it defaults), so confirm mode does not ask. */}
+        {!confirmMode && (
         <div>
           <FieldQuestion text="How was it paid?" />
           <div className="flex gap-1.5 flex-wrap">
@@ -980,6 +1343,7 @@ function PopupContents({
             ))}
           </div>
         </div>
+        )}
       </div>
 
       </div>
@@ -1021,9 +1385,11 @@ function PopupContents({
               <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
             </button>
           ) : (
-            /* Complete → the real save action. */
+            /* Complete → the real action. In CONFIRM mode that is the filing itself: he pressed Approve
+               to get here, and the button at the end of it must finish what he started rather than send
+               him back to the card to press the same word a second time. */
             <button
-              onClick={handleSave}
+              onClick={confirmMode ? handleApprove : handleSave}
               disabled={posting}
               className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-[13px] font-bold transition-all duration-200 active:scale-95"
               style={posting
@@ -1033,12 +1399,12 @@ function PopupContents({
               {posting ? (
                 <>
                   <span className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: 'rgba(154,142,128,.3)', borderTopColor: VOICE.system }} />
-                  Saving…
+                  {confirmMode ? 'Filing…' : 'Saving…'}
                 </>
               ) : (
                 <>
                   <span className="material-symbols-outlined text-[16px]">check</span>
-                  File it
+                  {confirmMode ? 'Approve & file' : 'File it'}
                 </>
               )}
             </button>

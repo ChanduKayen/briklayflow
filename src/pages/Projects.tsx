@@ -350,17 +350,45 @@ export default function Projects({ session }: { session: Session }) {
     onError: (e: any) => showSnackbar(e.message || 'Update failed', { type: 'error' }),
   })
 
+  /**
+   * DELETING A PROJECT — TWO STAGES, AND THE FIRST ONE IS THE HONEST ONE.
+   *
+   * It used to be a raw `delete from projects`, which Postgres refused at the first foreign key that
+   * does not cascade, and the UI shrugged: "Cannot delete — check for linked records." Check WHERE?
+   * There are eight tables it could have been. The database knew the answer and we threw it away.
+   *
+   * Now the server counts first (delete_project_preflight) and the button says what it is about to
+   * destroy, by name and by number: "3 work orders · 2 purchase orders · 1 goods receipt". Those are
+   * records that MONEY MOVED, so they are never collateral — you say yes to them specifically, and
+   * only then does p_force go through. Everything else (tasks, problems, photos, narrations) is site
+   * chatter and goes without a second question.
+   */
   const deleteProject = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from('projects').delete().eq('project_id', id)
+    mutationFn: async ({ id, force }: { id: string; force: boolean }) => {
+      const { data, error } = await supabase.rpc('delete_project', { p_project_id: id, p_force: force })
       if (error) throw error
+      return data as { ok: boolean; blocked?: { what: string; count: number }[] }
     },
-    onSuccess: () => {
+    onSuccess: (res, vars) => {
+      // NOT DELETED — the server refused, and it told us exactly what is in the way.
+      if (!res?.ok) {
+        const list = (res.blocked ?? [])
+          .map((b) => `${b.count} ${b.what}`)
+          .join(' · ')
+        const p = projects.find((x) => x.project_id === vars.id)
+        if (window.confirm(
+          `"${p?.name ?? vars.id}" still has:\n\n${list}\n\n` +
+          `These are financial records. Deleting the project destroys them too, permanently.\n\nDelete everything?`,
+        )) {
+          deleteProject.mutate({ id: vars.id, force: true })
+        }
+        return
+      }
       qc.invalidateQueries({ queryKey: ['projects'] })
       qc.invalidateQueries({ queryKey: ['sidebar_projects'] })
       showSnackbar('Project deleted')
     },
-    onError: (e: any) => showSnackbar(e.message || 'Cannot delete — check for linked records', { type: 'error' }),
+    onError: (e: any) => showSnackbar(e.message || 'Could not delete the project', { type: 'error' }),
   })
 
   const filtered = filter === 'all' ? projects : projects.filter(p => p.status === filter)
@@ -468,8 +496,10 @@ export default function Projects({ session }: { session: Session }) {
               canManage={canManage}
               onEdit={() => setEditingProject(p)}
               onDelete={() => {
-                if (window.confirm(`Delete "${p.name}"? This will fail if there are linked records.`)) {
-                  deleteProject.mutate(p.project_id)
+                // First ask about the PROJECT. If it turns out to be holding financial records, the
+                // server says so and the mutation asks a second, specific question — see above.
+                if (window.confirm(`Delete "${p.name}" and all its site work — tasks, problems, photos?`)) {
+                  deleteProject.mutate({ id: p.project_id, force: false })
                 }
               }}
             />

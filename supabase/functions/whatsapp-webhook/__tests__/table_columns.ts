@@ -121,6 +121,33 @@ export function loadTableColumns(opts: { before?: string; dir?: string } = {}): 
       for (const m of stmt.matchAll(/DROP\s+COLUMN\s+(?:IF\s+EXISTS\s+)?"?(\w+)"?/gi)) set.delete(m[1])
       for (const m of stmt.matchAll(/RENAME\s+COLUMN\s+"?(\w+)"?\s+TO\s+"?(\w+)"?/gi)) { set.delete(m[1]); set.add(m[2]) }
     }
+    // ── COLUMNS ADDED DYNAMICALLY, TO A LIST OF TABLES (2026-07-13) ─────────────────────────────────────
+    // The multi-tenant migrations do not write `ALTER TABLE projects ADD COLUMN org_id`. They loop:
+    //
+    //     do $$ declare v_tables text[] := array['user_profiles','projects','work_orders', …];
+    //     begin foreach v_table in array v_tables loop
+    //             execute format('alter table public.%I add column org_id uuid …', v_table);
+    //
+    // The statement scanner above cannot see through `format('… %I …')` — the table name is a placeholder —
+    // so `projects.org_id` did not exist as far as this parser was concerned. Nothing noticed until a select
+    // finally named it: the fake answered 42703, the project read as NULL, and the agent concluded the site
+    // had no construction stack. A FALSE RED, and precisely the failure this module's own header warns about
+    // (an incomplete column set is a lie in the other direction).
+    //
+    // So read the loop for what it is: the tables are the array literal, the columns are the ADD COLUMNs in
+    // the block, and every table in the list gets every column. Only tables we have already seen CREATEd are
+    // touched — the same rule the ALTER pass follows, for the same reason.
+    for (const [, body] of sql.matchAll(/\bdo\s+\$\$([\s\S]*?)\$\$/gi)) {
+      const added = [...body.matchAll(/ADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?"?(\w+)"?/gi)].map((m) => m[1])
+      if (!added.length) continue           // a backfill / not-null phase adds nothing — skip it
+      const tables = [...body.matchAll(/ARRAY\s*\[([\s\S]*?)\]/gi)]
+        .flatMap((m) => [...m[1].matchAll(/'([a-zA-Z_]\w*)'/g)].map((t) => t[1]))
+      for (const t of tables) {
+        const set = cols.get(t)
+        if (!set) continue                  // never saw it created — cannot know its full column set
+        for (const c of added) set.add(c)
+      }
+    }
   }
   return cols
 }

@@ -70,7 +70,25 @@
       "Bash(echo \"--- exit \\(1 = no matches = PASS\\): $? ---\")",
       "Bash(node_modules/.bin/eslint src/components/siteOps/ProjectSequence.tsx --format compact)",
       "Bash(node_modules/.bin/tsc -p tsconfig.app.json --noEmit)",
-      "Bash(grep *)"
+      "Bash(grep *)",
+      "Bash(command -v deno)",
+      "Bash(deno check *)",
+      "Read(//c/Users/koppi/.deno/**)",
+      "Read(//c/Users/koppi/.claude/plugins/cache/claude-plugins-official/supabase/0.1.11/**)",
+      "Bash(npx --no-install deno --version)",
+      "Bash(docker --version)",
+      "Bash(command -v supabase)",
+      "Bash(npx -y deno@2.9.1 test --allow-env --allow-read supabase/functions/whatsapp-webhook/__tests__/)",
+      "Bash(npx -y deno@2.9.1 test --no-check --sloppy-imports --allow-env --allow-read supabase/functions/whatsapp-webhook/__tests__/)",
+      "PowerShell($c = Get-Command deno -ErrorAction SilentlyContinue; if \\($c\\) { $c.Source; deno --version } else { \"NO DENO\"; Get-ChildItem \"$env:USERPROFILE\\\\.deno\\\\bin\" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name })",
+      "PowerShell(Select-String *)",
+      "PowerShell(npx supabase --version 2>&1 | Select-Object -First 3)",
+      "Bash(cp supabase/functions/whatsapp-webhook/_siteops_route.ts /tmp/route.now)",
+      "Bash(cp /tmp/route.bak supabase/functions/whatsapp-webhook/_siteops_route.ts)",
+      "Bash(python -)",
+      "Bash(git rm *)",
+      "Bash(rm -f supabase/functions/whatsapp-webhook/__tests__/assistant_question.test.ts)",
+      "Bash(python3 -)"
     ]
   }
 }

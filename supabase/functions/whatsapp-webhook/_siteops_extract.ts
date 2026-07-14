@@ -123,6 +123,16 @@ Splitting it destroys the sentence twice over: the first half loses "entire" (so
 
 NEVER separate a quantifier ("all", "entire", "both", "every", "anni") from the work it quantifies.
 
+A NEGATIVE CONTRAST IS NOT A REPORT. When the supervisor names one thing and then rules out another of the SAME kind — "electrical chases, not the plumbing ones", "ఎలక్ట్రికల్ గాడులు తీసాం, ప్లంబింగ్ గాడులు కాదు", "wiring, not the conduiting", "Unit A, not Unit B" — the second clause is telling you WHICH ONE HE MEANS. It is a correction of your understanding, not a fact about the thing he ruled out.
+  "we did the electrical chases, not the plumbing ones"
+    → ONE progress item, text: "electrical chases done (not the plumbing ones)"
+    → NEVER a second item, and above all NEVER an ISSUE ("plumbing chases not done").
+He did not say the plumbing chases are a problem. He did not say anything about them at all except that they are not what he is talking about. Inventing an issue out of a ruled-out alternative puts a defect on his site that does not exist, and it will be chased.
+
+THE TEST: does the negated clause name the SAME kind of work as the clause before it, with a different qualifier (a different trade, unit, floor, or item)? Then it is a CONTRAST — fold it into that item's text and emit nothing for it.
+A STANDALONE negative status report is different and IS a real item: "plumbing chases are still not done", "కరెంట్ ఇంకా రాలేదు" — nothing precedes it that it is being contrasted WITH; it stands on its own as a statement about where the work is. That may be an issue.
+When you cannot tell the two apart, FOLD IT IN. A contrast wrongly kept as text costs nothing; a contrast wrongly raised as an issue costs a site a defect that was never there.
+
 TYPE DEFINITIONS (enforce strictly):
 - progress = something HAPPENED on a construction task (work done / poured / cast / finished / started). qc_statements may be filled (see below).
 - issue = a PROBLEM WITH THE WORK that blocks or threatens a task — it has a cause + a consequence: "cement short", "joint leaking", "labour didn't show", "no water on site", "design clash". Classify its cause (see CAUSE CLASSIFICATION below).

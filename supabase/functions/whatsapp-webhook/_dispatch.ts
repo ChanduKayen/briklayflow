@@ -3,7 +3,7 @@
 // Sprint-3 legacy bridge + wa_sessions mirror are retired). Reporting/data queries
 // still bridge to the legacy handleQuery until a Reporting agent exists.
 
-import { routeMessage } from './_router.ts'
+import { routeMessage, detectLanguage, type RouterDecision } from './_router.ts'
 import {
   getRouterView, openConversation, closeConversation, abandonConversation, logRouterDecision, type ConvoRow,
 } from './_conversation.ts'
@@ -243,7 +243,29 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
   // now serves exactly two jobs, both inside the agent: ranking/injecting the ⭐ chased candidates, and
   // dropBatchItems bookkeeping. Whether a chase is open is legible to the router from HISTORY (the digest
   // is an assistant turn) — as a FACT to reason over, never as a gate that decides for it.
-  const d = await routeMessage({ text, pending, history })
+  // ── A TAP IS NOT A SENTENCE (2026-07-13, latency) ─────────────────────────────
+  // An interactive reply against an open conversation is ALREADY treated as an answer, by construction —
+  // see `isInteractiveReply` below, which overrides whatever the router says. So on a tapped list row we
+  // were paying a ~5-6s LLM classification and then THROWING ITS ANSWER AWAY. It contributed nothing:
+  // ANSWERS_PENDING routes by the DB's owning agent (`chosenAgent` below), never by intent_agent, and the
+  // only other field we keep is reply_language — which is detectLanguage(), a pure local function.
+  //
+  // This is NOT the deleted lexical short-circuit coming back. That one GUESSED at meaning from words (a
+  // bare "ok", a regex for an order) and second-guessed a model that had read the conversation. This
+  // guesses at nothing: he tapped a row on a list WE sent, against a question WE have open. It is a
+  // structural fact, and the dispatcher already said so — it just said so five seconds too late.
+  const isInteractiveReply = !!(ctx.interactiveId || ctx.flowResponse)
+  const structuralAnswer = !!(view.open && isInteractiveReply)
+  const d = structuralAnswer
+    ? {
+      decision: 'ANSWERS_PENDING' as const,
+      intent_agent: (view.open?.owning_agent ?? 'CONCIERGE') as RouterDecision['intent_agent'],
+      confidence: 1,
+      reply_language: detectLanguage(text),
+      reasoning: 'structural: an interactive reply answers the question that sent it (router not consulted)',
+    }
+    : await routeMessage({ text, pending, history })
+  if (structuralAnswer) console.log('[router] SKIPPED — interactive reply to an open question (structural)')
   const lang = d.reply_language
   // The uniform agent context (carries language + the tapped interactive id + any Flow payload).
   const actx: TxnCtx = { supabase, from, senderName: ctx.senderName, orgId, wamid, lang, interactiveId: ctx.interactiveId, flowResponse: ctx.flowResponse ?? null, image: ctx.image, audio: ctx.audio }
@@ -279,8 +301,7 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
   // intent. Override any router misread (e.g. the button title "Send to a vendor"
   // classified AMBIGUOUS -> concierge). Terminal Flows echo no token, so the open
   // wa_conversation (owning_agent + staged_entry_id) IS the binding.
-  const isInteractiveReply = !!(ctx.interactiveId || ctx.flowResponse)
-  let decision = (view.open && isInteractiveReply) ? 'ANSWERS_PENDING' : d.decision
+  let decision = structuralAnswer ? 'ANSWERS_PENDING' : d.decision
   let intentAgent = d.intent_agent
   // (B3 lived here — deleted 2026-07-09. See the routeMessage call above.)
 
@@ -458,6 +479,17 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
       // Procurement (materials request) gets the same instant ack as TRANSACTION, sent directly so it lands
       // before the slower sourcing reply. Concierge shares this branch but is conversational — no ack.
       if (agent.intent === 'PROCUREMENT') await sendNow(supabase, from, M.mProcRouteAck(lang))
+      // SITEOPS gets one too — and needed it most. It is the SLOWEST agent by a wide margin (a measured
+      // voice turn: ~30s from the supervisor finishing his sentence to his phone buzzing), and it was the
+      // only agent that said nothing at all until it was completely done. The two fast agents acknowledged
+      // instantly; the slow one left him staring at a dead chat. sendNow, not the outbox: a queued ack
+      // drained ten seconds later is not an ack.
+      // A VOICE NOTE OR A PHOTO WAS ALREADY ACKED, ten seconds ago, from processJob — before transcription,
+      // before the router, before any of this. Acking it a second time here would just tell him again that
+      // we heard him, which he knows. Only a TEXT message reaches SiteOps un-acked.
+      else if (agent.intent === 'SITEOPS' && !ctx.audio && !ctx.image) {
+        await sendNow(supabase, from, M.mSiteopsAck(lang, null))
+      }
       await agent.run(actx, text, { prefix, lingering: view.lingering, history })
     }
   } else if (decision === 'CHITCHAT') {

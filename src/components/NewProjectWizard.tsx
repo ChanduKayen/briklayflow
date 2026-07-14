@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 import { useUserProfile } from '../App'
 import { useQueryClient } from '@tanstack/react-query'
 import { fmtProjectId } from '../lib/projectId'
-import ConstructionConfig from './siteOps/ConstructionConfig'
+import { PlanSetup } from './desk/PlanSetup'
 
 const PROJECT_TYPES = [
   { label: 'Residential', icon: '🏠' },
@@ -204,10 +204,15 @@ export default function NewProjectWizard({ session }: { session: Session }) {
         </div>
       )}
 
-      {/* Card */}
+      {/* Card — it WIDENS for the building.
+          Steps 0/1/3 are a column of fields and read best narrow. Step 2 is the plan-setup card, which
+          is a form BESIDE a drawing: at 520px the drawing had nowhere to stand and was being cropped.
+          So the card grows to fit the thing inside it, and the growth is animated — the card opening
+          up is the page making room, which is exactly what is happening. */}
       <div
         style={{
-          width: '100%', maxWidth: 520,
+          width: '100%', maxWidth: step === 2 ? 980 : 520,
+          transition: 'max-width 360ms cubic-bezier(.2,.8,.3,1)',
           background: '#ffffff',
           borderRadius: 24,
           boxShadow: '0 2px 8px rgba(0,0,0,0.06), 0 20px 60px rgba(0,0,0,0.06)',
@@ -453,7 +458,7 @@ export default function NewProjectWizard({ session }: { session: Session }) {
 
         {/* Step 2: Construction set-up — the meta that generates the task plan (skippable) */}
         {step === 2 && createdProjectId && (
-          <div style={{ padding: '44px 48px 40px' }}>
+          <div style={{ padding: 'clamp(24px, 4vw, 44px) clamp(16px, 3.5vw, 44px) 40px' }}>
             <div style={{ marginBottom: 8 }}>
               <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#C8603A', opacity: 0.7 }}>
                 Step 3 of 3
@@ -465,7 +470,9 @@ export default function NewProjectWizard({ session }: { session: Session }) {
             <p style={{ fontSize: 14, color: 'rgba(0,0,0,0.45)', marginBottom: 28, lineHeight: 1.5 }}>
               A few details about the build generate the full site task list automatically. You can skip and set this up later.
             </p>
-            <ConstructionConfig
+            {/* The SAME card the Site Desk shows on an empty plan — same questions, same drawing, same
+                generator (setupPlan). A project must not be described one way here and another there. */}
+            <PlanSetup
               projectId={createdProjectId}
               projectType={projType}
               onComplete={goNext}

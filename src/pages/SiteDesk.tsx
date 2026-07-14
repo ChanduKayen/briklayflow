@@ -18,6 +18,7 @@ import { useOrgMembers } from '../components/siteOps/UserPicker'
 import ItemsTable, { type DeskProblem, type DeskSnag, type ThreadEntry } from '../components/siteOps/ItemsTable'
 import UnplacedQueue, { type UnplacedRow } from '../components/siteOps/UnplacedQueue'
 import { appendEvent, legacyToFollowupType, trailKey, useTrailStates } from '../lib/siteOps/followup'
+import { fetchSnags, setSnagDone, patchSnag as snagPatch } from '../lib/siteOps/legacySnags'
 
 const CREAM = '#FBF9F6', INK = '#221A13', INK_SOFT = 'rgba(34,26,19,0.55)', INK_FAINT = 'rgba(34,26,19,0.34)'
 const TERRA = '#C8603A', FAIL = '#B2402A', LINE = 'rgba(34,26,19,0.10)'
@@ -50,7 +51,8 @@ export default function SiteDesk({ session }: { session: Session }) {
       const FULL = 'id, title, status, cause, owner_id, owner_source, task_id, source_narration_id, project_id, next_followup_at, deadline, impact, status_history, created_at'
       const RICH = 'id, title, status, cause, owner_id, owner_source, task_id, source_narration_id, project_id, next_followup_at, status_history, created_at'
       const BASE = 'id, title, status, cause, owner_id, task_id, source_narration_id, project_id, next_followup_at, created_at'
-      const q = (cols: string) => supabase.from('problems').select(cols).eq('org_id', orgId)
+      // ISSUES ONLY — a snag is a problems row too (kind='snag') and has its own list below.
+      const q = (cols: string) => supabase.from('problems').select(cols).eq('org_id', orgId).neq('kind', 'snag')
       let res: { data: unknown; error: { message: string } | null } = await q(FULL)   // Phase 2.2/2.3 cols
       if (res.error) res = await q(RICH)
       if (res.error) res = await q(BASE)
@@ -60,14 +62,11 @@ export default function SiteDesk({ session }: { session: Session }) {
     enabled: !!orgId,
     refetchInterval: 20000,
   })
+  // A snag is a `problems` row now (20260713000001) — `todos` is a read-only archive. Same store as
+  // the new Site Desk, so an item cannot be closed on one screen and chased forever by the other.
   const { data: snags = [] } = useQuery({
     queryKey: ['desk_snags', orgId],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('todos')
-        .select('id, text, owner_id, due_date, status, task_id, project_id, created_at').eq('org_id', orgId)
-      if (error) throw error
-      return (data ?? []) as DeskSnag[]
-    },
+    queryFn: () => fetchSnags({ orgId: orgId ?? undefined }),
     enabled: !!orgId,
     refetchInterval: 20000,
   })
@@ -143,15 +142,15 @@ export default function SiteDesk({ session }: { session: Session }) {
   }
   function patchSnag(id: string, patch: Partial<DeskSnag>) {
     qc.setQueryData(['desk_snags', orgId], (old: DeskSnag[] | undefined) => old?.map((x) => (x.id === id ? { ...x, ...patch } : x)))
-    supabase.from('todos').update(patch).eq('id', id).then(({ error }) => { if (error) qc.invalidateQueries({ queryKey: ['desk_snags', orgId] }) })
+    void snagPatch(id, patch).catch(() => qc.invalidateQueries({ queryKey: ['desk_snags', orgId] }))
   }
   function toggleSnag(t: DeskSnag) {
     const next = t.status === 'DONE' ? 'OPEN' : 'DONE'
     qc.setQueryData(['desk_snags', orgId], (old: DeskSnag[] | undefined) => old?.map((x) => (x.id === t.id ? { ...x, status: next } : x)))
-    supabase.from('todos').update({ status: next }).eq('id', t.id).then(({ error }) => { if (error) qc.invalidateQueries({ queryKey: ['desk_snags', orgId] }) })
+    void setSnagDone(t.id, next === 'DONE').catch(() => qc.invalidateQueries({ queryKey: ['desk_snags', orgId] }))
     if (orgId) {
-      void appendEvent({ kind: 'todo', id: t.id, orgId, type: 'status_changed', body: next === 'DONE' ? 'Marked done' : 'Reopened', actorId: session.user.id })
-        .then(() => qc.invalidateQueries({ queryKey: trailKey('todo', t.id) }))
+      void appendEvent({ kind: 'issue', id: t.id, orgId, type: 'status_changed', body: next === 'DONE' ? 'Marked done' : 'Reopened', actorId: session.user.id })
+        .then(() => qc.invalidateQueries({ queryKey: trailKey('issue', t.id) }))
     }
   }
 

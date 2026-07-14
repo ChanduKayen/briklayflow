@@ -336,7 +336,9 @@ export async function runTransaction(
 // entry, then one aggregated card. No questions for a batch (incomplete entries stage
 // flagged for the Day Book). Router + single-entry UX are untouched.
 
-type EntryOutcome = { payee: string | null; amount: number | null; project: string | null; committed: boolean; replayId?: string }
+type EntryOutcome = { payee: string | null; amount: number | null; project: string | null; committed: boolean; replayId?: string
+  /** The staged entry's id — the deep-link target ('View entry'). Present only when it committed. */
+  entryId?: string | null }
 
 /** Batch status: incomplete entries are NOT questions — they stage flagged for the Day Book. */
 function statusFor(plan: Plan): string {
@@ -378,8 +380,8 @@ async function sendBatchCard(ctx: TxnCtx, outcomes: EntryOutcome[], prefix?: str
     : `retryall_${wamid}`
   // Ordered (message order) so the serials read 1..N regardless of saved/failed grouping.
   const card = applyPrefix(M.mBatch(lang, {
-    entries: outcomes.map((o) => ({ payee: o.payee, amount: o.amount, project: o.project, committed: o.committed })),
-    appLink: LINK, retryButtonId,
+    entries: outcomes.map((o) => ({ payee: o.payee, amount: o.amount, project: o.project, committed: o.committed, entryId: o.entryId ?? null })),
+    retryButtonId,
   }), prefix)
   await send(supabase, from, card, { org_id: orgId, wamid })
   if (failed.length === 0 && committedCount > 0) {
@@ -399,7 +401,7 @@ async function runBatch(
     const plan = buildPlan(entries[i], stakeholders, projects, ctx.from)
     const project = plan.projectName ?? plan.projectRaw ?? null
     const id = await commitEntry(ctx, statusFor(plan), text, plan.ai, ctx.wamid, i)
-    if (id) outcomes.push({ payee: plan.payeeDisplay, amount: plan.amount, project, committed: true })
+    if (id) outcomes.push({ payee: plan.payeeDisplay, amount: plan.amount, project, committed: true, entryId: id })
     else outcomes.push({ payee: plan.payeeDisplay, amount: plan.amount, project, committed: false, replayId: await recordFailedWrite(ctx, plan, text, ctx.wamid, i) })
   }
   await sendBatchCard(ctx, outcomes, prefix)
@@ -424,7 +426,7 @@ export async function retryBatchEntries(ctx: TxnCtx, rows: { replay_id: string; 
     const keyWamid = (p.wamid as string) ?? ctx.wamid
     const idx = typeof p.entry_index === 'number' ? p.entry_index : 0
     const id = await commitEntry(ctx, statusFor(plan), (p.raw_text as string) ?? '', plan.ai, keyWamid, idx)
-    if (id) { outcomes.push({ payee: plan.payeeDisplay, amount: plan.amount, project, committed: true }); cleared.push(row.replay_id) }
+    if (id) { outcomes.push({ payee: plan.payeeDisplay, amount: plan.amount, project, committed: true, entryId: id }); cleared.push(row.replay_id) }
     else outcomes.push({ payee: plan.payeeDisplay, amount: plan.amount, project, committed: false, replayId: await recordFailedWrite(ctx, plan, (p.raw_text as string) ?? '', keyWamid, idx) })
   }
   if (cleared.length) await ctx.supabase.from('wa_failed_writes').delete().in('replay_id', cleared)

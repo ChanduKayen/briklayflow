@@ -35,6 +35,30 @@ export const serif: CSSProperties = { fontFamily: "Georgia, 'Times New Roman', s
 export const nums: CSSProperties = { fontVariantNumeric: 'tabular-nums' };
 export const terraGrad = 'linear-gradient(135deg, #C75530 0%, #A93E1F 100%)';
 
+/**
+ * THE DAY BOOK'S THREE VOICES.
+ *
+ * A day book is a DOCUMENT — a bound ledger somebody signs off, page by page — and the redesign is
+ * built on that idea rather than on "a feed of notifications". Three typefaces carry it, and each one
+ * is doing a job that the other two cannot:
+ *
+ *   display  Playfair Display — the amount, and the date a day begins. The figure IS the fact; it is
+ *            the thing the eye lands on and the thing the whole card exists to state. (Already loaded
+ *            for the New Transaction ledger; the same voice, deliberately.)
+ *   mono     DM Mono — the docket furniture: the voucher number, the timestamp, the running total. A
+ *            ledger's small print has always been monospaced, and it is what makes the card read as a
+ *            record rather than a message.
+ *   telugu   Noto Sans Telugu — the supervisor's OWN WORDS, quoted verbatim and set in italic. This is
+ *            the one line on the card nobody at head office wrote, and it must not fall back to
+ *            whatever the operating system happens to have lying around.
+ *
+ * The PALETTE stays Briklay's (V above). The reference's cream/terracotta/sage sit within a hair of
+ * these already, and a second palette living inside one module is how an app starts to look like two.
+ */
+export const display: CSSProperties = { fontFamily: "'Playfair Display', Georgia, serif" };
+export const mono: CSSProperties = { fontFamily: "'DM Mono', ui-monospace, 'SF Mono', monospace" };
+export const telugu: CSSProperties = { fontFamily: "'Noto Sans Telugu', 'DM Sans', sans-serif" };
+
 /** Fluid type — scales with viewport, never fixed px. */
 export const T: Record<'h1' | 'body' | 'sm' | 'xs' | 'amt', CSSProperties> = {
   h1:   { fontSize: 'clamp(1.6rem, 1.1rem + 2.2vw, 2.1rem)' },

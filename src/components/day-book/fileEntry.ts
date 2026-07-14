@@ -37,13 +37,36 @@ export interface ResolvedFields {
   generalExpenseHead?: string;    // the GEN-xx head it's filed under (default GEN-99)
 }
 
-/** Ready to file once every mandatory field is resolved (payee + project must
- *  be matched to real records, not just heard). Drives the File button + swipe.
- *  A general expense waives ONLY the payee requirement — project/amount/description
- *  are still mandatory. */
+/**
+ * Ready to file once every mandatory field is resolved.
+ *
+ * THE REASON IS NOT MANDATORY, AND NEVER SHOULD HAVE BEEN. A payment with a payee, a project and an
+ * amount is a complete transaction — it is who, where, and how much, and a ledger has been able to
+ * record exactly that for six hundred years. The reason is a NOTE on it. Demanding one meant a card
+ * that knew everything that matters sat there refusing to file because nobody had typed "cement".
+ *
+ * `payeeId` and `projectId` must be REAL rows — see resolveIds() in ReviewCard. They arrive from the
+ * AI as strings in a jsonb blob, and a string that looks like a key is not a key.
+ */
 export function isResolved(r: ResolvedFields): boolean {
   const payeeOk = r.generalExpense ? true : Boolean(r.payeeId);
-  return payeeOk && Boolean(r.projectId) && r.amount > 0 && Boolean(r.description.trim());
+  return payeeOk && Boolean(r.projectId) && r.amount > 0;
+}
+
+/**
+ * WHAT IS ACTUALLY MISSING — the list, in the order a person would fix it.
+ *
+ * This is the whole basis of the assist: ONE gap is a question we can ask on the card and answer in a
+ * single press. TWO OR MORE is a conversation, and that is what the editor is for.
+ */
+export type Gap = 'amount' | 'payee' | 'project';
+
+export function gapsOf(r: ResolvedFields): Gap[] {
+  const out: Gap[] = [];
+  if (!(r.amount > 0)) out.push('amount');
+  if (!r.generalExpense && !r.payeeId) out.push('payee');
+  if (!r.projectId) out.push('project');
+  return out;
 }
 
 /**

@@ -1,7 +1,8 @@
 // STEP A — the IMMEDIATE receipt ack. A batch/compound message must not sit in ~45s of silence: as soon as
-// decompose knows the count, acknowledge ("picked out N updates, reviewing…") BEFORE the resolve loop. A
+// decompose knows the count, acknowledge ("Found N updates, reviewing…") BEFORE the resolve loop. A
 // single message gets a lighter "got your message" ack. The ack always PRECEDES the final readback.
 
+import { mentionsNothingToUpdate } from '../_siteops_resolution.ts'
 import { suite, test, expect } from './harness'
 import { fakeSupabase, type Seed } from './fake_supabase'
 import { runSiteops } from '../_agents/siteops.ts'
@@ -23,20 +24,23 @@ const DEC = (texts: string[]) => JSON.stringify({ project_hint: 'ASM Elite', ite
 const BOTH_FALSE = JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: false, updates: [] } })
 const model = (dec: string) => (_s: string, user: string): Promise<string> =>
   Promise.resolve(user.startsWith('CANDIDATES:') ? BOTH_FALSE : dec)
-const idxOf = (fake: ReturnType<typeof fakeSupabase>, re: RegExp) => fake.outbox().findIndex((b) => re.test(b))
+// Takes a RegExp OR a predicate — the miss message is now written in the sender's language, so it is
+// recognised by MEANING (isNothingToUpdate), never by one language's words.
+const idxOf = (fake: ReturnType<typeof fakeSupabase>, m: RegExp | ((b: string) => boolean)) =>
+  fake.outbox().findIndex((b) => (typeof m === 'function' ? m(b) : m.test(b)))
 
 suite('siteops — Step A: immediate receipt ack (batch count + single), before the readback', () => {
   test('a BATCH (2+ items) is acked immediately with the count', async () => {
     const fake = fakeSupabase(seed())
     await runSiteops(ctxFor(fake), 'wiring done, plumbing done', { callModel: model(DEC(['wiring done', 'plumbing done'])) })
-    expect(fake.outbox().some((b) => /picked out \*2 updates\*/i.test(b))).toBe(true)
+    expect(fake.outbox().some((b) => /Found \*2 updates\*/i.test(b))).toBe(true)
   })
 
   test('the ack PRECEDES the final readback', async () => {
     const fake = fakeSupabase(seed())
     await runSiteops(ctxFor(fake), 'wiring done, plumbing done', { callModel: model(DEC(['wiring done', 'plumbing done'])) })
-    const ack = idxOf(fake, /picked out \*2 updates\*/i)
-    const readback = idxOf(fake, /nothing updated/i)   // the both-false readback flush
+    const ack = idxOf(fake, /Found \*2 updates\*/i)
+    const readback = idxOf(fake, mentionsNothingToUpdate)   // the both-false readback flush
     expect(ack >= 0).toBe(true)
     expect(readback >= 0).toBe(true)
     expect(ack < readback).toBe(true)
@@ -45,6 +49,6 @@ suite('siteops — Step A: immediate receipt ack (batch count + single), before 
   test('a SINGLE message gets the lighter "got your message" ack', async () => {
     const fake = fakeSupabase(seed())
     await runSiteops(ctxFor(fake), 'wiring done', { callModel: model(DEC(['wiring done'])) })
-    expect(fake.outbox().some((b) => /got your message/i.test(b))).toBe(true)
+    expect(fake.outbox().some((b) => /checking against open work/i.test(b))).toBe(true)
   })
 })

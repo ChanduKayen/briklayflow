@@ -2,6 +2,7 @@
 // edges from the build prompt are present with the authored nature/reason.
 import { suite, test, expect } from './harness'
 import { LIBRARY, validateLibrary, taskType, canonicalRank } from '../library'
+import { briefOf } from '../briefs'
 
 function predEdge(followerId: string, predId: string) {
   return taskType(followerId).seq.find((e) => e.pred === predId)
@@ -19,7 +20,10 @@ suite('M1 library', () => {
     // 12 stages the legacy expander tracked and the engine did not (site_marking, plinth_slab, riser,
     // putty, window_grill, fixture, decorative, external_paint, terrace_waterproof, terrace_finish,
     // stair_finish, snagging) authored in. See library.ts "THE FLOOR CYCLE".
-    expect(LIBRARY.taskTypes.size).toBe(69)
+    // 69 → 72 (2026-07-13): the amenity systems expanded into their real components (+5: ca_lift_shaft,
+    // ca_lift_mech, ca_lift_door, ca_oht_pump, ca_fire_floor) and the dead lift model deleted (-2:
+    // lift_shaft, lift_mechanism, which were gated on a `hasLift` no caller ever passed).
+    expect(LIBRARY.taskTypes.size).toBe(72)
     expect(LIBRARY.freedomSets.size).toBe(5)
   })
 
@@ -84,9 +88,53 @@ suite('M1 library', () => {
     expect(predEdge('ceiling_frame', 'blockwork')!.nature).toBe('DESTRUCTIVE')
   })
 
-  test('lift_mechanism is long-lead; blockwork is the gateway', () => {
-    expect(taskType('lift_mechanism').longLead).toBeTruthy()
+  test('the lift mechanism is long-lead; blockwork is the gateway', () => {
+    expect(taskType('ca_lift_mech').longLead).toBeTruthy()
     expect(taskType('blockwork').isGateway).toBeTruthy()
+  })
+
+  // ── amenity systems: a system is several components, each with its real instancing ──
+  test('the lift is a system, not an atom — shaft & doors per floor, mechanism & licence once', () => {
+    for (const id of ['ca_lift_shaft', 'ca_lift_mech', 'ca_lift_door', 'ca_lift'])
+      expect(taskType(id).system).toBe('ca_lift')          // one opt-in key enables all four
+    expect(taskType('ca_lift_shaft').instancing).toBe('per_floor')
+    expect(taskType('ca_lift_door').instancing).toBe('per_floor')  // THE fix: a door at every landing
+    // the machine room is a ROOM: it stands in the headroom on the terrace, not in a floorless abstraction
+    expect(taskType('ca_lift_mech').instancing).toBe('sited')
+    expect(taskType('ca_lift_mech').sitedDefault).toBe('top')
+    // commissioning cannot precede the landing doors
+    expect(predEdge('ca_lift', 'ca_lift_door')!.nature).toBe('IMPOSSIBLE')
+  })
+
+  test('a sited plant has a level: the DG stands low, the tank and the solar stand high', () => {
+    expect(taskType('ca_generator').instancing).toBe('sited')
+    expect(taskType('ca_generator').sitedDefault).toBe('lowest')
+    expect(taskType('ca_transformer').sitedDefault).toBe('lowest')
+    expect(taskType('ca_oht').sitedDefault).toBe('top')
+    expect(taskType('ca_solar').sitedDefault).toBe('top')
+  })
+
+  // ── the brief: what a task IS, before anyone starts it ──
+  // (validateLibrary already proves 3 points in BOTH languages for all 72 types — see 'validates
+  // clean'. These pin the shape and the fallback, which a count check can't see.)
+  test('every task type explains itself, in Telugu and in English', () => {
+    for (const t of LIBRARY.taskTypes.values()) {
+      expect(briefOf(t.id, 'en')).toHaveLength(3)
+      expect(briefOf(t.id, 'te')).toHaveLength(3)
+    }
+    // and the Telugu is actually Telugu — not the English quietly falling through
+    const te = briefOf('conduit', 'te')!
+    if (!/[ఀ-౿]/.test(te.join(' '))) throw new Error('the Telugu brief is not in Telugu script')
+  })
+
+  test('a task with no engine type gets no brief — an honest gap, not an invented one', () => {
+    expect(briefOf('user_solar_panel_thing', 'te')).toBeNull()
+    expect(briefOf(null, 'te')).toBeNull()
+  })
+
+  test('the riser climbs — it is per-floor, gated by the floor below', () => {
+    expect(taskType('riser').instancing).toBe('per_floor')
+    expect(predEdge('riser', 'riser')!.scope).toEqual({ kind: 'cross_floor', delta: -1 })
   })
 
   // ── construction-semantic fields ──

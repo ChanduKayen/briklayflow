@@ -8,6 +8,7 @@
 // the supervisor how to name the work. What survives here are the journeys that were never about acks —
 // no-eat under a model failure, and resolve-and-close on a message that does name its referent.
 
+import { mentionsNothingToUpdate } from '../_siteops_resolution.ts'
 import { suite, test, expect } from './harness'
 import { fakeSupabase, type Seed } from './fake_supabase'
 import { runSiteops } from '../_agents/siteops.ts'
@@ -48,7 +49,7 @@ suite('siteops empty-decompose JOURNEY (reachability — Defect A)', () => {
     const fake = fakeSupabase(loneChaseSeed())
     await runSiteops(ctxFor(fake), 'వాటర్ లాగింగ్ ఇష్యూ ఏసీ ఎమ్ఎల్ఐటీ రిసాల్వ్డ్')
 
-    expect(fake.outbox().some((b) => /nothing updated/i.test(b))).toBe(false)   // not dead-ended (Defect-A invariant)
+    expect(fake.outbox().some((b) => mentionsNothingToUpdate(b))).toBe(false)   // not dead-ended (Defect-A invariant)
     expect(fake.writesTo('siteops_unplaced').length).toBe(1)                 // reached the engine, held for review
   })
 
@@ -73,7 +74,7 @@ suite('siteops empty-decompose JOURNEY — state combinations', () => {
     const emptyExtraction = () => Promise.resolve(JSON.stringify({ project_hint: null, items: [] }))
     await runSiteops(ctxFor(fake), 'కొంచెం రాంగ్ మెసేజ్', { callModel: emptyExtraction })
 
-    expect(fake.outbox().some((b) => /nothing updated/i.test(b))).toBe(true)
+    expect(fake.outbox().some((b) => mentionsNothingToUpdate(b))).toBe(true)
     expect(fake.trail().length).toBe(0)
   })
 
@@ -98,24 +99,31 @@ suite('siteops empty-decompose JOURNEY — state combinations', () => {
     expect(fake.writesTo('chase_batches').filter((w) => w.op === 'update').length).toBe(0) // batch untouched
   })
 
-  // RESOLVE-AND-CLOSE under v2: a to-do chase + "done" is now MODEL-driven (closure words are deliberately
+  // RESOLVE-AND-CLOSE under v2: a to-do chase + "done" is MODEL-driven (closure words are deliberately
   // NOT bare acks, so "done" goes to the model, which grades closure_explicit=true → resolve). The executor
-  // resolves the todo (→DONE) and drops it, closing the emptied batch. Exercises the todo resolve branch +
-  // dropBatchItems through the full v2 stack.
-  test('(J6) "inspector call is done" + lone open TODO chase → model resolves it (todo→DONE), closes the batch', async () => {
+  // resolves it and drops it, closing the emptied batch.
+  //
+  // AND IT RESOLVES A `problems` ROW, NOT A `todos` ROW (20260713000001). That is the whole point: a
+  // to-do used to be written to a second table the Site Desk could not read — so an item the founder
+  // closed in the portal was chased on WhatsApp forever, and an item WhatsApp closed never showed as
+  // closed in the portal. Same store, same status vocabulary (RESOLVED), same chase clock nulled.
+  test('(J6) "inspector call is done" + lone open TODO chase → resolves the PROBLEMS row, closes the batch', async () => {
     const todo: BatchItem = { kind: 'todo', id: 'todo-1', orgId: ORG, projectId: 'proj-asm', projectName: 'ASM Elite', title: 'call the inspector', taskName: null, cause: null }
     const fake = fakeSupabase({
       ...loneChaseSeed(),
       chase_batches: [{ id: 'batch-1', items: [todo] }],
-      todos: { 'todo-1': { id: 'todo-1', text: 'call the inspector', project_id: 'proj-asm', status: 'OPEN' } },
+      problems: { 'todo-1': { id: 'todo-1', title: 'call the inspector', project_id: 'proj-asm', status: 'OPEN', kind: 'snag', is_planned: true } },
     })
     const resolveTodo = () => Promise.resolve(JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: true, updates: [{ target_id: 'todo-1', target_kind: 'todo', action: 'resolve', confidence: 'high', closure_explicit: true, reason: 'done' }] } }))
     // NB: the message NAMES the to-do. A bare "done" no longer reaches SiteOps at all (referent rule).
     await runSiteops(ctxFor(fake), 'inspector call is done', { callModel: resolveTodo })
 
-    expect(fake.writesTo('todos').some((w) => w.op === 'update' && w.payload?.status === 'DONE')).toBe(true)
+    const upd = fake.writesTo('problems').filter((w) => w.op === 'update' && w.payload?.status === 'RESOLVED')
+    expect(upd.length > 0).toBe(true)
+    expect(upd[0].payload?.next_followup_at).toBe(null)                 // the chase clock is OFF
+    expect(fake.writesTo('todos').length).toBe(0)                       // the second store is gone
     expect(fake.writesTo('chase_batches').some((w) => w.op === 'update' && w.payload?.status === 'CLOSED')).toBe(true)
-    expect(fake.outbox().some((b) => /nothing updated/i.test(b))).toBe(false)
+    expect(fake.outbox().some((b) => mentionsNothingToUpdate(b))).toBe(false)
   })
 })
 

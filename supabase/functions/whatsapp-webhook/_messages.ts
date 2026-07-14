@@ -5,6 +5,7 @@
 // so the formatter renders the right interactive type.
 
 import type { OutMessage } from './_format.ts'
+import { entryLink, dayBookLink } from './_links.ts'
 
 export type Lang = 'en' | 'te' | 'te-en' | 'hi'
 
@@ -139,6 +140,67 @@ export function mProcRouteAck(lang: Lang): OutMessage {
   return { kind: 'text', body: pick(lang, c) }
 }
 
+// SiteOps routing ack — the same instant-ack pattern TRANSACTION and PROCUREMENT have had all along,
+// and which SiteOps, ALONE, did not.
+//
+// SiteOps is by some distance the slowest agent: a measured voice turn ran ~30s from the supervisor
+// finishing his sentence to his phone buzzing (STT → router → decompose → a resolve call per item →
+// the readback). Every other agent said "got it" in the first second; the one that takes half a minute
+// said nothing at all. That is exactly backwards.
+//
+// It names NOTHING it has not read yet — no site, no task, no count. The site and the items are the
+// readback's to own, and a wrong guess here would be a correction the supervisor has to make. It says
+// only the one thing we know for certain at routing time: it arrived, and we are reading it.
+const SITEOPS_ACKS: { en: string; te?: string; hi?: string }[] = [
+  { en: '📋 *Got it* — reading your update…', te: '📋 *అందింది* — చూస్తున్నాను…' },
+  { en: '📋 *Received* — going through it now…', te: '📋 *అందింది* — ఇప్పుడే చూస్తున్నాను…' },
+  { en: '📋 *Noted* — working through it…', te: '📋 *నోట్ చేసుకున్నా* — చూస్తున్నాను…' },
+]
+
+// A VOICE note earns its own line. He has just spoken for twenty seconds and the transcription alone
+// takes ~7s of the turn — so name the thing he actually did, and the wait stops feeling like a fault.
+const SITEOPS_VOICE_ACKS: { en: string; te?: string; hi?: string }[] = [
+  { en: '🎤 *Got your voice note* — listening…', te: '🎤 *వాయిస్ నోట్ అందింది* — వింటున్నాను…' },
+  { en: '🎤 *Received* — playing it back now…', te: '🎤 *అందింది* — ఇప్పుడే వింటున్నాను…' },
+]
+
+// A PHOTO likewise: the vision pass is a real, visible cost, and "looking at it" is the honest word.
+const SITEOPS_IMAGE_ACKS: { en: string; te?: string; hi?: string }[] = [
+  { en: '📷 *Got your photo* — looking at it…', te: '📷 *ఫోటో అందింది* — చూస్తున్నాను…' },
+  { en: '📷 *Received* — checking the photo…', te: '📷 *అందింది* — ఫోటో చూస్తున్నాను…' },
+]
+
+/** The instant "it landed, I'm reading it" — sent on routing to SITEOPS, before the slow work begins. */
+export function mSiteopsAck(lang: Lang, media: 'voice' | 'image' | null = null): OutMessage {
+  const pool = media === 'voice' ? SITEOPS_VOICE_ACKS : media === 'image' ? SITEOPS_IMAGE_ACKS : SITEOPS_ACKS
+  const c = pool[Math.floor(Math.random() * pool.length)]
+  return { kind: 'text', body: pick(lang, c) }
+}
+
+/**
+ * THE MEDIA ACK — sent the INSTANT a voice note or a photo arrives, before we have read a word of it.
+ *
+ * The agent acks above all fire from the dispatcher, which runs AFTER transcription and AFTER the router. On
+ * a TEXT message that is ~5s. On a VOICE NOTE it measured **10 seconds** — transcription alone was 5.4s and
+ * the router another 4.8s — and an acknowledgement that arrives ten seconds late is not an acknowledgement,
+ * it is a delayed reaction. He has already looked at the screen twice by then.
+ *
+ * This one needs NOTHING we have to compute. It does not claim to know what he said, which site he meant, or
+ * even which agent will handle it — because at this point we do not. It claims exactly one thing, and it is
+ * true of a voice note whatever it turns out to be about: **it arrived, and we are listening to it.**
+ *
+ * The language is a guess (we have no transcript yet), so it says as little as possible and leans on the
+ * emoji. The real, language-correct reply follows from the agent that ends up owning the turn.
+ */
+const MEDIA_ACKS: Record<'voice' | 'image', { en: string; te?: string; hi?: string }> = {
+  voice: { en: '🎤 Got your voice note — listening…', te: '🎤 వాయిస్ నోట్ అందింది — వింటున్నాను…' },
+  image: { en: '📷 Got your photo — looking at it…', te: '📷 ఫోటో అందింది — చూస్తున్నాను…' },
+}
+
+export function mMediaAck(lang: Lang, media: 'voice' | 'image'): OutMessage {
+  return { kind: 'text', body: pick(lang, MEDIA_ACKS[media]) }
+}
+
 // ── The two essential-asks (the ONLY questions the Transaction agent ever sends) ──
 // Each captures a raw value; neither matches against the DB. Acknowledge-before-ask:
 // surface what is already known, ask only the gap.
@@ -265,44 +327,86 @@ export function mWriteFailed(
  * PARTIAL -> reply-buttons naming each saved/not-saved line + [Try again] (one entry's
  * replay id, or a retry-all token for ≥2) + [Add in Day Book]. Functional EN copy; the
  * message-system pass polishes te-latin/te-script later. retryButtonId is null only when
- * nothing failed. appLink is a REAL https Day Book url (this card is sent OUTSIDE the
- * staging RPC, so the __ENTRY_LINK__ placeholder wouldn't be substituted).
+ * nothing failed. The URLs come from the LINK LAYER (_links.ts) — this card is sent OUTSIDE the
+ * staging RPC, so the __ENTRY_LINK__ placeholder would never be substituted.
  */
-type BatchEntry = { payee: string | null; amount: number | null; project: string | null; committed: boolean }
+type BatchEntry = {
+  payee: string | null; amount: number | null; project: string | null; committed: boolean
+  /** The staged entry's id — the deep-link target when exactly one entry landed. */
+  entryId?: string | null
+}
 
 export function mBatch(
   lang: Lang,
-  p: { entries: BatchEntry[]; appLink: string; retryButtonId: string | null },
+  p: { entries: BatchEntry[]; retryButtonId: string | null },
 ): OutMessage {
-  // "Rajeev Sharma → ₹3,25,000 · The Pride" — payee · amount · project (project omitted when absent).
+  /**
+   * ══ TYPE 5 · THE MONEY CONFIRMATION ═════════════════════════════════════════════════════════════════
+   *
+   *     ✓ *₹3,25,000 → Rajeev Sharma* — The Pride
+   *     Recorded in *Day Book* · Briklay
+   *     [ View entry ]
+   *
+   * ── THE ARROW WAS POINTING THE WRONG WAY ────────────────────────────────────────────────────────────
+   *
+   * This card read `Rajeev Sharma → ₹3,25,000`, and in the one grammar this system has, `→` means MONEY
+   * DIRECTION and nothing else. So the line said, precisely, that Rajeev paid US three lakh — the exact
+   * inverse of what happened. It is the single worst sentence the system could produce about money, and it
+   * was produced on every payment, because nobody had written the arrow's meaning down anywhere.
+   *
+   * ── AND THE WHOLE FACT IS ONE BOLD RUN ──────────────────────────────────────────────────────────────
+   *
+   * Amount, direction and party are ONE fact; split across two bold runs, the eye has to decide which of
+   * them is the news. The project rides after the em-dash as context, unbolded, because it is not.
+   */
+  const money = (n: number) => '₹' + n.toLocaleString('en-IN')
   const line = (e: BatchEntry) => {
-    const amt = e.amount != null ? '₹' + e.amount.toLocaleString('en-IN') : pick(lang, { en: 'amount not set' })
+    const amt = e.amount != null ? money(e.amount) : pick(lang, { en: 'amount not set' })
     const who = e.payee ?? pick(lang, { en: 'payee not set' })
-    const proj = e.project ? ` · ${e.project}` : ''
-    return `${who} → ${amt}${proj}`
+    const proj = e.project ? ` — ${e.project}` : ''
+    return `${amt} → ${who}${proj}`
   }
-  const committed = p.entries.filter((e) => e.committed).length
-  const failed = p.entries.length - committed
-  // Sum of what actually saved (free — already in memory; NOT a day-total query).
-  const savedSum = p.entries.filter((e) => e.committed).reduce((s, e) => s + (e.amount ?? 0), 0)
-  const sumStr = '₹' + savedSum.toLocaleString('en-IN')
+  const committed = p.entries.filter((e) => e.committed)
+  const failed = p.entries.filter((e) => !e.committed)
+  const savedSum = committed.reduce((s, e) => s + (e.amount ?? 0), 0)
 
-  if (failed === 0) {
-    const head = '✓ ' + pick(lang, { en: `Added ${committed} to your Day Book` })
-    const lines = p.entries.map((e) => line(e)).join('\n')
-    const total = pick(lang, { en: `That's ${sumStr} across these ${committed}.` })
-    const body = [head, lines, total].join('\n\n')
-    return { kind: 'cta', body, cta: { text: pick(lang, { en: 'Review in Day Book' }), url: p.appLink } }
+  // WHERE IT LANDED — on every card, because a card that wrote money and did not say where is the one
+  // message a builder will not take on trust.
+  const dest = `Recorded in *Day Book* · Briklay`
+
+  if (!failed.length) {
+    // ONE payment → the payment IS the headline, and the button lands on THAT entry (not on the Day Book
+    // to go looking in). Several → the count is the headline, and the button opens the book.
+    const one = committed.length === 1 ? committed[0] : null
+    const body = one
+      ? [`✓ *${line(one)}*`, dest].join('\n')
+      : [
+          `✓ *${committed.length} payments filed* — ${money(savedSum)}`,
+          committed.map(line).join('\n'),
+          dest,
+        ].join('\n\n')
+    // THE LINK LAYER OWNS THE URL (_links.ts). It was being built here by hand from a second copy of the
+    // Day Book base — two builders for one address is exactly the drift that layer exists to prevent.
+    return { kind: 'cta', body, cta: one?.entryId ? entryLink(one.entryId) : dayBookLink() }
   }
 
-  const head = pick(lang, { en: `Added ${committed} · couldn't save ${failed}` })
-  const lines = p.entries.map((e) =>
-    e.committed
-      ? `${line(e)}  (${pick(lang, { en: 'saved' })})`
-      : `${line(e)} — ${pick(lang, { en: 'not saved, nothing recorded' })}`,
-  ).join('\n')
-  const total = pick(lang, { en: `${sumStr} saved in all — the rest above wasn't recorded.` })
-  const body = [head, lines, total].join('\n\n')
+  /**
+   * PARTIAL. The retry button OUTRANKS the deep link for the same reason undo does on a site readback:
+   * WhatsApp allows one interactive type per message, and the most consequential thing he can do is not
+   * "go look at the ones that worked" — it is "save the one that didn't". So the link goes and the
+   * buttons stay.
+   *
+   * ⏸, NOT ⚠️: a write that failed on our side is Babai's limbo, not a hazard on his site. And the
+   * reassurance ("nothing was recorded for these") is LAST, after he has read what actually happened.
+   */
+  const head = committed.length
+    ? `✓ *${committed.length} filed* · ⏸ ${failed.length} couldn't save`
+    : `⏸ *Couldn't save ${failed.length === 1 ? 'that' : `those ${failed.length}`}*`
+  const lines = p.entries.map((e) => (e.committed ? `✓ ${line(e)}` : `⏸ ${line(e)}`)).join('\n')
+  const tail = committed.length
+    ? `${money(savedSum)} in the Day Book. Nothing was recorded for the ⏸ lines — tap to try again.`
+    : `Nothing was recorded — tap to try again.`
+  const body = [head, lines, tail].join('\n\n')
   return {
     kind: 'buttons',
     body,

@@ -4,6 +4,7 @@
 // the calibration greatest hits + the two seams adoption newly creates: model-down composing with live
 // batch state, and a question opened by the new path resuming through the old proven resume.
 
+import { mentionsNothingToUpdate } from '../_siteops_resolution.ts'
 import { suite, test, expect } from './harness'
 import { fakeSupabase, type Seed } from './fake_supabase'
 import { runSiteops, answerSiteops } from '../_agents/siteops.ts'
@@ -59,7 +60,7 @@ suite('siteops resolution v2 — ADOPTION end-to-end through runSiteops', () => 
     expect(fake.writesTo('problems').filter((w) => w.op === 'update').length).toBe(0)   // never advanced/resolved
     expect(fake.trail().length).toBe(0)                                                 // no bare_ack, no status_changed
     expect(fake.writesTo('chase_batches').filter((w) => w.op === 'update').length).toBe(0)
-    expect(fake.outbox().some((b) => /nothing updated/i.test(b))).toBe(true)            // the supportive guidance
+    expect(fake.outbox().some((b) => mentionsNothingToUpdate(b))).toBe(true)            // the supportive guidance
   })
 
   // (d) both-axes → one combined readback, both effects real (resolve + create/park).
@@ -67,7 +68,8 @@ suite('siteops resolution v2 — ADOPTION end-to-end through runSiteops', () => 
     const fake = fakeSupabase(baseSeed())
     await runSiteops(ctxFor(fake), 'waterlogging fixed, tiles broke', { callModel: model(BOTH) })
     expect(fake.writesTo('problems').some((w) => w.op === 'update' && w.payload?.status === 'RESOLVED')).toBe(true)
-    const reply = fake.writesTo('outbox').map((w) => w.payload?.payload?.body ?? '').find((b) => /Got it/.test(b)) ?? ''
+    // the digest no longer opens with "Got it" — line 1 is the count. Find the reply by what it SAYS.
+    const reply = fake.writesTo('outbox').map((w) => w.payload?.payload?.body ?? '').find((b) => /resolved/i.test(b)) ?? ''
     expect(/resolved/i.test(reply)).toBe(true)
   })
 

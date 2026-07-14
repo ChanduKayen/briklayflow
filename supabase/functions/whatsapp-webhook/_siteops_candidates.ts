@@ -52,8 +52,28 @@ export async function loadCandidates(
   const scopedChase = chaseItems.filter((c) => c.projectId === projectId)
   const chasedIds = new Set(scopedChase.map((c) => c.id))
 
+  /**
+   * A CHASED ITEM THAT IS ALREADY CLOSED IS NOT THE LIVE QUESTION.
+   *
+   * The batch is a digest we sent HOURS ago. Between then and now the founder may have closed the
+   * item in the portal — and this pushed it into the candidate set anyway, at the top of the
+   * precedence list, with `chased: true`. So the supervisor's next message went on being matched
+   * against a thing that was already done: the cron had correctly stopped chasing it, and the
+   * CONVERSATION had not. That is the "still being chased on WhatsApp" the founder actually saw.
+   *
+   * The batch is a prior, not a fact. The row is the fact — so it is re-read, every time.
+   */
+  const terminal = new Set<string>()
+  if (scopedChase.length) {
+    const { data: dead } = await supabase.from('problems')
+      .select('id, status').in('id', [...chasedIds])
+      .in('status', ['RESOLVED', 'DISMISSED'])
+    for (const d of (dead ?? []) as { id: string }[]) terminal.add(d.id)
+  }
+
   // CHASE first — the thing we asked about ranks top of the set (a strong prior, not a lock).
   for (const c of scopedChase) {
+    if (terminal.has(c.id)) continue          // closed since we asked: it is no longer on the table
     out.push({
       kind: c.kind === 'issue' ? 'issue' : 'todo', id: c.id, node_key: null,
       label: c.title, floor: null, unit: null, tradeText: `${c.title} ${c.taskName ?? ''}`, chased: true,
@@ -61,20 +81,17 @@ export async function loadCandidates(
   }
 
   try {
-    const [tasksRes, problemsRes, todosRes] = await Promise.all([
+    const [tasksRes, problemsRes] = await Promise.all([
       // OPEN tasks — closed ('done') excluded. project_id-scoped, mirroring finishRoute's load.
       supabase.from('site_tasks')
-        .select('task_id, name, trade, floor_label, unit_label, status, node_key')
+        .select('task_id, name, trade, floor_label, unit_label, status, node_key, trade_phase')
         .eq('project_id', projectId).neq('status', 'done'),
-      // OPEN issues — anything not RESOLVED (OPEN + ADDRESSING); a DISMISSED (retracted) issue is
-      // terminal and must not be offered as a candidate.
+      // OPEN issues AND snags — one table, one query. A snag used to be fetched separately from
+      // `todos`; it is a problems row now (kind='snag'), so it is already in here. DISMISSED
+      // (retracted) is terminal and must never be offered as a candidate.
       supabase.from('problems')
         .select('id, title, cause, status')
         .eq('org_id', orgId).eq('project_id', projectId).neq('status', 'RESOLVED').neq('status', 'DISMISSED'),
-      // OPEN snags (DB-honest: todos).
-      supabase.from('todos')
-        .select('id, text, status')
-        .eq('org_id', orgId).eq('project_id', projectId).eq('status', 'OPEN'),
     ])
     for (const t of (tasksRes?.data ?? []) as Record<string, string | null>[]) {
       if (t.task_id && !chasedIds.has(t.task_id)) out.push({
@@ -88,12 +105,6 @@ export async function loadCandidates(
       if (p.id && !chasedIds.has(p.id)) out.push({
         kind: 'issue', id: p.id, node_key: null, label: p.title ?? '',
         floor: null, unit: null, tradeText: `${p.title ?? ''} ${p.cause ?? ''}`, chased: false,
-      })
-    }
-    for (const d of (todosRes?.data ?? []) as Record<string, string | null>[]) {
-      if (d.id && !chasedIds.has(d.id)) out.push({
-        kind: 'todo', id: d.id, node_key: null, label: d.text ?? '',
-        floor: null, unit: null, tradeText: d.text ?? '', chased: false,
       })
     }
   } catch (e) {

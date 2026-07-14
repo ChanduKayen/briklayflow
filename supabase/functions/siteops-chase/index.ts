@@ -80,26 +80,23 @@ async function loadDueIssues(supabase: SB, now: Date): Promise<RawIssue[]> {
   return (res.data ?? []) as RawIssue[]
 }
 
-/** To-dos due on/before today and still open — minus any already chased today. */
-async function loadDueTodos(supabase: SB, today: string): Promise<RawTodo[]> {
-  const { data, error } = await supabase.from('todos')
-    .select('id, org_id, project_id, task_id, text, owner_id, due_date')
-    .eq('status', 'OPEN')
-    .not('owner_id', 'is', null)
-    .not('due_date', 'is', null)
-    .lte('due_date', today)
-  if (error) { console.error('[chase] loadDueTodos:', error); return [] }
-  const todos = (data ?? []) as RawTodo[]
-  if (!todos.length) return []
-  // to-dos have no chase clock to advance, so dedup on the trail: skip ones
-  // already chased since IST midnight — one nudge per IST day, not per tick.
-  const { data: ev } = await supabase.from('followup_events')
-    .select('todo_id')
-    .in('todo_id', todos.map((t) => t.id))
-    .eq('type', 'chase_sent')
-    .gte('created_at', `${today}T00:00:00+05:30`)
-  const chased = new Set((ev ?? []).map((e: { todo_id: string }) => e.todo_id))
-  return todos.filter((t) => !chased.has(t.id))
+/**
+ * THE SECOND LEG IS GONE. There is one item store now.
+ *
+ * This used to chase `todos` as well — a table the Site Desk cannot read, cannot render and cannot
+ * close. That is the whole bug: the founder closed an item in the portal, the portal showed it
+ * closed, and this function went on chasing a DIFFERENT row, daily, in a table no screen could
+ * reach. Nothing he could ever click would have stopped it.
+ *
+ * A to-do is now a planned snag (problems: kind='snag', is_planned, deadline → next_followup_at),
+ * so loadDueIssues() above already chases it — and `status='RESOLVED'`, which is exactly what the
+ * Desk writes when you close it, is exactly what stops the chase. One store, one close, one truth.
+ *
+ * See 20260713000001_todos_into_problems.sql: the existing rows were migrated, and `todos` is now a
+ * read-only archive with a trigger that refuses writes.
+ */
+async function loadDueTodos(_supabase: SB, _today: string): Promise<RawTodo[]> {
+  return []
 }
 
 serve(async (req) => {

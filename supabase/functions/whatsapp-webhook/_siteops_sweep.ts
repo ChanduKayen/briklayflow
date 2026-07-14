@@ -24,7 +24,8 @@
 // human reply survives (the 22-minute lesson cut both ways).
 
 import { abandonConversation, type ConvoRow } from './_conversation.ts'
-import { combineReadbacks, type HeldReadback } from './_siteops_readback.ts'
+import { composeConfirmation, type HeldReadback, type ReadbackEntry } from './_siteops_readback.ts'
+import type { OutMessage } from './_format.ts'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SB = any
@@ -162,7 +163,9 @@ export interface HeldFlushResult { checked: number; flushed: number; parked: num
  *  `send` is injected (supabase-agnostic) so the flush is provable without the outbox/WA layer. */
 export async function flushAbandonedHeldReadbacks(
   supabase: SB,
-  send: (to: string, body: string, orgId: string) => Promise<void>,
+  // THE SEAM CARRIES A MESSAGE, not a string. A flushed summary is a Type 5 confirmation like any other —
+  // it wrote rows, so it owes a destination line and a button, and a `body: string` seam cannot express one.
+  send: (to: string, msg: OutMessage, orgId: string) => Promise<void>,
   opts: { now?: Date; idleMinutes?: number } = {},
 ): Promise<HeldFlushResult> {
   const now = opts.now ?? new Date()
@@ -189,8 +192,13 @@ export async function flushAbandonedHeldReadbacks(
       const h = slots.held_readback as HeldReadback
       // the SURE items + a line NAMING the pending piece as saved-for-review (never a silent drop).
       const piece = typeof slots.piece_text === 'string' && slots.piece_text.trim() ? slots.piece_text.trim() : null
-      const entries = [...h.entries, ...(piece ? [{ project: null, body: `⏳ still had a question on “${piece}” — saved it for review so it's not lost` }] : [])]
-      await send(c.sender_number, combineReadbacks(entries), c.org_id)
+      // The unanswered piece is itself a Review write — it is being parked two lines below — so it declares
+      // that home, and the flush's button lands where the thing that still needs him actually is.
+      const pieceEntry: ReadbackEntry[] = piece
+        ? [{ project: null, body: `⏳ still had a question on “${piece}” — saved it for review so it's not lost`, homes: ['Review'] }]
+        : []
+      const entries: ReadbackEntry[] = [...h.entries, ...pieceEntry]
+      await send(c.sender_number, composeConfirmation(entries, h.resolvedRefs ?? []), c.org_id)
       res.flushed++
       // park the pending item (the SAME core the interrupt + 24h sweep use), then abandon so it stops intercepting.
       const out = await parkConvoObservation(supabase, c)

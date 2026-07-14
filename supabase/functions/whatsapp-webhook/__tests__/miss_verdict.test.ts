@@ -5,6 +5,7 @@
 // normal-looking narration (items + project) with no object and can't answer "should this have matched."
 // FIX: persist miss_verdict = {reason, contract} onto that narration.
 
+import { mentionsNothingToUpdate } from '../_siteops_resolution.ts'
 import { suite, test, expect } from './harness'
 import { fakeSupabase, type Seed } from './fake_supabase'
 import { runSiteops } from '../_agents/siteops.ts'
@@ -41,7 +42,7 @@ suite('siteops T7 concern A — miss durability (clause 6: auditable both-false 
     const emptyExtraction = () => Promise.resolve(JSON.stringify({ project_hint: null, items: [] }))
     await runSiteops(ctxFor(fake), 'asdfgh zxcvbn qwerty', { callModel: emptyExtraction })
     expect(fake.writesTo('site_narrations').some((w) => w.op === 'insert')).toBe(true)
-    expect(fake.outbox().some((b) => /nothing updated/i.test(b))).toBe(true)
+    expect(fake.outbox().some((b) => mentionsNothingToUpdate(b))).toBe(true)
   })
 
   // j2 (RED flip) — a BOTH-FALSE miss: decompose extracted a progress item and a project resolved, yet the

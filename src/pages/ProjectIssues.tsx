@@ -15,6 +15,7 @@ import { supabase } from '../lib/supabase'
 import { PageSkeleton } from '../components/SkeletonLoader'
 import { useOrgMembers } from '../components/siteOps/UserPicker'
 import ItemsTable, { type DeskProblem, type DeskSnag, type ThreadEntry } from '../components/siteOps/ItemsTable'
+import { fetchSnags, setSnagDone, patchSnag as snagPatch } from '../lib/siteOps/legacySnags'
 import { appendEvent, legacyToFollowupType, trailKey, useTrailStates } from '../lib/siteOps/followup'
 
 const CREAM = '#FBF9F6', INK = '#221A13', INK_SOFT = 'rgba(34,26,19,0.55)'
@@ -52,7 +53,9 @@ export default function ProjectIssues({ session }: { session: Session }) {
       const FULL = 'id, title, status, cause, owner_id, owner_source, task_id, source_narration_id, project_id, next_followup_at, deadline, impact, status_history, created_at'
       const RICH = 'id, title, status, cause, owner_id, owner_source, task_id, source_narration_id, project_id, next_followup_at, status_history, created_at'
       const BASE = 'id, title, status, cause, owner_id, task_id, source_narration_id, project_id, next_followup_at, created_at'
-      const q = (cols: string) => supabase.from('problems').select(cols).eq('project_id', projectId)
+      // ISSUES ONLY. A snag is a problems row too (kind='snag') and has its own tab — without this
+      // filter the same row appears under both, which is how "the tabs disagree" starts.
+      const q = (cols: string) => supabase.from('problems').select(cols).eq('project_id', projectId).neq('kind', 'snag')
       let res: { data: unknown; error: { message: string } | null } = await q(FULL)   // Phase 2.2/2.3 cols
       if (res.error) res = await q(RICH)
       if (res.error) res = await q(BASE)
@@ -62,14 +65,12 @@ export default function ProjectIssues({ session }: { session: Session }) {
     enabled: !!projectId,
     refetchInterval: 20000,
   })
+  // A SNAG IS A `problems` ROW NOW (20260713000001) — the `todos` table is a read-only archive. This
+  // page and the Site Desk finally read the same store, which is what stops an item being closed in
+  // one and chased forever by the other.
   const { data: snags = [] } = useQuery({
     queryKey: ['project_snags', projectId],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('todos')
-        .select('id, text, owner_id, due_date, status, task_id, project_id, created_at').eq('project_id', projectId)
-      if (error) throw error
-      return (data ?? []) as DeskSnag[]
-    },
+    queryFn: () => fetchSnags({ projectId }),
     enabled: !!projectId,
     refetchInterval: 20000,
   })
@@ -116,15 +117,17 @@ export default function ProjectIssues({ session }: { session: Session }) {
   }
   function patchSnag(id: string, patch: Partial<DeskSnag>) {
     qc.setQueryData(['project_snags', projectId], (old: DeskSnag[] | undefined) => old?.map((x) => (x.id === id ? { ...x, ...patch } : x)))
-    supabase.from('todos').update(patch).eq('id', id).then(({ error }) => { if (error) qc.invalidateQueries({ queryKey: ['project_snags', projectId] }) })
+    void snagPatch(id, patch).catch(() => qc.invalidateQueries({ queryKey: ['project_snags', projectId] }))
   }
   function toggleSnag(t: DeskSnag) {
     const next = t.status === 'DONE' ? 'OPEN' : 'DONE'
     qc.setQueryData(['project_snags', projectId], (old: DeskSnag[] | undefined) => old?.map((x) => (x.id === t.id ? { ...x, status: next } : x)))
-    supabase.from('todos').update({ status: next }).eq('id', t.id).then(({ error }) => { if (error) qc.invalidateQueries({ queryKey: ['project_snags', projectId] }) })
+    void setSnagDone(t.id, next === 'DONE').catch(() => qc.invalidateQueries({ queryKey: ['project_snags', projectId] }))
     if (orgId) {
-      void appendEvent({ kind: 'todo', id: t.id, orgId, type: 'status_changed', body: next === 'DONE' ? 'Marked done' : 'Reopened', actorId: session.user.id })
-        .then(() => qc.invalidateQueries({ queryKey: trailKey('todo', t.id) }))
+      // the trail hangs off `problems` now, so the event is an issue event — a `todo_id` would point
+      // at a table nothing writes to any more
+      void appendEvent({ kind: 'issue', id: t.id, orgId, type: 'status_changed', body: next === 'DONE' ? 'Marked done' : 'Reopened', actorId: session.user.id })
+        .then(() => qc.invalidateQueries({ queryKey: trailKey('issue', t.id) }))
     }
   }
 

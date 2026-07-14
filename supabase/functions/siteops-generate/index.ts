@@ -14,7 +14,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 // The engine, bundled for Deno (scripts/build-engine-bundle.mjs). Single source of truth.
-import { buildProjectVM, persistGraph, instantiate, stackToGeometry } from '../_shared/siteops-engine.js'
+import { buildProjectVM, persistGraph, instantiate, geometryOf, geometryOptionsOf, loadProjectRow } from '../_shared/siteops-engine.js'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -38,19 +38,9 @@ serve(async (req) => {
     )
 
     // 1. load the project's resolved stack + name + capability flags
-    let pRes = await supabase
-      .from('projects')
-      .select('project_id, org_id, name, construction_stack, has_common_areas, common_systems, suppressed_tasks')
-      .eq('project_id', project_id)
-      .single()
-    if (pRes.error) pRes = await supabase
-      .from('projects')
-      .select('project_id, org_id, name, construction_stack, has_common_areas')
-      .eq('project_id', project_id)
-      .single()
-    const project = pRes.data as (Record<string, unknown> & { construction_stack?: unknown; name?: string; has_common_areas?: boolean; common_systems?: string[]; suppressed_tasks?: string[]; org_id?: string; project_id?: string }) | null
-    const pErr = pRes.error
-    if (pErr || !project) throw new Error(`project not found / not visible: ${project_id}${pErr ? ` (${pErr.message})` : ''}`)
+    // ONE DOOR — the row (and its degraded-select fallback) comes from the engine. See engine/project.ts.
+    const project = await loadProjectRow(supabase, project_id)
+    if (!project) throw new Error(`project not found / not visible: ${project_id}`)
     if (!project.construction_stack) throw new Error(`project ${project_id} has no construction_stack — configure the build type first`)
 
     // 2. derive completion state from existing engine rows (node_key → status); empty if fresh /
@@ -70,20 +60,20 @@ serve(async (req) => {
       name: project.name ?? project_id,
       dryRun: !persist,
       generatedAt: new Date().toISOString(),
-      hasCommonAreas: !!project.has_common_areas,
-      hasExternalWorks: !!project.has_common_areas,
-      commonSystems: project.common_systems ?? [],
-      suppressedTasks: project.suppressed_tasks ?? [],
+      ...geometryOptionsOf(project),
     })
 
     // 4. PERSIST is gated until the dry-run is inspected (Step 5). The flag is wired but disabled.
     let persisted: unknown = null
     if (persist) {
       // INTENTIONALLY DISABLED until Step 5 sign-off. To enable, uncomment:
-      // const graph = instantiate(stackToGeometry(project.construction_stack, { hasCommonAreas: !!project.has_common_areas, hasExternalWorks: !!project.has_common_areas }))
-      // persisted = await persistGraph(supabase, { project_id: project.project_id, org_id: project.org_id }, graph)
-      // vm.dryRun = false
-      void persistGraph; void instantiate; void stackToGeometry // keep imports live; see Step 5
+      //   const graph = instantiate(geometryOf(project)!)
+      //   persisted = await persistGraph(supabase, { project_id, org_id: project.org_id! }, graph)
+      //   vm.dryRun = false
+      // (It used to hand-roll the option bag here and wire hasExternalWorks to has_common_areas — the
+      //  façade-less-project bug, preserved in amber, one uncomment away from being real again. The door
+      //  cannot express it: external works is not an option a caller gets to pass.)
+      void persistGraph; void instantiate; void geometryOf // keep imports live; see Step 5
       persisted = { skipped: 'persist is gated until the dry-run is inspected (Step 5)' }
     }
 

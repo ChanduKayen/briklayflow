@@ -52,7 +52,9 @@ suite('siteops candidates — loadCandidates project scope (Fix Y)', () => {
   // Minimal chainable supabase mock — every DB query resolves to no rows, so the output is exactly
   // the (scoped) chase precedence set. Each from() returns a fresh thenable chain.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sb: any = { from: () => { const q: any = { select: () => q, eq: () => q, neq: () => q, then: (r: (v: unknown) => void) => r({ data: [] }) }; return q } }
+  // `.in` is here because loadCandidates now RE-READS the chased ids to drop any that were closed
+  // in the portal since the digest went out (the stale-batch guard).
+  const sb: any = { from: () => { const q: any = { select: () => q, eq: () => q, neq: () => q, in: () => q, then: (r: (v: unknown) => void) => r({ data: [] }) }; return q } }
   const bi = (p: Partial<BatchItem>): BatchItem => ({
     kind: p.kind ?? 'issue', id: p.id ?? 'x', orgId: 'o', projectId: p.projectId ?? null,
     projectName: p.projectName ?? '', title: p.title ?? 'item', taskName: null, cause: null,

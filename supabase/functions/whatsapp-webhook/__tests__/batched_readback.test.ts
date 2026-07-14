@@ -55,7 +55,10 @@ suite('siteops — batched readback (one combined reply)', () => {
 // STEP B — the professional, sectioned readback: a warm header, per-SITE sections (multi-project), and a
 // closing invitation — replacing the ` · ` run-on. Single-entry readbacks are UNCHANGED (verbatim, keeps undo).
 suite('siteops — Step B: professional sectioned readback format', () => {
-  const landed = (fake: ReturnType<typeof fakeSupabase>) => fake.outbox().find((b) => /everything landed/i.test(b)) ?? ''
+  // THE DIGEST IS FOUND BY ITS LINE 1, which is now its strongest fact rather than a preamble:
+  // "✓ *3 updates filed* — 2 sites". A push preview shows ~50 characters; "Here's where everything
+  // landed 👇" spent all of them saying nothing.
+  const landed = (fake: ReturnType<typeof fakeSupabase>) => fake.outbox().find((b) => /updates? filed\*/i.test(b)) ?? ''
 
   test('multi-project compound → sectioned layout (header, per-site headers, closing), no dot run-on', async () => {
     const fake = fakeSupabase(seed())
@@ -63,17 +66,18 @@ suite('siteops — Step B: professional sectioned readback format', () => {
       callModel: model(DEC([{ text: 'slab crack at ASM', hint: 'ASM Elite' }, { text: 'cement short at Soundharya', hint: 'Soundharya' }])),
     })
     const rb = landed(fake)
-    expect(/here'?s where everything landed/i.test(rb)).toBe(true)   // warm header
+    expect(/^✓ \*\d+ updates? filed\*/m.test(rb)).toBe(true)   // line 1 IS the notification
     expect(/\n\*ASM Elite\*\n/.test(rb)).toBe(true)                   // per-site header on its own line
     expect(/\n\*Soundharya\*\n/.test(rb)).toBe(true)
-    expect(/anything off/i.test(rb)).toBe(true)                       // closing invitation
-    expect(/ · /.test(rb)).toBe(false)                               // NO ` · ` run-on join
+    expect(/wrong anywhere\? just reply/i.test(rb)).toBe(true)        // the ONE repair handle (§1.7)
+    expect(/Got it — .+ · /.test(rb)).toBe(false)                    // NO "Got it — a · b" run-on join
+    expect(/Recorded in \*Problems\* · Briklay/.test(rb)).toBe(true)   // …and it says WHERE the rows landed
   })
 
-  test('single-item readback is UNCHANGED — no "everything landed" wrapper (keeps its verbatim + undo shape)', async () => {
+  test('single-item readback is UNCHANGED — no digest wrapper (keeps its verbatim + undo shape)', async () => {
     const fake = fakeSupabase(seed())
     await runSiteops(ctxFor(fake), 'ASM lo slab crack', { callModel: model(DEC([{ text: 'slab crack', hint: 'ASM Elite' }])) })
-    expect(fake.outbox().some((b) => /everything landed/i.test(b))).toBe(false)
+    expect(fake.outbox().some((b) => /updates? filed*/i.test(b))).toBe(false)
     expect(fake.outbox().some((b) => /logged new/i.test(b))).toBe(true)   // the plain single readback still lands
   })
 })

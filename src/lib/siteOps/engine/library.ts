@@ -16,6 +16,7 @@
 import type {
   TaskType, FreedomSet, Library, Scope, TaskTypeId, QcCheck,
 } from './types'
+import { BRIEFS } from './briefs'
 
 // ── scope helpers (terse authoring) ──────────────────────────────────────────
 const SZ: Scope = { kind: 'same_zone' }
@@ -129,6 +130,7 @@ const TASK_TYPES: TaskType[] = [
   },
   {
     id: 'floor_pour', label: 'Frame — slab & beam pour', trade: 'civil', layer: 'structure',
+    saidAs: ['slab', 'slab pour', 'concreting', 'casting', 'స్లాబ్'],
     instancing: 'per_floor', appliesTo: [],
     seq: [
       // The gate the whole QC story hangs off: once this is poured, everything below it is buried. A
@@ -139,6 +141,7 @@ const TASK_TYPES: TaskType[] = [
   },
   {
     id: 'shuttering_removal', label: 'Frame — de-propping (shuttering removal)', trade: 'civil', layer: 'structure',
+    saidAs: ['de-shuttering', 'de-propping', 'షట్టరింగ్ తీయడం'],
     instancing: 'per_floor', appliesTo: [],
     seq: [
       // R7 Pour → Shuttering-removal. Sheet nature = "CURING-WAIT": encoded DESTRUCTIVE +
@@ -148,6 +151,7 @@ const TASK_TYPES: TaskType[] = [
   },
   {
     id: 'blockwork', label: 'Wall — blockwork', trade: 'masonry', layer: 'structure',
+    saidAs: ['brick work', 'block work', 'masonry', 'గోడలు'],
     instancing: 'per_floor', appliesTo: [],
     isGateway: true, // once a floor's walls are up, the whole services freedom-set fans out
     seq: [
@@ -166,7 +170,10 @@ const TASK_TYPES: TaskType[] = [
 
   // ════════ SERVICES (muscle) — per_zone unless noted ════════
   {
-    id: 'conduit', label: 'Electrical — conduiting (1st fix)', trade: 'electrical', layer: 'services',
+    id: 'conduit', label: 'Electrical — conduiting', phase: '1st fix', trade: 'electrical', layer: 'services',
+    // THE COLLISION. A chase is a groove cut in a wall; the electrician cuts them for his conduit. The word
+    // lived only on the plumbing label, so "electrical chases" matched plumbing. It lives here now too.
+    saidAs: ['electrical chases', 'chases', 'grooves', 'గాడులు', 'gaadulu', 'కండ్యూట్', '1st fix', 'first fix'],
     instancing: 'per_zone', appliesTo: ['dry', 'wet', 'balcony', 'common'],
     freedomSet: 'muscle_followers',
     hosts: ['wiring', 'switchboard'],
@@ -177,6 +184,7 @@ const TASK_TYPES: TaskType[] = [
   },
   {
     id: 'in_wall_plumbing', label: 'Plumbing — in-wall lines (chases & sleeves)', trade: 'plumbing', layer: 'services',
+    saidAs: ['plumbing chases', 'pipe chases', 'sleeves', 'ప్లంబింగ్ గాడులు', 'పైపు గాడులు'],
     instancing: 'per_zone', appliesTo: ['wet', 'balcony', 'common'],
     freedomSet: 'muscle_followers',
     concealedBy: ['plaster'],
@@ -205,21 +213,27 @@ const TASK_TYPES: TaskType[] = [
     id: 'pressure_test', label: 'Plumbing — pressure test', trade: 'plumbing', layer: 'services',
     instancing: 'per_zone', appliesTo: ['wet', 'balcony'],
     seq: [
-      { pred: 'plumb_rough', nature: 'STRONG_PREF', reason: 'quality', scope: SZ, note: 'test before concealing — catch leaks' }, // R17
+      { pred: 'plumb_rough', nature: 'IMPOSSIBLE', reason: 'structural', scope: SZ, note: 'there is nothing to pressurise until the pipes are laid' }, // R17
     ],
   },
   {
     // NEW (2026-07-11) — the legacy expander tracked "Vertical Plumbing Risers" and the engine had only
     // the per-floor rough-in. The risers are the vertical spine every floor's rough-in ties into; a
     // supervisor reporting "risers done" had nowhere to land it.
+    // PER_FLOOR since 2026-07-13. A riser is not one task: it climbs the shaft and is dropped, teed and
+    // valved AT EVERY FLOOR, and that is the unit of work a plumber reports ("risers done up to third").
+    // As a single `building` node the floors it passes were invisible and unreportable.
     id: 'riser', label: 'Plumbing — vertical risers', trade: 'plumbing', layer: 'services',
-    instancing: 'building', appliesTo: ['shaft', 'common'],
+    saidAs: ['risers', 'vertical lines', 'shaft pipes'],
+    instancing: 'per_floor', appliesTo: ['shaft', 'common'],
     seq: [
-      { pred: 'foundation', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'the risers rise from the substructure through the shafts' },
+      { pred: 'blockwork', nature: 'IMPOSSIBLE', reason: 'structural', scope: SF, note: 'the shaft walls must exist on this floor before the riser is dropped through it' },
+      { pred: 'riser', nature: 'IMPOSSIBLE', reason: 'structural', scope: CF(-1), note: 'a riser climbs — the floor below carries this one' },
     ],
   },
   {
-    id: 'wiring', label: 'Electrical — wire pulling (2nd fix)', trade: 'electrical', layer: 'services',
+    id: 'wiring', label: 'Electrical — wire pulling', phase: '2nd fix', trade: 'electrical', layer: 'services',
+    saidAs: ['wiring', 'wire pulling', 'వైరింగ్', '2nd fix', 'second fix'],
     instancing: 'per_zone', appliesTo: ['dry', 'wet', 'balcony', 'common'],
     hostedBy: ['conduit'],
     seq: [
@@ -228,6 +242,7 @@ const TASK_TYPES: TaskType[] = [
   },
   {
     id: 'switchboard', label: 'Electrical — switchboards / DB', trade: 'electrical', layer: 'services',
+    saidAs: ['switchboards', 'DB', 'distribution board', 'స్విచ్ బోర్డ్'],
     instancing: 'per_zone', appliesTo: ['dry', 'wet', 'common'],
     hostedBy: ['conduit'],
     seq: [
@@ -280,6 +295,7 @@ const TASK_TYPES: TaskType[] = [
     hostedBy: ['ceiling_frame'],
     concealedBy: ['ceiling_board'],
     seq: [
+      { pred: 'blockwork', nature: 'IMPOSSIBLE', reason: 'structural', scope: SZ, note: 'services run in a room, off a slab - the shell must exist' },
       { pred: 'ceiling_frame', nature: 'STRONG_PREF', reason: 'logistics', scope: SZ, note: 'service hung on frame' }, // R27
     ],
   },
@@ -295,6 +311,7 @@ const TASK_TYPES: TaskType[] = [
     // Services. Wiring run in the ceiling void belongs with the overhead_void set, after the frame
     // that forms the void. Added as a soft order anchor (it can be partly pre-run, so not hard):
     seq: [
+      { pred: 'blockwork', nature: 'IMPOSSIBLE', reason: 'structural', scope: SZ, note: 'services run in a room, off a slab - the shell must exist' },
       { pred: 'ceiling_frame', nature: 'STRONG_PREF', reason: 'logistics', scope: SZ, note: 'run in the ceiling void the frame forms' },
     ],
   },
@@ -302,6 +319,7 @@ const TASK_TYPES: TaskType[] = [
   // ════════ FINISHES (skin) — per_zone unless noted ════════
   {
     id: 'plaster', label: 'Wall — internal plaster', trade: 'plaster', layer: 'finishes',
+    saidAs: ['plastering', 'internal plastering', 'ప్లాస్టరింగ్'],
     instancing: 'per_zone', appliesTo: ['dry', 'wet', 'balcony', 'common'],
     conceals: ['conduit', 'in_wall_plumbing', 'pressure_test'],
     hosts: ['switchplate'],
@@ -327,15 +345,18 @@ const TASK_TYPES: TaskType[] = [
   },
   {
     id: 'waterproof', label: 'Wet area — waterproofing', trade: 'waterproofing', layer: 'finishes',
+    saidAs: ['waterproofing', 'వాటర్‌ప్రూఫింగ్'],
     instancing: 'per_zone', appliesTo: ['wet', 'balcony'],
     concealedBy: ['screed', 'floor_tile'],
     cohesion: [
       { with: 'screed', nature: 'DESTRUCTIVE', reason: 'concealment', note: 'stacked covers move as one' }, // R36
     ],
-    seq: [],
+    seq: [
+      { pred: 'blockwork', nature: 'IMPOSSIBLE', reason: 'structural', scope: SZ, note: 'a wet area is a ROOM - there is nothing to tank until the walls are up' },],
   },
   {
     id: 'screed', label: 'Floor — screed / leveling', trade: 'flooring', layer: 'finishes',
+    saidAs: ['screed', 'levelling', 'base coat'],
     instancing: 'per_zone', appliesTo: ['dry', 'wet', 'balcony', 'common'],
     conceals: ['waterproof'],
     concealedBy: ['floor_tile'],
@@ -345,6 +366,7 @@ const TASK_TYPES: TaskType[] = [
   },
   {
     id: 'floor_tile', label: 'Floor — tiling', trade: 'tiling', layer: 'finishes',
+    saidAs: ['floor tiles', 'tiles laying', 'flooring', 'టైల్స్'],
     instancing: 'per_zone', appliesTo: ['dry', 'wet', 'balcony', 'common'],
     conceals: ['screed', 'waterproof'],
     seq: [
@@ -354,8 +376,10 @@ const TASK_TYPES: TaskType[] = [
   },
   {
     id: 'wall_tile', label: 'Wall — tiling / dado', trade: 'tiling', layer: 'finishes',
+    saidAs: ['wall tiles', 'dado', 'గోడ టైల్స్'],
     instancing: 'per_zone', appliesTo: ['wet'],
     seq: [
+      { pred: 'blockwork', nature: 'IMPOSSIBLE', reason: 'structural', scope: SZ, note: 'you cannot tile a wall that does not exist (plaster below is the QUALITY pref, not the wall)' },
       { pred: 'plaster', nature: 'STRONG_PREF', reason: 'quality', scope: SZ, note: 'tile backing' }, // R24
     ],
   },
@@ -372,11 +396,13 @@ const TASK_TYPES: TaskType[] = [
     ],
   },
   {
-    id: 'switchplate', label: 'Electrical — switchplates (final fix)', trade: 'electrical', layer: 'finishes',
+    id: 'switchplate', label: 'Electrical — switchplates', phase: 'final fix', trade: 'electrical', layer: 'finishes',
+    saidAs: ['switchplates', 'switch boards', 'స్విచ్ ప్లేట్లు', 'final fix'],
     instancing: 'per_zone', appliesTo: ['dry', 'wet', 'common'],
     freedomSet: 'skin_fittings',
     hostedBy: ['plaster'],
     seq: [
+      { pred: 'wiring', nature: 'IMPOSSIBLE', reason: 'structural', scope: SZ, note: 'a plate terminates a wire - there must be wire' },
       { pred: 'plaster', nature: 'STRONG_PREF', reason: 'logistics', scope: SZ, note: 'mount on finished wall' }, // R25
     ],
   },
@@ -393,11 +419,13 @@ const TASK_TYPES: TaskType[] = [
     instancing: 'per_zone', appliesTo: ['dry', 'common'],
     conceals: ['void_wiring'],
     seq: [
+      { pred: 'blockwork', nature: 'IMPOSSIBLE', reason: 'structural', scope: SZ, note: 'the room must exist; boarding below is the quality pref' },
       { pred: 'ceiling_board', nature: 'STRONG_PREF', reason: 'quality', scope: SZ, note: 'finish over board' }, // R29
     ],
   },
   {
-    id: 'sanitary', label: 'Plumbing — sanitaryware & fittings (final fix)', trade: 'plumbing', layer: 'finishes',
+    id: 'sanitary', label: 'Plumbing — sanitaryware & fittings', phase: 'final fix', trade: 'plumbing', layer: 'finishes',
+    saidAs: ['sanitaryware', 'fittings', 'taps', 'closet', 'final fix plumbing'],
     instancing: 'per_zone', appliesTo: ['wet'],
     freedomSet: 'skin_fittings',
     hostedBy: ['plumb_rough'],
@@ -444,6 +472,7 @@ const TASK_TYPES: TaskType[] = [
     id: 'decorative', label: 'Decorative installations', trade: 'finishing', layer: 'finishes',
     instancing: 'per_zone', appliesTo: ['dry', 'common'],
     seq: [
+      { pred: 'blockwork', nature: 'IMPOSSIBLE', reason: 'structural', scope: SZ, note: 'nothing to install into before the walls are up' },
       { pred: 'paint', nature: 'STRONG_PREF', reason: 'quality', scope: SZ, note: 'decorative work lands on finished surfaces' },
     ],
   },
@@ -452,13 +481,15 @@ const TASK_TYPES: TaskType[] = [
   {
     id: 'external_structure', label: 'External — façade structure', trade: 'civil', layer: 'structure',
     instancing: 'building', appliesTo: ['external'],
-    seq: [],
+    seq: [
+      { pred: 'floor_pour', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'a facade hangs on a FRAME - authored with no predecessor at all, so the plan put it at seq_no 1, ahead of clearing the site' },],
   },
   {
     id: 'facade_plaster', label: 'External — façade plaster', trade: 'plaster', layer: 'finishes',
     instancing: 'building', appliesTo: ['external'],
     freedomSet: 'common_stream',
     seq: [
+      { pred: 'floor_pour', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'no elevation to plaster until the frame is up (facade structure below is the access/scaffolding pref)' },
       { pred: 'external_structure', nature: 'STRONG_PREF', reason: 'logistics', scope: BW, note: 'scaffolding / access' }, // R37
     ],
   },
@@ -477,8 +508,11 @@ const TASK_TYPES: TaskType[] = [
     // NEW (2026-07-11) — "Terrace Waterproofing" from the legacy set. `waterproof` is the WET-AREA job
     // (per zone, bathrooms/balconies). The terrace is a building-wide job at a different moment, and it
     // is the single most expensive thing on the building to get wrong.
+    // ON THE TERRACE (2026-07-13). This was `building` — floorless — so the single most expensive thing on
+    // the building to get wrong lived nowhere: not on a floor, not in a stage a supervisor would look at.
+    // `sited`/'top' puts it where it happens, now that the building has a roof to happen on.
     id: 'terrace_waterproof', label: 'Terrace — waterproofing', trade: 'waterproofing', layer: 'finishes',
-    instancing: 'building', appliesTo: ['external'],
+    instancing: 'sited', sitedDefault: 'top', appliesTo: ['terrace'],
     concealedBy: ['terrace_finish'],
     seq: [
       { pred: 'floor_pour', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'the terrace slab must be cast first' },
@@ -488,68 +522,147 @@ const TASK_TYPES: TaskType[] = [
     // NEW (2026-07-11) — "Terrace Finishing" from the legacy set: the screed/tile layer that BURIES the
     // waterproofing. Once this is down, a membrane defect is invisible until it leaks into the top floor.
     id: 'terrace_finish', label: 'Terrace — finishing', trade: 'flooring', layer: 'finishes',
-    instancing: 'building', appliesTo: ['external'],
+    instancing: 'sited', sitedDefault: 'top', appliesTo: ['terrace'],
     conceals: ['terrace_waterproof'],
     seq: [
       { pred: 'terrace_waterproof', nature: 'DESTRUCTIVE', reason: 'concealment', scope: BW, note: 'the finish buries the membrane — never cover an untested one' },
     ],
   },
+  // DELETED (2026-07-13): `lift_shaft` + `lift_mechanism`. They were gated on `geometry.hasLift`, which
+  // NO CALLER EVER PASSED — so neither type was ever instantiated, in any project, ever. Meanwhile
+  // `ca_lift` modelled the same lift as a single opaque atom. Two models, one of them dead. The lift is
+  // now ONE system (`ca_lift`) expanded into its real components below.
   {
-    id: 'lift_shaft', label: 'Lift — shaft structure', trade: 'civil', layer: 'structure',
-    instancing: 'building', appliesTo: ['shaft'],
-    seq: [],
-  },
-  {
-    id: 'lift_mechanism', label: 'Lift — mechanism', trade: 'lift', layer: 'services',
-    instancing: 'building', appliesTo: ['shaft'],
-    longLead: true, // start procurement early though install is late
-    seq: [
-      { pred: 'lift_shaft', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'LONG-LEAD: start early' }, // R38
-    ],
-  },
-  {
+    // GRADING HAPPENS AT THE STILT, NOT AT SITE PREP (2026-07-13). It was a floorless `building` task gated
+    // only on clearing the plot, so the plan put it third — in among the setting-out and the excavation. You
+    // cannot shape the finished ground while the plinth is still an open trench and lorries are still driving
+    // over it. Cut and fill is the level the STILT (or, with no stilt, the ground floor) stands on, and it is
+    // done once the substructure is out of the ground. `sited`/'lowest' stands it on that level — the same
+    // level the parking deck stands on — so it reads where it actually happens.
     id: 'site_grade', label: 'Site — grading', trade: 'civil', layer: 'structure',
-    instancing: 'building', appliesTo: ['external'],
-    seq: [],
+    instancing: 'sited', sitedDefault: 'lowest', appliesTo: ['external'],
+    seq: [
+      { pred: 'ground_clearance', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'you cannot grade ground you have not cleared' },
+      { pred: 'plinth_slab', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'the substructure must be out of the ground — you cannot grade over an open trench' },
+    ],
   },
   {
     id: 'site_development', label: 'Site — development', trade: 'civil', layer: 'finishes',
     instancing: 'building', appliesTo: ['external'],
     freedomSet: 'common_stream',
     seq: [
+      { pred: 'floor_pour', nature: 'DESTRUCTIVE', reason: 'quality', scope: BW, note: 'site works laid before the frame is up are destroyed by construction traffic' },
       { pred: 'site_grade', nature: 'STRONG_PREF', reason: 'logistics', scope: EX, note: 'near handover' }, // R39
     ],
   },
 
-  // ════════ COMMON AREAS / AMENITIES — building singletons, OPT-IN per project ════════
-  // Each is gated by the project's enabled common-systems set (instantiate.buildingTypeEnabled): a
-  // `ca_*` node only instantiates when the project ticked it. All sit on the substructure (after
-  // `foundation`), run parallel to each other and to the unit work, and surface as one "Common areas"
-  // stage in the timeline. Anchors are deliberately light — these are managed as a parallel stream.
-  { id: 'ca_parking', label: 'Parking deck & markings', trade: 'civil', layer: 'structure', instancing: 'building', appliesTo: [], seq: [{ pred: 'foundation', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'built on the substructure' }] },
-  { id: 'ca_stair', label: 'Common staircase — structure', trade: 'civil', layer: 'structure', instancing: 'building', appliesTo: [], seq: [{ pred: 'foundation', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'rises from the substructure' }] },
-  { id: 'ca_ugt', label: 'Underground sump / tank', trade: 'civil', layer: 'structure', instancing: 'building', appliesTo: [], seq: [{ pred: 'foundation', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'cast with the substructure' }] },
-  { id: 'ca_stp', label: 'Sewage treatment plant (STP)', trade: 'civil', layer: 'structure', instancing: 'building', appliesTo: [], seq: [{ pred: 'foundation', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'below-grade plant' }] },
-  { id: 'ca_compound', label: 'Compound wall & gate', trade: 'civil', layer: 'structure', instancing: 'building', appliesTo: [], seq: [{ pred: 'foundation', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'site boundary' }] },
-  { id: 'ca_lift', label: 'Lift (shaft & cabin)', trade: 'lift', layer: 'services', instancing: 'building', appliesTo: [], longLead: true, seq: [{ pred: 'foundation', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'LONG-LEAD: order early' }] },
-  { id: 'ca_transformer', label: 'Transformer / substation', trade: 'electrical', layer: 'services', instancing: 'building', appliesTo: [], longLead: true, seq: [{ pred: 'foundation', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'LONG-LEAD power infra' }] },
-  { id: 'ca_generator', label: 'DG / generator set', trade: 'electrical', layer: 'services', instancing: 'building', appliesTo: [], longLead: true, seq: [{ pred: 'foundation', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'backup power' }] },
-  { id: 'ca_oht', label: 'Overhead tank & pumps', trade: 'plumbing', layer: 'services', instancing: 'building', appliesTo: [], seq: [{ pred: 'foundation', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'water storage & pumping' }] },
-  { id: 'ca_fire', label: 'Fire fighting (pumps, sprinklers, alarm)', trade: 'fire', layer: 'services', instancing: 'building', appliesTo: [], seq: [{ pred: 'foundation', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'building-wide fire system' }] },
-  { id: 'ca_solar', label: 'Rooftop solar', trade: 'electrical', layer: 'services', instancing: 'building', appliesTo: [], seq: [{ pred: 'foundation', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'roof-mounted PV' }] },
-  { id: 'ca_borewell', label: 'Borewell', trade: 'plumbing', layer: 'services', instancing: 'building', appliesTo: [], seq: [{ pred: 'foundation', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'water source' }] },
-  { id: 'ca_corridor', label: 'Corridor & lobby finishes', trade: 'finishing', layer: 'finishes', instancing: 'building', appliesTo: [], seq: [{ pred: 'ca_stair', nature: 'STRONG_PREF', reason: 'logistics', scope: BW, note: 'finish after the common structure' }] },
-  { id: 'ca_landscaping', label: 'Landscaping & hardscape', trade: 'landscaping', layer: 'finishes', instancing: 'building', appliesTo: [], seq: [{ pred: 'ca_compound', nature: 'STRONG_PREF', reason: 'logistics', scope: BW, note: 'near handover, inside the boundary' }] },
+  // ════════ AMENITY SYSTEMS — OPT-IN per project, EXPANDED into their real components ════════
+  //
+  // Every type here carries `system`, which is BOTH the opt-in key (projects.common_systems — the ids
+  // are unchanged, so existing project rows keep working) and the grouping key for the amenities view.
+  // One system now yields several task types, each with the instancing its component actually has:
+  //
+  //   sited     — the plant, ON its level. The DG and the transformer sit on the stilt; the OHT and the
+  //               solar sit on the roof; the sump and the STP go below grade. `sitedDefault` picks the
+  //               level when the project hasn't said, and projects.amenity_levels overrides it.
+  //   per_floor — the part that REPEATS at every level: the lift shaft and its landing doors, the stair
+  //               flight, the corridor, the fire standpipe. This is the fix for the real complaint —
+  //               there was no row for "lift landing door, 3rd floor", so nobody could report it.
+  //   building  — commissioning / licence / boundary work: genuinely one thing, once.
+  //
+  // Before 2026-07-13 all fourteen were a single `building` atom with one edge ("after foundation"), so
+  // an amenity had no place, no per-floor work, and no progress until someone flipped the whole thing.
 
-  // NEW (2026-07-11) — the two closing stages the legacy expander had and the engine did not.
-  // `ca_stair` is the staircase STRUCTURE (civil); its finishing is a separate, much later job.
-  { id: 'stair_finish', label: 'Common staircase — finishing', trade: 'finishing', layer: 'finishes', instancing: 'building', appliesTo: [], seq: [{ pred: 'ca_stair', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'finish the staircase that exists' }] },
+  // ── vertical circulation: the lift, as the four things it actually is ──
+  { id: 'ca_lift_shaft', label: 'Lift — shaft', trade: 'civil', layer: 'structure', instancing: 'per_floor', appliesTo: [], system: 'ca_lift', seq: [
+    { pred: 'blockwork', nature: 'IMPOSSIBLE', reason: 'structural', scope: SF, note: 'the shaft walls rise with this floor\'s masonry' },
+    { pred: 'ca_lift_shaft', nature: 'IMPOSSIBLE', reason: 'structural', scope: CF(-1), note: 'a shaft climbs — the floor below carries this one' },
+  ] },
+  // THE MACHINE ROOM IS A ROOM, and it stands in the headroom on the terrace. It was `building` (nowhere).
+  // `sited` keeps the system's level override (amenity_levels), so a machine-room-less lift can be placed
+  // elsewhere without touching the library.
+  { id: 'ca_lift_mech', label: 'Lift — mechanism & car', trade: 'lift', layer: 'services', instancing: 'sited', sitedDefault: 'top', appliesTo: [], system: 'ca_lift', longLead: true, seq: [
+    { pred: 'ca_lift_shaft', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'LONG-LEAD: order early, but it installs into a finished shaft' },
+  ] },
+  { id: 'ca_lift_door', label: 'Lift — landing door', trade: 'lift', layer: 'services', instancing: 'per_floor', appliesTo: [], system: 'ca_lift', seq: [
+    { pred: 'ca_lift_shaft', nature: 'IMPOSSIBLE', reason: 'structural', scope: SF, note: 'the door seats into this floor\'s shaft opening' },
+    { pred: 'ca_lift_mech', nature: 'IMPOSSIBLE', reason: 'logistics', scope: BW, note: 'doors hang off the installed guide rails' },
+  ] },
+  { id: 'ca_lift', label: 'Lift — commissioning & licence', trade: 'lift', layer: 'services', instancing: 'building', appliesTo: [], system: 'ca_lift', seq: [
+    { pred: 'ca_lift_door', nature: 'IMPOSSIBLE', reason: 'quality', scope: BW, note: 'you cannot certify a lift whose landing doors are not all hung' },
+  ] },
+
+  // ── the common staircase: a flight per floor, finished per floor ──
+  // …to the terrace as well: the top flight IS the staircase headroom, and without it there is no way onto
+  // the roof at all. (A per_floor type occupies parking + habitable by default; these two opt in.)
+  { id: 'ca_stair', label: 'Common staircase — structure', trade: 'civil', layer: 'structure', instancing: 'per_floor', floors: ['parking', 'habitable', 'terrace'], appliesTo: [], system: 'ca_stair', seq: [
+    { pred: 'floor_pour', nature: 'IMPOSSIBLE', reason: 'structural', scope: SF, note: 'the flight lands on this floor\'s slab' },
+  ] },
+  { id: 'stair_finish', label: 'Common staircase — finishing', trade: 'finishing', layer: 'finishes', instancing: 'per_floor', floors: ['parking', 'habitable', 'terrace'], appliesTo: [], system: 'ca_stair', seq: [
+    { pred: 'ca_stair', nature: 'IMPOSSIBLE', reason: 'structural', scope: SF, note: 'finish the flight that exists' },
+  ] },
+  { id: 'ca_corridor', label: 'Corridor & lobby finishes', trade: 'finishing', layer: 'finishes', instancing: 'per_floor', appliesTo: [], system: 'ca_corridor', seq: [
+      { pred: 'blockwork', nature: 'IMPOSSIBLE', reason: 'structural', scope: SF, note: 'a corridor is walls and a slab - finish what exists' },
+    { pred: 'plaster', nature: 'STRONG_PREF', reason: 'logistics', scope: SF, note: 'finish the corridor after the units on this floor are plastered' },
+  ] },
+
+  // ── water: the tank is on the roof, the pump is downstairs, the sump is below grade ──
+  { id: 'ca_oht', label: 'Overhead tank', trade: 'plumbing', layer: 'services', instancing: 'sited', appliesTo: [], system: 'ca_oht', sitedDefault: 'top', seq: [
+    { pred: 'floor_pour', nature: 'IMPOSSIBLE', reason: 'structural', scope: SF, note: 'the tank sits on the roof slab' },
+  ] },
+  { id: 'ca_oht_pump', label: 'Water pumps & plumbing room', trade: 'plumbing', layer: 'services', instancing: 'sited', appliesTo: [], system: 'ca_oht', sitedDefault: 'lowest', seq: [
+    { pred: 'riser', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'the pump feeds the risers — they must exist to be fed' },
+  ] },
+  { id: 'ca_ugt', label: 'Underground sump / tank', trade: 'civil', layer: 'structure', instancing: 'sited', appliesTo: [], system: 'ca_ugt', sitedDefault: 'lowest', seq: [{ pred: 'foundation', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'cast with the substructure' }] },
+  { id: 'ca_borewell', label: 'Borewell', trade: 'plumbing', layer: 'services', instancing: 'sited', appliesTo: [], system: 'ca_borewell', sitedDefault: 'lowest', seq: [{ pred: 'foundation', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'water source' }] },
+  { id: 'ca_stp', label: 'Sewage treatment plant (STP)', trade: 'civil', layer: 'structure', instancing: 'sited', appliesTo: [], system: 'ca_stp', sitedDefault: 'lowest', seq: [{ pred: 'foundation', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'below-grade plant' }] },
+
+  // ── power: the DG and the transformer stand on a level (the stilt, usually) ──
+  { id: 'ca_transformer', label: 'Transformer / substation', trade: 'electrical', layer: 'services', instancing: 'sited', appliesTo: [], system: 'ca_transformer', sitedDefault: 'lowest', longLead: true, seq: [{ pred: 'foundation', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'LONG-LEAD power infra' }] },
+  { id: 'ca_generator', label: 'DG / generator set', trade: 'electrical', layer: 'services', instancing: 'sited', appliesTo: [], system: 'ca_generator', sitedDefault: 'lowest', longLead: true, seq: [{ pred: 'foundation', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'backup power' }] },
+  { id: 'ca_solar', label: 'Rooftop solar', trade: 'electrical', layer: 'services', instancing: 'sited', appliesTo: [], system: 'ca_solar', sitedDefault: 'top', seq: [
+    { pred: 'terrace_waterproof', nature: 'DESTRUCTIVE', reason: 'concealment', scope: BW, note: 'never anchor a frame through un-waterproofed roof' },
+  ] },
+
+  // ── fire: a standpipe/hydrant on every floor, a pump downstairs, one approval ──
+  { id: 'ca_fire_floor', label: 'Fire — standpipe & hydrant', trade: 'fire', layer: 'services', instancing: 'per_floor', appliesTo: [], system: 'ca_fire', seq: [
+    { pred: 'blockwork', nature: 'IMPOSSIBLE', reason: 'structural', scope: SF, note: 'the wet riser runs the shaft on this floor' },
+    { pred: 'ca_fire_floor', nature: 'IMPOSSIBLE', reason: 'structural', scope: CF(-1), note: 'the wet riser climbs' },
+  ] },
+  { id: 'ca_fire', label: 'Fire fighting — pumps, alarm & approval', trade: 'fire', layer: 'services', instancing: 'building', appliesTo: [], system: 'ca_fire', seq: [
+    { pred: 'ca_fire_floor', nature: 'IMPOSSIBLE', reason: 'quality', scope: BW, note: 'the authority certifies a system that reaches every floor' },
+  ] },
+
+  // ── site & boundary: genuinely one thing, once ──
+  /**
+   * PARKING DECK & MARKINGS IS A FINISH, NOT A FRAME.
+   *
+   * It was `layer: 'structure'` with ONE gate — `foundation` — which meant that the moment the footings
+   * were in, the engine believed you could go and paint the bay markings. It topo-sorted to the very
+   * top of the stilt floor, AHEAD OF THE COLUMNS, and took the "Up next" chip: the first job the desk
+   * offered on a real site was to line out the car park of a building that did not exist yet.
+   *
+   * The structural slab of the parking level is part of the frame — it is `floor_pour` on that level,
+   * and it already exists as its own task. THIS is the wearing surface and the paint on top of it, and
+   * it is one of the last things that happens: for the whole build, that deck is the road every mixer,
+   * every lorry and every steel delivery drives over. Lay it early and you resurface it at handover.
+   *
+   * So: a finish, and gated on the frame being up (the same rule, and the same reasoning, that
+   * landscaping already carries — "planting before the frame is up is planting under a crane").
+   */
+  { id: 'ca_parking', label: 'Parking deck & markings', trade: 'civil', layer: 'finishes', instancing: 'sited', appliesTo: [], system: 'ca_parking', sitedDefault: 'lowest', seq: [
+    { pred: 'foundation', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'built on the substructure' },
+    { pred: 'floor_pour', nature: 'DESTRUCTIVE', reason: 'quality', scope: BW, note: 'the deck is the site road until the frame is up — surface it early and every lorry on the job drives over it' },
+  ] },
+  { id: 'ca_compound', label: 'Compound wall & gate', trade: 'civil', layer: 'structure', instancing: 'building', appliesTo: [], system: 'ca_compound', seq: [{ pred: 'foundation', nature: 'IMPOSSIBLE', reason: 'structural', scope: BW, note: 'site boundary' }] },
+  { id: 'ca_landscaping', label: 'Landscaping & hardscape', trade: 'landscaping', layer: 'finishes', instancing: 'building', appliesTo: [], system: 'ca_landscaping', seq: [
+      { pred: 'floor_pour', nature: 'DESTRUCTIVE', reason: 'quality', scope: BW, note: 'planting before the frame is up is planting under a crane' },{ pred: 'ca_compound', nature: 'STRONG_PREF', reason: 'logistics', scope: BW, note: 'near handover, inside the boundary' }] },
   // Snagging is anchored SOFT on purpose: it is a WALK of whatever is finished. A hard gate on every
   // finishing type would make it unavailable until the last zone in the building is done — the opposite
   // of how a snag list is actually built (you start walking as units complete).
   { id: 'snagging', label: 'Snagging & handover', trade: 'finishing', layer: 'finishes', instancing: 'building', appliesTo: [], seq: [
-    { pred: 'paint', nature: 'STRONG_PREF', reason: 'quality', scope: BW, note: 'walk the finished units' },
-    { pred: 'sanitary', nature: 'STRONG_PREF', reason: 'quality', scope: BW, note: 'fittings in before the walk' },
+    { pred: 'paint', nature: 'IMPOSSIBLE', reason: 'quality', scope: BW, note: 'you cannot hand over an unpainted building - this was a PREF, so the plan offered handover on bare ground' },
+    { pred: 'sanitary', nature: 'IMPOSSIBLE', reason: 'quality', scope: BW, note: 'nor one with no fittings in it' },
   ] },
 ]
 
@@ -850,8 +963,33 @@ const QC: Record<TaskTypeId, QcCheck[]> = {
   ],
   ca_lift: [
     { question: 'The lift is commissioned, load-tested and safety-tested by the supplier, with the certificate on record', is_critical: true },
-    { question: 'Shaft, pit and headroom met the supplier\'s requirement before installation began', is_critical: false },
-    { question: 'Landing doors align and interlock at every floor', is_critical: false },
+    { question: 'The statutory lift licence / inspector approval is obtained and on record', is_critical: false },
+    { question: 'Landing doors align and interlock at every floor, and the car levels correctly at each', is_critical: false },
+  ],
+  ca_lift_shaft: [
+    { question: 'The shaft is PLUMB through this floor and its clear internal dimensions match the lift supplier\'s drawing — a shaft out of tolerance cannot take the car', is_critical: true },
+    { question: 'The landing opening on this floor is formed to the specified size, with its lintel in place', is_critical: false },
+    { question: 'Scaffold inserts and any temporary openings through the shaft wall are made good', is_critical: false },
+  ],
+  ca_lift_mech: [
+    { question: 'Guide rails are plumb and aligned over the full travel, and the car and counterweight run free', is_critical: true },
+    { question: 'The machine room / headroom equipment is installed with the supplier\'s clearances met', is_critical: false },
+    { question: 'The pit is dry, and the buffers and pit ladder are installed', is_critical: false },
+  ],
+  ca_lift_door: [
+    { question: 'The landing door on this floor interlocks — the car cannot move with it open, and it cannot be opened with no car at the landing', is_critical: true },
+    { question: 'The door sill is level with the finished floor and the gap is within tolerance', is_critical: false },
+    { question: 'The frame is plumb and grouted solid into the shaft opening', is_critical: false },
+  ],
+  ca_oht_pump: [
+    { question: 'The pump set delivers to the topmost floor at the design pressure, and the auto cut-off works', is_critical: true },
+    { question: 'The pumps are mounted on an anti-vibration base and the room drains', is_critical: false },
+    { question: 'Suction and delivery valves are installed and the standby pump changeover works', is_critical: false },
+  ],
+  ca_fire_floor: [
+    { question: 'The hydrant / hose reel on this floor is pressure-tested and holds — no leak at the landing valve', is_critical: true },
+    { question: 'Sprinkler coverage on this floor matches the approved fire drawing', is_critical: false },
+    { question: 'The floor\'s hose cabinet is accessible, stocked, and not obstructed by stored material', is_critical: false },
   ],
   ca_transformer: [
     { question: 'The transformer is commissioned and tested by the licensed agency, with the statutory approvals on record', is_critical: true },
@@ -865,13 +1003,13 @@ const QC: Record<TaskTypeId, QcCheck[]> = {
   ],
   ca_oht: [
     { question: 'The tank holds water — leak-tested with no seepage through the base or walls', is_critical: true },
-    { question: 'The pump set delivers to every floor at the design pressure', is_critical: false },
+    { question: 'The tank sits on a designed support that the roof slab can actually carry', is_critical: false },
     { question: 'Overflow, vent and cleaning access are all provided', is_critical: false },
   ],
   ca_fire: [
     { question: 'The system is commissioned, pressure-tested and approved by the fire authority', is_critical: true },
     { question: 'The pumps start automatically on a pressure drop and the alarm sounds on every floor', is_critical: false },
-    { question: 'Sprinkler and hydrant coverage matches the approved fire drawing', is_critical: false },
+    { question: 'The fire NOC / occupancy clearance is obtained and on record', is_critical: false },
   ],
   ca_solar: [
     { question: 'The array is commissioned and generating, with the inverter/meter reading verified', is_critical: true },
@@ -960,10 +1098,16 @@ export const CANONICAL_SEQUENCE: TaskTypeId[] = [
   'paint', 'switchplate', 'sanitary', 'door_shutter', 'window_grill', 'fixture', 'decorative',
   // common / external / long-lead
   'external_structure', 'facade_plaster', 'external_paint', 'terrace_waterproof', 'terrace_finish',
-  'lift_shaft', 'lift_mechanism', 'site_grade', 'site_development',
-  // common areas / amenities (opt-in per project)
-  'ca_parking', 'ca_stair', 'ca_ugt', 'ca_stp', 'ca_compound', 'ca_lift', 'ca_transformer', 'ca_generator',
-  'ca_oht', 'ca_fire', 'ca_solar', 'ca_borewell', 'ca_corridor', 'stair_finish', 'ca_landscaping',
+  'site_grade', 'site_development',
+  // amenity systems (opt-in per project). Each system reads in its own build order: the structure it
+  // needs, then the plant, then the per-floor components, then commissioning.
+  'ca_parking', 'ca_ugt', 'ca_stp', 'ca_borewell', 'ca_compound',
+  'ca_stair', 'stair_finish',
+  'ca_lift_shaft', 'ca_lift_mech', 'ca_lift_door', 'ca_lift',
+  'ca_transformer', 'ca_generator',
+  'ca_oht', 'ca_oht_pump',
+  'ca_fire_floor', 'ca_fire',
+  'ca_solar', 'ca_corridor', 'ca_landscaping',
   // the closing stage
   'snagging',
 ]
@@ -977,10 +1121,18 @@ export function canonicalRank(lib: Library = LIBRARY): Map<TaskTypeId, number> {
 
 // ── Build + freeze the Library ───────────────────────────────────────────────
 export function buildLibrary(): Library {
-  // QC rides onto its type here — authored once, in one block, never generated.
-  const taskTypes = new Map(TASK_TYPES.map((t) => [t.id, { ...t, qc: QC[t.id] ?? [] }]))
+  // QC and the BRIEF both ride onto their type here — authored once, never generated.
+  const taskTypes = new Map(TASK_TYPES.map((t) => [t.id, { ...t, qc: QC[t.id] ?? [], brief: BRIEFS[t.id] }]))
   const freedomSets = new Map(FREEDOM_SETS.map((f) => [f.id, f]))
   return { taskTypes, freedomSets }
+}
+
+/** The site's own words for a task type — shown to the resolver on the candidate line so a supervisor's
+ *  word reaches the task it names. Empty for a type with no observed collision, and for a hand-added task
+ *  (no engine type → no aliases, and none are invented). */
+export function saidAsOf(taskTypeId: string | null | undefined): string[] {
+  if (!taskTypeId) return []
+  return LIBRARY.taskTypes.get(taskTypeId)?.saidAs ?? []
 }
 
 /** Singleton — the library is immutable authored data. */
@@ -1029,6 +1181,19 @@ export function validateLibrary(lib: Library = LIBRARY): ValidationIssue[] {
     if (crit !== 1) issues.push({ kind: 'qc_critical', detail: `task-type '${t.id}' has ${crit} critical QC checks (need exactly 1)` })
     for (const q of qc)
       if (!q.question.trim()) issues.push({ kind: 'qc_empty', detail: `task-type '${t.id}' has an empty QC question` })
+  }
+
+  // BRIEF COVERAGE — exactly 3 points, in EVERY language. A task with a brief in one language and not
+  // the other is worse than none: the user toggles, gets a blank, and stops trusting the toggle.
+  for (const t of ids.values()) {
+    const b = t.brief
+    if (!b) { issues.push({ kind: 'brief_missing', detail: `task-type '${t.id}' has no brief` }); continue }
+    for (const lang of ['en', 'te'] as const) {
+      const pts = b[lang] ?? []
+      if (pts.length !== 3) issues.push({ kind: 'brief_count', detail: `task-type '${t.id}' has ${pts.length} ${lang} brief points (need exactly 3)` })
+      for (const line of pts)
+        if (!line.trim()) issues.push({ kind: 'brief_empty', detail: `task-type '${t.id}' has an empty ${lang} brief point` })
+    }
   }
 
   // Acyclicity over the abstract (scope-ignored) hard-edge graph. A cycle = authoring error.

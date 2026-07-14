@@ -6,17 +6,26 @@
 // surfaced suggestion. Disambiguation reuses the AWAIT_PROJECT mechanism (openConversation +
 // the dispatcher's ANSWERS_PENDING → answer()), not a new interaction.
 
-import { send } from '../_format.ts'
+// ONE ROAD (2026-07-13). `send` — the outbox — is deliberately NOT imported here any more. The outbox is
+// drained by a pg_cron on a 10-second tick, and this agent's messages are read by a human IN SEQUENCE: an
+// ack before its ask, a failure notice before the next question. Mixing the queue with the direct path meant
+// the fast message overtook the slow one and the turn was heard out of order (see one_road.test). Everything
+// SiteOps says in a turn now goes by sendNowDurable — which IS the durable path (it falls back to that same
+// outbox on any failure, and stamps wa_message_map just the same), minus the queue's latency. The queue still
+// carries what nobody is waiting on: the chase cron, the sweeper, the digests.
+import { sendNowDurable } from '../_format.ts'
 import { resolveProject, type ProjectRef } from '../_resolve.ts'
 import { distinctiveTokens } from '../_match.ts'
 import { openConversation, closeConversation, type ConvoRow } from '../_conversation.ts'
-import { combineReadbacks, composePhotoAck, type HeldReadback } from '../_siteops_readback.ts'
+import { combineReadbacks, composeConfirmation, composePhotoAck, recordLink, type HeldReadback, type ReadbackEntry } from '../_siteops_readback.ts'
 import { parkConvoObservation } from '../_siteops_sweep.ts'
 import { decompose, callLLM, safeParse, DecomposeUnreadable, VALID_CAUSE_KEYS, structureFromText, type SiteItem } from '../_siteops_extract.ts'
 import { decomposeImage, applyMediaStructure, mergeSameScene } from '../_siteops_vision.ts'
 import { mediaComposite, humanizeInbound, type MediaParts } from '../_siteops_media.ts'
+import { G, bold, italic, lines, blocks, rowTitle, rowDesc } from '../_voice.ts'
 import { loadCandidates, prefilterCandidates, groundingLabels } from '../_siteops_candidates.ts'
 import { resolveTypedPick, type PickCandidate } from '../_siteops_attach.ts'
+import { interpretPickReply } from '../_siteops_pick_llm.ts'
 import type { CaptureRef } from '../_wa_message_map.ts'
 import { distillSignal } from '../_siteops_reanalyze.ts'
 import { planCorrection } from '../_siteops_correct.ts'
@@ -34,12 +43,12 @@ import {
   type OpenBatch, type BatchItem,
 } from '../_siteops_batch.ts'
 import {
-  composeReadback, assertAllApplied, executeResolution, NOTHING_TO_UPDATE, COULDNT_READ_THAT, ALREADY_LOGGED,
+  composeReadback, homesOf, assertAllApplied, executeResolution, nothingToUpdate, COULDNT_READ_THAT, ALREADY_LOGGED,
   type Terminal, type TerminalOutcome, type AttachUpdate, type StructureSlot,
 } from '../_siteops_resolution.ts'
-import { resolveInbound } from '../_siteops_resolution_llm.ts'
+import { resolveInbound, prefetchResolveInputs, type ResolveInboundCtx } from '../_siteops_resolution_llm.ts'
 // The engine, bundled for Deno — used to materialise a project's full task set on first WhatsApp touch.
-import { buildProjectVM, instantiate, stackToGeometry, persistGraph } from '../../_shared/siteops-engine.js'
+import { buildProjectVM, instantiate, persistGraph, fanOutQc, toPersistRows, geometryOf, geometryOptionsOf, loadProjectRow } from '../../_shared/siteops-engine.js'
 
 export type SiteopsCtx = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -60,9 +69,13 @@ export type SiteopsCtx = {
   // Present when the inbound was a VOICE note: the ALREADY-stored audio (rough-entry-media). We record it
   // as an attachment on the narration so the source audio stays FINDABLE (clause 1), never re-upload.
   audio?: { storagePath: string; mime: string }
+  // THE READ-TIME SELF-HEAL's memo (see ensureProjectFresh). Turn-scoped, and used ONLY to make the
+  // reconcile-before-read happen once per project per turn. It is deliberately NOT the memo the write
+  // guardrail uses — that one is per-applyTerminals, for the reason spelled out on materializeProjectTasks.
+  vmRead?: VmMemo
 }
 
-const TASK_COLS = 'task_id, phase, trade, floor_label, unit_label, name, status, node_key, task_type_id, owner_id, owner_source'
+const TASK_COLS = 'task_id, phase, trade_phase, trade, floor_label, unit_label, name, status, node_key, task_type_id, owner_id, owner_source'
 
 /** APPLIABLE task identities: engine rows (node_key, deduped) PLUS flat one-offs with no engine
  *  NAME-TWIN — a flat duplicate of an engine row stays invisible (the columns lesson: its write can't
@@ -103,6 +116,95 @@ async function materializeProjectTasks(ctx: SiteopsCtx, projectId: string, memo?
   return p
 }
 
+/**
+ * RECONCILE BEFORE WE READ THE WORK — not only before we write it (live probe, 2026-07-13, 17:19).
+ *
+ * materializeProjectTasks is the self-heal: it rebuilds the project's rows from the current library and
+ * retires the ones the library no longer generates. It was reachable ONLY from the write paths. So a
+ * project whose rows predate a library change stayed stale until somebody happened to write to it — and
+ * every message about it in the meantime was matched against rows that no longer existed.
+ *
+ * The Pride had 87 rows from the OLD, zone-split library; today's engine builds 57. A photo arrived, we
+ * read the 87, offered him `ceiling_frame@Ground#Ground-unit-dry`, he picked it — and the ANSWER turn, being
+ * the first WRITE, finally ran the reconcile, deleted that very row (retired=61), and then the guardrail
+ * correctly refused to write to it. He was offered a row and then told it could not be saved. The self-heal
+ * and the bug were the same line of code, in the same turn.
+ *
+ * So it runs at the READ now: whatever we are about to OFFER him, we have already made true. A library
+ * change is absorbed by the FIRST message about the project, not by the unlucky one that happens to write.
+ *
+ * It is cheap where there is nothing to heal — graphIsMaterialized short-circuits the whole reconcile to a
+ * single select on a settled project — and memoised per turn (ctx.vmRead), so a compound multi-project
+ * message pays it once per site.
+ *
+ * It RETURNS the VM it built, because the reader wants it: the candidate set is filtered through these same
+ * sets so we can never OFFER a row the guardrail would then refuse (buildCandidateSet's `vm`). This is NOT
+ * the memo the WRITE path uses — that one is rebuilt per applyTerminals, deliberately, because a completed
+ * task can unlock new nodes mid-turn and a turn-wide cache could refuse a later legitimate write.
+ */
+async function ensureProjectFresh(ctx: SiteopsCtx, projectId: string): Promise<{ keys: Set<string>; names: Set<string> }> {
+  return await materializeProjectTasks(ctx, projectId, (ctx.vmRead ??= new Map()))
+}
+
+/** One persisted row, as the materialised-check reads it. */
+export interface MaterializedRow {
+  node_key?: string | null
+  seq_no?: number | null
+  source?: string | null
+  // …and its PLAN. Without this, a library change that alters a task's dependencies but not its position in
+  // the order looks "unchanged" here, the reconcile is skipped, and the row keeps a plan the library no
+  // longer holds — forever. (persist.ts: toRefresh. The desk reads `binding` to decide "can this start?".)
+  binding?: { node_key?: string; nature?: string; reason?: string }[] | null
+}
+
+/** The dependency list as a stable, order-insensitive string — the same comparison persist.reconcile makes. */
+const bindingKey = (b: MaterializedRow['binding']): string =>
+  JSON.stringify([...(b ?? [])].map((x) => [x.node_key, x.nature, x.reason]).sort())
+
+/**
+ * WOULD persistGraph CHANGE ANYTHING? (2026-07-13)
+ *
+ * persistGraph is a GENERATOR, and it ran on EVERY inbound WhatsApp message: a select, a reconcile, a
+ * delete, an insert, then a seq_no update PER ROW. On a settled project every one of those is a no-op —
+ * the live logs read `inserted=0 retired=0` turn after turn — and the round trips are pure latency on a
+ * turn a human is sitting through.
+ *
+ * This is EXACT, not a heuristic. persistGraph writes precisely two things about a generated row: that it
+ * exists (node_key) and where it sits (seq_no). So compare exactly that — the generated rows'
+ * (node_key → seq_no) against the graph's — and skip only when they already agree.
+ *
+ * Anything that would make persistGraph do work moves one of those and the full reconcile runs: a library
+ * change, a new floor, an amenity ticked, a task suppressed, a re-ordered topo, the zone-collapse
+ * migration retiring old keys. The project still SELF-HEALS mid-conversation. It just stops paying for
+ * the privilege when there is nothing to heal.
+ *
+ * MANUAL ROWS ARE IGNORED on purpose: reconcile never touches them (it neither deletes nor re-sequences
+ * a human's row), so their presence or absence cannot make persistGraph do work, and counting them here
+ * would make a hand-added task look like a reason to re-reconcile on every single message, forever.
+ */
+export function graphIsMaterialized(
+  existing: MaterializedRow[],
+  // The rows the engine WOULD write (toPersistRows). Not the bare graph: the graph knows a node's id and its
+  // place in the order, but a row also carries its PLAN (`binding` — the hard predecessors), and that is the
+  // field a library change most often moves. Compared here, a corrected dependency reaches every existing
+  // project on its next message; compared only on (key, seq) it would reach none of them.
+  fresh: { node_key: string; seq_no: number; binding?: MaterializedRow['binding'] }[],
+): boolean {
+  const byKey = new Map<string, MaterializedRow>()
+  for (const r of existing) {
+    if (r.node_key && r.source === 'generated' && typeof r.seq_no === 'number') byKey.set(r.node_key, r)
+  }
+  if (byKey.size !== fresh.length) return false                   // a row was added, retired, or never made
+  for (const n of fresh) {
+    const prior = byKey.get(n.node_key)
+    if (!prior) return false                                      // a key the library makes and the DB lacks
+    if (prior.seq_no !== n.seq_no) return false                   // its place in the order moved
+    // `binding` absent from the SELECT → we cannot judge the plan; judge only what we were given.
+    if (prior.binding !== undefined && bindingKey(prior.binding) !== bindingKey(n.binding)) return false
+  }
+  return true
+}
+
 async function materializeProjectTasksUncached(ctx: SiteopsCtx, projectId: string): Promise<{ keys: Set<string>; names: Set<string> }> {
   // Returns the project's CURRENT VM fold-id set (every node_key the UI overlay can render) PLUS the
   // normalized VM task labels (the flat-row TWIN check). The write path uses both for the `visibleInVM`
@@ -110,23 +212,25 @@ async function materializeProjectTasksUncached(ctx: SiteopsCtx, projectId: strin
   const vmKeys = new Set<string>()
   const vmNames = new Set<string>()
   try {
-    let pr = await ctx.supabase.from('projects')
-      .select('org_id, name, construction_stack, has_common_areas, common_systems, suppressed_tasks').eq('project_id', projectId).maybeSingle()
-    if (pr.error) pr = await ctx.supabase.from('projects')
-      .select('org_id, name, construction_stack, has_common_areas').eq('project_id', projectId).maybeSingle()
-    const project = pr.data
-    const stack = project?.construction_stack
-    if (!stack) { console.log(`[siteops:materialize] project=${projectId} HAS NO construction_stack — cannot generate tasks`); return { keys: vmKeys, names: vmNames } }
-    const { data: existing } = await ctx.supabase.from('site_tasks').select('node_key, status').eq('project_id', projectId)
+    // ONE DOOR — the row, and the geometry it describes, come from the engine (loadProjectRow/geometryOf).
+    // This used to hand-assemble the option bag twice inside this one function (once for the VM, once for
+    // the persist), which is how a sixth disagreement gets born.
+    const project = await loadProjectRow(ctx.supabase, projectId)
+    const geometry = geometryOf(project)
+    if (!geometry) { console.log(`[siteops:materialize] project=${projectId} HAS NO construction_stack — cannot generate tasks`); return { keys: vmKeys, names: vmNames } }
+    // seq_no + source ride along on the SAME query (no extra round trip) — they are what
+    // graphIsMaterialized() reads to decide whether the reconcile below has any work to do.
+    const { data: existing } = await ctx.supabase.from('site_tasks').select('node_key, status, seq_no, source, binding').eq('project_id', projectId)
     const completion = new Map<string, 'active' | 'done'>()
     const seen = new Set<string>()
     for (const r of (existing ?? [])) {
       if (r.node_key) { seen.add(r.node_key); if (r.status === 'active' || r.status === 'done') completion.set(r.node_key, r.status) }
     }
-    const vm = buildProjectVM(projectId, stack, completion, {
+    // hasExternalWorks is NOT passed: it defaults true. It used to be wired to has_common_areas here and
+    // at every other call site, so a project with no amenities silently had no façade and no site works.
+    const vm = buildProjectVM(projectId, project!.construction_stack as never, completion, {
       name: project?.name ?? projectId, dryRun: true,
-      hasCommonAreas: !!project?.has_common_areas, hasExternalWorks: !!project?.has_common_areas,
-      commonSystems: project?.common_systems ?? [], suppressedTasks: project?.suppressed_tasks ?? [],
+      ...geometryOptionsOf(project),
     })
     for (const f of vm.floors) for (const b of f.blocks) for (const t of b.tasks) {
       vmKeys.add(t.nodeKey)
@@ -144,12 +248,34 @@ async function materializeProjectTasksUncached(ctx: SiteopsCtx, projectId: strin
     // expander rows are `keptManual`), and never deletes a manual or human-reordered row. What it DOES
     // retire is an obsolete AUTHORED row — which is exactly right after a library change: the old
     // `beams@Ground` / `slab@Ground` rows go, the floor-cycle rows arrive, no human action needed.
-    const geometry = stackToGeometry(stack, {
-      hasCommonAreas: !!project?.has_common_areas, hasExternalWorks: !!project?.has_common_areas,
-      commonSystems: project?.common_systems ?? [], suppressedTasks: project?.suppressed_tasks ?? [],
-    })
-    const res = await persistGraph(ctx.supabase, { project_id: projectId, org_id: project.org_id }, instantiate(geometry))
-    console.log(`[siteops:materialize] project=${projectId} existingRows=${(existing ?? []).length} vmNodeKeys=${vmKeys.size} inserted=${res.inserted} retired=${res.deleted} keptManual=${res.keptManual}`)
+    const graph = instantiate(geometry)
+
+    // ── IS THERE ANYTHING TO DO? (2026-07-13) ─────────────────────────────────────────────────────
+    // persistGraph is a GENERATOR, and it ran on EVERY inbound message: a select, a reconcile, a delete,
+    // an insert, then a seq_no update PER ROW, then the QC fan-out. On a settled project every one of
+    // those is a no-op — the live logs read `inserted=0 retired=0` turn after turn — and the round trips
+    // are pure latency on a turn a human is waiting through.
+    //
+    // So: skip it when it would change NOTHING. `unchanged` is exact, not a heuristic — it compares the
+    // generated rows' (node_key → seq_no) against the graph's, which is precisely the set of facts
+    // persistGraph would write. Anything else — a library change, a new floor, an amenity ticked, a
+    // suppressed task, a re-ordered topo, the zone-collapse migration — moves a key or a seq, and the
+    // full reconcile runs. The project still SELF-HEALS mid-conversation; it just stops paying for the
+    // privilege when there is nothing to heal.
+    //
+    // fanOutQc is NOT skipped with it, deliberately. It is the door that guarantees no task exists
+    // without its checks (see persist.ts), and it must not become conditional on a row set changing — a
+    // fan-out that failed once would then never retry. One read, unconditionally, forever.
+    // The rows the engine would write, RIGHT NOW — the yardstick for "is this project already materialised?"
+    // and the source of the plan (`binding`) each row must carry.
+    const freshRows = toPersistRows(graph, { project_id: projectId, org_id: project.org_id })
+    if (graphIsMaterialized(existing ?? [], freshRows)) {
+      const qcInserted = await fanOutQc(ctx.supabase, { project_id: projectId, org_id: project.org_id })
+      console.log(`[siteops:materialize] project=${projectId} UNCHANGED (${graph.nodes.size} nodes) — reconcile skipped, qc=${qcInserted}`)
+    } else {
+      const res = await persistGraph(ctx.supabase, { project_id: projectId, org_id: project.org_id }, graph)
+      console.log(`[siteops:materialize] project=${projectId} existingRows=${(existing ?? []).length} vmNodeKeys=${vmKeys.size} inserted=${res.inserted} retired=${res.deleted} refreshed=${res.refreshed} keptManual=${res.keptManual}`)
+    }
   } catch (e) {
     console.error('[siteops:materialize] ENGINE/BUILD ERROR:', (e as Error).message, (e as Error).stack)
   }
@@ -183,10 +309,10 @@ async function sendTaskConfirm(
   const base = { site, progress: outc.progress, problems: outc.problems, todos: outc.todos, parked: outc.parked, pendingPick: 0, ownerLabel: 'you', projectId, appBase: APP_BASE }
   if (single?.nodeKey && APP_BASE) {
     const url = `${APP_BASE}/projects/${projectId}/tasks?task=${encodeURIComponent(single.nodeKey)}`
-    await send(ctx.supabase, ctx.from, { kind: 'cta', body: buildConfirm({ ...base, ctaMode: true }), cta: { text: 'View task', url } }, { ...meta, capture })
+    await sendNowDurable(ctx.supabase, ctx.from, { kind: 'cta', body: buildConfirm({ ...base, ctaMode: true }), cta: { text: 'View task', url } }, { ...meta, capture })
     return
   }
-  await send(ctx.supabase, ctx.from, { kind: 'text', body: buildConfirm(base) }, { ...meta, capture })
+  await sendNowDurable(ctx.supabase, ctx.from, { kind: 'text', body: buildConfirm(base) }, { ...meta, capture })
 }
 
 async function findPrincipal(supabase: SiteopsCtx['supabase'], orgId: string): Promise<string | null> {
@@ -260,7 +386,7 @@ export async function commitInterruptedSiteops(ctx: SiteopsCtx, convo: ConvoRow)
   // is named by the returned note ("Kept your earlier note…"), so nothing is dropped and the user is told.
   const held = ((convo.slots_so_far ?? {}) as { held_readback?: HeldReadback }).held_readback ?? null
   if (held?.entries?.length) {
-    await send(ctx.supabase, ctx.from, { kind: 'text', body: combineReadbacks(held.entries) }, { org_id: ctx.orgId, wamid: ctx.wamid })
+    await sendNowDurable(ctx.supabase, ctx.from, composeConfirmation(held.entries, held.resolvedRefs ?? []), { org_id: ctx.orgId, wamid: ctx.wamid })
   }
   const out = await parkConvoObservation(ctx.supabase, convo)
   await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'parked to place' })
@@ -353,18 +479,22 @@ async function applyBatchResolution(
   const resolved = applied === 'resolve'
   const reason = opts.reason ?? ''
 
+  /**
+   * ONE ITEM, ONE PATH. This function used to fork on `item.kind`, because a to-do lived in a
+   * different table — and the fork was not merely plumbing: a to-do got no ADDRESSING state, no
+   * cause cadence, no resolve event to undo, and a "Done" that no portal screen could ever undo or
+   * even see. It was a second-class item with a second-class life.
+   *
+   * A to-do is now a planned snag in `problems` (20260713000001), so there is nothing to fork on.
+   * Everything below treats every item the same way, which is the point.
+   */
   if (resolved) {
     const note = reason || replyText.trim().slice(0, 140)
-    if (item.kind === 'issue') {
-      // Trail FIRST so its id exists as the FK target, then stamp it as the ACTIVE resolve — the undo binds
-      // to this exact event, so a later re-resolve (new event) makes a stale old undo no-op.
-      const eid = await trailEvent(ctx, item, 'status_changed', note ? `Resolved — ${note}` : 'Resolved — confirmed by reply', actorId)
-      await ctx.supabase.from('problems').update({ status: 'RESOLVED', next_followup_at: null, active_resolve_event: eid }).eq('id', item.id)
-      if (opts.out) opts.out.resolveEvent = eid ?? undefined
-    } else {
-      await ctx.supabase.from('todos').update({ status: 'DONE' }).eq('id', item.id)
-      await trailEvent(ctx, item, 'status_changed', note ? `Done — “${note}”` : 'Done — confirmed by reply', actorId)
-    }
+    // Trail FIRST so its id exists as the FK target, then stamp it as the ACTIVE resolve — the undo binds
+    // to this exact event, so a later re-resolve (new event) makes a stale old undo no-op.
+    const eid = await trailEvent(ctx, item, 'status_changed', note ? `Resolved — ${note}` : 'Resolved — confirmed by reply', actorId)
+    await ctx.supabase.from('problems').update({ status: 'RESOLVED', next_followup_at: null, active_resolve_event: eid }).eq('id', item.id)
+    if (opts.out) opts.out.resolveEvent = eid ?? undefined
     return 'resolved'
   }
 
@@ -376,37 +506,33 @@ async function applyBatchResolution(
   // just made themselves.
   if (applied === 'blocked') {
     const stated = parseWhen(replyText, now)
-    if (item.kind === 'issue') {
-      // a stated date wins ("tiles by Friday"); else chase on the next tick.
-      const next = stated && stated.getTime() > now.getTime() ? stated : now
-      await ctx.supabase.from('problems').update({ next_followup_at: next.toISOString() }).eq('id', item.id)
-    } else if (stated) {
-      // to-dos carry no chase clock — only a due_date, which the chase reads. A stated date re-dates it.
-      await ctx.supabase.from('todos').update({ due_date: stated.toISOString().slice(0, 10) }).eq('id', item.id)
-    }
+    // a stated date wins ("tiles by Friday"); else chase on the next tick.
+    const next = stated && stated.getTime() > now.getTime() ? stated : now
+    const patch: Record<string, string> = { next_followup_at: next.toISOString() }
+    // a planned snag's DEADLINE is the promise; a stated date moves it, and the chase follows.
+    if (stated) patch.deadline = stated.toISOString().slice(0, 10)
+    await ctx.supabase.from('problems').update(patch).eq('id', item.id)
     return 'blocked'
   }
 
   // kept alive — re-time the next chase (to a stated date, else the cause cadence)
   const when = parseWhen(replyText, now)
-  if (item.kind === 'issue') {
-    let next: Date
-    if (when && when.getTime() > now.getTime()) next = when
-    else {
-      const row = cadenceMap.get(item.cause ?? 'other') ?? cadenceMap.get('other') ?? { clock: 2, cadence: 3 }
-      const days = row.cadence ?? row.clock ?? 2
-      next = new Date(now.getTime() + days * 86_400_000)
-    }
-    // a reply = engagement → advance OPEN → ADDRESSING, and re-time. The judgment REASON
-    // (the why we kept it alive) rides the status entry shown in the UI.
-    const { data: cur } = await ctx.supabase.from('problems').select('status').eq('id', item.id).maybeSingle()
-    const advancing = cur?.status === 'OPEN'
-    await ctx.supabase.from('problems').update({ next_followup_at: next.toISOString(), ...(advancing ? { status: 'ADDRESSING' } : {}) }).eq('id', item.id)
-    const why = reason || (when ? `expected ${fmtDay(next)}` : 'will check back')
-    await trailEvent(ctx, item, 'status_changed', advancing ? `Now addressing — ${why}` : `Kept open — ${why}`, actorId)
-  } else if (when) {
-    await ctx.supabase.from('todos').update({ due_date: when.toISOString().slice(0, 10) }).eq('id', item.id)
+  let next: Date
+  if (when && when.getTime() > now.getTime()) next = when
+  else {
+    const row = cadenceMap.get(item.cause ?? 'other') ?? cadenceMap.get('other') ?? { clock: 2, cadence: 3 }
+    const days = row.cadence ?? row.clock ?? 2
+    next = new Date(now.getTime() + days * 86_400_000)
   }
+  // a reply = engagement → advance OPEN → ADDRESSING, and re-time. The judgment REASON
+  // (the why we kept it alive) rides the status entry shown in the UI.
+  const { data: cur } = await ctx.supabase.from('problems').select('status').eq('id', item.id).maybeSingle()
+  const advancing = cur?.status === 'OPEN'
+  const patch: Record<string, string> = { next_followup_at: next.toISOString(), ...(advancing ? { status: 'ADDRESSING' } : {}) }
+  if (when) patch.deadline = when.toISOString().slice(0, 10)      // the promise moved with the answer
+  await ctx.supabase.from('problems').update(patch).eq('id', item.id)
+  const why = reason || (when ? `expected ${fmtDay(next)}` : 'will check back')
+  await trailEvent(ctx, item, 'status_changed', advancing ? `Now addressing — ${why}` : `Kept open — ${why}`, actorId)
   return 'open'
 }
 
@@ -441,6 +567,10 @@ export interface ExecCtx {
                                           // silent wrong adoption becomes visible/correctable (clause 4).
   message?: string                        // B floor — the raw inbound message, so a near-candidate which_item ask
                                           // carries it as the collision piece_text (trail/apply on confirm).
+  // WHERE the item is (floor/unit), as decompose or the vision pass read it. object_created writes it
+  // onto the row: a snag that knew it was on the fourth floor while it was being created must not
+  // forget by the time it is stored — and a unit chip has nothing to count problems BY without it.
+  structure?: StructureSlot | null
   // BATCHED READBACK (opt-in) — when a sink is present, applyTerminals COLLECTS its readback body + resolved
   // refs into it instead of sending, so runSiteops emits ONE combined reply for a whole compound/multi-project
   // message (asks still fire inline). Absent (every direct caller / the resume path) → send immediately, as before.
@@ -503,7 +633,7 @@ export interface PendingItemAsk {
 // A per-turn pool of readback bodies (one per applyTerminals call that produced one) + the resolved refs for
 // the optional undo. runSiteops owns it and flushes ONE message at the end.
 export interface ReadbackSink {
-  entries: { project: string | null; body: string }[]
+  entries: ReadbackEntry[]
   resolvedRefs: { kind: string; id: string; event: string }[]
   // STEP C1 — set by askItemPick when a which_item ask is opened this turn: the ask's slots + question, so
   // flushOrHoldReadback can STASH the held summary onto that same conversation (the resume folds it) without
@@ -515,7 +645,7 @@ export interface ReadbackSink {
 // the executor's slim view of an offered candidate (built from res.candidates in the caller).
 export interface ExecCandidate { kind: 'task' | 'issue' | 'todo'; title: string; projectId: string | null; projectName: string | null }
 
-function toSiteItem(it: { kind: 'issue' | 'snag'; detail: string; location: string | null; project_hint: string | null; confidence?: 'high' | 'med' | 'low'; planned?: boolean; due_date?: string | null; cause?: string | null; owner?: string | null }): SiteItem {
+function toSiteItem(it: { kind: 'issue' | 'snag'; detail: string; location: string | null; project_hint: string | null; confidence?: 'high' | 'med' | 'low'; planned?: boolean; due_date?: string | null; cause?: string | null; owner?: string | null }, structure?: StructureSlot | null): SiteItem {
   // T6 — the planner's KIND + CONFIDENCE ride through to the row (clauses 3 + 4). `type` stays 'issue' so
   // routeItems routes it to createProblem (issue AND snag are the SAME `problems` table); `kind` records
   // which it actually is; `confidence` gates the chase (createProblem holds a low/med note un-scheduled).
@@ -524,7 +654,7 @@ function toSiteItem(it: { kind: 'issue' | 'snag'; detail: string; location: stri
   // NO-INFO-LOSS — CAUSE (clamped to the taxonomy → drives cadence/impact) and OWNER ("tell Ramesh") now
   // ride through instead of the old hard-coded 'other'/null that silently dropped them.
   const cause = it.cause && (VALID_CAUSE_KEYS as readonly string[]).includes(it.cause) ? it.cause : 'other'
-  return { type: 'issue', kind: it.kind, confidence: it.confidence, planned: it.planned, text: it.detail, task_hint: it.location, qc_statements: [], cause, cause_reason: null, owner_hint: it.owner ?? null, date_hint: it.due_date ?? null, project_hint: it.project_hint }
+  return { type: 'issue', kind: it.kind, confidence: it.confidence, planned: it.planned, text: it.detail, task_hint: it.location, qc_statements: [], cause, cause_reason: null, owner_hint: it.owner ?? null, date_hint: it.due_date ?? null, project_hint: it.project_hint, structure: structure ?? null }
 }
 
 /** STAGE 2 (1/N) — apply a HIGH-confidence update onto an offered OPEN TASK via the PROVEN applyProgress
@@ -627,7 +757,7 @@ async function applyQcFailures(
       ? `⚠️ *A quality check failed* — ${check.question}\n_${f.text}_\nLogged as an issue and being chased.`
       : `A quality check didn't pass — ${check.question}\n_${f.text}_\nLogged for review (not chased).`
     if (sink) sink.entries.push({ project: null, body })
-    else await send(ctx.supabase, ctx.from, { kind: 'text', body }, { org_id: ctx.orgId, wamid: ctx.wamid })
+    else await sendNowDurable(ctx.supabase, ctx.from, { kind: 'text', body }, { org_id: ctx.orgId, wamid: ctx.wamid })
   }
 }
 
@@ -731,7 +861,7 @@ export async function handleUndoResolve(ctx: SiteopsCtx, quotedWamid: string): P
     await trailEvent(ctx, { kind: 'issue', id: r.id, orgId: ctx.orgId }, 'reopened', 'Reopened — you tapped “Not resolved”', actorId)
     reopened++
   }
-  if (reopened) await send(ctx.supabase, ctx.from, { kind: 'text', body: 'Reopened — back on the chase.' }, { org_id: ctx.orgId, wamid: ctx.wamid })
+  if (reopened) await sendNowDurable(ctx.supabase, ctx.from, { kind: 'text', body: 'Reopened — back on the chase.' }, { org_id: ctx.orgId, wamid: ctx.wamid })
   return true   // we handled the undo tap (a stale/idempotent no-op is still "handled")
 }
 
@@ -764,26 +894,69 @@ const splitLabel = (title: string): { name: string; loc: string } => {
   return i > 0 ? { name: title.slice(0, i), loc: title.slice(i + 3) } : { name: title, loc: '' }
 }
 type PickRow = { id: string; title: string; description?: string }
+
+/**
+ * WHICH AXIS IS THIS PICK ABOUT? It decides the row titles AND the question, and those two must agree —
+ * a message whose rows say "First · Unit A / Second · Unit A" while the question asks "which work is this?"
+ * is asking about a thing its own options do not vary.
+ *
+ *   'work'      same place, different work — three kinds of tiling on First · Unit A
+ *   'location'  same work, different places — wiring on five floors
+ *   'mixed'     neither — a genuine grab-bag
+ */
+type PickAxis = 'work' | 'location' | 'mixed'
+function pickAxis(cands: CollisionCand[]): PickAxis {
+  const parts = cands.map((c) => splitLabel(c.title))
+  if (parts.every((p) => p.loc && p.loc === parts[0].loc)) return 'work'
+  if (parts.every((p) => p.name === parts[0].name) && parts.every((p) => p.loc)) return 'location'
+  return 'mixed'
+}
+
 function pickRows(cands: CollisionCand[], multiKind: boolean): PickRow[] | null {
   if (!cands.length || cands.length > LIST_MAX_CANDS) return null
   const parts = cands.map((c) => splitLabel(c.title))
-  // WHICH AXIS is this pick? Same place, different work (the tiling tie) → the WORK is the differentiator.
-  // Same work, different places (five floors of wiring) → the FLOOR · UNIT is. Neither → fall back to the name.
-  const sameLoc = parts.every((p) => p.loc && p.loc === parts[0].loc)
-  const sameName = parts.every((p) => p.name === parts[0].name)
+  const axis = pickAxis(cands)
+  /**
+   * THE ROW IS NOW THE ONLY PLACE THE CANDIDATES APPEAR, so it has to carry the fact whole.
+   *
+   * It could not, before: a 24-char title truncated "Ceiling — false-ceiling frame" to a stump, so the
+   * body printed the full list as well — and that duplicate print was a P1. The fix is in the row, not
+   * the body: rowTitle() drops the category prefix, because the DESCRIPTION already carries it. The
+   * title says WHAT the work is; the description says which kind and where. Between them nothing is
+   * lost, and nothing is said twice.
+   *
+   * MARKUP DOES NOT RENDER IN A ROW. Bold in a row title shows literal asterisks, and visible stars read
+   * as a broken app — so rowTitle/rowDesc strip every mark. Hierarchy comes from title vs description,
+   * which is precisely what those two fields are for.
+   */
   const rows: PickRow[] = cands.map((c, i) => {
     const p = parts[i]
-    const differentiator = sameLoc ? p.name : (sameName && p.loc ? p.loc : p.name)
+    const differentiator = axis === 'location' ? p.loc : p.name
     return {
       id: `pick:${i + 1}`,                                   // POSITIONAL — display order IS stored order
-      title: cut(differentiator, 24),
-      description: cut(`${c.title}${multiKind ? `  [${c.kind}]` : ''}`, 72),
+      title: rowTitle(differentiator),
+      description: rowDesc([c.title, multiKind ? c.kind : null].filter(Boolean).join(' · ')),
     }
   })
-  // The escapes keep their numbers (resolveTypedPick reads length+1 / length+2), so a tap and a typed number
-  // mean exactly the same thing.
-  rows.push({ id: `pick:${cands.length + 1}`, title: 'It’s something else', description: 'Log it as a new item' })
-  rows.push({ id: `pick:${cands.length + 2}`, title: 'None of these', description: 'Save for review — change nothing' })
+
+  /**
+   * THE ESCAPE HATCHES — always last, always in this order, and each says what it DOES.
+   *
+   * 🆕 logs a new item; ⏸ changes nothing and holds it in Review. They keep their numbers (resolveTypedPick
+   * reads length+1 / length+2), so a tap and a typed number mean exactly the same thing.
+   *
+   * ── WHAT IS MISSING HERE, AND SHOULD NOT BE ────────────────────────────────────────────────────────
+   *
+   * The spec's third escape is `➕ Add 1st floor & file there` — and it is the best row in the message,
+   * because it BELIEVES HIM. He said 1st floor; he is standing on it. Creating the floor from a tap is
+   * the difference between a question and a dead end.
+   *
+   * It is not here because it is a WRITE — it would add a level to the construction stack and re-run the
+   * engine — and this pass is the message system, not the machinery behind it. A row that does nothing is
+   * worse than no row, so it stays out until the action exists. This is the one part of Type 4 still owed.
+   */
+  rows.push({ id: `pick:${cands.length + 1}`, title: '🆕 Log as new item', description: 'It is not on the list yet' })
+  rows.push({ id: `pick:${cands.length + 2}`, title: '⏸ Hold for review', description: 'Change nothing — I will keep it in Review' })
   return rows
 }
 /**
@@ -803,29 +976,73 @@ function composeItemPickBody(
   a: { pieceText: string; pending?: PendingItemAsk[]; preamble?: string | null },
   cands: CollisionCand[], multiKind: boolean, tappable: boolean,
 ): string {
-  const listLines = cands.map((c, i) => `${i + 1}. ${c.title}${multiKind ? `  [${c.kind}]` : ''}`).join('\n')
-  // The drain is serialized, so say so: without this a 3-ask turn reads as one question and two lost updates.
-  const more = a.pending?.length ? `\n\n(${a.pending.length} more to sort out after this.)` : ''
-  // EXPLAIN WHAT EVERY CHOICE DOES. 'new' creates a fresh item; 'none' must NOT — when the right row is simply
-  // missing (the fifth-floor wiring task that does not exist), creating a duplicate is the wrong repair, so it
-  // is saved for review and nothing changes.
-  const nOther = cands.length + 1
-  const nNone = cands.length + 2
-  // WHOSE WORDS ARE WHOSE. A photo's piece is the marked composite (caption + our description). Quoting the
-  // whole thing under "You said" put OUR description in the sender's mouth — live, he was shown
-  // "You said: … — Ceiling installation framework visible at the construction site", which he never said.
-  const { said, seen } = humanizeInbound(a.pieceText)
-  const heard = said
-    ? `You said:\n"${said}"${seen ? `\n\nFrom the photo, I can see: ${seen}` : ''}`
-    : `About this photo — what I can see:\n"${seen ?? a.pieceText}"`
-  // THE PREAMBLE — a fact he must know to answer ("this site has no floor cellar"). It sits between what we
-  // heard and what we're asking, because it is the REASON we're asking.
-  const why = a.preamble?.trim() ? `${a.preamble.trim()}\n\n` : ''
-  return `${heard}\n\n${why}` +
-    `Which of these is it about? ${tappable ? 'Tap one below' : 'Reply with the number'} and I'll update that one:\n${listLines}\n\n` +
-    `${nOther}. It's something else — I'll log it as a new item\n` +
-    `${nNone}. None of these — I'll save it for review and change nothing\n\n` +
-    `Or just name the work, for example "${cands[0]?.title ?? 'wiring on the fourth floor'}".${more}`
+  /**
+   * ══ TYPE 4 · THE QUESTION — ONE JOB, AND IT IS ASKING ════════════════════════════════════════════
+   *
+   * This message was the worst in the system, and it was worst because it was doing FOUR jobs at once:
+   * it quoted him, it re-printed the vision essay, it denied his building, it enumerated the candidates
+   * as a numbered list — AND THEN sent the same candidates again as tappable rows. He was shown the same
+   * five things twice in one bubble.
+   *
+   *   THE DUPLICATE PRINT IS A P1. Not a cosmetic one: a wrong extraction looks like a mistake, and a
+   *   duplicate looks like a MALFUNCTION. It costs more trust than being wrong does.
+   *
+   * The reason it existed was honest — a 24-character row title truncates ("Ceiling — false-ceiling
+   * frame" → "Ceiling — false-ceilin…"), so the body carried the full names as the place a fact could
+   * always be read. But that is a truncation problem, and it has a truncation fix (rowTitle() drops the
+   * category prefix — which the row DESCRIPTION already carries — so "False-ceiling frame" fits whole).
+   * Fix the row, and the body's copy of it is pure noise.
+   *
+   * So the body now does exactly one job:
+   *
+   *     ❓ You said _"1st floor false ceilings"_
+   *     I don't have a *1st floor* for this site — only Ground.
+   *     Where should this go?
+   *
+   *   · THE GAP FIRST, OWNED BY US (§1.3). One line.
+   *   · ONE QUESTION. Five words. No compound clauses.
+   *   · THE VISION ESSAY DOES NOT RIDE ALONG. The readback already happened (Type 3) and he read it.
+   *     Repeating it here is the system talking to itself.
+   *   · NO "or just name the work, for example …". That is training-wheels copy. The line goes; the
+   *     input is still accepted, exactly as before.
+   *   · NO REPAIR HANDLE. A question is not done yet, and begging to be corrected mid-flow reads anxious.
+   */
+  const { said } = humanizeInbound(a.pieceText)
+
+  // HIS words, in his voice. On a photo the piece is a composite (his caption + OUR read of the pixels);
+  // quoting the whole thing put our sentence in his mouth. Only the caption is ever "what you said".
+  const heard = said ? `${G.ask} You said: ${italic('"' + said + '"')}` : G.ask
+
+  const why = a.preamble?.trim() ?? ''
+
+  /**
+   * THE QUESTION ASKS ABOUT THE AXIS THE OPTIONS VARY ON — and nothing else.
+   *
+   * "Where should this go?" over three kinds of tiling that are all on First · Unit A is not a question,
+   * it is a non-sequitur: the answer he would give ("first floor") is already true of every option. So
+   * the pick's axis (the same one that chose the row titles) chooses the sentence, and the two can never
+   * disagree, because they are computed from the same call.
+   */
+  const question = { work: 'Which work is this?', location: 'Where should this go?', mixed: 'Which one is it?' }[pickAxis(cands)]
+
+  // The drain is serialized, so say so — without it a 3-ask turn reads as one question and two lost
+  // updates. It is meta, so it sits alone at the bottom.
+  const more = a.pending?.length
+    ? `${a.pending.length} more to sort out after this.`
+    : ''
+
+  // NOT TAPPABLE (too many rows for Meta's cap) → the candidates must appear SOMEWHERE, so the body
+  // carries them, numbered, and the typed number still resolves. This is the ONLY case in which the
+  // body ever lists them, and it is the case where the rows do not exist to list them instead.
+  const listed = tappable
+    ? ''
+    : cands.map((c, i) => `${i + 1}. ${c.title}${multiKind ? ` [${c.kind}]` : ''}`).join('\n')
+
+  return blocks(
+    lines(heard, why),
+    tappable ? question : lines(question, listed),
+    more,
+  )
 }
 
 async function askItemPick(ctx: SiteopsCtx, meta: { org_id: string; wamid: string }, a: {
@@ -885,7 +1102,9 @@ async function askItemPick(ctx: SiteopsCtx, meta: { org_id: string; wamid: strin
   // The turn-specific prefix (a welcome) leads the message but is NOT part of the question, so it never rides
   // the slots: a question replayed an hour later must not re-greet the sender.
   const body = a.prefix ? `${a.prefix}\n\n${askBody}` : askBody
-  await send(ctx.supabase, ctx.from, rows
+  // An ask is the ONE message that actually blocks the human — he can do nothing until it arrives, so it
+  // must never sit in a 10-second queue. (Falls back to the outbox on a failed send, exactly as before.)
+  await sendNowDurable(ctx.supabase, ctx.from, rows
     ? { kind: 'list', body, button: 'Pick the work', rows }
     : { kind: 'text', body }, meta)
 
@@ -954,7 +1173,7 @@ async function askResolutionQuestion(ctx: SiteopsCtx, t: Extract<Terminal, { kin
       },
       lastMessageId: ctx.wamid,
     })
-    await send(ctx.supabase, ctx.from, {
+    await sendNowDurable(ctx.supabase, ctx.from, {
       kind: 'list',
       body: `Got the photo — is it about one of these, or something new?`,
       button: 'Pick',
@@ -981,7 +1200,7 @@ async function askResolutionQuestion(ctx: SiteopsCtx, t: Extract<Terminal, { kin
       slots: { kind: 'siteops_project', items: [toSiteItem(t.item)], candidates: cands, narration_id: ex.narrationId, image: null },
       lastMessageId: ctx.wamid,
     })
-    await send(ctx.supabase, ctx.from, {
+    await sendNowDurable(ctx.supabase, ctx.from, {
       kind: 'list', body: `Which project is *${fullText(t.item.detail)}* for?`, button: 'Pick project',
       rows: cands.slice(0, 10).map((c, i) => ({ id: `pick:${i + 1}`, title: c.name.slice(0, 24) })),
     }, meta)
@@ -1134,19 +1353,21 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
         const proj = await resolveProject(ctx.supabase, ctx.orgId, { nameHint: t.item.project_hint })
         const pid = proj.projectId ?? ex.projectId ?? null
         if (!pid) throw new Error('project unresolved')
-        const out = await routeGroup(ctx, pid, [toSiteItem(t.item)], ex.narrationId)
+        const out = await routeGroup(ctx, pid, [toSiteItem(t.item, ex.structure)], ex.narrationId)
         if (out.progress.length + out.problems.length + out.todos.length === 0) throw new Error('nothing created')
         // Image evidence rides the create (finishRoute's twin): link the ALREADY-stored photo to each
         // object this terminal created — after create, so a failed create leaves no orphan attachment.
         if (ctx.image?.storagePath) {
           const sp = ctx.image.storagePath, cap = ctx.image.caption ?? null
           for (const p of out.problems) if (p.id) await attachImage(ctx, 'problem', p.id, sp, cap, 'creation')
-          for (const td of out.todos) if (td.id) await attachImage(ctx, 'todo', td.id, sp, cap, 'creation')
+          // a to-do IS a problems row now (a planned snag) — the parent kind must say where it lives,
+          // or its photo hangs off an id in a table that no longer receives writes
+          for (const td of out.todos) if (td.id) await attachImage(ctx, 'problem', td.id, sp, cap, 'creation')
           for (const pr of out.progress) if (pr.taskId) await attachImage(ctx, 'site_task', pr.taskId, sp, cap, 'creation')
           // T5 Gap C — remember the CREATED objects so the enrichment window can hold over them (below). Only
           // problems/todos: the window resume enriches those (site_task refs are skipped by the resume).
           for (const p of out.problems) if (p.id) createdRefs.push({ kind: 'problem', id: p.id, label: p.title })
-          for (const td of out.todos) if (td.id) createdRefs.push({ kind: 'todo', id: td.id, label: td.text })
+          for (const td of out.todos) if (td.id) createdRefs.push({ kind: 'problem', id: td.id, label: td.text })
         }
         outcomes.push({ terminal: t, status: 'ok', label: readbackLabel(t.item.detail) })
       } else if (t.kind === 'acked_untracked_work') {
@@ -1231,19 +1452,30 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
     const loneMiss = outcomes.length === 1 && outcomes[0].terminal.kind === 'acked_didnt_catch' && outcomes[0].status === 'ok'
     let body = (loneMiss && ex.readbackSuffix)
       ? `Got it —${ex.readbackSuffix.replace(/^ ·/, '')} · didn't catch anything else in that`
-      : composeReadback(outcomes) + (ex.readbackSuffix ?? '')
+      : composeReadback(outcomes, ctx.lang) + (ex.readbackSuffix ?? '')
     // T8b (clause 4) — DISCLOSE a batch-ASSUMED project so a wrong adoption is visible and correctable
     // (there's no project-correction tap yet — reuse the fresh path: "send it again with the site").
     if (ex.assumedSite) body += ` · logged at *${ex.assumedSite}* (assumed from your open chase) — wrong site? send it again with the site`
+    // TYPE 5 — WHERE the rows landed, and (when it is exactly one row) WHICH row. Both are read off the
+    // OUTCOMES, here, where the truth is: the sink entry carries them to whichever door finally sends.
+    const homes = homesOf(outcomes)
+    const written = outcomes.filter((o) => o.status === 'ok' && o.terminal.kind === 'object_updated')
+    const one = written.length === 1 && !written[0].terminal.collectiveTargetIds?.length ? written[0].terminal : null
+    const link = one && one.kind === 'object_updated'
+      ? recordLink(ex.projectId, one.update.target_id, one.update.target_kind)
+      : null
+    const entry: ReadbackEntry = { project: ex.projectName ?? null, body, homes, link }
+
     if (ex.readbackSink) {
       // BATCHED — collect for the ONE combined reply runSiteops flushes (asks already went out inline).
-      console.log(`[siteops:readback:collect] project=${ex.projectName ?? '-'} body=${JSON.stringify(body.slice(0, 200))}`)
-      ex.readbackSink.entries.push({ project: ex.projectName ?? null, body })
+      console.log(`[siteops:readback:collect] project=${ex.projectName ?? '-'} homes=${homes.join('+') || '-'} body=${JSON.stringify(body.slice(0, 200))}`)
+      ex.readbackSink.entries.push(entry)
       for (const r of resolvedRefs) ex.readbackSink.resolvedRefs.push(r)
-    } else if (resolvedRefs.length) {
-      await send(ctx.supabase, ctx.from, { kind: 'buttons', body, buttons: [{ id: 'siteops_undo', title: 'Not resolved' }] }, { ...meta, capture: { ref_kind: 'readback', object_refs: resolvedRefs } })
     } else {
-      await send(ctx.supabase, ctx.from, { kind: 'text', body }, meta)
+      // ONE DOOR (Type 5) — body, destination line and button are composed in one place, so the direct path
+      // and the batched path cannot drift. The undo capture still rides along when a resolve landed.
+      await sendNowDurable(ctx.supabase, ctx.from, composeConfirmation([entry], resolvedRefs),
+        resolvedRefs.length ? { ...meta, capture: { ref_kind: 'readback', object_refs: resolvedRefs } } : meta)
     }
   }
 
@@ -1362,8 +1594,8 @@ async function runSingularUnit(ctx: SiteopsCtx, u: {
 
   // projectName rides along: this unit's site is SETTLED (decompose named it, the group resolved it), so a new
   // item the model forgets to site is created HERE, not sent back as "which project is this for?".
-  const rc = { supabase: ctx.supabase, orgId: ctx.orgId, from: ctx.from, projectId: u.projectId, projectName: u.projectName ?? null }
-  const say = (body: string) => send(ctx.supabase, ctx.from, { kind: 'text', body }, meta)
+  const rc: ResolveInboundCtx = { supabase: ctx.supabase, orgId: ctx.orgId, from: ctx.from, projectId: u.projectId, projectName: u.projectName ?? null }
+  const say = (body: string) => sendNowDurable(ctx.supabase, ctx.from, { kind: 'text', body }, meta)
   const image = ctx.image?.storagePath ? { storagePath: ctx.image.storagePath, caption: ctx.image.caption ?? null } : null
 
   // STAGE-2 LOOP — recurse over THIS project's items (a single narration = one message; a same-project
@@ -1374,8 +1606,34 @@ async function runSingularUnit(ctx: SiteopsCtx, u: {
   const resolvedIds: string[] = []
   // ONE row, ONE action, once — across every item of this unit (see ExecCtx.appliedTargets).
   const appliedTargets = new Set<string>()
+
+  // ── RESOLVE CONCURRENTLY, APPLY SERIALLY (2026-07-13, latency) ────────────────────────────────────
+  // Each item's resolve is one model call over THE SAME candidate set, and it produces terminals without
+  // touching a row. They do not depend on one another — but they ran one after another anyway, so a
+  // four-item voice note paid four model calls end to end (~1.1–1.7s each, measured), plus four identical
+  // candidate loads. Nothing was waiting on anything.
+  //
+  // The APPLY still runs strictly in order, one item at a time, exactly as before. That is not an
+  // oversight — the order is load-bearing: `appliedTargets` enforces one-row-one-action across the unit,
+  // the ask queue must offer questions in the order the sentences were spoken, and the readback sink
+  // composes its lines in that order too. Only the THINKING is parallel. Every write stays in single file.
+  //
+  // resolveInbound's happy path sends nothing; it only speaks when it PARKS (a model failure). Those
+  // notices are independent of each other, so no ordering promise is broken by them racing.
+  // THE OFFER MUST BE TRUE BEFORE IT IS MADE. prefetchResolveInputs reads site_tasks straight out of the
+  // DB; on a project whose rows predate a library change those rows are fiction, and we would ask him to
+  // pick one of them. Heal first, then read — and hand the READER the same VM the WRITER is judged against,
+  // so a row the guardrail would refuse is never offered in the first place. (Memoised per turn.)
+  rc.vm = await ensureProjectFresh(ctx, u.projectId)
+  const pre = await prefetchResolveInputs(rc, rankBatch)
+  const resolutions = await Promise.all(u.messages.map((msg, mi) => resolveInbound(
+    rc,
+    { message: msg, image: mi === 0 ? image : null, narrationId: u.narrationId, context: u.context ?? null, itemType: u.itemTypes?.[mi] ?? null, structure: u.structures?.[mi] ?? null },
+    rankBatch, say, u.callModel, pre,
+  )))
+
   for (let mi = 0; mi < u.messages.length; mi++) {
-    const res = await resolveInbound(rc, { message: u.messages[mi], image: mi === 0 ? image : null, narrationId: u.narrationId, context: u.context ?? null, itemType: u.itemTypes?.[mi] ?? null, structure: u.structures?.[mi] ?? null }, rankBatch, say, u.callModel)
+    const res = resolutions[mi]
     if (res.kind === 'parked') { console.log(`[siteops:unit:msg] i=${mi} → PARKED (${res.reason})`); continue }   // honest five-part park; nothing touched for this item
 
     // itemsById spans EVERY offered issue/todo candidate — an update onto THE project's open work applies
@@ -1404,6 +1662,9 @@ async function runSingularUnit(ctx: SiteopsCtx, u: {
       narrationId: u.narrationId, projectId: u.projectId, assumedSite: mi === 0 ? u.assumedSite : undefined, message: u.messages[mi],
       readbackSink: u.sink, projectName: u.projectName, askQueue: u.askQueue, projectAskQueue: u.projectAskQueue,
       appliedTargets,
+      // WHERE this item is. The slot was computed at decompose and handed to the resolver as the
+      // task pin's only input — it just never travelled as far as the row it created.
+      structure: u.structures?.[mi] ?? null,
       qc: { statements: u.qcStatements?.[mi] ?? [], call: u.callModel },
     })
     console.log(`[siteops:unit:msg] i=${mi} outcomes=${JSON.stringify(outcomes.map((o) => ({ k: o.terminal.kind, s: o.status, l: (o.label ?? '').slice(0, 40) })))}`)
@@ -1436,15 +1697,42 @@ async function runSingularUnit(ctx: SiteopsCtx, u: {
 // CONFIRMATION: what we read out of the photo, quoted back beside the caption, before the resolve loop
 // writes anything — so a misread is caught by the one person who was standing there. See composePhotoAck.
 // It degrades to the plain count ack whenever the photo yielded nothing to show.
+//
+// IT TAKES THE SAME ROAD AS THE ASK (live probe, 2026-07-13, 17:19). This used `send()` — the outbox —
+// while every ask and readback in the turn uses `sendNowDurable()` — a direct POST. The outbox is drained
+// by a pg_cron on a 10-second tick, so on a 4-second turn the ask, SAID second, was HEARD first:
+//
+//     17:19  "This site has no floor First…" + the numbered pick — the question.
+//     17:20  "Here's what I can see in it… Checking it against the open work now — I'll confirm back."
+//
+// We promised to come back after we had come back, and the confirmation whose entire purpose is to let him
+// catch a misread BEFORE we act arrived after we had acted. A message that another message in the same turn
+// must not overtake has to travel by the same road as that message; the outbox's FIFO guarantee is worth
+// nothing to a message that skips the queue. sendNowDurable keeps the durability (it falls back to the
+// outbox if the direct POST fails), it just stops paying the queue's latency for a message a human is
+// actively waiting on — which is exactly what it exists for.
 async function sendReceiptAck(
   ctx: SiteopsCtx, meta: { org_id: string; wamid: string }, itemCount: number,
-  seen?: { items: SiteItem[]; caption: string | null },
+  seen?: { items: SiteItem[]; caption: string | null; project?: string | null; replyTo?: string },
 ): Promise<void> {
-  const photo = seen ? composePhotoAck(seen.items, seen.caption) : null
+  const photo = seen ? composePhotoAck(seen.items, seen.caption, { project: seen.project ?? null }) : null
+
+  /**
+   * TYPE 2 · STAGE 2 — THE TRIAGE REPORT, AND IT EARNS ITS BUBBLE ONLY BY CARRYING A COUNT.
+   *
+   * Two acks that say the same thing ("got it" … "processing it") are noise: TIME ALONE NEVER JUSTIFIES
+   * A MESSAGE. A count does. So a single quick item gets no second bubble at all — it goes straight from
+   * the transport receipt to the confirmation — and a four-part voice note earns one, because "found 4
+   * updates" is information the sender did not have.
+   *
+   * ✅ is dead everywhere (it is a duplicate of ✓, and two glyphs for one meaning is how a vocabulary
+   * stops being one).
+   */
   const body = photo ?? (itemCount > 1
-    ? `✅ Got your message — I've picked out *${itemCount} updates*. Reviewing each now; I'll confirm back and check with you if anything needs clarifying.`
-    : `✅ Got your message — taking a look now…`)
-  await send(ctx.supabase, ctx.from, { kind: 'text', body }, meta)
+    ? `Found ${bold(`${itemCount} updates`)} — checking each against open work. Confirming back in a moment.`
+    : `Got it — checking against open work. Confirming back in a moment.`)
+
+  await sendNowDurable(ctx.supabase, ctx.from, { kind: 'text', body, replyTo: seen?.replyTo }, meta)
 }
 
 // STEP C1 — HOLD-and-FOLD. When some items resolved this turn AND a which_item ask is now OPEN, stash the
@@ -1486,19 +1774,23 @@ async function finishItemAsk(
     await drainItemAsks(ctx, meta, pending, { heldEntries: entries, heldRefs: held?.resolvedRefs ?? [] })
     return
   }
-  if (entries.length) await send(ctx.supabase, ctx.from, { kind: 'text', body: combineReadbacks(entries) }, meta)
+  if (entries.length) {
+    const refs = held?.resolvedRefs ?? []
+    await sendNowDurable(ctx.supabase, ctx.from, composeConfirmation(entries, refs),
+      refs.length ? { ...meta, capture: { ref_kind: 'readback', object_refs: refs } } : meta)
+  }
 }
 
 async function flushReadback(ctx: SiteopsCtx, sink: ReadbackSink, meta: Record<string, unknown>): Promise<void> {
   if (!sink.entries.length) { console.log('[siteops:readback:flush] nothing to send (entries=0)'); return }
-  const body = combineReadbacks(sink.entries)
-  console.log(`[siteops:readback:flush] entries=${sink.entries.length} resolves=${sink.resolvedRefs.length} body=${JSON.stringify(body.slice(0, 400))}`)
-  // A single entry keeps its undo button (an issue resolve is one-tap reversible); a batched reply does not.
-  if (sink.entries.length === 1 && sink.resolvedRefs.length) {
-    await send(ctx.supabase, ctx.from, { kind: 'buttons', body, buttons: [{ id: 'siteops_undo', title: 'Not resolved' }] }, { ...meta, capture: { ref_kind: 'readback', object_refs: sink.resolvedRefs } })
-  } else {
-    await send(ctx.supabase, ctx.from, { kind: 'text', body }, meta)
-  }
+  const msg = composeConfirmation(sink.entries, sink.resolvedRefs)
+  console.log(`[siteops:readback:flush] entries=${sink.entries.length} resolves=${sink.resolvedRefs.length} kind=${msg.kind} body=${JSON.stringify(('body' in msg ? msg.body : '').slice(0, 400))}`)
+  // sendNowDurable, not send: THIS is the message he has been waiting ~30 seconds for, and the outbox is
+  // drained by a 10-second cron — so it used to sit in a queue for up to a third as long again as the
+  // thinking took. It still falls back to that same outbox if the direct send fails, and it still stamps
+  // wa_message_map for the capture, so undo and quoted-replies work exactly as before.
+  await sendNowDurable(ctx.supabase, ctx.from, msg,
+    sink.resolvedRefs.length ? { ...meta, capture: { ref_kind: 'readback', object_refs: sink.resolvedRefs } } : meta)
 }
 
 // ── THE PROJECT-GROUP ARRAY (multi-project → recurse per site) ────────────────────────────────────────
@@ -1597,30 +1889,53 @@ async function recentDuplicateNarration(ctx: SiteopsCtx, text: string): Promise<
 
 export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?: string; callModel?: (system: string, user: string) => Promise<string> } = {}): Promise<void> {
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
-  const say = (body: string) => send(ctx.supabase, ctx.from, { kind: 'text', body: opts.prefix ? `${opts.prefix}\n\n${body}` : body }, meta)
+  const say = (body: string) => sendNowDurable(ctx.supabase, ctx.from, { kind: 'text', body: opts.prefix ? `${opts.prefix}\n\n${body}` : body }, meta)
 
-  // The open chase batch is loaded as CONTEXT — a prior for the fast path, for project resolution, and
-  // for candidate ranking. It is NEVER a router: the gate that force-routed any message into batch-only
-  // execution died with the singular-first restructure (D5 batch-captures-fresh, Phase-0 E1).
-  const batch = await getOpenBatch(ctx.supabase, ctx.orgId, ctx.from)
+  // ── FOUR READS, ONE WAVE (2026-07-13, latency) ────────────────────────────────────────────────────
+  // The open batch, the duplicate probe, the sender's name and the org's project roster are FOUR
+  // independent reads, and they ran one after another: four serial round trips before this agent had done
+  // a single thing. On the measured voice turn that stretch was ~2.3s of the ~30s the supervisor waited.
+  //
+  // Nothing here depends on anything else here — a supabase-js builder is a thenable and does not fire
+  // until awaited, so building them first and Promise.all-ing sends them together. (The same reasoning,
+  // and the same fix, as buildCandidateSet's "ONE WAVE, not four".)
+  //
+  // The ORDER OF THE DECISIONS below is unchanged: the duplicate check still short-circuits before a single
+  // thing is captured, modelled or matched. Only the WAITING is shared.
+  const [batch, dup, sName, projRows] = await Promise.all([
+    // The open chase batch is CONTEXT — a prior for the fast path, for project resolution, and for
+    // candidate ranking. It is NEVER a router: the gate that force-routed any message into batch-only
+    // execution died with the singular-first restructure (D5 batch-captures-fresh, Phase-0 E1).
+    getOpenBatch(ctx.supabase, ctx.orgId, ctx.from),
+    // A RE-SEND IS NOT NEW INFORMATION (2026-07-11). The supervisor re-sent his voice note; we had already
+    // logged its contents, so its own sentences now matched the rows they had created, and we asked him
+    // which of his own items he meant. Recognise the repeat and say so. Only a narration we actually
+    // HANDLED counts: a re-send after a FAILURE is a RETRY, and the retry is the whole point of "send it
+    // again whenever you like".
+    recentDuplicateNarration(ctx, text),
+    senderName(ctx),
+    // Roster for project resolution: hand the extractor the org's active project NAMES so it returns the
+    // CANONICAL project (semantic match), mirroring the transaction agent. Then resolveProject's string
+    // match is just a safety net, not the primary resolver. Ids ride along so the multi-project planner
+    // resolves each item's site without a second round-trip.
+    ctx.supabase.from('projects').select('project_id, name').eq('org_id', ctx.orgId).eq('status', 'Active'),
+  ])
 
-  // A RE-SEND IS NOT NEW INFORMATION (2026-07-11). The supervisor re-sent his voice note; we had already
-  // logged its contents, so its own sentences now matched the rows they had created, and we asked him which
-  // of his own items he meant. Recognise the repeat and say so — before anything is captured, modelled or
-  // matched. Only a narration we actually HANDLED counts: a re-send after a failure is a RETRY, and the
-  // retry is the whole point of "send it again whenever you like".
-  const dup = await recentDuplicateNarration(ctx, text)
   if (dup) {
     console.log(`[siteops:duplicate] same narration as ${dup.id} (${dup.ageMins}m ago) — acknowledged, not re-run`)
     await say(ALREADY_LOGGED)
     return
   }
 
+  const projects: ProjectRef[] = (((projRows as { data?: { project_id: string; name: string }[] })?.data ?? []) as { project_id: string; name: string }[])
+    .map((p) => ({ id: p.project_id, name: p.name }))
+  const projectNames = projects.map((p) => p.name)
+
   // Capture-first: persist the raw narration immediately so nothing is ever lost. Stamp the sender's
   // name so the task feed shows who sent it; fall back without the column if the migration isn't applied
   // yet (capture-first must never fail on a missing column).
   const base = { org_id: ctx.orgId, raw_text: text, resolved_project_via: 'unresolved' }
-  let ins = await ctx.supabase.from('site_narrations').insert({ ...base, sender_name: await senderName(ctx) }).select('id').single()
+  let ins = await ctx.supabase.from('site_narrations').insert({ ...base, sender_name: sName }).select('id').single()
   if (ins.error) ins = await ctx.supabase.from('site_narrations').insert(base).select('id').single()
   const narrationId: string | null = ins.data?.id ?? null
   console.log(`[siteops:entry] wamid=${ctx.wamid} narration=${narrationId} image=${!!ctx.image?.base64} audio=${!!ctx.audio?.storagePath} batch=${batch?.items?.length ?? 0} text=${JSON.stringify((text ?? '').slice(0, 200))}`)
@@ -1650,13 +1965,7 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
   // reaches the concierge, which shows the supervisor what a naming message looks like. Nothing moves until
   // they say what changed.
 
-  // Roster for project resolution: hand the extractor the org's active project NAMES so it
-  // returns the CANONICAL project (semantic match), mirroring the transaction agent. Then
-  // resolveProject's string match is just a safety net, not the primary resolver. We load ids
-  // too so the multi-project planner can resolve each item's site without a second round-trip.
-  const { data: projRows } = await ctx.supabase.from('projects').select('project_id, name').eq('org_id', ctx.orgId).eq('status', 'Active')
-  const projects: ProjectRef[] = ((projRows ?? []) as { project_id: string; name: string }[]).map((p) => ({ id: p.project_id, name: p.name }))
-  const projectNames = projects.map((p) => p.name)
+  // (the project roster is loaded up top, in the one wave — see "FOUR READS, ONE WAVE")
 
   // BATCHED READBACK — one combined reply for a whole compound/multi-project message. Every runSingularUnit
   // COLLECTS its readback into this sink instead of sending; the finally flushes ONE message after all groups
@@ -1694,10 +2003,16 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
     let qcChecks: string[] = []
     let qcById = new Map<string, QcCheckRef>()
     let groundedProjectId: string | null = null
+    let groundedProjectName: string | null = null
     try {
       const pre = await resolveProject(ctx.supabase, ctx.orgId, { narration: ctx.image.caption ?? '', nameHint: null })
       if (pre.projectId) {
         groundedProjectId = pre.projectId
+        groundedProjectName = pre.projectName ?? null
+        // …and the SAME heal before the grounding read: the shortlist we show the vision pass, and the QC
+        // checks we ask it to grade, are drawn from these rows. Grounding a photo against dead work is how
+        // a misread starts. (Memoised — the unit below reuses this call, it does not repeat it.)
+        await ensureProjectFresh(ctx, pre.projectId)
         const cands = await loadCandidates(ctx.supabase, ctx.orgId, pre.projectId, batch?.items ?? [])
         const shortlist = prefilterCandidates(cands, ctx.image.caption ?? '')
         groundingHints = groundingLabels(shortlist)
@@ -1755,7 +2070,12 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
     if (decomposed) decomposed = { ...decomposed, items: unitItems }
     // STEP A (IMAGE) — read the observation BACK before the resolve loop writes anything. The words are ours,
     // not his; he is the only one who can catch a misread, and only if we show him what we saw.
-    await sendReceiptAck(ctx, meta, items.length, { items, caption: ctx.image.caption ?? null })
+    // The readback names the project — the ONE part of the place we have actually confirmed. It does not
+    // name the floor: if the floor is about to be questioned (Type 4), stating it here as fact is the
+    // self-contradiction that cost the most trust in the live transcript.
+    await sendReceiptAck(ctx, meta, items.length, {
+      items, caption: ctx.image.caption ?? null, project: groundedProjectName, replyTo: meta.wamid,
+    })
     if (qcFailures.length) {
       await applyQcFailures(ctx, qcFailures, qcById, groundedProjectId, narrationId, sink)
     }
@@ -1817,7 +2137,7 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
         return
       }
       if (narrationId) await ctx.supabase.from('site_narrations').update({ miss_verdict: { reason: 'nothing_extracted' } }).eq('id', narrationId)
-      await say(NOTHING_TO_UPDATE)
+      await say(nothingToUpdate(ctx.lang))
       return
     }
 
@@ -1950,7 +2270,7 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
     }
     if (!decomposed && !mentionsProjectToken(text, projects)) {
       if (narrationId) await ctx.supabase.from('site_narrations').update({ miss_verdict: { reason: 'nothing_extracted' } }).eq('id', narrationId)
-      await say(NOTHING_TO_UPDATE)
+      await say(nothingToUpdate(ctx.lang))
       return
     }
     await askProjectGroups(ctx, meta, [{ messages: [text], nameTried: proj.nameTried, candidates: proj.suggestions ?? projects.map((p) => ({ id: p.id, name: p.name })) }], narrationId, null)
@@ -2097,7 +2417,7 @@ async function askProjectGroups(
     pendingQuestion: 'which project?', slots, lastMessageId: ctx.wamid,
   })
   if (opts.sink) { opts.sink.askSlots = slots; opts.sink.askQuestion = { pendingQuestion: 'which project?', lastMessageId: ctx.wamid } }
-  await send(ctx.supabase, ctx.from, {
+  await sendNowDurable(ctx.supabase, ctx.from, {
     kind: 'list',
     body,
     button: 'Pick project',
@@ -2178,7 +2498,7 @@ export async function handleQuotedReply(ctx: SiteopsCtx, text: string, quotedWam
   // undoing the log, not editing it. Dismiss (never hard-delete — the evidence stays).
   if (isRetraction(text)) {
     const n = await dismissRefs(ctx.supabase, ctx.orgId, refs)
-    await send(ctx.supabase, ctx.from, { kind: 'text', body: n ? `Dismissed — pulled ${n} item${n > 1 ? 's' : ''} back out (the photo/record stays). 👍` : `Noted 👍` }, meta)
+    await sendNowDurable(ctx.supabase, ctx.from, { kind: 'text', body: n ? `Dismissed — pulled ${n} item${n > 1 ? 's' : ''} back out (the photo/record stays). 👍` : `Noted 👍` }, meta)
     return true
   }
   await correctReadback(ctx, text, refs)
@@ -2197,7 +2517,7 @@ export async function handleReaction(supabase: SiteopsCtx['supabase'], p: { orgI
   const refs = (data.object_refs ?? []) as { kind: string; id: string }[]
   if (intent === 'retract') {
     const n = await dismissRefs(supabase, p.orgId, refs)
-    if (n) await send(supabase, p.from, { kind: 'text', body: `Dismissed — pulled ${n} item${n > 1 ? 's' : ''} back out (the record stays). 👍` }, { org_id: p.orgId })
+    if (n) await sendNowDurable(supabase, p.from, { kind: 'text', body: `Dismissed — pulled ${n} item${n > 1 ? 's' : ''} back out (the record stays). 👍` }, { org_id: p.orgId })
     return
   }
   await confirmRefs(supabase, p.orgId, refs)   // positive → a quiet confirmation touch on the trail
@@ -2210,8 +2530,10 @@ async function dismissRefs(supabase: SiteopsCtx['supabase'], orgId: string, refs
   let n = 0
   for (const r of refs) {
     let err: { message: string } | null = null
-    if (r.kind === 'problem') ({ error: err } = await supabase.from('problems').update({ status: 'DISMISSED' }).eq('id', r.id))
-    else if (r.kind === 'todo') ({ error: err } = await supabase.from('todos').update({ status: 'DISMISSED' }).eq('id', r.id))
+    // 'todo' is a legacy ref kind — the row it names is a problems row now (a planned snag), so both
+    // land in the same place. Keeping the kind name costs nothing; sending it to another table costs
+    // the retraction.
+    if (r.kind === 'problem' || r.kind === 'todo') ({ error: err } = await supabase.from('problems').update({ status: 'DISMISSED' }).eq('id', r.id))
     else continue
     // Don't claim a dismissal we didn't land (e.g. the DISMISSED status isn't migrated yet, or the row
     // is gone) — the ack degrades to a plain "Noted" rather than a false "Dismissed".
@@ -2244,7 +2566,7 @@ async function placeLateAnswer(ctx: SiteopsCtx, text: string, parked: ParkedRow 
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
   const slots = reconstructParkedSlots(parked)
   if (!slots) {   // an evidence-only park (no pending choice) — nothing to re-answer; leave it queued.
-    await send(ctx.supabase, ctx.from, { kind: 'text', body: `That one's on your to-place list — open it in the app to sort it.` }, meta)
+    await sendNowDurable(ctx.supabase, ctx.from, { kind: 'text', body: `That one's on your to-place list — open it in the app to sort it.` }, meta)
     return
   }
   // Re-open the pick as a live convo so answerSiteops drives AND closes it through the normal lifecycle.
@@ -2266,7 +2588,7 @@ async function placeLateAnswer(ctx: SiteopsCtx, text: string, parked: ParkedRow 
  *  progress correction is re-association / QC (heavier; not 4b). */
 async function correctReadback(ctx: SiteopsCtx, text: string, refs: { kind: string; id: string }[]): Promise<void> {
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
-  if (isBareAffirmation(text)) { await send(ctx.supabase, ctx.from, { kind: 'text', body: 'Got it 👍' }, meta); return }
+  if (isBareAffirmation(text)) { await sendNowDurable(ctx.supabase, ctx.from, { kind: 'text', body: 'Got it 👍' }, meta); return }
 
   let items: SiteItem[] = []
   try { items = (await decompose(text)).items } catch { items = [] }
@@ -2278,24 +2600,19 @@ async function correctReadback(ctx: SiteopsCtx, text: string, refs: { kind: stri
     if (r.kind !== 'problem' && r.kind !== 'todo') continue   // site_task = progress axis; not 4b
     sawEditable = true
     const kind: 'issue' | 'todo' = r.kind === 'problem' ? 'issue' : 'todo'
-    const res = kind === 'issue'
-      ? await ctx.supabase.from('problems').select('cause, deadline').eq('id', r.id).maybeSingle()
-      : await ctx.supabase.from('todos').select('due_date').eq('id', r.id).maybeSingle()
+    // both kinds are problems rows now — one read, one write, one deadline column
+    const res = await ctx.supabase.from('problems').select('cause, deadline').eq('id', r.id).maybeSingle()
     const row = res.data as Record<string, string | null> | null
     if (!row) continue
     const plan = planCorrection(
-      { kind, cause: kind === 'issue' ? (row.cause ?? null) : null, deadline: kind === 'issue' ? (row.deadline ?? null) : (row.due_date ?? null) },
+      { kind, cause: row.cause ?? null, deadline: row.deadline ?? null },
       sig, now,
     )
     if (!plan.changed) continue
-    if (kind === 'issue') {
-      const upd: Record<string, string> = {}
-      if (plan.updates.cause) upd.cause = plan.updates.cause
-      if (plan.updates.deadline) upd.deadline = plan.updates.deadline
-      await ctx.supabase.from('problems').update(upd).eq('id', r.id)
-    } else if (plan.updates.deadline) {
-      await ctx.supabase.from('todos').update({ due_date: plan.updates.deadline }).eq('id', r.id)
-    }
+    const upd: Record<string, string> = {}
+    if (plan.updates.cause) upd.cause = plan.updates.cause
+    if (plan.updates.deadline) upd.deadline = plan.updates.deadline
+    if (Object.keys(upd).length) await ctx.supabase.from('problems').update(upd).eq('id', r.id)
     await ctx.supabase.from('followup_events').insert({
       org_id: ctx.orgId, problem_id: kind === 'issue' ? r.id : null, todo_id: kind === 'todo' ? r.id : null,
       type: 'status_changed', body: `Corrected — ${Object.entries(plan.updates).map(([k, v]) => `${k} → ${v}`).join(', ')}`,
@@ -2308,7 +2625,7 @@ async function correctReadback(ctx: SiteopsCtx, text: string, refs: { kind: stri
     : sawEditable
       ? `Noted — I couldn't spot a change to make from that. Tell me the cause or the due date and I'll correct it.`
       : `Noted 👍`
-  await send(ctx.supabase, ctx.from, { kind: 'text', body }, meta)
+  await sendNowDurable(ctx.supabase, ctx.from, { kind: 'text', body }, meta)
 }
 
 /** Resume a pending SITEOPS follow-up — a project pick OR a task disambiguation. */
@@ -2341,7 +2658,7 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
       }
     }
     await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'photo + note' })
-    await send(ctx.supabase, ctx.from, { kind: 'text', body: trailed ? `Added your note to what I logged from the photo. 👍` : `Noted with the photo. 👍` }, meta)
+    await sendNowDurable(ctx.supabase, ctx.from, { kind: 'text', body: trailed ? `Added your note to what I logged from the photo. 👍` : `Noted with the photo. 👍` }, meta)
     return
   }
 
@@ -2362,7 +2679,27 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
     // "Tiling", which is a substring of "Floor tiling" AND "Wall tiling / dado" — matching that text would be
     // ambiguous (correctly) and re-prompt a supervisor who had already answered.
     const tapped = /^pick:(\d+)$/.exec((ctx.interactiveId ?? '').trim())?.[1] ?? null
-    const picked = resolveTypedPick(picks, picks, tapped ?? text)
+    let picked = resolveTypedPick(picks, picks, tapped ?? text)
+
+    // ── THE LEXICAL MATCHER CANNOT READ TELUGU (2026-07-13) ────────────────────────────────────────────
+    // resolveTypedPick tokenizes with /[a-z0-9]{3,}/g. A Telugu-script reply yields ZERO tokens, so it can
+    // never match — and our supervisors answer in Telugu. Live: we offered one option ("Plumbing — in-wall
+    // lines") and he replied "ఎలక్ట్రికల్ గార్డలు తీసాం, ప్లంబింగ్ గార్డలు కాదు" — the electrical ones, not the
+    // plumbing. A perfect answer. It matched nothing, was re-read as a fresh narration, and decompose turned
+    // his negation into a NEW ISSUE: "plumbing guards not removed". We invented a defect out of a correction.
+    //
+    // So when the lexical pass finds nothing, ask the model what he meant — bounded to the ids we offered,
+    // failing CLOSED to not_an_answer. A TAP never comes here (it is unambiguous by construction), so this
+    // costs a call only on a reply we had already given up on.
+    if (picked.kind === 'none' && !tapped) {
+      const reading = await interpretPickReply((slots.ask_body as string | null) ?? 'Which item is this about?', picks, text)
+      if (reading.kind === 'pick') picked = { kind: 'attach', target: reading.target }
+      else if (reading.kind === 'new') picked = { kind: 'observe' }
+      else if (reading.kind === 'none') picked = { kind: 'park' }
+      // 'not_an_answer' → leave `picked` as 'none' and fall through to the dispatcher's fresh-turn path
+      // below, UNCHANGED. That path exists because a ₹25,000 payment once arrived mid-pick and was dropped;
+      // it stays exactly as it is.
+    }
     // "None of these" — the offered list is wrong, and the right row may not EXIST (the fifth-floor wiring
     // task nobody created). Creating a duplicate would be the wrong repair, so the piece is saved for review
     // and NOTHING changes. This is the option every pick now spells out.
@@ -2371,7 +2708,7 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
       await parkObservation(ctx, pieceText, 'disambig', (slots.narration_id as string | null) ?? null, null,
         { projectId: (slots.project_id as string | null) ?? null, image: (slots.image ?? null) as { storagePath?: string; caption?: string | null } | null })
       await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'saved for review' })
-      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Understood — I've changed nothing and saved it for review:
+      await sendNowDurable(ctx.supabase, ctx.from, { kind: 'text', body: `Understood — I've changed nothing and saved it for review:
 "${pieceText}"
 
 ` + `If the right task isn't set up yet, add it in the app and tell me again.` }, meta)
@@ -2384,7 +2721,7 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
       const pieceText = (slots.piece_text as string | null) ?? text
       await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site update' })
       if (!pid) {
-        await send(ctx.supabase, ctx.from, { kind: 'text', body: `Got it — send that as a new update with the site and I'll log it.` }, meta)
+        await sendNowDurable(ctx.supabase, ctx.from, { kind: 'text', body: `Got it — send that as a new update with the site and I'll log it.` }, meta)
         await finishItemAsk(ctx, meta, slots, null)   // still move the cursor — the other asks are not this one's fault
         return
       }
@@ -2395,7 +2732,7 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
       const cimg = slots.image as { storagePath?: string; caption?: string | null } | null
       if (cimg?.storagePath) {
         for (const p of out.problems) if (p.id) await attachImage(ctx, 'problem', p.id, cimg.storagePath, cimg.caption ?? null, 'creation')
-        for (const td of out.todos) if (td.id) await attachImage(ctx, 'todo', td.id, cimg.storagePath, cimg.caption ?? null, 'creation')
+        for (const td of out.todos) if (td.id) await attachImage(ctx, 'problem', td.id, cimg.storagePath, cimg.caption ?? null, 'creation')
       }
       const n = out.problems.length + out.todos.length + out.progress.length
       await finishItemAsk(ctx, meta, slots, { project: null, body: n ? `Logged as new — *${fullText(pieceText)}*. 👍` : `Noted 👍` })
@@ -2448,7 +2785,7 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
         await finishItemAsk(ctx, meta, slots, { project: chosen.projectName, body })
       } else {
         await parkObservation(ctx, `update ${chosen.id}: ${pieceText}`, 'v2_effect_failed', narrId, null, { projectId: projId, image: cimg })
-        await send(ctx.supabase, ctx.from, { kind: 'text', body: `Couldn't update “${fullText(chosen.title)}” just now — saved it for review so nothing's lost.` }, meta)
+        await sendNowDurable(ctx.supabase, ctx.from, { kind: 'text', body: `Couldn't update “${fullText(chosen.title)}” just now — saved it for review so nothing's lost.` }, meta)
         await finishItemAsk(ctx, meta, slots, null)   // a failed effect still moves the cursor — never strand the rest
       }
       return
@@ -2498,12 +2835,12 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
       return 'not_an_answer'
     }
     if (!img.storagePath) {
-      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Reply with the number of the item this photo is about.` }, meta)
+      await sendNowDurable(ctx.supabase, ctx.from, { kind: 'text', body: `Reply with the number of the item this photo is about.` }, meta)
       return
     }
     await answerWithPhoto(ctx, { kind: chosen.kind, id: chosen.id, orgId: chosen.orgId }, img.storagePath, img.caption ?? null)
     await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'photo attached' })
-    await send(ctx.supabase, ctx.from, { kind: 'text', body: `Added your photo to *${fullText(chosen.title)}*.` }, meta)
+    await sendNowDurable(ctx.supabase, ctx.from, { kind: 'text', body: `Added your photo to *${fullText(chosen.title)}*.` }, meta)
     return
   }
 
@@ -2522,7 +2859,7 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
     if (d.kind === 'attach') {
       if (img.storagePath) await attachExistingEvidence(ctx, { kind: d.target.kind, id: d.target.id }, img.storagePath, img.caption ?? null)
       await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'photo attached' })
-      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Added your photo to *${fullText(d.target.label)}*.` }, meta)
+      await sendNowDurable(ctx.supabase, ctx.from, { kind: 'text', body: `Added your photo to *${fullText(d.target.label)}*.` }, meta)
       return
     }
     // observe — create the held item fresh, attach the photo as creation evidence, confirm.
@@ -2531,7 +2868,7 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
     if (!storedItem) {
       await parkObservation(ctx, 'photo evidence', 'evidence_await_placement', (slots.narration_id as string | null) ?? null, null, { projectId: (slots.project_id as string | null) ?? null, image: img })
       await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'photo parked' })
-      await send(ctx.supabase, ctx.from, { kind: 'text', body: `Saved the photo to your to-place list. 👍` }, meta)
+      await sendNowDurable(ctx.supabase, ctx.from, { kind: 'text', body: `Saved the photo to your to-place list. 👍` }, meta)
       return
     }
     const out = await routeGroup(ctx, slots.project_id, [storedItem], slots.narration_id ?? null)
@@ -2608,14 +2945,14 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
     } else if (await drainItemAsks(ctx, meta, itemAsks, { heldEntries: acc, heldRefs: rsink.resolvedRefs })) {
       // every project is sited; now sort out the ambiguous items, one question at a time (the ask holds `acc`).
     } else if (acc.length) {
-      await send(ctx.supabase, ctx.from, { kind: 'text', body: combineReadbacks(acc) }, meta)
+      await sendNowDurable(ctx.supabase, ctx.from, composeConfirmation(acc, rsink.resolvedRefs), meta)
     }
     return
   }
 
   if (slots.kind !== 'siteops_disambig') {
     await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site note' })
-    await send(ctx.supabase, ctx.from, { kind: 'text', body: 'Okay.' }, meta)
+    await sendNowDurable(ctx.supabase, ctx.from, { kind: 'text', body: 'Okay.' }, meta)
     return
   }
   const candidates = (slots.candidates ?? []) as { task_id: string; node_key?: string | null; name: string; floor: string | null; unit: string | null }[]
@@ -2636,14 +2973,14 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
 
   await closeConversation(ctx.supabase, { orgId: ctx.orgId, sender: ctx.from, lastActionSummary: 'site update' })
   if (!task) {
-    await send(ctx.supabase, ctx.from, { kind: 'text', body: `I couldn't find that task anymore — send the update again and I'll re-place it.` }, meta)
+    await sendNowDurable(ctx.supabase, ctx.from, { kind: 'text', body: `I couldn't find that task anymore — send the update again and I'll re-place it.` }, meta)
     return
   }
   const res = await applyProgress(rc, task, slots.item)
   // GUARDRAIL (Step 3): a pick that resolved to a row the UI can't render must NEVER read back as
   // "✓ logged" — that's the silent-loss bug. Be honest and let the supervisor re-place it.
   if (!res.visibleInVM) {
-    await send(ctx.supabase, ctx.from, { kind: 'text', body: `I couldn't attach that to a task on your screen — send it again with the floor/task and I'll place it.` }, meta)
+    await sendNowDurable(ctx.supabase, ctx.from, { kind: 'text', body: `I couldn't attach that to a task on your screen — send it again with the floor/task and I'll place it.` }, meta)
     return
   }
   await sendTaskConfirm(ctx, meta, slots.project_name ?? null, slots.project_id, { progress: [res], problems: [], todos: [], parked: 0 })

@@ -14,13 +14,15 @@ const STACK = {
 const GEO = stackToGeometry(STACK)
 const G: ConcreteGraph = instantiate(GEO)
 
-function nodeOf(tid: string, floor: string, kind: 'dry' | 'wet'): NodeId {
-  const n = [...G.nodes.values()].find((x) => x.taskTypeId === tid && x.floorLabel === floor && x.zoneKind === kind)
-  if (!n) throw new Error(`no ${kind} ${tid}@${floor}`)
+// A zone is a UNIT (a flat), not a room — so there is exactly one per-zone node per (type, floor, unit).
+// These tests used to address a `dry` node and a `wet` node separately; the wet room lives INSIDE the
+// unit now, so `unit('plaster')` is the whole flat's plastering and it conceals BOTH the conduit and the
+// in-wall plumbing. That is the point: you don't plaster a flat over an untested pipe.
+function unit(tid: string, floor = 'Ground'): NodeId {
+  const n = [...G.nodes.values()].find((x) => x.taskTypeId === tid && x.floorLabel === floor && x.zoneId !== null)
+  if (!n) throw new Error(`no ${tid}@${floor}`)
   return n.id
 }
-const dry = (tid: string, floor = 'Ground') => nodeOf(tid, floor, 'dry')
-const wet = (tid: string, floor = 'Ground') => nodeOf(tid, floor, 'wet')
 
 // the hard-pred chain leading to a Ground-floor zone's blockwork being done
 const blockworkDoneGround = (): NodeId[] => [
@@ -36,94 +38,103 @@ suite('M3 evaluate', () => {
     expect(ev.whyMessage('columns@Ground')).toBe('after Foundation — mass concrete — structural')
   })
 
-  test('plaster blocked AFTER conduit (concealment); becomes available once conduit done', () => {
-    const conduit = dry('conduit'), plaster = dry('plaster')
+  // Every line the flat's plaster buries. The unit contains a wet room, so the concealed plumbing and
+  // its pressure test are in here too — plaster waits for ALL of them, not just the conduit.
+  const concealedByPlaster = () => [unit('conduit'), unit('in_wall_plumbing'), unit('pressure_test')]
+
+  test('plaster blocked AFTER every line it conceals; available once they are all done', () => {
+    const plaster = unit('plaster')
     const ev = new Evaluator(G, stateOf({ done: blockworkDoneGround() }))
-    expect(ev.availability(conduit)).toBe('available')
+    expect(ev.availability(unit('conduit'))).toBe('available')
     expect(ev.availability(plaster)).toBe('blocked')
     expect(ev.why(plaster).some((b) => b.taskTypeId === 'conduit' && b.reason === 'concealment')).toBeTruthy()
-    // dry zone: plaster's only concealed line is conduit (in-wall plumbing/pressure-test are wet-only)
-    const ev2 = new Evaluator(G, stateOf({ done: [...blockworkDoneGround(), conduit] }))
+
+    // conduit alone is NOT enough — the flat's in-wall plumbing is still open behind the plaster
+    const ev1 = new Evaluator(G, stateOf({ done: [...blockworkDoneGround(), unit('conduit')] }))
+    expect(ev1.availability(plaster)).toBe('blocked')
+    expect(ev1.why(plaster).some((b) => b.taskTypeId === 'in_wall_plumbing')).toBeTruthy()
+
+    const ev2 = new Evaluator(G, stateOf({ done: [...blockworkDoneGround(), ...concealedByPlaster()] }))
     expect(ev2.availability(plaster)).toBe('available')
   })
 
   test('door frames available IN PARALLEL with conduit (both now hard-need blockwork)', () => {
     const ev = new Evaluator(G, stateOf({ done: blockworkDoneGround() }))
-    expect(ev.availability(dry('conduit'))).toBe('available')
-    expect(ev.availability(dry('door_frame'))).toBe('available')
+    expect(ev.availability(unit('conduit'))).toBe('available')
+    expect(ev.availability(unit('door_frame'))).toBe('available')
   })
 
   // ── Gap-1/2: frames + ceiling are BLOCKED until walls exist (no longer available on bare floors) ──
   test('Gap-2: door_frame BLOCKED before blockwork (only structure done up to slab)', () => {
     const upToSlab = ['foundation', 'columns@Ground', 'beams@Ground', 'slab@Ground', 'shuttering_removal@Ground']
     const ev = new Evaluator(G, stateOf({ done: upToSlab }))
-    expect(ev.availability(dry('door_frame'))).toBe('blocked')
-    expect(ev.why(dry('door_frame'))[0].taskTypeId).toBe('blockwork')
-    expect(ev.why(dry('door_frame'))[0].nature).toBe('IMPOSSIBLE')
+    expect(ev.availability(unit('door_frame'))).toBe('blocked')
+    expect(ev.why(unit('door_frame'))[0].taskTypeId).toBe('blockwork')
+    expect(ev.why(unit('door_frame'))[0].nature).toBe('IMPOSSIBLE')
   })
   test('Gap-1: ceiling_frame BLOCKED on a bare floor; needs the pour + blockwork', () => {
     const ev0 = new Evaluator(G, stateOf({ done: ['foundation'] }))
-    expect(ev0.availability(dry('ceiling_frame'))).toBe('blocked')
+    expect(ev0.availability(unit('ceiling_frame'))).toBe('blocked')
     // once blockwork (hence the pour) is done → available
     const ev1 = new Evaluator(G, stateOf({ done: blockworkDoneGround() }))
-    expect(ev1.availability(dry('ceiling_frame'))).toBe('available')
+    expect(ev1.availability(unit('ceiling_frame'))).toBe('available')
   })
 
   test('switchboards blocked until conduit done (IMPOSSIBLE / logistics)', () => {
-    const conduit = dry('conduit'), sb = dry('switchboard')
+    const conduit = unit('conduit'), sb = unit('switchboard')
     expect(new Evaluator(G, stateOf({ done: blockworkDoneGround() })).availability(sb)).toBe('blocked')
     expect(new Evaluator(G, stateOf({ done: blockworkDoneGround() })).why(sb)[0].nature).toBe('IMPOSSIBLE')
     expect(new Evaluator(G, stateOf({ done: [...blockworkDoneGround(), conduit] })).availability(sb)).toBe('available')
   })
 
   test('freedom GROWS as concealed lines finish', () => {
-    const conduit = dry('conduit'), plaster = dry('plaster')
+    const plaster = unit('plaster')
     expect(new Evaluator(G, stateOf({ done: blockworkDoneGround() })).freedom(plaster).earliestAfterDone).toBeFalsy()
-    expect(new Evaluator(G, stateOf({ done: [...blockworkDoneGround(), conduit] })).freedom(plaster).earliestAfterDone).toBeTruthy()
+    expect(new Evaluator(G, stateOf({ done: [...blockworkDoneGround(), ...concealedByPlaster()] })).freedom(plaster).earliestAfterDone).toBeTruthy()
   })
 
   test('conduit reports its freedom set (muscle_followers)', () => {
     const ev = new Evaluator(G, stateOf({ done: blockworkDoneGround() }))
-    expect(ev.freedom(dry('conduit')).freedomSet).toBe('muscle_followers')
-    expect(ev.freedom(dry('conduit')).fullyFree).toBeTruthy() // blockwork anchor done
+    expect(ev.freedom(unit('conduit')).freedomSet).toBe('muscle_followers')
+    expect(ev.freedom(unit('conduit')).fullyFree).toBeTruthy() // blockwork anchor done
   })
 
   test('cohesion: waterproof drags screed as one bundle', () => {
     const ev = new Evaluator(G, stateOf({}))
-    const bundle = ev.cohesionSet(wet('waterproof'))
-    expect(bundle).toContain(wet('waterproof'))
-    expect(bundle).toContain(wet('screed'))
+    const bundle = ev.cohesionSet(unit('waterproof'))
+    expect(bundle).toContain(unit('waterproof'))
+    expect(bundle).toContain(unit('screed'))
   })
 
   test('cohesion: a completed member releases its binding', () => {
-    const ev = new Evaluator(G, stateOf({ done: [wet('screed')] }))
-    const bundle = ev.cohesionSet(wet('waterproof'))
-    expect(bundle).toContain(wet('waterproof'))
-    expect(bundle.includes(wet('screed'))).toBeFalsy()
+    const ev = new Evaluator(G, stateOf({ done: [unit('screed')] }))
+    const bundle = ev.cohesionSet(unit('waterproof'))
+    expect(bundle).toContain(unit('waterproof'))
+    expect(bundle.includes(unit('screed'))).toBeFalsy()
   })
 
   // ── checkMove drag verdicts (the truth table) ──
   test('checkMove: plaster before conduit → allow_with_consequence (DESTRUCTIVE concealment)', () => {
     const ev = new Evaluator(G, stateOf({ done: blockworkDoneGround() }))
-    const res = ev.checkMove(dry('plaster'), G.nodes.get(dry('conduit'))!.seqNo)
+    const res = ev.checkMove(unit('plaster'), G.nodes.get(unit('conduit'))!.seqNo)
     expect(res.verdict).toBe('allow_with_consequence')
     expect(res.reason).toBe('concealment')
   })
 
   test('checkMove: wiring before conduit → forbid (IMPOSSIBLE)', () => {
     const ev = new Evaluator(G, stateOf({ done: blockworkDoneGround() }))
-    expect(ev.checkMove(dry('wiring'), G.nodes.get(dry('conduit'))!.seqNo).verdict).toBe('forbid')
+    expect(ev.checkMove(unit('wiring'), G.nodes.get(unit('conduit'))!.seqNo).verdict).toBe('forbid')
   })
 
   test('checkMove: door_frame before blockwork → forbid (Gap-2: now IMPOSSIBLE)', () => {
     const ev = new Evaluator(G, stateOf({ done: blockworkDoneGround() }))
-    const res = ev.checkMove(dry('door_frame'), G.nodes.get('blockwork@Ground')!.seqNo)
+    const res = ev.checkMove(unit('door_frame'), G.nodes.get('blockwork@Ground')!.seqNo)
     expect(res.verdict).toBe('forbid')
   })
 
   test('checkMove: switchplate before plaster → warn (a remaining STRONG_PREF)', () => {
     const ev = new Evaluator(G, stateOf({ done: blockworkDoneGround() }))
-    const res = ev.checkMove(dry('switchplate'), G.nodes.get(dry('plaster'))!.seqNo)
+    const res = ev.checkMove(unit('switchplate'), G.nodes.get(unit('plaster'))!.seqNo)
     expect(res.verdict).toBe('warn')
   })
 

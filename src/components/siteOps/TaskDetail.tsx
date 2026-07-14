@@ -33,6 +33,9 @@ export interface QcRow {
 export interface StatusEvent { status?: string; at?: string; by?: string; source?: string; narration_id?: string | null }
 export interface Task {
   task_id: string; task_no: string; phase: string; trade: string
+  /** The trade pass — '2nd fix'. Its own field, not glued into `name`, so the list renders it as a chip
+   *  instead of a parenthetical on every second row. (`phase` above is the LAYER, a different thing.) */
+  trade_phase?: string | null
   floor_label: string | null; unit_label: string | null
   name: string; description: string | null; seq_no: number; status: string
   source: 'generated' | 'manual'

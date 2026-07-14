@@ -49,7 +49,10 @@ const ROUTER_MODEL_ANTHROPIC = Deno.env.get('WA_ROUTER_MODEL_ANTHROPIC') ?? 'cla
 // The replacement is not a better list. It is the REFERENT RULE in the prompt, applied by the model over
 // the actual conversation: a message that NAMES nothing acts on nothing. See SYSTEM_PROMPT.
 
-function detectLanguage(text: string): RouterDecision['reply_language'] {
+/** PURE, local, no model. Exported because the dispatcher needs a reply language on the one path where it
+ *  does NOT consult the router at all — a tapped list row against an open question (see _dispatch.ts,
+ *  "A TAP IS NOT A SENTENCE"). Same function the router itself uses, so the language cannot diverge. */
+export function detectLanguage(text: string): RouterDecision['reply_language'] {
   if (/[ఀ-౿]/.test(text)) return 'te'           // Telugu script
   if (/[ऀ-ॿ]/.test(text)) return 'hi'           // Devanagari
   const tenglish = /\b(sare|sari|avunu|ki|ku|icch|konn|nak|entha|evaru|ela|leru|undi|cheppu)\b/i

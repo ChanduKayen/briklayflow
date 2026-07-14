@@ -6,6 +6,7 @@
 // All DB access is via an injected supabase client (works against the real client or a
 // test mock), mirroring the rest of the webhook.
 
+import { tradeGroups } from './_siteops_trades.ts'
 import { openaiTemp, type SiteItem } from './_siteops_extract.ts'
 import { loadCadenceMap, computeBlockedTaskEnd, computeTiming, type CadenceMap } from './_siteops_timing.ts'
 import { computeImpact, type ImpactResult } from './_siteops_impact.ts'
@@ -105,32 +106,10 @@ export function unitFromHint(hint: string | null): string | null {
   if (num) { const n = parseInt(num[1], 10); if (n >= 1 && n <= 26) return `Unit ${String.fromCharCode(64 + n)}` }
   return null
 }
-// Trade SYNONYM GROUPS — a supervisor's word ("brick work") and the engine's label ("Blockwork
-// (walls)") must resolve to the SAME group. We canonicalise BOTH sides to group indices and match
-// group-vs-group, so vocabulary differences (brick≡block≡masonry, wiring≡conduit, tiling≡flooring…)
-// never cause a false "parked".
-const TRADE_GROUPS: string[][] = [
-  ['block', 'brick', 'masonry'],          // brick work = block work = masonry walls
-  ['plaster', 'rendering'],
-  ['conduit', 'wiring', 'cable', 'electric'],
-  ['plumb', 'sanitary', 'pipe'],
-  ['tile', 'tiling', 'flooring', 'floor finish'],
-  ['paint', 'putty'],
-  ['slab', 'pour', 'cast', 'casting', 'concreting'],
-  ['column'], ['beam'], ['footing'], ['plinth'], ['excavat', 'digging'], ['pcc'], ['backfill'],
-  ['waterproof'], ['ceiling'], ['door'], ['window'], ['grill', 'railing'], ['curing'],
-  ['shutter', 'de-prop', 'deprop', 'deshutter'], ['reinforc', 'steel', 'rebar'], ['pile'], ['raft'],
-  ['screed'], ['skirting'], ['frame'],
-]
-/** Which trade groups a free-text string mentions (by index). Works for BOTH a message hint and a
- *  task's "name + trade" label, so the two can be matched as sets. */
-export function tradeGroups(s: string | null): number[] {
-  if (!s) return []
-  const h = s.toLowerCase()
-  const out: number[] = []
-  TRADE_GROUPS.forEach((g, i) => { if (g.some((w) => h.includes(w))) out.push(i) })
-  return out
-}
+// Trade vocabulary lives in _siteops_trades.ts — PURE, so the enforcement planner can read it too (it must
+// never import this file, which touches a database). Imported for our own use AND re-exported, so every
+// existing caller of `tradeGroups` from this module is unchanged.
+export { tradeGroups } from './_siteops_trades.ts'
 
 export type TaskResolution =
   | { kind: 'attached'; task: SiteTaskRow }
@@ -427,7 +406,11 @@ async function insertProblem(supabase: SB, fullRow: Record<string, unknown>): Pr
   if (res.error) {
     // degrade if a not-yet-applied column is present (deadline/impact, the S note-provenance cols, or the
     // T6 kind/confidence cols) — a missing column must never cost us the issue; the DB default fills it.
-    const { deadline: _d, impact: _i, source_note_id: _sn, source_note_kind: _sk, kind: _k, confidence: _cf, is_planned: _ip, ...base } = fullRow
+    const {
+      deadline: _d, impact: _i, source_note_id: _sn, source_note_kind: _sk, kind: _k, confidence: _cf, is_planned: _ip,
+      floor_label: _fl, unit_label: _ul,   // Site Desk (20260712000001) — not yet applied everywhere
+      ...base
+    } = fullRow
     res = await supabase.from('problems').insert(base).select('id').single()
   }
   if (res.error) console.error('[siteops] problem insert failed:', res.error.message)
@@ -463,8 +446,22 @@ export async function createProblem(c: RouteCtx, item: SiteItem, taskId: string 
     try { impact = await computeImpact(c.supabase, { text: item.text, cause }, taskId) } catch { impact = null }
   }
 
+  // WHERE IT IS. The slot the capture already computed (decompose / the vision pass) — the only
+  // input the task pin ever had — now rides onto the row. When the item named no place but IS
+  // attached to a task, it inherits the task's: an issue found on "Wiring — Fourth floor" is on
+  // the fourth floor, and saying "Project-wide" instead would be a worse answer than the truth.
+  // NO GUESS beyond that: an item with neither writes null, and the portal asks rather than invents.
+  let floorLabel = item.structure?.floor ?? null
+  let unitLabel = item.structure?.unit ?? null
+  if (!floorLabel && !unitLabel && taskId) {
+    const { data: t } = await c.supabase.from('site_tasks').select('floor_label, unit_label').eq('task_id', taskId).maybeSingle()
+    floorLabel = (t?.floor_label as string | null) ?? null
+    unitLabel = (t?.unit_label as string | null) ?? null
+  }
+
   const id = await insertProblem(c.supabase, {
     org_id: c.orgId, project_id: c.projectId, task_id: taskId, source_narration_id: c.narrationId,
+    floor_label: floorLabel, unit_label: unitLabel,
     // note→object provenance: a WhatsApp narration IS the note. Lets the task feed hide the raw
     // narration and show the live chip (mark-and-hide). UI spawns stamp 'comment' post-create.
     source_note_id: c.narrationId, source_note_kind: c.narrationId ? 'narration' : null,
@@ -482,23 +479,35 @@ export async function createProblem(c: RouteCtx, item: SiteItem, taskId: string 
 }
 
 export interface TodoResult { id: string | null; text: string; dueDate: string | null }
-/** todo → lightweight action item (no cause, no follow-up engine). */
-export async function createTodo(c: RouteCtx, item: SiteItem, taskId: string | null): Promise<TodoResult> {
+
+/**
+ * A TO-DO IS A PLANNED SNAG. IT IS NOT A SECOND KIND OF ROW.
+ *
+ * This used to insert into `todos` — a whole second item store, with no ref, no cause, no follow-up
+ * clock, and no way to record why it was ever closed. The consequences were not theoretical: the
+ * Site Desk reads `problems` and nothing else, so it could never see a to-do, let alone close one —
+ * while the chase cron chased BOTH tables. The founder closed an item in the Desk, the Desk showed
+ * it closed, and WhatsApp went on chasing a different row in a table no screen could reach.
+ *
+ * So it writes a problem. "Fix the leak by Monday" is a snag (kind='snag') that someone has been
+ * ASKED to fix (is_planned) by a date (deadline) — a shape the model already had
+ * (20260708000000_problems_is_planned.sql). One store, one ref, one close, one chase.
+ *
+ * The RETURN TYPE is unchanged on purpose: every caller downstream (the readback, the image
+ * enrichment window, the reply text) still speaks of "todos", because to the person on WhatsApp a
+ * to-do is still a to-do. What changed is WHERE IT LIVES, and that was never the user's business.
+ */
+export async function createTodo(c: RouteCtx, item: SiteItem, taskId: string | null, cadence: CadenceMap): Promise<TodoResult> {
   const due = parseWhen(item.date_hint, c.now)
-  const owner = resolveOwner(item.owner_hint, c.members, c.supervisorId, c.principalId)
-  const row = { org_id: c.orgId, project_id: c.projectId, task_id: taskId, text: item.text, owner_id: owner, due_date: due ? due.toISOString().slice(0, 10) : null, status: 'OPEN' }
-  // note→object provenance (mark-and-hide): the narration IS the note. Degrade if the S columns
-  // aren't applied yet (retry without them) so snag creation never breaks pre-migration.
-  const withProv = { ...row, source_note_id: c.narrationId, source_note_kind: c.narrationId ? 'narration' : null }
-  let ins = await c.supabase.from('todos').insert(withProv).select('id').single()
-  if (ins.error) ins = await c.supabase.from('todos').insert(row).select('id').single()
-  if (ins.error) console.error('[siteops] todo insert failed:', ins.error.message)
-  const newId = ins.data?.id ?? null
-  if (newId && owner && owner !== c.principalId) {
-    try { await notifyAssigneeAtCreation(c, { kind: 'todo', itemId: newId, ownerId: owner, title: item.text, due: row.due_date, cause: null }) }
-    catch (e) { console.error('[siteops] assign notify failed:', (e as Error).message) }
-  }
-  return { id: newId, text: item.text, dueDate: row.due_date }
+  const dueStr = due ? due.toISOString().slice(0, 10) : null
+
+  const p = await createProblem(
+    c,
+    { ...item, type: 'issue', kind: 'snag', planned: true },   // ← the only translation there is
+    taskId,
+    cadence,
+  )
+  return { id: p.id, text: p.title, dueDate: p.deadline ?? dueStr }
 }
 
 // ── orchestrate Stages 2-3 over all items (testable; the agent adds disambig + send) ──
@@ -519,12 +528,13 @@ export async function routeItems(c: RouteCtx, tasks: SiteTaskRow[], items: SiteI
   const out: RouteOutcome = { progress: [], problems: [], todos: [], parked: [], ambiguous: [] }
   console.log(`[siteops:route] ${tasks.length} tasks, ${items.length} items; tasksSample=${JSON.stringify(tasks.slice(0, 5).map((t) => ({ n: t.name, f: t.floor_label, u: t.unit_label, nk: !!t.node_key })))}; items=${JSON.stringify(items.map((i) => ({ type: i.type, hint: i.task_hint, text: i.text })))}`)
   // Load the org's follow-up cadence ONCE (taxonomy defaults + org overrides) for every issue's timing.
-  const hasIssue = items.some((i) => i.type === 'issue')
+  // a to-do is a planned snag now, so it needs the cadence map too — it is chased like anything else
+  const hasIssue = items.some((i) => i.type === 'issue' || i.type === 'todo')
   const cadenceMap: CadenceMap = hasIssue ? await loadCadenceMap(c.supabase, c.orgId) : new Map()
   for (const item of items) {
     if (item.type === 'todo') {
       const r = resolveTask(tasks, item)
-      out.todos.push(await createTodo(c, item, r.kind === 'attached' ? r.task.task_id : null))
+      out.todos.push(await createTodo(c, item, r.kind === 'attached' ? r.task.task_id : null, cadenceMap))
       continue
     }
     if (item.type === 'issue') {

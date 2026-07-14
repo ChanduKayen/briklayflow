@@ -15,7 +15,7 @@ import {
 } from './_siteops_resolution.ts'
 // stackToGeometry (engine) → the building's real floors/units, so the pin can tell a missing floor from an
 // untracked task. Bundled for Deno alongside buildProjectVM.
-import { stackToGeometry } from '../_shared/siteops-engine.js'
+import { geometryOf, loadProjectRow, saidAsOf } from '../_shared/siteops-engine.js'
 import type { BatchItem } from './_siteops_batch.ts'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -44,6 +44,10 @@ export interface Candidate {
   // name string ("switchboards"/"switchplates"/"wiring" all = the electrical task). Surfaced in the prompt line.
   trade?: string | null
   phase?: string | null
+  // THE SITE'S OWN WORDS for this task (engine `saidAs`). He says "గాడులు"/"chases"; the label says
+  // "conduiting". The word he used lived on exactly one label in the library — the PLUMBING one — so the
+  // model matched that. A task the supervisor cannot name is a task he cannot report.
+  saidAs?: string[]
   // ISSUE-only MEANING (Fix A·i) — the defect's cause (taxonomy key). A DIFFERENT vocabulary than a task's
   // trade · phase, so the model matches "transformer resolved" → a wiring/electrical ISSUE by its defect
   // nature, and a completion ("wiring done") still reads as the TASK. 'other'/null → no hint (no noise).
@@ -67,7 +71,19 @@ export const taskTypeId = (projectId: string | null, name: string): string => `t
 const OPEN_ISSUE = new Set(['OPEN', 'ADDRESSING'])
 const DONE_TASK = new Set(['DONE', 'COMPLETE', 'COMPLETED', 'CLOSED'])
 
-type TaskRow = { task_id: string; name: string; project_id: string | null; status: string; node_key?: string | null; floor_label?: string | null; unit_label?: string | null; trade?: string | null; phase?: string | null }
+type TaskRow = { task_id: string; name: string; project_id: string | null; status: string; node_key?: string | null; floor_label?: string | null; unit_label?: string | null; trade?: string | null; phase?: string | null; trade_phase?: string | null; task_type_id?: string | null }
+
+/**
+ * The name the MODEL sees — the clean name plus the trade pass it belongs to.
+ *
+ * `site_tasks.name` no longer carries "(2nd fix)": that pass is its own column (trade_phase) so the task
+ * list can render it as a chip instead of a parenthetical on every second row. But the pass is NOT
+ * cosmetic to the resolver — "second fix is done" is a thing a supervisor says, and it has to land on
+ * wire-pulling rather than conduiting. So the meaning layer re-attaches it here, and nothing about
+ * matching changes. Strip this and the three electrical passes over one wall blur back together.
+ */
+export const qualifiedName = (t: { name: string; trade_phase?: string | null }): string =>
+  t.trade_phase ? `${t.name} (${t.trade_phase})` : t.name
 
 /**
  * Build the candidate set for ONE call. SINGULAR UNIT (projectId given): the set is THAT project's open
@@ -77,7 +93,12 @@ type TaskRow = { task_id: string; name: string; project_id: string | null; statu
  * Legacy (projectId null): all active projects, unchanged (the unreachable chase-path shell).
  * (Scale note: a recency/cardinality cap belongs here if the open set grows large — NEVER a meaning filter.)
  */
-export async function buildCandidateSet(supabase: SB, orgId: string, batch: { items: BatchItem[] } | null, projectId: string | null = null): Promise<Candidate[]> {
+export async function buildCandidateSet(
+  supabase: SB, orgId: string, batch: { items: BatchItem[] } | null, projectId: string | null = null,
+  /** THE PROJECT'S VM — the same fold-key/name sets the write guardrail judges by. Present → an engine row
+   *  outside the VM is not offered at all (see the task block below). Absent → nothing is filtered. */
+  vm?: { keys: Set<string>; names: Set<string> } | null,
+): Promise<Candidate[]> {
   // A candidate-load failure must NEVER read as "the org has none". LIVE LESSON (2026-07-09): this function
   // selected `todos.title` — the column is `todos.text` — PostgREST rejected the select, `error` was
   // destructured away, and to-dos silently became zero rows. Every chased 📋 item was then invisible to the
@@ -98,14 +119,15 @@ export async function buildCandidateSet(supabase: SB, orgId: string, batch: { it
   // site_tasks is the ONLY dependent read, and only in the legacy all-projects mode, where its filter needs
   // `activeIds`. With THE project known (the singular unit — every live path) all four go out together.
   const qProjects = supabase.from('projects').select('project_id, name').eq('org_id', orgId).eq('status', 'Active')
+  // ONE ITEM STORE. Issues AND snags are `problems` rows (kind='issue'|'snag'); the separate `todos`
+  // read is gone with the table (20260713000001). One query, so a snag can no longer be visible to
+  // one loader and invisible to the other — which is exactly how an item ended up being chased by
+  // WhatsApp while the portal showed it closed.
   const qProblems = supabase.from('problems').select('id, title, project_id, status, cause').eq('org_id', orgId)
-  // `text` is the column (see 20260626000003_siteops_block_a.sql) — NOT `title`. The writer (createTodo) and
-  // the sibling loader (_siteops_candidates.loadCandidates) have always agreed on `text`; only this read drifted.
-  const qTodos = supabase.from('todos').select('id, text, project_id, status').eq('org_id', orgId)
-  const TASK_SELECT = 'task_id, name, project_id, status, node_key, floor_label, unit_label, trade, phase'
+  const TASK_SELECT = 'task_id, name, project_id, status, node_key, floor_label, unit_label, trade, phase, trade_phase, task_type_id'
   const qTasksScoped = projectId ? supabase.from('site_tasks').select(TASK_SELECT).in('project_id', [projectId]) : null
 
-  const [projRes, probRes, todoRes, taskResScoped] = await Promise.all([qProjects, qProblems, qTodos, qTasksScoped ?? Promise.resolve(null)])
+  const [projRes, probRes, taskResScoped] = await Promise.all([qProjects, qProblems, qTasksScoped ?? Promise.resolve(null)])
   const projects = must<{ project_id: string; name: string }[]>('projects', projRes)
   const nameById = new Map(projects.map((p) => [p.project_id, p.name]))
   const activeIds = new Set(projects.map((p) => p.project_id))
@@ -115,7 +137,6 @@ export async function buildCandidateSet(supabase: SB, orgId: string, batch: { it
   const inScope = (pid: string | null) => (projectId ? pid === projectId : !(pid && !activeIds.has(pid)))
 
   const probRows = must<{ id: string; title: string; project_id: string | null; status: string; cause?: string | null }[]>('problems', probRes)
-  const todoRows = must<{ id: string; text: string; project_id: string | null; status: string }[]>('todos', todoRes)
   const taskRows = must<TaskRow[]>('site_tasks',
     taskResScoped ?? await supabase.from('site_tasks').select(TASK_SELECT).in('project_id', [...activeIds]))
 
@@ -125,11 +146,6 @@ export async function buildCandidateSet(supabase: SB, orgId: string, batch: { it
     if (!OPEN_ISSUE.has(p.status) || !inScope(p.project_id)) continue
     seen.add(p.id)
     cands.push({ id: p.id, kind: 'issue', title: p.title, project_id: p.project_id, project_name: nameById.get(p.project_id ?? '') ?? null, chased: chasedIds.has(p.id), cause: p.cause ?? null })
-  }
-  for (const t of todoRows) {
-    if (t.status === 'DONE' || !inScope(t.project_id)) continue
-    seen.add(t.id)
-    cands.push({ id: t.id, kind: 'todo', title: t.text, project_id: t.project_id, project_name: nameById.get(t.project_id ?? '') ?? null, chased: chasedIds.has(t.id) })
   }
   // CHASE INJECTION — the thing we just asked about can NEVER be missing from the set. Marking `chased` on a
   // row that happened to load is a decoration; INJECTING the batch item is the guarantee. When the todos read
@@ -162,12 +178,30 @@ export async function buildCandidateSet(supabase: SB, orgId: string, batch: { it
     const k = t.project_id ?? ''
     tasksByProject.set(k, [...(tasksByProject.get(k) ?? []), t])
   }
-  const rowTitle = (t: TaskRow): string => `${t.name}${t.floor_label ? ` — ${t.floor_label}` : ''}${t.unit_label ? ` · ${t.unit_label}` : ''}`
+  const rowTitle = (t: TaskRow): string => `${qualifiedName(t)}${t.floor_label ? ` — ${t.floor_label}` : ''}${t.unit_label ? ` · ${t.unit_label}` : ''}`
   for (const rows of tasksByProject.values()) {
-    const engine = [...new Map(rows.filter((t) => t.node_key).map((t) => [t.node_key as string, t])).values()]
-    const engineNames = new Set(engine.map((t) => normTaskName(t.name)))
-    const flats = engine.length ? rows.filter((t) => !t.node_key && !engineNames.has(normTaskName(t.name))) : []
-    const appliable = engine.length ? [...engine, ...flats] : rows
+    // …AND THE VM IS THE JUDGE OF WHAT IS REAL (2026-07-13). The rule above was enforced against the OTHER
+    // ROWS IN THE TABLE, never against the view-model — so an engine row whose node_key the library no longer
+    // generates was still, by this code's reckoning, an "appliable identity". It is not one: the UI cannot
+    // render it and the guardrail must refuse every write onto it. We offered the supervisor exactly such a
+    // fossil (`ceiling_frame@Ground#Ground-unit-dry`, from the zone-split library), he picked it, and the
+    // guardrail — doing precisely its job — told him it could not be saved. A guardrail that only speaks at
+    // the write can only ever apologise. So the SAME test it applies at the write applies here, at the offer:
+    // an engine row is real iff node_key ∈ VM; a flat row is real iff it does not NAME-TWIN a VM row.
+    //
+    // `vm` absent (a stack-less project, a VM that failed to build) → judge nothing, offer everything, exactly
+    // as before. That is the guardrail's own "can't judge → proceed", and it must stay that way: an empty VM
+    // is not a licence to hide a supervisor's real work from him.
+    const engineAll = [...new Map(rows.filter((t) => t.node_key).map((t) => [t.node_key as string, t])).values()]
+    const engine = vm?.keys.size ? engineAll.filter((t) => vm.keys.has(t.node_key as string)) : engineAll
+    // The twin set is the VM's names when we have them (the guardrail's own set), else the engine rows' —
+    // never the FILTERED engine's, or a fossil dropping out would resurrect its flat duplicate as "real".
+    const twins = vm?.names.size ? vm.names : new Set(engineAll.map((t) => normTaskName(qualifiedName(t))))
+    const flats = engineAll.length ? rows.filter((t) => !t.node_key && !twins.has(normTaskName(qualifiedName(t)))) : []
+    // A project with NO engine rows at all is the legacy/hand-made shape — every row it has is what it has.
+    // (Note this reads engineAll, not engine: "the library filtered them all out" is a different fact from
+    // "there was never an engine here", and only the second one licenses offering raw rows.)
+    const appliable = engineAll.length ? [...engine, ...flats] : rows
 
     // GROUP BY NAME → one candidate per TASK TYPE. Five floors of "Wiring (wire pulling)" collapse to one line;
     // "Ceiling void-wiring" stays its own line (dedupe is by NAME, and the (trade · phase) parenthetical keeps
@@ -175,19 +209,20 @@ export async function buildCandidateSet(supabase: SB, orgId: string, batch: { it
     // candidate for the pin; the model never sees them.
     const byName = new Map<string, TaskRow[]>()
     for (const t of appliable) {
-      const k = normTaskName(t.name)
+      const k = normTaskName(qualifiedName(t))   // conduiting (1st fix) and wire pulling (2nd fix) stay apart
       byName.set(k, [...(byName.get(k) ?? []), t])
     }
     for (const group of byName.values()) {
       const head = group[0]
+      const qn = qualifiedName(head)
       cands.push({
-        id: taskTypeId(head.project_id, head.name),
+        id: taskTypeId(head.project_id, qn),
         kind: 'task',
-        title: head.name,                       // the TYPE's name — NO floor, NO unit: the model must not see one
+        title: qn,                              // the TYPE's name — NO floor, NO unit: the model must not see one
         project_id: head.project_id, project_name: nameById.get(head.project_id ?? '') ?? null,
         chased: false,                          // a chase batch only ever holds issues and to-dos
-        name: head.name, trade: head.trade ?? null, phase: head.phase ?? null,
-        rows: group.map((t) => ({ id: t.task_id, name: t.name, floor: t.floor_label ?? null, unit: t.unit_label ?? null, title: rowTitle(t) })),
+        name: qn, trade: head.trade ?? null, phase: head.phase ?? null, saidAs: saidAsOf(head.task_type_id),
+        rows: group.map((t) => ({ id: t.task_id, name: qualifiedName(t), floor: t.floor_label ?? null, unit: t.unit_label ?? null, title: rowTitle(t) })),
       })
     }
   }
@@ -274,7 +309,11 @@ export function buildResolutionUser(candidates: Candidate[], message: string, co
   const meaning = (c: Candidate): string => {
     if (c.kind === 'task') {
       const bits = [c.trade, c.phase].filter((x): x is string => !!x)
-      return bits.length ? `  (${bits.join(' · ')})` : ''
+      // …AND THE WORDS HE ACTUALLY USES FOR IT. The trade·phase hint tells the model what the work IS; this
+      // tells it what the work is CALLED on a site. Without it, "electrical chases" had nowhere to land but
+      // the one label in the library carrying the word "chases" — the plumbing one.
+      const said = c.saidAs?.length ? `; said as: ${c.saidAs.join(', ')}` : ''
+      return bits.length || said ? `  (${bits.join(' · ')}${said})` : ''
     }
     // ISSUE (Fix A·i) — a SINGLE-token defect vocabulary (its cause), visibly different from a task's two-
     // token (trade · phase). 'other'/null → nothing (an honest 'other' is no signal). Todos carry no hint.
@@ -413,11 +452,13 @@ export function disposeRawResponse(
 export async function loadGeometry(supabase: SB, projectId: string | null): Promise<Geometry | null> {
   if (!projectId) return null
   try {
-    const { data } = await supabase.from('projects').select('construction_stack, has_common_areas').eq('project_id', projectId).maybeSingle()
-    const stack = (data as { construction_stack?: unknown } | null)?.construction_stack
-    if (!stack) return null
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const geo = stackToGeometry(stack as any, { hasCommonAreas: !!(data as any)?.has_common_areas })
+    // The SAME geometry the materializer builds — literally the same function now (engine/project.ts).
+    // It used to pass only `hasCommonAreas`, so the structure slot the resolver reasoned over did not
+    // contain the amenities the materializer had created rows for: two views of one building, disagreeing.
+    // Now neither of them assembles anything; both ask the door. (loadProjectRow degrades the select on
+    // its own — an un-migrated column must not cost us the geometry.)
+    const geo = geometryOf(await loadProjectRow(supabase, projectId))
+    if (!geo) return null
     const floors: string[] = []
     const unitsByFloor = new Map<string, string[]>()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -465,6 +506,9 @@ export interface ResolveInboundCtx {
   /** …and its NAME. A new item raised here is CREATED on this site — never sent back as "which project?"
    *  (the model's per-item project_hint is silent as often as not). See ResolutionContext.sitedProject. */
   projectName?: string | null
+  /** The project's VM (fold keys + task names), as the write guardrail sees it. The candidate set is filtered
+   *  through it so we can never OFFER a row the guardrail would then have to refuse. Absent → no filtering. */
+  vm?: { keys: Set<string>; names: Set<string> } | null
 }
 export interface InboundInput {
   message: string                                   // text or voice transcript (caption for an image)
@@ -491,14 +535,49 @@ export type ResolveOutcome =
  * ever lost even when the enforcement planner is never reached. `send` is injected so the shell stays
  * transport-agnostic and testable.
  */
+/**
+ * THE READS EVERY ITEM OF A TURN SHARES (2026-07-13, latency).
+ *
+ * resolveInbound did three project-scoped reads of its own — the candidate set, the task coverage probe and
+ * the building geometry — and a compound message resolves ONE ITEM AT A TIME. So a four-item voice note did
+ * all three FOUR TIMES, for the same project, getting the same answer: the live logs print the identical
+ * 60-candidate dump four times in one turn.
+ *
+ * None of the three depends on the item. They depend on the PROJECT. So load them once per project and hand
+ * them to every item — which also makes the resolves independent of one another, and therefore concurrent.
+ */
+export interface ResolvePrefetch {
+  candidates: Candidate[]
+  coverage: 'none' | 'all_done' | 'open'
+  geometry: Geometry | null
+}
+
+/** Load the per-project inputs ONCE. Candidates first (coverage needs the open-task count), then the
+ *  other two together. Same reads as before, done a quarter as often. */
+export async function prefetchResolveInputs(
+  ctx: ResolveInboundCtx,
+  batch: { items: BatchItem[] } | null,
+): Promise<ResolvePrefetch> {
+  const candidates = await buildCandidateSet(ctx.supabase, ctx.orgId, batch, ctx.projectId ?? null, ctx.vm ?? null)
+  const openTasks = candidates.filter((c) => c.kind === 'task').length
+  const [coverage, geometry] = await Promise.all([
+    loadTaskCoverage(ctx.supabase, ctx.projectId ?? null, openTasks),
+    loadGeometry(ctx.supabase, ctx.projectId ?? null),
+  ])
+  return { candidates, coverage, geometry }
+}
+
 export async function resolveInbound(
   ctx: ResolveInboundCtx,
   input: InboundInput,
   batch: { items: BatchItem[] } | null,
   send: (body: string) => Promise<void>,
   callModel: (system: string, user: string) => Promise<string> = callLLM,   // injectable for end-to-end tests; default is the real client
+  // The project's shared reads, already loaded (prefetchResolveInputs). Absent → load them here, exactly as
+  // before: every existing caller and every test keeps working unchanged.
+  pre?: ResolvePrefetch,
 ): Promise<ResolveOutcome> {
-  const candidates = await buildCandidateSet(ctx.supabase, ctx.orgId, batch, ctx.projectId ?? null)
+  const candidates = pre?.candidates ?? await buildCandidateSet(ctx.supabase, ctx.orgId, batch, ctx.projectId ?? null, ctx.vm ?? null)
   const isImage = !!input.image
   const kc = { task: 0, issue: 0, todo: 0 } as Record<string, number>
   for (const c of candidates) kc[c.kind] = (kc[c.kind] ?? 0) + 1
@@ -534,10 +613,12 @@ export async function resolveInbound(
   // real geometry (to tell a missing floor from an untracked task). Both loaded here (I/O); the planner is pure.
   const taskRowsByType = new Map<string, TaskRowRef[]>()
   for (const c of candidates) if (c.kind === 'task' && c.rows?.length) taskRowsByType.set(c.id, c.rows)
-  const [coverage, geometry] = await Promise.all([
-    loadTaskCoverage(ctx.supabase, ctx.projectId ?? null, kc.task),   // task=0? untracked vs all-finished
-    loadGeometry(ctx.supabase, ctx.projectId ?? null),
-  ])
+  const [coverage, geometry] = pre
+    ? [pre.coverage, pre.geometry]
+    : await Promise.all([
+      loadTaskCoverage(ctx.supabase, ctx.projectId ?? null, kc.task),   // task=0? untracked vs all-finished
+      loadGeometry(ctx.supabase, ctx.projectId ?? null),
+    ])
   // candidateIds spans every OFFERED id: the type ids (a task update targets one), the issue/todo ids, AND
   // the task ROW ids (the image place_photo belt offers rows; a which_item ask/pin retargets to one). A task
   // update never targets a row id and the belt never targets a type id, so there is no collision.

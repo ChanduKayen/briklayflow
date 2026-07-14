@@ -6,16 +6,27 @@
 // (Typing indicators are NOT durable -- see sendTypingIndicator, sent inline.)
 
 import type { CaptureRef } from './_wa_message_map.ts'
+import { parseSentWamid, buildMapRow } from './_wa_message_map.ts'
 
 const WA_ACCESS_TOKEN    = Deno.env.get('WA_ACCESS_TOKEN')!
 const WA_PHONE_NUMBER_ID = Deno.env.get('WA_PHONE_NUMBER_ID')!
 
 // ── Typed message union every agent uses ───────────────────────────────────────
+//
+// `footer` — THE REPAIR HANDLE'S HOME. WhatsApp renders a footer small and grey, which is exactly the
+// weight meta-text should have; in the body it sits at full size and shouts, competing with the fact it
+// is offering to correct. Only interactive messages have a footer field, so a plain text message keeps
+// its handle in the body — which is right, because there is nothing else in it to compete with.
+//
+// `replyTo` — NATIVE REPLY-THREADING. A readback sent as a contextual reply to the photo it is about
+// makes WhatsApp draw the photo's own thumbnail above it, for free. That is a better quote than any
+// "You said:" line we could write, and it is the ORIGINAL, not our transcription of it. The wamid of
+// the inbound message is all it takes.
 export type OutMessage =
-  | { kind: 'text';     body: string }
-  | { kind: 'buttons';  body: string; buttons: { id: string; title: string }[] } // <= 3
-  | { kind: 'list';     body: string; button: string; rows: { id: string; title: string; description?: string }[] }
-  | { kind: 'cta';      body: string; cta: { text: string; url: string } }
+  | { kind: 'text';     body: string; replyTo?: string }
+  | { kind: 'buttons';  body: string; buttons: { id: string; title: string }[]; footer?: string; replyTo?: string } // <= 3
+  | { kind: 'list';     body: string; button: string; rows: { id: string; title: string; description?: string }[]; footer?: string; replyTo?: string }
+  | { kind: 'cta';      body: string; cta: { text: string; url: string }; footer?: string; replyTo?: string }
   | { kind: 'reaction'; messageId: string; emoji: string }   // ✓-react an inbound message
   | { kind: 'template'; name: string; language: string; components?: unknown[] }
   // WhatsApp Flow (interactive form). `data` is injected into the first `screen`;
@@ -70,7 +81,10 @@ async function logOutbound(supabase: any, to: string, msg: OutMessage): Promise<
 
 /** Render an OutMessage to the WhatsApp Cloud API request body for `to`. */
 export function renderToWhatsApp(to: string, msg: OutMessage): Record<string, unknown> {
-  const base = { messaging_product: 'whatsapp', recipient_type: 'individual', to }
+  // A message that names an inbound wamid is sent AS A REPLY to it — WhatsApp draws the quoted bubble
+  // (a photo's own thumbnail, the voice note's waveform) natively, above ours.
+  const ctx = 'replyTo' in msg && msg.replyTo ? { context: { message_id: msg.replyTo } } : {}
+  const base = { messaging_product: 'whatsapp', recipient_type: 'individual', to, ...ctx }
   switch (msg.kind) {
     case 'text':
       return { ...base, type: 'text', text: { preview_url: false, body: msg.body } }
@@ -82,6 +96,7 @@ export function renderToWhatsApp(to: string, msg: OutMessage): Record<string, un
         interactive: {
           type: 'button',
           body: { text: msg.body },
+          ...(msg.footer ? { footer: { text: msg.footer } } : {}),
           action: {
             buttons: msg.buttons.slice(0, 3).map((b) => ({
               type: 'reply', reply: { id: b.id, title: b.title },
@@ -97,6 +112,7 @@ export function renderToWhatsApp(to: string, msg: OutMessage): Record<string, un
         interactive: {
           type: 'list',
           body: { text: msg.body },
+          ...(msg.footer ? { footer: { text: msg.footer } } : {}),
           action: {
             button: msg.button,
             sections: [{
@@ -115,6 +131,7 @@ export function renderToWhatsApp(to: string, msg: OutMessage): Record<string, un
         interactive: {
           type: 'cta_url',
           body: { text: msg.body },
+          ...(msg.footer ? { footer: { text: msg.footer } } : {}),
           action: { name: 'cta_url', parameters: { display_text: msg.cta.text, url: msg.cta.url } },
         },
       }
@@ -218,6 +235,64 @@ export async function sendNow(supabase: any, to: string, msg: OutMessage): Promi
 }
 
 /**
+ * SEND IT NOW, BUT DO NOT LOSE IT — the durable path, minus the queue wait.
+ *
+ * The outbox is drained by a pg_cron on a 10-second tick, so a readback enqueued the instant we finished
+ * thinking still sat there for up to ten more seconds. On a turn already running ~30s that is a tenth of
+ * the wait, spent doing nothing at all.
+ *
+ * `sendNow` alone would fix the latency and lose the guarantee: no retry, no backoff, no TTL. So: TRY to
+ * send it directly, and fall back to the outbox if the direct send fails for ANY reason. The happy path is
+ * instant; the unhappy path is exactly as durable as it was before, because it IS what it was before.
+ *
+ * Only the messages a human is actively waiting on should use this. Anything that can wait, should — the
+ * queue exists for good reasons and this deliberately opts out of most of them.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function sendNowDurable(
+  supabase: any,
+  to: string,
+  msg: OutMessage,
+  opts: { org_id?: string | null; wamid?: string | null; dedup_key?: string | null; capture?: CaptureRef | null } = {},
+): Promise<void> {
+  try {
+    const res = await fetch(`https://graph.facebook.com/v18.0/${WA_PHONE_NUMBER_ID}/messages`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${WA_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(renderToWhatsApp(to, msg)),
+    })
+    if (res.ok) {
+      const body = await res.text().catch(() => '')
+      // THE CAPTURE STILL HAPPENS. A readback/pick carries a `capture` so a later 👍 or quoted-reply can
+      // resolve back to the objects it confirmed — and only the sender learns the outbound wamid. The
+      // DRAINER used to be the only sender, so it was the only place that could stamp wa_message_map.
+      // The Meta response carries the id too, so we stamp it here with the SAME shared helpers the
+      // drainer uses (parseSentWamid/buildMapRow) — one shape, two senders, no drift.
+      // Swallowed on failure, exactly as in the drainer: a capture is a bonus, never a send failure.
+      if (opts.capture) {
+        try {
+          const wamid = parseSentWamid(body)   // raw response text — the same input the drainer parses
+          const mapRow = buildMapRow(opts.org_id ?? null, opts.capture, wamid)
+          if (mapRow) {
+            const { error } = await supabase.from('wa_message_map')
+              .upsert(mapRow, { onConflict: 'outbound_wamid', ignoreDuplicates: true })
+            if (error) console.warn('[format] wa_message_map write skipped:', error.message)
+          }
+        } catch (e) {
+          console.warn('[format] capture stamp skipped (ignored):', (e as Error)?.message ?? e)
+        }
+      }
+      await logOutbound(supabase, to, msg)
+      return
+    }
+    console.warn('[format] sendNowDurable non-2xx — falling back to the outbox:', res.status, await res.text().catch(() => ''))
+  } catch (e) {
+    console.warn('[format] sendNowDurable failed — falling back to the outbox:', (e as Error)?.message ?? e)
+  }
+  await send(supabase, to, msg, opts)   // the durable path, unchanged: retry, backoff, TTL, dedup, capture
+}
+
+/**
  * Mark-read + typing indicator on an inbound message. EPHEMERAL: sent inline,
  * best-effort, fire-and-forget -- a typing indicator drained 15s later is nonsense.
  * Never throws into the caller; failures here must not affect the job.
@@ -238,3 +313,33 @@ export async function sendTypingIndicator(wamid: string): Promise<void> {
     console.warn('[format] typing indicator failed (ignored):', (e as Error)?.message ?? e)
   }
 }
+
+/**
+ * KEEP THE TYPING INDICATOR ALIVE FOR AS LONG AS WE ARE ACTUALLY THINKING.
+ *
+ * WhatsApp's typing indicator has a **25-second TTL** and is dismissed the moment we send anything. A
+ * SiteOps voice turn measured ~30s end to end — so the supervisor watched "typing…" for 25 seconds,
+ * watched it VANISH, and then sat in silence for the rest. That is worse than never showing it: an
+ * indicator that disappears reads as "he gave up on me", which is the exact opposite of the truth.
+ *
+ * So re-arm it on a timer until the turn ends. Returns a stop() the caller MUST call in a finally —
+ * a timer left running in an edge isolate would re-arm against a message we already answered.
+ *
+ * Everything here is best-effort and swallowed: a typing indicator is a courtesy, and a courtesy must
+ * never be able to fail a job.
+ */
+const TYPING_TTL_MS = 25_000
+const TYPING_REARM_MS = 20_000          // comfortably inside the TTL, so there is no visible flicker
+const TYPING_MAX_MS = 3 * 60_000        // a backstop: never re-arm forever if a caller forgets to stop
+
+export function keepTyping(wamid: string | null): () => void {
+  if (!wamid) return () => {}
+  void sendTypingIndicator(wamid)       // the first one, immediately
+  const started = Date.now()
+  const timer = setInterval(() => {
+    if (Date.now() - started > TYPING_MAX_MS) { clearInterval(timer); return }
+    void sendTypingIndicator(wamid)
+  }, TYPING_REARM_MS)
+  return () => clearInterval(timer)
+}
+export const TYPING_TTL_MS_FOR_TEST = TYPING_TTL_MS

@@ -270,7 +270,22 @@ function LedgerEmpty({ reviewCount, onReview, onNew }: { reviewCount: number; on
   );
 }
 
-export default function Ledger({ session }: { session: Session }) {
+/**
+ * THE SAME LEDGER, UNDER A PROJECT.
+ *
+ * The project used to have a ledger of its own (ProjectTransactions) — a second, smaller table with its
+ * own columns, its own filters and its own idea of what a transaction looks like. Two ledgers means two
+ * places to fix the next bug, and the one nobody is looking at rots. It also means the same payment can
+ * be described two different ways by the same product, which is the worst thing a book of account can do.
+ *
+ * And it was never needed: this page has ALWAYS filtered by project (`filterProject`). All it lacked was
+ * somebody to tell it which one and to take the choice away afterwards.
+ *
+ *   lockedProject   the project's NAME (that is what the allocations carry). The Project filter simply
+ *                   disappears — you are already inside the project, and offering to filter by a
+ *                   different one is offering to leave without saying so.
+ */
+export default function Ledger({ session, lockedProject }: { session: Session; lockedProject?: string }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const { openPeek, prefetchPeek } = usePeek();
@@ -282,7 +297,8 @@ export default function Ledger({ session }: { session: Session }) {
   const [filterNeedsAction] = useState(() => searchParams.get('needs_action') === 'true');
   const [filterUnlinked, setFilterUnlinked] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterProject, setFilterProject] = useState<string[]>([]);
+  // Under a project, the project IS the filter — set once, and never offered again.
+  const [filterProject, setFilterProject] = useState<string[]>(lockedProject ? [lockedProject] : []);
   const [filterType, setFilterType] = useState<string[]>([]);
   const [activeFilterDropdown, setActiveFilterDropdown] = useState<string | null>(null);
   const [chipDropPos, setChipDropPos] = useState<{ top: number; left: number } | null>(null);
@@ -1024,10 +1040,15 @@ export default function Ledger({ session }: { session: Session }) {
           </FilterChip>
           {activeFilterDropdown === 'type' && multiDropdown(uniqueTypes, filterType, setFilterType)}
 
-          <FilterChip active={filterProject.length > 0} onClick={(e) => openDrop('project', e)}>
-            {filterProject.length === 1 ? filterProject[0] : filterProject.length > 1 ? `Project: ${filterProject.length}` : 'Project'}
-          </FilterChip>
-          {activeFilterDropdown === 'project' && multiDropdown(uniqueProjects, filterProject, setFilterProject)}
+          {/* The project filter is for CHOOSING a project, and under one it is already chosen. */}
+          {!lockedProject && (
+            <>
+              <FilterChip active={filterProject.length > 0} onClick={(e) => openDrop('project', e)}>
+                {filterProject.length === 1 ? filterProject[0] : filterProject.length > 1 ? `Project: ${filterProject.length}` : 'Project'}
+              </FilterChip>
+              {activeFilterDropdown === 'project' && multiDropdown(uniqueProjects, filterProject, setFilterProject)}
+            </>
+          )}
 
           {unlinkedCount > 0 && (
             <FilterChip tone="ask" active={filterUnlinked} onClick={() => setFilterUnlinked(v => !v)}>
@@ -1049,7 +1070,7 @@ export default function Ledger({ session }: { session: Session }) {
         {/* filters — mobile: one Filters button + a collapsed in/out/net pill + search */}
         {(() => {
           const activeFilterCount =
-            (filterType.length ? 1 : 0) + (filterProject.length ? 1 : 0) +
+            (filterType.length ? 1 : 0) + (!lockedProject && filterProject.length ? 1 : 0) +
             (filterUnlinked ? 1 : 0) + (datePreset !== 'month' ? 1 : 0);
           return (
             <div className="sm:hidden mt-5 space-y-2.5">
@@ -1114,7 +1135,7 @@ export default function Ledger({ session }: { session: Session }) {
                     <div className="flex flex-wrap gap-2">{uniqueTypes.map(o => toggle(o, filterType, setFilterType))}</div>
                   </div>
                 )}
-                {uniqueProjects.length > 0 && (
+                {!lockedProject && uniqueProjects.length > 0 && (
                   <div>
                     <p className="text-[11px] font-semibold uppercase mb-2.5" style={label}>Project</p>
                     <div className="flex flex-wrap gap-2">{uniqueProjects.map(o => toggle(o, filterProject, setFilterProject))}</div>
@@ -1128,7 +1149,15 @@ export default function Ledger({ session }: { session: Session }) {
                 )}
                 <div className="flex gap-2 pt-1">
                   <button
-                    onClick={() => { setDatePreset('month'); setFilterType([]); setFilterProject([]); setFilterUnlinked(false); }}
+                    // "Clear all" clears the filters HE chose. It does not clear the project he is
+                    // standing in — that is not a filter, it is the address. Wiping it would silently
+                    // show him every site's money on a page titled with one site's name.
+                    onClick={() => {
+                      setDatePreset('month');
+                      setFilterType([]);
+                      setFilterProject(lockedProject ? [lockedProject] : []);
+                      setFilterUnlinked(false);
+                    }}
                     className="px-4 rounded-xl text-sm font-medium" style={{ height: 46, background: V.field, color: V.inkSoft, ...font }}
                   >
                     Clear all

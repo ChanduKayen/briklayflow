@@ -164,7 +164,7 @@ suite('siteops — the ceiling photo pins its floor (one apply, zero questions)'
     expect(writes.length).toBe(1)
     expect(writes[0].filters.some(([k, v]) => k === 'task_id' && v === 'fcf-fourth')).toBe(true)
     // …and the nine-row interrogation is gone
-    expect(fake.outbox().some((b) => /Which of these is it about/i.test(b))).toBe(false)
+    expect(fake.outbox().some((b) => b.includes('❓'))).toBe(false)
     expect(fake.writesTo('wa_conversations').length).toBe(0)
   })
 })

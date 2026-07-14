@@ -19,10 +19,10 @@ import type { RoughEntry } from '../types';
 import { useUserProfile } from '../App';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import { useSnackbar } from '../components/Snackbar';
-import { ResolvePopup } from '../components/ResolvePopup';
+import { ResolvePopup, type GapKey } from '../components/ResolvePopup';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { PageSkeleton } from '../components/SkeletonLoader';
-import { V, font, serif, nums, T } from '../components/day-book/tokens';
+import { V, font, serif, nums, display, mono, T } from '../components/day-book/tokens';
 import { ANIM, hasRevealed, markRevealed } from '../components/day-book/motion';
 import { prefersReducedMotion } from '../components/day-book/useSwipeTriage';
 import { WhatsAppGlyph } from '../components/day-book/atoms';
@@ -88,7 +88,20 @@ export default function Logbook({ session }: { session: Session }) {
   const canManage = profile?.role === 'management' || profile?.role === 'principal' || profile?.role === 'accountant';
 
   const [tab, setTab] = useState<TabKey>('review');
-  const [fixEntry, setFixEntry] = useState<RoughEntry | null>(null);
+  /**
+   * ONE EDITOR, TWO ERRANDS.
+   *
+   * `only: undefined` — the EDIT button. Every field, because you came to change something that is
+   *                     already there and wrong, and you must be able to see all of it.
+   * `only: [...]`     — the APPROVE button, with something missing. The SAME popup, narrowed to
+   *                     exactly the blanks. It does not re-present the facts you already gave it.
+   *
+   * There is deliberately no second "confirm" dialog. Two cards that look almost the same is how a
+   * product starts feeling like two products.
+   */
+  const [editor, setEditor] = useState<{ entry: RoughEntry; only?: GapKey[] } | null>(null);
+  /** An entry filed from the editor — the card is told, so it can take its leave. */
+  const [flyOut, setFlyOut] = useState<string | null>(null);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [teamOpen, setTeamOpen] = useState(false);
 
@@ -186,6 +199,38 @@ export default function Logbook({ session }: { session: Session }) {
   const rejected  = useMemo(() => entries.filter(e => e.status === 'DISMISSED').sort(byRecent), [entries]);
   const shown = tab === 'review' ? review : tab === 'filed' ? filed : rejected;
 
+  /**
+   * THE DAY BOOK IS KEPT BY THE DAY — that is what makes it a day book and not an inbox.
+   *
+   * Grouped on the day the entry was CAPTURED (created_at), which is the day the money actually moved
+   * as far as the site is concerned — the day somebody stood there and said so. Not the day we got
+   * round to reading it.
+   *
+   * The order inside a day is left exactly as it was (`shown` is already sorted); this only cuts the
+   * run into pages.
+   */
+  const byDay = useMemo(() => {
+    const groups = new Map<string, { label: string; weekday: string; entries: typeof shown }>();
+    for (const e of shown) {
+      const d = new Date(e.created_at);
+      const key = d.toDateString();                       // local day — the site's day, not UTC's
+      const g = groups.get(key) ?? {
+        label: d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }),
+        weekday: d.toLocaleDateString('en-IN', { weekday: 'long' }),
+        entries: [] as typeof shown,
+      };
+      g.entries.push(e);
+      groups.set(key, g);
+    }
+    return [...groups.entries()];
+  }, [shown]);
+
+  /** What is standing in the book unposted. The number that turns a chore into a reason to sit down. */
+  const unpostedTotal = useMemo(
+    () => review.reduce((s, e) => s + (parseFloat(String(e.ai_extracted?.amount ?? '').replace(/[^\d.]/g, '')) || 0), 0),
+    [review],
+  );
+
   // On open with no deep-link, land on the first entry card so the cards — not the header
   // preamble — are the focus (the tabs stay peeking via scroll-margin). Once only.
   const didInitScroll = useRef(false);
@@ -224,6 +269,8 @@ export default function Logbook({ session }: { session: Session }) {
   };
   const dismiss = (entryId: string) => {
     setLingering((s) => { const n = new Set(s); n.delete(entryId); return n; });
+    // The card has finished taking its leave. NOW the list may catch up with the truth.
+    if (flyOut === entryId) { setFlyOut(null); invalidateEntries(); }
   };
   const restore = (entryId: string) => {
     setLingering((s) => { const n = new Set(s); n.delete(entryId); return n; });
@@ -323,28 +370,63 @@ export default function Logbook({ session }: { session: Session }) {
                 </p>
               )
             )}
-            {shown.map((r, idx) => (
-              <div
-                key={r.id}
-                id={`db-entry-${r.id}`}
-                style={{ scrollMarginTop: 40, ...(focusId === r.id ? { borderRadius: 18, boxShadow: '0 0 0 2px #C8603A', transition: 'box-shadow .3s' } : {}) }}
-              >
-              <ReviewCard
-                entry={r}
-                orgId={orgId}
-                canManage={canManage}
-                stakeholders={stakeholders}
-                projects={projects}
-                reveal={tab === 'review' && idx === 0 && reveal}
-                onFiled={() => handleFiled(r.id)}
-                onView={viewTxn}
-                onDismiss={() => dismiss(r.id)}
-                onRejected={() => handleRejected(r.id)}
-                onRestore={() => restore(r.id)}
-                onFix={() => setFixEntry(r)}
-                onLightbox={setLightboxUrl}
-                onError={(m) => showSnackbar(m, { type: 'error' })}
-              />
+            {/* ═══ THE LEDGER HEAD ═══════════════════════════════════════════════════════════════
+                A day book is a bound ledger, and a ledger's page carries its own totals. Two facts,
+                and only two: how many are still waiting on him, and how much money is standing in
+                them unposted. The second is the one that makes the first urgent — "4 to review"
+                is a chore; "₹1,03,100 unposted" is a reason to sit down. */}
+            {shown.length > 0 && tab === 'review' && (
+              <div className="flex items-baseline justify-between gap-3 px-1.5 pb-1" style={{ ...mono, fontSize: 11, letterSpacing: '.16em', textTransform: 'uppercase', color: V.sys }}>
+                <span>Day book</span>
+                <span style={{ letterSpacing: '.04em', color: V.faint, textTransform: 'none' }}>
+                  <b style={{ color: V.sys, fontWeight: 500 }}>{shown.length}</b> to review
+                  {unpostedTotal > 0 && <> · <b style={{ color: V.sys, fontWeight: 500 }}>₹{unpostedTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</b> unposted</>}
+                </span>
+              </div>
+            )}
+
+            {/* ═══ THE DAYS ══════════════════════════════════════════════════════════════════════
+                A day book is kept BY THE DAY — that is the whole of what makes it a day book. The
+                entries were a flat run of cards, so a Sunday's three payments and last Tuesday's one
+                sat in the same undifferentiated column, and there was nowhere for the eye to rest and
+                nothing to finish. Now each day is a page: it opens with its date, it says how many are
+                on it, and it ends. */}
+            {byDay.map(([dayKey, group]) => (
+              <div key={dayKey} className="space-y-4">
+                <div className="flex items-baseline gap-3 px-1.5" style={{ marginTop: 2 }}>
+                  <h2 style={{ ...display, fontWeight: 600, fontSize: 17, color: V.ink }}>{group.label}</h2>
+                  <span style={{ ...mono, fontSize: 11, letterSpacing: '.06em', color: V.faint }}>
+                    {group.weekday} · {group.entries.length} {tab === 'review' ? `to review` : group.entries.length === 1 ? 'entry' : 'entries'}
+                  </span>
+                  <span className="flex-1" style={{ height: 1, background: V.line, transform: 'translateY(-3px)' }} />
+                </div>
+
+                {group.entries.map((r) => (
+                  <div
+                    key={r.id}
+                    id={`db-entry-${r.id}`}
+                    style={{ scrollMarginTop: 40, ...(focusId === r.id ? { borderRadius: 18, boxShadow: '0 0 0 2px #C8603A', transition: 'box-shadow .3s' } : {}) }}
+                  >
+                    <ReviewCard
+                      entry={r}
+                      orgId={orgId}
+                      canManage={canManage}
+                      stakeholders={stakeholders}
+                      projects={projects}
+                      reveal={tab === 'review' && r.id === shown[0]?.id && reveal}
+                      onFiled={() => handleFiled(r.id)}
+                      onView={viewTxn}
+                      onDismiss={() => dismiss(r.id)}
+                      onRejected={() => handleRejected(r.id)}
+                      onRestore={() => restore(r.id)}
+                      onFix={() => setEditor({ entry: r })}
+                      onConfirm={(gaps) => setEditor({ entry: r, only: gaps })}
+                      justFiled={flyOut === r.id}
+                      onLightbox={setLightboxUrl}
+                      onError={(m) => showSnackbar(m, { type: 'error' })}
+                    />
+                  </div>
+                ))}
               </div>
             ))}
           </div>
@@ -357,16 +439,30 @@ export default function Logbook({ session }: { session: Session }) {
         )}
       </div>
 
-      {/* Fix — the full editor (existing ResolvePopup) */}
-      {fixEntry && (
+      {/* THE editor. Edit opens it whole; Approve opens it narrowed to what is missing. */}
+      {editor && (
         <ResolvePopup
-          entry={fixEntry}
+          entry={editor.entry}
+          only={editor.only}
           session={session}
-          onClose={() => setFixEntry(null)}
+          onClose={() => setEditor(null)}
           onUpdated={(updated) => {
-            invalidateEntries();
             qc.invalidateQueries({ queryKey: ['ledger'] });
-            if (updated.status !== 'PENDING') setFixEntry(null);
+            // Filed from the editor → hand the CARD its own exit: the tick, the slide, the receipt,
+            // exactly as if he had approved it on the card. Two ways in, one way out.
+            //
+            // LINGERING IS WHAT KEEPS IT ALIVE TO DO THAT. The row is POSTED now, so the "to review"
+            // list would drop it on the very next refetch and the card would simply vanish mid-leave.
+            // `lingering` holds it on screen until it has finished going (dismiss() lets it go).
+            if (updated.status === 'POSTED') {
+              setLingering((l) => new Set(l).add(updated.id));
+              setFlyOut(updated.id);
+              setEditor(null);
+              invalidateEntries();
+              return;
+            }
+            invalidateEntries();
+            if (updated.status !== 'PENDING') setEditor(null);
           }}
         />
       )}

@@ -11,7 +11,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { flushAbandonedHeldReadbacks } from '../whatsapp-webhook/_siteops_sweep.ts'
-import { send } from '../whatsapp-webhook/_format.ts'
+import { send, type OutMessage } from '../whatsapp-webhook/_format.ts'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SB = any
@@ -31,8 +31,8 @@ serve(async (req) => {
 
   // preview → a no-op send (report the count, never deliver/park/abandon).
   const sender = preview
-    ? (_to: string, _b: string, _o: string) => Promise.resolve()
-    : (to: string, body: string, org: string) => send(supabase, to, { kind: 'text', body }, { org_id: org })
+    ? (_to: string, _m: OutMessage, _o: string) => Promise.resolve()
+    : (to: string, msg: OutMessage, org: string) => send(supabase, to, msg, { org_id: org })
 
   let result: unknown
   try {

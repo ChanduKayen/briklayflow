@@ -2,6 +2,7 @@
 // The UI computes none of this; these assertions prove the engine emits it correctly.
 import { suite, test, expect } from './harness'
 import { buildProjectVM } from '../viewModel'
+import { STAGE_LABEL } from '../stages'
 import { canonicalRank } from '../library'
 import { stateOf } from '../evaluate'
 import type { BlockVM, TaskVM } from '../types'
@@ -26,16 +27,30 @@ suite('VM buildProjectVM', () => {
     expect(VM.name).toBe('Test Tower')
   })
 
-  test('(a) floors in bottom-up index order — Foundation first, then Ground → Third', () => {
+  // Foundation (-1) → the real floors → Building-wide (9998): terrace, façade, risers and handover are
+  // floorless, so they cap the elevation rather than falling out of it.
+  // The stage NAMES now come from the engine's one classifier (stages.ts), so the elevation and the desk's
+  // rail read alike. 'Foundation' -> 'Site & foundation', 'Common areas' -> 'Amenities'.
+  const SYNTHETIC = [STAGE_LABEL.foundation, STAGE_LABEL.exterior, STAGE_LABEL.amenities]
+
+  // THE TOP OF THE BUILDING IS THE ROOF, not the top flat. Since 2026-07-13 the Terrace is a REAL level:
+  // it is where the tank, the solar, the lift machine room and the waterproofing stand. It is the last real
+  // floor, above Third — and the synthetic stages still cap the elevation above it.
+  test('(a) floors in bottom-up index order — Foundation, Ground → Third, Terrace, then the stages', () => {
     const idx = VM.floors.map((f) => f.index)
     for (let i = 1; i < idx.length; i++) expect(idx[i] > idx[i - 1]).toBeTruthy()
-    expect(VM.floors[0].name).toBe('Foundation') // the substructure stage, index -1
+    expect(VM.floors[0].name).toBe(STAGE_LABEL.foundation) // the substructure stage, index -1
     expect(VM.floors[1].name).toBe('Ground')
-    expect(VM.floors[VM.floors.length - 1].name).toBe('Third')
+    expect(VM.floors[VM.floors.length - 1].name).toBe(STAGE_LABEL.exterior)
+    const real = VM.floors.filter((f) => !SYNTHETIC.includes(f.name))
+    expect(real[real.length - 1].name).toBe('Terrace')
+    expect(real[real.length - 2].name).toBe('Third')
   })
 
-  test('each real floor has 2 blocks (units); the Foundation stage has one', () => {
-    for (const f of VM.floors) expect(f.blocks).toHaveLength(f.name === 'Foundation' ? 1 : 2)
+  // A flat has units; the ROOF does not. The terrace is a real floor with exactly one block — the roof itself.
+  test('each real floor has 2 blocks (units); the terrace and a synthetic stage have one', () => {
+    const ONE_BLOCK = [...SYNTHETIC, 'Terrace']
+    for (const f of VM.floors) expect(f.blocks).toHaveLength(ONE_BLOCK.includes(f.name) ? 1 : 2)
     expect(VM.floors.find((f) => f.name === 'Ground')!.blocks[0].name).toBe('Unit A')
   })
 
