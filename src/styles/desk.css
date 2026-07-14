@@ -64,7 +64,23 @@
   line-height: 1.5;
   font-size: 14px;
   font-feature-settings: "tnum";           /* tabular numerals — the ref rail must not jitter */
-  min-height: 100%;
+
+  /* ═══ THE DESK OWNS THE WHOLE SCREEN, OR SOMETHING ELSE'S SHOWS THROUGH ═══════════════════════════
+   *
+   * This said `min-height: 100%`, and that line has never once done anything.
+   *
+   * A PERCENTAGE MIN-HEIGHT RESOLVES AGAINST THE CONTAINING BLOCK'S *HEIGHT* — and this one's parent is
+   * App's <main class="min-h-screen">, whose HEIGHT is auto (a min-height is not a height). A percentage
+   * against an indefinite height computes to zero. So the desk was only ever as tall as its content.
+   *
+   * `main` really is at least one screen tall, though. So any time the desk came up short of a full
+   * screen — a short list, a short plan — `main` stretched to 100vh anyway and the strip between the
+   * desk's bottom edge and main's painted the APP SHELL's cool background instead of the desk's warm
+   * paper. It read exactly like what it was: a second screen showing through underneath this one.
+   *
+   * 100vh, not 100%: it is a length, so it resolves. The desk now covers the window, always, and nothing
+   * can appear beneath it — because there is no beneath. */
+  min-height: 100vh;
 }
 .desk-root *, .desk-portal * { box-sizing: border-box; }
 
