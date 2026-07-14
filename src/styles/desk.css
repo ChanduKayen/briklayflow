@@ -82,6 +82,23 @@
    * can appear beneath it — because there is no beneath. */
   min-height: 100vh;
 }
+/* ═══ THE 32 PIXELS UNDER THE PAGE — AND WHY THEY WERE SO HARD TO FIND ═══════════════════════════════
+ *
+ * App puts padding under <main> on desktop, and every other page in the product wants it: 32px of
+ * breathing room below the content. It is declared on a class called `.mobile-main-pb`, inside a
+ * `@media (min-width: 768px)` block — a DESKTOP rule wearing a mobile name — which is precisely why a
+ * source-read for what was adding height under the desk kept coming up empty. Nothing was BELOW the
+ * desk. The desk's own parent was 32px taller than it, and the strip between them painted the app
+ * shell's cool background instead of the desk's warm paper: a second screen, showing through under
+ * this one, and 32px of scroll whose only job was to reveal it.
+ *
+ * The desk is the one page that does not want it. It is a full-height surface that reserves its own
+ * floor (--shell-pad), so App's floor lands underneath the desk's, outside its paper.
+ *
+ * Scoped with :has() so it takes the padding off the desk's <main> and NOTHING else's — the Ledger,
+ * Projects, every other page keeps its 32px exactly as it was. */
+main:has(.desk-root) { padding-bottom: 0; }
+
 .desk-root *, .desk-portal * { box-sizing: border-box; }
 
 /* THE RESET STOPS AT `.desk-legacy` — AND ADDS NO SPECIFICITY DOING IT.
