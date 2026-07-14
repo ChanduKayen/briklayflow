@@ -24,7 +24,7 @@ const T = (o: Partial<DeskTask>): DeskTask => ({
 const byRef = (ts: DeskTask[]) => (r: string) => ts.find((t) => t.ref === r)
 
 suite('severity — what he sees first', () => {
-  test('waiting-on-owner outranks ANY age of a Babai-managed item', () => {
+  test('waiting-on-owner outranks ANY age of a Briklay-managed item', () => {
     const mine = P({ state: 'you', days: 0 })
     const babais = P({ state: 'chasing', days: 90 })
     expect(sevScore(mine) > sevScore(babais)).toBe(true)
@@ -410,7 +410,7 @@ suite('the medallion — the left column can never disagree with the row', () =>
   test('a problem that needs him is the only terracotta on the left edge', () => {
     expect(problemTone('you')).toBe('you')
   })
-  test('with Babai → the breathing dot; accepted and moving → its own tone', () => {
+  test('with Briklay → the breathing dot; accepted and moving → its own tone', () => {
     expect(problemTone('chasing')).toBe('chasing')
     expect(problemTone('moving')).toBe('moving')
   })
@@ -468,8 +468,8 @@ suite('the close contract', () => {
     expect(closeItem('Fixed', '  ').resolution).toEqual({ outcome: 'Fixed', note: 'Fixed', by: 'You', when: 'just now' })
   })
 
-  test('an auto-close is attributed to Babai, not to him', () => {
-    expect(closeItem('Fixed', 'Verified from fix photo', 'Babai — auto-closed').resolution.by).toBe('Babai — auto-closed')
+  test('an auto-close is attributed to Briklay, not to him', () => {
+    expect(closeItem('Fixed', 'Verified from fix photo', 'Briklay — auto-closed').resolution.by).toBe('Briklay — auto-closed')
   })
 })
 

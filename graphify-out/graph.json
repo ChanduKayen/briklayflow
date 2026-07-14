@@ -52302,8 +52302,8 @@
       "source_file": "supabase\\functions\\whatsapp-webhook\\__tests__\\money_single.test.ts",
       "source_location": "L22",
       "weight": 1.0,
-      "_src": "tests_money_single_test_clean",
-      "_tgt": "whatsapp_webhook_messages_mcomplete",
+      "_src": "whatsapp_webhook_messages_mcomplete",
+      "_tgt": "tests_money_single_test_clean",
       "source": "whatsapp_webhook_messages_mcomplete",
       "target": "tests_money_single_test_clean"
     },

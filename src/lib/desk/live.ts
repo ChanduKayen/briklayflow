@@ -313,7 +313,7 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
           supervisorId: p.supervisor_id ?? null,
           focus: plan?.focus ? `${plan.focus} floor` : '—',
           state: you ? 'hot' : open ? 'mid' : 'ok',
-          note: you ? `${you} need you` : open ? `${open} with Babai` : 'all clear',
+          note: you ? `${you} need you` : open ? `${open} with Briklay` : 'all clear',
           youCount: you, openCount: open,
         } as DeskSite
       })
@@ -451,7 +451,7 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
       ...d,
       events: [...d.events, {
         id: `tmp-${Date.now()}`, problem_id: id, type: 'comment',
-        body: text, actor_kind: 'user', created_at: new Date().toISOString(),
+        body: text, actor_kind: 'user', actor_id: userId, created_at: new Date().toISOString(),
       }],
     }))
     await must('Adding the note', () => supabase.from('followup_events').insert({
@@ -910,7 +910,7 @@ export class DeskUnsupported extends Error {
       const nIds = [...new Set(tasks.data.flatMap((t) => narrationIdsOf(t.status_history)))]
       const memberIds = [...new Set(members.data.map((m) => m.user_id).filter(Boolean))]
       const [events, atts, taskAtts, narrations, resolutions, phones, profiles] = await Promise.all([
-        fetchIn<EventRow>(pIds, (c, f, t) => supabase.from('followup_events').select('id, problem_id, type, body, actor_kind, created_at').eq('org_id', orgId).in('problem_id', c).order('created_at').range(f, t)),
+        fetchIn<EventRow>(pIds, (c, f, t) => supabase.from('followup_events').select('id, problem_id, type, body, actor_kind, actor_id, created_at').eq('org_id', orgId).in('problem_id', c).order('created_at').range(f, t)),
         fetchIn<AttachmentRow & { bucket: string; object_path: string }>(pIds, (c, f, t) => supabase.from('attachments').select('parent_id, role, caption, created_at, bucket, object_path').eq('org_id', orgId).eq('parent_type', 'problem').in('parent_id', c).order('created_at').range(f, t)),
         // THE PHOTOS. The webhook has always attached a site photo to the TASK it resolved onto
         // (attachments.parent_type='site_task', siteops.ts attachImage) — the desk only ever fetched
@@ -1033,7 +1033,7 @@ export function deskQuery(orgId: string) {
       const nIds = [...new Set(tasks.data.flatMap((t) => narrationIdsOf(t.status_history)))]
       const memberIds = [...new Set(members.data.map((m) => m.user_id).filter(Boolean))]
       const [events, atts, taskAtts, narrations, resolutions, phones, profiles] = await Promise.all([
-        fetchIn<EventRow>(pIds, (c, f, t) => supabase.from('followup_events').select('id, problem_id, type, body, actor_kind, created_at').eq('org_id', orgId).in('problem_id', c).order('created_at').range(f, t)),
+        fetchIn<EventRow>(pIds, (c, f, t) => supabase.from('followup_events').select('id, problem_id, type, body, actor_kind, actor_id, created_at').eq('org_id', orgId).in('problem_id', c).order('created_at').range(f, t)),
         fetchIn<AttachmentRow & { bucket: string; object_path: string }>(pIds, (c, f, t) => supabase.from('attachments').select('parent_id, role, caption, created_at, bucket, object_path').eq('org_id', orgId).eq('parent_type', 'problem').in('parent_id', c).order('created_at').range(f, t)),
         // THE PHOTOS. The webhook has always attached a site photo to the TASK it resolved onto
         // (attachments.parent_type='site_task', siteops.ts attachImage) — the desk only ever fetched

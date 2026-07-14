@@ -4,7 +4,7 @@
 import { suite, test, expect } from './harness'
 import {
   deriveState, trailFacts, statusLine, chaseWhen, toDeskProblem, toDeskTask, blockersByTask,
-  toQcChecks, qcAlarm, qcAlarmIsLoud, buildTaskStory, narrationIdsOf, statusShort, outcomeWord, outcomeKey, ago,
+  toQcChecks, qcAlarm, qcAlarmIsLoud, buildTaskStory, buildChase, narrationIdsOf, statusShort, outcomeWord, outcomeKey, ago,
 } from '../fromDb'
 import type { EventRow, ProblemRow, QcRow, ResolutionRow, TaskRow } from '../fromDb'
 
@@ -18,8 +18,8 @@ const P = (o: Partial<ProblemRow>): ProblemRow => ({
   floor_label: null, unit_label: null, area_label: null,
   next_followup_at: null, deadline: null, created_at: daysAgo(6), updated_at: daysAgo(1), ...o,
 })
-const E = (type: string, at: string, body = ''): EventRow =>
-  ({ id: Math.random().toString(), problem_id: 'p1', type, body, actor_kind: 'system', created_at: at })
+const E = (type: string, at: string, body = '', actor_id: string | null = null): EventRow =>
+  ({ id: Math.random().toString(), problem_id: 'p1', type, body, actor_kind: 'system', actor_id, created_at: at })
 
 const ctx = (o: Partial<Parameters<typeof toDeskProblem>[1]> = {}) => ({
   events: [], photos: [], resolution: null,
@@ -43,7 +43,7 @@ suite('deriveState — who has the ball', () => {
   test('ADDRESSING → moving: someone accepted it and is acting', () => {
     expect(deriveState(P({ status: 'ADDRESSING' }), trailFacts([]))).toBe('moving')
   })
-  test('OPEN with a chase clock → chasing: Babai has it', () => {
+  test('OPEN with a chase clock → chasing: Briklay has it', () => {
     expect(deriveState(P({ next_followup_at: inDays(1) }), trailFacts([]))).toBe('chasing')
   })
   test('THE DEFAULT IS `you` — an open item nobody is chasing is not "fine", and must not hide in grey', () => {
@@ -103,7 +103,7 @@ suite('statusLine — one line, and TRUE', () => {
 
   test('chasing quotes the REAL next-chase time', () => {
     expect(statusLine(P({ next_followup_at: inDays(1) }), 'chasing', t0, null, 'Jaggu', false, NOW))
-      .toBe('Babai chases again tomorrow morning')
+      .toBe('Briklay chases again tomorrow morning')
   })
 
   test('moving with a fix photo offers the close', () => {
@@ -120,13 +120,13 @@ suite('statusLine — one line, and TRUE', () => {
       .toBe('Fixed · closed by you')
   })
 
-  test('an AUTO-close is attributed to Babai — he did not do it, and must not be told he did', () => {
+  test('an AUTO-close is attributed to Briklay — he did not do it, and must not be told he did', () => {
     const r: ResolutionRow = {
       problem_id: 'p1', outcome: 'fixed', note: 'n', duplicate_of: null,
       closed_by: null, auto_closed: true, closed_at: daysAgo(1), reopened_at: null,
     }
     expect(statusLine(P({ status: 'RESOLVED' }), 'resolved', t0, r, 'Jaggu', false, NOW))
-      .toBe('Fixed · closed by Babai')
+      .toBe('Fixed · closed by Briklay')
   })
 })
 
@@ -140,8 +140,8 @@ suite('statusShort — the row does not repeat the medallion', () => {
     expect(statusShort('Waiting on you — nobody assigned yet', 'you')).toBe('Nobody assigned yet')
   })
 
-  test('"Babai" is the dot too — a breathing medallion IS Babai having it', () => {
-    expect(statusShort('Babai chases again tomorrow morning', 'chasing')).toBe('Chases again tomorrow morning')
+  test('"Briklay" is the dot too — a breathing medallion IS Briklay having it', () => {
+    expect(statusShort('Briklay chases again tomorrow morning', 'chasing')).toBe('Chases again tomorrow morning')
   })
 
   test('a sentence with nothing to strip survives whole', () => {
@@ -394,7 +394,7 @@ suite('buildTaskStory — the WhatsApp update that vanished', () => {
     expect(s[0]).toEqual({ t: 'event', l: 'Marked done by Ravi', w: '2 days ago' })
   })
 
-  test('A NARRATION THAT MOVED NOTHING IS STILL AN EVENT — "I told Babai and nothing happened" starts here', () => {
+  test('A NARRATION THAT MOVED NOTHING IS STILL AN EVENT — "I told Briklay and nothing happened" starts here', () => {
     const s = story([{ at: daysAgo(1), by: 'Ravi', source: 'narration' }])
     expect(s[0]).toEqual({ t: 'event', l: 'Update from Ravi', w: 'yesterday' })
   })
@@ -546,5 +546,85 @@ suite('ago', () => {
     expect(ago(new Date(NOW - 3 * 3_600_000).toISOString(), NOW)).toBe('3 hours ago')
     expect(ago(daysAgo(1), NOW)).toBe('yesterday')
     expect(ago(daysAgo(4), NOW)).toBe('4 days ago')
+  })
+})
+
+/* ══ THE CHASE BLOCK — why is this on MY desk? ═══════════════════════════════════════════════════════
+ *
+ * The card could always say WHAT the problem was and WHEN things happened to it. It could never answer
+ * the one question a founder opens it to ask. Three lines do: where the ball is, what went wrong, and
+ * who it passed through to get here.
+ *
+ * The path is the part that has to be TRUE. A fabricated name on an escalation chain is worse than a
+ * missing one — the whole value of the line is that you can trust who has actually been asked. */
+const NAMES: Record<string, string> = { u1: 'Jaggu', u9: 'Ravi Kumar' }
+const nameOf = (id: string | null) => (id ? NAMES[id] ?? '' : '')
+
+suite('buildChase — the escalation path', () => {
+  test('a closed item has NO chase block — the resolution below already says it all', () => {
+    expect(buildChase(P({ status: 'RESOLVED' }), 'resolved', trailFacts([]), 'Jaggu', [], nameOf, false, NOW)).toBe(null)
+  })
+
+  test('escalated → the full path: reporter → the owner who went silent → You', () => {
+    const events = [
+      E('description_added', daysAgo(9), 'Reported from site', 'u9'),
+      E('chase_sent', daysAgo(5)), E('chase_sent', daysAgo(3)),
+      E('escalated', daysAgo(1)),
+    ]
+    const t = trailFacts(events)
+    const c = buildChase(P({ deadline: daysAgo(9) }), 'you', t, 'Jaggu', events, nameOf, false, NOW)!
+
+    expect(c.tone).toBe('you')
+    expect(c.since).toBe('With you since yesterday')
+    expect(c.path.map((h) => h.name)).toEqual(['Ravi Kumar', 'Jaggu', 'You'])
+    expect(c.path[1].note).toBe('notified 2 times')
+    expect(c.path[2].live).toBe(true)                         // YOU are holding it — nobody else
+    // small counts read as words; the overdue clause is the most damning fact, so it rides the reason
+    expect(c.why).toBe("Jaggu didn't reply to two nudges. The committed date is 9 days past.")
+  })
+
+  // THE HONEST GAP. A problem Briklay filed off a WhatsApp narration has no human reporter. The hop is
+  // simply not drawn — never "Unknown", never guessed.
+  test('an unknown reporter is NOT drawn — no invented name on an escalation path', () => {
+    const events = [E('description_added', daysAgo(9)), E('chase_sent', daysAgo(5)), E('escalated', daysAgo(1))]
+    const c = buildChase(P({}), 'you', trailFacts(events), 'Jaggu', events, nameOf, false, NOW)!
+    expect(c.path.map((h) => h.name)).toEqual(['Jaggu', 'You'])
+    expect(JSON.stringify(c.path)).toContain('notified 1 time')     // singular, not "1 times"
+    expect(/unknown/i.test(JSON.stringify(c))).toBe(false)
+  })
+
+  test('nobody assigned → the path is just you, and the reason says exactly why', () => {
+    const c = buildChase(P({ owner_id: null }), 'you', trailFacts([]), '', [], nameOf, false, NOW)!
+    expect(c.path.map((h) => h.name)).toEqual(['You'])
+    expect(c.why).toBe('Nobody is assigned to this, so nobody is being chased.')
+  })
+
+  // Briklay still has it — amber, not red. Red only ever means "nobody else is going to do this".
+  test('chasing → amber tone, the owner is the LIVE hop, and the next nudge is named', () => {
+    const events = [E('chase_sent', daysAgo(1))]
+    const c = buildChase(P({ next_followup_at: inDays(1) }), 'chasing', trailFacts(events), 'Jaggu', events, nameOf, false, NOW)!
+    expect(c.tone).toBe('chasing')
+    expect(c.since).toBe('Briklay is chasing Jaggu')
+    expect(c.path[c.path.length - 1]).toEqual({ name: 'Jaggu', note: 'notified 1 time', live: true })
+    expect(/Next nudge/.test(c.why)).toBe(true)
+  })
+
+  test('accepted and moving → green, and Briklay says it is standing down', () => {
+    const c = buildChase(P({ status: 'ADDRESSING' }), 'moving', trailFacts([]), 'Jaggu', [], nameOf, false, NOW)!
+    expect(c.tone).toBe('moving')
+    expect(c.since).toBe('Jaggu is on it')
+    expect(c.path[0].live).toBe(true)
+    expect(/not chasing while it moves/.test(c.why)).toBe(true)
+  })
+
+  test('the fix photo is in → moving says the ONE thing left to do', () => {
+    const c = buildChase(P({ status: 'ADDRESSING' }), 'moving', trailFacts([]), 'Jaggu', [], nameOf, true, NOW)!
+    expect(c.why).toBe('The fix photo is in — confirm it and this closes.')
+  })
+
+  // A deadline that has NOT passed is not news. Only a broken commitment earns a sentence.
+  test('a deadline still in the future adds nothing to the reason', () => {
+    const c = buildChase(P({ owner_id: null, deadline: inDays(3) }), 'you', trailFacts([]), '', [], nameOf, false, NOW)!
+    expect(/committed date/.test(c.why)).toBe(false)
   })
 })

@@ -170,7 +170,7 @@ function useMockDeskApi(): DeskApi {
   }, [patch])
 
   const nudge = useCallback(async (id: string) => {
-    patch(id, (p) => ({ ...p, story: [...p.story, { t: 'event', l: 'You asked Babai to follow up now', w: 'just now' }] }))
+    patch(id, (p) => ({ ...p, story: [...p.story, { t: 'event', l: 'You asked Briklay to follow up now', w: 'just now' }] }))
   }, [patch])
 
   const approve = useCallback(async (id: string) => {

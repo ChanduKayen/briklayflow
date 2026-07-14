@@ -23,7 +23,7 @@ export type Outcome = (typeof OUTCOMES)[number]
 export interface Resolution {
   outcome: Outcome
   note: string
-  by: string          // "You" | "Babai — auto-closed"
+  by: string          // "You" | "Briklay — auto-closed"
   when: string
 }
 
@@ -51,6 +51,41 @@ export interface Person { name: string; phone: string }
  *  stored — minted at read time, per the attachments contract). */
 export interface Photo { e: string; l: string; url?: string | null }
 
+/**
+ * ══ THE CHASE BLOCK — WHY THIS IS SITTING WHERE IT IS ═══════════════════════════════════════════════
+ *
+ * The card could always tell you WHAT the problem was and WHEN things happened to it. It could never
+ * tell you the one thing a founder opens it to find out: why has this ended up on MY desk?
+ *
+ * Three lines answer that, and each is a different kind of fact:
+ *
+ *   since   WHERE the ball is, and since when.   "With you since yesterday"
+ *   why     WHAT went wrong to put it there.     "Suresh didn't reply to two nudges. The committed
+ *                                                 date is 9 days past."
+ *   path    WHO it passed through to get here.   Ravi → Suresh · notified 2 times → You
+ *
+ * The path is the point. A single red line saying "waiting on you" is an accusation with no story; the
+ * path shows the chain of people who tried, so the reader arrives already knowing what has been done and
+ * what is left. It is drawn ONLY from hops we actually know — an unknown reporter is simply not drawn,
+ * never rendered as "Unknown" and never invented.
+ */
+export interface ChaseHop {
+  name: string
+  /** What happened at this hop — "notified 2 times". Absent when nothing did. */
+  note?: string | null
+  /** THE ONE holding it now. Rendered in the block's tone; everyone before it is spent. */
+  live?: boolean
+}
+
+export interface Chase {
+  /** The rail's colour and the block's voice. `resolved` items have no chase block — the resolution
+   *  block below already says everything, and two closing statements is one too many. */
+  tone: 'you' | 'chasing' | 'moving'
+  since: string
+  why: string
+  path: ChaseHop[]
+}
+
 export interface DeskProblem {
   id: string
   ref: string                    // DSR-21 — per-site, shared number space with tasks
@@ -77,6 +112,8 @@ export interface DeskProblem {
   prefillNote?: string           // auto-close proposal, pre-filled from the evidence
   secondary?: string
   resolution?: Resolution | null
+  /** Why it is where it is (see Chase). Null once resolved. */
+  chase?: Chase | null
 }
 
 export type TaskState = 'todo' | 'active' | 'done'

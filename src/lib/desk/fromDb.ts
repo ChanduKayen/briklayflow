@@ -10,7 +10,7 @@
 // tests pin exact sentences against a fixed clock, and a status line can never drift under us.
 
 import type {
-  DeskProblem, DeskTask, Outcome, Photo, ProblemKind, ProblemState, QcCheck, QcStatus, StoryStep, TaskState,
+  Chase, ChaseHop, DeskProblem, DeskTask, Outcome, Photo, ProblemKind, ProblemState, QcCheck, QcStatus, StoryStep, TaskState,
 } from './types'
 import { gatesFromBinding, type GateRow, type Gates } from './gates'
 
@@ -42,6 +42,9 @@ export interface EventRow {
   type: string
   body: string | null
   actor_kind: string
+  /** WHO did it. The webhook has always written this; the desk never read it — so the one thing the
+   *  escalation path needs (who reported this from site) reached the database and no screen. */
+  actor_id: string | null
   created_at: string
 }
 
@@ -371,7 +374,7 @@ export function statusLine(
   if (state === 'resolved') {
     if (p.status === 'DISMISSED') return 'Not a problem · dismissed'
     if (!res) return 'Closed'
-    const by = res.auto_closed ? 'Babai' : 'you'
+    const by = res.auto_closed ? 'Briklay' : 'you'
     return `${outcomeWord(res.outcome)} · closed by ${by}`
   }
 
@@ -393,7 +396,102 @@ export function statusLine(
 
   // chasing
   const when = chaseWhen(p.next_followup_at, now)
-  return when ? `Babai chases again ${when}` : `Babai is following up with ${owner}`
+  return when ? `Briklay chases again ${when}` : `Briklay is following up with ${owner}`
+}
+
+/**
+ * ══ THE CHASE BLOCK ═══════════════════════════════════════════════════════════════════════════════
+ *
+ * Composed from facts, in code, exactly like statusLine — so it can be pinned by tests against a fixed
+ * clock and can never drift under us.
+ *
+ * THE PATH IS DRAWN FROM WHAT WE KNOW AND NOTHING ELSE. The reporter comes from the FIRST event's
+ * actor_id — a real person who really did raise it. When that is a system actor (a WhatsApp narration
+ * Briklay filed on its own) there is no name, so the hop is simply not drawn. It is never "Unknown", and
+ * it is never guessed: a fabricated name on an escalation path is worse than a missing one, because the
+ * whole point of the line is that you can trust who has been asked.
+ */
+export function buildChase(
+  p: ProblemRow, state: ProblemState, t: TrailFacts, owner: string,
+  events: EventRow[], nameOf: NameOf, hasAnswerPhoto: boolean, now: number,
+): Chase | null {
+  // A CLOSED ITEM HAS NO CHASE. The resolution block below already says who closed it and why; a second
+  // closing statement above it would just be the card telling you the same thing twice.
+  if (state === 'resolved') return null
+
+  const sorted = [...events].sort((a, b) => a.created_at.localeCompare(b.created_at))
+  const reporter = sorted.length ? nameOf(sorted[0].actor_id) : ''
+  const escalatedAt = sorted.find((e) => e.type === 'escalated')?.created_at ?? null
+
+  // THE OVERDUE CLAUSE — the committed date, if there was one and it has passed. It is the single most
+  // damning fact on the card, so it rides the reason line rather than hiding in the timeline.
+  const late = p.deadline ? daysBetween(p.deadline, now) : 0
+  const overdue = p.deadline && late > 0
+    ? ` The committed date is ${late} ${late === 1 ? 'day' : 'days'} past.`
+    : ''
+
+  const path: ChaseHop[] = []
+  if (reporter && reporter !== owner) path.push({ name: reporter })
+
+  if (state === 'you') {
+    // The owner is a spent hop — he was asked, and he is not the one holding it any more. You are.
+    if (p.owner_id && owner) {
+      path.push({
+        name: owner,
+        note: t.chases ? `notified ${t.chases} ${t.chases === 1 ? 'time' : 'times'}` : 'not reachable',
+      })
+    }
+    path.push({ name: 'You', live: true })
+
+    const silent = t.lastChaseAt ? daysBetween(t.lastChaseAt, now) : 0
+    const since = escalatedAt ? `With you since ${ago(escalatedAt, now)}` : 'With you'
+
+    const why =
+      !p.owner_id
+        ? `Nobody is assigned to this, so nobody is being chased.${overdue}`
+        : t.chases && !t.lastReplyAt
+          ? `${owner} didn't reply to ${numWord(t.chases)} ${t.chases === 1 ? 'nudge' : 'nudges'}.${overdue}`
+          : t.escalated
+            ? `There is no one above ${owner} left to chase.${overdue}`
+            : `Nobody has chased this in ${silent || daysBetween(p.created_at, now)} days.${overdue}`
+
+    return { tone: 'you', since, why, path }
+  }
+
+  if (state === 'moving') {
+    if (p.owner_id && owner) path.push({ name: owner, live: true })
+    return {
+      tone: 'moving',
+      since: `${owner} is on it`,
+      why: hasAnswerPhoto
+        ? `The fix photo is in — confirm it and this closes.${overdue}`
+        : `Accepted and being worked on. Briklay is not chasing while it moves.${overdue}`,
+      path,
+    }
+  }
+
+  // chasing — Briklay has it, and has a clock set.
+  if (p.owner_id && owner) {
+    path.push({
+      name: owner,
+      note: t.chases ? `notified ${t.chases} ${t.chases === 1 ? 'time' : 'times'}` : null,
+      live: true,
+    })
+  }
+  const when = chaseWhen(p.next_followup_at, now)
+  return {
+    tone: 'chasing',
+    since: `Briklay is chasing ${owner}`,
+    why: when
+      ? `No reply yet. Next nudge ${when}.${overdue}`
+      : `Waiting on a reply.${overdue}`,
+    path,
+  }
+}
+
+/** Two nudges reads better than 2 nudges — small counts are words, past that they are numerals. */
+function numWord(n: number): string {
+  return ['no', 'one', 'two', 'three', 'four', 'five', 'six'][n] ?? String(n)
 }
 
 /**
@@ -414,8 +512,11 @@ export function statusShort(full: string, state: ProblemState): string {
     return cut ? cap(cut) : full
   }
   if (state === 'chasing') {
-    // "Babai chases again tomorrow morning" → "Chases again tomorrow morning"
-    const cut = full.replace(/^babai\s+/i, '').trim()
+    // "Briklay chases again tomorrow morning" → "Chases again tomorrow morning" — the breathing medallion
+    // already SAYS it is with Briklay, and a row that repeats the medallion beside it wastes the only
+    // horizontal space a row has. (It is Briklay, never "Babai": that name is ours, internally, and the
+    // product only ever speaks in its own.)
+    const cut = full.replace(/^briklay\s+/i, '').trim()
     return cut ? cap(cut) : full
   }
   return full
@@ -436,17 +537,40 @@ const STEP_KIND: Record<string, StoryStep['t']> = {
   reopened: 'event',
 }
 
-export function buildStory(events: EventRow[], owner: string, now: number): StoryStep[] {
-  const sorted = [...events].sort((a, b) => a.created_at.localeCompare(b.created_at))
-  const out: StoryStep[] = sorted.map((e) => {
+/**
+ * THE PROBLEM'S STORY — events AND the photos, on ONE rail, in the order they actually happened.
+ *
+ * The photos used to hang in a strip ABOVE the story, detached from time: a fix photo that arrived
+ * yesterday and the crack photo from three weeks ago sat side by side as if they were the same kind of
+ * fact. But a photo IS an event — usually the most important one on the card, because it is the only
+ * thing on it that cannot be argued with — and its place in the sequence is half of what it means.
+ * (The task story has interleaved them like this all along; the problem story simply never did.)
+ */
+export function buildStory(events: EventRow[], owner: string, now: number, photos: AttachmentRow[] = []): StoryStep[] {
+  const rail: { at: string; step: StoryStep }[] = []
+
+  for (const e of events) {
     const w = ago(e.created_at, now)
     const kind = STEP_KIND[e.type] ?? 'event'
-    if (kind === 'msg') return { t: 'msg', from: owner, text: e.body ?? '', w }
-    if (kind === 'note') return { t: 'note', text: e.body ?? '', w }
-    if (kind === 'miss') return { t: 'miss', l: e.body ?? 'Escalated — no one left to chase', w }
-    return { t: 'event', l: e.body ?? e.type.replace(/_/g, ' '), w }
-  })
-  return out
+    const step: StoryStep =
+      kind === 'msg' ? { t: 'msg', from: owner, text: e.body ?? '', w }
+        : kind === 'note' ? { t: 'note', text: e.body ?? '', w }
+          : kind === 'miss' ? { t: 'miss', l: e.body ?? 'Escalated — no one left to chase', w }
+            : { t: 'event', l: e.body ?? e.type.replace(/_/g, ' '), w }
+    rail.push({ at: e.created_at, step })
+  }
+
+  for (const a of photos) {
+    // No timestamp → no place on a timeline. It still reaches the reader (PhotoStrip), but it is not
+    // given a position in a sequence we cannot actually vouch for.
+    if (!a.created_at) continue
+    rail.push({
+      at: a.created_at,
+      step: { t: 'photo', url: a.url ?? null, caption: a.caption, w: ago(a.created_at, now) },
+    })
+  }
+
+  return rail.sort((a, b) => a.at.localeCompare(b.at)).map((e) => e.step)
 }
 
 export function ago(iso: string, now: number): string {
@@ -478,7 +602,9 @@ export function toDeskProblem(
   const owner = ctx.nameOf(p.owner_id)
   const hasAnswerPhoto = ctx.photos.some((a) => a.role === 'answer')
 
-  const photos: Photo[] = ctx.photos.map((a) => ({
+  // The rail carries every photo that HAS a timestamp (buildStory interleaves them). The strip is left
+  // holding only the ones that do not — they are still evidence, they simply have no place in a sequence.
+  const photos: Photo[] = ctx.photos.filter((a) => !a.created_at).map((a) => ({
     e: a.role === 'answer' ? '✅' : '📷',
     l: a.caption ?? (a.role === 'answer' ? 'Fix photo' : 'Photo'),
     url: a.url ?? null,
@@ -504,8 +630,9 @@ export function toDeskProblem(
     statusShort: statusShort(statusLine(p, state, t, ctx.resolution, owner, hasAnswerPhoto, ctx.now), state),
     photos: photos.length ? photos : undefined,
     // "photo pending — Babai asking": a snag with no evidence that we are actively chasing for.
-    photoPending: p.kind === 'snag' && photos.length === 0 && !!p.next_followup_at,
-    story: buildStory(ctx.events, owner, ctx.now),
+    photoPending: p.kind === 'snag' && ctx.photos.length === 0 && !!p.next_followup_at,
+    story: buildStory(ctx.events, owner, ctx.now, ctx.photos),
+    chase: buildChase(p, state, t, owner, ctx.events, ctx.nameOf, hasAnswerPhoto, ctx.now),
     guide: undefined,                    // TODO(map §X4) — the read-model's guide line
     draft: undefined,                    // TODO(map §6 /siteops-say) — the owner-voice prefill
     // Babai has evidence and the item is moving → offer the pre-filled close.
@@ -516,7 +643,7 @@ export function toDeskProblem(
       ? {
         outcome: outcomeWord(ctx.resolution.outcome),
         note: ctx.resolution.note ?? '',
-        by: ctx.resolution.auto_closed ? 'Babai — auto-closed' : (ctx.nameOf(ctx.resolution.closed_by) || 'You'),
+        by: ctx.resolution.auto_closed ? 'Briklay — auto-closed' : (ctx.nameOf(ctx.resolution.closed_by) || 'You'),
         when: ago(ctx.resolution.closed_at, ctx.now),
       }
       : null,

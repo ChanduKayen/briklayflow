@@ -83,7 +83,7 @@ export function ScopePicker({
                   {s.name} <span className="sm-code">{s.code}</span>
                 </div>
                 <div className={`sm-state ${s.youCount ? 'hot' : ''}`}>
-                  {s.youCount ? `${s.youCount} need you` : s.openCount ? `${s.openCount} open, with Babai` : 'all clear'} · plan {s.pct}%
+                  {s.youCount ? `${s.youCount} need you` : s.openCount ? `${s.openCount} open, with Briklay` : 'all clear'} · plan {s.pct}%
                 </div>
               </div>
               <span className="sm-pct">{s.pct}%</span>

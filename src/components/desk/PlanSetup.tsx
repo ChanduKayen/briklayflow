@@ -204,7 +204,7 @@ export function PlanSetup({
     <div className="psetup desk-legacy">
       <div className="card">
         <div className="card-head">
-          <b>Describe the building once</b> — Babai lays out every task, in the order it can actually be built.
+          <b>Describe the building once</b> — Briklay lays out every task, in the order it can actually be built.
         </div>
 
         <div className="split">

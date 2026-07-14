@@ -867,17 +867,6 @@
 }
 .desk-root .outcomes button.on .mk, .desk-portal .outcomes button.on .mk { width: 13px; margin-right: 5px; }
 
-/* ── 6. FLAT CHIP — a place with life ──────────────────────────────────────────────────────── */
-/* trouble springs in, and leaves by shrinking away */
-
-/* ── 7. EYEBROW — even the item's NAME knows it is settled ─────────────────────────────────── */
-.desk-root .d-eyebrow .ref-big, .desk-portal .d-eyebrow .ref-big {
-  transition: background var(--t-morph), color var(--t-morph);
-}
-.desk-root .d-eyebrow.is-sorted .ref-big, .desk-portal .d-eyebrow.is-sorted .ref-big {
-  background: var(--green-soft); color: var(--green);
-}
-
 /* ── 8. FLOOR TIMELINE — focus TRAVELS · completion celebrates ─────────────────────────────── */
 /* A floor can be BOTH complete and the one you are looking at: the dot stays green (the fact), and
  * the halo says you are standing here (the selection). Two facts, two channels. */
@@ -954,24 +943,6 @@
   content: ""; position: absolute; inset: 0; background: var(--green-soft);
   animation: dsk-wash 1.4s ease-out forwards; pointer-events: none;
 }
-
-/* ── inputs ────────────────────────────────────────────────────────────────────────────────── */
-.desk-root .note-box input, .desk-portal .note-box input {
-  transition: border-color var(--t-hover), box-shadow var(--t-hover);
-}
-.desk-root .note-box input:focus, .desk-portal .note-box input:focus {
-  border-color: var(--ink-3); box-shadow: 0 0 0 3px rgba(33, 29, 24, .05); outline: none; background: var(--surface);
-}
-
-/* ── the rest: one press, one hover ────────────────────────────────────────────────────────── */
-.desk-root .iconbtn, .desk-root .pe-item, .desk-root .sup-select, .desk-root .reflink,
-.desk-root .fold-btn, .desk-root .pcard-acts button, .desk-root .note-box button,
-.desk-portal .note-box button, .desk-portal .reflink {
-  transition: background-color var(--t-hover), border-color var(--t-hover), color var(--t-hover),
-    box-shadow var(--t-hover), transform var(--t-press);
-}
-.desk-root .iconbtn:active, .desk-root .pe-item:active, .desk-root .pcard-acts button:active,
-.desk-root .note-box button:active, .desk-portal .note-box button:active { transform: scale(.96); }
 .desk-root .iconbtn:hover { border-color: var(--ink-3); color: var(--ink); }
 .desk-root .pe-item:hover { border-color: var(--ink-3); box-shadow: 0 4px 16px -10px rgba(33, 29, 24, .18); }
 .desk-root .sup-select:hover { border-color: var(--ink-3); }
@@ -1472,6 +1443,39 @@
 /* ---------- Workspace: list + master-detail panel ---------- */
 .desk-root .workspace { display: grid; grid-template-columns: 1fr; gap: 20px; align-items: start; }
 @media (min-width: 920px) { .desk-root .workspace { grid-template-columns: minmax(380px, 460px) 1fr; } }
+
+/* ═══ ONE SCROLLBAR ON PROBLEMS TOO — and the only thing it moves is the LIST ═══════════════════════
+ *
+ * SiteDeskV2 has claimed this in a comment for a while ("same rule, both tabs — the thing you are
+ * looking AT stays still, and the things you are looking THROUGH move"). The CSS never delivered it:
+ * every rule that makes it true was scoped to `.plan-workspace`, so Problems fell through to the base
+ * `.panel`, which pins itself at `top: 20px`.
+ *
+ * TWENTY PIXELS IS NOT WHERE THE PAGE STARTS. The site header is sticky at top:0 and is --header-h
+ * tall, so a card pinned at 20 tucks itself UNDER the header and hangs off the bottom of the window by
+ * however much it overshot. The card was never in one frame, and the only way to read the end of a long
+ * thread was to scroll the whole page — which carried the item you were reading off the top of the
+ * screen. Both complaints, one number.
+ *
+ * The fix is the plan's, unchanged: pin at EXACTLY the offset the column already occupies (--pin), cap
+ * the pane at the window, and let the card's own guts (.d-scroll) take the overflow. Then the header is
+ * fixed, the card is whole, its action bar never scrolls away, and the list is the only thing that moves.
+ */
+@media (min-width: 920px) {
+  /* A sticky pane is released the moment its OWN box ends — and a column only as tall as its card ends
+     almost immediately. So the column STRETCHES to the row's full height and the thing that sticks is
+     the pane inside it; now it holds for the whole scroll, to the last problem and past it.
+     (Scoped OFF the plan, which owns its own three-column version of this at 1120px.) */
+  .desk-root .workspace:not(.plan-workspace) { align-items: stretch; }
+  .desk-root .workspace:not(.plan-workspace) > .pin {
+    position: static; height: 100%; min-height: 0; min-width: 0;
+  }
+  .desk-root .workspace:not(.plan-workspace) > .pin > .panel {
+    position: sticky; top: var(--pin);
+    max-height: calc(100vh - var(--pin) - 20px);
+    display: flex; flex-direction: column; min-height: 0; min-width: 0;
+  }
+}
 
 /* ═══════════ THE PLAN'S THREE COLUMNS: the building · the work · the task ═══════════
  *
@@ -2056,13 +2060,6 @@
 .desk-root .d-bar-row .abtn.closer, .desk-portal .d-bar-row .abtn.closer { flex: 0 0 auto; padding: 0 20px; }
 /* The note "Add" button: square-ish, matches the input's height. */
 .desk-root .abtn.addbtn, .desk-portal .abtn.addbtn { height: 42px; padding: 0 18px; font-size: 13.5px; border-radius: 10px; }
-
-.desk-root .d-eyebrow, .desk-portal .d-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.desk-root .d-eyebrow .ref-big, .desk-portal .d-eyebrow .ref-big { font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: .02em; color: var(--ink-2); background: var(--fill); padding: 2px 7px; border-radius: 6px; text-transform: none; }
-.desk-root .d-eyebrow .you, .desk-portal .d-eyebrow .you { color: var(--red); }
-.desk-root .d-eyebrow .resword, .desk-portal .d-eyebrow .resword { color: var(--green); }
-.desk-root .d-title, .desk-portal .d-title { font-family: var(--serif); font-size: 20px; font-weight: 400; margin-top: 10px; line-height: 1.35; }
-.desk-root .d-meta, .desk-portal .d-meta { margin-top: 3px; font-size: 13px; color: var(--ink-3); }
 .desk-root .d-holding, .desk-portal .d-holding { margin-top: 6px; font-size: 13px; color: var(--red); }
 
 .desk-root .photos, .desk-portal .photos { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
@@ -2083,34 +2080,9 @@
 .desk-root .step.resolve::before, .desk-portal .step.resolve::before { background: var(--green); }
 .desk-root .step time, .desk-portal .step time { display: block; font-size: 11px; color: var(--ink-3); font-weight: 400; margin-top: 1px; }
 
-.desk-root .bubble, .desk-portal .bubble { position: relative; background: var(--fill); border-radius: 11px; border-top-left-radius: 4px; padding: 9px 12px; font-size: 13px; color: var(--ink); line-height: 1.45; max-width: 94%; }
-.desk-root .bubble::before, .desk-portal .bubble::before { content: ""; position: absolute; left: -21px; top: 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); }
-.desk-root .bubble .from, .desk-portal .bubble .from { font-size: 11px; font-weight: 600; color: var(--ink-2); margin-bottom: 2px; }
-.desk-root .bubble .from em, .desk-portal .bubble .from em { font-style: normal; font-weight: 400; color: var(--ink-3); }
-.desk-root .bubble time, .desk-portal .bubble time { display: block; font-size: 10.5px; color: var(--ink-3); margin-top: 3px; text-align: right; }
-
-.desk-root .note-item, .desk-portal .note-item { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: 11px; padding: 9px 12px; font-size: 13px; color: var(--ink-2); line-height: 1.45; max-width: 94%; }
-.desk-root .note-item::before, .desk-portal .note-item::before { content: ""; position: absolute; left: -21px; top: 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--surface); border: 1.5px solid var(--ink-3); }
-.desk-root .note-item .from, .desk-portal .note-item .from { font-size: 11px; font-weight: 600; color: var(--ink-3); margin-bottom: 2px; }
-
 .desk-root .res-block, .desk-portal .res-block { margin-top: 16px; padding: 13px 15px; border-radius: 11px; background: #f0f5f1; font-size: 13px; color: #2e5741; line-height: 1.55; }
 .desk-root .res-block b, .desk-portal .res-block b { font-weight: 600; }
 .desk-root .res-block .res-meta, .desk-portal .res-block .res-meta { font-size: 11.5px; color: #5d7f6c; margin-top: 4px; }
-
-.desk-root .note-box, .desk-portal .note-box { margin-top: 14px; display: flex; gap: 8px; }
-.desk-root .note-box input, .desk-portal .note-box input { flex: 1; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13px; background: var(--bg); min-width: 0; }
-.desk-root .note-box input::placeholder, .desk-portal .note-box input::placeholder { color: var(--ink-3); }
-.desk-root .note-box button, .desk-portal .note-box button {
-  flex: none; padding: 0 16px; min-height: 40px; border-radius: 10px;
-  border: 1px solid var(--line); font-size: 13px; font-weight: 600; color: var(--ink-2);
-  display: inline-flex; align-items: center; justify-content: center;
-}
-.desk-root .note-box button:hover:not(:disabled), .desk-portal .note-box button:hover:not(:disabled) {
-  border-color: var(--ink); background: var(--ink); color: #fff;
-}
-.desk-root .note-box input:focus, .desk-portal .note-box input:focus {
-  border-color: var(--ink-3); background: var(--surface); outline: none;
-}
 
 .desk-root .guide, .desk-portal .guide { margin-top: 16px; padding: 12px 14px; border-radius: 11px; background: var(--bg); font-size: 13px; color: var(--ink-2); line-height: 1.55; }
 .desk-root .guide b, .desk-portal .guide b { color: var(--ink); font-weight: 600; }
@@ -2482,3 +2454,168 @@
 /* the skeleton is not a row you can point at */
 .desk-root .list .row.sk-row,
 .desk-root .list .row.sk-row:hover { background: var(--surface); }
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════════
+   THE PROBLEM CARD — the header, the chase block, and ONE rail.
+
+   The card used to be four visual languages stacked on each other: an eyebrow, a floating photo strip
+   that had escaped time entirely, grey step lines, WhatsApp bubbles, and a note box bolted underneath.
+   Reading it meant re-learning the layout at every entry — and nowhere on it did it say the one thing
+   you opened it to find out: WHY IS THIS MINE?
+
+   Now: meta in mono (skippable in one glance) → the title in serif (the only line a human wrote) → the
+   chase block (why it is here) → one rail carrying everything that happened, in the order it happened.
+
+   Every colour and every face is already in the desk's palette. No new red, no new serif — the design's
+   discipline is what we are adopting, not its hex codes.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════════ */
+
+/* ── the header: four facts, mono, one line ─────────────────────────────────────────────────────── */
+.desk-root .pc-meta, .desk-portal .pc-meta {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+}
+.desk-root .pc-meta .m, .desk-portal .pc-meta .m {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+/* ONE of them is coloured, and only ever this one. Red means "nobody else is going to do this" — the
+   moment it also means "old", or "a snag", it stops meaning anything at all. */
+.desk-root .pc-meta .m.is-you, .desk-portal .pc-meta .m.is-you { color: var(--red); }
+
+.desk-root .pc-title, .desk-portal .pc-title {
+  font-family: var(--serif); font-weight: 500; font-size: 27px; line-height: 1.28;
+  color: var(--ink); margin: 16px 0 7px; max-width: 20em; letter-spacing: -.005em;
+}
+.desk-root .pc-context, .desk-portal .pc-context { font-size: 13.5px; color: var(--ink-3); }
+
+/* ── the chase block ────────────────────────────────────────────────────────────────────────────── */
+.desk-root .chase-block, .desk-portal .chase-block {
+  margin: 26px 0 0; padding: 2px 0 2px 18px; border-left: 2px solid var(--ink-3);
+}
+.desk-root .chase-block .cb-since, .desk-portal .chase-block .cb-since {
+  font-size: 15px; font-weight: 600; color: var(--ink-2);
+}
+.desk-root .chase-block .cb-why, .desk-portal .chase-block .cb-why {
+  font-size: 13.5px; color: var(--ink-2); margin-top: 3px; line-height: 1.5;
+}
+/* THE PATH. Mono, because it is a chain of facts rather than a sentence — and mono is what this desk
+   uses for anything the machine is REPORTING rather than saying. */
+.desk-root .chase-block .cb-path, .desk-portal .chase-block .cb-path {
+  font-family: var(--mono); font-size: 11.5px; color: var(--ink-3);
+  margin-top: 9px; letter-spacing: .02em; line-height: 1.7;
+}
+.desk-root .chase-block .cb-arrow, .desk-portal .chase-block .cb-arrow { margin: 0 7px; opacity: .6; }
+.desk-root .chase-block .cb-note, .desk-portal .chase-block .cb-note { margin-left: 6px; opacity: .8; }
+/* the LIVE hop — whoever is actually holding it now, in the block's own colour. */
+.desk-root .chase-block .cb-live, .desk-portal .chase-block .cb-live { font-weight: 500; }
+
+/* Three tones, three truths. Red is EARNED; it is not the default. */
+.desk-root .chase-block.is-you, .desk-portal .chase-block.is-you { border-left-color: var(--red); }
+.desk-root .chase-block.is-you .cb-since, .desk-portal .chase-block.is-you .cb-since { color: var(--red); }
+.desk-root .chase-block.is-you .cb-live, .desk-portal .chase-block.is-you .cb-live { color: var(--red); }
+
+.desk-root .chase-block.is-chasing, .desk-portal .chase-block.is-chasing { border-left-color: var(--ask); }
+.desk-root .chase-block.is-chasing .cb-since, .desk-portal .chase-block.is-chasing .cb-since { color: var(--ask); }
+.desk-root .chase-block.is-chasing .cb-live, .desk-portal .chase-block.is-chasing .cb-live { color: var(--ask); }
+
+.desk-root .chase-block.is-moving, .desk-portal .chase-block.is-moving { border-left-color: var(--green); }
+.desk-root .chase-block.is-moving .cb-since, .desk-portal .chase-block.is-moving .cb-since { color: var(--green); }
+.desk-root .chase-block.is-moving .cb-live, .desk-portal .chase-block.is-moving .cb-live { color: var(--green); }
+
+/* ── the rail ───────────────────────────────────────────────────────────────────────────────────── */
+.desk-root .rail-head, .desk-portal .rail-head {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--ink-3); margin: 34px 0 15px;
+}
+.desk-root .rail, .desk-portal .rail { position: relative; }
+/* The thread stops short of the last dot on purpose: a line running past the final entry reads as
+   "there is more below", and there is not. */
+.desk-root .rail::before, .desk-portal .rail::before {
+  content: ''; position: absolute; left: 4px; top: 8px; bottom: 26px;
+  width: 1px; background: var(--line);
+}
+.desk-root .rail .entry, .desk-portal .rail .entry {
+  position: relative; display: flex; align-items: baseline; gap: 14px; padding: 0 0 20px 24px;
+}
+.desk-root .rail .entry:last-child, .desk-portal .rail .entry:last-child { padding-bottom: 0; }
+.desk-root .rail .entry::before, .desk-portal .rail .entry::before {
+  content: ''; position: absolute; left: 0; top: 4px; width: 9px; height: 9px;
+  border-radius: 50%; background: var(--surface); border: 1.5px solid var(--ink-3);
+  box-sizing: border-box;
+}
+.desk-root .rail .entry > .txt, .desk-portal .rail .entry > .txt {
+  flex: 1; font-size: 13.5px; color: var(--ink-2); line-height: 1.5;
+}
+.desk-root .rail .entry .when, .desk-portal .rail .entry .when {
+  font-family: var(--mono); font-size: 11px; color: var(--ink-3); white-space: nowrap;
+}
+
+/* THE ESCALATION — the one entry that earns colour. It is the moment the machine ran out of people to
+   ask, which is exactly the moment the item became yours. */
+.desk-root .rail .entry.is-miss::before, .desk-portal .rail .entry.is-miss::before {
+  background: var(--red); border-color: var(--red);
+}
+.desk-root .rail .entry.is-miss > .txt, .desk-portal .rail .entry.is-miss > .txt {
+  color: var(--red); font-weight: 500;
+}
+/* What Briklay will do NEXT has not happened yet — hollow dot, quiet text. */
+.desk-root .rail .entry.is-next::before, .desk-portal .rail .entry.is-next::before {
+  border-style: dashed; border-color: var(--ink-3);
+}
+.desk-root .rail .entry.is-next > .txt, .desk-portal .rail .entry.is-next > .txt { color: var(--ink-3); }
+
+/* ── entries that carry CONTENT (someone's words, your note) become a field on the rail ─────────── */
+.desk-root .rail .entry.is-said, .desk-root .rail .entry.is-note,
+.desk-portal .rail .entry.is-said, .desk-portal .rail .entry.is-note { display: block; }
+/* YOUR words get a solid ink dot — you were here, and that is worth seeing at a glance down the rail. */
+.desk-root .rail .entry.is-note::before, .desk-portal .rail .entry.is-note::before {
+  background: var(--ink); border-color: var(--ink);
+}
+.desk-root .rail .said-field, .desk-portal .rail .said-field {
+  border: 1px solid var(--line); background: var(--fill);
+  border-radius: 12px; padding: 12px 15px 11px;
+}
+.desk-root .rail .said-field .lbl, .desk-portal .rail .said-field .lbl {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ink-3); margin-bottom: 5px;
+}
+.desk-root .rail .said-field .txt, .desk-portal .rail .said-field .txt {
+  font-size: 14px; color: var(--ink); line-height: 1.5;
+}
+.desk-root .rail .entry.is-said .when, .desk-root .rail .entry.is-note .when,
+.desk-portal .rail .entry.is-said .when, .desk-portal .rail .entry.is-note .when {
+  margin-top: 6px; display: block;
+}
+
+/* A PHOTO IS AN EVENT — usually the most important one on the card, because it is the only thing on it
+   that cannot be argued with. It keeps its own dot, and its place in the sequence. */
+.desk-root .rail .entry.is-photo, .desk-portal .rail .entry.is-photo { display: block; }
+.desk-root .rail .entry.is-photo::before, .desk-portal .rail .entry.is-photo::before {
+  background: var(--ink-2); border-color: var(--ink-2);
+}
+.desk-root .rail .entry.is-photo .story-photo, .desk-portal .rail .entry.is-photo .story-photo { margin: 0; }
+.desk-root .rail .entry.is-photo .when, .desk-portal .rail .entry.is-photo .when { margin-top: 6px; display: block; }
+
+/* ── the composer IS the last entry ─────────────────────────────────────────────────────────────── */
+.desk-root .rail .entry.is-compose, .desk-portal .rail .entry.is-compose { display: block; }
+/* An open dot, waiting to be filled in: adding a note is the next thing that happens in the story, so
+   it sits where the next thing goes. */
+.desk-root .rail .entry.is-compose::before, .desk-portal .rail .entry.is-compose::before {
+  border-style: dashed; border-color: var(--ink-3); background: var(--surface);
+}
+.desk-root .rail .compose-row, .desk-portal .rail .compose-row { display: flex; gap: 10px; }
+.desk-root .rail .compose-row input, .desk-portal .rail .compose-row input {
+  flex: 1; font-family: var(--font); font-size: 14px; color: var(--ink);
+  border: 1px solid var(--line); border-radius: 12px; padding: 12px 15px;
+  background: var(--surface); outline: none;
+}
+.desk-root .rail .compose-row input::placeholder, .desk-portal .rail .compose-row input::placeholder { color: var(--ink-3); }
+.desk-root .rail .compose-row input:focus, .desk-portal .rail .compose-row input:focus { border-color: var(--ink-2); }
+.desk-root .rail .compose-row .addbtn, .desk-portal .rail .compose-row .addbtn {
+  flex: 0 0 auto; padding: 0 22px; border-radius: 12px;
+}
+
+@media (max-width: 640px) {
+  .desk-root .pc-title, .desk-portal .pc-title { font-size: 23px; }
+  .desk-root .rail .entry, .desk-portal .rail .entry { padding-left: 22px; }
+}

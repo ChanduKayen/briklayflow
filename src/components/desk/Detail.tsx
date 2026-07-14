@@ -5,7 +5,7 @@
 // must be reachable from anywhere in a long story.
 
 import { useState } from 'react'
-import type { DeskProblem, DeskTask, Outcome, StoryStep } from '../../lib/desk/types'
+import type { Chase, DeskProblem, DeskTask, Outcome, StoryStep } from '../../lib/desk/types'
 import { OUTCOMES } from '../../lib/desk/types'
 import { canClose } from '../../lib/desk/derive'
 import { Btn } from './Btn'
@@ -53,36 +53,97 @@ export function StoryPhoto({ step }: { step: Extract<StoryStep, { t: 'photo' }> 
   )
 }
 
-/* ---------- StoryTimeline: events, chase steps, WhatsApp bubbles, private notes ---------- */
-export function StoryTimeline({ item }: { item: DeskProblem }) {
+/* ══ THE CHASE BLOCK — why this is sitting where it is ═══════════════════════════════════════════════
+ *
+ * The card could always say WHAT the problem was and WHEN things happened to it. It could never answer the
+ * question a founder actually opens it to ask: why has this ended up on MY desk?
+ *
+ * Three lines answer it — where the ball is, what went wrong, and who it passed through to get here.
+ *
+ * THE PATH IS THE POINT. A red line saying "waiting on you" is an accusation with no story. The path shows
+ * the chain of people who tried, so the reader arrives already knowing what has been done and what is left.
+ * Hops we cannot vouch for are not drawn (buildChase) — never an "Unknown", never a guess.
+ *
+ * The TONE is the rail's colour, and it is honest in all three states: red when it is genuinely stuck on
+ * you, amber while Briklay is still chasing, green once somebody has accepted it. Red only ever means the
+ * one thing, so it never stops meaning it. */
+export function ChaseBlock({ chase }: { chase: Chase }) {
   return (
-    <div className="story">
+    <div className={`chase-block is-${chase.tone}`}>
+      <div className="cb-since">{chase.since}</div>
+      <div className="cb-why">{chase.why}</div>
+      {chase.path.length > 0 && (
+        <div className="cb-path">
+          {chase.path.map((h, i) => (
+            <span key={i}>
+              {i > 0 && <span className="cb-arrow">→</span>}
+              <span className={h.live ? 'cb-live' : ''}>{h.name}</span>
+              {h.note && <span className="cb-note">· {h.note}</span>}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ---------- StoryTimeline: ONE rail. Events, replies, photos, notes — in the order they happened ----------
+ *
+ * It used to be four different visual languages stacked on top of each other: grey step lines, WhatsApp
+ * bubbles, a floating photo strip that had escaped time entirely, and notes in a fifth style. Reading it
+ * meant re-learning the layout at every entry.
+ *
+ * Now there is one rail and one rule: every entry is a dot on it, at the moment it happened, with its time
+ * on the right. What DIFFERS between them is what the entry contains — a line of text, somebody's words, a
+ * photograph — and that is the only thing that should differ, because it is the only thing that IS different.
+ *
+ * A `miss` (the escalation) is the one entry that earns colour. It is the moment the machine ran out of
+ * people to ask, which is precisely the moment the item became yours. */
+export function StoryTimeline({ item, children }: { item: DeskProblem; children?: React.ReactNode }) {
+  return (
+    <div className="rail">
       {item.story.map((s, i) => {
+        if (s.t === 'photo') {
+          return (
+            <div className="entry is-photo" key={i}>
+              <StoryPhoto step={s} />
+              {s.w && <div className="when">{s.w}</div>}
+            </div>
+          )
+        }
         if (s.t === 'msg') {
           return (
-            <div className="bubble" key={i}>
-              <div className="from">{s.from} <em>· WhatsApp</em></div>
-              {s.text}
-              {s.w && <time>{s.w}</time>}
+            <div className="entry is-said" key={i}>
+              <div className="said-field">
+                <div className="lbl">{s.from} · WhatsApp</div>
+                <div className="txt">{s.text}</div>
+              </div>
+              {s.w && <div className="when">{s.w}</div>}
             </div>
           )
         }
         if (s.t === 'note') {
           return (
-            <div className="note-item" key={i}>
-              <div className="from">Your note</div>
-              {s.text}
+            <div className="entry is-note" key={i}>
+              <div className="said-field">
+                <div className="lbl">Your note</div>
+                <div className="txt">{s.text}</div>
+              </div>
+              {s.w && <div className="when">{s.w}</div>}
             </div>
           )
         }
-        if (s.t === 'photo') return <StoryPhoto step={s} key={i} />
         return (
-          <div className={`step ${s.t === 'event' ? '' : s.t}`} key={i}>
-            {s.l}
-            {s.w && <time>{s.w}</time>}
+          <div className={`entry${s.t === 'miss' ? ' is-miss' : ''}${s.t === 'next' ? ' is-next' : ''}`} key={i}>
+            <div className="txt">{s.l}</div>
+            {s.w && <div className="when">{s.w}</div>}
           </div>
         )
       })}
+      {/* THE COMPOSER IS THE LAST ENTRY, not a box bolted under the card. Adding a note is the next thing
+          that happens in the story, so it sits where the next thing goes — with an open, dashed dot waiting
+          to be filled in. */}
+      {children}
     </div>
   )
 }
@@ -105,7 +166,7 @@ export function PhotoStrip({ item }: { item: DeskProblem }) {
   if (item.photoPending) {
     return (
       <div className="photos">
-        <div className="ph pending">📷<span>No photo yet<br />Babai is asking</span></div>
+        <div className="ph pending">📷<span>No photo yet<br />Briklay is asking</span></div>
       </div>
     )
   }
@@ -148,7 +209,7 @@ export function ResolveForm({
         {gate.ok ? (
           <div className="hint">
             {item.prefillNote
-              ? 'Babai pre-filled this from the evidence — edit if needed.'
+              ? 'Briklay pre-filled this from the evidence — edit if needed.'
               : `This stays on the ${item.ref} record and in the site register.`}
           </div>
         ) : (
@@ -225,36 +286,67 @@ export function DetailContent({
     setNote('')
   }
 
+  // The state, in the words the eyebrow uses. Only ONE of them is coloured — the one that means "nobody
+  // else is going to do this".
   const stateWord =
-    item.state === 'resolved' ? <span className="resword">Sorted</span>
-      : item.state === 'you' ? <span className="you">Waiting on you</span>
-        : item.state === 'chasing' ? 'Babai is on it'
+    item.state === 'resolved' ? 'Sorted'
+      : item.state === 'you' ? 'Waiting on you'
+        : item.state === 'chasing' ? 'Briklay is on it'
           : 'On track'
 
+  const age = item.state === 'resolved' ? 'closed'
+    : item.days === 0 ? 'raised today'
+      : `${item.days} ${item.days === 1 ? 'day' : 'days'}`
 
   return (
     <>
-      {/* Even the item's NAME knows it is settled — the ref pill warms green when sorted. */}
-      <div className={`d-eyebrow ${item.state === 'resolved' ? 'is-sorted' : ''}`}>
+      {/* ══ THE HEADER ═════════════════════════════════════════════════════════════════════════════
+          Four facts, all mono, all small, on one line — the ref, what it is, where it stands, how old.
+          They are META, and meta is set in mono at the top of the card so the eye can skip it in one
+          movement and land on the title, which is the only thing here written by a human. */}
+      <div className={`pc-meta ${item.state === 'resolved' ? 'is-sorted' : ''}`}>
         <span className="ref-big">{item.ref}</span>
-        <span>
-          {item.kind === 'snag' ? 'Snag' : 'Issue'} · {stateWord} ·{' '}
-          {item.state === 'resolved' ? 'closed' : item.days === 0 ? 'raised today' : `open ${item.days} days`}
-        </span>
+        <span className="m">{item.kind === 'snag' ? 'Snag' : 'Issue'}</span>
+        <span className={`m ${item.state === 'you' ? 'is-you' : ''}`}>{stateWord}</span>
+        <span className="m">{age}</span>
       </div>
 
-      <h2 className="d-title">{item.title}</h2>
-      <div className="d-meta">{item.site}{item.kind === 'snag' ? ` · ${item.loc ?? 'Project-wide'}` : ` · ${item.tag}`}</div>
+      {/* The title is the one line somebody actually wrote. It gets the serif, and it gets room. */}
+      <h2 className="pc-title">{item.title}</h2>
+      <div className="pc-context">
+        {item.site}{item.kind === 'snag' ? ` · ${item.loc ?? 'Project-wide'}` : ` · ${item.tag}`}
+      </div>
 
-      {/* Reverse-link: what this problem is holding up, in the Work Plan */}
+      {item.chase && <ChaseBlock chase={item.chase} />}
+
+      {/* What this problem is holding up, over in the Work Plan. */}
       {holding.length > 0 && item.state !== 'resolved' && (
         <div className="d-holding">
           Holding up: {holding.map((t) => `${t.ref} ${t.title}`).join(' · ')} in the Work Plan
         </div>
       )}
 
+      {/* Only the photos with no timestamp are left here — everything datable is on the rail, in its
+          place in the sequence. Plus the honest "no photo yet" state. */}
       <PhotoStrip item={item} />
-      <StoryTimeline item={item} />
+
+      <div className="rail-head">Activity</div>
+      <StoryTimeline item={item}>
+        {item.state !== 'resolved' && (
+          <div className="entry is-compose">
+            <div className="compose-row">
+              <input
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') void submitNote() }}
+                placeholder="Add a note — only your team sees this"
+              />
+              {/* The button WAKES only when there is something to add. */}
+              <Btn variant="primary" className="addbtn" disabled={!note.trim()} onClick={submitNote}>Add</Btn>
+            </div>
+          </div>
+        )}
+      </StoryTimeline>
 
       {item.resolution && (
         <div className="res-block">
@@ -265,16 +357,6 @@ export function DetailContent({
 
       {item.state !== 'resolved' && (
         <>
-          <div className="note-box">
-            <input
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') void submitNote() }}
-              placeholder="Add a note — only your team sees this"
-            />
-            {/* The button WAKES only when there is something to add. */}
-            <Btn variant="primary" className="addbtn" disabled={!note.trim()} onClick={submitNote}>Add</Btn>
-          </div>
           {item.guide && <div className="guide" dangerouslySetInnerHTML={{ __html: item.guide }} />}
           {!isTouch && item.person.phone && (
             <div className="contact-hint">{item.person.name} · {item.person.phone}</div>

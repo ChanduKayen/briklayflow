@@ -360,7 +360,7 @@ export function canClose(
   const needsPhoto = i.kind === 'snag' && outcome === 'Fixed'
   const hasPhoto = !!i.photos?.length
   if (needsPhoto && !hasPhoto) {
-    return { ok: false, why: 'A snag can only be closed as fixed once the fix photo is in. Babai is asking for it.' }
+    return { ok: false, why: 'A snag can only be closed as fixed once the fix photo is in. Briklay is asking for it.' }
   }
   return { ok: true }
 }

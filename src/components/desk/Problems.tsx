@@ -75,7 +75,7 @@ export function ProblemRow({
         <div className="r-right">
           {hasPhoto
             ? <span className="cam" title="has a photo">📷</span>
-            : item.photoPending ? <span className="cam" title="photo pending — Babai is asking">📷…</span> : null}
+            : item.photoPending ? <span className="cam" title="photo pending — Briklay is asking">📷…</span> : null}
           <span className={`age ${isOldAge(item) ? 'old' : ''}`} title={item.status}>
             {item.days === 0 ? 'today' : `${item.days}d`}
           </span>
@@ -105,8 +105,8 @@ export function ProblemList({
   const head = segment === 'sorted'
     ? 'Recently sorted — every closed item keeps its reason and photos'
     : sortBy === 'severe'
-      ? 'Yours first — red needs you, grey is with Babai'
-      : 'Latest first — red needs you, grey is with Babai'
+      ? 'Yours first — red needs you, grey is with Briklay'
+      : 'Latest first — red needs you, grey is with Briklay'
 
   return (
     <div className="list">

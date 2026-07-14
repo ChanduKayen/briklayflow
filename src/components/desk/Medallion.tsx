@@ -23,7 +23,7 @@ import type { MedTone } from '../../lib/desk/medTone'
 
 const TITLES: Record<MedTone, string> = {
   you: 'Needs you',
-  chasing: 'Babai is chasing it',
+  chasing: 'Briklay is chasing it',
   moving: 'Someone is on it',
   done: 'Settled',
   idle: 'Not started',

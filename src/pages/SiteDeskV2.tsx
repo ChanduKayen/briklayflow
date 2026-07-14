@@ -317,7 +317,7 @@ export default function SiteDeskV2({
       return
     }
     if (act === 'nudge') {
-      await attempt(() => api.nudge(item.id), 'Follow-up moved up — Babai chases on the next run')
+      await attempt(() => api.nudge(item.id), 'Follow-up moved up — Briklay chases on the next run')
       if (!isDesktop) dismissDetail()
       return
     }
