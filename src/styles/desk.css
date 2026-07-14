@@ -101,7 +101,7 @@
 
 /* Wider than 1100 now: the building rail earned a third column, and the page has the room on both
  * sides to give it one without squeezing the list. */
-.desk-root .shell { max-width: 1320px; margin: 0 auto; padding: 0 20px max(40px, env(safe-area-inset-bottom)); }
+.desk-root .shell { max-width: 1320px; margin: 0 auto; padding: 0 20px max(var(--shell-pad), env(safe-area-inset-bottom)); }
 
 /* NO JUMP WHEN THE TAB CHANGES.
  *
@@ -122,6 +122,13 @@
   --header-h: 76px;
   --gap-under-header: 22px;
   --pin: calc(var(--header-h) + var(--gap-under-header));
+  /* What .shell reserves BELOW everything. NAMED, because the pinned columns are measured against it —
+     and a magic 40 in one place and a 20 in another is exactly how a page grows a 20px scrollbar that
+     scrolls nothing. A scrollbar is a promise that there is something down there to see. */
+  --shell-pad: 40px;
+  /* what .shell reserves BELOW everything. Named, because the workspace's height is measured against
+     it — and a magic 40 in two places is how a page quietly grows a scrollbar nobody asked for. */
+  --shell-pad: 40px;
 }
 
 /* ---------- Top bar: ONE LINE ----------
@@ -1449,36 +1456,52 @@
 .desk-root .workspace { display: grid; grid-template-columns: 1fr; gap: 20px; align-items: start; }
 @media (min-width: 920px) { .desk-root .workspace { grid-template-columns: minmax(380px, 460px) 1fr; } }
 
-/* ═══ ONE SCROLLBAR ON PROBLEMS TOO — and the only thing it moves is the LIST ═══════════════════════
+/* ═══ ONE SCROLLBAR — THE WINDOW'S — AND THE ONLY THING IT MOVES IS THE LIST ═══════════════════════
  *
- * SiteDeskV2 has claimed this in a comment for a while ("same rule, both tabs — the thing you are
- * looking AT stays still, and the things you are looking THROUGH move"). The CSS never delivered it:
- * every rule that makes it true was scoped to `.plan-workspace`, so Problems fell through to the base
- * `.panel`, which pins itself at `top: 20px`.
+ * No column gets a scroller of its own. You spin the wheel, the page scrolls, the rows move; the card
+ * stays exactly where it is. That is the rule, and everything below is the arithmetic that makes it true.
  *
- * TWENTY PIXELS IS NOT WHERE THE PAGE STARTS. The site header is sticky at top:0 and is --header-h
- * tall, so a card pinned at 20 tucks itself UNDER the header and hangs off the bottom of the window by
- * however much it overshot. The card was never in one frame, and the only way to read the end of a long
- * thread was to scroll the whole page — which carried the item you were reading off the top of the
- * screen. Both complaints, one number.
+ * ── WHAT WAS WRONG, AND WHY IT WAS TWO BUGS WEARING ONE COAT ───────────────────────────────────────
  *
- * The fix is the plan's, unchanged: pin at EXACTLY the offset the column already occupies (--pin), cap
- * the pane at the window, and let the card's own guts (.d-scroll) take the overflow. Then the header is
- * fixed, the card is whole, its action bar never scrolls away, and the list is the only thing that moves.
+ * A GRID ROW IS AS TALL AS ITS TALLEST ITEM. The detail card can run to about a full screen, so a long
+ * card made the ROW a screen tall no matter how short the list was — and the page grew to hold a row
+ * nobody had anything to put in. That is the field of white space under the last row.
+ *
+ * And the twenty pixels: the pane was capped at `100vh - --pin - 20px` while the shell reserves 40px
+ * beneath everything. The document therefore came out 20px taller than the window, every time, on every
+ * tab — a scrollbar whose entire travel showed you nothing.
+ *
+ * And on Problems, the card was sticky INSIDE a wrapper that was only as tall as the card itself. A
+ * sticky box is released the moment its own containing block ends, so it was released immediately and
+ * rode up with the list. Pinned in the CSS, unpinned on the screen.
+ *
+ * ── THE FIX: THE PINNED PANE IS THE GRID ITEM ─────────────────────────────────────────────────────
+ *
+ * A grid item's containing block is its GRID AREA — the full height of the row, which the list defines.
+ * So a sticky grid item can travel the entire list, however long the list gets, without anybody needing
+ * a second scrollbar. `align-self: start` keeps it from stretching, and the max-height keeps it inside
+ * one screen; past that the card's own guts take the overflow (.d-scroll), which is the one scroll that
+ * belongs to it and always did.
+ *
+ * The page is therefore as tall as the LIST, or one screen — whichever is more. A short list scrolls
+ * nowhere at all. A long list scrolls exactly itself. Neither ever scrolls past the end of anything.
  */
 @media (min-width: 920px) {
-  /* A sticky pane is released the moment its OWN box ends — and a column only as tall as its card ends
-     almost immediately. So the column STRETCHES to the row's full height and the thing that sticks is
-     the pane inside it; now it holds for the whole scroll, to the last problem and past it.
-     (Scoped OFF the plan, which owns its own three-column version of this at 1120px.) */
-  .desk-root .workspace:not(.plan-workspace) { align-items: stretch; }
+  .desk-root .workspace:not(.plan-workspace) > .list-col { min-width: 0; }
+
   .desk-root .workspace:not(.plan-workspace) > .pin {
-    position: static; height: 100%; min-height: 0; min-width: 0;
-  }
-  .desk-root .workspace:not(.plan-workspace) > .pin > .panel {
     position: sticky; top: var(--pin);
-    max-height: calc(100vh - var(--pin) - 20px);
+    align-self: start;                                        /* do NOT stretch — the list owns the row */
+    max-height: calc(100vh - var(--pin) - var(--shell-pad));  /* never taller than one screen */
     display: flex; flex-direction: column; min-height: 0; min-width: 0;
+  }
+  /* The panel simply IS the pane now. Nothing here is sticky, so nothing here can come unstuck:
+     .d-scroll takes the overflow and .d-bar stays welded to the foot of the card.
+     `relative` (not static) because the Celebrate overlay fills the CARD, and it can only do that if
+     the card is a positioned box — it used to get that for free from being sticky. */
+  .desk-root .workspace:not(.plan-workspace) > .pin > .panel {
+    position: relative; top: auto; max-height: none;
+    flex: 1; min-height: 0; min-width: 0;
   }
 }
 
@@ -1503,42 +1526,28 @@
 @media (max-width: 1119px) { .desk-root .plan-workspace { grid-template-columns: 1fr; } }
 @media (min-width: 1120px) {
   .desk-root .plan-workspace { grid-template-columns: 220px minmax(400px, 1fr) minmax(360px, 430px); gap: 28px; }
-  /* ═══ ONE SCROLLBAR — THE WINDOW'S — AND THE ONLY THING IT MOVES IS THE TASKS ═══
-   *
-   * NO SECOND SCROLLER. The list is not a little window with its own bar; you spin the wheel, the
-   * page scrolls, the tasks move. Everything else — the rail, the detail — is pinned and simply does
-   * not go anywhere, so "the page scrolls" and "only the list moves" are the same sentence.
-   *
-   * THE JITTER WAS A TWO-PIXEL LIE. A sticky pane travels until it reaches its `top`, and I had set
-   * it to 96 when the columns naturally begin at 98 (76px header band + 22px gap) — so on the first
-   * flick the whole page slid two pixels and then caught. The cure is not more machinery: it is
-   * pinning them at EXACTLY the offset they already occupy, so there is nothing to travel. --pin is
-   * that number, in one place, and the header's height is measured against it.
-   *
-   * They also never need a scroller of their own: each is capped at the window's height, so the rail
-   * and the detail are always wholly in view — the only overflow on the screen belongs to the list,
-   * and the list gives it to the page. */
-  /* A STICKY PANE IS RELEASED THE MOMENT ITS OWN BOX ENDS — and a column only as tall as its card
-     ends almost immediately, which is why the detail slid up the instant the task list ran out. So
-     the two side columns are STRETCHED to the full height of the row (they are as tall as the list,
-     whatever the list does), and the thing that sticks is the pane INSIDE them. Now they hold for the
-     entire scroll, to the last task and past it. */
-  .desk-root .plan-workspace { align-items: stretch; }
-  .desk-root .plan-workspace .building,
-  .desk-root .plan-workspace .panel-col { position: static; top: auto; height: 100%; min-height: 0; }
 
-  .desk-root .plan-workspace .pin {
+  /* THE SAME RULE, THREE COLUMNS. The TASKS own the row's height and the window's scrollbar; the tower
+     and the card are sticky GRID ITEMS, so each travels the full length of the list without stretching
+     it (see the Problems note above for why that distinction is the whole fix). If a tower has more
+     floors than the window is tall, the RAIL gives — not the page. */
+  .desk-root .plan-workspace > .plan-col { min-width: 0; }
+
+  .desk-root .plan-workspace > .building,
+  .desk-root .plan-workspace > .panel-col {
     position: sticky; top: var(--pin);
-    max-height: calc(100vh - var(--pin) - 20px);
-    display: flex; flex-direction: column; min-height: 0;
+    align-self: start;
+    max-height: calc(100vh - var(--pin) - var(--shell-pad));
+    display: flex; flex-direction: column; min-height: 0; min-width: 0;
   }
-  /* if a tower has more floors than the window is tall, the RAIL gives, not the page */
+  .desk-root .plan-workspace .pin {
+    position: static; top: auto; max-height: none;
+    flex: 1; min-height: 0; display: flex; flex-direction: column;
+  }
   .desk-root .plan-workspace .bd-card { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
   .desk-root .plan-workspace .panel {
-    position: static; top: auto; flex: 1; min-height: 0; max-height: none;
+    position: relative; top: auto; flex: 1; min-height: 0; max-height: none;
   }
-
-  .desk-root .plan-col { min-width: 0; }
 }
 
 /* One card, hairline rows inside it — the Ledger's day-card shell, minus the day. (The items are
@@ -2045,11 +2054,16 @@
 .desk-root .empty { text-align: center; padding: 48px 24px; color: var(--ink-3); font-size: 13.5px; }
 .desk-root .empty b { display: block; font-size: 15px; font-weight: 600; color: var(--ink-2); margin-bottom: 4px; }
 
-.desk-root .panel { display: none; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; position: sticky; top: 20px; max-height: calc(100vh - 40px); overflow: hidden; }
-/* The celebration fills the CARD, so the card is what it is measured against. (Only needed on the
-   plan, where the panel is static inside its .pin — everywhere else it is sticky, and a sticky box
-   is already a positioned one.) */
-.desk-root .plan-workspace .panel { position: relative; }
+/* THE CARD ITSELF. It is NOT the thing that sticks — the pane around it is (see the workspace rules),
+   and the card simply fills that pane, top to bottom, with .d-scroll taking the overflow and .d-bar
+   welded to the foot. `relative` because the Celebrate overlay fills the CARD, and it can only measure
+   itself against a positioned box.
+
+   Below 920px none of that applies: the panel is a bottom sheet, and it is display:none in the flow. */
+.desk-root .panel {
+  display: none; position: relative; overflow: hidden;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+}
 @media (min-width: 920px) { .desk-root .panel { display: flex; flex-direction: column; } }
 .desk-root .panel-empty { color: var(--ink-3); font-size: 13.5px; text-align: center; padding: 64px 20px; width: 100%; }
 
@@ -2369,26 +2383,6 @@
 .desk-root .scope-locked {
   font-family: var(--serif); font-size: 15.5px; font-weight: 600; color: var(--ink);
   white-space: nowrap; letter-spacing: -0.01em;
-}
-
-/* ═══ THE PROBLEMS TAB PINS ITS DETAIL, EXACTLY AS THE PLAN DOES ═══════════════════════════════════
- *
- * The plan has one scrollbar — the window's — and the only thing it moves is the work: the rail and the
- * detail are pinned, and the tasks stream past them. The problems tab let the WHOLE page scroll, so
- * reading a long chase thread carried the item you were reading straight off the top of the screen.
- *
- * One rule, both tabs: the thing you are looking AT stays still; the things you are looking THROUGH
- * move. (Below 920px the panel is a sheet, and none of this applies.) */
-@media (min-width: 920px) {
-  .desk-root .workspace { align-items: stretch; }
-  .desk-root .workspace .pin {
-    position: sticky; top: var(--pin, 20px);
-    max-height: calc(100vh - var(--pin, 20px) - 20px);
-    display: flex; flex-direction: column; min-height: 0;
-  }
-  .desk-root .workspace .pin .panel {
-    position: static; top: auto; flex: 1; min-height: 0; max-height: none;
-  }
 }
 
 /* ═══ THE SKELETON ════════════════════════════════════════════════════════════════════════════════
