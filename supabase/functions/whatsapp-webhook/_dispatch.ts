@@ -470,7 +470,19 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
       // Instant ack the moment we route to TRANSACTION — before the (slower) extraction + staging. Sent
       // DIRECTLY (sendNow), NOT via the durable outbox: the queued path is drained later and would land after
       // the confirmation. The real confirmation (mComplete / asks / batch card) still follows via the outbox.
-      await sendNow(supabase, from, M.mTxnAck(lang))
+      //
+      // …UNLESS A VOICE NOTE OR A PHOTO ALREADY GOT ITS ACK, seconds ago, from processJob — before the STT,
+      // before the router, before any of this. SiteOps has had this guard all along (see below); TRANSACTION
+      // never got it, so every spoken payment was acked TWICE:
+      //
+      //     🎤 Got your voice note — listening…
+      //     🧾 Got it — recording the details now…
+      //
+      // The second line carries no fact the first did not. The spec allows a second beat only when it says
+      // something NEW (a count, a triage) — "count, never a repeat" — and a repeat is the P1 this whole pass
+      // exists to kill: a wrong extraction looks like a mistake, a duplicate looks like a malfunction.
+      // Only a TEXT payment reaches here un-acked, and only a text payment is acked here.
+      if (!ctx.audio && !ctx.image) await sendNow(supabase, from, M.mTxnAck(lang))
       await agent.run(actx, text, { prefix, lingering: view.lingering, history })
     } else if (MONEY_QUERY_RE.test(text)) {
       if (prefix) await send(supabase, from, { kind: 'text', body: prefix }, { org_id: orgId, wamid })

@@ -81,6 +81,7 @@ import './offer_only_live_rows.test';
 import './one_road.test';
 import './confirmation.test';
 import './money_card.test';
+import './money_single.test';
 import { runAll } from './harness';
 
 await runAll();

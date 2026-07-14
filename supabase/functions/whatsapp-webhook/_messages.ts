@@ -36,17 +36,44 @@ function entryLine(payee: string | null, amount: number | null, project: string 
 // ── Catalog ─────────────────────────────────────────────────────────────────────
 
 /**
- * Capture-first confirmation (presentation redesign). Same states, gating and CTA
- * target as before -- only the WORDING and LAYOUT changed:
- *   ✓ outcome / amount-first *bold* hero ("*₹3,500* to ramu") / unlabeled
- *   "project · mode" context / RAW note shown italic + unlabeled / a calm flag line
- *   that explains the CTA. Blank lines group the parts; absent parts drop out.
- *     payee matched     -> clean;  CTA "Review in Day Book"
- *     payee unmatched   -> flag "<payee> isn't in your contacts yet"; CTA "Review & add contact"
- *     project unmatched -> flag 'I noted the site as "<raw>" ...';     CTA "Review & set site"
- * Italic is the only de-emphasis WhatsApp offers (no secondary-text colour). mode and
- * direction render only when supplied -- not plumbed today, so mode is omitted and the
- * preposition defaults to "to".
+ * ══ TYPE 5 · THE SINGLE-PAYMENT CONFIRMATION ═════════════════════════════════════════════════════════
+ *
+ *     ✓ *₹25,000 → Nukaraju* — Dr Soundharya Residence
+ *
+ *     _Weekly payment for Dr Soundharya's site_
+ *
+ *     Recorded in *Day Book* · Briklay
+ *     [ View entry ]
+ *
+ * ── WHY THIS EXISTED SEPARATELY, AND WHAT IT COST ────────────────────────────────────────────────────
+ *
+ * There were TWO money composers: mBatch for 2+ payments, and this one for a single payment — which is to
+ * say, this one, almost always. The Type 5 pass unified six hand-rolled confirmation composers in SiteOps
+ * and fixed mBatch, and MISSED this. So the new grammar shipped to the rare case and the old copy stayed
+ * live on the common one. That is the exact disease Type 5 was written to cure, caught wearing the cure.
+ *
+ * ── LINE 1 IS THE NOTIFICATION ───────────────────────────────────────────────────────────────────────
+ *
+ * It opened with `✓ Added to your Day Book` and put the money on line 2. A push preview shows roughly the
+ * first fifty characters, so what a man saw on his lock screen was a sentence with no amount, no payee and
+ * no site in it — a preamble to a fact, delivered instead of the fact. The money IS the news; it goes first,
+ * and "Day Book" moves to the destination line, where it also earns its keep by naming the home.
+ *
+ * ── ONE BOLD RUN, AND THE ARROW ──────────────────────────────────────────────────────────────────────
+ *
+ * Amount, direction and party are ONE fact. `→` is money direction and nothing else, so `₹25,000 → Nukaraju`
+ * says who paid whom without a preposition — and the project rides after the em-dash as context, unbolded,
+ * because it is not the news.
+ *
+ * ── AND A GAP GETS A HANDLE (Type 7) ─────────────────────────────────────────────────────────────────
+ *
+ * `Nukaraju isn't in your contacts yet` is a bare observation — an orphan line, the machine thinking out
+ * loud. Every unknown gets the same shape: NAME the gap, OFFER the one fix, MAKE IGNORING SAFE. The fix
+ * here is the button this card already carries, so the line points at it and promises what happens if he
+ * does nothing.
+ *
+ * The CTA target is unchanged (EDIT_LINK → the staging RPC substitutes the real entry link), and so are the
+ * states and the gating. `mode`/`direction` render only when supplied.
  */
 export function mComplete(
   lang: Lang,
@@ -55,45 +82,45 @@ export function mComplete(
     amount: number | null;
     projectName: string | null; projectRaw: string | null;
     note: string | null;
-    mode?: string | null;              // appended to the context line ONLY when present
-    direction?: 'out' | 'in' | null;   // 'in' -> "from", otherwise "to" (default)
+    mode?: string | null;              // appended after the fact ONLY when present
+    direction?: 'out' | 'in' | null;   // 'in' → money came TO us: the arrow reverses
   },
 ): OutMessage {
-  // 1. Outcome -- existing copy, now check-marked.
-  const outcome = '✓ ' + pick(lang, { en: 'Added to your Day Book' })
-
-  // 2. Hero -- amount FIRST and bold (WhatsApp *...*), then to/from payee. Indian
-  //    grouping unchanged; only bolded and moved ahead of the payee.
-  const amt = p.amount != null ? '*₹' + p.amount.toLocaleString('en-IN') + '*' : ''
-  const prep = p.direction === 'in' ? pick(lang, { en: 'from' }) : pick(lang, { en: 'to' })
+  // 1. THE FACT — one bold run: amount, direction, party. The project is context, after the dash.
+  const amt = p.amount != null ? '₹' + p.amount.toLocaleString('en-IN') : pick(lang, { en: 'amount not set' })
   const who = p.payee ?? pick(lang, { en: 'payee not set' })
-  const hero = [amt, `${prep} ${who}`].filter(Boolean).join(' ')
+  const flow = p.direction === 'in' ? `${who} → ${amt}` : `${amt} → ${who}`
+  const site = p.projectName ?? p.projectRaw ?? null
+  const modeBit = p.mode?.trim() ? ` · ${p.mode.trim()}` : ''
+  const fact = `✓ *${flow}*${site ? ` — ${site}` : ''}${modeBit}`
 
-  // 3. Context -- matched project, NO "Project:" label; append " · mode" only if a mode
-  //    is present. No project -> omit the whole line (never an empty one).
-  const modeBit = p.mode?.trim() ? ' · ' + p.mode.trim() : ''
-  const contextLine = p.projectName ? p.projectName + modeBit : ''
-  const heroBlock = contextLine ? `${hero}\n${contextLine}` : hero
-
-  // 4. Note -- shown RAW (never summarized), italic (_..._), unlabeled, only if present.
+  // 2. HIS note, raw (never summarised), italic — his words stay in his voice.
   const noteBlock = p.note?.trim() ? `_${p.note.trim()}_` : ''
 
-  // 5. Flags -- calm, off the hero line, one per condition that fires (logic unchanged).
+  // 3. THE GAPS — named, each with the one fix, and ignoring is safe (Type 7).
   const flags: string[] = []
-  if (p.payee && !p.payeeMatched) flags.push(pick(lang, { en: `${p.payee} isn't in your contacts yet` }))
-  if (p.projectRaw) flags.push(pick(lang, { en: `I noted the site as "${p.projectRaw}" — not one of your projects yet` }))
+  if (p.payee && !p.payeeMatched) {
+    flags.push(pick(lang, {
+      en: `*${p.payee}* is new to me — tap below to add them to contacts, or ignore and I'll keep this as a one-off.`,
+    }))
+  }
+  if (p.projectRaw) {
+    flags.push(pick(lang, {
+      en: `I don't have a site called *${p.projectRaw}* — tap below to set the right one, or ignore and it stays unassigned.`,
+    }))
+  }
   const flagBlock = flags.join('\n')
 
-  // 7. CTA -- target unchanged (EDIT_LINK); label per state. The payee flag keeps the
-  //    existing priority, then unknown-site, else clean.
+  // 4. WHERE IT LANDED — the proof of the write, on every card that made one.
+  const dest = `Recorded in *Day Book* · Briklay`
+
+  // The CTA label still names the state; the target is unchanged.
   const ctaText =
-    (p.payee && !p.payeeMatched) ? pick(lang, { en: 'Review & add contact' })
-    : p.projectRaw ? pick(lang, { en: 'Review & set site' })
-    : pick(lang, { en: 'Review in Day Book' })
+    (p.payee && !p.payeeMatched) ? pick(lang, { en: 'Add contact' })
+    : p.projectRaw ? pick(lang, { en: 'Set the site' })
+    : pick(lang, { en: 'View entry' })
 
-  // 6. Blank-line grouping: outcome / hero+context / note / flag.
-  const body = [outcome, heroBlock, noteBlock, flagBlock].filter(Boolean).join('\n\n')
-
+  const body = [fact, noteBlock, flagBlock, dest].filter(Boolean).join('\n\n')
   return { kind: 'cta', body, cta: { text: ctaText, url: EDIT_LINK } }
 }
 
@@ -280,12 +307,27 @@ export function mInterruptedList(
   return mProjectList(lang, { payee: p.payee, amount: p.amount, options: p.options, prefix: p.ackA + ' — ' + pick(lang, { en: 'now,' }) })
 }
 
-/** Abandoned: text + Edit CTA (this is the A1 fix path; also enqueued by the SQL sweep). */
+/**
+ * THE INCOMPLETE ENTRY — a row WAS written, so it owes a destination line like any other write.
+ *
+ * It read `Saved Nukaraju · ₹25,000 — payee not set. Add anytime.`: it never said where "saved" had put it,
+ * and it stated the gap as a bare fact with no handle on it. Every unknown gets the same shape (Type 7) —
+ * NAME the gap, OFFER the one fix, MAKE IGNORING SAFE — and here ignoring it really is safe, because the
+ * entry is in the Day Book whatever he does next. That is the reassuring thing to say, so it is said LAST.
+ * (Also the A1 fix path; also enqueued by the SQL sweep.)
+ */
 export function mAbandoned(lang: Lang, p: { payee: string | null; amount: number | null; missing: string }): OutMessage {
+  // What we DID capture leads — half a fact is still the news, and it is what he will recognise.
+  const amt = p.amount != null ? '₹' + p.amount.toLocaleString('en-IN') : null
+  const fact = amt && p.payee ? `${amt} → ${p.payee}` : (amt ?? p.payee ?? pick(lang, { en: 'your entry' }))
   return {
     kind: 'cta',
-    body: `${pick(lang, { en: 'Saved' })} ${entryLine(p.payee, p.amount, null)} — ${p.missing} ${pick(lang, { en: 'not set. Add anytime.' })}`,
-    cta: { text: pick(lang, { en: '✏️ Add details' }), url: EDIT_LINK },
+    body: [
+      `✓ *${fact}*`,
+      pick(lang, { en: `I don't have the ${p.missing} yet — tap below to add it, or leave it and I'll keep the entry as it is.` }),
+      `Recorded in *Day Book* · Briklay`,
+    ].join('\n\n'),
+    cta: { text: pick(lang, { en: 'Add details' }), url: EDIT_LINK },
   }
 }
 
@@ -304,14 +346,22 @@ export function mFailureNoAmount(lang: Lang): OutMessage {
 // button can't share a message with reply buttons -> [Add in Day Book] sends the link
 // as a follow-up).
 
-/** "⚠️ I couldn't save this — Kumar · ₹12,000 · ASM Elite / Nothing was recorded…". */
+/** "⏸ *Couldn't save ₹12,000 → Kumar* — ASM Elite / Nothing was recorded — tap to try again." */
 export function mWriteFailed(
   lang: Lang,
   p: { payee: string | null; amount: number | null; project: string | null; replayId: string },
 ): OutMessage {
-  const line = entryLine(p.payee, p.amount, p.project)
-  const head = pick(lang, { en: "⚠️ I couldn't save this" })
-  const body = `${head}${line ? ' — ' + line : ''}\n${pick(lang, { en: 'Nothing was recorded. Try again, or add it in the app.' })}`
+  // ⏸, NOT ⚠️. ⚠️ means the SITE has a problem — something a builder must act on. A write that failed on OUR
+  // side is Babai's limbo. Using one mark for both is how a warning glyph stops being read at all.
+  // And NO destination line: this one is telling the truth when it says nothing was recorded, so there is no
+  // home to name — the reassurance is that nothing half-landed, and it comes LAST.
+  const amt = p.amount != null ? '₹' + p.amount.toLocaleString('en-IN') : null
+  const fact = amt && p.payee ? `${amt} → ${p.payee}` : (amt ?? p.payee ?? pick(lang, { en: 'that' }))
+  const site = p.project ? ` — ${p.project}` : ''
+  const body = [
+    `⏸ *${pick(lang, { en: "Couldn't save" })} ${fact}*${site}`,
+    pick(lang, { en: 'Nothing was recorded — tap to try again.' }),
+  ].join('\n\n')
   return {
     kind: 'buttons',
     body,
