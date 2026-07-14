@@ -2700,51 +2700,65 @@ main:has(.desk-root) { padding-bottom: 0; }
 }
 .desk-root .se-fade.on { opacity: 1; }
 
-/* THE CUE. Centred on the COLUMN, not the page — the column is what scrolls. It sits above the fade's
-   opaque foot, so it reads as resting on the paper rather than sinking into it. */
+/* ── THE CUE: a hairline rail, and a chevron that travels down it ──────────────────────────────────
+ *
+ * Two passes tried to use Briklay's own mark here, on the theory that the mark is a descending form. It
+ * was clever and it was wrong: a mark is a BRAND, not a DIRECTION. Nobody decodes a logo into an
+ * instruction. Instructions are read in the shapes people already know, and the shape the world knows
+ * for "there is more below" is a chevron. Anything else asks the reader to learn a private language in
+ * order to be told a public fact.
+ *
+ * So: the conventional form, made properly.
+ *
+ *   THE RAIL — one pixel, materialising out of the paper: transparent at the top, ink at the foot. It is
+ *   the track, and it gives the chevron somewhere to have come FROM. A lone chevron floats; on a rail,
+ *   the movement has a beginning, and a beginning is what makes a gesture read as a journey rather than
+ *   a twitch.
+ *
+ *   THE CHEVRON — 1.4px and round-capped, the exact weight of the hairlines this desk is already drawn
+ *   with, so it belongs to the page instead of sitting on top of it. It slides the length of the rail,
+ *   reaches the foot, and dissolves into the paper.
+ *
+ * Two strokes and a line. There is nothing left to take away, which is the only test that matters. */
 .desk-root .se-cue {
-  position: absolute; left: 0; right: 0; bottom: 14px;
-  display: flex; justify-content: center;
+  position: absolute; left: 0; right: 0; bottom: 15px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
   opacity: 0;
-  transition: opacity .45s cubic-bezier(.2, .8, .3, 1);
+  transition: opacity .5s cubic-bezier(.2, .8, .3, 1);
 }
 .desk-root .se-cue.on { opacity: 1; }
 
-/* THE MARK FALLS.
- *
- * The first pass was a 15px silhouette bobbing 4px, and it said nothing: a smudge you would never
- * identify, moving too little to read as a direction. A cue you cannot see is not a SUBTLE cue, it is a
- * MISSING one — and a cue you can see but cannot interpret is worse, because it costs attention and
- * returns nothing.
- *
- * So it is the logo, at the size the eye actually resolves a shape (22px), in ink dark enough to be
- * looked at rather than looked past — and it FALLS. It appears, travels its own height downward,
- * dissolves near the floor, and is reborn above. That is not decoration; it is the instruction, drawn.
- * The mark is a descending form to begin with, so the brand and the direction are the same object: the
- * thing that tells you to go down IS the logo, going down.
- *
- * AND THEN IT WAITS. The fall takes half the cycle; the rest is stillness. A loop with no rest is a
- * pulse, and a pulse is a demand — it pulls the eye back every 800ms whether or not you have anything
- * to gain by looking. The pause is what turns a demand into an invitation. */
-.desk-root .se-cue .mk {
+.desk-root .se-rail {
+  width: 1px; height: 20px;
+  background: linear-gradient(to bottom, transparent, var(--ink-3));
+  opacity: .5;
+}
+.desk-root .se-chev {
   display: block;
   color: var(--ink-2);
-  animation: se-fall 2.6s cubic-bezier(.45, 0, .25, 1) infinite;
+  animation: se-slide 2.4s cubic-bezier(.45, 0, .25, 1) infinite;
 }
-@keyframes se-fall {
-  0%   { transform: translateY(-9px); opacity: 0; }
-  18%  { transform: translateY(-4px); opacity: .5; }
-  42%  { transform: translateY(4px);  opacity: .62; }   /* the fall — it travels its own height */
-  58%  { transform: translateY(10px); opacity: 0; }     /* …and dissolves into the paper */
-  59%  { transform: translateY(-9px); opacity: 0; }     /* reborn above, unseen */
-  100% { transform: translateY(-9px); opacity: 0; }     /* and then it waits. The rest is the manners. */
+
+/* IT TRAVELS, AND THEN IT WAITS.
+ *
+ * The slide takes half the cycle; the rest is stillness. A loop with no rest is a pulse, and a pulse is
+ * a demand — it pulls the eye back every second whether or not there is anything to gain by looking.
+ * The pause is what turns a demand into an invitation, and the invitation is the whole point: this is a
+ * hint, offered once, to someone who has not yet realised the list continues. */
+@keyframes se-slide {
+  0%   { transform: translateY(-14px); opacity: 0; }
+  16%  { transform: translateY(-9px);  opacity: .55; }
+  44%  { transform: translateY(0);     opacity: .75; }   /* down the rail, to its foot */
+  58%  { transform: translateY(5px);   opacity: 0; }     /* …and into the paper */
+  59%  { transform: translateY(-14px); opacity: 0; }     /* back to the top of the rail, unseen */
+  100% { transform: translateY(-14px); opacity: 0; }     /* and it waits. The rest is the manners. */
 }
 
 /* A cue that MOVES is the whole point of the cue — so when motion is refused, the mark simply stays,
    quietly, and the fade does the work. It is never removed: the person who turned motion off still needs
    to know the list continues. */
 @media (prefers-reduced-motion: reduce) {
-  .desk-root .se-cue .mk { animation: none; opacity: .55; transform: none; }
+  .desk-root .se-chev { animation: none; opacity: .7; transform: none; }
   .desk-root .se-fade, .desk-root .se-cue { transition: none; }
 }
 

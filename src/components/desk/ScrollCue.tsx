@@ -15,14 +15,11 @@
 //                A hint that stays after it has been taken is a nag, and nagging is what cheap software
 //                does to fill silence.
 //
-// THE MARK IS THE ARROW. Briklay's mark is a descending form — it already points down — so the cue is the
-// brand, moving the way the brand is shaped. It does not need a chevron bolted underneath it and it does
-// not need the word "scroll": the motion IS the sentence.
-//
-// AND IT IS DRAWN IN THE DESK'S OWN INK. The mark is violet, and there is not one violet pixel anywhere
-// else in this product's warm paper, terracotta and sage. A lone violet object at the foot of the page
-// would read as something that had fallen in from another application. The FORM carries the brand; the
-// SURFACE owns the colour. So the silhouette is drawn in --ink-3, at the weight of a watermark.
+// THE CUE IS A CHEVRON, NOT THE LOGO. Two passes went into putting Briklay's mark here, on the theory
+// that the mark is itself a descending form. It was clever and it was wrong: a mark is a BRAND, not a
+// DIRECTION. Nobody decodes a logo into an instruction — instructions are read in the shapes people
+// already know, and the shape the world knows for "there is more below" is a chevron. Anything else asks
+// the reader to learn a private language in order to be told a public fact.
 
 import { useEffect, useRef, useState, type RefObject } from 'react'
 
@@ -69,19 +66,37 @@ export function useMoreBelow(ref: RefObject<HTMLElement | null>): { more: boolea
 }
 
 /**
- * Briklay's mark, as a silhouette — the outline path only, none of the violet gradient behind it.
+ * THE CUE — a hairline rail, and a chevron that travels down it.
  *
- * BIG ENOUGH TO BE THE LOGO. At 15px and half-opacity it was a watermark: a smudge you would never
- * identify and never read as an instruction. A cue you cannot see is not a subtle cue, it is a missing
- * one. 22px, in ink, is the size at which the eye recognises the shape — and the shape is the whole
- * message, because the shape descends.
+ * The first two passes used Briklay's own mark. It was a nice idea and it was wrong: the mark is a
+ * BRAND, not a DIRECTION, and at 22px on warm paper it is a blob. A reader does not decode a logo into
+ * an instruction — he reads instructions in the shapes he already knows, and the shape the whole world
+ * knows for "there is more below" is a chevron. Using anything else is asking him to learn a private
+ * language in order to be told a public fact.
+ *
+ * So: the conventional form, made well.
+ *
+ *   THE RAIL is a one-pixel hairline that materialises out of the paper — transparent at the top,
+ *   ink at the foot. It is the track, and it gives the chevron somewhere to have come FROM. Without it
+ *   a lone chevron floats; with it, the gesture has a beginning, and a beginning is what makes a
+ *   movement read as a journey rather than a twitch.
+ *
+ *   THE CHEVRON is 1.4px, round-capped, 15px across — the weight of the hairlines this desk is drawn
+ *   with, so it belongs to the page rather than sitting on top of it. It slides down the rail, reaches
+ *   the foot, and dissolves into the paper.
+ *
+ * Two strokes and a line. There is nothing to remove, which is the only test of this that matters.
  */
-function Mark() {
+function Chevron() {
   return (
-    <svg className="mk" viewBox="0 0 48 46" width="22" height="21" aria-hidden="true" focusable="false">
+    <svg className="se-chev" viewBox="0 0 16 8" width="15" height="8" aria-hidden="true" focusable="false">
       <path
-        fill="currentColor"
-        d="M25.946 44.938c-.664.845-2.021.375-2.021-.698V33.937a2.26 2.26 0 0 0-2.262-2.262H10.287c-.92 0-1.456-1.04-.92-1.788l7.48-10.471c1.07-1.497 0-3.578-1.842-3.578H1.237c-.92 0-1.456-1.04-.92-1.788L10.013.474c.214-.297.556-.474.92-.474h28.894c.92 0 1.456 1.04.92 1.788l-7.48 10.471c-1.07 1.498 0 3.579 1.842 3.579h11.377c.943 0 1.473 1.088.89 1.83L25.947 44.94z"
+        d="M1.4 1.4 L8 6.4 L14.6 1.4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </svg>
   )
@@ -100,7 +115,8 @@ export function ScrollEdge({ more, fresh }: { more: boolean; fresh: boolean }) {
     <div className={`scroll-edge ${more ? 'more' : ''}`} aria-hidden="true">
       <div className={`se-fade ${more ? 'on' : ''}`} />
       <div className={`se-cue ${more && fresh ? 'on' : ''}`}>
-        <Mark />
+        <span className="se-rail" />
+        <Chevron />
       </div>
     </div>
   )
