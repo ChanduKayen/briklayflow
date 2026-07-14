@@ -68,10 +68,17 @@ export function useMoreBelow(ref: RefObject<HTMLElement | null>): { more: boolea
   return state
 }
 
-/** Briklay's mark, as a silhouette. One path — the outline; none of the violet gradient behind it. */
+/**
+ * Briklay's mark, as a silhouette — the outline path only, none of the violet gradient behind it.
+ *
+ * BIG ENOUGH TO BE THE LOGO. At 15px and half-opacity it was a watermark: a smudge you would never
+ * identify and never read as an instruction. A cue you cannot see is not a subtle cue, it is a missing
+ * one. 22px, in ink, is the size at which the eye recognises the shape — and the shape is the whole
+ * message, because the shape descends.
+ */
 function Mark() {
   return (
-    <svg viewBox="0 0 48 46" width="15" height="14" aria-hidden="true" focusable="false">
+    <svg className="mk" viewBox="0 0 48 46" width="22" height="21" aria-hidden="true" focusable="false">
       <path
         fill="currentColor"
         d="M25.946 44.938c-.664.845-2.021.375-2.021-.698V33.937a2.26 2.26 0 0 0-2.262-2.262H10.287c-.92 0-1.456-1.04-.92-1.788l7.48-10.471c1.07-1.497 0-3.578-1.842-3.578H1.237c-.92 0-1.456-1.04-.92-1.788L10.013.474c.214-.297.556-.474.92-.474h28.894c.92 0 1.456 1.04.92 1.788l-7.48 10.471c-1.07 1.498 0 3.579 1.842 3.579h11.377c.943 0 1.473 1.088.89 1.83L25.947 44.94z"
