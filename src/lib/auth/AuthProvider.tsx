@@ -21,6 +21,55 @@ const REFRESH_BASE_MS = 1_000
 const REFRESH_MAX_MS = 30_000
 const MAX_REFRESH_ATTEMPTS = 5
 
+// S4 — the resolver waits, and retries; it never concludes "logged out".
+//
+// Each attempt is bounded ABOVE the 15s /rest/ fetch watchdog in lib/supabase.ts, so the request's
+// own abort is what fails an attempt — this timer is only the backstop for a stall that happens
+// BEFORE the request is dispatched (supabase-js queues every PostgREST call behind the gotrue auth
+// lock; on a cold boot, a backgrounded/throttled tab, or a slow device, that queueing alone can eat
+// many seconds while zero bytes are on the wire). The old 10s race fired in exactly that window —
+// before the RPC had even left the browser.
+const RESOLVER_ATTEMPT_TIMEOUT_MS = 20_000
+// Retry forever while the answer is merely UNKNOWN (timeout / network error). Capped backoff, so a
+// long outage costs one cheap RPC every 30s rather than a login screen.
+const RESOLVER_BACKOFF_MS = [1_000, 2_000, 5_000, 10_000, 30_000]
+
+/**
+ * Back off — but wake EARLY if the tab is focused or the network returns.
+ *
+ * A hidden tab is exactly where the resolver stalls: Chrome throttles background timers (a
+ * setTimeout(0) can cost hundreds of ms), so supabase-js's lock-and-timer-driven boot may not even
+ * dispatch the RPC for many seconds. Sleeping out a 30s backoff after the user has come BACK to the
+ * tab would make the app feel broken at the one moment they are watching it. So the two signals that
+ * mean "conditions just changed" — visible again, online again — cut the wait short.
+ */
+function backoffSleep(ms: number): Promise<void> {
+  return new Promise<void>(resolve => {
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('online', finish)
+      resolve()
+    }
+    const onVisible = () => { if (document.visibilityState === 'visible') finish() }
+    const timer = setTimeout(finish, ms)
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('online', finish)
+  })
+}
+
+/** Bound a promise, and CLEAR the timer when it settles (the old race leaked one timer per call). */
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+  })
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer)) as Promise<T>
+}
+
 // ── Membership cache (localStorage) ──────────────────────────────
 const CACHE_KEY = 'briklay_membership_ctx'
 
@@ -145,41 +194,65 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setAuthState({ status: 'resolving' })
     }
 
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('resolver timed out after 10s')), 10_000)
-    )
-
     try {
-      const result = await Promise.race([resolveAuthDestination(userId, email), timeout])
+      // GOVERNING INVARIANT (S4): a resolver failure is an UNKNOWN answer, never a NEGATIVE one.
+      // The old code raced a 10s timer and, on timeout with no cached context, set 'unauthenticated'
+      // — which routes a perfectly signed-in user to the login screen because the network was slow.
+      // "I could not ask" and "you are not a member" are different sentences; only the RPC's actual
+      // answer may move the user. So: keep asking, with capped backoff, and stay on the splash.
+      for (let attempt = 0; ; attempt++) {
+        // The user signed out, or a different user signed in, while we were waiting → this run is
+        // stale. Drop it rather than writing a dead user's context over the live one.
+        if (resolvedUserIdRef.current !== userId) {
+          console.warn('[auth:resolver] abandoned — user changed while resolving')
+          return
+        }
 
-      switch (result.destination) {
-        case 'dashboard':
-          saveCtxCache(result.context)
-          setAuthState({ status: 'authenticated', context: result.context })
-          if (!cached) queryClient.clear()
-          break
-        case 'accept-invite':
-          clearCtxCache()
-          setAuthState({ status: 'unauthenticated' })
-          navigate(`/invite/${result.token}`, { replace: true })
-          break
-        case 'create-workspace':
-          clearCtxCache()
-          setAuthState({ status: 'no-org' })
-          break
-        case 'pending':
-          clearCtxCache()
-          setAuthState({ status: 'pending', orgName: result.orgName })
-          break
+        try {
+          const result = await withTimeout(
+            resolveAuthDestination(userId, email),
+            RESOLVER_ATTEMPT_TIMEOUT_MS,
+            '[auth:resolver] attempt',
+          )
+
+          switch (result.destination) {
+            case 'dashboard':
+              saveCtxCache(result.context)
+              setAuthState({ status: 'authenticated', context: result.context })
+              if (!cached) queryClient.clear()
+              break
+            case 'accept-invite':
+              clearCtxCache()
+              setAuthState({ status: 'unauthenticated' })
+              navigate(`/invite/${result.token}`, { replace: true })
+              break
+            case 'create-workspace':
+              clearCtxCache()
+              setAuthState({ status: 'no-org' })
+              break
+            case 'pending':
+              clearCtxCache()
+              setAuthState({ status: 'pending', orgName: result.orgName })
+              break
+          }
+          if (attempt > 0) console.log(`[auth:resolver] recovered on attempt ${attempt + 1}`)
+          return
+        } catch (err) {
+          const delay = RESOLVER_BACKOFF_MS[Math.min(attempt, RESOLVER_BACKOFF_MS.length - 1)]
+          // The app keeps running on cached context if we have it; otherwise the splash stays up —
+          // which is honest: we genuinely do not know yet who this user is.
+          console.warn(
+            `[auth:resolver] attempt ${attempt + 1} failed — reason: unknown (timeout/network); ` +
+            `retrying in ${delay}ms${cached ? ' (app stays up on cached context)' : ''}`,
+            err,
+          )
+          await backoffSleep(delay)
+        }
       }
-    } catch (err) {
-      console.error('[auth:resolver] failed — reason: resolver_timeout_or_error', err)
-      // If we have cached data, keep showing the app — network may be flaky
-      if (!cached) setAuthState({ status: 'unauthenticated' })
     } finally {
       resolvingRef.current = false
     }
-  }, [navigate])
+  }, [navigate, queryClient])
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
