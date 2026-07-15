@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { PeekModal } from './PeekModal';
 import { PeekDocSkeleton } from './PeekSkeleton';
 import type { POLineItem } from '../types';
-import { usePeek } from '../context/PeekContext';
+import { usePeek } from '../context/PeekContextCore';
 import { TxnRow } from './TxnRow';
 import { OtherOpenWithParty } from './OtherOpenWithParty';
 import { fmtRupee, hexA, DocPaper, SERIF, INK, INK_SOFT, PAPER_EDGE, TERRA_INK } from './PeekHero';

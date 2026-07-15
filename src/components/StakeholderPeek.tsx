@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { PeekModal } from './PeekModal';
 import { PeekSkeleton } from './PeekSkeleton';
-import { usePeek } from '../context/PeekContext';
+import { usePeek } from '../context/PeekContextCore';
 import { TxnRow } from './TxnRow';
 
 

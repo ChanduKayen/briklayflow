@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useSignedDocUrl } from '../lib/storage';
 import { PeekModal } from './PeekModal';
 import { PeekHeroSkeleton } from './PeekSkeleton';
-import { usePeek } from '../context/PeekContext';
+import { usePeek } from '../context/PeekContextCore';
 import {
   WalnutHero, HeroFigure, DirectionEyebrow, HeroPill, GroupLabel,
   TERRA, SAGE, fmtRupee,

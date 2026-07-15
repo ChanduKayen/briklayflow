@@ -7,7 +7,7 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { usePeek } from '../context/PeekContext';
+import { usePeek } from '../context/PeekContextCore';
 
 function fmtRupee(n: number) {
   return '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 0 });

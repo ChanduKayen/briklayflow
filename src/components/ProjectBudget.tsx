@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { usePeek } from '../context/PeekContext';
+import { usePeek } from '../context/PeekContextCore';
 import { getCostCode, MAT_DIVISIONS, WRK_DIVISIONS } from '../lib/costCodes';
 import { parseAmount } from '../lib/money';
 

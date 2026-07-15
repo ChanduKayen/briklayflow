@@ -5,7 +5,7 @@ import { SITE_DESK_ENABLED } from '../lib/desk/flag';
 import { UserPicker, useOrgMembers, MemberAvatar } from '../components/siteOps/UserPicker';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
-import { usePeek } from '../context/PeekContext';
+import { usePeek } from '../context/PeekContextCore';
 import { useUserProfile } from '../App';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import { useSnackbar } from '../components/Snackbar';

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { usePeek, type PeekType } from '../context/PeekContext';
+import { usePeek, type PeekType } from '../context/PeekContextCore';
 
 interface PeekLinkProps {
   type: PeekType;

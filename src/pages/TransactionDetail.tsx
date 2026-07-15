@@ -9,7 +9,7 @@ import type { Session } from '@supabase/supabase-js';
 import Breadcrumb from '../components/Breadcrumb';
 import { BackLink } from '../components/BackLink';
 import { useUserProfile } from '../App';
-import { usePeek } from '../context/PeekContext';
+import { usePeek } from '../context/PeekContextCore';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { autoCloseWOIfFullyPaid } from '../lib/woAutoClose';
 import jsPDF from 'jspdf';

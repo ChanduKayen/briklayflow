@@ -1,19 +1,10 @@
-import { createContext, useContext, useState, useEffect, lazy, Suspense, type ReactNode } from 'react';
+import { useState, useEffect, lazy, Suspense, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { PeekContext, type PeekState, type PeekType } from './PeekContextCore';
 
-export type PeekType = 'WO' | 'PO' | 'TRANSACTION' | 'STAKEHOLDER' | 'PROJECT';
-
-export interface PeekState { type: PeekType; id: string; }
-
-interface PeekContextValue {
-  peek: PeekState | null;
-  openPeek: (type: PeekType, id: string) => void;
-  closePeek: () => void;
-  /** Warm a peek's component chunk + primary query so the eventual click paints instantly. */
-  prefetchPeek: (type: PeekType, id: string) => void;
-}
-
-export const PeekContext = createContext<PeekContextValue | null>(null);
+// The context object and usePeek live in PeekContextCore — a module with no component exports, so
+// editing this file can never mint a second context object and orphan the mounted tree. Consumers
+// import { usePeek } from './PeekContextCore'; this file exports the Provider and nothing else.
 
 // Lazy-import factories — reused for both <Suspense> rendering AND idle chunk-preloading,
 // so the component code is downloaded before any click.
@@ -75,10 +66,4 @@ export function PeekProvider({ children }: { children: ReactNode }) {
       </Suspense>
     </PeekContext.Provider>
   );
-}
-
-export function usePeek() {
-  const ctx = useContext(PeekContext);
-  if (!ctx) throw new Error('usePeek must be used inside PeekProvider');
-  return ctx;
 }

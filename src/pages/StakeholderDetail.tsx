@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
-import { usePeek } from '../context/PeekContext';
+import { usePeek } from '../context/PeekContextCore';
 import { StarDisplay } from './Stakeholders';
 import { QuickTransactionSheet } from '../components/QuickTransactionSheet';
 import jsPDF from 'jspdf';

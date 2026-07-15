@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { resolveDocUrl } from '../lib/storage';
-import { usePeek } from '../context/PeekContext';
+import { usePeek } from '../context/PeekContextCore';
 import type { Stakeholder, Project } from '../types';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';

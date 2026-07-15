@@ -7,7 +7,7 @@ import {
 } from '@tabler/icons-react';
 import { supabase } from '../lib/supabase';
 import { useCommandBar } from '../context/CommandBarContext';
-import { usePeek } from '../context/PeekContext';
+import { usePeek } from '../context/PeekContextCore';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

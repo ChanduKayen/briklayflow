@@ -14,7 +14,7 @@ import autoTable from 'jspdf-autotable';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useOrgId } from '../lib/auth/AuthProvider';
-import { usePeek } from '../context/PeekContext';
+import { usePeek } from '../context/PeekContextCore';
 import type { POLineItem, POApproval } from '../types';
 import ReceiveAtSiteDrawer from '../components/ReceiveAtSiteDrawer';
 import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
