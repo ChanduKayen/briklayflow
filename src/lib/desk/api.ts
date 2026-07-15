@@ -51,6 +51,9 @@ export interface DeskApi {
   /** Assign the person responsible: a task's owner, or the project's supervisor. */
   assignTask: (taskRef: string, userId: string | null) => Promise<void>
   assignSupervisor: (siteCode: string, userId: string | null) => Promise<void>
+  /** Reassign a PROBLEM's owner (problems.owner_id + owner_source='manual') and re-notify the new
+   *  assignee on WhatsApp — the same hand-off notification a first assignment sends. */
+  assignProblem: (id: string, userId: string | null) => Promise<void>
   /** Everyone who can be assigned — org members. */
   members: Array<{ id: string; name: string }>
 
@@ -163,6 +166,14 @@ function useMockDeskApi(): DeskApi {
   }, [patchTaskByRef])
 
   const assignSupervisor = useCallback(async () => { /* mock: no-op */ }, [])
+
+  const assignProblem = useCallback(async (id: string, uid: string | null) => {
+    const m = MOCK_MEMBERS.find((x) => x.id === uid)
+    patch(id, (p) => ({
+      ...p, ownerId: uid, ownerSource: 'manual', assignReason: 'Assigned by hand',
+      person: { name: m?.name ?? 'Unassigned', phone: p.person.phone },
+    }))
+  }, [patch])
 
   const say = useCallback(async (id: string, text: string) => {
     const short = text.length > 60 ? `${text.slice(0, 60)}…` : text
@@ -281,6 +292,7 @@ function useMockDeskApi(): DeskApi {
         return { ...p, [siteCode]: { ...plan, tasks: withNewTask(plan.tasks, draft, row) as DeskTask[] } }
       })
     },
+    assignProblem,
     close, undo, reopen, addNote, say, nudge, approve, place, dismissPending, patchTask, editTask, reorder,
-  }), [problems, pending, plans, close, undo, reopen, addNote, addTaskNote, assignTask, assignSupervisor, say, nudge, approve, place, dismissPending, patchTask, editTask, reorder])
+  }), [problems, pending, plans, close, undo, reopen, addNote, addTaskNote, assignTask, assignSupervisor, assignProblem, say, nudge, approve, place, dismissPending, patchTask, editTask, reorder])
 }

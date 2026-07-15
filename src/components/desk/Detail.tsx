@@ -10,6 +10,9 @@ import { OUTCOMES } from '../../lib/desk/types'
 import { canClose } from '../../lib/desk/derive'
 import { Btn } from './Btn'
 
+const initials = (name: string) =>
+  name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || '—'
+
 /* ---------- StoryPhoto: a picture somebody sent from the site ----------
  *
  * The webhook has always attached these to the object it resolved onto — a photo of a poured slab
@@ -255,7 +258,9 @@ export function Composer({
         </div>
       </div>
       <div className="d-bar-row" style={{ marginTop: 12 }}>
-        <Btn variant="primary" className="flex1" loadingLabel="Sending" successLabel="Sent" onClick={() => onSend(text)}>
+        {/* celebrate: sending a message to the site IS finishing real work — it earns the one bloom
+            (a rationed green exhale), not just a label flip. Sending → Sent → a soft celebration. */}
+        <Btn variant="primary" className="flex1" loadingLabel="Sending" successLabel="Sent" celebrate onClick={() => onSend(text)}>
           Send on WhatsApp
         </Btn>
         <button className="btn btn-quiet" style={{ flex: '0 0 auto', padding: '0 16px' }} onClick={onBack}>Back</button>
@@ -268,12 +273,16 @@ export function Composer({
 type Mode = { k: 'view' } | { k: 'resolve' } | { k: 'compose' }
 
 export function DetailContent({
-  item, tasks, isTouch, onNote,
+  item, tasks, isTouch, onNote, members, onAssign,
 }: {
   item: DeskProblem
   tasks: DeskTask[]
   isTouch: boolean
   onNote: (text: string) => Promise<void>
+  /** Everyone this item can be handed to (org members). */
+  members: Array<{ id: string; name: string }>
+  /** Reassign the item's owner. The live path re-notifies the new assignee on WhatsApp. */
+  onAssign: (userId: string | null) => void
 }) {
   const [note, setNote] = useState('')
   const holding = tasks.filter((t) => t.blockedBy === item.ref)
@@ -318,6 +327,36 @@ export function DetailContent({
       </div>
 
       {item.chase && <ChaseBlock chase={item.chase} />}
+
+      {/* ══ ASSIGNED TO — who holds it, WHY, and the one control that changes both ═══════════════════
+          The chase block above says who the ball is with; this says who OWNS it and lets you hand it
+          to someone else. Reassigning re-notifies the new person on WhatsApp (siteops-notify-assignment),
+          so the hand-off is real, not just a label change. The subtext is the honest provenance — the
+          "no supervisor on this site" case is exactly why an item can sit silent, so we name it. */}
+      {item.state !== 'resolved' && (
+        <div className="props assign-block">
+          <label className="prop">
+            <span className="k">Assigned to</span>
+            <span className="v">
+              <span className="avatar">{initials(item.person.name || '—')}</span>
+              {item.person.name || 'Unassigned'}
+            </span>
+            <select
+              className="prop-pick"
+              aria-label="Reassign this item"
+              value={item.ownerId ?? ''}
+              onChange={(e) => onAssign(e.target.value || null)}
+            >
+              <option value="">Unassigned</option>
+              {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+            <svg className="chev" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+              <path d="M3 5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+            </svg>
+          </label>
+          {item.assignReason && <div className="assign-why">{item.assignReason}</div>}
+        </div>
+      )}
 
       {/* What this problem is holding up, over in the Work Plan. */}
       {holding.length > 0 && item.state !== 'resolved' && (

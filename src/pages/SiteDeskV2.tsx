@@ -340,9 +340,11 @@ export default function SiteDeskV2({
   const onSend = async (text: string) => {
     const item = openItem
     if (!item) return
+    // The await resolves the moment the send succeeds — which is what lets the Send button play its
+    // success + bloom. So DON'T yank the composer away on that same tick; let the celebration land,
+    // then fold back to the story. A failure throws out of here (composer stays open, toast explains).
     await attempt(() => api.say(item.id, text), `Sent to ${item.person.name} — reply will land here`)
-    setMode({ k: 'view' })
-    if (!isDesktop) dismissDetail()
+    setTimeout(() => { setMode({ k: 'view' }); if (!isDesktop) dismissDetail() }, 1400)
   }
 
   /* ---------- Plan ---------- */
@@ -610,6 +612,14 @@ export default function SiteDeskV2({
           <DetailContent
             item={openItem} tasks={allTasks} isTouch={isTouch}
             onNote={(t) => attempt(() => api.addNote(openItem.id, t), 'Note added')}
+            members={api.members}
+            onAssign={(uid) => {
+              const name = api.members.find((m) => m.id === uid)?.name
+              attemptQuiet(
+                () => api.assignProblem(openItem.id, uid),
+                uid ? `Reassigned to ${name ?? 'them'} — notifying on WhatsApp` : 'Unassigned',
+              )
+            }}
           />
         ),
         bar: (

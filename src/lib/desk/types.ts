@@ -99,6 +99,14 @@ export interface DeskProblem {
   days: number                   // age
   last: number                   // hours since last movement (newest-sort key)
   person: Person
+  /** The current assignee's user id — the selected value of the reassign dropdown. Null = unassigned. */
+  ownerId?: string | null
+  /** HOW the assignee was set (problems.owner_source): 'auto' = Briklay defaulted it from the site,
+   *  'manual' = a human picked. Drives the "why is it assigned to them" subtext. */
+  ownerSource?: 'auto' | 'manual' | null
+  /** The plain-language reason the assignee holds this — derived from ownerSource + whether they are the
+   *  site's supervisor. e.g. "Auto-assigned to the site supervisor" / "Assigned by hand". */
+  assignReason?: string
   status: string                 // the one-line plain-language status (X4 read-model) — the DETAIL
   /** The same sentence with the part the medallion already says removed — for the ROW. */
   statusShort?: string

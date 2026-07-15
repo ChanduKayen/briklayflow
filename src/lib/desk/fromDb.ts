@@ -27,6 +27,7 @@ export interface ProblemRow {
   project_id: string | null
   task_id: string | null
   owner_id: string | null
+  owner_source: string | null       // 'auto' (Briklay defaulted from the site) | 'manual' (a human picked)
   floor_label: string | null
   unit_label: string | null
   area_label: string | null
@@ -538,6 +539,20 @@ const STEP_KIND: Record<string, StoryStep['t']> = {
 }
 
 /**
+ * INTERNAL MARKERS THAT ARE NOT STORY. The feed reads followup_events with NO type filter, so any type
+ * the webhook writes lands here — including reconciliation markers that were never meant for a reader.
+ *
+ * `possible_photo_followup` is the one that bit us: when a text arrives while a photo's enrichment window
+ * is open and the lexical scorer can't tie them together, the webhook stamps the text onto the held photo's
+ * problem as a HYPOTHESIS for the reanalyze cron to confirm or discard (siteops.ts · stampPossibleFollowup).
+ * It is never a confirmed fact — a CONFIRMED follow-up becomes a `reanalyzed` line (the merge's user-facing
+ * record) or a `description_added` bubble; a REJECTED one is deleted. So rendering the raw marker showed an
+ * UNRELATED, often cross-project message (e.g. a bricks report) as a bubble on the wrong problem (a lights
+ * issue). It has no place on any rail — drop it, in both the confirmed and the pending state.
+ */
+const INTERNAL_ONLY_EVENTS = new Set(['possible_photo_followup'])
+
+/**
  * THE PROBLEM'S STORY — events AND the photos, on ONE rail, in the order they actually happened.
  *
  * The photos used to hang in a strip ABOVE the story, detached from time: a fix photo that arrived
@@ -550,7 +565,11 @@ export function buildStory(events: EventRow[], owner: string, now: number, photo
   const rail: { at: string; step: StoryStep }[] = []
 
   for (const e of events) {
+    if (INTERNAL_ONLY_EVENTS.has(e.type)) continue   // a reconciliation marker, not a thing the site said
     const w = ago(e.created_at, now)
+    // An AD-HOC MESSAGE the founder sent from the desk (siteops-say) — his own words, going OUT on Briklay's
+    // line to the assignee. Render it as a sent bubble ("You · WhatsApp"), the mirror of an inbound reply.
+    if (e.type === 'message_sent') { rail.push({ at: e.created_at, step: { t: 'msg', from: 'You', text: e.body ?? '', w } }); continue }
     const kind = STEP_KIND[e.type] ?? 'event'
     const step: StoryStep =
       kind === 'msg' ? { t: 'msg', from: owner, text: e.body ?? '', w }
@@ -584,6 +603,24 @@ export function ago(iso: string, now: number): string {
 
 /* ── the whole item ── */
 
+/**
+ * WHY THIS PERSON HOLDS IT — the subtext under the assignee dropdown.
+ *
+ * The database knows only two provenances (problems.owner_source): 'manual' (a human picked this owner)
+ * and 'auto' (Briklay defaulted it when the item was created — named-in-message → the site's supervisor →
+ * the principal, see _siteops_route.resolveOwner). We say the true one, and for the auto case we say WHICH
+ * default fired — because "auto-assigned to the supervisor" and "auto-assigned to you because this site has
+ * no supervisor" are different facts, and the second is exactly why an item goes silent on WhatsApp.
+ */
+function assignReasonOf(
+  ownerSource: 'auto' | 'manual' | null, ownerId: string | null, supervisorId: string | null | undefined,
+): string | undefined {
+  if (!ownerId) return 'Nobody is assigned yet'
+  if (ownerSource === 'manual') return 'Assigned by hand'
+  if (supervisorId && ownerId === supervisorId) return 'Auto-assigned to the site supervisor'
+  return 'Auto-assigned — this site has no supervisor set'
+}
+
 export function toDeskProblem(
   p: ProblemRow,
   ctx: {
@@ -592,6 +629,7 @@ export function toDeskProblem(
     resolution: ResolutionRow | null
     siteName: string
     siteCode: string
+    supervisorId?: string | null
     nameOf: NameOf
     phoneOf: PhoneOf
     now: number
@@ -600,6 +638,7 @@ export function toDeskProblem(
   const t = trailFacts(ctx.events)
   const state = deriveState(p, t)
   const owner = ctx.nameOf(p.owner_id)
+  const ownerSource = (p.owner_source === 'manual' ? 'manual' : p.owner_source === 'auto' ? 'auto' : null)
   const hasAnswerPhoto = ctx.photos.some((a) => a.role === 'answer')
 
   // The rail carries every photo that HAS a timestamp (buildStory interleaves them). The strip is left
@@ -626,6 +665,9 @@ export function toDeskProblem(
     days: daysBetween(p.created_at, ctx.now),
     last: hoursBetween(lastMove, ctx.now),
     person: { name: owner, phone: ctx.phoneOf(p.owner_id) },
+    ownerId: p.owner_id,
+    ownerSource,
+    assignReason: assignReasonOf(ownerSource, p.owner_id, ctx.supervisorId),
     status: statusLine(p, state, t, ctx.resolution, owner, hasAnswerPhoto, ctx.now),
     statusShort: statusShort(statusLine(p, state, t, ctx.resolution, owner, hasAnswerPhoto, ctx.now), state),
     photos: photos.length ? photos : undefined,

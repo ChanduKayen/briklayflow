@@ -18,6 +18,7 @@ import type { DeskApi, TaskEdit } from './api'
 import { checkMove, planRename } from './edit'
 import { withNewTask, type NewTask } from './add'
 import { gatesByTask } from './gates'
+import { notifyAssignment } from '../siteOps/followup'
 import { GEOMETRY_COLUMNS, type ProjectRow as EngineProjectRow } from '../siteOps/engine'
 import type { DeskPending, DeskPlan, DeskProblem, DeskSite, DeskTask, Outcome, QcStatus } from './types'
 import {
@@ -60,7 +61,7 @@ interface DeskData {
 import { planFloors, snapshot, closeItem, type UndoSnapshot } from './derive'
 
 const PROBLEM_COLS =
-  'id, ref, kind, title, status, cause, confidence, project_id, task_id, owner_id, floor_label, unit_label, area_label, next_followup_at, deadline, created_at, updated_at'
+  'id, ref, kind, title, status, cause, confidence, project_id, task_id, owner_id, owner_source, floor_label, unit_label, area_label, next_followup_at, deadline, created_at, updated_at'
 const TASK_COLS =
   'task_id, ref, project_id, name, description, source, phase, trade, status, floor_label, unit_label, seq_no, duration_days, started_at, owner_id, node_key, task_type_id, binding, status_history, updated_at'
 
@@ -224,6 +225,7 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
         resolution: resBy.get(p.id) ?? null,
         siteName: projById.get(p.project_id!)?.name ?? '',
         siteCode: codeOf(p.project_id),
+        supervisorId: projById.get(p.project_id!)?.supervisor_id ?? null,
         nameOf, phoneOf, now,
       }))
 
@@ -473,6 +475,45 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
 
   // NOT WIRED — no endpoint exists (map §6). These throw rather than lie.
   const unsupported = (what: string) => async () => { throw new DeskUnsupported(what) }
+
+  /**
+   * THE AD-HOC MESSAGE — the founder's own words, out on Briklay's line to the assignee (siteops-say).
+   *
+   * This is what the Composer always promised and never had. It THROWS on a non-delivery rather than
+   * resolve quietly, so the toast tells the truth: WhatsApp only allows free-text inside the 24h window,
+   * so out of it the note is saved on the trail but NOT sent — and the founder must know that, not be
+   * told "Sent" over a message that never left.
+   */
+  const say = useCallback(async (id: string, text: string) => {
+    const { data, error } = await supabase.functions.invoke('siteops-say', { body: { id, text } })
+    if (error) throw new Error(error.message || 'Could not send the message')
+    const r = (data ?? {}) as { ok?: boolean; sent?: boolean; reason?: string; message?: string; error?: string }
+    if (!r.ok) throw new Error(r.error ?? 'The message could not be sent')
+    if (!r.sent) throw new Error(r.message ?? `Not delivered — ${r.reason ?? 'unknown reason'}`)
+    invalidate()
+  }, [invalidate])
+
+  /**
+   * REASSIGN A PROBLEM — and re-notify the new owner, exactly as a fresh assignment would.
+   *
+   * Two writes: owner_id + owner_source='manual' on the row (a human's choice, which the generator never
+   * re-defaults), then the shared hand-off notifier (siteops-notify-assignment) records the hand-off on the
+   * trail and messages the new owner (free-text in-window / template out). The notify is best-effort — a
+   * missing WhatsApp number or an undeployed notifier must not fail the reassignment itself.
+   */
+  const assignProblem = useCallback(async (id: string, userId: string | null) => {
+    patchCache((d) => ({
+      ...d,
+      problems: d.problems.map((p) => (p.id === id ? { ...p, owner_id: userId, owner_source: 'manual' } : p)),
+    }))
+    await must('Reassigning', () => supabase.from('problems')
+      .update({ owner_id: userId, owner_source: 'manual' }).eq('id', id).eq('org_id', orgId))
+    if (userId) {
+      try { await notifyAssignment('issue', id, userId) }
+      catch (e) { console.warn('[desk] reassign notify failed (item still reassigned):', (e as Error).message) }
+    }
+    invalidate()
+  }, [orgId, invalidate, patchCache])
 
   const patchTask = useCallback(async (_site: string, ref: string, f: (t: DeskTask) => DeskTask) => {
     const current = Object.values(model.plans).flatMap((p) => p.tasks).find((t) => t.ref === ref)
@@ -840,13 +881,13 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
     // lie the interface tells with its hands. It simply is not a lie any more.
     canReorder: true,
     members: (data?.members ?? []).filter((m) => m.name).map((m) => ({ id: m.id, name: m.name as string })),
-    addTaskNote, assignTask, assignSupervisor,
+    addTaskNote, assignTask, assignSupervisor, assignProblem,
     close, undo, reopen, addNote,
-    say: unsupported('Sending a message in your voice'),
+    say,
     nudge,
     approve: unsupported('Approving from the portal'),
     place, dismissPending, patchTask, editTask, deleteTask, addTask, answerQc, reorder,
-  }), [model, message, isLoading, data, close, undo, reopen, addNote, addTaskNote, assignTask, assignSupervisor, nudge, place, dismissPending, patchTask, editTask, deleteTask, addTask, answerQc, reorder])
+  }), [model, message, isLoading, data, close, undo, reopen, addNote, addTaskNote, assignTask, assignSupervisor, assignProblem, say, nudge, place, dismissPending, patchTask, editTask, deleteTask, addTask, answerQc, reorder])
 }
 
 /** Thrown by an action the backend cannot honour yet. The UI catches it and says so. */

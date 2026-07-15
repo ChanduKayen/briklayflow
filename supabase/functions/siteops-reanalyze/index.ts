@@ -83,6 +83,15 @@ serve(async (req) => {
     if (!preview) await supabase.from('followup_events').update({ pending_reanalysis: false }).eq('id', id)
   }
 
+  // A REJECTED HYPOTHESIS LEAVES NOTHING BEHIND. A `possible_photo_followup` stamp is a GUESS that a text
+  // arriving near a photo describes that photo's problem (siteops.ts · stampPossibleFollowup). When the
+  // harvest decides `skip` — the text was NOT about it, and it was already routed fresh to its own
+  // problem/agent — merely clearing the flag STRANDS the wrong text on the wrong problem forever (a bricks
+  // report left on a lights issue). The row was never a real event; delete it.
+  const deleteMarker = async (id: string) => {
+    if (!preview) await supabase.from('followup_events').delete().eq('id', id)
+  }
+
   const results: { id: string; type: string; action: string; applied?: Record<string, string> | null }[] = []
   for (const e of (events ?? []) as Record<string, string | null>[]) {
     const parent = e.problem_id ? { kind: 'issue' as const, id: e.problem_id }
@@ -127,7 +136,11 @@ serve(async (req) => {
         }
       }
     }
-    await clearMarker(e.id!)
+    // skip = the guess was wrong (the text belongs to its own freshly-routed problem). Delete the stray
+    // stamp rather than leave it flagged-but-attached. Everything else (merge, and the description_added
+    // path) keeps its row and just clears the flag.
+    if (decision.action === 'skip' && e.type === 'possible_photo_followup') await deleteMarker(e.id!)
+    else await clearMarker(e.id!)
     results.push({ id: e.id!, type: e.type!, action: decision.action, applied })
   }
 

@@ -340,7 +340,17 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
     if (verdict === 'related') {
       decision = 'ANSWERS_PENDING'   // → SITEOPS.answer enriches the held objects, then closes the window
     } else {
-      await stampPossibleFollowup(supabase, orgId, view.open as ConvoRow, text)
+      // STAMP ONLY WHILE THE WINDOW IS GENUINELY LIVE. `classifyPhotoFollowup` returns 'unrelated' for TWO
+      // different situations (see decideAssociation): a message that arrives WITHIN the ~90s hold but doesn't
+      // lexically tie to the photo (a real "maybe this describes the photo" — worth a hypothesis for the
+      // reanalyze cron), AND a message that arrives AFTER the hold has expired (the window just never got
+      // swept). Only the first is a possible follow-up. Stamping the second attaches an unrelated, often
+      // CROSS-PROJECT message (a bricks report an hour after a lights photo) onto the held problem — the
+      // exact bug the desk then rendered. decideAssociation itself says an expired window "is never a trap:
+      // route fresh, no scoring, no questions" — so honour that and do not stamp past the hold.
+      const holdUntilMs = Date.parse(String((pending.slots as { hold_until?: string })?.hold_until ?? ''))
+      const withinHold = Number.isFinite(holdUntilMs) && holdUntilMs > Date.now()
+      if (withinHold) await stampPossibleFollowup(supabase, orgId, view.open as ConvoRow, text)
       const fresh = await routeMessage({ text, pending: null, history })   // classify as if no window existed
       decision = fresh.decision
       intentAgent = fresh.intent_agent
