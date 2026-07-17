@@ -320,7 +320,10 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
 
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   // Tapping a party name opens their running ledger in a side drawer (as on Txn Detail).
-  const [drawerStk, setDrawerStk] = useState<string | null>(null);
+  // `?stakeholder=<id>` opens it on arrival — the landing point for the "View ledger" button on a WhatsApp
+  // payment answer (partyLedgerLink), so the number he was told and the payments behind it are one tap apart.
+  // Read once, as the initial state: closing the drawer must not re-open it, and must not touch the URL.
+  const [drawerStk, setDrawerStk] = useState<string | null>(() => searchParams.get('stakeholder'));
 
   // Direction-aware drag-to-sum: a Set of txn_ids the accountant rubber-bands.
   const [sumSel, setSumSel] = useState<Set<string>>(new Set());

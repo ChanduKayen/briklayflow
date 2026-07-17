@@ -5,7 +5,7 @@
 // so the formatter renders the right interactive type.
 
 import type { OutMessage } from './_format.ts'
-import { entryLink, dayBookLink } from './_links.ts'
+import { entryLink, dayBookLink, partyLedgerLink, APP_ORIGIN } from './_links.ts'
 
 export type Lang = 'en' | 'te' | 'te-en' | 'hi'
 
@@ -475,6 +475,187 @@ export function mDaybookLink(lang: Lang, url: string): OutMessage {
 /** [Try again] on a replay row that expired / no longer exists. */
 export function mReplayExpired(lang: Lang): OutMessage {
   return { kind: 'text', body: pick(lang, { en: 'That entry expired — just send it again.' }) }
+}
+
+/**
+ * REPORTING's placeholder answer — the whole agent, until the real one lands.
+ *
+ * It says three things, and each one is load-bearing:
+ *
+ *  1. WE CANNOT ANSWER YET, and no number. A fabricated total would be believed, and a wrong number about
+ *     money is worse than no number at all. It promises nothing and guesses nothing.
+ *
+ *  2. NOTHING WAS RECORDED. This is the safety valve for the ask/tell boundary, which is the MODEL's
+ *     judgement and will sometimes be wrong. When a real narration misroutes here, the dummy has nowhere to
+ *     park it — there is no REPORTING side of the desk to hold it. Saying so plainly is what turns a silent
+ *     loss into a re-send. A quiet dummy would eat site updates, and eating an update is the one failure this
+ *     codebase has never accepted.
+ *
+ *  3. WHERE THE ANSWER LIVES. It does not name the desk OR the logbook specifically, because the dummy does
+ *     not know which one he wants — deciding that is a reading of the question, and the only thing allowed to
+ *     read a question here is the model (there is no regex, deliberately). The real agent will know, and will
+ *     deep-link precisely. The app root is the honest answer a placeholder can give.
+ */
+export function mReportingSoon(lang: Lang): OutMessage {
+  return {
+    kind: 'text',
+    body: pick(lang, {
+      en: "🔎 I can't answer questions like this yet — payments and work progress are coming soon.\n\n" +
+        '*Nothing from this message was recorded.* If you meant to report an update, send it again as a statement ' +
+        '— "3rd floor wiring done" — and I\'ll file it.\n\n' +
+        'Everything is in the app meanwhile: ' + APP_ORIGIN,
+    }),
+  }
+}
+
+/** "₹2,40,000" — Indian grouping, no paise (site money is never counted in paise). */
+const rupees = (n: number): string => '₹' + Math.round(n).toLocaleString('en-IN')
+
+/**
+ * REPORTING case 1 — the payment total for one party, optionally on one site.
+ *
+ * `siteName` present → he named a site, so this is that site's number ALONE (allocations are the only thing
+ * that knows about sites). Absent → the full total across everything, read from `transactions.total_amount`:
+ * what actually left the account, which stays true even for a payment nobody has allocated to a project yet.
+ *
+ * `unallocated` is that gap, and it is NAMED rather than hidden. It is not an error — a payment can sit
+ * unallocated for perfectly good reasons — but a total that silently disagreed with the per-site numbers
+ * would look like a bug in us. Only surfaced when the total case is asked and the gap is real.
+ */
+export function mPaymentTotal(lang: Lang, p: {
+  party: string; total: number; count: number; siteName?: string | null; unallocated?: number
+  /** The per-site split, biggest first. Only for the TOTAL case, and only when there is genuinely something
+   *  to split — the caller withholds it for a single-site party, where it would just repeat the total. */
+  bySite?: { name: string; total: number }[]
+  /** The party's stakeholder_id → a "View ledger" button. A number invites exactly one follow-up — "which
+   *  payments?" — so the working behind it is one tap away, not a hunt through the app. */
+  partyId?: string | null
+}): OutMessage {
+  const scope = p.siteName ? `${p.party} · ${p.siteName}` : p.party
+  const payments = p.count === 1 ? pick(lang, { en: 'payment' }) : pick(lang, { en: 'payments' })
+  const lines = [`*${scope}*`, `${rupees(p.total)} — ${p.count} ${payments}`]
+  const sites = p.bySite ?? []
+  if (sites.length) {
+    lines.push('')
+    // NEVER A SILENT CAP: WhatsApp is a phone, so a party on a dozen sites gets the biggest few and is TOLD
+    // how many were left off — a list that just stops looks like the whole list.
+    for (const s of sites.slice(0, SITE_LINES)) lines.push(`· ${s.name} — ${rupees(s.total)}`)
+    const rest = sites.length - SITE_LINES
+    if (rest > 0) lines.push(pick(lang, { en: `· +${rest} more site${rest === 1 ? '' : 's'}` }))
+  }
+  if (!p.siteName && p.unallocated && p.unallocated > 0) {
+    lines.push('', pick(lang, { en: `${rupees(p.unallocated)} of this isn't assigned to a site yet.` }))
+  }
+  return withLedger(lang, lines.join('\n'), p.partyId)
+}
+const SITE_LINES = 6
+
+/** A party answer, plus the button to its ledger. No id (shouldn't happen) → plain text rather than a
+ *  button that lands nowhere. */
+function withLedger(lang: Lang, body: string, partyId?: string | null): OutMessage {
+  if (!partyId) return { kind: 'text', body }
+  const l = partyLedgerLink(partyId)
+  return { kind: 'cta', body, cta: { text: pick(lang, { en: l.text }), url: l.url } }
+}
+
+/**
+ * ══ THE VENDOR LEDGER — totals, not rows ═════════════════════════════════════════════════════════════
+ *
+ *     *Ramesh Traders* · The Pride
+ *     _Still owed on approved orders._
+ *
+ *     ```
+ *     Paid         ₹1,00,000
+ *     Advance        ₹50,000
+ *     ─────────────────────
+ *     Balance      ₹3,50,000
+ *     ```
+ *     [ View ledger ]
+ *
+ * ── WHY THESE THREE LINES, AND NOT A LIST OF PAYMENTS ────────────────────────────────────────────────
+ * A man asking "how much did we pay X" is not asking for his own ledger back — he has the app for that,
+ * one tap away on the button. He is asking the three questions this block answers: what has gone out, what
+ * is still owed, and whether they are sitting on our money. Individual rows would bury all three.
+ *
+ * ── WHY MONOSPACE, AND WHY NO BOX ────────────────────────────────────────────────────────────────────
+ * The ``` fence is the only way WhatsApp will align a column of amounts. But phone monospace wraps around
+ * thirty characters, and a wrapped BORDER misaligns into garbage — so this is a RULE, not a box: the block
+ * stays ~21 chars, and if it ever does wrap it degrades into a scruffy line instead of a broken frame.
+ *
+ * ── WHERE THE NUMBERS COME FROM (and one that cannot) ────────────────────────────────────────────────
+ * `balance` is `v_vendor_balance.owed` — read, never recomputed ("The vendor hub READS this; it must never
+ * recompute balance some other way"). `advance` is the ADVANCE-typed allocations, which is a FACT we read
+ * rather than a balance we derive. ORDERED IS DELIBERATELY ABSENT: the view does not expose it, and
+ * re-deriving it would mean duplicating its own "approved, not cancelled" definition here — a second
+ * definition that silently diverges the day the first one changes. The summary line carries that meaning
+ * in words instead.
+ *
+ * `balance: null` → the line is omitted entirely (the view is unavailable, or this party has no orders).
+ * A missing balance is never rendered as ₹0 — "we don't know" and "nothing is owed" are different answers.
+ */
+export function mVendorLedger(lang: Lang, p: {
+  party: string; siteName?: string | null; paid: number; advance: number; balance: number | null
+  partyId?: string | null
+}): OutMessage {
+  const W = 21
+  const row = (label: string, amount: number) => label.padEnd(8) + rupees(amount).padStart(W - 8)
+  const head = `*${p.party}${p.siteName ? ` · ${p.siteName}` : ''}*`
+  const lead = pick(lang, {
+    en: p.balance == null ? '_Paid to date._' : '_Still owed on approved orders._',
+  })
+  const lines = [row(pick(lang, { en: 'Paid' }), p.paid)]
+  if (p.advance > 0) lines.push(row(pick(lang, { en: 'Advance' }), p.advance))
+  if (p.balance != null) {
+    lines.push('─'.repeat(W), row(pick(lang, { en: 'Balance' }), p.balance))
+  }
+  const block = '```\n' + lines.join('\n') + '\n```'
+  const tail = p.advance > 0 && p.balance === 0
+    ? '\n\n' + pick(lang, { en: `They're holding ${rupees(p.advance)} of ours.` })
+    : ''
+  return withLedger(lang, `${head}\n${lead}\n\n${block}${tail}`, p.partyId)
+}
+
+/** No payments at all for a party we DID resolve — an answer, not a failure. It carries the ledger button
+ *  too: "none on this site" is exactly the answer he will want to check for himself. */
+export function mPaymentNone(lang: Lang, p: { party: string; siteName?: string | null; partyId?: string | null }): OutMessage {
+  const scope = p.siteName ? `${p.party} on ${p.siteName}` : p.party
+  return withLedger(lang, pick(lang, { en: `No payments recorded for *${scope}* yet.` }), p.partyId)
+}
+
+/** The name was ambiguous — the nearest matches, as a tappable list. Ids ride as `rep_payee_<id>`. */
+export function mPayeePick(lang: Lang, p: { raw: string; closest: { id: string; name: string }[] }): OutMessage {
+  return {
+    kind: 'list',
+    body: pick(lang, { en: `Which *${trunc(p.raw, 40)}* do you mean?` }),
+    button: pick(lang, { en: 'Pick one' }),
+    rows: p.closest.slice(0, MAX_ROWS).map((c) => ({ id: `rep_payee_${c.id}`, title: trunc(c.name, ROW_TITLE) })),
+  }
+}
+
+/** Nobody by that name in this org's stakeholders. Says so plainly rather than answering ₹0. */
+export function mPayeeUnknown(lang: Lang, p: { raw: string }): OutMessage {
+  return { kind: 'text', body: pick(lang, { en: `I don't have anyone called *${trunc(p.raw, 40)}* on your books.` }) }
+}
+
+/** His words fit two-plus of the org's real sites and the model said so rather than guessing. Ids ride as
+ *  `rep_site_<project_id>`. Only ever built from projects that exist — no "nearest" filler. */
+export function mSitePick(lang: Lang, p: { raw: string; options: { id: string; name: string }[] }): OutMessage {
+  return {
+    kind: 'list',
+    body: pick(lang, { en: `Which *${trunc(p.raw, 40)}*?` }),
+    button: pick(lang, { en: 'Pick a site' }),
+    rows: p.options.slice(0, MAX_ROWS).map((o) => ({ id: `rep_site_${o.id}`, title: trunc(o.name, ROW_TITLE) })),
+  }
+}
+
+/** He named a site we cannot pin. Says so, and NEVER falls back to the all-sites total — answering a
+ *  question he did not ask, with a number that looks like the one he did, is the failure this replaces. */
+export function mSiteUnknown(lang: Lang, p: { raw: string; projects: string[] }): OutMessage {
+  const lines = [pick(lang, { en: `I don't have a site called *${trunc(p.raw, 40)}*.` })]
+  if (p.projects.length) {
+    lines.push('', pick(lang, { en: 'Your sites:' }), ...p.projects.slice(0, 10).map((n) => `· ${n}`))
+  }
+  return { kind: 'text', body: lines.join('\n') }
 }
 
 /**

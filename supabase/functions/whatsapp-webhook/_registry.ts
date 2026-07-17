@@ -17,6 +17,7 @@ import { runTransactionMessage, answerTransaction, commitInterrupted } from './_
 import { runProcurementMessage, answerProcurement, commitInterruptedProc } from './_agents/procurement.ts'
 import { runConcierge } from './_agents/concierge.ts'
 import { runSiteops, answerSiteops, commitInterruptedSiteops } from './_agents/siteops.ts'
+import { runReporting, answerReporting } from './_agents/reporting.ts'
 
 // The uniform turn context the dispatcher hands any agent. (The transaction agent's
 // TxnCtx already carries exactly these fields, so it consumes this directly.)
@@ -81,7 +82,21 @@ const SITEOPS: AgentDef = {
   commitInterrupted: (ctx, convo) => commitInterruptedSiteops(ctx, convo),
 }
 
-export const AGENTS: Record<string, AgentDef> = { TRANSACTION, CONCIERGE, PROCUREMENT, SITEOPS }
+// REPORTING — the read side, and the only agent that answers instead of recording. It is what keeps "is the
+// wiring done?" out of SITEOPS, where a question could be written down as its own answer.
+//
+// ONE case is built (a party's payment total, role-gated); everything else answers "coming soon". It HAS an
+// `answer` because that one case can end in a pick — "which Ramesh do you mean?" — and a pick is a pending
+// question the dispatcher must be able to route the reply back to. No `commitInterrupted`: a REPORTING pick
+// holds no half-written state, so an interruption costs nothing but the question, and the dispatcher's
+// credibility flow re-surfaces that by itself. See _agents/reporting.ts.
+const REPORTING: AgentDef = {
+  intent: 'REPORTING',
+  run: (ctx, text, opts) => runReporting(ctx, text, opts),
+  answer: (ctx, text, convo) => answerReporting(ctx, text, convo),   // may return 'not_an_answer' → dispatcher re-routes
+}
+
+export const AGENTS: Record<string, AgentDef> = { TRANSACTION, CONCIERGE, PROCUREMENT, SITEOPS, REPORTING }
 
 /** Resolve a router intent (or stored owning-agent) to its agent; unknown -> concierge. */
 export function agentFor(intent: string | null | undefined): AgentDef {

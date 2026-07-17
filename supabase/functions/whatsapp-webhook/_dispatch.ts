@@ -1,7 +1,8 @@
 // WhatsApp Sprint 4 dispatcher. Router classifies; THIS owns control flow + state
 // in wa_conversations. TRANSACTION now routes to the real Transaction agent (the
-// Sprint-3 legacy bridge + wa_sessions mirror are retired). Reporting/data queries
-// still bridge to the legacy handleQuery until a Reporting agent exists.
+// Sprint-3 legacy bridge + wa_sessions mirror are retired). Questions — a party's
+// payments, work progress — now have a REPORTING agent and route through the
+// registry like everything else; the legacy handleQuery bridge is gone (below).
 
 import { routeMessage, detectLanguage, type RouterDecision } from './_router.ts'
 import {
@@ -16,7 +17,6 @@ import { send, sendNow } from './_format.ts'
 import * as M from './_messages.ts'
 import type { Lang } from './_messages.ts'
 import type { TxnExtract } from './_extract.ts'
-import { handleQuery } from './_handlers.ts'   // reporting/query bridge only
 import { loadHistory } from './_history.ts'   // the conversation the router reads
 import { resurfaceBody, pendingSubjectOf, deferredOf, snapshotPending, type DeferredPending } from './_pending.ts'   // pure renderers + deferral snapshot for the credibility flow
 
@@ -65,18 +65,34 @@ async function markOriented(supabase: any, from: string): Promise<void> {
     .eq('phone_number', from).is('oriented_at', null)
 }
 
-// Reporting/data query the router doesn't model yet -> legacy handleQuery bridge.
-// Match ONLY genuine money/report words — NOT every "?", which used to swallow plain
-// conversational questions ("do you speak Hindi?") and dump them on the reports handler.
-// NAMED for what it matches: the MONEY/REPORT bridge to the legacy handleQuery. It stays ONLY until a
-// Reporting agent exists — deleting it today would strand every "how much did I pay Ramesh" with the
-// concierge. It must never again be read as "is this a question?".
+// DELETED (2026-07-17): MONEY_QUERY_RE + the handleQuery bridge. Its own comment said it stays "ONLY until a
+// Reporting agent exists" — REPORTING exists now (_agents/reporting.ts), so questions route through the
+// registry like every other agent, and the router decides they ARE questions by reading them (the ASKING IS
+// NOT REPORTING rule in the prompt). It leaves nothing behind, because it was never able to do the job:
 //
-// DELETED (2026-07-09): isAssistantQuestion / HELP_PHRASE_RE — a per-language list of capability phrases,
-// written to stop the B3 chase-batch override (also deleted) from swallowing "what can you do?". It was a
-// guard on a hack: it could only ever BLOCK a misroute, never route, and it needed a new entry for every
-// language, phrasing and transcription. The router reads the conversation now and needs neither.
-const MONEY_QUERY_RE = /how\s*much|balance|pending|due|outstanding|ledger|\btotal\b|statement|enta|entha|evariki/i
+//   • IT WAS LATIN-ONLY, and so half-blind. "ఎంత ఇచ్చాను రాముకి" and "कितना दिया रामू को" matched none of it —
+//     it carried romanized "enta/entha/evariki" but nothing in Telugu or Devanagari script. A supervisor
+//     asking about money in his own script could not reach the money path AT ALL. Exactly the bug that took
+//     out the pick matcher (which Telugu could never answer) and AFFIRM_NEG (which shipped a corrupted
+//     'vద్దు' for months). A word list cannot fail loudly. This is the last one in the routing path.
+//
+//   • IT COULD ONLY EVER SEE MONEY. A question about WORK — "3rd floor wiring ayipoyinda?" — matched nothing
+//     here and fell through to the residual, SITEOPS, which RECORDS what it is given. A man asking whether
+//     the wiring was finished could have it marked finished. Asking is not reporting; a question never writes.
+//
+//   • ITS TARGET LEAKED ACROSS ORGS. handleQuery ignored its `_registered` argument and read rough_entries
+//     with NO org_id filter on the SERVICE-ROLE client (RLS bypassed) — any registered number typing
+//     "pending" got the five most recent pending entries, payee and amount, of EVERY org in the database.
+//     Routing money questions to an honest "I can't answer that yet" is strictly better than answering them
+//     with other people's books.
+//
+// THE LEAK IS DEAD, NOT MOVED. This file's `import { handleQuery } from './_handlers.ts'` was the LAST
+// importer of that module — index.ts's own header already said the legacy handlers "are reached only via the
+// dispatcher's bridge". With the bridge gone, nothing imports _handlers.ts at all: handleQuery, and the
+// handleSessionReply path that calls it internally, are unreachable dead code. The unscoped read cannot run.
+// The module should be deleted outright, but that is its own change with its own blast radius (it still
+// holds parseAmount/fmtAmount lineage and the old image path), so it is left standing and orphaned here.
+// If any of it is ever revived, the org filter is not optional.
 
 // ── Agent-agnostic pending-question credibility ──────────────────────────────
 // A question we asked (ANY agent's) can be interrupted by a new turn. The DISPATCHER — never the agent —
@@ -380,8 +396,11 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
   // intent (a payment) is honoured as usual, with the welcome FOLDED into that one
   // reply (capture-first: never make them repeat themselves). A returning-after-a-gap
   // member just gets a light "welcome back" folded in. Stamped once via oriented_at.
+  // (The `&& !MONEY_QUERY_RE.test(text)` guard went with the word list. It existed so a first-ever message
+  // that was really a money QUESTION wasn't answered with an orientation blurb — and it is now structural:
+  // a question is NEW_INTENT / REPORTING, so it never reaches this CHITCHAT/AMBIGUOUS branch at all.)
   const firstContact = ctx.firstTouch === true
-  if (firstContact && (decision === 'CHITCHAT' || decision === 'AMBIGUOUS') && !MONEY_QUERY_RE.test(text)) {
+  if (firstContact && (decision === 'CHITCHAT' || decision === 'AMBIGUOUS')) {
     await runConcierge(supabase, {
       from, orgId, wamid, text, language: lang, mode: 'orientation',
       orientation: { name: ctx.senderName, orgName: await orgNameOf(supabase, orgId), role: registered?.role ?? null },
@@ -494,9 +513,6 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
       // Only a TEXT payment reaches here un-acked, and only a text payment is acked here.
       if (!ctx.audio && !ctx.image) await sendNow(supabase, from, M.mTxnAck(lang))
       await agent.run(actx, text, { prefix, lingering: view.lingering, history })
-    } else if (MONEY_QUERY_RE.test(text)) {
-      if (prefix) await send(supabase, from, { kind: 'text', body: prefix }, { org_id: orgId, wamid })
-      await handleQuery(supabase, text, from, registered)
     } else {
       // Procurement (materials request) gets the same instant ack as TRANSACTION, sent directly so it lands
       // before the slower sourcing reply. Concierge shares this branch but is conversational — no ack.
@@ -515,12 +531,10 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
       await agent.run(actx, text, { prefix, lingering: view.lingering, history })
     }
   } else if (decision === 'CHITCHAT') {
-    if (MONEY_QUERY_RE.test(text)) {
-      if (prefix) await send(supabase, from, { kind: 'text', body: prefix }, { org_id: orgId, wamid })
-      await handleQuery(supabase, text, from, registered)
-    } else {
-      await agentFor('CONCIERGE').run(actx, text, { prefix, lingering: view.lingering, history })
-    }
+    // A money question is no longer smuggled through here by a regex: it is NEW_INTENT / REPORTING and runs
+    // in the branch above. What stays CHITCHAT is what always should have been — a question about ME rather
+    // than about the records ("what can you do?"), which the concierge has always owned.
+    await agentFor('CONCIERGE').run(actx, text, { prefix, lingering: view.lingering, history })
   } else if (decision === 'AMBIGUOUS') {
     // Only reached with NO pending question (the pending case re-surfaced + returned above).
     await send(supabase, from, M.mDisambiguate(lang, prefix), { org_id: orgId, wamid })

@@ -55,3 +55,21 @@
 {"id":"pend_explicit_drop","text":"leave it, drop that question","pending":{"agent":"SITEOPS","question":"which project is this for?","slots":{"kind":"siteops_project","messages":["cars are getting damaged"],"candidates":[{"id":"p1","name":"Dr Sonudharya"},{"id":"p2","name":"ASM Elite"}]}},"expect":{"decision":"CHITCHAT"}}
 {"id":"pend_photo_window_new_narration","text":"electrical conduit laid on third floor","pending":{"agent":"SITEOPS","question":"got the photo — what's it for?","slots":{"kind":"siteops_photo","piece_text":"[photo received]","candidates":[]}},"expect":{"decision":"NEW_INTENT","intent_agent":"SITEOPS"}}
 {"id":"pend_typed_pick_wrong_subject","text":"cement delivery came in short by 10 bags","pending":{"agent":"SITEOPS","question":"which task did you mean?","slots":{"kind":"siteops_typed_pick","piece_text":"tiling done","candidates":[{"id":"t1","title":"Tiling — Ground"},{"id":"t2","title":"Tiling — First"}]}},"expect":{"decision":"NEW_INTENT","intent_agent":"SITEOPS"}}
+{"id":"report_money_en","text":"how much did we pay ramesh in total?","expect":{"decision":"NEW_INTENT","intent_agent":"REPORTING"}}
+{"id":"report_money_teng","text":"ramu ki entha icham?","expect":{"decision":"NEW_INTENT","intent_agent":"REPORTING"}}
+{"id":"report_money_te_script","text":"రాముకి ఎంత ఇచ్చాము?","expect":{"decision":"NEW_INTENT","intent_agent":"REPORTING"}}
+{"id":"report_money_hi_script","text":"कितना दिया रामू को?","expect":{"decision":"NEW_INTENT","intent_agent":"REPORTING"}}
+{"id":"report_money_due","text":"what's still due to the tile vendor?","expect":{"decision":"NEW_INTENT","intent_agent":"REPORTING"}}
+{"id":"report_money_per_project","text":"how much have we spent on The Pride so far?","expect":{"decision":"NEW_INTENT","intent_agent":"REPORTING"}}
+{"id":"report_money_balance_teng","text":"ramesh balance enta undi","expect":{"decision":"NEW_INTENT","intent_agent":"REPORTING"}}
+{"id":"report_progress_en","text":"is the 3rd floor wiring done?","expect":{"decision":"NEW_INTENT","intent_agent":"REPORTING"}}
+{"id":"report_progress_teng","text":"3rd floor wiring ayipoyinda?","expect":{"decision":"NEW_INTENT","intent_agent":"REPORTING"}}
+{"id":"report_progress_te_script","text":"మూడో ఫ్లోర్ వైరింగ్ అయిపోయిందా?","expect":{"decision":"NEW_INTENT","intent_agent":"REPORTING"}}
+{"id":"report_progress_pending","text":"what's still pending on the 2nd floor?","expect":{"decision":"NEW_INTENT","intent_agent":"REPORTING"}}
+{"id":"report_progress_didit","text":"did the slab pour happen yesterday?","expect":{"decision":"NEW_INTENT","intent_agent":"REPORTING"}}
+{"id":"ask_tell_pair_tell","text":"3rd floor wiring done","expect":{"decision":"NEW_INTENT","intent_agent":"SITEOPS"}}
+{"id":"ask_tell_pair_ask","text":"3rd floor wiring done aa?","expect":{"decision":"NEW_INTENT","intent_agent":"REPORTING"}}
+{"id":"qmark_is_not_a_question","text":"ramu 5000 cash?","expect":{"decision":"NEW_INTENT","intent_agent":"TRANSACTION"}}
+{"id":"question_without_qmark","text":"ramu ki entha icham","expect":{"decision":"NEW_INTENT","intent_agent":"REPORTING"}}
+{"id":"cap_question_is_not_reporting","text":"how do I check payments in this?","expect":{"decision":"CHITCHAT","intent_agent":"CONCIERGE"}}
+{"id":"report_interrupts_pending","text":"by the way how much did we pay ramesh?","pending":{"agent":"SITEOPS","question":"which task did you mean?","slots":{"kind":"siteops_typed_pick","piece_text":"tiling done","candidates":[{"id":"t1","title":"Tiling — Ground"},{"id":"t2","title":"Tiling — First"}]}},"expect":{"decision":"NEW_INTENT","intent_agent":"REPORTING"}}

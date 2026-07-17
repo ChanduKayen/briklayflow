@@ -47,7 +47,21 @@ export interface Seed {
   wa_message_log?: Row[]                     // the conversation history the router reads (newest-first, as the real query returns)
   site_narration_id?: string                // id returned by the capture-first insert().select('id').single()
   site_narrations?: Row[]                    // narrations ALREADY captured (the duplicate-narration guard reads these)
+  // REPORTING case 1 — the money tables. NOTE they have no CREATE TABLE in supabase/migrations (they predate
+  // the folder), so table_columns.ts has no entry for them and column enforcement DOES NOT APPLY here: a
+  // typo'd column passes this fake and fails in prod. Their shape is taken from the write RPC
+  // (20260513600000) and from src/lib/vendorTrackingApi.ts, which is live app code.
+  stakeholders?: Row[]
+  transactions?: Row[]
+  txn_allocations?: Row[]
+  /** v_vendor_balance — a VIEW, one row per (org_id, stakeholder_id, project_id), column `owed`. Seed it
+   *  ABSENT to exercise the unreadable-view path (the balance line is then omitted, never rendered as ₹0). */
+  v_vendor_balance?: Row[]
 }
+
+/** The filters a query collected. `eq` is what datasetFor has always taken; `neq`/`ins` are applied ONLY by
+ *  the tables that opt in (see below) — globally they remain no-ops, deliberately. */
+type Filters = { eq: [string, unknown][]; neq: [string, unknown][]; ins: [string, unknown[]][] }
 
 export interface Write { table: string; op: 'insert' | 'update' | 'upsert'; payload: Row; filters: [string, unknown][] }
 
@@ -68,8 +82,31 @@ function eqVal(filters: [string, unknown][], key: string): unknown {
   return f ? f[1] : undefined
 }
 
-function datasetFor(table: string, filters: [string, unknown][], seed: Seed): Row[] {
+/**
+ * Rows for a select. `q` carries neq/in as well as eq, but ONLY the tables below that ask for them apply
+ * them — every other case reads `filters` exactly as it always has.
+ *
+ * WHY NOT APPLY neq/in EVERYWHERE (2026-07-17): they are real filters in prod and no-ops here, which is a
+ * lie of the kind this file exists to prevent — `_siteops_candidates.ts` genuinely relies on
+ * `.neq('status','done')` and `.in('status', [...])`, so those journeys are today matching rows postgres
+ * would never return. Switching them on globally is the right fix and a big one (it moves the candidate
+ * builder under most of the siteops suite), so it is NOT bundled into the REPORTING case. The money tables
+ * opt in because `.neq('status','Voided')` and `.in('txn_id', ids)` ARE the correctness of that feature.
+ */
+function datasetFor(table: string, filters: [string, unknown][], seed: Seed, q?: Filters): Row[] {
+  const applyAll = (rows: Row[]): Row[] => {
+    let out = rows
+    for (const [k, v] of filters) out = out.filter((r) => r[k] === v)
+    for (const [k, v] of q?.neq ?? []) out = out.filter((r) => r[k] !== v)
+    for (const [k, vs] of q?.ins ?? []) out = out.filter((r) => vs.includes(r[k]))
+    return out
+  }
   switch (table) {
+    // ── REPORTING case 1 (eq + neq + in all honoured — see above) ──────────────────────────────────────
+    case 'stakeholders':    return applyAll(seed.stakeholders ?? [])
+    case 'v_vendor_balance': return applyAll(seed.v_vendor_balance ?? [])
+    case 'transactions':    return applyAll(seed.transactions ?? [])
+    case 'txn_allocations': return applyAll(seed.txn_allocations ?? [])
     case 'chase_batches':         return seed.chase_batches ?? []
     case 'projects':              return seed.projects ?? []
     case 'cause_taxonomy':        return seed.cause_taxonomy ?? []
@@ -162,6 +199,8 @@ export function fakeSupabase(seed: Seed = {}, opts: FakeOpts = {}): FakeSupabase
 
   function builder(table: string) {
     const filters: [string, unknown][] = []
+    // Recorded for the tables that opt in (datasetFor's `q`). Still invisible to every other table.
+    const q: Filters = { eq: filters, neq: [], ins: [] }
     let op: 'select' | 'insert' | 'update' | 'upsert' = 'select'
     let payload: Row = null
     let single = false
@@ -175,7 +214,7 @@ export function fakeSupabase(seed: Seed = {}, opts: FakeOpts = {}): FakeSupabase
         return { data: null, error: { code: '42703', message: `column ${table}.${missing[0]} does not exist` } }
       }
       if (op === 'select') {
-        const rows = datasetFor(table, filters, seed)
+        const rows = datasetFor(table, filters, seed, q)
         return { data: single ? (rows[0] ?? null) : rows, error: null }
       }
       // CHECK enforcement — a violating row is REJECTED (error returned, write not recorded), like postgres.
@@ -196,8 +235,8 @@ export function fakeSupabase(seed: Seed = {}, opts: FakeOpts = {}): FakeSupabase
       upsert: (p: Row) => { op = 'upsert'; payload = p; return api },
       delete: () => { op = 'update'; payload = null; return api },
       eq: (k: string, v: unknown) => { filters.push([k, v]); return api },
-      neq: () => api,
-      in: () => api,
+      neq: (k: string, v: unknown) => { q.neq.push([k, v]); return api },
+      in: (k: string, vs: unknown[]) => { q.ins.push([k, vs ?? []]); return api },
       is: () => api,
       not: () => api,
       gte: () => api,
