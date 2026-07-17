@@ -88,7 +88,8 @@
       "Bash(python -)",
       "Bash(git rm *)",
       "Bash(rm -f supabase/functions/whatsapp-webhook/__tests__/assistant_question.test.ts)",
-      "Bash(python3 -)"
+      "Bash(python3 -)",
+      "Bash(\"C:/Users/koppi/.deno/bin/deno.exe\" check *)"
     ]
   }
 }

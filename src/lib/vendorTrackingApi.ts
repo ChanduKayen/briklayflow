@@ -148,8 +148,20 @@ export async function createVendorPurchase(txn: TrackTxn, orgId: string, b: Vend
   if (!res?.success || !res.po_id) throw new Error(res?.error ?? 'Could not record the purchase');
   // Declared at payment time → auto-approve so it's immediately clearable. Record the bill
   // amount (money) when one was attached; never touch stock/GRN.
+  //
+  // bill_recorded_at RIDES WITH THE AMOUNT, ALWAYS. This was the only writer of vendor_bill_amount
+  // that left the timestamp null (RecordBillSheet, PurchaseOrderDetail and ProjectPurchaseOrders
+  // all set it), and a bill with an amount but no date is invisible to the party ledger: its credit
+  // row is keyed on this timestamp, so `if (!po.bill_recorded_at) continue` silently dropped the
+  // purchase. Net Balance then read as (0 − every payment), which is how Pattabhi Traders showed
+  // "Advance Dr ₹1,28,014.96" while the tile beside it said ₹33,375 of bills were recorded.
+  // An amount without a date is not a record of anything.
+  const billedAt = new Date().toISOString();
   await supabase.from('purchase_orders')
-    .update({ approval_status: 'APPROVED', ...(b.hasBill ? { vendor_bill_amount: b.amount } : {}) })
+    .update({
+      approval_status: 'APPROVED',
+      ...(b.hasBill ? { vendor_bill_amount: b.amount, bill_recorded_at: billedAt, vendor_bill_date: billedAt.split('T')[0] } : {}),
+    })
     .eq('po_id', res.po_id);
   return { poId: res.po_id };
 }

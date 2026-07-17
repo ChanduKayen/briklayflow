@@ -277,7 +277,30 @@ function extractJson(raw: string): any | null {
 /** Parse + validate LLM output defensively. Returns null to trigger the fallback. */
 function validate(raw: string, input: RouterInput, lang: string): RouterDecision | null {
   const p = extractJson(raw)
-  if (!p || !DECISIONS.includes(p.decision)) return null
+  if (!p) return null
+
+  // THE SLOT CONFUSION (a code floor for a model that understood perfectly and filled the wrong box).
+  // Live: {"decision":"REPORTING","intent_agent":"TRANSACTION","reasoning":"User is asking for payment
+  // status to a specific party, not supplying a fact."} — the ask/tell axis, read correctly, in the model's
+  // own words. But REPORTING is an AGENT, and it went in the DECISION box, so the enum check below rejected
+  // the whole thing and the fallback dropped a perfect classification onto CHITCHAT/CONCIERGE.
+  //
+  // The two axes (see the header) are OUR abstraction, not a natural one: asked "what is this message?", the
+  // model has one answer and `decision` is the first field on the form. Look at what it did with the field
+  // it had left — intent_agent:"TRANSACTION", ownership demoted to TOPIC (it's about money). Both boxes are
+  // filled, both mean something, and the VERDICT is in the first one. So the decision slot wins.
+  //
+  // This is a translation, not a guess: it fires only when `decision` holds a value we already know to be an
+  // agent, and it moves that value back onto the ownership axis. DECISIONS stays four values wide forever.
+  if (!DECISIONS.includes(p.decision) && AGENTS.includes(p.decision)) {
+    console.log(`[router] slot confusion salvaged: decision="${p.decision}" is an agent → intent_agent`)
+    p.intent_agent = p.decision
+    // CONCIERGE is the one agent whose turn is not actionable — it owns the chitchat, so that is what
+    // naming it means. Every other agent name is a new actionable turn.
+    p.decision = p.decision === 'CONCIERGE' ? 'CHITCHAT' : 'NEW_INTENT'
+  }
+
+  if (!DECISIONS.includes(p.decision)) return null
 
   // NOTE: we do NOT gate on the model's self-reported confidence. Empirically it
   // emits confidence:0.0 on plenty of CORRECT decisions, so a floor would discard
@@ -299,3 +322,7 @@ function validate(raw: string, input: RouterInput, lang: string): RouterDecision
     reasoning: typeof p.reasoning === 'string' ? p.reasoning.slice(0, 200) : '',
   }
 }
+
+// The whole router is one LLM call away from the network, so validate() is where the testable judgement
+// lives — the salvage above is driven directly (router_slot_confusion.test.ts).
+export const _validateForTest = validate

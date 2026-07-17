@@ -57,6 +57,11 @@ export interface Seed {
   /** v_vendor_balance — a VIEW, one row per (org_id, stakeholder_id, project_id), column `owed`. Seed it
    *  ABSENT to exercise the unreadable-view path (the balance line is then omitted, never rendered as ₹0). */
   v_vendor_balance?: Row[]
+  /** v_party_orders — a VIEW: one row per (org_id, stakeholder_id, project_id, party_kind), columns
+   *  `ordered` and `billed`. FACTS ONLY — there is no `owed` any more; the balance (billed − paid) is
+   *  composed by the agent. Seed it ABSENT to exercise the no-orders path (the plain paid-to-date answer,
+   *  never a card of zeros). */
+  v_party_orders?: Row[]
 }
 
 /** The filters a query collected. `eq` is what datasetFor has always taken; `neq`/`ins` are applied ONLY by
@@ -105,6 +110,7 @@ function datasetFor(table: string, filters: [string, unknown][], seed: Seed, q?:
     // ── REPORTING case 1 (eq + neq + in all honoured — see above) ──────────────────────────────────────
     case 'stakeholders':    return applyAll(seed.stakeholders ?? [])
     case 'v_vendor_balance': return applyAll(seed.v_vendor_balance ?? [])
+    case 'v_party_orders':  return applyAll(seed.v_party_orders ?? [])
     case 'transactions':    return applyAll(seed.transactions ?? [])
     case 'txn_allocations': return applyAll(seed.txn_allocations ?? [])
     case 'chase_batches':         return seed.chase_batches ?? []

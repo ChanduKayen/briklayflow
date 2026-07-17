@@ -7,6 +7,7 @@ import { useSnackbar } from './Snackbar';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import { ImageLightbox } from './ImageLightbox';
 import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
+import { searchPayees, rankPayeeName, PAYEE_SEARCH_FLOOR } from '../lib/payeeSearch';
 import { fileRoughEntry } from './day-book/fileEntry';
 
 // ── Walnut-ledger palette (mirrors NewTransaction.tsx) ──────────────────────────
@@ -49,16 +50,16 @@ function FieldQuestion({ text, missing }: { text: string; missing?: boolean }) {
 }
 
 // ── Payee fuzzy sort ──────────────────────────────────────────────────────────
+// The scoring itself lives in src/lib/payeeSearch.ts, mirroring the Edge scorer (_match.ts) that WhatsApp
+// uses — so "sreenu" finds Srinu in the Day Book and on the phone, or in neither. What was here was a THIRD
+// matcher: a character-overlap heuristic with no edit distance, which only ever SORTED (by what the AI
+// heard) while the list itself was filtered by a raw `.includes()`. So the ranking was fuzzy and the
+// filtering was exact — the one that decided whether Srinu appeared at all was the one that couldn't spell.
 
+/** 0..100, for the "did you mean" hint next to a row — the AI's heard name vs a stored one. */
 function payeeSimilarityScore(name: string, q: string): number {
   if (!q) return 0;
-  const n  = name.toLowerCase();
-  const qL = q.toLowerCase();
-  if (n === qL) return 100;
-  if (n.includes(qL) || qL.includes(n.split(' ')[0])) return 80;
-  if (n.split(' ')[0] === qL.split(' ')[0]) return 60;
-  const overlap = [...qL].filter((c) => n.includes(c)).length;
-  return Math.round((overlap / Math.max(qL.length, 1)) * 40);
+  return Math.round(rankPayeeName(q, name) * 100);
 }
 
 function sortByPayeeSimilarity(list: any[], rawName: string): any[] {
@@ -484,9 +485,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
   }, [onClose]);
 
   // ── Derived ────────────────────────────────────────────────────────────────
-  const filteredPayees = stakeholders.filter(
-    (s) => s.name.toLowerCase().includes(payeeSearch.toLowerCase())
-  );
+  const filteredPayees = searchPayees(stakeholders, payeeSearch);
 
   // THE REMARK IS NOT MANDATORY. Payee + site + amount is a complete transaction — who, where, how
   // much. The remark is a note ON it, and a ledger that refuses to record a payment because nobody
@@ -858,11 +857,11 @@ function PopupContents({
     advanceAfter('payee');
   };
 
-  // Payee search list: sorted by similarity to ai.payee_raw, filtered by typed text
+  // Payee search list. TWO different questions, and they were tangled: with NO typed text the ordering
+  // question is "who did the AI hear?" (sort by similarity to payee_raw); the moment he types, the question
+  // is "who is he looking for?" and searchPayees ranks by THAT — his query, not the AI's guess.
   const sortedPayees = sortByPayeeSimilarity(stakeholders, ai.payee_raw || '');
-  const searchedPayees = payeeSearch
-    ? sortedPayees.filter((s: any) => s.name.toLowerCase().includes(payeeSearch.toLowerCase()))
-    : sortedPayees;
+  const searchedPayees = payeeSearch ? searchPayees(stakeholders, payeeSearch) : sortedPayees;
   // The name the owner typed (or what the AI heard) — used to personalise the "Add …" CTA.
   const typedName = (payeeSearch.trim() || ai.payee_raw || '').trim();
 
@@ -1217,8 +1216,11 @@ function PopupContents({
 
                     {/* ── Matches, when present ── */}
                     {hasMatches && searchedPayees.slice(0, 8).map((s: any) => {
+                      // The hint CLAIMS a match ("· matched 'sreenu'"), so it answers to the same floor as
+                      // everything else — under the old overlap scale, 30/100 was a coin toss wearing a fact's
+                      // clothes. PAYEE_SEARCH_FLOOR is the one number that decides "is this near?" anywhere.
                       const score = payeeSimilarityScore(s.name, ai.payee_raw || '');
-                      const showHint = ai.payee_raw && score > 30 && s.name.toLowerCase() !== (ai.payee_raw || '').toLowerCase();
+                      const showHint = ai.payee_raw && score >= PAYEE_SEARCH_FLOOR * 100 && s.name.toLowerCase() !== (ai.payee_raw || '').toLowerCase();
                       return (
                         <button key={s.stakeholder_id} type="button"
                           onMouseDown={(e) => { e.preventDefault(); selectPayee(s.stakeholder_id, s.name); }}

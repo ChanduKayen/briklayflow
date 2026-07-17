@@ -324,6 +324,13 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   // payment answer (partyLedgerLink), so the number he was told and the payments behind it are one tap apart.
   // Read once, as the initial state: closing the drawer must not re-open it, and must not touch the URL.
   const [drawerStk, setDrawerStk] = useState<string | null>(() => searchParams.get('stakeholder'));
+  // `&project=<id>` narrows that drawer to one site. A WhatsApp answer about a SITE quoted a site's number,
+  // so its button must land on that site's ledger — a whole-party ledger behind a per-site figure reads as a
+  // contradiction. Only honoured for the deep-linked party: tapping a DIFFERENT party in the list is a fresh
+  // question about them, and must not inherit a site filter from a link he followed earlier.
+  const deepLinkStk = searchParams.get('stakeholder');
+  const deepLinkProject = searchParams.get('project');
+  const [drawerProject, setDrawerProject] = useState<string | null>(() => searchParams.get('project'));
 
   // Direction-aware drag-to-sum: a Set of txn_ids the accountant rubber-bands.
   const [sumSel, setSumSel] = useState<Set<string>>(new Set());
@@ -1259,7 +1266,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                         dir={dir}
                         payee={genExp ? ((txn.remarks || '').trim() || 'General expense') : (txn.stakeholders?.name || 'Unknown')}
                         stakeholderId={genExp ? null : (txn.stakeholder_id ?? null)}
-                        onPayeeClick={() => { if (txn.stakeholder_id) setDrawerStk(txn.stakeholder_id); }}
+                        onPayeeClick={() => { if (txn.stakeholder_id) { setDrawerProject(txn.stakeholder_id === deepLinkStk ? deepLinkProject : null); setDrawerStk(txn.stakeholder_id); } }}
                         context={context}
                         anchor={anchor}
                         info={linkedInfo}
@@ -1402,7 +1409,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
       <ImageLightbox url={lightboxUrl} title="Payment Proof" onClose={() => setLightboxUrl(null)} />
 
       {drawerStk && (
-        <StakeholderLedgerDrawer isOpen={!!drawerStk} onClose={() => setDrawerStk(null)} stakeholderId={drawerStk} />
+        <StakeholderLedgerDrawer isOpen={!!drawerStk} onClose={() => setDrawerStk(null)} stakeholderId={drawerStk} projectId={drawerProject} />
       )}
 
       {/* bulk action bar */}

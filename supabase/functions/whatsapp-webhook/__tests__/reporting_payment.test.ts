@@ -356,11 +356,35 @@ suite('reporting case 1 — every party answer carries its ledger', () => {
     expect(/\/ledger\?stakeholder=S1/.test(m.cta?.url ?? '')).toBe(true)
   })
 
-  test('a site answer carries it too', async () => {
+  // A SITE ANSWER MUST LAND ON THAT SITE'S LEDGER. The message quoted The Pride's ₹1,00,000; a button
+  // opening his ledger across every site would show ₹1,40,000 — two numbers that disagree, with nothing to
+  // tell him which answers his question.
+  test('a site answer deep-links to THAT site\'s ledger', async () => {
     __readAskForTests(ask({ party: 'Ramesh Kumar', site: 'The Pride' }))
     const fake = fakeSupabase(seed('management', money()))
     await runReporting(ctxFor(fake), 'ramesh kumar pride?', {})
-    expect(/\/ledger\?stakeholder=S1/.test(ctaOf(fake).cta?.url ?? '')).toBe(true)
+    const url = ctaOf(fake).cta?.url ?? ''
+    expect(/\/ledger\?stakeholder=S1/.test(url)).toBe(true)
+    expect(/[?&]project=P1/.test(url)).toBe(true)
+  })
+
+  // He asked about everywhere — the whole ledger IS the answer, so no filter is imposed on him.
+  test('an all-sites answer carries NO project filter', async () => {
+    __readAskForTests(ask({ party: 'Ramesh Kumar' }))
+    const fake = fakeSupabase(seed('management', money()))
+    await runReporting(ctxFor(fake), 'ramesh kumar?', {})
+    expect(/project=/.test(ctaOf(fake).cta?.url ?? '')).toBe(false)
+  })
+
+  test('a vendor\'s ledger block deep-links to the site it priced', async () => {
+    __readAskForTests(ask({ party: 'Ramesh Traders', site: 'The Pride' }))
+    const fake = fakeSupabase(seed('management', {
+      ...money(),
+      stakeholders: [{ stakeholder_id: 'S1', name: 'Ramesh Traders', org_id: ORG, type: 'Vendor' }],
+      v_vendor_balance: [{ org_id: ORG, stakeholder_id: 'S1', project_id: 'P1', owed: 350000 }],
+    }))
+    await runReporting(ctxFor(fake), 'ramesh traders pride balance?', {})
+    expect(/[?&]project=P1/.test(ctaOf(fake).cta?.url ?? '')).toBe(true)
   })
 
   // "None on this site" is exactly the answer he'll want to check for himself.
@@ -384,83 +408,24 @@ suite('reporting case 1 — every party answer carries its ledger', () => {
   })
 })
 
-// A VENDOR has a ledger: approved POs, less what we've paid. It is READ from v_vendor_balance — the view's
-// own header forbids recomputing it. Everyone else keeps the paid-to-date answer, because for them no
-// balance exists in any table and "Balance ₹0" would state as fact something we do not know.
-suite('reporting case 1 — a vendor gets the ledger block', () => {
-  const vendor = (extra: Partial<Seed> = {}): Partial<Seed> => ({
-    ...money(),
-    stakeholders: [{ stakeholder_id: 'S1', name: 'Ramesh Traders', org_id: ORG, type: 'Vendor' }],
-    v_vendor_balance: [{ org_id: ORG, stakeholder_id: 'S1', project_id: 'P1', owed: 350000 }],
-    ...extra,
-  })
-
-  test('the block is monospace, totals-only, and the balance is the view\'s', async () => {
-    __readAskForTests(ask({ party: 'Ramesh Traders', site: 'The Pride' }))
-    const fake = fakeSupabase(seed('management', vendor()))
-    await runReporting(ctxFor(fake), 'ramesh traders pride balance?', {})
-    const body = out(fake)[0]
-    expect(body.includes('```')).toBe(true)              // monospace, or the columns can't align
-    expect(/Paid\s+₹1,00,000/.test(body)).toBe(true)     // P1 allocations: 60k + 40k
-    expect(/Balance\s+₹3,50,000/.test(body)).toBe(true)  // straight from v_vendor_balance.owed
-    expect(body.includes('│')).toBe(false)               // a rule, never a box — a wrapped border is garbage
-  })
-
-  // The clamp destroys "how much are they holding"; the ADVANCE rows are a fact, and survive it.
-  test('an advance they hold is named — the thing the view\'s GREATEST(0,…) throws away', async () => {
-    __readAskForTests(ask({ party: 'Ramesh Traders', site: 'The Pride' }))
-    const fake = fakeSupabase(seed('management', vendor({
-      transactions: [{ txn_id: 'T1', stakeholder_id: 'S1', org_id: ORG, total_amount: 50000, status: 'Posted' }],
-      txn_allocations: [{ txn_id: 'T1', project_id: 'P1', allocated_amount: 50000, order_type: 'ADVANCE' }],
-      v_vendor_balance: [{ org_id: ORG, stakeholder_id: 'S1', project_id: 'P1', owed: 0 }],
-    })))
-    await runReporting(ctxFor(fake), 'ramesh traders pride?', {})
-    const body = out(fake)[0]
-    expect(/Advance\s+₹50,000/.test(body)).toBe(true)
-    expect(/holding ₹50,000 of ours/.test(body)).toBe(true)
-  })
-
-  // "We don't know" and "nothing is owed" are different answers. Only one is safe to render as a number.
-  test('an unreadable view OMITS the balance line — it never becomes ₹0', async () => {
-    __readAskForTests(ask({ party: 'Ramesh Traders', site: 'The Pride' }))
-    const fake = fakeSupabase(seed('management', vendor({ v_vendor_balance: [] })))
-    await runReporting(ctxFor(fake), 'ramesh traders pride?', {})
-    const body = out(fake)[0]
-    expect(/Paid\s+₹1,00,000/.test(body)).toBe(true)
-    expect(/Balance/.test(body)).toBe(false)
-    expect(/Paid to date/.test(body)).toBe(true)         // the lead says what it IS, not what it isn't
-  })
-
-  // The org filter is not optional: the view is security_invoker and we call it as service role, so RLS
-  // scopes nothing. Another org's payable must not be summed into his.
-  test('another org\'s payable is never summed in', async () => {
-    __readAskForTests(ask({ party: 'Ramesh Traders', site: 'The Pride' }))
-    const fake = fakeSupabase(seed('management', vendor({
-      v_vendor_balance: [
-        { org_id: ORG, stakeholder_id: 'S1', project_id: 'P1', owed: 350000 },
-        { org_id: 'org-OTHER', stakeholder_id: 'S1', project_id: 'P1', owed: 900000 },
-      ],
-    })))
-    await runReporting(ctxFor(fake), 'ramesh traders pride?', {})
-    expect(/Balance\s+₹3,50,000/.test(out(fake)[0])).toBe(true)
-    expect(/12,50,000|9,00,000/.test(out(fake)[0])).toBe(false)
-  })
-
-  // A worker has no readable balance — the WO burn-down isn't wired here yet — so he keeps the total.
-  test('a NON-vendor keeps the paid-to-date answer, with no balance line', async () => {
-    __readAskForTests(ask({ party: 'Ramesh Kumar' }))
-    const fake = fakeSupabase(seed('management', {
-      ...money(),
-      stakeholders: [{ stakeholder_id: 'S1', name: 'Ramesh Kumar', org_id: ORG, type: 'Worker' }],
-      v_vendor_balance: [{ org_id: ORG, stakeholder_id: 'S1', project_id: 'P1', owed: 999999 }],  // must be ignored
-    }))
-    await runReporting(ctxFor(fake), 'ramesh kumar?', {})
-    const body = out(fake)[0]
-    expect(/₹1,40,000/.test(body)).toBe(true)
-    expect(/Balance/.test(body)).toBe(false)
-    expect(/999,999|9,99,999/.test(body)).toBe(false)
-  })
-})
+// ── GRAVE: "a vendor gets the ledger block" (v_vendor_balance.owed) — DELETED 2026-07-17 ────────────────
+// Five tests lived here and all five passed, right up until a live probe of Pattabhi Traders proved the
+// thing they were protecting was wrong. They pinned a card reading `Paid` over a rule over `Balance`, where
+// Paid was every rupee ever paid and Balance was `v_vendor_balance.owed` — a number that netted payments
+// across unrelated POs inside a project, measured ORDERS when the liability is the BILL, and clamped a
+// ₹96,640 credit to zero before reporting ₹8,375 owed.
+//
+// The tests could not have caught it. They asserted the card faithfully rendered whatever the view returned
+// ("the balance is the view's"), which it did. Nothing asked whether the view was right, or whether two
+// numbers under a subtraction rule shared a denominator. A gate that pins "we display X correctly" can never
+// notice that X is a lie — and this one made the lie load-bearing for a month.
+//
+// The replacement is __tests__/party_account.test.ts, built on Chandu's real production rows, asserting the
+// arithmetic itself: Balance = billed − paid, signed, unclamped, with Ordered kept out of the column so
+// nobody subtracts a commitment. v_vendor_balance is dead code in the database; v_party_orders emits facts
+// and composes nothing.
+//
+// What survives here unchanged: the paid-to-date suites above. They were never wrong.
 
 suite('reporting case 1 — the role gate', () => {
   for (const role of ['management', 'accountant', 'principal']) {

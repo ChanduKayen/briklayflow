@@ -62,12 +62,20 @@ export const reviewLink = (siteCode?: string | null): Link => ({
 /** The Day Book itself — a place, for when we wrote money but hold no entry id. */
 export const dayBookLink = (): Link => ({ text: 'Open Day Book', url: url('/logbook') })
 
-/** ONE PARTY'S LEDGER — every payment to them, opened on the stakeholder drawer. The answer on WhatsApp is
- *  a number; this is the working behind it, which is what he reaches for the moment the number surprises
- *  him. `?stakeholder=` is read by Ledger.tsx and opens StakeholderLedgerDrawer directly. */
-export const partyLedgerLink = (stakeholderId: string): Link => ({
+/**
+ * ONE PARTY'S LEDGER — the working behind the number, which is what he reaches for the moment the number
+ * surprises him. `?stakeholder=` opens StakeholderLedgerDrawer directly (read by Ledger.tsx).
+ *
+ * `projectId` NARROWS IT TO THE SITE THE ANSWER WAS ABOUT. This is not a nicety: a reply that said
+ * "Ramesh · The Pride — ₹1,00,000" behind a button opening his ledger across EVERY site would show a
+ * different, larger number than the message the button is attached to — and of two numbers that disagree,
+ * the man has no way to know which is the answer to his question. The site rides through so the page and the
+ * message say the same thing. Omitted when he asked about everywhere, which is the whole ledger anyway.
+ */
+export const partyLedgerLink = (stakeholderId: string, projectId?: string | null): Link => ({
   text: 'View ledger',
-  url: url(`/ledger?stakeholder=${encodeURIComponent(stakeholderId)}`),
+  url: url(`/ledger?stakeholder=${encodeURIComponent(stakeholderId)}`
+    + (projectId ? `&project=${encodeURIComponent(projectId)}` : '')),
 })
 
 /**

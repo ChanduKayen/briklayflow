@@ -10,6 +10,7 @@ import type { Dispatch, SetStateAction } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { X, Mail, Lock, ArrowRight } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { safeRedirect } from '../../lib/auth/routes';
 import { V, font, serif, terraGrad } from './landingTokens';
 
 type Mode = 'signin' | 'signup';
@@ -37,7 +38,10 @@ export default function AuthPanel({
 }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const redirectTo = new URLSearchParams(location.search).get('redirect');
+  // Where he was headed before the guard sent him here — a WhatsApp "View ledger" deep link, usually,
+  // since WhatsApp's in-app browser carries no session. safeRedirect() because this value comes off a URL
+  // anyone can compose: unvalidated, `?redirect=//evil.example` makes our own login screen the redirector.
+  const redirectTo = safeRedirect(new URLSearchParams(location.search).get('redirect'));
 
   const signin = mode === 'signin';
 
@@ -61,7 +65,11 @@ export default function AuthPanel({
     setError(null);
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: window.location.origin },
+      // Google leaves the app entirely, so a deep link can only survive by riding in THIS url — there is
+      // no component state to come back to. Password sign-in navigates in-page and keeps its own copy.
+      // Lands on the target path directly; supabase-js (detectSessionInUrl) exchanges the code wherever
+      // it lands, not only at the root.
+      options: { redirectTo: window.location.origin + (redirectTo ?? '') },
     });
     // On success the browser navigates away to Google; nothing else runs here.
     if (error) { setError(error.message); setLoading(false); }

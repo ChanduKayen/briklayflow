@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { billDateOf, BILL_DATE_COLUMNS } from '../lib/partyLedger';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { usePeek } from '../context/PeekContextCore';
@@ -144,7 +145,7 @@ export default function StakeholderDetail({ session }: { session: Session }) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('purchase_orders')
-        .select('po_id, vendor_bill_number, vendor_bill_no, vendor_bill_amount, bill_recorded_at')
+        .select(`po_id, vendor_bill_number, vendor_bill_no, ${BILL_DATE_COLUMNS}`)
         .eq('stakeholder_id', stakeholderId!)
         .not('vendor_bill_amount', 'is', null)
         .gt('vendor_bill_amount', 0);
@@ -334,11 +335,15 @@ export default function StakeholderDetail({ session }: { session: Session }) {
 
   if (stkType === 'Vendor') {
     // CREDIT — vendor gave material (bill recorded)
+    // The AMOUNT is the gate, not the timestamp: `if (!po.bill_recorded_at) continue` was never a filter,
+    // it was this row needing a date. It silently dropped every bill recorded before the timestamp column
+    // existed — and with them, this ledger's entire credit side. See billDateOf().
     for (const po of (stakeholderPOs || [])) {
-      if (!po.bill_recorded_at) continue;
+      const billedOn = billDateOf(po);
+      if (!billedOn) continue;
       rawRows.push({
         id: `bill-${po.po_id}`,
-        date: po.bill_recorded_at,
+        date: billedOn,
         particulars: 'By Purchase',
         detail: po.vendor_bill_number || po.vendor_bill_no || null,
         project: null,

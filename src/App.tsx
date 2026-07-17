@@ -1,7 +1,7 @@
 import React, { createContext, lazy, Suspense, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from './lib/auth/AuthProvider';
-import { LOGIN_ROUTE } from './lib/auth/routes';
+import { LOGIN_ROUTE, loginRouteFor } from './lib/auth/routes';
 import { useGlobalShortcuts } from './hooks/useGlobalShortcuts';
 import { SITE_DESK_ENABLED } from './lib/desk/flag';
 import { useDeskPreload } from './lib/desk/live';
@@ -406,7 +406,15 @@ function App() {
     // S1-2 Part B: consolidate EVERY other unauthenticated path onto the single login route so an
     // involuntary signout on a deep route (e.g. /ledger) can never surface the retired Login screen —
     // even a forgotten reference or a stale-bundle tab lands on the current login surface.
-    return <Navigate to={LOGIN_ROUTE} replace />;
+    //
+    // …CARRYING WHERE HE WAS GOING. This used to be a bare `to={LOGIN_ROUTE}`, which discarded the
+    // pathname and the query. Every WhatsApp answer's "View ledger" button is a deep link
+    // (/ledger?stakeholder=…&project=…) opened in WhatsApp's own in-app browser — a separate cookie
+    // jar, so it usually lands here with no session. He signed in and got the COMPLETE ledger: not
+    // his party, not his site, contradicting the per-site number he had just tapped from.
+    // AuthPanel has read `?redirect=` all along; nothing ever sent it. `location.search` is the
+    // load-bearing half — which party and which site live entirely in the query string.
+    return <Navigate to={loginRouteFor(p, location.search)} replace />;
   }
   
   // Guard against rendering the main app layout when we are supposed to redirect

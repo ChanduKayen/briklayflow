@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { billDateOf, BILL_DATE_COLUMNS } from '../lib/partyLedger';
 import { usePeek } from '../context/PeekContextCore';
 import { StarDisplay } from '../pages/Stakeholders';
 
@@ -11,6 +12,10 @@ interface StakeholderLedgerDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   stakeholderId: string;
+  /** Open filtered to one site. The WhatsApp payment answer deep-links here (?stakeholder=&project=), and
+   *  it quoted a SITE number — so the ledger behind that button must be that site's, or the two disagree
+   *  and one of them is lying. Null/absent → every site, as before. */
+  projectId?: string | null;
 }
 
 type DateFilter = 'all' | 'month' | '3m' | 'fy';
@@ -21,6 +26,14 @@ interface LedgerRow {
   particulars: string;
   detail: string | null;
   project: string | null;
+  /** Every site this row touches. A PO bill or a WO milestone has exactly one; a PAYMENT can have several
+   *  (one payment, split across sites) or none at all (unallocated). The project filter reads THIS, not the
+   *  `project` label above, which is a display string and says "Multiple" when it can't decide. */
+  projectIds: string[];
+  /** For a payment split across sites: project_id → the amount allocated to THAT site. When the ledger is
+   *  filtered to one site, its debit becomes this — otherwise a ₹1,00,000 payment of which ₹60,000 was for
+   *  The Pride would read as ₹1,00,000 ON The Pride, contradicting the very number that sent him here. */
+  byProject?: Record<string, number>;
   ref_id: string | null;
   ref_number: string | null;
   ref_type: 'PO' | 'WO' | 'INV' | null;
@@ -32,6 +45,16 @@ interface LedgerRow {
   txn_link: string | null;
   is_one_time?: boolean;
   runningBalance: number;
+}
+
+/** The sites a payment's allocations touch, and how much landed on each. */
+function splitByProject(allocs: any[]): { projectIds: string[]; byProject: Record<string, number> } {
+  const byProject: Record<string, number> = {};
+  for (const a of allocs || []) {
+    if (!a?.project_id) continue;
+    byProject[a.project_id] = (byProject[a.project_id] || 0) + Number(a.allocated_amount || 0);
+  }
+  return { projectIds: Object.keys(byProject), byProject };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -101,6 +124,7 @@ export default function StakeholderLedgerDrawer({
   isOpen,
   onClose,
   stakeholderId,
+  projectId = null,
 }: StakeholderLedgerDrawerProps) {
   const navigate = useNavigate();
   const { openPeek } = usePeek();
@@ -112,6 +136,15 @@ export default function StakeholderLedgerDrawer({
   // Filters and Grouping toggles
   const [dateFilter, setDateFilter] = useState<DateFilter>('all');
   const [sortByDate, setSortByDate] = useState(false); // Default to group by PO
+  // 'all' or a project_id. Seeded from the `projectId` prop so a WhatsApp deep-link opens ON the site it
+  // quoted; he can widen it to All from here, and doing so must not snap back — hence state, not the prop.
+  const [projectFilter, setProjectFilter] = useState<string>(projectId || 'all');
+
+  // A deep-link can change under a mounted drawer (another party, another site). Re-seed on open, or the
+  // second link would silently keep the first one's filter.
+  useEffect(() => {
+    if (isOpen) setProjectFilter(projectId || 'all');
+  }, [isOpen, projectId, stakeholderId]);
 
   useEffect(() => {
     if (isOpen) {
@@ -192,7 +225,9 @@ export default function StakeholderLedgerDrawer({
       // rows itself, and total_value gives the COMMITTED figure for the statement grid.
       const { data, error } = await supabase
         .from('purchase_orders')
-        .select('po_id, vendor_bill_number, vendor_bill_no, vendor_bill_amount, bill_recorded_at, total_value, order_value, status')
+        // project_id + projects(name): a PO belongs to ONE site, and without it a bill row cannot be told
+        // apart by site — so the project filter would silently drop every credit.
+        .select(`po_id, project_id, projects(name), vendor_bill_number, vendor_bill_no, total_value, order_value, status, ${BILL_DATE_COLUMNS}`)
         .eq('stakeholder_id', stakeholderId);
       if (error) throw error;
       return data as any[];
@@ -213,15 +248,20 @@ export default function StakeholderLedgerDrawer({
 
   if (stk) {
     if (stkType === 'Vendor') {
-      // CREDIT — vendor bill recorded
+      // CREDIT — vendor bill recorded.
+      // The AMOUNT is the gate, not the timestamp: `if (!po.bill_recorded_at) continue` was never a filter,
+      // it was this row needing a date. It silently dropped every bill recorded before the timestamp column
+      // existed — and with them, this drawer's entire credit side. See billDateOf().
       for (const po of (stakeholderPOs || [])) {
-        if (!po.bill_recorded_at) continue;
+        const billedOn = billDateOf(po);
+        if (!billedOn) continue;
         rawRows.push({
           id: `bill-${po.po_id}`,
-          date: po.bill_recorded_at,
+          date: billedOn,
           particulars: 'By Purchase',
           detail: po.vendor_bill_number || po.vendor_bill_no || null,
-          project: null,
+          project: (po as any).projects?.name || null,
+          projectIds: po.project_id ? [po.project_id] : [],
           ref_id: po.po_id,
           ref_number: po.po_id,
           ref_type: 'PO',
@@ -237,6 +277,7 @@ export default function StakeholderLedgerDrawer({
       for (const t of activeTxns) {
         const allocs: any[] = t.txn_allocations || [];
         const project = allocs.length === 1 ? (allocs[0].projects?.name || null) : allocs.length > 1 ? 'Multiple' : null;
+        const { projectIds, byProject } = splitByProject(allocs);
         const poAlloc = allocs.find((a: any) => a.order_type === 'PO');
         rawRows.push({
           id: `txn-${t.txn_id}`,
@@ -244,6 +285,8 @@ export default function StakeholderLedgerDrawer({
           particulars: `To ${t.payment_mode || 'Cash'}`,
           detail: t.category + (t.remarks ? ` — ${t.remarks}` : ''),
           project,
+          projectIds,
+          byProject,
           ref_id: poAlloc?.order_ref || null,
           ref_number: poAlloc?.order_ref || null,
           ref_type: poAlloc ? 'PO' : null,
@@ -267,6 +310,7 @@ export default function StakeholderLedgerDrawer({
             particulars: 'By Work Done',
             detail: m.name,
             project: wo.projects?.name || null,
+            projectIds: wo.project_id ? [wo.project_id] : [],   // a work order belongs to exactly one site
             ref_id: wo.wo_id,
             ref_number: wo.wo_id,
             ref_type: 'WO',
@@ -283,6 +327,7 @@ export default function StakeholderLedgerDrawer({
       for (const t of activeTxns) {
         const allocs: any[] = t.txn_allocations || [];
         const project = allocs.length === 1 ? (allocs[0].projects?.name || null) : allocs.length > 1 ? 'Multiple' : null;
+        const { projectIds, byProject } = splitByProject(allocs);
         const woAlloc = allocs.find((a: any) => a.order_type === 'WO');
         rawRows.push({
           id: `txn-${t.txn_id}`,
@@ -290,6 +335,8 @@ export default function StakeholderLedgerDrawer({
           particulars: `To ${t.payment_mode || 'Cash'}`,
           detail: t.category + (t.remarks ? ` — ${t.remarks}` : ''),
           project,
+          projectIds,
+          byProject,
           ref_id: woAlloc?.order_ref || null,
           ref_number: woAlloc?.order_ref || null,
           ref_type: woAlloc ? 'WO' : null,
@@ -307,12 +354,15 @@ export default function StakeholderLedgerDrawer({
       for (const t of activeTxns) {
         const allocs: any[] = t.txn_allocations || [];
         const project = allocs.length === 1 ? (allocs[0].projects?.name || null) : allocs.length > 1 ? 'Multiple' : null;
+        const { projectIds, byProject } = splitByProject(allocs);
         rawRows.push({
           id: `txn-${t.txn_id}`,
           date: t.date,
           particulars: `By ${t.payment_mode || 'Cash'}`,
           detail: t.category + (t.remarks ? ` — ${t.remarks}` : ''),
           project,
+          projectIds,
+          byProject,
           ref_id: null,
           ref_number: null,
           ref_type: null,
@@ -344,7 +394,31 @@ export default function StakeholderLedgerDrawer({
     return true;
   };
 
-  const filteredRows = rawRows.filter(filterRow);
+  // ── THE SITES THIS PARTY ACTUALLY APPEARS ON ────────────────────────────────
+  // Built from the rows themselves, not the org's project list: offering a site he has never been paid on
+  // would be a filter that can only ever empty the ledger. Unfiltered rows, so the options don't vanish as
+  // he narrows. Sorted by name; the id→name map comes from the rows' own embeds.
+  const projectNameById = new Map<string, string>();
+  for (const po of (stakeholderPOs || [])) if (po.project_id) projectNameById.set(po.project_id, (po as any).projects?.name || po.project_id);
+  for (const wo of (workOrders || [])) if (wo.project_id) projectNameById.set(wo.project_id, wo.projects?.name || wo.project_id);
+  for (const t of activeTxns) for (const a of (t.txn_allocations || [])) if (a.project_id) projectNameById.set(a.project_id, a.projects?.name || a.project_id);
+  const projectOptions = [...new Set(rawRows.flatMap(r => r.projectIds))]
+    .map(id => ({ id, name: projectNameById.get(id) || id }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  // A site that was deep-linked but that this party has no rows on: keep it SELECTED rather than silently
+  // falling back to All. An empty ledger for the site he asked about is the truthful answer; quietly showing
+  // him every site's rows under a "The Pride" heading would not be.
+  const projectFiltered = projectFilter !== 'all';
+  const filteredRows = rawRows
+    .filter(filterRow)
+    .filter(row => !projectFiltered || row.projectIds.includes(projectFilter))
+    // ONE SITE → ONE SITE'S MONEY. A payment split across sites keeps only its slice here, so the drawer's
+    // numbers are the same numbers WhatsApp quoted. Rows with no split (a PO bill, a WO milestone) are
+    // whole and belong entirely to their site.
+    .map(row => (projectFiltered && row.byProject && row.debit > 0)
+      ? { ...row, debit: row.byProject[projectFilter] ?? 0 }
+      : row);
 
   // Sort chronologically (oldest first) to compute precise running balance
   filteredRows.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -652,6 +726,36 @@ export default function StakeholderLedgerDrawer({
                         </button>
                       ))}
                     </div>
+
+                    {/* SITE FILTER — only when there is a choice to make. One site (or none) means the
+                        filter can only ever say what the header already says, so it stays out of the way.
+                        A <select>, not chips: a party can sit on a dozen sites, and chips would wrap the
+                        toolbar into two rows on a phone for a control used once. */}
+                    {projectOptions.length > 1 && (
+                      <>
+                        <span className="w-px h-3 bg-stone-200 mx-0.5" />
+                        <div className="relative">
+                          <select
+                            value={projectFilter}
+                            onChange={(e) => setProjectFilter(e.target.value)}
+                            aria-label="Filter by site"
+                            className={`appearance-none pl-3 pr-7 py-1 rounded-full text-[10px] font-semibold tracking-wide border transition-all duration-150 cursor-pointer focus:outline-none focus:ring-1 focus:ring-stone-300 ${
+                              projectFiltered
+                                ? 'bg-stone-800 border-stone-800 text-white hover:bg-stone-900 shadow-xs'
+                                : 'bg-white border-stone-200 text-stone-600 hover:text-stone-850 hover:border-stone-300'
+                            }`}
+                          >
+                            <option value="all">All sites</option>
+                            {projectOptions.map((p) => (
+                              <option key={p.id} value={p.id}>{p.name}</option>
+                            ))}
+                          </select>
+                          <span className={`material-symbols-outlined pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[13px] font-bold ${projectFiltered ? 'text-white' : 'text-stone-400'}`}>
+                            expand_more
+                          </span>
+                        </div>
+                      </>
+                    )}
 
                     <span className="w-px h-3 bg-stone-200 mx-0.5" />
 

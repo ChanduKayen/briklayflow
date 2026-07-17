@@ -61,7 +61,7 @@
 
 import { send, type OutMessage } from '../_format.ts'
 import * as M from '../_messages.ts'
-import { matchPayee } from '../_match.ts'
+import { matchPayee, pickable } from '../_match.ts'
 import { openConversation, closeConversation, type ConvoRow } from '../_conversation.ts'
 import type { AgentCtx, TurnOpts } from '../_registry.ts'
 
@@ -204,13 +204,19 @@ async function loadStakeholders(supabase: DB, orgId: string): Promise<{ stakehol
  * is OMITTED. A view that isn't there must never render as "Balance ₹0": "we don't know" and "nothing is
  * owed" are different answers, and only one of them is safe to guess.
  */
-async function vendorOwed(supabase: DB, orgId: string, stakeholderId: string, projectId: string | null): Promise<number | null> {
-  let q = supabase.from('v_vendor_balance').select('owed').eq('org_id', orgId).eq('stakeholder_id', stakeholderId)
+/** What a party ORDERED and BILLED us, from v_party_orders. Facts; the balance is composed by the caller.
+ *  null = no orders exist at all, which is NOT "nothing was ordered" — the caller falls back to the plain
+ *  paid-to-date answer rather than render a card built on zeros we never read. */
+async function orderRows(
+  supabase: DB, orgId: string, stakeholderId: string, projectId: string | null,
+): Promise<{ ordered: unknown; billed: unknown }[] | null> {
+  let q = supabase.from('v_party_orders').select('ordered, billed')
+    .eq('org_id', orgId).eq('stakeholder_id', stakeholderId)
   if (projectId) q = q.eq('project_id', projectId)
   const { data, error } = await q
-  if (error) { console.error('[reporting] v_vendor_balance unreadable:', error.message ?? error); return null }
-  const rows = (data ?? []) as { owed: unknown }[]
-  return rows.length ? rows.reduce((sum, r) => sum + num(r.owed), 0) : null
+  if (error) { console.error('[reporting] v_party_orders unreadable:', error.message ?? error); return null }
+  const rows = (data ?? []) as { ordered: unknown; billed: unknown }[]
+  return rows.length ? rows : null
 }
 
 async function loadProjects(supabase: DB, orgId: string): Promise<Proj[]> {
@@ -239,31 +245,60 @@ async function answerPaymentTotal(
   const say = (m: OutMessage) =>
     send(supabase, ctx.from, prefix ? withPrefix(m, prefix) : m, { org_id: orgId, wamid: ctx.wamid })
 
-  if (!txns.length) return say(M.mPaymentNone(ctx.lang, { party: party.name, siteName: site?.name ?? null, partyId: party.id }))
+  if (!txns.length) return say(M.mPaymentNone(ctx.lang, { party: party.name, siteName: site?.name ?? null, siteId: site?.id ?? null, partyId: party.id }))
 
   const ids = txns.map((t) => t.txn_id)
   const { data: allocRows } = await supabase
     .from('txn_allocations').select('txn_id, project_id, allocated_amount, order_type').in('txn_id', ids)
   const allocs = (allocRows ?? []) as { txn_id: string; project_id: string | null; allocated_amount: unknown; order_type?: string | null }[]
 
-  // ── A VENDOR HAS A LEDGER; MOST PARTIES DO NOT ───────────────────────────────────────────────────────
-  // Balance only means something against something OWED, and only a vendor's is readable today: approved POs
-  // net of payments, in v_vendor_balance. A WORKER's would be the work-order burn-down (trackingApi's
-  // `max(0, order_value − WO allocations)`) — not read here yet, so they keep the paid-to-date answer. And a
-  // labourer paid ad-hoc has NO order at all, so no balance exists for him in any table: showing him a
-  // "Balance ₹0" would state as fact something we simply do not know. Paid-to-date is the honest answer, and
-  // for most parties it is the whole answer.
-  if ((party.type ?? '').toLowerCase() === 'vendor') {
+  // ── THE ACCOUNT CARD — facts, and one subtraction that is true ───────────────────────────────────────
+  // Reads v_party_orders (ordered + billed, per org/stakeholder/project) and composes:
+  //
+  //     Balance = billed − paid        signed, unclamped
+  //
+  // Nothing derives an `owed` any more. v_vendor_balance did, and a live probe of Pattabhi Traders showed
+  // what that cost: it netted payments across unrelated POs inside a project (a ₹10,000 payment on one PO
+  // cancelled another PO's order — that IS the ₹8,375 a user was shown), it measured ORDERS while the
+  // liability is the BILL, and it clamped a ₹96,640 credit to zero before reporting a debt. The full
+  // autopsy is in the v_party_orders migration header.
+  //
+  // THE CARD FOLLOWS THE CONTRACT, NOT THE TYPE. No orders at all → no card: the ad-hoc labourer and the
+  // never-ordered-from vendor keep the paid-to-date answer, which is RICHER (payment count, per-site split,
+  // unallocated-to-a-site gap). A card of zeros would tell them less while implying we knew more.
+  const ptype = (party.type ?? '').toLowerCase()
+  const orders = ptype === 'vendor' || ptype === 'worker'
+    ? await orderRows(supabase, orgId, party.id, site?.id ?? null)
+    : null
+  if (orders) {
     const scoped = site ? allocs.filter((a) => a.project_id === site.id) : allocs
+    // PAID is every rupee that reached them, tagged or not — that is the denominator BILLED subtracts from.
+    // The old card's central lie was pairing this total with a PO-scoped balance under a subtraction rule.
     const paid = site
       ? scoped.reduce((s, a) => s + num(a.allocated_amount), 0)
       : txns.reduce((s, t) => s + num(t.total_amount), 0)
-    // The advance is a FACT we read (ADVANCE-typed rows), not a balance we derive — which is why it survives
-    // the view's GREATEST(0,…) clamp, where "how much are they holding" is otherwise destroyed.
-    const advance = scoped.filter((a) => (a.order_type ?? '') === 'ADVANCE').reduce((s, a) => s + num(a.allocated_amount), 0)
-    const balance = await vendorOwed(supabase, orgId, party.id, site?.id ?? null)
-    return say(M.mVendorLedger(ctx.lang, {
-      party: party.name, siteName: site?.name ?? null, paid, advance, balance, partyId: party.id,
+    const ordered = orders.reduce((s, r) => s + num(r.ordered), 0)
+    // A WORKER HAS NO BILL — billed stays null so the card claims no balance, rather than subtract a zero
+    // we invented from money he really was paid.
+    const billed = ptype === 'vendor' ? orders.reduce((s, r) => s + num(r.billed), 0) : null
+    // UNALLOCATED — paid, less what's tagged against an order. Advances fold in: they are not tied to an
+    // order either (order_ref is null by design), which is the rule as stated. It never touches the balance;
+    // it is the hygiene signal explaining why a payment can't be matched to a bill.
+    const tagged = scoped
+      .filter((a) => (a.order_type ?? '') === (ptype === 'vendor' ? 'PO' : 'WO'))
+      .reduce((s, a) => s + num(a.allocated_amount), 0)
+    // UNPLACED — paid, less everything carrying an allocation row. PARTY-WIDE and never scoped: a payment
+    // with no allocation belongs to no site, so no site card can show it, which is exactly why the site
+    // cards and the overall card cannot sum. Σ per-site balances − unplaced = overall, exactly. Naming it
+    // on BOTH cards is what stops that gap reading as us contradicting ourselves.
+    const placed = allocs.reduce((s, a) => s + num(a.allocated_amount), 0)
+    const paidAll = txns.reduce((s, t) => s + num(t.total_amount), 0)
+    return say(M.mPartyLedger(ctx.lang, {
+      party: party.name, siteName: site?.name ?? null, siteId: site?.id ?? null,
+      paid, ordered, billed,
+      unallocated: Math.max(0, paid - tagged),
+      unplaced: Math.max(0, paidAll - placed),
+      partyId: party.id,
     }))
   }
 
@@ -271,11 +306,11 @@ async function answerPaymentTotal(
     // ONE SITE: allocations are the only rows that carry a project, so this is the only honest source.
     const mine = allocs.filter((a) => a.project_id === site.id)
     const total = mine.reduce((s, a) => s + num(a.allocated_amount), 0)
-    if (!total) return say(M.mPaymentNone(ctx.lang, { party: party.name, siteName: site.name, partyId: party.id }))
+    if (!total) return say(M.mPaymentNone(ctx.lang, { party: party.name, siteName: site.name, siteId: site.id, partyId: party.id }))
     // COUNT THE PAYMENTS, not the allocation rows: one payment split across two projects is still one
     // payment, and a site's slice of it is one payment's worth of money on that site.
     const count = new Set(mine.map((a) => a.txn_id)).size
-    return say(M.mPaymentTotal(ctx.lang, { party: party.name, total, count, siteName: site.name, partyId: party.id }))
+    return say(M.mPaymentTotal(ctx.lang, { party: party.name, total, count, siteName: site.name, siteId: site.id, partyId: party.id }))
   }
 
   // THE FULL TOTAL, with the per-site split beneath it. The split costs nothing extra to compute — the
@@ -370,18 +405,24 @@ export async function runReporting(ctx: AgentCtx, text: string, opts: TurnOpts):
   if (m.band === 'auto' && m.id && m.name) {
     return withSite(ctx, { id: m.id, name: m.name, type: typeOf(stakeholders, m.id) }, site, opts.prefix)
   }
-  if (m.band === 'open' || !m.closest.length) {
+  // …AND THE LIST OBEYS THE SAME FLOOR (the other half of the same bug, fixed 2026-07-17). The band above
+  // stopped an unknown name picking from noise; it could do nothing about the noise INSIDE a real pick.
+  // "Which Srinu?" offered Srinu · Suribabu · Raju — one near-match at 0.70 and two strangers at 0.375 and
+  // 0.333, riding in on a top-3 slice. pickable() is that floor, named: every row is a candidate the matcher
+  // stands behind, or there is no row. If nothing clears it, nothing is near — which is mPayeeUnknown.
+  const candidates = pickable(m)
+  if (m.band === 'open' || !candidates.length) {
     return send(ctx.supabase, ctx.from, M.mPayeeUnknown(ctx.lang, { raw: ask.party }), { org_id: ctx.orgId, wamid: ctx.wamid })
   }
   // AMBIGUOUS -> he picks. The candidates are FROZEN into the slots: the answer resolves against exactly what
   // we offered, never against a fresh match of his reply (the same discipline as SiteOps' picks). The SITE
   // rides along, so a pick answered two minutes later still answers the question he actually asked.
-  await send(ctx.supabase, ctx.from, M.mPayeePick(ctx.lang, { raw: ask.party, closest: m.closest }),
+  await send(ctx.supabase, ctx.from, M.mPayeePick(ctx.lang, { raw: ask.party, closest: candidates }),
     { org_id: ctx.orgId, wamid: ctx.wamid })
   await openConversation(ctx.supabase, {
     orgId: ctx.orgId, sender: ctx.from, owningAgent: 'REPORTING',
     pendingQuestion: `which ${ask.party}?`,
-    slots: { kind: 'reporting_payee_pick', raw: ask.party, candidates: m.closest.map((c) => ({ ...c, type: typeOf(stakeholders, c.id) })), site },
+    slots: { kind: 'reporting_payee_pick', raw: ask.party, candidates: candidates.map((c) => ({ ...c, type: typeOf(stakeholders, c.id) })), site },
     lastMessageId: ctx.wamid,
   })
 }

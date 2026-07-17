@@ -523,7 +523,7 @@ const rupees = (n: number): string => '₹' + Math.round(n).toLocaleString('en-I
  * would look like a bug in us. Only surfaced when the total case is asked and the gap is real.
  */
 export function mPaymentTotal(lang: Lang, p: {
-  party: string; total: number; count: number; siteName?: string | null; unallocated?: number
+  party: string; total: number; count: number; siteName?: string | null; siteId?: string | null; unallocated?: number
   /** The per-site split, biggest first. Only for the TOTAL case, and only when there is genuinely something
    *  to split — the caller withholds it for a single-site party, where it would just repeat the total. */
   bySite?: { name: string; total: number }[]
@@ -546,15 +546,16 @@ export function mPaymentTotal(lang: Lang, p: {
   if (!p.siteName && p.unallocated && p.unallocated > 0) {
     lines.push('', pick(lang, { en: `${rupees(p.unallocated)} of this isn't assigned to a site yet.` }))
   }
-  return withLedger(lang, lines.join('\n'), p.partyId)
+  return withLedger(lang, lines.join('\n'), p.partyId, p.siteId)
 }
 const SITE_LINES = 6
 
-/** A party answer, plus the button to its ledger. No id (shouldn't happen) → plain text rather than a
- *  button that lands nowhere. */
-function withLedger(lang: Lang, body: string, partyId?: string | null): OutMessage {
+/** A party answer, plus the button to its ledger — narrowed to the SITE the answer was about, so the page
+ *  and the message quote the same number. No id (shouldn't happen) → plain text rather than a button that
+ *  lands nowhere. */
+function withLedger(lang: Lang, body: string, partyId?: string | null, siteId?: string | null): OutMessage {
   if (!partyId) return { kind: 'text', body }
-  const l = partyLedgerLink(partyId)
+  const l = partyLedgerLink(partyId, siteId ?? null)
   return { kind: 'cta', body, cta: { text: pick(lang, { en: l.text }), url: l.url } }
 }
 
@@ -593,33 +594,116 @@ function withLedger(lang: Lang, body: string, partyId?: string | null): OutMessa
  * `balance: null` → the line is omitted entirely (the view is unavailable, or this party has no orders).
  * A missing balance is never rendered as ₹0 — "we don't know" and "nothing is owed" are different answers.
  */
-export function mVendorLedger(lang: Lang, p: {
-  party: string; siteName?: string | null; paid: number; advance: number; balance: number | null
+/**
+ * THE PARTY ACCOUNT — facts, and one subtraction that is actually true.
+ *
+ * ══ WHAT THIS CARD REPLACED, AND WHY ═══════════════════════════════════════════════════════════════════
+ * The old card was `Paid` over a rule over `Balance`. It read as arithmetic and was not:
+ *
+ *      Paid        ₹1,28,015     ← every rupee ever paid to them
+ *      ─────────────────────     ← says "these subtract"
+ *      Balance        ₹8,375     ← built from ₹12,000 of PO-tagged allocations
+ *
+ * Two numbers with different denominators, joined by a rule that promised they shared one. The real
+ * position was ₹96,640 IN CREDIT. The card had the sign wrong, the magnitude wrong, and looked like maths.
+ *
+ * ══ THE RULE, NOW ══════════════════════════════════════════════════════════════════════════════════════
+ * Only what SUBTRACTS goes inside the block. Billed − Paid = Balance, signed, unclamped. That is the whole
+ * arithmetic and every line of it is on screen.
+ *
+ *   • ORDERED is a COMMITMENT, not a liability — you do not owe a man for an order he has not billed. It
+ *     lives OUTSIDE the block, in words, because the moment it sits in the column someone subtracts it.
+ *     (That is not hypothetical: it is precisely what v_vendor_balance did.)
+ *   • ADVANCE is NOT subtracted. An advance IS a payment; it is already inside Paid, and subtracting it
+ *     again double-counts. This is the one place the old view's `ordered − po_paid − advance` was right —
+ *     there `po_paid` excluded advances, so they were disjoint. Mix TOTAL paid with advance and it breaks.
+ *   • UNALLOCATED is bookkeeping hygiene, not an input. Every rupee paid to a party is against their
+ *     account whether or not anyone tagged it, so it never touches the balance. It answers a different
+ *     question — "why can't I see which bill this cleared?" — and it is the loudest thing on the card when
+ *     it is large, because a ledger nobody tags cannot be audited.
+ *   • NO CLAMP. `GREATEST(0, …)` is what turned a ₹96,640 credit into a ₹8,375 debt. When the SIGN is the
+ *     finding, clamping it away is the bug.
+ */
+export function mPartyLedger(lang: Lang, p: {
+  party: string; siteName?: string | null; siteId?: string | null
+  paid: number
+  /** Σ order value — POs for a vendor, work orders for a worker. Context; never subtracted. */
+  ordered: number
+  /** Σ vendor_bill_amount. NULL for a worker: a work order has no bill, so he gets no balance rather
+   *  than a balance built on a zero we invented. (His nearest equivalent — a certified milestone — is
+   *  not read yet.) */
+  billed: number | null
+  /** Paid, less what's tagged against an order — SCOPED to the card (a site card counts that site's).
+   *  Money the ledger cannot tie to a bill. */
+  unallocated: number
+  /**
+   * Paid, less everything with an allocation row at all — PARTY-WIDE, never scoped, on every card.
+   *
+   * THE RECONCILIATION LINE. Per-site cards and the overall card cannot agree while money sits on no
+   * site, and the arithmetic is exact: Σ per-site balances − unplaced = overall. Live, Pattabhi Traders:
+   * ask about everything → "In credit ₹96,640"; ask about Soundharya → "Balance ₹23,375 owed". Opposite
+   * signs, same vendor, both correctly scoped, ₹76,715 of payments belonging to no site at all.
+   *
+   * It rides on the SITE cards too, and that is the point: a site card's own hygiene looks perfect
+   * (Soundharya's every allocated rupee is PO-tagged, so its `unallocated` is a true ₹0) while an
+   * unplaced payment of exactly PO-2026-0006's bill amount sits one table away. The clean-looking card
+   * is the dangerous one. Unplaced money may belong here, and only the man knows.
+   */
+  unplaced: number
   partyId?: string | null
 }): OutMessage {
-  const W = 21
-  const row = (label: string, amount: number) => label.padEnd(8) + rupees(amount).padStart(W - 8)
+  const W = 25
+  const LBL = 12
+  const row = (label: string, amount: number) => label.padEnd(LBL) + rupees(amount).padStart(W - LBL)
   const head = `*${p.party}${p.siteName ? ` · ${p.siteName}` : ''}*`
-  const lead = pick(lang, {
-    en: p.balance == null ? '_Paid to date._' : '_Still owed on approved orders._',
-  })
-  const lines = [row(pick(lang, { en: 'Paid' }), p.paid)]
-  if (p.advance > 0) lines.push(row(pick(lang, { en: 'Advance' }), p.advance))
-  if (p.balance != null) {
-    lines.push('─'.repeat(W), row(pick(lang, { en: 'Balance' }), p.balance))
+
+  const lines: string[] = []
+  const notes: string[] = []
+
+  if (p.billed == null) {
+    // A worker: no bill exists, so no subtraction is honest. Facts only.
+    lines.push(row(pick(lang, { en: 'Paid' }), p.paid))
+    if (p.ordered > 0) lines.push(row(pick(lang, { en: 'Ordered' }), p.ordered))
+    if (p.ordered > 0) notes.push(pick(lang, { en: `_Ordered_ is what we committed to on his work orders. We can't show a balance — a work order carries no bill to owe against.` }))
+  } else {
+    const balance = p.billed - p.paid
+    lines.push(row(pick(lang, { en: 'Billed' }), p.billed))
+    lines.push(row(pick(lang, { en: 'Paid' }), p.paid))
+    lines.push('─'.repeat(W))
+    // The SIGN is the answer, so it is spelled in words, not left to a minus sign a man must decode.
+    lines.push(balance > 0 ? row(pick(lang, { en: 'Balance' }), balance)
+             : balance < 0 ? row(pick(lang, { en: 'In credit' }), -balance)
+             :               pick(lang, { en: 'Settled' }))
+    notes.push(pick(lang, {
+      en: `_Billed_ is what they've invoiced — that's what we owe against.`
+        + (p.ordered > 0 ? ` _Ordered_ ${rupees(p.ordered)} is committed, not yet billed.` : ''),
+    }))
+    if (balance < 0) notes.push(pick(lang, { en: `We've paid ${rupees(-balance)} more than they've billed us.` }))
   }
+
+  // The two gaps are NESTED, not parallel: money on no site is necessarily on no bill either (a PO belongs
+  // to a site). Printed as two bare numbers they read as separate pools and invite adding them; the overall
+  // card says so in one sentence. A site card shows only the site gap — its own bill gap is already scoped.
+  if (!p.siteName && p.unallocated > 0) {
+    notes.push(pick(lang, {
+      en: `${rupees(p.unallocated)} of what we paid isn't tied to any bill.`
+        + (p.unplaced > 0 ? ` ${rupees(p.unplaced)} of that isn't on a site at all.` : ''),
+    }))
+  } else if (p.siteName) {
+    if (p.unallocated > 0) notes.push(pick(lang, { en: `${rupees(p.unallocated)} of this site's payments isn't tied to any bill.` }))
+    // Why this site's number may not be the whole story — and why it won't add up to the overall answer.
+    if (p.unplaced > 0) notes.push(pick(lang, { en: `${rupees(p.unplaced)} paid to them isn't assigned to any site — some of it may belong here.` }))
+  }
+
   const block = '```\n' + lines.join('\n') + '\n```'
-  const tail = p.advance > 0 && p.balance === 0
-    ? '\n\n' + pick(lang, { en: `They're holding ${rupees(p.advance)} of ours.` })
-    : ''
-  return withLedger(lang, `${head}\n${lead}\n\n${block}${tail}`, p.partyId)
+  return withLedger(lang, `${head}\n\n${block}\n${notes.join('\n\n')}`, p.partyId, p.siteId)
 }
 
 /** No payments at all for a party we DID resolve — an answer, not a failure. It carries the ledger button
  *  too: "none on this site" is exactly the answer he will want to check for himself. */
-export function mPaymentNone(lang: Lang, p: { party: string; siteName?: string | null; partyId?: string | null }): OutMessage {
+export function mPaymentNone(lang: Lang, p: { party: string; siteName?: string | null; siteId?: string | null; partyId?: string | null }): OutMessage {
   const scope = p.siteName ? `${p.party} on ${p.siteName}` : p.party
-  return withLedger(lang, pick(lang, { en: `No payments recorded for *${scope}* yet.` }), p.partyId)
+  return withLedger(lang, pick(lang, { en: `No payments recorded for *${scope}* yet.` }), p.partyId, p.siteId)
 }
 
 /** The name was ambiguous — the nearest matches, as a tappable list. Ids ride as `rep_payee_<id>`. */
