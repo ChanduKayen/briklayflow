@@ -54,7 +54,9 @@ export interface AttachmentRow {
   role: string                      // creation | answer
   caption: string | null
   created_at?: string               // needed to interleave a photo into a task's story
-  url?: string | null               // signed at read time — never stored
+  url?: string | null               // an ALREADY-signed url, if the caller has one (the mock)
+  bucket?: string | null            // the private-bucket ref, signed LAZILY at render (useSignedUrl)
+  object_path?: string | null
 }
 
 /** A raw inbound WhatsApp message. The status_history entry a resolver writes carries only its ID —
@@ -247,7 +249,7 @@ export function buildTaskStory(
   for (const a of photos) {
     const at = a.created_at
     if (!at) continue
-    events.push({ at, step: { t: 'photo', url: a.url ?? null, caption: a.caption, seen: theRead, w: ago(at, now) } })
+    events.push({ at, step: { t: 'photo', url: a.url ?? null, caption: a.caption, seen: theRead, w: ago(at, now), ...bucketRef(a) } })
   }
 
   return events.sort((a, b) => a.at.localeCompare(b.at)).map((e) => e.step)
@@ -585,7 +587,7 @@ export function buildStory(events: EventRow[], owner: string, now: number, photo
     if (!a.created_at) continue
     rail.push({
       at: a.created_at,
-      step: { t: 'photo', url: a.url ?? null, caption: a.caption, w: ago(a.created_at, now) },
+      step: { t: 'photo', url: a.url ?? null, caption: a.caption, w: ago(a.created_at, now), ...bucketRef(a) },
     })
   }
 
@@ -647,6 +649,7 @@ export function toDeskProblem(
     e: a.role === 'answer' ? '✅' : '📷',
     l: a.caption ?? (a.role === 'answer' ? 'Fix photo' : 'Photo'),
     url: a.url ?? null,
+    ...bucketRef(a),
   }))
 
   const loc = [p.floor_label, p.unit_label, p.area_label].filter(Boolean).join(' · ')
@@ -702,6 +705,13 @@ const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
  * (_siteops_media.ts · mediaComposite) precisely so that nobody downstream has to guess which half is
  * whose. Plain text — every non-image message — has no markers and passes through untouched as `said`.
  */
+/** The private-bucket ref a photo step carries for LAZY signing (useSignedUrl). Present ONLY when there
+ *  is a real ref — so a photo that already has a url (or none at all) keeps the plain, older shape. */
+function bucketRef(a: AttachmentRow): { bucket?: string; path?: string } {
+  if (a.bucket && a.object_path) return { bucket: a.bucket, path: a.object_path }
+  return {}
+}
+
 const CAPTION_RE = /<caption>([\s\S]*?)<\/caption>/i
 const PHOTO_RE = /<photo>([\s\S]*?)<\/photo>/i
 

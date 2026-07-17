@@ -131,7 +131,9 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
       <span>{oneLabel}</span>
     </button>
   ) : (
-    // ── UNRESOLVED — the choice, mobile-friendly (wraps), with an "or" connector. ──
+    // ── UNRESOLVED — the row carries ONE action: the link nudge. The "one-time" choice moved INTO the hub,
+    //    as a beautiful button at its head (ContractHub) — so a worker row is a single clean nudge, not a
+    //    two-button fork. Vendor rows keep their inline "direct purchase" (no hub head-button on that side). ──
     <span className="inline-flex items-center gap-1.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
       <button
         ref={btnRef}
@@ -144,16 +146,20 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
         <span>{linkLabel}</span>
         <ChevronRight size={12} className="shrink-0" style={{ opacity: 0.7 }} />
       </button>
-      <span className="text-[11px] select-none" style={{ color: V.faint, ...font }}>or</span>
-      <button
-        type="button"
-        disabled={busy}
-        onClick={(e) => { e.stopPropagation(); void setOneTime(); }}
-        className="db-onetime-btn inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg disabled:opacity-60"
-        style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.sys, fontWeight: 500 }}
-      >
-        <span>{busy ? 'Saving…' : oneLabel}</span>
-      </button>
+      {!isWO && (
+        <>
+          <span className="text-[11px] select-none" style={{ color: V.faint, ...font }}>or</span>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={(e) => { e.stopPropagation(); void setOneTime(); }}
+            className="db-onetime-btn inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg disabled:opacity-60"
+            style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.sys, fontWeight: 500 }}
+          >
+            <span>{busy ? 'Saving…' : oneLabel}</span>
+          </button>
+        </>
+      )}
     </span>
   );
 

@@ -17,16 +17,17 @@ const seed = (): Seed => ({
   user_profiles: [{ id: 'u1', name: 'Ramesh' }],
   site_narration_id: 'narr-1',
   site_tasks: {
-    'tk-g': { task_id: 'tk-g', name: 'Sanitaryware / fittings', project_id: 'P1', status: 'not_started', node_key: 'sanitary@Ground', floor_label: 'Ground', unit_label: null },
-    'tk-1': { task_id: 'tk-1', name: 'Sanitaryware / fittings', project_id: 'P1', status: 'not_started', node_key: 'sanitary@First', floor_label: 'First', unit_label: null },
-    'tk-2': { task_id: 'tk-2', name: 'Sanitaryware / fittings', project_id: 'P1', status: 'not_started', node_key: 'sanitary@Second', floor_label: 'Second', unit_label: null },
+    // the label the engine actually emits (library.ts:427) — `Category — Work`, internal ' — ' and all
+    'tk-g': { task_id: 'tk-g', name: 'Plumbing — sanitaryware & fittings', project_id: 'P1', status: 'not_started', node_key: 'sanitary@Ground', floor_label: 'Ground', unit_label: null },
+    'tk-1': { task_id: 'tk-1', name: 'Plumbing — sanitaryware & fittings', project_id: 'P1', status: 'not_started', node_key: 'sanitary@First', floor_label: 'First', unit_label: null },
+    'tk-2': { task_id: 'tk-2', name: 'Plumbing — sanitaryware & fittings', project_id: 'P1', status: 'not_started', node_key: 'sanitary@Second', floor_label: 'Second', unit_label: null },
   },
 })
 const ctxFor = (fake: ReturnType<typeof fakeSupabase>) => ({ supabase: fake, from: SENDER, orgId: ORG, wamid: 'w-1', lang: 'te' as const })
 
 // The "all" quantifier now lives in decompose's STRUCTURE slot; the model just targets the task TYPE.
 const DEC = JSON.stringify({ project_hint: 'ASM Elite', items: [{ type: 'progress', text: 'all sanitaryware done', task_hint: null, structure: { floor: null, unit: null, all: true, except: null }, qc_statements: [], cause: null, cause_reason: null, owner_hint: null, date_hint: null, project_hint: 'ASM Elite' }] })
-const R_COLLECTIVE = JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: true, updates: [{ target_id: 'type:P1:sanitaryware fittings', target_kind: 'task', action: 'resolve', confidence: 'high', closure_explicit: true, reason: 'all done' }] } })
+const R_COLLECTIVE = JSON.stringify({ issue_snag_found: { found: false, items: [] }, update_found: { found: true, updates: [{ target_id: 'type:P1:plumbing sanitaryware fittings', target_kind: 'task', action: 'resolve', confidence: 'high', closure_explicit: true, reason: 'all done' }] } })
 const model = (_s: string, user: string): Promise<string> => Promise.resolve(user.startsWith('CANDIDATES:') ? R_COLLECTIVE : DEC)
 
 suite('siteops #2 — explicit "all" sweeps every matching task, one combined readback', () => {
@@ -44,5 +45,10 @@ suite('siteops #2 — explicit "all" sweeps every matching task, one combined re
     const out = fake.outbox()
     expect(out.some((b) => /marked all 3/i.test(b))).toBe(true)
     expect(out.some((b) => b.includes('❓'))).toBe(false)
+
+    // …and it names THE WORK he reported, whole. The readback used to chop the label at its first ' — ',
+    // which on a real engine name leaves the CATEGORY: "Plumbing — marked all 3" tells him we swept a
+    // trade, not that his sanitaryware is closed on three floors.
+    expect(out.some((b) => /sanitaryware & fittings/.test(b))).toBe(true)
   })
 })

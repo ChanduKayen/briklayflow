@@ -28,26 +28,34 @@ const SENDER = '919900000000'
 const ctxFor = (fake: ReturnType<typeof fakeSupabase>, interactiveId: string | null = null) =>
   ({ supabase: fake, from: SENDER, orgId: ORG, wamid: 'w-1', lang: 'en' as const, interactiveId })
 
-// the three tiling ROWS the pin produced at First · Unit A (the live ASM Elite tie)
-const TILING_ROWS = [
-  { id: 'ft-1a', title: 'Floor tiling — First · Unit A' },
-  { id: 'wt-1a', title: 'Wall tiling / dado — First · Unit A' },
-  { id: 'pt-1a', title: 'Tiling — First · Unit A' },
-]
-// the same task name on four floors (the LOCATION axis)
-const FLOOR_ROWS = [
-  { id: 'w-1', title: 'Wiring (wire pulling) — First · Unit A' },
-  { id: 'w-2', title: 'Wiring (wire pulling) — Second · Unit A' },
-  { id: 'w-3', title: 'Wiring (wire pulling) — Third · Unit A' },
-  { id: 'w-4', title: 'Wiring (wire pulling) — Fourth · Unit A' },
-]
+// A row is (name, floor, unit) and its title is those three COMPOSED — the direction production runs in
+// (`_siteops_resolution_llm.ts` rowTitle). These fixtures used to be authored the other way round: a title
+// string, with name/floor/unit split back out of it on ' — '. That made every label here a single-segment
+// name the engine has never emitted ("Floor tiling", "Wiring (wire pulling)"), because a REAL one —
+// `Category — Work`, e.g. "Floor — tiling" — would have broken the split. So the suite could not see the
+// bug it was meant to guard: live, "Ceiling — POP finish — First" read as name "Ceiling" / loc "POP finish
+// — First", and a which-WORK tie asked "Where should this go?". Compose, never parse. See pick_label_axis.
+type Row = { id: string; name: string; floor: string | null; unit: string | null }
+const titleOf = (r: Row) => `${r.name}${r.floor ? ` — ${r.floor}` : ''}${r.unit ? ` · ${r.unit}` : ''}`
 
-const seedOf = (rows: { id: string; title: string }[]) => ({
+// the three tiling ROWS the pin produced at First · Unit A (the live ASM Elite tie). Two are engine types
+// (library.ts:368, :378); the bare "Tiling" is a flat one-off, which is the only kind of task whose name has
+// no category prefix — and it is deliberately a SUBSTRING of the other two (see UI4).
+const TILING_ROWS: Row[] = [
+  { id: 'ft-1a', name: 'Floor — tiling', floor: 'First', unit: 'Unit A' },
+  { id: 'wt-1a', name: 'Wall — tiling / dado', floor: 'First', unit: 'Unit A' },
+  { id: 'pt-1a', name: 'Tiling', floor: 'First', unit: 'Unit A' },
+]
+// the same task name on four floors (the LOCATION axis) — a real engine label, internal ' — ' and all
+const FLOOR_ROWS: Row[] = ['First', 'Second', 'Third', 'Fourth'].map((f, i) => ({
+  id: `w-${i + 1}`, name: 'Electrical — wire pulling', floor: f, unit: 'Unit A',
+}))
+
+const seedOf = (rows: Row[]) => ({
   projects: [{ project_id: 'P1', name: 'ASM Elite' }],
   site_tasks: Object.fromEntries(rows.map((r) => [r.id, {
-    task_id: r.id, project_id: 'P1', org_id: ORG, name: r.title.split(' — ')[0], status: 'OPEN',
-    floor_label: (r.title.split(' — ')[1] ?? '').split(' · ')[0] || null,
-    unit_label: r.title.split(' · ')[1] ?? null,
+    task_id: r.id, project_id: 'P1', org_id: ORG, name: r.name, status: 'OPEN',
+    floor_label: r.floor, unit_label: r.unit,
   }])),
   wa_registered_numbers: [{ user_id: 'u1', phone_number: SENDER, is_active: true }],
   user_profiles: [{ id: 'u1', name: 'Ramesh' }],
@@ -56,10 +64,15 @@ const seedOf = (rows: { id: string; title: string }[]) => ({
 const askTerminal = (ids: string[], axis: 'meaning' | 'location'): Terminal => ({
   kind: 'question_asked', about: 'which_item', axis, ref: ids[0], shortlistIds: ids, reason: '',
 })
-const execFor = (rows: { id: string; title: string }[]): ExecCtx => ({
+// candById as runSiteops builds it: one entry per PHYSICAL row, carrying the row's own facts next to the
+// composed title, so the renderer reads what the options ARE rather than guessing from how they look.
+const execFor = (rows: Row[]): ExecCtx => ({
   itemsById: new Map(),
-  labelById: new Map(rows.map((r) => [r.id, r.title])),
-  candById: new Map(rows.map((r) => [r.id, { kind: 'task' as const, title: r.title, projectId: 'P1' as string | null, projectName: 'ASM Elite' as string | null }])),
+  labelById: new Map(rows.map((r) => [r.id, titleOf(r)])),
+  candById: new Map(rows.map((r) => [r.id, {
+    kind: 'task' as const, title: titleOf(r), projectId: 'P1' as string | null,
+    projectName: 'ASM Elite' as string | null, name: r.name, floor: r.floor, unit: r.unit,
+  }])),
   cadenceMap: new Map(), actorId: 'u1', now: new Date('2026-07-11T09:00:00Z'),
   narrationId: 'narr-1', projectId: 'P1', message: 'tiles done first floor unit A',
 })
@@ -79,12 +92,13 @@ suite('siteops — the item pick as a WhatsApp LIST', () => {
     const list = listOf(fake)
     expect(!!list).toBe(true)
     expect((list.rows ?? []).length).toBe(5)                       // 3 candidates + "something else" + "none of these"
-    // the DIFFERENTIATOR is the work (all three share First · Unit A) → it goes in the title…
-    expect(list.rows[0].title).toBe('Floor tiling')
+    // the DIFFERENTIATOR is the work (all three share First · Unit A) → it goes in the title, WHOLE —
+    // category prefix included, because that prefix is part of the work's name, not a location
+    expect(list.rows[0].title).toBe('Floor — tiling')
     expect(list.rows[2].title).toBe('Tiling')
     // …and the FULL label (floor · unit included) rides the description, on EVERY row
-    expect(list.rows[0].description).toBe('Floor tiling — First · Unit A')
-    expect(list.rows[1].description).toBe('Wall tiling / dado — First · Unit A')
+    expect(list.rows[0].description).toBe('Floor — tiling — First · Unit A')
+    expect(list.rows[1].description).toBe('Wall — tiling / dado — First · Unit A')
     // Meta's hard caps, honoured
     for (const r of list.rows) {
       expect(r.title.length <= 24).toBe(true)
@@ -95,7 +109,7 @@ suite('siteops — the item pick as a WhatsApp LIST', () => {
     // THE BODY DOES NOT REPRINT THE ROWS — the P1 duplicate print. The candidates appear ONCE, in the rows,
     // where they are tappable; the body asks the question and nothing else. (rowTitle() made that safe: the
     // title no longer truncates, so the body is not needed as the place a full name can be read.)
-    expect(/Wall tiling \/ dado/.test(list.body)).toBe(false)
+    expect(/Wall — tiling \/ dado/.test(list.body)).toBe(false)
     expect(/Which work is this\?/.test(list.body)).toBe(true)   // same place, different work → the WORK axis
   })
 
@@ -106,31 +120,35 @@ suite('siteops — the item pick as a WhatsApp LIST', () => {
     const list = listOf(fake)
     expect(list.rows[0].title).toBe('First · Unit A')             // what tells them apart
     expect(list.rows[3].title).toBe('Fourth · Unit A')
-    expect(list.rows[0].description).toBe('Wiring (wire pulling) — First · Unit A')
+    expect(list.rows[0].description).toBe('Electrical — wire pulling — First · Unit A')
     // …and the QUESTION follows the same axis. "Which work is this?" over five floors of the one job is a
     // non-sequitur: the answer he'd give is already true of every row.
     expect(/Where should this go\?/.test(list.body)).toBe(true)
   })
 
   test('(UI3) more than 8 candidates → TEXT pick (never a silently dropped row inside a 10-row cap)', async () => {
-    const many = Array.from({ length: 9 }, (_, i) => ({ id: `t-${i}`, title: `Painting — Floor ${i} · Unit A` }))
+    const many: Row[] = Array.from({ length: 9 }, (_, i) => ({ id: `t-${i}`, name: 'Wall — internal paint', floor: `Floor ${i}`, unit: 'Unit A' }))
     const fake = fakeSupabase(seedOf(many))
     await applyTerminals(ctxFor(fake), [askTerminal(many.map((r) => r.id), 'location')], execFor(many))
 
-    expect(listOf(fake)).toBe(undefined)                                  // no interactive list
-    expect(/Painting — Floor 8 · Unit A/.test(textPick(fake))).toBe(true) // the text pick, in full
+    expect(listOf(fake)).toBe(undefined)                                              // no interactive list
+    expect(/Wall — internal paint — Floor 8 · Unit A/.test(textPick(fake))).toBe(true) // the text pick, in full
   })
 
-  // "Tiling" is a SUBSTRING of both "Floor tiling" and "Wall tiling / dado" — so a title can never be the
+  // "Tiling" is a SUBSTRING of both "Floor — tiling" and "Wall — tiling / dado" — so a title can never be the
   // resolution key for a tie like this one. WhatsApp delivers the tapped row's TITLE as the message text and
   // its ID separately (see _normalize); the id must win.
+  //
+  // The stored candidates here carry NO name/floor/unit, and that is on purpose: it is the shape an ask
+  // SERIALIZED BY AN OLDER DEPLOY has when its answer arrives after the new code is live. Such an ask must
+  // still resolve exactly as it did — the facts are an addition to the slot, never a requirement of it.
   test('(UI4) TAPPING a row resolves by its ID, not by re-parsing the title text', async () => {
     const fake = fakeSupabase(seedOf(TILING_ROWS))
     const convo = {
       slots_so_far: {
         kind: 'siteops_batch_collision', status: 'still_open', piece_text: 'tiles done first floor unit A',
         project_id: 'P1', narration_id: 'narr-1', image: null,
-        candidates: TILING_ROWS.map((r) => ({ id: r.id, kind: 'task', orgId: ORG, projectId: 'P1', projectName: 'ASM Elite', title: r.title, cause: null })),
+        candidates: TILING_ROWS.map((r) => ({ id: r.id, kind: 'task', orgId: ORG, projectId: 'P1', projectName: 'ASM Elite', title: titleOf(r), cause: null })),
       },
     }
     // Row 3's title is the bare word "Tiling" — a substring of BOTH other rows, so resolving by text is

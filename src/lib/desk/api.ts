@@ -37,7 +37,11 @@ export interface DeskApi {
   planFor: (siteCode: string) => DeskPlan | null
   /** Non-null when the read failed. A blank desk with no explanation is worse than an error. */
   error: string | null
+  /** The CORE load (Problems list). The desk skeleton shows while this is true. */
   loading: boolean
+  /** The PLAN load (Work Plan tasks) — a SEPARATE, later fetch. The Work Plan tab shows its own loader
+   *  on this so a still-loading plan is not mistaken for "no plan yet". */
+  plansLoading: boolean
 
   /** Close an item. Returns the snapshot needed to undo it. THROWS if the write failed — the row
    *  must not animate away over a close the database refused. */
@@ -248,7 +252,7 @@ function useMockDeskApi(): DeskApi {
     problems,
     pending,
     planFor: (code: string) => plans[code] ?? null,
-    error: null, loading: false,
+    error: null, loading: false, plansLoading: false,
     members: MOCK_MEMBERS,
     canReorder: true,                 // the mock's own rules engine referees, so the drag is real
     addTaskNote, assignTask, assignSupervisor,

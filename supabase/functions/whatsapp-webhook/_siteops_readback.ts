@@ -9,7 +9,7 @@
 import { isNothingToUpdate, MISS_CLAUSE, canonFloor, canonUnit } from './_siteops_resolution.ts'
 import type { SiteItem, StructureSlot } from './_siteops_extract.ts'
 import { G, bold, italic, plain, lines, blocks, heading, destinationLine, REPAIR, type Home } from './_voice.ts'
-import { reviewLink, todayLink, taskLink, type Link } from './_links.ts'
+import { reviewLink, todayLink, tasksLink, taskLink, type Link } from './_links.ts'
 import type { OutMessage } from './_format.ts'
 
 /**
@@ -222,7 +222,7 @@ export function combineReadbacks(entries: ReadbackEntry[]): string {
  *     ✓ Site — ground clearance
  *
  *     Recorded in *Tasks* · Briklay
- *     [ Open today ]
+ *     [ Open Tasks ]
  *
  * ── THE ONE BUTTON, AND WHO GETS IT ─────────────────────────────────────────────────────────────────
  *
@@ -234,8 +234,10 @@ export function combineReadbacks(entries: ReadbackEntry[]): string {
  *      issue is invisible precisely because it is closed. Nothing outranks it.
  *   2. OPEN REVIEW, when anything is held, failed or unplaced. The one thing that still needs him.
  *   3. VIEW TASK, when exactly one record was written and we know which. "View" lands on THE RECORD.
- *   4. OPEN TODAY, otherwise — a bundle touches several homes and one button cannot point at all of them,
- *      so it points one level UP, at the day, where everything the message listed is visible together.
+ *   4. OPEN TASKS, when several updates landed and every one of them was a task. No single record to open,
+ *      but they all live in one section — so it points at the Tasks plan, not the day.
+ *   5. OPEN TODAY, otherwise — a bundle that spans homes and one button cannot point at all of them, so it
+ *      points one level UP, at Problems: the half of the desk that needs a human.
  *
  * The DESTINATION LINE, unlike the button, is not scarce: it rides every one of these, because it is the
  * line that proves the write happened and teaches where the thing now lives.
@@ -268,7 +270,8 @@ export function composeConfirmation(
   const link: Link | null =
     homes.includes('Review') ? reviewLink()                                  // 2 — the thing still owed
     : entries.length === 1 && entries[0].link ? entries[0].link              // 3 — the one record we wrote
-    : homes.length ? todayLink()                                             // 4 — the day, one level up
+    : homes.length === 1 && homes[0] === 'Tasks' ? tasksLink()               // 4 — a pure task digest → the Tasks section
+    : homes.length ? todayLink()                                             // 5 — a mixed bundle → the day (Problems)
     : null                                                                   //     nothing written → no button
 
   return link ? { kind: 'cta', body, cta: link } : { kind: 'text', body }

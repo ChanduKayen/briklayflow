@@ -5,7 +5,7 @@
 
 import type { ProblemState, TaskState } from './types'
 
-export type MedTone = 'you' | 'chasing' | 'moving' | 'done' | 'idle' | 'blocked'
+export type MedTone = 'you' | 'chasing' | 'moving' | 'done' | 'idle' | 'blocked' | 'live' | 'ready'
 
 /** Who has the ball on a problem. This is the axis the whole page sorts by. */
 export const problemTone = (s: ProblemState): MedTone =>

@@ -40,28 +40,50 @@ interface ProjectRow extends EngineProjectRow {
 
 type SignedAttachment = AttachmentRow & { bucket: string; object_path: string; url: string | null }
 
-/** Exactly what one desk fetch returns — and therefore exactly what an optimistic edit patches. */
-interface DeskData {
+/**
+ * THE DESK IS TWO LOADS, NOT ONE — so the Problems tab paints without waiting for the Work Plan.
+ *
+ * The old single query fetched EVERYTHING before anything rendered: every problem AND every one of a
+ * real org's ~1,530 tasks + ~4,584 QC rows + their comments/narrations/photos. But the default view is
+ * the Problems tab, which shows NONE of that task payload — it waited on 6,000+ rows it never displays.
+ * That is the whole reason it felt slow next to the Transactions page, which pages in only what it shows.
+ *
+ *   CORE  — what the Problems list + Pending + site cards need: projects, problems, members, phones, and
+ *           each problem's events/photos/resolutions. Small, and it paints first.
+ *   PLAN  — the Work Plan's heavy payload: tasks, QC, comments, task narrations, task photos. Loaded
+ *           AFTER core (gated on core success), so it never stands between you and the Problems list.
+ *
+ * Each is its own react-query key, so an optimistic edit patches the right one and neither refetch drags
+ * the other. Every field is still exactly what an optimistic edit patches.
+ */
+interface DeskCoreData {
   projects: ProjectRow[]
   problems: ProblemRow[]
-  tasks: Array<TaskRow & { project_id?: string }>
   unplaced: Array<Record<string, unknown>>
   members: Array<{ id: string; name: string | null }>
   events: EventRow[]
   atts: SignedAttachment[]
-  /** Photos the webhook attached to a TASK (attachments.parent_type='site_task'). */
-  taskAtts: SignedAttachment[]
-  /** The raw WhatsApp messages a task's status_history points at — his actual words. */
-  narrations: NarrationRow[]
   resolutions: ResolutionRow[]
   phones: Array<{ user_id: string | null; phone_number: string }>
+}
+interface DeskPlanData {
+  tasks: Array<TaskRow & { project_id?: string }>
   qc: QcRow[]
   comments: TaskCommentRow[]
+  /** The raw WhatsApp messages a task's status_history points at — his actual words. */
+  narrations: NarrationRow[]
+  /** Photos the webhook attached to a TASK (attachments.parent_type='site_task'). */
+  taskAtts: SignedAttachment[]
 }
 import { planFloors, snapshot, closeItem, type UndoSnapshot } from './derive'
 
 const PROBLEM_COLS =
   'id, ref, kind, title, status, cause, confidence, project_id, task_id, owner_id, owner_source, floor_label, unit_label, area_label, next_followup_at, deadline, created_at, updated_at'
+// owner_source landed in 20260626000004; on an org that hasn't applied it, naming it 42703s the whole
+// problems read and blanks the desk. So degrade to the columns that predate it — the assignee-reason
+// subtext just falls back to a safe default. (RICH/BASE, the portal's own hand-applied-migration idiom.)
+const PROBLEM_COLS_BASE =
+  'id, ref, kind, title, status, cause, confidence, project_id, task_id, owner_id, floor_label, unit_label, area_label, next_followup_at, deadline, created_at, updated_at'
 const TASK_COLS =
   'task_id, ref, project_id, name, description, source, phase, trade, status, floor_label, unit_label, seq_no, duration_days, started_at, owner_id, node_key, task_type_id, binding, status_history, updated_at'
 
@@ -151,7 +173,6 @@ async function unplacedSelect(orgId: string) {
 
 export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
   const qc = useQueryClient()
-  const invalidate = useCallback(() => { void qc.invalidateQueries({ queryKey: ['desk'] }) }, [qc])
 
   /**
    * OPTIMISTIC. THE UI MOVES NOW; THE NETWORK CATCHES UP.
@@ -168,56 +189,100 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
    * A FAILED write is not hidden by this: `must()` throws, the toast says so, and the refetch that
    * follows pulls the true row back — the optimistic edit is corrected, out loud.
    */
-  const patchCache = useCallback((f: (d: DeskData) => DeskData) => {
-    qc.setQueryData<DeskData>(['desk', orgId], (d) => (d ? f(d) : d))
+  const patchCore = useCallback((f: (d: DeskCoreData) => DeskCoreData) => {
+    qc.setQueryData<DeskCoreData>(['desk', orgId], (d) => (d ? f(d) : d))
   }, [qc, orgId])
+  const patchPlan = useCallback((f: (d: DeskPlanData) => DeskPlanData) => {
+    qc.setQueryData<DeskPlanData>(['deskPlan', orgId], (d) => (d ? f(d) : d))
+  }, [qc, orgId])
+  const invalidateCore = useCallback(() => { void qc.invalidateQueries({ queryKey: ['desk', orgId] }) }, [qc, orgId])
+  const invalidatePlan = useCallback(() => { void qc.invalidateQueries({ queryKey: ['deskPlan', orgId] }) }, [qc, orgId])
 
-  /* ── the whole desk, in one query ──────────────────────────────────────────────────────────
-   * One round of reads, then everything is folded in pure code. Deliberately not five hooks:
-   * the state of an item depends on its trail, and its trail depends on its photos, so a partial
-   * load would render a WRONG state for a frame — and the state is the colour of the row. */
-  // `dataUpdatedAt` IS the clock. Reading Date.now() during render is impure and would make every
-  // age and every status sentence drift between two renders of the same data; this one moves only
-  // when the data does (every 20s poll), so the fold is a pure function of what we fetched.
-  const { data, dataUpdatedAt, error, isLoading } = useQuery({
-    ...deskQuery(orgId),
-    enabled: !!orgId,
-    refetchInterval: 20_000,
-  })
+  /* ── LIVE — A WHATSAPP WRITE LANDS ON THE OPEN DESK, WITH NO REFRESH ────────────────────────────
+   * CORE polls every 30s and PLAN reconciles on window focus — but a task a supervisor updates over
+   * WhatsApp while the founder is LOOKING at the plan would otherwise sit stale until he refocused the
+   * tab, which reads as "the desk is wrong". (The old SiteDesk had a realtime sub; the rewrite dropped it
+   * for the heavy plan payload, and that is the regression.) So we subscribe to the exact tables the
+   * webhook writes and invalidate the MATCHING load the instant a row changes — the task's status/comment/
+   * check/narration invalidate PLAN, the problem/its trail/the pending queue invalidate CORE. No timer over
+   * the 1,500-task payload, and zero requests when nothing moves. Same idiom as useBadgeRealtime, and
+   * org-scoped so the channel only wakes for THIS org's rows.
+   *
+   * NOTE: the site_* tables must be in the `supabase_realtime` publication for this to fire (RLS still
+   * applies to what the row payload can carry). If they are not, this is inert — never wrong, just as
+   * stale as before — so shipping it ahead of the publication change cannot break the desk. */
+  useEffect(() => {
+    if (!orgId) return
+    const flt = `org_id=eq.${orgId}`
+    const channel = supabase
+      .channel(`desk-live-${orgId}`)
+      // PLAN — the Work Plan payload: the task itself, its spoken updates, its checks, its words.
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'site_tasks', filter: flt }, invalidatePlan)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'site_task_comments', filter: flt }, invalidatePlan)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'site_task_qc', filter: flt }, invalidatePlan)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'site_narrations', filter: flt }, invalidatePlan)
+      // CORE — the Problems list, its trail, and the Pending (unplaced) queue.
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'problems', filter: flt }, invalidateCore)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'followup_events', filter: flt }, invalidateCore)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'problem_resolutions', filter: flt }, invalidateCore)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'siteops_unplaced', filter: flt }, invalidateCore)
+      .subscribe()
+    return () => { void supabase.removeChannel(channel) }
+  }, [orgId, invalidateCore, invalidatePlan])
 
+  /* ── two loads (see DeskCoreData / DeskPlanData) ──────────────────────────────────────────────
+   * CORE paints the Problems list; PLAN carries the Work Plan's heavy task/QC payload. The problems
+   * fold reads CORE alone, so the Problems tab renders the instant CORE lands — it never waits on the
+   * ~1,530 tasks / ~4,584 QC rows it does not show. */
+  // CORE: lean, and it polls — a 30s tick over a few hundred rows, not the old 20s over the whole world.
+  const core = useQuery({ ...deskCoreQuery(orgId), enabled: !!orgId, refetchInterval: 30_000 })
+  // PLAN: gated on CORE success so it never delays the Problems list, and it does NOT poll — it
+  // reconciles on a task write (invalidatePlan) or a window focus, never on a full-world timer.
+  const plan = useQuery({ ...deskPlanQuery(orgId), enabled: !!orgId && core.isSuccess, refetchOnWindowFocus: true })
 
-  /* ── fold ────────────────────────────────────────────────────────────────────────────────── */
+  const coreData = core.data
+  const planData = plan.data
+  // `dataUpdatedAt` (CORE's) IS the clock. Reading Date.now() during render is impure and would make
+  // every age and every status sentence drift between two renders of the same data; this one moves only
+  // when CORE polls, so the fold is a pure function of what we fetched.
+  const now = core.dataUpdatedAt || 0
+
+  /* ── fold ──────────────────────────────────────────────────────────────────────────────────
+   * problems + pending come from CORE and render immediately; plans fill in when PLAN arrives (until
+   * then a site card shows its problem counts with pct 0). One memo over both, so it re-derives when
+   * either load lands. */
   const model = useMemo(() => {
-    const now = dataUpdatedAt || 0
-    if (!data) return { sites: [] as DeskSite[], problems: [] as DeskProblem[], pending: [] as DeskPending[], plans: {} as Record<string, DeskPlan> }
+    const empty = { sites: [] as DeskSite[], problems: [] as DeskProblem[], pending: [] as DeskPending[], plans: {} as Record<string, DeskPlan> }
+    if (!coreData) return empty
 
-    const nameById = new Map(data.members.map((m) => [m.id, m.name ?? '']))
-    const phoneById = new Map(data.phones.filter((p) => p.user_id).map((p) => [p.user_id as string, p.phone_number]))
+    const nameById = new Map(coreData.members.map((m) => [m.id, m.name ?? '']))
+    const phoneById = new Map(coreData.phones.filter((p) => p.user_id).map((p) => [p.user_id as string, p.phone_number]))
     const nameOf = (id: string | null) => (id ? nameById.get(id) ?? '' : '')
     const phoneOf = (id: string | null) => (id ? phoneById.get(id) ?? '' : '')
 
-    const projById = new Map(data.projects.map((p) => [p.project_id, p]))
+    const projById = new Map(coreData.projects.map((p) => [p.project_id, p]))
     const codeOf = (pid: string | null) => (pid ? projById.get(pid)?.project_code ?? '' : '')
 
+    // ── problems (CORE) ──
     const eventsBy = new Map<string, EventRow[]>()
-    for (const e of data.events) {
+    for (const e of coreData.events) {
       if (!e.problem_id) continue
       const l = eventsBy.get(e.problem_id) ?? []
       l.push(e); eventsBy.set(e.problem_id, l)
     }
     const attsBy = new Map<string, AttachmentRow[]>()
-    for (const a of data.atts) {
+    for (const a of coreData.atts) {
       const l = attsBy.get(a.parent_id) ?? []
       l.push(a); attsBy.set(a.parent_id, l)
     }
     // The CURRENT resolution is the newest one that has not been reopened.
     const resBy = new Map<string, ResolutionRow>()
-    for (const r of data.resolutions) {
+    for (const r of coreData.resolutions) {
       if (r.reopened_at) continue
       if (!resBy.has(r.problem_id)) resBy.set(r.problem_id, r)
     }
 
-    const problems: DeskProblem[] = data.problems
+    const problems: DeskProblem[] = coreData.problems
       .filter((p) => p.project_id && codeOf(p.project_id))
       .map((p) => toDeskProblem(p, {
         events: eventsBy.get(p.id) ?? [],
@@ -229,77 +294,94 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
         nameOf, phoneOf, now,
       }))
 
+    // ── pending (CORE — siteops_unplaced) ──
+    const pending: DeskPending[] = coreData.unplaced.map((u) => {
+      const obs = u.observation as { text?: string } | null
+      return {
+        id: String(u.id),
+        text: obs?.text ?? (u.caption as string) ?? 'Photo with no caption',
+        sender: 'WhatsApp',
+        senderNumber: (u.sender_number as string) ?? '',
+        when: `${daysBetween(u.created_at as string, now)}d ago`,
+        // A question we asked that was never answered — the item is stuck waiting on HIM.
+        interrupted: !!u.question_wamid,
+        photo: !!u.object_path,
+        site: u.project_id ? projById.get(u.project_id as string)?.name ?? null : null,
+      }
+    })
+
+    // ── plans (PLAN — needs CORE's projects + problems) ──
     // A task is blocked by exactly the OPEN issues whose task_id points at it. Derived — see
     // blockersByTask(). Nothing writes a blocked flag, so nothing can leave one behind.
-    const blockerByTaskId = blockersByTask(data.problems)
-
-    const qcRowsByTask = new Map<string, QcRow[]>()
-    for (const r of data.qc) {
-      const l = qcRowsByTask.get(r.task_id) ?? []
-      l.push(r); qcRowsByTask.set(r.task_id, l)
-    }
-    const qcByTaskId = new Map([...qcRowsByTask].map(([tid, rows]) => [tid, toQcChecks(rows)]))
-
-    const commentsByTaskId = new Map<string, TaskCommentRow[]>()
-    for (const c of data.comments) {
-      const l = commentsByTaskId.get(c.task_id) ?? []
-      l.push(c); commentsByTaskId.set(c.task_id, l)
-    }
-    const narrationById = new Map(data.narrations.map((n) => [n.id, n]))
-    const photosByTaskId = new Map<string, AttachmentRow[]>()
-    for (const a of data.taskAtts) {
-      const l = photosByTaskId.get(a.parent_id) ?? []
-      l.push(a); photosByTaskId.set(a.parent_id, l)
-    }
-
-    // ── plans, one per project ──
+    const blockerByTaskId = blockersByTask(coreData.problems)
     const plans: Record<string, DeskPlan> = {}
-    const tasksByProject = new Map<string, TaskRow[]>()
-    for (const t of data.tasks as Array<TaskRow & { project_id?: string }>) {
-      const pid = t.project_id
-      if (!pid) continue
-      const l = tasksByProject.get(pid) ?? []
-      l.push(t); tasksByProject.set(pid, l)
-    }
+    if (planData) {
+      const qcRowsByTask = new Map<string, QcRow[]>()
+      for (const r of planData.qc) {
+        const l = qcRowsByTask.get(r.task_id) ?? []
+        l.push(r); qcRowsByTask.set(r.task_id, l)
+      }
+      const qcByTaskId = new Map([...qcRowsByTask].map(([tid, rows]) => [tid, toQcChecks(rows)]))
 
-    for (const proj of data.projects) {
-      const code = proj.project_code
-      if (!code) continue
-      const rows = tasksByProject.get(proj.project_id) ?? []
-
-      // A PROJECT WITH NO TASKS STILL HAS A PLAN — an EMPTY one. Skipping it here is what made the
-      // setup wizard unreachable: planFor() returned null, and the page could not tell "no plan yet"
-      // apart from "no project chosen", so it showed the project picker instead of the wizard.
-      if (!rows.length) {
-        plans[code] = { floors: [], focus: '', tasks: [] }
-        continue
+      const commentsByTaskId = new Map<string, TaskCommentRow[]>()
+      for (const c of planData.comments) {
+        const l = commentsByTaskId.get(c.task_id) ?? []
+        l.push(c); commentsByTaskId.set(c.task_id, l)
+      }
+      const narrationById = new Map(planData.narrations.map((n) => [n.id, n]))
+      const photosByTaskId = new Map<string, AttachmentRow[]>()
+      for (const a of planData.taskAtts) {
+        const l = photosByTaskId.get(a.parent_id) ?? []
+        l.push(a); photosByTaskId.set(a.parent_id, l)
       }
 
-      const refByNodeKey = new Map(rows.filter((t) => t.node_key && t.ref).map((t) => [t.node_key as string, t.ref as string]))
+      const tasksByProject = new Map<string, TaskRow[]>()
+      for (const t of planData.tasks) {
+        const pid = t.project_id
+        if (!pid) continue
+        const l = tasksByProject.get(pid) ?? []
+        l.push(t); tasksByProject.set(pid, l)
+      }
 
-      // WHAT EACH TASK WAITS FOR — from the LIVE graph (the building + the current library), not from
-      // the `binding` snapshot each row happens to carry. One instantiate per project, not per row.
-      // See gates.ts: this is what stopped "Wall — blockwork" reading Ready over an unpoured slab.
-      const gates = gatesByTask(proj as EngineProjectRow, rows)
+      for (const proj of coreData.projects) {
+        const code = proj.project_code
+        if (!code) continue
+        const rows = tasksByProject.get(proj.project_id) ?? []
 
-      const all: DeskTask[] = rows.map((t) => toDeskTask(t, {
-        refByNodeKey, gates, blockerByTaskId, qcByTaskId, commentsByTaskId, narrationById, photosByTaskId,
-        supervisorId: proj.supervisor_id,      // a task with no owner inherits the site's supervisor
-        nameOf, now,
-      }))
+        // A PROJECT WITH NO TASKS STILL HAS A PLAN — an EMPTY one. Skipping it here is what made the
+        // setup wizard unreachable: planFor() returned null, and the page could not tell "no plan yet"
+        // apart from "no project chosen", so it showed the project picker instead of the wizard.
+        if (!rows.length) {
+          plans[code] = { floors: [], focus: '', tasks: [] }
+          continue
+        }
 
-      // Floors bottom-up, in the engine's own seq order, with the building-level work on a floor of
-      // its own at the bottom (see planFloors / SITE_FLOOR).
-      const floors = planFloors(all)
-      // Focus = the lowest floor that is not finished. That is where the building actually is —
-      // but it is only a DEFAULT: the page can look at any floor it likes (sliceFloor).
-      const focus = floors.find((f) => f.pct < 100)?.n ?? floors.at(-1)?.n ?? ''
+        const refByNodeKey = new Map(rows.filter((t) => t.node_key && t.ref).map((t) => [t.node_key as string, t.ref as string]))
 
-      plans[code] = { floors, focus, tasks: all }
+        // WHAT EACH TASK WAITS FOR — from the LIVE graph (the building + the current library), not from
+        // the `binding` snapshot each row happens to carry. One instantiate per project, not per row.
+        // See gates.ts: this is what stopped "Wall — blockwork" reading Ready over an unpoured slab.
+        const gates = gatesByTask(proj as EngineProjectRow, rows)
+
+        const all: DeskTask[] = rows.map((t) => toDeskTask(t, {
+          refByNodeKey, gates, blockerByTaskId, qcByTaskId, commentsByTaskId, narrationById, photosByTaskId,
+          supervisorId: proj.supervisor_id,      // a task with no owner inherits the site's supervisor
+          nameOf, now,
+        }))
+
+        // Floors bottom-up, in the engine's own seq order, with the building-level work on a floor of
+        // its own at the bottom (see planFloors / SITE_FLOOR).
+        const floors = planFloors(all)
+        // Focus = the lowest floor that is not finished. That is where the building actually is —
+        // but it is only a DEFAULT: the page can look at any floor it likes (sliceFloor).
+        const focus = floors.find((f) => f.pct < 100)?.n ?? floors.at(-1)?.n ?? ''
+
+        plans[code] = { floors, focus, tasks: all }
+      }
     }
 
-    // ── sites ──
-    const sites: DeskSite[] = data.projects
+    // ── sites (CORE projects + problems; pct/focus from PLAN once it lands) ──
+    const sites: DeskSite[] = coreData.projects
       .filter((p) => p.project_code)
       .map((p) => {
         const code = p.project_code as string
@@ -320,24 +402,8 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
         } as DeskSite
       })
 
-    // ── pending (siteops_unplaced) ──
-    const pending: DeskPending[] = data.unplaced.map((u) => {
-      const obs = u.observation as { text?: string } | null
-      return {
-        id: String(u.id),
-        text: obs?.text ?? (u.caption as string) ?? 'Photo with no caption',
-        sender: 'WhatsApp',
-        senderNumber: (u.sender_number as string) ?? '',
-        when: `${daysBetween(u.created_at as string, now)}d ago`,
-        // A question we asked that was never answered — the item is stuck waiting on HIM.
-        interrupted: !!u.question_wamid,
-        photo: !!u.object_path,
-        site: u.project_id ? projById.get(u.project_id as string)?.name ?? null : null,
-      }
-    })
-
     return { sites, problems, pending, plans }
-  }, [data, dataUpdatedAt])
+  }, [coreData, planData, now])
 
   /* ── writes ──────────────────────────────────────────────────────────────────────────────── */
 
@@ -393,14 +459,14 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
       .update({ status: 'RESOLVED', next_followup_at: null, active_resolve_event: null })
       .eq('id', id).eq('org_id', orgId))
     // Only NOW is it safe to show it closed — the resolution is on file.
-    patchCache((d) => ({ ...d, problems: d.problems.map((p) => (p.id === id ? { ...p, status: 'RESOLVED' } : p)) }))
+    patchCore((d) => ({ ...d, problems: d.problems.map((p) => (p.id === id ? { ...p, status: 'RESOLVED' } : p)) }))
     await supabase.from('followup_events').insert({
       org_id: orgId, problem_id: id, type: 'status_changed', actor_kind: 'user', actor_id: userId,
       body: `Closed — ${outcome}`,
     })
-    invalidate()
+    invalidateCore()
     return snap
-  }, [model.problems, orgId, userId, invalidate, patchCache])
+  }, [model.problems, orgId, userId, invalidateCore, patchCore])
 
   const undo = useCallback((snap: UndoSnapshot) => {
     void (async () => {
@@ -418,9 +484,9 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
         .select('id').eq('problem_id', snap.id).eq('org_id', orgId).is('reopened_at', null)
         .order('closed_at', { ascending: false }).limit(1)
       if (r?.[0]) await supabase.from('problem_resolutions').delete().eq('id', r[0].id)
-      invalidate()
+      invalidateCore()
     })()
-  }, [orgId, invalidate])
+  }, [orgId, invalidateCore])
 
   const reopen = useCallback(async (id: string) => {
     {
@@ -429,7 +495,7 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
        * mean "reopen, and quietly never ask anyone about it again", which is the same silence this
        * whole fix set exists to end. The stale readback button is cleared with it. */
       const tomorrow = new Date(Date.now() + 24 * 3600 * 1000).toISOString()
-      patchCache((d) => ({ ...d, problems: d.problems.map((p) => (p.id === id ? { ...p, status: 'OPEN' } : p)) }))
+      patchCore((d) => ({ ...d, problems: d.problems.map((p) => (p.id === id ? { ...p, status: 'OPEN' } : p)) }))
       await must('Reopening', () => supabase.from('problems')
         .update({ status: 'OPEN', next_followup_at: tomorrow, active_resolve_event: null })
         .eq('id', id).eq('org_id', orgId))
@@ -444,12 +510,12 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
       await supabase.from('followup_events').insert({
         org_id: orgId, problem_id: id, type: 'reopened', actor_kind: 'user', actor_id: userId, body: 'Reopened',
       })
-      invalidate()
+      invalidateCore()
     }
-  }, [orgId, userId, invalidate, patchCache])
+  }, [orgId, userId, invalidateCore, patchCore])
 
   const addNote = useCallback(async (id: string, text: string) => {
-    patchCache((d) => ({
+    patchCore((d) => ({
       ...d,
       events: [...d.events, {
         id: `tmp-${Date.now()}`, problem_id: id, type: 'comment',
@@ -459,8 +525,8 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
     await must('Adding the note', () => supabase.from('followup_events').insert({
       org_id: orgId, problem_id: id, type: 'comment', actor_kind: 'user', actor_id: userId, body: text,
     }))
-    invalidate()
-  }, [orgId, userId, invalidate, patchCache])
+    invalidateCore()
+  }, [orgId, userId, invalidateCore, patchCore])
 
   /** TRUTHFUL nudge: bring the chase clock to now. The daily cron acts on it — so we say that,
    *  and we do not claim a message went out this second, because none did. */
@@ -470,8 +536,8 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
       org_id: orgId, problem_id: id, type: 'status_changed', actor_kind: 'user', actor_id: userId,
       body: 'You moved the follow-up to the next run',
     })
-    invalidate()
-  }, [orgId, userId, invalidate])
+    invalidateCore()
+  }, [orgId, userId, invalidateCore])
 
   // NOT WIRED — no endpoint exists (map §6). These throw rather than lie.
   const unsupported = (what: string) => async () => { throw new DeskUnsupported(what) }
@@ -490,8 +556,8 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
     const r = (data ?? {}) as { ok?: boolean; sent?: boolean; reason?: string; message?: string; error?: string }
     if (!r.ok) throw new Error(r.error ?? 'The message could not be sent')
     if (!r.sent) throw new Error(r.message ?? `Not delivered — ${r.reason ?? 'unknown reason'}`)
-    invalidate()
-  }, [invalidate])
+    invalidateCore()
+  }, [invalidateCore])
 
   /**
    * REASSIGN A PROBLEM — and re-notify the new owner, exactly as a fresh assignment would.
@@ -502,7 +568,7 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
    * missing WhatsApp number or an undeployed notifier must not fail the reassignment itself.
    */
   const assignProblem = useCallback(async (id: string, userId: string | null) => {
-    patchCache((d) => ({
+    patchCore((d) => ({
       ...d,
       problems: d.problems.map((p) => (p.id === id ? { ...p, owner_id: userId, owner_source: 'manual' } : p)),
     }))
@@ -512,8 +578,8 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
       try { await notifyAssignment('issue', id, userId) }
       catch (e) { console.warn('[desk] reassign notify failed (item still reassigned):', (e as Error).message) }
     }
-    invalidate()
-  }, [orgId, invalidate, patchCache])
+    invalidateCore()
+  }, [orgId, invalidateCore, patchCore])
 
   const patchTask = useCallback(async (_site: string, ref: string, f: (t: DeskTask) => DeskTask) => {
     const current = Object.values(model.plans).flatMap((p) => p.tasks).find((t) => t.ref === ref)
@@ -527,7 +593,7 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
     if (next.state === 'todo') patch.started_at = null
 
     // The segmented thumb glides NOW — not after 1,500 tasks come back over the wire.
-    patchCache((d) => ({
+    patchPlan((d) => ({
       ...d,
       tasks: d.tasks.map((t) => (t.ref === ref
         ? { ...t, ...patch as Partial<TaskRow>, updated_at: new Date().toISOString() }
@@ -535,18 +601,18 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
     }))
 
     await must('Saving the task', () => supabase.from('site_tasks').update(patch).eq('ref', ref).eq('org_id', orgId))
-    invalidate()
-  }, [model.plans, orgId, invalidate, patchCache])
+    invalidatePlan()
+  }, [model.plans, orgId, invalidatePlan, patchPlan])
 
   /** A note on a TASK. Goes to site_task_comments — the same table the WhatsApp resolver writes
    *  to, so a typed note and a spoken one land in the same trail and read as one story. */
   const addTaskNote = useCallback(async (taskRef: string, text: string) => {
-    const t = data?.tasks.find((x) => x.ref === taskRef)
+    const t = planData?.tasks.find((x) => x.ref === taskRef)
     if (!t) throw new Error('Task not found')
-    const author = data?.members.find((m) => m.id === userId)?.name ?? 'You'
+    const author = coreData?.members.find((m) => m.id === userId)?.name ?? 'You'
 
     // The note lands on the story immediately — that is the whole point of writing it.
-    patchCache((d) => ({
+    patchPlan((d) => ({
       ...d,
       comments: [...d.comments, {
         id: `tmp-${Date.now()}`, task_id: t.task_id, author_name: author,
@@ -557,8 +623,8 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
     await must('Adding the note', () => supabase.from('site_task_comments').insert({
       org_id: orgId, task_id: t.task_id, author_id: userId, author_name: author, body: text,
     }))
-    invalidate()
-  }, [data, orgId, userId, invalidate, patchCache])
+    invalidatePlan()
+  }, [planData, coreData, orgId, userId, invalidatePlan, patchPlan])
 
   /**
    * EDIT A TASK BY HAND — the name, and what it covers.
@@ -580,8 +646,8 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
   const editTask = useCallback(async (siteCode: string, ref: string, patch: TaskEdit) => {
     const plan = model.plans[siteCode]
     const current = plan?.tasks.find((t) => t.ref === ref)
-    const row = data?.tasks.find((t) => t.ref === ref)
-    if (!data || !current || !row) throw new Error('Task not found')
+    const row = planData?.tasks.find((t) => t.ref === ref)
+    if (!planData || !current || !row) throw new Error('Task not found')
 
     const rename = patch.name !== undefined
       ? planRename(current, patch.name, patch.renameScope ?? 'type', plan.tasks)
@@ -593,7 +659,7 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
     if (!rename && !descChanged) return
 
     const renamedRefs = new Set(rename?.refs ?? [])
-    patchCache((d) => ({
+    patchPlan((d) => ({
       ...d,
       tasks: d.tasks.map((t) => ({
         ...t,
@@ -603,7 +669,7 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
     }))
 
     if (rename) {
-      const ids = data.tasks.filter((t) => t.ref && renamedRefs.has(t.ref)).map((t) => t.task_id)
+      const ids = planData.tasks.filter((t) => t.ref && renamedRefs.has(t.ref)).map((t) => t.task_id)
       await must('Renaming the task', () => supabase.from('site_tasks')
         .update({ name: rename.name, name_source: 'manual' }).in('task_id', ids).eq('org_id', orgId))
 
@@ -632,8 +698,8 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
       await must('Saving the scope', () => supabase.from('site_tasks')
         .update({ description: patch.desc ?? null }).eq('task_id', row.task_id).eq('org_id', orgId))
     }
-    invalidate()
-  }, [model.plans, data, orgId, invalidate, patchCache])
+    invalidatePlan()
+  }, [model.plans, planData, orgId, invalidatePlan, patchPlan])
 
   /**
    * DELETE A TASK — and make it STAY deleted.
@@ -654,8 +720,8 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
    */
   const deleteTask = useCallback(async (siteCode: string, ref: string) => {
     const current = model.plans[siteCode]?.tasks.find((t) => t.ref === ref)
-    const row = data?.tasks.find((t) => t.ref === ref)
-    if (!data || !current || !row) throw new Error('Task not found')
+    const row = planData?.tasks.find((t) => t.ref === ref)
+    if (!planData || !current || !row) throw new Error('Task not found')
 
     if (current.nodeKey) {
       const { data: proj } = await supabase.from('projects')
@@ -671,40 +737,42 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
     await must('Deleting the task', () => supabase.from('site_tasks')
       .delete().eq('task_id', row.task_id).eq('org_id', orgId))
 
-    patchCache((d) => ({ ...d, tasks: d.tasks.filter((t) => t.task_id !== row.task_id) }))
-    invalidate()
-  }, [model.plans, data, orgId, invalidate, patchCache])
+    patchPlan((d) => ({ ...d, tasks: d.tasks.filter((t) => t.task_id !== row.task_id) }))
+    invalidatePlan()
+  }, [model.plans, planData, orgId, invalidatePlan, patchPlan])
 
   const assignTask = useCallback(async (taskRef: string, uid: string | null) => {
-    const t = data?.tasks.find((x) => x.ref === taskRef)
+    const t = planData?.tasks.find((x) => x.ref === taskRef)
     if (!t) throw new Error('Task not found')
-    patchCache((d) => ({ ...d, tasks: d.tasks.map((x) => (x.ref === taskRef ? { ...x, owner_id: uid } : x)) }))
+    patchPlan((d) => ({ ...d, tasks: d.tasks.map((x) => (x.ref === taskRef ? { ...x, owner_id: uid } : x)) }))
     // owner_source='manual' — a human's choice is never re-defaulted by the generator (persist.ts).
     await must('Assigning', () => supabase.from('site_tasks')
       .update({ owner_id: uid, owner_source: 'manual' }).eq('task_id', t.task_id).eq('org_id', orgId))
-    invalidate()
-  }, [data, orgId, invalidate, patchCache])
+    invalidatePlan()
+  }, [planData, orgId, invalidatePlan, patchPlan])
 
   const assignSupervisor = useCallback(async (siteCode: string, uid: string | null) => {
-    const p = data?.projects.find((x) => x.project_code === siteCode)
+    const p = coreData?.projects.find((x) => x.project_code === siteCode)
     if (!p) throw new Error('Site not found')
-    patchCache((d) => ({
+    // supervisor_id lives on CORE's projects (the plan fold reads them for task inheritance, so patching
+    // core also updates the plan's inherited owners without a plan refetch).
+    patchCore((d) => ({
       ...d,
       projects: d.projects.map((x) => (x.project_id === p.project_id ? { ...x, supervisor_id: uid } : x)),
     }))
     await must('Assigning the supervisor', () => supabase.from('projects')
       .update({ supervisor_id: uid }).eq('project_id', p.project_id).eq('org_id', orgId))
-    invalidate()
-  }, [data, orgId, invalidate, patchCache])
+    invalidateCore()
+  }, [coreData, orgId, invalidateCore, patchCore])
 
   const answerQc = useCallback(async (qcId: string, status: QcStatus, answer: string | null) => {
     // The tick lands on the same frame as the press.
-    patchCache((d) => ({ ...d, qc: d.qc.map((r) => (r.id === qcId ? { ...r, qc_status: status, answer } : r)) }))
+    patchPlan((d) => ({ ...d, qc: d.qc.map((r) => (r.id === qcId ? { ...r, qc_status: status, answer } : r)) }))
     await must('Saving the check', () => supabase.from('site_task_qc')
       .update({ qc_status: status, answer, answered_at: new Date().toISOString() })
       .eq('id', qcId).eq('org_id', orgId))
-    invalidate()
-  }, [orgId, invalidate, patchCache])
+    invalidatePlan()
+  }, [orgId, invalidatePlan, patchPlan])
 
   const place = useCallback(async (id: string) => {
     // Placement itself is the WhatsApp pipeline's job; from here we can only take it off the queue.
@@ -715,8 +783,8 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
     await supabase.from('siteops_unplaced')
       .update({ status: 'dismissed', resolved_at: new Date().toISOString() })
       .eq('id', id).eq('org_id', orgId)
-    invalidate()
-  }, [orgId, invalidate])
+    invalidateCore()   // siteops_unplaced rides on CORE (the Pending segment)
+  }, [orgId, invalidateCore])
 
   /**
    * WRITE A WHOLE ORDER, IN ONE STATEMENT.
@@ -729,7 +797,7 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
    * reconcile() re-defaulting a human's sequence back to the engine's on the next page load.
    */
   const resequence = useCallback(async (projectId: string, refsInOrder: string[]) => {
-    const rows = data?.tasks ?? []
+    const rows = planData?.tasks ?? []
     const idByRef = new Map(rows.filter((t) => t.ref).map((t) => [t.ref as string, t.task_id]))
     const ids = refsInOrder.map((r) => idByRef.get(r)).filter((id): id is string => !!id)
     if (!ids.length) return
@@ -762,7 +830,7 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
         .update({ seq_no: seqById.get(t.task_id), order_source: 'manual' })
         .eq('task_id', t.task_id).eq('org_id', orgId))
     }
-  }, [data, orgId])
+  }, [planData, orgId])
 
   /**
    * ADD A TASK BY HAND.
@@ -776,8 +844,8 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
    */
   const addTask = useCallback(async (siteCode: string, draft: NewTask) => {
     const plan = model.plans[siteCode]
-    const proj = data?.projects.find((p) => p.project_code === siteCode)
-    if (!data || !plan || !proj) throw new Error('Site not found')
+    const proj = coreData?.projects.find((p) => p.project_code === siteCode)
+    if (!coreData || !plan || !proj) throw new Error('Site not found')
 
     const insert = {
       org_id: orgId,
@@ -792,7 +860,7 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
       source: 'manual',
       order_source: 'manual',
       // seq_no is NOT NULL: park it at the end, then the resequence below puts it where it belongs.
-      seq_no: (data.tasks.filter((t) => t.project_id === proj.project_id)
+      seq_no: ((planData?.tasks ?? []).filter((t) => t.project_id === proj.project_id)
         .reduce((m, t) => Math.max(m, t.seq_no ?? 0), 0)) + 1,
     }
 
@@ -806,8 +874,8 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
       const order = withNewTask(plan.tasks, draft, { ref: newRef } as DeskTask).map((t) => (t as DeskTask).ref)
       await resequence(proj.project_id, order)
     }
-    invalidate()
-  }, [model.plans, data, orgId, invalidate, resequence])
+    invalidatePlan()
+  }, [model.plans, coreData, planData, orgId, invalidatePlan, resequence])
 
   /**
    * REORDER — refereed first, written second, and ONLY what moved is written.
@@ -827,14 +895,14 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
   const reorder = useCallback(async (siteCode: string, ref: string, targetRef: string) => {
     const plan = model.plans[siteCode]
     const moved = plan?.tasks.find((t) => t.ref === ref)
-    const row = data?.tasks.find((t) => t.ref === ref)
-    if (!data || !plan || !moved || !row) return { ok: false, message: 'Task not found' }
+    const row = planData?.tasks.find((t) => t.ref === ref)
+    if (!planData || !plan || !moved || !row) return { ok: false, message: 'Task not found' }
 
     const verdict = checkMove(moved, targetRef, plan.tasks)
     if (!verdict.ok) return { ok: verdict.ok, message: verdict.message }
 
     const seqByRef = new Map(verdict.order.map((t, i) => [t.ref, i + 1]))
-    patchCache((d) => ({
+    patchPlan((d) => ({
       ...d,
       tasks: d.tasks.map((t) => (t.ref && seqByRef.has(t.ref)
         ? { ...t, seq_no: seqByRef.get(t.ref) as number }
@@ -842,14 +910,17 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
     }))
 
     if (row.project_id) await resequence(row.project_id, verdict.order.map((t) => t.ref))
-    invalidate()
+    invalidatePlan()
     return { ok: true, message: verdict.message }
-  }, [model.plans, data, invalidate, patchCache, resequence])
+  }, [model.plans, planData, invalidatePlan, patchPlan, resequence])
 
   // SAY WHAT ACTUALLY WENT WRONG. The first version of this guessed ("your migrations aren't
   // applied") and was confidently wrong the moment the failure was something else — which is
   // exactly the class of lie this codebase keeps getting bitten by. The real Postgres message
   // (code, table, column) goes on the screen and in the console, and only THEN a hint.
+  // CORE's failure is the desk's failure (it carries the Problems list). PLAN's failure is surfaced too,
+  // but the Problems tab still stands on CORE.
+  const error = core.error ?? plan.error
   const message = (() => {
     if (!error) return null
     const e = error as { message?: string; code?: string; details?: string; hint?: string }
@@ -872,7 +943,11 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
     pending: model.pending,
     planFor: (code: string) => model.plans[code] ?? null,
     error: message,
-    loading: isLoading,
+    // CORE gates the whole desk skeleton; the Problems tab paints the instant it lands.
+    loading: core.isLoading,
+    // PLAN is a SEPARATE, later load — the Work Plan tab shows its own loader on this instead of
+    // mistaking a still-loading plan for "no plan yet".
+    plansLoading: !!orgId && (plan.isLoading || (core.isSuccess && plan.fetchStatus === 'idle' && !planData)),
     // THE GRIP APPEARS NOW, because the drop can finally be refused for a real reason and persisted
     // for a real one: the referee is the engine's ladder run over the rows' own `binding` (edit.ts ·
     // checkMove), and the write is seq_no + order_source='manual', which reconcile() never undoes.
@@ -880,14 +955,14 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
     // The rule this flag encodes has not changed — a drag handle on a row that cannot be dragged is a
     // lie the interface tells with its hands. It simply is not a lie any more.
     canReorder: true,
-    members: (data?.members ?? []).filter((m) => m.name).map((m) => ({ id: m.id, name: m.name as string })),
+    members: (coreData?.members ?? []).filter((m) => m.name).map((m) => ({ id: m.id, name: m.name as string })),
     addTaskNote, assignTask, assignSupervisor, assignProblem,
     close, undo, reopen, addNote,
     say,
     nudge,
     approve: unsupported('Approving from the portal'),
     place, dismissPending, patchTask, editTask, deleteTask, addTask, answerQc, reorder,
-  }), [model, message, isLoading, data, close, undo, reopen, addNote, addTaskNote, assignTask, assignSupervisor, assignProblem, say, nudge, place, dismissPending, patchTask, editTask, deleteTask, addTask, answerQc, reorder])
+  }), [model, message, core.isLoading, plan.isLoading, plan.fetchStatus, core.isSuccess, planData, orgId, coreData, close, undo, reopen, addNote, addTaskNote, assignTask, assignSupervisor, assignProblem, say, nudge, place, dismissPending, patchTask, editTask, deleteTask, addTask, answerQc, reorder])
 }
 
 /** Thrown by an action the backend cannot honour yet. The UI catches it and says so. */
@@ -899,141 +974,31 @@ export class DeskUnsupported extends Error {
 }
 
 /**
- * THE DESK'S ONE QUERY — LIFTED OUT SO IT CAN BE FETCHED BEFORE ANY      const [projects, problems, tasks, unplaced, members, qc, comments] = await Promise.all([
-        // THE GEOMETRY COMES WITH THE PROJECT. The desk instantiates the real graph to find out what
-        // each task waits for (gates.ts), and the graph is a function of the whole building: the
-        // stack, which amenity systems are on, where their plant stands, and what has been suppressed.
-        // Ask for the stack alone and the graph is wrong — a lift's landing doors, say, simply would
-        // not exist, and the tasks that wait on them would come up free.
-        //
-        // DEGRADED SELECT, the same discipline as the engine's own project door (engine/project.ts):
-        // these columns arrived in later migrations and this codebase applies them by hand, so naming
-        // one that has not landed makes PostgREST reject the WHOLE select and the desk goes blank.
-        // Fall back to the columns that have always been there and carry on — with the stored binding
-        // as the fallback gate source, which is exactly what gates.ts does when there is no geometry.
-        fetchAll<ProjectRow>(async (f, t) => {
-          const cols = `project_id, name, project_code, project_type, supervisor_id, ${GEOMETRY_COLUMNS}`
-          const res = await supabase.from('projects').select(cols).eq('org_id', orgId).range(f, t)
-          if (!res.error) return res
-          return supabase.from('projects')
-            .select('project_id, name, project_code, project_type, construction_stack, supervisor_id')
-            .eq('org_id', orgId).range(f, t)
-        }),
-        fetchAll<ProblemRow>((f, t) =>
-          supabase.from('problems').select(PROBLEM_COLS).eq('org_id', orgId).order('created_at', { ascending: false }).range(f, t)),
-        fetchAll<TaskRow & { project_id?: string }>((f, t) =>
-          supabase.from('site_tasks').select(TASK_COLS).eq('org_id', orgId).order('seq_no').order('task_id').range(f, t)),
-        // RICH/BASE — the portal's own idiom (see SiteDesk.tsx, ProjectTasks.tsx). Production's
-        // schema has drifted from the repo: `question_wamid` is in this table's CREATE TABLE, yet
-        // the live table predates it. One optional column must never cost us the whole desk.
-        unplacedSelect(orgId),
-        // WHO CAN BE ASSIGNED = who is in this ORG. Reading user_profiles unscoped returned almost
-        // nothing under RLS, so every assignee dropdown had one option: "Nobody assigned".
-        // org_memberships is the membership list; user_profiles only supplies the names.
-        fetchAll<{ user_id: string }>((f, t) =>
-          supabase.from('org_memberships').select('user_id').eq('org_id', orgId).eq('status', 'active').range(f, t)),
-        fetchAll<QcRow>((f, t) =>
-          supabase.from('site_task_qc').select('id, task_id, question, is_critical, seq, answer, qc_status').eq('org_id', orgId).order('id').range(f, t)),
-        // The task's own trail. THIS is where a WhatsApp update lands once the resolver has
-        // mapped it onto a task — and it was never being read.
-        fetchAll<TaskCommentRow>((f, t) =>
-          supabase.from('site_task_comments').select('id, task_id, author_name, body, created_at').eq('org_id', orgId).order('created_at').range(f, t)),
-      ])
-      for (const r of [projects, problems, tasks, unplaced, members, qc, comments]) {
-        if (r.error) throw r.error
-      }
-
-      const pIds = problems.data.map((p) => p.id)
-      // THE WORDS. A resolver writes only status_history[].narration_id onto the task; the message
-      // itself is a site_narrations row. Fetch by ID, never org-wide — narrations are the highest-volume
-      // table here, and this file already pays for scanning the ones that are bounded (see the note on
-      // 1,530 tasks / 4,584 qc rows). No task has ever been touched → no query at all.
-      const nIds = [...new Set(tasks.data.flatMap((t) => narrationIdsOf(t.status_history)))]
-      const memberIds = [...new Set(members.data.map((m) => m.user_id).filter(Boolean))]
-      const [events, atts, taskAtts, narrations, resolutions, phones, profiles] = await Promise.all([
-        fetchIn<EventRow>(pIds, (c, f, t) => supabase.from('followup_events').select('id, problem_id, type, body, actor_kind, actor_id, created_at').eq('org_id', orgId).in('problem_id', c).order('created_at').range(f, t)),
-        fetchIn<AttachmentRow & { bucket: string; object_path: string }>(pIds, (c, f, t) => supabase.from('attachments').select('parent_id, role, caption, created_at, bucket, object_path').eq('org_id', orgId).eq('parent_type', 'problem').in('parent_id', c).order('created_at').range(f, t)),
-        // THE PHOTOS. The webhook has always attached a site photo to the TASK it resolved onto
-        // (attachments.parent_type='site_task', siteops.ts attachImage) — the desk only ever fetched
-        // the 'problem' ones, so a photo of the poured slab reached the database and no screen.
-        //
-        // Scoped by ORG, not by an `.in(task_id, …)` list: every task in the org is ~1,500 uuids, and
-        // that many in a GET query string is a 400 before Postgres is even reached (see fetchIn).
-        fetchAll<AttachmentRow & { bucket: string; object_path: string }>((f, t) => supabase.from('attachments').select('parent_id, role, caption, created_at, bucket, object_path').eq('org_id', orgId).eq('parent_type', 'site_task').order('created_at').range(f, t)),
-        // THE WORDS, fetched BY ID — narrations are the highest-volume table on the desk, so this is
-        // the one place an id list is genuinely the right filter. It is CHUNKED (fetchIn): a busy org's
-        // history can reference hundreds of messages, and hundreds of uuids in a URL is a 400.
-        //
-        // sender_name is a later migration — degrade to the base columns rather than lose every
-        // message if it isn't applied (the bubble then reads "Site").
-        (async () => {
-          const withName = await fetchIn<NarrationRow>(nIds, (c, f, t) => supabase.from('site_narrations').select('id, raw_text, created_at, sender_name').eq('org_id', orgId).in('id', c).order('created_at').range(f, t))
-          if (!withName.error) return withName
-          return await fetchIn<NarrationRow>(nIds, (c, f, t) => supabase.from('site_narrations').select('id, raw_text, created_at').eq('org_id', orgId).in('id', c).order('created_at').range(f, t))
-        })(),
-        fetchIn<ResolutionRow>(pIds, (c, f, t) => supabase.from('problem_resolutions').select('problem_id, outcome, note, duplicate_of, closed_by, auto_closed, closed_at, reopened_at').eq('org_id', orgId).in('problem_id', c).order('closed_at', { ascending: false }).range(f, t)),
-        fetchAll<{ user_id: string | null; phone_number: string }>((f, t) =>
-          supabase.from('wa_registered_numbers').select('user_id, phone_number').eq('org_id', orgId).range(f, t)),
-        fetchIn<{ id: string; name: string | null }>(memberIds, (c, f, t) =>
-          supabase.from('user_profiles').select('id, name').in('id', c).range(f, t)),
-      ])
-      for (const r of [events, atts, taskAtts, narrations, resolutions, phones, profiles]) {
-        if (r.error) throw r.error
-      }
-
-      console.log(`[desk] loaded projects=${projects.data.length} problems=${problems.data.length} tasks=${tasks.data.length} qc=${qc.data.length} events=${events.data.length} narrations=${narrations.data.length} taskPhotos=${taskAtts.data.length}`)
-
-      // Sign every photo url at read time — the bucket is private and no durable url is ever stored.
-      const sign = async (rows: Array<AttachmentRow & { bucket: string; object_path: string }>) =>
-        Promise.all(rows.map(async (a) => {
-          const { data: s } = await supabase.storage.from(a.bucket).createSignedUrl(a.object_path, 3600)
-          return { ...a, url: s?.signedUrl ?? null }
-        }))
-      const [signed, signedTaskAtts] = await Promise.all([sign(atts.data), sign(taskAtts.data)])
-
-      return {
-        projects: projects.data,
-        problems: problems.data,
-        tasks: tasks.data,
-        unplaced: unplaced.data,
-        // Everyone in the org who has a name — the people a task can actually be given to.
-        members: profiles.data.filter((p) => p.name),
-        events: events.data,
-        atts: signed,
-        taskAtts: signedTaskAtts,
-        narrations: narrations.data,
-        resolutions: resolutions.data,
-        phones: phones.data,
-        qc: qc.data,
-        comments: comments.data,
-      }
- ASKS FOR IT.
- *
- * This is a big read: every project, every problem, every task, the QC rows, the narrations, the
- * comments, and a signed URL minted for each photo. On a real org that is a second or two, and it used
- * to start the moment the page mounted — so opening the Site Desk meant looking at a skeleton while the
- * work you came to do was still being fetched.
- *
- * It is a plain query-options object now, so the app can PREFETCH it (see useDeskPreload) as soon as it
- * knows who you are. By the time you reach for the desk, the desk is already there: react-query hands
- * back the cached data and the page paints on the first frame.
+ * Attachments are NOT signed here anymore — they carry only their private-bucket ref (bucket + object_path)
+ * and are signed LAZILY, at render, by useSignedUrl. Signing every photo in the org up front (a storage
+ * round-trip each) was work spent before the list could paint; now a photo is signed only when it is about
+ * to be shown, and the result is cached. `url` is left null: the render path signs on demand.
  */
-export function deskQuery(orgId: string) {
+function unsignedAtts(rows: Array<AttachmentRow & { bucket: string; object_path: string }>): SignedAttachment[] {
+  return rows.map((a) => ({ ...a, url: null }))
+}
+
+/**
+ * CORE — what the Problems tab needs, and nothing the Work Plan needs.
+ *
+ * projects (WITH geometry — the plan fold reads them for gates.ts), problems, the org's people and their
+ * numbers, and each problem's events/photos/resolutions. This is the query that must be FAST: it carries
+ * the default view, and it is deliberately free of the ~1,530 tasks / ~4,584 QC rows that used to sit in
+ * front of it. A plain query-options object so it can be PREFETCHED (useDeskPreload) before the click.
+ */
+export function deskCoreQuery(orgId: string) {
   return {
     queryKey: ['desk', orgId] as const,
-    queryFn: async () => {
-      const [projects, problems, tasks, unplaced, members, qc, comments] = await Promise.all([
-        // THE GEOMETRY COMES WITH THE PROJECT. The desk instantiates the real graph to find out what
-        // each task waits for (gates.ts), and the graph is a function of the whole building: the
-        // stack, which amenity systems are on, where their plant stands, and what has been suppressed.
-        // Ask for the stack alone and the graph is wrong — a lift's landing doors, say, simply would
-        // not exist, and the tasks that wait on them would come up free.
-        //
-        // DEGRADED SELECT, the same discipline as the engine's own project door (engine/project.ts):
-        // these columns arrived in later migrations and this codebase applies them by hand, so naming
-        // one that has not landed makes PostgREST reject the WHOLE select and the desk goes blank.
-        // Fall back to the columns that have always been there and carry on — with the stored binding
-        // as the fallback gate source, which is exactly what gates.ts does when there is no geometry.
+    queryFn: async (): Promise<DeskCoreData> => {
+      const [projects, problems, unplaced, members] = await Promise.all([
+        // THE GEOMETRY COMES WITH THE PROJECT — the plan fold instantiates the real graph from it
+        // (gates.ts). DEGRADED SELECT (engine/project.ts idiom): a geometry column that a hand-applied
+        // migration hasn't landed must never blank the desk; fall back to the always-present columns.
         fetchAll<ProjectRow>(async (f, t) => {
           const cols = `project_id, name, project_code, project_type, supervisor_id, ${GEOMETRY_COLUMNS}`
           const res = await supabase.from('projects').select(cols).eq('org_id', orgId).range(f, t)
@@ -1042,95 +1007,105 @@ export function deskQuery(orgId: string) {
             .select('project_id, name, project_code, project_type, construction_stack, supervisor_id')
             .eq('org_id', orgId).range(f, t)
         }),
-        fetchAll<ProblemRow>((f, t) =>
-          supabase.from('problems').select(PROBLEM_COLS).eq('org_id', orgId).order('created_at', { ascending: false }).range(f, t)),
-        fetchAll<TaskRow & { project_id?: string }>((f, t) =>
-          supabase.from('site_tasks').select(TASK_COLS).eq('org_id', orgId).order('seq_no').order('task_id').range(f, t)),
-        // RICH/BASE — the portal's own idiom (see SiteDesk.tsx, ProjectTasks.tsx). Production's
-        // schema has drifted from the repo: `question_wamid` is in this table's CREATE TABLE, yet
-        // the live table predates it. One optional column must never cost us the whole desk.
+        // problems — RICH (owner_source) → BASE (without). See PROBLEM_COLS_BASE.
+        fetchAll<ProblemRow>(async (f, t) => {
+          const res = await supabase.from('problems').select(PROBLEM_COLS).eq('org_id', orgId).order('created_at', { ascending: false }).range(f, t)
+          if (!res.error || !/owner_source|42703|does not exist/i.test(res.error.message ?? '')) return res
+          console.warn('[desk] problems.owner_source missing (schema drift) — falling back:', res.error.message)
+          return supabase.from('problems').select(PROBLEM_COLS_BASE).eq('org_id', orgId).order('created_at', { ascending: false }).range(f, t)
+        }),
+        // RICH/BASE — the portal's own idiom. `question_wamid` is in the CREATE TABLE yet the live table
+        // predates it; one optional column must never cost us the whole desk.
         unplacedSelect(orgId),
-        // WHO CAN BE ASSIGNED = who is in this ORG. Reading user_profiles unscoped returned almost
-        // nothing under RLS, so every assignee dropdown had one option: "Nobody assigned".
-        // org_memberships is the membership list; user_profiles only supplies the names.
+        // WHO CAN BE ASSIGNED = who is in this ORG (org_memberships is the list; user_profiles the names).
         fetchAll<{ user_id: string }>((f, t) =>
           supabase.from('org_memberships').select('user_id').eq('org_id', orgId).eq('status', 'active').range(f, t)),
-        fetchAll<QcRow>((f, t) =>
-          supabase.from('site_task_qc').select('id, task_id, question, is_critical, seq, answer, qc_status').eq('org_id', orgId).order('id').range(f, t)),
-        // The task's own trail. THIS is where a WhatsApp update lands once the resolver has
-        // mapped it onto a task — and it was never being read.
-        fetchAll<TaskCommentRow>((f, t) =>
-          supabase.from('site_task_comments').select('id, task_id, author_name, body, created_at').eq('org_id', orgId).order('created_at').range(f, t)),
       ])
-      for (const r of [projects, problems, tasks, unplaced, members, qc, comments]) {
+      for (const r of [projects, problems, unplaced, members]) {
         if (r.error) throw r.error
       }
 
       const pIds = problems.data.map((p) => p.id)
-      // THE WORDS. A resolver writes only status_history[].narration_id onto the task; the message
-      // itself is a site_narrations row. Fetch by ID, never org-wide — narrations are the highest-volume
-      // table here, and this file already pays for scanning the ones that are bounded (see the note on
-      // 1,530 tasks / 4,584 qc rows). No task has ever been touched → no query at all.
-      const nIds = [...new Set(tasks.data.flatMap((t) => narrationIdsOf(t.status_history)))]
       const memberIds = [...new Set(members.data.map((m) => m.user_id).filter(Boolean))]
-      const [events, atts, taskAtts, narrations, resolutions, phones, profiles] = await Promise.all([
+      const [events, atts, resolutions, phones, profiles] = await Promise.all([
         fetchIn<EventRow>(pIds, (c, f, t) => supabase.from('followup_events').select('id, problem_id, type, body, actor_kind, actor_id, created_at').eq('org_id', orgId).in('problem_id', c).order('created_at').range(f, t)),
         fetchIn<AttachmentRow & { bucket: string; object_path: string }>(pIds, (c, f, t) => supabase.from('attachments').select('parent_id, role, caption, created_at, bucket, object_path').eq('org_id', orgId).eq('parent_type', 'problem').in('parent_id', c).order('created_at').range(f, t)),
-        // THE PHOTOS. The webhook has always attached a site photo to the TASK it resolved onto
-        // (attachments.parent_type='site_task', siteops.ts attachImage) — the desk only ever fetched
-        // the 'problem' ones, so a photo of the poured slab reached the database and no screen.
-        //
-        // Scoped by ORG, not by an `.in(task_id, …)` list: every task in the org is ~1,500 uuids, and
-        // that many in a GET query string is a 400 before Postgres is even reached (see fetchIn).
-        fetchAll<AttachmentRow & { bucket: string; object_path: string }>((f, t) => supabase.from('attachments').select('parent_id, role, caption, created_at, bucket, object_path').eq('org_id', orgId).eq('parent_type', 'site_task').order('created_at').range(f, t)),
-        // THE WORDS, fetched BY ID — narrations are the highest-volume table on the desk, so this is
-        // the one place an id list is genuinely the right filter. It is CHUNKED (fetchIn): a busy org's
-        // history can reference hundreds of messages, and hundreds of uuids in a URL is a 400.
-        //
-        // sender_name is a later migration — degrade to the base columns rather than lose every
-        // message if it isn't applied (the bubble then reads "Site").
-        (async () => {
-          const withName = await fetchIn<NarrationRow>(nIds, (c, f, t) => supabase.from('site_narrations').select('id, raw_text, created_at, sender_name').eq('org_id', orgId).in('id', c).order('created_at').range(f, t))
-          if (!withName.error) return withName
-          return await fetchIn<NarrationRow>(nIds, (c, f, t) => supabase.from('site_narrations').select('id, raw_text, created_at').eq('org_id', orgId).in('id', c).order('created_at').range(f, t))
-        })(),
         fetchIn<ResolutionRow>(pIds, (c, f, t) => supabase.from('problem_resolutions').select('problem_id, outcome, note, duplicate_of, closed_by, auto_closed, closed_at, reopened_at').eq('org_id', orgId).in('problem_id', c).order('closed_at', { ascending: false }).range(f, t)),
         fetchAll<{ user_id: string | null; phone_number: string }>((f, t) =>
           supabase.from('wa_registered_numbers').select('user_id, phone_number').eq('org_id', orgId).range(f, t)),
         fetchIn<{ id: string; name: string | null }>(memberIds, (c, f, t) =>
           supabase.from('user_profiles').select('id, name').in('id', c).range(f, t)),
       ])
-      for (const r of [events, atts, taskAtts, narrations, resolutions, phones, profiles]) {
+      for (const r of [events, atts, resolutions, phones, profiles]) {
         if (r.error) throw r.error
       }
 
-      console.log(`[desk] loaded projects=${projects.data.length} problems=${problems.data.length} tasks=${tasks.data.length} qc=${qc.data.length} events=${events.data.length} narrations=${narrations.data.length} taskPhotos=${taskAtts.data.length}`)
-
-      // Sign every photo url at read time — the bucket is private and no durable url is ever stored.
-      const sign = async (rows: Array<AttachmentRow & { bucket: string; object_path: string }>) =>
-        Promise.all(rows.map(async (a) => {
-          const { data: s } = await supabase.storage.from(a.bucket).createSignedUrl(a.object_path, 3600)
-          return { ...a, url: s?.signedUrl ?? null }
-        }))
-      const [signed, signedTaskAtts] = await Promise.all([sign(atts.data), sign(taskAtts.data)])
-
+      const atts_ = unsignedAtts(atts.data)
+      console.log(`[desk:core] projects=${projects.data.length} problems=${problems.data.length} events=${events.data.length} photos=${atts_.length}`)
       return {
         projects: projects.data,
         problems: problems.data,
-        tasks: tasks.data,
         unplaced: unplaced.data,
-        // Everyone in the org who has a name — the people a task can actually be given to.
         members: profiles.data.filter((p) => p.name),
         events: events.data,
-        atts: signed,
-        taskAtts: signedTaskAtts,
-        narrations: narrations.data,
+        atts: atts_,
         resolutions: resolutions.data,
         phones: phones.data,
-        qc: qc.data,
-        comments: comments.data,
+      }
+    },
+  }
+}
+
+/**
+ * PLAN — the Work Plan's heavy payload, kept OFF the Problems path.
+ *
+ * The ~1,530 tasks, their ~4,584 QC rows, comments, the narrations their status_history points at, and
+ * the task photos. Loaded after CORE (the hook gates it on core success) so it never delays the Problems
+ * list. It reads CORE's projects in the fold for geometry — it does not re-fetch them here.
+ */
+export function deskPlanQuery(orgId: string) {
+  return {
+    queryKey: ['deskPlan', orgId] as const,
+    queryFn: async (): Promise<DeskPlanData> => {
+      const [tasks, qc, comments] = await Promise.all([
+        fetchAll<TaskRow & { project_id?: string }>((f, t) =>
+          supabase.from('site_tasks').select(TASK_COLS).eq('org_id', orgId).order('seq_no').order('task_id').range(f, t)),
+        fetchAll<QcRow>((f, t) =>
+          supabase.from('site_task_qc').select('id, task_id, question, is_critical, seq, answer, qc_status').eq('org_id', orgId).order('id').range(f, t)),
+        // The task's own trail — where a resolved WhatsApp update lands.
+        fetchAll<TaskCommentRow>((f, t) =>
+          supabase.from('site_task_comments').select('id, task_id, author_name, body, created_at').eq('org_id', orgId).order('created_at').range(f, t)),
+      ])
+      for (const r of [tasks, qc, comments]) {
+        if (r.error) throw r.error
       }
 
+      // THE WORDS — the narrations a task's status_history points at, fetched BY ID (chunked; hundreds of
+      // uuids in a URL is a 400). sender_name is a later migration — degrade to base if it isn't applied.
+      const nIds = [...new Set(tasks.data.flatMap((t) => narrationIdsOf(t.status_history)))]
+      const [narrations, taskAtts] = await Promise.all([
+        (async () => {
+          const withName = await fetchIn<NarrationRow>(nIds, (c, f, t) => supabase.from('site_narrations').select('id, raw_text, created_at, sender_name').eq('org_id', orgId).in('id', c).order('created_at').range(f, t))
+          if (!withName.error) return withName
+          return await fetchIn<NarrationRow>(nIds, (c, f, t) => supabase.from('site_narrations').select('id, raw_text, created_at').eq('org_id', orgId).in('id', c).order('created_at').range(f, t))
+        })(),
+        // Task photos (attachments.parent_type='site_task'). Org-scoped, not an `.in(task_id,…)` list —
+        // ~1,500 uuids in a GET is a 400 before Postgres is reached (see fetchIn).
+        fetchAll<AttachmentRow & { bucket: string; object_path: string }>((f, t) => supabase.from('attachments').select('parent_id, role, caption, created_at, bucket, object_path').eq('org_id', orgId).eq('parent_type', 'site_task').order('created_at').range(f, t)),
+      ])
+      for (const r of [narrations, taskAtts]) {
+        if (r.error) throw r.error
+      }
+
+      const taskAtts_ = unsignedAtts(taskAtts.data)
+      console.log(`[desk:plan] tasks=${tasks.data.length} qc=${qc.data.length} narrations=${narrations.data.length} taskPhotos=${taskAtts_.length}`)
+      return {
+        tasks: tasks.data,
+        qc: qc.data,
+        comments: comments.data,
+        narrations: narrations.data,
+        taskAtts: taskAtts_,
+      }
     },
   }
 }
@@ -1157,8 +1132,10 @@ export function useDeskPreload(orgId: string | null): void {
     const run = () => {
       // the CODE: pull the route's chunk down now, so the click costs no network at all
       void import('../../pages/SiteDeskV2')
-      // the DATA: the same query the desk itself will ask for, asked early
-      void qc.prefetchQuery({ ...deskQuery(orgId), staleTime: 15_000 })
+      // the DATA: CORE first (it paints the Problems tab), then the heavier PLAN — the same two queries
+      // the desk itself asks for, asked early. prefetchQuery is a no-op if already cached.
+      void qc.prefetchQuery({ ...deskCoreQuery(orgId), staleTime: 15_000 })
+      void qc.prefetchQuery({ ...deskPlanQuery(orgId), staleTime: 15_000 })
     }
 
     const w = window as Window & {

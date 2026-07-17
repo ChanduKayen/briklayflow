@@ -80,15 +80,28 @@ suite('Type 5 — the confirmation: destination line + exactly one button', () =
     expect(ctaOf(msg)?.url.includes('task=tk-1')).toBe(true)
   })
 
-  // A bundle touches several homes and WhatsApp allows exactly one button — so it points one level UP, at the
-  // day, where everything the message just listed is visible together.
-  test('a DIGEST → one button, one level up: Open today', () => {
+  // A MIXED bundle spans homes and WhatsApp allows exactly one button — it can't point at all of them, so it
+  // points one level UP, at Problems: the half of the desk that needs a human.
+  test('a MIXED digest (spans homes) → one button, Open today, landing on Problems', () => {
     const msg = composeConfirmation([
       { project: 'The Pride', body: '✓ “Floor tiling” updated', homes: ['Tasks'] },
       { project: 'Soundharya', body: 'logged new: “cement short”', homes: ['Problems'] },
     ])
     expect(ctaOf(msg)?.text).toBe('Open today')
+    expect(ctaOf(msg)?.url.includes('/problems')).toBe(true)   // Problems, not the plan
     expect(/Recorded in \*Tasks & Problems\* · Briklay/.test(bodyOf(msg))).toBe(true)
+  })
+
+  // Several updates, and every one of them a task — no single record to open, but they all live in one
+  // section. So the button lands on the Tasks plan, not the day.
+  test('a PURE-TASK digest → one button, Open Tasks, landing on the plan', () => {
+    const msg = composeConfirmation([
+      { project: 'The Pride', body: '✓ “Floor tiling” updated', homes: ['Tasks'] },
+      { project: 'Chakradhar', body: '✓ “ground clearance” updated', homes: ['Tasks'] },
+    ])
+    expect(ctaOf(msg)?.text).toBe('Open Tasks')
+    expect(ctaOf(msg)?.url.includes('/plan')).toBe(true)
+    expect(/Recorded in \*Tasks\* · Briklay/.test(bodyOf(msg))).toBe(true)
   })
 
   // Something is waiting on him. That outranks navigation to what already worked.

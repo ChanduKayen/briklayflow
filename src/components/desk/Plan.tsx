@@ -14,7 +14,7 @@ import { taskStatus, groupIsFoldable, upNextRefs } from '../../lib/desk/derive'
 import { checkMove, type MoveVerdict } from '../../lib/desk/edit'
 import { qcAlarm } from '../../lib/desk/fromDb'
 import { Medallion } from './Medallion'
-import { taskTone } from '../../lib/desk/medTone'
+import type { MedTone } from '../../lib/desk/medTone'
 
 export interface Group { n: string; note: string }
 
@@ -249,6 +249,17 @@ function TaskRow({
   const alarm = qcAlarm(t)
   const [menu, setMenu] = useState(false)
 
+  /* THE DOT CARRIES THE STATE. The selected bar is one flat dark; what tells running from up-next from
+   * waiting is the medallion, so it speaks the full alphabet: a green LIVE dot while the work runs, a
+   * gold READY dot for the one that starts next, the green check for done, the empty ring for waiting,
+   * red for blocked. (taskTone stays as it was — a test pins it — so the richer read is computed here.) */
+  const medTone: MedTone =
+    st.cls === 'blocked' ? 'blocked'
+      : t.state === 'done' ? 'done'
+        : t.state === 'active' ? 'live'
+          : isNext ? 'ready'
+            : 'idle'
+
   /**
    * THE TICK IS DRAWN, AND ONLY WHEN IT IS EARNED.
    *
@@ -356,7 +367,7 @@ function TaskRow({
           into the drag handle: the row grows no extra furniture, and the thing you reach for is the
           thing that was already there. */}
       <span className={`r-med ${canDrag ? 'grippable' : ''} ${justDone ? 'just-done' : ''}`}>
-        <Medallion tone={taskTone(t.state, st.cls === 'blocked')} />
+        <Medallion tone={medTone} />
         {canDrag && <span className="grip" aria-hidden="true">⠿</span>}
       </span>
 
@@ -364,7 +375,6 @@ function TaskRow({
       <div className="row-body">
         <div className="headline">
           {t.title}
-          {isNext && <span className="upnext">Up next</span>}
         </div>
         <div className="meta">
           <span className="ref">{t.ref}</span>
@@ -372,7 +382,8 @@ function TaskRow({
           {[t.trade, t.assignee].filter(Boolean).join(' · ')}
           {/* The QC alarm rides the subtext — no column of its own, and only when it is actionable. */}
           {alarm === 'failed' && <span className="qc-chip bad">Check failed</span>}
-          {alarm === 'last_chance' && <span className="qc-chip warn">Check open</span>}
+          {/* "Check open" used to ride here too — it read as an alarm on a row that was simply mid-check,
+              which was confusing more than it helped. A failed check still shows; an open one does not. */}
           {/* We cannot see the work this one waits for. Better a visible question than a confident
               lie — this is the row that used to say "Ready" over a slab nobody had poured. */}
           {st.cls === 'unknown' && <span className="qc-chip warn">Can’t confirm</span>}
@@ -387,14 +398,22 @@ function TaskRow({
        *   blocked → the blocking ref, because that is the ONE thing you cannot infer from the dot
        *   waiting → how long it takes, so he can see the shape of the work ahead
        * There is no status column any more. The sentence is a reading matter; this is a glance. */}
+      {/* ONE FACT, right-aligned. The chip and the number are the SAME slot, never both: a running or
+          up-next row already says where it stands in its chip — a "day 1 of 1" beside "In progress" is
+          the same thing said twice. So the chip stands in for the number while it runs or waits its
+          turn; the number returns for the states a chip does not cover (waiting, done, over-run). */}
       <div className="r-right">
         {st.cls === 'blocked'
           ? <button className="blocked-ref" onClick={(e) => { e.stopPropagation(); onRef(st.ref) }}>{st.ref}</button>
-          : (
-            <span className={`age ${over > 0 ? 'over' : ''} ${st.cls === 'live' ? 'live' : ''}`}>
-              {rightText}
-            </span>
-          )}
+          : t.state === 'active'
+            ? <span className="statechip inprogress">In progress</span>
+            : isNext
+              ? <span className="statechip upnext">Up next</span>
+              : (
+                <span className={`age ${over > 0 ? 'over' : ''} ${st.cls === 'live' ? 'live' : ''}`}>
+                  {rightText}
+                </span>
+              )}
       </div>
 
       {/* THE ⋯ CARRIES ONLY WHAT IS NOT AN EDIT.

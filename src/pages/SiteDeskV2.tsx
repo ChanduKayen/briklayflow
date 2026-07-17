@@ -756,6 +756,12 @@ export default function SiteDeskV2({
                 ))}
               </div>
             </div>
+          ) : api.plansLoading && (!plan || plan.tasks.length === 0) ? (
+            /* THE PLAN IS A SEPARATE, LATER LOAD than the Problems list — so an empty `plan` here can
+               mean "still loading", not "no plan yet". Show the plan skeleton until it lands; only THEN
+               is a truly-empty plan the wizard's cue. Without this, opening the Work Plan before the
+               plan query returns would flash the setup wizard over a plan that was already there. */
+            <DeskSkeleton tab="plan" />
           ) : !plan || plan.tasks.length === 0 ? (
             /* NO PLAN YET. A project with no tasks is not an empty screen — it is a building waiting
                to be described. PlanSetup asks for it (and draws it as you answer); setupPlan() does
@@ -766,7 +772,10 @@ export default function SiteDeskV2({
                 projectId={scopedSite?.projectId ?? ''}
                 projectType={scopedSite?.projectType ?? ''}
                 onComplete={(r) => {
+                  // PlanSetup writes TASKS — those live in the PLAN query. Invalidate both so the new
+                  // plan lands and the site cards' pct refreshes.
                   void queryClient.invalidateQueries({ queryKey: ['desk'] })
+                  void queryClient.invalidateQueries({ queryKey: ['deskPlan'] })
                   setToast({
                     msg: r.generated
                       ? `Plan laid out — ${r.taskCount} tasks`

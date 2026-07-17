@@ -28,14 +28,18 @@ const TITLES: Record<MedTone, string> = {
   done: 'Settled',
   idle: 'Not started',
   blocked: 'Blocked',
+  live: 'In progress',
+  ready: 'Up next',
 }
 
 export function Medallion({ tone }: { tone: MedTone }) {
+  // `live` breathes like `chasing` — the same "something is happening here" respiration, in green.
+  const breathes = tone === 'chasing' || tone === 'live'
   return (
     <span className={`med med-${tone}`} title={TITLES[tone]} aria-label={TITLES[tone]}>
       {tone === 'done'
         ? <span className="med-check">{Check}</span>
-        : tone === 'chasing'
+        : breathes
           ? <span className="med-pulse" aria-hidden="true" />
           : <span className="med-core" aria-hidden="true" />}
     </span>

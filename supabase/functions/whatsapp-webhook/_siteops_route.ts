@@ -258,11 +258,18 @@ const DONE_RE = /\b(done|finished|completed|complete|cast|poured|laid|over|ayipo
 const STARTED_RE = /\b(started|starting|ongoing|in progress|going on|begun|begin)\b/i
 /** Map a progress statement to the status it implies. TERMINAL closure ('done') is the LADDER's call
  *  alone (clause 4, Hazard 3): a bare "done"/"cast"/"poured" from this word-list is PROGRESS — it advances
- *  the task, it NEVER terminally closes it, unless the caller passes `closureAuthorized` (only
- *  applyTaskUpdate does, and only when the ladder ruled applied==='resolve'). An already-done task is left
- *  done (no unauthorized regress). */
+ *  the task, it NEVER terminally closes it, unless the caller passes `closureAuthorized` (applyTaskUpdate on
+ *  a ladder RESOLVE, and a which_item pick whose held update was an explicit-closure resolve). An
+ *  already-done task is left done (no unauthorized regress).
+ *
+ *  WHEN CLOSURE IS AUTHORIZED, TRUST IT — do not re-gate on DONE_RE. The ladder read the message with full
+ *  language understanding and already ruled this a closure; this regex is English + a few romanized Telugu
+ *  tokens, so a Telugu-SCRIPT "అయిపోయింది" ("finished") matches nothing and a genuinely-resolved report got
+ *  stuck at in-progress (the live bug). The word-list is now only the heuristic for the UNAUTHORIZED path —
+ *  a bare "done" that no ladder verdict backs, which still only advances. */
 export function statusFromProgress(text: string, current: string, closureAuthorized = false): string {
-  if (DONE_RE.test(text)) return closureAuthorized ? 'done' : (current === 'done' ? 'done' : 'active')
+  if (closureAuthorized) return 'done'
+  if (DONE_RE.test(text)) return current === 'done' ? 'done' : 'active'
   if (STARTED_RE.test(text)) return 'active'
   return current === 'not_started' ? 'active' : current
 }

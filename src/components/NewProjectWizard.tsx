@@ -119,10 +119,12 @@ export default function NewProjectWizard({ session }: { session: Session }) {
     }
   }
 
-  // Auto-navigate after celebration — land on the Task Manager with the first-arrival cascade.
+  // Auto-navigate after celebration — land on the project's SITE DESK, not the retired /tasks screen.
+  // `/projects/:id/desk` redirects to the plan (App.tsx), so a just-built project opens on the work
+  // sequence it was just given — the place the wizard was leading to all along.
   useEffect(() => {
     if (step === 3 && createdProjectId) {
-      const t = setTimeout(() => navigate(`/projects/${createdProjectId}/tasks`, { state: { justCreated: true } }), 2200)
+      const t = setTimeout(() => navigate(`/projects/${createdProjectId}/desk`), 2200)
       return () => clearTimeout(t)
     }
   }, [step, createdProjectId, navigate])

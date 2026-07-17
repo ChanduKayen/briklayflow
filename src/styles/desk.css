@@ -396,8 +396,11 @@ main:has(.desk-root) { padding-bottom: 0; }
  * transition away from every other, so the rail is always mid-thought rather than mid-flicker.
  */
 .desk-root .building { position: sticky; top: 96px; align-self: start; min-width: 0; }
+/* NO CARD. The building is not a widget sitting on the page — it IS the page's left margin. So the
+ * rail drops its border, its paper and its radius and rests straight on the background; the only
+ * surface left on it is the focused floor's own fill, which is state, not chrome. */
 .desk-root .bd-card {
-  background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 6px;
+  background: transparent; border: none; border-radius: 0; padding: 0;
 }
 
 .desk-root .bd-floor {
@@ -681,7 +684,15 @@ main:has(.desk-root) { padding-bottom: 0; }
 
 /* PLANNED vs RUNNING. An overrun is amber — "needs a decision", not "going wrong". */
 .desk-root .plan-status.over { color: var(--ask); font-weight: 500; }
-.desk-root .upnext { font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--green); border: 1px solid #cfe0d5; border-radius: 5px; padding: 1px 6px; margin-left: 8px; vertical-align: 2px; }
+/* THE STATE CHIP — one shape, two readings. Up next is amber (the next job to start), in progress is
+ * green (running now). Same pill, so the eye files them as one family and only the colour has to change. */
+.desk-root .statechip {
+  font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  border: 1px solid currentColor; border-radius: 5px; padding: 1px 6px;
+  margin-left: 8px; vertical-align: 2px;
+}
+.desk-root .upnext { color: var(--ask); border-color: var(--ask-line); }
+.desk-root .inprogress { color: var(--green); border-color: var(--green-line); }
 
 /* Task detail bits */
 .desk-root .kv, .desk-portal .kv { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line-soft); font-size: 13px; }
@@ -1071,6 +1082,52 @@ main:has(.desk-root) { padding-bottom: 0; }
   transition: color var(--t-hover), background var(--t-hover);
 }
 .desk-root .statline .dep:hover, .desk-portal .statline .dep:hover { color: var(--ink); background: var(--line); }
+
+/* ═══ THE STICKY HEAD — PAPER AT REST, ONE DARK LINE PINNED ═══════════════════════════════════════════
+ * Identity + the state control ride the top of the card. To pin FLUSH to the card's top, the scroller
+ * gives up its own top padding to the head (so top:0 lands on the card edge, not 24px below it inside
+ * the padding — that was the gap); the head carries that spacing itself and bleeds its sides to the
+ * card edges, so the pinned bar runs corner to corner. At rest it is the paper — the full identity, the
+ * tabs, the status. Scrolled, it becomes a single DARK bar in the selected row's own colour, carrying
+ * only the task name; the bar and its row in the plan read as one object (settle easing on the surface). */
+.desk-root .d-scroll:has(.t-head) { padding-top: 0; }
+.desk-root .t-head {
+  position: sticky; top: 0; z-index: 6;
+  margin: 0 -26px 0; padding: 24px 26px 10px;
+  background: transparent; border-bottom: 1px solid transparent;
+  /* ONLY the shadow eases — a soft lift. The layout switch itself is INSTANT: animating the gradient (which
+   * can't interpolate, so it stutters), the padding, or the title's size all made the change JITTER. A crisp
+   * snap of one clean state to another reads far more elegant than a half-drawn tween. */
+  transition: box-shadow var(--t-morph);
+}
+
+/* CONDENSED, PINNED — ONE DARK LINE. Scrolled, the head becomes a single bar carrying only the task NAME,
+ * in the very same dark the SELECTED ROW wears in the list — so a task's pinned card-head and its row in
+ * the plan read as one object. The eyebrow, the state tabs and the status/assignee line all step away;
+ * what stays is the one thing you need while reading on: which task this is. THE TITLE KEEPS ITS OWN FONT —
+ * same serif, same size, same weight as at rest; only its colour turns for the dark. */
+.desk-root .t-head.stuck {
+  background: linear-gradient(180deg, #322D23 0%, #272219 100%);
+  border-bottom-color: transparent;
+  box-shadow: 0 8px 20px -14px rgba(30, 26, 21, .5);
+  padding-top: 13px; padding-bottom: 14px;
+}
+.desk-root .t-head.stuck .t-eyebrow,
+.desk-root .t-head.stuck .segx,
+.desk-root .t-head.stuck .statwrap { display: none; }
+.desk-root .t-head.stuck .t-title {
+  margin-top: 0; color: #F7F3EC;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* the bottom sheet has a different inset (0 20px), so its head bleeds to match — the scroller already
+   has no top padding there, so nothing to reclaim; just the −20px sides for the bar to reach the edges. */
+.desk-portal .sheet .t-head { margin: 0 -20px 0; padding: 6px 20px 10px; }
+
+/* a reader who asked for less motion gets the change of surface, not a slide — no transition to speak of. */
+@media (prefers-reduced-motion: reduce) {
+  .desk-root .t-head, .desk-root .t-head * { transition-duration: .01ms !important; }
+}
 
 /* properties — Notion-quiet: they only reveal their controls when you approach */
 .desk-root .props, .desk-portal .props { margin-top: 20px; border-top: 1px solid var(--line-soft); padding-top: 6px; }
@@ -1938,6 +1995,16 @@ main:has(.desk-root) { padding-bottom: 0; }
 .desk-root .med-idle { border-color: var(--line); }
 .desk-root .med-idle .med-core { background: transparent; }
 
+/* in progress — a LIVE green dot. The work is running on site, so the dot breathes in green: the
+ * same respiration as "chasing", a different colour, because this is progress, not a wait. */
+.desk-root .med-live { border-color: #8CBE8C; }
+.desk-root .med-live .med-pulse { background: #4F9A54; }
+.desk-root .med-live .med-pulse::after { border-color: #4F9A54; }
+
+/* up next — the one job that can start now, marked in gold: a filled amber dot in a soft gold ring. */
+.desk-root .med-ready { border-color: #E0C07E; }
+.desk-root .med-ready .med-core { background: #C68A2A; width: 8px; height: 8px; }
+
 /* settled — the only filled green. The check DRAWS itself, like everywhere else. */
 .desk-root .med-done { background: var(--green); border-color: var(--green); }
 .desk-root .med-check { display: flex; }
@@ -2492,6 +2559,61 @@ main:has(.desk-root) { padding-bottom: 0; }
 /* the skeleton is not a row you can point at */
 .desk-root .list .row.sk-row,
 .desk-root .list .row.sk-row:hover { background: var(--surface); }
+
+/* ═══ THE PLAN LIST IS A TIMELINE, NOT A TABLE ═══════════════════════════════════════════════════════
+ * The rows carry no paper of their own and no rules between them — they sit straight on the page, and
+ * the only line on the column is the ONE vertical spine that threads down through the medallions: the
+ * dependency chain, drawn. A white fill behind each row would hide that thread; a horizontal rule
+ * between them would cut it into boxes and turn a sequence back into a list. So neither is there. */
+.desk-root .plan-list .row { background: transparent; border-bottom: none; }
+.desk-root .plan-list .row:hover { background: var(--fill); }
+.desk-root .plan-list .task-group::before { background: #D8D1C5; }
+
+/* ═══ THE SELECTED PLAN ROW — A SOLID DARK BAR ═══════════════════════════════════════════════════════
+ * The row you open is the work you are about to touch, so it stops being a lighter shade of the list
+ * and becomes ONE solid dark bar the eye cannot lose down a list of forty. The bar is uniform and warm
+ * (espresso, never black); it does NOT change colour with the work — that is the medallion's job, and
+ * it says so against the dark: green while it runs, gold up-next, the green check done, an empty ring
+ * waiting. Everything else on the row inverts to read. Scoped to .plan-list: Problems keeps its cream. */
+.desk-root .plan-list .row.sel,
+.desk-root .plan-list .row.sel:hover {
+  background: linear-gradient(180deg, #322D23 0%, #272219 100%);
+  border-radius: 12px;
+  border-bottom-color: transparent;
+  box-shadow: 0 6px 18px rgba(30, 26, 21, .16);
+  color: #F7F3EC;
+}
+/* the dark bar IS the mark — the list's left spine has nothing to add here */
+.desk-root .plan-list .row.sel::before { opacity: 0; }
+
+/* the text, inverted onto the dark */
+.desk-root .plan-list .row.sel .headline { color: #F7F3EC; font-weight: 600; }
+.desk-root .plan-list .row.sel .meta { color: #B7AE9F; }
+.desk-root .plan-list .row.sel .meta .ref { color: #CFC7B9; }
+.desk-root .plan-list .row.sel .age { color: #C6BDAE; }
+.desk-root .plan-list .row.sel .age.live { color: #9FCB9C; }
+.desk-root .plan-list .row.sel .age.over { color: #E0A38A; }
+.desk-root .plan-list .row.sel .blocked-ref { color: #E0A38A; }
+
+/* a done row is dimmed in the list; the moment it is the one you are reading, it is full strength */
+.desk-root .plan-list .row.sel.rowdone { opacity: 1; }
+.desk-root .plan-list .row.sel.rowdone .headline { color: #F7F3EC; font-weight: 600; }
+
+/* the ⋯, the grip and the "Up next" chip, lifted onto the dark bar */
+.desk-root .plan-list .row.sel .r-dots { color: #B7AE9F; }
+.desk-root .plan-list .row.sel .r-dots:hover { color: #F7F3EC; }
+.desk-root .plan-list .row.sel .grip { color: #8C8377; }
+/* the chips keep their meaning on the dark bar, brightened so amber and green both read */
+.desk-root .plan-list .row.sel .upnext { color: #E0B968; border-color: rgba(224, 185, 104, .5); }
+.desk-root .plan-list .row.sel .inprogress { color: #8FCB90; border-color: rgba(143, 203, 144, .5); }
+
+/* THE MEDALLION KEEPS ITS COLOUR ON THE DARK. The white paper-mask (its fill + halo) that hides the
+ * rail on the list is dropped — the dark bar is already the mask — so the ring floats: a thin light
+ * ring for waiting, the green disc + check for done, the coloured ring + dot for running and up-next. */
+.desk-root .plan-list .row.sel .med { background: transparent; box-shadow: none; }
+.desk-root .plan-list .row.sel .med-idle { border-color: rgba(247, 243, 236, .42); }
+.desk-root .plan-list .row.sel .med-blocked { background: transparent; }
+.desk-root .plan-list .row.sel .med-done { background: var(--green); border-color: var(--green); }
 
 /* ═══════════════════════════════════════════════════════════════════════════════════════════════════
    THE PROBLEM CARD — the header, the chase block, and ONE rail.

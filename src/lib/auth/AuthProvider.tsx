@@ -273,11 +273,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // S1-2 Step 1: make every session transition observable, incl. whether the user actually changed.
         console.log(`[auth:event] ${event}${uid ? ` user=${uid.slice(0, 8)} sameUser=${sameUser}` : ' (no session)'}`)
 
+        // DEADLOCK GUARD — never AWAIT a supabase data call inside this callback.
+        //
+        // auth-js fires this callback from INSIDE its exclusive auth lock (initialize/_recoverAndRefresh
+        // → _notifyAllSubscribers → `await callback(...)`, all while _acquireLock is held). runResolver
+        // issues an RPC, and every PostgREST call first re-acquires that same lock to read the token —
+        // so awaiting it here waits for a lock this very callback is blocking. The lock ends up held AND
+        // pending on itself, the RPC never reaches the wire, and the app hangs on the splash forever
+        // (the resolver's own 20s timer fires; the /rest/ fetch watchdog never even logs, because fetch
+        // was never called). setTimeout(…, 0) defers the resolve to a fresh macrotask, after auth-js has
+        // released the lock — the callback returns promptly, the lock frees, the RPC can then acquire it.
+        const resolveAfterLock = (u: string, e: string) => { setTimeout(() => { void runResolver(u, e) }, 0) }
+
         // USER_UPDATED fires when the email gets confirmed (among other profile changes) — re-resolve
         // even for the same user so a freshly-confirmed user is picked up without a stale state lingering.
         if (event === 'USER_UPDATED' && session?.user) {
           resolvedUserIdRef.current = session.user.id
-          await runResolver(session.user.id, session.user.email ?? '')
+          resolveAfterLock(session.user.id, session.user.email ?? '')
           return
         }
         // S1-2 Step 2: gate the resolver/re-fetch on the user id CHANGING. A SIGNED_IN re-emitted for the
@@ -289,7 +301,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             return
           }
           resolvedUserIdRef.current = session.user.id
-          await runResolver(session.user.id, session.user.email ?? '')
+          resolveAfterLock(session.user.id, session.user.email ?? '')
           return
         }
         // TOKEN_REFRESHED (same user, new token) is intentionally NOT handled — it must never re-load the app.

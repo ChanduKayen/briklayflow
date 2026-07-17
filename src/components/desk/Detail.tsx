@@ -5,9 +5,10 @@
 // must be reachable from anywhere in a long story.
 
 import { useState } from 'react'
-import type { Chase, DeskProblem, DeskTask, Outcome, StoryStep } from '../../lib/desk/types'
+import type { Chase, DeskProblem, DeskTask, Outcome, Photo, StoryStep } from '../../lib/desk/types'
 import { OUTCOMES } from '../../lib/desk/types'
 import { canClose } from '../../lib/desk/derive'
+import { useSignedUrl } from '../../lib/desk/useSignedUrl'
 import { Btn } from './Btn'
 
 const initials = (name: string) =>
@@ -24,13 +25,16 @@ const initials = (name: string) =>
  * durable url is ever stored). If signing failed it is null — and we say so, rather than rendering a
  * broken image and letting the reader think the photo never came. */
 export function StoryPhoto({ step }: { step: Extract<StoryStep, { t: 'photo' }> }) {
+  // Signed on demand — only now that the photo is actually being shown (useSignedUrl). `null` means
+  // still resolving OR genuinely unavailable; either way we don't render a broken image.
+  const url = useSignedUrl(step.bucket, step.path, step.url)
   return (
     <div className="story-photo">
       <div className="from">Photo from the site <em>· WhatsApp</em></div>
-      {step.url
+      {url
         ? (
-          <a href={step.url} target="_blank" rel="noopener noreferrer">
-            <img src={step.url} alt={step.caption || 'Site photo'} loading="lazy" />
+          <a href={url} target="_blank" rel="noopener noreferrer">
+            <img src={url} alt={step.caption || 'Site photo'} loading="lazy" />
           </a>
         )
         : <div className="sp-gone">Photo unavailable</div>}
@@ -152,17 +156,21 @@ export function StoryTimeline({ item, children }: { item: DeskProblem; children?
 }
 
 /* ---------- PhotoStrip, incl. the "photo pending — Babai asking" state ---------- */
+/** One tile — signs its own url on demand (a hook per photo, so it can't live in the .map above). */
+function StripPhoto({ photo }: { photo: Photo }) {
+  const url = useSignedUrl(photo.bucket, photo.path, photo.url)
+  // The label rides underneath as the alt text too — a site photo with no caption is still evidence,
+  // and must never render as a blank tile. While the url resolves, the labelled placeholder holds.
+  return url
+    ? <img className="ph ph-img" src={url} alt={photo.l} title={photo.l} />
+    : <div className="ph">{photo.e}<span>{photo.l}</span></div>
+}
+
 export function PhotoStrip({ item }: { item: DeskProblem }) {
   if (item.photos?.length) {
     return (
       <div className="photos">
-        {item.photos.map((p, i) => (
-          p.url
-            // A real photo, signed at read time. The label rides underneath as the alt text too —
-            // a site photo with no caption is still evidence, and must never render as a blank tile.
-            ? <img className="ph ph-img" key={i} src={p.url} alt={p.l} title={p.l} />
-            : <div className="ph" key={i}>{p.e}<span>{p.l}</span></div>
-        ))}
+        {item.photos.map((p, i) => <StripPhoto key={i} photo={p} />)}
       </div>
     )
   }

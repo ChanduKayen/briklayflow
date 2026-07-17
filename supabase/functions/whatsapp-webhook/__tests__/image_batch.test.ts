@@ -142,6 +142,43 @@ suite('siteops image-under-batch — audit-#1 acceptance journeys (h–l)', () =
     expect(fake.writesTo('chase_batches').some((w) => w.payload?.status === 'CLOSED')).toBe(true)
   })
 
+  // (n) FOUNDER FIX (2026-07-16): a siteless photo must not be silently filed onto the sender's active site
+  // — even with a SINGLE-site open batch. A photo carries no site WORDS, so the batch prior is not enough to
+  // write to a building: it ASKS which project, carrying the photo. (Was: adopted the lone batch site as
+  // via='auto' and ran the unit with no ask — the reported live regression.)
+  test('(n) siteless photo + single-site batch → ASK which project (no silent adoption), photo carried', async () => {
+    const fake = fakeSupabase(seed())   // default batch-1 is single-site (ASM / P1)
+    const calls: Call[] = []
+    await runSiteops(imgCtx(fake, ''), 'Image received', {
+      callModel: imgModel(calls, {
+        vision: VIS(null, [{ type: 'issue', text: 'wall crack near stairs' }]),
+        resolve: R_BOTH_FALSE,
+      }),
+    })
+    const convoW = fake.writesTo('wa_conversations').find((w) => w.payload?.slots_so_far?.kind === 'siteops_project')
+    expect(!!convoW).toBe(true)                                              // it ASKS, never adopts
+    expect(convoW?.payload?.slots_so_far?.image?.storagePath).toBe(PHOTO)   // …carrying the photo in the pick
+    expect(resolutionCalls(calls).length).toBe(0)                            // project is a precondition — no resolve ran
+    expect(fake.writesTo('problems').length).toBe(0)                         // nothing written to any building
+  })
+
+  // (o) FOUNDER FIX (2026-07-16): the which_project ask must never leak OUR read of the photo — no <photo>
+  // markers, no vision essay. A siteless photo with a long read asks about "your photo"; only the sender's
+  // own caption is ever quoted back. (Was: `Got "<photo>…whole paragraph…</photo>" — which project?`)
+  test('(o) siteless photo → project ask says "your photo", never the <photo> essay', async () => {
+    const fake = fakeSupabase(seed())
+    const ESSAY = 'Interior lobby/corridor finishing in progress: walls and soffit have plaster and putty, ' +
+      'loose wiring hangs from the left wall, dust and protective sheets cover the floor'
+    await runSiteops(imgCtx(fake, ''), 'Image received', {
+      callModel: imgModel([], { vision: VIS(null, [{ type: 'progress', text: ESSAY }]), resolve: R_BOTH_FALSE }),
+    })
+    const convoW = fake.writesTo('wa_conversations').find((w) => w.payload?.slots_so_far?.kind === 'siteops_project')
+    const askBody: string = convoW?.payload?.slots_so_far?.ask_body ?? ''
+    expect(askBody.includes('<photo>')).toBe(false)        // the marker never leaks
+    expect(askBody.includes('loose wiring')).toBe(false)   // …nor the essay
+    expect(/your photo/i.test(askBody)).toBe(true)         // a one-liner stand-in instead
+  })
+
   // (k) no project signal + a MULTI-project batch: the batch cannot say which site, so ASK FIRST — the
   // pick carries the photo in its slots. NEVER a model call over multi-project candidates.
   test('(k) siteless photo + multi-project batch → ask-first carrying the photo, zero cross-project calls', async () => {

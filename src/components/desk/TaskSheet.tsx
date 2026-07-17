@@ -279,6 +279,30 @@ export function TaskSheetBody({
   const [openQc, setOpenQc] = useState(false)
   const qcOpen = t.state === 'active' ? true : (openQc || !allPassed)
 
+  /* THE HEADER FROSTS ONCE YOU SCROLL PAST IT.
+   *
+   * Who this task is and — the reason it stays — the ONE control that changes its state are welded to
+   * the top of the card. At rest the header IS the paper: no glass, nothing to explain. The moment the
+   * brief and the story slide up beneath it, it lifts onto frosted glass with a hairline under it,
+   * because now it is a layer above the page and has to say so — and the state is reachable from
+   * anywhere in a long story, not just the top of it. (rAF-throttled: the card's own scroll must never
+   * be the thing that stutters.) */
+  const headRef = useRef<HTMLDivElement>(null)
+  const [stuck, setStuck] = useState(false)
+  useEffect(() => {
+    const box = headRef.current?.closest('.d-scroll') as HTMLElement | null
+    if (!box) return
+    let queued = false
+    const onScroll = () => {
+      if (queued) return
+      queued = true
+      requestAnimationFrame(() => { queued = false; setStuck(box.scrollTop > 4) })
+    }
+    onScroll()
+    box.addEventListener('scroll', onScroll, { passive: true })
+    return () => box.removeEventListener('scroll', onScroll)
+  }, [t.ref])
+
   // FOCUS ON START. The moment a task goes in-progress — from Not started, or reopened from Done —
   // the cursor lands in the note box. Starting a job and saying you've started it are one motion.
   //
@@ -320,6 +344,8 @@ export function TaskSheetBody({
 
   return (
     <div className={`tsheet s-${t.state}`}>
+      {/* ── the sticky head: identity + the state control, pinned and frosted on scroll ── */}
+      <div className={`t-head ${stuck ? 'stuck' : ''}`} ref={headRef}>
       {/* ── identity: one block, one voice ── */}
       <div className="t-eyebrow">
         <span className="t-ref">{t.ref}</span>
@@ -404,10 +430,11 @@ export function TaskSheetBody({
             <>
               <span className="ldot" aria-hidden="true" />
               {t.assignee} on it
+              {/* SAID THE WAY A SITE SAYS IT. Not "day 1 of 1" — the first day of work; not "day 3" —
+                  running for three days. "Day 6 of 4" is nonsense anyway; two days over is a fact. */}
               {t.started && (over > 0
-                // PLANNED vs RUNNING, said plainly. "Day 6 of 4" is nonsense; two days over is a fact.
-                ? <> · <span className="over">day {t.started}, {over} day{over > 1 ? 's' : ''} over {days}-day plan</span></>
-                : <> · day {t.started} of {days}</>)}
+                ? <> · <span className="over">running for {t.started} days · {over} day{over > 1 ? 's' : ''} over the {days}-day plan</span></>
+                : <> · {t.started === 1 ? '1st day of work' : `running for ${t.started} days`}</>)}
             </>
           )}
 
@@ -437,6 +464,7 @@ export function TaskSheetBody({
           {t.state === 'todo' && st.cls === 'ready' && <>Ready — can start now</>}
         </div>
       </div>
+      </div>{/* /.t-head */}
 
       {/* ── properties: quiet, editable on approach ── */}
       <div className="props">

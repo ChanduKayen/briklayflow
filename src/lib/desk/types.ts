@@ -44,12 +44,16 @@ export type StoryStep =
       caption?: string | null;
       /** OUR read of the pixels — what the vision pass saw. NEVER shown as something he said. */
       seen?: string | null;
+      /** The private-bucket ref to sign LAZILY, at render (see useSignedUrl). `url` is the eager path —
+       *  set only when something already signed it (the mock). One of the two carries the picture. */
+      bucket?: string | null;
+      path?: string | null;
     }
 
 export interface Person { name: string; phone: string }
-/** `e` is the placeholder glyph; `url` is a SIGNED storage url when the photo is real (never
- *  stored — minted at read time, per the attachments contract). */
-export interface Photo { e: string; l: string; url?: string | null }
+/** `e` is the placeholder glyph; `url` is a SIGNED storage url when one is already in hand; otherwise
+ *  `bucket`/`path` are the private-bucket ref that useSignedUrl mints a URL from at render time. */
+export interface Photo { e: string; l: string; url?: string | null; bucket?: string | null; path?: string | null }
 
 /**
  * ══ THE CHASE BLOCK — WHY THIS IS SITTING WHERE IT IS ═══════════════════════════════════════════════

@@ -117,4 +117,28 @@ suite('siteops T2 — DONE_RE demoted: terminal task status needs the ladder (Ha
     expect(res.statusTo).toBe('active')
     expect(siteTaskStatus(fake).includes('done')).toBe(false)
   })
+
+  // j6 (RED) — AUTHORIZED closure must land 'done' regardless of the DONE_RE word-list's language. The ladder
+  // (or a which_item pick, which supplies the missing WHICH) authorizes closure; the text is Telugu SCRIPT
+  // ("అయిపోయింది" = finished) that the English/romanized regex cannot see. RED today: the old code required
+  // DONE_RE to ALSO match, so an authorized Telugu closure fell through to 'active' — a report the founder
+  // plainly closed, stuck at in-progress (the live bug behind "I picked the task and it didn't close").
+  test('(j6) authorized Telugu closure "అయిపోయింది" → terminal done (closure is the ladder’s call, not the regex’s)', async () => {
+    const fake = fakeSupabase({})
+    const res = await applyProgress(mkRc(fake), task(), progressItem('సీలింగ్ అయిపోయింది'), { closureAuthorized: true })
+
+    expect(res.statusTo).toBe('done')
+    expect(siteTaskStatus(fake).includes('done')).toBe(true)
+  })
+
+  // j7 (guard) — the mirror of j6: the SAME Telugu closure with NO authorization advances (active), never
+  // closes. Authorization is the only difference, so the two diverging is the proof that closure is gated by
+  // the ladder's verdict alone — never by the presence of a done-word in any language.
+  test('(j7) UNauthorized Telugu closure "అయిపోయింది" → advances to active, never terminal done', async () => {
+    const fake = fakeSupabase({})
+    const res = await applyProgress(mkRc(fake), task(), progressItem('సీలింగ్ అయిపోయింది'))
+
+    expect(res.statusTo).toBe('active')
+    expect(siteTaskStatus(fake).includes('done')).toBe(false)
+  })
 })

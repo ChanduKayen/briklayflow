@@ -643,7 +643,16 @@ export interface ReadbackSink {
 }
 
 // the executor's slim view of an offered candidate (built from res.candidates in the caller).
-export interface ExecCandidate { kind: 'task' | 'issue' | 'todo'; title: string; projectId: string | null; projectName: string | null }
+export interface ExecCandidate {
+  kind: 'task' | 'issue' | 'todo'; title: string; projectId: string | null; projectName: string | null
+  // THE FACTS BEHIND THE LABEL (task ROWS only — `site_tasks.name` / `floor_label` / `unit_label`).
+  // `title` is those three COMPOSED for a human to read; it is not a data structure, and it must never be
+  // parsed back apart. It cannot be: the engine's naming contract is `Category — Work` ("Ceiling — POP
+  // finish"), and the row composer joins the floor on with the SAME ' — ', so the label's separators are
+  // ambiguous by construction. Absent (issues/todos, whose title is free text) → the renderer falls back to
+  // its heuristic. See splitLabel.
+  name?: string; floor?: string | null; unit?: string | null
+}
 
 function toSiteItem(it: { kind: 'issue' | 'snag'; detail: string; location: string | null; project_hint: string | null; confidence?: 'high' | 'med' | 'low'; planned?: boolean; due_date?: string | null; cause?: string | null; owner?: string | null }, structure?: StructureSlot | null): SiteItem {
   // T6 — the planner's KIND + CONFIDENCE ride through to the row (clauses 3 + 4). `type` stays 'issue' so
@@ -875,7 +884,12 @@ export async function handleUndoResolve(ctx: SiteopsCtx, quotedWamid: string): P
 //    (never re-derived from the reply). The proven collision resume is the SOLE resolve path.
 // `update` threads the ladder's held verdict (T3 sole-authority) for a SINGLE-target ask; a multi-candidate
 // ask has no single verdict → verdict-less slot → the resume forces ADDRESSING on confirm (the safe floor).
-type CollisionCand = { id: string; kind: 'issue' | 'todo' | 'task'; orgId: string; projectId: string | null; projectName: string; title: string; cause: string | null }
+// `name`/`loc` are the row's OWN facts (task rows only — see ExecCandidate), carried here so the renderer
+// never has to guess them back out of `title`. OPTIONAL, and that is deliberate two ways: an issue/todo has
+// no such decomposition to carry, and an ask SERIALIZED by an older deploy (they ride `slots.candidates`
+// across a restart) will not have them. Both land on the splitLabel fallback — which is exactly the old
+// behaviour, so no in-flight pick changes under a deploy.
+type CollisionCand = { id: string; kind: 'issue' | 'todo' | 'task'; orgId: string; projectId: string | null; projectName: string; title: string; cause: string | null; name?: string; loc?: string }
 
 // ── THE PICK'S LIST ROWS (2026-07-11) ─────────────────────────────────────────────────────────────────────
 // Meta's HARD caps: 10 rows per list, 24 chars per row title, 72 per row description. The pick was TEXT-only
@@ -888,11 +902,31 @@ type CollisionCand = { id: string; kind: 'issue' | 'todo' | 'task'; orgId: strin
 // cannot fit: it falls back to the TEXT list rather than drop a row inside the cap (→ null).
 const LIST_MAX_CANDS = 8
 const cut = (s: string, n: number) => (s.length <= n ? s : `${s.slice(0, n - 1).trimEnd()}…`)
-/** "Floor tiling — First · Unit A" → { name: "Floor tiling", loc: "First · Unit A" } (loc '' when unsuffixed). */
+/**
+ * THE LAST RESORT — guess a name/location boundary out of a display label. Only for a title with no facts
+ * behind it: a free-text issue/todo ("Slab — Ground floor"), or an ask serialized by an older deploy.
+ *
+ * IT MUST NEVER BE ASKED ABOUT A TASK. A task label is `Category — Work — Floor · Unit`, and both of the
+ * first two ' — 's look identical to this function, so it reads the engine's own naming contract backwards:
+ * "Ceiling — POP finish — First" → name "Ceiling", loc "POP finish — First". Live, that turned a which-WORK
+ * tie between "Ceiling — boarding" and "Ceiling — POP finish" into "Where should this go?" — asking a man for
+ * the floor he had just given us, over two rows already pinned to it. Tasks carry their facts now (partsOf).
+ *
+ * The heuristic survives only because an issue's title genuinely is prose — there are no columns under it to
+ * read instead, so a first-' — ' guess is the best available, and it is what shipped.
+ */
 const splitLabel = (title: string): { name: string; loc: string } => {
   const i = title.indexOf(' — ')
   return i > 0 ? { name: title.slice(0, i), loc: title.slice(i + 3) } : { name: title, loc: '' }
 }
+
+/** The location, composed the way the label composes it (`_siteops_resolution_llm.ts` rowTitle). */
+const locLabel = (floor?: string | null, unit?: string | null): string => [floor, unit].filter(Boolean).join(' · ')
+
+/** What tells these rows apart, and where: the candidate's FACTS when it carries them, else the guess. */
+const partsOf = (c: CollisionCand): { name: string; loc: string } =>
+  c.name === undefined ? splitLabel(c.title) : { name: c.name, loc: c.loc ?? '' }
+
 type PickRow = { id: string; title: string; description?: string }
 
 /**
@@ -906,7 +940,7 @@ type PickRow = { id: string; title: string; description?: string }
  */
 type PickAxis = 'work' | 'location' | 'mixed'
 function pickAxis(cands: CollisionCand[]): PickAxis {
-  const parts = cands.map((c) => splitLabel(c.title))
+  const parts = cands.map(partsOf)
   if (parts.every((p) => p.loc && p.loc === parts[0].loc)) return 'work'
   if (parts.every((p) => p.name === parts[0].name) && parts.every((p) => p.loc)) return 'location'
   return 'mixed'
@@ -914,7 +948,7 @@ function pickAxis(cands: CollisionCand[]): PickAxis {
 
 function pickRows(cands: CollisionCand[], multiKind: boolean): PickRow[] | null {
   if (!cands.length || cands.length > LIST_MAX_CANDS) return null
-  const parts = cands.map((c) => splitLabel(c.title))
+  const parts = cands.map(partsOf)
   const axis = pickAxis(cands)
   /**
    * THE ROW IS NOW THE ONLY PLACE THE CANDIDATES APPEAR, so it has to carry the fact whole.
@@ -1238,11 +1272,16 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
         const kind = (item?.kind ?? c?.kind) as 'issue' | 'todo' | 'task' | undefined
         if (!kind) continue   // target resolves to no offered candidate → not askable; parked in the else below
         seen.add(id)
+        // The row's FACTS ride along when it has them (task rows), so the renderer names the axis from what
+        // the options ARE, not from what their labels look like. A batch ITEM is an issue/todo — free text,
+        // no facts to carry — so it never sets them, and the fallback stands.
+        const facts = c?.name !== undefined && !item ? { name: c.name, loc: locLabel(c.floor, c.unit) } : {}
         cands.push({
           id, kind, orgId: ctx.orgId,
           projectId: item?.projectId ?? c?.projectId ?? ex.projectId ?? null,
           projectName: item?.projectName ?? c?.projectName ?? '',
           title: item?.title ?? c?.title ?? '', cause: item?.cause ?? null,
+          ...facts,
         })
       }
     }
@@ -1310,7 +1349,13 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
               : await applyTaskProgressById(ctx, id, t.update.reason, ex.narrationId, ex.now, ex.projectId ?? null, t.applied === 'resolve', ex.vmMemo, ex.qc)
             if (label) succeeded.push(id)
           }
-          const baseName = (ex.candById?.get(t.update.target_id)?.title ?? ex.labelById.get(t.update.target_id) ?? 'tasks').split(' — ')[0]
+          // THE SWEPT ROWS' SHARED NAME — the row's own `name`, never the label with its tail chopped off.
+          // The old `title.split(' — ')[0]` was the same mistake splitLabel made: on "Plumbing — sanitaryware
+          // & fittings — Ground" it read the CATEGORY as the whole name, so a three-floor sweep read back as
+          // "Plumbing — marked all 3", which names a trade, not the work that was done. Falls back to the old
+          // split only for a row with no facts (a legacy shortlist), where a guess is all there is.
+          const cand = ex.candById?.get(t.update.target_id)
+          const baseName = cand?.name ?? (cand?.title ?? ex.labelById.get(t.update.target_id) ?? 'tasks').split(' — ')[0]
           console.log(`[siteops:collective] name=${JSON.stringify(baseName)} targets=${t.collectiveTargetIds.length} applied=${succeeded.length}`)
           outcomes.push({ terminal: { ...t, collectiveTargetIds: succeeded.length ? succeeded : t.collectiveTargetIds }, status: succeeded.length ? 'ok' : 'failed', label: baseName })
           continue
@@ -1654,7 +1699,10 @@ async function runSingularUnit(ctx: SiteopsCtx, u: {
       if (c.kind !== 'task' || !c.rows?.length) continue
       for (const r of c.rows) {
         labelById.set(r.id, readbackLabel(r.title))
-        candById.set(r.id, { kind: 'task', title: r.title, projectId: c.project_id, projectName: c.project_name })
+        // `r.title` is r.name + r.floor + r.unit, composed. Carry the three THEMSELVES as well: the pick's
+        // renderer needs to know what tells its rows apart, and the composed string cannot tell it (both the
+        // name's own ' — ' and the floor's join on the same separator).
+        candById.set(r.id, { kind: 'task', title: r.title, projectId: c.project_id, projectName: c.project_name, name: r.name, floor: r.floor, unit: r.unit })
       }
     }
     const outcomes = await applyTerminals(ctx, res.terminals, {
@@ -1807,7 +1855,7 @@ interface ProjectGroup {
   via: string
   assumedSite?: string
 }
-async function resolveGroups(ctx: SiteopsCtx, decomposed: { items: SiteItem[]; project_hint: string | null } | null, projects: ProjectRef[], batch: OpenBatch | null, rawText: string): Promise<ProjectGroup[]> {
+async function resolveGroups(ctx: SiteopsCtx, decomposed: { items: SiteItem[]; project_hint: string | null } | null, projects: ProjectRef[], batch: OpenBatch | null, rawText: string, opts: { adoptBatch?: boolean } = {}): Promise<ProjectGroup[]> {
   const items = decomposed?.items ?? []
   if (!items.length) return []
   const topHint = decomposed?.project_hint ?? null
@@ -1844,8 +1892,12 @@ async function resolveGroups(ctx: SiteopsCtx, decomposed: { items: SiteItem[]; p
     g.items.push(items[i])
   }
 
-  // single unresolved group + a SINGLE-site open batch → adopt it (the batch prior, disclosed via='auto')
-  if (groups.length === 1 && !groups[0].projectId && batch?.items?.length) {
+  // single unresolved group + a SINGLE-site open batch → adopt it (the batch prior, disclosed via='auto').
+  // NOT on the image path (adoptBatch:false): a photo carries no site WORDS at all, so adopting the sender's
+  // active building off a photo that names nothing is exactly the silent mis-file the founder rule forbids
+  // (_resolve.ts:15) — an unsited photo ASKS which project instead (the caller's unresolved-group ask). Text
+  // keeps the prior: a message mid-conversation about one site legitimately carries that site forward.
+  if (opts.adoptBatch !== false && groups.length === 1 && !groups[0].projectId && batch?.items?.length) {
     const pids = [...new Set(batch.items.map((b) => b.projectId).filter(Boolean))] as string[]
     if (pids.length === 1) {
       groups[0].projectId = pids[0]; groups[0].via = 'auto'
@@ -2091,11 +2143,12 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
     if (!unitItems.length && qcFailures.length) return   // the photo's whole content WAS the QC failure — handled
     if (!items.length) {
       const proj = await resolveProject(ctx.supabase, ctx.orgId, { narration: ctx.image.caption || text, nameHint: null })
-      let pid = proj.projectId; let via: string = proj.via; let assumed: string | undefined
-      if (!pid && batch?.items?.length) {
-        const pids = [...new Set(batch.items.map((b) => b.projectId).filter(Boolean))] as string[]
-        if (pids.length === 1) { pid = pids[0]; via = 'auto'; assumed = projects.find((p) => p.id === pid)?.name }
-      }
+      const pid = proj.projectId; const via: string = proj.via
+      // NO single-site-batch adoption for a siteless photo (the twin of the resolveGroups guard). A photo we
+      // could not even read, with no site named, must not be filed onto the sender's active building off a
+      // prior — pid stays null, so it falls to the caption-names-a-site ask below, else an honest evidence
+      // park. (via can still be 'auto' only for a genuine single-project org — that disclosure is kept.)
+      const assumed: string | undefined = via === 'auto' ? (pname(pid) ?? undefined) : undefined
       await ctx.supabase.from('site_narrations').update({ project_id: pid, decomposed: items, resolved_project_via: pid ? via : 'unresolved' }).eq('id', narrationId)
       if (pid) {
         // Grade on the MARKED COMPOSITE (his caption + our read, each attributed), never the ` -- ` mush —
@@ -2149,7 +2202,7 @@ export async function runSiteops(ctx: SiteopsCtx, text: string, opts: { prefix?:
     // discarded the photo's own evidence whenever a caption existed; the bare ` -- ` mush the router builds
     // hid whose claim was whose, and got quoted back to the sender as HIS words.) No caption and no
     // description → fall back to whatever the router had.
-    const rawGroups = await resolveGroups(ctx, decomposed, projects, batch, imgRawText)
+    const rawGroups = await resolveGroups(ctx, decomposed, projects, batch, imgRawText, { adoptBatch: false })
     // `single` is judged on what the photo ACTUALLY yielded (before the merge): one observation still grades on
     // the marked composite (caption + our read), exactly as before. Two observations of one scene grade on the
     // MERGED bullets, which say more than the composite's thin routing description does.
@@ -2395,7 +2448,17 @@ async function askProjectGroups(
   const pending = groups.slice(1)
   // AUDIT #2 — the question CARRIES the observation in its TEXT, not just the slots: the supervisor must
   // see WHAT is being sited before picking, or a stale question reads as a context-free "which project?".
-  const obs = g.messages[0] ? `"${g.messages[0]}"${g.messages.length > 1 ? ` (+${g.messages.length - 1} more)` : ''}` : 'your site note'
+  // ONE LINE, NEVER OUR READ. For a PHOTO the observation is OURS — a routing description (single item, a
+  // <photo>…</photo> composite) or the vision read (multi item). Quoting it back put our paragraph in his
+  // mouth AND leaked the markers. So a photo quotes only HIS caption; no caption → "your photo". Plain text
+  // is his own words and passes through exactly as before.
+  const isPhoto = !!image?.storagePath
+  const caption = (image?.caption ?? '').trim()
+  const obs = isPhoto
+    ? (caption ? `"${caption}"` : 'your photo')
+    : g.messages[0]
+      ? `"${g.messages[0]}"${g.messages.length > 1 ? ` (+${g.messages.length - 1} more)` : ''}`
+      : 'your site note'
   const body = g.nameTried
     ? `I couldn't find a project called "${g.nameTried}". Which project is ${obs} for?`
     : `Got ${obs} — which project is it for?`
@@ -2767,13 +2830,21 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
       // which — "tiles not yet laid → that one" confirms the TARGET, never that the work happened.
       const heldTask = slots.update as AttachUpdate | null | undefined
       const blocked = heldTask?.action === 'blocked'
+      // THE PICK IS THE MISSING CONFIDENCE. He read the row and tapped it, so WHICH task is now certain — the
+      // exact thing the fresh ladder needed to close. So closure is authorized iff the held update was an
+      // explicit-closure resolve (action='resolve' + closure_explicit) — the SAME rule landTask applies once a
+      // task is high-confidence, and the twin of the issue/todo pick just below (which re-runs the ladder at
+      // confidence:'high'). Without this the pick could NEVER close: a picked "అయిపోయింది / finished" stayed at
+      // in-progress no matter how plainly he said it (closureAuthorized was hard-coded false here — the bug). A
+      // verdict-less slot (pre-T3 fossil) carries no held update → false, exactly as the issue path force-addresses.
+      const closeOk = heldTask?.action === 'resolve' && heldTask?.closure_explicit === true
       // GAP 1 — the checkable facts the ORIGINAL message stated ride the slots; apply them here, where we
       // finally know WHICH task they belong to. Without this the ask path silently discarded every piece of
       // QC evidence — and the ask path is the one an ambiguous photo of slab steel always takes.
       const qcStatements = (slots.qc_statements as string[] | undefined) ?? []
       const label = blocked
         ? await applyTaskBlockedById(ctx, chosen.id, heldTask?.reason || pieceText)
-        : await applyTaskProgressById(ctx, chosen.id, pieceText, narrId, new Date(), projId, false, undefined,
+        : await applyTaskProgressById(ctx, chosen.id, pieceText, narrId, new Date(), projId, closeOk, undefined,
             { statements: qcStatements, call: opts.callModel ?? callLLM })
       const cimg = slots.image as { storagePath?: string; caption?: string | null } | null
       if (label && cimg?.storagePath) await attachImage(ctx, 'site_task', chosen.id, cimg.storagePath, cimg.caption ?? null, 'creation')
@@ -2781,7 +2852,9 @@ export async function answerSiteops(ctx: SiteopsCtx, text: string, convo: ConvoR
       if (label) {
         const body = blocked
           ? `⏳ “${label}” still open — noted, chasing sooner — ${chosen.projectName}`
-          : `✓ “${label}” updated — ${chosen.projectName}`
+          : closeOk
+            ? `✓ “${label}” done — ${chosen.projectName}`
+            : `✓ “${label}” updated — ${chosen.projectName}`
         await finishItemAsk(ctx, meta, slots, { project: chosen.projectName, body })
       } else {
         await parkObservation(ctx, `update ${chosen.id}: ${pieceText}`, 'v2_effect_failed', narrId, null, { projectId: projId, image: cimg })

@@ -310,6 +310,18 @@ export function ContractHub({ txn, onClose, onLinked }: { txn: TrackTxn; onClose
         Daily labour doesn't need this.
       </div>
 
+      {/* THE ONE-TIME EXIT, AT THE HEAD. Moved out of the payment ROW (it made every worker line a
+          two-button fork) and off the bottom of this panel (buried under the labour flow). It sits up
+          top now, as one calm, complete option: a standalone payout that is simply not a contract. */}
+      <button type="button" className="ch-onetime" disabled={busy} onClick={addOneoff}>
+        <span className="ch-ot-ic">₹</span>
+        <span className="ch-ot-tx">
+          <span className="ch-ot-1">One-time payment</span>
+          <span className="ch-ot-2">A standalone payout — no contract, nothing to track</span>
+        </span>
+        <span className="ch-ot-arr">→</span>
+      </button>
+
       {isLoading ? (
         <p className="ch-help" style={{ marginBottom: 0 }}>Looking for open contracts…</p>
       ) : openContracts.length > 0 ? (
@@ -385,9 +397,7 @@ export function ContractHub({ txn, onClose, onLinked }: { txn: TrackTxn; onClose
               </span>
               <button type="button" className="ch-cbtn ch-ghost" disabled={busy} onClick={addNMR}>Use this</button>
             </div>
-            <button type="button" className="ch-dismiss ch-oneoff" disabled={busy} onClick={addOneoff}>
-              ↩ or just file as a one-off, no tracking
-            </button>
+            {/* the one-off exit moved to the head of the panel — this zone is now just the daily-wage path */}
           </>
         ) : (
           <button type="button" className="ch-ltoggle" onClick={() => setLabourOpen(true)}>
@@ -559,6 +569,17 @@ export const CONTRACT_HUB_CSS = `
 .ch-help{font-size:12.5px;color:${V.sys};line-height:1.6;max-width:480px;margin-bottom:20px}
 .ch-help b{color:${V.terraDeep};font-weight:600}
 .ch-sub{font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:${V.faint};margin:0 0 10px}
+.ch-onetime{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:${V.field};border:1px solid ${V.line};border-radius:12px;padding:11px 13px;margin:0 0 16px;cursor:pointer;transition:.16s cubic-bezier(.22,1,.36,1);font-family:inherit}
+.ch-onetime:hover{border-color:${V.sage};background:${V.sageWash};transform:translateY(-1px);box-shadow:0 8px 20px -14px rgba(60,110,83,.4)}
+.ch-onetime:active{transform:translateY(0)}
+.ch-onetime:disabled{opacity:.6;cursor:default;transform:none;box-shadow:none}
+.ch-ot-ic{width:30px;height:30px;flex:0 0 auto;border-radius:8px;background:${V.surface};border:1px solid ${V.line};display:grid;place-items:center;font-size:14px;font-weight:700;color:${V.sys};transition:.16s}
+.ch-ot-tx{flex:1;min-width:0;display:block}
+.ch-ot-1{display:block;font-size:13px;font-weight:600;color:${V.ink}}
+.ch-ot-2{display:block;font-size:11px;color:${V.faint};margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ch-ot-arr{flex:0 0 auto;color:${V.faint};font-size:15px;transition:.16s}
+.ch-onetime:hover .ch-ot-arr{color:${V.sage};transform:translateX(2px)}
+.ch-onetime:hover .ch-ot-ic{border-color:${V.sage};color:${V.sage}}
 .ch-clist{display:flex;flex-direction:column;gap:9px}
 .ch-newbtn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:14px;background:${V.surface};border:1.5px dashed ${V.line};border-radius:12px;padding:13px;font-size:12.5px;font-weight:600;color:${V.terraDeep};cursor:pointer;transition:.16s;font-family:inherit}
 .ch-newbtn:hover{border-color:${V.terra};background:${V.terraWash}}
