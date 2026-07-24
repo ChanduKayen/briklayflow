@@ -24,6 +24,7 @@ import { supabase } from '../../lib/supabase';
 import { useSnackbar } from '../Snackbar';
 import { useOrgId } from '../../lib/auth/AuthProvider';
 import { useUserProfile } from '../../App';
+import { emailInviteLink } from '../../lib/team/invites';
 import type { UserRole } from '../../types';
 import { V, N, WA, font, serif, nums, terraGrad, T } from '../day-book/tokens';
 import { ANIM } from '../day-book/motion';
@@ -377,7 +378,7 @@ export default function TeamAccess({ session }: { session: Session }) {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [role, setRole] = useState<string>(INVITE_ROLES[0].value);
-  const [result, setResult] = useState<{ link?: string; phone: string; mode: 'email' | 'wa'; name: string } | null>(null);
+  const [result, setResult] = useState<{ link?: string; phone: string; mode: 'email' | 'wa'; name: string; welcomeError?: string; emailError?: string } | null>(null);
   const [copied, setCopied] = useState(false);
 
   const emailProvided = email.trim().length > 0;
@@ -571,6 +572,19 @@ export default function TeamAccess({ session }: { session: Session }) {
     mutationFn: async () => {
       if (!phoneOk) throw new Error('Enter their WhatsApp number');
       const nm = name.trim();
+
+      // Notify the new teammate on WhatsApp via the approved welcome template, then
+      // stamp welcomed_at so it never re-sends. The send is non-fatal (the invite
+      // already stands) but its failure is RETURNED, not swallowed, so it surfaces
+      // instead of masquerading as a clean success.
+      const tryWelcome = async (): Promise<string | undefined> => {
+        try {
+          await sendWelcome(nm || 'there', digits(phone));
+          await supabase.from('wa_registered_numbers').update({ welcomed_at: new Date().toISOString() }).eq('phone_number', intlPhone(phone));
+          return undefined;
+        } catch (e: any) { return e?.message || 'Could not send the WhatsApp welcome'; }
+      };
+
       if (emailProvided) {
         if (!emailOk) throw new Error('Enter a valid email address');
         const { data, error } = await supabase.rpc('create_invite', {
@@ -582,23 +596,23 @@ export default function TeamAccess({ session }: { session: Session }) {
         const { error: waErr } = await supabase.from('wa_registered_numbers')
           .insert({ name: nm || email.trim(), phone_number: intlPhone(phone), role: roleLabel(role), is_active: true });
         if (waErr && !/duplicate|unique/i.test(waErr.message)) throw waErr;
-        // Notify the new teammate on WhatsApp via the existing welcome template (best-effort — the
-        // invite itself already succeeded; a failed send must not fail the invite).
-        try {
-          await sendWelcome(nm || email.trim(), digits(phone));
-          await supabase.from('wa_registered_numbers').update({ welcomed_at: new Date().toISOString() }).eq('phone_number', intlPhone(phone));
-        } catch { /* welcome is best-effort */ }
-        return { link: inviteLinkFor(row.token), phone: digits(phone), mode: 'email' as const, name: nm };
+        // Email the join link so it reaches the invitee (best-effort — the invite row
+        // already exists; a failed email is surfaced, and the copyable link remains).
+        const emailError = await emailInviteLink({ to: email.trim().toLowerCase(), link: inviteLinkFor(row.token), inviterName: profile?.name, role });
+        const welcomeError = await tryWelcome();
+        return { link: inviteLinkFor(row.token), phone: digits(phone), mode: 'email' as const, name: nm, welcomeError, emailError };
       }
       const { error } = await supabase.rpc('wa_invite_number', { p_phone: intlPhone(phone), p_name: nm || null, p_role: roleLabel(role) });
       if (error) throw error;
-      try {
-        await sendWelcome(nm || 'there', digits(phone));
-        await supabase.from('wa_registered_numbers').update({ welcomed_at: new Date().toISOString() }).eq('phone_number', intlPhone(phone));
-      } catch { /* welcome is best-effort */ }
-      return { phone: digits(phone), mode: 'wa' as const, name: nm };
+      const welcomeError = await tryWelcome();
+      return { phone: digits(phone), mode: 'wa' as const, name: nm, welcomeError };
     },
-    onSuccess: (r) => { setResult(r); refreshInvites(); },
+    onSuccess: (r) => {
+      setResult(r);
+      refreshInvites();
+      if (r.emailError) show(`Invite saved, but the email didn't send — ${r.emailError}`, { type: 'error' });
+      if (r.welcomeError) show(`Invite saved, but the WhatsApp welcome didn't send — ${r.welcomeError}`, { type: 'error' });
+    },
     onError: (e: any) => show(e.message || 'Could not send the invite', { type: 'error' }),
   });
 
@@ -701,7 +715,9 @@ export default function TeamAccess({ session }: { session: Session }) {
               </p>
               {result.mode === 'email' ? (
                 <>
-                  <p className="mt-1.5 leading-relaxed" style={{ color: V.sys, ...font, ...T.xs }}>Share this link so they can join. Their WhatsApp number can already send to Briklay.</p>
+                  <p className="mt-1.5 leading-relaxed" style={{ color: V.sys, ...font, ...T.xs }}>
+                    {result.emailError ? 'Couldn’t email the link — share it directly below.' : 'We’ve emailed the join link to them. You can also copy it below.'} Their WhatsApp number can already send to Briklay.
+                  </p>
                   <button onClick={() => result.link && copyLink(result.link)} className="mt-3 w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl" style={{ background: V.field, color: V.inkSoft, ...font, ...T.xs }}>
                     <span className="truncate">{result.link}</span>
                     {copied ? <Check size={14} style={{ color: V.sage, flexShrink: 0 }} /> : <Copy size={13} style={{ color: V.faint, flexShrink: 0 }} />}

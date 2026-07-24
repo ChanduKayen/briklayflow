@@ -118,7 +118,28 @@ export function ReviewCard({
    *
    * We now never post an id we have not seen in the org's own tables.
    */
-  const projectRow = ai.project_id ? projects.find((p) => p.project_id === ai.project_id) ?? null : null;
+  /**
+   * ID FIRST — but a missed id is not always a phantom.
+   *
+   * The id is the verified key. But this card re-checks the saved id against its OWN copy of the
+   * project list, and that copy can lag what the editor just wrote (a project activated mid-session,
+   * or simply a list this card fetched earlier). When it lags, `find(id)` misses even though the owner
+   * picked a real site — and because `project_name` is now that real name, the card would print
+   * "<real name> · not a project", which is the exact "site present but says not a project" bug.
+   *
+   * So when the id misses, fall back to an EXACT, UNIQUE name match against the SAME real list. That
+   * is still verification — a phantom id whose name matches no row we can see stays unresolved — it
+   * only rescues a real, named row the id lookup happened to miss.
+   */
+  const nrm = (s?: string | null) => (s ?? '').trim().toLowerCase();
+  const projectByName = (() => {
+    const q = nrm(ai.project_name);
+    if (!q) return null;
+    const hits = projects.filter((p) => nrm(p.name) === q);
+    return hits.length === 1 ? hits[0] : null;
+  })();
+  const projectById = ai.project_id ? projects.find((p) => p.project_id === ai.project_id) ?? null : null;
+  const projectRow = projectById ?? projectByName;
   const payeeRow = ai.payee_id ? stakeholders.find((s) => s.stakeholder_id === ai.payee_id) ?? null : null;
 
   const payeeId = payeeRow?.stakeholder_id ?? null;

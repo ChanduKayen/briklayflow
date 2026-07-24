@@ -68,8 +68,8 @@
     "hash": "520a6a362920ebeeea713886f59ab308"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\App.tsx": {
-    "mtime": 1784027431.0178752,
-    "hash": "f3eb4ac0c0aca8ba459f69f3342fd020"
+    "mtime": 1784276780.6953323,
+    "hash": "f875baae876e98ac9ca0a2538300d6e3"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\main.tsx": {
     "mtime": 1781522433.6385138,
@@ -224,8 +224,8 @@
     "hash": "70366c72b897e4ad2a4670c5b946afde"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\components\\ResolvePopup.tsx": {
-    "mtime": 1784016902.3071585,
-    "hash": "eb46e063c17fb21a319a7e0e14bff9a7"
+    "mtime": 1784263800.901971,
+    "hash": "2ecf97e489d5b30af57d76cdcc40e908"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\components\\ShortcutTicker.tsx": {
     "mtime": 1778857164.0482192,
@@ -240,8 +240,8 @@
     "hash": "519057e4bd5e7494c1035710c4f2b7b9"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\components\\StakeholderLedgerDrawer.tsx": {
-    "mtime": 1784050450.7755315,
-    "hash": "45cd9d870e4aae1bf0fc9e648ed11195"
+    "mtime": 1784276287.9843163,
+    "hash": "f66cc9e40e9e6deca6b5da44accf12f9"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\components\\StakeholderPeek.tsx": {
     "mtime": 1784050450.5691342,
@@ -372,8 +372,8 @@
     "hash": "6ac91a7e78c4d49bd9874ff202d09da0"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\components\\landing\\AuthPanel.tsx": {
-    "mtime": 1782719134.832963,
-    "hash": "e2986f7101dd62f178ef9849299dc14a"
+    "mtime": 1784276919.480086,
+    "hash": "2726094de6a85fe4d409015831a6adc1"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\components\\landing\\Gate.tsx": {
     "mtime": 1781244080.1272457,
@@ -571,6 +571,14 @@
     "mtime": 1780241099.676158,
     "hash": "a935b974ed4dd13f94d675fe55daabfc"
   },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\partyLedger.ts": {
+    "mtime": 1784276078.9493325,
+    "hash": "c8d24545cedac2c18a2b2f8bce5be01e"
+  },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\payeeSearch.ts": {
+    "mtime": 1784276061.8260026,
+    "hash": "ec4684d840382a0eebeb9782e7471e6b"
+  },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\pdfHelpers.ts": {
     "mtime": 1778725747.1455994,
     "hash": "333eea8b29e5fe95787e58a640416814"
@@ -636,8 +644,8 @@
     "hash": "dd1c681c06b69acc5eadf4f72fa7d55e"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\vendorTrackingApi.ts": {
-    "mtime": 1782216329.2731793,
-    "hash": "cb102cb799cba0da93b06fb440dc5009"
+    "mtime": 1784276028.1071894,
+    "hash": "170ba27a3657b6d4c00bfccb5b26e22d"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\woAutoClose.ts": {
     "mtime": 1778896449.5837727,
@@ -656,12 +664,12 @@
     "hash": "602852d29a3485d7f89bc90d0e7d3a93"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\auth\\routes.ts": {
-    "mtime": 1782888233.785589,
-    "hash": "3a26f9c2dd4dc4803e3e758bf05f9598"
+    "mtime": 1784276755.8854845,
+    "hash": "2fbd364495edd7fa2afb2e135e1fa362"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\auth\\__tests__\\all.test.ts": {
-    "mtime": 1782893754.2501204,
-    "hash": "f79a414a018ff6723e1635e197bf263b"
+    "mtime": 1784276851.5567684,
+    "hash": "bfa8a40a855a84b23c841b26ab43262a"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\auth\\__tests__\\harness.ts": {
     "mtime": 1782893754.2501204,
@@ -670,6 +678,10 @@
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\auth\\__tests__\\refreshPolicy.test.ts": {
     "mtime": 1782893754.2652774,
     "hash": "9650f9df899885e79622b012e678c68b"
+  },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\auth\\__tests__\\routes.test.ts": {
+    "mtime": 1784276831.2591705,
+    "hash": "107932dbd4e2b803b7d556da19137a00"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\auth\\__tests__\\run-tests.mjs": {
     "mtime": 1782893754.2652774,
@@ -907,6 +919,26 @@
     "mtime": 1784016232.8446138,
     "hash": "c0a5212258948f003e4fd67038970fbf"
   },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\__tests__\\all.test.ts": {
+    "mtime": 1784276158.8464675,
+    "hash": "2d7aeaf02c6b622728eddad01302fe4b"
+  },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\__tests__\\harness.ts": {
+    "mtime": 1784263698.6402092,
+    "hash": "fad0cc714bc7e58f3e66b9071c93c3d6"
+  },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\__tests__\\partyLedger.test.ts": {
+    "mtime": 1784276150.02282,
+    "hash": "816991e79c858f682618b3c552824cd1"
+  },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\__tests__\\payeeSearch.test.ts": {
+    "mtime": 1784263729.7779467,
+    "hash": "c2e7f48fa72d8d896d97fa95702e5032"
+  },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\__tests__\\run-tests.mjs": {
+    "mtime": 1784263698.7420766,
+    "hash": "02c5d43e366941b75059f2b40084f62a"
+  },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\BillDetail.tsx": {
     "mtime": 1782718704.5861585,
     "hash": "5a5b12d6654caaa88758d4693a4f1e91"
@@ -964,8 +996,8 @@
     "hash": "bab676026fa95ffbe8b10226fd49eade"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\Ledger.tsx": {
-    "mtime": 1784260454.1371272,
-    "hash": "dd7f41cc45fe53758722dc9aa7142c3c"
+    "mtime": 1784261880.726894,
+    "hash": "c050ea3bafb55a212d8700ce378c4e2a"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\LegalLayout.tsx": {
     "mtime": 1781764084.8336263,
@@ -1092,8 +1124,8 @@
     "hash": "1bbcc2c3137bfcec85afd1ddb710c805"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\StakeholderDetail.tsx": {
-    "mtime": 1784050451.2486084,
-    "hash": "092b5dce895a3f536f2f75eab35ccff7"
+    "mtime": 1784276287.9872787,
+    "hash": "cb3301d6d24f419e960382c839b2bda0"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\Stakeholders.tsx": {
     "mtime": 1780023473.0293374,
@@ -1232,16 +1264,16 @@
     "hash": "d7f57b58c1b1a323d8271e26c7ac7e32"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\_links.ts": {
-    "mtime": 1784260440.8393621,
-    "hash": "287ceee9d0fb7ebc9663b2d4a81bc5dc"
+    "mtime": 1784261896.5827725,
+    "hash": "2849e5ece558c4241628e7939b56ea82"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\_match.ts": {
-    "mtime": 1783423975.630378,
-    "hash": "1d98bc07839d23a1abc426a554562945"
+    "mtime": 1784263551.228178,
+    "hash": "36d678870e65c9ae5290c164acad6553"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\_messages.ts": {
-    "mtime": 1784261007.9285493,
-    "hash": "48d851c3b5edab6566615cf8a6d96851"
+    "mtime": 1784277294.864781,
+    "hash": "cd3db30412cbc3c3b28b2833124c2adf"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\_normalize.ts": {
     "mtime": 1784016232.9299858,
@@ -1264,8 +1296,8 @@
     "hash": "3307ac15f9ced5a7fac9ce4e505f1936"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\_router.ts": {
-    "mtime": 1784257130.648707,
-    "hash": "bc88ea6e0dcb81399559be27f1d9f55a"
+    "mtime": 1784262311.0450945,
+    "hash": "6189902a6ae6c1be4b8585d9888d941d"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\_session.ts": {
     "mtime": 1778669407.6396632,
@@ -1376,16 +1408,16 @@
     "hash": "58f91f4ed09b177922f10c371205fdbe"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\_agents\\concierge.ts": {
-    "mtime": 1783787923.9976344,
-    "hash": "a37be2da619e0217d3dd5b9861990c2f"
+    "mtime": 1784262318.3783948,
+    "hash": "b8001b581d1928679100e5eb4820b4f8"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\_agents\\procurement.ts": {
     "mtime": 1782360439.182779,
     "hash": "69dac265b02d2764e8650c5b8a8c5e0a"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\_agents\\reporting.ts": {
-    "mtime": 1784261075.2226079,
-    "hash": "2f66c1d780ae8b2a67694afcc1da502b"
+    "mtime": 1784277304.5238545,
+    "hash": "5bbd9c832f403415a14298401cde1fe7"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\_agents\\siteops.ts": {
     "mtime": 1784253953.5585268,
@@ -1408,8 +1440,8 @@
     "hash": "c9e51730e9958546dbccf4d18b960db2"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\__tests__\\all.test.ts": {
-    "mtime": 1784258119.6842904,
-    "hash": "4bbc38e05c8cb738e074cbaade89f2fe"
+    "mtime": 1784275488.079098,
+    "hash": "a65d0d52601d33cd3baf074e0c76d235"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\__tests__\\ask_list_ui.test.ts": {
     "mtime": 1784252714.7207391,
@@ -1479,6 +1511,10 @@
     "mtime": 1783414686.221227,
     "hash": "0722e1a07023e3fc9bb08602fa4ec0b4"
   },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\__tests__\\concierge_invents_nothing.test.ts": {
+    "mtime": 1784262333.623268,
+    "hash": "7307e7e56f195c562b1edecfd1632264"
+  },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\__tests__\\confirmation.test.ts": {
     "mtime": 1784124285.9517913,
     "hash": "07c3c43c88139b2f3af202a1c810761b"
@@ -1516,8 +1552,8 @@
     "hash": "d00bddbedb107464097cbd20e35d4e67"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\__tests__\\fake_supabase.ts": {
-    "mtime": 1784261087.7953932,
-    "hash": "5ef7ac6b50145e72b62d9318615cb767"
+    "mtime": 1784275403.5464911,
+    "hash": "f06c17bb821d26d2c94ec86579279906"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\__tests__\\floor_unit_disambiguation.test.ts": {
     "mtime": 1783767816.0140464,
@@ -1639,6 +1675,14 @@
     "mtime": 1783760191.8251836,
     "hash": "16f79220a20143f534abf1e564bcfb31"
   },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\__tests__\\party_account.test.ts": {
+    "mtime": 1784277333.4879327,
+    "hash": "dd016118980c5afcaf616aeee29b3c82"
+  },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\__tests__\\payee_pick_floor.test.ts": {
+    "mtime": 1784263531.1202755,
+    "hash": "bbb3f5344a9c51f6b12bcf69cd2fa63c"
+  },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\__tests__\\pending_credibility.test.ts": {
     "mtime": 1784016232.908425,
     "hash": "e97cd328d695815ee32fb371d03963aa"
@@ -1708,8 +1752,8 @@
     "hash": "fa8536f289598d48a07ba3c437d50d6f"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\__tests__\\reporting_payment.test.ts": {
-    "mtime": 1784261114.0149777,
-    "hash": "03afab374c4200e1bb86e4399e466147"
+    "mtime": 1784275527.7088563,
+    "hash": "cfa485e395ffd371242ed7b07f93c3f6"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\__tests__\\reporting_route.test.ts": {
     "mtime": 1784259975.7966375,
@@ -1734,6 +1778,10 @@
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\__tests__\\router_referent.test.ts": {
     "mtime": 1783736782.9466743,
     "hash": "7def65dcc19f4e091df386b1c10e5810"
+  },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\__tests__\\router_slot_confusion.test.ts": {
+    "mtime": 1784262225.5520394,
+    "hash": "3b323f328486a0f1a85fa9e95ba20e89"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\functions\\whatsapp-webhook\\__tests__\\run-tests.mjs": {
     "mtime": 1784016232.916023,
@@ -2486,6 +2534,10 @@
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\migrations\\20260716000000_generate_task_no_self_heal.sql": {
     "mtime": 1784212054.5203552,
     "hash": "638f2b60ec307a0ba94cb5e422dbec39"
+  },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\migrations\\20260717000000_party_orders_view.sql": {
+    "mtime": 1784275270.1811173,
+    "hash": "860156bb90d1cb7aa25b5300f6722375"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\diff.txt": {
     "mtime": 1779510146.5580544,

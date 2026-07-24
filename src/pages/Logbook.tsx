@@ -448,6 +448,10 @@ export default function Logbook({ session }: { session: Session }) {
           onClose={() => setEditor(null)}
           onUpdated={(updated) => {
             qc.invalidateQueries({ queryKey: ['ledger'] });
+            // Refresh the lists the CARD resolves against, so a site/payee just picked in the editor
+            // can't fail to resolve on the card because this page's copy of the list lagged the edit.
+            qc.invalidateQueries({ queryKey: ['daybook_projects'] });
+            qc.invalidateQueries({ queryKey: ['daybook_stakeholders'] });
             // Filed from the editor → hand the CARD its own exit: the tick, the slide, the receipt,
             // exactly as if he had approved it on the card. Two ways in, one way out.
             //

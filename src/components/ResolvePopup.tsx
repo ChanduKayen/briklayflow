@@ -1132,7 +1132,11 @@ function PopupContents({
               there is never a form and a search box on screen at once arguing about which one you meant. */}
           {payeeState === 'C' && (showCreateStkForm ? (
             <NewPartyRow
-              defaultName={ai.payee_raw || payeeSearch}
+              // Seed with what the owner actually TYPED (payeeSearch), falling back to the
+              // WhatsApp-heard name only when he typed nothing. The old order (ai.payee_raw
+              // first) meant an edited name was discarded — the "Create '<typedName>'" button
+              // promised his correction, then the form opened with the WhatsApp name instead.
+              defaultName={payeeSearch.trim() || ai.payee_raw || ''}
               onCreated={(id, name) => {
                 selectPayee(id, name);
                 setShowCreateStkForm(false);

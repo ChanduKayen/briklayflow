@@ -24,6 +24,7 @@ import { useOrgId } from '../../lib/auth/AuthProvider';
 import { N, V, WA, font, serif, nums, terraGrad, T } from './tokens';
 import { WhatsAppGlyph } from './atoms';
 import { StartOnWhatsAppButton } from './StartOnWhatsApp';
+import { emailInviteLink } from '../../lib/team/invites';
 
 interface WaContact {
   id: string;
@@ -372,7 +373,7 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [role, setRole] = useState<string>(INVITE_ROLES[0].value);
-  const [result, setResult] = useState<{ link?: string; phone: string; mode: 'email' | 'wa'; name: string } | null>(null);
+  const [result, setResult] = useState<{ link?: string; phone: string; mode: 'email' | 'wa'; name: string; welcomeError?: string; emailError?: string } | null>(null);
   const [copied, setCopied] = useState(false);
 
   const emailProvided = email.trim().length > 0;
@@ -401,9 +402,9 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
   // fires once per row — gated on the durable `welcomed_at` marker, NOT on whether
   // we just inserted — so an invited/legacy teammate (whose row already exists) is
   // greeted on their first enable, and re-enabling never re-sends.
-  const sendWelcome = async (m: OrgMember, ph: string) => {
+  const sendWelcome = async (name: string, ph: string) => {
     const to = ph.length === 10 ? `91${ph}` : ph;
-    const first = (m.name || '').trim().split(/\s+/)[0] || m.name || 'there';
+    const first = (name || '').trim().split(/\s+/)[0] || name || 'there';
     const { data, error } = await supabase.functions.invoke('send-template', {
       body: { templateKey: 'teammate_welcome', to, params: { name: first } },
     });
@@ -458,7 +459,7 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
     // so a later retry still greets them.
     let didWelcome = false;
     if (!alreadyWelcomed) {
-      await sendWelcome(m, ph);
+      await sendWelcome(m.name, ph);
       if (rowId) {
         await supabase.from('wa_registered_numbers')
           .update({ welcomed_at: new Date().toISOString() }).eq('id', rowId);
@@ -512,6 +513,18 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
       if (!phoneOk) throw new Error('Enter their WhatsApp number');
       const nm = name.trim();
 
+      // Send the approved welcome template, then stamp welcomed_at so it never
+      // re-sends. Returns an error message on failure (non-fatal — the invite still
+      // stands) rather than silently swallowing it, so a failed send stays visible.
+      const tryWelcome = async (): Promise<string | undefined> => {
+        try {
+          await sendWelcome(nm || 'there', digits(phone));
+          await supabase.from('wa_registered_numbers')
+            .update({ welcomed_at: new Date().toISOString() }).eq('phone_number', intlPhone(phone));
+          return undefined;
+        } catch (e: any) { return e?.message || 'Could not send the WhatsApp welcome'; }
+      };
+
       if (emailProvided) {
         if (!emailOk) throw new Error('Enter a valid email address');
         const { data: u } = await supabase.auth.getUser();
@@ -528,18 +541,29 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
         const { error: waErr } = await supabase.from('wa_registered_numbers')
           .insert({ name: nm || email.trim(), phone_number: intlPhone(phone), role: roleLabel(role), is_active: true });
         if (waErr && !/duplicate|unique/i.test(waErr.message)) throw waErr;
-        return { link: inviteLinkFor(row.token), phone: digits(phone), mode: 'email' as const, name: nm };
+        // Email the join link so it reaches the invitee (best-effort — the invite row
+        // already exists; a failed email is surfaced, and the copyable link remains).
+        const emailError = await emailInviteLink({ to: email.trim().toLowerCase(), link: inviteLinkFor(row.token), role });
+        const welcomeError = await tryWelcome();
+        return { link: inviteLinkFor(row.token), phone: digits(phone), mode: 'email' as const, name: nm, welcomeError, emailError };
       }
 
-      // WhatsApp-only: pre-register the number as 'invited' (inactive). The inbound
-      // webhook flips it active + welcomes them on their first message.
+      // WhatsApp-only: pre-register the number as 'invited' (inactive), then proactively
+      // welcome them via the approved template so they know they can start. They still
+      // self-activate the moment they reply / first message Briklay.
       const { error } = await supabase.rpc('wa_invite_number', {
         p_phone: intlPhone(phone), p_name: nm || null, p_role: roleLabel(role),
       });
       if (error) throw error;
-      return { phone: digits(phone), mode: 'wa' as const, name: nm };
+      const welcomeError = await tryWelcome();
+      return { phone: digits(phone), mode: 'wa' as const, name: nm, welcomeError };
     },
-    onSuccess: (r) => { setResult(r); refresh(); },
+    onSuccess: (r) => {
+      setResult(r);
+      refresh();
+      if (r.emailError) show(`Invite saved, but the email didn't send — ${r.emailError}`, { type: 'error' });
+      if (r.welcomeError) show(`Invite saved, but the WhatsApp welcome didn't send — ${r.welcomeError}`, { type: 'error' });
+    },
     onError: (e: any) => show(e.message || 'Could not send the invite', { type: 'error' }),
   });
 
@@ -644,7 +668,9 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
                 <span className="w-5 h-5 rounded-full inline-flex items-center justify-center db-pop" style={{ background: V.sageWash }}><Check size={12} color={V.sage} strokeWidth={3} /></span>
                 Invite ready
               </p>
-              <p className="mt-1.5 leading-relaxed" style={{ color: V.sys, ...font, ...T.xs }}>Share this link so they can join. Their WhatsApp number can already send to Briklay.</p>
+              <p className="mt-1.5 leading-relaxed" style={{ color: V.sys, ...font, ...T.xs }}>
+                {result.emailError ? 'Couldn’t email the link — share it directly below.' : 'We’ve emailed the join link to them. You can also copy it below.'} Their WhatsApp number can already send to Briklay.
+              </p>
               <button onClick={() => result.link && copyLink(result.link)} className="mt-3 w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg" style={{ background: V.field, color: V.inkSoft, ...font, ...T.xs }}>
                 <span className="truncate">{result.link}</span>
                 {copied ? <Check size={14} style={{ color: V.sage, flexShrink: 0 }} /> : <Copy size={13} style={{ color: V.faint, flexShrink: 0 }} />}

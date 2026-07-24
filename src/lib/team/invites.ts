@@ -1,0 +1,29 @@
+import { supabase } from '../supabase';
+
+/**
+ * Email the org-invite join link to the invitee via the `send-invite-email` edge
+ * function (Resend). Best-effort by contract: returns an error message string on
+ * failure (so the caller can surface a warning) and `undefined` on success. Never
+ * throws — a failed email must not fail the invite, which already exists in the DB.
+ */
+export async function emailInviteLink(args: {
+  to: string;
+  link: string;
+  orgName?: string;
+  inviterName?: string;
+  role?: string;
+}): Promise<string | undefined> {
+  const { data, error } = await supabase.functions.invoke('send-invite-email', { body: args });
+  if (error) {
+    // Prefer the function's JSON error body (Resend/config message) over the generic one.
+    let msg = error.message;
+    try {
+      const ctx = (error as any).context;
+      const parsed = ctx && typeof ctx.json === 'function' ? await ctx.json() : null;
+      if (parsed?.error) msg = parsed.error;
+    } catch { /* fall back to error.message */ }
+    return msg || 'Could not send the invite email';
+  }
+  if (data && data.ok === false) return data.error || 'Could not send the invite email';
+  return undefined;
+}
