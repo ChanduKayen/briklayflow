@@ -352,58 +352,79 @@ export default function NewWorkOrder({ session }: { session: Session }) {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    e.target.value = '';   // let the same file be re-picked after a failure
     setIsExtracting(true);
     setAiError(null);
+    // NOTE: the reader is promise-wrapped so a failure INSIDE the async work is caught here.
+    // Previously the network call lived in reader.onload (async), which the surrounding try
+    // never covered — so any server error left the button spinning "Extracting…" forever with
+    // no message. (PDFs failed exactly this way: gpt-4o vision can't read a PDF as an image.)
     try {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = async () => {
-        const base64String = (reader.result as string).split(',')[1];
-        // Server-side BOQ extraction — no OpenAI key in the browser.
-        const { data: extracted, error: efError } = await supabase.functions.invoke('sku-matcher', {
-          body: {
-            action:       'extractWorkOrderBoQ',
-            image_base64: base64String,
-            image_mime:   file.type,
-          },
-        });
-        if (efError) throw new Error(efError.message || 'BOQ extraction failed');
-        if ((extracted as any)?.error) throw new Error((extracted as any).error);
-        const data = extracted as any;
+      const base64String = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('Could not read that file — try again.'));
+        reader.onload = () => {
+          const res = (reader.result as string) || '';
+          const b64 = res.includes(',') ? res.split(',')[1] : '';
+          b64 ? resolve(b64) : reject(new Error('Could not read that file — try again.'));
+        };
+        reader.readAsDataURL(file);
+      });
 
-        // Set header fields
-        if (data.scope_of_work) setScope(data.scope_of_work);
-        if (data.order_value)   setOrderValue(data.order_value);
-        if (data.date_issued && !isNaN(Date.parse(data.date_issued))) setDateIssued(data.date_issued);
-        if (data.worker_name_fuzzy && workers) {
-          const match = workers.find(w => w.name.toLowerCase().includes((data.worker_name_fuzzy as string).toLowerCase()));
-          if (match) setStakeholderId(match.stakeholder_id);
-        }
+      // Server-side BOQ extraction — no OpenAI key in the browser. Handles photos AND PDFs.
+      const { data: extracted, error: efError } = await supabase.functions.invoke('sku-matcher', {
+        body: {
+          action:       'extractWorkOrderBoQ',
+          image_base64: base64String,
+          image_mime:   file.type,
+        },
+      });
+      if (efError) {
+        // supabase.functions.invoke gives a generic "non-2xx" message; the real reason is in
+        // the JSON body. Surface it so a failed extraction says WHY instead of nothing.
+        let msg = efError.message;
+        try {
+          const ctx = (efError as any).context;
+          const parsed = ctx && typeof ctx.json === 'function' ? await ctx.json() : null;
+          if (parsed?.error) msg = parsed.error;
+        } catch { /* keep the generic message */ }
+        throw new Error(msg || 'Could not read the document. Try a clearer photo or a PDF.');
+      }
+      if ((extracted as any)?.error) throw new Error((extracted as any).error);
+      const data = extracted as any;
 
-        // Queue stages for review instead of adding directly
-        if (Array.isArray(data.stages) && data.stages.length > 0) {
-          setPendingStages(data.stages.map((s: any) => ({
-            _id: Math.random().toString(),
-            name: s.name ?? '',
-            mode: s.mode ?? 'ambiguous',
-            unit_type: s.unit_type ?? null,
-            qty: s.qty ?? null,
-            rate: s.rate ?? null,
-            amount: Number(s.amount) || 0,
-            amount_verified: Boolean(s.amount_verified),
-            arithmetic_mismatch: Boolean(s.arithmetic_mismatch),
-            mismatch_note: s.mismatch_note ?? null,
-            confidence: s.confidence ?? 'LOW',
-            confidence_reason: s.confidence_reason ?? '',
-          })));
-        }
+      // Set header fields
+      if (data.scope_of_work) setScope(data.scope_of_work);
+      if (data.order_value)   setOrderValue(data.order_value);
+      if (data.date_issued && !isNaN(Date.parse(data.date_issued))) setDateIssued(data.date_issued);
+      if (data.worker_name_fuzzy && workers) {
+        const match = workers.find(w => w.name.toLowerCase().includes((data.worker_name_fuzzy as string).toLowerCase()));
+        if (match) setStakeholderId(match.stakeholder_id);
+      }
 
-        setSource('uploaded_doc');
-        setIsAiExtracted(true);
-        setIsExtracting(false);
-      };
+      // Queue stages for review instead of adding directly
+      if (Array.isArray(data.stages) && data.stages.length > 0) {
+        setPendingStages(data.stages.map((s: any) => ({
+          _id: Math.random().toString(),
+          name: s.name ?? '',
+          mode: s.mode ?? 'ambiguous',
+          unit_type: s.unit_type ?? null,
+          qty: s.qty ?? null,
+          rate: s.rate ?? null,
+          amount: Number(s.amount) || 0,
+          amount_verified: Boolean(s.amount_verified),
+          arithmetic_mismatch: Boolean(s.arithmetic_mismatch),
+          mismatch_note: s.mismatch_note ?? null,
+          confidence: s.confidence ?? 'LOW',
+          confidence_reason: s.confidence_reason ?? '',
+        })));
+      }
+
+      setSource('uploaded_doc');
+      setIsAiExtracted(true);
     } catch (err: any) {
       setAiError(err.message || 'Failed to extract data.');
+    } finally {
       setIsExtracting(false);
     }
   };

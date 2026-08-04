@@ -1442,18 +1442,28 @@ Return ONLY this JSON object, no other text:
     }
   ]
 }`
-      const userContent: OpenAI.ChatCompletionContentPart[] = []
+      // A contract can arrive as a PHOTO or a PDF. GPT-4o's vision `image_url` cannot read a
+      // PDF — it must go in as a `file` content part (file_data), which gpt-4o parses natively.
+      // `any[]` because the `file` part isn't in the pinned openai@4 esm.sh types yet.
+      const mime = body.image_mime || ''
+      const isPdf = /pdf/i.test(mime) || (!!body.image_url && /\.pdf($|\?)/i.test(body.image_url))
+      const userContent: any[] = []
       if (body.image_base64) {
-        const mime = body.image_mime || 'image/jpeg'
-        userContent.push({
-          type: 'image_url',
-          image_url: { url: `data:${mime};base64,${body.image_base64}`, detail: 'high' },
-        })
+        if (isPdf) {
+          userContent.push({
+            type: 'file',
+            file: { filename: 'contract.pdf', file_data: `data:application/pdf;base64,${body.image_base64}` },
+          })
+        } else {
+          userContent.push({
+            type: 'image_url',
+            image_url: { url: `data:${mime || 'image/jpeg'};base64,${body.image_base64}`, detail: 'high' },
+          })
+        }
       } else if (body.image_url) {
-        userContent.push({
-          type: 'image_url',
-          image_url: { url: body.image_url, detail: 'high' },
-        })
+        userContent.push(isPdf
+          ? { type: 'file', file: { filename: 'contract.pdf', file_url: body.image_url } }
+          : { type: 'image_url', image_url: { url: body.image_url, detail: 'high' } })
       }
       userContent.push({ type: 'text', text: 'Extract all details from this construction document.' })
 
