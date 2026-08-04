@@ -634,7 +634,7 @@ const CSS = `
 
 .pt .scrim{position:fixed;inset:0;background:rgba(51,42,32,.32);opacity:0;pointer-events:none;transition:opacity .25s;z-index:40}
 .pt .scrim.open{opacity:1;pointer-events:auto}
-.pt .drawer{position:fixed;top:0;right:0;bottom:0;width:min(460px,100%);z-index:50;background:var(--cream);border-left:1px solid var(--line);transform:translateX(103%);transition:transform .3s cubic-bezier(.32,.72,.24,1);display:flex;flex-direction:column;box-shadow:-24px 0 60px rgba(51,42,32,.12)}
+.pt .drawer{position:fixed;top:0;right:0;bottom:0;width:min(600px,100%);z-index:50;background:var(--cream);border-left:1px solid var(--line);transform:translateX(103%);transition:transform .3s cubic-bezier(.32,.72,.24,1);display:flex;flex-direction:column;box-shadow:-24px 0 60px rgba(51,42,32,.12)}
 .pt .drawer.open{transform:translateX(0)}
 .pt .d-head{padding:26px 28px 20px;border-bottom:1px solid var(--line)}
 .pt .d-eyebrow{font-family:'DM Mono',monospace;font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-faint);display:flex;justify-content:space-between;align-items:center}
