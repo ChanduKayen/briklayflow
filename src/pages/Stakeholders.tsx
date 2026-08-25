@@ -405,6 +405,10 @@ export default function Stakeholders({ session }: { session: Session }) {
 
       {/* ── drawer ── */}
       <div className={`scrim ${drawerOpen ? 'open' : ''}`} onClick={closeDrawer} />
+      {/* host clips the off-canvas drawer so a closed (translated-off-screen) panel can't
+          add horizontal page scroll — a fixed element parked past the right edge otherwise
+          widens the scroll area. The drawer is absolute WITHIN this overflow-hidden host. */}
+      <div className="drawer-host">
       <aside className={`drawer ${drawerOpen ? 'open' : ''}`} aria-label="Edit party">
         <div className="d-head">
           <div className="d-eyebrow">
@@ -536,6 +540,7 @@ export default function Stakeholders({ session }: { session: Session }) {
           </div>
         )}
       </aside>
+      </div>
 
       {/* toast */}
       <div className={`toast ${toastMsg ? 'show' : ''}`}>{toastMsg}</div>
@@ -634,7 +639,8 @@ const CSS = `
 
 .pt .scrim{position:fixed;inset:0;background:rgba(51,42,32,.32);opacity:0;pointer-events:none;transition:opacity .25s;z-index:40}
 .pt .scrim.open{opacity:1;pointer-events:auto}
-.pt .drawer{position:fixed;top:0;right:0;bottom:0;width:min(600px,100%);z-index:50;background:var(--cream);border-left:1px solid var(--line);transform:translateX(103%);transition:transform .3s cubic-bezier(.32,.72,.24,1);display:flex;flex-direction:column;box-shadow:-24px 0 60px rgba(51,42,32,.12)}
+.pt .drawer-host{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:50}
+.pt .drawer{position:absolute;top:0;right:0;bottom:0;width:min(600px,100%);pointer-events:auto;background:var(--cream);border-left:1px solid var(--line);transform:translateX(100%);transition:transform .3s cubic-bezier(.32,.72,.24,1);display:flex;flex-direction:column;box-shadow:-24px 0 60px rgba(51,42,32,.12)}
 .pt .drawer.open{transform:translateX(0)}
 .pt .d-head{padding:26px 28px 20px;border-bottom:1px solid var(--line)}
 .pt .d-eyebrow{font-family:'DM Mono',monospace;font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-faint);display:flex;justify-content:space-between;align-items:center}
