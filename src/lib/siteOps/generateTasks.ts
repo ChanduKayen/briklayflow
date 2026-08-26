@@ -12,7 +12,7 @@
 // fs in scripts) — this module never reaches for a file.
 
 import { expand, type Sequence, type Stack, type GeneratedTask } from './expander'
-import { withTaskNoRetry } from './taskInsert'
+import { insertSiteTasks } from './taskInsert'
 
 export interface ProjectRow {
   project_id: string
@@ -117,7 +117,7 @@ export async function generateSiteTasks(
     if (error) throw new Error(`delete generated rows: ${error.message}`)
   }
   if (plan.toInsert.length) {
-    const { error } = await withTaskNoRetry(() => supabase.from('site_tasks').insert(plan.toInsert))
+    const { error } = await insertSiteTasks(supabase, plan.toInsert)
     if (error) throw new Error(`insert tasks: ${(error as { message?: string })?.message ?? error}`)
   }
 

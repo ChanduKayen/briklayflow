@@ -19,7 +19,7 @@
 import type { ConcreteGraph, NodeId, TaskNode, Library } from './types'
 import { buildAdjacency } from './instantiate'
 import { isHardNature, LIBRARY } from './library'
-import { withTaskNoRetry } from '../taskInsert'
+import { insertSiteTasks } from '../taskInsert'
 
 // ── row shapes ───────────────────────────────────────────────────────────────
 /** The subset of an existing site_tasks row reconciliation cares about. */
@@ -230,7 +230,7 @@ export async function persistGraph(
     if (error) throw new Error(`delete obsolete authored rows: ${error.message}`)
   }
   if (plan.toInsert.length) {
-    const { error } = await withTaskNoRetry(() => supabase.from('site_tasks').insert(plan.toInsert))
+    const { error } = await insertSiteTasks(supabase, plan.toInsert)
     if (error) throw new Error(`insert tasks: ${(error as { message?: string })?.message ?? error}`)
   }
   // seq updates one-by-one (small N; keeps each update RLS-checked and auditable)
