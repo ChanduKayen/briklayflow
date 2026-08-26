@@ -1002,14 +1002,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
             )}
             <div>
             {(() => {
-                let cumPlanned = 0;
-                let cumPaid = 0;
                 return milestones.map((m: any, idx: number) => {
-                  cumPlanned += Number(m.planned_amount) || 0;
-                  cumPaid += milestonePayments[m.milestone_id] || 0;
-                  const thisCumPlanned = cumPlanned;
-                  const thisCumPaid = cumPaid;
-
                   const planned = Number(m.planned_amount) || 0;
                   const paid = milestonePayments[m.milestone_id] || 0;
                   const remaining = Math.max(0, planned - paid);
@@ -1097,29 +1090,29 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                             </p>
                           ) : null}
 
-                          {/* Phase financials */}
-                          <div className="flex items-center gap-2 mt-1 flex-wrap">
-                            <span className="text-[12px] text-on-surface-variant">
-                              Phase{' '}
-                              {isOverpaid ? (
-                                <>
-                                  <span className="font-data-mono text-on-surface-variant/50 line-through">₹{planned.toLocaleString('en-IN')}</span>
-                                  {' '}
-                                  <span className="font-data-mono text-red-600 font-semibold">₹{paid.toLocaleString('en-IN')}</span>
-                                </>
-                              ) : (
-                                <span className="font-data-mono text-on-surface font-semibold">₹{planned.toLocaleString('en-IN')}</span>
-                              )}
+                          {/* Phase financials — per STAGE (not cumulative): what this stage is worth,
+                              what's been paid against THIS stage, and what's still pending for it. */}
+                          <div className="flex items-center gap-3 mt-1 flex-wrap text-[12px]">
+                            <span className="text-on-surface-variant">
+                              Agreed{' '}
+                              <span className="font-data-mono font-semibold text-on-surface">₹{planned.toLocaleString('en-IN')}</span>
                             </span>
                             <span className="text-on-surface-variant/40 text-[11px]">·</span>
-                            <span className="text-[12px] text-on-surface-variant">
-                              Cumulative{' '}
+                            <span className="text-on-surface-variant">
+                              Paid{' '}
                               <span className={`font-data-mono font-semibold ${
                                 isOverpaid ? 'text-red-600' :
-                                thisCumPaid >= thisCumPlanned && thisCumPlanned > 0 ? 'text-green-600' :
-                                thisCumPaid > 0 ? 'text-amber-700' : 'text-on-surface'
-                              }`}>₹{thisCumPaid.toLocaleString('en-IN')}</span>
-                              <span className="text-on-surface-variant"> / ₹{thisCumPlanned.toLocaleString('en-IN')}</span>
+                                paid >= planned && planned > 0 ? 'text-green-600' :
+                                paid > 0 ? 'text-amber-700' : 'text-on-surface'
+                              }`}>₹{paid.toLocaleString('en-IN')}</span>
+                            </span>
+                            <span className="text-on-surface-variant/40 text-[11px]">·</span>
+                            <span className="text-on-surface-variant">
+                              {isOverpaid ? (
+                                <>Overpaid{' '}<span className="font-data-mono font-semibold text-red-600">₹{overpay.toLocaleString('en-IN')}</span></>
+                              ) : (
+                                <>Pending{' '}<span className={`font-data-mono font-semibold ${remaining === 0 && planned > 0 ? 'text-green-600' : 'text-on-surface'}`}>₹{remaining.toLocaleString('en-IN')}</span></>
+                              )}
                             </span>
                           </div>
 
