@@ -776,6 +776,9 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
 
   // ── Filtering (per transaction; project filter matches any allocation) ───────
   const passesBase = (txn: LedgerRow): boolean => {
+    // A voided transaction is a closed record — it must never count toward the entry count, the
+    // in/out/net totals, or the visible ledger. It stays queryable on its own detail page.
+    if (txn.status === 'Voided') return false;
     const term = searchTerm.toLowerCase();
     const matchesSearch = !term || txn.txn_id.toLowerCase().includes(term) || txn.stakeholders?.name?.toLowerCase().includes(term) || txn.category?.toLowerCase().includes(term) || (txn.remarks || '').toLowerCase().includes(term);
     const matchesFlagged = filterFlagged ? txn.ai_flag_status === 'Flagged' : true;
