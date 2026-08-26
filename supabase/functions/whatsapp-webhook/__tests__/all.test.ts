@@ -89,6 +89,7 @@ import './one_road.test';
 import './confirmation.test';
 import './money_card.test';
 import './money_single.test';
+import './project_grounding.test';
 import { runAll } from './harness';
 
 await runAll();

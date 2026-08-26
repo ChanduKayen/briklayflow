@@ -119,7 +119,7 @@ THE SITE — this is YOUR job, and you answer in IDS. PROJECTS below lists the o
 People almost never say the full name. They use a short form, the person a site is named after, or a landmark — usually in Telugu or Hindi, sometimes in Telugu script. Match by MEANING, exactly as you would for a person:
   "asm" / "asm elite ki" / "ఏఎస్ఎం ఎలైట్"     -> the project listed as "ASM Elite"
   "pride" / "pride site" / "ప్రైడ్"            -> "The Pride"
-  "shyam gaari site" / "shyam gari inti pani"  -> "Dr Shyam's Residence"
+  "<person> gaari site" / "<person> gari inti pani"  -> the project listed as that person's (by its listed name)
 Set the fields like this:
 - site_named = what HE called the site, copied as he wrote it (this is only so we can say "I don't have a site called X"). null if he named NO site — that means "everywhere", and is the normal case.
 - site_id = the "id" of the ONE project he means, copied exactly from PROJECTS. This is the answer whenever you can tell.

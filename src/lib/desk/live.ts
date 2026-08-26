@@ -19,6 +19,7 @@ import { checkMove, planRename } from './edit'
 import { withNewTask, type NewTask } from './add'
 import { gatesByTask } from './gates'
 import { notifyAssignment } from '../siteOps/followup'
+import { withTaskNoRetry } from '../siteOps/taskInsert'
 import { GEOMETRY_COLUMNS, type ProjectRow as EngineProjectRow } from '../siteOps/engine'
 import type { DeskPending, DeskPlan, DeskProblem, DeskSite, DeskTask, Outcome, QcStatus } from './types'
 import {
@@ -864,9 +865,9 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
         .reduce((m, t) => Math.max(m, t.seq_no ?? 0), 0)) + 1,
     }
 
-    const { data: created, error } = await supabase.from('site_tasks')
-      .insert(insert).select('task_id, ref').single()
-    if (error) throw new Error(`Could not add the task: ${error.message}`)
+    const { data: created, error } = await withTaskNoRetry(() => supabase.from('site_tasks')
+      .insert(insert).select('task_id, ref').single())
+    if (error) throw new Error(`Could not add the task: ${(error as { message?: string })?.message ?? error}`)
 
     // WHERE THE JOB HAPPENS — with the work it is part of, not at the bottom of the site (add.ts).
     const newRef = (created as { ref: string | null }).ref

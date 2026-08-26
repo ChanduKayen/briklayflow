@@ -74,6 +74,12 @@ interface SKUMatcherRequest {
   // suggestCostCode inputs
   remark?:          string
   cost_codes?:      { code: string; name: string }[]
+  // classifyStakeholderTrade inputs — the Transactions importer. `parties` are the NEW names it
+  // could not match, each with the notes across its rows; `trade_vocab` is the client's trades.ts
+  // taxonomy (single source of truth), so the model is confined to real trades. The CLIENT snaps
+  // the raw answer back onto the vocab (importClassify.ts) — this action only proposes.
+  parties?:         { name: string; notes: string[] }[]
+  trade_vocab?:     { Worker: string[]; Vendor: string[]; Client: string[] }
   // generateStructuredSkuWithContext: when true the DB re-search skips trgm
   // and only consults the alias index. Set by the frontend after the user
   // rejects fuzzy suggestions via "Not what you need? Search web".
@@ -1503,6 +1509,41 @@ Return ONLY this JSON object, no other text:
       })
       const code = (completion.choices[0].message.content || 'NONE').trim().replace(/["'.]/g, '').toUpperCase()
       return new Response(JSON.stringify({ code }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
+
+    if (body.action === 'classifyStakeholderTrade') {
+      // Infer a type (Worker/Vendor/Client) + trade for each NEW party in a bulk import, reading the
+      // notes across all of that party's rows. The client passes the trade_vocab (its trades.ts) and
+      // SNAPS the answer back onto it (importClassify.ts) — so a hallucinated trade cannot survive.
+      // We only PROPOSE here; the model is asked to pick from the given lists, best-effort.
+      const parties = Array.isArray(body.parties) ? body.parties : []
+      const vocab   = body.trade_vocab
+      if (!parties.length || !vocab) {
+        return new Response(JSON.stringify({ results: [] }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      }
+      const vocabText = (['Worker', 'Vendor', 'Client'] as const)
+        .map((t) => `${t}: ${(vocab[t] || []).join(', ')}`).join('\n')
+      const partiesText = parties.map((p, i) =>
+        `${i + 1}. "${p.name}" — notes: ${(p.notes || []).slice(0, 15).join(' | ') || '(none)'}`).join('\n')
+
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini', temperature: 0,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content:
+            'You classify parties in an Indian construction ledger. For each party, using its name and ' +
+            'the notes describing what money was paid for, choose the single best TYPE (Worker, Vendor, or ' +
+            'Client) and the single best TRADE from ONLY the lists provided for that type. If nothing fits, ' +
+            'use the type\'s "Other (specify)". Return STRICT JSON: {"results":[{"name":<verbatim>,"type":..,"trade":..}]}. ' +
+            'Never invent a trade that is not in the lists.' },
+          { role: 'user', content: `Trades by type:\n${vocabText}\n\nParties:\n${partiesText}` },
+        ],
+      })
+      let results: unknown = []
+      try { results = JSON.parse(completion.choices[0].message.content || '{}').results ?? [] } catch { results = [] }
+      return new Response(JSON.stringify({ results }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 

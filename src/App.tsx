@@ -56,6 +56,7 @@ const NewPurchaseOrder = lazy(() => import('./pages/NewPurchaseOrder'));
 const PurchaseOrderDetail = lazy(() => import('./pages/PurchaseOrderDetail'));
 const Ledger = lazy(() => import('./pages/Ledger'));
 const NewTransaction = lazy(() => import('./pages/NewTransaction'));
+const ImportTransactions = lazy(() => import('./pages/ImportTransactions'));
 const Insights = lazy(() => import('./pages/Insights'));
 const Settings = lazy(() => import('./pages/Settings'));
 const FollowUpRules = lazy(() => import('./pages/FollowUpRules'));
@@ -524,6 +525,7 @@ function App() {
           <Route path="/tasks" element={<Navigate to="/desk/all/plan" replace />} />
           <Route path="/ledger" element={<Ledger session={session} />} />
           <Route path="/ledger/new" element={<NewTransaction session={session} />} />
+          <Route path="/ledger/import" element={<ImportTransactions session={session} />} />
           <Route path="/ledger/:txnId" element={<TransactionDetail session={session} />} />
           <Route path="/invoices" element={<Invoices />} />
           <Route path="/invoices/new" element={<NewInvoice session={session} />} />
@@ -642,6 +644,7 @@ function getMobileTitle(pathname: string): string {
     '/site-desk':           'Site Desk',
     '/ledger':              'Transactions',
     '/ledger/new':          'New Transaction',
+    '/ledger/import':       'Import Transactions',
     '/projects':            'Projects',
     '/work-orders':         'Contracts',
     '/work-orders/new':     'New Contract',

@@ -19,7 +19,7 @@ import {
   extractTransactions, extractTransactionsFromImage, type TxnExtract,
 } from '../_extract.ts'
 import { parseSpokenAmount } from '../_amount.ts'
-import { matchPayee, matchProject, type Match } from '../_match.ts'
+import { matchPayee, matchProject, distinctiveTokens, type Match } from '../_match.ts'
 import { send, renderToWhatsApp, type OutMessage } from '../_format.ts'
 import { closeConversation, abandonConversation, type ConvoRow } from '../_conversation.ts'
 import { toLatinName } from '../_translit.ts'
@@ -171,16 +171,37 @@ type Plan = {
   payeeMissing: boolean
 }
 
+// Honorifics that commonly prefix a project's name. Too generic to prove a project was
+// really mentioned -- "Dr site" shares "dr" with any "Dr <name>" project -- so they never
+// count toward grounding on their own.
+const GENERIC_PROJECT_TOKENS = new Set(['dr', 'mr', 'mrs', 'ms', 'sri', 'smt', 'md', 'sir'])
+
+/** Guard against the extractor INVENTING a project name -- its few-shot examples leaking onto a
+ *  vague input (the live "…Dr site…" -> "Dr Shyam's Residence" bug). A non-auto project is trusted
+ *  only when GROUNDED: at least one of its distinctive, non-generic words actually appears in the
+ *  source message. "Dr Shyam's Residence" shares only the generic "dr" with the message -> ungrounded
+ *  -> dropped, so no invented name reaches the Day Book. A real project the message clearly names
+ *  auto-matches earlier and never reaches this check. A mention with nothing distinctive to verify
+ *  (only a title/filler, e.g. "Dr site") is left alone -- we drop only demonstrable fabrications. */
+function projectGroundedInMessage(project: string | null, text: string): boolean {
+  if (!project) return false
+  const sig = distinctiveTokens(project).filter((t) => t.length >= 3 && !GENERIC_PROJECT_TOKENS.has(t))
+  if (!sig.length) return true
+  const msg = new Set(distinctiveTokens(text))
+  return sig.some((t) => msg.has(t))
+}
+
 /**
  * Silent, conservative matching. Auto-link ONLY at near-exact (the matcher's 'auto'
  * band). Below that we TAKE EXACTLY WHAT'S WRITTEN -- never substitute ("ramu" never
  * becomes "Raju" in chat) -- and stash the nearest candidate for the Day Book.
  */
-function buildPlan(
+export function buildPlan(
   ext: TxnExtract,
   stakeholders: { stakeholder_id: string; name: string }[],
   projects: { project_id: string; name: string }[],
   from: string,
+  text: string,
 ): Plan {
   const payeeM = matchPayee(ext.payee, stakeholders)
   const payeeAuto = payeeM.band === 'auto'
@@ -190,12 +211,16 @@ function buildPlan(
 
   let projectId: string | null = null, projectName: string | null = null
   let projectSug: { id: string; name: string; score: number } | null = null
+  const projGrounded = projectGroundedInMessage(ext.project, text)
   if (ext.project) {
     const pm = matchProject(ext.project, projects)
     if (pm.band === 'auto') { projectId = pm.id; projectName = pm.name }
-    else projectSug = suggestionFrom(pm)
+    else if (projGrounded) projectSug = suggestionFrom(pm)   // ungrounded -> don't even suggest
   }
-  const projectRaw = ext.project && !projectId ? ext.project : null
+  // Trust a project only if it auto-matched a REAL one, or its words are grounded in the message.
+  // An ungrounded, unmatched name is a model fabrication (few-shot leak) -> it never surfaces.
+  const safeProject = (projectId != null || projGrounded) ? ext.project : null
+  const projectRaw = safeProject && !projectId ? safeProject : null
 
   const ai = {
     payee_raw: ext.payee, payee_name: payeeDisplay, payee_id: payeeId,
@@ -205,15 +230,15 @@ function buildPlan(
     amount: ext.amount, amount_confidence: ext.amount_confidence ?? null,
     amount_source_phrase: ext.amount_source_phrase ?? null,
     mode: ext.mode, direction: ext.direction, description_raw: ext.note,
-    project_id: projectId, project_name: projectName, project_raw: ext.project ?? null,
-    project_matched: !!projectId, project_unmatched: !!ext.project && !projectId,
+    project_id: projectId, project_name: projectName, project_raw: safeProject ?? null,
+    project_matched: !!projectId, project_unmatched: !!safeProject && !projectId,
     suggested_project: projectSug,
     source_agent: 'transaction-v3', sender_number: from,
   }
   const slots = {
     amount: ext.amount, amount_confidence: ext.amount_confidence, amount_source_phrase: ext.amount_source_phrase,
     payee: payeeDisplay, raw: ext.payee,
-    project: ext.project, mode: ext.mode, note: ext.note, direction: ext.direction,
+    project: safeProject, mode: ext.mode, note: ext.note, direction: ext.direction,
   }
   return {
     ai, slots, payeeDisplay, payeeMatched: payeeAuto, amount: ext.amount,
@@ -314,7 +339,7 @@ export async function runTransaction(
     payee: ext.payee, project: ext.project, direction: ext.direction, mode: ext.mode, note: ext.note,
   }))
 
-  const plan = buildPlan(ext, stakeholders, projects, from)
+  const plan = buildPlan(ext, stakeholders, projects, from, text)
 
   // TRACE 4/4 -- the deterministic PLAN: matched payee, gate, what gets committed.
   console.log('[trace] plan(txn)', JSON.stringify({
@@ -398,7 +423,7 @@ async function runBatch(
 ): Promise<void> {
   const outcomes: EntryOutcome[] = []
   for (let i = 0; i < entries.length; i++) {
-    const plan = buildPlan(entries[i], stakeholders, projects, ctx.from)
+    const plan = buildPlan(entries[i], stakeholders, projects, ctx.from, text)
     const project = plan.projectName ?? plan.projectRaw ?? null
     const id = await commitEntry(ctx, statusFor(plan), text, plan.ai, ctx.wamid, i)
     if (id) outcomes.push({ payee: plan.payeeDisplay, amount: plan.amount, project, committed: true, entryId: id })
@@ -421,7 +446,7 @@ export async function retryBatchEntries(ctx: TxnCtx, rows: { replay_id: string; 
       amount_source_phrase: p.amount_source_phrase ?? null, payee: p.payee ?? p.raw ?? null,
       project: p.project ?? null, direction: p.direction ?? null, mode: p.mode ?? null, note: p.note ?? null, ref: null,
     }
-    const plan = buildPlan(ext, stakeholders, projects, ctx.from)
+    const plan = buildPlan(ext, stakeholders, projects, ctx.from, (p.raw_text as string) ?? '')
     const project = plan.projectName ?? plan.projectRaw ?? null
     const keyWamid = (p.wamid as string) ?? ctx.wamid
     const idx = typeof p.entry_index === 'number' ? p.entry_index : 0

@@ -12,7 +12,7 @@
 // name, two matchers, two answers. This gate is the Day Book's half.
 
 import { suite, test, expect } from './harness'
-import { searchPayees, rankPayeeName, PAYEE_SEARCH_FLOOR } from '../payeeSearch'
+import { searchPayees, rankPayeeName, PAYEE_SEARCH_FLOOR, matchPayee } from '../payeeSearch'
 
 const ROSTER = [
   { stakeholder_id: 'S1', name: 'Srinu' },
@@ -107,5 +107,79 @@ suite('payee search — the phonetic gap is known, not hidden', () => {
   test('laxmi does NOT yet find Lakshmi (ksh→x is 3 edits, below the floor)', () => {
     expect(rankPayeeName('laxmi', 'Lakshmi') < PAYEE_SEARCH_FLOOR).toBe(true);
     expect(searchPayees([{ name: 'Lakshmi' }], 'laxmi')).toEqual([]);
+  });
+});
+
+// ── matchPayee: the banded resolver the importer reads (auto/confirm/open + doubt) ────────────────────────
+suite('matchPayee — bands for the importer', () => {
+  const ROSTER = [
+    { stakeholder_id: 'S1', name: 'Durga Prasad' },
+    { stakeholder_id: 'S2', name: 'Durga Traders' },
+    { stakeholder_id: 'S3', name: 'Balaji Hardware' },
+  ];
+
+  test('an exact name is AUTO', () => {
+    const m = matchPayee('Balaji Hardware', ROSTER);
+    expect(m.band).toBe('auto');
+    expect(m.best?.id).toBe('S3');
+  });
+
+  test('a bare first name shared by two people → confirm + doubt, both offered', () => {
+    // "Durga" first-word-matches both at 0.8 — below the 0.95 payee AUTO floor, so it must ASK, not guess.
+    const m = matchPayee('Durga', ROSTER);
+    expect(m.band).toBe('confirm');
+    expect(m.doubt).toBe(true);
+    expect([m.best?.id, ...m.alts.map((a) => a.id)].sort()).toEqual(['S1', 'S2']);
+  });
+
+  test('an unknown name → open (drop to create-new)', () => {
+    const m = matchPayee('Nagaraju Sand', ROSTER);
+    expect(m.band).toBe('open');
+    expect(m.best).toBe(null);
+  });
+});
+
+// ── matchPayee: the NATURE of the name — a trade word disambiguates two same-named people ─────────────────
+// Live ask (2026-08-26): the sheet writes "Raju supervisor"; the roster has Raju Aradadi (painter) and Raju
+// Kojjavrapu (supervisor). A blind string match ties them and guesses. The importer knows each person's
+// trade, so the role word must pick the supervisor — and never mangle a vendor whose NAME contains a
+// material word.
+suite('matchPayee — the name\'s nature (trade/role) breaks a same-name tie', () => {
+  const CREW = [
+    { stakeholder_id: 'P1', name: 'Raju Aradadi', type: 'Worker', category: 'Painter' },
+    { stakeholder_id: 'P2', name: 'Raju Kojjavrapu', type: 'Worker', category: 'Supervisor' },
+    { stakeholder_id: 'V1', name: 'B R Granites', type: 'Vendor', category: 'Granite' },
+  ];
+
+  test('"Raju supervisor" picks the supervisor Raju, not the painter', () => {
+    expect(matchPayee('Raju supervisor', CREW).best?.id).toBe('P2');
+  });
+
+  test('"Raju painter" picks the painter Raju', () => {
+    expect(matchPayee('Raju painter', CREW).best?.id).toBe('P1');
+  });
+
+  test('a local variant of the role still works ("Raju mestri" → supervisor)', () => {
+    expect(matchPayee('Raju mestri', CREW).best?.id).toBe('P2');
+  });
+
+  test('bare "Raju" (no role) stays a doubt — both offered, nothing guessed', () => {
+    const m = matchPayee('Raju', CREW);
+    expect(m.doubt).toBe(true);
+    expect([m.best?.id, ...m.alts.map((a) => a.id)].sort()).toEqual(['P1', 'P2']);
+  });
+
+  test('jumbled order matches ("Aradadi Raju" → Raju Aradadi)', () => {
+    expect(matchPayee('Aradadi Raju', CREW).best?.id).toBe('P1');
+  });
+
+  test('a material word in a VENDOR name is identity, not a role ("B R Granite" → B R Granites)', () => {
+    const m = matchPayee('B R Granite', CREW);
+    expect(m.best?.id).toBe('V1');
+    expect(m.band).toBe('auto');
+  });
+
+  test('short sheet name, fuller roster name still resolves ("Kojjavrapu" → Raju Kojjavrapu)', () => {
+    expect(matchPayee('Kojjavrapu', CREW).best?.id).toBe('P2');
   });
 });

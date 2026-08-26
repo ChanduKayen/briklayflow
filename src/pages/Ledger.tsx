@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, type ReactNode, type MouseEvent } from 'react';
+import { useState, useRef, useEffect, useMemo, lazy, Suspense, type ReactNode, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -10,7 +10,7 @@ import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
 import { getCostCode } from '../lib/costCodes';
-import { Plus, Search, Download, Paperclip, Check, ArrowRight, X, SlidersHorizontal } from 'lucide-react';
+import { Plus, Search, Download, Paperclip, Check, ArrowRight, X, SlidersHorizontal, Upload, FileSpreadsheet } from 'lucide-react';
 import BottomSheet from '../components/BottomSheet';
 import { WhatsAppGlyph } from '../components/day-book/atoms';
 import { StartOnWhatsAppButton } from '../components/day-book/StartOnWhatsApp';
@@ -23,6 +23,8 @@ import { V, font, serif, nums, terraGrad } from '../components/txn-ledger/ledger
 import { DirMedallion, Amount, AnchorChip, FilterChip, FlowBar } from '../components/txn-ledger/LedgerAtoms';
 import { TrackChip, TRACK_CHIP_CSS } from '../components/txn-ledger/TrackChip';
 import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
+// Lazy — its xlsx parser is heavy and only needed when the import modal actually opens.
+const ImportTransactions = lazy(() => import('./ImportTransactions'));
 
 const PAGE_SIZE = 25;
 const inr = (n: number) => Math.round(n).toLocaleString('en-IN');
@@ -77,6 +79,47 @@ function CreateHint({ message, children }: { message: string; children: ReactNod
             <span style={{ color: 'rgba(255,255,255,0.8)' }}>{message}</span>
           </div>
           <div style={{ position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)', width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: '5px solid rgba(11,28,48,0.88)' }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Import button: outline secondary with a tooltip + micro-interactions ----------
+   Rest → hover (lifts, turns terra, the arrow rises and gently bobs) → active (presses in). */
+const IMPORT_BTN_CSS = `
+.imp-btn{position:relative;display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:500;
+  padding:10px 16px;border-radius:12px;border:1px solid ${V.line};color:${V.ink};background:#fff;cursor:pointer;
+  transition:transform .18s cubic-bezier(.34,1.56,.64,1),box-shadow .2s ease,border-color .2s ease,background .2s ease,color .2s ease}
+.imp-btn:hover{border-color:${V.terra};color:${V.terra};background:${V.terraWash};transform:translateY(-1.5px);
+  box-shadow:0 6px 16px rgba(188,75,39,.16)}
+.imp-btn:active{transform:translateY(0) scale(.97);background:#F7E0D6;box-shadow:0 2px 6px rgba(188,75,39,.14);transition-duration:.08s}
+.imp-btn .imp-ico{display:inline-flex;transition:transform .25s cubic-bezier(.34,1.56,.64,1);will-change:transform}
+.imp-btn:hover .imp-ico{animation:imp-bob 1.1s ease-in-out .25s infinite}
+.imp-btn:active .imp-ico{animation:none;transform:translateY(-1px) scale(.88)}
+@keyframes imp-bob{0%,100%{transform:translateY(-2px)}50%{transform:translateY(-4px)}}
+`;
+
+function ImportButton({ onClick }: { onClick: () => void }) {
+  const [show, setShow] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  return (
+    <div
+      className="relative inline-block"
+      onMouseEnter={() => { timer.current = setTimeout(() => setShow(true), 300); }}
+      onMouseLeave={() => { if (timer.current) clearTimeout(timer.current); setShow(false); }}
+    >
+      <style>{IMPORT_BTN_CSS}</style>
+      <button className="imp-btn" onClick={onClick} style={{ ...font }}>
+        <span className="imp-ico"><Upload size={15} /></span> Import
+      </button>
+      {show && (
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 pointer-events-none">
+          <div style={{ background: 'rgba(11,28,48,0.92)', color: 'white', fontSize: 11.5, padding: '9px 12px', borderRadius: 9, display: 'flex', alignItems: 'center', gap: 9, boxShadow: '0 10px 26px rgba(11,28,48,0.28)', width: 232, whiteSpace: 'normal' }}>
+            <FileSpreadsheet size={15} style={{ color: '#86E0AC', flexShrink: 0 }} />
+            <span style={{ color: 'rgba(255,255,255,0.9)', lineHeight: 1.4 }}>Upload an Excel or CSV file to import all your financial data</span>
+          </div>
+          <div style={{ position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)', width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: '5px solid rgba(11,28,48,0.92)' }} />
         </div>
       )}
     </div>
@@ -291,6 +334,17 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   const { openPeek, prefetchPeek } = usePeek();
   const [searchParams] = useSearchParams();
   const { data: profile } = useUserProfile(session.user.id);
+  const [importOpen, setImportOpen] = useState(false);
+  const closeImport = (imported?: boolean) => {
+    setImportOpen(false);
+    // An import may have added transactions, parties and sites — refresh what the Ledger shows.
+    qc.invalidateQueries({ queryKey: ['ledger'] });
+    qc.invalidateQueries({ queryKey: ['stakeholders'] });
+    qc.invalidateQueries({ queryKey: ['projects'] });
+    // Imported sheets are usually historical — the default "this month" filter would hide most rows.
+    // Show ALL dates so every imported entry is visible, not just the ones dated this month.
+    if (imported) setDatePreset('all');
+  };
 
   type DatePreset = 'today' | 'week' | 'month' | 'last_month' | 'quarter' | 'fy' | 'all' | 'custom';
   const [filterFlagged] = useState(() => searchParams.get('flagged') === 'true');
@@ -611,7 +665,8 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
 
   const recatMutation = useMutation({
     mutationFn: async ({ ids, category }: { ids: string[]; category: string }) => {
-      const { error } = await supabase.from('transactions').update({ category }).in('txn_id', ids);
+      // Never edit a voided transaction — it is a closed audit record.
+      const { error } = await supabase.from('transactions').update({ category }).in('txn_id', ids).neq('status', 'Voided');
       if (error) throw error;
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['ledger'] }); setSelectedTxnIds(new Set()); setShowRecategorize(false); setRecatCategory(''); showSnackbar('Category updated'); },
@@ -914,6 +969,11 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   return (
     <div ref={elasticRef} className="min-h-screen" style={{ background: V.page, ...font, overscrollBehaviorY: 'contain' }}>
       <style>{TRACK_CHIP_CSS}</style>
+      {importOpen && (
+        <Suspense fallback={<div className="fixed inset-0 z-[1000]" style={{ background: 'rgba(30,26,21,0.55)' }} />}>
+          <ImportTransactions session={session} onClose={closeImport} />
+        </Suspense>
+      )}
       <div className="mx-auto px-5 sm:px-8 py-8 max-w-[880px] lg:max-w-[1040px] xl:max-w-[1200px] min-[1700px]:max-w-[1640px] min-[1700px]:grid min-[1700px]:grid-cols-[minmax(0,1fr)_340px] min-[1700px]:gap-12 min-[1700px]:items-start">
 
         {/* ── main column: the day-book ── */}
@@ -931,15 +991,18 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
             </div>
           </div>
           <div className="flex flex-col items-end gap-1">
-            <CreateHint message="press / to create a new transaction">
-              <button
-                onClick={() => navigate('/ledger/new')}
-                className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl"
-                style={{ background: terraGrad, color: '#fff', ...font }}
-              >
-                <Plus size={15} /> New transaction
-              </button>
-            </CreateHint>
+            <div className="flex items-center gap-2">
+              <ImportButton onClick={() => setImportOpen(true)} />
+              <CreateHint message="press / to create a new transaction">
+                <button
+                  onClick={() => navigate('/ledger/new')}
+                  className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl"
+                  style={{ background: terraGrad, color: '#fff', ...font }}
+                >
+                  <Plus size={15} /> New transaction
+                </button>
+              </CreateHint>
+            </div>
             <div className="hidden md:block">
               <ShortcutTicker hints={[
                 { key: '/', label: 'new transaction' },
@@ -1253,7 +1316,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                     const anchorNode: ReactNode =
                       genExp
                         ? <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md" style={{ background: V.field, color: V.inkSoft, ...font }}><span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: V.faint }} />General expense <span style={{ color: V.faint }}>· overhead</span></span>
-                        : (anchor === null && dir === 'out' && txn.stakeholder_id && (txn.txn_allocations || []).length > 0)
+                        : (anchor === null && dir === 'out' && txn.stakeholder_id && (txn.txn_allocations || []).length > 0 && txn.status !== 'Voided')
                           ? <TrackChip txn={txn} onLinked={() => { qc.invalidateQueries({ queryKey: ['ledger'] }); }} />
                           : undefined;
                     return (

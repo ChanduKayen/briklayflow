@@ -15,7 +15,7 @@
  *                   a light simulation today; wire reconcile-po-bill when ingestion lands.
  */
 import { supabase } from './supabase';
-import type { TrackTxn } from './trackingApi';
+import { assertLinkable, type TrackTxn } from './trackingApi';
 
 export interface VendorBill {
   id: string;        // the PO id (the bill we clear)
@@ -127,6 +127,7 @@ export interface VendorCommitInput {
  *  Purchase Orders page and the hub can display its id). MONEY ONLY: a bill amount may be
  *  stored on the PO, but NO GRN/stock is written. Returns the new PO id. */
 export async function createVendorPurchase(txn: TrackTxn, orgId: string, b: VendorPurchase): Promise<{ poId: string }> {
+  assertLinkable(txn);
   const projectId = projectIdOf(txn);
   if (!projectId) throw new Error(NO_ALLOC);
   const stakeholderId = txn?.stakeholder_id ?? null;
@@ -171,6 +172,7 @@ export async function createVendorPurchase(txn: TrackTxn, orgId: string, b: Vend
  *  bills + purchases created on add). Sum of allocations equals the payment, so the
  *  project total on the existing allocation is preserved. MONEY ONLY. */
 export async function commitVendorPayment(txn: TrackTxn, orgId: string, input: VendorCommitInput): Promise<void> {
+  assertLinkable(txn);
   const projectId = projectIdOf(txn);
   const txnId = txn?.txn_id;
   if (!projectId || !txnId) throw new Error(NO_ALLOC);

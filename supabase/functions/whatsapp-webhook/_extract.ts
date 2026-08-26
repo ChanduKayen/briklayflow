@@ -191,10 +191,11 @@ guess a "proper" spelling (keep "ramu" as "ramu", never "Raju"). null if absent.
 PROJECT — the user's known projects: {{KNOWN_PROJECTS}}.
 People almost never say the full name. They refer to a project by the person it's named
 after, a short form, or a landmark — usually in Telugu/Hindi:
-  "shyam gaari site" / "shyam gari inti pani" -> "Dr Shyam's Residence"
-  "pride" / "pride site" -> "The Pride"
+  "<person> gaari site" / "<person> gari inti pani" -> the LISTED project named after that person
+  "pride" / "pride site"                            -> the LISTED project whose name contains it
 Match by MEANING — recognise the person or place the project is named for — not by string
-similarity.
+similarity. The bracketed placeholders above are ILLUSTRATIVE ONLY: never output a project name
+that is not in the list above — if none fits, return the raw mention (next rule).
 - Return the project's name EXACTLY as listed when ONE entry clearly fits.
 - AMBIGUOUS: if more than one listed project could fit (e.g. two involve a "Shyam"), do NOT
   pick — return the raw mention and set project_confidence "low".
@@ -258,25 +259,27 @@ is the norm for PROJECT (one site, named once, covers the whole list) and usuall
 DIRECTION (a payment list is all "out"). Apply MODE or DATE across entries only when the user
 states it globally — never by guessing. Never copy a project onto an entry that clearly names
 a different one.
-  "Shyam gaari site lo Raju ki 5000, Ramu ki 3000"
-     -> BOTH entries: project "Dr Shyam's Residence", direction "out"
+  "<person> gaari site lo Raju ki 5000, Ramu ki 3000"
+     -> BOTH entries: the SAME project (the listed one named after that person), direction "out"
 
 OUTPUT — STRICT JSON only: an object with an "entries" array ("entries": [] when the message
 contains no payment at all). Each element has EXACTLY these fields:
 {"amount":number|null,"amount_source_phrase":string|null,"amount_confidence":"high"|"low"|null,"payee":string|null,"project":string|null,"direction":"out"|"in"|null,"mode":"cash"|"upi"|"bank"|null,"note":string|null,"ref":string|null}
 
-WORKED EXAMPLE
+WORKED EXAMPLE (the project value «...» is a PLACEHOLDER for the exact name from the list — do
+NOT output the placeholder text itself; substitute the listed project the site phrase names, or
+the raw mention if none is listed)
 <msg>
-Shyam gaari site lo ivala Raju ki muppai aidu vela plastering, Ramu ki 3000 centering, cement 12000 upi
+<person> gaari site lo ivala Raju ki muppai aidu vela plastering, Ramu ki 3000 centering, cement 12000 upi
 </msg>
 {"entries":[
-  {"amount":35000,"amount_source_phrase":"muppai aidu vela","amount_confidence":"high","payee":"Raju","project":"Dr Shyam's Residence","direction":"out","mode":null,"note":"plastering","ref":null},
-  {"amount":3000,"amount_source_phrase":"3000","amount_confidence":"high","payee":"Ramu","project":"Dr Shyam's Residence","direction":"out","mode":null,"note":"centering","ref":null},
-  {"amount":12000,"amount_source_phrase":"12000","amount_confidence":"high","payee":null,"project":"Dr Shyam's Residence","direction":"out","mode":"upi","note":"cement","ref":null}
+  {"amount":35000,"amount_source_phrase":"muppai aidu vela","amount_confidence":"high","payee":"Raju","project":"«the listed project named after that person»","direction":"out","mode":null,"note":"plastering","ref":null},
+  {"amount":3000,"amount_source_phrase":"3000","amount_confidence":"high","payee":"Ramu","project":"«the listed project named after that person»","direction":"out","mode":null,"note":"centering","ref":null},
+  {"amount":12000,"amount_source_phrase":"12000","amount_confidence":"high","payee":null,"project":"«the listed project named after that person»","direction":"out","mode":"upi","note":"cement","ref":null}
 ]}
-Notes on the example: the site is named once -> it propagates to all three; "upi" appears only
-on the third -> only the third gets it, the others stay null (never guessed); the third is a
-material with no person -> payee null is correct.
+Notes on the example: the site is named once -> it propagates to all three (as the EXACT listed
+name, never the placeholder); "upi" appears only on the third -> only the third gets it, the
+others stay null (never guessed); the third is a material with no person -> payee null is correct.
 
 Each entry then independently follows these field rules:
 

@@ -21,6 +21,7 @@ import { supabase } from './supabase';
 /** The slice of a ledger transaction the hub needs (the row is otherwise untyped). */
 export interface TrackTxn {
   txn_id?: string;
+  status?: string | null;      // 'Active' | 'Voided' — a voided txn is a closed record, not linkable
   total_amount?: number | string | null;
   remarks?: string | null;
   stakeholder_id?: string | null;
@@ -31,6 +32,12 @@ export interface TrackTxn {
     project_id?: string | null;
     projects?: { name?: string | null } | null;
   }> | null;
+}
+
+/** Code-floor: a voided transaction is a closed audit record — nothing may link or re-file it, no
+ *  matter which UI path calls in. Every write in this module (and the vendor twin) goes through here first. */
+export function assertLinkable(txn: TrackTxn): void {
+  if (txn.status === 'Voided') throw new Error('This transaction is voided and can no longer be linked or changed.');
 }
 
 export interface ContractPhase {
@@ -157,6 +164,7 @@ export async function getTrackingOptions(txn: TrackTxn): Promise<TrackingOptions
  *  phase (milestone). Burn-down is reported at the CONTRACT level so the confirmation
  *  animates the contract balance regardless of which phase the money landed in. */
 export async function attachToContract(txn: TrackTxn, contract: OpenContract, milestoneId: string | null = null): Promise<{ balance: number; paidPct: number }> {
+  assertLinkable(txn);
   const allocId = allocIdOf(txn);
   if (!allocId) throw new Error(NO_ALLOC);
   const { error } = await supabase
@@ -225,6 +233,7 @@ export interface CreatedContract {
  *  Multiple phases → nothing is linked yet; the caller shows a phase picker over the
  *  returned phases (just like an existing multi-phase contract) and attaches the choice. */
 export async function createContract({ orgId, txn, value, description, title, phases }: CreateContractInput): Promise<CreatedContract> {
+  assertLinkable(txn);
   const projectId = projectIdOf(txn);
   const stakeholderId = txn.stakeholder_id ?? null;
   if (!projectId || !stakeholderId) throw new Error(NO_ALLOC);
@@ -291,6 +300,7 @@ export async function createContract({ orgId, txn, value, description, title, ph
  *  parts must sum to the payment so the project allocation total is preserved (the
  *  caller enforces this). RLS lets the client insert with its own org_id. */
 export async function splitAcrossPhases(txn: TrackTxn, woId: string, parts: Array<{ milestoneId: string; amount: number }>, orgId: string): Promise<void> {
+  assertLinkable(txn);
   const projectId = projectIdOf(txn);
   const txnId = txn.txn_id;
   if (!projectId || !txnId) throw new Error(NO_ALLOC);
@@ -313,6 +323,7 @@ export interface DailyWageResult { rate: number; days: number; amount: number; }
 /** MOCK — the NMR / muster backend is not built yet. No DB write. When the muster
  *  module lands, replace this body with the real RPC; the hub stays unchanged. */
 export async function markDailyWage(txn: TrackTxn, { rate }: { rate: number }): Promise<DailyWageResult> {
+  assertLinkable(txn);
   const amount = num(txn.total_amount);
   return { rate, days: rate > 0 ? amount / rate : 0, amount };
 }
@@ -322,6 +333,7 @@ export async function markDailyWage(txn: TrackTxn, { rate }: { rate: number }): 
  *  it and party ledgers group it under "One-time payments". The money already sits in the
  *  project cost breakdown via its allocation; this only records the owner's intent. */
 export async function fileAsLabour(txn: TrackTxn): Promise<void> {
+  assertLinkable(txn);
   if (!txn.txn_id) return;
   const { error } = await supabase.from('transactions').update({ is_one_time: true }).eq('txn_id', txn.txn_id);
   if (error) throw error;
