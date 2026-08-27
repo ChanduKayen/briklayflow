@@ -216,6 +216,10 @@ async function describeImage(base64: string, mime: string, caption: string): Pro
   const ctrl = new AbortController()
   const t = setTimeout(() => ctrl.abort(), 15000)
   try {
+    // Check res.ok and LOG the status on both providers — the old code did `await res.json()` blind, so a
+    // 401/429/400 returned '' with no trace (the caller then fell back to "Image received"). Anthropic
+    // first; an Anthropic miss FALLS THROUGH to OpenAI (was an early return, so it never did).
+    let out = ''
     if (ANTHROPIC_KEY) {
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         signal: ctrl.signal, method: 'POST',
@@ -228,10 +232,10 @@ async function describeImage(base64: string, mime: string, caption: string): Pro
           ] }],
         }),
       })
-      const d = await res.json()
-      return (d.content?.[0]?.text ?? '').trim()
+      if (res.ok) out = ((await res.json()).content?.[0]?.text ?? '').trim()
+      else console.error('[normalize] describeImage anthropic', res.status, (await res.text()).slice(0, 200))
     }
-    if (OPENAI_KEY) {
+    if (!out && OPENAI_KEY) {
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
         signal: ctrl.signal, method: 'POST',
         headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
@@ -243,9 +247,10 @@ async function describeImage(base64: string, mime: string, caption: string): Pro
           ] }],
         }),
       })
-      const d = await res.json()
-      return (d.choices?.[0]?.message?.content ?? '').trim()
+      if (res.ok) out = ((await res.json()).choices?.[0]?.message?.content ?? '').trim()
+      else console.error('[normalize] describeImage openai', res.status, (await res.text()).slice(0, 200))
     }
+    return out
   } catch (e) {
     console.error('[normalize] describeImage error:', e)
   } finally {

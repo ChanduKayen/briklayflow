@@ -3,6 +3,9 @@
 // Classification ONLY -- control flow lives in the dispatcher.
 
 import { renderHistory, type Turn } from './_history.ts'
+// GPT-5.x reasoning models reject `temperature` other than 1 — reuse the shared guard so the router
+// tolerates a GPT-5.x id in WA_ROUTER_MODEL (the param is dropped only for those ids).
+import { openaiTemp } from './_siteops_extract.ts'
 
 // The router classifies ONLY: which kind of turn + which agent owns it. It does NOT
 // extract domain slots -- the agent re-reads the raw text with its own understanding
@@ -226,18 +229,41 @@ async function classifyWithLLM(input: RouterInput, lang: string): Promise<Router
   const t = setTimeout(() => ctrl.abort(), 9000)
   try {
     let raw = ''
+    // OpenAI first. THREE fixes over the old block, all of which silently turned a photo into
+    // CONCIERGE/CHITCHAT (empty router response → validate('')=null → default CONCIERGE):
+    //   1. GPT-5.x reasoning ids reject `max_tokens` + `temperature:0` with a 400 — use
+    //      max_completion_tokens (with real headroom; reasoning is spent BEFORE any content) and drop
+    //      temperature via openaiTemp when the id is gpt-5.x.
+    //   2. LOG every non-2xx and every empty body — the old code hid the status behind an empty raw,
+    //      which is exactly why a failing call read as "no error, just empty".
+    //   3. FALL THROUGH to Anthropic when OpenAI yields nothing (was `else if` → Anthropic never ran
+    //      while OPENAI_KEY was set, so a bad key / bad model / outage had no fallback).
     if (OPENAI_KEY) {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        signal: ctrl.signal, method: 'POST',
-        headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: ROUTER_MODEL_OPENAI, max_tokens: 200, temperature: 0,
-          response_format: { type: 'json_object' },
-          messages: [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: contextBlock }],
-        }),
-      })
-      if (res.ok) raw = (await res.json()).choices?.[0]?.message?.content ?? ''
-    } else if (ANTHROPIC_KEY) {
+      const reasoning = /^gpt-5/i.test(ROUTER_MODEL_OPENAI)
+      try {
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          signal: ctrl.signal, method: 'POST',
+          headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: ROUTER_MODEL_OPENAI,
+            ...(reasoning ? { max_completion_tokens: 1200 } : { max_tokens: 200 }),
+            ...openaiTemp(ROUTER_MODEL_OPENAI),
+            response_format: { type: 'json_object' },
+            messages: [{ role: 'system', content: SYSTEM_PROMPT }, { role: 'user', content: contextBlock }],
+          }),
+        })
+        if (res.ok) {
+          const j = await res.json()
+          const choice = j.choices?.[0]
+          raw = choice?.message?.content ?? ''
+          if (!raw) console.error(`[router] openai empty content (finish_reason=${choice?.finish_reason ?? '?'}, reasoning_tokens=${j.usage?.completion_tokens_details?.reasoning_tokens ?? '?'}) — falling back to Anthropic`)
+        } else {
+          console.error('[router] openai', res.status, (await res.text()).slice(0, 300), '— falling back to Anthropic')
+        }
+      } catch (e) { console.error('[router] openai call failed:', (e as Error).message, '— falling back to Anthropic') }
+    }
+    // Anthropic — the REAL fallback: runs whenever OpenAI produced nothing, not only when OPENAI_KEY is unset.
+    if (!raw && ANTHROPIC_KEY) {
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         signal: ctrl.signal, method: 'POST',
         headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
@@ -247,6 +273,7 @@ async function classifyWithLLM(input: RouterInput, lang: string): Promise<Router
         }),
       })
       if (res.ok) raw = (await res.json()).content?.[0]?.text ?? ''
+      else console.error('[router] anthropic', res.status, (await res.text()).slice(0, 300))
     }
     // Raw LLM string BEFORE parse -- a fenced/non-matching string here is the
     // confidence-0 default cause (strip/parse fix), not a prompt problem.

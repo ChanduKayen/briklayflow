@@ -21,6 +21,7 @@ import {
 import { parseSpokenAmount } from '../_amount.ts'
 import { matchPayee, matchProject, distinctiveTokens, type Match } from '../_match.ts'
 import { send, renderToWhatsApp, type OutMessage } from '../_format.ts'
+import { signedMediaUrl } from '../_normalize.ts'
 import { closeConversation, abandonConversation, type ConvoRow } from '../_conversation.ts'
 import { toLatinName } from '../_translit.ts'
 import { WriteCommitFailed } from '../_spine.ts'
@@ -35,6 +36,29 @@ const LINK = (() => {
   try { return new URL('/logbook', b).href } catch { return 'https://briklayflow.vercel.app/logbook' }
 })()
 const SOURCE = 'WHATSAPP_TEXT'
+// Proof image: the private rough-entry-media bucket has no public URL, and the Day Book renders
+// rough_entries.raw_image_url DIRECTLY as <img src> (and it flows to transactions.proof_document_url
+// on posting). So we store a SIGNED url with a long TTL — a durable, per-object bearer link that the
+// existing UI shows with no frontend change. (~10y; re-signable if the JWT secret is ever rotated.)
+const PROOF_URL_TTL = 315_360_000
+
+/**
+ * Persist the WhatsApp photo as PROOF on the just-committed entry. The image was already stored in the
+ * private rough-entry-media bucket by _normalize (ctx.image.storagePath); here we only LINK it —
+ * rough_entries.raw_image_url → a signed URL the Day Book renders and that fileEntry copies to
+ * transactions.proof_document_url when the entry is posted. Best-effort: the entry already committed,
+ * so a missing/failed proof link must NEVER surface as a write failure.
+ */
+async function attachProofImage(ctx: TxnCtx, entryId: string | null): Promise<void> {
+  const path = ctx.image?.storagePath
+  if (!entryId || !path) return
+  try {
+    const url = await signedMediaUrl(ctx.supabase, path, PROOF_URL_TTL)
+    if (!url) { console.warn('[txn] proof sign returned null for', path); return }
+    const { error } = await ctx.supabase.from('rough_entries').update({ raw_image_url: url }).eq('id', entryId)
+    if (error) console.error('[txn] proof attach failed:', error.message)
+  } catch (e) { console.error('[txn] proof attach error:', (e as Error).message) }
+}
 // Below this score a nearest candidate is too weak to surface as a Day Book
 // suggestion (we still take the raw value as-is either way). Env-tunable.
 const SUGGEST_FLOOR = Number(Deno.env.get('TXN_SUGGEST_FLOOR') ?? '0.45')
@@ -48,7 +72,9 @@ export type TxnCtx = {
   lang: Lang
   interactiveId: string | null   // id of a tapped LIST row / reply button (kept for parity)
   flowResponse?: Record<string, unknown> | null   // decoded nfm_reply.response_json (WhatsApp Flow completion)
-  image?: { base64: string; mime: string; caption: string }   // present for payment images -> vision extraction
+  // present for payment images -> vision extraction; storagePath is the ALREADY-stored object
+  // (rough-entry-media) we link onto the entry as PROOF.
+  image?: { base64: string; mime: string; caption: string; storagePath?: string | null }
   audio?: { storagePath: string; mime: string }   // present for a VOICE note -> siteops records it as findable evidence (T7)
 }
 
@@ -297,6 +323,9 @@ async function applyPlan(ctx: TxnCtx, plan: Plan, text: string, opts: { prefix?:
     if (entryId === null) { await handleWriteFailure(ctx, plan, text, opts.keyWamid, opts.entryIndex); throw new WriteCommitFailed() }
   }
 
+  // Link the WhatsApp photo (if this was a payment image) as proof on the committed entry.
+  await attachProofImage(ctx, entryId)
+
   // No pending question -> always close the conversation (keeps the lingering context for
   // "another 2000 to him"). Incomplete entries are finished in the Day Book.
   await closeConversation(supabase, {
@@ -426,7 +455,7 @@ async function runBatch(
     const plan = buildPlan(entries[i], stakeholders, projects, ctx.from, text)
     const project = plan.projectName ?? plan.projectRaw ?? null
     const id = await commitEntry(ctx, statusFor(plan), text, plan.ai, ctx.wamid, i)
-    if (id) outcomes.push({ payee: plan.payeeDisplay, amount: plan.amount, project, committed: true, entryId: id })
+    if (id) { outcomes.push({ payee: plan.payeeDisplay, amount: plan.amount, project, committed: true, entryId: id }); await attachProofImage(ctx, id) }
     else outcomes.push({ payee: plan.payeeDisplay, amount: plan.amount, project, committed: false, replayId: await recordFailedWrite(ctx, plan, text, ctx.wamid, i) })
   }
   await sendBatchCard(ctx, outcomes, prefix)
