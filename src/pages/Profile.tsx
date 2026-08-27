@@ -77,7 +77,14 @@ export default function Profile({ session }: { session: Session }) {
       if (error) throw error;
       setPhoneStep('code');
     } catch (err: any) {
-      setPhoneErr(err.message || 'Could not send the code');
+      const m = err?.message || '';
+      // The number is on ANOTHER account (usually the user's own phone-login account). A confirmed
+      // phone can't belong to two users, so say what to do instead of showing the raw API error.
+      if (/already.*(registered|exists|in use)/i.test(m)) {
+        setPhoneErr("This number already belongs to another Briklay account — most likely your own phone login. Sign out and sign in with that number instead; you can add your email to it from there.");
+      } else {
+        setPhoneErr(m || 'Could not send the code');
+      }
     } finally { setPhoneBusy(false); }
   };
 

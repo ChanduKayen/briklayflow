@@ -21,7 +21,10 @@ import { Webhook } from "https://esm.sh/standardwebhooks@1.0.0";
 import { sendTemplate } from "../_shared/whatsapp.ts";
 
 interface HookPayload {
-  user?: { phone?: string | null };
+  // Login/signup OTP carries the number in user.phone. A phone CHANGE (from an account that has no
+  // phone yet) carries the NEW number in user.new_phone / user.phone_change instead — so read all.
+  user?: { phone?: string | null; new_phone?: string | null; phone_change?: string | null };
+  phone?: string | null;
   sms?: { otp?: string };
 }
 
@@ -29,10 +32,10 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
 Deno.serve(async (req) => {
-  if (req.method !== "POST") return json({ error: { message: "method not allowed" } }, 405);
+  if (req.method !== "POST") return json({ error: { http_code: 405, message: "method not allowed" } }, 405);
 
   const secret = Deno.env.get("SEND_SMS_HOOK_SECRET");
-  if (!secret) return json({ error: { message: "hook not configured (missing SEND_SMS_HOOK_SECRET)" } }, 500);
+  if (!secret) return json({ error: { http_code: 500, message: "hook not configured (missing SEND_SMS_HOOK_SECRET)" } }, 500);
 
   const raw = await req.text();
 
@@ -47,12 +50,31 @@ Deno.serve(async (req) => {
       "webhook-signature": req.headers.get("webhook-signature") ?? "",
     }) as HookPayload;
   } catch (e) {
-    return json({ error: { message: `invalid signature: ${String((e as Error).message ?? e)}` } }, 401);
+    return json({ error: { http_code: 401, message: `invalid signature: ${String((e as Error).message ?? e)}` } }, 401);
   }
 
-  const phone = (payload.user?.phone ?? "").replace(/[^\d]/g, ""); // WhatsApp wants E.164 digits, no "+"
+  // Log the payload SHAPE (OTP redacted) so an unexpected variant — a phone CHANGE, whose new number
+  // is NOT in user.phone — is diagnosable from the logs rather than guessed at.
+  try {
+    const shape = JSON.parse(JSON.stringify(payload));
+    if (shape?.sms?.otp) shape.sms.otp = "***";
+    console.log("[auth-sms-hook] payload", JSON.stringify(shape));
+  } catch { /* ignore */ }
+
+  const u = (payload.user ?? {}) as Record<string, unknown>;
+  // A phone ADD/CHANGE from an account with no phone yet sends user.phone as an EMPTY STRING and
+  // carries the new number in user.new_phone / user.phone_change. `??` only falls through on
+  // null/undefined, so it would return "" and never reach new_phone — pick the first NON-EMPTY.
+  const rawPhone =
+    [u.phone, u.new_phone, u.phone_change, payload.phone].find(
+      (v) => typeof v === "string" && v.trim() !== "",
+    ) ?? "";
+  const phone = String(rawPhone).replace(/[^\d]/g, ""); // WhatsApp wants E.164 digits, no "+"
   const otp = payload.sms?.otp;
-  if (!phone || !otp) return json({ error: { message: "missing phone or otp in hook payload" } }, 400);
+  if (!phone || !otp) {
+    console.error("[auth-sms-hook] missing phone/otp", JSON.stringify({ user_keys: Object.keys(u), has_otp: !!otp }));
+    return json({ error: { http_code: 400, message: "missing phone or otp in hook payload" } }, 400);
+  }
 
   try {
     // signup_otp body: "OTP Code: {{1}}. This is your OTP code for {{2}}. ..." — {{2}} is the
@@ -61,7 +83,7 @@ Deno.serve(async (req) => {
   } catch (e) {
     // A non-2xx tells Supabase the delivery failed, so the client sees an error instead of a
     // silent "code sent" for a message that never went out.
-    return json({ error: { message: `whatsapp delivery failed: ${String((e as Error).message ?? e)}` } }, 502);
+    return json({ error: { http_code: 502, message: `whatsapp delivery failed: ${String((e as Error).message ?? e)}` } }, 502);
   }
 
   return json({}, 200);
