@@ -20,9 +20,9 @@ import {
   IconChartPie, IconArrowsExchange,
   IconNotebook, IconClipboardList, IconShoppingBag,
   IconFileInvoice,
-  IconShieldLock, IconAdjustmentsHorizontal,
+  IconShieldLock,
   IconLogout, IconChevronLeft, IconDots,
-  IconRepeat, IconLayoutGrid, IconFiles, IconUsers,
+  IconRepeat, IconLayoutGrid, IconFiles, IconUsers, IconUser,
   IconCircleDot, IconClock, IconFileText, IconChecklist,
 } from '@tabler/icons-react';
 
@@ -58,7 +58,7 @@ const Ledger = lazy(() => import('./pages/Ledger'));
 const NewTransaction = lazy(() => import('./pages/NewTransaction'));
 const ImportTransactions = lazy(() => import('./pages/ImportTransactions'));
 const Insights = lazy(() => import('./pages/Insights'));
-const Settings = lazy(() => import('./pages/Settings'));
+const Profile = lazy(() => import('./pages/Profile'));
 const FollowUpRules = lazy(() => import('./pages/FollowUpRules'));
 const NewWorkOrder = lazy(() => import('./pages/NewWorkOrder'));
 const Financials = lazy(() => import('./pages/Financials'));
@@ -85,7 +85,6 @@ import Landing from './pages/Landing';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
 import DataDeletion from './pages/DataDeletion';
-const SKUDirectory = lazy(() => import('./pages/SKUDirectory'));
 const ProcurementRequests = lazy(() => import('./pages/ProcurementRequests'));
 const ProcurementQuotes = lazy(() => import('./pages/ProcurementQuotes'));
 const ProcurementOrders = lazy(() => import('./pages/ProcurementOrders'));
@@ -579,9 +578,12 @@ function App() {
           <Route path="/purchase-orders/new" element={<NewPurchaseOrder session={session} />} />
           <Route path="/purchase-orders/:poId" element={<PurchaseOrderDetail session={session} />} />
           <Route path="/inward-register" element={<InwardRegister session={session} />} />
-          <Route path="/sku-directory" element={<SKUDirectory session={session} />} />
           <Route path="/team" element={<Team session={session} />} />
-          <Route path="/settings" element={<Settings session={session} />} />
+          <Route path="/profile" element={<Profile session={session} />} />
+          {/* SKU directory + Settings retired → Settings' account/org config moved into /profile.
+              Keep the old /settings path as a redirect so stale links/bookmarks still land somewhere true. */}
+          <Route path="/settings" element={<Navigate to="/profile" replace />} />
+          <Route path="/sku-directory" element={<Navigate to="/" replace />} />
           {/* Follow-up Rules — org-tunable timing per cause (how soon / how often we chase). */}
           <Route path="/follow-up-rules" element={<FollowUpRules session={session} />} />
           <Route path="/financials" element={<PrincipalGuard session={session}><Financials /></PrincipalGuard>} />
@@ -655,7 +657,7 @@ function getMobileTitle(pathname: string): string {
     '/billing':             'Billing',
     '/billing/new':         'New Bill',
     '/stakeholders':        'Parties',
-    '/settings':            'Settings',
+    '/profile':             'Profile',
     '/team':                'Team & Access',
     '/financials':          'Financials',
     '/financials/pl':       'P&L',
@@ -739,6 +741,10 @@ function MobileTopbar({ session }: { session: Session }) {
             >
               {initials(profile.name ?? 'U')}
             </button>
+            {/* Email-pending bubble — mirrors the desktop rail; points at the "add your email" item in Profile. */}
+            {!session.user.email && (
+              <span aria-label="Email update needed" className="absolute -top-0.5 -right-0.5 rounded-full" style={{ width: 9, height: 9, background: '#E0603A', boxShadow: '0 0 0 2px #fff' }} />
+            )}
             {menuOpen && (
               <div
                 role="menu"
@@ -756,10 +762,10 @@ function MobileTopbar({ session }: { session: Session }) {
                 </div>
                 <button
                   role="menuitem"
-                  onClick={() => { setMenuOpen(false); navigate('/settings'); }}
+                  onClick={() => { setMenuOpen(false); navigate('/profile'); }}
                   className="w-full flex items-center gap-3 px-3.5 py-3 text-left text-[14px] text-on-surface touch-active"
                 >
-                  <IconAdjustmentsHorizontal size={17} strokeWidth={1.7} style={{ color: '#9A9186', flexShrink: 0 }} /> Settings
+                  <IconUser size={17} strokeWidth={1.7} style={{ color: '#9A9186', flexShrink: 0 }} /> Profile
                 </button>
                 <div style={{ borderTop: '1px solid #F0ECE6' }} />
                 <button
@@ -963,7 +969,7 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
 
   // ── Global context bottom bar ──────────────────────────────────────────
   const isOrdersActive = isActivePath('/orders') || isActivePath('/purchase-orders') || isActivePath('/work-orders');
-  const moreActive = ['/billing', '/team', '/settings', '/stakeholders', '/invoices', '/insights', '/inward-register'].some(p => isActivePath(p));
+  const moreActive = ['/billing', '/team', '/profile', '/stakeholders', '/invoices', '/insights', '/inward-register'].some(p => isActivePath(p));
 
   type Tab = { path: string; icon: React.ElementType; label: string; show: boolean; badge?: number };
   const tabs: Tab[] = [
@@ -1034,7 +1040,7 @@ function MoreNavSheet({
     { path: '/insights',      icon: IconChartPie,              label: 'Insights',       show: true },
     { path: '/team',          icon: IconShieldLock,            label: 'Team & Access',  show: role === 'principal' || role === 'management' },
     { path: '/follow-up-rules', icon: IconClock,               label: 'Follow-up Rules', show: role === 'principal' || role === 'management' },
-    { path: '/settings',      icon: IconAdjustmentsHorizontal, label: 'Settings',       show: true },
+    { path: '/profile',       icon: IconUser,                  label: 'Profile',        show: true },
   ].filter(i => i.show);
 
   const items = isInProject ? projectMoreItems.filter(i => i.show) : globalItems;

@@ -624,40 +624,6 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
     void handleApprove();
   }, [autoFile, confirmMode, mandatoryFilled, handleApprove]);
 
-  // ── Save action — Edit just records the owner's corrections back onto the entry so
-  // the Day Book card reflects them. It does NOT file the transaction; that happens
-  // when the owner taps Approve on the card. Status stays PENDING (still in review).
-  const handleSave = async () => {
-    if (posting) return;
-    setPosting(true);
-    try {
-      const projectName = projects.find((p) => p.project_id === projectId)?.name ?? ai.project_name ?? null;
-      const nextAi = {
-        ...ai,
-        payee_id: payeeId || null,
-        payee_name: payeeName || null,
-        amount: amount === '' ? null : Number(amount),
-        project_id: projectId || null,
-        project_name: projectName,
-        description: description.trim(),
-        mode,
-      };
-      const { data: updatedEntry } = await supabase
-        .from('rough_entries')
-        .update({ ai_extracted: nextAi })
-        .eq('id', entry.id)
-        .select().single();
-
-      qc.invalidateQueries({ queryKey: ['rough_entries'] });
-      onUpdated(updatedEntry as RoughEntry);
-      onClose();
-    } catch (err: any) {
-      showSnackbar(err.message || 'Failed to save', { type: 'error' });
-    } finally {
-      setPosting(false);
-    }
-  };
-
   // ── Dismiss action ─────────────────────────────────────────────────────────
   const handleDismiss = async () => {
     const { data: updatedEntry } = await supabase
@@ -699,7 +665,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
     payeeUnmatched, projectUnmatched,
     mandatoryFilled, posting,
     showDismissConfirm, setShowDismissConfirm,
-    onClose, handleSave, handleDismiss,
+    onClose, handleDismiss,
     payeeRef, advanceAfter, nextGap, goToGap,
     payeeState, setPayeeState,
     show, confirmMode, only, approval, handleApprove,
@@ -793,7 +759,7 @@ interface ContentProps {
   payeeUnmatched: boolean; projectUnmatched: boolean;
   mandatoryFilled: boolean; posting: boolean;
   showDismissConfirm: boolean; setShowDismissConfirm: (v: boolean) => void;
-  onClose: () => void; handleSave: () => void; handleDismiss: () => void;
+  onClose: () => void; handleDismiss: () => void;
   payeeRef: React.RefObject<HTMLInputElement | null>;
   advanceAfter: (justFilled: 'amount' | 'payee' | 'description' | 'project') => void;
   nextGap: { label: string; key: 'amount' | 'payee' | 'description' | 'project' } | null;
@@ -820,7 +786,7 @@ function PopupContents({
   payeeUnmatched, projectUnmatched,
   posting,
   showDismissConfirm, setShowDismissConfirm,
-  onClose, handleSave, handleDismiss,
+  onClose, handleDismiss,
   payeeRef, advanceAfter, nextGap, goToGap,
   payeeState, setPayeeState,
   show, confirmMode, only, approval, handleApprove, armAutoFile,
@@ -1391,11 +1357,12 @@ function PopupContents({
               <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
             </button>
           ) : (
-            /* Complete → the real action. In CONFIRM mode that is the filing itself: he pressed Approve
-               to get here, and the button at the end of it must finish what he started rather than send
-               him back to the card to press the same word a second time. */
+            /* Complete → FILE IT, from either door. Confirm mode always filed; Edit now does too — its
+               button says "File it", so it must file, not just save the corrections and send him back to
+               the card to press Approve a second time. Both go through the one write path (handleApprove
+               → fileRoughEntry), so an entry filed from Edit and one filed from Approve are one record. */
             <button
-              onClick={confirmMode ? handleApprove : handleSave}
+              onClick={handleApprove}
               disabled={posting}
               className="flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-[13px] font-bold transition-all duration-200 active:scale-95"
               style={posting
@@ -1405,7 +1372,7 @@ function PopupContents({
               {posting ? (
                 <>
                   <span className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: 'rgba(154,142,128,.3)', borderTopColor: VOICE.system }} />
-                  {confirmMode ? 'Filing…' : 'Saving…'}
+                  Filing…
                 </>
               ) : (
                 <>

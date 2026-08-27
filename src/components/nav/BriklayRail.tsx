@@ -20,9 +20,9 @@ import type { Session } from '@supabase/supabase-js';
 import {
   IconArrowsExchange, IconNotebook, IconFileInvoice, IconChartPie,
   IconShoppingBag, IconLayoutGrid, IconClipboardList, IconUsersGroup,
-  IconBarcode, IconShieldLock, IconAdjustmentsHorizontal,
+  IconShieldLock,
   IconChevronDown, IconChevronLeft, IconDots,
-  IconSettings, IconLogout,
+  IconSettings, IconLogout, IconUser,
   IconBox, IconListNumbers, IconTruck, IconLoader2, IconChecklist, IconAlertTriangle,
   IconListCheck, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand,
 } from '@tabler/icons-react';
@@ -125,6 +125,9 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
   const { data: profile } = useUserProfile(session.user.id);
   const { orgId, signOut } = useAuth();
   const role: Role = profile?.role ?? '';
+  // A phone-signup account has no email yet — a pending "add your email" item. The bubble on the
+  // name below points at it; the Profile page is where it's fixed.
+  const emailMissing = !session.user.email;
 
   // ── Secondary-nav contexts — BOTH the in-project nav and the Site Management hub use the same
   //    two-tier pattern: the rail collapses to its icon spine and a second column beside it carries
@@ -258,9 +261,7 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
       label: 'Workspace',
       items: ([
         can(role !== 'supervisor' && role !== 'accountant') && { route: '/stakeholders', label: 'Parties', icon: IconUsersGroup },
-        can(role === 'principal' || role === 'management') && { route: '/sku-directory', label: 'SKU directory', icon: IconBarcode },
         can(role === 'principal' || role === 'management') && { route: '/team', label: 'Team & access', icon: IconShieldLock },
-        can(role === 'principal' || role === 'management') && { route: '/settings', label: 'Settings', icon: IconAdjustmentsHorizontal },
       ].filter(Boolean) as Item[]),
     },
   ];
@@ -426,20 +427,28 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
 
         {/* user identity + menu */}
         <div className="mt-2" style={{ ...pad, position: 'relative' }} ref={userRef}>
-          <button onClick={() => setShowUser(o => !o)} title={profile?.name ?? 'Account'}
+          <button onClick={() => setShowUser(o => !o)} title={emailMissing ? `${profile?.name ?? 'Account'} — add your email` : (profile?.name ?? 'Account')}
             className="w-full flex items-center" style={{ gap: 9, paddingLeft: open ? 6 : 0, justifyContent: open ? 'flex-start' : 'center', background: 'transparent', height: 38, borderRadius: 8 }}>
-            <span className="rounded-full flex items-center justify-center shrink-0" style={{ width: 28, height: 28, ...railChip, fontWeight: 500, fontSize: 11, ...font }}>{initials(profile?.name ?? 'U')}</span>
+            <span className="relative shrink-0" style={{ width: 28, height: 28 }}>
+              <span className="rounded-full flex items-center justify-center w-full h-full" style={{ ...railChip, fontWeight: 500, fontSize: 11, ...font }}>{initials(profile?.name ?? 'U')}</span>
+              {/* Email-pending bubble — a small terra dot with a ring so it reads on the dark rail. */}
+              {emailMissing && <span aria-label="Email update needed" style={{ position: 'absolute', top: -1, right: -1, width: 9, height: 9, borderRadius: '50%', background: '#E0603A', boxShadow: '0 0 0 2px #241C15' }} />}
+            </span>
             <span className="min-w-0 text-left" style={{ opacity: open ? 1 : 0, transition: 'opacity .15s', overflow: 'hidden', flex: open ? '1 1 0%' : '0 0 0px', width: open ? 'auto' : 0 }}>
-              <span className="block truncate" style={{ fontSize: 13, color: N.text }}>{profile?.name ?? 'User'}</span>
-              <span className="block truncate capitalize" style={{ fontSize: 11, color: N.textFaint }}>{role}</span>
+              <span className="flex items-center gap-1.5 min-w-0">
+                <span className="block truncate" style={{ fontSize: 13, color: N.text }}>{profile?.name ?? 'User'}</span>
+                {emailMissing && <span className="shrink-0" style={{ width: 6, height: 6, borderRadius: '50%', background: '#E0603A' }} />}
+              </span>
+              <span className="block truncate capitalize" style={{ fontSize: 11, color: N.textFaint }}>{emailMissing ? 'Add your email' : role}</span>
             </span>
             <IconDots size={14} style={{ color: N.textFaint, opacity: open ? 1 : 0, transition: 'opacity .15s', flexShrink: 0, display: open ? 'block' : 'none' }} />
           </button>
           {showUser && (
             <div className="nav-pop" style={{ position: 'absolute', bottom: 'calc(100% + 4px)', left: open ? 8 : 6, minWidth: 188, background: V.surface, border: `1px solid ${V.line}`, borderRadius: 10, boxShadow: '0 -8px 28px rgba(20,16,12,0.18)', overflow: 'hidden', zIndex: 60 }}>
-              <button onClick={() => { navigate('/settings'); setShowUser(false); }} className="w-full flex items-center gap-2.5 px-3 py-2 text-left" style={{ fontSize: 13, color: V.inkSoft, background: 'transparent' }}
+              <button onClick={() => { navigate('/profile'); setShowUser(false); }} className="w-full flex items-center gap-2.5 px-3 py-2 text-left" style={{ fontSize: 13, color: V.inkSoft, background: 'transparent' }}
                 onMouseEnter={e => (e.currentTarget.style.background = V.field)} onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                <IconSettings size={15} strokeWidth={1.7} style={{ color: V.faint }} /> Settings
+                <IconUser size={15} strokeWidth={1.7} style={{ color: V.faint }} /> Profile
+                {emailMissing && <span style={{ marginLeft: 'auto', fontSize: 10.5, fontWeight: 600, color: '#B2402A' }}>email</span>}
               </button>
               <div style={{ borderTop: `1px solid ${V.line}` }} />
               <button onClick={doSignOut} disabled={signingOut} aria-busy={signingOut}
