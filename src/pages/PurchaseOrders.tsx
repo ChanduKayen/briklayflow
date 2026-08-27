@@ -957,8 +957,10 @@ export default function PurchaseOrders({ session }: { session: Session }) {
   // Live vs Draft are split by approval_status (the gate), NOT the fulfillment
   // `status`. Drafts (PENDING) are an approver-only queue; the agency tabs
   // (Your move / Waiting / Done) operate only over APPROVED ("live") POs.
-  const isPending  = (x: { po: { approval_status?: string } }) => x.po.approval_status === 'PENDING';
-  const isApproved = (x: { po: { approval_status?: string } }) => (x.po.approval_status ?? 'APPROVED') === 'APPROVED';
+  // A cancelled PO is never a pending draft — even if it was cancelled before approval, it belongs
+  // in the live list (as Done), not hidden in the approver-only draft queue.
+  const isPending  = (x: { po: { approval_status?: string; status?: string } }) => x.po.approval_status === 'PENDING' && x.po.status !== 'CANCELLED';
+  const isApproved = (x: { po: { approval_status?: string; status?: string } }) => (x.po.approval_status ?? 'APPROVED') === 'APPROVED' || x.po.status === 'CANCELLED';
 
   const tabCounts = useMemo(() => {
     const approved = enriched.filter(isApproved);

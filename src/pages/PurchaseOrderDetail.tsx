@@ -334,6 +334,161 @@ function SectionLabel({ icon, label }: { icon: string; label: string }) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
+// ── Reference PO-detail styling (po-detail.html), scoped under .podx so it can't leak into the app.
+//    Fonts swapped to the app's existing stacks per decision (serif title, system sans, mono numerics).
+const PODX_CSS = `
+.podx{
+  --cream:#F6F2EA; --paper:#FFFDF9; --paper-2:#FBF8F2;
+  --ink:#2F2622; --ink-2:#6E635B; --ink-3:#A39A91;
+  --line:#E4DCD0; --line-2:#EFE9DF;
+  --terra:#C4613A; --terra-deep:#A94E2B; --terra-tint:#F8E7DE;
+  --sage:#5F7F5B; --sage-tint:#E7EFE4;
+  --gold:#B8862E; --gold-tint:#F7EEDA;
+  --r:8px; --ease:cubic-bezier(.2,.7,.2,1);
+  --serif:Georgia,'Times New Roman',serif;
+  --sans:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  background:var(--cream);color:var(--ink);font:15px/1.45 var(--sans);-webkit-font-smoothing:antialiased;min-height:100vh;
+}
+.podx *{box-sizing:border-box}
+.podx button,.podx input,.podx select{font:inherit;color:inherit}
+.podx input::placeholder{color:var(--ink-3)}
+.podx .mono{font-family:var(--mono);font-feature-settings:"tnum";font-variant-numeric:tabular-nums}
+.podx .page{max-width:100%;margin:0 auto;padding:22px 32px 80px}
+.podx .crumb{display:flex;align-items:center;gap:6px;color:var(--ink-3);font-size:13px;margin-bottom:18px}
+.podx .crumb a{color:var(--ink-2);text-decoration:none;padding:4px 6px;border-radius:6px;margin-left:-6px;cursor:pointer;transition:background .15s}
+.podx .crumb a:hover{background:var(--paper)}
+.podx .crumb b{color:var(--ink);font-weight:500}
+.podx .head{display:grid;grid-template-columns:1fr auto;gap:12px 24px;align-items:start;margin-bottom:18px}
+.podx .head h1{font:600 28px/1.1 var(--serif);margin:0 0 8px;letter-spacing:-.01em;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.podx .tag{font:500 13px/1 var(--mono);letter-spacing:.04em;color:var(--ink-2);background:var(--paper);border:1px solid var(--line);padding:6px 9px;border-radius:6px}
+.podx .head .meta{color:var(--ink-2);font-size:14px;display:flex;flex-wrap:wrap;gap:4px 14px}
+.podx .head .meta b{color:var(--ink);font-weight:500}
+.podx .head .meta a{color:var(--ink);text-decoration:none;border-bottom:1px dashed var(--ink-3);cursor:pointer}
+.podx .head .meta a:hover{border-bottom-style:solid;color:var(--terra)}
+.podx .value{text-align:right}
+.podx .value small{display:block;font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2);margin-bottom:2px}
+.podx .value .mono{font-size:34px;font-weight:500;letter-spacing:-.02em;line-height:1}
+.podx .value .mono::first-letter{color:var(--ink-3);font-weight:400}
+.podx .more{position:relative}
+.podx .kebab{width:36px;height:36px;border-radius:50%;border:1px solid transparent;background:transparent;cursor:pointer;display:grid;place-items:center;color:var(--ink-2);transition:background .15s,border-color .15s,transform .12s}
+.podx .kebab:hover{background:var(--paper);border-color:var(--line)}
+.podx .kebab:active{transform:scale(.92)}
+.podx .menu{position:absolute;right:0;top:calc(100% + 6px);background:var(--paper);border:1px solid var(--line);border-radius:var(--r);box-shadow:0 12px 30px -12px rgba(47,38,34,.28);padding:4px;min-width:190px;display:none;z-index:30}
+.podx .menu.open{display:block;animation:podxpop .16s var(--ease)}
+.podx .menu button{display:flex;align-items:center;gap:10px;width:100%;border:0;background:transparent;text-align:left;padding:9px 10px;border-radius:6px;cursor:pointer;font-size:14px}
+.podx .menu button:hover{background:var(--paper-2)}
+.podx .menu button:disabled{opacity:.4;cursor:not-allowed}
+.podx .menu button.danger{color:var(--terra)}
+.podx .menu button.danger:hover{background:var(--terra-tint)}
+.podx .menu hr{border:0;border-top:1px solid var(--line-2);margin:4px 0}
+.podx .menu svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.7}
+@keyframes podxpop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.podx .strip{background:var(--paper);border:1px solid var(--line);border-radius:10px;display:grid;grid-template-columns:repeat(4,1fr);position:relative;overflow:hidden;margin-bottom:22px;box-shadow:0 1px 2px rgba(47,38,34,.04),0 8px 24px -18px rgba(47,38,34,.25)}
+.podx .strip::before{content:"";position:absolute;left:0;top:0;height:3px;width:var(--p,25%);background:var(--sage);transition:width .6s var(--ease)}
+.podx .stage{padding:16px 18px 16px 16px;border-right:1px solid var(--line-2);display:grid;grid-template-columns:26px 1fr;gap:2px 12px;align-items:start;align-content:start;min-height:96px;position:relative;z-index:1;transition:background .2s}
+.podx .stage.done{background:linear-gradient(180deg,var(--sage-tint) 0%,transparent 70%)}
+.podx .stage.now{background:linear-gradient(180deg,var(--terra-tint) 0%,transparent 75%)}
+.podx .stage:last-child{border-right:0}
+.podx .stage .ico{width:26px;height:26px;margin-top:6px;border-radius:50%;border:1.5px solid var(--line);background:var(--paper);display:grid;place-items:center;grid-row:span 2;font-size:12px;font-family:var(--mono);color:var(--ink-3);transition:background .25s,border-color .25s,color .25s,transform .3s var(--ease)}
+.podx .stage.done .ico{transform:scale(1.08)}
+.podx .stage .ico svg{width:12px;height:12px;stroke:#fff;fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;display:none}
+.podx .stage.done .ico{background:var(--sage);border-color:var(--sage)}
+.podx .stage.done .ico svg{display:block}.podx .stage.done .ico span{display:none}
+.podx .stage.now .ico{border-color:var(--terra);color:var(--terra);box-shadow:0 0 0 3px var(--terra-tint)}
+.podx .stage .t{font-weight:600;font-size:14px;letter-spacing:-.005em}
+.podx .stage .s{font-size:12.5px;color:var(--ink-3)}
+.podx .stage.done .s{color:var(--ink-2)}
+.podx .stage .act{grid-column:2;margin-top:8px}
+.podx .stage.next-later .t{color:var(--ink-3)}
+.podx .sec{display:flex;align-items:center;justify-content:space-between;margin:22px 0 10px}
+.podx .sec h2{margin:0;font:600 11.5px/1 var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2);padding-left:10px;border-left:3px solid var(--terra);display:flex;align-items:center;gap:14px;flex:1}
+.podx .sec h2::after{content:"";flex:1;height:1px;background:var(--line);margin-right:14px}
+.podx .sec .right{display:flex;gap:8px;align-items:center}
+.podx .sheet{background:var(--paper);border:1px solid var(--line);border-radius:10px;overflow:hidden;box-shadow:0 1px 2px rgba(47,38,34,.04),0 8px 24px -18px rgba(47,38,34,.25)}
+.podx table{width:100%;border-collapse:collapse;table-layout:fixed}
+.podx th{font-weight:500;font-size:12px;color:var(--ink-2);text-align:left;padding:9px 12px;background:var(--paper-2);border-bottom:1px solid var(--line);letter-spacing:.02em;white-space:nowrap}
+.podx td{padding:0 12px;border-bottom:1px solid var(--line-2);height:48px;vertical-align:middle;transition:background .15s}
+.podx tbody tr:hover td{background:var(--paper-2)}
+.podx tbody tr:hover td.bill-col{background:#F3E8CD}
+.podx th+th,.podx td+td{border-left:1px solid var(--line-2)}
+.podx tbody tr:last-child td{border-bottom:0}
+.podx .num{text-align:right;font-family:var(--mono);font-feature-settings:"tnum";font-variant-numeric:tabular-nums}
+.podx .dim{color:var(--ink-3)}
+.podx .n{text-align:center;color:var(--ink-3);font-size:12px;font-family:var(--mono)}
+.podx .item b{font-weight:600;letter-spacing:-.005em}.podx .item small{display:block;color:var(--ink-3);font-size:12px;margin-top:1px}
+.podx .unit{display:inline-block;font:500 11px/1 var(--mono);letter-spacing:.06em;color:var(--ink-2);background:var(--paper-2);border:1px solid var(--line-2);padding:4px 6px;border-radius:4px}
+.podx td.amt{font-weight:500;color:var(--ink)}
+.podx .bill-col{display:none;background:var(--gold-tint)}
+.podx th.bill-col{color:var(--gold)}
+.podx .sheet.billing .bill-col{display:table-cell}
+.podx .sheet.billing .item b{font-size:14px}
+.podx .cell{position:relative;height:44px;margin:0 -12px}
+.podx .cell input{width:100%;height:44px;border:0;background:transparent;padding:0 12px;outline:none;text-align:right;font-family:var(--mono)}
+.podx .cell::before{content:"";position:absolute;inset:0;pointer-events:none;border:2px solid transparent;border-radius:3px;transition:border-color .15s,box-shadow .15s}
+.podx .cell:hover:not(:focus-within)::before{border-color:var(--line)}
+.podx .cell:focus-within::before{border-color:var(--terra);box-shadow:0 0 0 3px var(--terra-tint)}
+.podx td.diff{background:var(--terra-tint);color:var(--terra-deep);font-weight:500}
+.podx td.diff .why{display:block;font-size:11px;font-family:var(--sans);font-weight:400;color:var(--terra)}
+.podx td.ok-match{color:var(--sage)}
+.podx tfoot td{background:var(--paper-2);height:40px;font-size:13.5px;color:var(--ink-2)}
+.podx tfoot td.num{color:var(--ink)}
+.podx tfoot tr.grand td{font-weight:600;color:var(--ink);font-size:15px;border-top:2px solid var(--line);height:46px}
+.podx .inline{display:none;grid-template-columns:1.2fr 1fr 1fr 1.3fr auto;gap:12px;align-items:end;padding:16px 18px;background:var(--gold-tint);border-top:1px solid var(--line);box-shadow:inset 0 3px 0 rgba(184,134,46,.35)}
+.podx .inline.open{display:grid;animation:podxpop .2s var(--ease)}
+.podx .inline.pay{background:var(--sage-tint);grid-template-columns:1fr 1fr 1fr 1.6fr auto;box-shadow:inset 0 3px 0 rgba(95,127,91,.4)}
+.podx .f label{display:block;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2);margin-bottom:5px}
+.podx .f input,.podx .f select,.podx .f .up{width:100%;height:38px;border:1px solid var(--line);border-radius:6px;background:var(--paper);padding:0 10px;outline:none;transition:border-color .15s,box-shadow .15s}
+.podx .f input:focus,.podx .f select:focus{border-color:var(--terra);box-shadow:0 0 0 3px var(--terra-tint)}
+.podx .f .up{display:flex;align-items:center;gap:8px;border-style:dashed;cursor:pointer;color:var(--ink-2);overflow:hidden}
+.podx .f .up span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.podx .f .up:hover{border-color:var(--terra);color:var(--terra);background:var(--terra-tint)}
+.podx .f .up svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.7;flex-shrink:0}
+.podx .f .up.has{border-style:solid;border-color:var(--sage);color:var(--sage);background:var(--sage-tint)}
+.podx .money{display:grid;grid-template-columns:repeat(4,1fr);background:var(--paper);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-top:22px;box-shadow:0 1px 2px rgba(47,38,34,.04),0 8px 24px -18px rgba(47,38,34,.25)}
+.podx .money>div{padding:16px 20px 14px;border-right:1px solid var(--line-2);position:relative}
+.podx .money>div::before{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:var(--line-2)}
+.podx .money>div:nth-child(2)::before{background:var(--gold)}
+.podx .money .bal.owe::before{background:var(--terra)}.podx .money .bal.nil::before{background:var(--sage)}
+.podx .money div:last-child{border-right:0}
+.podx .money small{display:block;font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-2);margin-bottom:4px}
+.podx .money .mono{font-size:22px;font-weight:500;letter-spacing:-.01em;transition:color .3s}
+.podx .money .bal .mono{font-size:26px}
+.podx .money .bal.owe .mono{color:var(--terra)}.podx .money .bal.nil .mono{color:var(--sage)}
+.podx .money .sub{font-size:12px;color:var(--ink-3);margin-top:2px}
+.podx .log{list-style:none;margin:0;padding:6px 0}
+.podx .log li{display:grid;grid-template-columns:130px 14px 1fr;gap:10px;padding:10px 16px;font-size:13.5px;color:var(--ink-2);align-items:start}
+.podx .log i{width:8px;height:8px;border-radius:50%;background:var(--line);border:2px solid var(--paper);box-shadow:0 0 0 1px var(--line);margin-top:6px}
+.podx .log li+li{border-top:1px solid var(--line-2)}
+.podx .log .mono{color:var(--ink-3);font-size:12px;padding-top:2px}
+.podx .log b{color:var(--ink);font-weight:500}
+.podx .btn{--bg:var(--paper);--fg:var(--ink);--bd:var(--line);display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 14px;border-radius:var(--r);border:1px solid var(--bd);background:var(--bg);color:var(--fg);font-weight:500;font-size:14px;cursor:pointer;position:relative;overflow:hidden;transition:background .16s var(--ease),border-color .16s,color .16s,transform .12s var(--ease),box-shadow .16s var(--ease)}
+.podx .btn:hover{--bg:var(--paper-2);box-shadow:0 2px 8px -4px rgba(47,38,34,.25);transform:translateY(-1px)}
+.podx .btn:active{transform:translateY(0) scale(.97);box-shadow:none}
+.podx .btn:disabled{opacity:.55;cursor:not-allowed;transform:none;box-shadow:none}
+.podx .btn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8}
+.podx .btn.primary{--bg:var(--terra);--fg:#fff;--bd:var(--terra)}
+.podx .btn.primary:hover{--bg:var(--terra-deep);--bd:var(--terra-deep);box-shadow:0 6px 16px -8px rgba(196,97,58,.7)}
+.podx .btn.soft{--bg:var(--terra-tint);--fg:var(--terra);--bd:transparent}.podx .btn.soft:hover{--bg:#F2D9CC}
+.podx .btn.ghost{--bd:transparent;--bg:transparent;color:var(--ink-2)}.podx .btn.ghost:hover{--bg:var(--paper)}
+.podx .btn.sm{height:30px;padding:0 10px;font-size:13px}
+.podx .spinner{width:15px;height:15px;border:2px solid rgba(196,97,58,.3);border-top-color:var(--terra);border-radius:50%;animation:podxspin .7s linear infinite}
+.podx .btn.primary .spinner{border-color:rgba(255,255,255,.35);border-top-color:#fff}
+@keyframes podxspin{to{transform:rotate(360deg)}}
+.podx .chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:12.5px;font-weight:500;background:var(--paper);border:1px solid var(--line);color:var(--ink-2)}
+.podx .chip i{width:6px;height:6px;border-radius:50%;background:var(--gold)}
+.podx .chip.sage{color:var(--sage);background:var(--sage-tint);border-color:transparent}.podx .chip.sage i{background:var(--sage)}
+@media (max-width:820px){
+  .podx .page{padding:16px 14px 60px}
+  .podx .head{grid-template-columns:1fr}.podx .value{text-align:left}
+  .podx .strip{grid-template-columns:1fr 1fr}.podx .stage{border-bottom:1px solid var(--line-2)}
+  .podx .money{grid-template-columns:1fr 1fr}
+  .podx .inline,.podx .inline.pay{grid-template-columns:1fr 1fr}
+  .podx .sheet{overflow-x:auto}.podx .sheet table{min-width:720px}
+}
+@media (prefers-reduced-motion:reduce){.podx *{animation-duration:.01ms !important;transition-duration:.01ms !important}}
+`;
+
 export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const { poId }   = useParams<{ poId: string }>();
   const navigate   = useNavigate();
@@ -381,6 +536,20 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const [settleAmount,     setSettleAmount]     = useState('');
   const [settlePayMode,    setSettlePayMode]    = useState<'NEFT' | 'UPI' | 'Cheque' | 'Cash'>('NEFT');
   const [settleRef,        setSettleRef]        = useState('');
+
+  // ── Reference PO-detail redesign (po-detail.html) UI state ──────────────────
+  const [menuOpen,     setMenuOpen]     = useState(false);
+  const [billingOpen,  setBillingOpen]  = useState(false);   // unfolds the bill columns + bill row
+  const [payRowOpen,   setPayRowOpen]   = useState(false);
+  const [refBillNo,    setRefBillNo]    = useState('');
+  const [refBillDate,  setRefBillDate]  = useState(new Date().toISOString().split('T')[0]);
+  const [refBillFile,  setRefBillFile]  = useState<File | null>(null);
+  const [refBillAmt,   setRefBillAmt]   = useState('');
+  const [billedQty,    setBilledQty]    = useState<Record<string, string>>({});
+  const [billedRate,   setBilledRate]   = useState<Record<string, string>>({});
+  const [savingBill,   setSavingBill]   = useState(false);
+  const refBillFileInputRef = useRef<HTMLInputElement>(null);
+  const refScanInputRef     = useRef<HTMLInputElement>(null);
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
@@ -854,6 +1023,61 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     doc.save(`${po.po_id}.pdf`);
   };
 
+  // Scan-and-fill: when the reconcile function returns, drop its extracted per-line qty/rate into the
+  // billed columns and the bill total, so "Scan bill & fill" behaves like the reference.
+  useEffect(() => {
+    if (!reconResult || !reconResult.line_matches?.length) return;
+    const q: Record<string, string> = {};
+    const r: Record<string, string> = {};
+    reconResult.line_matches.forEach((m, i) => {
+      const li = (lineItems ?? [])[i];
+      if (!li) return;
+      if (m.bill_qty != null)  q[String(li.id)] = String(m.bill_qty);
+      if (m.bill_rate != null) r[String(li.id)] = String(m.bill_rate);
+    });
+    setBilledQty(prev => ({ ...prev, ...q }));
+    setBilledRate(prev => ({ ...prev, ...r }));
+    if (reconResult.bill_total_extracted != null) setRefBillAmt(String(reconResult.bill_total_extracted));
+    setBillingOpen(true);
+  }, [reconResult]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Save the vendor bill (same write BillEntryForm performs) from the reference bill row.
+  async function saveRefBill(): Promise<void> {
+    const typed = parseAmount(refBillAmt);
+    const computed = (lineItems ?? []).reduce((s, li: any) => {
+      const q = parseFloat(billedQty[String(li.id)] || '') || Number(li.quantity_ordered) || 0;
+      const rt = parseFloat(billedRate[String(li.id)] || '') || Number(li.unit_rate) || 0;
+      return s + q * rt;
+    }, 0);
+    const bill = typed > 0 ? typed : (computed > 0 ? computed : totalValue);
+    if (!(bill > 0)) { showSnackbar('Enter a bill amount', { type: 'error' }); return; }
+    setSavingBill(true);
+    let billUrl: string | null = null;
+    if (refBillFile) {
+      const ext = refBillFile.type === 'application/pdf' ? 'pdf' : 'jpg';
+      const path = `po-bills/bill_${poId}_${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage.from('documents').upload(path, refBillFile, { contentType: refBillFile.type });
+      if (!upErr) { const { data: pub } = supabase.storage.from('documents').getPublicUrl(path); billUrl = pub.publicUrl; }
+    }
+    const { error } = await supabase.from('purchase_orders').update({
+      vendor_bill_number:    refBillNo.trim() || null,
+      vendor_bill_no:        refBillNo.trim() || null,
+      vendor_bill_amount:    bill,
+      vendor_bill_date:      refBillDate,
+      vendor_bill_url:       billUrl,
+      vendor_bill_doc_url:   billUrl,
+      bill_recorded_at:      new Date().toISOString(),
+      bill_recorded_by_name: currentUserName,
+      status:                'BILLED',
+    }).eq('po_id', poId!);
+    setSavingBill(false);
+    if (error) { showSnackbar(error.message || 'Could not save bill', { type: 'error' }); return; }
+    qc.invalidateQueries({ queryKey: ['po_detail', poId] });
+    qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
+    setBillingOpen(false);
+    showSnackbar('Bill saved');
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   if (isLoading) return <div className="p-4 md:p-8"><PageSkeleton /></div>;
@@ -885,1102 +1109,246 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     return <span className="count-up-amount">₹{displayed.toLocaleString('en-IN')}</span>;
   }
 
+  // ── Derived state for the redesign (real data behind the reference's look) ──
+  const inr0 = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
+  const cancelled = po.status === 'CANCELLED';
+  const orderValue = totalValue;
+  const gstValue = Number(po.gst_value) || 0;
+  const subTotal = Number(po.order_value) || (lineItems ?? []).reduce((s, li: any) => s + (Number(li.total_amount) || (Number(li.quantity_ordered) || 0) * (Number(li.unit_rate) || 0)), 0);
+
+  const received = !!(po.received_at_site || (grns?.length ?? 0) > 0);
+  const receivedWhen = po.received_at_site || grns?.[grns.length - 1]?.receipt_date || grns?.[0]?.receipt_date || null;
+  const receivedBy = po.received_by_name || grns?.[0]?.received_by || '';
+  const hasBill = billAmt > 0;
+  const billNo = po.vendor_bill_number || po.vendor_bill_no || '';
+  const payBase = hasBill ? billAmt : orderValue;
+  const balNum = payBase - paidTotal;
+  const paidDone = paidTotal > 0 && balNum <= 0;
+  const doneCount = 1 + (received ? 1 : 0) + (hasBill ? 1 : 0) + (paidDone ? 1 : 0);
+  const progressPct = cancelled ? 100 : doneCount * 25;
+  const nowStage = cancelled ? null : (!received ? 'recv' : !hasBill ? 'bill' : !paidDone ? 'pay' : null);
+
+  // Reconciliation of the (in-progress) billed columns against the order.
+  const billedLines = (lineItems ?? []).map((li: any) => {
+    const oq = Number(li.quantity_ordered) || 0;
+    const orr = Number(li.unit_rate) || 0;
+    const bq = billedQty[String(li.id)] !== undefined && billedQty[String(li.id)] !== '' ? parseFloat(billedQty[String(li.id)]) : oq;
+    const br = billedRate[String(li.id)] !== undefined && billedRate[String(li.id)] !== '' ? parseFloat(billedRate[String(li.id)]) : orr;
+    const amt = bq * br;
+    const why: string[] = [];
+    if (bq > oq) why.push(`qty +${+(bq - oq).toFixed(2)}`);
+    if (br > orr) why.push(`rate +${inr0(br - orr)}`);
+    return { li, oq, orr, bq, br, amt, why, ordAmt: oq * orr };
+  });
+  const billedTotal = billedLines.reduce((s, r) => s + r.amt, 0);
+  const billedFlags = billedLines.filter(r => r.why.length).length;
+  const billedDiff = billedTotal - subTotal;
+
+  // Activity feed, newest first.
+  type Act = { when: string | null; who: string; what: React.ReactNode; first?: boolean };
+  const activity: Act[] = [];
+  activity.push({ when: po.date_issued || po.created_at, who: po.ordered_by || 'Someone', what: <>created this order · {(lineItems?.length ?? 0)} item{(lineItems?.length ?? 0) !== 1 ? 's' : ''}</> });
+  if (received) activity.push({ when: receivedWhen, who: receivedBy || 'Site', what: <>marked material received at site</> });
+  if (hasBill) activity.push({ when: po.bill_recorded_at || po.vendor_bill_date, who: po.bill_recorded_by_name || 'Accounts', what: <>recorded vendor bill {billNo ? <b>{billNo}</b> : null} for <b>{inr0(billAmt)}</b></> });
+  for (const t of activeTxns) {
+    const tx = t.transactions || {};
+    activity.push({ when: tx.date, who: 'Accounts', what: <>paid <b>{inr0(Number(t.allocated_amount) || 0)}</b>{tx.payment_mode ? <> by {tx.payment_mode}</> : null}{tx.remarks ? <> · {tx.remarks}</> : null}</> });
+  }
+  if (cancelled) activity.push({ when: po.updated_at || null, who: 'Someone', what: <>cancelled this purchase order</> });
+  activity.sort((a, b) => new Date(b.when || 0).getTime() - new Date(a.when || 0).getTime());
+  if (activity[0]) activity[0].first = true;
+  const logTime = (d: string | null) => {
+    if (!d) return '';
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return '';
+    return dt.toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
+  };
+
+  const backTo = navState.from === 'project' && navState.projectId ? `/projects/${navState.projectId}/purchase-orders` : '/purchase-orders';
+  const Check = () => (<svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7" /></svg>);
+
   return (
-    <div className="min-h-screen bg-[#f7f6f4] px-4 sm:px-6 pt-6 pb-20">
-      <div className="max-w-[720px] mx-auto">
+    <div className="podx" onClick={() => menuOpen && setMenuOpen(false)}>
+      <style>{PODX_CSS}</style>
+      <div className="page">
+        {/* crumbs */}
+        <div className="crumb"><a onClick={() => navigate(backTo)}>Purchase orders</a> › <b>{po.po_id}</b></div>
 
-        {/* BACK */}
-        <div className="detail-reveal mb-3" style={{ animationDelay: '0ms' }}>
-          <BackLink
-            to={navState.from === 'project' && navState.projectId ? `/projects/${navState.projectId}/purchase-orders` : '/purchase-orders'}
-            label="Purchase orders"
-          />
-        </div>
-
-        {/* BREADCRUMB */}
-        <div className="detail-reveal mb-6" style={{ animationDelay: '0ms' }}>
-          <Breadcrumb
-            items={
-              navState.from === 'project' && navState.projectName
-                ? [
-                    { label: 'Projects', href: '/projects' },
-                    { label: navState.projectName, href: `/projects/${navState.projectId}` },
-                    { label: 'Purchase Orders', href: `/projects/${navState.projectId}/purchase-orders` },
-                    { label: poId! },
-                  ]
-                : [
-                    { label: 'Dashboard', href: '/' },
-                    { label: 'Purchase Orders', href: '/purchase-orders' },
-                    { label: poId! },
-                  ]
-            }
-          />
-        </div>
-
-        {/* HERO CARD */}
-        <div className="detail-reveal" style={{ animationDelay: '40ms' }}>
-          <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm overflow-hidden mb-4">
-            {/* Accent top bar */}
-            <div className={`h-1 w-full ${po.status === 'PAID' ? 'bg-gradient-to-r from-emerald-400 to-teal-400' : po.status === 'CANCELLED' ? 'bg-rose-300' : 'bg-gradient-to-r from-amber-400 via-orange-400 to-rose-400'}`} />
-            
-            <div className="p-6">
-              {/* Row 1: PO ID + date + status */}
-              <div className="flex items-start justify-between gap-3 mb-5">
-                <div>
-                  {/* An unapproved order IS the purchase request — one continuum, named by gate. */}
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-on-surface-variant/45 mb-1">{po.approval_status === 'APPROVED' ? 'Purchase Order' : 'Purchase Request'}</p>
-                  <p className="font-mono text-[11px] text-on-surface-variant/50 mb-1 tracking-wide">{po.po_id}</p>
-                  <p className="text-[12px] text-on-surface-variant/60">Ordered {fmtDate(po.date_issued)}{po.ordered_by ? ` by ${po.ordered_by}` : ''}</p>
-                </div>
-                <div className="flex items-center gap-2 flex-wrap justify-end">
-                  {isOverdue(po) && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full border border-red-200/60 animate-pulse">Overdue</span>}
-                  {(() => {
-                    // One derived status: the gate/price state wins until the PO is a
-                    // live, priced order; then we show the fulfillment status.
-                    const gate = poGateState(po);
-                    if (gate) {
-                      const c = gate.tone === 'pending'
-                        ? { bg: '#FBF3E0', fg: '#8A5A0B', bd: '#E5C98F' }
-                        : { bg: '#FBEEE6', fg: gate.tone === 'rejected' ? '#8F3318' : '#A8421F', bd: '#E9C3AD' };
-                      return (
-                        <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold" style={{ background: c.bg, color: c.fg, border: `1px solid ${c.bd}` }}>
-                          <span className="w-1.5 h-1.5 rounded-full" style={{ background: c.fg }} /> {gate.label}
-                        </span>
-                      );
-                    }
-                    return (
-                      <span className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold ${STATUS_BADGE[po.status] ?? 'bg-surface-container-highest text-on-surface-variant'}`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${STATUS_DOT[po.status] ?? 'bg-on-surface-variant/30'}`} />
-                        {STATUS_LABEL[po.status] ?? po.status}
-                      </span>
-                    );
-                  })()}
-                </div>
-              </div>
-
-              {/* Approval gate — a draft waits for management/principal */}
-              {po.approval_status === 'PENDING' && (
-                <div className="mb-5 rounded-xl p-4" style={{ background: '#FBF7EC', border: '1px solid #E5C98F' }}>
-                  <div className="flex items-start gap-2.5">
-                    <span className="material-symbols-outlined text-[18px] mt-0.5" style={{ color: '#8A5A0B' }}>verified_user</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[13px] font-semibold" style={{ color: '#6b4a08' }}>Waiting for approval</p>
-                      <p className="text-[12px] mt-0.5" style={{ color: '#8A5A0B' }}>
-                        {isApprover ? 'This PO stays a draft until you approve it.' : 'A draft — management or principal must approve it before it goes live.'}
-                      </p>
-
-                      {isApprover && !noteAction && (
-                        <div className="flex items-center gap-2 mt-3 flex-wrap">
-                          <button onClick={() => approve.mutate({ action: 'APPROVE' })} disabled={approve.isPending}
-                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold text-white transition-opacity disabled:opacity-50" style={{ background: '#2F5D34' }}>
-                            <span className="material-symbols-outlined text-[16px]">check</span>{approve.isPending ? 'Approving…' : 'Approve'}
-                          </button>
-                          <button onClick={() => setNoteAction('SEND_BACK')} disabled={approve.isPending}
-                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: 'transparent', border: '1px solid #E5C98F', color: '#8A5A0B' }}>
-                            <span className="material-symbols-outlined text-[16px]">undo</span>Send back
-                          </button>
-                          <button onClick={() => setNoteAction('REJECT')} disabled={approve.isPending}
-                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold" style={{ background: 'transparent', border: '1px solid #E9C3AD', color: '#8F3318' }}>
-                            <span className="material-symbols-outlined text-[16px]">block</span>Reject
-                          </button>
-                        </div>
-                      )}
-
-                      {isApprover && noteAction && (
-                        <div className="mt-3">
-                          <textarea autoFocus value={approvalRemark} onChange={e => setApprovalRemark(e.target.value)} rows={2}
-                            placeholder={noteAction === 'REJECT' ? 'Why is this rejected? (optional note)' : 'What needs fixing? (optional note to the creator)'}
-                            className="w-full text-[13px] px-3 py-2 rounded-lg outline-none" style={{ background: '#fff', border: '1px solid #E5C98F', color: '#3D3830' }} />
-                          <div className="flex items-center gap-2 mt-2">
-                            <button onClick={() => { approve.mutate({ action: noteAction, remarks: approvalRemark.trim() }); setNoteAction(null); setApprovalRemark(''); }} disabled={approve.isPending}
-                              className="px-4 py-2 rounded-lg text-[13px] font-semibold text-white disabled:opacity-50" style={{ background: '#8F3318' }}>
-                              {noteAction === 'REJECT' ? 'Reject this order' : 'Send back to creator'}
-                            </button>
-                            <button onClick={() => { setNoteAction(null); setApprovalRemark(''); }} className="px-3 py-2 rounded-lg text-[13px] font-medium" style={{ color: '#8A5A0B' }}>Cancel</button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Row 2: Amount */}
-              {totalValue > 0 && (
-                <div className="mb-5">
-                  <p className="text-[11px] font-medium text-on-surface-variant/50 mb-1 uppercase tracking-wider">Order Value</p>
-                  <p className="text-[38px] font-black text-on-surface tracking-tight leading-none font-data-mono"><AmountDisplay amount={totalValue} /></p>
-                </div>
-              )}
-
-              {/* Row 3: Vendor + Project */}
-              <div className="flex flex-wrap gap-3 mb-4">
-                <div className="flex-1 min-w-0">
-                  <p className="text-[10px] font-bold text-on-surface-variant/40 uppercase tracking-wider mb-1">Vendor</p>
-                  <button
-                    onClick={() => setShowStakeholderDrawer(true)}
-                    className="group inline-flex items-center gap-1 text-[15px] font-semibold text-primary text-left max-w-full"
-                  >
-                    <span className="border-b border-dashed border-primary/45 group-hover:border-solid group-hover:border-primary transition-all pb-[2px] truncate">
-                      {vendor?.name || '—'}
-                    </span>
-                    <span className="material-symbols-outlined text-[13px] text-primary/50 group-hover:text-primary transition-colors shrink-0">
-                      chevron_right
-                    </span>
-                  </button>
-                  <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{vendor?.category || ''}{vendor?.gstin ? ' · GST Registered' : ''}</p>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[10px] font-bold text-on-surface-variant/40 uppercase tracking-wider mb-1">Project</p>
-                  <p className="text-[15px] font-semibold text-on-surface">{project?.name || '—'}</p>
-                  {project?.site_location && <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{project.site_location}</p>}
-                </div>
-              </div>
-
-              {/* Status-driven primary action */}
-              {po.status === 'ORDERED' && canManage && (
-                <div className="mt-2 space-y-3">
-                  {Number(po.vendor_bill_amount) > 0 ? (
-                    /* Bill already entered — show summary */
-                    <BillSummaryCard po={po} activeTxns={activeTxns} onNavigate={navigate} />
-                  ) : billCelebration ? (
-                    <div className="rounded-xl border-2 border-green-500 bg-[#F0FDF4] p-4">
-                      <div className="flex items-start gap-3">
-                        <span className="text-2xl">🎉</span>
-                        <div className="flex-1">
-                          <p className="text-[15px] font-bold text-green-800">Bill recorded!</p>
-                          <p className="text-[22px] font-bold text-green-700 leading-tight mt-1">
-                            ₹{billCelebration.billAmount.toLocaleString('en-IN')}
-                          </p>
-                          <p className="text-[12px] text-green-700 mt-0.5">credited to {billCelebration.vendorName}'s account</p>
-                          {billCelebration.billNo && (
-                            <p className="text-[11px] text-green-600 mt-0.5 font-data-mono">Bill No: {billCelebration.billNo}</p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-4">
-                      <div className="flex items-start gap-3 mb-1">
-                        <span className="text-2xl">📄</span>
-                        <div className="flex-1">
-                          <p className="text-[14px] font-semibold text-amber-900">Enter vendor bill</p>
-                          <p className="text-[12px] text-amber-700 mt-0.5">Record the vendor's invoice amount before marking as received.</p>
-                        </div>
-                      </div>
-                      <BillEntryForm
-                        poId={poId!}
-                        currentUserName={currentUserName}
-                        onBillSaved={(data) => {
-                          fireCelebration();
-                          setBillCelebration({ billAmount: data.billAmount, billNo: data.billNo, vendorName: vendor?.name || 'vendor' });
-                          showSnackbar(`🎉 Bill recorded! ₹${data.billAmount.toLocaleString('en-IN')} credited to vendor account`);
-                          setTimeout(() => setBillCelebration(null), 4000);
-                        }}
-                      />
-                    </div>
-                  )}
-                  <div>
-                    <button onClick={() => setShowReceiveModal(true)}
-                      className="h-9 px-4 rounded-lg bg-[#7C3AED] text-white text-[13px] font-medium hover:opacity-90 flex items-center gap-2">
-                      <span className="material-symbols-outlined text-[16px]">inventory_2</span>
-                      Mark Received at Site
-                    </button>
-                    <p className="text-[11px] text-on-surface-variant/60 mt-1.5">Confirm material has arrived and been checked at site</p>
-                  </div>
-                </div>
-              )}
-
-              {(po.status === 'BILLED' || po.status === 'PARTIAL') && canManage && (
-                <div className="mt-2 space-y-3">
-                  <BillSummaryCard po={po} activeTxns={activeTxns} onNavigate={navigate} />
-                  <button onClick={() => setShowRecordPayment(true)}
-                    className="h-9 px-4 rounded-lg bg-[#C8603A] text-white text-[13px] font-medium hover:opacity-90 flex items-center gap-2">
-                    <span className="material-symbols-outlined text-[16px]">add</span>
-                    Record Payment
-                  </button>
-                </div>
-              )}
-
-              {po.status === 'PAID' && (
-                <div className="mt-2">
-                  <div className="flex items-center gap-2 text-green-600 mb-3">
-                    <span className="material-symbols-outlined text-[20px]" style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>
-                    <p className="text-[14px] font-medium">Fully paid and settled</p>
-                  </div>
-                  <BillSummaryCard po={po} activeTxns={activeTxns} onNavigate={navigate} />
-                </div>
-              )}
-
-              {po.status === 'CANCELLED' && (
-                <p className="text-[13px] text-on-surface-variant/60 mt-2">This PO has been cancelled.</p>
-              )}
+        {/* header */}
+        <div className="head">
+          <div>
+            <h1>Purchase order <span className="tag mono">{po.po_id}</span>{cancelled && <span className="chip" style={{ color: 'var(--terra)', borderColor: 'var(--terra-tint)', background: 'var(--terra-tint)' }}><i style={{ background: 'var(--terra)' }} />Cancelled</span>}</h1>
+            <div className="meta">
+              <span>Vendor {po.stakeholder_id ? <a onClick={() => navigate(`/stakeholders/${po.stakeholder_id}`)}>{vendor?.name || '—'}</a> : <b>{vendor?.name || '—'}</b>}</span>
+              <span>Project <b>{project?.name || '—'}</b>{project?.site_location ? <> · {project.site_location}</> : null}</span>
+              <span>Ordered <b>{fmtDate(po.date_issued)}</b>{po.ordered_by ? <> by {po.ordered_by}</> : null}</span>
             </div>
-
-            {/* Action bar */}
-            <div className="flex items-center gap-2 px-6 py-3 border-t border-outline-variant/10 bg-surface-container-low/30 flex-wrap">
-              <button onClick={handleDownloadPDF} className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-on-surface text-surface-container-lowest text-[12px] font-semibold hover:opacity-90 transition-opacity">
-                <span className="material-symbols-outlined text-[14px]">download</span> Download PDF
+          </div>
+          <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+            <div className="value"><small>Order value</small><span className="mono">{inr0(orderValue)}</span></div>
+            <div className="more" onClick={(e) => e.stopPropagation()}>
+              <button className="kebab" aria-label="More actions" onClick={() => setMenuOpen(o => !o)}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
               </button>
-              {['ORDERED', 'BILLED', 'PARTIAL'].includes(po.status) && canManage && (
-                <button onClick={() => { if (window.confirm('Cancel this PO?')) updateStatus.mutate('CANCELLED'); }} className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-red-200 text-red-600 text-[12px] font-semibold hover:bg-red-50 transition-colors">
-                  <span className="material-symbols-outlined text-[14px]">cancel</span> Cancel PO
-                </button>
-              )}
-              <button onClick={() => setShowLog(v => !v)} className="ml-auto flex items-center gap-1 text-[11px] text-on-surface-variant/50 hover:text-primary transition-colors">
-                <span className="material-symbols-outlined text-[13px]">history</span>
-                {showLog ? 'Hide log' : 'Activity Log'}
-              </button>
+              <div className={`menu${menuOpen ? ' open' : ''}`}>
+                <button onClick={() => { setMenuOpen(false); handleDownloadPDF(); }}><svg viewBox="0 0 24 24"><path d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" /></svg>Download PDF</button>
+                <button onClick={() => { setMenuOpen(false); navigate('/purchase-orders/new', { state: { projectId: po.project_id, stakeholderId: po.stakeholder_id } }); }}><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 1 8 8M4 20l4-4M4 20v-4h4" /></svg>Duplicate order</button>
+                <button onClick={() => { setMenuOpen(false); navigate('/purchase-orders/new', { state: { projectId: po.project_id, stakeholderId: po.stakeholder_id } }); }}><svg viewBox="0 0 24 24"><path d="M4 6h16M8 6V4h8v2M6 6l1 14h10l1-14" /></svg>Edit items</button>
+                <hr />
+                <button className="danger" disabled={cancelled} onClick={() => { setMenuOpen(false); if (!cancelled && window.confirm('Cancel this PO?')) updateStatus.mutate('CANCELLED'); }}><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M9 9l6 6M15 9l-6 6" /></svg>Cancel PO</button>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* ITEMS ORDERED */}
-        <div className="detail-reveal" style={{ animationDelay: '80ms' }}>
-          <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm p-5 mb-4">
-            <SectionLabel icon="inventory_2" label="Items Ordered" />
-            <div className="overflow-x-auto mt-3">
-              <table className="w-full text-[12px]">
-                <thead>
-                  <tr className="border-b border-outline-variant/20">
-                    <th className="pb-2 text-left text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">#</th>
-                    <th className="pb-2 text-left text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Code</th>
-                    <th className="pb-2 text-left text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Item</th>
-                    <th className="pb-2 text-center text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Unit</th>
-                    <th className="pb-2 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Qty</th>
-                    {lineItems?.some(li => (li.quantity_delivered ?? 0) > 0) && (
-                      <th className="pb-2 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Del.</th>
-                    )}
-                    <th className="pb-2 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Rate</th>
-                    <th className="pb-2 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">GST</th>
-                    <th className="pb-2 text-right text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wide">Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lineItems && lineItems.length > 0 ? (
-                    lineItems.map((li, i) => (
-                      <tr key={li.id ?? i} className="border-b border-outline-variant/[0.06] hover:bg-surface-container-low/20 transition-colors">
-                        <td className="py-2.5 pr-2 text-on-surface-variant/40 font-bold">{li.line_number}</td>
-                        <td className="py-2.5 pr-2">
-                          {li.category_id ? (
-                            <span className="font-data-mono text-[10px] text-on-surface-variant/60">{li.category_id}</span>
-                          ) : (
-                            <span className="text-on-surface-variant/20">—</span>
-                          )}
-                        </td>
-                        <td className="py-2.5 pr-2">
-                          <div className="flex items-center gap-1.5">
-                            <div>
-                              <p className="text-[13px] font-medium text-on-surface">{li.item_name}</p>
-                              {li.specification && (
-                                <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{li.specification}</p>
-                              )}
-                            </div>
-                            {li.is_ai_extracted && (
-                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 shrink-0">AI</span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="py-2.5 text-center text-on-surface-variant/70">{li.unit}</td>
-                        <td className="py-2.5 text-right font-data-mono">{li.quantity_ordered}</td>
-                        {lineItems.some(l => (l.quantity_delivered ?? 0) > 0) && (
-                          <td className="py-2.5 text-right font-data-mono text-teal-600">{li.quantity_delivered ?? 0}</td>
-                        )}
-                        <td className="py-2.5 text-right font-data-mono text-on-surface-variant/70">
-                          ₹{Number(li.unit_rate).toLocaleString('en-IN')}
-                        </td>
-                        <td className="py-2.5 text-right text-on-surface-variant/50">{li.gst_rate}%</td>
-                        <td className="py-2.5 text-right font-data-mono font-semibold text-on-surface">
-                          ₹{Number(li.total_amount).toLocaleString('en-IN')}
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    /* Legacy items fallback */
-                    (po.items || []).map((it: any, i: number) => (
-                      <tr key={i} className="border-b border-outline-variant/[0.06]">
-                        <td className="py-2.5 pr-2 text-on-surface-variant/40 font-bold">{i + 1}</td>
-                        <td className="py-2.5 pr-2" />
-                        <td className="py-2.5 pr-2">
-                          <p className="text-[13px] font-medium text-on-surface">{it.description}</p>
-                        </td>
-                        <td className="py-2.5 text-center text-on-surface-variant/70">{it.unit || 'LS'}</td>
-                        <td className="py-2.5 text-right font-data-mono">{it.qty}</td>
-                        <td className="py-2.5 text-right font-data-mono text-on-surface-variant/70">
-                          ₹{Number(it.rate).toLocaleString('en-IN')}
-                        </td>
-                        <td className="py-2.5 text-right text-on-surface-variant/50">—</td>
-                        <td className="py-2.5 text-right font-data-mono font-semibold text-on-surface">
-                          ₹{Number(it.amount).toLocaleString('en-IN')}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+        {/* lifecycle strip */}
+        <div className="strip" style={{ ['--p' as any]: progressPct + '%' }}>
+          <div className={`stage done`}>
+            <div className="ico"><span>1</span><Check /></div>
+            <div className="t">Ordered</div>
+            <div className="s">{fmtDate(po.date_issued)}{po.ordered_by ? ` · ${po.ordered_by}` : ''}</div>
+          </div>
 
-            {/* Totals footer */}
-            {totalValue > 0 && (
-              <div className="flex justify-end mt-3 pt-2 border-t border-outline-variant/15">
-                <div className="space-y-1 text-[13px] min-w-[200px]">
-                  <div className="flex justify-between text-on-surface-variant/60">
-                    <span>Order Value</span>
-                    <span className="font-data-mono">₹{Number(po.order_value).toLocaleString('en-IN')}</span>
-                  </div>
-                  {po.gst_value && Number(po.gst_value) > 0 && (
-                    <div className="flex justify-between text-on-surface-variant/60">
-                      <span>GST</span>
-                      <span className="font-data-mono">₹{Number(po.gst_value).toLocaleString('en-IN')}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between font-bold text-[14px] border-t border-outline-variant/20 pt-1">
-                    <span>Grand Total</span>
-                    <span className="font-data-mono text-primary">₹{totalValue.toLocaleString('en-IN')}</span>
-                  </div>
-                </div>
-              </div>
+          <div className={`stage ${received ? 'done' : nowStage === 'recv' ? 'now' : 'next-later'}`}>
+            <div className="ico"><span>2</span><Check /></div>
+            <div className="t">Received at site</div>
+            <div className="s">{received ? `${fmtDate(receivedWhen)}${receivedBy ? ` · ${receivedBy}` : ''}` : 'Material not yet checked in'}</div>
+            {!received && !cancelled && nowStage === 'recv' && (
+              <div className="act"><button className="btn primary sm" disabled={markReceived.isPending} onClick={() => markReceived.mutate()}>{markReceived.isPending ? 'Marking…' : 'Mark received'}</button></div>
             )}
+          </div>
 
-            {/* Notes */}
-            {(po.vendor_notes || po.internal_notes) && (
-              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                {po.vendor_notes && (
-                  <div>
-                    <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1.5">Vendor Terms</p>
-                    <p className="text-[12px] text-on-surface-variant/70 whitespace-pre-line">{po.vendor_notes}</p>
-                  </div>
-                )}
-                {po.internal_notes && (
-                  <div>
-                    <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-wider mb-1.5">Internal Notes</p>
-                    <p className="text-[12px] text-on-surface-variant/70 whitespace-pre-line">{po.internal_notes}</p>
-                  </div>
-                )}
-              </div>
+          <div className={`stage ${hasBill ? 'done' : nowStage === 'bill' ? 'now' : 'next-later'}`}>
+            <div className="ico"><span>3</span><Check /></div>
+            <div className="t">Bill recorded</div>
+            <div className="s">{hasBill ? `${billNo ? billNo + ' · ' : ''}${inr0(billAmt)}` : `Est. ${inr0(orderValue)} · no bill yet`}</div>
+            {!hasBill && !cancelled && (
+              <div className="act"><button className={`btn sm${nowStage === 'bill' ? ' primary' : ''}`} onClick={() => { setBillingOpen(true); setPayRowOpen(false); setTimeout(() => document.getElementById('podxItems')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 30); }}>Record bill</button></div>
+            )}
+          </div>
+
+          <div className={`stage ${paidDone ? 'done' : nowStage === 'pay' ? 'now' : 'next-later'}`}>
+            <div className="ico"><span>4</span><Check /></div>
+            <div className="t">Paid</div>
+            <div className="s">{paidTotal > 0 ? `${inr0(paidTotal)} paid · ${balNum > 0 ? inr0(balNum) + ' due' : 'settled'}` : 'Nothing paid'}</div>
+            {!paidDone && !cancelled && (
+              <div className="act"><button className={`btn sm${nowStage === 'pay' ? ' primary' : ''}`} onClick={() => { setPayRowOpen(true); setBillingOpen(false); setPayAmount(String(Math.max(0, payBase - paidTotal))); setTimeout(() => document.getElementById('podxItems')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 30); }}>Record payment</button></div>
             )}
           </div>
         </div>
 
-        {/* AI RECONCILIATION */}
-        {lineItems && lineItems.length > 0 && (
-          <div className="detail-reveal" style={{ animationDelay: '155ms' }}>
-            <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm p-5 mb-4">
-              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-                <SectionLabel icon="smart_toy" label="AI Reconciliation" />
-                {reconResult && (
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                    reconResult.risk_level === 'HIGH'   ? 'bg-red-100 text-red-800' :
-                    reconResult.risk_level === 'MEDIUM' ? 'bg-amber-100 text-amber-800' :
-                    'bg-green-100 text-green-800'
-                  }`}>{reconResult.risk_level} RISK</span>
-                )}
-              </div>
-
-              {/* Upload / run panel */}
-              {!reconResult && (
-                <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
-
-                  {/* Quick-run from attached bill URL */}
-                  {po.vendor_bill_doc_url && !reconFile && (
-                    <div className="px-4 py-3 bg-surface-container-low/40 flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-[12px] font-semibold text-on-surface">Use attached bill document</p>
-                        <p className="text-[11px] text-on-surface-variant/50">AI compares the uploaded bill against PO line items</p>
-                      </div>
-                      <button
-                        onClick={() => runReconciliation(null)}
-                        disabled={reconciling}
-                        className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold bg-primary text-on-primary rounded-lg hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                      >
-                        {reconciling ? (
-                          <><span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>Analyzing…</>
-                        ) : (
-                          <><span className="material-symbols-outlined text-[14px]">smart_toy</span>Run AI Check</>
-                        )}
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Upload zone */}
-                  <div className={`px-4 py-3 ${po.vendor_bill_doc_url && !reconFile ? 'border-t border-outline-variant/10' : ''}`}>
-                    <label className="flex items-center gap-3 cursor-pointer group">
-                      <span className="material-symbols-outlined text-[20px] text-on-surface-variant/40 group-hover:text-primary transition-colors">upload_file</span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[12px] text-on-surface-variant group-hover:text-on-surface transition-colors truncate">
-                          {reconFile
-                            ? reconFile.name
-                            : po.vendor_bill_doc_url
-                              ? 'Or upload a different bill image'
-                              : 'Upload vendor bill/invoice image'
-                          }
-                        </p>
-                        {reconFile && <p className="text-[10px] text-on-surface-variant/50">{(reconFile.size / 1024).toFixed(0)} KB</p>}
-                      </div>
-                      {reconFile && (
-                        <button
-                          onClick={e => { e.preventDefault(); setReconFile(null); setReconError(null); }}
-                          className="shrink-0 text-on-surface-variant/40 hover:text-red-500 transition-colors"
-                        >
-                          <span className="material-symbols-outlined text-[16px]">close</span>
-                        </button>
-                      )}
-                      <input
-                        type="file"
-                        className="hidden"
-                        accept=".jpg,.jpeg,.png,.webp"
-                        onChange={e => { const f = e.target.files?.[0]; if (f) { setReconFile(f); setReconError(null); } e.target.value = ''; }}
-                      />
-                    </label>
-
-                    {reconFile && (
-                      <button
-                        onClick={() => runReconciliation(reconFile)}
-                        disabled={reconciling}
-                        className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-primary text-on-primary text-[12px] font-semibold hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                      >
-                        {reconciling ? (
-                          <><span className="material-symbols-outlined text-[14px] animate-spin">progress_activity</span>Analyzing document…</>
-                        ) : (
-                          <><span className="material-symbols-outlined text-[14px]">smart_toy</span>Run AI Reconciliation</>
-                        )}
-                      </button>
-                    )}
-                  </div>
-
-                  {reconError && (
-                    <div className="px-4 py-2.5 bg-red-50 border-t border-red-100">
-                      <p className="text-[12px] text-red-700">{reconError}</p>
-                    </div>
-                  )}
-
-                  <div className="px-4 py-2.5 border-t border-outline-variant/[0.06] bg-surface-container-low/20">
-                    <p className="text-[10px] text-on-surface-variant/40">
-                      Checks for grade downgrades, qty inflation, rate increases, ghost items &amp; arithmetic errors · JPG / PNG
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* Results panel */}
-              {reconResult && (
-                <div className="space-y-3">
-
-                  {/* Summary banner */}
-                  <div className={`px-4 py-3 rounded-xl border ${
-                    reconResult.risk_level === 'HIGH'   ? 'bg-red-50 border-red-200/60' :
-                    reconResult.risk_level === 'MEDIUM' ? 'bg-amber-50 border-amber-200/60' :
-                    'bg-green-50 border-green-200/60'
-                  }`}>
-                    <p className={`text-[13px] font-semibold ${
-                      reconResult.risk_level === 'HIGH'   ? 'text-red-800' :
-                      reconResult.risk_level === 'MEDIUM' ? 'text-amber-800' :
-                      'text-green-800'
-                    }`}>{reconResult.summary}</p>
-                    {reconResult.bill_total_extracted != null && (
-                      <p className="text-[11px] mt-1 text-on-surface-variant/60">
-                        Bill total: <span className="font-data-mono font-semibold text-on-surface">₹{reconResult.bill_total_extracted.toLocaleString('en-IN')}</span>
-                      </p>
-                    )}
-                    {reconResult.overall_flags.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mt-2">
-                        {reconResult.overall_flags.map(f => (
-                          <span key={f} className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
-                            reconResult.risk_level === 'HIGH' ? 'bg-red-200/60 text-red-900' : 'bg-amber-200/60 text-amber-900'
-                          }`}>{FLAG_LABEL[f] ?? f}</span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Line-by-line breakdown */}
-                  {reconResult.line_matches.length > 0 && (
-                    <div className="rounded-xl border border-outline-variant/20 overflow-hidden divide-y divide-outline-variant/[0.08]">
-                      {reconResult.line_matches.map((m, i) => (
-                        <div key={i} className={`px-3 py-2.5 ${m.flags.length > 0 ? 'bg-amber-50/40' : ''}`}>
-                          <div className="flex items-start gap-2">
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                {m.matched
-                                  ? <span className="text-[9px] font-bold text-green-600">✓</span>
-                                  : <span className="text-[9px] font-bold text-red-500">✕</span>
-                                }
-                                <p className="text-[12px] font-semibold text-on-surface">{m.po_line}</p>
-                                {m.flags.map(f => (
-                                  <span key={f} className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800">
-                                    {FLAG_LABEL[f] ?? f}
-                                  </span>
-                                ))}
-                              </div>
-                              {m.flag_details && m.flags.length > 0 && (
-                                <p className="text-[11px] text-amber-700 mt-0.5 leading-snug">{m.flag_details}</p>
-                              )}
-                              {m.bill_line && m.bill_line !== m.po_line && (
-                                <p className="text-[10px] text-on-surface-variant/50 mt-0.5">Bill: "{m.bill_line}"</p>
-                              )}
-                              {!m.matched && (
-                                <p className="text-[10px] text-red-500 font-semibold mt-0.5">Not found in bill</p>
-                              )}
-                            </div>
-                            <div className="text-right shrink-0 text-[11px] space-y-0.5">
-                              <p className="font-data-mono text-on-surface-variant/60">PO ₹{(m.po_amount ?? 0).toLocaleString('en-IN')}</p>
-                              {m.bill_amount != null && (
-                                <p className={`font-data-mono font-semibold ${
-                                  m.bill_amount > m.po_amount * 1.02 ? 'text-red-600' :
-                                  m.bill_amount < m.po_amount * 0.98 ? 'text-green-600' :
-                                  'text-on-surface'
-                                }`}>Bill ₹{m.bill_amount.toLocaleString('en-IN')}</p>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Ghost items */}
-                  {reconResult.ghost_items.length > 0 && (
-                    <div className="rounded-xl border border-red-200/60 bg-red-50 px-3 py-3">
-                      <p className="text-[10px] font-bold text-red-700 uppercase tracking-wider mb-2">
-                        Ghost Items — billed but not in PO
-                      </p>
-                      <div className="space-y-1">
-                        {reconResult.ghost_items.map((g, i) => (
-                          <div key={i} className="flex items-center justify-between text-[12px]">
-                            <span className="text-red-800 font-medium">{g.item}</span>
-                            <span className="font-data-mono font-bold text-red-800">₹{(g.amount ?? 0).toLocaleString('en-IN')}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Re-run link */}
-                  <button
-                    onClick={() => { setReconResult(null); setReconFile(null); setReconError(null); }}
-                    className="flex items-center gap-1 text-[11px] text-on-surface-variant hover:text-primary transition-colors"
-                  >
-                    <span className="material-symbols-outlined text-[13px]">refresh</span>
-                    Run again with a different document
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* FINANCIAL */}
-        <div className="detail-reveal" style={{ animationDelay: '180ms' }}>
-          <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm p-5 mb-4">
-            <SectionLabel icon="account_balance_wallet" label="Financial Summary" />
-            <div className="rounded-xl border border-outline-variant/20 overflow-hidden mt-3">
-              {/* Credit row — vendor gave material */}
-              {billAmt > 0 ? (
-                <div className="flex items-center justify-between px-4 py-3 bg-[rgba(22,163,74,0.03)] border-b border-outline-variant/10">
-                  <div>
-                    <p className="text-[12px] font-medium text-[#16A34A]">Credit — By Purchase</p>
-                    <p className="text-[11px] text-on-surface-variant/60 mt-0.5">Vendor bill recorded</p>
-                  </div>
-                  <span className="font-data-mono font-semibold text-[14px] text-[#16A34A]">
-                    ₹{billAmt.toLocaleString('en-IN')}
-                  </span>
-                </div>
-              ) : (
-                <div className="flex items-center justify-between px-4 py-3 bg-amber-50/10 border-b border-outline-variant/10">
-                  <div>
-                    <p className="text-[12px] font-medium text-amber-700">Credit — Pending Bill</p>
-                    <p className="text-[11px] text-on-surface-variant/60 mt-0.5">
-                      No vendor bill recorded yet (Est. value: ₹{totalValue.toLocaleString('en-IN')})
-                    </p>
-                  </div>
-                  <span className="font-data-mono font-semibold text-[14px] text-on-surface-variant/40">
-                    —
-                  </span>
-                </div>
-              )}
-              {/* Debit row — payment made */}
-              {paidTotal > 0 && (
-                <div className="flex items-center justify-between px-4 py-3 border-b border-outline-variant/10">
-                  <div>
-                    <p className="text-[12px] font-medium text-on-surface">Debit — To Bank / Cash</p>
-                    <p className="text-[11px] text-on-surface-variant/60 mt-0.5">
-                      {billAmt === 0 ? 'PO Advance payment recorded' : 'Payment made'}
-                    </p>
-                  </div>
-                  <span className="font-data-mono font-semibold text-[14px] text-on-surface">
-                    ₹{paidTotal.toLocaleString('en-IN')}
-                  </span>
-                </div>
-              )}
-              {/* Balance */}
-              <div className="flex items-center justify-between px-4 py-3">
-                <p className="text-[13px] font-bold text-on-surface">Balance</p>
-                <span className={`font-data-mono font-bold text-[15px] ${balance > 0 ? 'text-[#DC2626]' : balance < 0 ? 'text-[#D97706]' : 'text-[#16A34A]'}`}>
-                  {balance === 0
-                    ? 'Nil — Settled ✓'
-                    : balance > 0
-                    ? `₹${balance.toLocaleString('en-IN')} Cr`
-                    : `₹${Math.abs(balance).toLocaleString('en-IN')} Dr`}
-                </span>
-              </div>
-            </div>
-
-            {/* Progress bar — only when bill amount is known */}
-            {billAmt > 0 && (
-              <div className="mt-4">
-                <div className="flex justify-between items-center mb-1.5">
-                  <span className="text-[11px] text-on-surface-variant">Payment progress</span>
-                  <span className="text-[11px] font-semibold text-on-surface">{pct.toFixed(0)}%</span>
-                </div>
-                <div className="h-2 rounded-full bg-surface-container overflow-hidden">
-                  <div
-                    className={`h-full rounded-full progress-bar-animate ${pct >= 100 ? 'bg-secondary' : 'bg-primary'}`}
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-              </div>
-            )}
-
-            {canManage && (
-              <button
-                onClick={() => setShowRecordPayment(true)}
-                className="mt-4 flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold bg-primary/10 text-primary rounded-lg hover:bg-primary/20 transition-colors"
-              >
-                <span className="material-symbols-outlined text-[14px]">add</span>
-                Record Payment
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* PAYMENTS */}
-        {activeTxns.length > 0 && (
-          <div className="detail-reveal" style={{ animationDelay: '230ms' }}>
-            <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm p-5 mb-4">
-              <SectionLabel icon="payments" label="Payments Made" />
-              <div className="space-y-1.5 mt-3">
-                {activeTxns.map((t: any) => (
-                  <button
-                    key={t.id}
-                    className="w-full flex items-center gap-3 py-2 text-left hover:bg-surface-container-low/30 transition-colors rounded-lg px-1 group"
-                    onClick={() => openPeek('TRANSACTION', t.transactions?.txn_id)}
-                  >
-                    {(() => {
-                      const f = formatTxn({ ...t.transactions, total_amount: t.allocated_amount }, 'po');
-                      return (
-                        <>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-[12px] font-[500] text-on-surface flex items-center gap-1.5 truncate">
-                              {f.primary}
-                              {t.transactions?.category === 'PO Advance' && (
-                                <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200/50 inline-flex items-center shrink-0">
-                                  Advance
-                                </span>
-                              )}
-                            </p>
-                            {f.secondary && <p className="text-[10px] text-on-surface-variant/60 truncate">{f.secondary}</p>}
-                            <p className="text-[9px] font-mono text-on-surface-variant/25 opacity-0 group-hover:opacity-100 transition-opacity">{t.transactions?.txn_id}</p>
-                          </div>
-                          <p className="font-data-mono font-semibold text-[12px] text-on-surface shrink-0">₹{Number(t.allocated_amount).toLocaleString('en-IN')}</p>
-                        </>
-                      );
-                    })()}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Receipts section */}
-        <div className="detail-reveal" style={{ animationDelay: '280ms' }}>
-          <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm p-5 mb-4">
-            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-              <SectionLabel icon="local_shipping" label="Receipts" />
-              {canManage && (
-                <button
-                  onClick={() => setShowReceiveDrawer(true)}
-                  className="flex items-center gap-1 text-[11px] text-primary font-semibold hover:underline"
-                >
-                  <span className="material-symbols-outlined text-[13px]">local_shipping</span>
-                  Receive at site
-                </button>
-              )}
-            </div>
-
-            {(!grns || grns.length === 0) ? (
-              <p className="text-[12px] text-on-surface-variant/35 py-2">No receipts yet.</p>
-            ) : (
-              <div className="space-y-3 mt-3">
-                {grns.map((grn: any) => {
-                  const items = (grnItems ?? []).filter((i: any) => i.grn_id === grn.grn_id);
-                  const hasDamaged = items.some((i: any) => i.condition !== 'good');
-                  return (
-                    <div key={grn.grn_id} className="rounded-xl border border-outline-variant/[0.10] bg-surface-container-low/30 p-3">
-                      <div className="flex items-start justify-between gap-2 mb-1.5">
-                        <p className="font-mono text-[12px] font-bold text-on-surface">{grn.grn_id}</p>
-                        <div className="flex items-center gap-1.5">
-                          {hasDamaged && (
-                            <span className="text-[10px] font-semibold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">
-                              Discrepancy
-                            </span>
-                          )}
-                          <span className="text-[11px] text-on-surface-variant/50">{fmtDate(grn.receipt_date)}</span>
-                          <button
-                            title="Download challan"
-                            onClick={() => downloadGRNChallan({
-                              grn_id:        grn.grn_id,
-                              po_id:         po.po_id,
-                              vendor_name:   vendor?.name ?? '—',
-                              project_name:  project?.name ?? '—',
-                              receipt_date:  grn.receipt_date,
-                              dc_number:     grn.dc_number,
-                              vehicle_number: grn.vehicle_number,
-                              driver_name:   grn.driver_name,
-                              remarks:       grn.remarks,
-                              items: items.map((i: any) => ({
-                                item_name:    i.item_name,
-                                unit:         i.unit,
-                                qty_ordered:  Number(i.qty_ordered),
-                                qty_received: Number(i.qty_received),
-                                unit_rate:    i.unit_rate != null ? Number(i.unit_rate) : null,
-                                condition:    i.condition,
-                                remarks:      i.remarks ?? null,
-                              })),
-                            })}
-                            style={{
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              width: 26, height: 26, borderRadius: 8, border: 'none',
-                              background: 'rgba(11,28,48,0.06)', cursor: 'pointer',
-                              transition: 'background 0.15s',
-                            }}
-                            onMouseEnter={e => (e.currentTarget.style.background = 'rgba(11,28,48,0.12)')}
-                            onMouseLeave={e => (e.currentTarget.style.background = 'rgba(11,28,48,0.06)')}
-                          >
-                            <span className="material-symbols-outlined text-[14px] text-on-surface/50">download</span>
-                          </button>
-                        </div>
-                      </div>
-                      <p className="text-[11px] text-on-surface-variant/50">
-                        {[grn.dc_number && `DC: ${grn.dc_number}`, grn.vehicle_number].filter(Boolean).join(' · ')}
-                      </p>
-                      {items.length > 0 && (
-                        <div className="mt-2 space-y-1">
-                          {items.map((item: any) => (
-                            <div key={item.po_line_item_id ?? item.item_name} className="flex items-center justify-between text-[11px]">
-                              <span className="text-on-surface/70">{item.item_name}</span>
-                              <div className="flex items-center gap-2">
-                                <span className="font-mono text-on-surface font-medium">{item.qty_received} {item.unit}</span>
-                                {item.condition !== 'good' && (
-                                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded capitalize ${
-                                    item.condition === 'damaged' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
-                                  }`}>{item.condition}</span>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {grn.remarks && <p className="text-[11px] text-on-surface-variant/50 mt-1.5 italic">{grn.remarks}</p>}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* TRAIL / ACTIVITY LOG */}
-        <div className="detail-reveal" style={{ animationDelay: '330ms' }}>
-          <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm p-5 mb-4">
-            <SectionLabel icon="history" label="Activity Log" />
-            
-            <button
-              onClick={() => setShowLog(v => !v)}
-              className="mt-3 flex items-center gap-1.5 text-[12px] text-on-surface-variant hover:text-primary transition-colors"
-            >
-              GRN record · Status history · View log
-              <span className="material-symbols-outlined text-[14px]">{showLog ? 'expand_less' : 'chevron_right'}</span>
+        {/* items */}
+        <div className="sec">
+          <h2>Items</h2>
+          <div className="right" style={{ display: billingOpen ? 'flex' : 'none' }}>
+            <span className={`chip${billedFlags ? '' : ' sage'}`}><i />{billedFlags ? `${billedFlags} line${billedFlags > 1 ? 's' : ''} above order — check before saving` : 'Bill matches order'}</span>
+            <button className="btn soft sm" disabled={reconciling} onClick={() => refScanInputRef.current?.click()}>
+              {reconciling ? <span className="spinner" /> : <svg viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 011-1h3M16 4h3a1 1 0 011 1v3M20 16v3a1 1 0 01-1 1h-3M8 20H5a1 1 0 01-1-1v-3M4 12h16" /></svg>}
+              Scan bill &amp; fill
             </button>
-
-            {showLog && (
-              <div className="mt-4 space-y-3 pl-1 border-l-2 border-outline-variant/10 ml-1">
-                <div className="flex items-center gap-3">
-                  <span className="w-2 h-2 rounded-full bg-on-surface-variant/30 shrink-0 -ml-[5px]" />
-                  <span className="text-[12px] text-on-surface-variant/60 w-24 shrink-0">{fmtDate(po.created_at)}</span>
-                  <span className="text-[12px] text-on-surface">Draft created</span>
-                </div>
-                {po.status !== 'Draft' && (
-                  <div className="flex items-center gap-3">
-                    <span className="w-2 h-2 rounded-full bg-blue-400 shrink-0 -ml-[5px]" />
-                    <span className="text-[12px] text-on-surface-variant/60 w-24 shrink-0">{fmtDate(po.date_issued)}</span>
-                    <span className="text-[12px] text-on-surface font-medium">Order placed</span>
-                  </div>
-                )}
-                {grns?.map((grn: any) => (
-                  <div key={grn.grn_id} className="flex items-center gap-3">
-                    <span className="w-2 h-2 rounded-full bg-teal-400 shrink-0 -ml-[5px]" />
-                    <span className="text-[12px] text-on-surface-variant/60 w-24 shrink-0">{fmtDate(grn.receipt_date)}</span>
-                    <span className="text-[12px] text-on-surface">GRN {grn.grn_id} recorded</span>
-                  </div>
-                ))}
-                {(po.vendor_bill_number || po.vendor_bill_no) && (
-                  <div className="flex items-center gap-3">
-                    <span className="w-2 h-2 rounded-full bg-purple-400 shrink-0 -ml-[5px]" />
-                    <span className="text-[12px] text-on-surface-variant/60 w-24 shrink-0">{fmtDate(po.vendor_bill_date)}</span>
-                    <span className="text-[12px] text-on-surface">Vendor bill {po.vendor_bill_number || po.vendor_bill_no} recorded{po.bill_recorded_by_name ? ` by ${po.bill_recorded_by_name}` : ''}</span>
-                  </div>
-                )}
-                {approvals?.map(ap => (
-                  <div key={ap.id} className="flex items-center gap-3">
-                    <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0 -ml-[5px]" />
-                    <span className="text-[12px] w-24 shrink-0 text-on-surface-variant/60">{fmtDate(ap.actioned_at)}</span>
-                    <span className="text-[12px] text-on-surface">{ap.action} {ap.remarks ? `· ${ap.remarks}` : ''}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+            <input ref={refScanInputRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0] || null; if (f) { setRefBillFile(f); runReconciliation(f); } }} />
           </div>
         </div>
 
-      </div>{/* end max-w container */}
-
-      {/* ── Receive at site drawer ──────────────────────────────────────── */}
-      {showReceiveDrawer && po && (
-        <ReceiveAtSiteDrawer
-          isOpen={showReceiveDrawer}
-          po={{
-            po_id:           po.po_id,
-            org_id:          po.org_id,
-            project_id:      po.project_id,
-            stakeholder_id:  po.stakeholder_id,
-            stakeholder_name: po.stakeholders?.name ?? '',
-            line_items:      (lineItems ?? []).map((li: any) => ({
-              id:                  li.id,
-              item_name:           li.item_name,
-              unit:                li.unit ?? 'Nos',
-              quantity_ordered:    Number(li.quantity_ordered ?? 0),
-              unit_rate:           Number(li.unit_rate ?? 0),
-              qty_received_so_far: Number(li.quantity_delivered ?? 0),
-            })),
-          }}
-          session={session}
-          onClose={() => setShowReceiveDrawer(false)}
-          onSuccess={(grnId) => {
-            setShowReceiveDrawer(false);
-            qc.invalidateQueries({ queryKey: ['po_grn', poId] });
-            qc.invalidateQueries({ queryKey: ['po_grn_items', poId] });
-            qc.invalidateQueries({ queryKey: ['po_detail', poId] });
-            qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
-            qc.invalidateQueries({ queryKey: ['po_receipt_summary'] });
-            showSnackbar(`GRN ${grnId} recorded`);
-          }}
-        />
-      )}
-
-      {/* ── Mark Received Confirmation Modal ──────────────────────────── */}
-      {showReceiveModal && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
-          onClick={e => { if (e.target === e.currentTarget) setShowReceiveModal(false); }}>
-          <div className="bg-white w-full max-w-sm rounded-2xl shadow-xl overflow-hidden">
-            <div className="px-6 pt-6 pb-5">
-              <p className="text-[16px] font-bold text-on-surface mb-1">Confirm Site Receipt</p>
-              <div className="text-[12px] text-on-surface-variant space-y-1 mt-3 mb-4">
-                <p className="font-data-mono font-semibold text-on-surface">{po.po_id} · {vendor?.name}</p>
-                {lineItems && lineItems.length > 0 && (
-                  <p className="text-on-surface-variant/70 line-clamp-2">
-                    {lineItems.slice(0, 2).map((li: any) => li.item_name).join(', ')}
-                    {lineItems.length > 2 ? ` +${lineItems.length - 2} more` : ''}
-                  </p>
-                )}
-              </div>
-              <div className="space-y-2 text-[12px] bg-surface-container-low/50 rounded-xl px-4 py-3 mb-4">
-                <div className="flex justify-between">
-                  <span className="text-on-surface-variant/60">Received by</span>
-                  <span className="font-medium text-on-surface">{currentUserName}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-on-surface-variant/60">Date</span>
-                  <span className="font-medium text-on-surface">{new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-                </div>
-              </div>
-              <div className="flex items-start gap-2 text-[11px] text-blue-700 bg-blue-50 rounded-lg px-3 py-2 mb-5">
-                <span className="material-symbols-outlined text-[14px] mt-0.5">info</span>
-                <span>After confirming, you must attach the vendor bill before payment can be processed.</span>
-              </div>
-              <div className="flex gap-3">
-                <button onClick={() => setShowReceiveModal(false)}
-                  className="flex-1 py-2.5 rounded-xl border border-outline-variant/30 text-[13px] text-on-surface-variant font-medium hover:bg-surface-container-low transition-colors">
-                  Cancel
-                </button>
-                <button onClick={() => markReceived.mutate()} disabled={markReceived.isPending}
-                  className="flex-1 py-2.5 rounded-xl bg-[#7C3AED] text-white text-[13px] font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-1.5">
-                  <span className="material-symbols-outlined text-[16px]">check</span>
-                  {markReceived.isPending ? 'Confirming…' : 'Confirm Receipt'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Record Payment Modal (Feature 3) ──────────────────────────── */}
-      {showRecordPayment && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-end md:items-center justify-center p-0 md:p-4">
-          <div className="bg-white w-full md:max-w-md rounded-t-2xl md:rounded-2xl shadow-xl overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant/10">
-              <p className="text-[15px] font-bold text-on-surface">Record Payment</p>
-              <button onClick={() => setShowRecordPayment(false)} className="text-on-surface-variant hover:text-on-surface p-1 rounded-lg">
-                <span className="material-symbols-outlined">close</span>
-              </button>
-            </div>
-            <div className="px-6 py-5 space-y-4">
-              <div className="p-3 bg-surface-container-low/60 rounded-xl text-[12px] space-y-1">
-                <p><span className="text-on-surface-variant/60">PO:</span> <span className="font-data-mono font-bold">{po.po_id}</span></p>
-                <p><span className="text-on-surface-variant/60">Vendor:</span> <span className="font-semibold">{vendor?.name}</span></p>
-                {po.vendor_bill_amount && (
-                  <p>
-                    <span className="text-on-surface-variant/60">Bill Amount:</span>
-                    <span className="font-data-mono font-semibold ml-1">₹{Number(po.vendor_bill_amount).toLocaleString('en-IN')}</span>
-                  </p>
-                )}
-              </div>
-              {(!po.vendor_bill_amount || Number(po.vendor_bill_amount) === 0) && (
-                <div className="p-3.5 rounded-xl border border-amber-200/50 bg-amber-50/50 text-amber-800 animate-fadeIn">
-                  <div className="flex items-start gap-2.5">
-                    <span className="material-symbols-outlined text-[18px] text-amber-600 mt-0.5" style={{ fontVariationSettings: "'FILL' 1" }}>warning</span>
-                    <div className="flex-1 text-[12px] leading-relaxed">
-                      <p className="font-semibold text-amber-900">No vendor bill recorded yet.</p>
-                      <p className="text-amber-800/80 mt-0.5">This transaction will be recorded as a <strong>PO Advance</strong> in the ledger and PO details.</p>
-                    </div>
-                  </div>
-                </div>
+        <div id="podxItems" className={`sheet${billingOpen ? ' billing' : ''}`}>
+          <table>
+            <colgroup>
+              <col style={{ width: 44 }} /><col /><col style={{ width: '8%' }} /><col style={{ width: '7%' }} /><col style={{ width: '10%' }} /><col style={{ width: '11%' }} />
+              <col className="bill-col" style={{ width: '8%' }} /><col className="bill-col" style={{ width: '10%' }} /><col className="bill-col" style={{ width: '11%' }} />
+            </colgroup>
+            <thead><tr>
+              <th>#</th><th>Item</th><th className="num">Qty</th><th>Unit</th><th className="num">Rate</th><th className="num">Amount</th>
+              <th className="bill-col num">Billed qty</th><th className="bill-col num">Billed rate</th><th className="bill-col num">Billed amt</th>
+            </tr></thead>
+            <tbody>
+              {billedLines.map(({ li, oq, orr, bq, br, amt, why, ordAmt }, i) => (
+                <tr key={li.id}>
+                  <td className="n">{li.line_number ?? i + 1}</td>
+                  <td className="item"><b>{li.item_name}</b>{li.specification ? <small>{li.specification}</small> : null}</td>
+                  <td className="num">{oq}</td>
+                  <td><span className="unit">{li.unit || '—'}</span></td>
+                  <td className="num dim">{inr0(orr)}</td>
+                  <td className="num amt">{inr0(Number(li.total_amount) || ordAmt)}</td>
+                  <td className="bill-col"><div className="cell"><input className="mono" inputMode="decimal" placeholder={String(oq)} value={billedQty[String(li.id)] ?? ''} disabled={hasBill} onChange={(e) => setBilledQty(p => ({ ...p, [String(li.id)]: e.target.value }))} /></div></td>
+                  <td className="bill-col"><div className="cell"><input className="mono" inputMode="decimal" placeholder={String(orr)} value={billedRate[String(li.id)] ?? ''} disabled={hasBill} onChange={(e) => setBilledRate(p => ({ ...p, [String(li.id)]: e.target.value }))} /></div></td>
+                  <td className={`bill-col num${why.length ? ' diff' : (amt === ordAmt ? ' ok-match' : '')}`}>{inr0(amt)}{why.length ? <span className="why">{why.join(' · ')}</span> : null}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colSpan={5} style={{ textAlign: 'right' }}>Order value</td>
+                <td className="num">{inr0(subTotal)}</td>
+                <td className="bill-col" colSpan={2} style={{ textAlign: 'right' }}>Billed value</td>
+                <td className="bill-col num">{inr0(billedTotal)}</td>
+              </tr>
+              {gstValue > 0 && (
+                <tr>
+                  <td colSpan={5} style={{ textAlign: 'right' }}>GST</td>
+                  <td className="num">{inr0(gstValue)}</td>
+                  <td className="bill-col" colSpan={3} />
+                </tr>
               )}
-              <div>
-                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1.5">Amount (₹) *</label>
-                <input
-                  type="number"
-                  autoFocus
-                  className="bk-input font-data-mono"
-                  placeholder={String(po.vendor_bill_amount || totalValue)}
-                  value={payAmount}
-                  onChange={e => setPayAmount(e.target.value)}
-                  step="any"
-                />
+              <tr className="grand">
+                <td colSpan={5} style={{ textAlign: 'right' }}>Grand total {gstValue > 0 ? <span className="dim" style={{ fontWeight: 400, fontSize: 12 }}>incl. GST</span> : <span className="dim" style={{ fontWeight: 400, fontSize: 12 }}>GST not applied</span>}</td>
+                <td className="num">{inr0(orderValue)}</td>
+                <td className="bill-col" colSpan={2} style={{ textAlign: 'right' }}>Difference</td>
+                <td className="bill-col num" style={{ color: billedDiff > 0 ? 'var(--terra)' : 'var(--sage)' }}>{billedDiff ? (billedDiff > 0 ? '+' : '−') + inr0(Math.abs(billedDiff)) : 'Matches order'}</td>
+              </tr>
+            </tfoot>
+          </table>
+
+          {/* Bill header row */}
+          <div className={`inline${billingOpen && !hasBill ? ' open' : ''}`}>
+            <div className="f"><label>Bill / invoice no</label><input placeholder="INV-…" value={refBillNo} onChange={(e) => setRefBillNo(e.target.value)} /></div>
+            <div className="f"><label>Bill date</label><input type="date" value={refBillDate} onChange={(e) => setRefBillDate(e.target.value)} /></div>
+            <div className="f"><label>Bill amount</label><input className="mono" inputMode="decimal" placeholder="₹" style={{ textAlign: 'right' }} value={refBillAmt} onChange={(e) => setRefBillAmt(e.target.value)} /></div>
+            <div className="f"><label>Document</label>
+              <div className={`up${refBillFile ? ' has' : ''}`} tabIndex={0} onClick={() => refBillFileInputRef.current?.click()}>
+                <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16" /></svg>
+                <span>{refBillFile ? refBillFile.name : 'Upload PDF / photo'}</span>
               </div>
-              <div>
-                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-2">Payment Mode</label>
-                <div className="flex gap-2 flex-wrap">
-                  {(['NEFT', 'UPI', 'Cheque', 'Cash'] as const).map(m => (
-                    <button
-                      key={m}
-                      onClick={() => setPayMode(m)}
-                      className={`px-3 py-1.5 rounded-lg text-[12px] font-semibold border transition-colors ${
-                        payMode === m
-                          ? 'bg-primary text-on-primary border-primary'
-                          : 'border-outline-variant/30 text-on-surface-variant hover:bg-surface-container-low'
-                      }`}
-                    >
-                      {m}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1.5">Reference</label>
-                <input className="bk-input" placeholder="UTR / Cheque no. / Reference" value={payRef} onChange={e => setPayRef(e.target.value)} />
-              </div>
+              <input ref={refBillFileInputRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }} onChange={(e) => setRefBillFile(e.target.files?.[0] || null)} />
             </div>
-            <div className="px-6 py-4 border-t border-outline-variant/10 flex gap-3 justify-end">
-              <button onClick={() => setShowRecordPayment(false)} className="bk-btn-ghost border border-outline-variant/30 text-[13px] px-4 py-2 rounded-xl">
-                Cancel
-              </button>
-              <button
-                onClick={() => recordPayment.mutate()}
-                disabled={recordPayment.isPending || !payAmount}
-                className="bk-btn text-[13px] px-5 py-2 rounded-xl flex items-center gap-2 disabled:opacity-50"
-              >
-                {recordPayment.isPending ? 'Saving…' : 'Record Payment'}
-                <span className="material-symbols-outlined text-[16px]">payments</span>
-              </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn ghost" onClick={() => setBillingOpen(false)}>Discard</button>
+              <button className="btn primary" disabled={savingBill} onClick={saveRefBill}>{savingBill ? <span className="spinner" /> : 'Save bill'}</button>
+            </div>
+          </div>
+
+          {/* Payment row */}
+          <div className={`inline pay${payRowOpen ? ' open' : ''}`}>
+            <div className="f"><label>Amount</label><input className="mono" inputMode="decimal" style={{ textAlign: 'right' }} value={payAmount} onChange={(e) => setPayAmount(e.target.value)} /></div>
+            <div className="f"><label>Paid on</label><input type="date" defaultValue={new Date().toISOString().split('T')[0]} /></div>
+            <div className="f"><label>Mode</label>
+              <select value={payMode} onChange={(e) => setPayMode(e.target.value as any)}>
+                <option value="UPI">UPI</option><option value="NEFT">NEFT / RTGS</option><option value="Cash">Cash</option><option value="Cheque">Cheque</option>
+              </select>
+            </div>
+            <div className="f"><label>Reference / note</label><input placeholder="UTR, cheque no, or who paid" value={payRef} onChange={(e) => setPayRef(e.target.value)} /></div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn ghost" onClick={() => setPayRowOpen(false)}>Discard</button>
+              <button className="btn primary" disabled={recordPayment.isPending || !(parseFloat(payAmount) > 0)} onClick={() => recordPayment.mutate(undefined, { onSuccess: () => setPayRowOpen(false) })}>{recordPayment.isPending ? <span className="spinner" /> : 'Save payment'}</button>
             </div>
           </div>
         </div>
-      )}
 
-      {/* ── Settle PO Modal ────────────────────────────────────────────── */}
-      {showSettleModal && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-end md:items-center justify-center p-0 md:p-4">
-          <div className="bg-white w-full md:max-w-md rounded-t-2xl md:rounded-2xl shadow-xl overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant/10">
-              <p className="text-[15px] font-bold text-on-surface">Settle Purchase Order</p>
-              <button onClick={() => setShowSettleModal(false)} className="text-on-surface-variant hover:text-on-surface p-1 rounded-lg">
-                <span className="material-symbols-outlined">close</span>
-              </button>
-            </div>
-            <div className="px-6 py-5 space-y-4">
-              <div className="p-3 bg-surface-container-low/60 rounded-xl text-[12px] space-y-1">
-                <p><span className="text-on-surface-variant/60">Settling PO:</span> <span className="font-data-mono font-bold">{po.po_id}</span></p>
-                <p><span className="text-on-surface-variant/60">Vendor:</span> <span className="font-semibold">{vendor?.name}</span></p>
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1.5">Amount (₹) *</label>
-                <input
-                  type="number"
-                  className="bk-input font-data-mono"
-                  value={settleAmount}
-                  onChange={e => setSettleAmount(e.target.value)}
-                  step="any"
-                />
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-2">Payment Mode</label>
-                <div className="flex gap-2 flex-wrap">
-                  {(['NEFT', 'UPI', 'Cheque', 'Cash'] as const).map(m => (
-                    <button
-                      key={m}
-                      onClick={() => setSettlePayMode(m)}
-                      className={`px-3 py-1.5 rounded-lg text-[12px] font-semibold border transition-colors ${
-                        settlePayMode === m
-                          ? 'bg-primary text-on-primary border-primary'
-                          : 'border-outline-variant/30 text-on-surface-variant hover:bg-surface-container-low'
-                      }`}
-                    >
-                      {m}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1.5">Reference</label>
-                <input className="bk-input" placeholder="UTR / Cheque no. / Reference" value={settleRef} onChange={e => setSettleRef(e.target.value)} />
-              </div>
-            </div>
-            <div className="px-6 py-4 border-t border-outline-variant/10 flex gap-3 justify-end">
-              <button onClick={() => setShowSettleModal(false)} className="bk-btn-ghost border border-outline-variant/30 text-[13px] px-4 py-2 rounded-xl">
-                Cancel
-              </button>
-              <button
-                onClick={() => settlePO.mutate()}
-                disabled={settlePO.isPending}
-                className="bk-btn text-[13px] px-5 py-2 rounded-xl flex items-center gap-2"
-              >
-                {settlePO.isPending ? 'Processing…' : 'Create Transaction & Mark Settled'}
-                <span className="material-symbols-outlined text-[16px]">check</span>
-              </button>
-            </div>
-          </div>
+        {/* money */}
+        <div className="money">
+          <div><small>Ordered</small><span className="mono">{inr0(orderValue)}</span><div className="sub">{fmtDate(po.date_issued)}</div></div>
+          <div><small>Billed</small><span className="mono">{hasBill ? inr0(billAmt) : '—'}</span><div className="sub">{hasBill ? (billNo || 'Vendor bill') + (billAmt > subTotal ? ` · ${inr0(billAmt - subTotal)} over order` : ' · matches order') : 'Estimate used until bill arrives'}</div></div>
+          <div><small>Paid</small><span className="mono">{inr0(paidTotal)}</span><div className="sub">{paidTotal > 0 ? `${activeTxns.length} payment${activeTxns.length !== 1 ? 's' : ''}` : 'No payments'}</div></div>
+          <div className={`bal ${balNum > 0 ? 'owe' : 'nil'}`}><small>Balance to vendor</small><span className="mono">{balNum > 0 ? inr0(balNum) : (balNum < 0 ? 'Over by ' + inr0(-balNum) : 'Nil')}</span><div className="sub">{balNum > 0 ? (hasBill ? 'Against vendor bill' : 'On credit · against estimate') : (balNum < 0 ? 'Refund or adjust next PO' : 'Settled in full')}</div></div>
         </div>
-      )}
 
-      {/* ── Stakeholder Ledger Drawer ─────────────────────────────────── */}
-      {po && (
-        <StakeholderLedgerDrawer
-          isOpen={showStakeholderDrawer}
-          onClose={() => setShowStakeholderDrawer(false)}
-          stakeholderId={po.stakeholder_id}
-        />
-      )}
+        {/* activity */}
+        <div className="sec"><h2>Activity</h2></div>
+        <div className="sheet"><ul className="log">
+          {activity.map((a, i) => (
+            <li key={i}><span className="mono">{logTime(a.when)}</span><i style={a.first ? { background: 'var(--terra)', boxShadow: '0 0 0 1px var(--terra)' } : undefined} /><span><b>{a.who}</b> {a.what}</span></li>
+          ))}
+        </ul></div>
+      </div>
     </div>
   );
 }

@@ -53,6 +53,31 @@ function SectionLabel({ n, title }: { n: string; title: string }) {
   );
 }
 
+// Sheet-redesign (ui/new-po-sheet). Section header = a small terra bar + uppercase label.
+function SheetSectionLabel({ title, right }: { title: string; right?: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between mb-2.5">
+      <div className="flex items-center gap-2">
+        <span className="h-3.5 w-[3px] rounded-full" style={{ background: uiV.accent }} />
+        <span className="text-[11px] font-bold uppercase tracking-[0.1em]" style={{ color: uiV.systemFaint }}>{title}</span>
+      </div>
+      {right}
+    </div>
+  );
+}
+
+// A keyboard-key chip used in the sheet's help line ("Move with [Tab] / [Enter]…").
+function Kbd({ children }: { children: React.ReactNode }) {
+  return (
+    <span
+      className="inline-flex items-center px-1.5 py-[1px] rounded-[5px] text-[10.5px] font-medium align-middle"
+      style={{ background: uiV.surface, border: `1px solid ${uiV.line}`, color: uiV.system, ...uiNums }}
+    >
+      {children}
+    </span>
+  );
+}
+
 
 const UNITS = ['Nos', 'Bags', 'MT', 'm³', 'm²', 'RFT', 'Ltr', 'kg', 'Set', 'LS', 'Pair', 'Rmt', 'Sqft'];
 const GST_RATES = [0, 5, 12, 18, 28];
@@ -988,6 +1013,16 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
   // ceremony JSX; never by any pipeline path or payload-constructing handler.
   const [uiCeremonyOpen, setUiCeremonyOpen] = useState(false);
 
+  // Sheet redesign: ONE order-level GST switch instead of the per-line GST/discount inputs.
+  // It's pure UI over the SAME per-line data model — flipping it maps every line's gst_rate to
+  // 18 or 0 and recomputes, so the saved payload (gst_value/total_value) is produced exactly as
+  // before. Default ON (newLine already seeds gst_rate = 18).
+  const [gstOn, setGstOn] = useState(true);
+  function toggleGlobalGst(on: boolean) {
+    setGstOn(on);
+    setLineItems(prev => prev.map(li => computeLine({ ...li, gst_rate: on ? 18 : 0 })));
+  }
+
   function getInitials(name: string): string {
     if (!name) return '?';
     return name.trim().split(/\s+/).map(w => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
@@ -1032,6 +1067,8 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
   function addLine() {
     setLineItems(prev => {
       const fresh = newLine(prev.length + 1);
+      // Respect the order-level GST switch so a new row matches the rest.
+      if (!gstOn) fresh.gst_rate = 0;
       // Activate the new card so its inputs are visually highlighted
       setActiveCardId(fresh.id);
       return [...prev, fresh];
@@ -3339,6 +3376,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
 
   return (
     <>
+      {/* Global matching overlay — unchanged from the card design. */}
       {isGlobalMatching && (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-white/40 backdrop-blur-xl transition-all duration-300">
           <div className="relative flex items-center justify-center mb-6">
@@ -3355,18 +3393,13 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
             <div className="absolute top-0 bottom-0 left-0 bg-gradient-to-r from-blue-500 to-indigo-600 rounded-full animate-[loading_1.5s_infinite_ease-in-out]" style={{ width: '40%' }} />
           </div>
           <style>{`
-            @keyframes loading {
-              0% { transform: translateX(-100%); }
-              100% { transform: translateX(250%); }
-            }
-            .explanation-lifecycle {
-              animation: explanation-lifecycle 8.6s linear forwards;
-            }
+            @keyframes loading { 0% { transform: translateX(-100%); } 100% { transform: translateX(250%); } }
+            .explanation-lifecycle { animation: explanation-lifecycle 8.6s linear forwards; }
             @keyframes explanation-lifecycle {
               0%, 3.5% { opacity: 0; transform: translateY(4px); }
-              7%        { opacity: 1; transform: translateY(0); }
-              94%       { opacity: 1; transform: translateY(0); }
-              100%      { opacity: 0; transform: translateY(0); }
+              7%   { opacity: 1; transform: translateY(0); }
+              94%  { opacity: 1; transform: translateY(0); }
+              100% { opacity: 0; transform: translateY(0); }
             }
             @media (prefers-reduced-motion: reduce) {
               .animate-glass-breathe { animation: none !important; }
@@ -3377,1261 +3410,843 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
       )}
 
       <div
-        className="px-margin-mobile md:px-margin-desktop pt-6 pb-32 mx-auto"
-        style={{ maxWidth: 860, background: uiV.page }}
+        className="px-4 md:px-6 pt-6 pb-36 mx-auto"
+        style={{ maxWidth: '100%', background: uiV.page }}
         onClick={(e) => {
-          // Tapping outside any line-item card deactivates the active card.
-          // The card's own onClick stops propagation by setting itself active,
-          // so a click that lands here came from empty space.
-          if (!(e.target as HTMLElement).closest('.line-item-card')) {
+          if (!(e.target as HTMLElement).closest('.po-sheet-row') && !(e.target as HTMLElement).closest('.po-row-expansion')) {
             setActiveCardId(null);
           }
         }}
+        onKeyDown={(e) => {
+          // Ctrl/Cmd + Enter creates the order (advertised in the help line).
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && canSubmit && !saveMutation.isPending) {
+            e.preventDefault();
+            handleSubmit('ORDERED');
+          }
+        }}
       >
-      {/* Page header — ui/new-po-redesign voice restyle (back handler unchanged) */}
-      <div className="flex items-center gap-3 mb-6">
-        <button
-          onClick={() => navigate(returnTo)}
-          className="p-2 -ml-2 rounded-xl transition-colors"
-          style={{ color: uiV.user }}
-          aria-label="Back"
-        >
-          <span className="material-symbols-outlined text-[22px]">arrow_back</span>
-        </button>
-        <h2 className="text-xl font-medium flex-1 tracking-tight" style={{ color: uiV.user }}>New purchase order</h2>
-        {/* PO ID display */}
-        <span
-          className="hidden md:inline-flex items-center px-2.5 py-1 rounded-full text-xs"
-          style={{ background: uiV.field, color: uiV.system, ...uiNums }}
-        >
-          {selectedProjectObj?.project_code
-            ? `PO-${selectedProjectObj.project_code}-…`
-            : 'Auto-generated'}
-        </span>
-      </div>
+        {/* ── Header ─────────────────────────────────────────────── */}
+        <div className="flex items-center gap-3 mb-6">
+          <button
+            onClick={() => navigate(returnTo)}
+            className="p-2 -ml-2 rounded-xl transition-colors"
+            style={{ color: uiV.user }}
+            aria-label="Back"
+          >
+            <span className="material-symbols-outlined text-[22px]">arrow_back</span>
+          </button>
+          <h1 className="flex-1 text-[26px] leading-none" style={{ color: uiV.user, fontFamily: "Georgia, 'Times New Roman', serif" }}>
+            New purchase order
+          </h1>
+          <span
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs whitespace-nowrap"
+            style={{ background: uiV.surface, border: `1px solid ${uiV.line}`, color: uiV.system }}
+          >
+            <span className="w-1.5 h-1.5 rounded-full" style={{ background: uiV.accent }} />
+            <span style={{ color: uiV.systemFaint }}>Auto-generated</span>
+            <span style={{ color: uiV.user, ...uiNums }}>
+              {selectedProjectObj?.project_code ? `PO-${selectedProjectObj.project_code}-…` : 'PO-—'}
+            </span>
+          </span>
+        </div>
 
-      {/* ────────────────────────────────────────────────────────────── */}
-      {/*  Single-page top section: vendor search · project · date     */}
-      {/* ────────────────────────────────────────────────────────────── */}
-
-      {/* Vendor search — either the search input OR the selected-vendor pill, never both */}
-      <div className="flex items-center gap-2 mb-2">
-        <span className="h-3.5 w-[3px] rounded-full" style={{ background: uiV.accent }} />
-        <p className="text-[11px] font-bold uppercase tracking-[0.09em]" style={{ color: uiV.userSoft }}>Vendor</p>
-        {vendorHint && !selectedVendor && (
-          <span className="text-[11px] font-bold uppercase tracking-wider animate-pulse" style={{ color: uiV.accent }}>· Select first</span>
-        )}
-      </div>
-      <div className="relative mb-4">
-        {selectedVendor && !showVendorResults && !vendorSearch ? (
-          // Display mode — selected vendor as a static pill
-          <div className="flex items-center gap-3 w-full rounded-2xl px-4 py-3.5" style={{ background: uiV.surface, border: `1px solid ${uiV.line}` }}>
-            <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-medium shrink-0" style={{ background: uiV.field, color: uiV.system }}>
-              {getInitials(selectedVendor.name)}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate" style={{ color: uiV.user }}>{selectedVendor.name}</p>
-              <p className="text-xs truncate" style={{ color: uiV.system }}>{selectedVendor.category}</p>
-              {/* Vendor PO-history line intentionally omitted — no backing query (amendment D) */}
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedVendor(null);
-                setVendorId('');
-                setVendorSearch('');
-                setShowVendorResults(true);
-                window.setTimeout(() => vendorSearchRef.current?.focus(), 0);
-              }}
-              className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center"
-              style={{ color: uiV.systemFaint }}
-              aria-label="Clear vendor"
-            >
-              <span className="material-symbols-outlined text-[16px]">close</span>
-            </button>
-          </div>
-        ) : (
-          // Search mode — input field with magnifier and clear-X
-          <>
-            <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-[20px] text-on-surface-variant/30 pointer-events-none z-10">search</span>
-            <input
-              ref={vendorSearchRef}
-              type="text"
-              value={vendorSearch}
-              onChange={e => { setVendorSearch(e.target.value); setShowVendorResults(true); }}
-              onFocus={() => setShowVendorResults(true)}
-              onBlur={() => window.setTimeout(() => setShowVendorResults(false), 180)}
-              placeholder="Search vendor…"
-              style={{ color: uiV.user }}
-              className={`w-full h-12 pl-11 pr-10 rounded-xl bg-white text-[15px] font-medium border-[1.5px] placeholder:font-normal placeholder:text-on-surface-variant/30 focus:outline-none focus:ring-[3px] focus:ring-primary/15 focus:border-primary transition-all ${vendorHint && !selectedVendor ? 'border-primary ring-[3px] ring-primary/15' : 'border-black/[0.12] hover:border-black/20'}`}
-            />
-            {vendorSearch && (
-              <button
-                type="button"
-                onClick={() => { setVendorSearch(''); vendorSearchRef.current?.focus(); }}
-                aria-label="Clear search"
-                className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full flex items-center justify-center text-on-surface-variant/40 hover:bg-surface-container"
-              >
-                <span className="material-symbols-outlined text-[18px]">close</span>
-              </button>
-            )}
-          </>
-        )}
-        {/* Search results dropdown */}
-        {showVendorResults && vendorSearch.trim().length > 0 && (
-          <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl border border-outline-variant/20 shadow-lg z-50 max-h-[260px] overflow-y-auto">
-            {(() => {
-              const hasMatches = filteredVendors.length > 0;
-              const typed = vendorSearch.trim();
-              const openCreate = () => {
-                setNewVendorName(typed);
-                setShowVendorCreate(true);
-                setShowVendorResults(false);
-              };
-              return (
+        {/* ── Order details ──────────────────────────────────────── */}
+        <SheetSectionLabel title="Order details" />
+        <div className="rounded-2xl overflow-hidden mb-2" style={{ border: `1px solid ${uiV.line}`, background: uiV.surface }}>
+          {/* Row 1: Vendor | Project */}
+          <div className="grid" style={{ gridTemplateColumns: '116px minmax(0,1fr) 116px minmax(0,1fr)', borderBottom: `1px solid ${uiV.line}` }}>
+            <div className="flex items-center px-3.5 py-3 text-[13px]" style={{ background: uiV.field, borderRight: `1px solid ${uiV.line}`, color: uiV.system }}>Vendor</div>
+            <div className="relative flex items-center">
+              {selectedVendor && !showVendorResults && !vendorSearch ? (
+                <div className="flex items-center gap-2.5 w-full px-3.5 py-2.5">
+                  <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-medium shrink-0" style={{ background: uiV.field, color: uiV.system }}>
+                    {getInitials(selectedVendor.name)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[14px] font-medium truncate" style={{ color: uiV.user }}>{selectedVendor.name}</p>
+                    <p className="text-[11px] truncate" style={{ color: uiV.systemFaint }}>{selectedVendor.category}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedVendor(null); setVendorId(''); setVendorSearch(''); setShowVendorResults(true); window.setTimeout(() => vendorSearchRef.current?.focus(), 0); }}
+                    className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center"
+                    style={{ color: uiV.systemFaint }}
+                    aria-label="Clear vendor"
+                  >
+                    <span className="material-symbols-outlined text-[15px]">close</span>
+                  </button>
+                </div>
+              ) : (
                 <>
-                  {/* Zero matches → create becomes the hero row, one tap to add a brand-new vendor */}
-                  {!hasMatches && (
-                    <button
-                      type="button"
-                      onMouseDown={openCreate}
-                      className="group w-full flex items-center gap-3 px-4 py-3.5 text-left bg-primary/[0.05] hover:bg-primary/[0.09] transition-colors"
-                    >
-                      <div className="w-9 h-9 rounded-full bg-primary text-on-primary flex items-center justify-center text-[13px] font-bold shrink-0 shadow-sm">
-                        {typed ? getInitials(typed) : '+'}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[14px] font-semibold text-on-surface truncate">
-                          {typed ? <>Create &ldquo;{typed}&rdquo;</> : 'Add a new vendor'}
-                        </p>
-                        <p className="text-[12px] text-on-surface-variant/55">New vendor · add category &amp; GSTIN</p>
-                      </div>
-                      <span className="material-symbols-outlined text-[18px] text-primary/60 group-hover:translate-x-0.5 transition-transform">arrow_forward</span>
-                    </button>
-                  )}
-
-                  {hasMatches && filteredVendors.slice(0, 12).map((v: any) => (
-                    <button
-                      key={v.stakeholder_id}
-                      type="button"
-                      onMouseDown={() => selectVendor(v)}
-                      className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-surface-container-low/60 transition-colors border-b border-outline-variant/[0.06] last:border-0"
-                    >
-                      <div className="w-8 h-8 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center text-[12px] font-bold shrink-0">
-                        {getInitials(v.name)}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-[14px] font-medium text-on-surface truncate">{v.name}</p>
-                        <p className="text-[12px] text-on-surface-variant/50 truncate">{v.category}</p>
-                      </div>
-                    </button>
-                  ))}
-
-                  {/* Subtle add footer — only when matches exist (the hero covers the empty case) */}
-                  {hasMatches && (
-                    <button
-                      type="button"
-                      onMouseDown={openCreate}
-                      className="w-full flex items-center gap-2 px-4 py-3 text-left text-primary hover:bg-primary/[0.04] border-t border-outline-variant/15"
-                    >
-                      <span className="material-symbols-outlined text-[18px]">add</span>
-                      <span className="text-[13px] font-medium">
-                        {typed ? <>Not listed? Add &ldquo;{typed}&rdquo; as new vendor</> : 'Add a new vendor'}
-                      </span>
-                    </button>
+                  <input
+                    ref={vendorSearchRef}
+                    type="text"
+                    value={vendorSearch}
+                    onChange={(e) => { setVendorSearch(e.target.value); setShowVendorResults(true); }}
+                    onFocus={() => setShowVendorResults(true)}
+                    onBlur={() => window.setTimeout(() => setShowVendorResults(false), 180)}
+                    placeholder="Search vendor…"
+                    className="w-full px-3.5 py-3 text-[14px] bg-transparent outline-none"
+                    style={{ color: uiV.user }}
+                  />
+                  {vendorHint && !selectedVendor && (
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold uppercase tracking-wider animate-pulse pointer-events-none" style={{ color: uiV.accent }}>Select first</span>
                   )}
                 </>
-              );
-            })()}
-          </div>
-        )}
-      </div>
-
-      {/* Inline new-vendor form (preserved) */}
-      {showVendorCreate && (
-        <div className="p-4 bg-surface-container-low/40 rounded-xl border border-primary/20 space-y-3 mb-4">
-          <p className="text-[11px] font-bold text-primary uppercase tracking-wider">New Vendor</p>
-          <div>
-            <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1">Name *</label>
-            <input autoFocus className="bk-input text-[13px]" placeholder="Vendor / company name" value={newVendorName} onChange={e => setNewVendorName(e.target.value)} />
-          </div>
-          <div>
-            <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1">Category <span className="text-red-500">*</span></label>
-            <select className="bk-input text-[13px]" value={newVendorCategory} onChange={e => { setNewVendorCategory(e.target.value); setNewVendorCategoryOther(''); }}>
-              <option value="" disabled>Select category…</option>
-              {VENDOR_TRADE_GROUPS.map(g => (
-                <optgroup key={g.group} label={g.group}>
-                  {g.trades.map(t => <option key={t} value={t}>{t}</option>)}
-                </optgroup>
-              ))}
-            </select>
-            {newVendorCategory === OTHER_TRADE && (
-              <input autoFocus className="bk-input text-[13px] mt-2" placeholder="Specify category…" value={newVendorCategoryOther} onChange={e => setNewVendorCategoryOther(e.target.value)} />
-            )}
-          </div>
-          <div>
-            <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider block mb-1">GSTIN</label>
-            <input className="bk-input text-[13px] font-data-mono" placeholder="Optional" value={newVendorGstin} onChange={e => setNewVendorGstin(e.target.value)} />
-          </div>
-          <div className="flex gap-2 pt-1">
-            <button type="button" onClick={() => { setShowVendorCreate(false); setNewVendorName(''); setNewVendorCategory(''); setNewVendorCategoryOther(''); setNewVendorGstin(''); }}
-              className="bk-btn-ghost border border-outline-variant/30 text-[12px] px-3 py-1.5 rounded-lg">Cancel</button>
-            <button type="button" onClick={() => createVendor.mutate()}
-              disabled={!newVendorName.trim() || !newVendorCategory || (newVendorCategory === OTHER_TRADE && !newVendorCategoryOther.trim()) || createVendor.isPending}
-              className="bk-btn text-[12px] px-4 py-1.5 rounded-lg flex items-center gap-1.5 disabled:opacity-50">
-              {createVendor.isPending ? 'Saving…' : 'Create & Select'}
-              <span className="material-symbols-outlined text-[14px]">check</span>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Project — ui/new-po-redesign chips (selected state + mobile horizontal scroll).
-          Show the selector whenever there's a project so it's always visible (and a single project
-          is auto-selected below, so it reads as chosen). */}
-      {projects && projects.length > 0 && (
-        <div className="mt-4 mb-4">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="h-3.5 w-[3px] rounded-full" style={{ background: uiV.accent }} />
-            <p className="text-[11px] font-bold uppercase tracking-[0.09em]" style={{ color: uiV.userSoft }}>Project</p>
-          </div>
-          <UiProjectChips
-            projects={projects.map((p: any) => ({ id: p.project_id, name: p.name }))}
-            selectedId={projectId}
-            onSelect={handleProjectChange}
-          />
-        </div>
-      )}
-
-      {/* Date — a clear, tappable chip (not muted text) */}
-      <div className="mb-2">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="h-3.5 w-[3px] rounded-full" style={{ background: uiV.accent }} />
-          <p className="text-[11px] font-bold uppercase tracking-[0.09em]" style={{ color: uiV.userSoft }}>Order date</p>
-        </div>
-        {isEditingDate ? (
-          <input
-            type="date"
-            value={orderedDate}
-            onChange={e => setOrderedDate(e.target.value)}
-            onBlur={() => setIsEditingDate(false)}
-            autoFocus
-            className="h-10 px-3 rounded-xl border-[1.5px] border-black/[0.12] text-[14px] font-medium focus:border-primary focus:ring-[3px] focus:ring-primary/15 focus:outline-none transition-all"
-            style={{ color: uiV.user }}
-          />
-        ) : (
-          <button
-            type="button"
-            onClick={() => setIsEditingDate(true)}
-            className="inline-flex items-center gap-2 h-10 px-3.5 rounded-xl bg-white border-[1.5px] border-black/[0.12] hover:border-primary/40 active:scale-[0.98] transition-all"
-            aria-label="Edit date"
-          >
-            <span className="material-symbols-outlined text-[16px]" style={{ color: uiV.accent }}>calendar_today</span>
-            <span className="text-[14px] font-medium" style={{ color: uiV.user }}>{orderedDate ? fmtDate(orderedDate) : 'Today'}</span>
-            <span className="material-symbols-outlined text-[14px]" style={{ color: uiV.systemFaint }}>edit</span>
-          </button>
-        )}
-      </div>
-
-      {/* Separator */}
-      <div className="border-t border-outline-variant/10 my-5" />
-
-      {/* ui/new-po-redesign — sticky context recap (shown once a vendor is chosen).
-          Pure display of values the page already holds. */}
-      {selectedVendor && (
-        <UiContextRecap
-          initials={getInitials(selectedVendor.name)}
-          vendorName={selectedVendor.name}
-          projectName={selectedProjectObj?.name}
-          dateLabel={orderedDate ? new Date(orderedDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : undefined}
-          poLabel={selectedProjectObj?.project_code ? `PO-${selectedProjectObj.project_code}-…` : undefined}
-        />
-      )}
-
-      {/* ═══ ITEMS SECTION — always visible. The old hard gate hid the items until a vendor was
-          chosen, which confused people. The fields are present now; focusing one with no vendor
-          selected bounces focus up to the vendor field and surfaces a hint there — guided, not hidden. ═══ */}
-      <div onFocusCapture={(e) => {
-        if (!vendorId && (e.target as HTMLElement).tagName === 'INPUT') {
-          setVendorHint(true);
-          vendorSearchRef.current?.focus();
-        }
-      }}>
-      <>
-      {/* Items header + inline doc-upload trigger */}
-      <div className="flex items-center justify-between mt-6 mb-3">
-        <div className="flex items-center gap-2">
-          <span className="h-3.5 w-[3px] rounded-full" style={{ background: uiV.accent }} />
-          <h2 className="text-[11px] font-bold uppercase tracking-[0.09em]" style={{ color: uiV.userSoft }}>Items</h2>
-          {lineItems.filter(li => li.item_name.trim()).length > 0 && (
-            <span className="text-[11px] font-bold leading-none px-1.5 py-1 rounded-full" style={{ color: uiV.accent, background: uiV.accentSoft }}>{lineItems.filter(li => li.item_name.trim()).length}</span>
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          className="inline-flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg border-[1.5px] active:scale-95 transition-all hover:brightness-95"
-          style={{ color: uiV.accentDeep, borderColor: uiV.accentLine, background: uiV.accentSoft }}
-          title="Upload a quotation or bill — AI extracts items"
-        >
-          <span className="material-symbols-outlined text-[16px]">document_scanner</span>
-          <span className="hidden sm:inline">Scan bill / quote</span>
-        </button>
-      </div>
-
-      {/* Hidden file input — kept for fileInputRef.current?.click() */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*,.pdf,.txt"
-        onChange={handleDocumentUpload}
-        style={{ display: 'none' }}
-      />
-      {docExtracting && (
-        <div className="flex items-center gap-3 rounded-xl border border-outline-variant/15 bg-surface-container-low/30 px-4 py-3 mb-3">
-          <span className="material-symbols-outlined text-[18px] text-on-surface-variant/40 animate-spin shrink-0">progress_activity</span>
-          <div>
-            <div className="text-[13px] font-medium text-on-surface/80">Reading document…</div>
-            <div className="text-[11px] text-on-surface-variant/40 mt-0.5">Extracting items and matching to SKU library</div>
-          </div>
-        </div>
-      )}
-      {docExtractError && (
-        <div className="flex items-center gap-2 rounded-lg bg-red-50 border border-red-100 px-3 py-2.5 text-[12px] text-red-700 mb-3">
-          <span className="material-symbols-outlined text-[14px]">error</span>
-          {docExtractError}
-        </div>
-      )}
-
-            {/* Line items as Cards */}
-            <div className="flex flex-col gap-3 mt-4">
-              {lineItems.map((li, rowIdx) => {
-                // The card has resolved context if pills exist, a family is matched,
-                // or the AI returned a suggestion. The checkmark surfaces in those states.
-                const hasPills          = !!li.attribute_pills && li.attribute_pills.length > 0;
-                const showOrphanContext = !li.family_match && !!li.web_variants && li.web_variants.length > 0;
-                const anyPanel          = hasPills || showOrphanContext;
-                const isSuccess         = aiJustMatchedIds.has(li.id);
-
-                const isActiveCard = activeCardId === li.id;
+              )}
+              {/* Vendor results dropdown — portalled to <body> so the order-details card's
+                  overflow-hidden can never clip it (it was getting buried inside the cell). */}
+              {showVendorResults && vendorSearch.trim().length > 0 && vendorSearchRef.current && createPortal((() => {
+                const rect = vendorSearchRef.current!.getBoundingClientRect();
                 return (
-                  <div
-                    key={li.id}
-                    id={`line-item-${li.id}`}
-                    onClick={() => setActiveCardId(li.id)}
-                    className={`line-item-card relative rounded-2xl border bg-white overflow-hidden transition-all duration-300 shadow-[0_2px_10px_rgba(0,0,0,0.02)] ${
-                      li.needs_sku_badge
-                        ? 'border-red-300 shadow-[0_4px_16px_rgba(239,68,68,0.10)]'
-                        : isSuccess
-                          ? 'border-green-200 shadow-[0_4px_16px_rgba(34,197,94,0.08)]'
-                          : isActiveCard
-                            ? 'border-outline-variant/30 shadow-md ring-1 ring-primary/10'
-                            : 'border-outline-variant/15 hover:border-outline-variant/25 hover:shadow-[0_4px_16px_rgba(0,0,0,0.03)]'
-                    }`}
-                  >
-                    {/* Collapsed / Main Body */}
-                    <div className={`p-4 flex flex-col md:flex-row gap-4 md:items-start transition-colors ${isSuccess ? 'bg-green-50/30' : ''}`}>
-
-                      {/* Left side: Item Name, Spec, Chips */}
-                      <div className="flex-1 min-w-0 relative">
-                        <div className="flex items-center gap-2 mb-2" role="status" aria-live="polite" aria-atomic="true">
-                          <span className="text-[11px] text-on-surface-variant/35 font-medium tabular-nums w-4">
-                            {li.line_number}
-                          </span>
-                          {/* Status pill — announced to screen readers when sku_id flips. */}
-                          {li.sku_id ? (
-                            <span className="inline-flex items-center gap-1.5 max-w-full">
-                              <span className="sr-only">{`Linked to ${li.item_name?.trim() || li.sku_id}`}</span>
-                              {/* ui/new-po-redesign — CONFIRM-voice linked/auto chip; unlink/dismiss handlers below unchanged */}
-                              <UiLinkedBadge auto={!!li.auto_applied} />
-                              {isSuccess && <span className="text-[9px] font-bold ml-0.5 shrink-0" style={{ color: uiV.ask }}>✦ AI</span>}
-                              {li.auto_applied ? (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const orig = li.original_input || '';
-                                    const dismissedId = li.sku_id;
-                                    // Auto-applied dismiss → quiet state. Restore the typed name
-                                    // and whatever spec the user had before auto-fill.
-                                    clearTimeout(searchDebounceRef.current[li.id]);
-                                    clearTimeout(aiMatchDebounceRef.current[li.id]);
-                                    updateLine(li.id, {
-                                      item_name:            orig,
-                                      specification:        li.pre_auto_spec ?? '',
-                                      pre_auto_spec:        undefined,
-                                      sku_id:               null,
-                                      auto_applied:         false,
-                                      user_selected:        false,
-                                      needs_review:         false,
-                                      needs_sku_badge:      false,
-                                      auto_apply_reason:    undefined,
-                                      dismissed:            true,
-                                      dismissed_sku_ids:    dismissedId
-                                        ? [...(li.dismissed_sku_ids || []), dismissedId]
-                                        : (li.dismissed_sku_ids || []),
-                                      // Clear every form of suggestion state — go quiet.
-                                      sku_alternatives:   undefined,
-                                      searchResults:      [],
-                                      showDropdown:       false,
-                                      family_match:       undefined,
-                                      family_profile:     undefined,
-                                      family_members:     undefined,
-                                      tree_resolution:    undefined,
-                                      attribute_pills:    undefined,
-                                      checkmark_ready:    undefined,
-                                      aiSuggestion:       undefined,
-                                      web_variants:       [],
-                                      isGeneratingAiChip: false,
-                                      searchCancelled:    true,
-                                      searching:          false,
-                                      card_message:       undefined,
-                                    });
-                                  }}
-                                  className="flex items-center justify-center w-7 h-7 -mr-1 rounded-full transition-colors"
-                                  style={{ color: uiV.systemFaint }}
-                                  title="Dismiss auto-match — card stays quiet until you type"
-                                  aria-label="Dismiss auto-applied SKU"
-                                >
-                                  <span className="material-symbols-outlined text-[16px]">close</span>
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => updateLine(li.id, {
-                                    sku_id:        null,
-                                    user_selected: false,
-                                    pre_auto_spec: undefined,
-                                  })}
-                                  className="flex items-center justify-center w-7 h-7 -mr-1 rounded-full transition-colors"
-                                  style={{ color: uiV.systemFaint }}
-                                  title="Unlink — keep current item name"
-                                  aria-label="Unlink SKU"
-                                >
-                                  <span className="material-symbols-outlined text-[16px]">close</span>
-                                </button>
-                              )}
-                            </span>
-                          ) : (
-                            <span className="flex items-center gap-1.5 px-1 py-[3px] text-[11px] font-medium" style={{ color: uiV.systemFaint }}>
-                              <span className="sr-only">Unlinked — no SKU selected</span>
-                              <span aria-hidden="true" className="w-1.5 h-1.5 rounded-full" style={{ background: uiV.systemFaint }} />
-                              <span aria-hidden="true">Unlinked</span>
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Name Input WITH DROPDOWN REFS */}
-                        <div className="relative group/input" ref={el => { if (el) itemRefs.current.set(li.id, el); else itemRefs.current.delete(li.id); }}>
-                          <input
-                            className="w-full text-[16px] font-semibold text-on-surface bg-transparent border-0 px-0 py-0 outline-none placeholder:text-on-surface-variant/25 placeholder:font-normal transition-colors focus:ring-0 tracking-tight leading-tight"
-                            placeholder="Type item name to search…"
-                            value={li.item_name}
-                            onChange={e => {
-                              const val = e.target.value;
-                              console.log('[EXTRACT]', val, extractAttrs(val));
-                              clearTimeout(aiMatchDebounceRef.current[li.id]);
-                              // Was the text actually modified vs the original input? If a card is in
-                              // dismissed/quiet state we only wake it up on a real edit, not on focus
-                              // shenanigans or programmatic changes.
-                              const prevText = li.dismissed ? (li.original_input ?? li.item_name) : li.item_name;
-                              const textChanged = val !== prevText;
-                              // Substantial clear (Gap 7): user wiped the field. Reset the
-                              // dismissed-SKU list so the same suggestions can surface again
-                              // for whatever the user types next.
-                              const wasCleared = val.trim().length <= 2;
-                              const patch: Partial<DraftLineItem> = {
-                                item_name: val, sku_id: null, ai_suggested_name: undefined,
-                                sku_alternatives: undefined, aiSuggestion: undefined,
-                                auto_applied: false, original_input: undefined,
-                                searchCancelled: false, auto_apply_reason: undefined,
-                                // Pills + checkmark are derived from the search — wipe them on edit.
-                                attribute_pills: undefined,
-                                checkmark_ready: undefined,
-                                family_match: undefined,
-                                family_profile: undefined,
-                                family_members: undefined,
-                                tree_resolution: undefined,
-                                pending_families: undefined,
-                                show_custom_fallback: false,
-                                sku_match_skipped: false,
-                                resolution_source: undefined,
-                                resolution_trace: undefined,
-                                skip_trgm_on_re_search: false,
-                                attribute_conflicts: undefined,
-                                insertion_reason: null,
-                                needs_sku_badge: false,
-                                user_selected: false,
-                                pre_auto_spec: undefined,
-                                skipped_linking: false,
-                                isSearching: false,
-                                search_stage: null,
-                                card_message: undefined,
-                                did_you_mean: undefined,
-                                dym_loading: false,
-                              };
-                              // FIX 10: capture the typed attributes (material-corrected)
-                              // so size/variant/grade persist even if nothing resolves.
-                              const ta = extractAttrs(val);
-                              patch.typed_attrs = { dimension: ta.dimension ?? null, variant: ta.variant ?? null, grade: ta.grade ?? null };
-                              // PART 2: auto-fill the Brand field if a known brand was typed in
-                              // the item field — but never override a brand the user picked.
-                              const detectedBrand = detectBrandInInput(val, lineBrandCategory(li));
-                              if (detectedBrand && !(li.brand && li.brand.trim())) {
-                                patch.brand = detectedBrand;
-                              }
-                              if (wasCleared) { patch.dismissed_sku_ids = []; patch.typed_attrs = undefined; }
-                              if (li.isGeneratingAiChip) {
-                                patch.isGeneratingAiChip = false;
-                                patch.searchCancelled     = true;
-                              }
-                              // Clear dismissed only if the user actually edited the text.
-                              if (li.dismissed && textChanged) patch.dismissed = false;
-                              updateLine(li.id, patch);
-                              // Don't fire a search if the card is still quiet (no edit yet).
-                              if (li.dismissed && !textChanged) return;
-                              // ═══ Two INDEPENDENT, parallel searches ═══
-                              // Catalog (alias/trgm/tree) — own debounce inside searchSKUs.
-                              searchSKUs(li.id, val);
-                              // "Did you mean?" Google/AI suggestion — fires in parallel on
-                              // its own thread, ≥3 chars. It only populates did_you_mean and
-                              // never touches catalog state.
-                              if (val.trim().length >= 3) fireDidYouMean(li.id, val);
-                            }}
-                            onBlur={() => {
-                              setTimeout(() => updateLine(li.id, { showDropdown: false }), 200);
-                              clearTimeout(aiMatchDebounceRef.current[li.id]);
-                            }}
-                            onFocus={() => {
-                              clearTimeout(aiMatchDebounceRef.current[li.id]);
-                              if (li.searchResults && li.searchResults.length > 0) updateLine(li.id, { showDropdown: true });
-                            }}
-                            onKeyDown={e => {
-                              // Enter → append a fresh row + focus its name input.
-                              // No-op when the field is empty so users can't fat-finger blank rows.
-                              if (e.key === 'Enter' && li.item_name.trim().length > 0) {
-                                e.preventDefault();
-                                (e.currentTarget as HTMLInputElement).blur();
-                                addLine();
-                                requestAnimationFrame(() => {
-                                  const cards = document.querySelectorAll('.line-item-card');
-                                  const last  = cards[cards.length - 1] as HTMLElement | undefined;
-                                  const next  = last?.querySelector<HTMLInputElement>('input[placeholder^="Type item name"]');
-                                  next?.focus();
-                                });
-                              }
-                            }}
-                          />
-                          <div className="absolute left-0 bottom-[-2px] h-[1px] w-full bg-outline-variant/20 scale-x-0 group-focus-within/input:scale-x-100 group-hover/input:scale-x-100 transition-transform origin-left"></div>
-                          
-                          {/* In-field spinner removed — it was driven by aiMatchingIds,
-                              which only the old runAIAutoMatch populated. Loading feedback
-                              now comes from the "Identifying…" indicator below (dym_loading),
-                              the single signal for the parallel "Did you mean?" call. */}
-                        </div>
-
-                        {/* ═══ "Did you mean?" — LEADS the flow. fireDidYouMean is the
-                            first thing to fire on type: a dedicated ultra-light model
-                            call (didYouMean action) returning just the canonical name
-                            in `did_you_mean`, in parallel with the catalog search.
-                            Positioned directly under the input — Google-style — and
-                            shown until the line is actually linked to a SKU. The
-                            `name === input` guard hides it when it agrees with what
-                            was typed. ═══ */}
-                        {(() => {
-                          const dym = li.did_you_mean?.trim();
-                          // Hide only once truly resolved or deliberately quieted.
-                          // NOT on searchCancelled — that's a catalog/skip flag and the
-                          // DYM path is independent; `dismissed` already covers user intent.
-                          const hide = li.sku_id || li.sku_match_skipped || li.skipped_linking
-                            || li.dismissed;
-                          if (hide) return null;
-
-                          // Lookup still in flight — show it leading. This is what makes
-                          // "Did you mean" appear IMMEDIATELY on type, ahead of the
-                          // catalog/DB result, as designed.
-                          if (li.dym_loading && !dym) {
-                            return (
-                              <div className="mt-1.5 flex items-center gap-2">
-                                <span className="material-symbols-outlined text-[13px] text-on-surface-variant/30 animate-spin">progress_activity</span>
-                                <span className="text-[12px] text-on-surface-variant/30">Identifying…</span>
-                              </div>
-                            );
-                          }
-                          if (!dym) return null;
-                          if (dym.toLowerCase() === li.item_name.trim().toLowerCase()) return null;
-
-                          // ui/new-po-redesign precedence (amendment B): when a higher-priority
-                          // artifact (candidate chips / family picker) is showing, demote this to a
-                          // small secondary line. Same startFreshResolution handler; no state change.
-                          const uiHigher =
-                            (!!li.pending_families?.length && !li.sku_id && !li.skipped_linking && !li.dismissed && !li.sku_match_skipped)
-                            || (!li.sku_id && !dictAddingIds.has(li.id) && !anyPanel && (li.sku_alternatives?.length ?? 0) > 0);
-                          if (uiHigher) {
-                            return (
-                              <UiDemotedSuggestion
-                                name={dym}
-                                onPick={() => { const raw = li.item_name; startFreshResolution(li.id, dym, raw, extractAttrs(raw)); }}
-                              />
-                            );
-                          }
-
-                          return (
-                            <div className="mt-1.5 flex items-center gap-2 flex-wrap">
-                              <span className="text-[12px] text-on-surface-variant/40">Did you mean</span>
-                              <button
-                                type="button"
-                                onMouseDown={(e) => {
-                                  e.preventDefault();
-                                  // Carry the garbled spec's attributes into the corrected
-                                  // search: the searched name is "Screw" but the user's
-                                  // "11/2\" ss" survives as seeded dimension/grade/variant.
-                                  const raw  = li.item_name;
-                                  const seed = extractAttrs(raw);
-                                  startFreshResolution(li.id, dym, raw, seed);
-                                }}
-                                className="text-[13px] text-primary/90 underline underline-offset-2 decoration-primary/30 hover:decoration-primary/70 hover:text-primary cursor-pointer bg-transparent border-0 p-0 transition-colors"
-                              >
-                                {dym}
-                              </button>
-                              <span className="text-[12px] text-on-surface-variant/30">?</span>
+                <div className="rounded-xl max-h-[280px] overflow-y-auto" style={{ position: 'fixed', top: rect.bottom + 4, left: rect.left, width: rect.width, zIndex: 60, background: uiV.surface, border: `1px solid ${uiV.line}`, boxShadow: '0 16px 40px rgba(30,26,21,0.18)' }}>
+                  {(() => {
+                    const hasMatches = filteredVendors.length > 0;
+                    const typed = vendorSearch.trim();
+                    const openCreate = () => { setNewVendorName(typed); setShowVendorCreate(true); setShowVendorResults(false); };
+                    return (
+                      <>
+                        {!hasMatches && (
+                          <button type="button" onMouseDown={openCreate} className="group w-full flex items-center gap-3 px-4 py-3.5 text-left" style={{ background: uiV.accentSoft }}>
+                            <div className="w-8 h-8 rounded-full flex items-center justify-center text-[12px] font-bold shrink-0" style={{ background: uiV.accent, color: '#fff' }}>{typed ? getInitials(typed) : '+'}</div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[14px] font-semibold truncate" style={{ color: uiV.user }}>{typed ? <>Create “{typed}”</> : 'Add a new vendor'}</p>
+                              <p className="text-[12px]" style={{ color: uiV.systemFaint }}>New vendor · add category &amp; GSTIN</p>
                             </div>
-                          );
-                        })()}
-
-                        {/* ═══ Family disambiguation — tappable chips ═══
-                            When the alias index returns several families bunched at the top
-                            score (e.g. "sand" → M-Sand / Natural Sand / Plaster Sand / River
-                            Sand at ~1.0), searchSKUs stores the tied set in `pending_families`
-                            and asks the user to pick. The 'family' attribute is in SKIP_ATTRS
-                            for ItemAttributeFields / InlineAttributePills, so the pill renders
-                            NOWHERE — these chips are the render path. Reuses the DYM chip look.
-                            Tap value is `${category}::${sub_category}` so same-named families
-                            across categories resolve correctly (handlePillSelection F4). ═══ */}
-                        {(() => {
-                          const fams = li.pending_families;
-                          if (!fams?.length) return null;
-                          if (li.sku_id || li.skipped_linking || li.dismissed || li.sku_match_skipped) return null;
-                          // ui/new-po-redesign — host the EXISTING family chips inside the ASK-voice
-                          // strip. Guard, key, and handlePillSelection are unchanged.
-                          return (
-                            <>
-                              <UiResolutionStrip
-                                questionEn={<>“{li.item_name.trim()}” matches more than one catalog family — which one?</>}
-                              >
-                                <div className="flex gap-2.5 flex-wrap">
-                                  {fams.map((fam: any) => (
-                                    <button
-                                      key={`${fam.category}::${fam.sub_category}`}
-                                      type="button"
-                                      onMouseDown={(e) => {
-                                        e.preventDefault();
-                                        handlePillSelection(li.id, 'family', `${fam.category}::${fam.sub_category}`);
-                                      }}
-                                      className="text-left rounded-xl px-3.5 py-2.5 transition-transform active:scale-[0.98]"
-                                      style={{ background: uiV.surface, border: `1px solid ${uiV.askLine}` }}
-                                    >
-                                      <span className="text-sm font-medium" style={{ color: uiV.askDeep }}>{fam.sub_category}</span>
-                                    </button>
-                                  ))}
-                                </div>
-                              </UiResolutionStrip>
-                              <UiStripEscapes
-                                term={li.item_name.trim()}
-                                onUseAsTyped={() => handleSkipWithoutLinking(li.id)}
-                                onAddNew={() => handleAddToCatalog(li.id)}
-                              />
-                            </>
-                          );
-                        })()}
-
-                        {/* Dead "Did you mean" blue box removed — the pipeline always
-                            set `ai_suggested_name` to undefined, so it never rendered.
-                            The single working "Did you mean" is the button above, which
-                            carries the AI-suggested name via `did_you_mean`. */}
-
-                        {/* Labeled attribute fields — Size / Variant / Grade.
-                            Replaces the old single-line spec input. Pills drive
-                            field state (satisfied / missing / conflict / suggested);
-                            selections route back through handlePillSelection so the
-                            pipeline behaviour is unchanged. After auto-link the
-                            fields stay visible but disabled, showing resolved
-                            values as read-only. Dismiss (✕) clears sku_id and
-                            reactivates the fields automatically. */}
-                        {(() => {
-                          // Family pills always win; otherwise fall back to the typed
-                          // attributes (FIX 10) so a size/variant/grade shows even with no
-                          // match. typed_attrs is kept OUT of attribute_pills so it doesn't
-                          // trip the chip-suppression gate — fields + DB chips can coexist.
-                          const familyPills  = li.attribute_pills || [];
-                          // Merge typed attrs over the resolved pills so a typed size/variant/
-                          // grade is never lost once a family resolves (even if that family's
-                          // tree lacks the axis, or a builder left it blank).
-                          const basePills = familyPills.length
-                            ? mergeTypedAttrsIntoPills(familyPills, li.typed_attrs)
-                            : pillsFromTypedAttrs(li.typed_attrs);
-                          // Tag pills whose value is novel (matches no catalog member) so the
-                          // field shows a subtle "new" indicator even while OTHER facets are
-                          // still being resolved (partially_resolved). Additive, render-only.
-                          const novelSet = new Set(li.tree_resolution?.novelAttributes || []);
-                          const displayPills = novelSet.size
-                            ? basePills.map(p => (novelSet.has(p.attribute) ? { ...p, isNovel: true } : p))
-                            : basePills;
-                          if (li.sku_id) console.log('[CHIP-RENDER]', li.item_name, 'sku_id=', li.sku_id, 'attribute_pills=', JSON.stringify(li.attribute_pills), 'displayPills=', JSON.stringify(displayPills)); // TEMP
-                          // Brand is rendered as a 4th column INSIDE ItemAttributeFields via
-                          // dedicated props (never a pill). brandTick re-reads localStorage
-                          // after a "+ Add". Shown once there's an item name to order against.
-                          const showBrand    = li.item_name.trim().length >= 2;
-                          const brandCat     = lineBrandCategory(li);
-                          const brandOptions = brandTick >= 0 ? brandsFor(brandCat) : [];
-                          return (
-                            <UiAttributeFieldsHost
-                              pills={displayPills}
-                              onSelectOption={(attribute, value) => handlePillSelection(li.id, attribute, value)}
-                              onCustomValue={(attribute, value) => handlePillSelection(li.id, attribute, value)}
-                              onConfirmSuggestion={(_attribute, _value) => handleFamilySuggestionClick(li.id)}
-                              familyName={li.family_match?.sub_category}
-                              familySize={li.family_match?.family_size}
-                              isOrphan={!li.family_match && (showOrphanContext || !!li.aiSuggestion)}
-                              disabled={!!li.sku_id || !li.item_name?.trim() || li.item_name.trim().length < 2}
-                              brandValue={li.brand}
-                              brandOptions={brandOptions}
-                              brandListId={`brands-${li.id}`}
-                              onBrandChange={showBrand ? (value) => updateLine(li.id, { brand: value }) : undefined}
-                              onBrandAdd={showBrand ? (value) => { addCustomBrand(brandCat, value); setBrandTick(t => t + 1); } : undefined}
-                            />
-                          );
-                        })()}
-                        {/* (Standalone Brand block removed — Brand now renders as the 4th
-                            column inside ItemAttributeFields above, on the same row.) */}
-
-                        {/* Mapping explanation — fades in after auto-apply, fades out after 8s */}
-                        {li.auto_applied && li.auto_apply_reason && (
-                          <MappingExplanation
-                            originalInput={li.original_input || ''}
-                            canonicalName={li.item_name}
-                            reason={li.auto_apply_reason}
-                          />
+                            <span className="material-symbols-outlined text-[18px]" style={{ color: uiV.accent }}>arrow_forward</span>
+                          </button>
                         )}
-
-                        {/* Family suggestion — medium-confidence alias match, no tree_resolution yet.
-                            Suppressed when pills are present — the suggested pill (Gap 4) carries the same affordance. */}
-                        {li.family_match && !li.sku_id && !li.tree_resolution && !hasPills && (
-                          <div className="flex items-center justify-between mt-2.5 px-3 py-2 bg-surface-container-low rounded-lg border border-outline-variant/20 animate-peek-in">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="material-symbols-outlined text-[16px] text-primary/60 shrink-0">label</span>
-                              <span className="text-[12px] text-on-surface-variant truncate">
-                                Closest catalog match:{' '}
-                                <button
-                                  type="button"
-                                  className="font-semibold text-primary hover:underline"
-                                  onClick={() => handleFamilySuggestionClick(li.id)}
-                                >
-                                  {li.family_match.sub_category}
-                                </button>
-                              </span>
+                        {hasMatches && filteredVendors.slice(0, 12).map((v: any) => (
+                          <button key={v.stakeholder_id} type="button" onMouseDown={() => selectVendor(v)} className="w-full flex items-center gap-3 px-4 py-3 text-left hover:brightness-[0.98]" style={{ borderBottom: `1px solid ${uiV.line}55` }}>
+                            <div className="w-7 h-7 rounded-full flex items-center justify-center text-[12px] font-bold shrink-0" style={{ background: uiV.field, color: uiV.system }}>{getInitials(v.name)}</div>
+                            <div className="min-w-0">
+                              <p className="text-[14px] font-medium truncate" style={{ color: uiV.user }}>{v.name}</p>
+                              <p className="text-[12px] truncate" style={{ color: uiV.systemFaint }}>{v.category}</p>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => handleFamilySuggestionClick(li.id)}
-                              className="text-[11px] text-primary/70 hover:text-primary flex items-center gap-0.5 shrink-0 ml-2"
-                            >
-                              Show variants
-                              <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
-                            </button>
-                          </div>
+                          </button>
+                        ))}
+                        {hasMatches && (
+                          <button type="button" onMouseDown={openCreate} className="w-full flex items-center gap-2 px-4 py-3 text-left" style={{ color: uiV.accent, borderTop: `1px solid ${uiV.line}` }}>
+                            <span className="material-symbols-outlined text-[18px]">add</span>
+                            <span className="text-[13px] font-medium">{typed ? <>Not listed? Add “{typed}”</> : 'Add a new vendor'}</span>
+                          </button>
                         )}
-
-                        {/* Smart Matches & AI Suggestion Chips */}
-                        {(() => {
-                           const dbCandidates = li.sku_alternatives || [];
-                           const shouldShowDbChips = !li.sku_id && !dictAddingIds.has(li.id) && !anyPanel && dbCandidates.length > 0;
-                           const shouldShowAiChip  = !li.sku_id && !dictAddingIds.has(li.id) && !anyPanel;
-
-                           if (!shouldShowDbChips && !shouldShowAiChip) return null;
-
-                           return (
-                             <div className="mt-2.5 flex flex-wrap gap-2 items-center">
-                               {shouldShowDbChips && dbCandidates.length > 0 && (
-                                 <span className="text-[9px] font-bold text-slate-400 mr-0.5 uppercase tracking-widest flex items-center gap-0.5">
-                                   <span className="material-symbols-outlined text-[11px]">database</span> Catalogue Matches:
-                                 </span>
-                               )}
-
-                               {/* Render whatever searchSKUs decided to surface in
-                                   sku_alternatives (already floor-filtered there). Dim
-                                   anything below the strict chip threshold, mark it "?". */}
-                               {shouldShowDbChips && dbCandidates.slice(0, 3).map((chip) => {
-                                 const low = chip.similarity < SKU_CHIP_DISPLAY;
-                                 return (
-                                   <button
-                                     key={chip.sku_id}
-                                     type="button"
-                                     onClick={() => handleChipClick(li.id, chip)}
-                                     className={`px-3 py-2 min-h-[44px] text-xs font-medium rounded-full border transition-colors shadow-sm ${
-                                       low
-                                         ? 'bg-slate-50 text-slate-400 border-slate-100 hover:bg-slate-100'
-                                         : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
-                                     }`}
-                                     title={chip.item_name}
-                                   >
-                                     {memberChipLabel(chip)}{low ? ' ?' : ''}
-                                   </button>
-                                 );
-                               })}
-
-                               {/* "AI Thinking…" pill removed — it fired from the same
-                                   event as the in-field spinner, so it was a redundant
-                                   second loader on the same row. The AI suggestion still
-                                   appears below once it resolves. */}
-
-                               {shouldShowAiChip && li.aiSuggestion && !li.isGeneratingAiChip && (
-                                 <button
-                                   type="button"
-                                   onClick={() => {
-                                     const attrs = li.aiSuggestion!.extracted_attributes;
-                                     if (li.aiSuggestion!.validation_metrics?.passes_shop_floor_test) {
-                                       const originalInput = li.item_name;
-                                       const finalData = {
-                                         sub_category: attrs.sub_category,
-                                         dimension: attrs.dimension,
-                                         variant: attrs.variant,
-                                         grade: attrs.grade,
-                                         aliases: li.aiSuggestion!.aliases || [],
-                                         originalName: originalInput
-                                       };
-                                       updateLine(li.id, {
-                                         item_name: li.aiSuggestion!.ai_suggested_name,
-                                         aiSuggestion: undefined,
-                                         needs_review: false,
-                                       });
-                                       setTimeout(() => autoAddItemToDictionary(li.id, true, finalData), 100);
-                                       return;
-                                     }
-                                     // Shop-floor failure (Fix 2.3): replace the dead expandedReview
-                                     // flag with inline pills. Satisfied for what AI extracted,
-                                     // missing for what's blank — user fills via pill picker, then
-                                     // commits via checkmark.
-                                     const PLACEHOLDER_VALS = new Set(['', 'null', 'n/a', 'none', 'generic', 'standard', 'default']);
-                                     const looksPlaceholder = (v: unknown) =>
-                                       !v || PLACEHOLDER_VALS.has(String(v).toLowerCase().trim());
-                                     const newPills: PillData[] = [];
-                                     if (attrs.sub_category) {
-                                       newPills.push({
-                                         attribute: 'sub_category',
-                                         label:     'Item',
-                                         value:     attrs.sub_category,
-                                         state:     'satisfied',
-                                         source:    'ai',
-                                       });
-                                     }
-                                     const missingParams = li.aiSuggestion!.validation_metrics?.missing_parameters || [];
-                                     for (const attr of ['dimension', 'variant', 'grade'] as const) {
-                                       const val = (attrs as any)[attr];
-                                       if (!looksPlaceholder(val)) {
-                                         newPills.push({
-                                           attribute: attr,
-                                           label:     humanLabel(attr),
-                                           value:     String(val),
-                                           state:     'satisfied',
-                                           source:    'ai',
-                                           editable:  true,
-                                         });
-                                       } else if (missingParams.includes(attr)) {
-                                         newPills.push({
-                                           attribute: attr,
-                                           label:     humanLabel(attr),
-                                           value:     null,
-                                           state:     'missing',
-                                           options:   [],
-                                         });
-                                       }
-                                     }
-                                     updateLine(li.id, {
-                                       attribute_pills: newPills,
-                                       checkmark_ready: newPills.every(p => p.state !== 'missing'),
-                                       aiSuggestion:    li.aiSuggestion,
-                                       expandedReview:  false,
-                                     });
-                                   }}
-                                   className="px-3 py-2 min-h-[44px] text-xs font-semibold rounded-full bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 flex items-center gap-1 shadow-sm transition-all animate-fade-in"
-                                 >
-                                   <span className="material-symbols-outlined text-xs text-indigo-600">auto_awesome</span>
-                                   {(() => {
-                                     const attrs = li.aiSuggestion!.extracted_attributes;
-                                     const parts: string[] = [];
-
-                                     if (attrs.dimension && attrs.dimension.toLowerCase() !== 'null' && attrs.dimension.trim() !== '') {
-                                       parts.push(attrs.dimension.trim());
-                                     }
-                                     if (attrs.grade && attrs.grade.toLowerCase() !== 'null' && attrs.grade.trim() !== '') {
-                                       parts.push(attrs.grade.trim());
-                                     }
-                                     if (attrs.sub_category && attrs.sub_category.toLowerCase() !== 'null' && attrs.sub_category.trim() !== '') {
-                                       parts.push(attrs.sub_category.trim());
-                                     }
-                                     let baseName = parts.join(' ').toUpperCase();
-                                     if (attrs.variant && attrs.variant.toLowerCase() !== 'null' && attrs.variant.trim() !== '') {
-                                       baseName += ` (${attrs.variant.trim().toUpperCase()})`;
-                                     }
-                                     return baseName.replace(/\s+/g, ' ').trim();
-                                   })()}
-                                 </button>
-                               )}
-                             </div>
-                           );
-                        })()}
-
-
-                        {/* No staged progress / bouncing dots / stage narration here —
-                            the in-field spinner is the single signal that this line is
-                            resolving. We keep `search_stage` as internal state (logic +
-                            cancellation) but never narrate the pipeline to the user.
-                            The only thing rendered is a quiet "Stop" affordance during
-                            the slow AI stages, so a long call can still be bailed out of. */}
-                        {(li.search_stage === 'checking_ai' || li.search_stage === 'ai_analyzing')
-                          && !li.sku_id && !li.searchCancelled && (
-                          <div className="flex mt-2 py-1">
-                            <button
-                              type="button"
-                              onClick={e => {
-                                e.stopPropagation();
-                                clearTimeout(aiMatchDebounceRef.current[li.id]);
-                                updateLine(li.id, {
-                                  isGeneratingAiChip:   false,
-                                  isSearching:          false,
-                                  searchCancelled:      true,
-                                  search_stage:         null,
-                                  show_custom_fallback: true,
-                                });
-                              }}
-                              className="text-[11px] text-on-surface-variant/40 hover:text-on-surface-variant ml-auto"
-                            >
-                              Stop
-                            </button>
-                          </div>
-                        )}
-
-                        {/* SKU dropdown portal */}
-                        {li.showDropdown && li.searchResults && li.searchResults.length > 0 && (() => {
-                          const triggerEl = itemRefs.current.get(li.id);
-                          if (!triggerEl) return null;
-                          const rect = triggerEl.getBoundingClientRect();
-                          return createPortal(
-                            <div className="bg-white shadow-2xl border border-slate-200 opacity-100 z-40" style={{
-                              position: 'fixed', top: rect.bottom + 6, left: rect.left,
-                              width: Math.max(rect.width, 280),
-                              borderRadius: 10,
-                              overflow: 'hidden', maxHeight: 220, overflowY: 'auto',
-                            }}>
-                              <div style={{ padding: '6px 10px 4px', fontSize: 9, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.08em', borderBottom: '0.5px solid rgba(0,0,0,0.06)' }}>
-                                SKU matches — click to select
-                              </div>
-                              {li.searchResults.map((sku, si) => (
-                                <div key={sku.sku_id} onMouseDown={() => selectSKU(li.id, sku)}
-                                  style={{
-                                    display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', cursor: 'pointer',
-                                    borderBottom: si < li.searchResults.length - 1 ? '0.5px solid rgba(0,0,0,0.05)' : 'none',
-                                    background: si === 0 ? 'rgba(22,163,74,0.03)' : 'transparent',
-                                  }}
-                                  onMouseEnter={e => { e.currentTarget.style.background = '#f3f4f6'; }}
-                                  onMouseLeave={e => { e.currentTarget.style.background = si === 0 ? 'rgba(22,163,74,0.03)' : 'transparent'; }}
-                                >
-                                  {si === 0 && (
-                                    <span className="material-symbols-outlined" style={{ fontSize: 13, color: '#16a34a', flexShrink: 0 }}>star</span>
-                                  )}
-                                  <div style={{ minWidth: 0, flex: 1 }}>
-                                    <div style={{ fontSize: 12, fontWeight: si === 0 ? 600 : 400, color: '#111827', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{memberChipLabel(sku)}</div>
-                                    <div style={{ fontSize: 9, color: '#9ca3af', marginTop: 1, fontFamily: 'monospace' }}>{sku.sku_id} · {sku.unit}</div>
-                                  </div>
-                                  <span style={{
-                                    fontSize: 10, padding: '1px 5px', borderRadius: 20, fontWeight: 600, flexShrink: 0,
-                                    background: sku.similarity >= 0.75 ? '#dcfce7' : sku.similarity >= 0.5 ? '#dbeafe' : '#fef9c3',
-                                    color: sku.similarity >= 0.75 ? '#16a34a' : sku.similarity >= 0.5 ? '#1d4ed8' : '#a16207',
-                                  }}>
-                                    {Math.round(sku.similarity * 100)}%
-                                  </span>
-                                </div>
-                              ))}
-                            </div>,
-                            document.body
-                          );
-                        })()}
-                      </div>
-
-                      {/* Right side: Total anchor + compact fields underneath */}
-                      <div className="flex flex-col items-stretch md:items-end shrink-0 mt-3 md:mt-0 gap-2">
-
-                        {/* Total — visual anchor that mirrors the item name on the left */}
-                        <div className="flex items-baseline gap-2 md:justify-end">
-                          {(() => {
-                            const rate = li.unit_rate || 0;
-                            const qty = li.quantity_ordered || 0;
-                            const disc = li.discount_percent || 0;
-                            const gst = li.gst_rate || 0;
-                            const total = rate * qty * (1 - disc / 100) * (1 + gst / 100);
-                            return (
-                              <>
-                                {disc > 0 && <span className="text-[11px] text-green-600 font-medium tabular-nums">−{disc}%</span>}
-                                <UiMoney size={18}>
-                                  {total > 0 ? <>₹{total.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</> : <span style={{ color: uiV.systemFaint }}>₹0</span>}
-                                </UiMoney>
-                                <button type="button" onClick={(e) => { e.stopPropagation(); removeLine(li.id); }} className="material-symbols-outlined text-[16px] text-on-surface-variant/25 hover:text-red-500 transition-colors -mr-1 p-0.5" title="Remove Line">
-                                  delete
-                                </button>
-                              </>
-                            );
-                          })()}
-                        </div>
-
-                        {/* Compact field row: Qty × Unit  +  Rate */}
-                        <div className="flex items-center gap-2 md:justify-end">
-                          {/* Qty & Unit */}
-                          <div className="flex items-center rounded-lg border border-outline-variant/25 bg-white focus-within:border-primary/40 focus-within:ring-1 focus-within:ring-primary/15 transition-all overflow-hidden h-9">
-                            <input
-                              type="number" min="1"
-                              aria-label="Quantity"
-                              className="w-[44px] h-full text-[13px] font-semibold text-center border-0 bg-transparent focus:ring-0"
-                              value={li.quantity_ordered}
-                              onFocus={() => dismissExplanation(li.id)}
-                              onChange={e => updateLine(li.id, { quantity_ordered: parseFloat(e.target.value) || 0 })}
-                            />
-                            <div className="w-px h-4 bg-outline-variant/20" />
-                            <input
-                              aria-label="Unit"
-                              className="w-[52px] h-full text-[12px] text-center text-on-surface-variant bg-transparent border-0 focus:ring-0 uppercase tracking-wider placeholder:text-on-surface-variant/30"
-                              placeholder="UNIT"
-                              value={li.unit}
-                              onFocus={() => dismissExplanation(li.id)}
-                              onChange={e => updateLine(li.id, { unit: e.target.value.toUpperCase() })}
-                            />
-                          </div>
-
-                          {/* Rate */}
-                          <div className="relative">
-                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[12px] text-on-surface-variant/40 pointer-events-none">₹</span>
-                            <input
-                              type="number" min="0" step="0.01"
-                              aria-label="Rate"
-                              className="w-[96px] h-9 pl-6 pr-2 rounded-lg border border-outline-variant/25 bg-white text-[13px] font-semibold tabular-nums focus:border-primary/40 focus:ring-1 focus:ring-primary/15 transition-all placeholder:text-on-surface-variant/30"
-                              value={li.unit_rate || ''}
-                              placeholder="rate"
-                              onFocus={() => dismissExplanation(li.id)}
-                              onChange={e => updateLine(li.id, { unit_rate: parseFloat(e.target.value) || 0 })}
-                            />
-                          </div>
-                        </div>
-
-                        {/* Disc / GST — only shown when rate has been entered */}
-                        {(li.unit_rate || 0) > 0 && (
-                          <div className="flex items-center gap-3 md:justify-end text-on-surface-variant/55">
-                            <label className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wider">
-                              Disc
-                              <input
-                                type="number" min="0" max="100"
-                                aria-label="Discount percent"
-                                className="w-[36px] h-6 text-[12px] font-semibold text-center border-b border-outline-variant/25 bg-transparent focus:border-primary focus:ring-0 text-on-surface placeholder:text-on-surface-variant/25"
-                                placeholder="0"
-                                value={li.discount_percent || ''}
-                                onChange={e => updateLine(li.id, { discount_percent: parseFloat(e.target.value) || 0 })}
-                              />
-                              <span className="text-[10px] text-on-surface-variant/40">%</span>
-                            </label>
-                            <label className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wider">
-                              GST
-                              <input
-                                type="number" min="0" max="100"
-                                aria-label="GST percent"
-                                className="w-[36px] h-6 text-[12px] font-semibold text-center border-b border-outline-variant/25 bg-transparent focus:border-primary focus:ring-0 text-on-surface placeholder:text-on-surface-variant/25"
-                                placeholder="0"
-                                value={li.gst_rate || ''}
-                                onChange={e => updateLine(li.id, { gst_rate: parseFloat(e.target.value) || 0 })}
-                              />
-                              <span className="text-[10px] text-on-surface-variant/40">%</span>
-                            </label>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Service line indicator (Gap 9) — no SKU pipeline ran */}
-                    {li.sku_match_skipped && !li.sku_id && (
-                      <div className="px-4 pb-3">
-                        <span className="text-[10px] text-on-surface-variant/25 italic">
-                          Service item — no SKU matching
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Insertion reasoning — explains why a NEW SKU is about to be created */}
-                    {li.insertion_reason && li.checkmark_ready && !li.sku_id && (
-                      <div className="px-4 pb-3">
-                        <div className="flex items-start gap-2 px-3 py-2 bg-blue-50/50 rounded-lg">
-                          <span className="material-symbols-outlined text-[14px] text-blue-400 mt-0.5 shrink-0">info</span>
-                          <p className="text-[11px] text-blue-600/70 leading-relaxed">
-                            {li.insertion_reason.message}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Submit-validation badge — surfaces when user tried to save with this item unlinked. */}
-                    {li.needs_sku_badge && !li.sku_id && (
-                      <div className="px-4 pb-3">
-                        <div className="flex items-center gap-2 px-3 py-2 bg-red-50 rounded-lg border border-red-200">
-                          <span className="material-symbols-outlined text-[14px] text-red-500 shrink-0">error</span>
-                          <span className="text-[12px] text-red-600 font-medium">Link to a SKU before saving</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* (Removed the "Couldn't identify / Add as custom" fallback — the
-                        always-visible "Add to catalog & use" footer now covers this.) */}
-
-                    {/* Skipped state — user explicitly opted out of linking */}
-                    {li.skipped_linking && !li.sku_id && (
-                      <div className="px-4 pb-3">
-                        <span className="text-[11px] text-on-surface-variant/30 italic">
-                          Using as typed
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Card message — one-line contextual explanation. Colour by type:
-                        red for conflict, blue for novel/identified, muted for everything else. */}
-                    {li.card_message && !li.sku_id && !li.skipped_linking && (
-                      <div className="px-4 pb-2">
-                        <p className={`text-[12px] leading-relaxed ${
-                          li.card_message.type === 'conflict'
-                            ? 'text-red-600/70'
-                            : (li.card_message.type === 'novel' || li.card_message.type === 'identified')
-                              ? 'text-blue-600/60'
-                              : 'text-on-surface-variant/50'
-                        }`}>
-                          {li.card_message.text}
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Single action footer — ALWAYS visible on an unlinked card with
-                        text. "Use as typed" (keep raw, no SKU) + "Add to catalog & use"
-                        (the ONE add-to-catalog path: links an exact match, inserts a
-                        novel variant, or classifies a brand-new item — preferring the
-                        "Did you mean" name when present). No gates on chips/pills/AI. */}
-                    {!li.sku_id && !li.skipped_linking && li.item_name.trim().length >= 2 && (
-                      <div className="px-4 pb-3 flex items-center justify-end gap-3">
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); handleSkipWithoutLinking(li.id); }}
-                          className="text-[12px] text-on-surface-variant/40 hover:text-on-surface-variant/60 transition-colors"
-                          title="Keep this item with the text you typed — don't link to the catalog"
-                        >
-                          Use as typed
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); handleAddToCatalog(li.id); }}
-                          disabled={(li.attribute_conflicts?.length ?? 0) > 0}
-                          className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-medium bg-primary/10 text-primary hover:bg-primary/15 active:scale-[0.97] transition-all min-h-[36px] disabled:opacity-40 disabled:cursor-not-allowed"
-                          title={(li.attribute_conflicts?.length ?? 0) > 0 ? 'Resolve the attribute conflict first' : 'Add this item to the catalog and link it'}
-                        >
-                          <span className="material-symbols-outlined text-[14px]">add_circle</span>
-                          Add to catalog &amp; use
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Always-visible one-line "how this was matched" reason.
-                        Plain English, no collapsibles. Hidden only when the
-                        story builder returns empty (no trace or nothing to
-                        say). Trace persists across linking/commit/skip and
-                        clears only on item-name retype. */}
-                    {(() => {
-                      const story = buildResolutionStory(li.resolution_trace, li.original_input);
-                      if (!story) return null;
-                      return (
-                        <div className="px-4 py-2 border-t border-outline-variant/10 flex items-start gap-1.5">
-                          <span className="material-symbols-outlined text-[13px] text-primary/55 mt-px shrink-0">info</span>
-                          <p className="text-[11px] text-on-surface-variant leading-relaxed">
-                            <span className="text-on-surface-variant/55">How this was matched: </span>
-                            {story}
-                          </p>
-                        </div>
-                      );
-                    })()}
-                  </div>
+                      </>
+                    );
+                  })()}
+                </div>
                 );
-              })}
+              })(), document.body)}
             </div>
-            
-            <button
-              onClick={addLine}
-              className="mt-3 w-full flex items-center justify-center gap-1.5 text-[12.5px] text-primary/70 font-semibold border border-dashed border-primary/25 hover:border-primary/45 hover:text-primary hover:bg-primary/[0.04] active:scale-[0.99] px-3 py-2.5 rounded-xl transition-all duration-200"
-            >
-              <span className="material-symbols-outlined text-[16px]">add</span>
-              Add Row
-            </button>
-      </>
-      </div>
-
-    </div>
-
-    {/* Sticky footer — running total + Save Order */}
-    <div
-      className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-xl border-t border-outline-variant/[0.08]"
-      style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)' }}
-    >
-      <div className="flex items-center justify-between gap-3 px-4 py-3 max-w-3xl mx-auto">
-        <div>
-          {/* ui/new-po-redesign — grand total with "excl. GST" qualifier */}
-          <UiTotalExclGst amountLabel={`₹${grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`} size={15} />
-          <p className="text-[11px] text-on-surface-variant/40 mt-1">
-            {lineItems.filter(li => li.item_name.trim()).length} item{lineItems.filter(li => li.item_name.trim()).length !== 1 ? 's' : ''}
-          </p>
-        </div>
-        <div className="flex flex-col items-end gap-1">
-          <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => handleSubmit('ORDERED')}
-            disabled={!canSubmit || saveMutation.isPending}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-[14px] font-semibold transition-all duration-200 ${
-              canSubmit && !saveMutation.isPending
-                ? 'bg-primary text-on-primary active:scale-[0.97] shadow-md shadow-primary/20 hover:shadow-lg hover:shadow-primary/25'
-                : 'bg-surface-container text-on-surface-variant/30 cursor-not-allowed'
-            }`}
-          >
-            {saveMutation.isPending ? (
-              <>
-                <span className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>
-                Saving
-              </>
-            ) : (
-              <>
-                Save order
-                <span className="material-symbols-outlined text-[16px]">check</span>
-              </>
-            )}
-          </button>
+            <div className="flex items-center px-3.5 py-3 text-[13px]" style={{ background: uiV.field, borderLeft: `1px solid ${uiV.line}`, borderRight: `1px solid ${uiV.line}`, color: uiV.system }}>Project</div>
+            <div className="relative flex items-center">
+              <select
+                value={projectId}
+                onChange={(e) => handleProjectChange(e.target.value)}
+                className="w-full appearance-none px-3.5 py-3 pr-9 text-[14px] bg-transparent outline-none cursor-pointer"
+                style={{ color: projectId ? uiV.user : uiV.systemFaint }}
+              >
+                <option value="" disabled>Choose project</option>
+                {(projects || []).map((p: any) => (
+                  <option key={p.project_id} value={p.project_id} style={{ color: uiV.user }}>{p.name}</option>
+                ))}
+              </select>
+              <span className="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-[20px] pointer-events-none" style={{ color: uiV.systemFaint }}>expand_more</span>
+            </div>
           </div>
-          {/* ui/new-po-redesign — disabled-Save helper, derived from the SAME conditions
-              that gate canSubmit (vendor → project → at least one named item). */}
-          <UiSaveHint text={!canSubmit ? (!vendorId ? 'Select a vendor' : !projectId ? 'Select a project' : 'Add at least one item') : undefined} />
+          {/* Row 2: Order date | Deliver to */}
+          <div className="grid" style={{ gridTemplateColumns: '116px minmax(0,1fr) 116px minmax(0,1fr)' }}>
+            <div className="flex items-center px-3.5 py-3 text-[13px]" style={{ background: uiV.field, borderRight: `1px solid ${uiV.line}`, color: uiV.system }}>Order date</div>
+            <div className="flex items-center">
+              <input
+                type="date"
+                value={orderedDate}
+                onChange={(e) => setOrderedDate(e.target.value)}
+                className="w-full px-3.5 py-3 text-[14px] bg-transparent outline-none"
+                style={{ color: uiV.user }}
+              />
+            </div>
+            <div className="flex items-center px-3.5 py-3 text-[13px]" style={{ background: uiV.field, borderLeft: `1px solid ${uiV.line}`, borderRight: `1px solid ${uiV.line}`, color: uiV.system }}>Deliver to</div>
+            <div className="flex items-center">
+              <input
+                type="text"
+                value={deliveryLocation}
+                onChange={(e) => setDeliveryLocation(e.target.value)}
+                placeholder="Site address (auto-fills from project)"
+                className="w-full px-3.5 py-3 text-[14px] bg-transparent outline-none placeholder:font-normal"
+                style={{ color: uiV.user }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Inline new-vendor form (unchanged behaviour) */}
+        {showVendorCreate && (
+          <div className="p-4 rounded-xl space-y-3 mb-4" style={{ background: uiV.field, border: `1px solid ${uiV.accentLine}` }}>
+            <p className="text-[11px] font-bold uppercase tracking-wider" style={{ color: uiV.accent }}>New vendor</p>
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider block mb-1" style={{ color: uiV.system }}>Name *</label>
+              <input autoFocus className="bk-input text-[13px]" placeholder="Vendor / company name" value={newVendorName} onChange={(e) => setNewVendorName(e.target.value)} />
+            </div>
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider block mb-1" style={{ color: uiV.system }}>Category *</label>
+              <select className="bk-input text-[13px]" value={newVendorCategory} onChange={(e) => { setNewVendorCategory(e.target.value); setNewVendorCategoryOther(''); }}>
+                <option value="" disabled>Select category…</option>
+                {VENDOR_TRADE_GROUPS.map((g: any) => (
+                  <optgroup key={g.group} label={g.group}>
+                    {g.trades.map((t: string) => <option key={t} value={t}>{t}</option>)}
+                  </optgroup>
+                ))}
+              </select>
+              {newVendorCategory === OTHER_TRADE && (
+                <input autoFocus className="bk-input text-[13px] mt-2" placeholder="Specify category…" value={newVendorCategoryOther} onChange={(e) => setNewVendorCategoryOther(e.target.value)} />
+              )}
+            </div>
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider block mb-1" style={{ color: uiV.system }}>GSTIN</label>
+              <input className="bk-input text-[13px] font-data-mono" placeholder="Optional" value={newVendorGstin} onChange={(e) => setNewVendorGstin(e.target.value)} />
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button type="button" onClick={() => { setShowVendorCreate(false); setNewVendorName(''); setNewVendorCategory(''); setNewVendorCategoryOther(''); setNewVendorGstin(''); }} className="text-[12px] px-3 py-1.5 rounded-lg" style={{ border: `1px solid ${uiV.line}`, color: uiV.system }}>Cancel</button>
+              <button type="button" onClick={() => createVendor.mutate()} disabled={!newVendorName.trim() || !newVendorCategory || (newVendorCategory === OTHER_TRADE && !newVendorCategoryOther.trim()) || createVendor.isPending} className="text-[12px] px-4 py-1.5 rounded-lg flex items-center gap-1.5 disabled:opacity-50" style={{ background: uiV.accent, color: '#fff' }}>
+                {createVendor.isPending ? 'Saving…' : 'Create & select'}
+                <span className="material-symbols-outlined text-[14px]">check</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Items ──────────────────────────────────────────────── */}
+        <div className="mt-6">
+          <SheetSectionLabel
+            title="Items"
+            right={(
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="inline-flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg active:scale-95 transition-all hover:brightness-95"
+                style={{ color: uiV.accentDeep, border: `1px solid ${uiV.accentLine}`, background: uiV.accentSoft }}
+                title="Upload a quotation or bill — AI extracts items"
+              >
+                <span className="material-symbols-outlined text-[16px]">document_scanner</span>
+                <span className="hidden sm:inline">Scan bill / quote</span>
+              </button>
+            )}
+          />
+        </div>
+
+        <input ref={fileInputRef} type="file" accept="image/*,.pdf,.txt" onChange={handleDocumentUpload} style={{ display: 'none' }} />
+        {docExtracting && (
+          <div className="flex items-center gap-3 rounded-xl px-4 py-3 mb-3" style={{ background: uiV.field, border: `1px solid ${uiV.line}` }}>
+            <span className="material-symbols-outlined text-[18px] animate-spin shrink-0" style={{ color: uiV.systemFaint }}>progress_activity</span>
+            <div>
+              <div className="text-[13px] font-medium" style={{ color: uiV.userSoft }}>Reading document…</div>
+              <div className="text-[11px] mt-0.5" style={{ color: uiV.systemFaint }}>Extracting items and matching to SKU library</div>
+            </div>
+          </div>
+        )}
+        {docExtractError && (
+          <div className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-[12px] mb-3" style={{ background: '#FDECEC', border: '1px solid #F6D2D2', color: '#B4231F' }}>
+            <span className="material-symbols-outlined text-[14px]">error</span>
+            {docExtractError}
+          </div>
+        )}
+
+        {/* The sheet */}
+        <div
+          className="rounded-2xl overflow-hidden"
+          style={{ border: `1px solid ${uiV.line}`, background: uiV.surface }}
+          onFocusCapture={(e) => {
+            // Focusing an item cell with no vendor bounces up to the vendor field, guided not hidden.
+            if (!vendorId && (e.target as HTMLElement).tagName === 'INPUT' && (e.target as HTMLElement).getAttribute('data-po-item') === '1') {
+              setVendorHint(true);
+              vendorSearchRef.current?.focus();
+            }
+          }}
+        >
+          <div className="overflow-x-auto">
+            <table className="w-full" style={{ borderCollapse: 'collapse', minWidth: 860 }}>
+              <thead>
+                <tr style={{ background: uiV.field }}>
+                  {[
+                    { k: 'n', t: '#', w: 44, a: 'left' },
+                    { k: 'item', t: 'Item', w: undefined, a: 'left' },
+                    { k: 'dim', t: 'Size / dimension', w: 130, a: 'left' },
+                    { k: 'var', t: 'Variant / type', w: 120, a: 'left' },
+                    { k: 'grd', t: 'Grade', w: 90, a: 'left' },
+                    { k: 'qty', t: 'Qty', w: 64, a: 'right' },
+                    { k: 'unit', t: 'Unit', w: 74, a: 'left' },
+                    { k: 'rate', t: 'Rate', w: 96, a: 'right' },
+                    { k: 'amt', t: 'Amount', w: 104, a: 'right' },
+                    { k: 'del', t: '', w: 40, a: 'left' },
+                  ].map((c) => (
+                    <th
+                      key={c.k}
+                      className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.04em]"
+                      style={{ width: c.w, textAlign: c.a as any, color: uiV.systemFaint, borderBottom: `1px solid ${uiV.line}` }}
+                    >
+                      {c.t}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {lineItems.map((li, rowIdx) => {
+                  const hasPills          = !!li.attribute_pills && li.attribute_pills.length > 0;
+                  const showOrphanContext = !li.family_match && !!li.web_variants && li.web_variants.length > 0;
+                  const anyPanel          = hasPills || showOrphanContext;
+                  const isSuccess         = aiJustMatchedIds.has(li.id);
+                  const isActive          = activeCardId === li.id;
+
+                  // Read-only mirror of the resolved / typed attributes for the sheet cells.
+                  const rowPills = (li.attribute_pills && li.attribute_pills.length)
+                    ? mergeTypedAttrsIntoPills(li.attribute_pills, li.typed_attrs)
+                    : pillsFromTypedAttrs(li.typed_attrs);
+                  const pv = (a: string) => rowPills.find((p: any) => p.attribute === a && p.value)?.value || null;
+                  const dimVal = pv('dimension');
+                  const varVal = pv('variant');
+                  const grdVal = pv('grade');
+                  const amount = (li.quantity_ordered || 0) * (li.unit_rate || 0);
+                  const cell = { borderBottom: `1px solid ${isActive ? 'transparent' : uiV.line}`, verticalAlign: 'middle' as const };
+                  const dash = <span style={{ color: uiV.systemFaint }}>—</span>;
+
+                  return (
+                    <React.Fragment key={li.id}>
+                      <tr
+                        id={`line-item-${li.id}`}
+                        className="po-sheet-row group"
+                        onClick={() => setActiveCardId(li.id)}
+                        style={{ background: li.needs_sku_badge ? '#FDF3F2' : isSuccess ? uiV.confirmWash : isActive ? '#FCFBFA' : uiV.surface }}
+                      >
+                        {/* # + linked dot */}
+                        <td className="px-3 py-2.5" style={cell}>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[12px] tabular-nums" style={{ color: uiV.systemFaint }}>{li.line_number}</span>
+                            <span
+                              className="w-1.5 h-1.5 rounded-full shrink-0"
+                              title={li.sku_id ? 'Linked to your catalogue' : 'Not linked'}
+                              style={{ background: li.sku_id ? uiV.confirm : uiV.line }}
+                            />
+                          </div>
+                        </td>
+
+                        {/* Item name */}
+                        <td className="px-3 py-2" style={cell}>
+                          <div className="relative" ref={(el) => { if (el) itemRefs.current.set(li.id, el); else itemRefs.current.delete(li.id); }}>
+                            <input
+                              data-po-item="1"
+                              className="w-full text-[14px] font-medium bg-transparent border-0 px-0 py-1 outline-none placeholder:font-normal"
+                              style={{ color: uiV.user }}
+                              placeholder="Type item name…"
+                              value={li.item_name}
+                              onFocus={() => {
+                                setActiveCardId(li.id);
+                                clearTimeout(aiMatchDebounceRef.current[li.id]);
+                                if (li.searchResults && li.searchResults.length > 0) updateLine(li.id, { showDropdown: true });
+                              }}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                clearTimeout(aiMatchDebounceRef.current[li.id]);
+                                const prevText = li.dismissed ? (li.original_input ?? li.item_name) : li.item_name;
+                                const textChanged = val !== prevText;
+                                const wasCleared = val.trim().length <= 2;
+                                const patch: Partial<DraftLineItem> = {
+                                  item_name: val, sku_id: null, ai_suggested_name: undefined,
+                                  sku_alternatives: undefined, aiSuggestion: undefined,
+                                  auto_applied: false, original_input: undefined,
+                                  searchCancelled: false, auto_apply_reason: undefined,
+                                  attribute_pills: undefined, checkmark_ready: undefined,
+                                  family_match: undefined, family_profile: undefined, family_members: undefined,
+                                  tree_resolution: undefined, pending_families: undefined,
+                                  show_custom_fallback: false, sku_match_skipped: false,
+                                  resolution_source: undefined, resolution_trace: undefined,
+                                  skip_trgm_on_re_search: false, attribute_conflicts: undefined,
+                                  insertion_reason: null, needs_sku_badge: false, user_selected: false,
+                                  pre_auto_spec: undefined, skipped_linking: false, isSearching: false,
+                                  search_stage: null, card_message: undefined, did_you_mean: undefined, dym_loading: false,
+                                };
+                                const ta = extractAttrs(val);
+                                patch.typed_attrs = { dimension: ta.dimension ?? null, variant: ta.variant ?? null, grade: ta.grade ?? null };
+                                const detectedBrand = detectBrandInInput(val, lineBrandCategory(li));
+                                if (detectedBrand && !(li.brand && li.brand.trim())) patch.brand = detectedBrand;
+                                if (wasCleared) { patch.dismissed_sku_ids = []; patch.typed_attrs = undefined; }
+                                if (li.isGeneratingAiChip) { patch.isGeneratingAiChip = false; patch.searchCancelled = true; }
+                                if (li.dismissed && textChanged) patch.dismissed = false;
+                                updateLine(li.id, patch);
+                                if (li.dismissed && !textChanged) return;
+                                searchSKUs(li.id, val);
+                                if (val.trim().length >= 3) fireDidYouMean(li.id, val);
+                              }}
+                              onBlur={() => { setTimeout(() => updateLine(li.id, { showDropdown: false }), 200); clearTimeout(aiMatchDebounceRef.current[li.id]); }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && li.item_name.trim().length > 0) {
+                                  e.preventDefault();
+                                  (e.currentTarget as HTMLInputElement).blur();
+                                  addLine();
+                                  requestAnimationFrame(() => {
+                                    const rows = document.querySelectorAll('.po-sheet-row');
+                                    const last = rows[rows.length - 1] as HTMLElement | undefined;
+                                    const next = last?.querySelector<HTMLInputElement>('input[data-po-item="1"]');
+                                    next?.focus();
+                                  });
+                                }
+                              }}
+                            />
+                            {/* SKU dropdown (portals to body, anchored to this input) */}
+                            {li.showDropdown && li.searchResults && li.searchResults.length > 0 && (() => {
+                              const triggerEl = itemRefs.current.get(li.id);
+                              if (!triggerEl) return null;
+                              const rect = triggerEl.getBoundingClientRect();
+                              return createPortal(
+                                <div className="z-40" style={{ position: 'fixed', top: rect.bottom + 6, left: rect.left, width: Math.max(rect.width, 280), borderRadius: 10, overflow: 'hidden', maxHeight: 220, overflowY: 'auto', background: uiV.surface, border: `1px solid ${uiV.line}`, boxShadow: '0 16px 40px rgba(30,26,21,0.18)' }}>
+                                  <div style={{ padding: '6px 10px 4px', fontSize: 9, fontWeight: 700, color: uiV.systemFaint, textTransform: 'uppercase', letterSpacing: '0.08em', borderBottom: `1px solid ${uiV.line}` }}>
+                                    SKU matches — click to select
+                                  </div>
+                                  {li.searchResults.map((sku: any, si: number) => (
+                                    <div key={sku.sku_id} onMouseDown={() => selectSKU(li.id, sku)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', cursor: 'pointer', borderBottom: si < li.searchResults.length - 1 ? `1px solid ${uiV.line}55` : 'none', background: si === 0 ? 'rgba(47,93,52,0.05)' : 'transparent' }}
+                                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = uiV.field; }}
+                                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = si === 0 ? 'rgba(47,93,52,0.05)' : 'transparent'; }}
+                                    >
+                                      {si === 0 && <span className="material-symbols-outlined" style={{ fontSize: 13, color: uiV.confirm, flexShrink: 0 }}>star</span>}
+                                      <div style={{ minWidth: 0, flex: 1 }}>
+                                        <div style={{ fontSize: 12, fontWeight: si === 0 ? 600 : 400, color: uiV.user, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{memberChipLabel(sku)}</div>
+                                        <div style={{ fontSize: 9, color: uiV.systemFaint, marginTop: 1, fontFamily: 'monospace' }}>{sku.sku_id} · {sku.unit}</div>
+                                      </div>
+                                      <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 20, fontWeight: 600, flexShrink: 0, background: sku.similarity >= 0.75 ? '#DCFCE7' : sku.similarity >= 0.5 ? '#DBEAFE' : '#FEF9C3', color: sku.similarity >= 0.75 ? '#16A34A' : sku.similarity >= 0.5 ? '#1D4ED8' : '#A16207' }}>
+                                        {Math.round(sku.similarity * 100)}%
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>,
+                                document.body,
+                              );
+                            })()}
+                          </div>
+                        </td>
+
+                        {/* Size / Variant / Grade — read-only mirrors */}
+                        <td className="px-3 py-2.5 text-[13px]" style={{ ...cell, color: uiV.userSoft }}>{dimVal || dash}</td>
+                        <td className="px-3 py-2.5 text-[13px]" style={{ ...cell, color: uiV.userSoft }}>{varVal || dash}</td>
+                        <td className="px-3 py-2.5 text-[13px]" style={{ ...cell, color: uiV.userSoft }}>{grdVal || dash}</td>
+
+                        {/* Qty */}
+                        <td className="px-2 py-2" style={{ ...cell, textAlign: 'right' }}>
+                          <input
+                            type="number" min="1" aria-label="Quantity"
+                            className="w-full text-[13px] font-medium bg-transparent border-0 outline-none text-right tabular-nums"
+                            style={{ color: uiV.user }}
+                            value={li.quantity_ordered}
+                            onFocus={() => dismissExplanation(li.id)}
+                            onChange={(e) => updateLine(li.id, { quantity_ordered: parseFloat(e.target.value) || 0 })}
+                          />
+                        </td>
+
+                        {/* Unit */}
+                        <td className="px-2 py-2" style={cell}>
+                          <div className="relative">
+                            <select
+                              aria-label="Unit"
+                              className="w-full appearance-none bg-transparent border-0 outline-none text-[12px] pr-4 cursor-pointer uppercase tracking-wide"
+                              style={{ color: uiV.system }}
+                              value={li.unit}
+                              onChange={(e) => updateLine(li.id, { unit: e.target.value })}
+                            >
+                              {(UNITS.includes(li.unit) ? UNITS : [li.unit, ...UNITS]).map((u) => <option key={u} value={u}>{u}</option>)}
+                            </select>
+                            <span className="material-symbols-outlined absolute right-0 top-1/2 -translate-y-1/2 text-[15px] pointer-events-none" style={{ color: uiV.systemFaint }}>expand_more</span>
+                          </div>
+                        </td>
+
+                        {/* Rate */}
+                        <td className="px-2 py-2" style={{ ...cell, textAlign: 'right' }}>
+                          <div className="relative flex items-center">
+                            <span className="text-[12px] mr-0.5" style={{ color: uiV.systemFaint }}>₹</span>
+                            <input
+                              type="number" min="0" step="0.01" aria-label="Rate"
+                              className="w-full text-[13px] font-medium bg-transparent border-0 outline-none text-right tabular-nums placeholder:font-normal"
+                              style={{ color: uiV.user }}
+                              placeholder="rate"
+                              value={li.unit_rate || ''}
+                              onFocus={() => dismissExplanation(li.id)}
+                              onChange={(e) => updateLine(li.id, { unit_rate: parseFloat(e.target.value) || 0 })}
+                            />
+                          </div>
+                        </td>
+
+                        {/* Amount */}
+                        <td className="px-3 py-2.5 text-[13px] font-semibold tabular-nums text-right" style={{ ...cell, color: uiV.user }}>
+                          {amount > 0 ? `₹${amount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : dash}
+                        </td>
+
+                        {/* Delete */}
+                        <td className="px-2 py-2 text-center" style={cell}>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); removeLine(li.id); }}
+                            className="material-symbols-outlined text-[16px] opacity-0 group-hover:opacity-100 transition-opacity"
+                            style={{ color: uiV.systemFaint }}
+                            title="Remove line"
+                          >
+                            delete
+                          </button>
+                        </td>
+                      </tr>
+
+                      {/* Expansion — the full resolution UI for the active row */}
+                      {isActive && li.item_name.trim().length > 0 && (
+                        <tr className="po-row-expansion">
+                          <td colSpan={10} style={{ borderBottom: `1px solid ${uiV.line}`, background: '#FCFBFA' }}>
+                            <div className="px-4 py-3 pl-12">
+                              {/* Did you mean */}
+                              {(() => {
+                                const dym = li.did_you_mean?.trim();
+                                const hide = li.sku_id || li.sku_match_skipped || li.skipped_linking || li.dismissed;
+                                if (hide) return null;
+                                if (li.dym_loading && !dym) {
+                                  return (
+                                    <div className="mb-2 flex items-center gap-2">
+                                      <span className="material-symbols-outlined text-[13px] animate-spin" style={{ color: uiV.systemFaint }}>progress_activity</span>
+                                      <span className="text-[12px]" style={{ color: uiV.systemFaint }}>Identifying…</span>
+                                    </div>
+                                  );
+                                }
+                                if (!dym) return null;
+                                if (dym.toLowerCase() === li.item_name.trim().toLowerCase()) return null;
+                                const uiHigher =
+                                  (!!li.pending_families?.length && !li.sku_id && !li.skipped_linking && !li.dismissed && !li.sku_match_skipped)
+                                  || (!li.sku_id && !dictAddingIds.has(li.id) && !anyPanel && (li.sku_alternatives?.length ?? 0) > 0);
+                                if (uiHigher) {
+                                  return <UiDemotedSuggestion name={dym} onPick={() => { const raw = li.item_name; startFreshResolution(li.id, dym, raw, extractAttrs(raw)); }} />;
+                                }
+                                return (
+                                  <div className="mb-2 flex items-center gap-2 flex-wrap">
+                                    <span className="text-[12px]" style={{ color: uiV.systemFaint }}>Did you mean</span>
+                                    <button
+                                      type="button"
+                                      onMouseDown={(e) => { e.preventDefault(); const raw = li.item_name; startFreshResolution(li.id, dym, raw, extractAttrs(raw)); }}
+                                      className="text-[13px] underline underline-offset-2"
+                                      style={{ color: uiV.accent }}
+                                    >
+                                      {dym}
+                                    </button>
+                                    <span className="text-[12px]" style={{ color: uiV.systemFaint }}>?</span>
+                                  </div>
+                                );
+                              })()}
+
+                              {/* Family disambiguation */}
+                              {(() => {
+                                const fams = li.pending_families;
+                                if (!fams?.length) return null;
+                                if (li.sku_id || li.skipped_linking || li.dismissed || li.sku_match_skipped) return null;
+                                return (
+                                  <>
+                                    <UiResolutionStrip questionEn={<>“{li.item_name.trim()}” matches more than one catalog family — which one?</>}>
+                                      <div className="flex gap-2.5 flex-wrap">
+                                        {fams.map((fam: any) => (
+                                          <button
+                                            key={`${fam.category}::${fam.sub_category}`}
+                                            type="button"
+                                            onMouseDown={(e) => { e.preventDefault(); handlePillSelection(li.id, 'family', `${fam.category}::${fam.sub_category}`); }}
+                                            className="text-left rounded-xl px-3.5 py-2.5 transition-transform active:scale-[0.98]"
+                                            style={{ background: uiV.surface, border: `1px solid ${uiV.askLine}` }}
+                                          >
+                                            <span className="text-sm font-medium" style={{ color: uiV.askDeep }}>{fam.sub_category}</span>
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </UiResolutionStrip>
+                                    <UiStripEscapes term={li.item_name.trim()} onUseAsTyped={() => handleSkipWithoutLinking(li.id)} onAddNew={() => handleAddToCatalog(li.id)} />
+                                  </>
+                                );
+                              })()}
+
+                              {/* Attribute editor + Brand. The Size/Variant/Grade editor duplicates the
+                                  sheet columns, so it appears ONLY while a decision is pending (a pill in
+                                  missing/conflict/suggested state — i.e. family disambiguation). Once
+                                  satisfied or linked, the columns carry the values and the strip is gone.
+                                  Brand is order metadata (not a column), so it renders on its own, always. */}
+                              {(() => {
+                                const familyPills = li.attribute_pills || [];
+                                const basePills = familyPills.length ? mergeTypedAttrsIntoPills(familyPills, li.typed_attrs) : pillsFromTypedAttrs(li.typed_attrs);
+                                const novelSet = new Set(li.tree_resolution?.novelAttributes || []);
+                                const displayPills = novelSet.size ? basePills.map((p: any) => (novelSet.has(p.attribute) ? { ...p, isNovel: true } : p)) : basePills;
+                                const needsAttrHost = !li.sku_id && displayPills.some((p: any) => p.state === 'missing' || p.state === 'conflict' || p.state === 'suggested');
+                                if (!needsAttrHost) return null;
+                                return (
+                                  <UiAttributeFieldsHost
+                                    pills={displayPills}
+                                    onSelectOption={(attribute: any, value: any) => handlePillSelection(li.id, attribute, value)}
+                                    onCustomValue={(attribute: any, value: any) => handlePillSelection(li.id, attribute, value)}
+                                    onConfirmSuggestion={() => handleFamilySuggestionClick(li.id)}
+                                    familyName={li.family_match?.sub_category}
+                                    familySize={li.family_match?.family_size}
+                                    isOrphan={!li.family_match && (showOrphanContext || !!li.aiSuggestion)}
+                                    disabled={!li.item_name?.trim() || li.item_name.trim().length < 2}
+                                  />
+                                );
+                              })()}
+
+                              {/* Mapping explanation */}
+                              {li.auto_applied && li.auto_apply_reason && (
+                                <MappingExplanation originalInput={li.original_input || ''} canonicalName={li.item_name} reason={li.auto_apply_reason} />
+                              )}
+
+                              {/* Family suggestion */}
+                              {li.family_match && !li.sku_id && !li.tree_resolution && !hasPills && (
+                                <div className="flex items-center justify-between mt-2.5 px-3 py-2 rounded-lg" style={{ background: uiV.field, border: `1px solid ${uiV.line}` }}>
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span className="material-symbols-outlined text-[16px] shrink-0" style={{ color: uiV.accent }}>label</span>
+                                    <span className="text-[12px] truncate" style={{ color: uiV.system }}>
+                                      Closest catalog match:{' '}
+                                      <button type="button" className="font-semibold hover:underline" style={{ color: uiV.accent }} onClick={() => handleFamilySuggestionClick(li.id)}>{li.family_match.sub_category}</button>
+                                    </span>
+                                  </div>
+                                  <button type="button" onClick={() => handleFamilySuggestionClick(li.id)} className="text-[11px] flex items-center gap-0.5 shrink-0 ml-2" style={{ color: uiV.accent }}>
+                                    Show variants<span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+                                  </button>
+                                </div>
+                              )}
+
+                              {/* Catalogue + AI chips */}
+                              {(() => {
+                                const dbCandidates = li.sku_alternatives || [];
+                                const shouldShowDbChips = !li.sku_id && !dictAddingIds.has(li.id) && !anyPanel && dbCandidates.length > 0;
+                                const shouldShowAiChip = !li.sku_id && !dictAddingIds.has(li.id) && !anyPanel;
+                                if (!shouldShowDbChips && !shouldShowAiChip) return null;
+                                return (
+                                  <div className="mt-2.5 flex flex-wrap gap-2 items-center">
+                                    {shouldShowDbChips && dbCandidates.length > 0 && (
+                                      <span className="text-[9px] font-bold mr-0.5 uppercase tracking-widest flex items-center gap-0.5" style={{ color: uiV.systemFaint }}>
+                                        <span className="material-symbols-outlined text-[11px]">database</span> Catalogue matches:
+                                      </span>
+                                    )}
+                                    {shouldShowDbChips && dbCandidates.slice(0, 3).map((chip: any) => {
+                                      const low = chip.similarity < SKU_CHIP_DISPLAY;
+                                      return (
+                                        <button key={chip.sku_id} type="button" onClick={() => handleChipClick(li.id, chip)} title={chip.item_name}
+                                          className="px-3 py-1.5 text-xs font-medium rounded-full border transition-colors"
+                                          style={{ background: low ? uiV.field : uiV.surface, color: low ? uiV.systemFaint : uiV.userSoft, borderColor: uiV.line }}>
+                                          {memberChipLabel(chip)}{low ? ' ?' : ''}
+                                        </button>
+                                      );
+                                    })}
+                                    {shouldShowAiChip && li.aiSuggestion && !li.isGeneratingAiChip && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const attrs = li.aiSuggestion!.extracted_attributes;
+                                          if (li.aiSuggestion!.validation_metrics?.passes_shop_floor_test) {
+                                            const originalInput = li.item_name;
+                                            const finalData = { sub_category: attrs.sub_category, dimension: attrs.dimension, variant: attrs.variant, grade: attrs.grade, aliases: li.aiSuggestion!.aliases || [], originalName: originalInput };
+                                            updateLine(li.id, { item_name: li.aiSuggestion!.ai_suggested_name, aiSuggestion: undefined, needs_review: false });
+                                            setTimeout(() => autoAddItemToDictionary(li.id, true, finalData), 100);
+                                            return;
+                                          }
+                                          const PLACEHOLDER_VALS = new Set(['', 'null', 'n/a', 'none', 'generic', 'standard', 'default']);
+                                          const looksPlaceholder = (v: unknown) => !v || PLACEHOLDER_VALS.has(String(v).toLowerCase().trim());
+                                          const newPills: PillData[] = [];
+                                          if (attrs.sub_category) newPills.push({ attribute: 'sub_category', label: 'Item', value: attrs.sub_category, state: 'satisfied', source: 'ai' });
+                                          const missingParams = li.aiSuggestion!.validation_metrics?.missing_parameters || [];
+                                          for (const attr of ['dimension', 'variant', 'grade'] as const) {
+                                            const val = (attrs as any)[attr];
+                                            if (!looksPlaceholder(val)) newPills.push({ attribute: attr, label: humanLabel(attr), value: String(val), state: 'satisfied', source: 'ai', editable: true });
+                                            else if (missingParams.includes(attr)) newPills.push({ attribute: attr, label: humanLabel(attr), value: null, state: 'missing', options: [] });
+                                          }
+                                          updateLine(li.id, { attribute_pills: newPills, checkmark_ready: newPills.every((p) => p.state !== 'missing'), aiSuggestion: li.aiSuggestion, expandedReview: false });
+                                        }}
+                                        className="px-3 py-1.5 text-xs font-semibold rounded-full flex items-center gap-1 transition-all"
+                                        style={{ background: uiV.askWash, color: uiV.askDeep, border: `1px solid ${uiV.askLine}` }}
+                                      >
+                                        <span className="material-symbols-outlined text-xs">auto_awesome</span>
+                                        {(() => {
+                                          const attrs = li.aiSuggestion!.extracted_attributes;
+                                          const parts: string[] = [];
+                                          if (attrs.dimension && attrs.dimension.toLowerCase() !== 'null' && attrs.dimension.trim() !== '') parts.push(attrs.dimension.trim());
+                                          if (attrs.grade && attrs.grade.toLowerCase() !== 'null' && attrs.grade.trim() !== '') parts.push(attrs.grade.trim());
+                                          if (attrs.sub_category && attrs.sub_category.toLowerCase() !== 'null' && attrs.sub_category.trim() !== '') parts.push(attrs.sub_category.trim());
+                                          let baseName = parts.join(' ').toUpperCase();
+                                          if (attrs.variant && attrs.variant.toLowerCase() !== 'null' && attrs.variant.trim() !== '') baseName += ` (${attrs.variant.trim().toUpperCase()})`;
+                                          return baseName.replace(/\s+/g, ' ').trim();
+                                        })()}
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+
+                              {/* Stop (long AI stage) */}
+                              {(li.search_stage === 'checking_ai' || li.search_stage === 'ai_analyzing') && !li.sku_id && !li.searchCancelled && (
+                                <div className="flex mt-2 py-1">
+                                  <button type="button" onClick={(e) => { e.stopPropagation(); clearTimeout(aiMatchDebounceRef.current[li.id]); updateLine(li.id, { isGeneratingAiChip: false, isSearching: false, searchCancelled: true, search_stage: null, show_custom_fallback: true }); }} className="text-[11px] ml-auto" style={{ color: uiV.systemFaint }}>
+                                    Stop
+                                  </button>
+                                </div>
+                              )}
+
+                              {/* Service line */}
+                              {li.sku_match_skipped && !li.sku_id && (
+                                <span className="text-[10px] italic" style={{ color: uiV.systemFaint }}>Service item — no SKU matching</span>
+                              )}
+
+                              {/* Insertion reasoning */}
+                              {li.insertion_reason && li.checkmark_ready && !li.sku_id && (
+                                <div className="flex items-start gap-2 px-3 py-2 rounded-lg mt-2" style={{ background: '#EEF4FB' }}>
+                                  <span className="material-symbols-outlined text-[14px] mt-0.5 shrink-0" style={{ color: '#6B8FB8' }}>info</span>
+                                  <p className="text-[11px] leading-relaxed" style={{ color: '#4E6B8A' }}>{li.insertion_reason.message}</p>
+                                </div>
+                              )}
+
+                              {/* Submit-validation badge */}
+                              {li.needs_sku_badge && !li.sku_id && (
+                                <div className="flex items-center gap-2 px-3 py-2 rounded-lg mt-2" style={{ background: '#FDECEC', border: '1px solid #F6D2D2' }}>
+                                  <span className="material-symbols-outlined text-[14px] shrink-0" style={{ color: '#D14343' }}>error</span>
+                                  <span className="text-[12px] font-medium" style={{ color: '#B4231F' }}>Link to a SKU before saving</span>
+                                </div>
+                              )}
+
+                              {/* Skipped */}
+                              {li.skipped_linking && !li.sku_id && (
+                                <span className="text-[11px] italic" style={{ color: uiV.systemFaint }}>Using as typed</span>
+                              )}
+
+                              {/* Card message */}
+                              {li.card_message && !li.sku_id && !li.skipped_linking && (
+                                <p className="text-[12px] leading-relaxed mt-1.5" style={{ color: li.card_message.type === 'conflict' ? '#B4231F' : (li.card_message.type === 'novel' || li.card_message.type === 'identified') ? '#4E6B8A' : uiV.system }}>
+                                  {li.card_message.text}
+                                </p>
+                              )}
+
+                              {/* Action footer */}
+                              {!li.sku_id && !li.skipped_linking && li.item_name.trim().length >= 2 && (
+                                <div className="flex items-center justify-end gap-3 mt-2.5">
+                                  <button type="button" onClick={(e) => { e.stopPropagation(); handleSkipWithoutLinking(li.id); }} className="text-[12px]" style={{ color: uiV.systemFaint }} title="Keep this item with the text you typed — don't link to the catalog">
+                                    Use as typed
+                                  </button>
+                                  <button type="button" onClick={(e) => { e.stopPropagation(); handleAddToCatalog(li.id); }} disabled={(li.attribute_conflicts?.length ?? 0) > 0} className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed" style={{ background: uiV.accentSoft, color: uiV.accentDeep }} title={(li.attribute_conflicts?.length ?? 0) > 0 ? 'Resolve the attribute conflict first' : 'Add this item to the catalog and link it'}>
+                                    <span className="material-symbols-outlined text-[14px]">add_circle</span>
+                                    Add to catalog &amp; use
+                                  </button>
+                                </div>
+                              )}
+
+                              {/* Resolution story */}
+                              {(() => {
+                                const story = buildResolutionStory(li.resolution_trace, li.original_input);
+                                if (!story) return null;
+                                return (
+                                  <div className="flex items-start gap-1.5 mt-2 pt-2" style={{ borderTop: `1px solid ${uiV.line}` }}>
+                                    <span className="material-symbols-outlined text-[13px] mt-px shrink-0" style={{ color: uiV.accent }}>info</span>
+                                    <p className="text-[11px] leading-relaxed" style={{ color: uiV.system }}>
+                                      <span style={{ color: uiV.systemFaint }}>How this was matched: </span>{story}
+                                    </p>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+
+                {/* Add row */}
+                <tr>
+                  <td colSpan={10}>
+                    <button onClick={addLine} className="w-full flex items-center justify-center gap-2 py-3 text-[13px] font-medium transition-colors hover:brightness-95" style={{ color: uiV.accentDeep, background: uiV.surface }}>
+                      <span className="material-symbols-outlined text-[16px]">add</span>
+                      Add row
+                      <Kbd>Enter</Kbd>
+                      <span style={{ color: uiV.systemFaint }}>on the last row also adds one</span>
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Help line + summary */}
+        <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 mt-4">
+          <p className="text-[12px] leading-relaxed max-w-md" style={{ color: uiV.systemFaint }}>
+            Move with <Kbd>Tab</Kbd> / <Kbd>Enter</Kbd> like a sheet. A green dot means the item is linked to your
+            catalogue, so stock and rates carry over. <Kbd>Ctrl</Kbd> + <Kbd>Enter</Kbd> creates the order.
+          </p>
+          <div className="w-full md:w-[320px] shrink-0 rounded-2xl p-4" style={{ background: uiV.surface, border: `1px solid ${uiV.line}` }}>
+            <div className="flex items-center justify-between">
+              <span className="text-[13px]" style={{ color: uiV.system }}>Subtotal</span>
+              <span className="text-[14px] font-medium tabular-nums" style={{ color: uiV.user }}>₹{subtotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+            </div>
+            <div className="flex items-center justify-between mt-3">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={gstOn}
+                onClick={() => toggleGlobalGst(!gstOn)}
+                className="flex items-center gap-2.5"
+              >
+                <span className="relative inline-flex items-center rounded-full transition-colors" style={{ width: 34, height: 20, background: gstOn ? uiV.accent : uiV.line }}>
+                  <span className="absolute rounded-full bg-white transition-transform" style={{ width: 16, height: 16, top: 2, left: 2, transform: gstOn ? 'translateX(14px)' : 'translateX(0)' }} />
+                </span>
+                <span className="text-[13px]" style={{ color: uiV.system }}>GST 18%</span>
+              </button>
+              <span className="text-[14px] font-medium tabular-nums" style={{ color: uiV.user }}>₹{totalGST.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+            </div>
+            <div className="flex items-center justify-between mt-3 pt-3" style={{ borderTop: `1px solid ${uiV.line}` }}>
+              <span className="text-[14px] font-semibold" style={{ color: uiV.user }}>Total</span>
+              <span className="text-[16px] font-bold tabular-nums" style={{ color: uiV.user }}>₹{grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
 
-    {/* ui/new-po-redesign — save ceremony. Opens via the sanctioned onSuccess
-        flag; every exit calls the EXISTING navigate with identical arguments
-        (decision 1). poId comes from the mutation result; the rest is derived
-        at render from existing state. */}
-    <UiSaveCeremony
-      open={uiCeremonyOpen}
-      poId={saveMutation.data}
-      vendorName={selectedVendor?.name}
-      projectName={selectedProjectObj?.name}
-      totalLabel={`₹${grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
-      onLeave={() => navigate(returnTo)}
-    />
+      {/* ── Sticky footer bar ──────────────────────────────────── */}
+      <div className="fixed bottom-0 left-0 right-0 z-40" style={{ background: 'rgba(251,250,248,0.96)', backdropFilter: 'blur(12px)', borderTop: `1px solid ${uiV.line}`, paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 10px)' }}>
+        <div className="flex items-center justify-between gap-3 px-4 md:px-6 py-3 mx-auto" style={{ maxWidth: '100%' }}>
+          <div className="flex items-baseline gap-2">
+            <span className="text-[13px]" style={{ color: uiV.system }}>
+              {lineItems.filter((li) => li.item_name.trim()).length} item{lineItems.filter((li) => li.item_name.trim()).length !== 1 ? 's' : ''}
+            </span>
+            <span className="text-[14px] font-semibold tabular-nums" style={{ color: uiV.user }}>₹{grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+          </div>
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={() => handleSubmit('DRAFT')}
+              disabled={saveMutation.isPending}
+              className="text-[14px] font-medium transition-colors disabled:opacity-50"
+              style={{ color: uiV.system }}
+            >
+              Save draft
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSubmit('ORDERED')}
+              disabled={!canSubmit || saveMutation.isPending}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[14px] font-semibold transition-all disabled:cursor-not-allowed"
+              style={{ background: canSubmit && !saveMutation.isPending ? uiV.accent : uiV.line, color: canSubmit && !saveMutation.isPending ? '#fff' : uiV.systemFaint }}
+              title={!canSubmit ? (!vendorId ? 'Select a vendor' : !projectId ? 'Select a project' : 'Add at least one item') : undefined}
+            >
+              {saveMutation.isPending ? (
+                <><span className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>Saving</>
+              ) : (
+                <><span className="material-symbols-outlined text-[16px]">check</span>Create purchase order</>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Save ceremony — unchanged */}
+      <UiSaveCeremony
+        open={uiCeremonyOpen}
+        poId={saveMutation.data}
+        vendorName={selectedVendor?.name}
+        projectName={selectedProjectObj?.name}
+        totalLabel={`₹${grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
+        onLeave={() => navigate(returnTo)}
+      />
     </>
   );
 }
