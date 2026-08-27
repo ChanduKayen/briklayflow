@@ -94,6 +94,21 @@ export const TEMPLATES = {
     header: { kind: "none" },
     bodyParams: ["name", "item", "due"],   // {{1}} owner, {{2}} item, {{3}} close date
   },
+
+  // Login / signup OTP — delivered over WhatsApp by the Supabase Send-SMS hook
+  // (auth-sms-hook), which passes the code Supabase itself generated. Meta AUTHENTICATION
+  // category: the body auto-reads "{{1}} is your verification code." and it REQUIRES a button
+  // (copy-code or one-tap). For a copy-code auth template Meta's send format is a URL-subtype
+  // button whose text is the code (same value as the body) — exactly what buttonUrlParams emits.
+  // ⚠ Create + get this AUTHENTICATION template APPROVED in Meta first, then set `name`/`language`
+  // to match EXACTLY (a mismatch → Meta #132012). Both params take the same `code` value.
+  auth_otp: {
+    name: "briklay_login_code",   // ← replace with your approved Meta authentication template name
+    language: "en",
+    header: { kind: "none" },
+    bodyParams: ["code"],                          // {{1}} = the OTP
+    buttonUrlParams: [{ index: 0, name: "code" }], // copy-code button carries the same OTP
+  },
 } satisfies Record<string, TemplateDef>;
 
 export type TemplateKey = keyof typeof TEMPLATES;
