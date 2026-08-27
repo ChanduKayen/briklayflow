@@ -194,6 +194,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setAuthState({ status: 'resolving' })
     }
 
+    // A phone signup may be an invited teammate whose number an admin registered to an org. On the FIRST
+    // resolve (no cache), convert that pending phone invite into an active membership BEFORE resolving, so
+    // the resolver lands them in the org — not "create your own workspace". Server-side it's a no-op
+    // (ok:false, cheap) for email/Google users or a number with no pending invite. Best-effort.
+    if (!cached) {
+      try { await supabase.rpc('accept_phone_invite') } catch (e) { console.warn('[auth] accept_phone_invite failed', e) }
+    }
+
     try {
       // GOVERNING INVARIANT (S4): a resolver failure is an UNKNOWN answer, never a NEGATIVE one.
       // The old code raced a 10s timer and, on timeout with no cached context, set 'unauthenticated'
