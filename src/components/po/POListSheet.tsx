@@ -381,7 +381,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
 
         <div className="sheet">
           <table>
-            <colgroup><col style={{ width: '19%' }} /><col style={{ width: '24%' }} /><col style={{ width: '12%' }} /><col style={{ width: '9%' }} /><col style={{ width: '17%' }} /><col style={{ width: '9%' }} /><col style={{ width: '10%' }} /><col style={{ width: 140 }} /></colgroup>
+            <colgroup><col style={{ width: '17%' }} /><col style={{ width: '19%' }} /><col style={{ width: '11%' }} /><col style={{ width: '12%' }} /><col style={{ width: '20%' }} /><col style={{ width: '10%' }} /><col style={{ width: '11%' }} /><col style={{ width: 140 }} /></colgroup>
             <thead><tr>
               <th className={sortK === 'vendor' ? 'sorted' : ''} onClick={() => onSort('vendor')}>Vendor · PO<span className="arr">{arr('vendor')}</span></th>
               <th style={{ cursor: 'default' }}>Items</th>
