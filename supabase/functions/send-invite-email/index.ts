@@ -2,21 +2,15 @@
 // delivered to the invitee's inbox (previously the link was only shown for manual
 // copy, so nothing ever reached the invitee).
 //
-// Transport: Google Workspace SMTP (smtp.gmail.com over implicit TLS), so the mail
-// comes from your own domain — no third-party email vendor. Requires:
-//   SMTP_USER         — the Workspace mailbox that authenticates + sends, e.g. admin@briklay.app
-//   SMTP_PASS         — an APP PASSWORD for that account (Google account → Security →
-//                       2-Step Verification → App passwords). NOT the normal login password.
-//   INVITE_FROM_EMAIL — optional display From, e.g. "Briklay <admin@briklay.app>". Defaults to
-//                       "Briklay <SMTP_USER>". Gmail requires the From to be SMTP_USER or one of
-//                       its verified "Send mail as" aliases, else it gets rewritten to SMTP_USER.
-// All read at request time so a clear error surfaces (rather than a silent no-send) when missing.
+// Transport: Resend's HTTP API (no SMTP libs needed in Deno). Requires two secrets:
+//   RESEND_API_KEY    — your Resend API key
+//   INVITE_FROM_EMAIL — a verified sender, e.g. "Briklay <invites@yourdomain.com>"
+// Both are read at request time so a clear error surfaces (rather than a silent
+// no-send) when they're missing.
 //
 // DEPLOY NOTE: after `supabase functions deploy send-invite-email`, this is invoked
 // from the browser (supabase.functions.invoke) with the caller's JWT — leave the
 // gateway's default verify_jwt ON so only authenticated users can send.
-
-import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -62,40 +56,29 @@ Deno.serve(async (req) => {
     const { to, link, orgName, inviterName, role } = await req.json();
     if (!to || !link) return json({ ok: false, error: "to and link are required" }, 400);
 
-    const user = Deno.env.get("SMTP_USER");
-    const pass = Deno.env.get("SMTP_PASS");
-    if (!user) return json({ ok: false, error: "Email is not configured (missing SMTP_USER)" }, 500);
-    if (!pass) return json({ ok: false, error: "Email is not configured (missing SMTP_PASS — use a Google App Password)" }, 500);
-    const from = Deno.env.get("INVITE_FROM_EMAIL") || `Briklay <${user}>`;
+    const apiKey = Deno.env.get("RESEND_API_KEY");
+    const from = Deno.env.get("INVITE_FROM_EMAIL");
+    if (!apiKey) return json({ ok: false, error: "Email is not configured (missing RESEND_API_KEY)" }, 500);
+    if (!from) return json({ ok: false, error: "Email is not configured (missing INVITE_FROM_EMAIL)" }, 500);
 
     const subject = orgName ? `You're invited to join ${orgName} on Briklay` : "You're invited to Briklay";
-    const html = inviteHtml({ link, orgName, inviterName, role });
 
-    const client = new SMTPClient({
-      connection: {
-        hostname: "smtp.gmail.com",
-        port: 465,
-        tls: true,
-        auth: { username: user, password: pass },
-      },
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from, to, subject, html: inviteHtml({ link, orgName, inviterName, role }) }),
     });
 
-    try {
-      await client.send({
-        from,
-        to,
-        subject,
-        content: `You've been invited to Briklay. Accept your invite: ${link}`,
-        html,
-      });
-    } finally {
-      // Always release the connection; a leaked socket wedges the isolate for the next request.
-      try { await client.close(); } catch { /* ignore */ }
+    if (!res.ok) {
+      // Surface Resend's message (invalid key, unverified domain, bad address) verbatim.
+      let msg = `Email provider returned ${res.status}`;
+      try { const b = await res.json(); msg = b?.message || b?.error?.message || msg; } catch { /* keep default */ }
+      return json({ ok: false, error: msg }, 502);
     }
 
-    return json({ ok: true });
+    const body = await res.json().catch(() => ({}));
+    return json({ ok: true, id: body?.id ?? null });
   } catch (e) {
-    // Surface the SMTP error verbatim (bad app password, blocked sender, bad address).
-    return json({ ok: false, error: String((e as Error).message ?? e) }, 502);
+    return json({ ok: false, error: String((e as Error).message ?? e) }, 500);
   }
 });
