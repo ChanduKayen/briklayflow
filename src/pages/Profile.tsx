@@ -17,6 +17,15 @@ export function emailIsPending(session: Session): boolean {
 
 const isValidEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim());
 
+// Normalize to E.164 (India default), mirroring AuthPanel — a bare 10-digit number → +91XXXXXXXXXX.
+const toE164 = (raw: string): string => {
+  const d = raw.replace(/\D/g, '');
+  if (raw.trim().startsWith('+')) return '+' + d;
+  if (d.length === 10) return '+91' + d;
+  if (d.length === 12 && d.startsWith('91')) return '+' + d;
+  return '+' + d;
+};
+
 export default function Profile({ session }: { session: Session }) {
   const { data: profile } = useUserProfile(session.user.id);
   const orgId = useOrgId();
@@ -49,6 +58,40 @@ export default function Profile({ session }: { session: Session }) {
     } catch (err: any) {
       showSnackbar(err.message || 'Could not update name', { type: 'error' });
     } finally { setSavingName(false); }
+  };
+
+  // ── Phone add / change — OTP-verified (the code arrives over WhatsApp via the auth hook) ──
+  const [phoneStep, setPhoneStep] = useState<'idle' | 'number' | 'code'>('idle');
+  const [newPhone, setNewPhone] = useState('');
+  const [phoneOtp, setPhoneOtp] = useState('');
+  const [phoneBusy, setPhoneBusy] = useState(false);
+  const [phoneErr, setPhoneErr] = useState<string | null>(null);
+
+  const sendPhoneOtp = async () => {
+    if (newPhone.length < 10 || phoneBusy) return;
+    setPhoneBusy(true); setPhoneErr(null);
+    try {
+      // Triggers Supabase's phone-change flow → sends an OTP to the new number (delivered on WhatsApp
+      // by the auth-sms-hook). The change stays pending until the code below is verified.
+      const { error } = await supabase.auth.updateUser({ phone: toE164(newPhone) });
+      if (error) throw error;
+      setPhoneStep('code');
+    } catch (err: any) {
+      setPhoneErr(err.message || 'Could not send the code');
+    } finally { setPhoneBusy(false); }
+  };
+
+  const verifyPhoneOtp = async () => {
+    if (phoneOtp.length < 4 || phoneBusy) return;
+    setPhoneBusy(true); setPhoneErr(null);
+    try {
+      const { error } = await supabase.auth.verifyOtp({ phone: toE164(newPhone), token: phoneOtp.trim(), type: 'phone_change' });
+      if (error) throw error;
+      setPhoneStep('idle'); setNewPhone(''); setPhoneOtp('');
+      showSnackbar('Phone number updated');
+    } catch (err: any) {
+      setPhoneErr(err.message || 'Wrong or expired code');
+    } finally { setPhoneBusy(false); }
   };
 
   const saveEmail = async () => {
@@ -208,13 +251,61 @@ export default function Profile({ session }: { session: Session }) {
               )}
             </div>
 
-            {/* Phone — the login identity, read-only */}
+            {/* Phone — a login identity; add/change is OTP-verified over WhatsApp. */}
             <div className="space-y-stack-sm">
               <label className="text-label-caps font-label-caps text-on-surface-variant">PHONE</label>
-              <div className="bk-input flex items-center justify-between" style={{ background: 'var(--color-surface-container-low, #F4EEE3)' }}>
-                <span className="text-on-surface">{phone ? `+${phone.replace(/^\+/, '')}` : 'Not set'}</span>
-                {phone && <span className="text-[11px] text-on-surface-variant">login number</span>}
-              </div>
+
+              {phoneStep === 'idle' && (
+                <div className="bk-input flex items-center justify-between">
+                  <span className="text-on-surface">{phone ? `+${phone.replace(/^\+/, '')}` : 'Not set'}</span>
+                  <button type="button" onClick={() => { setNewPhone(''); setPhoneErr(null); setPhoneStep('number'); }}
+                    className="text-[13px] font-semibold text-primary">
+                    {phone ? 'Change' : 'Add'}
+                  </button>
+                </div>
+              )}
+
+              {phoneStep === 'number' && (
+                <>
+                  <div className="flex gap-2">
+                    <div className="bk-input flex-1 flex items-center gap-2">
+                      <span className="text-[13px] text-on-surface-variant shrink-0">+91</span>
+                      <input inputMode="numeric" maxLength={10} autoFocus value={newPhone}
+                        onChange={e => setNewPhone(e.target.value.replace(/\D/g, ''))}
+                        placeholder="10-digit mobile number" className="flex-1 min-w-0 bg-transparent outline-none text-on-surface" />
+                    </div>
+                    <button type="button" onClick={sendPhoneOtp} disabled={phoneBusy || newPhone.length < 10}
+                      className="shrink-0 px-4 rounded-xl text-[13px] font-semibold text-on-primary bg-primary disabled:opacity-40 transition-opacity">
+                      {phoneBusy ? 'Sending…' : 'Send code'}
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between mt-1">
+                    <button type="button" onClick={() => { setPhoneStep('idle'); setPhoneErr(null); }} className="text-[12px] text-on-surface-variant">Cancel</button>
+                    <span className="text-[11px] text-on-surface-variant">We'll send a code on WhatsApp.</span>
+                  </div>
+                </>
+              )}
+
+              {phoneStep === 'code' && (
+                <>
+                  <p className="text-[12.5px] text-on-surface-variant mb-1">Enter the code sent to <b>+91 {newPhone}</b> on WhatsApp.</p>
+                  <div className="flex gap-2">
+                    <input inputMode="numeric" maxLength={6} autoFocus value={phoneOtp}
+                      onChange={e => setPhoneOtp(e.target.value.replace(/\D/g, ''))}
+                      placeholder="6-digit code" className="bk-input flex-1 tracking-[0.3em]" />
+                    <button type="button" onClick={verifyPhoneOtp} disabled={phoneBusy || phoneOtp.length < 4}
+                      className="shrink-0 px-4 rounded-xl text-[13px] font-semibold text-on-primary bg-primary disabled:opacity-40 transition-opacity">
+                      {phoneBusy ? 'Verifying…' : 'Verify'}
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between mt-1">
+                    <button type="button" onClick={() => { setPhoneStep('number'); setPhoneOtp(''); setPhoneErr(null); }} className="text-[12px] text-on-surface-variant">← Change number</button>
+                    <button type="button" onClick={sendPhoneOtp} disabled={phoneBusy} className="text-[12px] font-semibold text-primary">Resend</button>
+                  </div>
+                </>
+              )}
+
+              {phoneErr && <p className="text-[12px] mt-1" style={{ color: '#B2402A' }}>{phoneErr}</p>}
             </div>
 
           </div>
