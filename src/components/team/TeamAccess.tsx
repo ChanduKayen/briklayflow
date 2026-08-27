@@ -401,11 +401,15 @@ export default function TeamAccess({ session }: { session: Session }) {
         .from('user_profiles').select('id, name, role, assigned_projects').in('id', ids);
       if (pErr) throw pErr;
       const pById = new Map((profiles ?? []).map((p: any) => [p.id, p]));
-      return (rows ?? []).filter((r: any) => pById.has(r.user_id)).map((r: any) => {
+      // NEVER drop a membership just because its user_profiles row wasn't returned — a phone teammate
+      // whose profile.org_id hasn't synced is unreadable under the org-read RLS, and filtering on
+      // pById.has made them vanish from the team entirely. Show them (name falls back to 'Unnamed',
+      // role to the membership role) so a real member is always visible.
+      return (rows ?? []).map((r: any) => {
         const p = pById.get(r.user_id);
         // Display + edit the SAME column (user_profiles.role) so a role change reflects
         // immediately; fall back to the membership role if a profile role isn't set.
-        return { id: r.user_id, name: p.name ?? 'Unnamed', role: (p.role ?? r.role) as UserRole, assigned_projects: (p.assigned_projects ?? []) as string[], can_approve_procurement: !!r.can_approve_procurement, procurement_approval_limit: r.procurement_approval_limit ?? null, higher_approver_id: r.higher_approver_id ?? null } satisfies Member;
+        return { id: r.user_id, name: p?.name ?? 'Unnamed', role: (p?.role ?? r.role) as UserRole, assigned_projects: (p?.assigned_projects ?? []) as string[], can_approve_procurement: !!r.can_approve_procurement, procurement_approval_limit: r.procurement_approval_limit ?? null, higher_approver_id: r.higher_approver_id ?? null } satisfies Member;
       });
     },
   });
