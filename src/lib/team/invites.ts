@@ -29,17 +29,18 @@ export async function emailInviteLink(args: {
 }
 
 /**
- * Send the org-invite JOIN LINK over WhatsApp (the `team_invite` template — an "Accept invite" button
- * that opens /invite/<token>). Best-effort, same contract as emailInviteLink: returns an error string
- * on failure, `undefined` on success, never throws. `to` is E.164 digits without "+", e.g. "9198...".
+ * Notify the invitee on WhatsApp (the `team_invite` template — "Hi {invitee}, {inviter} invited you…"
+ * with a static button to the signup page, where they enter their number and our OTP takes over; org
+ * linking is by phone). Best-effort, same contract as emailInviteLink: returns an error string on
+ * failure, `undefined` on success, never throws. `to` is E.164 digits without "+", e.g. "9198...".
  */
 export async function whatsappInviteLink(args: {
   to: string;
-  token: string;
+  invitee?: string;
   inviter?: string;
 }): Promise<string | undefined> {
   const { data, error } = await supabase.functions.invoke('send-template', {
-    body: { templateKey: 'team_invite', to: args.to, params: { inviter: args.inviter || 'A teammate', token: args.token } },
+    body: { templateKey: 'team_invite', to: args.to, params: { invitee: args.invitee || 'there', inviter: args.inviter || 'A teammate' } },
   });
   if (error) {
     let msg = error.message;

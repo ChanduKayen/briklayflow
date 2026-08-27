@@ -599,12 +599,12 @@ export default function TeamAccess({ session }: { session: Session }) {
         // Email the join link so it reaches the invitee (best-effort — the invite row
         // already exists; a failed email is surfaced, and the copyable link remains).
         const emailError = await emailInviteLink({ to: email.trim().toLowerCase(), link: inviteLinkFor(row.token), inviterName: profile?.name, role });
-        // ALSO send the join link on WhatsApp (a tappable "Accept invite" → /invite/<token>), which is
-        // more reliable than email for this audience. Best-effort; failure surfaced, not swallowed.
+        // ALSO notify them on WhatsApp with the invite (static signup-page button; they enter their
+        // number and our OTP takes over). More reliable than email here. Best-effort; failure surfaced.
         const welcomeError = await (async (): Promise<string | undefined> => {
           try {
             const to = digits(phone).length === 10 ? `91${digits(phone)}` : digits(phone);
-            const err = await whatsappInviteLink({ to, token: row.token, inviter: profile?.name });
+            const err = await whatsappInviteLink({ to, invitee: nm, inviter: profile?.name });
             if (err) return err;
             await supabase.from('wa_registered_numbers').update({ welcomed_at: new Date().toISOString() }).eq('phone_number', intlPhone(phone));
             return undefined;

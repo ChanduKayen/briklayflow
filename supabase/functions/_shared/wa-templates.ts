@@ -106,17 +106,18 @@ export const TEMPLATES = {
     bodyParams: ["code"],   // {{1}} = the OTP
   },
 
-  // Team invite carrying the JOIN LINK — sent to a cold number, so it must be a template. A URL button
-  // "Accept invite" opens /invite/<token>. ⚠ Create + APPROVE in Meta, then set name/language to match:
-  //   • Body: one variable, e.g. "{{1}} invited you to Briklay. Tap Accept invite to set up your account."
-  //   • Button: type URL, "Accept invite", base = your PROD origin + "/invite/" and a DYNAMIC suffix
-  //     ({{1}}) that we fill with the invite token. So the full URL is https://<prod>/invite/{{token}}.
+  // Team invite — sent to a cold number, so it's a template. Approved Meta template
+  // `account_creation_confirmation_3` (English US). Body:
+  //   "Hi {{1}}, {{2}} invited you to Briklay App. Tap below to accept the invite and get set up…"
+  //   {{1}} = invited person's name, {{2}} = the inviter's name.
+  // The button is a STATIC URL to the signup page (no per-send param) — the invitee enters their
+  // mobile number there and our OTP takes over; org linking is by phone, so no token in the URL.
   team_invite: {
-    name: "team_invite",   // ← replace with your approved Meta template name
-    language: "en",
+    name: "account_creation_confirmation_3",
+    language: "en_US",
     header: { kind: "none" },
-    bodyParams: ["inviter"],                        // {{1}} = who invited them
-    buttonUrlParams: [{ index: 0, name: "token" }], // URL button suffix = the invite token
+    bodyParams: ["invitee", "inviter"],   // {{1}} = invited name, {{2}} = inviter name
+    // static button → no buttonUrlParams
   },
 } satisfies Record<string, TemplateDef>;
 
