@@ -24,7 +24,7 @@ import { supabase } from '../../lib/supabase';
 import { useSnackbar } from '../Snackbar';
 import { useOrgId } from '../../lib/auth/AuthProvider';
 import { useUserProfile } from '../../App';
-import { emailInviteLink } from '../../lib/team/invites';
+import { emailInviteLink, whatsappInviteLink } from '../../lib/team/invites';
 import type { UserRole } from '../../types';
 import { V, N, WA, font, serif, nums, terraGrad, T } from '../day-book/tokens';
 import { ANIM } from '../day-book/motion';
@@ -599,7 +599,17 @@ export default function TeamAccess({ session }: { session: Session }) {
         // Email the join link so it reaches the invitee (best-effort — the invite row
         // already exists; a failed email is surfaced, and the copyable link remains).
         const emailError = await emailInviteLink({ to: email.trim().toLowerCase(), link: inviteLinkFor(row.token), inviterName: profile?.name, role });
-        const welcomeError = await tryWelcome();
+        // ALSO send the join link on WhatsApp (a tappable "Accept invite" → /invite/<token>), which is
+        // more reliable than email for this audience. Best-effort; failure surfaced, not swallowed.
+        const welcomeError = await (async (): Promise<string | undefined> => {
+          try {
+            const to = digits(phone).length === 10 ? `91${digits(phone)}` : digits(phone);
+            const err = await whatsappInviteLink({ to, token: row.token, inviter: profile?.name });
+            if (err) return err;
+            await supabase.from('wa_registered_numbers').update({ welcomed_at: new Date().toISOString() }).eq('phone_number', intlPhone(phone));
+            return undefined;
+          } catch (e: any) { return e?.message || 'Could not send the WhatsApp invite'; }
+        })();
         return { link: inviteLinkFor(row.token), phone: digits(phone), mode: 'email' as const, name: nm, welcomeError, emailError };
       }
       const { error } = await supabase.rpc('wa_invite_number', { p_phone: intlPhone(phone), p_name: nm || null, p_role: roleLabel(role) });

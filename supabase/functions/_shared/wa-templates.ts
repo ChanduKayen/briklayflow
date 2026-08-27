@@ -95,19 +95,28 @@ export const TEMPLATES = {
     bodyParams: ["name", "item", "due"],   // {{1}} owner, {{2}} item, {{3}} close date
   },
 
-  // Login / signup OTP — delivered over WhatsApp by the Supabase Send-SMS hook
-  // (auth-sms-hook), which passes the code Supabase itself generated. Meta AUTHENTICATION
-  // category: the body auto-reads "{{1}} is your verification code." and it REQUIRES a button
-  // (copy-code or one-tap). For a copy-code auth template Meta's send format is a URL-subtype
-  // button whose text is the code (same value as the body) — exactly what buttonUrlParams emits.
-  // ⚠ Create + get this AUTHENTICATION template APPROVED in Meta first, then set `name`/`language`
-  // to match EXACTLY (a mismatch → Meta #132012). Both params take the same `code` value.
+  // Login / signup OTP — delivered over WhatsApp by the Supabase Send-SMS hook (auth-sms-hook),
+  // which passes the code Supabase generated. Matches the APPROVED Meta template `signup_otp`
+  // (English US → "en_US"). Body is a single variable ("OTP Code: {{1}}. This is your OTP code
+  // for Login…"); no button on this template, so bodyParams only.
   auth_otp: {
-    name: "briklay_login_code",   // ← replace with your approved Meta authentication template name
+    name: "signup_otp",
+    language: "en_US",
+    header: { kind: "none" },
+    bodyParams: ["code"],   // {{1}} = the OTP
+  },
+
+  // Team invite carrying the JOIN LINK — sent to a cold number, so it must be a template. A URL button
+  // "Accept invite" opens /invite/<token>. ⚠ Create + APPROVE in Meta, then set name/language to match:
+  //   • Body: one variable, e.g. "{{1}} invited you to Briklay. Tap Accept invite to set up your account."
+  //   • Button: type URL, "Accept invite", base = your PROD origin + "/invite/" and a DYNAMIC suffix
+  //     ({{1}}) that we fill with the invite token. So the full URL is https://<prod>/invite/{{token}}.
+  team_invite: {
+    name: "team_invite",   // ← replace with your approved Meta template name
     language: "en",
     header: { kind: "none" },
-    bodyParams: ["code"],                          // {{1}} = the OTP
-    buttonUrlParams: [{ index: 0, name: "code" }], // copy-code button carries the same OTP
+    bodyParams: ["inviter"],                        // {{1}} = who invited them
+    buttonUrlParams: [{ index: 0, name: "token" }], // URL button suffix = the invite token
   },
 } satisfies Record<string, TemplateDef>;
 
