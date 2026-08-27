@@ -253,7 +253,7 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
       label: 'Orders & work',
       items: ([
         can(role !== 'supervisor' && role !== 'accountant') && { route: '/purchase-orders', label: 'Purchase orders', icon: IconShoppingBag, badge: poUntallied, hasPanel: true },
-        can(role !== 'supervisor' && role !== 'accountant') && { route: '/inward-register', label: 'Inward register', icon: IconLayoutGrid },
+        // Inward register lives in the per-project nav (see projBase/inward below), not the main rail.
         { route: '/work-orders', label: 'Contracts', icon: IconClipboardList, badge: woPending },
       ].filter(Boolean) as Item[]),
     },
