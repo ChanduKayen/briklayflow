@@ -296,7 +296,9 @@ export default function AuthPanel({
                     {!signin && (
                       <div className="flex items-center gap-2.5 px-4 rounded-xl mb-3" style={{ background: V.surface, border: `1px solid ${V.line}`, height: 50 }}>
                         <span className="text-xs" style={{ color: V.faint }}>Aa</span>
-                        <input value={name} onChange={(e) => setName(e.target.value)} disabled={loading} placeholder="Your name" aria-label="Your name" className="flex-1 bg-transparent text-sm outline-none" style={{ color: V.ink }} />
+                        {/* Required on signup: a phone user has no email to fall back to, so without this the
+                            profile name becomes the raw phone digits and the teammate shows as "Unnamed". */}
+                        <input value={name} onChange={(e) => setName(e.target.value)} required disabled={loading} placeholder="Your name" aria-label="Your name" className="flex-1 bg-transparent text-sm outline-none" style={{ color: V.ink }} />
                       </div>
                     )}
                     <div className="flex items-center gap-2.5 px-4 rounded-xl" style={{ background: V.surface, border: `1px solid ${V.line}`, height: 50 }}>
@@ -305,7 +307,7 @@ export default function AuthPanel({
                       <input value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))} required disabled={loading} placeholder="10-digit mobile number" inputMode="numeric" maxLength={10} aria-label="Mobile number" className="flex-1 bg-transparent text-sm outline-none" style={{ color: V.ink }} />
                     </div>
                     {error && <p className="text-sm mt-4" style={{ color: V.terraDeep }}>{error}</p>}
-                    <button type="submit" disabled={loading || phone.length < 10} className="btnp mt-6 w-full py-3.5 rounded-xl text-sm font-medium inline-flex items-center justify-center gap-2" style={{ background: terraGrad, color: '#fff', opacity: (loading || phone.length < 10) ? 0.7 : 1 }}>
+                    <button type="submit" disabled={loading || phone.length < 10 || (!signin && !name.trim())} className="btnp mt-6 w-full py-3.5 rounded-xl text-sm font-medium inline-flex items-center justify-center gap-2" style={{ background: terraGrad, color: '#fff', opacity: (loading || phone.length < 10 || (!signin && !name.trim())) ? 0.7 : 1 }}>
                       {loading ? 'Sending…' : <>Send code <ArrowRight size={15} className="arr" /></>}
                     </button>
                     <p className="text-xs mt-3 text-center" style={{ color: V.faint }}>We'll send a login code to this number on WhatsApp.</p>

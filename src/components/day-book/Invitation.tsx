@@ -598,9 +598,14 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
     onError: (e: any) => show(e.message || 'Could not update', { type: 'error' }),
   });
 
-  // Senders not linked to an active member — so a registered number is never invisible.
+  // Teammates an admin deliberately invited who haven't activated yet (invite_status='invited',
+  // no membership row until their first WhatsApp/login). These ARE proper team members-in-waiting,
+  // so they belong on this list. Self-registered "Start on WhatsApp" numbers, greeted prospects and
+  // legacy phone-only rows (invite_status='active', not a member) are NOT team members — exclude them.
   const memberUserIds = new Set(members.map((m) => m.id));
-  const otherSenders = senders.filter((s) => !(s.user_id && memberUserIds.has(s.user_id)));
+  const otherSenders = senders.filter(
+    (s) => !(s.user_id && memberUserIds.has(s.user_id)) && s.invite_status === 'invited',
+  );
 
   const copyLink = (link: string) => {
     navigator.clipboard?.writeText(link).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); }).catch(() => { /* noop */ });
@@ -748,12 +753,11 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
             </p>
           </div>
 
-          {/* Other senders — registered numbers not tied to an active member (self-
-              registered via "Start on WhatsApp", or legacy phone-only rows). Shown so
-              nothing that can send is ever hidden from this panel. */}
+          {/* Invited teammates who haven't activated yet — admin added them (name + role) but they
+              haven't sent their first WhatsApp / logged in, so no membership row exists yet. */}
           {otherSenders.length > 0 && (
             <div className="mt-6">
-              <p className="uppercase font-medium mb-2" style={labelCaps}>Other senders</p>
+              <p className="uppercase font-medium mb-2" style={labelCaps}>Invited · awaiting first message</p>
               <div className="space-y-2">
                 {otherSenders.map((s) => (
                   <div key={s.id} className="rounded-xl p-3 flex items-center gap-3" style={{ background: V.surface, border: '1px solid #E3DDD4' }}>
