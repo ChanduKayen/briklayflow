@@ -84,6 +84,16 @@ export async function resolveAuthDestination(
     }
   }
 
-  // ── Step 3: no active/pending membership, no invite → create their own ──
+  // A SUSPENDED membership means access was revoked — not a fresh user. Route to the pending screen,
+  // which renders the "Access denied / suspended" state; do NOT fall through to create-workspace
+  // (that would silently invite a removed user to spin up a brand-new org).
+  if (ctx && ctx.status === 'suspended') {
+    return {
+      destination: 'pending',
+      orgName:     ctx.org_name,
+    }
+  }
+
+  // ── Step 3: no active/pending/suspended membership, no invite → create their own ──
   return { destination: 'create-workspace' }
 }

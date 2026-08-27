@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { LOGIN_ROUTE } from '../lib/auth/routes';
 import type { Session } from '@supabase/supabase-js';
 import { IconCircleCheck, IconCircleX, IconLoader2 } from '@tabler/icons-react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../lib/auth/AuthProvider';
 
 
 type CreateWorkspaceResult = {
@@ -30,6 +29,7 @@ export default function CreateWorkspace({ session }: { session: Session }) {
   const [checkingSlug,  setCheckingSlug]  = useState(false);
   const [submitting,    setSubmitting]    = useState(false);
   const [error,         setError]         = useState<string | null>(null);
+  const { signOut } = useAuth();
 
   // Auto-generate slug from name while user hasn't manually edited it
   useEffect(() => {
@@ -189,9 +189,17 @@ export default function CreateWorkspace({ session }: { session: Session }) {
 
         <p className="text-[11px] text-on-surface-variant text-center mt-6">
           Already have an invite?{' '}
-          <Link to={LOGIN_ROUTE} className="hover:text-on-surface transition-colors">
+          {/* Routing is gated by authState, not the URL — while we're here authState is 'no-org'
+              (still signed in), so a bare <Link to="/login"> just lands on a blank splash. The real
+              intent is "sign out of this account and sign in as the invited one": signOut() flips
+              authState → unauthenticated and the SIGNED_OUT handler navigates to the login surface. */}
+          <button
+            type="button"
+            onClick={() => { void signOut(); }}
+            className="underline hover:text-on-surface transition-colors"
+          >
             Sign in with a different account
-          </Link>
+          </button>
         </p>
 
       </div>

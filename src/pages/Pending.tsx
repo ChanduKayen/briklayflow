@@ -67,6 +67,10 @@ export default function Pending({ session }: { session: Session }) {
       if (membership?.created_at) setCreatedAt(membership.created_at);
     })();
 
+    // Detect a suspended (revoked) membership up front so a removed user routed here sees "Access
+    // denied" immediately, rather than a flash of "Awaiting approval" until the 30s poll fires.
+    checkStatus();
+
     intervalRef.current = setInterval(checkStatus, 30_000);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);

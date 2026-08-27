@@ -97,13 +97,21 @@ export const TEMPLATES = {
 
   // Login / signup OTP — delivered over WhatsApp by the Supabase Send-SMS hook (auth-sms-hook),
   // which passes the code Supabase generated. Matches the APPROVED Meta template `signup_otp`
-  // (English US → "en_US"). Body is a single variable ("OTP Code: {{1}}. This is your OTP code
-  // for Login…"); no button on this template, so bodyParams only.
+  // (English US → "en_US"). The approved body has TWO variables:
+  //   "OTP Code: {{1}}. This is your OTP code for {{2}}. For your security, do not share this code."
+  //   {{1}} = the OTP · {{2}} = the purpose label ("Login" in the approved sample).
+  // Sending only {{1}} → Meta #132000 ("localizable_params (1) does not match expected (2)").
+  //
+  // This template carries a URL button at index 0 (the "Copy code" / autofill button that
+  // WhatsApp OTP templates get). Meta REQUIRES that button's parameter on every send, else
+  // #131008 ("buttons: Button at index 0 of type Url requires a parameter"). The button's
+  // value is the OTP itself — the same `code` var — so the button copies/autofills the code.
   auth_otp: {
     name: "signup_otp",
     language: "en_US",
     header: { kind: "none" },
-    bodyParams: ["code"],   // {{1}} = the OTP
+    bodyParams: ["code", "purpose"],           // {{1}} = the OTP, {{2}} = purpose label
+    buttonUrlParams: [{ index: 0, name: "code" }],  // copy-code button → the OTP
   },
 
   // Team invite — sent to a cold number, so it's a template. Approved Meta template

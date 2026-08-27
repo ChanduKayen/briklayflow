@@ -55,7 +55,9 @@ Deno.serve(async (req) => {
   if (!phone || !otp) return json({ error: { message: "missing phone or otp in hook payload" } }, 400);
 
   try {
-    await sendTemplate("auth_otp", phone, { code: otp });
+    // signup_otp body: "OTP Code: {{1}}. This is your OTP code for {{2}}. ..." — {{2}} is the
+    // purpose label; "Login" matches the approved template sample.
+    await sendTemplate("auth_otp", phone, { code: otp, purpose: "Login" });
   } catch (e) {
     // A non-2xx tells Supabase the delivery failed, so the client sees an error instead of a
     // silent "code sent" for a message that never went out.

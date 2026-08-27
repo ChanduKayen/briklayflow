@@ -559,8 +559,20 @@ export default function TeamAccess({ session }: { session: Session }) {
     updateProfile(m.id, { assigned_projects: next }).catch((e) => show(e.message || 'Could not update sites', { type: 'error' }));
   };
   const removeMember = useMutation({
-    mutationFn: async (userId: string) => { const { error } = await supabase.functions.invoke('admin-users', { body: { action: 'delete', userId } }); if (error) throw error; },
-    onSuccess: () => { refreshMembers(); show('Member removed'); },
+    mutationFn: async (userId: string) => {
+      // Revoke BEFORE deleting. Access is coupled (a registered WhatsApp number grants app
+      // membership via OTP), so removal must revoke both sides or the same phone re-signs-up and
+      // auto-rejoins. Order matters: wa_registered_numbers.user_id is ON DELETE SET NULL, so deleting
+      // the auth user first would strand an ACTIVE row that accept_phone_invite would honour. Revoke
+      // while user_id still links the row → the row is marked revoked → the door stays shut.
+      const { data, error: revErr } = await supabase.rpc('revoke_member', { p_user_id: userId, p_org_id: orgId });
+      if (revErr) throw revErr;
+      const rev = data as { ok: boolean; error?: string } | null;
+      if (rev && rev.ok === false) throw new Error(rev.error || 'Could not revoke access');
+      const { error } = await supabase.functions.invoke('admin-users', { body: { action: 'delete', userId } });
+      if (error) throw error;
+    },
+    onSuccess: () => { refreshMembers(); refreshWa(); show('Member removed'); },
     onError: (e: any) => show(e.message || 'Could not remove member', { type: 'error' }),
   });
 
@@ -711,7 +723,7 @@ export default function TeamAccess({ session }: { session: Session }) {
                 <button onClick={resetForm} className="flex-1 py-2.5 rounded-xl" style={{ border: `1px solid ${V.line}`, color: V.sys, ...font, ...T.sm }}>Cancel</button>
                 <button disabled={!canInvite || invite.isPending} onClick={() => invite.mutate()} className="flex-1 py-2.5 rounded-xl font-medium inline-flex items-center justify-center gap-1.5"
                   style={{ background: terraGrad, color: '#fff', opacity: canInvite ? 1 : 0.5, ...font, ...T.sm }}>
-                  {invite.isPending ? <><Loader2 size={14} className="db-spin" /> Inviting…</> : emailProvided ? 'Send invite' : 'Add to WhatsApp'}
+                  {invite.isPending ? <><Loader2 size={14} className="db-spin" /> Inviting…</> : 'Invite'}
                 </button>
               </div>
             </div>
