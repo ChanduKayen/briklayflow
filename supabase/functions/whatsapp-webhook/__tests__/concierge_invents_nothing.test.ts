@@ -56,7 +56,7 @@ suite('concierge — the default persona is told it holds no records', () => {
   // The recovery, not just the refusal: a man who asked a real question deserves to be told where the answer
   // is, not stonewalled. Otherwise the honest reply is a worse product than the fabricated one.
   test('…and tells it to say so plainly and point at the app', () => {
-    expect(/APP_LINK|briklayflow/i.test(systemDefault)).toBe(true)
+    expect(/APP_LINK|briklay/i.test(systemDefault)).toBe(true)
   })
 
   // THE STATE HALF. A number is the loudest fabrication, not the only one: "yes, the 3rd floor wiring is

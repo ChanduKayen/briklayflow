@@ -23,8 +23,8 @@ import { resurfaceBody, pendingSubjectOf, deferredOf, snapshotPending, type Defe
 // Forced to <origin>/logbook (see transaction.ts) so a misconfigured WA_APP_LINK can't
 // send "Open Day Book" / entry deep-links to "/" -> /ledger.
 const LINK = (() => {
-  const b = Deno.env.get('WA_APP_LINK') ?? 'https://briklayflow.vercel.app'
-  try { return new URL('/logbook', b).href } catch { return 'https://briklayflow.vercel.app/logbook' }
+  const b = Deno.env.get('WA_APP_LINK') ?? 'https://briklay.app'
+  try { return new URL('/logbook', b).href } catch { return 'https://briklay.app/logbook' }
 })()
 
 export type DispatchCtx = {
@@ -196,8 +196,8 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
     const [act, , ...idParts] = ctx.interactiveId.split('_')
     const poId = idParts.join('_')
     const poLink = (() => {
-      const b = Deno.env.get('WA_APP_LINK') ?? 'https://briklayflow.vercel.app'
-      try { return new URL('/purchase-orders/' + poId, b).href } catch { return 'https://briklayflow.vercel.app/purchase-orders/' + poId }
+      const b = Deno.env.get('WA_APP_LINK') ?? 'https://briklay.app'
+      try { return new URL('/purchase-orders/' + poId, b).href } catch { return 'https://briklay.app/purchase-orders/' + poId }
     })()
     if (act === 'review') {
       await send(supabase, from, { kind: 'cta', body: `Purchase order ${poId} — review the full details, then approve or send back.`, cta: { text: 'Review details', url: poLink } }, { org_id: orgId, wamid })

@@ -22,8 +22,8 @@
 // Records get record links; bundles get the section, or the day.
 
 const BASE = (() => {
-  const b = Deno.env.get('WA_APP_LINK') ?? 'https://briklayflow.vercel.app'
-  try { return new URL('/', b).origin } catch { return 'https://briklayflow.vercel.app' }
+  const b = Deno.env.get('WA_APP_LINK') ?? 'https://briklay.app'
+  try { return new URL('/', b).origin } catch { return 'https://briklay.app' }
 })()
 
 const url = (path: string) => `${BASE}${path}`

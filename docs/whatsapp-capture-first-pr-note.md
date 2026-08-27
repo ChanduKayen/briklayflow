@@ -58,7 +58,7 @@ last entry silently (a read, not a question).
 
 ## `WA_APP_LINK`
 The Edit CTA needs a real https URL (WhatsApp rejects `localhost`). `WA_APP_LINK` defaults
-to `https://briklayflow.vercel.app/logbook` in both the agent and the staging RPCs — set it
+to `https://briklay.app/logbook` in both the agent and the staging RPCs — set it
 to the production Day Book URL per environment; never localhost.
 
 ---

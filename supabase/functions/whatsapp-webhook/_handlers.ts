@@ -71,7 +71,7 @@ function buildConfirmMsg(payee: string, amount: number, mode: string | null, des
     `✅ Added to logbook\n` +
     `*${payee}* — ${fmtAmount(amount)} · ${mode || 'Cash'}\n` +
     `${desc}\n\n` +
-    `Review: briklayflow.vercel.app/logbook`
+    `Review: briklay.app/logbook`
   )
 }
 
@@ -355,7 +355,7 @@ export async function handleSessionReply(
       await clearSession(supabase, from)
       const amount2 = updated.amount as number | null
       if (!amount2) {
-        await sendWA(from, `📥 Added to logbook — couldn't extract all details.\nReview: briklayflow.vercel.app/logbook`)
+        await sendWA(from, `📥 Added to logbook — couldn't extract all details.\nReview: briklay.app/logbook`)
         break
       }
       const desc2 = (updated.description_raw || updated.work_type || updated.category_name || 'Payment') as string
@@ -386,7 +386,7 @@ export async function handleSessionReply(
         await sendWA(from,
           `📥 Added to logbook\n` +
           `Open app to assign the right person:\n` +
-          `briklayflow.vercel.app/logbook`)
+          `briklay.app/logbook`)
         await clearSession(supabase, from)
       } else {
         await sendWA(from, `Reply 1 to ${matches.length + 1}`)
@@ -413,7 +413,7 @@ export async function handleSessionReply(
           `✅ Added to logbook\n` +
           `*${payeeName}* — ${fmtAmount(amount4)}\n` +
           `Project: ${chosen.name}\n\n` +
-          `Review: briklayflow.vercel.app/logbook`)
+          `Review: briklay.app/logbook`)
         await clearSession(supabase, from)
       } else {
         await sendWA(from, `Reply 1 to ${options.length}`)
@@ -434,7 +434,7 @@ export async function handleSessionReply(
         await supabase.from('rough_entries').update({
           ai_extracted: { ...currentEntry.ai_extracted, user_annotation: text },
         }).eq('id', ctx.rough_entry_id)
-        await sendWA(from, `✅ Note added to your entry.\nReview: briklayflow.vercel.app/logbook`)
+        await sendWA(from, `✅ Note added to your entry.\nReview: briklay.app/logbook`)
         await clearSession(supabase, from)
         return
       }
@@ -500,12 +500,12 @@ export async function handleQuery(
       })
       .join('\n')
     await sendWA(from,
-      `📥 *${rows.length} pending entries:*\n\n${list}\n\nOpen app: *briklayflow.vercel.app/logbook*`)
+      `📥 *${rows.length} pending entries:*\n\n${list}\n\nOpen app: *briklay.app/logbook*`)
     return
   }
 
   await sendWA(from,
-    "I can't pull up live reports right here yet — but your full ledger, balances and pending payments are always ready in the app:\nbriklayflow.vercel.app/logbook")
+    "I can't pull up live reports right here yet — but your full ledger, balances and pending payments are always ready in the app:\nbriklay.app/logbook")
 }
 
 // ── General handler ───────────────────────────────────────────────────────────
@@ -534,7 +534,7 @@ export async function handleGeneral(
       `What you can do:\n` +
       `• Add payments: _"ramu 5k cash plastering"_\n` +
       `• Check logbook: type *PENDING*\n\n` +
-      `Open app: briklayflow.vercel.app`)
+      `Open app: briklay.app`)
     return
   }
 
@@ -664,7 +664,7 @@ export async function processPaymentList(
     await supabase.from('rough_entries').update({ status: 'PENDING' }).eq('id', parentId)
     await sendWA(from,
       `📋 Could not read the list clearly.\n` +
-      `Saved to logbook for manual review:\nbriklayflow.vercel.app/logbook`)
+      `Saved to logbook for manual review:\nbriklay.app/logbook`)
     return
   }
 
@@ -745,7 +745,7 @@ export async function processPaymentList(
   await sendWA(from,
     `📋 Found ${rows.length} payments!\n\n` +
     `${preview}${more}\n\n` +
-    `Review all:\nbriklayflow.vercel.app/logbook`)
+    `Review all:\nbriklay.app/logbook`)
 
   console.log('[handlers] processPaymentList done:', { parentId, entriesCreated: rows.length })
 }
@@ -930,7 +930,7 @@ async function processImageWithContext(
     await sendWA(from,
       `✅ Added to logbook\n*${payee}* — ${amount}\n` +
       (desc ? `${desc}\n` : '') +
-      `📎 Image attached as proof\n\nReview: briklayflow.vercel.app/logbook`)
+      `📎 Image attached as proof\n\nReview: briklay.app/logbook`)
 
   } else if (image_type === 'PAYMENT_LIST') {
     // processPaymentList() is already running in background from handleImageMessage
@@ -954,7 +954,7 @@ async function processImageWithContext(
     await sendWA(from,
       `📷 Site photo saved!\n` +
       (userText ? `Note: "${userText}"\n` : '') +
-      `Review: briklayflow.vercel.app/logbook`)
+      `Review: briklay.app/logbook`)
 
   } else {
     // UNKNOWN
@@ -964,6 +964,6 @@ async function processImageWithContext(
       ai_extracted: { user_note: userText || null, has_attachment: true, attachment_url: image_url },
     }).eq('id', rough_entry_id)
 
-    await sendWA(from, `📎 Saved to logbook.\nbriklayflow.vercel.app/logbook`)
+    await sendWA(from, `📎 Saved to logbook.\nbriklay.app/logbook`)
   }
 }

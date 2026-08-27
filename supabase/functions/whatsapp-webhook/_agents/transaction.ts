@@ -32,8 +32,8 @@ import type { Lang } from '../_messages.ts'
 // a bare domain or another page can't land the entry CTA on "/" (which the app redirects
 // to /ledger). The RPC appends "?entry=<id>" to this.
 const LINK = (() => {
-  const b = Deno.env.get('WA_APP_LINK') ?? 'https://briklayflow.vercel.app'
-  try { return new URL('/logbook', b).href } catch { return 'https://briklayflow.vercel.app/logbook' }
+  const b = Deno.env.get('WA_APP_LINK') ?? 'https://briklay.app'
+  try { return new URL('/logbook', b).href } catch { return 'https://briklay.app/logbook' }
 })()
 const SOURCE = 'WHATSAPP_TEXT'
 // Proof image: the private rough-entry-media bucket has no public URL, and the Day Book renders

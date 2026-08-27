@@ -619,7 +619,7 @@ export function buildConfirm(parts: {
   parked: number; pendingPick: number; ownerLabel: string
   md?: boolean             // WhatsApp markdown (default); the UI channel passes false (plain text)
   projectId?: string | null  // with appBase, turns the view-links into real tappable deep links
-  appBase?: string | null    // web app ORIGIN (e.g. https://briklayflow.vercel.app)
+  appBase?: string | null    // web app ORIGIN (e.g. https://briklay.app)
   ctaMode?: boolean          // a tappable button replaces the text orientation links → omit them here
 }): string {
   const md = parts.md !== false

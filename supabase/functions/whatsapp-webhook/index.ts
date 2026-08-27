@@ -22,7 +22,7 @@ const DORMANT_MS = 14 * 24 * 60 * 60 * 1000
 
 // Self-serve sign-up / create-your-own-site link (a CTA button needs a real https URL;
 // the env may be scheme-less, so normalise). Used by the no-org reply.
-const SIGNUP_RAW = Deno.env.get('WA_SIGNUP_LINK') ?? 'https://briklayflow.vercel.app'
+const SIGNUP_RAW = Deno.env.get('WA_SIGNUP_LINK') ?? 'https://briklay.app'
 const SIGNUP_URL = /^https?:\/\//.test(SIGNUP_RAW) ? SIGNUP_RAW : `https://${SIGNUP_RAW}`
 // Pre-dispatch edge replies have no router language yet -> default 'en' templates.
 // Sprint 3: the 4-way router + dispatcher supersede _classify.ts (no longer in the

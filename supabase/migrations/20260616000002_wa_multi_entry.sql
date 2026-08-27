@@ -47,7 +47,7 @@ CREATE OR REPLACE FUNCTION public.stage_entry_v3(
   p_status text, p_source text, p_sender_name text, p_raw_text text, p_ai jsonb,
   p_payload  jsonb DEFAULT NULL,
   p_rendered jsonb DEFAULT NULL,
-  p_link_base text DEFAULT 'https://briklayflow.vercel.app/logbook',
+  p_link_base text DEFAULT 'https://briklay.app/logbook',
   p_reaction jsonb DEFAULT NULL
 ) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$

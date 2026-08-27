@@ -30,7 +30,7 @@ becomes a durable Day Book draft (`rough_entries`), and the conversation only en
 core. **Single active project auto-resolves** (no question) too.
 
 ## Deep-link target
-`https://briklayflow.vercel.app/logbook?entry=<rough_entry_id>` (`WA_APP_LINK`
+`https://briklay.app/logbook?entry=<rough_entry_id>` (`WA_APP_LINK`
 overridable). Added focus to the existing `/logbook` route (no per-entry route existed):
 `Logbook.tsx` reads `?entry`, scrolls to and ring-highlights `#db-entry-<id>`. The link
 is appended to the ack inside the staging RPC, so it's part of the same message + tx.

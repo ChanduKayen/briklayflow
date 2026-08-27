@@ -26,7 +26,7 @@ CREATE OR REPLACE FUNCTION public.stage_entry_v2(
   p_org_id uuid, p_sender text, p_wamid text, p_status text, p_source text,
   p_sender_name text, p_raw_text text, p_ai jsonb,
   p_payload jsonb, p_rendered jsonb,
-  p_link_base text DEFAULT 'https://briklayflow.vercel.app/logbook'
+  p_link_base text DEFAULT 'https://briklay.app/logbook'
 ) RETURNS uuid
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_id uuid; v_link text; v_rendered jsonb; v_payload jsonb;
@@ -50,7 +50,7 @@ CREATE OR REPLACE FUNCTION public.update_entry_v2(
   p_entry_id uuid, p_patch jsonb, p_status text,
   p_org_id uuid, p_sender text, p_wamid text,
   p_payload jsonb, p_rendered jsonb,
-  p_link_base text DEFAULT 'https://briklayflow.vercel.app/logbook'
+  p_link_base text DEFAULT 'https://briklay.app/logbook'
 ) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_link text; v_rendered jsonb; v_payload jsonb;
@@ -71,7 +71,7 @@ END $$;
 -- atomic with the conversation close. Staged-entry case -> "Saved ... not set" + Edit
 -- CTA; no-entry case -> failure text. Idempotent (dedup_key per convo).
 CREATE OR REPLACE FUNCTION public.wa_commit_abandoned_conversations(
-  p_ttl_minutes int DEFAULT 5, p_link_base text DEFAULT 'https://briklayflow.vercel.app/logbook'
+  p_ttl_minutes int DEFAULT 5, p_link_base text DEFAULT 'https://briklay.app/logbook'
 ) RETURNS int
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE c record; n int := 0; v_body text; v_payee text; v_amount text; v_link text;

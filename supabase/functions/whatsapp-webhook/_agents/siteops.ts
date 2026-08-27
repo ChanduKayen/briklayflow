@@ -285,8 +285,8 @@ async function materializeProjectTasksUncached(ctx: SiteopsCtx, projectId: strin
 // Web app ORIGIN for the deep links in the confirm. Same env the transaction agent uses
 // (WA_APP_LINK); we take its origin and append the project route in buildConfirm.
 const APP_BASE = (() => {
-  const b = Deno.env.get('WA_APP_LINK') ?? 'https://briklayflow.vercel.app'
-  try { return new URL(b).origin } catch { return 'https://briklayflow.vercel.app' }
+  const b = Deno.env.get('WA_APP_LINK') ?? 'https://briklay.app'
+  try { return new URL(b).origin } catch { return 'https://briklay.app' }
 })()
 
 /**

@@ -85,7 +85,7 @@ END $$;
 --   * without a staged_entry_id (awaiting amount, gate 1) -> "couldn't log, no
 --     amount" + ABANDONED (no commit). Idempotent; enqueue deduped per convo.
 CREATE OR REPLACE FUNCTION public.wa_commit_abandoned_conversations(
-  p_ttl_minutes int DEFAULT 5, p_link_base text DEFAULT 'https://briklayflow.vercel.app/logbook'
+  p_ttl_minutes int DEFAULT 5, p_link_base text DEFAULT 'https://briklay.app/logbook'
 ) RETURNS int
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE c record; n int := 0; v_body text; v_payee text; v_amount text;

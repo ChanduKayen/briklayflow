@@ -125,7 +125,7 @@ export default function CreateWorkspace({ session }: { session: Session }) {
               <span
                 className="flex items-center px-3 text-[12px] text-on-surface-variant shrink-0 border-r border-outline-variant bg-surface-container-low select-none"
               >
-                briklayflow.com/
+                briklay.app/
               </span>
               <div className="relative flex-1 flex items-center">
                 <input

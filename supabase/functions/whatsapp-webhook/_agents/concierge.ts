@@ -14,9 +14,9 @@
 import { send } from '../_format.ts'
 import { renderHistory, type Turn } from '../_history.ts'
 
-const APP_LINK    = 'briklayflow.vercel.app/logbook'
+const APP_LINK    = 'briklay.app/logbook'
 // A CTA button needs a real https URL; the env may be set without a scheme, so normalise.
-const SIGNUP_RAW  = Deno.env.get('WA_SIGNUP_LINK') ?? 'https://briklayflow.vercel.app'
+const SIGNUP_RAW  = Deno.env.get('WA_SIGNUP_LINK') ?? 'https://briklay.app'
 const SIGNUP_URL  = /^https?:\/\//.test(SIGNUP_RAW) ? SIGNUP_RAW : `https://${SIGNUP_RAW}`
 const SIGNUP_LINK = SIGNUP_URL.replace(/^https?:\/\//, '')
 

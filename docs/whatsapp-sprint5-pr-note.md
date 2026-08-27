@@ -58,7 +58,7 @@ failure copy carries a reason + an example, never a stack trace.
 
 ## `WA_APP_LINK` guidance
 CTA URL buttons require a real **https** URL. The default is
-`https://briklayflow.vercel.app/logbook` (**not localhost**) — set `WA_APP_LINK` to the prod
+`https://briklay.app/logbook` (**not localhost**) — set `WA_APP_LINK` to the prod
 https domain to override. localhost/http will not render a button.
 
 ## Apply / deploy

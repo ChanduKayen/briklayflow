@@ -201,7 +201,7 @@ suite('reporting — the dummy answers nothing, and says so plainly', () => {
   })
 
   test('it points at the app, where the answer actually lives today', () => {
-    expect(/briklayflow|http/i.test(body())).toBe(true)
+    expect(/briklay|http/i.test(body())).toBe(true)
   })
 
   // A fabricated total is worse than no answer: it would be believed. The dummy must carry no digits that
