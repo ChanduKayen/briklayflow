@@ -8,7 +8,7 @@ import { useOrgId } from '../lib/auth/AuthProvider';
 import { ImageLightbox } from './ImageLightbox';
 import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 import { searchPayees, rankPayeeName, PAYEE_SEARCH_FLOOR } from '../lib/payeeSearch';
-import { fileRoughEntry } from './day-book/fileEntry';
+import { fileRoughEntry, fileRoughEntrySplit } from './day-book/fileEntry';
 
 // ── Walnut-ledger palette (mirrors NewTransaction.tsx) ──────────────────────────
 // Warm cream canvas, walnut ink, terracotta accent for money-out, sage for money-in.
@@ -36,6 +36,17 @@ type PayeeState = 'A' | 'B' | 'C' | 'confirmed';
 /** The four things the editor can ask about. `only` narrows the popup to a subset of them. */
 export type GapKey = 'amount' | 'payee' | 'description' | 'project';
 
+/** One site-slice while splitting a capture across projects. */
+interface SplitRow { id: string; projectId: string; amount: number | ''; }
+interface SplitApi {
+  mode: boolean;
+  enable: (on: boolean) => void;
+  splits: SplitRow[];
+  setSplits: React.Dispatch<React.SetStateAction<SplitRow[]>>;
+  total: number;
+  remaining: number;
+}
+
 // Names read better title-cased — capitalise the first letter of each word as the
 // owner types, without fighting intentional caps elsewhere (e.g. "McRavi" stays).
 const capitalizeWords = (v: string) => v.replace(/(^|\s)([a-z])/g, (_, sp, c) => sp + c.toUpperCase());
@@ -46,6 +57,98 @@ function FieldQuestion({ text, missing }: { text: string; missing?: boolean }) {
     <h2 className="mb-3" style={{ fontFamily: VOICE.serif, fontSize: 19, fontWeight: 600, letterSpacing: '-0.2px', color: missing ? VOICE.out : VOICE.user }}>
       {text}
     </h2>
+  );
+}
+
+// ── Split among sites — the beautiful editor: segmented balance bar + per-site rows ──
+function SplitSites({ projects, api }: { projects: any[]; api: SplitApi }) {
+  const { splits, setSplits, total, remaining } = api;
+  const uid = () => Math.random().toString(36).slice(2, 8);
+  const up = (id: string, patch: Partial<SplitRow>) => setSplits((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const add = () => setSplits((rows) => [...rows, { id: uid(), projectId: '', amount: '' }]);
+  const rm = (id: string) => setSplits((rows) => (rows.length > 1 ? rows.filter((r) => r.id !== id) : rows));
+  const colors = ['#C75E32', '#4C6B47', '#6366F1', '#0EA5E9', '#C79A2E'];
+  const over = remaining < -0.005;
+  const balanced = Math.abs(remaining) < 0.005 && total > 0;
+  const used = new Set(splits.map((r) => r.projectId).filter(Boolean));
+  return (
+    <div>
+      {total > 0 && (
+        <div className="rounded-xl p-3 mb-2.5" style={{ background: VOICE.surface, border: `1px solid ${VOICE.line}` }}>
+          <div className="flex h-2 w-full rounded-full overflow-hidden" style={{ background: 'rgba(0,0,0,0.06)' }}>
+            {splits.map((r, i) => {
+              const amt = Number(r.amount) || 0;
+              const pct = total > 0 ? (amt / total) * 100 : 0;
+              return pct > 0 ? <div key={r.id} style={{ width: `${Math.min(100, pct)}%`, background: colors[i % colors.length], transition: 'width .3s' }} title={`₹${amt.toLocaleString('en-IN')}`} /> : null;
+            })}
+            {remaining > 0.005 && <div style={{ width: `${(remaining / total) * 100}%`, background: 'rgba(0,0,0,0.08)', transition: 'width .3s' }} />}
+          </div>
+          <div className="flex items-center justify-between mt-2 text-[11px] font-semibold" style={VNUMS}>
+            <span style={{ color: VOICE.systemFaint }}>Total ₹{total.toLocaleString('en-IN')}</span>
+            <span className="inline-flex items-center gap-1" style={{ color: over ? VOICE.out : balanced ? VOICE.confirm : VOICE.accentDeep }}>
+              {balanced && <span className="material-symbols-outlined text-[13px]" style={{ fontVariationSettings: "'FILL' 1" }}>check_circle</span>}
+              {over ? `₹${Math.abs(remaining).toLocaleString('en-IN')} over` : balanced ? 'Balanced' : `₹${remaining.toLocaleString('en-IN')} left`}
+            </span>
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {splits.map((r, i) => (
+          <div key={r.id} className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: colors[i % colors.length] }} />
+            <select
+              value={r.projectId}
+              onChange={(e) => up(r.id, { projectId: e.target.value })}
+              className="flex-1 min-w-0 text-[13px] px-2.5 py-2 rounded-lg outline-none appearance-none"
+              style={{ background: VOICE.field, border: `1px solid ${r.projectId ? VOICE.line : VOICE.outLine}`, color: VOICE.user }}
+            >
+              <option value="">Select site…</option>
+              {projects.map((p) => (
+                <option key={p.project_id} value={p.project_id} disabled={used.has(p.project_id) && p.project_id !== r.projectId}>{p.name}</option>
+              ))}
+            </select>
+            <div className="relative shrink-0" style={{ width: 104 }}>
+              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[12px] pointer-events-none" style={{ color: VOICE.systemFaint }}>₹</span>
+              <input
+                inputMode="numeric"
+                value={r.amount === '' ? '' : String(r.amount)}
+                onChange={(e) => { const v = e.target.value.replace(/[^0-9.]/g, ''); up(r.id, { amount: v === '' ? '' : Number(v) }); }}
+                placeholder="0"
+                className="w-full text-[13px] pl-5 pr-2 py-2 rounded-lg outline-none text-right"
+                style={{ ...VNUMS, background: VOICE.field, border: `1px solid ${Number(r.amount) > 0 ? VOICE.line : VOICE.outLine}`, color: VOICE.user }}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => rm(r.id)}
+              disabled={splits.length <= 1}
+              className="shrink-0 w-7 h-7 grid place-items-center rounded-lg disabled:opacity-25"
+              style={{ color: VOICE.systemFaint }}
+              aria-label="Remove site"
+            >
+              <span className="material-symbols-outlined text-[16px]">close</span>
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-3 mt-2">
+        <button type="button" onClick={add} className="inline-flex items-center gap-1 text-[12px] font-semibold" style={{ color: VOICE.accentDeep }}>
+          <span className="material-symbols-outlined text-[15px]">add</span> Add another site
+        </button>
+        {remaining > 0.005 && splits.length >= 1 && (
+          <button
+            type="button"
+            onClick={() => { const last = splits[splits.length - 1]; up(last.id, { amount: (Number(last.amount) || 0) + remaining }); }}
+            className="inline-flex items-center gap-1 text-[12px] font-medium"
+            style={{ color: VOICE.systemFaint }}
+          >
+            put ₹{remaining.toLocaleString('en-IN')} on the last
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -356,6 +459,25 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
   const [description, setDescription] = useState(ai.description || ai.description_raw || '');
   const [projectId, setProjectId] = useState(ai.project_id || '');
   const [mode, setMode] = useState<'Cash' | 'NEFT' | 'UPI' | 'Cheque'>(ai.mode || 'Cash');
+
+  // ── Split among sites ── file one capture as N transactions (one per site), via
+  //    fileRoughEntrySplit. Off by default; the split amounts must sum to the total.
+  const [splitMode, setSplitMode] = useState(false);
+  const [splits, setSplits] = useState<SplitRow[]>([{ id: 's1', projectId: '', amount: '' }]);
+  const enableSplit = (on: boolean) => {
+    setSplitMode(on);
+    if (on) setSplits((prev) => {
+      const kept = prev.filter((r) => r.projectId || r.amount !== '');
+      if (kept.length >= 2) return kept;
+      return [{ id: 's1', projectId, amount: '' }, { id: 's2', projectId: '', amount: '' }];
+    });
+  };
+  const splitTotal = Number(amount) || 0;
+  const splitSum = splits.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const splitRemaining = splitTotal - splitSum;
+  const splitValid = splitMode && splits.length >= 2
+    && splits.every((r) => r.projectId && Number(r.amount) > 0)
+    && Math.abs(splitRemaining) < 0.005;
   const [showDismissConfirm, setShowDismissConfirm] = useState(false);
   const [posting, setPosting] = useState(false);
 
@@ -491,6 +613,8 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
   // much. The remark is a note ON it, and a ledger that refuses to record a payment because nobody
   // typed "cement" is a ledger arguing with its own owner.
   const mandatoryFilled = !!payeeId && !!amount && Number(amount) > 0 && !!projectId;
+  // Filing is allowed either with a single project OR a valid split across sites.
+  const canFile = !!payeeId && splitTotal > 0 && (splitMode ? splitValid : !!projectId);
   const missingPayee = !payeeId;
   const missingAmount = !amount || Number(amount) <= 0;
   const missingDescription = !description.trim();
@@ -515,7 +639,8 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
   const amountResolved = amount !== '' && Number(amount) > 0;
   const payeeResolved = !!payeeId && (payeeState === 'A' || payeeState === 'confirmed');
   const descriptionResolved = !!description.trim();
-  const projectResolved = !!projectId;
+  // In split mode "project" is resolved once the split is valid (sites chosen, amounts sum to total).
+  const projectResolved = splitMode ? splitValid : !!projectId;
 
   type GapKey = 'amount' | 'payee' | 'description' | 'project';
   const fieldEl = (k: GapKey): HTMLElement | null =>
@@ -529,7 +654,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
   const nextGap: { label: string; key: GapKey } | null = (() => {
     if (!amountResolved) return { label: 'Enter the amount', key: 'amount' };
     if (!payeeResolved) return { label: payeeState === 'B' ? 'Confirm the payee' : 'Add the payee', key: 'payee' };
-    if (!projectResolved) return { label: 'Choose a project', key: 'project' };
+    if (!projectResolved) return { label: splitMode ? 'Finish the split' : 'Choose a project', key: 'project' };
     return null;
   })();
   const goToGap = () => { if (nextGap) bringIntoFrame(fieldEl(nextGap.key)); };
@@ -577,7 +702,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
   const [approval, setApproval] = useState<'ask' | 'filing' | 'filed'>('ask');
 
   const handleApprove = useCallback(async () => {
-    if (posting || !mandatoryFilled) return;
+    if (posting || !canFile) return;
     setPosting(true);
     setApproval('filing');
     try {
@@ -587,13 +712,23 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
         payee_id: payeeId || null, payee_name: payeeName || null,
         amount: Number(amount), project_id: projectId || null, project_name: projectName,
         description: description.trim(), mode,
+        // provenance for a split file: the sites this capture was booked across
+        ...(splitMode ? { split_project_ids: splits.map((s) => s.projectId) } : {}),
       };
       const { data: updatedEntry } = await supabase.from('rough_entries')
         .update({ ai_extracted: nextAi }).eq('id', entry.id).select().single();
 
-      await fileRoughEntry(updatedEntry as RoughEntry, orgId ?? '', {
-        payeeId, projectId, amount: Number(amount), description: description.trim(),
-      });
+      if (splitMode) {
+        await fileRoughEntrySplit(
+          updatedEntry as RoughEntry, orgId ?? '',
+          { payeeId, amount: Number(amount), description: description.trim() },
+          splits.map((s) => ({ projectId: s.projectId, amount: Number(s.amount) })),
+        );
+      } else {
+        await fileRoughEntry(updatedEntry as RoughEntry, orgId ?? '', {
+          payeeId, projectId, amount: Number(amount), description: description.trim(),
+        });
+      }
 
       // IT LANDED. Say so, hold it for a beat, and only then step out of the way — and hand the card
       // back its own moment (the fly-off), so an entry approved from here leaves the list exactly as
@@ -609,7 +744,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
       setApproval('ask');
       setPosting(false);
     }
-  }, [posting, mandatoryFilled, projects, projectId, ai, payeeId, payeeName, amount, description, mode, entry, orgId, qc, onUpdated, onClose, showSnackbar]);
+  }, [posting, canFile, splitMode, splits, projects, projectId, ai, payeeId, payeeName, amount, description, mode, entry, orgId, qc, onUpdated, onClose, showSnackbar]);
 
   /**
    * "THEN CONFIRM AUTO." When adding the payee was the LAST thing standing between this payment and
@@ -663,7 +798,8 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
     isWhatsApp,
     missingPayee, missingAmount, missingDescription, missingProject,
     payeeUnmatched, projectUnmatched,
-    mandatoryFilled, posting,
+    mandatoryFilled: canFile, posting,
+    splitApi: { mode: splitMode, enable: enableSplit, splits, setSplits, total: splitTotal, remaining: splitRemaining },
     showDismissConfirm, setShowDismissConfirm,
     onClose, handleDismiss,
     payeeRef, advanceAfter, nextGap, goToGap,
@@ -753,6 +889,7 @@ interface ContentProps {
   description: string; setDescription: (v: string) => void;
   projectId: string; setProjectId: (v: string) => void; projectRef: React.RefObject<HTMLSelectElement | null>;
   projects: any[];
+  splitApi: SplitApi;
   mode: 'Cash' | 'NEFT' | 'UPI' | 'Cheque'; setMode: (v: 'Cash' | 'NEFT' | 'UPI' | 'Cheque') => void;
   isWhatsApp: boolean;
   missingPayee: boolean; missingAmount: boolean; missingDescription: boolean; missingProject: boolean;
@@ -780,6 +917,7 @@ function PopupContents({
   amount, setAmount,
   description, setDescription,
   projectId, setProjectId, projectRef, projects,
+  splitApi,
   mode, setMode,
   isWhatsApp,
   missingPayee, missingAmount, missingProject,
@@ -1256,45 +1394,65 @@ function PopupContents({
         </div>
         )}
 
-        {/* 4. Project */}
+        {/* 4. Project (single) OR split among sites */}
         {show('project') && (
         <div>
-          <FieldQuestion text="Which project is this for?" missing={missingProject && !projectUnmatched} />
-          <select
-            ref={projectRef}
-            value={projectId}
-            onChange={(e) => { setProjectId(e.target.value); if (e.target.value) advanceAfter('project'); }}
-            className="w-full text-[13px] px-2.5 py-2 rounded-lg outline-none transition-colors appearance-none"
-            style={fieldStyle(missingProject && !projectUnmatched ? 'missing' : projectId ? 'filled' : projectUnmatched ? 'missing' : 'idle')}
-          >
-            <option value="">Select project…</option>
-            {projects.map((p) => (
-              <option key={p.project_id} value={p.project_id}>{p.name}</option>
-            ))}
-          </select>
+          <FieldQuestion text={splitApi.mode ? 'Split this across sites' : 'Which project is this for?'} missing={!splitApi.mode && missingProject && !projectUnmatched} />
 
-          {projectUnmatched && !projectId && (ai.project_closest_match?.length ?? 0) > 0 && (
-            <div className="mt-2 p-2.5 rounded-xl" style={{ background: VOICE.askWash, border: `1px solid ${VOICE.outLine}` }}>
-              <p className="text-[11px] font-medium mb-2 flex items-center gap-1" style={{ color: VOICE.accentDeep }}>
-                <span className="material-symbols-outlined text-[13px]">warning</span>
-                "<span className="italic">{ai.project_raw}</span>" didn't match a project
-              </p>
-              <div className="space-y-1">
-                {ai.project_closest_match!.map((p: any) => (
-                  <button key={p.id} type="button"
-                    onClick={() => { setProjectId(p.id); advanceAfter('project'); }}
-                    className="w-full text-left px-2.5 py-1.5 rounded-lg text-[13px] font-semibold transition-colors"
-                    style={{ background: VOICE.surface, border: `1px solid ${VOICE.outLine}`, color: VOICE.user }}
-                  >
-                    {p.name}
-                  </button>
+          {!splitApi.mode ? (
+            <>
+              <select
+                ref={projectRef}
+                value={projectId}
+                onChange={(e) => { setProjectId(e.target.value); if (e.target.value) advanceAfter('project'); }}
+                className="w-full text-[13px] px-2.5 py-2 rounded-lg outline-none transition-colors appearance-none"
+                style={fieldStyle(missingProject && !projectUnmatched ? 'missing' : projectId ? 'filled' : projectUnmatched ? 'missing' : 'idle')}
+              >
+                <option value="">Select project…</option>
+                {projects.map((p) => (
+                  <option key={p.project_id} value={p.project_id}>{p.name}</option>
                 ))}
-              </div>
-            </div>
+              </select>
+
+              {projectUnmatched && !projectId && (ai.project_closest_match?.length ?? 0) > 0 && (
+                <div className="mt-2 p-2.5 rounded-xl" style={{ background: VOICE.askWash, border: `1px solid ${VOICE.outLine}` }}>
+                  <p className="text-[11px] font-medium mb-2 flex items-center gap-1" style={{ color: VOICE.accentDeep }}>
+                    <span className="material-symbols-outlined text-[13px]">warning</span>
+                    "<span className="italic">{ai.project_raw}</span>" didn't match a project
+                  </p>
+                  <div className="space-y-1">
+                    {ai.project_closest_match!.map((p: any) => (
+                      <button key={p.id} type="button"
+                        onClick={() => { setProjectId(p.id); advanceAfter('project'); }}
+                        className="w-full text-left px-2.5 py-1.5 rounded-lg text-[13px] font-semibold transition-colors"
+                        style={{ background: VOICE.surface, border: `1px solid ${VOICE.outLine}`, color: VOICE.user }}
+                      >
+                        {p.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {isWhatsApp && !projectId && !projectUnmatched && (
+                <div className="mt-1.5"><span className="inline-flex items-center gap-1 text-[11px]" style={{ color: VOICE.accentDeep }}><span className="w-1.5 h-1.5 rounded-full" style={{ background: VOICE.accentSoft }} /> Pick a project</span></div>
+              )}
+            </>
+          ) : (
+            <SplitSites projects={projects} api={splitApi} />
           )}
 
-          {isWhatsApp && !projectId && !projectUnmatched && (
-            <div className="mt-1.5"><span className="inline-flex items-center gap-1 text-[11px]" style={{ color: VOICE.accentDeep }}><span className="w-1.5 h-1.5 rounded-full" style={{ background: VOICE.accentSoft }} /> Pick a project</span></div>
+          {/* Split / un-split toggle — only meaningful once there's an amount to divide. */}
+          {splitApi.total > 0 && (
+            <button
+              type="button"
+              onClick={() => splitApi.enable(!splitApi.mode)}
+              className="mt-2.5 inline-flex items-center gap-1.5 text-[12px] font-semibold transition-opacity hover:opacity-80"
+              style={{ color: VOICE.accentDeep }}
+            >
+              <span className="material-symbols-outlined text-[15px]">{splitApi.mode ? 'undo' : 'call_split'}</span>
+              {splitApi.mode ? 'Use a single site' : 'Split among sites'}
+            </button>
           )}
         </div>
         )}
