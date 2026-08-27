@@ -381,37 +381,32 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
 
         <div className="sheet">
           <table>
-            <colgroup><col style={{ width: '17%' }} /><col style={{ width: '19%' }} /><col style={{ width: '11%' }} /><col style={{ width: '12%' }} /><col style={{ width: '20%' }} /><col style={{ width: '10%' }} /><col style={{ width: '11%' }} /><col style={{ width: 140 }} /></colgroup>
+            <colgroup><col style={{ width: '18%' }} /><col style={{ width: '25%' }} /><col style={{ width: '13%' }} /><col style={{ width: '13%' }} /><col style={{ width: '20%' }} /><col style={{ width: '11%' }} /></colgroup>
             <thead><tr>
               <th className={sortK === 'vendor' ? 'sorted' : ''} onClick={() => onSort('vendor')}>Vendor · PO<span className="arr">{arr('vendor')}</span></th>
               <th style={{ cursor: 'default' }}>Items</th>
               <th className={sortK === 'site' ? 'sorted' : ''} onClick={() => onSort('site')}>Site<span className="arr">{arr('site')}</span></th>
               <th className={sortK === 'ordered' ? 'sorted' : ''} onClick={() => onSort('ordered')}>Ordered<span className="arr">{arr('ordered')}</span></th>
-              <th className={sortK === 'delivery' ? 'sorted' : ''} onClick={() => onSort('delivery')}>Received<span className="arr">{arr('delivery')}</span></th>
+              <th className={sortK === 'delivery' ? 'sorted' : ''} onClick={() => onSort('delivery')}>Delivery<span className="arr">{arr('delivery')}</span></th>
               <th className={`num${sortK === 'value' ? ' sorted' : ''}`} onClick={() => onSort('value')}>Value<span className="arr">{arr('value')}</span></th>
-              <th className={`num${sortK === 'balance' ? ' sorted' : ''}`} onClick={() => onSort('balance')}>Balance<span className="arr">{arr('balance')}</span></th>
-              <th style={{ cursor: 'default' }} />
             </tr></thead>
             <tbody>
               {isLoading ? (
-                <tr><td colSpan={8} className="empty">Loading…</td></tr>
+                <tr><td colSpan={6} className="empty">Loading…</td></tr>
               ) : list.length === 0 ? (
-                <tr><td colSpan={8} className="empty">Nothing here. {filter === 'mine' ? 'Nothing waiting on you — go build something.' : 'Try another filter.'}</td></tr>
+                <tr><td colSpan={6} className="empty">Nothing here. {filter === 'mine' ? 'Nothing waiting on you — go build something.' : 'Try another filter.'}</td></tr>
               ) : list.map((p) => {
-                const nx = nextAction(p), bal = balance(p);
                 const shown = p.items.slice(0, 2).map(i => i.n).join(', ');
                 const rest = p.items.length - 2;
                 const siteShort = p.site.replace(' Residence', '').replace("'s", '');
                 return (
                   <tr key={p.id} tabIndex={0} className={p.cancelled ? 'cancelled' : ''} onClick={() => openPO(p.id)} onKeyDown={(e) => { if (e.key === 'Enter') openPO(p.id); }}>
                     <td className="po"><b>{p.vendor}</b><span className="mono">{p.id}</span></td>
-                    <td><div className="items"><span className="t">{shown || <span className="dim">No items</span>}</span>{rest > 0 && <span className="more" onMouseEnter={(e) => showTip(e, p.id, false)} onMouseLeave={() => setTip(null)}>+{rest}</span>}</div></td>
+                    <td><div className="items"><span className="t">{shown || <span className="dim">No items</span>}</span>{rest > 0 && <span className="more" onMouseEnter={(e) => showTip(e, p.id, false)} onMouseLeave={() => setTip(null)}>+{rest} item{rest > 1 ? 's' : ''}</span>}</div></td>
                     <td className="site" title={p.site}>{siteShort}</td>
                     <td className="when">{dstr(D(p.ordered))}<small>{p.by}</small></td>
                     <td>{recvCell(p)}</td>
-                    <td className="num val">{p.rfq ? <span className="dim">—</span> : fmt(p.value)}{p.billed && p.billed !== p.value ? <small className="over">billed {p.billed > p.value ? '+' : '−'}{fmt(Math.abs(p.billed - p.value))}</small> : null}</td>
-                    <td className={`num bal ${p.cancelled || p.rfq ? '' : bal > 0 ? 'owe' : 'nil'}`}>{p.cancelled || p.rfq ? <span className="dim">—</span> : bal > 0 ? fmt(bal) : 'Nil'}</td>
-                    <td className="act">{nx && <button className={`next${nx.pri ? ' primary' : ''}${nx.soft ? ' soft' : ''}`} onClick={(e) => { e.stopPropagation(); openPO(p.id); }}>{nx.l}</button>}</td>
+                    <td className="num val">{p.rfq ? <span className="dim">—</span> : p.cancelled ? <span className="dim">{fmt(p.value)}</span> : fmt(p.value)}</td>
                   </tr>
                 );
               })}
