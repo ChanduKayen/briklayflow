@@ -30,11 +30,13 @@ export default function AuthPanel({
   mode,
   setMode,
   onClose,
+  initialMethod = 'email',
 }: {
   open: boolean;
   mode: Mode;
   setMode: Dispatch<SetStateAction<Mode>>;
   onClose: () => void;
+  initialMethod?: 'email' | 'phone';   // deep-link entry: open straight into phone signup (invite flow)
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -60,7 +62,7 @@ export default function AuthPanel({
 
   // Clear transient state when the mode flips or the panel (re)opens.
   useEffect(() => { setError(null); setSignupComplete(false); }, [mode]);
-  useEffect(() => { if (open) { setError(null); setSignupComplete(false); setLoading(false); setAuthMethod('email'); setPhoneStep('number'); setPhone(''); setOtp(''); } }, [open]);
+  useEffect(() => { if (open) { setError(null); setSignupComplete(false); setLoading(false); setAuthMethod(initialMethod); setPhoneStep('number'); setPhone(''); setOtp(''); } }, [open, initialMethod]);
 
   // Google OAuth. Redirects the whole page to Google, then back to the app
   // root, where supabase-js (detectSessionInUrl) exchanges the code and the

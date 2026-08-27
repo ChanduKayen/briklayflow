@@ -403,7 +403,9 @@ function App() {
 
   if (authState.status === 'unauthenticated') {
     const p = location.pathname;
-    if (p === '/' || p === LOGIN_ROUTE) return <Landing />;
+    // /signup is a public entry too (the team-invite button lands here as /signup?method=phone → the
+    // AuthPanel opens straight into phone signup). Render Landing directly so the query survives.
+    if (p === '/' || p === LOGIN_ROUTE || p === '/signup') return <Landing />;
     // S1-2 Part B: consolidate EVERY other unauthenticated path onto the single login route so an
     // involuntary signout on a deep route (e.g. /ledger) can never surface the retired Login screen —
     // even a forgotten reference or a stale-bundle tab lands on the current login surface.

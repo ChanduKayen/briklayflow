@@ -15,7 +15,8 @@ import AuthPanel from '../components/landing/AuthPanel';
 export default function Landing() {
   const [auth, setAuth] = useState(false);
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
-  const open = (m: 'signin' | 'signup') => { setMode(m); setAuth(true); };
+  const [authMethod, setAuthMethod] = useState<'email' | 'phone'>('email');
+  const open = (m: 'signin' | 'signup', method: 'email' | 'phone' = 'email') => { setMode(m); setAuthMethod(method); setAuth(true); };
 
   // Brick-grid hero hover: rAF lerp toward the pointer, written to CSS vars.
   const heroRef = useRef<HTMLElement>(null);
@@ -36,9 +37,18 @@ export default function Landing() {
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  // /login deep-link opens the AuthPanel in signin mode (panel defaults to signin).
+  // Deep links open the AuthPanel automatically:
+  //   • /login                        → sign in (default)
+  //   • ?method=phone (e.g. the team-invite button → /login?method=phone) → straight into PHONE SIGNUP,
+  //     so an invitee lands ready to type their number and get the OTP, not on the marketing page.
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.location?.pathname === '/login') setAuth(true);
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const path = window.location.pathname;
+    if (params.get('method') === 'phone') { open('signup', 'phone'); return; }
+    if (path === '/signup') { open('signup'); return; }
+    if (path === '/login') setAuth(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Marketing metadata while mounted; restored on unmount.
@@ -753,7 +763,7 @@ export default function Landing() {
         </div>
       </footer>
 
-      <AuthPanel open={auth} mode={mode} setMode={setMode} onClose={() => setAuth(false)} />
+      <AuthPanel open={auth} mode={mode} setMode={setMode} initialMethod={authMethod} onClose={() => setAuth(false)} />
     </div>
   );
 }
