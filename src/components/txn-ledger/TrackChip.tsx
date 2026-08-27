@@ -29,7 +29,8 @@ import type { TrackTxn } from '../../lib/trackingApi';
 import { fileAsLabour, clearOneTime, getTrackingOptions } from '../../lib/trackingApi';
 import { getVendorHub } from '../../lib/vendorTrackingApi';
 import { ContractHub, CONTRACT_HUB_CSS } from './ContractHub';
-import { VendorHub, VENDOR_HUB_CSS } from './VendorHub';
+import { VENDOR_HUB_CSS } from './VendorHub';
+import { AttachBillSheet } from './AttachBillSheet';
 
 type Kind = 'WO' | 'PO';
 
@@ -113,7 +114,7 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
   // and "direct purchase" (vendor) are the SAME mechanism (fileAsLabour → is_one_time).
   const isWO = kind === 'WO';
   const Icon = isWO ? Hammer : Package;
-  const linkLabel = isWO ? 'Link to a contract' : 'Link to a bill';
+  const linkLabel = isWO ? 'Link to a contract' : 'Attach bill';
   const oneLabel = isWO ? 'One-time payment' : 'Direct purchase';
 
   const gate = chosenOneTime ? (
@@ -146,20 +147,6 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
         <span>{linkLabel}</span>
         <ChevronRight size={12} className="shrink-0" style={{ opacity: 0.7 }} />
       </button>
-      {!isWO && (
-        <>
-          <span className="text-[11px] select-none" style={{ color: V.faint, ...font }}>or</span>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={(e) => { e.stopPropagation(); void setOneTime(); }}
-            className="db-onetime-btn inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg disabled:opacity-60"
-            style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.sys, fontWeight: 500 }}
-          >
-            <span>{busy ? 'Saving…' : oneLabel}</span>
-          </button>
-        </>
-      )}
     </span>
   );
 
@@ -180,7 +167,7 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
           >
             {kind === 'WO'
               ? <ContractHub txn={txn} onClose={close} onLinked={onLinked} />
-              : <VendorHub txn={txn} onClose={close} onLinked={onLinked} />}
+              : <AttachBillSheet txn={txn} onClose={close} onLinked={onLinked} />}
           </div>
         </>,
         document.body,

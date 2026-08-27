@@ -53,6 +53,27 @@ Risk level rules:
   MEDIUM — 1-2 flags, <5% overcharge; flag for review before payment
   HIGH   — any GHOST_ITEM, GRADE_DOWNGRADE, or total overcharge >5%; escalate`;
 
+// EXTRACT-ONLY mode (no PO to reconcile against): just read the bill and return its lines + total.
+// Used by the transactions "Attach bill" flow, where there is no existing PO yet.
+const EXTRACT_PROMPT = `You are a procurement AI for Indian construction companies. You receive an image of a
+vendor's bill / invoice / estimate. Read it and extract its contents.
+
+Return ONLY valid JSON — no markdown, no prose outside the JSON:
+{
+  "vendor_name": "string or null",
+  "bill_number": "string or null",
+  "bill_date": "YYYY-MM-DD or null",
+  "bill_total_extracted": number or null,   // the grand total payable (incl. taxes) if printed
+  "gst_amount": number or null,             // total GST if shown, else null
+  "line_items": [
+    { "item": "standard item name", "qty": number or null, "unit": "string or null", "rate": number or null, "amount": number or null }
+  ]
+}
+
+Rules: item names should be the standard industry name, not vendor shorthand. Numbers are plain
+(no currency symbols/commas). If the grand total is not clearly printed, sum the line amounts. Do NOT
+invent values that aren't on the bill.`;
+
 // Convert ArrayBuffer to base64 in chunks to avoid call-stack limits
 function bufToBase64(buf: ArrayBuffer): string {
   const bytes = new Uint8Array(buf);
@@ -80,7 +101,8 @@ serve(async (req) => {
       bill_total,
     } = body;
 
-    if (!po_line_items?.length) throw new Error('po_line_items is required');
+    // No PO lines → EXTRACT-ONLY mode (read the bill on its own). With PO lines → reconcile.
+    const extractOnly = !po_line_items?.length;
 
     // Resolve the bill image ─────────────────────────────────────────────────
     let imageBase64: string = bill_base64 ?? '';
@@ -102,21 +124,21 @@ serve(async (req) => {
       ? imageMime as ValidType
       : 'image/jpeg';
 
-    // Build PO context ────────────────────────────────────────────────────────
-    const poLines = (po_line_items as any[]).map((li: any, i: number) => {
-      const spec = li.specification ? ` [spec: ${li.specification}]` : '';
-      return `${i + 1}. ${li.item_name}${spec} — ${li.quantity_ordered} ${li.unit} @ ₹${li.unit_rate} = ₹${li.total_amount} (GST ${li.gst_rate ?? 0}%)`;
-    }).join('\n');
-
-    const userText = [
-      `PO Reference: ${po_id ?? 'unknown'}`,
-      bill_total ? `PO Grand Total: ₹${bill_total}` : null,
-      '',
-      'PO Line Items:',
-      poLines,
-      '',
-      'Examine the attached vendor bill/invoice image and compare it item-by-item against the PO lines above.',
-    ].filter((l): l is string => l !== null).join('\n');
+    // Build user text ───────────────────────────────────────────────────────
+    const userText = extractOnly
+      ? 'Read the attached vendor bill/invoice image and extract its vendor, total, and line items as JSON.'
+      : [
+          `PO Reference: ${po_id ?? 'unknown'}`,
+          bill_total ? `PO Grand Total: ₹${bill_total}` : null,
+          '',
+          'PO Line Items:',
+          (po_line_items as any[]).map((li: any, i: number) => {
+            const spec = li.specification ? ` [spec: ${li.specification}]` : '';
+            return `${i + 1}. ${li.item_name}${spec} — ${li.quantity_ordered} ${li.unit} @ ₹${li.unit_rate} = ₹${li.total_amount} (GST ${li.gst_rate ?? 0}%)`;
+          }).join('\n'),
+          '',
+          'Examine the attached vendor bill/invoice image and compare it item-by-item against the PO lines above.',
+        ].filter((l): l is string => l !== null).join('\n');
 
     // Call Claude ─────────────────────────────────────────────────────────────
     const anthropic = new Anthropic({ apiKey: Deno.env.get('ANTHROPIC_API_KEY') });
@@ -124,7 +146,7 @@ serve(async (req) => {
     const message = await anthropic.messages.create({
       model:      'claude-haiku-4-5-20251001',
       max_tokens: 2048,
-      system:     SYSTEM_PROMPT,
+      system:     extractOnly ? EXTRACT_PROMPT : SYSTEM_PROMPT,
       messages: [{
         role: 'user',
         content: [

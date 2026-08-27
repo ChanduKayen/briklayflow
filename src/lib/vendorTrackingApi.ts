@@ -19,6 +19,7 @@ import { assertLinkable, type TrackTxn } from './trackingApi';
 
 export interface VendorBill {
   id: string;        // the PO id (the bill we clear)
+  project_id: string | null; // the PO's site (for cross-project allocation)
   name: string;      // a readable line ("Cement — 50 bags")
   po: string;        // shown under the line (the PO id)
   due: number;       // amount still due
@@ -93,7 +94,7 @@ export async function getVendorHub(txn: TrackTxn): Promise<VendorHubData> {
     const due = Math.max(0, total - (paidByPo[p.po_id] || 0));
     totalBal += due;
     if (projectId && p.project_id === projectId) siteBal += due;
-    if (due > 0) bills.push({ id: p.po_id, name: poName(p.items, p.po_id), po: p.po_id, due, total, paid: paidByPo[p.po_id] || 0 });
+    if (due > 0) bills.push({ id: p.po_id, project_id: p.project_id, name: poName(p.items, p.po_id), po: p.po_id, due, total, paid: paidByPo[p.po_id] || 0 });
   }
   if (!projectId) siteBal = totalBal;
 
@@ -101,17 +102,97 @@ export async function getVendorHub(txn: TrackTxn): Promise<VendorHubData> {
   return { vendor, siteBal, totalBal, paidToDate, bills };
 }
 
-/** Read a vendor bill (image/PDF) via the reconcile-po-bill function → extract the bill
- *  total; GST is back-calculated at 18% (refine when the reader returns a GST split).
+export interface BillLine { item: string; qty: number | null; unit: string | null; rate: number | null; amount: number | null }
+export interface BillRead {
+  vendor: string | null;
+  billNo: string | null;
+  billDate: string | null;
+  total: number;
+  gst: number;
+  lines: BillLine[];
+}
+
+/** Read a vendor bill (image) with NO existing PO — the "Attach bill" flow. Uses reconcile-po-bill
+ *  in its extract-only mode (empty po_line_items) → returns vendor, total, GST and line items.
  *  Returns total 0 if nothing could be read, so the caller can fall back to manual entry. */
-export async function readVendorBill(base64: string, mime: string): Promise<{ total: number; gst: number }> {
+export async function readVendorBill(base64: string, mime: string): Promise<BillRead> {
   const { data, error } = await supabase.functions.invoke('reconcile-po-bill', {
     body: { bill_base64: base64, bill_mime_type: mime, po_line_items: [] },
   });
   if (error) throw error;
-  const d = data as { bill_total_extracted?: number | null } | null;
-  const total = Math.round(Number(d?.bill_total_extracted) || 0);
-  return { total, gst: total > 0 ? Math.round(total - total / 1.18) : 0 };
+  const d = (data ?? {}) as {
+    vendor_name?: string | null; bill_number?: string | null; bill_date?: string | null;
+    bill_total_extracted?: number | null; gst_amount?: number | null; line_items?: BillLine[] | null;
+  };
+  const lines = Array.isArray(d.line_items) ? d.line_items : [];
+  const lineSum = lines.reduce((s, l) => s + num(l.amount), 0);
+  const total = Math.round(num(d.bill_total_extracted) || lineSum);
+  const gst = d.gst_amount != null ? Math.round(num(d.gst_amount)) : (total > 0 ? Math.round(total - total / 1.18) : 0);
+  return { vendor: d.vendor_name ?? null, billNo: d.bill_number ?? null, billDate: d.bill_date ?? null, total, gst, lines };
+}
+
+/** One site's slice of an attached bill: a delivered PO for `projectId` billed `billAmount`, of
+ *  which `paidAmount` is covered by this payment (balance = billAmount − paidAmount). Creates an
+ *  auto-approved, RECEIVED PO (money + received marker only; no GRN/stock lines beyond the bill
+ *  line). Returns the new PO id. */
+export async function createDeliveredBillPO(
+  txn: TrackTxn, orgId: string,
+  row: { projectId: string; name: string; billAmount: number; paidAmount: number; gst?: number },
+): Promise<{ poId: string }> {
+  assertLinkable(txn);
+  const stakeholderId = txn?.stakeholder_id ?? null;
+  const { data: u } = await supabase.auth.getUser();
+  const createdBy = u?.user?.id ?? null;
+  const items = [{ name: row.name, quantity: 1, rate: row.billAmount, amount: row.billAmount }];
+  const lineItems = [{ line_number: 1, item_name: row.name, unit: 'Nos', quantity_ordered: 1, unit_rate: row.billAmount, basic_amount: row.billAmount, discount_percent: 0, discount_amount: 0, gst_rate: 0, cgst: 0, sgst: 0, igst: 0, total_amount: row.billAmount }];
+  const { data, error } = await supabase.rpc('create_purchase_order', {
+    p_po_data: {
+      org_id: orgId, project_id: row.projectId, stakeholder_id: stakeholderId,
+      items, order_value: row.billAmount, total_value: row.billAmount, gst_value: row.gst ?? 0,
+      status: 'BILLED',
+      date_issued: new Date().toISOString().split('T')[0], payment_terms_days: 0, created_by: createdBy,
+    },
+    p_line_items: lineItems,
+  });
+  if (error) throw error;
+  const res = data as { success?: boolean; error?: string; po_id?: string } | null;
+  if (!res?.success || !res.po_id) throw new Error(res?.error ?? 'Could not record the bill');
+
+  // Auto-approve + record the bill amount + mark DELIVERED (received) + set status from paid-vs-bill.
+  // The allocation of `paidAmount` onto this PO is done in one shot by commitBillSplit below; here we
+  // just stamp the status the payment will produce so the PO reads right immediately.
+  const nowIso = new Date().toISOString();
+  const status = row.paidAmount >= row.billAmount - 0.005 ? 'PAID' : row.paidAmount > 0 ? 'PARTIAL' : 'BILLED';
+  await supabase.from('purchase_orders')
+    .update({
+      approval_status: 'APPROVED',
+      vendor_bill_amount: row.billAmount, bill_recorded_at: nowIso, vendor_bill_date: nowIso.split('T')[0],
+      received_at_site: nowIso, received_by_user_id: createdBy,
+      status,
+    })
+    .eq('po_id', res.po_id);
+  return { poId: res.poId ?? res.po_id };
+}
+
+/** Book the payment across every site/PO of an attached bill IN ONE ATOMIC RE-SPLIT. Each part is a
+ *  slice of THIS payment placed on a PO (order_type 'PO'); the parts must sum to the payment total.
+ *  Uses set_txn_allocations (multi-project). MONEY ONLY. */
+export async function commitBillSplit(
+  txn: TrackTxn, orgId: string,
+  parts: Array<{ projectId: string; poId: string; amount: number }>,
+): Promise<void> {
+  assertLinkable(txn);
+  const txnId = txn?.txn_id;
+  if (!txnId) throw new Error('This payment has no id.');
+  const { data, error } = await supabase.rpc('set_txn_allocations', {
+    p_txn_id: txnId, p_org_id: orgId,
+    p_parts: parts
+      .filter((p) => p.amount > 0 && p.projectId && p.poId)
+      .map((p) => ({ project_id: p.projectId, order_type: 'PO', order_ref: p.poId, milestone_id: null, allocated_amount: Math.round(p.amount) })),
+  });
+  if (error) throw error;
+  const res = data as { success?: boolean; error?: string } | null;
+  if (!res?.success) throw new Error(res?.error ?? 'Could not book the payment');
 }
 
 export interface VendorPurchase { name: string; amount: number; hasBill: boolean; gst?: number }
