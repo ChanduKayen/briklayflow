@@ -1,5 +1,14 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
-import Anthropic from 'npm:@anthropic-ai/sdk';
+import OpenAI from 'https://esm.sh/openai@4';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+// Same LLM provider/key as the other AI functions (sku-matcher, ai-extract-entry, …). Anthropic
+// was never wired up as a secret for this project, so this function uses OpenAI's GPT-4o.
+const openai = new OpenAI({ apiKey: Deno.env.get('OPENAI_API_KEY') });
+
+// Service-role storage client — downloads the bill object directly, so we never depend on a
+// client-minted signed URL (those were 400-ing when the stored path didn't match the object).
+const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -98,6 +107,8 @@ serve(async (req) => {
       bill_base64,
       bill_mime_type,
       bill_url,
+      bill_bucket,
+      bill_path,
       bill_total,
     } = body;
 
@@ -108,6 +119,14 @@ serve(async (req) => {
     let imageBase64: string = bill_base64 ?? '';
     let imageMime: string   = bill_mime_type ?? 'image/jpeg';
 
+    // Preferred: download the object with the service role (no client signed URL needed).
+    if (!imageBase64 && bill_bucket && bill_path) {
+      const { data: blob, error: dlErr } = await admin.storage.from(bill_bucket).download(bill_path);
+      if (dlErr || !blob) throw new Error(`The attached bill file is missing (${bill_path}). Re-upload it.`);
+      imageBase64 = bufToBase64(await blob.arrayBuffer());
+      imageMime   = blob.type || 'image/jpeg';
+    }
+
     if (!imageBase64 && bill_url) {
       const res = await fetch(bill_url);
       if (!res.ok) throw new Error(`Could not fetch bill document (HTTP ${res.status})`);
@@ -115,18 +134,20 @@ serve(async (req) => {
       imageMime   = res.headers.get('content-type') ?? 'image/jpeg';
     }
 
-    if (!imageBase64) throw new Error('Either bill_base64 or bill_url is required');
+    if (!imageBase64) throw new Error('No bill document supplied (bill_base64, bill_bucket/bill_path, or bill_url).');
 
-    // Claude only accepts these image types
-    const VALID_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const;
-    type ValidType = typeof VALID_TYPES[number];
-    const safeMedia: ValidType = (VALID_TYPES as readonly string[]).includes(imageMime)
-      ? imageMime as ValidType
-      : 'image/jpeg';
+    // A bill can be a photo OR a PDF. GPT-4o's vision `image_url` cannot read a PDF — it must go in
+    // as a `file` content part (file_data), which gpt-4o parses natively (same shape as sku-matcher).
+    const isPdf = imageMime === 'application/pdf';
+    const VALID_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    const safeMedia = VALID_TYPES.includes(imageMime) ? imageMime : 'image/jpeg';
+    const mediaPart: any = isPdf
+      ? { type: 'file', file: { filename: 'bill.pdf', file_data: `data:application/pdf;base64,${imageBase64}` } }
+      : { type: 'image_url', image_url: { url: `data:${safeMedia};base64,${imageBase64}`, detail: 'high' } };
 
     // Build user text ───────────────────────────────────────────────────────
     const userText = extractOnly
-      ? 'Read the attached vendor bill/invoice image and extract its vendor, total, and line items as JSON.'
+      ? 'Read the attached vendor bill/invoice (image or PDF) and extract its vendor, total, and line items as JSON.'
       : [
           `PO Reference: ${po_id ?? 'unknown'}`,
           bill_total ? `PO Grand Total: ₹${bill_total}` : null,
@@ -140,29 +161,19 @@ serve(async (req) => {
           'Examine the attached vendor bill/invoice image and compare it item-by-item against the PO lines above.',
         ].filter((l): l is string => l !== null).join('\n');
 
-    // Call Claude ─────────────────────────────────────────────────────────────
-    const anthropic = new Anthropic({ apiKey: Deno.env.get('ANTHROPIC_API_KEY') });
-
-    const message = await anthropic.messages.create({
-      model:      'claude-haiku-4-5-20251001',
-      max_tokens: 2048,
-      system:     extractOnly ? EXTRACT_PROMPT : SYSTEM_PROMPT,
-      messages: [{
-        role: 'user',
-        content: [
-          {
-            type: 'image',
-            source: { type: 'base64', media_type: safeMedia, data: imageBase64 },
-          },
-          { type: 'text', text: userText },
-        ],
-      }],
+    // Call GPT-4o (OpenAI) ─────────────────────────────────────────────────────
+    const completion = await openai.chat.completions.create({
+      model:       'gpt-4o',
+      max_tokens:  2048,
+      temperature: 0.1,
+      messages: [
+        { role: 'system', content: extractOnly ? EXTRACT_PROMPT : SYSTEM_PROMPT },
+        { role: 'user',   content: [mediaPart, { type: 'text', text: userText }] as any },
+      ],
     });
 
-    const textBlock = message.content.find((c: any) => c.type === 'text');
-    if (!textBlock || textBlock.type !== 'text') throw new Error('Unexpected AI response type');
-
-    const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
+    const raw = completion.choices[0]?.message?.content?.trim() ?? '';
+    const jsonMatch = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('No JSON found in AI response');
 
     const result = JSON.parse(jsonMatch[0]);

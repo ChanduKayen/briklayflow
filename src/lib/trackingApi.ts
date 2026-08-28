@@ -345,3 +345,28 @@ export async function clearOneTime(txn: TrackTxn): Promise<void> {
   const { error } = await supabase.from('transactions').update({ is_one_time: false }).eq('txn_id', txn.txn_id);
   if (error) throw error;
 }
+
+/** Unlink a payment from its PO/WO: turn each order-linked allocation back into a PLAIN project
+ *  allocation (order_type/order_ref cleared) while keeping its project + amount, so the row shows the
+ *  Track nudge again and the order's paid/balance drops back. Advance parts are preserved. Does NOT
+ *  touch the PO itself (no bill removal) — just the money link. */
+export async function unlinkTxnOrder(txn: TrackTxn, orgId: string): Promise<void> {
+  assertLinkable(txn);
+  const txnId = txn?.txn_id;
+  if (!txnId) throw new Error('This payment has no id.');
+  const { data } = await supabase.from('txn_allocations')
+    .select('project_id, order_type, allocated_amount').eq('txn_id', txnId);
+  const rows = (data ?? []) as Array<{ project_id: string | null; order_type: string | null; allocated_amount: number | null }>;
+  const parts = rows.map((a) => ({
+    project_id: a.project_id,
+    order_type: a.order_type === 'ADVANCE' ? 'ADVANCE' : null,
+    order_ref: null,
+    milestone_id: null,
+    allocated_amount: Math.round(Number(a.allocated_amount) || 0),
+  }));
+  if (!parts.length) return;
+  const { data: res, error } = await supabase.rpc('set_txn_allocations', { p_txn_id: txnId, p_org_id: orgId, p_parts: parts });
+  if (error) throw error;
+  const r = res as { success?: boolean; error?: string } | null;
+  if (!r?.success) throw new Error(r?.error ?? 'Could not unlink this payment.');
+}

@@ -6,8 +6,17 @@ import { supabase } from './supabase';
 // out {bucket, path} and mint a short-lived signed URL on demand. Works for any
 // bucket, so it also handles rough-entry-media proof images uniformly.
 
-const PUBLIC_OBJECT_RE = /\/storage\/v1\/object\/public\/([^/]+)\/(.+)$/;
+const PUBLIC_OBJECT_RE = /\/storage\/v1\/object\/(?:public|sign)\/([^/]+)\/([^?]+)/;
 const SIGN_TTL_SECONDS = 3600;
+
+/** Parse a stored Supabase object URL into { bucket, path }. Returns null for non-Supabase URLs.
+ *  Lets callers (e.g. an edge function with the service role) fetch the object directly instead of
+ *  relying on a client-minted signed URL. */
+export function parseStoredPath(stored: string | null | undefined): { bucket: string; path: string } | null {
+  const m = stored?.match(PUBLIC_OBJECT_RE);
+  if (!m) return null;
+  return { bucket: m[1], path: decodeURIComponent(m[2]) };
+}
 
 /** Convert a stored Supabase public-object URL into a short-lived signed URL.
  *  Non-Supabase URLs (external links) are returned unchanged; null on failure. */
@@ -45,10 +54,18 @@ export function useSignedBucketUrl(bucket: string | null | undefined, path: stri
   return url;
 }
 
-/** Resolve a stored doc URL and open it in a new tab. */
+/** Resolve a stored doc URL and open it in a new tab. Opens the tab SYNCHRONOUSLY (inside the click
+ *  gesture) then navigates it once the signed URL resolves — otherwise the post-await window.open is
+ *  blocked as a popup and nothing happens. */
 export async function openDoc(stored: string | null | undefined): Promise<void> {
+  const w = window.open('', '_blank');
   const url = await resolveDocUrl(stored);
-  if (url) window.open(url, '_blank', 'noopener,noreferrer');
+  if (url) {
+    if (w) { try { (w as Window).opener = null; } catch { /* ignore */ } w.location.href = url; }
+    else window.open(url, '_blank', 'noopener,noreferrer'); // popups allowed — no pre-opened tab
+  } else if (w) {
+    w.close();
+  }
 }
 
 /** React hook: resolves a stored doc URL to a signed URL for <img>/<a> rendering.

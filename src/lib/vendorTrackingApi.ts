@@ -102,6 +102,147 @@ export async function getVendorHub(txn: TrackTxn): Promise<VendorHubData> {
   return { vendor, siteBal, totalBal, paidToDate, bills };
 }
 
+/** One site the payment already touches, with the amount placed on it. The payment→site split
+ *  is done at record time (Day Book / New Transaction); Attach-bill INHERITS it — it never
+ *  re-splits the paid money. Read straight from txn_allocations (summed per project). */
+export interface TxnSite { projectId: string; name: string; paid: number }
+export async function getTxnAllocations(txn: TrackTxn): Promise<TxnSite[]> {
+  const txnId = txn?.txn_id;
+  if (!txnId) return [];
+  const { data } = await supabase
+    .from('txn_allocations')
+    .select('project_id, allocated_amount, projects(name)')
+    .eq('txn_id', txnId)
+    .not('project_id', 'is', null);
+  const rows = (data ?? []) as Array<{ project_id: string; allocated_amount: number | null; projects: { name?: string | null } | null }>;
+  const byProj: Record<string, TxnSite> = {};
+  for (const r of rows) {
+    if (!byProj[r.project_id]) byProj[r.project_id] = { projectId: r.project_id, name: r.projects?.name || 'Site', paid: 0 };
+    byProj[r.project_id].paid += num(r.allocated_amount);
+  }
+  return Object.values(byProj).filter((s) => s.paid > 0);
+}
+
+/** Upload the attached bill image/PDF once to the private `documents` bucket and return its
+ *  public-object URL (parsed + signed on read via resolveDocUrl). One upload is reused across
+ *  every PO this bill fans out into. Returns null on failure (the bill is never a hard gate). */
+export async function uploadBillDoc(file: File, txnId: string): Promise<string | null> {
+  const ext = file.type === 'application/pdf' ? 'pdf' : 'jpg';
+  const path = `po-bills/attach_${txnId}_${uidStr()}.${ext}`;
+  const { error } = await supabase.storage.from('documents').upload(path, file, { contentType: file.type });
+  if (error) return null;
+  const { data } = supabase.storage.from('documents').getPublicUrl(path);
+  return data?.publicUrl ?? null;
+}
+
+const uidStr = () => Math.random().toString(36).slice(2, 10);
+
+/** supabase-js collapses any non-2xx from an edge function into the generic
+ *  "Edge Function returned a non-2xx status code". The real reason is in the Response it
+ *  attaches as `error.context` — pull the `{ error }` body out so the user sees WHY. */
+async function fnErrorMessage(error: unknown, fallback: string): Promise<string> {
+  const ctx = (error as { context?: unknown })?.context;
+  if (ctx instanceof Response) {
+    try {
+      const body = await ctx.clone().json();
+      if (body?.error) return String(body.error);
+    } catch {
+      try { const t = await ctx.clone().text(); if (t) return t.slice(0, 300); } catch { /* ignore */ }
+    }
+  }
+  const msg = (error as { message?: string })?.message;
+  return msg && !/non-2xx/i.test(msg) ? msg : fallback;
+}
+
+/** The vendor's recent purchase orders (most recent first), so the user can ALSO pin this same bill
+ *  onto an existing PO. Read-only list — attaching happens on click via `attachBillDocToPO`. */
+export interface VendorPO { poId: string; projectId: string | null; name: string; total: number; status: string | null; hasBill: boolean; projectName: string | null }
+export async function getVendorPOs(txn: TrackTxn, projectIds?: string[]): Promise<VendorPO[]> {
+  const stakeholderId = txn?.stakeholder_id ?? null;
+  if (!stakeholderId) return [];
+  let q = supabase.from('purchase_orders')
+    .select('po_id, project_id, items, total_value, order_value, status, vendor_bill_url, date_issued, projects(name)')
+    .eq('stakeholder_id', stakeholderId)
+    .not('status', 'in', '("CANCELLED","Cancelled","cancelled")');
+  const pids = (projectIds ?? []).filter(Boolean);
+  if (pids.length) q = q.in('project_id', pids);
+  const { data } = await q
+    .order('date_issued', { ascending: false })
+    .limit(20);
+  return ((data ?? []) as Array<{ po_id: string; project_id: string | null; items: unknown; total_value: number | null; order_value: number | null; status: string | null; vendor_bill_url: string | null; projects: { name?: string | null } | null }>)
+    .map((p) => ({
+      poId: p.po_id, projectId: p.project_id, name: poName(p.items, p.po_id),
+      total: num(p.total_value) || num(p.order_value), status: p.status ?? null,
+      hasBill: !!p.vendor_bill_url, projectName: p.projects?.name ?? null,
+    }));
+}
+
+/** Pin the (already-uploaded) bill image + number/date onto an EXISTING PO. Non-destructive: it does
+ *  not touch the PO's amount or status — just attaches the picture and the bill's identifiers. */
+export async function attachBillDocToPO(poId: string, doc: { billUrl?: string | null; billNo?: string | null; billDate?: string | null }): Promise<void> {
+  const patch: Record<string, unknown> = {};
+  if (doc.billUrl) { patch.vendor_bill_url = doc.billUrl; patch.vendor_bill_doc_url = doc.billUrl; }
+  if (doc.billNo) { patch.vendor_bill_number = doc.billNo; patch.vendor_bill_no = doc.billNo; }
+  if (doc.billDate) patch.vendor_bill_date = doc.billDate;
+  if (Object.keys(patch).length === 0) return;
+  await supabase.from('purchase_orders').update(patch).eq('po_id', poId);
+}
+
+/** Attach a bill to an EXISTING PO and settle it against THIS payment. Records the actual bill amount
+ *  as the PO's billed value (the ORDER value is left untouched — you ordered X, the vendor billed Y),
+ *  pins the image, and re-points this payment's share for the PO's project onto the PO — so the PO's
+ *  balance becomes bill − paid and the ledger chip resolves. Any other-project portion of the payment
+ *  stays a plain project allocation. Uses set_txn_allocations. MONEY + image only. */
+export async function linkBillToExistingPO(
+  txn: TrackTxn, orgId: string,
+  args: { poId: string; projectId: string | null; billAmount: number; billUrl?: string | null; billNo?: string | null; billDate?: string | null; sites: TxnSite[] },
+): Promise<void> {
+  assertLinkable(txn);
+  const txnId = txn?.txn_id;
+  if (!txnId) throw new Error('This payment has no id.');
+  const total = Math.round(num(txn.total_amount));
+  const poProject = args.projectId;
+
+  // How much of this payment belongs to the PO's project (what gets applied to the PO).
+  const poPaid = args.sites.length
+    ? args.sites.filter((s) => s.projectId === poProject).reduce((a, s) => a + s.paid, 0)
+    : total;
+
+  // 1) Record the bill on the PO (billed = the actual bill; order value untouched).
+  const nowIso = new Date().toISOString();
+  const patch: Record<string, unknown> = {};
+  if (args.billAmount > 0) {
+    patch.vendor_bill_amount = Math.round(args.billAmount);
+    patch.bill_recorded_at = nowIso;
+    patch.vendor_bill_date = args.billDate || nowIso.split('T')[0];
+    patch.status = poPaid >= args.billAmount - 0.005 ? 'PAID' : poPaid > 0 ? 'PARTIAL' : 'BILLED';
+  }
+  if (args.billUrl) { patch.vendor_bill_url = args.billUrl; patch.vendor_bill_doc_url = args.billUrl; }
+  if (args.billNo) { patch.vendor_bill_number = args.billNo; patch.vendor_bill_no = args.billNo; }
+  if (Object.keys(patch).length) await supabase.from('purchase_orders').update(patch).eq('po_id', args.poId);
+
+  // 2) Re-point the payment: PO's project → the PO; other projects → keep as plain project
+  //    allocations. Parts must sum to the payment total.
+  const rows = args.sites.length ? args.sites : (poProject ? [{ projectId: poProject, name: '', paid: total }] : []);
+  const parts = rows.map((s) => s.projectId === poProject
+    ? { project_id: s.projectId, order_type: 'PO', order_ref: args.poId, milestone_id: null, allocated_amount: Math.round(s.paid) }
+    : { project_id: s.projectId, order_type: null, order_ref: null, milestone_id: null, allocated_amount: Math.round(s.paid) });
+  if (!parts.length) return; // no project to link against — bill recorded, nothing to allocate
+
+  const { data, error } = await supabase.rpc('set_txn_allocations', { p_txn_id: txnId, p_org_id: orgId, p_parts: parts });
+  if (error) throw error;
+  const res = data as { success?: boolean; error?: string } | null;
+  if (!res?.success) throw new Error(res?.error ?? 'Could not link the payment to the PO');
+}
+
+/** Pin the (already-uploaded) bill image/PDF onto the TRANSACTION itself, so it shows in the
+ *  Transaction Detail "Proof of Payment" section (which reads `transactions.bill_doc_url`). Without
+ *  this the bill only lived on the PO and the txn's proof stayed empty. */
+export async function attachBillDocToTxn(txnId: string, billUrl: string): Promise<void> {
+  if (!txnId || !billUrl) return;
+  await supabase.from('transactions').update({ bill_doc_url: billUrl }).eq('txn_id', txnId);
+}
+
 export interface BillLine { item: string; qty: number | null; unit: string | null; rate: number | null; amount: number | null }
 export interface BillRead {
   vendor: string | null;
@@ -119,7 +260,7 @@ export async function readVendorBill(base64: string, mime: string): Promise<Bill
   const { data, error } = await supabase.functions.invoke('reconcile-po-bill', {
     body: { bill_base64: base64, bill_mime_type: mime, po_line_items: [] },
   });
-  if (error) throw error;
+  if (error) throw new Error(await fnErrorMessage(error, 'Could not read the bill'));
   const d = (data ?? {}) as {
     vendor_name?: string | null; bill_number?: string | null; bill_date?: string | null;
     bill_total_extracted?: number | null; gst_amount?: number | null; line_items?: BillLine[] | null;
@@ -137,7 +278,7 @@ export async function readVendorBill(base64: string, mime: string): Promise<Bill
  *  line). Returns the new PO id. */
 export async function createDeliveredBillPO(
   txn: TrackTxn, orgId: string,
-  row: { projectId: string; name: string; billAmount: number; paidAmount: number; gst?: number },
+  row: { projectId: string; name: string; billAmount: number; paidAmount: number; gst?: number; billUrl?: string | null; billNo?: string | null },
 ): Promise<{ poId: string }> {
   assertLinkable(txn);
   const stakeholderId = txn?.stakeholder_id ?? null;
@@ -158,20 +299,65 @@ export async function createDeliveredBillPO(
   const res = data as { success?: boolean; error?: string; po_id?: string } | null;
   if (!res?.success || !res.po_id) throw new Error(res?.error ?? 'Could not record the bill');
 
-  // Auto-approve + record the bill amount + mark DELIVERED (received) + set status from paid-vs-bill.
-  // The allocation of `paidAmount` onto this PO is done in one shot by commitBillSplit below; here we
-  // just stamp the status the payment will produce so the PO reads right immediately.
+  // Auto-approve + record the bill amount + set status from paid-vs-bill. We DO NOT mark the goods
+  // received here: receipt is a physical event that must be confirmed explicitly at site (the receive
+  // wizard on the PO detail page), never assumed just because a payment was recorded.
   const nowIso = new Date().toISOString();
   const status = row.paidAmount >= row.billAmount - 0.005 ? 'PAID' : row.paidAmount > 0 ? 'PARTIAL' : 'BILLED';
   await supabase.from('purchase_orders')
     .update({
       approval_status: 'APPROVED',
       vendor_bill_amount: row.billAmount, bill_recorded_at: nowIso, vendor_bill_date: nowIso.split('T')[0],
-      received_at_site: nowIso, received_by_user_id: createdBy,
-      status,
+      status, created_after_payment: true,
+      ...(row.billUrl ? { vendor_bill_url: row.billUrl, vendor_bill_doc_url: row.billUrl } : {}),
+      ...(row.billNo ? { vendor_bill_number: row.billNo, vendor_bill_no: row.billNo } : {}),
     })
     .eq('po_id', res.po_id);
   return { poId: res.poId ?? res.po_id };
+}
+
+/** A PENDING (unpaid) bill on `projectId`: an auto-approved PO carrying the bill amount as an
+ *  owed balance, with the bill IMAGE attached — and NOTHING else. NOT delivered (no received
+ *  marker) and NO payment allocation, so its full amount stays owed in the PO list. This is the
+ *  "one or more projects → separate POs, just a bill picture with a pending amount" case: the
+ *  bill total ran ahead of what this payment covered. MONEY + image only; no GRN/stock. */
+export async function createPendingBillPO(
+  txn: TrackTxn, orgId: string,
+  row: { projectId: string; name: string; amount: number; gst?: number; billUrl?: string | null; billNo?: string | null },
+): Promise<{ poId: string }> {
+  assertLinkable(txn);
+  const stakeholderId = txn?.stakeholder_id ?? null;
+  const { data: u } = await supabase.auth.getUser();
+  const createdBy = u?.user?.id ?? null;
+  const items = [{ name: row.name, quantity: 1, rate: row.amount, amount: row.amount }];
+  const lineItems = [{ line_number: 1, item_name: row.name, unit: 'Nos', quantity_ordered: 1, unit_rate: row.amount, basic_amount: row.amount, discount_percent: 0, discount_amount: 0, gst_rate: 0, cgst: 0, sgst: 0, igst: 0, total_amount: row.amount }];
+  const { data, error } = await supabase.rpc('create_purchase_order', {
+    p_po_data: {
+      org_id: orgId, project_id: row.projectId, stakeholder_id: stakeholderId,
+      items, order_value: row.amount, total_value: row.amount, gst_value: row.gst ?? 0,
+      status: 'BILLED',
+      date_issued: new Date().toISOString().split('T')[0], payment_terms_days: 0, created_by: createdBy,
+    },
+    p_line_items: lineItems,
+  });
+  if (error) throw error;
+  const res = data as { success?: boolean; error?: string; po_id?: string } | null;
+  if (!res?.success || !res.po_id) throw new Error(res?.error ?? 'Could not record the pending bill');
+
+  // Auto-approve + record the bill amount + attach the image. No received marker (not delivered),
+  // no txn allocation (unpaid) — the whole amount reads as owed. bill_recorded_at rides with the
+  // amount so the party ledger's credit row keys correctly (see createVendorPurchase note).
+  const nowIso = new Date().toISOString();
+  await supabase.from('purchase_orders')
+    .update({
+      approval_status: 'APPROVED',
+      vendor_bill_amount: row.amount, bill_recorded_at: nowIso, vendor_bill_date: nowIso.split('T')[0],
+      status: 'BILLED', created_after_payment: true,
+      ...(row.billUrl ? { vendor_bill_url: row.billUrl, vendor_bill_doc_url: row.billUrl } : {}),
+      ...(row.billNo ? { vendor_bill_number: row.billNo, vendor_bill_no: row.billNo } : {}),
+    })
+    .eq('po_id', res.po_id);
+  return { poId: res.po_id };
 }
 
 /** Book the payment across every site/PO of an attached bill IN ONE ATOMIC RE-SPLIT. Each part is a
@@ -184,11 +370,21 @@ export async function commitBillSplit(
   assertLinkable(txn);
   const txnId = txn?.txn_id;
   if (!txnId) throw new Error('This payment has no id.');
+  const poParts = parts
+    .filter((p) => p.amount > 0 && p.projectId && p.poId)
+    .map((p) => ({ project_id: p.projectId, order_type: 'PO', order_ref: p.poId, milestone_id: null, allocated_amount: Math.round(p.amount) }));
+
+  // The RPC replaces ALL of this payment's allocations and the schema requires them to sum to the
+  // payment total. If the paid parts don't cover the whole payment (e.g. some was held as an advance
+  // when the payment was recorded), keep that remainder as an ADVANCE so the sum-check holds and the
+  // advance money isn't silently reassigned to a bill.
+  const allParts: Array<{ project_id: string | null; order_type: string; order_ref: string | null; milestone_id: null; allocated_amount: number }> = [...poParts];
+  const total = Math.round(num(txn.total_amount));
+  const leftover = total - poParts.reduce((s, p) => s + p.allocated_amount, 0);
+  if (leftover > 0.5) allParts.push({ project_id: null, order_type: 'ADVANCE', order_ref: null, milestone_id: null, allocated_amount: leftover });
+
   const { data, error } = await supabase.rpc('set_txn_allocations', {
-    p_txn_id: txnId, p_org_id: orgId,
-    p_parts: parts
-      .filter((p) => p.amount > 0 && p.projectId && p.poId)
-      .map((p) => ({ project_id: p.projectId, order_type: 'PO', order_ref: p.poId, milestone_id: null, allocated_amount: Math.round(p.amount) })),
+    p_txn_id: txnId, p_org_id: orgId, p_parts: allParts,
   });
   if (error) throw error;
   const res = data as { success?: boolean; error?: string } | null;

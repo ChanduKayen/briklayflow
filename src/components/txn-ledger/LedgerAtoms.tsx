@@ -4,7 +4,7 @@
  */
 import { useState, useRef, type ReactNode, type MouseEvent, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowUpRight, ArrowDownLeft, Link2, ChevronDown, Hammer, Package } from 'lucide-react';
+import { ArrowUpRight, ArrowDownLeft, Link2, Unlink, ChevronDown, Hammer, Package } from 'lucide-react';
 import { V, font, nums } from './ledgerTokens';
 import type { TxnAnchor, TxnDirection } from '../../lib/transactions';
 
@@ -39,7 +39,7 @@ export function Amount({ dir, value }: { dir: TxnDirection; value: string }) {
   );
 }
 
-export function AnchorChip({ anchor, info, siblings = 0, partyName, siteName, onClick, onHover }: { anchor: TxnAnchor; info?: AnchorInfo; siblings?: number; partyName?: string | null; siteName?: string | null; onClick?: (e: MouseEvent) => void; onHover?: () => void }) {
+export function AnchorChip({ anchor, info, siblings = 0, partyName, siteName, onClick, onHover, onUnlink }: { anchor: TxnAnchor; info?: AnchorInfo; siblings?: number; partyName?: string | null; siteName?: string | null; onClick?: (e: MouseEvent) => void; onHover?: () => void; onUnlink?: () => void }) {
   const [hover, setHover] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const [tipPos, setTipPos] = useState<{ top: number; left: number } | null>(null);
@@ -122,6 +122,18 @@ export function AnchorChip({ anchor, info, siblings = 0, partyName, siteName, on
           <span className="shrink-0 whitespace-nowrap" style={{ color: V.sage, ...font }}>✓ settled</span>
         ) : (
           <span className="shrink-0 whitespace-nowrap" style={{ color: V.terraDeep, ...font, ...nums }}>₹{inr(balance)} left</span>
+        )}
+        {onUnlink && (
+          <span
+            role="button"
+            aria-label="Unlink this payment"
+            title="Unlink from this order"
+            onClick={(e) => { e.stopPropagation(); onUnlink(); }}
+            className="shrink-0 inline-flex items-center rounded p-0.5 db-unlink-btn"
+            style={{ color: V.faint, marginLeft: 1, marginRight: -2, opacity: hover ? 1 : 0, pointerEvents: hover ? 'auto' : 'none', transition: 'opacity .15s ease, color .15s ease' }}
+          >
+            <Unlink size={12} />
+          </span>
         )}
       </button>
       {stack && tipPos && createPortal(

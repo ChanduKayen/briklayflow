@@ -22,6 +22,8 @@ import { deriveDirection, isNotLinked, resolveAnchor, isGeneralExpense, payeeLab
 import { V, font, serif, nums, terraGrad } from '../components/txn-ledger/ledgerTokens';
 import { DirMedallion, Amount, AnchorChip, FilterChip, FlowBar } from '../components/txn-ledger/LedgerAtoms';
 import { TrackChip, TRACK_CHIP_CSS } from '../components/txn-ledger/TrackChip';
+import { unlinkTxnOrder } from '../lib/trackingApi';
+import { useOrgId } from '../lib/auth/AuthProvider';
 import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
 // Lazy — its xlsx parser is heavy and only needed when the import modal actually opens.
 const ImportTransactions = lazy(() => import('./ImportTransactions'));
@@ -45,9 +47,9 @@ function summarizeScope(s: string | null | undefined): string {
 
 // A PO is a basket of line items; name the leading item(s) that fit in ~24 chars,
 // then "+N others" for the rest — e.g. "Cement +23 others", "Cement, Steel +4 others".
-function summarizeItems(items: Array<{ item_name?: string | null; description?: string | null }> | null | undefined): string {
+function summarizeItems(items: Array<{ item_name?: string | null; specification?: string | null }> | null | undefined): string {
   const names = (items ?? [])
-    .map((it) => (it?.item_name || it?.description || '').replace(/\s+/g, ' ').trim())
+    .map((it) => (it?.item_name || it?.specification || '').replace(/\s+/g, ' ').trim())
     .filter(Boolean);
   if (names.length === 0) return 'Purchase';
   const lead: string[] = [];
@@ -152,6 +154,7 @@ type EntryProps = {
   onToggleSelect: (e: MouseEvent) => void;
   onAnchorClick: (e: MouseEvent) => void;
   onAnchorHover?: () => void;
+  onUnlink?: () => void;
   onAmountDown: (e: MouseEvent) => void;
   onAmountEnter: () => void;
   onAttach?: (e: MouseEvent) => void;
@@ -216,7 +219,7 @@ function EntryRow(p: EntryProps) {
       </div>
 
       <div className="bk-ledger-anchor flex items-center gap-2">
-        {p.anchorNode ?? <AnchorChip anchor={p.anchor} info={p.info} siblings={p.siblings} partyName={p.partyName} siteName={p.siteName} onHover={p.onAnchorHover} onClick={(e) => { e.stopPropagation(); p.onAnchorClick(e); }} />}
+        {p.anchorNode ?? <AnchorChip anchor={p.anchor} info={p.info} siblings={p.siblings} partyName={p.partyName} siteName={p.siteName} onHover={p.onAnchorHover} onUnlink={p.onUnlink} onClick={(e) => { e.stopPropagation(); p.onAnchorClick(e); }} />}
         {p.flagged && (
           <span className="text-xs px-1.5 py-0.5 rounded shrink-0" style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font }}>flagged</span>
         )}
@@ -330,6 +333,7 @@ function LedgerEmpty({ reviewCount, onReview, onNew }: { reviewCount: number; on
  */
 export default function Ledger({ session, lockedProject }: { session: Session; lockedProject?: string }) {
   const qc = useQueryClient();
+  const orgId = useOrgId();
   const navigate = useNavigate();
   const { openPeek, prefetchPeek } = usePeek();
   const [searchParams] = useSearchParams();
@@ -458,7 +462,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
       // PO: prefer the line-item embed; fall back to bare totals if the embed errors.
       let poData: any[] = [];
       if (poRefs.length) {
-        let r: any = await supabase.from('purchase_orders').select('po_id, project_id, total_value, order_value, po_line_items(item_name, description)').in('po_id', poRefs);
+        let r: any = await supabase.from('purchase_orders').select('po_id, project_id, total_value, order_value, po_line_items(item_name, specification)').in('po_id', poRefs);
         if (r.error) r = await supabase.from('purchase_orders').select('po_id, project_id, total_value, order_value').in('po_id', poRefs);
         poData = (r.data ?? []) as any[];
       }
@@ -1361,6 +1365,15 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                           if (anchor && (anchor.kind === 'WO' || anchor.kind === 'PO')) prefetchPeek(anchor.kind, anchor.ref);
                           else prefetchPeek('TRANSACTION', txn.txn_id);
                         }}
+                        onUnlink={anchor && (anchor.kind === 'WO' || anchor.kind === 'PO') && txn.status !== 'Voided'
+                          ? async () => {
+                              try {
+                                await unlinkTxnOrder({ txn_id: txn.txn_id, status: txn.status }, orgId ?? '');
+                                qc.invalidateQueries({ queryKey: ['ledger'] });
+                                qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
+                              } catch (e) { window.alert(e instanceof Error ? e.message : 'Could not unlink'); }
+                            }
+                          : undefined}
                         onAttach={async () => { const u = await resolveDocUrl(proofUrl); if (u) setLightboxUrl(u); }}
                         onAmountDown={() => { setIsDragging(true); setSumSel(new Set([txn.txn_id])); }}
                         onAmountEnter={() => { if (isDragging) setSumSel(prev => new Set(prev).add(txn.txn_id)); }}

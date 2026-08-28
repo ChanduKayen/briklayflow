@@ -5,7 +5,7 @@ import { BackLink } from '../components/BackLink';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import confetti from 'canvas-confetti';
 import { supabase } from '../lib/supabase';
-import { openDoc, resolveDocUrl } from '../lib/storage';
+import { openDoc, parseStoredPath } from '../lib/storage';
 import { poGateState } from '../lib/poLifecycle';
 import { useSnackbar } from '../components/Snackbar';
 import { PageSkeleton } from '../components/SkeletonLoader';
@@ -165,11 +165,12 @@ function BillEntryForm({ poId, currentUserName, onBillSaved }: BillEntryFormProp
     if (billFile) {
       setUploading(true);
       const ext = billFile.type === 'application/pdf' ? 'pdf' : 'jpg';
-      const { error: upErr } = await supabase.storage
-        .from('documents')
-        .upload(`po-bills/bill_${poId}_${Date.now()}.${ext}`, billFile, { contentType: billFile.type });
+      // ONE path for both upload and URL — calling Date.now() twice stored a URL whose timestamp
+      // didn't match the uploaded object, so the file could never be signed/opened afterwards.
+      const path = `po-bills/bill_${poId}_${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage.from('documents').upload(path, billFile, { contentType: billFile.type });
       if (!upErr) {
-        const { data: pub } = supabase.storage.from('documents').getPublicUrl(`po-bills/bill_${poId}_${Date.now()}.${ext}`);
+        const { data: pub } = supabase.storage.from('documents').getPublicUrl(path);
         billUrl = pub.publicUrl;
       }
       setUploading(false);
@@ -540,6 +541,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   // ── Reference PO-detail redesign (po-detail.html) UI state ──────────────────
   const [menuOpen,     setMenuOpen]     = useState(false);
   const [billingOpen,  setBillingOpen]  = useState(false);   // unfolds the bill columns + bill row
+  const [billEditOpen, setBillEditOpen] = useState(false);   // editing/replacing an already-recorded bill
   const [payRowOpen,   setPayRowOpen]   = useState(false);
   const [refBillNo,    setRefBillNo]    = useState('');
   const [refBillDate,  setRefBillDate]  = useState(new Date().toISOString().split('T')[0]);
@@ -682,25 +684,6 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   });
 
 
-  const markReceived = useMutation({
-    mutationFn: async () => {
-      const { error } = await supabase.from('purchase_orders').update({
-        received_at_site:    new Date().toISOString(),
-        received_by_name:    currentUserName,
-        received_by_user_id: session.user.id,
-      }).eq('po_id', poId!);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['po_detail', poId] });
-      qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
-      setShowReceiveModal(false);
-      fireCelebration();
-      showSnackbar(`📦 Receipt confirmed! Now attach the vendor bill to proceed.`);
-    },
-    onError: (err: any) => showSnackbar(err.message || 'Failed to record receipt', { type: 'error' }),
-  });
-
   const settlePO = useMutation({
     mutationFn: async () => {
       const amount = parseAmount(settleAmount) || Number(po?.total_value || po?.order_value) || 0;
@@ -818,9 +801,13 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   }
 
   async function runReconciliation(file: File | null) {
-    if (!lineItems?.length) return;
     setReconciling(true);
     setReconError(null);
+    if (!lineItems?.length) {
+      setReconciling(false);
+      setReconError('This PO has no line items to match the bill against.');
+      return;
+    }
     try {
       const body: Record<string, any> = {
         po_id:         poId,
@@ -839,11 +826,13 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
       if (file) {
         body.bill_base64   = await fileToBase64Str(file);
         body.bill_mime_type = file.type || 'image/jpeg';
-      } else if (po?.vendor_bill_doc_url) {
-        // documents bucket is private — send a short-lived signed URL the
-        // reconcile function can fetch (it does a plain fetch(bill_url)).
-        body.bill_url = await resolveDocUrl(po.vendor_bill_doc_url);
-        if (!body.bill_url) throw new Error('Could not access the attached bill document');
+      } else if (po?.vendor_bill_doc_url || po?.vendor_bill_url) {
+        // Hand the edge fn the object's bucket+path; it downloads with the service role. This avoids
+        // the client-signed URL, which was 400-ing (the stored path didn't match the object).
+        const stored = po.vendor_bill_doc_url || po.vendor_bill_url;
+        const parsed = parseStoredPath(stored);
+        if (parsed) { body.bill_bucket = parsed.bucket; body.bill_path = parsed.path; }
+        else body.bill_url = stored; // an external (non-Supabase) URL — let the fn fetch it directly
       } else {
         throw new Error('No bill document available — upload the vendor bill image first');
       }
@@ -851,9 +840,20 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
       const { data, error } = await supabase.functions.invoke('reconcile-po-bill', { body });
       if (error) throw error;
       if (!data?.ok) throw new Error(data?.error || 'Reconciliation failed');
-      setReconResult(data as ReconResult);
+      const rr = data as ReconResult;
+      setReconResult(rr);
+      // Read succeeded but nothing usable came back — say so instead of silently doing nothing.
+      const gotSomething = rr.bill_total_extracted != null || (rr.line_matches ?? []).some(m => m.bill_qty != null || m.bill_rate != null);
+      if (!gotSomething) setReconError('The bill was read, but no amounts could be matched to these lines. Enter them by hand, or try a clearer photo / PDF.');
     } catch (err: any) {
-      setReconError(err.message || 'Reconciliation failed');
+      // supabase-js hides the edge fn's real error behind "non-2xx"; the reason is in error.context.
+      let msg = err?.message || 'Reconciliation failed';
+      const ctx = err?.context;
+      if (ctx instanceof Response) {
+        try { const b = await ctx.clone().json(); if (b?.error) msg = String(b.error); }
+        catch { try { const t = await ctx.clone().text(); if (t) msg = t.slice(0, 200); } catch { /* ignore */ } }
+      }
+      setReconError(msg);
     } finally {
       setReconciling(false);
     }
@@ -1041,6 +1041,18 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     setBillingOpen(true);
   }, [reconResult]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Auto-read the attached bill once, as soon as the PO + its line items load — no button needed.
+  // Reads it against the PO lines so the billed amounts (and any mismatches) fill in automatically.
+  const autoReadRef = useRef(false);
+  useEffect(() => {
+    if (autoReadRef.current) return;
+    const hasDoc = !!(po?.vendor_bill_doc_url || po?.vendor_bill_url);
+    if (!hasDoc || !(lineItems?.length)) return;
+    autoReadRef.current = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void runReconciliation(null);
+  }, [po, lineItems]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Save the vendor bill (same write BillEntryForm performs) from the reference bill row.
   async function saveRefBill(): Promise<void> {
     const typed = parseAmount(refBillAmt);
@@ -1064,8 +1076,9 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
       vendor_bill_no:        refBillNo.trim() || null,
       vendor_bill_amount:    bill,
       vendor_bill_date:      refBillDate,
-      vendor_bill_url:       billUrl,
-      vendor_bill_doc_url:   billUrl,
+      // Keep the existing bill document when the user edits without re-uploading (else this wiped it).
+      vendor_bill_url:       billUrl ?? po.vendor_bill_url ?? po.vendor_bill_doc_url ?? null,
+      vendor_bill_doc_url:   billUrl ?? po.vendor_bill_doc_url ?? po.vendor_bill_url ?? null,
       bill_recorded_at:      new Date().toISOString(),
       bill_recorded_by_name: currentUserName,
       status:                'BILLED',
@@ -1075,7 +1088,20 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     qc.invalidateQueries({ queryKey: ['po_detail', poId] });
     qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
     setBillingOpen(false);
+    setBillEditOpen(false);
     showSnackbar('Bill saved');
+  }
+
+  // Open the bill row to edit / replace an already-recorded bill (prefilled from the PO).
+  function openBillEdit() {
+    setRefBillNo(po?.vendor_bill_number || po?.vendor_bill_no || '');
+    setRefBillDate(po?.vendor_bill_date || new Date().toISOString().split('T')[0]);
+    setRefBillAmt(po?.vendor_bill_amount != null ? String(po.vendor_bill_amount) : '');
+    setRefBillFile(null);
+    setBillEditOpen(true);
+    setBillingOpen(true);
+    setPayRowOpen(false);
+    setTimeout(() => document.getElementById('podxItems')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 30);
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -1112,6 +1138,9 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   // ── Derived state for the redesign (real data behind the reference's look) ──
   const inr0 = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
   const cancelled = po.status === 'CANCELLED';
+  // A PO created from a paid bill (the "Attach bill" flow) — recorded after the purchase, not raised
+  // or approved in advance. The banner below states this so owners don't read it as a pre-placed order.
+  const postPurchase = !!po.created_after_payment;
   const orderValue = totalValue;
   const gstValue = Number(po.gst_value) || 0;
   const subTotal = Number(po.order_value) || (lineItems ?? []).reduce((s, li: any) => s + (Number(li.total_amount) || (Number(li.quantity_ordered) || 0) * (Number(li.unit_rate) || 0)), 0);
@@ -1119,9 +1148,17 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const received = !!(po.received_at_site || (grns?.length ?? 0) > 0);
   const receivedWhen = po.received_at_site || grns?.[grns.length - 1]?.receipt_date || grns?.[0]?.receipt_date || null;
   const receivedBy = po.received_by_name || grns?.[0]?.received_by || '';
+  // Per-line quantity already received across prior GRNs — fed to the receive wizard as the baseline.
+  const recvByLine: Record<string, number> = {};
+  (grnItems ?? []).forEach((g: any) => { if (g.po_line_item_id) recvByLine[String(g.po_line_item_id)] = (recvByLine[String(g.po_line_item_id)] || 0) + (Number(g.qty_received) || 0); });
   const hasBill = billAmt > 0;
   const billNo = po.vendor_bill_number || po.vendor_bill_no || '';
-  const payBase = hasBill ? billAmt : orderValue;
+  // Balance is owed against the BILL, not the order. Prefer the saved bill amount; if none is saved
+  // yet use the amount just read from the bill (OCR) or typed in the panel; fall back to the order.
+  const readBill = reconResult?.bill_total_extracted != null ? Number(reconResult.bill_total_extracted) : 0;
+  const typedBill = refBillAmt ? (parseAmount(refBillAmt) || 0) : 0;
+  const billForBalance = billAmt > 0 ? billAmt : (typedBill > 0 ? typedBill : readBill);
+  const payBase = billForBalance > 0 ? billForBalance : orderValue;
   const balNum = payBase - paidTotal;
   const paidDone = paidTotal > 0 && balNum <= 0;
   const doneCount = 1 + (received ? 1 : 0) + (hasBill ? 1 : 0) + (paidDone ? 1 : 0);
@@ -1201,11 +1238,24 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
           </div>
         </div>
 
+        {/* post-purchase notice — this PO documents a completed purchase, not a pre-placed order */}
+        {postPurchase && (
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '11px 14px', borderRadius: 12, background: 'var(--gold-tint)', border: '1px solid var(--line)', margin: '0 0 16px' }}>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}><circle cx="12" cy="12" r="9" /><path d="M12 8h.01M11 12h1v4h1" /></svg>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--ink)' }}>Recorded after purchase</div>
+              <div style={{ fontSize: 12, color: 'var(--ink-2)', marginTop: 2, lineHeight: 1.5 }}>
+                This order was created from the vendor&apos;s bill after the material was purchased and paid for. It documents a completed transaction — it was not raised or approved in advance.
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* lifecycle strip */}
         <div className="strip" style={{ ['--p' as any]: progressPct + '%' }}>
           <div className={`stage done`}>
             <div className="ico"><span>1</span><Check /></div>
-            <div className="t">Ordered</div>
+            <div className="t">{postPurchase ? 'Recorded' : 'Ordered'}</div>
             <div className="s">{fmtDate(po.date_issued)}{po.ordered_by ? ` · ${po.ordered_by}` : ''}</div>
           </div>
 
@@ -1214,7 +1264,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
             <div className="t">Received at site</div>
             <div className="s">{received ? `${fmtDate(receivedWhen)}${receivedBy ? ` · ${receivedBy}` : ''}` : 'Material not yet checked in'}</div>
             {!received && !cancelled && nowStage === 'recv' && (
-              <div className="act"><button className="btn primary sm" disabled={markReceived.isPending} onClick={() => markReceived.mutate()}>{markReceived.isPending ? 'Marking…' : 'Mark received'}</button></div>
+              <div className="act"><button className="btn primary sm" onClick={() => setShowReceiveModal(true)}>Receive items</button></div>
             )}
           </div>
 
@@ -1224,6 +1274,21 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
             <div className="s">{hasBill ? `${billNo ? billNo + ' · ' : ''}${inr0(billAmt)}` : `Est. ${inr0(orderValue)} · no bill yet`}</div>
             {!hasBill && !cancelled && (
               <div className="act"><button className={`btn sm${nowStage === 'bill' ? ' primary' : ''}`} onClick={() => { setBillingOpen(true); setPayRowOpen(false); setTimeout(() => document.getElementById('podxItems')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 30); }}>Record bill</button></div>
+            )}
+            {hasBill && !cancelled && (
+              <div className="act" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {reconciling && <span className="chip"><span className="spinner" /> Reading bill…</span>}
+                {(po.vendor_bill_url || po.vendor_bill_doc_url) && (
+                  <button className="btn ghost sm" onClick={() => openDoc(po.vendor_bill_doc_url || po.vendor_bill_url)}>
+                    <svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" /><circle cx="12" cy="12" r="3" /></svg>
+                    View
+                  </button>
+                )}
+                <button className="btn ghost sm" onClick={openBillEdit}>
+                  <svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4 12.5-12.5z" /></svg>
+                  Edit / replace
+                </button>
+              </div>
             )}
           </div>
 
@@ -1244,11 +1309,18 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
             <span className={`chip${billedFlags ? '' : ' sage'}`}><i />{billedFlags ? `${billedFlags} line${billedFlags > 1 ? 's' : ''} above order — check before saving` : 'Bill matches order'}</span>
             <button className="btn soft sm" disabled={reconciling} onClick={() => refScanInputRef.current?.click()}>
               {reconciling ? <span className="spinner" /> : <svg viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 011-1h3M16 4h3a1 1 0 011 1v3M20 16v3a1 1 0 01-1 1h-3M8 20H5a1 1 0 01-1-1v-3M4 12h16" /></svg>}
-              Scan bill &amp; fill
+              {(po.vendor_bill_url || po.vendor_bill_doc_url) ? 'Upload a different bill' : 'Upload & read bill'}
             </button>
             <input ref={refScanInputRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0] || null; if (f) { setRefBillFile(f); runReconciliation(f); } }} />
           </div>
         </div>
+
+        {reconError && (
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: 'var(--terra-tint)', border: '1px solid var(--terra)', borderRadius: 10, padding: '9px 12px', margin: '0 0 10px', color: 'var(--terra-deep)', fontSize: 12.5, lineHeight: 1.45 }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, marginTop: 1 }}><circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16h.01" /></svg>
+            <span>Couldn&apos;t read the bill — {reconError}</span>
+          </div>
+        )}
 
         <div id="podxItems" className={`sheet${billingOpen ? ' billing' : ''}`}>
           <table>
@@ -1269,8 +1341,8 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
                   <td><span className="unit">{li.unit || '—'}</span></td>
                   <td className="num dim">{inr0(orr)}</td>
                   <td className="num amt">{inr0(Number(li.total_amount) || ordAmt)}</td>
-                  <td className="bill-col"><div className="cell"><input className="mono" inputMode="decimal" placeholder={String(oq)} value={billedQty[String(li.id)] ?? ''} disabled={hasBill} onChange={(e) => setBilledQty(p => ({ ...p, [String(li.id)]: e.target.value }))} /></div></td>
-                  <td className="bill-col"><div className="cell"><input className="mono" inputMode="decimal" placeholder={String(orr)} value={billedRate[String(li.id)] ?? ''} disabled={hasBill} onChange={(e) => setBilledRate(p => ({ ...p, [String(li.id)]: e.target.value }))} /></div></td>
+                  <td className="bill-col"><div className="cell"><input className="mono" inputMode="decimal" placeholder={String(oq)} value={billedQty[String(li.id)] ?? ''} disabled={hasBill && !billEditOpen} onChange={(e) => setBilledQty(p => ({ ...p, [String(li.id)]: e.target.value }))} /></div></td>
+                  <td className="bill-col"><div className="cell"><input className="mono" inputMode="decimal" placeholder={String(orr)} value={billedRate[String(li.id)] ?? ''} disabled={hasBill && !billEditOpen} onChange={(e) => setBilledRate(p => ({ ...p, [String(li.id)]: e.target.value }))} /></div></td>
                   <td className={`bill-col num${why.length ? ' diff' : (amt === ordAmt ? ' ok-match' : '')}`}>{inr0(amt)}{why.length ? <span className="why">{why.join(' · ')}</span> : null}</td>
                 </tr>
               ))}
@@ -1299,20 +1371,20 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
           </table>
 
           {/* Bill header row */}
-          <div className={`inline${billingOpen && !hasBill ? ' open' : ''}`}>
+          <div className={`inline${billingOpen && (!hasBill || billEditOpen) ? ' open' : ''}`}>
             <div className="f"><label>Bill / invoice no</label><input placeholder="INV-…" value={refBillNo} onChange={(e) => setRefBillNo(e.target.value)} /></div>
             <div className="f"><label>Bill date</label><input type="date" value={refBillDate} onChange={(e) => setRefBillDate(e.target.value)} /></div>
             <div className="f"><label>Bill amount</label><input className="mono" inputMode="decimal" placeholder="₹" style={{ textAlign: 'right' }} value={refBillAmt} onChange={(e) => setRefBillAmt(e.target.value)} /></div>
             <div className="f"><label>Document</label>
               <div className={`up${refBillFile ? ' has' : ''}`} tabIndex={0} onClick={() => refBillFileInputRef.current?.click()}>
                 <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16" /></svg>
-                <span>{refBillFile ? refBillFile.name : 'Upload PDF / photo'}</span>
+                <span>{refBillFile ? refBillFile.name : (billEditOpen && (po.vendor_bill_url || po.vendor_bill_doc_url) ? 'Replace bill — PDF / photo' : 'Upload PDF / photo')}</span>
               </div>
               <input ref={refBillFileInputRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }} onChange={(e) => setRefBillFile(e.target.files?.[0] || null)} />
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn ghost" onClick={() => setBillingOpen(false)}>Discard</button>
-              <button className="btn primary" disabled={savingBill} onClick={saveRefBill}>{savingBill ? <span className="spinner" /> : 'Save bill'}</button>
+              <button className="btn ghost" onClick={() => { setBillingOpen(false); setBillEditOpen(false); }}>Discard</button>
+              <button className="btn primary" disabled={savingBill} onClick={saveRefBill}>{savingBill ? <span className="spinner" /> : billEditOpen ? 'Update bill' : 'Save bill'}</button>
             </div>
           </div>
 
@@ -1336,9 +1408,9 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
         {/* money */}
         <div className="money">
           <div><small>Ordered</small><span className="mono">{inr0(orderValue)}</span><div className="sub">{fmtDate(po.date_issued)}</div></div>
-          <div><small>Billed</small><span className="mono">{hasBill ? inr0(billAmt) : '—'}</span><div className="sub">{hasBill ? (billNo || 'Vendor bill') + (billAmt > subTotal ? ` · ${inr0(billAmt - subTotal)} over order` : ' · matches order') : 'Estimate used until bill arrives'}</div></div>
+          <div><small>Billed</small><span className="mono">{billForBalance > 0 ? inr0(billForBalance) : '—'}</span><div className="sub">{billForBalance > 0 ? (hasBill ? (billNo || 'Vendor bill') : 'Read from bill · not yet saved') + (billForBalance > subTotal ? ` · ${inr0(billForBalance - subTotal)} over order` : ' · matches order') : 'Estimate used until bill arrives'}</div></div>
           <div><small>Paid</small><span className="mono">{inr0(paidTotal)}</span><div className="sub">{paidTotal > 0 ? `${activeTxns.length} payment${activeTxns.length !== 1 ? 's' : ''}` : 'No payments'}</div></div>
-          <div className={`bal ${balNum > 0 ? 'owe' : 'nil'}`}><small>Balance to vendor</small><span className="mono">{balNum > 0 ? inr0(balNum) : (balNum < 0 ? 'Over by ' + inr0(-balNum) : 'Nil')}</span><div className="sub">{balNum > 0 ? (hasBill ? 'Against vendor bill' : 'On credit · against estimate') : (balNum < 0 ? 'Refund or adjust next PO' : 'Settled in full')}</div></div>
+          <div className={`bal ${balNum > 0 ? 'owe' : 'nil'}`}><small>Balance to vendor</small><span className="mono">{balNum > 0 ? inr0(balNum) : (balNum < 0 ? 'Over by ' + inr0(-balNum) : 'Nil')}</span><div className="sub">{balNum > 0 ? (billForBalance > 0 ? 'Against vendor bill' : 'On credit · against estimate') : (balNum < 0 ? 'Refund or adjust next PO' : 'Settled in full')}</div></div>
         </div>
 
         {/* activity */}
@@ -1349,6 +1421,37 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
           ))}
         </ul></div>
       </div>
+
+      <ReceiveAtSiteDrawer
+        isOpen={showReceiveModal}
+        onClose={() => setShowReceiveModal(false)}
+        session={session}
+        poDateIssued={po.date_issued}
+        po={{
+          po_id: poId!,
+          org_id: po.org_id,
+          project_id: po.project_id,
+          stakeholder_id: po.stakeholder_id,
+          stakeholder_name: vendor?.name || 'Vendor',
+          line_items: (lineItems ?? []).map((li: any) => ({
+            id: String(li.id),
+            item_name: li.item_name,
+            unit: li.unit || 'Nos',
+            quantity_ordered: Number(li.quantity_ordered) || 0,
+            unit_rate: Number(li.unit_rate) || 0,
+            qty_received_so_far: recvByLine[String(li.id)] || 0,
+          })),
+        }}
+        onSuccess={() => {
+          setShowReceiveModal(false);
+          qc.invalidateQueries({ queryKey: ['po_detail', poId] });
+          qc.invalidateQueries({ queryKey: ['po_grn', poId] });
+          qc.invalidateQueries({ queryKey: ['po_grn_items', poId] });
+          qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
+          fireCelebration();
+          showSnackbar('📦 Receipt recorded');
+        }}
+      />
     </div>
   );
 }

@@ -83,7 +83,7 @@ const POLX_CSS = `
 .polx .val{font-weight:500}
 .polx .val small{display:block;font-size:11.5px;font-family:var(--sans);font-weight:400;color:var(--ink-3)}
 .polx .val small.over{color:var(--terra)}
-.polx .bal.owe{color:var(--terra);font-weight:500}.polx .bal.nil{color:var(--sage)}
+.polx .bal.owe{color:var(--terra);font-weight:500}.polx .bal.adv{color:var(--sage);font-weight:500}.polx .bal.nil{color:var(--sage)}.polx .bal small{font-size:10.5px;font-weight:600;opacity:.72;margin-left:1px}
 .polx .dlv{white-space:nowrap}
 .polx .dlv .late{color:var(--terra);font-weight:500}
 .polx .dlv .due{color:var(--gold);font-weight:500}
@@ -262,6 +262,15 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
 
   const TODAY = useMemo(() => new Date(), []);
   const balance = (p: PORow) => (p.billed || p.value) - p.paid;
+  // Balance shown as a vendor-ledger position: owed to the vendor = Credit (they're a creditor);
+  // paid ahead of the bill = Debit (an advance). Signed = billed/value − paid.
+  const balCell = (p: PORow) => {
+    if (p.rfq || p.cancelled) return <span className="dim">—</span>;
+    const b = balance(p);
+    if (b > 0.5) return <span className="bal owe">{fmt(b)}<small>Cr</small></span>;
+    if (b < -0.5) return <span className="bal adv">{fmt(-b)}<small>Dr</small></span>;
+    return <span className="bal nil">—</span>;
+  };
   const got = (p: PORow) => p.items.filter(i => i.r).length;
   const pend = (p: PORow) => p.items.filter(i => !i.r);
   const full = (p: PORow) => !p.cancelled && !p.rfq && p.items.length > 0 && got(p) === p.items.length;
@@ -381,7 +390,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
 
         <div className="sheet">
           <table>
-            <colgroup><col style={{ width: '18%' }} /><col style={{ width: '25%' }} /><col style={{ width: '13%' }} /><col style={{ width: '13%' }} /><col style={{ width: '20%' }} /><col style={{ width: '11%' }} /></colgroup>
+            <colgroup><col style={{ width: '17%' }} /><col style={{ width: '19%' }} /><col style={{ width: '12%' }} /><col style={{ width: '12%' }} /><col style={{ width: '16%' }} /><col style={{ width: '12%' }} /><col style={{ width: '12%' }} /></colgroup>
             <thead><tr>
               <th className={sortK === 'vendor' ? 'sorted' : ''} onClick={() => onSort('vendor')}>Vendor · PO<span className="arr">{arr('vendor')}</span></th>
               <th style={{ cursor: 'default' }}>Items</th>
@@ -389,12 +398,13 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
               <th className={sortK === 'ordered' ? 'sorted' : ''} onClick={() => onSort('ordered')}>Ordered<span className="arr">{arr('ordered')}</span></th>
               <th className={sortK === 'delivery' ? 'sorted' : ''} onClick={() => onSort('delivery')}>Delivery<span className="arr">{arr('delivery')}</span></th>
               <th className={`num${sortK === 'value' ? ' sorted' : ''}`} onClick={() => onSort('value')}>Value<span className="arr">{arr('value')}</span></th>
+              <th className={`num${sortK === 'balance' ? ' sorted' : ''}`} onClick={() => onSort('balance')} title="Owed to vendor = Credit · Advance = Debit">Balance<span className="arr">{arr('balance')}</span></th>
             </tr></thead>
             <tbody>
               {isLoading ? (
-                <tr><td colSpan={6} className="empty">Loading…</td></tr>
+                <tr><td colSpan={7} className="empty">Loading…</td></tr>
               ) : list.length === 0 ? (
-                <tr><td colSpan={6} className="empty">Nothing here. {filter === 'mine' ? 'Nothing waiting on you — go build something.' : 'Try another filter.'}</td></tr>
+                <tr><td colSpan={7} className="empty">Nothing here. {filter === 'mine' ? 'Nothing waiting on you — go build something.' : 'Try another filter.'}</td></tr>
               ) : list.map((p) => {
                 const shown = p.items.slice(0, 2).map(i => i.n).join(', ');
                 const rest = p.items.length - 2;
@@ -407,6 +417,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
                     <td className="when">{dstr(D(p.ordered))}<small>{p.by}</small></td>
                     <td>{recvCell(p)}</td>
                     <td className="num val">{p.rfq ? <span className="dim">—</span> : p.cancelled ? <span className="dim">{fmt(p.value)}</span> : fmt(p.value)}</td>
+                    <td className="num">{balCell(p)}</td>
                   </tr>
                 );
               })}

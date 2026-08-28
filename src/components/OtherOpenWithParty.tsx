@@ -67,13 +67,14 @@ export function OtherOpenWithParty({
       } else {
         let q: any = supabase
           .from('purchase_orders')
-          .select('po_id, total_value, order_value, po_line_items(item_name, description)')
-          .eq('stakeholder_id', stakeholderId);
+          .select('po_id, total_value, order_value, po_line_items(item_name, specification)')
+          .eq('stakeholder_id', stakeholderId)
+          .not('status', 'in', '("CANCELLED","Cancelled","cancelled")');
         if (projectId) q = q.eq('project_id', projectId);
         const r: any = await q;
         for (const p of (r.data ?? []) as any[]) {
           const lead = (p.po_line_items ?? [])
-            .map((it: any) => (it?.item_name || it?.description || '').trim())
+            .map((it: any) => (it?.item_name || it?.specification || '').trim())
             .filter(Boolean)[0];
           rows.push({
             id: String(p.po_id),
