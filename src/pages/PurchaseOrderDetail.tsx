@@ -1,12 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import Breadcrumb from '../components/Breadcrumb';
-import { BackLink } from '../components/BackLink';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import confetti from 'canvas-confetti';
 import { supabase } from '../lib/supabase';
 import { openDoc, parseStoredPath } from '../lib/storage';
-import { poGateState } from '../lib/poLifecycle';
 import { useSnackbar } from '../components/Snackbar';
 import { PageSkeleton } from '../components/SkeletonLoader';
 import { jsPDF } from 'jspdf';
@@ -14,52 +11,14 @@ import autoTable from 'jspdf-autotable';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useOrgId } from '../lib/auth/AuthProvider';
-import { usePeek } from '../context/PeekContextCore';
-import type { POLineItem, POApproval } from '../types';
+import type { POLineItem } from '../types';
 import ReceiveAtSiteDrawer from '../components/ReceiveAtSiteDrawer';
-import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
-import { downloadGRNChallan } from '../lib/grnChallan';
 import {
   fmtDate as pdfFmtDate, fmtRupee, amountInWords,
   MARGIN, CONTENT, RIGHT, C,
   setColor, drawRule, sectionLabel, valueText, drawHeader, drawFooter, drawSignatures,
 } from '../lib/pdfHelpers';
-import { formatTxn } from '../lib/formatTxn';
 import { parseAmount } from '../lib/money';
-
-// ── Status helpers ────────────────────────────────────────────────────────────
-
-const STATUS_BADGE: Record<string, string> = {
-  'ORDERED':   'bg-[#EFF6FF] text-[#3B82F6]',
-  'BILLED':    'bg-[#FFFBEB] text-[#D97706]',
-  'PARTIAL':   'bg-[#FFF7ED] text-[#EA580C]',
-  'PAID':      'bg-[#F0FDF4] text-[#16A34A]',
-  'CANCELLED': 'bg-[#F9FAFB] text-[#6B7280]',
-};
-
-const STATUS_DOT: Record<string, string> = {
-  'ORDERED':   'bg-[#3B82F6]',
-  'BILLED':    'bg-[#D97706]',
-  'PARTIAL':   'bg-[#EA580C]',
-  'PAID':      'bg-[#16A34A]',
-  'CANCELLED': 'bg-[#6B7280]',
-};
-
-const STATUS_LABEL: Record<string, string> = {
-  'ORDERED':   'Ordered',
-  'BILLED':    'Billed',
-  'PARTIAL':   'Partially Paid',
-  'PAID':      'Paid',
-  'CANCELLED': 'Cancelled',
-};
-
-function isOverdue(po: any): boolean {
-  if (!po.expected_delivery) return false;
-  const d = new Date(po.expected_delivery);
-  if (isNaN(d.getTime())) return false;
-  if (['BILLED', 'PARTIAL', 'PAID', 'CANCELLED'].includes(po.status)) return false;
-  return d < new Date();
-}
 
 // ── Reconciliation types ──────────────────────────────────────────────────────
 
@@ -91,18 +50,6 @@ interface ReconResult {
   overall_flags:         string[];
 }
 
-const FLAG_LABEL: Record<string, string> = {
-  BRAND_STRIPPED:          'Brand Stripped',
-  GRADE_DOWNGRADE:         'Grade Downgrade',
-  QTY_INFLATION:           'Qty Inflation',
-  RATE_INCREASE:           'Rate Increase',
-  UNIT_MISMATCH:           'Unit Mismatch',
-  GHOST_ITEM:              'Ghost Item',
-  DUPLICATE_ITEM:          'Duplicate Item',
-  AMOUNT_ARITHMETIC_ERROR: 'Arithmetic Error',
-  HSN_MISMATCH:            'HSN Mismatch',
-};
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtDate(d: string | null | undefined): string {
@@ -113,225 +60,10 @@ function fmtDate(d: string | null | undefined): string {
 }
 
 
-// ── Count-up hook ─────────────────────────────────────────────────────────────
-
-function useCountUp(target: number, duration = 500): number {
-  const [value, setValue] = useState(0);
-  const rafRef = useRef<number>(0);
-  useEffect(() => {
-    let start: number | null = null;
-    const animate = (ts: number) => {
-      if (!start) start = ts;
-      const elapsed = ts - start;
-      const progress = Math.min(elapsed / duration, 1);
-      const eased = 1 - (1 - progress) * (1 - progress);
-      setValue(Math.round(eased * target));
-      if (progress < 1) rafRef.current = requestAnimationFrame(animate);
-    };
-    rafRef.current = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [target, duration]);
-  return value;
-}
-
 function fireCelebration() {
   confetti({ particleCount: 60, spread: 50, origin: { y: 0.6 }, colors: ['#C8603A', '#16A34A', '#D97706', '#ffffff'] });
 }
 
-// ── BillEntryForm ─────────────────────────────────────────────────────────────
-
-interface BillEntryFormProps {
-  poId: string;
-  currentUserName: string;
-  onBillSaved: (data: { billAmount: number; billNo: string; billUrl: string | null }) => void;
-}
-
-function BillEntryForm({ poId, currentUserName, onBillSaved }: BillEntryFormProps) {
-  const [billNo, setBillNo]         = useState('');
-  const [billAmount, setBillAmount] = useState('');
-  const [billDate, setBillDate]     = useState(new Date().toISOString().split('T')[0]);
-  const [billFile, setBillFile]     = useState<File | null>(null);
-  const [uploading, setUploading]   = useState(false);
-  const [saving, setSaving]         = useState(false);
-  const qc = useQueryClient();
-
-  const bill    = parseAmount(billAmount);
-  const canSave = bill > 0;
-
-  const handleSave = async () => {
-    if (!canSave) return;
-    setSaving(true);
-    let billUrl: string | null = null;
-    if (billFile) {
-      setUploading(true);
-      const ext = billFile.type === 'application/pdf' ? 'pdf' : 'jpg';
-      // ONE path for both upload and URL — calling Date.now() twice stored a URL whose timestamp
-      // didn't match the uploaded object, so the file could never be signed/opened afterwards.
-      const path = `po-bills/bill_${poId}_${Date.now()}.${ext}`;
-      const { error: upErr } = await supabase.storage.from('documents').upload(path, billFile, { contentType: billFile.type });
-      if (!upErr) {
-        const { data: pub } = supabase.storage.from('documents').getPublicUrl(path);
-        billUrl = pub.publicUrl;
-      }
-      setUploading(false);
-    }
-    const { error } = await supabase.from('purchase_orders').update({
-      vendor_bill_number:    billNo.trim() || null,
-      vendor_bill_no:        billNo.trim() || null,
-      vendor_bill_amount:    bill,
-      vendor_bill_date:      billDate,
-      vendor_bill_url:       billUrl,
-      vendor_bill_doc_url:   billUrl,
-      bill_recorded_at:      new Date().toISOString(),
-      bill_recorded_by_name: currentUserName,
-      status:                'BILLED',
-    }).eq('po_id', poId);
-    setSaving(false);
-    if (!error) {
-      qc.invalidateQueries({ queryKey: ['po_detail', poId] });
-      qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
-      onBillSaved({ billAmount: bill, billNo: billNo.trim(), billUrl });
-    }
-  };
-
-  return (
-    <div className="mt-4 space-y-3">
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="text-[11px] font-bold uppercase tracking-wide text-amber-700 mb-1 block">Bill / Invoice No</label>
-          <input type="text" placeholder="e.g. INV-2023-0445" value={billNo} onChange={e => setBillNo(e.target.value)}
-            className="w-full text-[13px] px-3 py-2 border border-amber-300 rounded-lg bg-white focus:outline-none focus:border-amber-500" />
-        </div>
-        <div>
-          <label className="text-[11px] font-bold uppercase tracking-wide text-amber-700 mb-1 block">Bill Date</label>
-          <input type="date" value={billDate} onChange={e => setBillDate(e.target.value)}
-            className="w-full text-[13px] px-3 py-2 border border-amber-300 rounded-lg bg-white focus:outline-none focus:border-amber-500" />
-        </div>
-      </div>
-      <div>
-        <label className="text-[11px] font-bold uppercase tracking-wide text-amber-700 mb-1 block">
-          Bill Amount *
-        </label>
-        <div className="relative">
-          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[14px] font-medium text-amber-700">₹</span>
-          <input type="number" placeholder="0" value={billAmount} onChange={e => setBillAmount(e.target.value)} autoFocus
-            className="w-full text-[16px] font-semibold pl-7 pr-4 py-3 border-2 border-amber-400 rounded-lg bg-white focus:outline-none focus:border-amber-600 focus:ring-2 focus:ring-amber-200" />
-        </div>
-      </div>
-      <div>
-        <label className="text-[11px] font-bold uppercase tracking-wide text-amber-700 mb-1 block">
-          Bill Document <span className="text-[10px] font-normal normal-case">(PDF or image)</span>
-        </label>
-        {billFile ? (
-          <div className="flex items-center gap-2 p-3 border border-amber-300 rounded-lg bg-white">
-            <span className="material-symbols-outlined text-[16px] text-amber-500">attach_file</span>
-            <p className="text-[13px] flex-1 truncate">{billFile.name}</p>
-            <button onClick={() => setBillFile(null)} className="text-[11px] text-on-surface-variant hover:text-red-500">Remove</button>
-          </div>
-        ) : (
-          <label className="flex items-center gap-2 p-3 border border-dashed border-amber-300 rounded-lg bg-white cursor-pointer hover:border-amber-500 transition-colors">
-            <span className="material-symbols-outlined text-[16px] text-amber-500">upload_file</span>
-            <span className="text-[13px] text-amber-700">Upload vendor bill</span>
-            <input type="file" accept="image/jpeg,image/png,image/jpg,application/pdf"
-              onChange={e => setBillFile(e.target.files?.[0] || null)} className="hidden" />
-          </label>
-        )}
-      </div>
-      <button onClick={handleSave} disabled={!canSave || saving}
-        className={`w-full h-11 rounded-lg text-[14px] font-semibold transition-all ${canSave && !saving
-          ? 'bg-amber-500 text-white hover:bg-amber-600 shadow-md shadow-amber-200'
-          : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}>
-        {saving ? (uploading ? 'Uploading…' : 'Saving…')
-          : `Record Bill${billAmount ? ` — ₹${parseFloat(billAmount).toLocaleString('en-IN')}` : ''}`}
-      </button>
-    </div>
-  );
-}
-
-// ── BillSummaryCard ───────────────────────────────────────────────────────────
-
-function BillSummaryCard({ po, activeTxns, onNavigate }: { po: any; activeTxns: any[]; onNavigate: (p: string) => void }) {
-  const totalPaid = activeTxns.reduce((s: number, t: any) => s + (Number(t.allocated_amount) || 0), 0);
-  const billAmt   = Number(po.vendor_bill_amount) || 0;
-  const balance   = billAmt - totalPaid;
-  const billNo    = po.vendor_bill_number || po.vendor_bill_no || null;
-  const billUrl   = po.vendor_bill_url || po.vendor_bill_doc_url || null;
-
-  return (
-    <div className="rounded-xl border border-outline-variant/20 bg-white p-4">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <p className="text-[10px] uppercase tracking-wide text-on-surface-variant/60 mb-0.5">Vendor Bill</p>
-          <p className="text-[14px] font-medium text-on-surface">{billNo || 'No bill number'}</p>
-          {po.vendor_bill_date && <p className="text-[11px] text-on-surface-variant/50">{fmtDate(po.vendor_bill_date)}</p>}
-        </div>
-        {billUrl && (
-          <button type="button" onClick={() => openDoc(billUrl)}
-            className="text-[12px] text-[#C8603A] hover:underline flex items-center gap-1">
-            View bill <span className="material-symbols-outlined text-[13px]">open_in_new</span>
-          </button>
-        )}
-      </div>
-      <div className="space-y-2">
-        <div className="flex justify-between text-[12px]">
-          <span className="text-on-surface-variant/60">Bill Amount</span>
-          <span className="font-data-mono font-medium text-[#16A34A]">₹{billAmt.toLocaleString('en-IN')}</span>
-        </div>
-        <div className="h-px bg-outline-variant/15 my-1" />
-        <div className="flex justify-between text-[12px]">
-          <span className="text-on-surface-variant/60">Total Paid</span>
-          <span className="font-data-mono">₹{totalPaid.toLocaleString('en-IN')}</span>
-        </div>
-        <div className="flex justify-between">
-          <span className="text-[13px] font-semibold text-on-surface">
-            {balance > 0 ? 'Balance Due' : balance < 0 ? 'Overpaid' : 'Settled'}
-          </span>
-          <span className={`text-[14px] font-bold font-data-mono ${balance > 0 ? 'text-[#DC2626]' : balance < 0 ? 'text-amber-600' : 'text-[#16A34A]'}`}>
-            {balance === 0 ? '₹0 ✓' : `₹${Math.abs(balance).toLocaleString('en-IN')}`}
-          </span>
-        </div>
-      </div>
-      {activeTxns.length > 0 && (
-        <div className="mt-4 pt-3 border-t border-outline-variant/10">
-          <p className="text-[10px] uppercase tracking-wide text-on-surface-variant/60 mb-2">Payments</p>
-          {activeTxns.map((t: any) => {
-            const f = formatTxn({ ...t.transactions, total_amount: t.allocated_amount }, 'po');
-            return (
-              <div key={t.id} onClick={() => onNavigate(`/ledger/${t.transactions?.txn_id}`)}
-                className="flex justify-between py-1.5 cursor-pointer hover:bg-surface-container-low/30 rounded px-1 group">
-                <div className="min-w-0 flex-1 pr-2">
-                  <p className="text-[11px] font-[500] text-on-surface flex items-center gap-1.5 truncate">
-                    {f.primary}
-                    {t.transactions?.category === 'PO Advance' && (
-                      <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200/50 inline-flex items-center shrink-0">
-                        Advance
-                      </span>
-                    )}
-                  </p>
-                  {f.secondary && <p className="text-[10px] text-on-surface-variant/60 truncate">{f.secondary}</p>}
-                  <p className="text-[9px] font-mono text-on-surface-variant/25 opacity-0 group-hover:opacity-100 transition-opacity">{t.transactions?.txn_id}</p>
-                </div>
-                <p className="text-[12px] font-medium font-data-mono shrink-0">₹{Number(t.allocated_amount).toLocaleString('en-IN')}</p>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── SectionLabel ──────────────────────────────────────────────────────────────
-
-function SectionLabel({ icon, label }: { icon: string; label: string }) {
-  return (
-    <div className="flex items-center gap-2 mb-3">
-      <span className="material-symbols-outlined text-[15px] text-on-surface-variant/40">{icon}</span>
-      <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-on-surface-variant/50">{label}</span>
-      <div className="flex-1 h-px bg-outline-variant/15" />
-    </div>
-  );
-}
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -497,32 +229,16 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const navState   = (location.state as { from?: string; projectId?: string; projectName?: string }) || {};
   const qc         = useQueryClient();
   const { show: showSnackbar } = useSnackbar();
-  const { openPeek } = usePeek();
   const { data: profile } = useUserProfile(session.user.id);
   const orgId = useOrgId();
-
-  const canManage =
-    profile?.role === 'management' ||
-    profile?.role === 'principal' ||
-    profile?.role === 'accountant';
-  // Only management / principal approve POs.
-  const isApprover = profile?.role === 'management' || profile?.role === 'principal';
-  const [noteAction, setNoteAction] = useState<'SEND_BACK' | 'REJECT' | null>(null);
-  const [approvalRemark, setApprovalRemark] = useState('');
 
   const currentUserName: string = (profile as any)?.display_name || (profile as any)?.name || session.user.email || 'Unknown';
 
   // ── UI state ───────────────────────────────────────────────────────────────
-  const [showLog,              setShowLog]             = useState(false);
-  const [showReceiveDrawer,    setShowReceiveDrawer]   = useState(false);
-  const [showSettleModal,      setShowSettleModal]     = useState(false);
-  const [showRecordPayment,    setShowRecordPayment]   = useState(false);
+  const [, setShowRecordPayment] = useState(false);
   const [showReceiveModal,     setShowReceiveModal]    = useState(false);
-  const [billCelebration,      setBillCelebration]     = useState<{ billAmount: number; billNo: string; vendorName: string } | null>(null);
-  const [showStakeholderDrawer, setShowStakeholderDrawer] = useState(false);
 
   // AI reconciliation state
-  const [reconFile, setReconFile]     = useState<File | null>(null);
   const [reconciling, setReconciling] = useState(false);
   const [reconResult, setReconResult] = useState<ReconResult | null>(null);
   const [reconError, setReconError]   = useState<string | null>(null);
@@ -531,12 +247,6 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const [payAmount,   setPayAmount]   = useState('');
   const [payMode,     setPayMode]     = useState<'NEFT' | 'UPI' | 'Cheque' | 'Cash'>('NEFT');
   const [payRef,      setPayRef]      = useState('');
-
-
-  // Settle modal fields
-  const [settleAmount,     setSettleAmount]     = useState('');
-  const [settlePayMode,    setSettlePayMode]    = useState<'NEFT' | 'UPI' | 'Cheque' | 'Cash'>('NEFT');
-  const [settleRef,        setSettleRef]        = useState('');
 
   // ── Reference PO-detail redesign (po-detail.html) UI state ──────────────────
   const [menuOpen,     setMenuOpen]     = useState(false);
@@ -612,20 +322,6 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     enabled: (grns?.length ?? 0) > 0,
   });
 
-  const { data: approvals } = useQuery({
-    queryKey: ['po_approvals', poId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('po_approvals')
-        .select('*')
-        .eq('po_id', poId!)
-        .order('actioned_at', { ascending: false });
-      if (error) throw error;
-      return data as POApproval[];
-    },
-    enabled: !!poId,
-  });
-
   // Feature 3 — linked transactions
   const { data: linkedTxns } = useQuery({
     queryKey: ['po_linked_txns', poId],
@@ -656,77 +352,6 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     onError: (err: any) => showSnackbar(err.message || 'Failed to update status', { type: 'error' }),
   });
 
-  // ── Approval (draft → live), management/principal only ──────────────────────
-  const inrShort = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
-  const approve = useMutation({
-    mutationFn: async ({ action, remarks }: { action: 'APPROVE' | 'SEND_BACK' | 'REJECT'; remarks?: string }) => {
-      const { data, error } = await supabase.rpc('decide_purchase_order', {
-        p_po_id: poId!, p_action: action, p_remarks: remarks ?? null,
-      });
-      if (error) throw error;
-      const res = data as { success: boolean; error?: string; amount?: number; limit?: number; escalate_to?: string | null };
-      if (!res?.success) {
-        if (res?.error === 'above_limit') {
-          throw new Error(`This ${inrShort(res.amount ?? 0)} order is above your approval limit${res.limit != null ? ` of ${inrShort(res.limit)}` : ''}${res.escalate_to ? ' — it goes to your approver to sign off.' : ' — a higher approver must sign off.'}`);
-        }
-        throw new Error(res?.error || 'Approval failed');
-      }
-      return res;
-    },
-    onSuccess: (_d, vars) => {
-      qc.invalidateQueries({ queryKey: ['po_detail', poId] });
-      qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
-      qc.invalidateQueries({ queryKey: ['nav_po_draft'] });
-      qc.invalidateQueries({ queryKey: ['nav_po_total'] });
-      showSnackbar(vars.action === 'APPROVE' ? '✓ Purchase order approved' : vars.action === 'REJECT' ? 'Rejected' : 'Sent back to the creator');
-    },
-    onError: (err: any) => showSnackbar(err.message || 'Could not complete approval', { type: 'error' }),
-  });
-
-
-  const settlePO = useMutation({
-    mutationFn: async () => {
-      const amount = parseAmount(settleAmount) || Number(po?.total_value || po?.order_value) || 0;
-      if (!amount) throw new Error('Amount is required');
-
-      const txnId = `TXN-${Date.now()}`;
-      const { error: rpcError } = await supabase.rpc('insert_transaction_with_allocations', {
-        p_txn: {
-          txn_id:         txnId,
-          org_id:         orgId,
-          stakeholder_id: po!.stakeholder_id,
-          date:           new Date().toISOString().split('T')[0],
-          total_amount:   amount,
-          payment_mode:   settlePayMode,
-          category:       'Purchase Payment',
-          remarks:        `Settlement for PO ${poId}${settleRef ? ` · Ref: ${settleRef}` : ''}`,
-          ai_flag_status: 'Clean',
-          ai_flag_data:   {},
-        },
-        p_allocations: [{
-          project_id:       po!.project_id,
-          order_type:       'PO',
-          order_ref:        poId!,
-          allocated_amount: amount,
-        }],
-      });
-      if (rpcError) throw rpcError;
-
-      // Mark PO as fully paid
-      await supabase.from('purchase_orders').update({ status: 'PAID' }).eq('po_id', poId!);
-
-      return txnId;
-    },
-    onSuccess: (txnId) => {
-      qc.invalidateQueries({ queryKey: ['po_linked_txns', poId] });
-      qc.invalidateQueries({ queryKey: ['po_detail', poId] });
-      qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
-      setShowSettleModal(false);
-      showSnackbar('PO settled — transaction created');
-      navigate(`/ledger/${txnId}`);
-    },
-    onError: (err: any) => showSnackbar(err.message || 'Failed to settle PO', { type: 'error' }),
-  });
 
   // Feature 3 — record payment against PO
   const recordPayment = useMutation({
@@ -1126,14 +751,6 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const activeTxns = (linkedTxns ?? []).filter((t: any) => t.transactions?.status !== 'Voided');
   const paidTotal = activeTxns.reduce((s: number, t: any) => s + (Number(t.allocated_amount) || 0), 0);
   const billAmt   = Number(po.vendor_bill_amount) || 0;
-  const balance   = billAmt - paidTotal;
-  const pct       = billAmt > 0 ? Math.min(100, (paidTotal / billAmt) * 100) : 0;
-
-  // Count-up component
-  function AmountDisplay({ amount }: { amount: number }) {
-    const displayed = useCountUp(amount);
-    return <span className="count-up-amount">₹{displayed.toLocaleString('en-IN')}</span>;
-  }
 
   // ── Derived state for the redesign (real data behind the reference's look) ──
   const inr0 = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
@@ -1333,7 +950,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
               <th className="bill-col num">Billed qty</th><th className="bill-col num">Billed rate</th><th className="bill-col num">Billed amt</th>
             </tr></thead>
             <tbody>
-              {billedLines.map(({ li, oq, orr, bq, br, amt, why, ordAmt }, i) => (
+              {billedLines.map(({ li, oq, orr, amt, why, ordAmt }, i) => (
                 <tr key={li.id}>
                   <td className="n">{li.line_number ?? i + 1}</td>
                   <td className="item"><b>{li.item_name}</b>{li.specification ? <small>{li.specification}</small> : null}</td>

@@ -277,14 +277,6 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   const late = (p: PORow) => !p.cancelled && !full(p) && !!p.due && D(p.due) < TODAY;
   const mine = (p: PORow) => !p.cancelled && !p.rfq && !full(p) && (late(p) || got(p) > 0 || (!!p.due && days(TODAY, D(p.due)) <= 0));
 
-  const nextAction = (p: PORow): { l: string; pri?: boolean; soft?: boolean } | null => {
-    if (p.cancelled || full(p)) return null;
-    if (p.rfq) return { l: 'Waiting for price', soft: true };
-    if (late(p)) return { l: 'Chase vendor', pri: true };
-    if (got(p) > 0) return { l: 'Receive rest', pri: true };
-    return { l: 'Mark received' };
-  };
-
   const FILTERS: Record<string, (p: PORow) => boolean> = {
     all: () => true,
     mine,

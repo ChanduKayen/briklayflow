@@ -313,7 +313,7 @@ export async function createDeliveredBillPO(
       ...(row.billNo ? { vendor_bill_number: row.billNo, vendor_bill_no: row.billNo } : {}),
     })
     .eq('po_id', res.po_id);
-  return { poId: res.poId ?? res.po_id };
+  return { poId: res.po_id };
 }
 
 /** A PENDING (unpaid) bill on `projectId`: an auto-approved PO carrying the bill amount as an

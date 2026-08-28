@@ -26,7 +26,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Hammer, Package, ChevronRight, Check, Link2, Camera } from 'lucide-react';
 import { V, font } from './ledgerTokens';
 import type { TrackTxn } from '../../lib/trackingApi';
-import { fileAsLabour, clearOneTime, getTrackingOptions } from '../../lib/trackingApi';
+import { clearOneTime, getTrackingOptions } from '../../lib/trackingApi';
 import { getTxnAllocations } from '../../lib/vendorTrackingApi';
 import { ContractHub, CONTRACT_HUB_CSS } from './ContractHub';
 import { VENDOR_HUB_CSS } from './VendorHub';
@@ -138,13 +138,6 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
     return () => { window.removeEventListener('scroll', reposition, true); window.removeEventListener('resize', reposition); };
   }, [open]);
 
-  const setOneTime = async () => {
-    if (busy) return;
-    setBusy(true);
-    try { await fileAsLabour(txn); setChosenOneTime(true); onLinked(); }
-    catch { setChosenOneTime(false); } // e.g. migration not applied yet — leave the choice open
-    finally { setBusy(false); }
-  };
 
   const undoOneTime = async () => {
     if (busy) return;
