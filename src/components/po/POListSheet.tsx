@@ -9,6 +9,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
+import SendToVendorModal from '../po-new-ui/SendToVendorModal';
 
 const POLX_CSS = `
 .polx{
@@ -91,6 +92,8 @@ const POLX_CSS = `
 .polx .dlv .sent{color:#3b7bb5;font-weight:500}
 .polx .dlv .none{color:var(--ink-2)}
 .polx .dlv small{display:block;color:var(--ink-3);font-size:12px}
+.polx .dlv .send-link{display:inline-block;margin-top:4px;background:none;border:0;padding:0;font-family:inherit;font-size:12px;color:#1a9d5a;text-decoration:underline;text-underline-offset:2px;cursor:pointer;transition:color .14s}
+.polx .dlv .send-link:hover{color:#127c46;text-decoration-thickness:2px}
 .polx .dlv small b{font-weight:500}
 .polx .dlv .partial{display:inline-flex;align-items:center;gap:8px;font-weight:500;color:var(--gold)}
 .polx .dlv .partial i{width:44px;height:6px;border-radius:3px;background:var(--line-2);position:relative;overflow:hidden}
@@ -129,7 +132,8 @@ const POLX_CSS = `
 
 interface POItem { n: string; q: string; r: boolean }
 interface PORow {
-  id: string; vendor: string; site: string; by: string; ordered: string;
+  id: string; vendor: string; stakeholderId: string; vendorContact: string | null;
+  site: string; by: string; ordered: string;
   items: POItem[]; value: number; billed: number; paid: number;
   due: string | null; recv: string | null; sent: string | null; cancelled: boolean; rfq: boolean;
 }
@@ -145,7 +149,7 @@ function usePOListData(projectId?: string) {
     queryFn: async () => {
       let q = supabase
         .from('purchase_orders')
-        .select('po_id, status, approval_status, date_issued, created_at, ordered_by, expected_delivery, total_value, order_value, vendor_bill_amount, received_at_site, sent_to_vendor_at, stakeholder_id, project_id, items, projects(name), stakeholders(name), po_line_items(id, item_name, unit, quantity_ordered)')
+        .select('po_id, status, approval_status, date_issued, created_at, ordered_by, expected_delivery, total_value, order_value, vendor_bill_amount, received_at_site, sent_to_vendor_at, stakeholder_id, project_id, items, projects(name), stakeholders(name, contact), po_line_items(id, item_name, unit, quantity_ordered)')
         .order('created_at', { ascending: false });
       if (projectId) q = q.eq('project_id', projectId);
       const { data, error } = await q;
@@ -236,6 +240,8 @@ function usePOListData(projectId?: string) {
       return {
         id: po.po_id,
         vendor: po.stakeholders?.name || 'Vendor',
+        stakeholderId: po.stakeholder_id,
+        vendorContact: po.stakeholders?.contact ?? null,
         site: po.projects?.name || '',
         by: po.ordered_by || '',
         ordered: po.date_issued || po.created_at,
@@ -261,6 +267,8 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   const [sortDir, setSortDir] = useState(-1);
   const [q, setQ] = useState('');
   const [tip, setTip] = useState<{ id: string; pending: boolean; x: number; y: number } | null>(null);
+  // The PO whose "Send PO to vendor" link was tapped — opens the send dialog over the list.
+  const [sendRow, setSendRow] = useState<PORow | null>(null);
 
   const TODAY = useMemo(() => new Date(), []);
   const balance = (p: PORow) => (p.billed || p.value) - p.paid;
@@ -331,19 +339,37 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   const recvCell = (p: PORow): React.ReactNode => {
     if (p.cancelled) return <span className="dim">—</span>;
     const n = p.items.length, g = got(p), pl = pend(p);
-    if (n > 0 && g === n) return <div className="dlv"><span className="ok">✓ Received</span><small>{dstr(D(p.recv))}</small></div>;
-    const tipProps = { onMouseEnter: (e: React.MouseEvent) => showTip(e, p.id, true), onMouseLeave: () => setTip(null) };
-    if (g > 0) return (
-      <div className="dlv" {...tipProps}>
+    const fully = n > 0 && g === n;
+    const tipProps = g > 0 && !fully
+      ? { onMouseEnter: (e: React.MouseEvent) => showTip(e, p.id, true), onMouseLeave: () => setTip(null) }
+      : {};
+
+    // The status line for this PO's delivery.
+    let status: React.ReactNode;
+    if (fully) status = <><span className="ok">✓ Received</span><small>{dstr(D(p.recv))}</small></>;
+    else if (g > 0) status = (
+      <>
         <span className="partial"><i style={{ ['--w' as any]: `${g / n * 100}%` }} />{g} of {n} received</span>
         <small>{pl.length === 1 ? pl[0].n + ' pending' : pl.length + ' pending'} · {dueLabel(p)}</small>
+      </>
+    );
+    // Sent to the vendor (ordered, on its way) — wins over the "awaiting price" RFQ label.
+    else if (p.sent) status = <><span className="sent">✓ PO sent</span><small>to vendor · {dstr(D(p.sent))} · {dueLabel(p)}</small></>;
+    else if (p.rfq) status = <><span className="dim">Not ordered yet</span><small>awaiting price</small></>;
+    else status = <><span className={late(p) ? 'late' : 'none'}>Not received</span><small>{n} item{n !== 1 ? 's' : ''} · {dueLabel(p)}</small></>;
+
+    // Not yet sent and not delivered → a subtle, clearly-clickable way to send the PO to the vendor.
+    const canSend = !p.sent && !fully && !!p.stakeholderId;
+    return (
+      <div className="dlv" {...tipProps}>
+        {status}
+        {canSend && (
+          <button type="button" className="send-link" onClick={(e) => { e.stopPropagation(); setSendRow(p); }}>
+            Send PO to vendor
+          </button>
+        )}
       </div>
     );
-    // Sent to the vendor (ordered, on its way) — this wins over the "awaiting price" RFQ label,
-    // because sending the PO IS ordering it.
-    if (p.sent) return <div className="dlv"><span className="sent">✓ PO sent</span><small>to vendor · {dstr(D(p.sent))} · {dueLabel(p)}</small></div>;
-    if (p.rfq) return <div className="dlv"><span className="dim">Not ordered yet</span><small>awaiting price</small></div>;
-    return <div className="dlv"><span className={late(p) ? 'late' : 'none'}>Not received</span><small>{n} item{n !== 1 ? 's' : ''} · {dueLabel(p)}</small></div>;
   };
 
   function showTip(e: React.MouseEvent, id: string, pending: boolean) {
@@ -433,6 +459,19 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
           <ul>{tipRow.items.map((i, k) => (<li key={k} className={i.r ? 'r' : 'p'}><span className="g" /><span className="nm">{i.n}</span><span className="q">{i.q}</span></li>))}</ul>
         </div></div>,
         document.body,
+      )}
+
+      {sendRow && (
+        <SendToVendorModal
+          open={!!sendRow}
+          poId={sendRow.id}
+          vendorId={sendRow.stakeholderId}
+          vendorName={sendRow.vendor}
+          vendorContact={sendRow.vendorContact}
+          projectName={sendRow.site}
+          totalLabel={sendRow.rfq ? undefined : fmt(sendRow.value)}
+          onClose={() => setSendRow(null)}
+        />
       )}
     </div>
   );
