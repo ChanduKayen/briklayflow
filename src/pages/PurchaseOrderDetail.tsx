@@ -3,7 +3,9 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import confetti from 'canvas-confetti';
 import { supabase } from '../lib/supabase';
-import { openDoc, parseStoredPath } from '../lib/storage';
+import { openDoc, parseStoredPath, resolveDocUrl } from '../lib/storage';
+import { DocThumb } from '../components/DocThumb';
+import { ImageLightbox } from '../components/ImageLightbox';
 import { useSnackbar } from '../components/Snackbar';
 import { PageSkeleton } from '../components/SkeletonLoader';
 import { jsPDF } from 'jspdf';
@@ -239,6 +241,15 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const [, setShowRecordPayment] = useState(false);
   const [showReceiveModal,     setShowReceiveModal]    = useState(false);
   const [showSendModal,        setShowSendModal]       = useState(false);
+  const [billLightbox,         setBillLightbox]        = useState<string | null>(null);
+
+  // Open the vendor bill in a beautiful popup: images → lightbox, PDFs → new tab.
+  const previewBill = async (stored: string | null | undefined) => {
+    if (!stored) return;
+    if (/\.pdf(\?|$)/i.test(stored)) { void openDoc(stored); return; }
+    const signed = await resolveDocUrl(stored);
+    if (signed) setBillLightbox(signed); else void openDoc(stored);
+  };
 
   // AI reconciliation state
   const [reconciling, setReconciling] = useState(false);
@@ -896,10 +907,13 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
               <div className="act"><button className={`btn sm${nowStage === 'bill' ? ' primary' : ''}`} onClick={() => { setBillingOpen(true); setPayRowOpen(false); setTimeout(() => document.getElementById('podxItems')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 30); }}>Record bill</button></div>
             )}
             {hasBill && !cancelled && (
-              <div className="act" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <div className="act" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 {reconciling && <span className="chip"><span className="spinner" /> Reading bill…</span>}
                 {(po.vendor_bill_url || po.vendor_bill_doc_url) && (
-                  <button className="btn ghost sm" onClick={() => openDoc(po.vendor_bill_doc_url || po.vendor_bill_url)}>
+                  <DocThumb stored={po.vendor_bill_doc_url || po.vendor_bill_url} onImageClick={setBillLightbox} label="View bill" />
+                )}
+                {(po.vendor_bill_url || po.vendor_bill_doc_url) && (
+                  <button className="btn ghost sm" onClick={() => previewBill(po.vendor_bill_doc_url || po.vendor_bill_url)}>
                     <svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" /><circle cx="12" cy="12" r="3" /></svg>
                     View
                   </button>
@@ -1072,6 +1086,8 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
           showSnackbar('📦 Receipt recorded');
         }}
       />
+
+      <ImageLightbox url={billLightbox} title="Vendor bill" onClose={() => setBillLightbox(null)} />
 
       <SendToVendorModal
         open={showSendModal}

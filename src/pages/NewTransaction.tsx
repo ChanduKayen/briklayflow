@@ -81,6 +81,41 @@ function SectionLabel({ n, title }: { n: string; title: string }) {
   );
 }
 
+// One document uploader (dashed drop-zone ↔ chosen-file chip). Reused for the two categories a
+// transaction can carry: the vendor Bill and the Proof of payment. Each is optional.
+function DocUpload({ id, file, onFile, cta }: { id: string; file: File | null; onFile: (f: File | null) => void; cta: string }) {
+  return (
+    <>
+      <input type="file" id={id} onChange={(e) => onFile(e.target.files?.[0] || null)} className="hidden" accept=".pdf,.jpg,.jpeg,.png" />
+      {file ? (
+        <div className="flex items-center gap-3.5 p-4 rounded-2xl border border-black/[0.05] bg-white shadow-[0_4px_20px_rgba(0,0,0,0.015)] animate-fadeIn">
+          <div className="w-12 h-12 rounded-xl bg-black/[0.02] border border-black/[0.04] flex flex-col items-center justify-center shrink-0">
+            <span className="text-[9px] font-extrabold uppercase tracking-widest text-on-surface-variant/40 leading-none">{file.name.split('.').pop()?.slice(0, 3)}</span>
+            <span className="material-symbols-outlined text-[18px] text-on-surface-variant/30 mt-1">description</span>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[13px] font-semibold text-on-surface truncate" title={file.name}>{file.name}</p>
+            <p className="text-[10px] text-on-surface-variant/40 font-bold font-data-mono mt-0.5">{(file.size / 1024).toFixed(0)} KB</p>
+          </div>
+          <button type="button" onClick={(e) => { e.preventDefault(); onFile(null); }}
+            className="w-8 h-8 rounded-xl hover:bg-red-50 text-on-surface-variant/40 hover:text-red-600 transition-colors flex items-center justify-center shrink-0 active:scale-95">
+            <span className="material-symbols-outlined text-[18px]">delete</span>
+          </button>
+        </div>
+      ) : (
+        <label htmlFor={id}
+          className="flex flex-col items-center justify-center border-2 border-dashed border-black/[0.06] hover:border-[#006c49]/30 rounded-2xl p-6 bg-white/40 backdrop-blur-md cursor-pointer transition-all duration-300 group text-center shadow-[0_8px_30px_rgb(0,0,0,0.01)] hover:bg-white/[0.6]">
+          <div className="w-11 h-11 rounded-full bg-black/[0.02] group-hover:bg-[#006c49]/[0.04] flex items-center justify-center transition-colors mb-2.5">
+            <span className="material-symbols-outlined text-[20px] text-on-surface-variant/35 group-hover:text-[#006c49] transition-transform duration-300 group-hover:-translate-y-1">cloud_upload</span>
+          </div>
+          <p className="text-[13px] font-semibold text-on-surface group-hover:text-[#006c49] transition-colors">{cta}</p>
+          <p className="text-[11px] text-on-surface-variant/40 mt-1">PDF, JPG or PNG · optional</p>
+        </label>
+      )}
+    </>
+  );
+}
+
 // ── Obligation types + balance helpers ───────────────────────────────────────
 
 interface SelectedObligation {
@@ -514,6 +549,7 @@ export default function NewTransaction({ session: _session }: { session: Session
   const [category, setCategory] = useState('');
   const [remarks, setRemarks] = useState('');
   const [billFile, setBillFile] = useState<File | null>(null);
+  const [proofFile, setProofFile] = useState<File | null>(null);
   const [allocs, setAllocs] = useState<AllocDraft[]>([
     { id: '1', project_id: initialProjectId, order_type: '', order_ref: '', milestone_id: '', allocated_amount: 0 },
   ]);
@@ -731,6 +767,16 @@ export default function NewTransaction({ session: _session }: { session: Session
         const { data: pubData } = supabase.storage.from('documents').getPublicUrl(`bills/${filename}`);
         bill_doc_url = pubData.publicUrl;
       }
+      // Proof of payment is a SEPARATE document from the bill — its own upload + column.
+      let proof_document_url: string | null = null;
+      if (proofFile) {
+        const ext = proofFile.name.split('.').pop();
+        const filename = `${txnId}-proof-${Date.now()}.${ext}`;
+        const { error: proofErr } = await supabase.storage.from('documents').upload(`proofs/${filename}`, proofFile);
+        if (proofErr) throw proofErr;
+        const { data: proofPub } = supabase.storage.from('documents').getPublicUrl(`proofs/${filename}`);
+        proof_document_url = proofPub.publicUrl;
+      }
       // A general expense always files under a head — default to GEN-99 if none chosen.
       let effectiveCategory = isClientReceipt ? 'CLIENT-RECEIPT' : (category || (txnType === 'expense' ? GEN_FALLBACK : category));
       let effectiveRemarks = '';
@@ -776,7 +822,7 @@ export default function NewTransaction({ session: _session }: { session: Session
       if (splitMode && !isClientReceipt) {
         const base = {
           stakeholder_id: stkId || null, date, payment_mode: mode,
-          category: effectiveCategory, remarks: effectiveRemarks, bill_doc_url,
+          category: effectiveCategory, remarks: effectiveRemarks, bill_doc_url, proof_document_url,
           ai_flag_status: 'Clean', ai_flag_data: {}, org_id: orgId,
         };
         const baseTs = Date.now();
@@ -799,7 +845,7 @@ export default function NewTransaction({ session: _session }: { session: Session
         txn_id: txnId, stakeholder_id: stkId || null, date, total_amount: totalAmt,
         payment_mode: mode,
         category: effectiveCategory,
-        remarks: effectiveRemarks, bill_doc_url,
+        remarks: effectiveRemarks, bill_doc_url, proof_document_url,
         ai_flag_status: 'Clean',
         ai_flag_data: {},
         org_id: orgId,
@@ -842,7 +888,7 @@ export default function NewTransaction({ session: _session }: { session: Session
         const keptProject = allocs[0]?.project_id || '';
         setTxnId(genTxnId()); setStkId(''); setStkSearch(''); setShowSug(false); setShowCreate(false);
         setNewStkTrade(''); setNewStkTradeOther('');
-        setTotalAmt(0); setCategory(''); setRemarks(''); setBillFile(null);
+        setTotalAmt(0); setCategory(''); setRemarks(''); setBillFile(null); setProofFile(null);
         setSaveAttempted(false); setSplitMode(false);
         setDate(new Date().toISOString().split('T')[0]);
         setAllocs([{ id: Math.random().toString(), project_id: keptProject, order_type: '', order_ref: '', milestone_id: '', allocated_amount: 0 }]);
@@ -1977,57 +2023,19 @@ export default function NewTransaction({ session: _session }: { session: Session
               </div>
             )}
 
-            {/* ━━ 04 · Proof Document ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
+            {/* ━━ 04 · Documents — two categories: the Bill and the Proof of payment ━━ */}
             <div>
-              <SectionLabel n="04" title="Proof Document" />
-              <input type="file" id="proof-upload" onChange={(e) => setBillFile(e.target.files?.[0] || null)} className="hidden" accept=".pdf,.jpg,.jpeg,.png" />
-              
-              {billFile ? (
-                <div className="flex items-center gap-3.5 p-4 rounded-2xl border border-black/[0.05] bg-white shadow-[0_4px_20px_rgba(0,0,0,0.015)] animate-fadeIn">
-                  {/* File Type icon/badge */}
-                  <div className="w-12 h-12 rounded-xl bg-black/[0.02] border border-black/[0.04] flex flex-col items-center justify-center shrink-0">
-                    <span className="text-[9px] font-extrabold uppercase tracking-widest text-on-surface-variant/40 leading-none">
-                      {billFile.name.split('.').pop()?.slice(0, 3)}
-                    </span>
-                    <span className="material-symbols-outlined text-[18px] text-on-surface-variant/30 mt-1">description</span>
-                  </div>
-                  
-                  {/* Metadata */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[13px] font-semibold text-on-surface truncate" title={billFile.name}>
-                      {billFile.name}
-                    </p>
-                    <p className="text-[10px] text-on-surface-variant/40 font-bold font-data-mono mt-0.5">
-                      {(billFile.size / 1024).toFixed(0)} KB
-                    </p>
-                  </div>
-
-                  {/* Remove action button */}
-                  <button
-                    type="button"
-                    onClick={(e) => { e.preventDefault(); setBillFile(null); }}
-                    className="w-8 h-8 rounded-xl hover:bg-red-50 text-on-surface-variant/40 hover:text-red-600 transition-colors flex items-center justify-center shrink-0 active:scale-95"
-                  >
-                    <span className="material-symbols-outlined text-[18px]">delete</span>
-                  </button>
+              <SectionLabel n="04" title="Documents" />
+              <div className="space-y-4">
+                <div>
+                  <p className="text-[11px] font-semibold text-on-surface-variant/60 mb-2 uppercase tracking-wide">Bill</p>
+                  <DocUpload id="bill-upload" file={billFile} onFile={setBillFile} cta="Upload bill / invoice" />
                 </div>
-              ) : (
-                <label htmlFor="proof-upload"
-                  className="flex flex-col items-center justify-center border-2 border-dashed border-black/[0.06] hover:border-[#006c49]/30 rounded-2xl p-8 bg-white/40 backdrop-blur-md cursor-pointer transition-all duration-300 group text-center shadow-[0_8px_30px_rgb(0,0,0,0.01)] hover:bg-white/[0.6]"
-                >
-                  <div className="w-12 h-12 rounded-full bg-black/[0.02] group-hover:bg-[#006c49]/[0.04] flex items-center justify-center transition-colors mb-3">
-                    <span className="material-symbols-outlined text-[22px] text-on-surface-variant/35 group-hover:text-[#006c49] transition-transform duration-300 group-hover:-translate-y-1">
-                      cloud_upload
-                    </span>
-                  </div>
-                  <p className="text-[13px] font-semibold text-on-surface group-hover:text-[#006c49] transition-colors">
-                    Upload proof document
-                  </p>
-                  <p className="text-[11px] text-on-surface-variant/40 mt-1">
-                    PDF, JPG or PNG up to 10MB · optional
-                  </p>
-                </label>
-              )}
+                <div>
+                  <p className="text-[11px] font-semibold text-on-surface-variant/60 mb-2 uppercase tracking-wide">Proof of payment</p>
+                  <DocUpload id="proof-upload" file={proofFile} onFile={setProofFile} cta="Upload payment proof" />
+                </div>
+              </div>
             </div>
 
             {/* Unlinked warning */}

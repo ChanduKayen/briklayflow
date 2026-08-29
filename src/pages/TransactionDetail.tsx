@@ -1,19 +1,130 @@
-import { useState, useEffect, useRef, Fragment } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { useSignedDocUrl } from '../lib/storage';
-import { Loader2, Wallet } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { isGeneralExpense } from '../lib/transactions';
 import type { Session } from '@supabase/supabase-js';
-import Breadcrumb from '../components/Breadcrumb';
-import { BackLink } from '../components/BackLink';
 import { useUserProfile } from '../App';
 import { usePeek } from '../context/PeekContextCore';
 import { ImageLightbox } from '../components/ImageLightbox';
+import { DocThumb } from '../components/DocThumb';
 import { autoCloseWOIfFullyPaid } from '../lib/woAutoClose';
 import jsPDF from 'jspdf';
 import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
+
+// ─── Scoped stylesheet — a faithful port of the txn-detail reference (cream/terracotta).
+//     Every selector is prefixed with `.txnx` so nothing leaks into the rest of the app. ──
+const TXNX_CSS = `
+.txnx{--cream:#F6F2EA;--paper:#FFFDF9;--paper-2:#FBF8F2;--ink:#2F2622;--ink-2:#6E635B;--ink-3:#A39A91;--line:#E4DCD0;--line-2:#EFE9DF;--terra:#C4613A;--terra-deep:#A94E2B;--terra-tint:#F8E7DE;--sage:#5F7F5B;--sage-tint:#E7EFE4;--gold:#B8862E;--gold-tint:#F7EEDA;--r:8px;--ease:cubic-bezier(.2,.7,.2,1);--shadow:0 1px 2px rgba(47,38,34,.04),0 8px 24px -18px rgba(47,38,34,.25);min-height:100vh;background:var(--cream);color:var(--ink);font:15px/1.45 "DM Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.txnx *{box-sizing:border-box}
+.txnx button{font:inherit;color:inherit}
+.txnx .mono{font-family:"DM Mono",ui-monospace,monospace;font-feature-settings:"tnum"}
+.txnx .page{max-width:960px;margin:0 auto;padding:22px 32px 90px}
+.txnx .page>*{animation:txnxRise .5s var(--ease) both}
+.txnx .page>*:nth-child(2){animation-delay:.05s}.txnx .page>*:nth-child(3){animation-delay:.1s}.txnx .page>*:nth-child(4){animation-delay:.15s}.txnx .page>*:nth-child(6){animation-delay:.2s}
+@keyframes txnxRise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.txnx .crumb{display:flex;align-items:center;gap:6px;color:var(--ink-3);font-size:13px;margin-bottom:16px}
+.txnx .crumb a{color:var(--ink-2);text-decoration:none;padding:4px 6px;border-radius:6px;margin-left:-6px;transition:background .15s;cursor:pointer}
+.txnx .crumb a:hover{background:var(--paper)}
+.txnx .crumb b{color:var(--ink);font-weight:500}
+.txnx .head{display:grid;grid-template-columns:1fr auto auto;gap:8px 20px;align-items:start;margin-bottom:20px}
+.txnx h1{font:600 28px/1.1 "Playfair Display",Georgia,serif;margin:0 0 8px;letter-spacing:-.01em;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.txnx .tag{font:500 13px/1 "DM Mono";letter-spacing:.04em;color:var(--ink-2);background:var(--paper);border:1px solid var(--line);padding:6px 9px;border-radius:6px}
+.txnx .meta{color:var(--ink-2);font-size:14px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center}
+.txnx .meta .sep{width:1px;height:16px;background:var(--line)}
+.txnx .meta b{color:var(--ink);font-weight:500}
+.txnx .chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:12.5px;font-weight:500;border:1px solid transparent}
+.txnx .chip i{width:6px;height:6px;border-radius:50%}
+.txnx .chip.sage{color:var(--sage);background:var(--sage-tint)}.txnx .chip.sage i{background:var(--sage)}
+.txnx .chip.warn{color:var(--terra);background:var(--terra-tint);cursor:pointer;transition:transform .12s}
+.txnx .chip.warn:hover{transform:translateY(-1px)}.txnx .chip.warn i{background:var(--terra)}
+.txnx .chip.gold{color:var(--gold);background:var(--gold-tint)}.txnx .chip.gold i{background:var(--gold)}
+.txnx .amount{text-align:right;padding-top:2px}
+.txnx .amount small{border-top:3px solid var(--terra);padding-top:6px;display:block;font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2);margin-bottom:2px}
+.txnx .amount.in small{border-top-color:var(--sage)}
+.txnx .amount .mono{font-size:28px;font-weight:500;letter-spacing:-.02em;line-height:1;color:var(--terra-deep)}
+.txnx .amount .dir{font-size:12px;color:var(--ink-3);margin-top:2px}
+.txnx .amount.in .mono{color:var(--sage)}
+.txnx .more{position:relative}
+.txnx .kebab{width:36px;height:36px;border-radius:50%;border:1px solid transparent;background:transparent;cursor:pointer;display:grid;place-items:center;color:var(--ink-2);transition:background .15s,border-color .15s,transform .12s}
+.txnx .kebab:hover{background:var(--paper);border-color:var(--line)}.txnx .kebab:active{transform:scale(.92)}
+.txnx .menu{position:absolute;right:0;top:calc(100% + 6px);background:var(--paper);border:1px solid var(--line);border-radius:var(--r);box-shadow:0 12px 30px -12px rgba(47,38,34,.28);padding:4px;min-width:210px;z-index:30;animation:txnxPop .16s var(--ease)}
+@keyframes txnxPop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.txnx .menu button{display:flex;align-items:center;gap:10px;width:100%;border:0;background:transparent;text-align:left;padding:9px 10px;border-radius:6px;cursor:pointer}
+.txnx .menu button:hover{background:var(--paper-2)}
+.txnx .menu button.danger{color:var(--terra)}.txnx .menu button.danger:hover{background:var(--terra-tint)}
+.txnx .menu hr{border:0;border-top:1px solid var(--line-2);margin:4px 0}
+.txnx .menu svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.7}
+.txnx .menu .hint{font-size:11.5px;color:var(--ink-3);padding:2px 10px 6px}
+.txnx .sec{display:flex;align-items:center;justify-content:space-between;margin:22px 0 10px}
+.txnx .sec h2{margin:0;font:600 11.5px/1 "DM Sans";letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2);padding-left:10px;border-left:3px solid var(--terra);display:flex;align-items:center;gap:14px;flex:1}
+.txnx .sec h2::after{content:"";flex:1;height:1px;background:var(--line);margin-right:14px}
+.txnx .sheet{background:var(--paper);border:1px solid var(--line);border-radius:10px;overflow:hidden;box-shadow:var(--shadow)}
+.txnx table{width:100%;border-collapse:collapse;table-layout:fixed}
+.txnx th{font-weight:500;font-size:12px;color:var(--ink-2);text-align:left;padding:9px 14px;background:var(--paper-2);border-bottom:1px solid var(--line);letter-spacing:.02em;white-space:nowrap}
+.txnx td{padding:10px 14px;border-bottom:1px solid var(--line-2);vertical-align:middle;height:48px}
+.txnx th+th,.txnx td+td{border-left:1px solid var(--line-2)}
+.txnx tbody tr:last-child td{border-bottom:0}
+.txnx .num{text-align:right;font-family:"DM Mono",monospace;font-feature-settings:"tnum"}
+.txnx .dim{color:var(--ink-3)}
+.txnx .hdr th{width:110px;background:var(--paper-2);border-bottom:1px solid var(--line-2);vertical-align:middle}
+.txnx .hdr tr:last-child th{border-bottom:0}
+.txnx .hdr td b{font-weight:600}
+.txnx .hdr td small{display:block;color:var(--ink-3);font-size:12.5px}
+.txnx .hdr a{color:var(--ink);text-decoration:none;border-bottom:1px dashed var(--ink-3);font-weight:600;cursor:pointer}
+.txnx .who{display:grid;grid-template-columns:34px 1fr;gap:2px 10px;align-items:center}
+.txnx .who a{justify-self:start}
+.txnx .who .av{grid-row:span 2;width:34px;height:34px;border-radius:50%;background:var(--terra-tint);color:var(--terra);display:grid;place-items:center;font:600 13px "DM Sans"}
+.txnx .hdr a:hover{border-bottom-style:solid;color:var(--terra)}
+.txnx .pill{display:inline-flex;align-items:center;gap:6px;font:500 12px "DM Mono";letter-spacing:.05em;background:var(--paper-2);border:1px solid var(--line-2);padding:5px 8px;border-radius:5px;color:var(--ink-2)}
+.txnx .sheet.alloc{overflow:visible;position:relative;z-index:5}
+.txnx .alloc td{height:56px}
+.txnx .lnk{display:inline-flex;align-items:center;gap:8px}
+.txnx .lnk .st{font-weight:500}
+.txnx .lnk .st.un{color:var(--terra)}
+.txnx .lnk .st.un::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;border:1.5px dashed var(--terra);margin-right:7px;vertical-align:1px}
+.txnx .lnk .st.ok{color:var(--sage)}
+.txnx .lnk .st.adv{color:var(--gold)}
+.txnx .lnk small{display:block;font-weight:400;color:var(--ink-3);font-size:12px}
+.txnx .linkbtn{height:32px;padding:0 14px;border-radius:6px;border:1px solid var(--terra);background:var(--terra);color:#fff;font-size:13px;font-weight:500;cursor:pointer;transition:background .15s,transform .12s,box-shadow .15s}
+.txnx .linkbtn:hover{background:var(--terra-deep);transform:translateY(-1px);box-shadow:0 5px 12px -6px rgba(196,97,58,.7)}
+.txnx .linkbtn:active{transform:scale(.96)}
+.txnx .ghost{height:30px;padding:0 10px;border-radius:6px;border:1px solid var(--line);background:var(--paper);font-size:13px;font-weight:500;color:var(--ink-2);cursor:pointer;transition:background .15s,color .15s}
+.txnx .ghost:hover{background:var(--terra-tint);color:var(--terra);border-color:transparent}
+.txnx tfoot td{background:var(--paper-2);font-size:13.5px;color:var(--ink-2);height:42px;border-top:2px solid var(--line)}
+.txnx tfoot td.num{color:var(--ink);font-weight:600}
+.txnx .pickwrap{position:relative}
+.txnx .picker{position:absolute;right:0;left:auto;top:calc(100% + 6px);z-index:40;background:var(--paper);border:1px solid var(--line);border-radius:10px;box-shadow:0 16px 40px -14px rgba(47,38,34,.35);width:400px;max-width:92vw;padding:6px;animation:txnxPop .18s var(--ease)}
+.txnx .picker h5{margin:2px 0 4px;padding:6px 10px 0;font:600 11px "DM Sans";letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3);display:flex;align-items:center;gap:6px}
+.txnx .picker .bk{width:22px;height:22px;padding:0;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--ink-2);font-size:14px;line-height:1;cursor:pointer;display:grid;place-items:center}
+.txnx .picker .bk:hover{background:var(--terra-tint);color:var(--terra);border-color:transparent}
+.txnx .picker>button{display:grid;grid-template-columns:1fr auto;gap:2px 12px;width:100%;text-align:left;border:0;background:transparent;padding:9px 10px;border-radius:7px;cursor:pointer;transition:background .12s}
+.txnx .picker>button:hover{background:var(--terra-tint)}
+.txnx .picker>button b{font-weight:600;display:flex;align-items:center;gap:8px}
+.txnx .picker>button b svg{width:15px;height:15px;stroke:var(--ink-2);fill:none;stroke-width:1.7;flex:none}
+.txnx .picker>button:hover b svg{stroke:var(--terra)}
+.txnx .picker>button.adv b svg{stroke:var(--gold)}
+.txnx .picker>button .mono{color:var(--ink-2);font-size:13px}
+.txnx .picker>button small{grid-column:1/-1;color:var(--ink-3);font-size:12px}
+.txnx .picker>button.adv{border-top:1px solid var(--line-2);margin-top:4px;border-radius:0 0 7px 7px;color:var(--gold)}
+.txnx .picker>button.adv:hover{background:var(--gold-tint)}
+.txnx .log{list-style:none;margin:0;padding:6px 0}
+.txnx .log li{display:grid;grid-template-columns:130px 14px 1fr;gap:10px;padding:10px 16px;font-size:13.5px;color:var(--ink-2);align-items:start}
+.txnx .log li+li{border-top:1px solid var(--line-2)}
+.txnx .log li i{width:8px;height:8px;border-radius:50%;background:var(--line);border:2px solid var(--paper);box-shadow:0 0 0 1px var(--line);margin-top:6px}
+.txnx .log li:first-child i{background:var(--terra);box-shadow:0 0 0 1px var(--terra)}
+.txnx .log .mono{color:var(--ink-3);font-size:12px;padding-top:2px}
+.txnx .log b{color:var(--ink);font-weight:500}
+.txnx .voided-mark .amount .mono{text-decoration:line-through;color:var(--ink-3)}
+@media (max-width:760px){
+  .txnx .page{padding:16px 14px 60px}
+  .txnx .head{grid-template-columns:1fr auto}.txnx .amount{text-align:left;grid-column:1}
+  .txnx .picker{width:min(92vw,380px)}
+  .txnx .sheet{overflow-x:auto}.txnx .alloc table{min-width:640px}
+}
+@media (prefers-reduced-motion:reduce){.txnx *{animation-duration:.01ms !important;transition-duration:.01ms !important}}
+`;
 
 // ─── Amendment types ──────────────────────────────────────────────────────────
 
@@ -47,24 +158,6 @@ function fmtAmendVal(label: string, val: any): string {
 
 // ─── Count-up hook ────────────────────────────────────────────────────────────
 
-function useCountUp(target: number, duration = 700): number {
-  const [value, setValue] = useState(0);
-  const rafRef = useRef<number>(0);
-  useEffect(() => {
-    let start: number | null = null;
-    const animate = (ts: number) => {
-      if (!start) start = ts;
-      const elapsed = ts - start;
-      const progress = Math.min(elapsed / duration, 1);
-      const eased = 1 - (1 - progress) * (1 - progress);
-      setValue(Math.round(eased * target));
-      if (progress < 1) rafRef.current = requestAnimationFrame(animate);
-    };
-    rafRef.current = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [target, duration]);
-  return value;
-}
 
 // ─── Obligation linking sub-components ───────────────────────────────────────
 
@@ -77,299 +170,14 @@ interface SelectedObligation {
   balance: number;
 }
 
-function getWOBalance(wo: any): number { return Number(wo.order_value || 0); }
-function getPhaseBalance(phase: any): number { return Number(phase.planned_amount || 0); }
 function getPOBalance(po: any): number { return Number(po.vendor_bill_amount || po.total_value || 0); }
 
-function WOObligationRow({ wo, selectedObligation, expanded, onToggleExpand, onSelect, milestonePayments }: {
-  wo: any; selectedObligation: SelectedObligation | null;
-  expanded: boolean; onToggleExpand: () => void;
-  onSelect: (ob: SelectedObligation) => void;
-  milestonePayments: Record<string, number>;
-}) {
-  const hasPhases = (wo.wo_milestones?.length || 0) > 0;
-  const woBalance = getWOBalance(wo);
-  const isSelected = selectedObligation?.wo_id === wo.wo_id && !selectedObligation?.phase_id;
-  return (
-    <div className={isSelected ? 'bg-[rgba(200,96,58,0.04)]' : ''}>
-      <div
-        className="px-4 py-3 flex items-center gap-3 cursor-pointer hover:bg-black/[0.02] transition-colors"
-        onClick={hasPhases ? onToggleExpand : () => onSelect({ type: 'WO', wo_id: wo.wo_id, label: `${wo.wo_id} · ${wo.stakeholders?.name || ''}`, balance: woBalance })}
-      >
-        <div className="w-5 shrink-0 flex items-center justify-center">
-          {hasPhases ? (
-            <span className="material-symbols-outlined text-[16px] text-on-surface-variant/40">{expanded ? 'expand_more' : 'chevron_right'}</span>
-          ) : isSelected ? (
-            <div className="w-4 h-4 rounded-full bg-[#C8603A] flex items-center justify-center">
-              <span className="material-symbols-outlined text-white text-[10px]" style={{ fontVariationSettings: "'FILL' 1" }}>check</span>
-            </div>
-          ) : (
-            <div className="w-4 h-4 rounded-full border-2 border-outline-variant/40" />
-          )}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <p className="text-[13px] font-medium text-on-surface truncate">{wo.stakeholders?.name || 'Unknown'}</p>
-            <span className="font-data-mono text-[10px] text-on-surface-variant/40 shrink-0">{wo.wo_id}</span>
-          </div>
-          {wo.scope_of_work && <p className="text-[11px] text-on-surface-variant/50 truncate mt-0.5">{(wo.scope_of_work as string).slice(0, 60)}</p>}
-        </div>
-        <div className="text-right shrink-0">
-          <p className={`text-[13px] font-medium font-data-mono ${woBalance > 0 ? 'text-on-surface' : 'text-on-surface-variant/40'}`}>
-            {woBalance > 0 ? `₹${woBalance.toLocaleString('en-IN')}` : 'Settled'}
-          </p>
-          {hasPhases && <p className="text-[10px] text-on-surface-variant/40">{wo.wo_milestones.length} phases</p>}
-        </div>
-      </div>
-      {hasPhases && expanded && (
-        <div className="border-t border-black/[0.04] bg-black/[0.01]">
-          {wo.wo_milestones.map((phase: any) => {
-            const balance = getPhaseBalance(phase);
-            const isPhaseSelected = selectedObligation?.phase_id === phase.milestone_id;
-            const settled = phase.status === 'PAID' || phase.status === 'Paid';
-            const paid = milestonePayments[phase.milestone_id] || 0;
-            const due = balance - paid;
-            return (
-              <div key={phase.milestone_id}
-                className={`pl-9 pr-4 py-3 flex items-center gap-3 border-b border-black/[0.03] last:border-0 transition-colors
-                  ${settled ? 'opacity-50 cursor-not-allowed' : isPhaseSelected ? 'bg-[rgba(200,96,58,0.06)] cursor-pointer' : 'cursor-pointer hover:bg-black/[0.02]'}`}
-                onClick={() => { if (settled) return; onSelect({ type: 'WO_PHASE', wo_id: wo.wo_id, phase_id: phase.milestone_id, label: `${phase.name} · ${wo.wo_id}`, balance }); }}
-              >
-                <div className="w-4 shrink-0 flex items-center justify-center">
-                  {isPhaseSelected ? (
-                    <div className="w-4 h-4 rounded-full bg-[#C8603A] flex items-center justify-center">
-                      <span className="material-symbols-outlined text-white text-[10px]" style={{ fontVariationSettings: "'FILL' 1" }}>check</span>
-                    </div>
-                  ) : <div className="w-4 h-4 rounded-full border-2 border-outline-variant/40" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[13px] font-medium text-on-surface">{phase.name}</p>
-                  {phase.qty && phase.unit_type && (
-                    <p className="text-[10px] text-on-surface-variant/40 mt-0.5">{phase.qty} {phase.unit_type}{phase.rate ? ` × ₹${Number(phase.rate).toLocaleString('en-IN')}` : ''}</p>
-                  )}
-                </div>
-                <div className="text-right shrink-0 ml-3">
-                  <p className="text-[13px] font-medium font-data-mono text-on-surface">₹{balance.toLocaleString('en-IN')}</p>
-                  {settled
-                    ? <p className="text-[10px] text-[#16A34A] font-medium">Settled ✓</p>
-                    : due < 0
-                      ? <p className="text-[10px] text-rose-600 font-medium">Overpaid</p>
-                      : due === 0
-                        ? <p className="text-[10px] text-[#16A34A] font-medium">Fully Paid</p>
-                        : <p className="text-[10px] text-[#C8603A] font-medium">₹{due.toLocaleString('en-IN')} due</p>}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
 
-function POObligationRow({ po, selectedObligation, onSelect }: {
-  po: any; selectedObligation: SelectedObligation | null;
-  onSelect: (ob: SelectedObligation) => void;
-}) {
-  const balance = getPOBalance(po);
-  const isSelected = selectedObligation?.po_id === po.po_id;
-  return (
-    <div
-      className={`px-4 py-3 flex items-center gap-3 transition-colors
-        ${balance <= 0 ? 'opacity-50 cursor-not-allowed' : isSelected ? 'bg-[rgba(200,96,58,0.06)] cursor-pointer' : 'cursor-pointer hover:bg-black/[0.02]'}`}
-      onClick={() => { if (balance <= 0) return; onSelect({ type: 'PO', po_id: po.po_id, label: `${po.po_id} · ${po.stakeholders?.name || ''}`, balance }); }}
-    >
-      <div className="w-5 shrink-0 flex items-center justify-center">
-        {isSelected ? (
-          <div className="w-4 h-4 rounded-full bg-[#C8603A] flex items-center justify-center">
-            <span className="material-symbols-outlined text-white text-[10px]" style={{ fontVariationSettings: "'FILL' 1" }}>check</span>
-          </div>
-        ) : <div className="w-4 h-4 rounded-full border-2 border-outline-variant/40" />}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <p className="text-[13px] font-medium text-on-surface">{po.stakeholders?.name || 'Unknown'}</p>
-          <span className="font-data-mono text-[10px] text-on-surface-variant/40 shrink-0">{po.po_id}</span>
-        </div>
-        {po.po_line_items?.[0] && (
-          <p className="text-[11px] text-on-surface-variant/50 truncate mt-0.5">
-            {po.po_line_items[0].item_name || po.po_line_items[0].description || po.po_line_items[0].name || ''}
-            {po.po_line_items.length > 1 && ` +${po.po_line_items.length - 1} more`}
-          </p>
-        )}
-      </div>
-      <div className="text-right shrink-0 ml-3">
-        {balance > 0
-          ? <><p className="text-[13px] font-medium font-data-mono text-on-surface">₹{balance.toLocaleString('en-IN')}</p><p className="text-[10px] text-[#C8603A] font-medium">due</p></>
-          : <p className="text-[12px] text-[#16A34A] font-medium">Settled ✓</p>}
-      </div>
-    </div>
-  );
-}
 
-function DetailLinkingPanel({ wos, pos, loading, selectedObligation, onSelect, onSkip, onConfirm, isPending, projectId, stkType }: {
-  wos: any[]; pos: any[]; loading: boolean;
-  selectedObligation: SelectedObligation | null;
-  onSelect: (ob: SelectedObligation) => void;
-  onSkip: () => void;
-  onConfirm: (ob: SelectedObligation) => void;
-  isPending: boolean;
-  projectId: string;
-  stkType: string;
-}) {
-  const nav = useNavigate();
-  const [expandedWOs, setExpandedWOs] = useState<string[]>([]);
-  const [milestonePayments, setMilestonePayments] = useState<Record<string, number>>({});
-
-  useEffect(() => {
-    if (wos.length === 0) { setMilestonePayments({}); return; }
-    const woIds = wos.map((w: any) => w.wo_id);
-    supabase.from('txn_allocations')
-      .select('milestone_id, allocated_amount')
-      .in('order_ref', woIds)
-      .eq('order_type', 'WO')
-      .not('milestone_id', 'is', null)
-      .then(({ data }) => {
-        const map: Record<string, number> = {};
-        for (const row of (data || [])) {
-          map[row.milestone_id] = (map[row.milestone_id] || 0) + Number(row.allocated_amount);
-        }
-        setMilestonePayments(map);
-      });
-  }, [wos]);
-  const isWorker = stkType === 'Worker';
-  const isVendor = stkType === 'Vendor';
-
-  if (loading) {
-    return (
-      <div className="rounded-xl border border-outline-variant/20 p-4 space-y-3">
-        <div className="h-3 w-36 bg-surface-container-highest rounded animate-pulse" />
-        <div className="h-12 bg-surface-container-highest rounded-lg animate-pulse" />
-        <div className="h-12 bg-surface-container-highest rounded-lg animate-pulse" />
-      </div>
-    );
-  }
-
-  if (wos.length === 0 && pos.length === 0) {
-    return (
-      <div className="rounded-xl border border-dashed border-outline-variant/30 p-5 text-center">
-        <span className="material-symbols-outlined text-[28px] text-on-surface-variant/20 mb-2 block">link_off</span>
-        <p className="text-[13px] font-medium text-on-surface mb-1">No open {isWorker ? 'Contracts' : isVendor ? 'Purchase Orders' : 'Contracts or POs'} found</p>
-        <p className="text-[11px] text-on-surface-variant/50 mb-4">Create one to link this payment, or keep unlinked.</p>
-        <div className="flex gap-2 justify-center flex-wrap">
-          {isWorker && (
-            <button type="button"
-              onClick={() => nav(`/work-orders/new?project=${projectId}`)}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-outline-variant/30 text-[12px] font-medium text-on-surface hover:bg-surface-container transition-colors">
-              <span className="material-symbols-outlined text-[15px]">assignment_add</span> New Contract
-            </button>
-          )}
-          {isVendor && (
-            <button type="button"
-              onClick={() => nav(`/purchase-orders/new?project=${projectId}`)}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-outline-variant/30 text-[12px] font-medium text-on-surface hover:bg-surface-container transition-colors">
-              <span className="material-symbols-outlined text-[15px]">receipt_long</span> New Purchase Order
-            </button>
-          )}
-          <button type="button" onClick={onSkip} className="px-4 py-2 rounded-lg text-[12px] text-on-surface-variant/50 hover:text-on-surface transition-colors">
-            Keep unlinked
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded-xl border border-outline-variant/20 overflow-hidden">
-      <div className="px-4 py-2.5 bg-black/[0.02] border-b border-outline-variant/[0.08]">
-        <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/50">Link to Contract or Purchase Order</p>
-        <p className="text-[11px] text-on-surface-variant/40 mt-0.5">Select what this payment is for</p>
-      </div>
-      <div className="divide-y divide-outline-variant/[0.06]">
-        {wos.length > 0 && (
-          <div>
-            <div className="px-4 py-1.5 bg-black/[0.01]">
-              <p className="text-[9px] font-bold uppercase tracking-wide text-on-surface-variant/40">Contracts ({wos.length})</p>
-            </div>
-            {wos.map((wo: any) => (
-              <WOObligationRow key={wo.wo_id} wo={wo} selectedObligation={selectedObligation}
-                expanded={expandedWOs.includes(wo.wo_id)}
-                onToggleExpand={() => setExpandedWOs(prev => prev.includes(wo.wo_id) ? prev.filter(id => id !== wo.wo_id) : [...prev, wo.wo_id])}
-                onSelect={onSelect} milestonePayments={milestonePayments} />
-            ))}
-          </div>
-        )}
-        {pos.length > 0 && (
-          <div>
-            <div className="px-4 py-1.5 bg-black/[0.01]">
-              <p className="text-[9px] font-bold uppercase tracking-wide text-on-surface-variant/40">Purchase Orders ({pos.length})</p>
-            </div>
-            {pos.map((po: any) => (
-              <POObligationRow key={po.po_id} po={po} selectedObligation={selectedObligation} onSelect={onSelect} />
-            ))}
-          </div>
-        )}
-      </div>
-      <div className="px-4 py-2.5 border-t border-outline-variant/[0.08] bg-black/[0.01] flex items-center gap-2 flex-wrap">
-        {selectedObligation ? (
-          <>
-            <div className="flex-1 min-w-0">
-              <p className="text-[11px] text-on-surface-variant/50">Selected</p>
-              <p className="text-[12px] font-semibold text-on-surface truncate">{selectedObligation.label}</p>
-            </div>
-            <button type="button" onClick={onSkip} className="text-[12px] text-on-surface-variant/40 hover:text-on-surface transition-colors">Cancel</button>
-            <button type="button" onClick={() => onConfirm(selectedObligation)} disabled={isPending}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#C8603A] text-white text-[12px] font-semibold hover:opacity-90 disabled:opacity-50 shrink-0">
-              {isPending ? <><Loader2 size={13} className="animate-spin" /> Linking…</> : <><span className="material-symbols-outlined text-[14px]">link</span> Link</>}
-            </button>
-          </>
-        ) : (
-          <>
-            {isWorker && (
-              <button type="button"
-                onClick={() => nav(`/work-orders/new?project=${projectId}`)}
-                className="flex items-center gap-1 text-[11px] font-medium text-on-surface-variant/50 hover:text-primary transition-colors">
-                <span className="material-symbols-outlined text-[13px]">add</span> New WO
-              </button>
-            )}
-            {isVendor && (
-              <button type="button"
-                onClick={() => nav(`/purchase-orders/new?project=${projectId}`)}
-                className="flex items-center gap-1 text-[11px] font-medium text-on-surface-variant/50 hover:text-primary transition-colors">
-                <span className="material-symbols-outlined text-[13px]">add</span> New PO
-              </button>
-            )}
-            <button type="button" onClick={onSkip} className="ml-auto text-[12px] text-on-surface-variant/40 hover:text-on-surface transition-colors hover:underline underline-offset-2">
-              Skip — keep unlinked
-            </button>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
 
 // ─── Section heading ──────────────────────────────────────────────────────────
-function SectionLabel({ icon, label }: { icon: string; label: string }) {
-  return (
-    <div className="flex items-center gap-2 mb-3">
-      <span className="material-symbols-outlined text-[15px] text-on-surface-variant/40">{icon}</span>
-      <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-on-surface-variant/50">{label}</span>
-      <div className="flex-1 h-px bg-outline-variant/15" />
-    </div>
-  );
-}
 
 // ─── Pill badge ───────────────────────────────────────────────────────────────
-function PayModePill({ mode }: { mode: string }) {
-  const icons: Record<string, string> = { NEFT: 'account_balance', UPI: 'qr_code_2', Cheque: 'article', Cash: 'payments' };
-  return (
-    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-surface-container-high text-[11px] font-semibold text-on-surface-variant">
-      <span className="material-symbols-outlined text-[13px]">{icons[mode] || 'payments'}</span>
-      {mode}
-    </span>
-  );
-}
 
 // ─── PDF Generator ────────────────────────────────────────────────────────────
 function generatePDF(txn: any, allocs: any[], effective: AmendmentSnapshot, isAmended: boolean) {
@@ -564,17 +372,17 @@ export default function TransactionDetail({ session }: { session: Session }) {
 
   const { data: profile } = useUserProfile(session.user.id);
 
+  const navigate = useNavigate();
   const [mappingAllocId, setMappingAllocId] = useState<string | null>(null);
-  const [selectedObligation, setSelectedObligation] = useState<SelectedObligation | null>(null);
-  const [projectWOs, setProjectWOs] = useState<any[]>([]);
+  const [, setSelectedObligation] = useState<SelectedObligation | null>(null);
+  const [, setProjectWOs] = useState<any[]>([]);
   const [projectPOs, setProjectPOs] = useState<any[]>([]);
   const [loadingObligations, setLoadingObligations] = useState(false);
   const [voidConfirm, setVoidConfirm] = useState(false);
   const [amendStep, setAmendStep] = useState<'idle' | 'edit' | 'diff'>('idle');
   const [amendForm, setAmendForm] = useState({ total_amount: '', date: '', payment_mode: '', category: '', remarks: '' });
   const [amendError, setAmendError] = useState<string | null>(null);
-  const [showAmendHistory, setShowAmendHistory] = useState(false);
-  const [showTrail, setShowTrail] = useState(false);
+  const [, setShowAmendHistory] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [showStakeholderDrawer, setShowStakeholderDrawer] = useState(false);
 
@@ -598,6 +406,20 @@ export default function TransactionDetail({ session }: { session: Session }) {
       const { data, error } = await supabase.from('txn_allocations').select('*, projects(name), wo_milestones(name)').eq('txn_id', txnId);
       if (error) throw error;
       return data;
+    },
+  });
+
+  // The bill for a PO-linked payment lives on the PO (uploaded there, or via the bill that
+  // created it). Fetch each linked PO's bill doc so we can preview it inline on this page.
+  const linkedPoIds = Array.from(new Set((allocs || []).filter((a) => a.order_type === 'PO' && a.order_ref).map((a) => a.order_ref as string)));
+  const { data: poBills } = useQuery({
+    queryKey: ['txn_po_bills', txnId, linkedPoIds.slice().sort().join(',')],
+    enabled: linkedPoIds.length > 0,
+    queryFn: async () => {
+      const { data } = await supabase.from('purchase_orders').select('po_id, vendor_bill_doc_url, vendor_bill_url').in('po_id', linkedPoIds);
+      const map: Record<string, string> = {};
+      (data || []).forEach((p: any) => { const u = p.vendor_bill_doc_url || p.vendor_bill_url; if (u) map[p.po_id] = u; });
+      return map;
     },
   });
 
@@ -677,14 +499,44 @@ export default function TransactionDetail({ session }: { session: Session }) {
     onError: (err: any) => setAmendError(err.message || 'Amendment failed.'),
   });
 
+  // ── Redesigned page: kebab menu + the per-allocation "Attach bill" picker ──
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [pickerStep, setPickerStep] = useState<'menu' | 'po'>('menu');
+  const billInputRef = useRef<HTMLInputElement>(null);
+
+  // "No bill — mark as advance": turn the allocation into an ADVANCE against the party.
+  const advanceMutation = useMutation({
+    mutationFn: async (allocId: string) => {
+      const { error } = await supabase.from('txn_allocations').update({ order_type: 'ADVANCE', order_ref: null, milestone_id: null }).eq('allocation_id', allocId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['txn_allocations', txnId] });
+      qc.invalidateQueries({ queryKey: ['transaction', txnId] });
+      qc.invalidateQueries({ queryKey: ['ledger'] });
+      setMappingAllocId(null);
+    },
+  });
+
+  // "Upload a new bill": store the file and stamp transactions.bill_doc_url.
+  const billUploadMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const ext = file.name.split('.').pop();
+      const path = `bills/${txnId}-${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage.from('documents').upload(path, file, { contentType: file.type });
+      if (upErr) throw upErr;
+      const { data: pub } = supabase.storage.from('documents').getPublicUrl(path);
+      const { error } = await supabase.from('transactions').update({ bill_doc_url: pub.publicUrl }).eq('txn_id', txnId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['transaction', txnId] });
+      qc.invalidateQueries({ queryKey: ['ledger'] });
+      setMappingAllocId(null);
+    },
+  });
+
   const isLoading = txnLoading || allocsLoading;
-  // documents bucket is private — resolve the stored URL to a signed URL for display.
-  // This hook MUST run before the early returns below (Rules of Hooks): otherwise a cold
-  // open renders the loading branch first (hook not called) then the loaded branch (hook
-  // called) -> "rendered more hooks than previous render" -> blank screen. Compute the URL
-  // defensively since txn may be undefined while loading.
-  const proofUrl = txn ? ((txn as any).proof_document_url || txn.bill_doc_url || null) : null;
-  const proofSigned = useSignedDocUrl(proofUrl);
   if (isLoading) return <div className="flex justify-center py-20"><Loader2 className="animate-spin text-primary/40" size={28} /></div>;
   if (!txn) return <div className="p-8 text-center text-on-surface-variant/50 text-[14px]">Transaction not found.</div>;
 
@@ -711,18 +563,6 @@ export default function TransactionDetail({ session }: { session: Session }) {
     setAmendError(null); setAmendStep('edit');
   };
 
-  const isImage = proofUrl?.match(/\.(jpeg|jpg|gif|png|webp)(\?.*)?$/i);
-
-  const needsActionType = (() => {
-    if (txn.status === 'Voided') return false;
-    if (txn.is_one_time) return false; // a deliberate one-time payment is resolved, not orphaned
-    const stkType = txn.stakeholders?.type;
-    if (stkType !== 'Worker' && stkType !== 'Vendor') return false;
-    const hasUnlinked = allocs?.some(a => !a.order_type);
-    if (!hasUnlinked) return false;
-    return stkType === 'Worker' ? 'link_wo' as const : 'link_po' as const;
-  })();
-
   const primaryAlloc = focusProjectId
     ? (allocs?.find((a) => a.project_id === focusProjectId) ?? allocs?.[0])
     : allocs?.[0];
@@ -734,458 +574,193 @@ export default function TransactionDetail({ session }: { session: Session }) {
   const timeStr = txnDateTime ? txnDateTime.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '';
   const isVoided = txn.status === 'Voided';
 
-  function AmountDisplay({ amount }: { amount: number }) {
-    const displayed = useCountUp(amount);
-    return <span>{displayed.toLocaleString('en-IN')}</span>;
-  }
-
-  // Direction drives the amount-hero accent: Client receipt = money IN (sage), else OUT (terracotta).
+  // Direction drives the amount accent: Client receipt = money IN (sage), else OUT (terracotta).
   const isIn = txn.stakeholders?.type === 'Client';
-  const accentSoft = isIn ? '#9CBB91' : '#E89A72';
+
+  // ── Redesigned-page derivations ──
+  const backTo = navState.backTo || (navState.from === 'project' && navState.projectId ? `/projects/${navState.projectId}/transactions` : '/ledger');
+  const backLabel = navState.backLabel || (navState.from === 'project' ? 'Transactions' : 'Ledger');
+  const payeeName: string = txn.stakeholders?.name || (isGeneralExpense(txn) ? ((txn as any).ai_flag_data?.general_payee || 'General expense') : 'Unknown');
+  const payeeType: string = txn.stakeholders?.type || '';
+  const payeeCategory: string = txn.stakeholders?.category || '';
+  const initials = (payeeName.split(/\s+/).map((w: string) => w[0]).filter(Boolean).slice(0, 2).join('') || '—').toUpperCase();
+  const recordedBy: string = (txn as any).created_by_name || (txn as any).recorded_by_name || (txn as any).ordered_by || '';
+  const totalAllocated = (allocs || []).reduce((s, a) => s + Number(a.allocated_amount), 0);
+  const allAllocs = primaryAlloc ? [primaryAlloc, ...secondaryAllocs] : (allocs || []);
+  const billLinked = !!primaryAlloc?.order_type || !!txn.bill_doc_url;
+  const rupee = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
+  const openPicker = (allocId: string) => { setPickerStep('menu'); setMappingAllocId(allocId); };
 
   return (
-    <div className="min-h-screen bg-[#f7f6f4]">
-      <div className={`max-w-[720px] mx-auto px-4 sm:px-6 pt-6 pb-20 ${isVoided ? 'opacity-60' : ''}`}>
+    <div className={`txnx${isVoided ? ' voided-mark' : ''}`}>
+      <style>{TXNX_CSS}</style>
+      <div className="page">
 
-        {/* ── Back ───────────────────────────────────────────────── */}
-        <div className="detail-reveal mb-3" style={{ animationDelay: '0ms' }}>
-          <BackLink
-            to={navState.backTo || (navState.from === 'project' && navState.projectId ? `/projects/${navState.projectId}/transactions` : '/ledger')}
-            label={navState.backLabel || 'Transactions'}
-          />
-        </div>
+        <div className="crumb"><a onClick={() => navigate(backTo)}>{backLabel}</a> › <b>{txn.txn_id}</b></div>
 
-        {/* ── Breadcrumb ─────────────────────────────────────────── */}
-        <div className="detail-reveal mb-6" style={{ animationDelay: '0ms' }}>
-          <Breadcrumb
-            items={
-              navState.from === 'project' && navState.projectName
-                ? [
-                    { label: 'Projects', href: '/projects' },
-                    { label: navState.projectName, href: `/projects/${navState.projectId}` },
-                    { label: 'Transactions', href: `/projects/${navState.projectId}/transactions` },
-                    { label: txnId! },
-                  ]
-                : [
-                    { label: 'Ledger', href: '/ledger' },
-                    { label: txnId! },
-                  ]
-            }
-          />
-        </div>
-
-        {/* ── Hero Card ──────────────────────────────────────────── */}
-        <div className="detail-reveal" style={{ animationDelay: '40ms' }}>
-          <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm overflow-hidden mb-4">
-
-            {/* ── Walnut amount hero (mirrors the editor / day-book card) ── */}
-            <div style={{
-              padding: '20px 24px 22px',
-              background: isVoided
-                ? 'linear-gradient(158deg,#2A2622 0%,#221F1B 60%,#1A1714 100%)'
-                : isIn
-                  ? 'radial-gradient(120% 120% at 85% 0%, rgba(156,187,145,.17) 0%, rgba(156,187,145,0) 42%), linear-gradient(158deg,#232619 0%,#1c2014 60%,#161a0f 100%)'
-                  : 'radial-gradient(120% 120% at 85% 0%, rgba(224,138,92,.15) 0%, rgba(224,138,92,0) 42%), linear-gradient(158deg,#2D2118 0%,#221A13 60%,#1B140E 100%)',
-            }}>
-              {/* Voucher id / date + status badges (dark) */}
-              <div className="flex items-start justify-between gap-3 mb-4">
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] mb-1" style={{ color: accentSoft }}>Transaction Voucher</p>
-                  <p className="font-mono text-[11px] mb-1 tracking-wide" style={{ color: 'rgba(243,234,219,.52)' }}>{txn.txn_id}</p>
-                  <p className="text-[12px]" style={{ color: 'rgba(243,234,219,.42)' }}>{dateStr}{timeStr ? ` · ${timeStr}` : ''}</p>
-                </div>
-                <div className="flex items-center gap-2 flex-wrap justify-end">
-                  {isAmended && (
-                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold" style={{ background: 'rgba(96,165,250,.16)', color: '#A9C9F5', border: '1px solid rgba(96,165,250,.24)' }}>AMENDED</span>
-                  )}
-                  {txn.ai_flag_status === 'Flagged' && (
-                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold" style={{ background: 'rgba(224,138,92,.18)', color: '#EBAE86', border: '1px solid rgba(224,138,92,.26)' }}>FLAGGED</span>
-                  )}
-                  <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold" style={
-                    txn.status === 'Active' ? { background: 'rgba(123,176,108,.16)', color: '#AFD3A1', border: '1px solid rgba(123,176,108,.24)' }
-                    : txn.status === 'Voided' ? { background: 'rgba(229,115,115,.16)', color: '#F0A593', border: '1px solid rgba(229,115,115,.24)' }
-                    : { background: 'rgba(243,234,219,.1)', color: 'rgba(243,234,219,.6)', border: '1px solid rgba(243,234,219,.14)' }
-                  }>
-                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: txn.status === 'Active' ? '#84BE74' : txn.status === 'Voided' ? '#E57373' : 'rgba(243,234,219,.4)' }} />
-                    {txn.status?.toUpperCase()}
-                  </span>
-                </div>
-              </div>
-
-              {/* Direction eyebrow + serif amount */}
-              <span className="inline-flex items-center gap-1.5" style={{ color: accentSoft, fontSize: 10.5, fontWeight: 700, letterSpacing: '0.14em' }}>
-                <span className="material-symbols-outlined text-[13px]">{isIn ? 'south_west' : 'north_east'}</span>
-                {isIn ? 'MONEY IN' : 'MONEY OUT'}
-              </span>
-              <p className="mt-1.5" style={{ color: '#F3EADB', fontFamily: "Georgia, 'Times New Roman', serif", fontVariantNumeric: 'tabular-nums', lineHeight: 1, letterSpacing: '-0.02em', fontSize: 'clamp(2.4rem, 1.5rem + 4.4vw, 3.4rem)' }}>
-                <span style={{ fontSize: '0.4em', fontWeight: 600, marginRight: '0.1em', color: accentSoft }}>{isIn ? '+ ₹' : '− ₹'}</span><AmountDisplay amount={Number(effective.total_amount) || 0} />
-              </p>
+        {/* header */}
+        <div className="head">
+          <div>
+            <h1>{isIn ? 'Payment in' : 'Payment out'} <span className="tag mono">{txn.txn_id}</span></h1>
+            <div className="meta">
+              <span><b>{dateStr}</b>{timeStr ? ` · ${timeStr}` : ''}</span>
+              {effective.payment_mode && <><span className="sep" /><span className="pill">{effective.payment_mode}</span></>}
+              {recordedBy && <span>Recorded by <b>{recordedBy}</b></span>}
+              <span className="sep" />
+              <span className="chip sage" style={isVoided ? { color: 'var(--terra)', background: 'var(--terra-tint)' } : undefined}><i style={isVoided ? { background: 'var(--terra)' } : undefined} />{isVoided ? 'Voided' : (txn.status || 'Active')}</span>
+              {!isVoided && !billLinked && (
+                <span className="chip warn" onClick={() => { document.getElementById('txnx-alloc')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); const a = allAllocs.find((x) => !x.order_type); if (a) setTimeout(() => openPicker(a.allocation_id), 350); }}><i />No bill attached — attach now</span>
+              )}
+              {txn.ai_flag_status === 'Flagged' && <span className="chip gold"><i />Flagged</span>}
             </div>
-
-            {/* ── Details (on white) ── */}
-            <div className="p-6 pt-5">
-              {/* Row 3: Payee + Project pills */}
-              <div className="flex flex-wrap gap-3 mb-5">
-                <div className="flex-1 min-w-0">
-                  <p className="text-[10px] font-bold text-on-surface-variant/40 uppercase tracking-wider mb-1">Payee</p>
-                  {txn.stakeholder_id ? (
-                    <button
-                      onClick={() => setShowStakeholderDrawer(true)}
-                      className="group inline-flex items-center gap-1 text-[15px] font-semibold text-primary text-left max-w-full"
-                    >
-                      <span className="border-b border-dashed border-primary/45 group-hover:border-solid group-hover:border-primary transition-all pb-[2px] truncate">
-                        {txn.stakeholders?.name || '—'}
-                      </span>
-                      <span className="material-symbols-outlined text-[13px] text-primary/50 group-hover:text-primary transition-colors shrink-0">
-                        chevron_right
-                      </span>
-                    </button>
-                  ) : isGeneralExpense(txn) ? (
-                    <p className="inline-flex items-center gap-1.5 text-[15px] font-semibold text-on-surface">
-                      <Wallet size={15} className="text-on-surface-variant/55" /> {(txn as any).ai_flag_data?.general_payee || 'General expense'}
-                    </p>
-                  ) : (
-                    <p className="text-[15px] font-semibold text-on-surface">{txn.stakeholders?.name || '—'}</p>
+          </div>
+          <div className={`amount${isIn ? ' in' : ''}`}>
+            <small>{isIn ? '↙ Money in' : '↗ Money out'}</small>
+            <span className="mono">{isIn ? '+₹' : '−₹'}{(Number(effective.total_amount) || 0).toLocaleString('en-IN')}</span>
+            <div className="dir">{isIn ? `Received from ${payeeName}` : `${payeeName} was paid`}{effective.payment_mode ? ` · ${effective.payment_mode}` : ''}</div>
+          </div>
+          <div className="more">
+            <button className="kebab" aria-label="More actions" onClick={(e) => { e.stopPropagation(); setMenuOpen((o) => !o); }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
+            </button>
+            {menuOpen && (
+              <>
+                <div style={{ position: 'fixed', inset: 0, zIndex: 25 }} onClick={() => setMenuOpen(false)} />
+                <div className="menu">
+                  <button onClick={() => { setMenuOpen(false); generatePDF(txn, allocs || [], effective, isAmended); }}><svg viewBox="0 0 24 24"><path d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" /></svg>Download voucher PDF</button>
+                  {isManagement && !isVoided && <button onClick={() => { setMenuOpen(false); openAmendModal(); }}><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z" /></svg>Amend</button>}
+                  {canVoid && !isVoided && (
+                    <>
+                      <hr />
+                      <button className="danger" onClick={() => { setMenuOpen(false); setVoidConfirm(true); }}><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M9 9l6 6M15 9l-6 6" /></svg>Void transaction</button>
+                      <div className="hint">Voiding keeps the record but reverses it in the books.</div>
+                    </>
                   )}
-                  <p className="text-[11px] text-on-surface-variant/50 mt-0.5">
-                    {isGeneralExpense(txn)
-                      ? ((txn as any).ai_flag_data?.general_payee ? 'General expense · no linked party' : 'no linked party')
-                      : `${txn.stakeholders?.type || ''}${txn.stakeholders?.category ? ` · ${txn.stakeholders.category}` : ''}`}
-                  </p>
                 </div>
+              </>
+            )}
+          </div>
+        </div>
 
-                {primaryAlloc && (
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[10px] font-bold text-on-surface-variant/40 uppercase tracking-wider mb-1">Project</p>
-                    <p className="text-[15px] font-semibold text-on-surface truncate">{primaryAlloc.projects?.name || primaryAlloc.project_id}</p>
-                    {secondaryAllocs.length > 0 && (
-                      <p className="text-[11px] text-on-surface-variant/50 mt-0.5">+{secondaryAllocs.length} more project{secondaryAllocs.length > 1 ? 's' : ''}</p>
-                    )}
+        {/* details */}
+        <div className="sec"><h2>Details</h2></div>
+        <div className="sheet hdr">
+          <table>
+            <colgroup><col style={{ width: 110 }} /><col /><col style={{ width: 110 }} /><col /></colgroup>
+            <tbody>
+              <tr>
+                <th>Paid to</th>
+                <td>
+                  <div className="who">
+                    <span className="av">{initials}</span>
+                    {txn.stakeholder_id ? <a onClick={() => setShowStakeholderDrawer(true)}>{payeeName}</a> : <b>{payeeName}</b>}
+                    <small>{[payeeType, payeeCategory].filter(Boolean).join(' · ') || (isGeneralExpense(txn) ? 'General expense · no linked party' : '—')}</small>
                   </div>
-                )}
-              </div>
-
-              {/* Row 4: Meta pills */}
-              <div className="flex flex-wrap gap-2">
-                <PayModePill mode={effective.payment_mode || '—'} />
-                {effective.category && (
-                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-surface-container-high text-[11px] font-semibold text-on-surface-variant">
-                    <span className="material-symbols-outlined text-[13px]">label</span>
-                    {effective.category}
-                  </span>
-                )}
-                {txn.ref_number && (
-                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-surface-container-high text-[11px] font-mono text-on-surface-variant">
-                    Ref: {txn.ref_number}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* Action bar */}
-            <div className="flex items-center gap-2 px-6 py-3 border-t border-outline-variant/10 bg-surface-container-low/30 flex-wrap">
-              {txn.status !== 'Voided' && (
-                <>
-                  {isManagement && (
-                    <button onClick={openAmendModal}
-                      className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-outline-variant/30 text-[12px] font-semibold text-on-surface hover:bg-surface-container transition-colors">
-                      <span className="material-symbols-outlined text-[14px]">edit_note</span> Amend
-                    </button>
-                  )}
-                  {canVoid && (
-                    <button onClick={() => setVoidConfirm(true)}
-                      className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-error/20 text-error text-[12px] font-semibold hover:bg-error-container/20 transition-colors">
-                      <span className="material-symbols-outlined text-[14px]">block</span> Void
-                    </button>
-                  )}
-                </>
-              )}
-
-              {/* PDF Download */}
-              <button
-                onClick={() => generatePDF(txn, allocs || [], effective, isAmended)}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-on-surface text-surface-container-lowest text-[12px] font-semibold hover:opacity-90 transition-opacity"
-              >
-                <span className="material-symbols-outlined text-[14px]">download</span>
-                Download PDF
-              </button>
-
-              <button onClick={() => setShowTrail(v => !v)}
-                className="ml-auto flex items-center gap-1 text-[11px] text-on-surface-variant/50 hover:text-primary transition-colors">
-                <span className="material-symbols-outlined text-[13px]">history</span>
-                {showTrail ? 'Hide' : 'Activity Log'}
-              </button>
-            </div>
-          </div>
+                </td>
+                <th>Project</th>
+                <td>{primaryAlloc ? <><b>{primaryAlloc.projects?.name || primaryAlloc.project_id}</b><small>{primaryAlloc.project_id}{secondaryAllocs.length > 0 ? ` · +${secondaryAllocs.length} more` : ''}</small></> : <span className="dim">—</span>}</td>
+              </tr>
+              <tr>
+                <th>Remarks</th>
+                <td colSpan={3}>{effective.remarks ? effective.remarks : <span className="dim">No remarks</span>}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
 
-        {/* ── Needs-action banner ────────────────────────────────── */}
-        {needsActionType && (
-          <div className="detail-reveal mb-4" style={{ animationDelay: '60ms' }}>
-            <div className="flex items-center gap-3 px-4 py-3 bg-amber-50 border border-amber-200/70 rounded-xl">
-              <span className="material-symbols-outlined text-amber-500 text-[18px] shrink-0">link_off</span>
-              <p className="text-[12px] text-amber-800 flex-1 font-medium">
-                {needsActionType === 'link_wo' ? 'Payment not linked to a Contract' : 'Payment not linked to a Purchase Order'} —{' '}
-                <button onClick={() => document.getElementById('alloc-table')?.scrollIntoView({ behavior: 'smooth' })}
-                  className="font-bold underline underline-offset-2">Map below</button>
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* ── Remarks ────────────────────────────────────────────── */}
-        {effective.remarks && (
-          <div className="detail-reveal mb-4" style={{ animationDelay: '80ms' }}>
-            <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm p-5">
-              <SectionLabel icon="notes" label="Remarks" />
-              <p className="text-[14px] text-on-surface leading-relaxed whitespace-pre-wrap">{effective.remarks}</p>
-            </div>
-          </div>
-        )}
-
-        {/* ── AI Flag ────────────────────────────────────────────── */}
-        {txn.ai_flag_status === 'Flagged' && txn.ai_flag_data && (
-          <div className="detail-reveal mb-4" style={{ animationDelay: '90ms' }}>
-            <div className="bg-error-container/10 rounded-2xl border border-error/15 p-5">
-              <SectionLabel icon="flag" label="Flag Reason" />
-              <p className="text-[13px] text-error/80 font-medium">{txn.ai_flag_data.reason || 'Transaction flagged for manual review.'}</p>
-              {txn.ai_flag_data.details && (
-                <pre className="mt-2 text-[10px] text-error/60 overflow-x-auto p-2 bg-error-container/20 rounded whitespace-pre-wrap">
-                  {JSON.stringify(txn.ai_flag_data.details, null, 2)}
-                </pre>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ── Proof Document ─────────────────────────────────────── */}
-        {proofUrl && (
-          <div className="detail-reveal mb-4" style={{ animationDelay: '100ms' }}>
-            <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm p-5">
-              <SectionLabel icon="attach_file" label="Proof of Payment" />
-              {isImage ? (
-                <div>
-                  <div
-                    className="relative inline-block cursor-pointer group"
-                    onClick={() => proofSigned && setLightboxUrl(proofSigned)}
-                  >
-                    <img
-                      src={proofSigned ?? undefined}
-                      alt="Payment proof"
-                      className="h-32 w-auto rounded-xl object-cover border border-outline-variant/20 group-hover:opacity-90 transition-opacity"
-                    />
-                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-xl bg-black/20">
-                      <span className="bg-black/60 text-white text-[11px] font-semibold px-3 py-1.5 rounded-full flex items-center gap-1">
-                        <span className="material-symbols-outlined text-[14px]">open_in_full</span> Expand
-                      </span>
-                    </div>
-                  </div>
-                  <p className="text-[11px] text-on-surface-variant/50 mt-2">
-                    {(txn as any).proof_document_url ? '📱 Received via WhatsApp' : '📎 Uploaded document'}
-                  </p>
-                </div>
-              ) : (
-                <a href={proofSigned ?? undefined} target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-surface-container-low border border-outline-variant/20 text-[13px] text-primary font-semibold hover:bg-surface-container transition-colors">
-                  <span className="material-symbols-outlined text-[16px]">open_in_new</span> View Document
-                </a>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ── Project Allocations ────────────────────────────────── */}
-        <div id="alloc-table" className="detail-reveal mb-4" style={{ animationDelay: '120ms' }}>
-          <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm overflow-hidden">
-            <div className="p-5 pb-3">
-              <SectionLabel icon="account_tree" label="Project Allocations" />
-            </div>
-
-            {/* Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-separate border-spacing-0">
-                <thead>
-                  <tr>
-                    <th className="px-5 pb-3 text-[9px] font-bold text-on-surface-variant/40 uppercase tracking-widest">Project</th>
-                    <th className="px-4 pb-3 text-[9px] font-bold text-on-surface-variant/40 uppercase tracking-widest">Linked Order</th>
-                    <th className="px-5 pb-3 text-right text-[9px] font-bold text-on-surface-variant/40 uppercase tracking-widest">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(primaryAlloc ? [primaryAlloc, ...secondaryAllocs] : (allocs || [])).map((a) => {
-                    const isUnlinked = !a.order_type;
-                    const isMapping = mappingAllocId === a.allocation_id;
-                    const milestoneName = (a as any).wo_milestones?.name ?? null;
-                    return (
-                      <Fragment key={a.allocation_id}>
-                        <tr className={`border-t border-outline-variant/[0.08] transition-colors ${isUnlinked && !isMapping ? 'bg-amber-50/40' : 'hover:bg-surface-container-low/30'}`}>
-                          <td className="px-5 py-3.5">
-                            <p className="text-[13px] font-semibold text-on-surface">{a.projects?.name || 'Unassigned'}</p>
-                            <p className="text-[10px] text-on-surface-variant/40 font-mono mt-0.5">{a.project_id}</p>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            {a.order_type ? (
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${a.order_type === 'WO' ? 'bg-primary/10 text-primary' : 'bg-tertiary/10 text-tertiary'}`}>
-                                  {a.order_type}
-                                </span>
-                                <button onClick={() => openPeek(a.order_type as 'WO' | 'PO', a.order_ref)}
-                                  className="text-[12px] font-mono text-primary hover:underline underline-offset-2 cursor-pointer">
-                                  {a.order_ref} ↗
-                                </button>
-                                {milestoneName && <span className="text-on-surface-variant text-[11px]">· {milestoneName}</span>}
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-2">
-                                <span className="text-[11px] text-amber-600 italic flex items-center gap-1 font-medium">
-                                  <span className="material-symbols-outlined text-[13px]">link_off</span> Unlinked
-                                </span>
-                                <button onClick={() => setMappingAllocId(a.allocation_id)}
-                                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-primary bg-primary/8 hover:bg-primary/15 border border-primary/15 transition-colors">
-                                  <span className="material-symbols-outlined text-[12px]">link</span> Map
-                                </button>
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-5 py-3.5 text-right font-mono font-bold text-[13px] text-on-surface">
-                            ₹{Number(a.allocated_amount).toLocaleString('en-IN')}
-                          </td>
-                        </tr>
-                        {isMapping && (
-                          <tr>
-                            <td colSpan={3} className="px-5 pb-5 pt-1">
-                              <DetailLinkingPanel
-                                wos={projectWOs} pos={projectPOs} loading={loadingObligations}
-                                selectedObligation={selectedObligation} onSelect={setSelectedObligation}
-                                onSkip={() => { setMappingAllocId(null); setSelectedObligation(null); }}
-                                onConfirm={(ob) => updateAlloc.mutate({
-                                  allocId: a.allocation_id,
-                                  order_type: ob.type === 'PO' ? 'PO' : 'WO',
-                                  order_ref: ob.type === 'PO' ? ob.po_id! : ob.wo_id!,
-                                  milestone_id: ob.type === 'WO_PHASE' ? ob.phase_id : undefined,
-                                })}
-                                isPending={updateAlloc.isPending} projectId={a.project_id} stkType={txn.stakeholders?.type || ''} />
-                            </td>
-                          </tr>
+        {/* where this money went */}
+        <div className="sec" id="txnx-alloc"><h2>Where this money went</h2></div>
+        <div className="sheet alloc">
+          <table>
+            <colgroup><col style={{ width: '34%' }} /><col /><col style={{ width: '20%' }} /></colgroup>
+            <thead><tr><th>Project</th><th>Bill</th><th className="num">Amount</th></tr></thead>
+            <tbody>
+              {allAllocs.map((a) => {
+                const linked = a.order_type;
+                const isPO = linked === 'PO';
+                const isWO = linked === 'WO';
+                const isAdv = linked === 'ADVANCE';
+                const milestoneName = (a as any).wo_milestones?.name ?? null;
+                const picking = mappingAllocId === a.allocation_id;
+                const hasBill = isPO || isWO || isAdv || !!txn.bill_doc_url;
+                return (
+                  <tr key={a.allocation_id}>
+                    <td><b style={{ fontWeight: 600 }}>{a.projects?.name || 'Unassigned'}</b></td>
+                    <td>
+                      <div className="lnk">
+                        {isPO || isWO ? (
+                          <>
+                            <span className="st ok" onClick={() => openPeek(linked as 'WO' | 'PO', a.order_ref)} style={{ cursor: 'pointer' }}>✓ {a.order_ref}<small>{isPO ? (poBills?.[a.order_ref] ? 'Bill on PO · tap to preview' : 'Bill on PO') : 'Contract'}{milestoneName ? ` · ${milestoneName}` : ''}</small></span>
+                            {isPO && poBills?.[a.order_ref] && <DocThumb stored={poBills[a.order_ref]} onImageClick={setLightboxUrl} />}
+                          </>
+                        ) : isAdv ? (
+                          <span className="st adv">Advance to {payeeName}<small>No bill yet · adjusts into the next bill</small></span>
+                        ) : txn.bill_doc_url ? (
+                          <>
+                            <span className="st ok">✓ Bill attached<small>Uploaded · tap to preview</small></span>
+                            <DocThumb stored={txn.bill_doc_url} onImageClick={setLightboxUrl} />
+                          </>
+                        ) : (
+                          <span className="st un">No bill<small>Link a PO bill or upload one</small></span>
                         )}
-                      </Fragment>
-                    );
-                  })}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t border-outline-variant/20">
-                    <td colSpan={2} className="px-5 py-3 text-right text-[9px] font-bold uppercase tracking-widest text-on-surface-variant/50">
-                      Total Allocated
-                    </td>
-                    <td className="px-5 py-3 text-right font-mono font-black text-[14px] text-primary">
-                      ₹{(allocs || []).reduce((s, a) => s + Number(a.allocated_amount), 0).toLocaleString('en-IN')}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Amendment History ──────────────────────────────────── */}
-        {isAmended && (
-          <div className="detail-reveal mb-4" style={{ animationDelay: '140ms' }}>
-            <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm overflow-hidden">
-              <button
-                onClick={() => setShowAmendHistory(v => !v)}
-                className="w-full flex items-center gap-3 px-5 py-4 hover:bg-surface-container-low/40 transition-colors"
-              >
-                <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
-                  <span className="material-symbols-outlined text-[16px] text-blue-600">edit_note</span>
-                </div>
-                <div className="flex-1 text-left">
-                  <p className="text-[13px] font-semibold text-on-surface">{existingAmendments.length} Amendment{existingAmendments.length > 1 ? 's' : ''}</p>
-                  <p className="text-[11px] text-on-surface-variant/50">View change history</p>
-                </div>
-                <span className="material-symbols-outlined text-[18px] text-on-surface-variant/40 transition-transform" style={{ transform: showAmendHistory ? 'rotate(180deg)' : '' }}>expand_more</span>
-              </button>
-
-              {showAmendHistory && (
-                <div className="border-t border-outline-variant/10 divide-y divide-outline-variant/[0.07]">
-                  {[...existingAmendments].reverse().map((a: any, i) => {
-                    if (a.type === 'phase_move' || a.type === 'phase_move_undo') {
-                      const isUndo = a.type === 'phase_move_undo';
-                      return (
-                        <div key={a.id} className="px-5 py-4">
-                          <div className="flex items-center gap-2 mb-2">
-                            <span className="material-symbols-outlined text-[14px] text-on-surface-variant/50">swap_horiz</span>
-                            <p className="text-[12px] font-semibold text-on-surface">Phase {isUndo ? 'reassignment undone' : 'reassigned'} · {a.moved_by}</p>
-                            <span className="text-[11px] text-on-surface-variant/50">· {new Date(a.moved_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-                            {i === 0 && <span className="ml-auto px-2 py-0.5 text-[9px] font-bold rounded-full bg-blue-50 text-blue-700 border border-blue-200/60">LATEST</span>}
-                          </div>
-                          <p className="text-[12px] text-on-surface-variant pl-5">
-                            <span className="line-through opacity-50">{a.from_milestone_name}</span>
-                            {' → '}
-                            <span className="font-semibold text-on-surface">{a.to_milestone_name}</span>
-                            {a.allocated_amount && <span className="ml-2 font-mono text-on-surface-variant/60">₹{Number(a.allocated_amount).toLocaleString('en-IN')}</span>}
-                          </p>
-                        </div>
-                      );
-                    }
-                    return (
-                      <div key={a.id} className="px-5 py-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <p className="text-[12px] font-semibold text-on-surface">Amended by {a.amended_by}</p>
-                          <span className="text-[11px] text-on-surface-variant/50">· {new Date(a.amended_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-                          {i === 0 && <span className="ml-auto px-2 py-0.5 text-[9px] font-bold rounded-full bg-blue-50 text-blue-700 border border-blue-200/60">LATEST</span>}
-                        </div>
-                        <div className="flex flex-wrap gap-x-6 gap-y-1.5">
-                          {Object.entries(a.changes || {}).map(([label, vals]) => {
-                            const [oldVal, newVal] = vals as [any, any];
-                            return (
-                              <p key={label} className="text-[12px] text-on-surface-variant">
-                                <span className="font-semibold text-on-surface">{label}:</span>{' '}
-                                <span className="line-through opacity-50">{fmtAmendVal(label, oldVal)}</span>
-                                {' → '}
-                                <span className="text-blue-700 font-semibold">{fmtAmendVal(label, newVal)}</span>
-                              </p>
-                            );
-                          })}
-                        </div>
+                        {!isVoided && (
+                          <span className="pickwrap">
+                            {hasBill
+                              ? <button className="ghost" onClick={() => openPicker(a.allocation_id)}>Change</button>
+                              : <button className="linkbtn" onClick={() => openPicker(a.allocation_id)}>Attach bill</button>}
+                            {picking && (
+                              <>
+                                <div style={{ position: 'fixed', inset: 0, zIndex: 35 }} onClick={() => setMappingAllocId(null)} />
+                                <div className="picker">
+                                  {pickerStep === 'menu' ? (
+                                    <>
+                                      <button onClick={() => setPickerStep('po')}><b><svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1.5 1.5M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1.5-1.5" /></svg>Link to a PO</b><span className="mono">{loadingObligations ? '…' : `${projectPOs.length} open`}</span><small>Use the bill already recorded on a purchase order</small></button>
+                                      <button onClick={() => { setMappingAllocId(a.allocation_id); billInputRef.current?.click(); }}><b><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16" /></svg>Upload a new bill</b><span /><small>Photo or PDF of the vendor's bill</small></button>
+                                      <button className="adv" onClick={() => advanceMutation.mutate(a.allocation_id)}><b><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 3" /></svg>No bill — mark as advance</b><span /><small>Sits against {payeeName}, adjusts into the next bill</small></button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <h5><button className="bk" onClick={() => setPickerStep('menu')}>&lsaquo;</button> Open POs · {payeeName}</h5>
+                                      {loadingObligations ? (
+                                        <button disabled><b>Loading…</b></button>
+                                      ) : projectPOs.length === 0 ? (
+                                        <button disabled><b>No open POs</b><span /><small>Upload a bill or mark as advance instead</small></button>
+                                      ) : (
+                                        projectPOs.map((po: any) => {
+                                          const bal = getPOBalance(po);
+                                          return <button key={po.po_id} onClick={() => updateAlloc.mutate({ allocId: a.allocation_id, order_type: 'PO', order_ref: po.po_id })}><b>{po.po_id}</b><span className="mono">{rupee(bal)} due</span><small>{po.stakeholders?.category || 'Purchase order'}{po.status ? ` · ${po.status}` : ''}</small></button>;
+                                        })
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              </>
+                            )}
+                          </span>
+                        )}
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+                    </td>
+                    <td className="num" style={{ fontWeight: 500 }}>{rupee(Number(a.allocated_amount))}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot><tr><td colSpan={2} style={{ textAlign: 'right' }}>Total allocated</td><td className="num">{rupee(totalAllocated)}</td></tr></tfoot>
+          </table>
+        </div>
+        <input ref={billInputRef} type="file" accept="image/*,.pdf" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) billUploadMutation.mutate(f); }} />
 
-        {/* ── Activity Log ───────────────────────────────────────── */}
-        {showTrail && (
-          <div className="detail-reveal mb-4" style={{ animationDelay: '0ms' }}>
-            <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm p-5">
-              <SectionLabel icon="history" label="Activity Log" />
-              <div className="space-y-3">
-                <div className="flex items-start gap-3">
-                  <div className="mt-1 w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                  </div>
-                  <div>
-                    <p className="text-[12px] font-semibold text-on-surface">Transaction recorded</p>
-                    <p className="text-[11px] text-on-surface-variant/50">{new Date(txn.created_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
-                  </div>
-                </div>
-                {isVoided && (
-                  <div className="flex items-start gap-3">
-                    <div className="mt-1 w-5 h-5 rounded-full bg-error-container flex items-center justify-center shrink-0">
-                      <span className="material-symbols-outlined text-[12px] text-error">block</span>
-                    </div>
-                    <div>
-                      <p className="text-[12px] font-semibold text-error">Voided</p>
-                      <p className="text-[11px] text-on-surface-variant/50">{txn.voided_at ? new Date(txn.voided_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
+        {/* activity */}
+        <div className="sec"><h2>Activity</h2></div>
+        <div className="sheet"><ul className="log">
+          {isVoided && txn.voided_at && (
+            <li><span className="mono">{new Date(txn.voided_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span><i /><span><b>Voided</b> — reversed in the books</span></li>
+          )}
+          {[...existingAmendments].reverse().map((am: any) => (
+            <li key={am.id}><span className="mono">{new Date(am.amended_at || am.moved_at || txn.created_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span><i /><span><b>{am.amended_by || am.moved_by || 'Someone'}</b> amended {Object.keys(am.changes || {}).join(', ') || 'this transaction'}</span></li>
+          ))}
+          <li><span className="mono">{new Date(txn.created_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span><i /><span><b>{recordedBy || 'Recorded'}</b> {rupee(Number(txn.total_amount))} {isIn ? 'received from' : 'paid to'} {payeeName}{effective.payment_mode ? ` by ${effective.payment_mode}` : ''}</span></li>
+        </ul></div>
       </div>
 
       {/* ── VOID STAMP ─────────────────────────────────────────────── */}
