@@ -88,6 +88,7 @@ const POLX_CSS = `
 .polx .dlv .late{color:var(--terra);font-weight:500}
 .polx .dlv .due{color:var(--gold);font-weight:500}
 .polx .dlv .ok{color:var(--sage);font-weight:500}
+.polx .dlv .sent{color:#3b7bb5;font-weight:500}
 .polx .dlv .none{color:var(--ink-2)}
 .polx .dlv small{display:block;color:var(--ink-3);font-size:12px}
 .polx .dlv small b{font-weight:500}
@@ -130,7 +131,7 @@ interface POItem { n: string; q: string; r: boolean }
 interface PORow {
   id: string; vendor: string; site: string; by: string; ordered: string;
   items: POItem[]; value: number; billed: number; paid: number;
-  due: string | null; recv: string | null; cancelled: boolean; rfq: boolean;
+  due: string | null; recv: string | null; sent: string | null; cancelled: boolean; rfq: boolean;
 }
 
 const fmt = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
@@ -144,7 +145,7 @@ function usePOListData(projectId?: string) {
     queryFn: async () => {
       let q = supabase
         .from('purchase_orders')
-        .select('po_id, status, approval_status, date_issued, created_at, ordered_by, expected_delivery, total_value, order_value, vendor_bill_amount, received_at_site, stakeholder_id, project_id, items, projects(name), stakeholders(name), po_line_items(id, item_name, unit, quantity_ordered)')
+        .select('po_id, status, approval_status, date_issued, created_at, ordered_by, expected_delivery, total_value, order_value, vendor_bill_amount, received_at_site, sent_to_vendor_at, stakeholder_id, project_id, items, projects(name), stakeholders(name), po_line_items(id, item_name, unit, quantity_ordered)')
         .order('created_at', { ascending: false });
       if (projectId) q = q.eq('project_id', projectId);
       const { data, error } = await q;
@@ -243,6 +244,7 @@ function usePOListData(projectId?: string) {
         paid: paid[po.po_id] || 0,
         due: po.expected_delivery || null,
         recv: po.received_at_site || receipt[po.po_id]?.last_receipt_date || null,
+        sent: po.sent_to_vendor_at || null,
         cancelled, rfq,
       };
     });
@@ -328,7 +330,6 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   };
   const recvCell = (p: PORow): React.ReactNode => {
     if (p.cancelled) return <span className="dim">—</span>;
-    if (p.rfq) return <div className="dlv"><span className="dim">Not ordered yet</span><small>awaiting price</small></div>;
     const n = p.items.length, g = got(p), pl = pend(p);
     if (n > 0 && g === n) return <div className="dlv"><span className="ok">✓ Received</span><small>{dstr(D(p.recv))}</small></div>;
     const tipProps = { onMouseEnter: (e: React.MouseEvent) => showTip(e, p.id, true), onMouseLeave: () => setTip(null) };
@@ -338,6 +339,10 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
         <small>{pl.length === 1 ? pl[0].n + ' pending' : pl.length + ' pending'} · {dueLabel(p)}</small>
       </div>
     );
+    // Sent to the vendor (ordered, on its way) — this wins over the "awaiting price" RFQ label,
+    // because sending the PO IS ordering it.
+    if (p.sent) return <div className="dlv"><span className="sent">✓ PO sent</span><small>to vendor · {dstr(D(p.sent))} · {dueLabel(p)}</small></div>;
+    if (p.rfq) return <div className="dlv"><span className="dim">Not ordered yet</span><small>awaiting price</small></div>;
     return <div className="dlv"><span className={late(p) ? 'late' : 'none'}>Not received</span><small>{n} item{n !== 1 ? 's' : ''} · {dueLabel(p)}</small></div>;
   };
 

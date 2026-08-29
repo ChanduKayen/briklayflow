@@ -95,19 +95,18 @@ html, body {
 @media (max-width: 639px) {
   .bk-ledger-row {
     grid-template-columns: 28px minmax(0, 1fr) auto;
-    grid-template-areas:
-      "med main   amount"
-      "med anchor anchor";
+    grid-template-areas: "med main amount";
     column-gap: 10px;
-    row-gap: 6px;
-    align-items: start;
-    min-height: 64px;
+    align-items: center;
+    min-height: 56px;
     padding: 10px 12px 10px 16px;
   }
   .bk-ledger-med    { align-self: center; }
-  .bk-ledger-amount { align-self: start; padding-top: 1px; }
-  /* On mobile the anchor row carries nothing? keep it collapsible */
-  .bk-ledger-anchor:empty { display: none; }
+  .bk-ledger-amount { align-self: center; padding-top: 0; }
+  /* Mobile: drop the whole anchor cell — no link nudge (Link to a contract / Attach bill)
+     and no linked PO/contract reference chip — so the phone list is a clean payee + amount
+     line. Linking happens on the transaction page. Desktop grid is untouched. */
+  .bk-ledger-anchor { display: none; }
 }
 
 /* ── Inbox entry bar positioning ── */

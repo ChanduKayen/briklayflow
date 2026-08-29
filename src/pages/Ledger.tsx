@@ -200,6 +200,11 @@ function EntryRow(p: EntryProps) {
 
       <div className="bk-ledger-main">
         <p className="text-sm font-medium truncate" style={{ color: V.ink, ...font }}>
+          {/* Mobile-only: the "flagged" badge lives in the (hidden) anchor cell on a phone, so
+              carry a subtle amber dot beside the name instead. Desktop keeps the full badge. */}
+          {p.flagged && (
+            <span className="sm:hidden" title="AI-flagged" style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: V.ask, marginRight: 6, verticalAlign: 'middle' }} />
+          )}
           {p.stakeholderId && p.onPayeeClick ? (
             <span
               role="button"

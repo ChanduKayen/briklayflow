@@ -13,6 +13,7 @@ import { useUserProfile } from '../App';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import type { POLineItem } from '../types';
 import ReceiveAtSiteDrawer from '../components/ReceiveAtSiteDrawer';
+import SendToVendorModal from '../components/po-new-ui/SendToVendorModal';
 import {
   fmtDate as pdfFmtDate, fmtRupee, amountInWords,
   MARGIN, CONTENT, RIGHT, C,
@@ -237,6 +238,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   // ── UI state ───────────────────────────────────────────────────────────────
   const [, setShowRecordPayment] = useState(false);
   const [showReceiveModal,     setShowReceiveModal]    = useState(false);
+  const [showSendModal,        setShowSendModal]       = useState(false);
 
   // AI reconciliation state
   const [reconciling, setReconciling] = useState(false);
@@ -270,7 +272,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('purchase_orders')
-        .select('*, projects(name, site_location), stakeholders(name, category, gstin, is_approved)')
+        .select('*, projects(name, site_location), stakeholders(name, category, gstin, is_approved, contact)')
         .eq('po_id', poId!)
         .single();
       if (error) throw error;
@@ -845,6 +847,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
               </button>
               <div className={`menu${menuOpen ? ' open' : ''}`}>
+                <button onClick={() => { setMenuOpen(false); setShowSendModal(true); }}><svg viewBox="0 0 24 24"><path d="M21 3L3 10.5l6 2.5 2.5 6L21 3z" /><path d="M9 13l3-3" /></svg>Send to vendor</button>
                 <button onClick={() => { setMenuOpen(false); handleDownloadPDF(); }}><svg viewBox="0 0 24 24"><path d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" /></svg>Download PDF</button>
                 <button onClick={() => { setMenuOpen(false); navigate('/purchase-orders/new', { state: { projectId: po.project_id, stakeholderId: po.stakeholder_id } }); }}><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 1 8 8M4 20l4-4M4 20v-4h4" /></svg>Duplicate order</button>
                 <button onClick={() => { setMenuOpen(false); navigate('/purchase-orders/new', { state: { projectId: po.project_id, stakeholderId: po.stakeholder_id } }); }}><svg viewBox="0 0 24 24"><path d="M4 6h16M8 6V4h8v2M6 6l1 14h10l1-14" /></svg>Edit items</button>
@@ -1068,6 +1071,17 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
           fireCelebration();
           showSnackbar('📦 Receipt recorded');
         }}
+      />
+
+      <SendToVendorModal
+        open={showSendModal}
+        poId={poId!}
+        vendorId={po.stakeholder_id}
+        vendorName={vendor?.name}
+        vendorContact={vendor?.contact}
+        projectName={project?.name}
+        totalLabel={inr0(orderValue)}
+        onClose={() => { setShowSendModal(false); qc.invalidateQueries({ queryKey: ['po_detail', poId] }); }}
       />
     </div>
   );

@@ -2,18 +2,17 @@
  * TrackChip — the "not linked" slot on a payment row, framed as a declarative,
  * swappable status: "This payment is — [ Linked to a contract › ] [ One-time ]".
  *
- * WORKER payments (→ ContractHub) get the segmented control:
- *   · Linked to a contract ›  routes through the hub (link to an open contract, start
- *                             a new one, or — inside — daily-wage/labour). Decision A:
- *                             labour lives in the hub. Once linked, the row swaps to the
- *                             contract reference and this chip unmounts, so the control
- *                             only ever shows two states: unanswered + one-time-chosen.
- *   · One-time                sets directly (fileAsLabour). Tap again to clear; tap the
- *                             contract side to swap. Green = the selected tick, never a
- *                             red "reject" — one-time is a valid, neutral outcome.
+ * WORKER payments (→ ContractHub) mirror the VENDOR chip's hover menu — one calm
+ * nudge that opens a two-item menu (symmetry with "Attach bill"):
+ *   · Labour payment          files directly (fileAsLabour → is_one_time). One tap, no
+ *                             panel — the chip swaps to the resolved "✓ Labour payment".
+ *                             Tap that again to clear. Green = the selected tick, never a
+ *                             red "reject" — labour is a valid, neutral outcome.
+ *   · Link to a contract ›    opens the hub (link to an open contract, start a new one,
+ *                             or — inside — daily-wage). Once linked, the row swaps to the
+ *                             contract reference and this chip unmounts.
  *
- * VENDOR payments (→ VendorHub) keep the single-tap nudge — the vendor side has no
- * one-off path, so there's no binary/segment to offer.
+ * VENDOR payments (→ VendorHub) use the same hover menu: "Link to a PO" / "Upload a bill".
  *
  * NOTE on persistence: fileAsLabour writes nothing today (no "untracked" flag in the
  * schema), so the one-time selection is session-local — the 'chosen' state IS the
@@ -26,7 +25,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Hammer, Package, ChevronRight, Check, Link2, Camera } from 'lucide-react';
 import { V, font } from './ledgerTokens';
 import type { TrackTxn } from '../../lib/trackingApi';
-import { clearOneTime, getTrackingOptions } from '../../lib/trackingApi';
+import { clearOneTime, getTrackingOptions, fileAsLabour } from '../../lib/trackingApi';
 import { getTxnAllocations } from '../../lib/vendorTrackingApi';
 import { ContractHub, CONTRACT_HUB_CSS } from './ContractHub';
 import { VENDOR_HUB_CSS } from './VendorHub';
@@ -88,7 +87,6 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
     const bottom = Math.max(M, window.innerHeight - r.top + 6);
     return { bottom, ...side, maxH: Math.max(160, window.innerHeight - bottom - M) };
   };
-  const toggle = () => { if (!open) { const p = computePos(); if (p) setPos(p); } setOpen((o) => !o); };
   const close = () => { setOpen(false); setBillFile(null); };
 
   // Vendor chip: a small floating menu (Link to PO / Upload bill) shown above the chip on hover/tap —
@@ -124,6 +122,18 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
   // "Link to PO": skip the upload — open the sheet straight to the vendor's orders.
   const linkToPO = () => { closeMenu(); setAttachMode('link'); setBillFile(null); const p = computePos(); if (p) setPos(p); setOpen(true); };
 
+  // WORKER menu — "Labour payment": file directly (the one-time mechanism), no panel. The chip
+  // swaps to the resolved "✓ Labour payment". "Link to a contract": open the ContractHub.
+  const fileLabourNow = async () => {
+    closeMenu();
+    if (busy) return;
+    setBusy(true);
+    try { await fileAsLabour(txn); setChosenOneTime(true); onLinked(); }
+    catch { /* leave the nudge in place if it failed */ }
+    finally { setBusy(false); }
+  };
+  const openHub = () => { closeMenu(); const p = computePos(); if (p) setPos(p); setOpen(true); };
+
   // Keep the panel attached to the chip while the page scrolls; close if it leaves view.
   useEffect(() => {
     if (!open) return;
@@ -152,7 +162,7 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
   const isWO = kind === 'WO';
   const Icon = isWO ? Hammer : Package;
   const linkLabel = isWO ? 'Link to a contract' : 'Attach bill';
-  const oneLabel = isWO ? 'One-time payment' : 'Direct purchase';
+  const oneLabel = isWO ? 'Labour payment' : 'Direct purchase';
 
   const gate = chosenOneTime ? (
     // ── RESOLVED — uniform with the linked AnchorChip (calm grey, same size/shape).
@@ -177,13 +187,15 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
         <button
           ref={(el) => { btnRef.current = el; }}
           type="button"
-          onClick={(e) => { e.stopPropagation(); toggle(); }}
+          onMouseEnter={openMenu}
+          onMouseLeave={scheduleCloseMenu}
+          onClick={(e) => { e.stopPropagation(); openMenu(); }}
           className="db-link-btn inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg"
           style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.terraDeep, fontWeight: 600 }}
         >
           <Icon size={12} className="shrink-0" style={{ color: V.terra }} />
           <span>{linkLabel}</span>
-          <ChevronRight size={12} className="shrink-0" style={{ opacity: 0.7 }} />
+          <ChevronRight size={12} className="shrink-0" style={{ opacity: 0.7, transform: 'rotate(90deg)' }} />
         </button>
       ) : (
         <button
@@ -219,24 +231,49 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
           onClick={(e) => e.stopPropagation()}
           style={{ position: 'fixed', top: menuPos.top, bottom: menuPos.bottom, left: menuPos.left, zIndex: 9999, width: 228, display: 'flex', flexDirection: 'column', gap: 2, padding: 5, borderRadius: 14, background: V.surface, border: `1px solid ${V.line}`, boxShadow: '0 16px 40px -12px rgba(30,26,21,0.28)', ...font }}
         >
-          <button type="button" onClick={(e) => { e.stopPropagation(); linkToPO(); }}
-            className="db-menu-row w-full flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] text-left"
-            style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}>
-            <span className="shrink-0 inline-flex items-center justify-center rounded-lg" style={{ width: 28, height: 28, background: V.terraWash }}><Link2 size={14} style={{ color: V.terra }} /></span>
-            <span className="min-w-0">
-              <span className="block text-[12.5px] font-semibold leading-tight" style={{ color: V.ink }}>Link this payment to a PO</span>
-              <span className="block text-[10.5px] leading-tight mt-0.5" style={{ color: V.faint }}>Pick an existing order — no bill</span>
-            </span>
-          </button>
-          <button type="button" onClick={(e) => { e.stopPropagation(); openBillPicker(); }}
-            className="db-menu-row w-full flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] text-left"
-            style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}>
-            <span className="shrink-0 inline-flex items-center justify-center rounded-lg" style={{ width: 28, height: 28, background: V.terraWash }}><Camera size={14} style={{ color: V.terra }} /></span>
-            <span className="min-w-0">
-              <span className="block text-[12.5px] font-semibold leading-tight" style={{ color: V.ink }}>Upload a new bill</span>
-              <span className="block text-[10.5px] leading-tight mt-0.5" style={{ color: V.faint }}>Read it & attach or create a PO</span>
-            </span>
-          </button>
+          {isWO ? (
+            <>
+              <button type="button" disabled={busy} onClick={(e) => { e.stopPropagation(); void fileLabourNow(); }}
+                className="db-menu-row w-full flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] text-left disabled:opacity-60"
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}>
+                <span className="shrink-0 inline-flex items-center justify-center rounded-lg" style={{ width: 28, height: 28, background: V.terraWash }}><Hammer size={14} style={{ color: V.terra }} /></span>
+                <span className="min-w-0">
+                  <span className="block text-[12.5px] font-semibold leading-tight" style={{ color: V.ink }}>Labour payment</span>
+                  <span className="block text-[10.5px] leading-tight mt-0.5" style={{ color: V.faint }}>Standalone payout — nothing to track</span>
+                </span>
+              </button>
+              <button type="button" onClick={(e) => { e.stopPropagation(); openHub(); }}
+                className="db-menu-row w-full flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] text-left"
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}>
+                <span className="shrink-0 inline-flex items-center justify-center rounded-lg" style={{ width: 28, height: 28, background: V.terraWash }}><Link2 size={14} style={{ color: V.terra }} /></span>
+                <span className="min-w-0">
+                  <span className="block text-[12.5px] font-semibold leading-tight" style={{ color: V.ink }}>Link it to a contract</span>
+                  <span className="block text-[10.5px] leading-tight mt-0.5" style={{ color: V.faint }}>Pick an open one or start new</span>
+                </span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" onClick={(e) => { e.stopPropagation(); linkToPO(); }}
+                className="db-menu-row w-full flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] text-left"
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}>
+                <span className="shrink-0 inline-flex items-center justify-center rounded-lg" style={{ width: 28, height: 28, background: V.terraWash }}><Link2 size={14} style={{ color: V.terra }} /></span>
+                <span className="min-w-0">
+                  <span className="block text-[12.5px] font-semibold leading-tight" style={{ color: V.ink }}>Link this payment to a PO</span>
+                  <span className="block text-[10.5px] leading-tight mt-0.5" style={{ color: V.faint }}>Pick an existing order — no bill</span>
+                </span>
+              </button>
+              <button type="button" onClick={(e) => { e.stopPropagation(); openBillPicker(); }}
+                className="db-menu-row w-full flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] text-left"
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}>
+                <span className="shrink-0 inline-flex items-center justify-center rounded-lg" style={{ width: 28, height: 28, background: V.terraWash }}><Camera size={14} style={{ color: V.terra }} /></span>
+                <span className="min-w-0">
+                  <span className="block text-[12.5px] font-semibold leading-tight" style={{ color: V.ink }}>Upload a new bill</span>
+                  <span className="block text-[10.5px] leading-tight mt-0.5" style={{ color: V.faint }}>Read it & attach or create a PO</span>
+                </span>
+              </button>
+            </>
+          )}
         </div>,
         document.body,
       )}

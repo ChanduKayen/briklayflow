@@ -65,6 +65,24 @@ export const TEMPLATES = {
     buttonUrlParams: [{ index: 0, name: "po_id" }],
   },
 
+  // Sends a placed PO to its VENDOR, with the signed PO PDF as the document header. Proactive
+  // (out-of-24h-window) → must be a template. Approved copy:
+  //   "Hello {{1}},\n\n*{{2}}* has placed Purchase Order {{3}} with you.\n\nThe signed PO PDF is
+  //    attached. Kindly proceed with the order and dispatch as per the delivery schedule in the PO."
+  //   {{1}} = vendor name · {{2}} = builder (sender) name · {{3}} = PO number.
+  // Header is a DYNAMIC document — the PO PDF link is a per-send param (headerDocument). ⚠ Register
+  // in Meta (exact name/language/components) before enabling; `language` assumed "en" — correct it
+  // if Meta registered another code.
+  purchase_order: {
+    name: "purchase_order",
+    // Meta registered this in English (US) → "en_US" (a plain "en" gives #132001 "Template name
+    // does not exist in the translation"). If the template's language chip in WhatsApp Manager
+    // reads just "English", change this back to "en".
+    language: "en_US",
+    header: { kind: "document", dynamic: true },
+    bodyParams: ["vendor_name", "builder_name", "po_number"],
+  },
+
   // Block B chase templates — APPROVED in Meta (user-supplied specs). ⚠ `language` is
   // assumed "en"; correct it if Meta registered another code (a mismatch → #132012).
   //

@@ -21,10 +21,11 @@ const WA_TOKEN = Deno.env.get("WA_PERMANENT_TOKEN") ?? Deno.env.get("WA_ACCESS_T
 export interface SendTemplateParams {
   // body var values keyed by the names in bodyParams, e.g. { name: "Chandu" }
   [k: string]: string | undefined;
-  headerImage?: string;     // required if header.kind is image & dynamic
-  headerVideo?: string;     // required if header.kind is video & dynamic
-  headerDocument?: string;  // required if header.kind is document & dynamic
-  headerText?: string;      // required if header.kind is text
+  headerImage?: string;         // required if header.kind is image & dynamic
+  headerVideo?: string;         // required if header.kind is video & dynamic
+  headerDocument?: string;      // required if header.kind is document & dynamic
+  headerDocumentFilename?: string; // optional: the name WhatsApp shows for a document header
+  headerText?: string;          // required if header.kind is text
 }
 
 function buildComponents(def: TemplateDef, params: SendTemplateParams) {
@@ -42,9 +43,13 @@ function buildComponents(def: TemplateDef, params: SendTemplateParams) {
     const field = map[h.kind];
     const url = h.dynamic ? params[field] : h.url;
     if (!url) throw new Error(`Template "${def.name}" needs ${h.dynamic ? field : "a fixed header url"}`);
+    // A document header may carry a filename so WhatsApp shows a clean name (e.g. "PO-1234.pdf")
+    // instead of the raw URL tail.
+    const media: Record<string, unknown> = { link: url };
+    if (h.kind === "document" && params.headerDocumentFilename) media.filename = params.headerDocumentFilename;
     components.push({
       type: "header",
-      parameters: [{ type: h.kind, [h.kind]: { link: url } }],
+      parameters: [{ type: h.kind, [h.kind]: media }],
     });
   }
   // h.kind === "none" → no header component

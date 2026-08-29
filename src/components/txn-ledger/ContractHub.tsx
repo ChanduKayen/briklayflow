@@ -17,7 +17,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useOrgId } from '../../lib/auth/AuthProvider';
 import { V, font, serif, nums } from './ledgerTokens';
 import {
-  getTrackingOptions, attachToContract, createContract, markDailyWage, fileAsLabour, splitAcrossPhases,
+  getTrackingOptions, attachToContract, createContract, markDailyWage, splitAcrossPhases,
   generateContractTitle, type OpenContract, type ContractPhase, type TrackTxn,
 } from '../../lib/trackingApi';
 
@@ -63,8 +63,7 @@ function samplePlaceholder(note: string | null, trade: string | null, projectNam
 
 type Confirm =
   | { type: 'contract'; title: string; sub: string; total: number; oldBal: number; newBal: number; pay: number }
-  | { type: 'nmr'; sub: string; rate: number; days: number; pay: number }
-  | { type: 'oneoff'; sub: string };
+  | { type: 'nmr'; sub: string; rate: number; days: number; pay: number };
 
 const Check = (
   <svg viewBox="0 0 24 24" className="ch-check"><path d="M5 13l4 4L19 7" /></svg>
@@ -104,7 +103,6 @@ export function ContractHub({ txn, onClose, onLinked }: { txn: TrackTxn; onClose
   // (the likely choice) is the focus; tapping "Create a new contract" reveals it.
   const [creatingNew, setCreatingNew] = useState(false);
 
-  const showDesc = cval.replace(/[^0-9]/g, '').length > 0;
   const contractValue = parseInt(cval.replace(/[^0-9]/g, ''), 10) || 0;
   const allocated = phaseRows.reduce((s, r) => s + (parseInt(r.amount.replace(/[^0-9]/g, ''), 10) || 0), 0);
   const overAllocated = phasesOpen && contractValue > 0 && allocated > contractValue;
@@ -207,14 +205,6 @@ export function ContractHub({ txn, onClose, onLinked }: { txn: TrackTxn; onClose
     } catch (e) { fail(e); }
   };
 
-  const addOneoff = async () => {
-    if (busy) return; setBusy(true); setErr(null);
-    try {
-      await fileAsLabour(txn);
-      setConfirm({ type: 'oneoff', sub: `${payee}${projSuffix}` });
-    } catch (e) { fail(e); }
-  };
-
   const done = () => { onLinked(); onClose(); };
 
   if (confirm) return <ConfirmView p={confirm} onDone={done} />;
@@ -236,21 +226,29 @@ export function ContractHub({ txn, onClose, onLinked }: { txn: TrackTxn; onClose
   // New-contract form: agreed value → reveals description, optional phases, Track balance.
   // Gated behind "Create a new contract" when open contracts exist; shown directly when none.
   const newContractForm = (
-    <>
+    <div className="ch-newform">
+      {/* A clear, self-announcing form — every field visible at once so it reads as
+          "you are creating a contract", not a bare amount box. */}
+      <div className="ch-nfhead">
+        <span className="ch-nfh1">Create a new contract</span>
+        <span className="ch-nfh2">with {payee}{projectName ? ` · ${projectName}` : ''}</span>
+      </div>
+
       <div className="ch-optrow">
-        <span className="ch-orl">New contract</span>
+        <span className="ch-orl">Agreed value</span>
         <span className="ch-crow">
           <span className="ch-cu">₹</span>
           <input
             inputMode="numeric"
-            placeholder="agreed value e.g. 8,00,000"
+            placeholder="e.g. 8,00,000"
             value={cval}
             onChange={(e) => setCval(e.target.value.replace(/[^0-9,]/g, ''))}
             style={{ ...nums }}
           />
         </span>
       </div>
-      <div className={`ch-newcx${showDesc ? ' ch-newcx--show' : ''}`}>
+
+      <div className="ch-nfdesc">
         <div className="ch-ndlab">What's this contract for? <span>name it so the team recognises it later</span></div>
         <textarea
           className="ch-ndesc"
@@ -293,13 +291,13 @@ export function ContractHub({ txn, onClose, onLinked }: { txn: TrackTxn; onClose
           </button>
         )}
 
-        <button type="button" className="ch-cbtn ch-ndbtn" disabled={busy || overAllocated} onClick={addNew}>{naming ? 'Naming your contract…' : 'Link payment'}</button>
+        <button type="button" className="ch-cbtn ch-ndbtn" disabled={busy || overAllocated} onClick={addNew}>{naming ? 'Naming your contract…' : 'Create contract'}</button>
         {overAllocated && <span className="ch-phhint">Phases exceed the contract by {rupee(allocated - contractValue)}</span>}
         {!phasesOpen && contractValue > 0 && amount > contractValue && (
           <span className="ch-phhint">This {rupee(amount)} payment is {rupee(amount - contractValue)} more than the contract value.</span>
         )}
       </div>
-    </>
+    </div>
   );
 
   return (
@@ -310,18 +308,9 @@ export function ContractHub({ txn, onClose, onLinked }: { txn: TrackTxn; onClose
         Daily labour doesn't need this.
       </div>
 
-      {/* THE ONE-TIME EXIT, AT THE HEAD. Moved out of the payment ROW (it made every worker line a
-          two-button fork) and off the bottom of this panel (buried under the labour flow). It sits up
-          top now, as one calm, complete option: a standalone payout that is simply not a contract. */}
-      <button type="button" className="ch-onetime" disabled={busy} onClick={addOneoff}>
-        <span className="ch-ot-ic">₹</span>
-        <span className="ch-ot-tx">
-          <span className="ch-ot-1">One-time payment</span>
-          <span className="ch-ot-2">A standalone payout — no contract, nothing to track</span>
-        </span>
-        <span className="ch-ot-arr">→</span>
-      </button>
-
+      {/* The one-time / "Labour payment" exit now lives in the row's hover menu (alongside "Link to a
+          contract"), so this panel is single-purpose: existing contracts + create. Daily-wage stays
+          below as the "not a contract" exit. */}
       {isLoading ? (
         <p className="ch-help" style={{ marginBottom: 0 }}>Looking for open contracts…</p>
       ) : openContracts.length > 0 ? (
@@ -369,11 +358,16 @@ export function ContractHub({ txn, onClose, onLinked }: { txn: TrackTxn; onClose
         </>
       ) : (
         <>
-          {/* No open contracts for this payee/site — say so, then create as usual */}
+          {/* No open contracts for this payee/site — say so, then offer the create BUTTON first
+              (not the bare amount box), so starting a contract is a deliberate tap. */}
           <p className="ch-empty">
             No open contracts with <b>{payee}</b>{projectName ? <> at <b>{projectName}</b></> : null} yet.
           </p>
-          {newContractForm}
+          {creatingNew ? newContractForm : (
+            <button type="button" className="ch-newbtn" onClick={() => setCreatingNew(true)}>
+              <span className="ch-newbtn-plus">+</span> Create a new contract
+            </button>
+          )}
         </>
       )}
 
@@ -440,14 +434,6 @@ function ConfirmView({ p, onDone }: { p: Confirm; onDone: () => void }) {
   return (
     <div className="ch-confirm" style={{ ...font }}>
       <div className="ch-seal">{Check}</div>
-
-      {p.type === 'oneoff' && (
-        <>
-          <div className="ch-cf-title" style={{ ...serif }}>Filed as labour</div>
-          <div className="ch-cf-sub">{p.sub}</div>
-          <div className="ch-cf-foot">No tracking object — it just lands in the project's cost breakdown.</div>
-        </>
-      )}
 
       {p.type === 'nmr' && (
         <>
@@ -636,6 +622,11 @@ export const CONTRACT_HUB_CSS = `
 .ch-ghost:hover{background:${V.terraWash}}
 .ch-newcx{max-height:0;opacity:0;overflow:hidden;transform:translateY(-5px);transition:max-height .4s cubic-bezier(.22,1,.36,1),opacity .3s ease,transform .3s ease}
 .ch-newcx--show{max-height:1200px;opacity:1;transform:none;margin-top:13px}
+.ch-newform{animation:chCfIn .26s cubic-bezier(.22,1,.36,1)}
+.ch-nfhead{margin-bottom:15px}
+.ch-nfh1{display:block;font-size:15.5px;font-weight:600;color:${V.ink};letter-spacing:-.01em}
+.ch-nfh2{display:block;font-size:11.5px;color:${V.faint};margin-top:3px}
+.ch-nfdesc{margin-top:14px}
 .ch-ndlab{font-size:12px;font-weight:600;color:${V.ink};margin-bottom:9px}
 .ch-ndlab span{color:${V.faint};font-weight:400;font-size:11px}
 .ch-ndesc{width:100%;max-width:440px;border:1.5px solid ${V.line};border-radius:11px;padding:11px 13px;font-size:13px;line-height:1.5;font-weight:500;color:${V.ink};background:${V.surface};resize:vertical;outline:0;transition:.14s;display:block;font-family:inherit}

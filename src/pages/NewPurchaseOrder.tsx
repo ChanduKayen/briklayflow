@@ -941,7 +941,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('stakeholders')
-        .select('stakeholder_id, name, category, gstin, is_approved, type')
+        .select('stakeholder_id, name, category, gstin, is_approved, type, contact')
         .in('type', ['Vendor'])
         .order('name');
       if (error) throw error;
@@ -4243,6 +4243,8 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
         open={uiCeremonyOpen}
         poId={saveMutation.data}
         vendorName={selectedVendor?.name}
+        vendorId={selectedVendor?.stakeholder_id}
+        vendorContact={selectedVendor?.contact}
         projectName={selectedProjectObj?.name}
         totalLabel={`₹${grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
         onLeave={() => navigate(returnTo)}
