@@ -272,7 +272,8 @@ function useOpenRfqs(projectId?: string) {
   return useQuery({
     queryKey: ['open_rfqs', projectId ?? 'all'],
     queryFn: async (): Promise<RfqRow[]> => {
-      let q = supabase.from('rfqs').select('rfq_id, created_at, items, status, projects(name)').eq('status', 'open').order('created_at', { ascending: false });
+      // NB: rfqs has no FK to projects, so we can't embed projects(name) — fetch names separately.
+      let q = supabase.from('rfqs').select('rfq_id, created_at, items, status, project_id').eq('status', 'open').order('created_at', { ascending: false });
       if (projectId) q = q.eq('project_id', projectId);
       const { data, error } = await q;
       if (error) throw error;
@@ -287,10 +288,16 @@ function useOpenRfqs(projectId?: string) {
           if (r.status === 'quoted') { c.replied++; const t = Number(r.quoted_total) || 0; if (t > 0 && (c.best == null || t < c.best)) c.best = t; }
         });
       }
+      const pids = [...new Set(rows.map((r) => r.project_id).filter(Boolean))];
+      const nameById: Record<string, string> = {};
+      if (pids.length) {
+        const { data: pj } = await supabase.from('projects').select('project_id, name').in('project_id', pids);
+        (pj ?? []).forEach((p: any) => { nameById[p.project_id] = p.name; });
+      }
       return rows.map((r) => {
         const names = ((r.items ?? []) as any[]).map((it) => it.item_name).filter(Boolean);
         const summary = names.length <= 2 ? names.join(', ') : `${names.slice(0, 2).join(', ')} +${names.length - 2}`;
-        return { rfq_id: r.rfq_id, created_at: r.created_at, site: r.projects?.name || '', summary, itemCount: (r.items ?? []).length, sent: agg[r.rfq_id]?.sent || 0, replied: agg[r.rfq_id]?.replied || 0, best: agg[r.rfq_id]?.best ?? null };
+        return { rfq_id: r.rfq_id, created_at: r.created_at, site: nameById[r.project_id] || '', summary, itemCount: (r.items ?? []).length, sent: agg[r.rfq_id]?.sent || 0, replied: agg[r.rfq_id]?.replied || 0, best: agg[r.rfq_id]?.best ?? null };
       });
     },
   });
