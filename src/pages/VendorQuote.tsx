@@ -135,8 +135,12 @@ export default function VendorQuote({ token }: { token: string }) {
 
   useEffect(() => {
     (async () => {
+      // A valid token is a UUID. A literal "{{1}}" (Static Meta button) or junk lands here.
+      if (!/^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i.test(token)) {
+        setErr('This quote link looks broken — please ask your contact to resend it.'); return;
+      }
       const { data: d, error } = await supabase.rpc('rfq_by_token', { p_token: token });
-      if (error) { setErr(error.message); return; }
+      if (error) { setErr('This link is no longer valid.'); return; }
       const r = d as RfqData;
       if (!r?.ok) { setErr(r?.error === 'not_found' ? 'This link is no longer valid.' : (r?.error || 'Could not load the enquiry.')); return; }
       const items = r.items ?? [];
