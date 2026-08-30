@@ -9,6 +9,22 @@ import { ImageLightbox } from './ImageLightbox';
 import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 import { searchPayees, rankPayeeName, PAYEE_SEARCH_FLOOR } from '../lib/payeeSearch';
 import { fileRoughEntry, fileRoughEntrySplit } from './day-book/fileEntry';
+import { GEN_HEADS, getCostCode } from '../lib/costCodes';
+
+// A general expense (an overhead with no party) matches the payee search the same
+// way NewTransaction does: normalise separators, then compacted-substring OR every
+// token in any order — so "hamali", "loading" and "load unload" all find the head.
+const normHead = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+function matchGenHeads(query: string): { code: string; name: string }[] {
+  const q = normHead(query);
+  if (!q) return [];
+  const compact = q.replace(/\s+/g, '');
+  const tokens = q.split(' ').filter(Boolean);
+  return GEN_HEADS.filter((h) => {
+    const n = normHead(h.name);
+    return n.replace(/\s+/g, '').includes(compact) || tokens.every((t) => n.includes(t));
+  }).map((h) => ({ code: h.code, name: h.name }));
+}
 
 // ── Walnut-ledger palette (mirrors NewTransaction.tsx) ──────────────────────────
 // Warm cream canvas, walnut ink, terracotta accent for money-out, sage for money-in.
@@ -442,15 +458,29 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
 
   const ai = entry.ai_extracted;
 
+  // A general expense is party-less — filed under a GEN-xx head. Seeded from the AI's
+  // category only when it already flagged a party-less GEN code, so an AI-classified
+  // overhead opens pre-selected in the "who" slot.
+  const initGenHead = (!ai.payee_id && String((ai as any).category_code || '').toUpperCase().startsWith('GEN'))
+    ? String((ai as any).category_code).toUpperCase() : '';
+  const initGenName = initGenHead ? (getCostCode(initGenHead)?.item.name || '') : '';
+
   // ── Field state ────────────────────────────────────────────────────────────
   const [payeeId, setPayeeId] = useState(ai.payee_id || '');
-  const [payeeName, setPayeeName] = useState(ai.payee_name || '');
-  const [payeeSearch, setPayeeSearch] = useState(ai.payee_name || ai.payee_raw || '');
+  const [payeeName, setPayeeName] = useState(initGenName || ai.payee_name || '');
+  const [payeeSearch, setPayeeSearch] = useState(initGenName || ai.payee_name || ai.payee_raw || '');
   const [showPayeeDrop, setShowPayeeDrop] = useState(false);
+  // When genHead is set this entry IS a general expense (payeeId stays empty); genName
+  // is the head's display name shown in the "who" slot.
+  const [genHead, setGenHead] = useState(initGenHead);
+  const [genName, setGenName] = useState(initGenName);
+  const isGeneral = !!genHead;
   // Payee resolution state machine (lifted here so the smart-CTA gap logic can read it):
   // A = confirmed match · B = matched LOW-confidence, needs confirm · C = searching/unmatched
-  // · confirmed = user explicitly chose. Payee is "resolved" only in A or confirmed.
+  // · confirmed = user explicitly chose. Payee is "resolved" only in A or confirmed. A general
+  // expense counts as confirmed the moment its head is chosen.
   const [payeeState, setPayeeState] = useState<PayeeState>(() => {
+    if (initGenHead) return 'confirmed';
     if (!ai.payee_id) return 'C';
     if (ai.payee_matched === true && ai.payee_confidence === 'LOW') return 'B';
     return 'A';
@@ -612,14 +642,15 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
   // THE REMARK IS NOT MANDATORY. Payee + site + amount is a complete transaction — who, where, how
   // much. The remark is a note ON it, and a ledger that refuses to record a payment because nobody
   // typed "cement" is a ledger arguing with its own owner.
-  const mandatoryFilled = !!payeeId && !!amount && Number(amount) > 0 && !!projectId;
-  // Filing is allowed either with a single project OR a valid split across sites.
-  const canFile = !!payeeId && splitTotal > 0 && (splitMode ? splitValid : !!projectId);
-  const missingPayee = !payeeId;
+  const mandatoryFilled = (isGeneral || !!payeeId) && !!amount && Number(amount) > 0 && !!projectId;
+  // Filing is allowed either with a single project OR a valid split across sites. A general
+  // expense needs no party — its head stands in for the payee.
+  const canFile = (isGeneral || !!payeeId) && splitTotal > 0 && (splitMode ? splitValid : !!projectId);
+  const missingPayee = !payeeId && !isGeneral;
   const missingAmount = !amount || Number(amount) <= 0;
   const missingDescription = !description.trim();
   const missingProject = !projectId;
-  const payeeUnmatched = !payeeId && !!(ai.payee_unmatched || ai.payee_name || ai.payee_raw);
+  const payeeUnmatched = !payeeId && !isGeneral && !!(ai.payee_unmatched || ai.payee_name || ai.payee_raw);
   const projectUnmatched = !projectId && !!ai.project_unmatched;
 
   // ── Auto-focus / auto-advance (copied from NewTransaction) ──────────────────
@@ -637,7 +668,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
 
   // A field counts as RESOLVED, not merely filled — payee is resolved only once confirmed.
   const amountResolved = amount !== '' && Number(amount) > 0;
-  const payeeResolved = !!payeeId && (payeeState === 'A' || payeeState === 'confirmed');
+  const payeeResolved = isGeneral || (!!payeeId && (payeeState === 'A' || payeeState === 'confirmed'));
   const descriptionResolved = !!description.trim();
   // In split mode "project" is resolved once the split is valid (sites chosen, amounts sum to total).
   const projectResolved = splitMode ? splitValid : !!projectId;
@@ -709,9 +740,12 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
       const projectName = projects.find((p) => p.project_id === projectId)?.name ?? ai.project_name ?? null;
       const nextAi = {
         ...ai,
-        payee_id: payeeId || null, payee_name: payeeName || null,
+        payee_id: isGeneral ? null : (payeeId || null),
+        payee_name: isGeneral ? null : (payeeName || null),
         amount: Number(amount), project_id: projectId || null, project_name: projectName,
         description: description.trim(), mode,
+        // a general expense carries its GEN head as the category (no linked party)
+        ...(isGeneral ? { category_code: genHead } : {}),
         // provenance for a split file: the sites this capture was booked across
         ...(splitMode ? { split_project_ids: splits.map((s) => s.projectId) } : {}),
       };
@@ -721,12 +755,13 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
       if (splitMode) {
         await fileRoughEntrySplit(
           updatedEntry as RoughEntry, orgId ?? '',
-          { payeeId, amount: Number(amount), description: description.trim() },
+          { payeeId, amount: Number(amount), description: description.trim(), generalExpense: isGeneral, generalExpenseHead: genHead || undefined },
           splits.map((s) => ({ projectId: s.projectId, amount: Number(s.amount) })),
         );
       } else {
         await fileRoughEntry(updatedEntry as RoughEntry, orgId ?? '', {
           payeeId, projectId, amount: Number(amount), description: description.trim(),
+          generalExpense: isGeneral, generalExpenseHead: genHead || undefined,
         });
       }
 
@@ -744,7 +779,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
       setApproval('ask');
       setPosting(false);
     }
-  }, [posting, canFile, splitMode, splits, projects, projectId, ai, payeeId, payeeName, amount, description, mode, entry, orgId, qc, onUpdated, onClose, showSnackbar]);
+  }, [posting, canFile, splitMode, splits, projects, projectId, ai, payeeId, payeeName, isGeneral, genHead, amount, description, mode, entry, orgId, qc, onUpdated, onClose, showSnackbar]);
 
   /**
    * "THEN CONFIRM AUTO." When adding the payee was the LAST thing standing between this payment and
@@ -790,6 +825,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
     payeeId, payeeName, payeeSearch,
     setPayeeId, setPayeeName, setPayeeSearch,
     showPayeeDrop, setShowPayeeDrop,
+    genHead, genName, setGenHead, setGenName,
     stakeholders, filteredPayees,
     amount, setAmount,
     description, setDescription,
@@ -883,6 +919,7 @@ interface ContentProps {
   payeeId: string; payeeName: string; payeeSearch: string;
   setPayeeId: (v: string) => void; setPayeeName: (v: string) => void; setPayeeSearch: (v: string) => void;
   showPayeeDrop: boolean; setShowPayeeDrop: (v: boolean) => void;
+  genHead: string; genName: string; setGenHead: (v: string) => void; setGenName: (v: string) => void;
   stakeholders: any[];
   filteredPayees: any[];
   amount: number | ''; setAmount: (v: number | '') => void;
@@ -913,7 +950,9 @@ interface ContentProps {
 function PopupContents({
   entry, sm, fmtTime,
   payeeId, payeeName, payeeSearch, setPayeeId, setPayeeName, setPayeeSearch,
-  showPayeeDrop, setShowPayeeDrop, stakeholders,
+  showPayeeDrop, setShowPayeeDrop,
+  genHead, genName, setGenHead, setGenName,
+  stakeholders,
   amount, setAmount,
   description, setDescription,
   projectId, setProjectId, projectRef, projects,
@@ -951,6 +990,7 @@ function PopupContents({
   }, []);
 
   const selectPayee = (id: string, name: string) => {
+    setGenHead(''); setGenName('');   // choosing a party clears any general-expense head
     setPayeeId(id);
     setPayeeName(name);
     setPayeeSearch(name);
@@ -960,6 +1000,22 @@ function PopupContents({
     // Auto-advance to the next still-empty mandatory field (cursor active on mobile).
     advanceAfter('payee');
   };
+
+  // Pick a general-expense head (overhead, no party): the head stands in for the payee.
+  const pickGeneralHead = (code: string, name: string) => {
+    setGenHead(code);
+    setGenName(name);
+    setPayeeId('');
+    setPayeeName(name);
+    setPayeeSearch(name);
+    setShowPayeeDrop(false);
+    setPayeeState('confirmed');
+    setShowCreateStkForm(false);
+    advanceAfter('payee');
+  };
+
+  // Overhead heads matching what the owner typed, shown BELOW the party matches.
+  const genMatches = matchGenHeads(payeeSearch);
 
   // Payee search list. TWO different questions, and they were tangled: with NO typed text the ordering
   // question is "who did the AI hear?" (sort by similarity to payee_raw); the moment he types, the question
@@ -1164,21 +1220,24 @@ function PopupContents({
             <div className="flex items-center justify-between py-2 px-3 rounded-xl" style={{ border: `1px solid ${VOICE.innLine}`, background: VOICE.innWash }}>
               <div className="flex items-center gap-2 min-w-0">
                 <div className="min-w-0">
-                  <span className="text-[14px] font-semibold" style={{ color: VOICE.user }}>{payeeName}</span>
-                  {(() => {
-                    const s = stakeholders.find((x: any) => x.stakeholder_id === payeeId);
-                    return s?.category
-                      ? <span className="text-[11px] ml-1.5" style={{ color: VOICE.systemFaint }}>· {s.category}</span>
-                      : null;
-                  })()}
+                  <span className="text-[14px] font-semibold" style={{ color: VOICE.user }}>{genHead ? genName : payeeName}</span>
+                  {genHead
+                    ? <span className="text-[11px] ml-1.5" style={{ color: VOICE.systemFaint }}>· overhead, no party</span>
+                    : (() => {
+                        const s = stakeholders.find((x: any) => x.stakeholder_id === payeeId);
+                        return s?.category
+                          ? <span className="text-[11px] ml-1.5" style={{ color: VOICE.systemFaint }}>· {s.category}</span>
+                          : null;
+                      })()}
                 </div>
               </div>
               <button type="button"
                 onClick={() => {
+                  setGenHead(''); setGenName('');
                   setPayeeState('C');
                   setPayeeId('');
                   setPayeeName('');
-                  setPayeeSearch(ai.payee_raw || '');
+                  setPayeeSearch(genHead ? '' : (ai.payee_raw || ''));
                   setTimeout(() => setShowPayeeDrop(true), 50);
                 }}
                 className="text-[11px] hover:underline shrink-0 ml-2" style={{ color: VOICE.accentDeep }}>
@@ -1266,10 +1325,11 @@ function PopupContents({
                     onChange={(e) => {
                       setPayeeSearch(e.target.value);
                       if (payeeId) { setPayeeId(''); setPayeeName(''); }
+                      if (genHead) { setGenHead(''); setGenName(''); }
                       setShowPayeeDrop(true);
                     }}
                     onFocus={() => setShowPayeeDrop(true)}
-                    placeholder="Search name…"
+                    placeholder="Search a name or an expense…"
                     className="w-full text-[13px] px-2.5 py-2 pr-8 rounded-lg outline-none transition-colors"
                     style={fieldStyle(missingPayee ? 'missing' : 'idle')}
                     autoComplete="off"
@@ -1347,6 +1407,26 @@ function PopupContents({
                         </button>
                       );
                     })}
+
+                    {/* ── General-expense heads (overheads) — shown BELOW the party matches.
+                         An overhead has no party; picking a head files the entry party-less
+                         under that GEN code, mirroring the New Transaction search. ── */}
+                    {genMatches.length > 0 && (
+                      <>
+                        <div className="px-3 pt-2 pb-1 text-[9px] font-bold uppercase tracking-widest" style={{ color: VOICE.systemFaint, borderTop: `1px solid ${VOICE.line}` }}>General expense · overhead</div>
+                        {genMatches.map((h) => (
+                          <button key={h.code} type="button"
+                            onMouseDown={(e) => { e.preventDefault(); pickGeneralHead(h.code, h.name); }}
+                            className="w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-black/[0.025]"
+                            style={{ borderBottom: `1px solid ${VOICE.line}` }}
+                          >
+                            <span className="material-symbols-outlined text-[15px] shrink-0" style={{ color: VOICE.systemFaint }}>receipt_long</span>
+                            <span className="flex-1 min-w-0 text-[13px] font-medium truncate" style={{ color: VOICE.user }}>{h.name}</span>
+                            <span className="text-[10px] font-mono shrink-0" style={{ color: VOICE.faint }}>{h.code}</span>
+                          </button>
+                        ))}
+                      </>
+                    )}
 
                     {/* ── Subtle "add" footer — only when matches exist (the hero covers the empty case) ── */}
                     {hasMatches && (
