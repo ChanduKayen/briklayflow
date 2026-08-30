@@ -5,6 +5,8 @@
  * TRANSACTIONS_IMPLEMENTATION_BRIEF.md.
  */
 
+import { getCostCode } from './costCodes';
+
 export type TxnDirection = 'in' | 'out';
 
 /**
@@ -51,13 +53,25 @@ export function isGeneralExpense(txn: any): boolean {
 }
 
 /**
+ * The specific general-expense head for a txn, by its GEN-xx category — e.g.
+ * "Loading & unloading (hamali)" or "Transport & logistics". We surface the KIND
+ * of expense rather than the generic bucket. Falls back to "General expense" only
+ * when the code is missing/unknown (and treats the GEN-99 catch-all as generic too).
+ */
+export function generalExpenseLabel(txn: any): string {
+  const code = String(txn?.category ?? '').toUpperCase();
+  if (!code || code === 'GEN-99') return 'General expense';
+  return getCostCode(code)?.item.name ?? 'General expense';
+}
+
+/**
  * The label for the "payee" slot. Linked party -> its name. General expense ->
- * "General expense" (the description is shown as the identifier alongside). A NULL
- * stakeholder that isn't a general expense -> the party was removed.
+ * its specific head (e.g. "Loading & unloading (hamali)"). A NULL stakeholder that
+ * isn't a general expense -> the party was removed.
  */
 export function payeeLabel(txn: any): string {
   if (txn?.stakeholders?.name) return txn.stakeholders.name;
-  if (!txn?.stakeholder_id) return isGeneralExpense(txn) ? 'General expense' : '(removed contact)';
+  if (!txn?.stakeholder_id) return isGeneralExpense(txn) ? generalExpenseLabel(txn) : '(removed contact)';
   return 'Unknown';
 }
 

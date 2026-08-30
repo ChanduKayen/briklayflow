@@ -3,7 +3,7 @@ import { useParams, useNavigate, useSearchParams, useLocation } from 'react-rout
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { Loader2 } from 'lucide-react';
-import { isGeneralExpense } from '../lib/transactions';
+import { isGeneralExpense, generalExpenseLabel } from '../lib/transactions';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { usePeek } from '../context/PeekContextCore';
@@ -600,7 +600,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
   // ── Redesigned-page derivations ──
   const backTo = navState.backTo || (navState.from === 'project' && navState.projectId ? `/projects/${navState.projectId}/transactions` : '/ledger');
   const backLabel = navState.backLabel || (navState.from === 'project' ? 'Transactions' : 'Ledger');
-  const payeeName: string = txn.stakeholders?.name || (isGeneralExpense(txn) ? ((txn as any).ai_flag_data?.general_payee || 'General expense') : 'Unknown');
+  const payeeName: string = txn.stakeholders?.name || (isGeneralExpense(txn) ? ((txn as any).ai_flag_data?.general_payee || generalExpenseLabel(txn)) : 'Unknown');
   const payeeType: string = txn.stakeholders?.type || '';
   const payeeCategory: string = txn.stakeholders?.category || '';
   const initials = (payeeName.split(/\s+/).map((w: string) => w[0]).filter(Boolean).slice(0, 2).join('') || '—').toUpperCase();
@@ -675,7 +675,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
                   <div className="who">
                     <span className="av">{initials}</span>
                     {txn.stakeholder_id ? <a onClick={() => setShowStakeholderDrawer(true)}>{payeeName}</a> : <b>{payeeName}</b>}
-                    <small>{[payeeType, payeeCategory].filter(Boolean).join(' · ') || (isGeneralExpense(txn) ? 'General expense · no linked party' : '—')}</small>
+                    <small>{[payeeType, payeeCategory].filter(Boolean).join(' · ') || (isGeneralExpense(txn) ? 'Overhead · no linked party' : '—')}</small>
                   </div>
                 </td>
                 <th>Project</th>

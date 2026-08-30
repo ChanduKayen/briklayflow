@@ -18,7 +18,7 @@ import { ShortcutTicker } from '../components/ShortcutTicker';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { PageSkeleton } from '../components/SkeletonLoader';
 import { useQueryGate } from '../components/QueryGate';
-import { deriveDirection, isNotLinked, resolveAnchor, isGeneralExpense, payeeLabel, type TxnAnchor, type TxnDirection } from '../lib/transactions';
+import { deriveDirection, isNotLinked, resolveAnchor, isGeneralExpense, generalExpenseLabel, payeeLabel, type TxnAnchor, type TxnDirection } from '../lib/transactions';
 import { V, font, serif, nums, terraGrad } from '../components/txn-ledger/ledgerTokens';
 import { DirMedallion, Amount, AnchorChip, FilterChip, FlowBar } from '../components/txn-ledger/LedgerAtoms';
 import { TrackChip, TRACK_CHIP_CSS } from '../components/txn-ledger/TrackChip';
@@ -1276,12 +1276,14 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                       ? resolveAnchor(txn, null)
                       : isNotLinked(txn) ? null : resolveAnchor(txn, primaryAlloc);
                     const genExp = isGeneralExpense(txn);
+                    const genLabel = genExp ? generalExpenseLabel(txn) : '';
                     const projName = (txn.txn_allocations || [])[0]?.projects?.name || null;
                     const trade = txn.stakeholders?.category || null;
                     // Context = the payee's discipline/trade + what the money was for
-                    // (description) — not the "Worker/Vendor" type label. General expense
-                    // stays party-less (its description is already the bold line).
-                    const ctxParts = genExp ? ['General expense'] : [trade, txn.remarks];
+                    // (description) — not the "Worker/Vendor" type label. A general expense
+                    // leads with its KIND (the GEN head) on the bold line, so the context
+                    // carries its free-text description.
+                    const ctxParts = genExp ? [txn.remarks] : [trade, txn.remarks];
                     if (!(filterProject.length === 1) && projName) ctxParts.push(projName);
                     const context = ctxParts.filter(Boolean).join(' · ');
                     const proofUrl = txn.bill_doc_url || txn.proof_document_url || null;
@@ -1303,7 +1305,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                     //  · otherwise -> the existing AnchorChip (linked ref, or default)
                     const anchorNode: ReactNode =
                       genExp
-                        ? <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md" style={{ background: V.field, color: V.inkSoft, ...font }}><span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: V.faint }} />General expense <span style={{ color: V.faint }}>· overhead</span></span>
+                        ? <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md" style={{ background: V.field, color: V.inkSoft, ...font }}><span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: V.faint }} />Overhead <span style={{ color: V.faint }}>· no party</span></span>
                         : (anchor === null && dir === 'out' && txn.stakeholder_id && (txn.txn_allocations || []).length > 0 && txn.status !== 'Voided')
                           ? <TrackChip txn={txn} onLinked={() => { qc.invalidateQueries({ queryKey: ['ledger'] }); }} />
                           : undefined;
@@ -1315,7 +1317,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                       >
                       <EntryRow
                         dir={dir}
-                        payee={genExp ? ((txn.remarks || '').trim() || 'General expense') : (txn.stakeholders?.name || 'Unknown')}
+                        payee={genExp ? genLabel : (txn.stakeholders?.name || 'Unknown')}
                         stakeholderId={genExp ? null : (txn.stakeholder_id ?? null)}
                         onPayeeClick={() => { if (txn.stakeholder_id) { setDrawerProject(txn.stakeholder_id === deepLinkStk ? deepLinkProject : null); setDrawerStk(txn.stakeholder_id); } }}
                         context={context}
