@@ -54,6 +54,7 @@ const TransactionDetail = lazy(() => import('./pages/TransactionDetail'));
 const PurchaseOrders = lazy(() => import('./pages/PurchaseOrders'));
 const NewPurchaseOrder = lazy(() => import('./pages/NewPurchaseOrder'));
 const PurchaseOrderDetail = lazy(() => import('./pages/PurchaseOrderDetail'));
+const RfqCompare = lazy(() => import('./pages/RfqCompare'));
 const Ledger = lazy(() => import('./pages/Ledger'));
 const NewTransaction = lazy(() => import('./pages/NewTransaction'));
 const ImportTransactions = lazy(() => import('./pages/ImportTransactions'));
@@ -75,6 +76,7 @@ import { BriklayDesktopNav } from './components/nav/BriklayRail';
 import { isSecondaryNavRoute } from './components/nav/navTokens';
 const Orders = lazy(() => import('./pages/Orders'));
 import InviteAccept from './pages/InviteAccept';
+import VendorQuote from './pages/VendorQuote';
 import OnboardingWizard from './components/OnboardingWizard';
 import Pending from './pages/Pending';
 import Welcome from './pages/Welcome';
@@ -374,6 +376,12 @@ function App() {
     return <InviteAccept session={session} token={token} />;
   }
 
+  // Public, no-login vendor quote page — the RFQ WhatsApp link lands here.
+  if (location.pathname.startsWith('/quote/')) {
+    const token = location.pathname.replace('/quote/', '');
+    return <VendorQuote token={token} />;
+  }
+
   if (location.pathname === '/pending') {
     if (!routerReady) return null;
     if (!session) return <Navigate to={LOGIN_ROUTE} replace />;
@@ -577,6 +585,7 @@ function App() {
           <Route path="/purchase-requests" element={<Navigate to="/purchase-orders?status=draft" replace />} />
           <Route path="/purchase-orders/new" element={<NewPurchaseOrder session={session} />} />
           <Route path="/purchase-orders/:poId" element={<PurchaseOrderDetail session={session} />} />
+          <Route path="/rfq/:rfqId" element={<RfqCompare session={session} />} />
           <Route path="/inward-register" element={<InwardRegister session={session} />} />
           <Route path="/team" element={<Team session={session} />} />
           <Route path="/profile" element={<Profile session={session} />} />
@@ -1034,7 +1043,7 @@ function MoreNavSheet({
   const globalItems = [
     { path: '/site-desk',     icon: IconClipboardList,         label: 'Site Desk',       show: true },
     { path: '/tasks',         icon: IconChecklist,             label: 'Task Manager',    show: true },
-    { path: '/stakeholders',  icon: IconUsers,                 label: 'Parties',         show: role !== 'supervisor' && role !== 'accountant' },
+    { path: '/stakeholders',  icon: IconUsers,                 label: 'Parties',         show: role !== 'supervisor' },
     { path: '/inward-register', icon: IconLayoutGrid,          label: 'Inward Register', show: role !== 'supervisor' && role !== 'accountant' },
     { path: '/billing',       icon: IconFileInvoice,           label: 'Client Billing', show: role !== 'supervisor' },
     { path: '/insights',      icon: IconChartPie,              label: 'Insights',       show: true },

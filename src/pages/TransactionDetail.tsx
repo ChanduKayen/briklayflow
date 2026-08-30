@@ -649,7 +649,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
                 <div style={{ position: 'fixed', inset: 0, zIndex: 25 }} onClick={() => setMenuOpen(false)} />
                 <div className="menu">
                   <button onClick={() => { setMenuOpen(false); generatePDF(txn, allocs || [], effective, isAmended); }}><svg viewBox="0 0 24 24"><path d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" /></svg>Download voucher PDF</button>
-                  {isManagement && !isVoided && <button onClick={() => { setMenuOpen(false); openAmendModal(); }}><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z" /></svg>Amend</button>}
+                  {(isManagement || profile?.role === 'accountant') && !isVoided && <button onClick={() => { setMenuOpen(false); openAmendModal(); }}><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z" /></svg>Amend</button>}
                   {canVoid && !isVoided && (
                     <>
                       <hr />

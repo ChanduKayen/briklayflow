@@ -122,6 +122,14 @@ const POLX_CSS = `
 .polx .tip li.r .g::before{content:"✓";color:#9DBB98}
 .polx .tip li.p .g::before{content:"○";color:#E0B45B}
 .polx .tip::after{content:"";position:absolute;left:18px;top:-5px;width:10px;height:10px;background:var(--ink);transform:rotate(45deg);border-radius:2px}
+.polx tbody tr.rfq td{background:var(--paper-2)}
+.polx tbody tr.rfq:hover td{background:var(--gold-tint)}
+.polx tbody tr.rfq td:first-child{box-shadow:inset 3px 0 0 var(--terra)}
+.polx tbody tr.rfq .po .mono{color:var(--gold)}
+.polx .chip.quote{color:var(--gold);border-color:#EBD9B4}
+.polx .chip.quote .n{color:var(--gold)}
+.polx .chip.quote.on{background:var(--gold);border-color:var(--gold);color:#fff}
+.polx .chip.quote.on .n{color:rgba(255,255,255,.65)}
 @media (max-width:980px){
   .polx .page{padding:16px 14px 60px}
   .polx .figs{grid-template-columns:1fr 1fr}
@@ -259,10 +267,40 @@ function usePOListData(projectId?: string) {
   return { rows, isLoading: posQ.isLoading };
 }
 
+interface RfqRow { rfq_id: string; created_at: string; site: string; summary: string; itemCount: number; sent: number; replied: number; best: number | null }
+function useOpenRfqs(projectId?: string) {
+  return useQuery({
+    queryKey: ['open_rfqs', projectId ?? 'all'],
+    queryFn: async (): Promise<RfqRow[]> => {
+      let q = supabase.from('rfqs').select('rfq_id, created_at, items, status, projects(name)').eq('status', 'open').order('created_at', { ascending: false });
+      if (projectId) q = q.eq('project_id', projectId);
+      const { data, error } = await q;
+      if (error) throw error;
+      const rows = (data ?? []) as any[];
+      const ids = rows.map((r) => r.rfq_id);
+      const agg: Record<string, { sent: number; replied: number; best: number | null }> = {};
+      if (ids.length) {
+        const { data: rc } = await supabase.from('rfq_recipients').select('rfq_id, status, quoted_total').in('rfq_id', ids);
+        (rc ?? []).forEach((r: any) => {
+          const c = agg[r.rfq_id] ?? (agg[r.rfq_id] = { sent: 0, replied: 0, best: null });
+          c.sent++;
+          if (r.status === 'quoted') { c.replied++; const t = Number(r.quoted_total) || 0; if (t > 0 && (c.best == null || t < c.best)) c.best = t; }
+        });
+      }
+      return rows.map((r) => {
+        const names = ((r.items ?? []) as any[]).map((it) => it.item_name).filter(Boolean);
+        const summary = names.length <= 2 ? names.join(', ') : `${names.slice(0, 2).join(', ')} +${names.length - 2}`;
+        return { rfq_id: r.rfq_id, created_at: r.created_at, site: r.projects?.name || '', summary, itemCount: (r.items ?? []).length, sent: agg[r.rfq_id]?.sent || 0, replied: agg[r.rfq_id]?.replied || 0, best: agg[r.rfq_id]?.best ?? null };
+      });
+    },
+  });
+}
+
 export default function POListSheet({ projectId }: { projectId?: string }) {
   const navigate = useNavigate();
   const { rows, isLoading } = usePOListData(projectId);
-  const [filter, setFilter] = useState<'all' | 'mine' | 'late' | 'open' | 'vendor' | 'done'>('all');
+  const { data: openRfqs = [] } = useOpenRfqs(projectId);
+  const [filter, setFilter] = useState<'all' | 'mine' | 'late' | 'open' | 'vendor' | 'done' | 'quotes'>('all');
   const [sortK, setSortK] = useState<'vendor' | 'site' | 'ordered' | 'delivery' | 'value' | 'balance'>('ordered');
   const [sortDir, setSortDir] = useState(-1);
   const [q, setQ] = useState('');
@@ -305,11 +343,24 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   };
 
   const list = useMemo(() => {
-    let l = rows.filter(FILTERS[filter]);
+    let l = rows.filter(FILTERS[filter] ?? (() => false));   // 'quotes' shows no POs
     if (q) l = l.filter(p => (p.vendor + p.id + p.site + p.items.map(i => i.n).join(' ')).toLowerCase().includes(q));
     l = l.slice().sort((a, b) => { const x = KEY[sortK](a), y = KEY[sortK](b); return (x > y ? 1 : x < y ? -1 : 0) * sortDir; });
     return l;
   }, [rows, filter, q, sortK, sortDir]);
+
+  // RFQs awaiting quotes, interleaved with POs by date (only in All / Quotes).
+  const rfqShown = useMemo(() => (filter === 'all' || filter === 'quotes')
+    ? openRfqs.filter(r => !q || ('quote request enquiry ' + r.site + ' ' + r.summary + ' ' + r.rfq_id).toLowerCase().includes(q))
+    : [], [openRfqs, filter, q]);
+  type MergedRow = { kind: 'po'; date: number; po: PORow } | { kind: 'rfq'; date: number; rfq: RfqRow };
+  const merged: MergedRow[] = useMemo(() => {
+    const rfqD = rfqShown.map(r => ({ kind: 'rfq' as const, date: D(r.created_at).getTime(), rfq: r }));
+    if (filter === 'quotes') return rfqD;
+    const poD = list.map(p => ({ kind: 'po' as const, date: D(p.ordered).getTime(), po: p }));
+    if (sortK === 'ordered') return [...poD, ...rfqD].sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : 0) * sortDir);
+    return [...rfqD, ...poD];   // non-date sorts: quotes pinned on top
+  }, [list, rfqShown, filter, sortK, sortDir]);
 
   const live = useMemo(() => rows.filter(p => !p.cancelled && !p.rfq), [rows]);
   const fLate = rows.filter(late).length;
@@ -407,6 +458,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
             <button className={`chip${filter === 'all' ? ' on' : ''}`} onClick={() => setFilter('all')}>All <span className="n">{cAll}</span></button>
             <button className={`chip warn${filter === 'mine' ? ' on' : ''}`} onClick={() => setFilter('mine')}>To receive <span className="n">{cMine}</span></button>
             <button className={`chip${filter === 'vendor' ? ' on' : ''}`} onClick={() => setFilter('vendor')}>On the way <span className="n">{cVendor}</span></button>
+            {openRfqs.length > 0 && <button className={`chip quote${filter === 'quotes' ? ' on' : ''}`} onClick={() => setFilter('quotes')}>Quotes <span className="n">{openRfqs.length}</span></button>}
             <button className={`chip${filter === 'done' ? ' on' : ''}`} onClick={() => setFilter('done')}>Received <span className="n">{cDone}</span></button>
           </div>
         </div>
@@ -426,9 +478,30 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
             <tbody>
               {isLoading ? (
                 <tr><td colSpan={7} className="empty">Loading…</td></tr>
-              ) : list.length === 0 ? (
-                <tr><td colSpan={7} className="empty">Nothing here. {filter === 'mine' ? 'Nothing waiting on you — go build something.' : 'Try another filter.'}</td></tr>
-              ) : list.map((p) => {
+              ) : merged.length === 0 ? (
+                <tr><td colSpan={7} className="empty">Nothing here. {filter === 'quotes' ? 'No open quote requests.' : filter === 'mine' ? 'Nothing waiting on you — go build something.' : 'Try another filter.'}</td></tr>
+              ) : merged.map((row) => {
+                if (row.kind === 'rfq') {
+                  const r = row.rfq;
+                  const ref = 'ENQ-' + r.rfq_id.slice(0, 6).toUpperCase();
+                  const siteShort = r.site.replace(' Residence', '').replace("'s", '');
+                  return (
+                    <tr key={'rfq-' + r.rfq_id} className="rfq" tabIndex={0} onClick={() => navigate(`/rfq/${r.rfq_id}`)} onKeyDown={(e) => { if (e.key === 'Enter') navigate(`/rfq/${r.rfq_id}`); }}>
+                      <td className="po"><b>{r.sent} vendor{r.sent !== 1 ? 's' : ''} asked</b><span className="mono">{ref} · enquiry</span></td>
+                      <td><div className="items"><span className="t">{r.summary || `${r.itemCount} items`}</span></div></td>
+                      <td className="site" title={r.site}>{siteShort}</td>
+                      <td className="when">{dstr(D(r.created_at))}</td>
+                      <td><div className="dlv">
+                        {r.replied > 0
+                          ? <><span className="due">{r.replied} of {r.sent} quoted</span><small>{r.best != null ? `best ${fmt(r.best)} · ` : ''}tap to compare</small></>
+                          : <><span className="due">Awaiting quotes</span><small>{r.sent} vendor{r.sent !== 1 ? 's' : ''} asked · {dstr(D(r.created_at))}</small></>}
+                      </div></td>
+                      <td className="num"><span className="dim">—</span></td>
+                      <td className="num"><span className="dim">—</span></td>
+                    </tr>
+                  );
+                }
+                const p = row.po;
                 const shown = p.items.slice(0, 2).map(i => i.n).join(', ');
                 const rest = p.items.length - 2;
                 const siteShort = p.site.replace(' Residence', '').replace("'s", '');

@@ -260,7 +260,7 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
     {
       label: 'Workspace',
       items: ([
-        can(role !== 'supervisor' && role !== 'accountant') && { route: '/stakeholders', label: 'Parties', icon: IconUsersGroup },
+        can(role !== 'supervisor') && { route: '/stakeholders', label: 'Parties', icon: IconUsersGroup },
         can(role === 'principal' || role === 'management') && { route: '/team', label: 'Team & access', icon: IconShieldLock },
       ].filter(Boolean) as Item[]),
     },

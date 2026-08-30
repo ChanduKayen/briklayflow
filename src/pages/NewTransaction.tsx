@@ -8,6 +8,7 @@ import type { Session } from '@supabase/supabase-js';
 import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 import { useSnackbar } from '../components/Snackbar';
 import { useOrgId } from '../lib/auth/AuthProvider';
+import { useUserProfile } from '../App';
 import { CostCodePicker } from '../components/CostCodePicker';
 import { GenHeadPicker } from '../components/GenHeadPicker';
 import { DirLabel } from '../components/NewTxnFab';
@@ -613,6 +614,7 @@ export default function NewTransaction({ session: _session }: { session: Session
   const [saveAttempted, setSaveAttempted] = useState(false);
   const { show: showSnackbar } = useSnackbar();
   const orgId = useOrgId();
+  const { data: _profile } = useUserProfile(_session.user.id);
   const payeeRef = useRef<HTMLInputElement>(null);
   const stkDropRef = useRef<HTMLDivElement>(null);
 
@@ -1276,6 +1278,21 @@ export default function NewTransaction({ session: _session }: { session: Session
       },
     });
   };
+
+  // A supervisor records money through the day book (which passes an approver),
+  // never a direct ledger transaction — the database now enforces this too.
+  if (_profile && _profile.role === 'supervisor') {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-6" style={{ background: VOICE.page }}>
+        <div className="max-w-sm text-center rounded-2xl p-8" style={{ background: VOICE.surface, border: `1px solid ${VOICE.line}` }}>
+          <span className="material-symbols-outlined text-[40px] mb-2" style={{ color: VOICE.systemFaint }}>edit_note</span>
+          <h1 className="text-lg font-semibold mb-1" style={{ color: VOICE.user }}>Use the day book</h1>
+          <p className="text-sm mb-5" style={{ color: VOICE.system }}>Site supervisors record spends in the day book, where a manager reviews and files them. Direct ledger entries are for accounts.</p>
+          <button onClick={() => navigate('/logbook')} className="text-sm font-medium px-5 py-2.5 rounded-xl text-white" style={{ background: VOICE.user }}>Open the day book</button>
+        </div>
+      </div>
+    );
+  }
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (

@@ -1486,7 +1486,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
             <button onClick={() => { setRecatCategory(''); setShowRecategorize(true); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-bold bg-surface/10 hover:bg-surface/20 transition-colors">
               <span className="material-symbols-outlined text-[16px]">category</span>Re-categorize
             </button>
-            {(profile?.role === 'management' || profile?.role === 'accountant') && voidableSelected.length > 0 && (
+            {(profile?.role === 'management' || profile?.role === 'accountant' || profile?.role === 'principal') && voidableSelected.length > 0 && (
               <button onClick={() => setShowVoidAll(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-bold bg-error/80 hover:bg-error transition-colors text-white">
                 <span className="material-symbols-outlined text-[16px]">block</span>Void All
               </button>

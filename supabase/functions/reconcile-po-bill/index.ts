@@ -100,6 +100,13 @@ serve(async (req) => {
   }
 
   try {
+    // ── Authenticate the caller (this function reads storage with the service role) ──
+    const authHeader = req.headers.get('Authorization') ?? '';
+    if (!authHeader) return new Response(JSON.stringify({ error: 'Missing authorization' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    const userClient = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: authHeader } } });
+    const { data: { user }, error: userErr } = await userClient.auth.getUser();
+    if (userErr || !user) return new Response(JSON.stringify({ error: 'Invalid session' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
     const body = await req.json();
     const {
       po_id,
@@ -111,6 +118,16 @@ serve(async (req) => {
       bill_path,
       bill_total,
     } = body;
+
+    // If a PO is named, the caller must belong to its org.
+    if (po_id) {
+      const { data: po } = await admin.from('purchase_orders').select('org_id').eq('po_id', po_id).maybeSingle();
+      if (po?.org_id) {
+        const { data: mem } = await admin.from('org_memberships').select('role')
+          .eq('user_id', user.id).eq('org_id', po.org_id).eq('status', 'active').maybeSingle();
+        if (!mem) return new Response(JSON.stringify({ error: "Forbidden: not a member of this PO's organisation" }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+    }
 
     // No PO lines → EXTRACT-ONLY mode (read the bill on its own). With PO lines → reconcile.
     const extractOnly = !po_line_items?.length;

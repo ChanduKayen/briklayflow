@@ -549,7 +549,19 @@ export default function TeamAccess({ session }: { session: Session }) {
     if (m.role === 'principal' && r !== 'principal' && principalCount <= 1) {
       show('Assign another Principal before changing this one.', { type: 'error' }); refreshMembers(); return;
     }
-    updateProfile(m.id, { role: r }).then(() => show('Role updated')).catch((e) => show(e.message || 'Could not change role', { type: 'error' }));
+    // Role changes go through the guarded RPC — it updates org_memberships (the
+    // authoritative store) + user_profiles, enforces principal-only assignment and
+    // the single-principal invariant in the DB, and writes the audit log.
+    void (async () => {
+      try {
+        const { error } = await supabase.rpc('change_member_role', { p_org_id: orgId, p_user_id: m.id, p_new_role: r });
+        if (error) throw error;
+        await refreshMembers();
+        show('Role updated');
+      } catch (e: any) {
+        show(e.message || 'Could not change role', { type: 'error' });
+      }
+    })();
   };
   const rename = (m: Member, n: string) => updateProfile(m.id, { name: n });
   // Procurement approval lives on org_memberships (not user_profiles) — the governance primitive.

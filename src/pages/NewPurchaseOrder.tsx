@@ -31,6 +31,7 @@ import type { InsertionReason } from '../lib/skuInsertionReason';
 // ui/new-po-redesign — presentation-only sibling components (brief §0.2 / amendment A).
 // Aliased with a ui-prefix where needed to avoid shadowing any existing identifier (§2).
 import UiSaveCeremony from '../components/po-new-ui/UiSaveCeremony';
+import RequestQuotesModal from '../components/po-new-ui/RequestQuotesModal';
 import { V as uiV, nums as uiNums } from '../components/po-new-ui/voiceTokens';
 import UiContextRecap from '../components/po-new-ui/UiContextRecap';
 import UiProjectChips from '../components/po-new-ui/UiProjectChips';
@@ -930,6 +931,9 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
   const [paymentTermsDays, setPaymentTermsDays] = useState(30);
   const [customTerms, setCustomTerms]           = useState('');
   const [deliveryLocation, setDeliveryLocation] = useState('');
+  // Place a PO (you have a vendor + price) vs Request quotes (you have items, ask vendors to price).
+  const [poMode, setPoMode] = useState<'po' | 'rfq'>('po');
+  const [showRfq, setShowRfq] = useState(false);
 
   const [showVendorCreate, setShowVendorCreate] = useState(false);
   const [newVendorName, setNewVendorName]             = useState('');
@@ -3612,6 +3616,17 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
           </span>
         </div>
 
+        {/* Place a PO, or request quotes from vendors first */}
+        <div className="flex gap-1 p-1 rounded-xl mb-5 w-max" style={{ background: uiV.surface, border: `1px solid ${uiV.line}` }}>
+          {([['po', 'Place PO'], ['rfq', 'Request quotes']] as const).map(([m, label]) => (
+            <button key={m} type="button" onClick={() => setPoMode(m)}
+              className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+              style={poMode === m ? { background: uiV.accent, color: '#fff' } : { color: uiV.system }}>
+              {label}
+            </button>
+          ))}
+        </div>
+
         {/* ── Order details ──────────────────────────────────────── */}
         <SheetSectionLabel title="Order details" />
         <div className="rounded-2xl overflow-hidden mb-2" style={{ border: `1px solid ${uiV.line}`, background: uiV.surface }}>
@@ -4495,6 +4510,25 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
             </span>
             <span className="text-[14px] font-semibold tabular-nums" style={{ color: uiV.user }}>₹{grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
           </div>
+          {poMode === 'rfq' ? (
+            <div className="flex items-center gap-4">
+              {(() => {
+                const canRfq = !!projectId && lineItems.some(li => li.item_name.trim().length > 0);
+                return (
+                  <button
+                    type="button"
+                    onClick={() => setShowRfq(true)}
+                    disabled={!canRfq}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[14px] font-semibold transition-all disabled:cursor-not-allowed"
+                    style={{ background: canRfq ? uiV.accent : uiV.line, color: canRfq ? '#fff' : uiV.systemFaint }}
+                    title={!projectId ? 'Select a project' : 'Add at least one item'}
+                  >
+                    <span className="material-symbols-outlined text-[16px]">forward_to_inbox</span>Request quotes
+                  </button>
+                );
+              })()}
+            </div>
+          ) : (
           <div className="flex items-center gap-4">
             <button
               type="button"
@@ -4520,8 +4554,20 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
               )}
             </button>
           </div>
+          )}
         </div>
       </div>
+
+      {showRfq && (
+        <RequestQuotesModal
+          orgId={orgId ?? ''}
+          projectId={projectId || null}
+          deliveryLocation={deliveryLocation || null}
+          tradeCategory={selectedVendor?.category ?? ((lineItems.find(li => (li as any).category) as any)?.category ?? null)}
+          items={lineItems.filter(li => li.item_name.trim().length > 0).map((li, i) => ({ line: i + 1, item_name: li.item_name, unit: (li as any).unit, qty: (li as any).quantity_ordered, spec: (li as any).specification }))}
+          onClose={() => setShowRfq(false)}
+        />
+      )}
 
       {/* Save ceremony — unchanged */}
       <UiSaveCeremony

@@ -12,6 +12,8 @@
 // from the browser (supabase.functions.invoke) with the caller's JWT — leave the
 // gateway's default verify_jwt ON so only authenticated users can send.
 
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -53,6 +55,19 @@ Deno.serve(async (req) => {
     new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
   try {
+    // ── Only an admin (management/principal) may send an invite email ─────────
+    const authHeader = req.headers.get("Authorization") ?? "";
+    if (!authHeader) return json({ ok: false, error: "Missing authorization" }, 401);
+    const userClient = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: authHeader } } });
+    const { data: { user }, error: userErr } = await userClient.auth.getUser();
+    if (userErr || !user) return json({ ok: false, error: "Invalid session" }, 401);
+    const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
+    const { data: adminMem } = await admin
+      .from("org_memberships").select("org_id")
+      .eq("user_id", user.id).eq("status", "active")
+      .in("role", ["principal", "management"]).maybeSingle();
+    if (!adminMem) return json({ ok: false, error: "Forbidden: only management or principal can send invites" }, 403);
+
     const { to, link, orgName, inviterName, role } = await req.json();
     if (!to || !link) return json({ ok: false, error: "to and link are required" }, 400);
 

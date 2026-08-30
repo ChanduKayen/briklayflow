@@ -18,6 +18,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { sendTemplate } from '../_shared/whatsapp.ts';
 
 const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -30,6 +31,13 @@ const json = (body: unknown, status = 200) =>
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
+    // ── Authenticate the caller (no more anonymous PO-sends) ──────────────────
+    const authHeader = req.headers.get('Authorization') ?? '';
+    if (!authHeader) return json({ ok: false, error: 'Missing authorization' }, 401);
+    const userClient = createClient(Deno.env.get('SUPABASE_URL')!, ANON_KEY, { global: { headers: { Authorization: authHeader } } });
+    const { data: { user }, error: userErr } = await userClient.auth.getUser();
+    if (userErr || !user) return json({ ok: false, error: 'Invalid session' }, 401);
+
     const { poId, to, pdfBase64 } = await req.json();
     console.log('[send-po-to-vendor] request', { poId, to, pdfBytes: pdfBase64 ? String(pdfBase64).length : 0 });
     if (!poId || !to || !pdfBase64) return json({ ok: false, error: 'poId, to and pdfBase64 are required' }, 400);
@@ -45,6 +53,16 @@ serve(async (req) => {
       .eq('po_id', poId)
       .single();
     if (poErr || !po) { console.error('[send-po-to-vendor] PO read failed', poErr); return json({ ok: false, error: poErr?.message ?? 'PO not found' }, 404); }
+
+    // ── Authorize: caller must be an active member of THIS PO's org ───────────
+    const { data: mem } = await admin
+      .from('org_memberships')
+      .select('role')
+      .eq('user_id', user.id)
+      .eq('org_id', (po as any).org_id)
+      .eq('status', 'active')
+      .maybeSingle();
+    if (!mem) return json({ ok: false, error: "Forbidden: not a member of this PO's organisation" }, 403);
 
     const vendorName = (po as any).stakeholders?.name ?? 'Vendor';
     let builderName = 'Your builder';

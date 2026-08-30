@@ -132,6 +132,20 @@ export const TEMPLATES = {
     buttonUrlParams: [{ index: 0, name: "code" }],  // copy-code button → the OTP
   },
 
+  // RFQ — request a quotation from a vendor (proactive → template). Approved Meta template
+  // `request_for_quotation` (English US). Body has 4 vars + a DYNAMIC URL button opening a
+  // no-login page where the vendor enters their rates. The Meta button URL is
+  // `https://www.briklay.app/{{1}}`, and we send {{1}} = "quote/<token>" → the final link is
+  // https://www.briklay.app/quote/<token> (matches the /quote/:token route).
+  //   {{1}} vendor name · {{2}} builder (user org) name · {{3}} items summary + count · {{4}} delivery address
+  request_for_quotation: {
+    name: "request_for_quotation_approved",   // the approved Meta template name
+    language: "en_US",
+    header: { kind: "none" },
+    bodyParams: ["vendor_name", "builder_name", "items_summary", "delivery_location"],
+    buttonUrlParams: [{ index: 0, name: "token_path" }],
+  },
+
   // Team invite — sent to a cold number, so it's a template. Approved Meta template
   // `account_creation_confirmation_3` (English US). Body:
   //   "Hi {{1}}, {{2}} invited you to Briklay App. Tap below to accept the invite and get set up…"

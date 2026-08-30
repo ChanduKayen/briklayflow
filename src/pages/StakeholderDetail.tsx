@@ -80,7 +80,7 @@ export default function StakeholderDetail({ session }: { session: Session }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { data: profile } = useUserProfile(session.user.id);
-  const canManage = profile?.role === 'management' || profile?.role === 'accountant';
+  const canManage = profile?.role === 'management' || profile?.role === 'accountant' || profile?.role === 'principal';
 
   // ─── UI state ───────────────────────────────────────────────────────────
 
