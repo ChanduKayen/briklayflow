@@ -139,7 +139,7 @@ export const TEMPLATES = {
   // https://www.briklay.app/quote/<token> (matches the /quote/:token route).
   //   {{1}} vendor name · {{2}} builder (user org) name · {{3}} items summary + count · {{4}} delivery address
   request_for_quotation: {
-    name: "request_for_quotation_approved",   // the approved Meta template name
+    name: "rfq_vendor_v1",   // the approved Meta template name (dynamic URL button)
     language: "en_US",
     header: { kind: "none" },
     bodyParams: ["vendor_name", "builder_name", "items_summary", "delivery_location"],

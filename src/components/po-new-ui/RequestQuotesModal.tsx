@@ -17,6 +17,7 @@ interface Props {
   deliveryLocation?: string | null;
   tradeCategory?: string | null;     // the vendor trade to default the list to
   items: RfqLineItem[];
+  rfqId?: string;                    // append mode: add vendors to an existing enquiry
   onClose: () => void;
   onSent?: (rfqId: string) => void;
 }
@@ -30,7 +31,7 @@ function tradeWords(s: string | null | undefined): string[] {
     .filter((w) => w.length > 3 && !['materials', 'material', 'supplier', 'vendor', 'trader', 'store', 'shop', 'works'].includes(w));
 }
 
-export default function RequestQuotesModal({ orgId, projectId, deliveryLocation, tradeCategory, items, onClose, onSent }: Props) {
+export default function RequestQuotesModal({ orgId, projectId, deliveryLocation, tradeCategory, items, rfqId, onClose, onSent }: Props) {
   const { show } = useSnackbar();
   const qc = useQueryClient();
   const [showAll, setShowAll] = useState(false);
@@ -102,9 +103,10 @@ export default function RequestQuotesModal({ orgId, projectId, deliveryLocation,
         if (p && p !== (v.contact ?? '')) await supabase.from('stakeholders').update({ contact: p }).eq('stakeholder_id', v.stakeholder_id);
       }));
       const recipients = chosen.map((v) => ({ stakeholderId: v.stakeholder_id, name: v.name, phone: phoneOf(v) }));
-      const { data, error } = await supabase.functions.invoke('send-rfq', {
-        body: { orgId, projectId, deliveryLocation, quoteBy: quoteBy || null, items, recipients },
-      });
+      const body = rfqId
+        ? { rfqId, recipients }                                                        // append to an existing enquiry
+        : { orgId, projectId, deliveryLocation, quoteBy: quoteBy || null, items, recipients };
+      const { data, error } = await supabase.functions.invoke('send-rfq', { body });
       if (error) throw error;
       const res = data as { ok: boolean; rfq_id?: string; sent: string[]; failed: { name?: string; error: string }[]; error?: string };
       if (!res.ok) throw new Error(res.error || 'Failed to send');
@@ -123,11 +125,11 @@ export default function RequestQuotesModal({ orgId, projectId, deliveryLocation,
         {/* header */}
         <div className="px-5 pt-5 pb-3 border-b border-black/[0.06]">
           <div className="flex items-center justify-between">
-            <h3 className="text-[17px] font-semibold text-on-surface">Request quotes</h3>
+            <h3 className="text-[17px] font-semibold text-on-surface">{rfqId ? 'Ask another vendor' : 'Request quotes'}</h3>
             <button onClick={onClose} className="text-on-surface-variant/60 hover:text-on-surface"><span className="material-symbols-outlined">close</span></button>
           </div>
           <p className="text-[13px] text-on-surface-variant/70 mt-0.5">
-            {items.length} item{items.length !== 1 ? 's' : ''} · vendors get a WhatsApp link to enter their rates
+            {rfqId ? 'They get the same enquiry with a link to enter their rates' : `${items.length} item${items.length !== 1 ? 's' : ''} · vendors get a WhatsApp link to enter their rates`}
           </p>
         </div>
 

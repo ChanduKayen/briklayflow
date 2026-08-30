@@ -7,7 +7,7 @@ import { supabase } from '../lib/supabase';
 
 interface RfqItem { line: number; item_name: string; spec?: string; qty?: number | string; unit?: string }
 interface RfqData {
-  ok: boolean; ref?: string; builder_name?: string; vendor_name?: string;
+  ok: boolean; ref?: string; status?: string; builder_name?: string; vendor_name?: string;
   delivery_location?: string | null; quote_by?: string | null; items?: RfqItem[];
   already_quoted?: boolean; error?: string;
   extras?: { transport_included?: boolean | null; gst_included?: boolean | null; valid_days?: number | null; vendor_note?: string | null };
@@ -205,7 +205,8 @@ export default function VendorQuote({ token }: { token: string }) {
     const p_extras = { transport_included: transport, gst_included: gst, valid_days: parseInt(valid, 10) || 7, vendor_note: note.trim() || null, quoted_total: calc.tot };
     const { data: res, error } = await supabase.rpc('submit_rfq_quote', { p_token: token, p_lines, p_extras });
     setSending(false);
-    if (error || !(res as any)?.ok) { setErr(error?.message || (res as any)?.error || 'Could not send. Try again.'); return; }
+    const r = res as any;
+    if (error || !r?.ok) { setErr(error?.message || (r?.error === 'closed' ? 'This enquiry was just closed by the buyer — the order is placed.' : 'Could not send. Try again.')); return; }
     const varied = lines.filter((l) => !l.skip && num(l.rate) > 0 && l.varTxt.trim()).length;
     setSent({ done: calc.done, tot: calc.tot, skipped: calc.skipped, varied });
     window.scrollTo(0, 0);
@@ -213,6 +214,19 @@ export default function VendorQuote({ token }: { token: string }) {
 
   if (err) return <div className="vq"><style>{CSS}</style><div className="center">{err}</div></div>;
   if (!data) return <div className="vq"><style>{CSS}</style><div className="center">Loading enquiry…</div></div>;
+
+  // Once the buyer places the order, the enquiry closes and this page stops taking rates.
+  if (data.status && data.status !== 'open') {
+    return (
+      <div className="vq"><style>{CSS}</style>
+        <div className="wrap"><div className="doneScr">
+          <div className="big" style={{ background: 'var(--ink-3)' }}><svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7" /></svg></div>
+          <h2>This enquiry is closed</h2>
+          <p style={{ fontSize: 14 }}>{data.builder_name} has placed the order. Thanks for quoting.</p>
+        </div></div>
+      </div>
+    );
+  }
 
   if (sent) {
     return (

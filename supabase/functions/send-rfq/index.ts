@@ -1,15 +1,14 @@
-// send-rfq — request a quotation from one or more vendors.
+// send-rfq — request a quotation from vendors.
 //
-// Creates an RFQ (the BOQ, no prices) + one recipient row per vendor (each with an
-// unguessable token), then WhatsApps every vendor the approved `request_for_quotation`
-// template with a per-vendor link to https://www.briklay.app/quote/<token> — a no-login
-// page (Phase 2) where they type their rates.
+// Three modes:
+//   NEW    : { orgId, projectId, deliveryLocation, quoteBy, items, recipients } → create an RFQ +
+//            a recipient per vendor (each a token), WhatsApp the request_for_quotation template.
+//   APPEND : { rfqId, recipients } → add more vendors to an existing RFQ and send to them.
+//   RESEND : { rfqId, resendRecipientId } → re-send to one existing recipient (its token).
 //
-// Auth: caller must be an active management/principal member of the RFQ's org (same
-// authority that creates a PO). Runs the writes with the service role.
+// Auth: caller must be an active management/principal member of the RFQ's org.
 //
-// DEPLOY: supabase functions deploy send-rfq  · needs WA_* secrets and the
-// `request_for_quotation` template APPROVED in Meta.
+// DEPLOY: supabase functions deploy send-rfq · needs WA_* secrets and the approved template.
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -39,70 +38,85 @@ function itemsSummary(items: RfqItem[]): string {
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
-    // ── Authenticate the caller ───────────────────────────────────────────────
     const authHeader = req.headers.get('Authorization') ?? '';
     if (!authHeader) return json({ ok: false, error: 'Missing authorization' }, 401);
     const userClient = createClient(Deno.env.get('SUPABASE_URL')!, ANON_KEY, { global: { headers: { Authorization: authHeader } } });
     const { data: { user }, error: userErr } = await userClient.auth.getUser();
     if (userErr || !user) return json({ ok: false, error: 'Invalid session' }, 401);
 
-    const { orgId, projectId, deliveryLocation, quoteBy, items, recipients } = await req.json() as {
-      orgId: string; projectId?: string; deliveryLocation?: string; quoteBy?: string;
-      items: RfqItem[]; recipients: Recipient[];
+    const body = await req.json() as {
+      orgId?: string; projectId?: string; deliveryLocation?: string; quoteBy?: string;
+      items?: RfqItem[]; recipients?: Recipient[]; rfqId?: string; resendRecipientId?: string;
     };
-    if (!orgId || !Array.isArray(items) || items.length === 0 || !Array.isArray(recipients) || recipients.length === 0) {
-      return json({ ok: false, error: 'orgId, items and recipients are required' }, 400);
-    }
 
-    // ── Authorize: management/principal of THIS org (same as creating a PO) ────
+    // Resolve the RFQ (existing for APPEND/RESEND, or create for NEW) → org, items, delivery.
+    let orgId = body.orgId ?? '';
+    let items: RfqItem[] = body.items ?? [];
+    let deliveryLocation = body.deliveryLocation ?? '';
+    let rfqId = body.rfqId ?? '';
+
+    if (rfqId) {
+      const { data: rfq } = await admin.from('rfqs').select('org_id, items, delivery_location').eq('rfq_id', rfqId).maybeSingle();
+      if (!rfq) return json({ ok: false, error: 'Enquiry not found' }, 404);
+      orgId = rfq.org_id;
+      items = (rfq.items ?? []) as RfqItem[];
+      deliveryLocation = rfq.delivery_location ?? '';
+    }
+    if (!orgId) return json({ ok: false, error: 'orgId is required' }, 400);
+
     const { data: mem } = await admin.from('org_memberships').select('role')
       .eq('user_id', user.id).eq('org_id', orgId).eq('status', 'active')
       .in('role', ['management', 'principal']).maybeSingle();
     if (!mem) return json({ ok: false, error: 'Forbidden: only management or principal can request quotes' }, 403);
 
-    // Builder name for the message.
     let builderName = 'Your builder';
     const { data: org } = await admin.from('organizations').select('name').eq('org_id', orgId).maybeSingle();
     if (org?.name) builderName = org.name;
-
     const summary = itemsSummary(items);
     const address = (deliveryLocation ?? '').trim() || 'the site';
+    const wa = (dest: string, name: string, token: string) => sendTemplate('request_for_quotation', dest, {
+      vendor_name: name, builder_name: builderName, items_summary: summary, delivery_location: address,
+      token_path: String(token),   // Meta base https://www.briklay.app/quote/{{1}} → {{1}} = token
+    });
 
-    // ── Create the RFQ header ─────────────────────────────────────────────────
-    const { data: rfq, error: rfqErr } = await admin.from('rfqs').insert({
-      org_id: orgId, project_id: projectId ?? null, created_by: user.id,
-      quote_by: quoteBy || null, delivery_location: deliveryLocation ?? null, items,
-    }).select('rfq_id').single();
-    if (rfqErr || !rfq) return json({ ok: false, error: rfqErr?.message ?? 'Could not create the request' }, 500);
+    // ── RESEND to one existing recipient ──────────────────────────────────────
+    if (body.resendRecipientId) {
+      const { data: r } = await admin.from('rfq_recipients').select('token, vendor_name, vendor_phone').eq('recipient_id', body.resendRecipientId).maybeSingle();
+      if (!r) return json({ ok: false, error: 'Recipient not found' }, 404);
+      const dest = String(r.vendor_phone ?? '').replace(/[^\d]/g, '');
+      if (dest.length < 11) return json({ ok: false, error: 'That vendor has no valid number' }, 400);
+      try { await wa(dest, r.vendor_name ?? 'there', r.token); await admin.from('rfq_recipients').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('recipient_id', body.resendRecipientId); }
+      catch (e) { return json({ ok: false, error: (e as Error).message }, 500); }
+      return json({ ok: true, resent: r.vendor_name });
+    }
 
-    // ── One recipient + one WhatsApp per vendor ───────────────────────────────
+    // ── NEW: create the RFQ header ────────────────────────────────────────────
+    if (!rfqId) {
+      if (!Array.isArray(items) || items.length === 0) return json({ ok: false, error: 'items are required' }, 400);
+      const { data: rfq, error: rfqErr } = await admin.from('rfqs').insert({
+        org_id: orgId, project_id: body.projectId ?? null, created_by: user.id,
+        quote_by: body.quoteBy || null, delivery_location: body.deliveryLocation ?? null, items,
+      }).select('rfq_id').single();
+      if (rfqErr || !rfq) return json({ ok: false, error: rfqErr?.message ?? 'Could not create the request' }, 500);
+      rfqId = rfq.rfq_id;
+    }
+
+    // ── NEW / APPEND: a recipient + a WhatsApp per vendor ──────────────────────
+    const recipients = body.recipients ?? [];
+    if (recipients.length === 0) return json({ ok: false, error: 'recipients are required' }, 400);
     const sent: string[] = [];
     const failed: { name?: string; error: string }[] = [];
     for (const r of recipients) {
       const dest = String(r.phone ?? '').replace(/[^\d]/g, '');
       if (dest.length < 11 || dest.length > 15) { failed.push({ name: r.name, error: `Invalid number: "${r.phone}"` }); continue; }
-
       const { data: rcpt, error: rcptErr } = await admin.from('rfq_recipients').insert({
-        rfq_id: rfq.rfq_id, org_id: orgId, stakeholder_id: r.stakeholderId ?? null,
-        vendor_name: r.name ?? null, vendor_phone: dest,
+        rfq_id: rfqId, org_id: orgId, stakeholder_id: r.stakeholderId ?? null, vendor_name: r.name ?? null, vendor_phone: dest,
       }).select('token').single();
       if (rcptErr || !rcpt) { failed.push({ name: r.name, error: rcptErr?.message ?? 'record failed' }); continue; }
-
-      try {
-        await sendTemplate('request_for_quotation', dest, {
-          vendor_name: r.name ?? 'there',
-          builder_name: builderName,
-          items_summary: summary,
-          delivery_location: address,
-          token_path: String(rcpt.token),   // Meta button base must be https://www.briklay.app/quote/{{1}} → {{1}} = token
-        });
-        sent.push(r.name ?? dest);
-      } catch (e) {
-        failed.push({ name: r.name, error: (e as Error).message });
-      }
+      try { await wa(dest, r.name ?? 'there', rcpt.token); sent.push(r.name ?? dest); }
+      catch (e) { failed.push({ name: r.name, error: (e as Error).message }); }
     }
-
-    return json({ ok: true, rfq_id: rfq.rfq_id, sent, failed });
+    return json({ ok: true, rfq_id: rfqId, sent, failed });
   } catch (e) {
     console.error('[send-rfq] error', e);
     return json({ ok: false, error: (e as Error).message }, 500);
