@@ -1,9 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import Breadcrumb from '../components/Breadcrumb';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { Loader2 } from 'lucide-react';
 import type { Stakeholder } from '../types';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
@@ -11,41 +9,28 @@ import { useOrgId } from '../lib/auth/AuthProvider';
 import { multiply, parseAmount } from '../lib/money';
 import { WORKER_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 import { useSnackbar } from '../components/Snackbar';
-// ui/work-order-redesign — consolidated onto the shared po-new-ui voice tokens (ruling 7);
-// VOICE/VNUMS are aliases so the prior reskin's VOICE.x usages keep working unchanged.
-import { V as VOICE, nums as VNUMS } from '../components/po-new-ui/voiceTokens';
-import { SEG } from '../components/wo-new-ui/woTokens';
-import UiAllocationBar from '../components/wo-new-ui/UiAllocationBar';
-import UiContractorCombobox from '../components/wo-new-ui/UiContractorCombobox';
-import UiWoCeremony from '../components/wo-new-ui/UiWoCeremony';
-import { UiTotalExclGst } from '../components/po-new-ui/UiMoney';
-import UiSaveHint from '../components/po-new-ui/UiSaveHint';
 
 // ─── Work Stage types ──────────────────────────────────────────────────────
 
 interface StageDraft {
   id: string;
   name: string;
+  paid_when: string;       // "Paid when" — the milestone's condition (UI-captured; RPC ignores it today)
   unit_type: string;
   quantity: number | null;
   rate: number | null;
   amount: number | null;   // directly-entered lumpsum; null means computed from qty×rate
-  ambiguous?: boolean;     // amber border flag for AI-extracted stages needing review
+  ambiguous?: boolean;     // amber flag for AI-extracted stages needing review
 }
 
 interface ExtractedStage {
-  _id: string;
   name: string;
   mode: 'measured' | 'lumpsum' | 'ambiguous';
   unit_type: string | null;
   qty: number | null;
   rate: number | null;
   amount: number;
-  amount_verified: boolean;
   arithmetic_mismatch: boolean;
-  mismatch_note: string | null;
-  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
-  confidence_reason: string;
 }
 
 type StageMode = 'empty' | 'measured' | 'lumpsum';
@@ -58,83 +43,246 @@ function getMode(s: StageDraft): StageMode {
   return 'empty';
 }
 
-// ─── Unit system ──────────────────────────────────────────────────────────
+// ─── Unit system (canonical values the rest of the app expects) ─────────────
 
 const UNIT_GROUPS = [
-  { group: 'LUMP SUM', items: [
-    { value: 'LS',    label: 'LS — Lump Sum' },
-  ]},
+  { group: 'LUMP SUM', items: [{ value: 'LS', label: 'LS' }] },
   { group: 'AREA', items: [
-    { value: 'Sqft',  label: 'Sqft — Square Feet' },
-    { value: 'Sqm',   label: 'Sqm — Square Metres' },
-    { value: 'Sqyd',  label: 'Sqyd — Square Yards' },
+    { value: 'Sqft', label: 'Sqft' }, { value: 'Sqm', label: 'Sqm' }, { value: 'Sqyd', label: 'Sqyd' },
   ]},
   { group: 'VOLUME', items: [
-    { value: 'Cum',   label: 'Cum — Cubic Metres' },
-    { value: 'Cft',   label: 'Cft — Cubic Feet' },
-    { value: 'Cu.yd', label: 'Cu.yd — Cubic Yards' },
+    { value: 'Cum', label: 'Cum' }, { value: 'Cft', label: 'Cft' }, { value: 'Cu.yd', label: 'Cu.yd' },
   ]},
   { group: 'LENGTH', items: [
-    { value: 'Rmt',   label: 'Rmt — Running Metres' },
-    { value: 'Rft',   label: 'Rft — Running Feet' },
+    { value: 'Rmt', label: 'Rmt' }, { value: 'Rft', label: 'Rft' },
   ]},
   { group: 'COUNT', items: [
-    { value: 'Nos',         label: 'Nos — Numbers' },
-    { value: 'Per Point',   label: 'Per Point — Electrical' },
-    { value: 'Per Fixture', label: 'Per Fixture — Plumbing' },
-    { value: 'Per Set',     label: 'Per Set' },
-    { value: 'Per Column',  label: 'Per Column' },
-    { value: 'Per Beam',    label: 'Per Beam' },
+    { value: 'Nos', label: 'Nos' }, { value: 'Per Point', label: 'Per Point' },
+    { value: 'Per Fixture', label: 'Per Fixture' }, { value: 'Per Set', label: 'Per Set' },
+    { value: 'Per Column', label: 'Per Column' }, { value: 'Per Beam', label: 'Per Beam' },
     { value: 'Per Footing', label: 'Per Footing' },
   ]},
   { group: 'RESIDENTIAL', items: [
-    { value: 'Per Flat',  label: 'Per Flat' },
-    { value: 'Per Floor', label: 'Per Floor' },
-    { value: 'Per Room',  label: 'Per Room' },
-    { value: 'Per Bay',   label: 'Per Bay' },
+    { value: 'Per Flat', label: 'Per Flat' }, { value: 'Per Floor', label: 'Per Floor' },
+    { value: 'Per Room', label: 'Per Room' }, { value: 'Per Bay', label: 'Per Bay' },
   ]},
   { group: 'WEIGHT', items: [
-    { value: 'Kg',      label: 'Kg — Kilograms' },
-    { value: 'MT',      label: 'MT — Metric Tonnes' },
-    { value: 'Quintal', label: 'Quintal — 100 Kg' },
+    { value: 'Kg', label: 'Kg' }, { value: 'MT', label: 'MT' }, { value: 'Quintal', label: 'Quintal' },
   ]},
 ];
 
 const UNIT_SUGGESTIONS: Array<{ pattern: RegExp; unit: string }> = [
   { pattern: /plastering|brickwork|masonry|tiling|flooring|painting|false.?ceiling|waterproofing/, unit: 'Sqft' },
-  { pattern: /concrete|slab|excavation/,   unit: 'Cum' },
-  { pattern: /steel|reinforcement/,         unit: 'Kg' },
-  { pattern: /plumbing/,                    unit: 'Per Fixture' },
-  { pattern: /electrical/,                  unit: 'Per Point' },
-  { pattern: /door|window/,                 unit: 'Nos' },
+  { pattern: /concrete|slab|excavation/, unit: 'Cum' },
+  { pattern: /steel|reinforcement/, unit: 'Kg' },
+  { pattern: /plumbing/, unit: 'Per Fixture' },
+  { pattern: /electrical/, unit: 'Per Point' },
+  { pattern: /door|window/, unit: 'Nos' },
 ];
 
 function suggestUnit(name: string): string {
   const n = name.toLowerCase();
-  for (const { pattern, unit } of UNIT_SUGGESTIONS) {
-    if (pattern.test(n)) return unit;
-  }
+  for (const { pattern, unit } of UNIT_SUGGESTIONS) if (pattern.test(n)) return unit;
   return '';
 }
+
+// Stage-name suggestions offered in the row popover (purely a typing aid).
+const STAGE_NAMES = [
+  'Foundation & footing', 'Plinth beam', 'GF columns', 'GF slab', 'Brickwork',
+  'Plastering', 'Flooring', 'Electrical first fix', 'Plumbing first fix', 'Painting',
+  'Final finish & handover',
+];
 
 function calcAmount(s: StageDraft): number {
   const mode = getMode(s);
   if (mode === 'measured') return multiply(s.quantity ?? 0, s.rate ?? 0);
-  if (mode === 'lumpsum')  return s.amount ?? 0;
+  if (mode === 'lumpsum') return s.amount ?? 0;
   return 0;
 }
 
-const fmtRupee = (n: number) =>
-  '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+const fmt = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
 
-// ui/work-order-redesign (B4) — split `budget` across weighted stages by their
-// percentages, each rounded to ₹500, the remainder absorbed into the LAST stage
-// so the sum equals `budget` exactly (→ accept-all reconciles to the contract).
-function uiAllocateWeighted(pcts: number[], budget: number): number[] {
-  if (budget <= 0 || pcts.length === 0) return pcts.map(() => 0);
-  const out = pcts.map(p => Math.round(((p / 100) * budget) / 500) * 500);
-  out[out.length - 1] += budget - out.reduce((a, b) => a + b, 0);
-  return out;
+// ─── Scoped styles — a faithful port of the contract-create mockup ──────────
+const WOX_CSS = `
+.wox{
+  --cream:#F6F2EA; --paper:#FFFDF9; --paper-2:#FBF8F2;
+  --ink:#2F2622; --ink-2:#6E635B; --ink-3:#A39A91;
+  --line:#E4DCD0; --line-2:#EFE9DF;
+  --terra:#C4613A; --terra-deep:#A94E2B; --terra-tint:#F8E7DE;
+  --sage:#5F7F5B; --sage-tint:#E7EFE4;
+  --gold:#B8862E;
+  --r:8px; --ease:cubic-bezier(.2,.7,.2,1);
+  --shadow:0 1px 2px rgba(47,38,34,.04),0 8px 24px -18px rgba(47,38,34,.25);
+  background:var(--cream); color:var(--ink);
+  font:15px/1.45 "DM Sans",system-ui,sans-serif; -webkit-font-smoothing:antialiased; min-height:100vh;
+}
+.wox .page{max-width:1020px;margin:0 auto;padding:26px 32px 120px}
+.wox .page>*{animation:woxrise .5s var(--ease) both}
+.wox .page>*:nth-child(2){animation-delay:.05s}.wox .page>*:nth-child(3){animation-delay:.1s}.wox .page>*:nth-child(4){animation-delay:.15s}.wox .page>*:nth-child(5){animation-delay:.2s}
+@keyframes woxrise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.wox .mono{font-family:"DM Mono",ui-monospace,monospace;font-feature-settings:"tnum"}
+.wox button,.wox input,.wox select{font:inherit;color:inherit}
+.wox input::placeholder{color:var(--ink-3)}
+
+.wox .top{display:flex;align-items:center;gap:14px;margin-bottom:24px}
+.wox .back{width:36px;height:36px;border-radius:50%;border:1px solid transparent;background:transparent;display:grid;place-items:center;cursor:pointer;transition:background .18s,border-color .18s,transform .18s}
+.wox .back:hover{background:var(--paper);border-color:var(--line)}
+.wox .back:active{transform:scale(.92)}
+.wox .back svg{width:18px;height:18px;stroke:var(--ink);fill:none;stroke-width:1.8}
+.wox .title-wrap{position:relative;display:inline-block}
+.wox h1{font:600 26px/1.1 "Playfair Display",Georgia,serif;margin:0;letter-spacing:-.01em}
+.wox .wo{margin-left:auto;display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;background:var(--paper);border:1px solid var(--line);color:var(--ink-2);font-size:13px}
+.wox .wo .mono{color:var(--ink);letter-spacing:.02em}
+.wox .wo i{width:6px;height:6px;border-radius:50%;background:var(--gold);display:inline-block}
+
+.wox .sec{display:flex;align-items:center;justify-content:space-between;margin:24px 0 10px}
+.wox .sec h2{margin:0;font:600 11.5px/1 "DM Sans";letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2);padding-left:10px;border-left:3px solid var(--terra);display:flex;align-items:center;gap:14px;flex:1}
+.wox .sec h2::after{content:"";flex:1;height:1px;background:var(--line);margin-right:14px}
+
+.wox .sheet{background:var(--paper);border:1px solid var(--line);border-radius:10px;overflow:hidden;box-shadow:var(--shadow)}
+.wox table{width:100%;border-collapse:collapse;table-layout:fixed}
+.wox th{font-weight:500;font-size:12px;color:var(--ink-2);text-align:left;padding:9px 12px;background:var(--paper-2);border-bottom:1px solid var(--line);letter-spacing:.02em;white-space:nowrap}
+.wox td{padding:0;border-bottom:1px solid var(--line-2);vertical-align:middle;height:46px}
+.wox th+th,.wox td+td{border-left:1px solid var(--line-2)}
+.wox tr:last-child td{border-bottom:0}
+.wox .hdr th{width:118px;background:var(--paper-2);border-bottom:1px solid var(--line-2);vertical-align:middle}
+.wox .hdr tr:last-child th{border-bottom:0}
+
+.wox .cell{position:relative;height:100%}
+.wox .cell input,.wox .cell select{width:100%;height:46px;border:0;background:transparent;padding:0 12px;outline:none;border-radius:0}
+.wox .cell select{appearance:none;-webkit-appearance:none;cursor:pointer;padding-right:32px}
+.wox .cell.sel::after{content:"";position:absolute;right:12px;top:50%;width:7px;height:7px;border-right:1.5px solid var(--ink-3);border-bottom:1.5px solid var(--ink-3);transform:translateY(-70%) rotate(45deg);pointer-events:none}
+.wox .cell::before{content:"";position:absolute;inset:0;pointer-events:none;border:2px solid transparent;border-radius:3px;transition:border-color .15s,box-shadow .15s}
+.wox .cell:focus-within::before{border-color:var(--terra);box-shadow:0 0 0 3px var(--terra-tint)}
+.wox .cell:hover:not(:focus-within)::before{border-color:var(--line)}
+.wox .cell.bad::before{border-color:var(--terra);background:rgba(196,97,58,.06)}
+.wox .cell.filled input{font-weight:500}
+.wox .cell.num input{text-align:right;font-family:"DM Mono",monospace;font-feature-settings:"tnum"}
+.wox .cell .pre{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--ink-3);font-size:13px;pointer-events:none}
+.wox .cell.pre-pad input{padding-left:24px}
+.wox .cell.calc input{color:var(--ink-2);font-weight:500}
+.wox .cell.calc .pre{color:var(--sage);font-weight:600}
+.wox .cell.calc .pre::after{content:" ="}
+
+.wox .pop{position:absolute;left:-1px;right:-1px;top:calc(100% + 4px);z-index:30;background:var(--paper);border:1px solid var(--line);border-radius:var(--r);box-shadow:0 12px 30px -12px rgba(47,38,34,.28);padding:4px;display:none;max-height:250px;overflow:auto}
+.wox .pop.open{display:block;animation:woxpop .16s var(--ease)}
+@keyframes woxpop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.wox .pop button{display:flex;align-items:center;width:100%;gap:10px;text-align:left;border:0;background:transparent;padding:8px 10px;border-radius:6px;cursor:pointer}
+.wox .pop button:hover{background:var(--terra-tint)}
+.wox .pop button small{color:var(--ink-3);margin-left:auto;font-size:12px}
+.wox .pop .new{color:var(--terra);font-weight:500}
+.wox .pop .new b{width:18px;height:18px;border-radius:50%;background:var(--terra-tint);display:grid;place-items:center;font-size:14px;line-height:1;font-weight:500}
+
+.wox .stg .n{width:44px;text-align:center;color:var(--ink-3);font-size:12px;font-family:"DM Mono"}
+.wox .stg .share{text-align:right;padding:0 12px;font-family:"DM Mono";font-size:12px;color:var(--ink-3);white-space:nowrap}
+.wox .stg .share b{font-weight:500;color:var(--ink-2)}
+.wox .stg .del{width:40px;text-align:center}
+.wox .stg .del button{width:28px;height:28px;border:0;background:transparent;border-radius:6px;display:inline-grid;place-items:center;color:var(--ink-3);cursor:pointer;opacity:0;transition:opacity .15s,background .15s,color .15s,transform .15s}
+.wox .stg tr:hover .del button,.wox .stg .del button:focus-visible{opacity:1}
+.wox .stg .del button:hover{background:var(--terra-tint);color:var(--terra)}
+.wox .stg .del button:active{transform:scale(.9)}
+.wox .stg .del svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.7}
+.wox .stg tr.in{animation:woxrowin .28s var(--ease)}
+@keyframes woxrowin{from{background:var(--sage-tint)}to{background:transparent}}
+.wox .split{display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--line-2);margin:14px 16px 4px}
+.wox .split i{height:100%;transition:width .35s var(--ease);min-width:0}
+.wox .split i:nth-child(5n+1){background:var(--terra)}.wox .split i:nth-child(5n+2){background:var(--gold)}.wox .split i:nth-child(5n+3){background:var(--sage)}.wox .split i:nth-child(5n+4){background:#E0906A}.wox .split i:nth-child(5n+5){background:#8FA98B}
+.wox .split-lbl{display:flex;justify-content:space-between;margin:0 16px 12px;font-size:12px;color:var(--ink-3)}
+
+.wox .addrow{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;height:44px;border:0;border-top:1px dashed var(--line);background:var(--paper-2);color:var(--ink-2);cursor:pointer;transition:background .15s,color .15s;font-weight:500}
+.wox .addrow:hover{background:var(--terra-tint);color:var(--terra)}
+.wox .addrow:active{background:#F1D8CB}
+.wox .addrow kbd{font:11px "DM Mono";color:var(--ink-3);border:1px solid var(--line);border-radius:4px;padding:1px 5px;background:var(--paper);margin-left:6px}
+
+.wox tfoot td{background:var(--paper-2);height:44px;padding:0 12px;font-size:13.5px;color:var(--ink-2);border-top:2px solid var(--line)}
+.wox tfoot .num{text-align:right;font-family:"DM Mono";font-weight:600;color:var(--ink);font-size:15px}
+.wox .gst{display:flex;align-items:center;gap:8px}
+.wox .tgl{width:34px;height:20px;border-radius:999px;background:var(--line);border:0;position:relative;cursor:pointer;transition:background .2s;flex:none}
+.wox .tgl::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2);transition:transform .2s var(--ease)}
+.wox .tgl[aria-checked=true]{background:var(--sage)}
+.wox .tgl[aria-checked=true]::after{transform:translateX(14px)}
+
+.wox .btn{--bg:var(--paper);--fg:var(--ink);--bd:var(--line);display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 16px;border-radius:var(--r);border:1px solid var(--bd);background:var(--bg);color:var(--fg);font-weight:500;cursor:pointer;position:relative;overflow:hidden;transition:background .16s var(--ease),border-color .16s,color .16s,transform .12s var(--ease),box-shadow .16s}
+.wox .btn:hover{--bg:var(--paper-2);box-shadow:0 2px 8px -4px rgba(47,38,34,.25);transform:translateY(-1px)}
+.wox .btn:active{transform:translateY(0) scale(.97);box-shadow:none}
+.wox .btn:focus-visible{outline:2px solid var(--terra);outline-offset:2px}
+.wox .btn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.8}
+.wox .btn.primary{--bg:var(--terra);--fg:#fff;--bd:var(--terra)}
+.wox .btn.primary:hover{--bg:var(--terra-deep);--bd:var(--terra-deep);box-shadow:0 6px 16px -8px rgba(196,97,58,.7)}
+.wox .btn.primary:active{--bg:#93441F}
+.wox .btn.soft{--bg:var(--terra-tint);--fg:var(--terra);--bd:transparent}
+.wox .btn.soft:hover{--bg:#F2D9CC}
+.wox .btn.ghost{--bd:transparent;--bg:transparent;color:var(--ink-2)}
+.wox .btn.ghost:hover{--bg:var(--paper)}
+.wox .btn.sm{height:32px;padding:0 12px;font-size:13.5px}
+.wox .btn .lbl{display:inline-flex;align-items:center;gap:8px;transition:opacity .15s,transform .2s var(--ease)}
+.wox .btn .alt{position:absolute;inset:0;display:grid;place-items:center;opacity:0;transform:translateY(8px);transition:opacity .2s,transform .25s var(--ease)}
+.wox .btn.loading .lbl,.wox .btn.done .lbl{opacity:0;transform:translateY(-8px)}
+.wox .btn.loading .alt.spin,.wox .btn.done .alt.ok{opacity:1;transform:none}
+.wox .btn.loading{pointer-events:none}
+.wox .btn.done{--bg:var(--sage);--bd:var(--sage);--fg:#fff;pointer-events:none}
+.wox .spinner{width:16px;height:16px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:woxspin .7s linear infinite}
+.wox .btn.soft .spinner{border-color:rgba(196,97,58,.3);border-top-color:var(--terra)}
+@keyframes woxspin{to{transform:rotate(360deg)}}
+.wox .ok svg{width:18px;height:18px;stroke:#fff;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+
+.wox .note{color:var(--ink-3);font-size:13px;line-height:1.6;margin-top:12px}
+.wox .note kbd{font:11px "DM Mono";border:1px solid var(--line);border-radius:4px;padding:1px 5px;background:var(--paper)}
+.wox .err{margin-top:14px;padding:10px 14px;border-radius:8px;background:var(--terra-tint);color:var(--terra-deep);font-size:13px;display:flex;gap:8px;align-items:center}
+
+.wox .addform{margin:10px 16px 4px;padding:14px;border-radius:10px;background:var(--paper-2);border:1px solid var(--line);display:grid;gap:10px;max-width:440px}
+.wox .addform label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3)}
+.wox .addform input,.wox .addform select{width:100%;height:38px;padding:0 12px;border-radius:8px;border:1px solid var(--line);background:var(--paper);outline:none}
+.wox .addform input:focus,.wox .addform select:focus{border-color:var(--terra);box-shadow:0 0 0 3px var(--terra-tint)}
+
+.wox .stamp{position:absolute;left:100%;top:-6px;margin-left:16px;padding:4px 10px;border:2px solid var(--sage);color:var(--sage);border-radius:6px;font:600 11px/1 "DM Sans";letter-spacing:.16em;text-transform:uppercase;transform:rotate(-8deg) scale(1.6);opacity:0;white-space:nowrap}
+.wox .stamp.on{animation:woxstamp .45s var(--ease) forwards}
+@keyframes woxstamp{60%{opacity:1;transform:rotate(-8deg) scale(.95)}100%{opacity:1;transform:rotate(-8deg) scale(1)}}
+.wox.locked .sheet{opacity:.75;pointer-events:none}
+
+.woxbar{position:fixed;left:0;right:0;bottom:0;background:rgba(246,242,234,.85);backdrop-filter:blur(10px);border-top:1px solid #E4DCD0;z-index:40}
+@media (min-width:768px){.woxbar{left:18rem}}
+.woxbar .in{max-width:1020px;margin:0 auto;padding:12px 32px;display:flex;align-items:center;gap:10px}
+.woxbar .stat{margin-right:auto;color:#6E635B;font-size:13px;line-height:1.4}
+.woxbar .stat b{color:#2F2622;font-weight:500}
+.woxbar .stat small{display:block;color:#A39A91}
+
+.woxtoast{position:fixed;left:50%;bottom:84px;transform:translate(-50%,10px);background:#2F2622;color:#FFFDF9;padding:10px 16px;border-radius:999px;font-size:13.5px;opacity:0;pointer-events:none;transition:opacity .2s,transform .3s cubic-bezier(.2,.7,.2,1);display:flex;gap:10px;align-items:center;z-index:50}
+.woxtoast.show{opacity:1;transform:translate(-50%,0)}
+.woxtoast.warn{background:#A94E2B}
+.woxtoast i{width:6px;height:6px;border-radius:50%;background:#5F7F5B}
+.woxtoast.warn i{background:#FFD5C2}
+.woxbrick{position:fixed;width:12px;height:6px;border-radius:1px;pointer-events:none;z-index:60;will-change:transform,opacity}
+.wox .shake{animation:woxshake .4s var(--ease)}
+@keyframes woxshake{20%{transform:translateX(-4px)}40%{transform:translateX(4px)}60%{transform:translateX(-3px)}80%{transform:translateX(2px)}}
+
+@media (max-width:760px){
+  .wox .page{padding:18px 14px 130px}
+  .wox .hdr th{width:86px}
+  .wox .stg-scroll{overflow-x:auto}.wox .stg-scroll table{min-width:900px}
+  .woxbar .in{padding:10px 14px;flex-wrap:wrap}.woxbar .stat{width:100%}
+}
+@media (prefers-reduced-motion:reduce){.wox *{animation-duration:.01ms !important;transition-duration:.01ms !important}}
+`;
+
+const reduced = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function bricks(x: number, y: number) {
+  if (reduced) return;
+  const cs = ['#C4613A', '#E0906A', '#5F7F5B', '#B8862E', '#F1D8CB'];
+  for (let i = 0; i < 26; i++) {
+    const b = document.createElement('span');
+    b.className = 'woxbrick';
+    b.style.cssText = `background:${cs[i % 5]};left:${x}px;top:${y}px`;
+    document.body.appendChild(b);
+    const a = -Math.PI / 2 + (Math.random() - .5) * 1.6, sp = 260 + Math.random() * 260;
+    const vx = Math.cos(a) * sp, vy = Math.sin(a) * sp, rot = (Math.random() - .5) * 720;
+    b.animate([
+      { transform: 'translate(0,0)', opacity: 1 },
+      { transform: `translate(${vx * .6}px,${vy * .6 + 140}px) rotate(${rot}deg)`, opacity: 1, offset: .6 },
+      { transform: `translate(${vx}px,${vy + 520}px) rotate(${rot * 1.4}deg)`, opacity: 0 },
+    ], { duration: 1100 + Math.random() * 500, easing: 'cubic-bezier(.2,.7,.3,1)' }).onfinish = () => b.remove();
+  }
 }
 
 // ─── Component ────────────────────────────────────────────────────────────
@@ -145,38 +293,63 @@ export default function NewWorkOrder({ session }: { session: Session }) {
   const queryClient = useQueryClient();
   const { data: profile } = useUserProfile(session.user.id);
   const orgId = useOrgId();
+  const { show: showSnackbar } = useSnackbar();
 
   const initState = (location.state as any) || {};
+  const backTo = initState.returnTo || (initState.from === 'project' && initState.projectId ? `/projects/${initState.projectId}/work-orders` : '/work-orders');
 
   const [projectId, setProjectId] = useState<string>(initState.projectId || '');
   const [stakeholderId, setStakeholderId] = useState<string>(initState.stakeholderId || '');
+  const [conSearch, setConSearch] = useState('');
+  const [conOpen, setConOpen] = useState(false);
   const [scope, setScope] = useState('');
-  const [orderValue, setOrderValue] = useState<number>(0);
-  // Date issued defaults to today, but stays editable.
+  const [agreedValue, setAgreedValue] = useState<number>(0);   // optional; blank ⇒ derive from stages
   const [dateIssued, setDateIssued] = useState(new Date().toISOString().split('T')[0]);
-  // Inline "add new worker" quick-create state.
+  const [gst, setGst] = useState(false);
+
+  const [stages, setStages] = useState<StageDraft[]>([blankStage()]);
+  const [newStageId, setNewStageId] = useState<string | null>(null);
+
   const [showAddWorker, setShowAddWorker] = useState(false);
   const [newWorkerName, setNewWorkerName] = useState('');
   const [newWorkerTrade, setNewWorkerTrade] = useState('');
   const [newWorkerTradeOther, setNewWorkerTradeOther] = useState('');
   const [newWorkerContact, setNewWorkerContact] = useState('');
-  const { show: showSnackbar } = useSnackbar();
-  const [stages, setStages] = useState<StageDraft[]>([]);
-  const [newStageId, setNewStageId] = useState<string | null>(null);
-  const [pendingStages, setPendingStages] = useState<ExtractedStage[]>([]);
+
   const [source, setSource] = useState<'manual' | 'uploaded_doc'>('manual');
   const [isAiExtracted, setIsAiExtracted] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
-  const [aiError, setAiError] = useState<string | null>(null);
-  const [showOneTimeDialog, setShowOneTimeDialog] = useState(false);
 
-  // Auto-focus newly added stage name input
+  const [badKeys, setBadKeys] = useState<Set<string>>(new Set());
+  const [toastMsg, setToastMsg] = useState<{ text: string; warn?: boolean } | null>(null);
+  const [created, setCreated] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const conCellRef = useRef<HTMLDivElement>(null);
+
+  function blankStage(): StageDraft {
+    return { id: Math.random().toString(36).slice(2), name: '', paid_when: '', unit_type: 'LS', quantity: null, rate: null, amount: null };
+  }
+
+  const toast = useCallback((text: string, warn?: boolean) => {
+    setToastMsg({ text, warn });
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToastMsg(null), 2400);
+  }, []);
+
   useEffect(() => {
     if (!newStageId) return;
-    const el = document.querySelector(`[data-stage-id="${newStageId}"]`) as HTMLInputElement | null;
+    const el = document.querySelector(`[data-stage-name="${newStageId}"]`) as HTMLInputElement | null;
     el?.focus();
     setNewStageId(null);
-  }, [newStageId]);
+  }, [newStageId, stages.length]);
+
+  // close the contractor popover on an outside click
+  useEffect(() => {
+    const h = (e: MouseEvent) => { if (conCellRef.current && !conCellRef.current.contains(e.target as Node)) setConOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
 
   const { data: projects } = useQuery({
     queryKey: ['projects'],
@@ -190,94 +363,80 @@ export default function NewWorkOrder({ session }: { session: Session }) {
   const { data: workers } = useQuery({
     queryKey: ['workers'],
     queryFn: async () => {
-      // category = the worker's trade; needed by "Draft stages from scope" (B4) to pick a template.
       const { data, error } = await supabase.from('stakeholders').select('stakeholder_id, name, category').eq('type', 'Worker').order('name');
       if (error) throw error;
       return data as Pick<Stakeholder, 'stakeholder_id' | 'name' | 'category'>[];
     },
   });
 
-  const selectedProject = projects?.find(p => p.project_id === projectId);
-  const selectedWorker  = workers?.find(w => w.stakeholder_id === stakeholderId);
+  const selectedWorker = workers?.find(w => w.stakeholder_id === stakeholderId);
+  useEffect(() => { if (selectedWorker && !conSearch) setConSearch(selectedWorker.name); }, [selectedWorker]); // eslint-disable-line
+
+  // ─── Derivations ──────────────────────────────────────────────────────────
+  const namedStages = stages.filter(s => s.name.trim());
   const stagesTotal = stages.reduce((sum, s) => sum + calcAmount(s), 0);
-  const isOver  = orderValue > 0 && stagesTotal > orderValue + 0.01;
-  // ui/work-order-redesign — cosmetic, dead-ended (brief §1); read only by redesign JSX,
-  // never by any handler/mutation/payload.
-  const [uiCeremonyOpen, setUiCeremonyOpen] = useState(false);
-  const [uiActiveSeg, setUiActiveSeg] = useState<number | null>(null);
-  // B4 "Draft stages from scope" — separate from document extraction (both can be in flight).
-  const [uiDrafting, setUiDrafting] = useState(false);
-  const [uiDraftError, setUiDraftError] = useState<string | null>(null);
-  // Pure render-time derivations for the living sentence / allocation bar / recap.
-  const uiNamedStages = stages.filter(s => s.name.trim());
-  const uiSegments = uiNamedStages.map(s => calcAmount(s));
-  const uiAllocated = uiSegments.reduce((sum, a) => sum + a, 0);
+  const contractValue = agreedValue > 0 ? agreedValue : stagesTotal;      // saved order_value
+  const gstAmt = gst ? contractValue * 0.18 : 0;
+  const grossTotal = contractValue + gstAmt;
+  const isOver = agreedValue > 0 && stagesTotal > agreedValue + 0.01;
+  const measuredCount = stages.filter(s => s.unit_type !== 'LS' && (s.quantity ?? 0) > 0 && (s.rate ?? 0) > 0).length;
 
-  // ─── Save mutation ───────────────────────────────────────────────────────
-
+  // ─── Create mutation ──────────────────────────────────────────────────────
   const createWO = useMutation({
     mutationFn: async (): Promise<string> => {
-      if (!projectId || !stakeholderId || !scope || !dateIssued)
-        throw new Error('Please fill in all required fields.');
-      const milestones = stages.length > 0
-        ? stages.map((s, idx) => {
-            const mode = getMode(s);
-            return {
-              seq_no: idx + 1, name: s.name,
-              unit_type: s.unit_type || null,
-              quantity: mode === 'measured' ? s.quantity : (mode === 'lumpsum' ? 1 : null),
-              rate: mode === 'measured' ? s.rate : null,
-              planned_amount: calcAmount(s),
-              ai_extracted: isAiExtracted,
-            };
-          })
-        : [{
-            seq_no: 1, name: 'Full Payment',
-            unit_type: 'LS', quantity: 1, rate: null,
-            planned_amount: orderValue,
-            ai_extracted: false,
-          }];
+      if (!projectId || !stakeholderId || !dateIssued) throw new Error('Please fill in all required fields.');
+      const scopeText = scope.trim() || namedStages.map(s => s.name).join(', ') || 'Work contract';
+      const milestones = stages
+        .filter(s => s.name.trim() || calcAmount(s) > 0)
+        .map((s, idx) => {
+          const mode = getMode(s);
+          return {
+            seq_no: idx + 1,
+            name: s.name.trim() || `Stage ${idx + 1}`,
+            paid_when: s.paid_when.trim() || null,
+            unit_type: s.unit_type || null,
+            quantity: mode === 'measured' ? s.quantity : (mode === 'lumpsum' ? 1 : null),
+            rate: mode === 'measured' ? s.rate : null,
+            planned_amount: calcAmount(s),
+            ai_extracted: isAiExtracted,
+          };
+        });
       const { data, error } = await supabase.rpc('create_work_order', {
-        p_org_id:         orgId,
-        p_project_id:     projectId,
+        p_org_id: orgId,
+        p_project_id: projectId,
         p_stakeholder_id: stakeholderId,
-        p_scope:          scope,
-        p_order_value:    orderValue,
-        p_date_issued:    dateIssued,
-        p_source:         source,
-        p_milestones:     milestones,
+        p_scope: scopeText,
+        p_order_value: contractValue,
+        p_date_issued: dateIssued,
+        p_source: source,
+        p_milestones: milestones,
       });
       if (error) throw error;
       if (!data?.success) throw new Error(data?.error ?? 'Failed to create contract');
       return data.wo_id as string;
     },
-    onSuccess: () => {
+    onSuccess: (woId, _v, _c) => {
       queryClient.invalidateQueries({ queryKey: ['work_orders'] });
-      // ui/work-order-redesign (B5): keep invalidation immediate; the ceremony now gates
-      // the redirect. The id is read from createWO.data (=== the mutationFn's returned
-      // wo_id) in UiWoCeremony.onLeave, which fires the identical navigate. Error path
-      // untouched (still surfaces via createWO.isError).
-      setUiCeremonyOpen(true);
+      setCreated(woId);
+      requestAnimationFrame(() => {
+        const el = document.getElementById('wox-create');
+        if (el) { const r = el.getBoundingClientRect(); bricks(r.left + r.width / 2, r.top + r.height / 2); }
+      });
+      toast(`${woId} created · ${selectedWorker?.name ?? 'contract'}`);
     },
+    onError: (err: any) => toast(err.message || 'Failed to create contract', true),
   });
-
-  // ─── Add-new-worker mutation ──────────────────────────────────────────────
 
   const createWorker = useMutation({
     mutationFn: async () => {
       const name = newWorkerName.trim();
       if (!name) throw new Error('Worker name is required');
-      const category = newWorkerTrade === OTHER_TRADE
-        ? (newWorkerTradeOther.trim() || 'Other')
-        : newWorkerTrade;
+      const category = newWorkerTrade === OTHER_TRADE ? (newWorkerTradeOther.trim() || 'Other') : newWorkerTrade;
       if (!category) throw new Error('Trade is required');
       const ns = {
         stakeholder_id: `STK-${Math.floor(1000 + Math.random() * 9000)}`,
-        name,
-        type: 'Worker',
-        category,
-        contact: newWorkerContact.trim() || null,
-        org_id: orgId,
+        name, type: 'Worker', category,
+        contact: newWorkerContact.trim() || null, org_id: orgId,
       };
       const { data, error } = await supabase.from('stakeholders').insert([ns]).select().single();
       if (error) throw error;
@@ -286,6 +445,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
     onSuccess: (w) => {
       queryClient.invalidateQueries({ queryKey: ['workers'] });
       setStakeholderId(w.stakeholder_id);
+      setConSearch(w.name);
       setShowAddWorker(false);
       setNewWorkerName(''); setNewWorkerTrade(''); setNewWorkerTradeOther(''); setNewWorkerContact('');
       showSnackbar(`Worker "${w.name}" added`);
@@ -293,72 +453,31 @@ export default function NewWorkOrder({ session }: { session: Session }) {
     onError: (err: any) => showSnackbar(err.message || 'Failed to add worker', { type: 'error' }),
   });
 
-  // ─── Stage helpers ────────────────────────────────────────────────────────
-
+  // ─── Stage helpers ──────────────────────────────────────────────────────
   const addStage = () => {
-    const id = Math.random().toString();
-    setStages(prev => [...prev, { id, name: '', unit_type: '', quantity: null, rate: null, amount: null }]);
-    setNewStageId(id);
+    const s = blankStage();
+    setStages(prev => [...prev, s]);
+    setNewStageId(s.id);
   };
-
-  const updateStage = (id: string, field: keyof StageDraft, value: string | number | null) =>
-    setStages(prev => prev.map(s => s.id === id ? { ...s, [field]: value } : s));
-
+  const updateStage = (id: string, patch: Partial<StageDraft>) =>
+    setStages(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
   const removeStage = (id: string) =>
-    setStages(prev => prev.filter(s => s.id !== id));
+    setStages(prev => {
+      if (prev.length === 1) return [blankStage()];   // never leave the table empty
+      return prev.filter(s => s.id !== id);
+    });
+  const clearBad = (key: string) => setBadKeys(prev => { if (!prev.has(key)) return prev; const n = new Set(prev); n.delete(key); return n; });
 
-  const handleNameBlur = (s: StageDraft) => {
-    if (!s.unit_type && s.name.trim()) {
-      const suggested = suggestUnit(s.name);
-      if (suggested) updateStage(s.id, 'unit_type', suggested);
-    }
+  const selectContractor = (id: string, name: string) => {
+    setStakeholderId(id); setConSearch(name); setConOpen(false); clearBad('con');
   };
 
-  // ─── Stage add helpers ────────────────────────────────────────────────────
-
-  const addPendingStage = (es: ExtractedStage, amountOverride?: number) => {
-    const resolvedAmount = amountOverride ?? es.amount;
-    const newStage: StageDraft = {
-      id: Math.random().toString(),
-      name: es.name,
-      unit_type: es.unit_type ?? '',
-      quantity: es.mode === 'measured' ? es.qty : null,
-      rate: es.mode === 'measured' ? es.rate : null,
-      amount: es.mode === 'measured' ? null : resolvedAmount,
-      ambiguous: es.mode === 'ambiguous',
-    };
-    setStages(prev => [...prev, newStage]);
-    setPendingStages(prev => prev.filter(p => p._id !== es._id));
-  };
-
-  const addAllPendingStages = () => {
-    const newStages = pendingStages
-      .filter(es => !es.arithmetic_mismatch)
-      .map(es => ({
-        id: Math.random().toString(),
-        name: es.name,
-        unit_type: es.unit_type ?? '',
-        quantity: es.mode === 'measured' ? es.qty : null,
-        rate: es.mode === 'measured' ? es.rate : null,
-        amount: es.mode === 'measured' ? null : es.amount,
-        ambiguous: es.mode === 'ambiguous',
-      }));
-    setStages(prev => [...prev, ...newStages]);
-    setPendingStages(prev => prev.filter(p => p.arithmetic_mismatch));
-  };
-
-  // ─── AI file upload ────────────────────────────────────────────────────────
-
+  // ─── AI scan → rows fill directly ────────────────────────────────────────
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    e.target.value = '';   // let the same file be re-picked after a failure
+    e.target.value = '';
     setIsExtracting(true);
-    setAiError(null);
-    // NOTE: the reader is promise-wrapped so a failure INSIDE the async work is caught here.
-    // Previously the network call lived in reader.onload (async), which the surrounding try
-    // never covered — so any server error left the button spinning "Extracting…" forever with
-    // no message. (PDFs failed exactly this way: gpt-4o vision can't read a PDF as an image.)
     try {
       const base64String = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
@@ -370,18 +489,10 @@ export default function NewWorkOrder({ session }: { session: Session }) {
         };
         reader.readAsDataURL(file);
       });
-
-      // Server-side BOQ extraction — no OpenAI key in the browser. Handles photos AND PDFs.
       const { data: extracted, error: efError } = await supabase.functions.invoke('sku-matcher', {
-        body: {
-          action:       'extractWorkOrderBoQ',
-          image_base64: base64String,
-          image_mime:   file.type,
-        },
+        body: { action: 'extractWorkOrderBoQ', image_base64: base64String, image_mime: file.type },
       });
       if (efError) {
-        // supabase.functions.invoke gives a generic "non-2xx" message; the real reason is in
-        // the JSON body. Surface it so a failed extraction says WHY instead of nothing.
         let msg = efError.message;
         try {
           const ctx = (efError as any).context;
@@ -393,121 +504,87 @@ export default function NewWorkOrder({ session }: { session: Session }) {
       if ((extracted as any)?.error) throw new Error((extracted as any).error);
       const data = extracted as any;
 
-      // Set header fields
-      if (data.scope_of_work) setScope(data.scope_of_work);
-      if (data.order_value)   setOrderValue(data.order_value);
+      if (data.scope_of_work && !scope.trim()) setScope(data.scope_of_work);
+      if (data.order_value) setAgreedValue(Number(data.order_value) || 0);
       if (data.date_issued && !isNaN(Date.parse(data.date_issued))) setDateIssued(data.date_issued);
       if (data.worker_name_fuzzy && workers) {
         const match = workers.find(w => w.name.toLowerCase().includes((data.worker_name_fuzzy as string).toLowerCase()));
-        if (match) setStakeholderId(match.stakeholder_id);
+        if (match) selectContractor(match.stakeholder_id, match.name);
       }
 
-      // Queue stages for review instead of adding directly
       if (Array.isArray(data.stages) && data.stages.length > 0) {
-        setPendingStages(data.stages.map((s: any) => ({
-          _id: Math.random().toString(),
-          name: s.name ?? '',
-          mode: s.mode ?? 'ambiguous',
-          unit_type: s.unit_type ?? null,
-          qty: s.qty ?? null,
-          rate: s.rate ?? null,
-          amount: Number(s.amount) || 0,
-          amount_verified: Boolean(s.amount_verified),
-          arithmetic_mismatch: Boolean(s.arithmetic_mismatch),
-          mismatch_note: s.mismatch_note ?? null,
-          confidence: s.confidence ?? 'LOW',
-          confidence_reason: s.confidence_reason ?? '',
-        })));
+        const drafted: StageDraft[] = (data.stages as any[]).map((s): StageDraft => {
+          const es: ExtractedStage = {
+            name: s.name ?? '',
+            mode: s.mode ?? 'ambiguous',
+            unit_type: s.unit_type ?? null,
+            qty: s.qty ?? null,
+            rate: s.rate ?? null,
+            amount: Number(s.amount) || 0,
+            arithmetic_mismatch: Boolean(s.arithmetic_mismatch),
+          };
+          return {
+            id: Math.random().toString(36).slice(2),
+            name: es.name,
+            paid_when: '',
+            unit_type: es.mode === 'measured' ? (es.unit_type ?? 'Sqft') : 'LS',
+            quantity: es.mode === 'measured' ? es.qty : null,
+            rate: es.mode === 'measured' ? es.rate : null,
+            amount: es.mode === 'measured' ? null : es.amount,
+            ambiguous: es.mode === 'ambiguous' || es.arithmetic_mismatch,
+          };
+        });
+        // replace the empty starter row(s) with the drafted stages
+        setStages(prev => {
+          const kept = prev.filter(s => s.name.trim() || calcAmount(s) > 0);
+          return [...kept, ...drafted];
+        });
       }
-
       setSource('uploaded_doc');
       setIsAiExtracted(true);
+      toast(`Drafted ${Array.isArray(data.stages) ? data.stages.length : 0} stage${(data.stages?.length ?? 0) > 1 ? 's' : ''} from the document — check amounts`);
     } catch (err: any) {
-      setAiError(err.message || 'Failed to extract data.');
+      toast(err.message || 'Failed to read the document', true);
     } finally {
       setIsExtracting(false);
     }
   };
 
-  // ─── B4: Draft stages from scope ──────────────────────────────────────────
-  // Additive. Calls the NEW wo-stage-drafter edge function and feeds the EXISTING
-  // pendingStages → AI Review Panel → addPendingStage pipeline. Touches nothing
-  // existing (createWO, calcAmount, stage keys, save conditions all unchanged).
-  async function handleDraftStages() {
-    if (!scope.trim()) { setUiDraftError('Write the scope first.'); return; }
-    setUiDrafting(true);
-    setUiDraftError(null);
-    try {
-      const existing_stage_names = stages.filter(s => s.name.trim()).map(s => s.name.trim());
-      const { data, error } = await supabase.functions.invoke('wo-stage-drafter', {
-        body: {
-          scope_text: scope,
-          trade: selectedWorker?.category ?? null,
-          contract_value: orderValue > 0 ? orderValue : null,
-          existing_stage_names,
-        },
-      });
-      if (error) throw error;
-      const drafted = (data as any)?.stages as any[] | undefined;
-      if (!Array.isArray(drafted) || drafted.length === 0) {
-        setUiDraftError('No stages suggested — add more detail to the scope.');
-        return;
-      }
-      // Weighted budget = contract minus explicit measured totals, so accept-all
-      // reconciles to the contract exactly. Empty contract → amounts 0, pct shown.
-      const measuredTotal = drafted
-        .filter(s => s.mode === 'measured')
-        .reduce((sum, s) => sum + (Number(s.quantity) || 0) * (Number(s.rate) || 0), 0);
-      const priced = orderValue > 0;
-      const budget = priced ? Math.max(0, orderValue - measuredTotal) : 0;
-      const weightedPcts = drafted.filter(s => s.mode === 'weighted').map(s => Number(s.weight_pct) || 0);
-      const weightedAmts = uiAllocateWeighted(weightedPcts, budget);
-
-      let wi = 0;
-      const pending: ExtractedStage[] = drafted.map((s): ExtractedStage => {
-        if (s.mode === 'measured') {
-          const qty = Number(s.quantity) || 0;
-          const rate = Number(s.rate) || 0;
-          return {
-            _id: Math.random().toString(),
-            name: String(s.name || ''),
-            mode: 'measured',
-            unit_type: s.unit_type ?? null,
-            qty, rate,
-            amount: qty * rate,
-            amount_verified: true,
-            arithmetic_mismatch: false,
-            mismatch_note: null,
-            confidence: 'HIGH',
-            confidence_reason: '',
-          };
-        }
-        const pct = Number(s.weight_pct) || 0;
-        const amount = weightedAmts[wi++] || 0;
-        return {
-          _id: Math.random().toString(),
-          name: String(s.name || ''),
-          mode: 'lumpsum',
-          unit_type: 'LS',
-          qty: null, rate: null,
-          amount,
-          amount_verified: priced,
-          arithmetic_mismatch: false,
-          mismatch_note: null,
-          confidence: priced ? 'HIGH' : 'MEDIUM',
-          confidence_reason: priced ? '' : `${pct}% of contract — enter the contract value to price`,
-        };
-      });
-      setPendingStages(pending);
-    } catch (err: any) {
-      setUiDraftError(err?.message || 'Could not draft stages. Try again.');
-    } finally {
-      setUiDrafting(false);
+  // ─── Validate + create ────────────────────────────────────────────────────
+  function attemptCreate() {
+    if (createWO.isPending || created) return;
+    const bad = new Set<string>();
+    if (!stakeholderId) bad.add('con');
+    if (!projectId) bad.add('proj');
+    let any = false;
+    stages.forEach(s => {
+      const named = !!s.name.trim(), amt = calcAmount(s) > 0;
+      if (!named && !amt) return;
+      any = true;
+      if (!named) bad.add(`name-${s.id}`);
+      if (!amt) bad.add(`amt-${s.id}`);
+    });
+    if (!any) bad.add(`name-${stages[0].id}`);
+    if (bad.size) {
+      setBadKeys(bad);
+      toast(bad.size === 1 ? 'One field needs filling' : `${bad.size} fields need filling`, true);
+      return;
     }
+    if (isOver) { toast(`Stages exceed the agreed value by ${fmt(stagesTotal - agreedValue)}`, true); return; }
+    setBadKeys(new Set());
+    createWO.mutate();
   }
 
-  // ─── Access guard ─────────────────────────────────────────────────────────
+  // Ctrl/Cmd+Enter creates
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); attemptCreate(); }
+    };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  }); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ─── Access guard ─────────────────────────────────────────────────────────
   if (profile && profile.role !== 'management' && profile.role !== 'principal') {
     return (
       <div className="px-margin-mobile md:px-margin-desktop pt-6">
@@ -519,599 +596,378 @@ export default function NewWorkOrder({ session }: { session: Session }) {
     );
   }
 
-  // ─── Render ────────────────────────────────────────────────────────────────
+  const conHits = (workers ?? []).filter(w => w.name.toLowerCase().includes(conSearch.trim().toLowerCase()));
+  const conExact = conHits.some(w => w.name.toLowerCase() === conSearch.trim().toLowerCase());
 
+  // ─── Render ────────────────────────────────────────────────────────────────
   return (
     <>
-    <div className="min-h-screen" style={{ background: VOICE.page }}>
-      <div className="mx-auto px-5 sm:px-6 pt-6 pb-40" style={{ maxWidth: 700 }}>
+      <style>{WOX_CSS}</style>
+      <div className={`wox${created ? ' locked' : ''}`}>
+        <div className="page">
 
-      <Breadcrumb items={
-        initState.returnTo
-          ? [
-              { label: 'Dashboard', href: '/' },
-              { label: initState.returnLabel || 'Back', href: initState.returnTo },
-              { label: 'New' },
-            ]
-          : initState.from === 'project' && initState.projectName
-          ? [
-              { label: 'Dashboard', href: '/' },
-              { label: 'Projects', href: '/projects' },
-              { label: initState.projectName, href: `/projects/${initState.projectId}` },
-              { label: 'Contracts', href: `/projects/${initState.projectId}/work-orders` },
-              { label: 'New' },
-            ]
-          : [
-              { label: 'Dashboard', href: '/' },
-              { label: 'Contracts', href: '/work-orders' },
-              { label: 'New' },
-            ]
-      } />
-
-      {/* Header — compact (back handler unchanged) */}
-      <header className="flex items-center gap-3 mb-2 mt-1">
-        <button
-          type="button"
-          onClick={() => navigate(initState.returnTo || (initState.from === 'project' && initState.projectId ? `/projects/${initState.projectId}/work-orders` : '/work-orders'))}
-          aria-label="Back to contracts"
-          style={{ color: VOICE.user }}
-        >
-          <span className="material-symbols-outlined">arrow_back</span>
-        </button>
-        <p className="text-sm flex-1" style={{ color: VOICE.system }}>New contract</p>
-        <span className="text-xs px-2.5 py-1 rounded-full" style={{ background: VOICE.field, color: VOICE.system, ...VNUMS }}>WO · auto</span>
-      </header>
-
-      {aiError && (
-        <div className="mb-4 p-4 bg-error-container text-on-error-container rounded-xl text-body-sm flex items-center gap-2">
-          <span className="material-symbols-outlined shrink-0">error</span> {aiError}
-        </div>
-      )}
-      {isAiExtracted && (
-        <div className="mb-4 p-4 bg-secondary-container text-on-secondary-container rounded-xl text-body-sm flex items-center gap-2">
-          <span className="material-symbols-outlined shrink-0">auto_awesome</span>
-          Data extracted from document — please review all fields before saving.
-        </div>
-      )}
-
-      {/* Title — a plain heading; this is a contract */}
-      <div className="mt-6 mb-1">
-        <h1 className="text-[26px] font-semibold tracking-tight" style={{ color: VOICE.user }}>New Contract</h1>
-      </div>
-
-      {/* Entry mode — "extract from a document" (existing handleFileUpload, relocated) */}
-      <div className="flex gap-2 items-center mt-4 flex-wrap">
-        <p className="text-xs" style={{ color: VOICE.systemFaint }}>Fill it in below, or</p>
-        <label className="text-xs font-medium inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full cursor-pointer" style={{ border: `1px solid ${VOICE.line}`, color: VOICE.user }}>
-          {isExtracting ? <Loader2 className="animate-spin" size={12} /> : <span className="material-symbols-outlined text-[14px]">upload_file</span>}
-          {isExtracting ? 'Extracting…' : 'extract from a document'}
-          <input type="file" accept="image/*,application/pdf" className="hidden" onChange={handleFileUpload} disabled={isExtracting} />
-        </label>
-      </div>
-
-      <hr className="border-0 mt-8 mb-2" style={{ height: 1, background: VOICE.line }} />
-
-      <form
-        id="wo-new-form"
-        onSubmit={e => { e.preventDefault(); if (stages.length === 0) { setShowOneTimeDialog(true); } else { createWO.mutate(); } }}
-        className="mt-2"
-      >
-
-          {/* 01 — Who's doing the work? */}
-          <section>
-            <Question n="01" hint="Search by name — if they're not in the list yet, add them right from the result.">Who's doing the work?</Question>
-            <UiContractorCombobox
-              workers={workers ?? []}
-              selectedId={stakeholderId}
-              selectedName={selectedWorker?.name ?? ''}
-              onSelect={(id) => setStakeholderId(id)}
-              onClear={() => setStakeholderId('')}
-              onAddNew={(name) => { setNewWorkerName(name); setShowAddWorker(true); }}
-            />
-
-            {/* Existing inline add-worker form (createWorker) — opened by the combobox's "add as new" */}
-            {showAddWorker && (
-              <div className="mt-3 rounded-xl p-4 space-y-3" style={{ background: VOICE.askWash, border: `1px solid ${VOICE.askLine}`, maxWidth: 420 }}>
-                <p className="text-xs font-semibold" style={{ color: VOICE.askDeep }}>New worker</p>
-                <input value={newWorkerName} onChange={e => setNewWorkerName(e.target.value)} className="bk-input" placeholder="Worker name" autoFocus />
-                <select value={newWorkerTrade} onChange={e => { setNewWorkerTrade(e.target.value); setNewWorkerTradeOther(''); }} className="bk-input">
-                  <option value="" disabled>Select trade…</option>
-                  {WORKER_TRADE_GROUPS.map(g => (
-                    <optgroup key={g.group} label={g.group}>
-                      {g.trades.map(t => <option key={t} value={t}>{t}</option>)}
-                    </optgroup>
-                  ))}
-                </select>
-                {newWorkerTrade === OTHER_TRADE && (
-                  <input value={newWorkerTradeOther} onChange={e => setNewWorkerTradeOther(e.target.value)} className="bk-input" placeholder="Specify trade…" />
-                )}
-                <input value={newWorkerContact} onChange={e => setNewWorkerContact(e.target.value)} className="bk-input" placeholder="Contact (optional)" />
-                <div className="flex gap-2 justify-end">
-                  <button type="button" onClick={() => { setShowAddWorker(false); setNewWorkerName(''); setNewWorkerTrade(''); setNewWorkerTradeOther(''); setNewWorkerContact(''); }} className="px-3 py-1.5 rounded-lg text-xs font-medium" style={{ border: `1px solid ${VOICE.line}`, color: VOICE.system }}>Cancel</button>
-                  <button type="button" onClick={() => createWorker.mutate()} disabled={!newWorkerName.trim() || !newWorkerTrade || (newWorkerTrade === OTHER_TRADE && !newWorkerTradeOther.trim()) || createWorker.isPending} className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white inline-flex items-center gap-1.5 disabled:opacity-50" style={{ background: VOICE.askDeep }}>{createWorker.isPending ? 'Saving…' : 'Save & select'}</button>
-                </div>
-              </div>
-            )}
-
-            {/* Project + date (functional, restyled) */}
-            <div className="flex gap-3 flex-wrap mt-4">
-              <select value={projectId} onChange={e => setProjectId(e.target.value)} required className="flex-1 min-w-44 px-3.5 py-2.5 rounded-xl text-sm" style={{ background: VOICE.surface, border: `1px solid ${VOICE.line}`, color: VOICE.user }}>
-                <option value="">Select project…</option>
-                {projects?.map(p => <option key={p.project_id} value={p.project_id}>{p.name}</option>)}
-              </select>
-              <input type="date" value={dateIssued} onChange={e => setDateIssued(e.target.value)} required className="flex-1 min-w-44 px-3.5 py-2.5 rounded-xl text-sm" style={{ background: VOICE.surface, border: `1px solid ${VOICE.line}`, color: VOICE.user, ...VNUMS }} />
+          {/* top */}
+          <div className="top">
+            <button className="back" aria-label="Back" onClick={() => navigate(backTo)}>
+              <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
+            </button>
+            <div className="title-wrap">
+              <h1>New work contract</h1>
+              <span className={`stamp${created ? ' on' : ''}`}>Created</span>
             </div>
-          </section>
-
-          <hr className="border-0 my-9" style={{ height: 1, background: VOICE.line }} />
-
-          {/* 02 — What's the work? */}
-          <section>
-            <div className="flex items-start justify-between gap-3">
-              <Question n="02" hint="Write it the way you'd say it.">What's the work?</Question>
-              {/* B4 — draft stages from the scope (wo-stage-drafter) */}
-              <button
-                type="button"
-                onClick={handleDraftStages}
-                disabled={uiDrafting || !scope.trim()}
-                title={!scope.trim() ? 'Write the scope first' : 'Draft stages from the scope'}
-                className="text-xs font-medium inline-flex items-center gap-1.5 mt-1 shrink-0 disabled:opacity-40"
-                style={{ color: VOICE.askDeep }}
-              >
-                {uiDrafting
-                  ? <Loader2 className="animate-spin" size={12} />
-                  : <span className="material-symbols-outlined text-[14px]">auto_awesome</span>}
-                {uiDrafting ? 'Drafting…' : 'draft stages from this'}
-              </button>
+            <div className="wo">
+              <i /><span>{created ? 'Contract' : 'Auto-generated'}</span>
+              <span className="mono">{created ?? 'WO · auto'}</span>
             </div>
-            {uiDraftError && (
-              <p className="text-xs mt-2" style={{ color: '#B91C1C' }}>{uiDraftError}</p>
-            )}
-            <textarea
-              value={scope}
-              onChange={e => setScope(e.target.value)}
-              rows={2}
-              className="w-full px-4 py-3 rounded-xl text-sm outline-none resize-none"
-              style={{ background: VOICE.surface, border: `1px solid ${VOICE.line}`, color: VOICE.user }}
-              placeholder='"Foundation and plinth lump sum 1.8L, GF brickwork 1400 sft at 85, then plastering…"'
-              required
-            />
-          </section>
+          </div>
 
-          <hr className="border-0 my-9" style={{ height: 1, background: VOICE.line }} />
-
-          {/* 03 — How is the money split? */}
-          <section>
-            <Question n="03" hint="Each stage becomes a payable milestone.">How is the money split?</Question>
-
-            <div className="flex items-baseline gap-2 flex-wrap">
-              <span className="text-sm" style={{ color: VOICE.system }}>Contract value</span>
-              <span className="text-lg" style={{ color: VOICE.systemFaint }}>₹</span>
-              <input
-                type="number" step="0.01" min="0"
-                value={orderValue || ''}
-                onChange={e => setOrderValue(parseAmount(e.target.value))}
-                placeholder="0"
-                required
-                aria-label="Contract value in rupees"
-                className="bg-transparent outline-none font-medium"
-                style={{ color: VOICE.user, fontSize: 28, width: 220, ...VNUMS }}
-              />
-              <span className="text-xs" style={{ color: VOICE.systemFaint }}>excl. GST</span>
-            </div>
-
-            <UiAllocationBar
-              contract={orderValue}
-              total={uiAllocated}
-              segments={uiSegments}
-              isOver={isOver}
-              activeSeg={uiActiveSeg}
-              onSegTap={(i) => setUiActiveSeg(uiActiveSeg === i ? null : i)}
-            />
-
-            <div className="flex items-center justify-between mt-6 mb-1">
-              <span className="text-xs font-semibold uppercase tracking-[0.1em]" style={{ color: VOICE.system }}>Stages</span>
-              <button type="button" onClick={addStage} className="flex items-center gap-1.5 text-xs font-medium" style={{ color: VOICE.user }}>
-                <span className="material-symbols-outlined text-[16px]">add</span> Add stage
-              </button>
-            </div>
-
-            {/* AI Review Panel */}
-            {pendingStages.length > 0 && (
-              <div className="mb-4 rounded-xl border border-secondary/20 bg-secondary-container/10 overflow-hidden">
-                <div className="flex items-center justify-between px-4 py-2.5 border-b border-secondary/10">
-                  <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-[16px] text-secondary">auto_awesome</span>
-                    <p className="text-[11px] font-bold text-on-surface-variant uppercase tracking-wider">
-                      {pendingStages.length} extracted stage{pendingStages.length > 1 ? 's' : ''} — review before adding
-                    </p>
-                  </div>
-                  {pendingStages.some(p => !p.arithmetic_mismatch) && (
-                    <button
-                      type="button"
-                      onClick={addAllPendingStages}
-                      className="text-[11px] font-semibold text-primary hover:text-primary/80 px-3 py-1 rounded-lg hover:bg-primary/5 transition-colors"
-                    >
-                      Add All
-                    </button>
-                  )}
-                </div>
-                <div className="p-3 space-y-2">
-                  {pendingStages.map(es => (
-                    <ExtractedStageCard key={es._id} stage={es} onAdd={addPendingStage} />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {stages.length === 0 && pendingStages.length === 0 ? (
-              <button
-                type="button"
-                onClick={addStage}
-                className="w-full border-2 border-dashed border-outline-variant/40 rounded-xl p-8 text-center text-on-surface-variant hover:border-primary/30 hover:bg-primary/5 transition-all group"
-              >
-                <span className="material-symbols-outlined text-[36px] opacity-30 group-hover:opacity-60 mb-2 block transition-opacity">playlist_add</span>
-                <p className="text-body-sm">No work stages yet — click to add the first row.</p>
-              </button>
-            ) : stages.length > 0 ? (
-              <div className="space-y-1">
-                {stages.map((s) => {
-                  const mode    = getMode(s);
-                  const isLS    = s.unit_type === 'LS';
-                  const amount  = calcAmount(s);
-                  // ui/work-order-redesign — index among named stages, for the segment dot
-                  // colour + the allocation-bar row highlight (decorative; no logic change).
-                  const namedIdx = uiNamedStages.indexOf(s);
-
-                  return (
-                    <div
-                      key={s.id}
-                      className="rounded-xl px-4 py-4 transition-colors"
-                      style={{
-                        background: uiActiveSeg === namedIdx && namedIdx !== -1 ? VOICE.field : VOICE.surface,
-                        border: `1px solid ${VOICE.line}`,
-                        borderLeft: s.ambiguous ? '3px solid #E5A100' : `1px solid ${VOICE.line}`,
-                      }}
-                      title={s.ambiguous ? 'Verify this stage — add qty & rate if measured' : undefined}
-                    >
-                      {/* line 1 — segment dot + stage name + remove */}
-                      <div className="flex items-center gap-2.5">
-                        <span
-                          className="w-2.5 h-2.5 rounded-full shrink-0"
-                          style={{ background: s.name.trim() && namedIdx !== -1 ? SEG[namedIdx % SEG.length] : VOICE.line }}
-                          aria-hidden="true"
-                        />
-                        <input
-                          data-stage-id={s.id}
-                          value={s.name}
-                          onChange={e => updateStage(s.id, 'name', e.target.value)}
-                          onBlur={() => handleNameBlur(s)}
-                          aria-label="Stage description"
-                          className="flex-1 min-w-0 bg-transparent text-[15px] font-medium outline-none"
-                          style={{ color: VOICE.user }}
-                          placeholder="e.g. Plastering — 2nd floor"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => removeStage(s.id)}
-                          aria-label="Remove stage"
-                          className="shrink-0"
-                          style={{ color: VOICE.systemFaint }}
-                        >
-                          <span className="material-symbols-outlined text-[18px]">delete</span>
-                        </button>
-                      </div>
-
-                      {/* line 2 — qty · unit · rate … amount */}
-                      <div className="flex items-center gap-2.5 mt-3 ml-5 flex-wrap">
-                        {isLS ? (
-                          <span className="text-sm h-10 inline-flex items-center justify-end px-3.5 rounded-lg select-none" style={{ background: VOICE.field, border: `1px solid ${VOICE.line}`, color: VOICE.systemFaint, width: 96 }}>—</span>
-                        ) : (
-                          <input
-                            type="number" step="0.01" min="0"
-                            value={s.quantity ?? ''}
-                            onChange={e => {
-                              const v = parseFloat(e.target.value) || null;
-                              setStages(prev => prev.map(st => st.id !== s.id ? st : { ...st, quantity: v, amount: null }));
-                            }}
-                            aria-label="Stage quantity"
-                            className="h-10 px-3.5 rounded-lg text-sm text-right outline-none"
-                            style={{ background: VOICE.field, border: `1px solid ${VOICE.line}`, color: VOICE.user, width: 96, ...VNUMS }}
-                            placeholder="qty"
-                          />
-                        )}
-                        <select
-                          value={s.unit_type}
-                          onChange={e => {
-                            const u = e.target.value;
-                            // Switching to LS → clear qty/rate; switching away → clear direct amount
-                            setStages(prev => prev.map(st => st.id !== s.id ? st : {
-                              ...st,
-                              unit_type: u,
-                              quantity: u === 'LS' ? null : st.quantity,
-                              rate:     u === 'LS' ? null : st.rate,
-                              amount:   u === 'LS' ? st.amount : null,
-                            }));
-                          }}
-                          aria-label="Stage unit"
-                          className="h-10 px-3 rounded-lg text-sm outline-none"
-                          style={{ background: VOICE.field, border: `1px solid ${VOICE.line}`, color: VOICE.system, minWidth: 104 }}
-                        >
-                          <option value="">unit</option>
-                          {UNIT_GROUPS.map(g => (
-                            <optgroup key={g.group} label={`── ${g.group} ──`}>
-                              {g.items.map(i => <option key={i.value} value={i.value}>{i.label}</option>)}
-                            </optgroup>
-                          ))}
-                        </select>
-                        <span className="text-xs" style={{ color: VOICE.systemFaint }}>×</span>
-                        {isLS ? (
-                          <span className="text-sm h-10 inline-flex items-center justify-end px-3.5 rounded-lg select-none" style={{ background: VOICE.field, border: `1px solid ${VOICE.line}`, color: VOICE.systemFaint, width: 120 }}>—</span>
-                        ) : (
-                          <input
-                            type="number" step="0.01" min="0"
-                            value={s.rate ?? ''}
-                            onChange={e => {
-                              const v = parseFloat(e.target.value) || null;
-                              setStages(prev => prev.map(st => st.id !== s.id ? st : { ...st, rate: v, amount: null }));
-                            }}
-                            aria-label="Stage rate"
-                            className="h-10 px-3.5 rounded-lg text-sm text-right outline-none"
-                            style={{ background: VOICE.field, border: `1px solid ${VOICE.line}`, color: VOICE.user, width: 120, ...VNUMS }}
-                            placeholder="₹ rate"
-                          />
-                        )}
-                        <span className="flex-1" />
-                        {mode === 'measured' ? (
-                          <span className="text-[15px] font-semibold text-right" style={{ color: VOICE.user, minWidth: 128, ...VNUMS }}>
-                            {fmtRupee(amount)}
-                          </span>
-                        ) : (
-                          <input
-                            type="number" step="0.01" min="0"
-                            value={s.amount ?? ''}
-                            onChange={e => {
-                              const v = parseFloat(e.target.value) || null;
-                              // typing amount clears qty/rate to lock into lumpsum mode
-                              setStages(prev => prev.map(st => st.id !== s.id ? st : { ...st, amount: v, quantity: null, rate: null }));
-                            }}
-                            aria-label="Stage amount"
-                            className="h-10 px-3.5 rounded-lg text-[15px] text-right font-semibold outline-none"
-                            style={{ background: VOICE.field, border: `1px solid ${VOICE.line}`, color: VOICE.user, width: 148, ...VNUMS }}
-                            placeholder="₹ amount"
-                          />
+          {/* ===== Agreement ===== */}
+          <div className="sec"><h2>Agreement</h2></div>
+          <div className="sheet hdr">
+            <table>
+              <colgroup><col style={{ width: 118 }} /><col /><col style={{ width: 118 }} /><col /></colgroup>
+              <tbody>
+                <tr>
+                  <th>Contractor</th>
+                  <td>
+                    <div className={`cell${badKeys.has('con') ? ' bad' : ''}${stakeholderId ? ' filled' : ''}`} ref={conCellRef}>
+                      <input
+                        value={conSearch}
+                        onChange={e => { setConSearch(e.target.value); setStakeholderId(''); setConOpen(true); clearBad('con'); }}
+                        onFocus={() => setConOpen(true)}
+                        placeholder="Search contractor…"
+                        autoComplete="off"
+                      />
+                      <div className={`pop${conOpen && (conHits.length > 0 || conSearch.trim()) ? ' open' : ''}`}>
+                        {conHits.map(w => (
+                          <button type="button" key={w.stakeholder_id} onMouseDown={e => { e.preventDefault(); selectContractor(w.stakeholder_id, w.name); }}>
+                            <span>{w.name}</span>{w.category && <small>{w.category}</small>}
+                          </button>
+                        ))}
+                        {conSearch.trim() && !conExact && (
+                          <button type="button" className="new" onMouseDown={e => { e.preventDefault(); setNewWorkerName(conSearch.trim()); setShowAddWorker(true); setConOpen(false); }}>
+                            <b>+</b>Add “{conSearch.trim()}” as new contractor
+                          </button>
                         )}
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            ) : null}
-          </section>
-
-          {createWO.isError && (
-            <div className="mt-8 p-4 bg-error-container text-on-error-container rounded-xl text-body-sm flex items-center gap-2">
-              <span className="material-symbols-outlined shrink-0">error</span>
-              {(createWO.error as Error)?.message}
-            </div>
-          )}
-        </form>
-      </div>
-
-      {/* Fixed bottom action bar — total + status + single primary (B1: disable on isOver only) */}
-      <footer className="fixed bottom-16 md:bottom-0 left-0 md:left-72 right-0 z-40 backdrop-blur-sm" style={{ background: VOICE.surface, borderTop: `1px solid ${VOICE.line}`, paddingBottom: 'env(safe-area-inset-bottom)' }}>
-        <div className="px-margin-mobile md:px-margin-desktop py-3 flex items-center gap-3 flex-wrap">
-          <div>
-            <UiTotalExclGst amountLabel={`₹${uiAllocated.toLocaleString('en-IN')}`} size={16} />
-            <p className="text-xs" style={{ color: VOICE.systemFaint, ...VNUMS }}>
-              {uiNamedStages.length > 0 ? `${uiNamedStages.length} stage${uiNamedStages.length > 1 ? 's' : ''}` : 'one full payment'} · draft
-            </p>
+                  </td>
+                  <th>Project</th>
+                  <td>
+                    <div className={`cell sel${badKeys.has('proj') ? ' bad' : ''}${projectId ? ' filled' : ''}`}>
+                      <select value={projectId} onChange={e => { setProjectId(e.target.value); clearBad('proj'); }}>
+                        <option value="">Choose project</option>
+                        {projects?.map(p => <option key={p.project_id} value={p.project_id}>{p.name}</option>)}
+                      </select>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <th>Starts</th>
+                  <td><div className="cell filled"><input type="date" value={dateIssued} onChange={e => setDateIssued(e.target.value)} /></div></td>
+                  <th>Value</th>
+                  <td>
+                    <div className={`cell num pre-pad${agreedValue > 0 ? ' filled' : ''}`}>
+                      <span className="pre">₹</span>
+                      <input
+                        inputMode="decimal"
+                        value={agreedValue || ''}
+                        onChange={e => setAgreedValue(parseAmount(e.target.value))}
+                        placeholder="agreed total — or leave blank to add up from stages"
+                        style={{ textAlign: 'left', fontFamily: 'inherit' }}
+                      />
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <th>Work</th>
+                  <td colSpan={3}>
+                    <div className={`cell${scope.trim() ? ' filled' : ''}`}>
+                      <input value={scope} onChange={e => setScope(e.target.value)} placeholder="One line — e.g. Structure up to GF slab, labour only" />
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-          <span className="flex-1" />
-          <button
-            type="button"
-            onClick={() => navigate(initState.returnTo || (initState.from === 'project' && initState.projectId ? `/projects/${initState.projectId}/work-orders` : '/work-orders'))}
-            className="text-sm font-medium"
-            style={{ color: VOICE.system }}
-          >
-            Cancel
-          </button>
-          <div className="text-right">
-            <button
-              type="submit"
-              form="wo-new-form"
-              className="text-sm font-medium px-6 py-3 rounded-xl inline-flex items-center gap-1.5 text-white disabled:opacity-50"
-              style={{ background: VOICE.user }}
-              disabled={createWO.isPending || isOver}
-            >
-              {createWO.isPending
-                ? <><Loader2 className="animate-spin" size={15} /> Saving…</>
-                : <><span className="material-symbols-outlined text-[18px]">check</span> Create contract</>}
-            </button>
-            <UiSaveHint text={isOver ? `stages exceed contract by ₹${(stagesTotal - orderValue).toLocaleString('en-IN')}` : null} />
-          </div>
-        </div>
-      </footer>
 
-      {/* ── One-time job confirmation dialog ──────────────────────────── */}
-      {showOneTimeDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4">
-          <div className="bg-surface rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4">
-            <div className="flex items-start gap-3">
-              <span className="material-symbols-outlined text-[28px] text-amber-500 shrink-0">info</span>
+          {/* add-contractor inline form */}
+          {showAddWorker && (
+            <div className="addform">
               <div>
-                <h3 className="text-title-md font-semibold text-on-surface">One-Time Job?</h3>
-                <p className="text-body-sm text-on-surface-variant mt-1">
-                  No work stages have been added. Is this a one-shot job? A single <strong>Full Payment</strong> milestone will be created for the full order value.
-                </p>
+                <label>New contractor</label>
+                <input value={newWorkerName} onChange={e => setNewWorkerName(e.target.value)} placeholder="Contractor name" autoFocus style={{ marginTop: 6 }} />
               </div>
-            </div>
-            <div className="flex flex-col gap-2 pt-1">
-              <button
-                className="bk-btn w-full py-2.5 rounded-xl text-body-sm font-semibold"
-                onClick={() => { setShowOneTimeDialog(false); createWO.mutate(); }}
-              >
-                Yes, it's a one-time job
-              </button>
-              <button
-                className="bk-btn-ghost w-full py-2.5 rounded-xl border border-outline-variant/40 text-body-sm font-semibold"
-                onClick={() => {
-                  setShowOneTimeDialog(false);
-                  const id = Math.random().toString();
-                  setStages([{ id, name: '', unit_type: '', quantity: null, rate: null, amount: null }]);
-                  setNewStageId(id);
-                }}
-              >
-                Add milestones
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-
-    {/* ui/work-order-redesign — save ceremony (B5). onLeave fires the EXISTING navigate
-        with the id read from createWO.data; every exit (scrim/Done/View) calls it. */}
-    <UiWoCeremony
-      open={uiCeremonyOpen}
-      woId={createWO.data}
-      workerName={selectedWorker?.name}
-      projectName={selectedProject?.name}
-      total={uiAllocated}
-      contract={orderValue}
-      segments={uiSegments}
-      stageCount={uiNamedStages.length}
-      onLeave={() => initState.returnTo
-        ? navigate(initState.returnTo)
-        : navigate(`/work-orders/${createWO.data}`, { state: initState.from === 'project' ? { from: 'project', projectId: initState.projectId, projectName: initState.projectName } : undefined })}
-    />
-    </>
-  );
-}
-
-function Question({ n, hint, children }: { n: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-baseline gap-3 mb-4">
-      <span className="text-xs" style={{ color: VOICE.systemFaint, ...VNUMS }}>{n}</span>
-      <div>
-        <h2 className="text-base font-medium" style={{ color: VOICE.user }}>{children}</h2>
-        {hint && <p className="text-xs mt-0.5" style={{ color: VOICE.systemFaint }}>{hint}</p>}
-      </div>
-    </div>
-  );
-}
-
-// ─── AI Extraction Review Card ─────────────────────────────────────────────
-
-const CONFIDENCE_STYLE = {
-  HIGH:   { bar: '████',  cls: 'bg-green-100 text-green-700' },
-  MEDIUM: { bar: '███░',  cls: 'bg-amber-100 text-amber-700' },
-  LOW:    { bar: '██░░',  cls: 'bg-red-100 text-red-700' },
-} as const;
-
-function ExtractedStageCard({
-  stage,
-  onAdd,
-}: {
-  stage: ExtractedStage;
-  onAdd: (s: ExtractedStage, amountOverride?: number) => void;
-}) {
-  const conf = CONFIDENCE_STYLE[stage.confidence];
-  const calcAmt =
-    stage.qty != null && stage.rate != null
-      ? multiply(stage.qty, stage.rate)
-      : null;
-
-  return (
-    <div className={`rounded-lg border bg-surface p-3 ${
-      stage.arithmetic_mismatch
-        ? 'border-amber-300'
-        : stage.confidence === 'HIGH'
-          ? 'border-outline-variant/20'
-          : 'border-amber-200/70'
-    }`}>
-      <div className="flex items-start gap-3">
-        <div className="flex-1 min-w-0">
-
-          {/* Confidence badge row */}
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-[10px] text-on-surface-variant">🤖 Extracted</span>
-            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded font-data-mono ${conf.cls}`}>
-              {stage.confidence} {conf.bar}
-            </span>
-          </div>
-
-          {/* Name */}
-          <p className="text-[13px] font-semibold text-on-surface mb-0.5 truncate">{stage.name}</p>
-
-          {/* Mode display */}
-          {stage.mode === 'measured' && (
-            <p className="text-[12px] text-on-surface-variant font-data-mono">
-              {(stage.qty ?? 0).toLocaleString('en-IN')} {stage.unit_type} &times; ₹{(stage.rate ?? 0).toLocaleString('en-IN')} ={' '}
-              <span className="text-on-surface font-semibold">{fmtRupee(stage.amount)}</span>
-              {stage.amount_verified && !stage.arithmetic_mismatch && (
-                <span className="text-green-600 ml-1 not-italic">✓</span>
+              <select value={newWorkerTrade} onChange={e => { setNewWorkerTrade(e.target.value); setNewWorkerTradeOther(''); }}>
+                <option value="" disabled>Select trade…</option>
+                {WORKER_TRADE_GROUPS.map(g => (
+                  <optgroup key={g.group} label={g.group}>
+                    {g.trades.map(t => <option key={t} value={t}>{t}</option>)}
+                  </optgroup>
+                ))}
+              </select>
+              {newWorkerTrade === OTHER_TRADE && (
+                <input value={newWorkerTradeOther} onChange={e => setNewWorkerTradeOther(e.target.value)} placeholder="Specify trade…" />
               )}
-            </p>
-          )}
-          {stage.mode === 'lumpsum' && (
-            <p className="text-[12px] text-on-surface-variant">
-              {stage.unit_type === 'LS' ? 'Lump Sum — ' : ''}{fmtRupee(stage.amount)}
-            </p>
-          )}
-          {stage.mode === 'ambiguous' && (
-            <p className="text-[12px] text-on-surface-variant">
-              {fmtRupee(stage.amount)} — no qty/rate found
-            </p>
-          )}
-
-          {/* Confidence warning */}
-          {stage.confidence !== 'HIGH' && !stage.arithmetic_mismatch && (
-            <p className="text-[11px] text-amber-700 mt-0.5">
-              ⚠ {stage.mode === 'ambiguous' ? 'Assumed lump sum — verify' : stage.confidence_reason}
-            </p>
-          )}
-
-          {/* Arithmetic mismatch — user must resolve */}
-          {stage.arithmetic_mismatch && (
-            <div className="mt-2 rounded-md bg-amber-50 border border-amber-200/60 p-2.5">
-              <p className="text-[11px] text-amber-800 font-medium mb-1">
-                ⚠ {stage.mismatch_note}
-              </p>
-              <p className="text-[11px] text-on-surface-variant mb-2">Which amount is correct?</p>
-              <div className="flex gap-2 flex-wrap">
-                {calcAmt != null && (
-                  <button
-                    type="button"
-                    onClick={() => onAdd(stage, calcAmt)}
-                    className="text-[11px] px-2.5 py-1.5 rounded-lg bg-white border border-outline-variant/30 text-on-surface hover:bg-surface-container-low transition-colors font-medium"
-                  >
-                    Use calculated {fmtRupee(calcAmt)}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => onAdd(stage, stage.amount)}
-                  className="text-[11px] px-2.5 py-1.5 rounded-lg bg-white border border-outline-variant/30 text-on-surface hover:bg-surface-container-low transition-colors font-medium"
-                >
-                  Use document {fmtRupee(stage.amount)}
+              <input value={newWorkerContact} onChange={e => setNewWorkerContact(e.target.value)} placeholder="Contact (optional)" />
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button type="button" className="btn ghost sm" onClick={() => { setShowAddWorker(false); setNewWorkerName(''); setNewWorkerTrade(''); setNewWorkerTradeOther(''); setNewWorkerContact(''); }}>Cancel</button>
+                <button type="button" className="btn primary sm" disabled={!newWorkerName.trim() || !newWorkerTrade || (newWorkerTrade === OTHER_TRADE && !newWorkerTradeOther.trim()) || createWorker.isPending} onClick={() => createWorker.mutate()}>
+                  {createWorker.isPending ? 'Saving…' : 'Save & select'}
                 </button>
               </div>
             </div>
           )}
-        </div>
 
-        {/* Add button (hidden for mismatch — user must pick via choice buttons) */}
-        {!stage.arithmetic_mismatch && (
-          <button
-            type="button"
-            onClick={() => onAdd(stage)}
-            className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
-          >
-            <span className="material-symbols-outlined text-[13px]">check</span> Add
-          </button>
-        )}
+          {/* ===== Stages & payments ===== */}
+          <div className="sec">
+            <h2>Stages &amp; payments</h2>
+            <label className="btn soft sm" style={{ cursor: isExtracting ? 'default' : 'pointer' }}>
+              {isExtracting
+                ? <span className="lbl"><span className="spinner" /> Reading…</span>
+                : <span className="lbl">
+                    <svg viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 011-1h3M16 4h3a1 1 0 011 1v3M20 16v3a1 1 0 01-1 1h-3M8 20H5a1 1 0 01-1-1v-3M4 12h16" /></svg>
+                    Scan agreement / quote
+                  </span>}
+              <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }} onChange={handleFileUpload} disabled={isExtracting} />
+            </label>
+          </div>
+
+          <div className="sheet stg">
+            <div className="split">
+              {stagesTotal > 0
+                ? stages.filter(s => calcAmount(s) > 0).map(s => <i key={s.id} style={{ width: `${(calcAmount(s) / stagesTotal) * 100}%` }} />)
+                : <i style={{ width: '100%', background: 'var(--line-2)' }} />}
+            </div>
+            <div className="split-lbl">
+              <span>How the money splits across stages</span>
+              <span>{stagesTotal > 0
+                ? `${stages.filter(s => calcAmount(s) > 0).length} payments · biggest ${Math.round(Math.max(...stages.map(s => calcAmount(s))) / stagesTotal * 100)}%`
+                : 'no stages yet'}</span>
+            </div>
+
+            <div className="stg-scroll">
+              <table>
+                <colgroup>
+                  <col style={{ width: 44 }} /><col style={{ width: '21%' }} /><col /><col style={{ width: '8%' }} />
+                  <col style={{ width: '9%' }} /><col style={{ width: '10%' }} /><col style={{ width: '12%' }} /><col style={{ width: '8%' }} /><col style={{ width: 40 }} />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>#</th><th>Stage</th><th>Paid when</th><th style={{ textAlign: 'right' }}>Qty</th><th>Unit</th>
+                    <th style={{ textAlign: 'right' }}>Rate</th><th style={{ textAlign: 'right' }}>Amount</th><th style={{ textAlign: 'right' }}>Share</th><th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {stages.map((s, i) => (
+                    <StageRow
+                      key={s.id}
+                      idx={i + 1}
+                      stage={s}
+                      total={stagesTotal}
+                      isLast={i === stages.length - 1}
+                      badName={badKeys.has(`name-${s.id}`)}
+                      badAmt={badKeys.has(`amt-${s.id}`)}
+                      onChange={patch => updateStage(s.id, patch)}
+                      onClearBad={which => clearBad(`${which}-${s.id}`)}
+                      onRemove={() => removeStage(s.id)}
+                      onAddRow={addStage}
+                    />
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td colSpan={4}>
+                      <span className="gst">
+                        <button type="button" className="tgl" role="switch" aria-checked={gst} aria-label="Add GST 18%" onClick={() => setGst(g => !g)} />
+                        GST 18%<span className="mono" style={{ color: 'var(--ink-3)' }}>{fmt(gstAmt)}</span>
+                      </span>
+                    </td>
+                    <td colSpan={2} style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {agreedValue > 0 ? 'Contract value' : 'Contract value (from stages)'}
+                    </td>
+                    <td className="num">{fmt(grossTotal)}</td><td /><td />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            <button type="button" className="addrow" onClick={addStage}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14" /></svg>
+              Add stage <kbd>Enter</kbd> on the last row also adds one
+            </button>
+          </div>
+
+          {isOver && (
+            <div className="err">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L14.7 3.9a2 2 0 00-3.4 0z" /></svg>
+              Stages exceed the agreed value by {fmt(stagesTotal - agreedValue)}
+            </div>
+          )}
+
+          <div className="note">
+            Each stage becomes a payable milestone. Lump-sum stages take a straight amount; pick a measured unit (Sqft / Rft / Cft / Nos …) to enter qty × rate — the amount computes, and measured stages settle on actual site measurement at billing. <kbd>Ctrl</kbd>+<kbd>Enter</kbd> creates the contract.
+          </div>
+        </div>
       </div>
-    </div>
+
+      {/* fixed bottom bar */}
+      <div className="woxbar">
+        <div className="in">
+          <div className="stat">
+            <b>{namedStages.length ? `${namedStages.length} stage${namedStages.length > 1 ? 's' : ''}` : 'No stages'}</b>
+            <span className="mono" style={{ marginLeft: 6 }}>{fmt(grossTotal)}</span>
+            <small>{namedStages.length
+              ? `${conSearch || 'Contractor'} · ${measuredCount ? `${measuredCount} measured stage${measuredCount > 1 ? 's' : ''} settle on actual quantities` : 'paid stage by stage as work completes'}`
+              : 'Add at least one stage, or scan the agreement'}</small>
+          </div>
+          {created ? (
+            <button className="btn" onClick={() => navigate(initState.returnTo
+              ? initState.returnTo
+              : `/work-orders/${created}`, { state: initState.from === 'project' ? { from: 'project', projectId: initState.projectId, projectName: initState.projectName } : undefined })}>
+              Open contract
+            </button>
+          ) : (
+            <button className="btn ghost" onClick={() => navigate(backTo)}>Cancel</button>
+          )}
+          <button
+            id="wox-create"
+            className={`btn primary${createWO.isPending ? ' loading' : ''}${created ? ' done' : ''}`}
+            onClick={attemptCreate}
+          >
+            <span className="lbl"><svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7" /></svg>Create contract</span>
+            <span className="alt spin"><span className="spinner" /></span>
+            <span className="alt ok"><svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7" /></svg></span>
+          </button>
+        </div>
+      </div>
+
+      {toastMsg && (
+        <div className={`woxtoast show${toastMsg.warn ? ' warn' : ''}`}><i /><span>{toastMsg.text}</span></div>
+      )}
+    </>
+  );
+}
+
+// ─── Stage row ──────────────────────────────────────────────────────────────
+function StageRow({
+  idx, stage, total, isLast, badName, badAmt, onChange, onClearBad, onRemove, onAddRow,
+}: {
+  idx: number;
+  stage: StageDraft;
+  total: number;
+  isLast: boolean;
+  badName: boolean;
+  badAmt: boolean;
+  onChange: (patch: Partial<StageDraft>) => void;
+  onClearBad: (which: 'name' | 'amt') => void;
+  onRemove: () => void;
+  onAddRow: () => void;
+}) {
+  const [namePop, setNamePop] = useState(false);
+  const mode = getMode(stage);
+  const isLS = stage.unit_type === 'LS';
+  const amount = calcAmount(stage);
+  const share = amount && total ? Math.round((amount / total) * 100) : 0;
+
+  const usedFilter = STAGE_NAMES.filter(n => n.toLowerCase().includes(stage.name.toLowerCase()) && n.toLowerCase() !== stage.name.toLowerCase()).slice(0, 6);
+
+  const enterAdds = (e: React.KeyboardEvent) => { if (e.key === 'Enter') { e.preventDefault(); if (isLast) onAddRow(); } };
+
+  return (
+    <tr className="in" style={stage.ambiguous ? { boxShadow: 'inset 3px 0 0 #E5A100' } : undefined}
+        title={stage.ambiguous ? 'Verify this stage — check the amount or add qty & rate' : undefined}>
+      <td className="n">{idx}</td>
+
+      {/* Stage name + suggestions */}
+      <td>
+        <div className={`cell${badName ? ' bad' : ''}${stage.name ? ' filled' : ''}`}>
+          <input
+            data-stage-name={stage.id}
+            value={stage.name}
+            onChange={e => { onChange({ name: e.target.value }); onClearBad('name'); setNamePop(true); }}
+            onFocus={() => setNamePop(true)}
+            onBlur={() => { setTimeout(() => setNamePop(false), 120); if (!stage.unit_type || stage.unit_type === 'LS') { const u = suggestUnit(stage.name); if (u) onChange({ unit_type: u }); } }}
+            onKeyDown={e => { if (e.key === 'Enter' && namePop && usedFilter[0]) { e.preventDefault(); onChange({ name: usedFilter[0] }); setNamePop(false); } else enterAdds(e); if (e.key === 'Escape') setNamePop(false); }}
+            placeholder="Stage name…"
+            autoComplete="off"
+          />
+          <div className={`pop${namePop && usedFilter.length > 0 ? ' open' : ''}`}>
+            {usedFilter.map(n => (
+              <button type="button" key={n} onMouseDown={e => { e.preventDefault(); onChange({ name: n }); setNamePop(false); }}>
+                <span>{n}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </td>
+
+      {/* Paid when */}
+      <td>
+        <div className={`cell${stage.paid_when ? ' filled' : ''}`}>
+          <input value={stage.paid_when} onChange={e => onChange({ paid_when: e.target.value })} onKeyDown={enterAdds} placeholder="e.g. on slab casting" />
+        </div>
+      </td>
+
+      {/* Qty */}
+      <td>
+        <div className={`cell num${!isLS && stage.quantity != null ? ' filled' : ''}`}>
+          {isLS
+            ? <input value="" readOnly placeholder="—" tabIndex={-1} style={{ pointerEvents: 'none' }} />
+            : <input inputMode="decimal" value={stage.quantity ?? ''} onChange={e => onChange({ quantity: parseFloat(e.target.value) || null, amount: null })} onKeyDown={enterAdds} placeholder="—" />}
+        </div>
+      </td>
+
+      {/* Unit */}
+      <td>
+        <div className="cell sel">
+          <select
+            value={stage.unit_type}
+            onChange={e => {
+              const u = e.target.value;
+              onChange(u === 'LS'
+                ? { unit_type: 'LS', quantity: null, rate: null }
+                : { unit_type: u, amount: null });
+            }}
+          >
+            {UNIT_GROUPS.map(g => (
+              <optgroup key={g.group} label={g.group}>
+                {g.items.map(it => <option key={it.value} value={it.value}>{it.label}</option>)}
+              </optgroup>
+            ))}
+          </select>
+        </div>
+      </td>
+
+      {/* Rate */}
+      <td>
+        <div className={`cell num pre-pad${!isLS && stage.rate != null ? ' filled' : ''}`}>
+          <span className="pre">₹</span>
+          {isLS
+            ? <input value="" readOnly placeholder="—" tabIndex={-1} style={{ pointerEvents: 'none' }} />
+            : <input inputMode="decimal" value={stage.rate ?? ''} onChange={e => onChange({ rate: parseFloat(e.target.value) || null, amount: null })} onKeyDown={enterAdds} placeholder="—" />}
+        </div>
+      </td>
+
+      {/* Amount (computed for measured, entered otherwise) */}
+      <td>
+        <div className={`cell num pre-pad${badAmt ? ' bad' : ''}${mode === 'measured' ? ' calc filled' : (stage.amount ? ' filled' : '')}`}>
+          <span className="pre">₹</span>
+          {mode === 'measured'
+            ? <input value={Math.round(amount)} readOnly tabIndex={-1} />
+            : <input inputMode="decimal" value={stage.amount ?? ''} onChange={e => { onChange({ amount: parseFloat(e.target.value) || null, quantity: null, rate: null }); onClearBad('amt'); }} onKeyDown={enterAdds} placeholder="amount" />}
+        </div>
+      </td>
+
+      {/* Share */}
+      <td className="share">{share ? <b>{share}%</b> : '—'}</td>
+
+      {/* Delete */}
+      <td className="del">
+        <button type="button" aria-label="Remove stage" onClick={onRemove}>
+          <svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>
+        </button>
+      </td>
+    </tr>
   );
 }
