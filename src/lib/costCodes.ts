@@ -695,6 +695,7 @@ const GEN: CostCodeDivision = {
     { code: 'GEN-13', name: 'Bank & finance charges' },
     { code: 'GEN-14', name: 'Medical & first-aid' },
     { code: 'GEN-15', name: 'Security & watchman' },
+    { code: 'GEN-16', name: 'Loading & unloading (hamali)' },
     { code: 'GEN-99', name: 'Miscellaneous / uncategorised' },
   ],
 };

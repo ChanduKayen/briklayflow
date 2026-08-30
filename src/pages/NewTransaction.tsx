@@ -10,6 +10,7 @@ import { useSnackbar } from '../components/Snackbar';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import { CostCodePicker } from '../components/CostCodePicker';
 import { GenHeadPicker } from '../components/GenHeadPicker';
+import { DirLabel } from '../components/NewTxnFab';
 import { getCostCode, costCodeLabel, ALL_COST_CODES, GEN_HEADS, GEN_FALLBACK } from '../lib/costCodes';
 import { autoCloseWOIfFullyPaid } from '../lib/woAutoClose';
 
@@ -47,13 +48,6 @@ const COA_DEFAULTS: Record<string, { type: 'MAT' | 'WRK'; division?: string }> =
 type TxnType = 'worker' | 'material' | 'expense' | 'client_receipt';
 type PayMode = 'NEFT' | 'UPI' | 'Cheque' | 'Cash';
 interface AllocDraft { id: string; project_id: string; order_type: 'WO' | 'PO' | ''; order_ref: string; milestone_id: string; allocated_amount: number; }
-
-const TXN_TYPES: { key: TxnType; icon: string; label: string; dir: 'in' | 'out' }[] = [
-  { key: 'worker',         icon: 'engineering',   label: 'Worker payment',    dir: 'out' },
-  { key: 'material',       icon: 'shopping_cart', label: 'Material purchase', dir: 'out' },
-  { key: 'expense',        icon: 'receipt_long',  label: 'General expense',   dir: 'out' },
-  { key: 'client_receipt', icon: 'payments',      label: 'Client receipt',    dir: 'in'  },
-];
 
 function genTxnId() {
   // PK (text). The old `Date.now().slice(-6)` cycled every ~16.7 min → duplicate-key collisions on
@@ -518,10 +512,19 @@ export default function NewTransaction({ session: _session }: { session: Session
   const initialTxnType        = (location.state as any)?.txnType        || null;
   const initialStkName        = (location.state as any)?.stakeholderName || '';
 
-  // ── Type ──────────────────────────────────────────────────────────────────
+  // ── Direction is the ONLY top-level choice now (money out / money in). The old worker / vendor /
+  //    expense / receipt "type" is DERIVED from (direction + the chosen payee) and kept internally as
+  //    txnType, which still drives all the downstream flow/save logic. ──
+  const [direction, setDirection] = useState<'out' | 'in' | null>(
+    ((location.state as any)?.direction as 'out' | 'in' | undefined)
+      ?? (initialTxnType ? (initialTxnType === 'client_receipt' ? 'in' : 'out') : null),
+  );
   const [txnType, setTxnType] = useState<TxnType | null>(initialTxnType as TxnType | null);
-  // The 2×2 type grid collapses to a compact chip once a type is chosen (frees space on mobile).
+  // Direction chip collapses once chosen; "Change" re-opens the picker.
   const [pickingType, setPickingType] = useState(false);
+  // Out → the payee decides worker vs vendor; In → any party is a money-in (client receipt / refund).
+  const typeForPayee = (payeeType: string | null | undefined): TxnType =>
+    direction === 'in' ? 'client_receipt' : payeeType === 'Worker' ? 'worker' : 'material';
   // Mobile keyboard: tuck the fixed footer away when the on-screen keyboard is up, so it
   // never overlaps the focused field or jumps (iOS doesn't reposition fixed elements). The
   // >150px viewport shrink only happens on a real keyboard, so desktop is unaffected.
@@ -541,6 +544,10 @@ export default function NewTransaction({ session: _session }: { session: Session
   const [stkSearch, setStkSearch] = useState(initialStkName);
   const [showSug, setShowSug] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  // The quick-add now owns the "what is this" choice (was inferred from the top-level txnType) — so
+  // it stays correct once the top-level selector collapses into in/out. Vendor/Worker create a
+  // party; "GeneralExpense" is NOT a party — it switches the whole transaction to an overhead.
+  const [newStkType, setNewStkType] = useState<'Worker' | 'Vendor' | 'GeneralExpense'>('Vendor');
   const [newStkTrade, setNewStkTrade] = useState('');
   const [newStkTradeOther, setNewStkTradeOther] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -714,12 +721,54 @@ export default function NewTransaction({ session: _session }: { session: Session
   }, [stkId, txnType, refetchTrigger]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Derived ──────────────────────────────────────────────────────────────
-  const tgtType = txnType === 'worker' ? 'Worker' : txnType === 'material' ? 'Vendor' : txnType === 'client_receipt' ? 'Client' : '';
-  const filtStk = (stakeholders || []).filter(
-    (s) => (tgtType ? s.type === tgtType : true) && s.name.toLowerCase().includes(stkSearch.toLowerCase())
-  );
+  // The payee list is filtered by DIRECTION now (not a pre-chosen type): money out → workers &
+  // vendors (you pay them); money in → any party (client receipt, or a vendor/worker refund).
+  const allowPayee = (t: string | null | undefined) =>
+    direction === 'in' ? true : (t === 'Worker' || t === 'Vendor');
+  // Party search must be forgiving of dots / spaces / separators: "B.R granite", "B R granite",
+  // "b.r. granite" and "br granite" should all find "B R Granite". Normalise separators to single
+  // spaces, then match a compacted substring (handles "b.r"→"br") OR every token in any order.
+  const _pn = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const _qNorm = _pn(stkSearch);
+  const _qCompact = _qNorm.replace(/\s+/g, '');
+  const _qTokens = _qNorm.split(' ').filter(Boolean);
+  const filtStk = (stakeholders || []).filter((s) => {
+    if (!allowPayee(s.type)) return false;
+    if (!_qCompact) return true;
+    const nName = _pn(s.name);
+    return nName.replace(/\s+/g, '').includes(_qCompact) || _qTokens.every((t) => nName.includes(t));
+  });
   const selName = stakeholders?.find((s) => s.stakeholder_id === stkId)?.name || '';
-  const filteredRecents = recentPayees.filter((p) => !tgtType || p.type === tgtType);
+  const filteredRecents = recentPayees.filter((p) => allowPayee(p.type));
+  // Money out: the party search ALSO surfaces general-expense heads (overheads) — shown below the
+  // worker/vendor matches — so "transport", "hamali", "fuel" etc. are one search away.
+  const matchedHeads = direction === 'out'
+    ? GEN_HEADS.filter((h) => !_qCompact || _pn(h.name).replace(/\s+/g, '').includes(_qCompact) || _qTokens.every((t) => _pn(h.name).includes(t)))
+    : [];
+  const pickExpenseHead = (code: string, name: string) => { setTxnType('expense'); setCategory(code); setStkId(''); setStkSearch(name); setShowSug(false); setShowCreate(false); advanceAfter('payee'); };
+  const chooseDirection = (d: 'out' | 'in') => {
+    setPickingType(false);
+    if (direction !== d) {
+      setDirection(d); setTxnType(null); setStkId(''); setStkSearch('');
+      setCategory(''); setSaveAttempted(false);
+      setNewStkTrade(''); setNewStkTradeOther('');
+      setDismissedReceiptSuggestion(false); setDismissedMilestoneSuggestion(false);
+    }
+  };
+  // While the direction picker is showing (and you're not typing in a field), O / I choose it.
+  useEffect(() => {
+    if (direction && !pickingType) return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      const k = e.key.toLowerCase();
+      if (k === 'o') { e.preventDefault(); chooseDirection('out'); }
+      else if (k === 'i') { e.preventDefault(); chooseDirection('in'); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [direction, pickingType]);
 
   const effectiveAllocs = splitMode ? allocs : [{ ...allocs[0], allocated_amount: totalAmt }];
   const totalAlloc = effectiveAllocs.reduce((s, a) => s + (Number(a.allocated_amount) || 0), 0);
@@ -730,7 +779,7 @@ export default function NewTransaction({ session: _session }: { session: Session
   // ── Mutations ────────────────────────────────────────────────────────────
   const createStakeholder = useMutation({
     mutationFn: async (fd: FormData) => {
-      const type = txnType === 'worker' ? 'Worker' : 'Vendor';
+      const type = newStkType;
       const firstName = (fd.get('first_name') as string || '').trim();
       const lastName = (fd.get('last_name') as string || '').trim();
       const fullName = lastName ? `${firstName} ${lastName}` : firstName;
@@ -748,7 +797,7 @@ export default function NewTransaction({ session: _session }: { session: Session
     },
     onSuccess: (d) => {
       qc.invalidateQueries({ queryKey: ['stakeholders'] });
-      setStkId(d.stakeholder_id); setStkSearch(d.name);
+      setStkId(d.stakeholder_id); setStkSearch(d.name); setTxnType(typeForPayee(d.type));
       setShowCreate(false); setShowSug(false);
       setNewStkTrade(''); setNewStkTradeOther('');
     },
@@ -1280,55 +1329,36 @@ export default function NewTransaction({ session: _session }: { session: Session
           </div>
         </div>
 
-        {/* ── Type selector — collapses to a compact chip once chosen (frees space on mobile) ── */}
-        {txnType && !pickingType ? (() => {
-          const sel = TXN_TYPES.find((t) => t.key === txnType)!;
-          const acc = sel.dir === 'in' ? VOICE.innSoft : VOICE.accentSoft;
-          return (
-            <div className="flex items-center justify-between gap-2 mb-6 rounded-xl px-3.5 py-2.5" style={{ background: VOICE.walnut }}>
-              <span className="inline-flex items-center gap-2 min-w-0">
-                <span className="material-symbols-outlined text-[18px] shrink-0" style={{ color: acc, fontVariationSettings: "'FILL' 1" }}>{sel.icon}</span>
-                <span className="text-sm font-medium truncate" style={{ color: VOICE.ivory }}>{sel.label}</span>
-                <span className="text-[11px] inline-flex items-center gap-0.5 shrink-0" style={{ color: acc }}>
-                  <span className="material-symbols-outlined text-[12px]">{sel.dir === 'in' ? 'south_west' : 'north_east'}</span>
-                  {sel.dir === 'in' ? 'in' : 'out'}
-                </span>
-              </span>
-              <button type="button" onClick={() => setPickingType(true)} className="text-xs font-semibold shrink-0 px-2.5 py-1 rounded-lg" style={{ color: VOICE.ivory, background: 'rgba(243,234,219,.12)' }}>Change</button>
-            </div>
-          );
-        })() : (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-8">
-            {TXN_TYPES.map((t) => {
-              const isSelected = txnType === t.key;
-              const accentSoft = t.dir === 'in' ? VOICE.innSoft : VOICE.accentSoft;
+        {/* ── Direction selector — the ONE top-level choice (money out / in). The kind (worker /
+            vendor / expense / receipt) is derived from the payee you pick below. ── */}
+        {direction && !pickingType ? (
+          <div className="flex items-center justify-between gap-2 mb-6 rounded-xl px-3.5 py-2.5" style={{ background: VOICE.walnut }}>
+            <span className="inline-flex items-center gap-2 min-w-0" style={{ color: direction === 'in' ? VOICE.innSoft : VOICE.accentSoft }}>
+              <span className="material-symbols-outlined text-[18px] shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>{direction === 'in' ? 'south_west' : 'north_east'}</span>
+              <span className="text-sm font-medium truncate" style={{ color: VOICE.ivory }}>{direction === 'in' ? 'Money in' : 'Money out'}</span>
+            </span>
+            <button type="button" onClick={() => setPickingType(true)} className="text-xs font-semibold shrink-0 px-2.5 py-1 rounded-lg" style={{ color: VOICE.ivory, background: 'rgba(243,234,219,.12)' }}>Change</button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-2.5 mb-8">
+            {([['out', 'north_east', 'Pay a worker, vendor, or a general expense'], ['in', 'south_west', 'A client receipt, or a refund back to you']] as const).map(([d, icon, sub]) => {
+              const isSel = direction === d;
+              const acc = d === 'in' ? VOICE.innSoft : VOICE.accentSoft;
               return (
                 <button
-                  key={t.key}
+                  key={d}
                   type="button"
-                  aria-pressed={isSelected}
-                  onClick={() => {
-                    setPickingType(false);
-                    if (txnType !== t.key) {
-                      setTxnType(t.key); setStkId(''); setStkSearch('');
-                      setCategory(''); setSaveAttempted(false);
-                      setNewStkTrade(''); setNewStkTradeOther('');
-                      setDismissedReceiptSuggestion(false);
-                      setDismissedMilestoneSuggestion(false);
-                    }
-                  }}
-                  className="rounded-xl px-3 py-2.5 sm:py-3 text-left transition-transform active:scale-[0.98] relative"
-                  style={isSelected
+                  aria-pressed={isSel}
+                  onClick={() => chooseDirection(d)}
+                  className="rounded-2xl px-4 py-4 text-left transition-transform active:scale-[0.98] relative"
+                  style={isSel
                     ? { background: VOICE.walnut, border: `1.5px solid ${VOICE.walnut}`, boxShadow: '0 14px 30px -18px rgba(34,26,19,.6)' }
                     : { background: VOICE.surface, border: `1px solid ${VOICE.line}` }}
                 >
-                  {isSelected && <span className="absolute top-2.5 right-2.5 w-[7px] h-[7px] rounded-full" style={{ background: accentSoft }} />}
-                  <span className="material-symbols-outlined text-[18px]" style={{ color: isSelected ? accentSoft : VOICE.systemFaint, fontVariationSettings: isSelected ? "'FILL' 1" : "'FILL' 0" }}>{t.icon}</span>
-                  <p className="text-[13px] sm:text-sm font-medium mt-1 leading-tight" style={{ color: isSelected ? VOICE.ivory : VOICE.user }}>{t.label}</p>
-                  <p className="text-[11px] mt-0.5 inline-flex items-center gap-1" style={{ color: isSelected ? accentSoft : VOICE.systemFaint }}>
-                    <span className="material-symbols-outlined text-[12px]">{t.dir === 'in' ? 'south_west' : 'north_east'}</span>
-                    money {t.dir === 'in' ? 'in' : 'out'}
-                  </p>
+                  {isSel && <span className="absolute top-3 right-3 w-[7px] h-[7px] rounded-full" style={{ background: acc }} />}
+                  <span className="material-symbols-outlined text-[22px]" style={{ color: isSel ? acc : VOICE.systemFaint, fontVariationSettings: isSel ? "'FILL' 1" : "'FILL' 0" }}>{icon}</span>
+                  <p className="text-[15px] font-semibold mt-1.5 leading-tight" style={{ color: isSel ? VOICE.ivory : VOICE.user }}><DirLabel dir={d} /></p>
+                  <p className="text-[11.5px] mt-1 leading-snug" style={{ color: isSel ? acc : VOICE.systemFaint }}>{sub}</p>
                 </button>
               );
             })}
@@ -1336,15 +1366,15 @@ export default function NewTransaction({ session: _session }: { session: Session
         )}
 
         {/* ── Empty state ─────────────────────────────────────────────────── */}
-        {!txnType && (
+        {!direction && (
           <div className="text-center py-20">
             <span className="material-symbols-outlined text-[64px] text-on-surface-variant/15 block mb-4">touch_app</span>
-            <p className="text-body-md text-on-surface-variant/40">Select a type above to begin</p>
+            <p className="text-body-md text-on-surface-variant/40">Money out or money in?</p>
           </div>
         )}
 
         {/* ── Form ────────────────────────────────────────────────────────── */}
-        {txnType && (
+        {direction && (
           <div className="space-y-8">
 
             {/* Hero Amount — dark walnut "ledger" card (signature element) */}
@@ -1358,18 +1388,18 @@ export default function NewTransaction({ session: _session }: { session: Session
               onClick={() => document.getElementById('txn-amount-input')?.focus()}
               style={{
                 borderRadius: 24, padding: '28px 26px 24px', cursor: 'text',
-                background: txnType === 'client_receipt'
+                background: direction === 'in'
                   ? 'radial-gradient(120% 120% at 85% 0%, rgba(156,187,145,.16) 0%, rgba(156,187,145,0) 42%), linear-gradient(158deg,#232619 0%,#1c2014 60%,#161a0f 100%)'
                   : 'radial-gradient(120% 120% at 85% 0%, rgba(224,138,92,.14) 0%, rgba(224,138,92,0) 42%), linear-gradient(158deg,#2D2118 0%,#221A13 60%,#1B140E 100%)',
                 boxShadow: '0 26px 50px -28px rgba(34,26,19,.7), inset 0 0 0 1px rgba(243,234,219,.06)',
               }}
             >
-              <span className="inline-flex items-center gap-1.5 mb-3.5" style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '1.6px', textTransform: 'uppercase', color: txnType === 'client_receipt' ? VOICE.innSoft : VOICE.accentSoft }}>
-                <span className="material-symbols-outlined text-[13px]">{txnType === 'client_receipt' ? 'south_west' : 'north_east'}</span>
-                {txnType === 'client_receipt' ? 'Money coming in' : 'Money going out'}
+              <span className="inline-flex items-center gap-1.5 mb-3.5" style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '1.6px', textTransform: 'uppercase', color: direction === 'in' ? VOICE.innSoft : VOICE.accentSoft }}>
+                <span className="material-symbols-outlined text-[13px]">{direction === 'in' ? 'south_west' : 'north_east'}</span>
+                {direction === 'in' ? 'Money coming in' : 'Money going out'}
               </span>
               <div className="flex items-baseline gap-1.5 min-w-0">
-                <span style={{ fontFamily: VOICE.serif, fontSize: 'clamp(24px, 7vw, 30px)', fontWeight: 600, color: txnType === 'client_receipt' ? VOICE.innSoft : VOICE.accentSoft, flex: '0 0 auto' }}>₹</span>
+                <span style={{ fontFamily: VOICE.serif, fontSize: 'clamp(24px, 7vw, 30px)', fontWeight: 600, color: direction === 'in' ? VOICE.innSoft : VOICE.accentSoft, flex: '0 0 auto' }}>₹</span>
                 <input
                   id="txn-amount-input"
                   type="number"
@@ -1392,7 +1422,7 @@ export default function NewTransaction({ session: _session }: { session: Session
                     // on a 360px phone; now ~61px, matching the 64px desktop cap).
                     fontSize: 'clamp(58px, 17vw, 64px)',
                     background: 'transparent', border: 'none', outline: 'none', color: VOICE.ivory,
-                    caretColor: txnType === 'client_receipt' ? VOICE.innSoft : VOICE.accentSoft,
+                    caretColor: direction === 'in' ? VOICE.innSoft : VOICE.accentSoft,
                     flex: '1 1 auto', width: '100%', minWidth: 0, padding: 0,
                   }}
                 />
@@ -1409,16 +1439,16 @@ export default function NewTransaction({ session: _session }: { session: Session
 
             {/* ━━ 01 · Payment / Receipt Details ━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
             <div>
-              <SectionLabel n="01" title={txnType === 'client_receipt' ? 'Receipt Details' : 'Payment Details'} />
+              <SectionLabel n="01" title={direction === 'in' ? 'Receipt Details' : 'Payment Details'} />
               <div className="bg-white rounded-2xl border border-black/[0.05] shadow-[0_8px_30px_rgb(0,0,0,0.02)]">
                 <div className="p-6 space-y-6">
 
                   {/* Payee / Client */}
                   <div className="relative" ref={stkDropRef}>
                     <h2 className="mb-3" style={{ fontFamily: VOICE.serif, fontSize: 19, fontWeight: 600, letterSpacing: '-0.2px', color: missingPayee ? VOICE.out : VOICE.user }}>
-                      {txnType === 'client_receipt' ? "Who's this from?" : 'Who are you paying?'}
+                      {txnType === 'expense' ? 'General expense' : direction === 'in' ? "Who's this from?" : 'Who are you paying?'}
                       {txnType !== 'expense' && <span style={{ color: VOICE.out }}> *</span>}
-                      {txnType === 'expense' && <span className="ml-1.5" style={{ fontFamily: 'inherit', fontSize: 12, fontWeight: 500, color: VOICE.systemFaint }}>· optional</span>}
+                      {txnType === 'expense' && <span className="ml-1.5" style={{ fontFamily: 'inherit', fontSize: 12, fontWeight: 500, color: VOICE.systemFaint }}>· overhead, no party</span>}
                     </h2>
 
                     <div className="relative">
@@ -1429,7 +1459,7 @@ export default function NewTransaction({ session: _session }: { session: Session
                         value={stkId ? selName : stkSearch}
                         onChange={(e) => { setStkSearch(e.target.value); if (stkId) setStkId(''); setShowSug(true); setShowCreate(false); }}
                         onFocus={() => setShowSug(true)}
-                        placeholder={`Search ${tgtType ? tgtType.toLowerCase() : 'payee'}…`}
+                        placeholder={`Search party…`}
                         className={`bk-input pl-10 pr-10 focus:ring-4 focus:ring-primary/5 transition-all duration-200 ${missingPayee ? 'border-error' : 'border-outline-variant/30'}`}
                         autoComplete="new-password"
                       />
@@ -1440,12 +1470,12 @@ export default function NewTransaction({ session: _session }: { session: Session
 
                     {/* Dropdown */}
                     {showSug && !stkId && (
-                      <div className="absolute left-0 right-0 top-full bg-white border border-black/[0.08] rounded-xl mt-1 z-30 shadow-lg max-h-60 overflow-y-auto animate-peek-in">
+                      <div className="absolute left-0 right-0 top-full bg-white border border-black/[0.08] rounded-xl mt-1 z-30 shadow-lg max-h-72 overflow-y-auto animate-peek-in">
                         {filteredRecents.length > 0 && !stkSearch && (
                           <>
                             <div className="px-4 pt-3 pb-1 text-[9px] font-bold text-on-surface-variant/40 uppercase tracking-widest">Recent</div>
                             {filteredRecents.map((p) => (
-                              <div key={p.id} onClick={() => { setStkId(p.id); setStkSearch(p.name); setShowSug(false); advanceAfter('payee'); }}
+                              <div key={p.id} onClick={() => { setStkId(p.id); setStkSearch(p.name); setTxnType(typeForPayee(p.type)); setShowSug(false); advanceAfter('payee'); }}
                                 className="px-4 py-2.5 hover:bg-surface-container-low/60 cursor-pointer flex items-center gap-3">
                                 <span className="material-symbols-outlined text-[14px] text-on-surface-variant/40">history</span>
                                 <span className="text-[13px] font-medium text-on-surface">{p.name}</span>
@@ -1455,15 +1485,30 @@ export default function NewTransaction({ session: _session }: { session: Session
                           </>
                         )}
                         {filtStk.map((s) => (
-                          <div key={s.stakeholder_id} onClick={() => { setStkId(s.stakeholder_id); setStkSearch(s.name); setShowSug(false); advanceAfter('payee'); }}
+                          <div key={s.stakeholder_id} onClick={() => { setStkId(s.stakeholder_id); setStkSearch(s.name); setTxnType(typeForPayee(s.type)); setShowSug(false); advanceAfter('payee'); }}
                             className="px-4 py-3 hover:bg-surface-container-low/60 cursor-pointer border-b border-outline-variant/[0.08] last:border-0">
                             <p className="text-[13px] font-semibold text-on-surface">{s.name}</p>
                             <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{s.category}</p>
                           </div>
                         ))}
-                        {filtStk.length === 0 && stkSearch ? (
+                        {/* General-expense heads (overheads) — shown BELOW the party matches on money out. */}
+                        {direction === 'out' && matchedHeads.length > 0 && (
+                          <>
+                            <div className="mx-4 border-t border-outline-variant/15 my-1" />
+                            <div className="px-4 pt-2 pb-1 text-[9px] font-bold text-on-surface-variant/40 uppercase tracking-widest">General expense · overhead</div>
+                            {matchedHeads.map((h) => (
+                              <div key={h.code} onClick={() => pickExpenseHead(h.code, h.name)}
+                                className="px-4 py-2.5 hover:bg-surface-container-low/60 cursor-pointer flex items-center gap-3">
+                                <span className="material-symbols-outlined text-[15px] text-on-surface-variant/40">receipt_long</span>
+                                <span className="flex-1 min-w-0 text-[13px] font-medium text-on-surface truncate">{h.name}</span>
+                                <span className="text-[10px] font-mono text-on-surface-variant/40 shrink-0">{h.code}</span>
+                              </div>
+                            ))}
+                          </>
+                        )}
+                        {filtStk.length === 0 && matchedHeads.length === 0 && stkSearch ? (
                           /* Zero matches → create is the hero row (one tap to add a brand-new payee) */
-                          <div onClick={() => { setShowCreate(true); setShowSug(false); }}
+                          <div onClick={() => { setShowCreate(true); setShowSug(false); setNewStkType('Vendor'); setNewStkTrade(''); }}
                             className="px-4 py-3 cursor-pointer flex items-center gap-3"
                             style={{ background: VOICE.accentTint }}>
                             <span className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-[15px] font-bold" style={{ background: VOICE.out, color: '#fff' }}>
@@ -1471,17 +1516,17 @@ export default function NewTransaction({ session: _session }: { session: Session
                             </span>
                             <span className="flex-1 min-w-0">
                               <span className="block text-[13px] font-semibold" style={{ color: VOICE.user }}>Create &ldquo;{stkSearch.trim()}&rdquo;</span>
-                              <span className="block text-[11px]" style={{ color: VOICE.systemFaint }}>New {tgtType ? tgtType.toLowerCase() : 'payee'} · add trade &amp; phone</span>
+                              <span className="block text-[11px]" style={{ color: VOICE.systemFaint }}>New party · add trade &amp; phone</span>
                             </span>
                             <span className="material-symbols-outlined text-[18px]" style={{ color: VOICE.out }}>arrow_forward</span>
                           </div>
                         ) : (
                           /* Matches present → quiet add footer */
-                          <div onClick={() => { setShowCreate(true); setShowSug(false); }}
+                          <div onClick={() => { setShowCreate(true); setShowSug(false); setNewStkType('Vendor'); setNewStkTrade(''); }}
                             className="px-4 py-3 cursor-pointer flex items-center gap-2.5 border-t hover:bg-black/[0.02]"
                             style={{ color: VOICE.out, borderColor: VOICE.line }}>
                             <span className="material-symbols-outlined text-[17px]">person_add</span>
-                            <span className="text-[13px] font-semibold">Add new {tgtType ? tgtType.toLowerCase() : 'payee'}{stkSearch ? ` "${stkSearch}"` : ''}</span>
+                            <span className="text-[13px] font-semibold">Add new party{stkSearch ? ` "${stkSearch}"` : ''}</span>
                           </div>
                         )}
                       </div>
@@ -1490,58 +1535,92 @@ export default function NewTransaction({ session: _session }: { session: Session
                     {/* Inline quick-add */}
                     {showCreate && !stkId && (
                       <div className="mt-3 border border-black/[0.05] rounded-2xl p-5 bg-surface-container-lowest shadow-[0_4px_20px_rgba(0,0,0,0.01)] animate-peek-in">
-                        <p className="text-[12px] font-semibold text-on-surface mb-4">Quick-add {tgtType || 'stakeholder'}</p>
-                        <div className="grid grid-cols-2 gap-3 mb-4">
-                          <div>
-                            <label className="text-[10px] font-semibold text-on-surface-variant/60 block mb-1.5 uppercase tracking-wide">First name</label>
-                            <input id="stk_fn" className="bk-input focus:ring-4 focus:ring-primary/5 transition-all duration-200" placeholder="First" defaultValue={stkSearch.split(' ')[0] || ''} autoFocus />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-semibold text-on-surface-variant/60 block mb-1.5 uppercase tracking-wide">Last name</label>
-                            <input id="stk_ln" className="bk-input focus:ring-4 focus:ring-primary/5 transition-all duration-200" placeholder="Last" defaultValue={stkSearch.split(' ').slice(1).join(' ') || ''} />
-                          </div>
-                        </div>
+                        <p className="text-[12px] font-semibold text-on-surface mb-4">{newStkType === 'GeneralExpense' ? 'Record a general expense' : `Quick-add ${newStkType.toLowerCase()}`}</p>
+                        {/* What is this — vendor / worker (a party) or a general expense (no party). */}
                         <div className="mb-4">
-                          <label className="text-[10px] font-semibold text-on-surface-variant/60 block mb-1.5 uppercase tracking-wide">
-                            Trade <span className="text-red-500">*</span>
-                          </label>
-                          <select className="bk-input focus:ring-4 focus:ring-primary/5 transition-all duration-200" value={newStkTrade} onChange={(e) => { setNewStkTrade(e.target.value); setNewStkTradeOther(''); }}>
-                            <option value="" disabled>Select trade…</option>
-                            {(txnType === 'worker' ? WORKER_TRADE_GROUPS : VENDOR_TRADE_GROUPS).map((g) => (
-                              <optgroup key={g.group} label={g.group}>
-                                {g.trades.map((t) => <option key={t} value={t}>{t}</option>)}
-                              </optgroup>
+                          <label className="text-[10px] font-semibold text-on-surface-variant/60 block mb-1.5 uppercase tracking-wide">This is a</label>
+                          <div className="inline-flex rounded-xl p-0.5 w-full" style={{ background: VOICE.field, border: `1px solid ${VOICE.line}` }}>
+                            {([['Vendor', 'Vendor'], ['Worker', 'Worker'], ['GeneralExpense', 'General expense']] as const).map(([t, label]) => (
+                              <button
+                                key={t}
+                                type="button"
+                                onClick={() => { setNewStkType(t); setNewStkTrade(''); setNewStkTradeOther(''); }}
+                                className="flex-1 text-[12px] font-semibold py-1.5 rounded-lg transition-all"
+                                style={newStkType === t
+                                  ? { background: VOICE.surface, color: VOICE.user, boxShadow: '0 1px 2px rgba(0,0,0,.08)' }
+                                  : { background: 'transparent', color: VOICE.systemFaint }}
+                              >
+                                {label}
+                              </button>
                             ))}
-                          </select>
-                          {newStkTrade === OTHER_TRADE && (
-                            <input className="bk-input mt-2 focus:ring-4 focus:ring-primary/5 transition-all duration-200" placeholder="Specify trade…" value={newStkTradeOther} onChange={(e) => setNewStkTradeOther(e.target.value)} autoFocus />
-                          )}
+                          </div>
                         </div>
-                        <div className="mb-5">
-                          <label className="text-[10px] font-semibold text-on-surface-variant/60 block mb-1.5 uppercase tracking-wide">Contact (optional)</label>
-                          <input id="stk_contact" className="bk-input focus:ring-4 focus:ring-primary/5 transition-all duration-200" placeholder="Phone" />
-                        </div>
+                        {newStkType === 'GeneralExpense' && (
+                          <p className="text-[11.5px] leading-relaxed mb-4 px-3 py-2.5 rounded-lg" style={{ background: VOICE.field, color: VOICE.system }}>
+                            A general expense has <b>no party</b> — it's an overhead (transport, hamali, fuel…). It files under an expense head instead of a payee.
+                          </p>
+                        )}
+                        {newStkType !== 'GeneralExpense' && (
+                          <>
+                            <div className="grid grid-cols-2 gap-3 mb-4">
+                              <div>
+                                <label className="text-[10px] font-semibold text-on-surface-variant/60 block mb-1.5 uppercase tracking-wide">First name</label>
+                                <input id="stk_fn" className="bk-input focus:ring-4 focus:ring-primary/5 transition-all duration-200" placeholder="First" defaultValue={stkSearch.split(' ')[0] || ''} autoFocus />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-semibold text-on-surface-variant/60 block mb-1.5 uppercase tracking-wide">Last name</label>
+                                <input id="stk_ln" className="bk-input focus:ring-4 focus:ring-primary/5 transition-all duration-200" placeholder="Last" defaultValue={stkSearch.split(' ').slice(1).join(' ') || ''} />
+                              </div>
+                            </div>
+                            <div className="mb-4">
+                              <label className="text-[10px] font-semibold text-on-surface-variant/60 block mb-1.5 uppercase tracking-wide">
+                                {newStkType === 'Worker' ? 'Trade' : 'Category'} <span className="text-red-500">*</span>
+                              </label>
+                              <select className="bk-input focus:ring-4 focus:ring-primary/5 transition-all duration-200" value={newStkTrade} onChange={(e) => { setNewStkTrade(e.target.value); setNewStkTradeOther(''); }}>
+                                <option value="" disabled>{newStkType === 'Worker' ? 'Select trade…' : 'Select category…'}</option>
+                                {(newStkType === 'Worker' ? WORKER_TRADE_GROUPS : VENDOR_TRADE_GROUPS).map((g) => (
+                                  <optgroup key={g.group} label={g.group}>
+                                    {g.trades.map((t) => <option key={t} value={t}>{t}</option>)}
+                                  </optgroup>
+                                ))}
+                              </select>
+                              {newStkTrade === OTHER_TRADE && (
+                                <input className="bk-input mt-2 focus:ring-4 focus:ring-primary/5 transition-all duration-200" placeholder={newStkType === 'Worker' ? 'Specify trade…' : 'Specify category…'} value={newStkTradeOther} onChange={(e) => setNewStkTradeOther(e.target.value)} autoFocus />
+                              )}
+                            </div>
+                            <div className="mb-5">
+                              <label className="text-[10px] font-semibold text-on-surface-variant/60 block mb-1.5 uppercase tracking-wide">Contact (optional)</label>
+                              <input id="stk_contact" className="bk-input focus:ring-4 focus:ring-primary/5 transition-all duration-200" placeholder="Phone" />
+                            </div>
+                          </>
+                        )}
                         <div className="flex gap-2 justify-end">
                           <button type="button" className="bk-btn-ghost px-4 py-2 rounded-xl text-[13px] border border-outline-variant/30" onClick={() => { setShowCreate(false); setNewStkTrade(''); setNewStkTradeOther(''); }}>Cancel</button>
-                          <button
-                            type="button"
-                            className="bk-btn px-4 py-2 rounded-xl text-[13px] disabled:opacity-50"
-                            disabled={
-                              !newStkTrade ||
-                              (newStkTrade === OTHER_TRADE && !newStkTradeOther.trim()) ||
-                              createStakeholder.isPending
-                            }
-                            onClick={() => { const fd = new FormData(); fd.append('first_name', (document.getElementById('stk_fn') as HTMLInputElement).value); fd.append('last_name', (document.getElementById('stk_ln') as HTMLInputElement).value); fd.append('contact', (document.getElementById('stk_contact') as HTMLInputElement).value); createStakeholder.mutate(fd); }}
-                          >
-                            {createStakeholder.isPending ? 'Saving…' : 'Save & select'}
-                          </button>
+                          {newStkType === 'GeneralExpense' ? (
+                            <button
+                              type="button"
+                              className="bk-btn px-4 py-2 rounded-xl text-[13px]"
+                              onClick={() => { setTxnType('expense'); setStkId(''); setStkSearch(''); setCategory(''); setShowCreate(false); setShowSug(false); setNewStkTrade(''); setNewStkTradeOther(''); }}
+                            >
+                              Record general expense
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="bk-btn px-4 py-2 rounded-xl text-[13px] disabled:opacity-50"
+                              disabled={!newStkTrade || (newStkTrade === OTHER_TRADE && !newStkTradeOther.trim()) || createStakeholder.isPending}
+                              onClick={() => { const fd = new FormData(); fd.append('first_name', (document.getElementById('stk_fn') as HTMLInputElement).value); fd.append('last_name', (document.getElementById('stk_ln') as HTMLInputElement).value); fd.append('contact', (document.getElementById('stk_contact') as HTMLInputElement).value); createStakeholder.mutate(fd); }}
+                            >
+                              {createStakeholder.isPending ? 'Saving…' : 'Save & select'}
+                            </button>
+                          )}
                         </div>
                       </div>
                     )}
                   </div>
 
                   {/* Client Receipt: Reference + Description fields */}
-                  {txnType === 'client_receipt' && (
+                  {direction === 'in' && (
                     <>
                       <div>
                         <label className="block text-[11px] font-medium text-on-surface-variant/60 mb-2">Reference / UTR <span className="text-on-surface-variant/35">(optional)</span></label>
@@ -1587,7 +1666,7 @@ export default function NewTransaction({ session: _session }: { session: Session
             </div>
 
             {/* ━━ 02 · Categorise (hidden for client_receipt) ━━━━━━━━━━━━━ */}
-            {txnType !== 'client_receipt' && <div>
+            {direction !== 'in' && <div>
               <SectionLabel n="02" title="Note" />
               <div className="bg-white rounded-2xl border border-black/[0.05] shadow-[0_8px_30px_rgb(0,0,0,0.02)]">
                 <div className="p-5 space-y-4">
@@ -1686,7 +1765,7 @@ export default function NewTransaction({ session: _session }: { session: Session
                 <span className="text-[10px] font-bold text-on-surface-variant/40 tabular-nums">03</span>
                 <span className="h-px flex-1 bg-outline-variant/20" />
                 <span className="text-[10px] font-semibold text-on-surface-variant/50 uppercase tracking-[0.1em]">Project Allocation</span>
-                {splitMode && totalAmt > 0 && txnType !== 'client_receipt' && (
+                {splitMode && totalAmt > 0 && direction !== 'in' && (
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ml-1 ${
                     isOver ? 'bg-error-container text-error' :
                     isFullyAllocated ? 'bg-secondary-container text-on-secondary-container' :
@@ -1702,7 +1781,7 @@ export default function NewTransaction({ session: _session }: { session: Session
               </h2>
 
               {/* Premium Slim Visual progress bar for split mode */}
-              {splitMode && totalAmt > 0 && txnType !== 'client_receipt' && (
+              {splitMode && totalAmt > 0 && direction !== 'in' && (
                 <div className="mb-4 bg-white border border-black/[0.05] rounded-2xl p-4 shadow-[0_8px_30px_rgb(0,0,0,0.015)] space-y-2.5">
                   <div className="h-2 w-full bg-black/[0.04] rounded-full overflow-hidden flex shadow-inner">
                     {effectiveAllocs.map((a, i) => {
@@ -1753,7 +1832,7 @@ export default function NewTransaction({ session: _session }: { session: Session
               )}
 
               {/* Client Receipt: simple project picker only */}
-              {txnType === 'client_receipt' ? (
+              {direction === 'in' ? (
                 <div className="bg-white rounded-2xl border border-black/[0.06] shadow-sm p-5">
                   <div>
                     <label className={`block text-[11px] font-medium mb-1.5 ${missingProject && !allocs[0]?.project_id ? 'text-error' : 'text-on-surface-variant/60'}`}>
@@ -1979,7 +2058,7 @@ export default function NewTransaction({ session: _session }: { session: Session
             </div>
 
             {/* ━━ Smart Suggestions ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
-            {txnType === 'client_receipt' && !dismissedReceiptSuggestion && stkId && totalAmt > 0 && allocs[0]?.project_id && (
+            {direction === 'in' && !dismissedReceiptSuggestion && stkId && totalAmt > 0 && allocs[0]?.project_id && (
               <div className="p-4 rounded-xl border border-outline-variant/20 bg-surface-container-low/60">
                 <div className="flex items-start gap-3">
                   <span className="text-[18px]">💡</span>
@@ -2432,7 +2511,7 @@ export default function NewTransaction({ session: _session }: { session: Session
           {txnType && (
             <div className="mr-1">
               <p style={{ fontFamily: VOICE.serif, fontSize: 20, fontWeight: 600, color: VOICE.user, ...VNUMS }}>
-                {txnType === 'client_receipt' ? '+' : '−'}{totalAmt > 0 ? `₹${totalAmt.toLocaleString('en-IN')}` : '₹0'}
+                {direction === 'in' ? '+' : '−'}{totalAmt > 0 ? `₹${totalAmt.toLocaleString('en-IN')}` : '₹0'}
               </p>
               <p className="uppercase" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '.7px', color: VOICE.faint }}>Draft</p>
             </div>

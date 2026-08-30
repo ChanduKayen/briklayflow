@@ -51,8 +51,9 @@ export function FloatingActionButton() {
 
   const go = (path: string) => { navigate(path); handleClose(); };
 
-  // Full-screen create forms (New Transaction, etc.) own their own actions — hide the FAB.
-  if (/\/new$/.test(location.pathname)) return null;
+  // Full-screen create forms own their own actions; the Ledger has its dedicated NewTxnFab
+  // (money in / out) — hide the generic FAB there to avoid two overlapping buttons.
+  if (/\/new$/.test(location.pathname) || location.pathname === '/ledger') return null;
 
   return (
     <div

@@ -25,6 +25,8 @@ import { TrackChip, TRACK_CHIP_CSS } from '../components/txn-ledger/TrackChip';
 import { unlinkTxnOrder } from '../lib/trackingApi';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
+import { NewTxnFab } from '../components/NewTxnFab';
+import { NewTxnMenuButton } from '../components/NewTxnMenuButton';
 // Lazy — its xlsx parser is heavy and only needed when the import modal actually opens.
 const ImportTransactions = lazy(() => import('./ImportTransactions'));
 
@@ -1005,14 +1007,13 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
           <div className="flex flex-col items-end gap-1">
             <div className="flex items-center gap-2">
               <ImportButton onClick={() => setImportOpen(true)} />
-              <CreateHint message="press / to create a new transaction">
-                <button
-                  onClick={() => navigate('/ledger/new')}
+              <CreateHint message="hover for Money out / in · press / to create">
+                <NewTxnMenuButton
                   className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl"
                   style={{ background: terraGrad, color: '#fff', ...font }}
                 >
                   <Plus size={15} /> New transaction
-                </button>
+                </NewTxnMenuButton>
               </CreateHint>
             </div>
             <div className="hidden md:block">
@@ -1592,6 +1593,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
           </div>
         </div>
       )}
+      <NewTxnFab />
     </div>
   );
 }
