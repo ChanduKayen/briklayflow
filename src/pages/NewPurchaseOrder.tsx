@@ -162,6 +162,29 @@ function learnAlias(skuId: string | null | undefined, rawInput: string | null | 
     .catch((e: unknown) => console.warn('learnAlias error:', e));
 }
 
+// Product decision: NEVER auto-select a catalog match. A confident match is offered in the
+// dropdown (highlighted top suggestion) and the user picks it — nothing links on its own.
+// Flip to true to restore the old auto-link behaviour.
+const AUTO_LINK_MATCHES = false;
+
+// Always capitalise the first letter of a typed item name (e.g. "wall putty" → "Wall putty").
+const capFirst = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+
+// A soft, dark rounded hover tooltip (matches the platform's tooltip styling) — replaces the raw
+// native `title=`. Anchored below and right-aligned so it never runs off the header edge.
+function Tip({ text, children, width = 240 }: { text: string; children: React.ReactNode; width?: number }) {
+  return (
+    <span className="relative inline-flex group">
+      {children}
+      <span role="tooltip" className="pointer-events-none absolute top-full right-0 mt-2 z-[70] opacity-0 translate-y-0.5 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-150">
+        <span className="block rounded-xl px-3 py-2 text-[11.5px] leading-snug font-medium" style={{ background: '#2A231E', color: '#F6EFE6', width, boxShadow: '0 14px 34px -12px rgba(30,22,16,.55)', border: '1px solid rgba(255,255,255,.07)' }}>
+          {text}
+        </span>
+      </span>
+    </span>
+  );
+}
+
 // Returns a · -joined spec string from matched SKU fields, filtering placeholder values.
 // ── Strict auto-link gate (Resolution Rethink) ────────────────────────
 // The ONLY conditions under which a sku_id is set without user confirmation.
@@ -878,6 +901,9 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
   const fileInputRef      = useRef<HTMLInputElement>(null);
   const itemRefs          = useRef<Map<string, HTMLDivElement>>(new Map());
   const lineItemsRef      = useRef<DraftLineItem[]>([]);
+  // Line ids that should NOT auto-open their match dropdown (bulk bill extract → many lines at
+  // once; the match is ready but the user opens each on focus). Consumed once per id.
+  const noAutoOpenRef     = useRef<Set<string>>(new Set());
 
   const [orderedDate, setOrderedDate]         = useState(new Date().toISOString().split('T')[0]);
   const [expectedDelivery, setExpectedDelivery] = useState('');
@@ -1008,6 +1034,11 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
   // Vendor dropdown visibility + per-card "active" highlight + date editor.
   const [showVendorResults, setShowVendorResults] = useState(false);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  // Which action is mid-commit (drives the loading spinner, then a brief success tick).
+  const [committing, setCommitting] = useState<{ id: string; kind: 'link' | 'typed' | 'add'; skuId?: string; phase: 'loading' | 'done' } | null>(null);
+  // PO-wide mode: 'catalog' = match each item to the catalog (default); 'typed' = use every item
+  // exactly as typed, no catalog matching (for quick one-off orders).
+  const [poMatchMode, setPoMatchMode] = useState<'catalog' | 'typed'>('catalog');
   const [isEditingDate, setIsEditingDate] = useState(false);
   // ui/new-po-redesign — cosmetic, dead-ended (brief §3). Read ONLY by the save
   // ceremony JSX; never by any pipeline path or payload-constructing handler.
@@ -1396,6 +1427,8 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
 
       // Strict gate: only this branch auto-links.
       if (canAutoLink(resolution as any, conflicts as any)) {
+        // Never auto-select: offer the match in the dropdown for the user to pick.
+        if (!AUTO_LINK_MATCHES) { offerMatchInDropdown(itemId, resolution.matchedMember!, familyMembers, query, trace, family.similarity ?? 1); return; }
         const member      = resolution.matchedMember!;
         const currentItem = lineItemsRef.current.find(l => l.id === itemId);
         setStatus(trace, 'auto_linked');
@@ -1548,6 +1581,8 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
       });
 
       if (conflicts.length === 0) {
+        // Never auto-select: offer the single member in the dropdown for the user to pick.
+        if (!AUTO_LINK_MATCHES) { offerMatchInDropdown(itemId, m, familyMembers, query, trace, 1); return; }
         setStatus(trace, 'auto_linked');
         addStep(trace, { stage: 'commit', input: m.sku_id, result: 'AUTO-LINKED (no_tree single)' });
         logTrace(query, trace);
@@ -2132,6 +2167,113 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
         });
       }
     }, 300);
+  }
+
+  // Edit a line's Size / Variant / Grade directly in the sheet columns. Writes to typed_attrs,
+  // which the columns mirror and specFromTypedAttrs turns into the line's specification.
+  function setTypedAttr(itemId: string, key: 'dimension' | 'variant' | 'grade', value: string) {
+    const li = lineItemsRef.current.find(l => l.id === itemId);
+    const cur = li?.typed_attrs || { dimension: null, variant: null, grade: null };
+    updateLine(itemId, { typed_attrs: { ...cur, [key]: value.trim() ? value : null } });
+  }
+
+  // Never-auto-link: surface a confident match (and any alternatives) in the dropdown as the
+  // highlighted top suggestion instead of committing it. The user picks → selectSKU commits.
+  function offerMatchInDropdown(itemId: string, member: any, alternatives: any[], query: string, trace?: any, topSim = 1) {
+    const toResult = (m: any, sim: number): SKUResult => ({
+      sku_id: m.sku_id, item_name: m.item_name, category: m.category, sub_category: m.sub_category,
+      dimension: m.dimension ?? null, variant: m.variant ?? null, grade: m.grade ?? null,
+      unit: m.unit, aliases: m.aliases, similarity: sim,
+    });
+    const clampSim = (s: number) => Math.min(1, Math.max(0.5, s > 0 ? s : 0.9));
+    const seen = new Set<string>([member.sku_id]);
+    const results: SKUResult[] = [toResult(member, clampSim(topSim))];
+    for (const a of alternatives || []) {
+      if (a?.sku_id && !seen.has(a.sku_id)) { seen.add(a.sku_id); results.push(toResult(a, clampSim(typeof a.similarity === 'number' ? a.similarity : 0.6))); }
+    }
+    // Single typed item → open the dropdown right away (match highlighted). Bulk bill extract →
+    // keep it closed (the field's onFocus reopens it) so we don't stack many dropdowns at once.
+    const autoOpen = !noAutoOpenRef.current.has(itemId);
+    noAutoOpenRef.current.delete(itemId);
+    clearTimeout(dymDebounceRef.current[itemId]);   // cancel the parallel "Did you mean?" — the dropdown is the one surface
+    if (trace) setStatus(trace, 'needs_input');
+    updateLine(itemId, {
+      sku_id:              undefined,
+      original_input:      query,
+      searchResults:       results,
+      showDropdown:        autoOpen,
+      needs_review:        true,
+      auto_applied:        false,
+      checkmark_ready:     false,
+      // ONE clean surface: the "Catalog matches" dropdown. Suppress the parallel strips (yellow
+      // card message, "Did you mean?", family disambiguation, spec editor) so the row isn't
+      // cluttered with three competing prompts.
+      card_message:        undefined,
+      did_you_mean:        undefined,
+      dym_loading:         false,
+      insertion_reason:    null,
+      attribute_pills:     undefined,
+      attribute_conflicts: undefined,
+      pending_families:    undefined,
+      searching:           false,
+      resolution_trace:    trace,
+    });
+  }
+
+  // Commit a catalog pick: a brief loading beat, then link (the row settling into its linked
+  // state is the success).
+  function commitPick(itemId: string, sku: SKUResult, e: React.MouseEvent) {
+    e.preventDefault();
+    if (committing) return;
+    setCommitting({ id: itemId, kind: 'link', skuId: sku.sku_id, phase: 'loading' });
+    setTimeout(() => { selectSKU(itemId, sku); setCommitting(null); }, 360);
+  }
+  // Commit "Use as typed": loading → a green success tick → then keep-as-typed.
+  function commitUseAsTyped(itemId: string, e: React.MouseEvent) {
+    e.preventDefault();
+    if (committing) return;
+    setCommitting({ id: itemId, kind: 'typed', phase: 'loading' });
+    setTimeout(() => setCommitting({ id: itemId, kind: 'typed', phase: 'done' }), 320);
+    setTimeout(() => { handleSkipWithoutLinking(itemId); setCommitting(null); }, 900);
+  }
+  // Commit "Add to catalog & use" — a REAL async op: spinner until it lands, then a success tick.
+  function commitAddToCatalog(itemId: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (committing) return;
+    setCommitting({ id: itemId, kind: 'add', phase: 'loading' });
+    Promise.resolve(handleAddToCatalog(itemId))
+      .then(() => { setCommitting({ id: itemId, kind: 'add', phase: 'done' }); setTimeout(() => setCommitting(null), 700); })
+      .catch(() => setCommitting(null));
+  }
+
+  // Flip the whole PO between "match to catalog" and "use everything as typed".
+  function setMatchMode(mode: 'catalog' | 'typed') {
+    if (mode === poMatchMode) return;
+    setPoMatchMode(mode);
+    if (mode === 'typed') {
+      // Use all as typed: cancel any resolution, drop the catalog UI, mark every named line skipped.
+      lineItemsRef.current.forEach((li) => {
+        clearTimeout(aiMatchDebounceRef.current[li.id]);
+        clearTimeout(dymDebounceRef.current[li.id]);
+        clearTimeout(searchDebounceRef.current[li.id]);
+        if (li.item_name.trim()) updateLine(li.id, {
+          skipped_linking: true, sku_id: null, showDropdown: false, searchResults: [],
+          sku_alternatives: undefined, did_you_mean: undefined, dym_loading: false,
+          card_message: undefined, pending_families: undefined, family_match: undefined,
+          family_members: undefined, tree_resolution: undefined, attribute_pills: undefined,
+          needs_sku_badge: false, checkmark_ready: undefined, isSearching: false, search_stage: null,
+        });
+      });
+    } else {
+      // Back to catalog: clear the skip and re-resolve each named, still-unlinked line.
+      lineItemsRef.current.forEach((li) => {
+        if (li.item_name.trim() && !li.sku_id) {
+          updateLine(li.id, { skipped_linking: false });
+          noAutoOpenRef.current.add(li.id);
+          setTimeout(() => { const raw = li.item_name; startFreshResolution(li.id, raw, raw, li.typed_attrs ?? extractAttrs(raw)); }, 50);
+        }
+      });
+    }
   }
 
   function selectSKU(itemId: string, sku: SKUResult) {
@@ -3291,24 +3433,44 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
         return;
       }
       const base = lineItems.filter(l => l.item_name.trim()).length;
-      const newItems = result.items.map((item, i) => computeLine({
-        ...newLine(base + i + 1),
-        item_name:        item.sku_name ?? item.item_name,
-        sku_id:           item.sku_id,
-        unit:             item.unit ?? 'Nos',
-        quantity_ordered: item.quantity ?? 1,
-        confidence:       item.confidence,
-        needs_review:     item.needs_review,
-        match_source:     item.match_source,
-      }));
+      // Never auto-select from a bill: bring each extracted line in UNLINKED (raw name as read
+      // off the bill, no sku_id, no auto-add) — then run resolution so its match(es) surface in
+      // the dropdown for the user to pick, exactly like a typed item.
+      const newItems = result.items.map((item, i) => {
+        const rawName = capFirst(item.item_name ?? item.sku_name ?? '');
+        const spec = (item as any).specification ?? null;
+        // The doc's size / variant / grade come back on the `specification` string — parse them
+        // out so the Size/Variant/Grade columns fill (prefer any structured fields if present).
+        const a = extractAttrs(`${rawName} ${spec ?? ''}`.trim());
+        const dimension = (item as any).dimension ?? a.dimension ?? null;
+        const variant   = (item as any).variant   ?? a.variant   ?? null;
+        const grade     = (item as any).grade     ?? a.grade     ?? null;
+        return computeLine({
+          ...newLine(base + i + 1),
+          item_name:        rawName,
+          unit:             item.unit ?? 'Nos',
+          quantity_ordered: item.quantity ?? 1,
+          specification:    spec,
+          typed_attrs:      { dimension, variant, grade },
+        });
+      });
       setLineItems(prev => [...prev.filter(l => l.item_name.trim()), ...newItems]);
       showSnackbar(`${newItems.length} item${newItems.length !== 1 ? 's' : ''} extracted`);
-      newItems
-        .filter(li => !li.sku_id && li.item_name.trim().length >= 2)
-        .forEach(li => setTimeout(() => autoAddItemToDictionary(li.id), 500));
+      if (poMatchMode === 'typed') {
+        // Use-as-typed mode: keep extracted items exactly as read; no catalog matching.
+        newItems.filter(li => li.item_name.trim().length >= 2).forEach(li => updateLine(li.id, { skipped_linking: true }));
+      } else {
+        newItems
+          .filter(li => li.item_name.trim().length >= 2)
+          .forEach(li => {
+            noAutoOpenRef.current.add(li.id);   // ready the match, but don't pop every dropdown at once
+            // Seed resolution with the parsed size/variant/grade so the match respects them.
+            setTimeout(() => { const raw = li.item_name; startFreshResolution(li.id, raw, raw, li.typed_attrs ?? extractAttrs(raw)); }, 300);
+          });
+      }
     } catch (err: any) {
-      setDocExtractError('Failed to process document. Try again.');
-      console.error(err);
+      console.error('[handleDocumentUpload]', err);
+      setDocExtractError(err?.message || 'Failed to process document. Try again.');
     } finally {
       setDocExtracting(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -3621,16 +3783,45 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
           <SheetSectionLabel
             title="Items"
             right={(
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="inline-flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg active:scale-95 transition-all hover:brightness-95"
-                style={{ color: uiV.accentDeep, border: `1px solid ${uiV.accentLine}`, background: uiV.accentSoft }}
-                title="Upload a quotation or bill — AI extracts items"
-              >
-                <span className="material-symbols-outlined text-[16px]">document_scanner</span>
-                <span className="hidden sm:inline">Scan bill / quote</span>
-              </button>
+              <div className="inline-flex items-center gap-2 flex-wrap justify-end">
+                {/* PO-wide: match every item to the catalog, or use them all exactly as typed. */}
+                <div className="inline-flex rounded-lg p-0.5" style={{ background: uiV.field, border: `1px solid ${uiV.line}` }}>
+                  <Tip text="Recommended — standardise each item against your catalog, so spend stays consistent and is easy to track & report.">
+                    <button
+                      type="button"
+                      onClick={() => setMatchMode('catalog')}
+                      className="text-[11.5px] font-semibold px-2.5 py-1 rounded-md transition-all"
+                      style={poMatchMode === 'catalog'
+                        ? { background: uiV.surface, color: uiV.accentDeep, boxShadow: '0 1px 2px rgba(0,0,0,.08)' }
+                        : { background: 'transparent', color: uiV.systemFaint }}
+                    >
+                      Match to catalog
+                    </button>
+                  </Tip>
+                  <Tip text="For item lists that aren't in your catalog — keep everything exactly as typed, without linking.">
+                    <button
+                      type="button"
+                      onClick={() => setMatchMode('typed')}
+                      className="text-[11.5px] font-semibold px-2.5 py-1 rounded-md transition-all"
+                      style={poMatchMode === 'typed'
+                        ? { background: uiV.surface, color: uiV.accentDeep, boxShadow: '0 1px 2px rgba(0,0,0,.08)' }
+                        : { background: 'transparent', color: uiV.systemFaint }}
+                    >
+                      Use as typed
+                    </button>
+                  </Tip>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="inline-flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg active:scale-95 transition-all hover:brightness-95"
+                  style={{ color: uiV.accentDeep, border: `1px solid ${uiV.accentLine}`, background: uiV.accentSoft }}
+                  title="Upload a quotation or bill — AI extracts items"
+                >
+                  <span className="material-symbols-outlined text-[16px]">document_scanner</span>
+                  <span className="hidden sm:inline">Scan bill / quote</span>
+                </button>
+              </div>
             )}
           />
         </div>
@@ -3745,8 +3936,19 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
                                 if (li.searchResults && li.searchResults.length > 0) updateLine(li.id, { showDropdown: true });
                               }}
                               onChange={(e) => {
-                                const val = e.target.value;
+                                const val = capFirst(e.target.value);
                                 clearTimeout(aiMatchDebounceRef.current[li.id]);
+                                // "Use as typed" mode: keep exactly what's typed, no catalog matching.
+                                if (poMatchMode === 'typed') {
+                                  const ta = extractAttrs(val);
+                                  updateLine(li.id, {
+                                    item_name: val, sku_id: null, skipped_linking: val.trim().length > 0,
+                                    showDropdown: false, searchResults: [], did_you_mean: undefined,
+                                    dym_loading: false, card_message: undefined, needs_sku_badge: false,
+                                    typed_attrs: { dimension: ta.dimension ?? null, variant: ta.variant ?? null, grade: ta.grade ?? null },
+                                  });
+                                  return;
+                                }
                                 const prevText = li.dismissed ? (li.original_input ?? li.item_name) : li.item_name;
                                 const textChanged = val !== prevText;
                                 const wasCleared = val.trim().length <= 2;
@@ -3798,25 +4000,56 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
                               if (!triggerEl) return null;
                               const rect = triggerEl.getBoundingClientRect();
                               return createPortal(
-                                <div className="z-40" style={{ position: 'fixed', top: rect.bottom + 6, left: rect.left, width: Math.max(rect.width, 280), borderRadius: 10, overflow: 'hidden', maxHeight: 220, overflowY: 'auto', background: uiV.surface, border: `1px solid ${uiV.line}`, boxShadow: '0 16px 40px rgba(30,26,21,0.18)' }}>
-                                  <div style={{ padding: '6px 10px 4px', fontSize: 9, fontWeight: 700, color: uiV.systemFaint, textTransform: 'uppercase', letterSpacing: '0.08em', borderBottom: `1px solid ${uiV.line}` }}>
-                                    SKU matches — click to select
+                                <div className="z-40" style={{ position: 'fixed', top: rect.bottom + 6, left: rect.left, width: Math.max(rect.width, 300), borderRadius: 12, overflow: 'hidden', maxHeight: 320, overflowY: 'auto', background: uiV.surface, border: `1px solid ${uiV.line}`, boxShadow: '0 18px 44px rgba(30,26,21,0.20)' }}>
+                                  <style>{`
+                                    @keyframes poSpin{to{transform:rotate(360deg)}}
+                                    .po-pick{transition:background .14s ease, transform .1s ease}
+                                    .po-pick:hover{background:${uiV.field} !important}
+                                    .po-pick:active{transform:scale(.985)}
+                                    .po-typed{transition:background .14s ease, border-color .14s ease, transform .1s ease, box-shadow .14s ease}
+                                    .po-typed:hover{background:${uiV.confirmWash} !important;border-color:${uiV.confirm} !important;box-shadow:0 6px 16px -8px rgba(47,93,52,.5)}
+                                    .po-typed:active{transform:scale(.97)}
+                                    .po-spin{width:13px;height:13px;border-radius:50%;border:2px solid rgba(0,0,0,.15);border-top-color:${uiV.confirm};display:inline-block;animation:poSpin .7s linear infinite;flex-shrink:0}
+                                  `}</style>
+                                  <div style={{ padding: '7px 11px 5px', fontSize: 9, fontWeight: 700, color: uiV.systemFaint, textTransform: 'uppercase', letterSpacing: '0.08em', borderBottom: `1px solid ${uiV.line}` }}>
+                                    Catalog matches — pick one to link
                                   </div>
-                                  {li.searchResults.map((sku: any, si: number) => (
-                                    <div key={sku.sku_id} onMouseDown={() => selectSKU(li.id, sku)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', cursor: 'pointer', borderBottom: si < li.searchResults.length - 1 ? `1px solid ${uiV.line}55` : 'none', background: si === 0 ? 'rgba(47,93,52,0.05)' : 'transparent' }}
-                                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = uiV.field; }}
-                                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = si === 0 ? 'rgba(47,93,52,0.05)' : 'transparent'; }}
+                                  {li.searchResults.map((sku: any, si: number) => {
+                                    const busy = committing?.id === li.id && committing.kind === 'link' && committing.skuId === sku.sku_id;
+                                    return (
+                                    <div key={sku.sku_id} className="po-pick" role="button" tabIndex={0}
+                                      title={`Link this line to “${memberChipLabel(sku)}” in your catalog`}
+                                      onMouseDown={(e) => commitPick(li.id, sku, e)}
+                                      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 11px', cursor: 'pointer', borderBottom: si < li.searchResults.length - 1 ? `1px solid ${uiV.line}55` : 'none', background: si === 0 ? 'rgba(47,93,52,0.06)' : 'transparent', opacity: committing && !busy ? 0.5 : 1 }}
                                     >
-                                      {si === 0 && <span className="material-symbols-outlined" style={{ fontSize: 13, color: uiV.confirm, flexShrink: 0 }}>star</span>}
+                                      {busy ? <span className="po-spin" /> : (si === 0 ? <span className="material-symbols-outlined" style={{ fontSize: 14, color: uiV.confirm, flexShrink: 0 }}>star</span> : <span style={{ width: 14, flexShrink: 0 }} />)}
                                       <div style={{ minWidth: 0, flex: 1 }}>
-                                        <div style={{ fontSize: 12, fontWeight: si === 0 ? 600 : 400, color: uiV.user, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{memberChipLabel(sku)}</div>
-                                        <div style={{ fontSize: 9, color: uiV.systemFaint, marginTop: 1, fontFamily: 'monospace' }}>{sku.sku_id} · {sku.unit}</div>
+                                        <div style={{ fontSize: 12.5, fontWeight: si === 0 ? 600 : 400, color: uiV.user, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{memberChipLabel(sku)}</div>
+                                        <div style={{ fontSize: 9.5, color: uiV.systemFaint, marginTop: 1, fontFamily: 'monospace' }}>{busy ? 'Linking…' : `${sku.sku_id} · ${sku.unit}`}</div>
                                       </div>
-                                      <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 20, fontWeight: 600, flexShrink: 0, background: sku.similarity >= 0.75 ? '#DCFCE7' : sku.similarity >= 0.5 ? '#DBEAFE' : '#FEF9C3', color: sku.similarity >= 0.75 ? '#16A34A' : sku.similarity >= 0.5 ? '#1D4ED8' : '#A16207' }}>
+                                      {!busy && <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 20, fontWeight: 600, flexShrink: 0, background: sku.similarity >= 0.75 ? '#DCFCE7' : sku.similarity >= 0.5 ? '#DBEAFE' : '#FEF9C3', color: sku.similarity >= 0.75 ? '#16A34A' : sku.similarity >= 0.5 ? '#1D4ED8' : '#A16207' }}>
                                         {Math.round(sku.similarity * 100)}%
-                                      </span>
+                                      </span>}
                                     </div>
-                                  ))}
+                                    );
+                                  })}
+                                  {/* Use as typed — an EQUAL, first-class action: keep exactly what you typed, no catalog link. */}
+                                  {(() => {
+                                    const busy = committing?.id === li.id && committing.kind === 'typed';
+                                    return (
+                                      <div style={{ padding: 8, borderTop: `1px solid ${uiV.line}`, background: uiV.field }}>
+                                        <button type="button" className="po-typed"
+                                          title="Keep exactly what you typed — don’t link it to the catalog"
+                                          onMouseDown={(e) => commitUseAsTyped(li.id, e)}
+                                          style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '9px 12px', borderRadius: 9, border: `1px solid ${uiV.line}`, background: uiV.surface, color: uiV.user, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', opacity: committing && !busy ? 0.5 : 1 }}
+                                        >
+                                          {busy
+                                            ? <><span className="po-spin" /> Using…</>
+                                            : <><span className="material-symbols-outlined" style={{ fontSize: 15 }}>edit_note</span> Use “{li.item_name.trim()}” as typed</>}
+                                        </button>
+                                      </div>
+                                    );
+                                  })()}
                                 </div>,
                                 document.body,
                               );
@@ -3824,10 +4057,16 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
                           </div>
                         </td>
 
-                        {/* Size / Variant / Grade — read-only mirrors */}
-                        <td className="px-3 py-2.5 text-[13px]" style={{ ...cell, color: uiV.userSoft }}>{dimVal || dash}</td>
-                        <td className="px-3 py-2.5 text-[13px]" style={{ ...cell, color: uiV.userSoft }}>{varVal || dash}</td>
-                        <td className="px-3 py-2.5 text-[13px]" style={{ ...cell, color: uiV.userSoft }}>{grdVal || dash}</td>
+                        {/* Size / Variant / Grade — editable (write to typed_attrs; feeds the spec). */}
+                        <td className="px-3 py-2" style={cell}>
+                          <input aria-label="Size" className="w-full text-[13px] bg-transparent border-0 px-0 py-1 outline-none placeholder:font-normal" style={{ color: uiV.userSoft }} placeholder="—" value={dimVal || ''} onFocus={() => setActiveCardId(li.id)} onChange={(e) => setTypedAttr(li.id, 'dimension', e.target.value)} />
+                        </td>
+                        <td className="px-3 py-2" style={cell}>
+                          <input aria-label="Variant" className="w-full text-[13px] bg-transparent border-0 px-0 py-1 outline-none placeholder:font-normal" style={{ color: uiV.userSoft }} placeholder="—" value={varVal || ''} onFocus={() => setActiveCardId(li.id)} onChange={(e) => setTypedAttr(li.id, 'variant', e.target.value)} />
+                        </td>
+                        <td className="px-3 py-2" style={cell}>
+                          <input aria-label="Grade" className="w-full text-[13px] bg-transparent border-0 px-0 py-1 outline-none placeholder:font-normal" style={{ color: uiV.userSoft }} placeholder="—" value={grdVal || ''} onFocus={() => setActiveCardId(li.id)} onChange={(e) => setTypedAttr(li.id, 'grade', e.target.value)} />
+                        </td>
 
                         {/* Qty */}
                         <td className="px-2 py-2" style={{ ...cell, textAlign: 'right' }}>
@@ -3900,7 +4139,9 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
                               {/* Did you mean */}
                               {(() => {
                                 const dym = li.did_you_mean?.trim();
-                                const hide = li.sku_id || li.sku_match_skipped || li.skipped_linking || li.dismissed;
+                                // When the "Catalog matches" dropdown already carries picks, that's the single
+                                // surface — don't also show a "Did you mean?" for the same line.
+                                const hide = li.sku_id || li.sku_match_skipped || li.skipped_linking || li.dismissed || (li.searchResults && li.searchResults.length > 0);
                                 if (hide) return null;
                                 if (li.dym_loading && !dym) {
                                   return (
@@ -4117,18 +4358,62 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
                                 </p>
                               )}
 
-                              {/* Action footer */}
-                              {!li.sku_id && !li.skipped_linking && li.item_name.trim().length >= 2 && (
-                                <div className="flex items-center justify-end gap-3 mt-2.5">
-                                  <button type="button" onClick={(e) => { e.stopPropagation(); handleSkipWithoutLinking(li.id); }} className="text-[12px]" style={{ color: uiV.systemFaint }} title="Keep this item with the text you typed — don't link to the catalog">
-                                    Use as typed
+                              {/* Action footer — two first-class buttons with hover / click / loading /
+                                  success (+ celebrate) states. */}
+                              {!li.sku_id && !li.skipped_linking && li.item_name.trim().length >= 2 && (() => {
+                                const mine      = committing?.id === li.id ? committing : null;
+                                const usingBusy = mine?.kind === 'typed' && mine.phase === 'loading';
+                                const usingDone = mine?.kind === 'typed' && mine.phase === 'done';
+                                const addBusy   = mine?.kind === 'add'   && mine.phase === 'loading';
+                                const addDone   = mine?.kind === 'add'   && mine.phase === 'done';
+                                const anyBusy   = !!mine;
+                                const conflicted = (li.attribute_conflicts?.length ?? 0) > 0;
+                                return (
+                                <div className="flex items-center justify-end gap-2.5 mt-2.5">
+                                  <style>{`
+                                    .po-fbtn{transition:background .15s ease,border-color .15s ease,color .15s ease,transform .1s ease,box-shadow .15s ease}
+                                    .po-fbtn:not(:disabled):active{transform:scale(.96)}
+                                    .po-fbtn:disabled{cursor:default}
+                                    .po-useb:not(:disabled):hover{background:${uiV.field} !important;border-color:${uiV.lineStrong} !important;color:${uiV.user} !important}
+                                    .po-addb:not(:disabled):hover{background:${uiV.accent} !important;color:#fff !important;border-color:${uiV.accent} !important;box-shadow:0 6px 16px -8px rgba(196,97,58,.55)}
+                                    @keyframes poFSpin{to{transform:rotate(360deg)}}
+                                    .po-fspin{width:13px;height:13px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;display:inline-block;animation:poFSpin .7s linear infinite}
+                                  `}</style>
+                                  <button
+                                    type="button"
+                                    disabled={anyBusy}
+                                    onClick={(e) => { e.stopPropagation(); commitUseAsTyped(li.id, e); }}
+                                    className="po-fbtn po-useb inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[12px] font-semibold"
+                                    style={usingDone
+                                      ? { background: uiV.confirmWash, border: `1px solid ${uiV.confirm}`, color: uiV.confirm }
+                                      : { background: uiV.surface, border: `1px solid ${uiV.line}`, color: uiV.system, opacity: anyBusy && !usingBusy ? 0.5 : 1 }}
+                                    title="Keep this item with the text you typed — don't link to the catalog"
+                                  >
+                                    {usingDone
+                                      ? <><span className="material-symbols-outlined text-[14px]">check_circle</span> Kept as typed</>
+                                      : usingBusy
+                                        ? <><span className="po-fspin" /> Using…</>
+                                        : <><span className="material-symbols-outlined text-[14px]">edit_note</span> Use as typed</>}
                                   </button>
-                                  <button type="button" onClick={(e) => { e.stopPropagation(); handleAddToCatalog(li.id); }} disabled={(li.attribute_conflicts?.length ?? 0) > 0} className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed" style={{ background: uiV.accentSoft, color: uiV.accentDeep }} title={(li.attribute_conflicts?.length ?? 0) > 0 ? 'Resolve the attribute conflict first' : 'Add this item to the catalog and link it'}>
-                                    <span className="material-symbols-outlined text-[14px]">add_circle</span>
-                                    Add to catalog &amp; use
+                                  <button
+                                    type="button"
+                                    disabled={anyBusy || conflicted}
+                                    onClick={(e) => commitAddToCatalog(li.id, e)}
+                                    className="po-fbtn po-addb inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[12px] font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+                                    style={addDone
+                                      ? { background: uiV.confirmWash, color: uiV.confirm, border: `1px solid ${uiV.confirm}` }
+                                      : { background: uiV.accentSoft, color: uiV.accentDeep, border: `1px solid ${uiV.accentLine}`, opacity: anyBusy && !addBusy ? 0.5 : undefined }}
+                                    title={conflicted ? 'Resolve the attribute conflict first' : 'Add this item to the catalog and link it'}
+                                  >
+                                    {addDone
+                                      ? <><span className="material-symbols-outlined text-[14px]">check_circle</span> Added</>
+                                      : addBusy
+                                        ? <><span className="po-fspin" /> Adding…</>
+                                        : <><span className="material-symbols-outlined text-[14px]">add_circle</span> Add to catalog &amp; use</>}
                                   </button>
                                 </div>
-                              )}
+                                );
+                              })()}
 
                               {/* Resolution story */}
                               {(() => {

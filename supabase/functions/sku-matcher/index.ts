@@ -3,6 +3,14 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import OpenAI from 'https://esm.sh/openai@4'
 
 const openai  = new OpenAI({ apiKey: Deno.env.get('OPENAI_API_KEY') })
+
+// The vision model used to READ a bill/quote/PO (often photos of HANDWRITTEN site notes — the
+// hardest case). Env-overridable so you can point it at your finest model without a code change,
+// e.g. `SKU_EXTRACT_MODEL=gpt-5` or an o-series model. Default is the strongest broadly-available.
+const EXTRACT_MODEL  = Deno.env.get('SKU_EXTRACT_MODEL') ?? 'gpt-4o'
+// If SKU_EXTRACT_MODEL is set to an id this account can't use (OpenAI 400 "invalid model"),
+// we fall back to this known-good vision model so uploads never hard-fail.
+const FALLBACK_MODEL = 'gpt-4o'
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL')!,
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -63,6 +71,7 @@ interface SKUMatcherRequest {
   image_base64?:    string
   image_url?:       string
   image_mime?:      string
+  filename?:        string
   vendor_category?: string
   org_id?:          string
   caller?:          string
@@ -413,32 +422,54 @@ async function trgmSearch(
 function buildExtractionPrompt(vendorCategory?: string): string {
   const cats = vendorCategory ? (VENDOR_TO_SKU_CATEGORIES[vendorCategory] ?? []) : []
   const categoryContext = cats.length > 0
-    ? `\nVendor type: "${vendorCategory}" — items are expected in [${cats.join(', ')}]. Use this to resolve ambiguous or regional names.\n`
+    ? `\nVendor type: "${vendorCategory}" (likely trades: [${cats.join(', ')}]) — use this ONLY as a soft hint to disambiguate an unclear name. Still extract EVERY item written, including any outside this list.\n`
     : ''
 
   return `You are a senior procurement manager for Indian construction projects with deep knowledge of material trade names across Andhra Pradesh, Telangana, and pan-India.${categoryContext}
 
-TASK: Extract every material line item from the document. DO NOT match to SKUs yet — just extract cleanly.
+TASK: Read the document and extract EVERY material line item. DO NOT match to SKUs yet — just extract.
 
-CRITICAL — item_name MUST be the standard Indian construction industry name. Never copy vendor shorthand verbatim.
+THE DOCUMENT IS OFTEN A PHOTO OF A HANDWRITTEN SITE ORDER in rough Indian plumbing/hardware/site
+shorthand (mixed spellings, no punctuation). Read it like an experienced site engineer would.
 
-INTERPRETATION REFERENCE:
-  Aggregates  : "jelly" / "metal" / "coarse agg" → "Coarse Aggregate <size>mm"
-  Sand        : "m-sand" / "robo sand" → "M-Sand"  |  "river sand" → "River Sand"
-  Cement      : "53 grade" / brand+"53" → "OPC 53 Cement"  |  "43 grade" → "OPC 43 Cement"
-  Steel       : "tmt/tor/rebar" + grade+dia → "TMT Bar <grade> <dia>mm"
-  Bricks      : "ita" / "mitti" → "Clay Brick"  |  "solid block 200" → "Concrete Block 200mm"
-  Electrical  : "4c×6sq" → "4 Core 6 Sq.mm Armoured Cable"
-  Plumbing    : "health facet" / "health facets" / "health fasset" → "Health Faucet" | "bib cock" → "Bib Cock" | "ball valve" → "Ball Valve" | "cpvc pipe" → "CPVC Pipe" | "upvc pipe" → "uPVC Pipe" | "gI pipe" / "gi pipe" → "GI Pipe" | "flush valve" → "Flush Valve" | "stop cock" → "Stop Cock"
+FAITHFULNESS RULES — follow EXACTLY:
+1. TRANSCRIBE, DON'T INVENT. Every item you output MUST correspond to a real line in the document.
+   Never add items that are not written. Never split one line into two, never merge two lines into one.
+2. READ EVERY REGION. There may be MULTIPLE handwritten notes / pages / slips — extract items from ALL
+   of them. A printed header table (Bill To / PO Number / Site) is NOT an item — skip it.
+3. QUANTITY IS CRITICAL — transcribe it EXACTLY as written. It is the number written near the end of
+   the line, usually before "No / Nos / No. / Set / Box / Kg". Examples: "— 30No" → 30, "8No" → 8,
+   "4No" → 4, "1 Box" → 1 (unit Box). NEVER default a quantity to 1. If a line truly has no number,
+   set quantity to null (do not guess 1).
+4. If a word is illegible, still include the line: put your best-guess standard name in item_name and
+   the verbatim scribble in item_raw. Do not drop the line.
+5. item_name = the STANDARD Indian construction industry name (expand the shorthand). item_raw = the
+   verbatim text as written. Put size/grade/variant into "specification" (e.g. "32mm", "18x14",
+   "2 feet", "Fe500", "OPC 53", "Long body", "Swan neck").
 
-Return ONLY a valid JSON array:
+NAMING THE ITEM (trade-agnostic — the note may be about ANY trade: civil, plumbing, electrical,
+steel, tiling/finishing, waterproofing, hardware, carpentry, painting…):
+- Read what is ACTUALLY written and name that exact item. Expand the writer's phonetic/abbreviated
+  shorthand into the STANDARD Indian construction-industry product name for it, using your own domain
+  knowledge — the same way an experienced site engineer for that trade would read it.
+- Do NOT bias toward any single trade or a fixed vocabulary, and never bend an item into a category
+  just to fit. Infer the category from the item itself (and from neighbouring lines, which usually
+  share a trade). Set category_hint to its real category.
+- Apply these GENERAL transforms to whatever the word is: phonetic misspelling → correct spelling;
+  local/brand word → the generic material; abbreviation/code → the full standard name.
+- Any grade / size / dimension / type written inline (e.g. "53", "12mm", "Fe500", "18x14", "2 feet",
+  "3 phase", "1BHK", "8x4") belongs in "specification", not baked silently into the name.
+- When genuinely unsure of the standard name, keep item_name close to the legible words rather than
+  guessing a different product — accuracy over polish.
+
+Return ONLY a valid JSON array, one object PER written line, IN ORDER:
 [{
-  "item_raw": "verbatim text from document",
+  "item_raw": "verbatim text from the document line",
   "item_name": "standard industry name",
-  "specification": "grade/size/variant or null",
-  "quantity": number_or_null,
-  "unit": "Bags|MT|kg|Nos|Rmt|Sqft|Ltr|m³|m²|null",
-  "category_hint": "likely category: Cement|Steel|Sand|Aggregate|Brick|Block|Paint|Tile|Plumbing|Electrical|Hardware|Plywood|Waterproofing"
+  "specification": "size / grade / variant, or null",
+  "quantity": number_or_null,   // the EXACT written quantity — never invent, never default to 1
+  "unit": "Bags|MT|kg|Nos|Set|Box|Rmt|Sqft|Ltr|m³|m²|null",
+  "category_hint": "Cement|Steel|Sand|Aggregate|Brick|Block|Paint|Tile|Plumbing|Electrical|Hardware|Plywood|Waterproofing"
 }]
 
 If no items found, return [].`.trim()
@@ -492,12 +523,24 @@ async function extractItems(
 ): Promise<ExtractedRaw[]> {
   const systemPrompt = buildExtractionPrompt(req.vendor_category)
 
-  let content: OpenAI.ChatCompletionContentPart[]
+  // Honour the ACTUAL file type. A PDF must be sent as a document `file` part — a PDF shoved into
+  // an image_url as a fake JPEG is unreadable and the extraction silently returns nothing / errors.
+  const mime = (req.image_mime || '').toLowerCase()
+  const isPdf = mime.includes('pdf') || (req.filename || '').toLowerCase().endsWith('.pdf')
+
+  // deno-lint-ignore no-explicit-any
+  let content: any
   if (req.text) {
     content = [{ type: 'text', text: req.text }]
-  } else if (req.image_base64) {
+  } else if (req.image_base64 && isPdf) {
     content = [
-      { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${req.image_base64}`, detail: 'high' } },
+      { type: 'file', file: { filename: req.filename || 'document.pdf', file_data: `data:application/pdf;base64,${req.image_base64}` } },
+      { type: 'text', text: 'Extract all material line items from this bill / quotation PDF.' },
+    ]
+  } else if (req.image_base64) {
+    const dataMime = mime.startsWith('image/') ? mime : 'image/jpeg'
+    content = [
+      { type: 'image_url', image_url: { url: `data:${dataMime};base64,${req.image_base64}`, detail: 'high' } },
       { type: 'text', text: 'Extract all material line items from this document.' },
     ]
   } else if (req.image_url) {
@@ -509,17 +552,55 @@ async function extractItems(
     throw new Error('Provide text, image_base64, or image_url')
   }
 
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4.1', max_tokens: 2000, temperature: 0,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user',   content },
-    ],
-  })
+  // GPT-5 / o-series are REASONING models: they reject `temperature` (only the default is allowed) and
+  // use `max_completion_tokens`, not `max_tokens`. They also SPEND output budget on hidden reasoning,
+  // so a tight cap returns an EMPTY body — keep the cap generous. Non-reasoning models keep the classic
+  // low-temperature deterministic call.
+  const runExtract = (model: string) => {
+    const isReasoning = /^(gpt-5|o\d)/i.test(model)
+    // deno-lint-ignore no-explicit-any
+    const params: any = {
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user',   content },
+      ],
+    }
+    if (isReasoning) {
+      params.max_completion_tokens = 16000   // room for reasoning + the JSON, so it never comes back empty
+    } else {
+      params.max_tokens = 4000
+      params.temperature = 0
+    }
+    return openai.chat.completions.create(params)
+  }
+
+  console.log(`[extractItems] requested model="${EXTRACT_MODEL}" (env SKU_EXTRACT_MODEL="${Deno.env.get('SKU_EXTRACT_MODEL') ?? ''}"), input=${isPdf ? 'pdf' : req.image_base64 ? 'image' : 'text'}`)
+  let response
+  try {
+    response = await runExtract(EXTRACT_MODEL)
+  } catch (err) {
+    const msg = String((err as { message?: string })?.message ?? err)
+    // A bad / inaccessible model id (OpenAI 400 "invalid model") shouldn't break extraction.
+    if (EXTRACT_MODEL !== FALLBACK_MODEL && /model/i.test(msg)) {
+      console.warn(`[extractItems] model "${EXTRACT_MODEL}" rejected (${msg}); falling back to "${FALLBACK_MODEL}"`)
+      response = await runExtract(FALLBACK_MODEL)
+    } else {
+      throw err
+    }
+  }
+  // The authoritative id OpenAI actually ran (e.g. a dated version), so you can confirm it in the logs.
+  console.log(`[extractItems] ✅ model USED = "${response.model}"`)
 
   const raw     = response.choices[0].message.content?.trim() ?? '[]'
   const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '')
-  return JSON.parse(cleaned) as ExtractedRaw[]
+  try {
+    return JSON.parse(cleaned) as ExtractedRaw[]
+  } catch {
+    // The model returned prose instead of JSON (often "I can't read this document…").
+    console.error('extractItems: non-JSON model output:', cleaned.slice(0, 400))
+    throw new Error(`Could not read line items from the ${isPdf ? 'PDF' : 'file'}. Make sure it clearly shows the item table.`)
+  }
 }
 
 // Shared return type for all rerankers (adds match_source to the MatchedItem pick)

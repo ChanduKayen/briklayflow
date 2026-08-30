@@ -11,7 +11,7 @@
  * UI-only. Reads nothing from the resolution pipeline.
  */
 import { useState } from 'react';
-import { Check, Truck, FileText, Camera, ChevronRight, MessageCircle } from 'lucide-react';
+import { Check, Truck, FileText, Camera, ChevronRight, MessageCircle, Copy } from 'lucide-react';
 import { V, nums } from './voiceTokens';
 import SendToVendorPanel from './SendToVendorPanel';
 
@@ -35,6 +35,11 @@ export default function UiSaveCeremony({
   open, poId, vendorName, vendorId, vendorContact, projectName, totalLabel, onLeave,
 }: UiSaveCeremonyProps) {
   const [mode, setMode] = useState<'saved' | 'send'>('saved');
+  const [copied, setCopied] = useState(false);
+  const copyPo = () => {
+    if (!poId) return;
+    navigator.clipboard?.writeText(poId).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1800); }).catch(() => { /* clipboard blocked */ });
+  };
   if (!open) return null;
 
   const subtitleParts = ['Order saved', vendorName, projectName].filter(Boolean);
@@ -76,7 +81,21 @@ export default function UiSaveCeremony({
             </div>
 
             {poId && (
-              <p className="text-2xl font-medium" style={{ color: V.user, ...nums }}>{poId}</p>
+              <button
+                type="button"
+                onClick={copyPo}
+                className="group inline-flex items-center gap-2 mx-auto px-3.5 py-1.5 rounded-xl transition-all active:scale-[0.98]"
+                style={{ background: copied ? V.confirmWash : V.field, border: `1px solid ${copied ? V.confirm : V.line}` }}
+                title="Copy PO number"
+                aria-label={copied ? 'PO number copied' : 'Copy PO number'}
+              >
+                <span className="text-2xl font-medium tracking-tight" style={{ color: copied ? V.confirm : V.user, ...nums }}>{poId}</span>
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold" style={{ color: copied ? V.confirm : V.systemFaint }}>
+                  {copied
+                    ? <><Check size={13} /> Copied</>
+                    : <span className="inline-flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><Copy size={13} /> Copy</span>}
+                </span>
+              </button>
             )}
             <p className="text-sm mt-1" style={{ color: V.system }}>
               {subtitleParts.join(' · ')}

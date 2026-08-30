@@ -28,7 +28,7 @@ const TXNX_CSS = `
 .txnx .crumb a{color:var(--ink-2);text-decoration:none;padding:4px 6px;border-radius:6px;margin-left:-6px;transition:background .15s;cursor:pointer}
 .txnx .crumb a:hover{background:var(--paper)}
 .txnx .crumb b{color:var(--ink);font-weight:500}
-.txnx .head{display:grid;grid-template-columns:1fr auto auto;gap:8px 20px;align-items:start;margin-bottom:20px}
+.txnx .head{display:grid;grid-template-columns:1fr auto auto;gap:8px 20px;align-items:start;margin-bottom:20px;position:relative;z-index:20}
 .txnx h1{font:600 28px/1.1 "Playfair Display",Georgia,serif;margin:0 0 8px;letter-spacing:-.01em;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .txnx .tag{font:500 13px/1 "DM Mono";letter-spacing:.04em;color:var(--ink-2);background:var(--paper);border:1px solid var(--line);padding:6px 9px;border-radius:6px}
 .txnx .meta{color:var(--ink-2);font-size:14px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center}
@@ -384,6 +384,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
   const [amendError, setAmendError] = useState<string | null>(null);
   const [, setShowAmendHistory] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+  const [lightboxTitle, setLightboxTitle] = useState('Document');
   const [showStakeholderDrawer, setShowStakeholderDrawer] = useState(false);
 
   const { openPeek } = usePeek();
@@ -503,6 +504,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [pickerStep, setPickerStep] = useState<'menu' | 'po'>('menu');
   const billInputRef = useRef<HTMLInputElement>(null);
+  const proofInputRef = useRef<HTMLInputElement>(null);
 
   // "No bill — mark as advance": turn the allocation into an ADVANCE against the party.
   const advanceMutation = useMutation({
@@ -533,6 +535,24 @@ export default function TransactionDetail({ session }: { session: Session }) {
       qc.invalidateQueries({ queryKey: ['transaction', txnId] });
       qc.invalidateQueries({ queryKey: ['ledger'] });
       setMappingAllocId(null);
+    },
+  });
+
+  // Proof of payment is a SEPARATE document from the bill (receipt / UPI screenshot / Day-Book
+  // photo) — stored on transactions.proof_document_url.
+  const proofUploadMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const ext = file.name.split('.').pop();
+      const path = `proofs/${txnId}-${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage.from('documents').upload(path, file, { contentType: file.type });
+      if (upErr) throw upErr;
+      const { data: pub } = supabase.storage.from('documents').getPublicUrl(path);
+      const { error } = await supabase.from('transactions').update({ proof_document_url: pub.publicUrl }).eq('txn_id', txnId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['transaction', txnId] });
+      qc.invalidateQueries({ queryKey: ['ledger'] });
     },
   });
 
@@ -590,6 +610,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
   const billLinked = !!primaryAlloc?.order_type || !!txn.bill_doc_url;
   const rupee = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
   const openPicker = (allocId: string) => { setPickerStep('menu'); setMappingAllocId(allocId); };
+  const openLightbox = (url: string, title: string) => { setLightboxTitle(title); setLightboxUrl(url); };
 
   return (
     <div className={`txnx${isVoided ? ' voided-mark' : ''}`}>
@@ -691,14 +712,14 @@ export default function TransactionDetail({ session }: { session: Session }) {
                         {isPO || isWO ? (
                           <>
                             <span className="st ok" onClick={() => openPeek(linked as 'WO' | 'PO', a.order_ref)} style={{ cursor: 'pointer' }}>✓ {a.order_ref}<small>{isPO ? (poBills?.[a.order_ref] ? 'Bill on PO · tap to preview' : 'Bill on PO') : 'Contract'}{milestoneName ? ` · ${milestoneName}` : ''}</small></span>
-                            {isPO && poBills?.[a.order_ref] && <DocThumb stored={poBills[a.order_ref]} onImageClick={setLightboxUrl} />}
+                            {isPO && poBills?.[a.order_ref] && <DocThumb stored={poBills[a.order_ref]} onImageClick={(u) => openLightbox(u, 'Bill / Invoice')} />}
                           </>
                         ) : isAdv ? (
                           <span className="st adv">Advance to {payeeName}<small>No bill yet · adjusts into the next bill</small></span>
                         ) : txn.bill_doc_url ? (
                           <>
                             <span className="st ok">✓ Bill attached<small>Uploaded · tap to preview</small></span>
-                            <DocThumb stored={txn.bill_doc_url} onImageClick={setLightboxUrl} />
+                            <DocThumb stored={txn.bill_doc_url} onImageClick={(u) => openLightbox(u, 'Bill / Invoice')} />
                           </>
                         ) : (
                           <span className="st un">No bill<small>Link a PO bill or upload one</small></span>
@@ -749,6 +770,32 @@ export default function TransactionDetail({ session }: { session: Session }) {
           </table>
         </div>
         <input ref={billInputRef} type="file" accept="image/*,.pdf" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) billUploadMutation.mutate(f); }} />
+
+        {/* proof of payment — a SEPARATE doc from the bill (receipt / UPI screenshot / Day-Book
+            photo captured while recording the payment). Lives on transactions.proof_document_url. */}
+        <div className="sec"><h2>Proof of payment</h2></div>
+        <div className="sheet" style={{ padding: 16 }}>
+          {txn.proof_document_url ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <DocThumb stored={txn.proof_document_url} onImageClick={(u) => openLightbox(u, 'Proof of payment')} w={54} h={68} label="View proof" />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)' }}>Payment proof attached</div>
+                <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>Receipt / screenshot · tap to preview</div>
+              </div>
+              {!isVoided && <button className="ghost" style={{ marginLeft: 'auto' }} onClick={() => proofInputRef.current?.click()}>Replace</button>}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13, color: 'var(--ink-3)' }}>No proof of payment attached yet.</span>
+              {!isVoided && (
+                <button className="linkbtn" style={{ marginLeft: 'auto' }} disabled={proofUploadMutation.isPending} onClick={() => proofInputRef.current?.click()}>
+                  {proofUploadMutation.isPending ? 'Uploading…' : 'Upload proof'}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+        <input ref={proofInputRef} type="file" accept="image/*,.pdf" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) proofUploadMutation.mutate(f); }} />
 
         {/* activity */}
         <div className="sec"><h2>Activity</h2></div>
@@ -810,7 +857,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
       )}
 
       {/* ── IMAGE LIGHTBOX ───────────────────────────────────────────── */}
-      <ImageLightbox url={lightboxUrl} title="Payment Proof" onClose={() => setLightboxUrl(null)} />
+      <ImageLightbox url={lightboxUrl} title={lightboxTitle} onClose={() => setLightboxUrl(null)} />
 
       {/* ── AMEND MODAL ─────────────────────────────────────────────── */}
       {amendStep !== 'idle' && (
