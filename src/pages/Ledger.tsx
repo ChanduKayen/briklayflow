@@ -66,29 +66,6 @@ function summarizeItems(items: Array<{ item_name?: string | null; specification?
   return rest > 0 ? `${lead.join(', ')} +${rest} other${rest === 1 ? '' : 's'}` : lead.join(', ');
 }
 
-function CreateHint({ message, children }: { message: string; children: ReactNode }) {
-  const [show, setShow] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  return (
-    <div
-      className="relative inline-block"
-      onMouseEnter={() => { timer.current = setTimeout(() => setShow(true), 300); }}
-      onMouseLeave={() => { if (timer.current) clearTimeout(timer.current); setShow(false); }}
-    >
-      {children}
-      {show && (
-        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 pointer-events-none whitespace-nowrap">
-          <div style={{ background: 'rgba(11,28,48,0.88)', color: 'white', fontSize: 11, padding: '6px 10px', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 6, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
-            <span style={{ fontFamily: 'monospace', fontSize: 10, border: '1px solid rgba(255,255,255,0.2)', borderRadius: 4, padding: '1px 5px', lineHeight: 1, color: 'rgba(255,255,255,0.6)' }}>/</span>
-            <span style={{ color: 'rgba(255,255,255,0.8)' }}>{message}</span>
-          </div>
-          <div style={{ position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)', width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: '5px solid rgba(11,28,48,0.88)' }} />
-        </div>
-      )}
-    </div>
-  );
-}
-
 /* ---------- Import button: outline secondary with a tooltip + micro-interactions ----------
    Rest → hover (lifts, turns terra, the arrow rises and gently bobs) → active (presses in). */
 const IMPORT_BTN_CSS = `
@@ -1007,14 +984,12 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
           <div className="flex flex-col items-end gap-1">
             <div className="flex items-center gap-2">
               <ImportButton onClick={() => setImportOpen(true)} />
-              <CreateHint message="hover for Money out / in · press / to create">
-                <NewTxnMenuButton
-                  className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl"
-                  style={{ background: terraGrad, color: '#fff', ...font }}
-                >
-                  <Plus size={15} /> New transaction
-                </NewTxnMenuButton>
-              </CreateHint>
+              <NewTxnMenuButton
+                className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl"
+                style={{ background: terraGrad, color: '#fff', ...font }}
+              >
+                <Plus size={15} /> New transaction
+              </NewTxnMenuButton>
             </div>
             <div className="hidden md:block">
               <ShortcutTicker hints={[

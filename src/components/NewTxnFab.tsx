@@ -20,7 +20,7 @@ const CSS = `
 `;
 
 /** "Money Out"/"Money In" with the shortcut letter underlined (inline style so it works anywhere). */
-const UNDERLINE: CSSProperties = { textDecoration: 'underline', textUnderlineOffset: 2, textDecorationThickness: 1.5 };
+const UNDERLINE: CSSProperties = { textDecoration: 'underline', textUnderlineOffset: 3, textDecorationThickness: 1, textDecorationColor: 'color-mix(in srgb, currentColor 45%, transparent)' };
 export function DirLabel({ dir }: { dir: 'out' | 'in' }): ReactNode {
   return dir === 'out'
     ? <>Money <span style={UNDERLINE}>O</span>ut</>
