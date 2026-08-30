@@ -75,7 +75,7 @@ const CDX_CSS = `
 .cdx .crumb a{color:var(--ink-2);text-decoration:none;padding:4px 6px;border-radius:6px;margin-left:-6px;cursor:pointer;transition:background .15s}
 .cdx .crumb a:hover{background:var(--paper)}
 .cdx .crumb b{color:var(--ink);font-weight:500}
-.cdx .head{display:grid;grid-template-columns:1fr auto auto;gap:8px 22px;align-items:start;margin-bottom:20px}
+.cdx .head{display:grid;grid-template-columns:1fr auto auto;gap:8px 22px;align-items:start;margin-bottom:20px;position:relative;z-index:40}
 .cdx h1{font:600 28px/1.1 "Playfair Display",Georgia,serif;margin:0 0 8px;letter-spacing:-.01em;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .cdx .tag{font:500 13px/1 "DM Mono";letter-spacing:.04em;color:var(--ink-2);background:var(--paper);border:1px solid var(--line);padding:6px 9px;border-radius:6px}
 .cdx .meta{color:var(--ink-2);font-size:14px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center}
@@ -98,7 +98,7 @@ const CDX_CSS = `
 .cdx .kebab{width:36px;height:36px;border-radius:50%;border:1px solid transparent;background:transparent;cursor:pointer;display:grid;place-items:center;color:var(--ink-2);transition:background .15s,border-color .15s,transform .12s}
 .cdx .kebab:hover{background:var(--paper);border-color:var(--line)}
 .cdx .kebab:active{transform:scale(.92)}
-.cdx .menu{position:absolute;right:0;top:calc(100% + 6px);background:var(--paper);border:1px solid var(--line);border-radius:var(--r);box-shadow:0 12px 30px -12px rgba(47,38,34,.28);padding:4px;min-width:200px;z-index:30;animation:cdxpop .16s var(--ease)}
+.cdx .menu{position:absolute;right:0;top:calc(100% + 6px);background:var(--paper);border:1px solid var(--line);border-radius:var(--r);box-shadow:0 12px 30px -12px rgba(47,38,34,.28);padding:4px;min-width:200px;z-index:90;animation:cdxpop .16s var(--ease)}
 @keyframes cdxpop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
 .cdx .menu button{display:flex;align-items:center;gap:10px;width:100%;border:0;background:transparent;text-align:left;padding:9px 10px;border-radius:6px;cursor:pointer}
 .cdx .menu button:hover{background:var(--paper-2)}
@@ -187,6 +187,23 @@ const CDX_CSS = `
 .cdx .log .mono{color:var(--ink-3);font-size:12px;padding-top:2px}
 .cdx .log b{color:var(--ink);font-weight:500}
 .cdx .empty{padding:34px 16px;text-align:center;color:var(--ink-3);font-size:13.5px}
+.cdx .ecell{width:100%;height:34px;border:1px solid var(--line);border-radius:6px;background:var(--paper);padding:0 8px;outline:none;transition:border-color .15s,box-shadow .15s}
+.cdx .ecell:focus{border-color:var(--terra);box-shadow:0 0 0 3px var(--terra-tint)}
+.cdx .ecell.num{text-align:right;font-family:"DM Mono",monospace}
+.cdx .ecell.sm{height:30px;font-size:12.5px;margin-top:4px}
+.cdx .scope-edit{width:100%;min-height:38px;border:1px solid var(--line);border-radius:8px;background:var(--paper);padding:8px 10px;outline:none;font-size:14px;margin-top:6px}
+.cdx .scope-edit:focus{border-color:var(--terra);box-shadow:0 0 0 3px var(--terra-tint)}
+.cdx .addrow{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;height:44px;border:0;border-top:1px dashed var(--line);background:var(--paper-2);color:var(--ink-2);cursor:pointer;transition:background .15s,color .15s;font-weight:500}
+.cdx .addrow:hover{background:var(--terra-tint);color:var(--terra)}
+.cdx .addrow svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2}
+.cdx .savebar{display:flex;align-items:center;gap:10px;margin-top:14px}
+.cdx .savebar .info{margin-right:auto;font-size:13px;color:var(--ink-2)}
+.cdx .savebar .info b{color:var(--ink);font-weight:500}
+.cdx .rowdel{width:28px;height:28px;border:0;background:transparent;border-radius:6px;display:inline-grid;place-items:center;color:var(--ink-3);cursor:pointer;transition:background .15s,color .15s}
+.cdx .rowdel:hover{background:var(--terra-tint);color:var(--terra)}
+.cdx .rowdel:disabled{opacity:.3;cursor:not-allowed}
+.cdx .rowdel svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.7}
+.cdx .editing-note{font-size:12.5px;color:var(--terra-deep);background:var(--terra-tint);border-radius:6px;padding:2px 8px;font-weight:500}
 .cdx .scrim{position:fixed;inset:0;background:rgba(47,38,34,.35);backdrop-filter:blur(2px);display:grid;place-items:center;z-index:60;padding:20px;animation:cdxfade .15s ease}
 @keyframes cdxfade{from{opacity:0}to{opacity:1}}
 .cdx-card{background:var(--paper);border:1px solid var(--line);border-radius:12px;box-shadow:0 24px 60px -20px rgba(47,38,34,.5);max-width:360px;width:100%;padding:22px}
@@ -223,6 +240,12 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [showStakeholderDrawer, setShowStakeholderDrawer] = useState(false);
   const [approveDone, setApproveDone] = useState(false);
+
+  // Edit mode — change scope, add/remove stages, edit amounts.
+  interface EStage { key: string; milestone_id: string | null; name: string; paid_when: string; agreed: string; paid: number }
+  const [editMode, setEditMode] = useState(false);
+  const [editScope, setEditScope] = useState('');
+  const [editStages, setEditStages] = useState<EStage[]>([]);
 
   // Inline release row — the milestone whose "Release" was tapped.
   const [releaseFor, setReleaseFor] = useState<{ milestone: any; remaining: number } | null>(null);
@@ -365,6 +388,58 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
     onError: (err: any) => toast(err.message || 'Failed to release payment'),
   });
 
+  const editSaveMutation = useMutation({
+    mutationFn: async () => {
+      if (!wo) throw new Error('No contract');
+      const rows = editStages.filter((s) => s.name.trim() || parseAmount(s.agreed) > 0);
+      if (rows.length === 0) throw new Error('Add at least one stage.');
+      const orderVal = rows.reduce((a, s) => a + (parseAmount(s.agreed) || 0), 0);
+
+      // Update the contract header (scope + agreed value = sum of stages).
+      const { error: woErr } = await supabase.from('work_orders')
+        .update({ scope_of_work: editScope.trim(), order_value: orderVal }).eq('wo_id', woId);
+      if (woErr) throw woErr;
+
+      // Delete stages the user removed — only ones with no payments (UI blocks removing paid stages).
+      const keptIds = new Set(rows.filter((s) => s.milestone_id).map((s) => s.milestone_id));
+      const toDelete = sortedMs.filter((m) => !keptIds.has(m.milestone_id) && (milestonePayments[m.milestone_id] || 0) <= 0);
+      for (const m of toDelete) {
+        const { error } = await supabase.from('wo_milestones').delete().eq('milestone_id', m.milestone_id);
+        if (error) throw error;
+      }
+
+      // Upsert the kept + new stages, renumbered by position.
+      let seq = 1;
+      for (const s of rows) {
+        const base = {
+          name: s.name.trim() || `Stage ${seq}`,
+          planned_amount: parseAmount(s.agreed) || 0,
+          trigger_condition: s.paid_when.trim() || null,
+          seq_no: seq,
+        };
+        seq++;
+        if (s.milestone_id) {
+          const { error } = await supabase.from('wo_milestones').update(base).eq('milestone_id', s.milestone_id);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase.from('wo_milestones').insert({
+            ...base, wo_id: woId, org_id: (wo as any).org_id,
+            unit_type: 'LS', quantity: 1, rate: null, status: 'Pending', ai_extracted: false,
+          });
+          if (error) throw error;
+        }
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['wo', woId] });
+      queryClient.invalidateQueries({ queryKey: ['wo_allocations', woId] });
+      queryClient.invalidateQueries({ queryKey: ['work_orders'] });
+      setEditMode(false);
+      toast('Contract updated');
+    },
+    onError: (err: any) => toast(err.message || 'Failed to save changes'),
+  });
+
   // ─── Calculations ──────────────────────────────────────────────────────────
   const milestones: any[] = (wo as any)?.wo_milestones ?? [];
   const orderValue = Number(wo?.order_value) || 0;
@@ -379,7 +454,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
   const progressPercentage = orderValue > 0 ? Math.min(100, Math.round((totalPaid / orderValue) * 100)) : 0;
 
   const sortedMs = [...milestones].sort((a, b) => (a.seq_no ?? 0) - (b.seq_no ?? 0));
-  const stageRows = sortedMs.map((m) => {
+  const baseRows = sortedMs.map((m) => {
     const agreed = Number(m.planned_amount) || 0;
     const paid = milestonePayments[m.milestone_id] || 0;
     const bal = agreed - paid;
@@ -392,6 +467,17 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
       : '';
     return { m, agreed, paid, bal, done, estP, measured, measText };
   });
+  // A contract with no stages settles as one payment for the whole agreed value — a synthetic
+  // "Full contract" stage stands in, releasable like any other (its payment allocates with no milestone).
+  const synthetic = baseRows.length === 0 && orderValue > 0;
+  const stageRows = synthetic
+    ? [{
+        m: { milestone_id: null, name: 'Full contract', trigger_condition: 'single payment on completion of the work', unit_type: 'LS' },
+        agreed: orderValue, paid: totalPaid, bal: orderValue - totalPaid,
+        done: orderValue - totalPaid <= SETTLE_TOLERANCE, estP: totalPaid > 0 ? Math.min(1, totalPaid / orderValue) : 0,
+        measured: false, measText: '',
+      }]
+    : baseRows;
   const workDoneEst = stageRows.reduce((a, r) => a + r.estP * r.agreed, 0);
   const workAhead = workDoneEst - totalPaid;
   const releaseCount = allocations?.length ?? 0;
@@ -537,6 +623,24 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
     releaseMutation.mutate();
   };
 
+  const enterEdit = () => {
+    setMenuOpen(false);
+    setReleaseFor(null);
+    setEditScope(wo.scope_of_work || '');
+    const seed: EStage[] = sortedMs.map((m) => ({
+      key: m.milestone_id, milestone_id: m.milestone_id, name: m.name || '',
+      paid_when: m.trigger_condition || '', agreed: String(Math.round(Number(m.planned_amount) || 0)),
+      paid: milestonePayments[m.milestone_id] || 0,
+    }));
+    if (seed.length === 0) seed.push({ key: Math.random().toString(36).slice(2), milestone_id: null, name: 'Full contract', paid_when: 'single payment on completion of the work', agreed: orderValue ? String(Math.round(orderValue)) : '', paid: totalPaid });
+    setEditStages(seed);
+    setEditMode(true);
+  };
+  const addEditStage = () => setEditStages((prev) => [...prev, { key: Math.random().toString(36).slice(2), milestone_id: null, name: '', paid_when: '', agreed: '', paid: 0 }]);
+  const updEditStage = (key: string, patch: Partial<EStage>) => setEditStages((prev) => prev.map((s) => (s.key === key ? { ...s, ...patch } : s)));
+  const delEditStage = (key: string) => setEditStages((prev) => prev.filter((s) => s.key !== key));
+  const editTotal = editStages.reduce((a, s) => a + (parseAmount(s.agreed) || 0), 0);
+
   return (
     <div className="cdx">
       <style>{CDX_CSS}</style>
@@ -555,12 +659,14 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
               <span>Started <b>{startLabel}</b></span>
               <span className={`chip ${chipCls}`}><i />{status}</span>
             </div>
-            {wo.scope_of_work && <div className="scope">Scope — <b>{wo.scope_of_work}</b></div>}
+            {editMode
+              ? <input className="scope-edit" value={editScope} onChange={(e) => setEditScope(e.target.value)} placeholder="One line — the scope of work" />
+              : (wo.scope_of_work && <div className="scope">Scope — <b>{wo.scope_of_work}</b></div>)}
           </div>
           <div className="amount">
             <small>Agreed value</small>
-            <span className="mono">{fmt(orderValue)}</span>
-            <div className="dir">{milestones.length} stage{milestones.length !== 1 ? 's' : ''} · paid as work completes</div>
+            <span className="mono">{fmt(editMode ? editTotal : orderValue)}</span>
+            <div className="dir">{editMode ? 'sum of the stages below' : `${milestones.length} stage${milestones.length !== 1 ? 's' : ''} · paid as work completes`}</div>
           </div>
           <div className="more" onClick={(e) => e.stopPropagation()}>
             <button className="kebab" aria-label="More actions" onClick={() => setMenuOpen((o) => !o)}>
@@ -568,6 +674,11 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
             </button>
             {menuOpen && (
               <div className="menu">
+                {!isCancelled && (canApprove || canTransition) && (
+                  <button onClick={enterEdit}>
+                    <svg viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z" /></svg>Edit contract
+                  </button>
+                )}
                 <button onClick={() => { setMenuOpen(false); handleDownloadPdf(); }}>
                   <svg viewBox="0 0 24 24"><path d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" /></svg>Download contract PDF
                 </button>
@@ -586,7 +697,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
         </div>
 
         {/* APPROVE BANNER (draft) */}
-        {isDraft && canApprove && (
+        {isDraft && canApprove && !editMode && (
           <div className="approve">
             <p><b>This contract is a draft.</b> {workerName} can't be paid against it until it's approved — check the stages below, then start it.</p>
             <button className={`btn primary${approveMutation.isPending ? ' loading' : ''}${approveDone ? ' done' : ''}`} onClick={() => approveMutation.mutate()}>
@@ -598,17 +709,21 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
         )}
 
         {/* MONEY FIGURES */}
-        <div className="money">
-          <div><small>Agreed</small><span className="mono">{fmt(orderValue)}</span><div className="sub">across {milestones.length} stage{milestones.length !== 1 ? 's' : ''}</div></div>
-          <div><small>Work done (est.)</small><span className="mono">{workDoneEst > 0 ? '~' + fmt(workDoneEst) : '—'}</span><div className="sub">from stage status — an aid, not a bill</div></div>
-          <div><small>Paid</small><span className="mono" id="cdx-total-paid">{fmt(totalPaid)}</span><div className="sub">{releaseCount ? `${releaseCount} release${releaseCount > 1 ? 's' : ''}` : 'nothing released yet'}</div></div>
-          <div className="gap"><small>{workAhead > SETTLE_TOLERANCE ? 'Work ahead of payment' : 'Outstanding'}</small><span className="mono">{workAhead > SETTLE_TOLERANCE ? '~' + fmt(workAhead) : fmt(Math.max(0, balance))}</span><div className="sub">{workAhead > SETTLE_TOLERANCE ? 'estimated work not yet paid for' : 'agreed value still to pay'}</div></div>
-        </div>
+        {!editMode && (
+          <div className="money">
+            <div><small>Agreed</small><span className="mono">{fmt(orderValue)}</span><div className="sub">across {milestones.length} stage{milestones.length !== 1 ? 's' : ''}</div></div>
+            <div><small>Work done (est.)</small><span className="mono">{workDoneEst > 0 ? '~' + fmt(workDoneEst) : '—'}</span><div className="sub">from stage status — an aid, not a bill</div></div>
+            <div><small>Paid</small><span className="mono" id="cdx-total-paid">{fmt(totalPaid)}</span><div className="sub">{releaseCount ? `${releaseCount} release${releaseCount > 1 ? 's' : ''}` : 'nothing released yet'}</div></div>
+            <div className="gap"><small>{workAhead > SETTLE_TOLERANCE ? 'Work ahead of payment' : 'Outstanding'}</small><span className="mono">{workAhead > SETTLE_TOLERANCE ? '~' + fmt(workAhead) : fmt(Math.max(0, balance))}</span><div className="sub">{workAhead > SETTLE_TOLERANCE ? 'estimated work not yet paid for' : 'agreed value still to pay'}</div></div>
+          </div>
+        )}
 
         {/* STAGES */}
         <div className="sec">
           <h2>Stages</h2>
-          <div className="legend"><span className="paid"><i />Paid</span><span className="est"><i />Work done (est.)</span></div>
+          {editMode
+            ? <span className="editing-note">Editing — add, remove or change stages</span>
+            : <div className="legend"><span className="paid"><i />Paid</span><span className="est"><i />Work done (est.)</span></div>}
         </div>
         <div className="sheet clip stgwrap">
           <table className="stg">
@@ -617,14 +732,36 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
               <th>#</th><th>Stage</th><th>Work done vs paid</th><th className="num">Agreed</th><th className="num">Paid</th><th className="num">Balance</th><th />
             </tr></thead>
             <tbody>
-              {stageRows.length === 0 ? (
+              {editMode ? (
+                editStages.map((s, i) => {
+                  const agreedN = parseAmount(s.agreed) || 0;
+                  const bal = agreedN - s.paid;
+                  return (
+                    <tr key={s.key}>
+                      <td className="n">{i + 1}</td>
+                      <td className="name" colSpan={2}>
+                        <input className="ecell" value={s.name} onChange={(e) => updEditStage(s.key, { name: e.target.value })} placeholder="Stage name…" />
+                        <input className="ecell sm" value={s.paid_when} onChange={(e) => updEditStage(s.key, { paid_when: e.target.value })} placeholder="Paid when — e.g. on slab casting" />
+                      </td>
+                      <td className="num"><input className="ecell num" inputMode="decimal" value={s.agreed} onChange={(e) => updEditStage(s.key, { agreed: e.target.value })} placeholder="₹0" /></td>
+                      <td className="num paidcell">{s.paid ? fmt(s.paid) : '—'}</td>
+                      <td className="num">{fmt(bal)}</td>
+                      <td className="act">
+                        <button className="rowdel" aria-label="Remove stage" disabled={s.paid > 0} title={s.paid > 0 ? 'Has payments — cannot remove' : 'Remove stage'} onClick={() => delEditStage(s.key)}>
+                          <svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : stageRows.length === 0 ? (
                 <tr><td colSpan={7}><div className="empty">No stages on this contract.</div></td></tr>
               ) : stageRows.map((r, i) => {
                 const pct = Math.round(r.estP * 100);
                 const paidPct = r.agreed > 0 ? Math.round((r.paid / r.agreed) * 100) : 0;
                 const ahead = r.estP * r.agreed - r.paid;
                 return (
-                  <tr key={r.m.milestone_id}>
+                  <tr key={r.m.milestone_id ?? 'synthetic'}>
                     <td className="n">{i + 1}</td>
                     <td className="name">
                       <b>{r.m.name || 'Stage'}{r.measured && <span className="meas">MEASURED</span>}</b>
@@ -653,14 +790,20 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
             </tbody>
             <tfoot><tr>
               <td colSpan={3} style={{ textAlign: 'right' }}>Totals</td>
-              <td className="num">{fmt(orderValue)}</td>
+              <td className="num">{fmt(editMode ? editTotal : orderValue)}</td>
               <td className="num">{fmt(totalPaid)}</td>
-              <td className="num">{fmt(balance)}</td>
+              <td className="num">{fmt((editMode ? editTotal : orderValue) - totalPaid)}</td>
               <td />
             </tr></tfoot>
           </table>
 
-          {releaseFor && (
+          {editMode && (
+            <button type="button" className="addrow" onClick={addEditStage}>
+              <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg> Add stage
+            </button>
+          )}
+
+          {!editMode && releaseFor && (
             <div className="inline">
               <div className="ctx">Releasing against <b>{releaseFor.milestone.name}</b> — balance {fmt(releaseFor.remaining)}</div>
               <div className="f"><label>Amount</label><input id="cdx-rel-amt" className={`mono${releaseBad ? ' shake' : ''}`} inputMode="decimal" style={{ textAlign: 'right' }} value={releaseAmount} onChange={(e) => setReleaseAmount(e.target.value)} /></div>
@@ -682,6 +825,17 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
             </div>
           )}
         </div>
+
+        {editMode && (
+          <div className="savebar">
+            <span className="info">Agreed value updates to <b>{fmt(editTotal)}</b> · {editStages.length} stage{editStages.length !== 1 ? 's' : ''}</span>
+            <button className="btn ghost" onClick={() => setEditMode(false)} disabled={editSaveMutation.isPending}>Cancel</button>
+            <button className={`btn primary${editSaveMutation.isPending ? ' loading' : ''}`} onClick={() => editSaveMutation.mutate()}>
+              <span className="lbl"><svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7" /></svg>Save changes</span>
+              <span className="alt spin"><span className="spinner" /></span>
+            </button>
+          </div>
+        )}
 
         {/* ACTIVITY */}
         <div className="sec"><h2>Activity</h2></div>
