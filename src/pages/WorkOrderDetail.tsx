@@ -23,6 +23,9 @@ const DONE_STATUSES = new Set(['Completed', 'Approved', 'Paid']);
 const SETTLE_TOLERANCE = 50;
 
 const fmt = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
+// Placeholder strings some contracts carry as a stage name / condition — treated as empty.
+const PLACEHOLDER = new Set(['', 'none', 'n/a', 'na', '-', '—', 'null', 'undefined', 'stage']);
+const cleanText = (s: any): string => { const t = String(s ?? '').trim(); return PLACEHOLDER.has(t.toLowerCase()) ? '' : t; };
 const reduced = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 function fmtLogTime(iso: string | null | undefined): string {
@@ -454,8 +457,12 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
   const progressPercentage = orderValue > 0 ? Math.min(100, Math.round((totalPaid / orderValue) * 100)) : 0;
 
   const sortedMs = [...milestones].sort((a, b) => (a.seq_no ?? 0) - (b.seq_no ?? 0));
+  const sumPlanned = sortedMs.reduce((a, m) => a + (Number(m.planned_amount) || 0), 0);
+  // A single-phase contract: one milestone that carries no amount of its own — the whole agreed
+  // value IS that one stage's payment. Represent it with the full value, not ₹0.
+  const singlePhaseFill = sortedMs.length === 1 && sumPlanned <= SETTLE_TOLERANCE && orderValue > 0;
   const baseRows = sortedMs.map((m) => {
-    const agreed = Number(m.planned_amount) || 0;
+    const agreed = singlePhaseFill ? orderValue : (Number(m.planned_amount) || 0);
     const paid = milestonePayments[m.milestone_id] || 0;
     const bal = agreed - paid;
     const done = bal <= SETTLE_TOLERANCE && agreed > 0;
@@ -465,14 +472,17 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
     const measText = measured && (m.quantity || m.rate)
       ? `${m.quantity ?? ''}${m.unit_type ? ' ' + m.unit_type : ''}${m.rate ? ' @ ₹' + Number(m.rate).toLocaleString('en-IN') : ''}`.trim()
       : '';
-    return { m, agreed, paid, bal, done, estP, measured, measText };
+    const name = singlePhaseFill ? 'Full contract' : (cleanText(m.name) || 'Stage');
+    const note = singlePhaseFill ? 'single payment on completion of the work' : (cleanText(m.trigger_condition) || cleanText(m.description));
+    return { m, name, note, agreed, paid, bal, done, estP, measured, measText };
   });
   // A contract with no stages settles as one payment for the whole agreed value — a synthetic
   // "Full contract" stage stands in, releasable like any other (its payment allocates with no milestone).
   const synthetic = baseRows.length === 0 && orderValue > 0;
   const stageRows = synthetic
     ? [{
-        m: { milestone_id: null, name: 'Full contract', trigger_condition: 'single payment on completion of the work', unit_type: 'LS' },
+        m: { milestone_id: null, name: 'Full contract', trigger_condition: '', unit_type: 'LS' },
+        name: 'Full contract', note: 'single payment on completion of the work',
         agreed: orderValue, paid: totalPaid, bal: orderValue - totalPaid,
         done: orderValue - totalPaid <= SETTLE_TOLERANCE, estP: totalPaid > 0 ? Math.min(1, totalPaid / orderValue) : 0,
         measured: false, measText: '',
@@ -628,8 +638,10 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
     setReleaseFor(null);
     setEditScope(wo.scope_of_work || '');
     const seed: EStage[] = sortedMs.map((m) => ({
-      key: m.milestone_id, milestone_id: m.milestone_id, name: m.name || '',
-      paid_when: m.trigger_condition || '', agreed: String(Math.round(Number(m.planned_amount) || 0)),
+      key: m.milestone_id, milestone_id: m.milestone_id,
+      name: singlePhaseFill ? 'Full contract' : (cleanText(m.name) || ''),
+      paid_when: cleanText(m.trigger_condition),
+      agreed: String(Math.round(singlePhaseFill ? orderValue : (Number(m.planned_amount) || 0))),
       paid: milestonePayments[m.milestone_id] || 0,
     }));
     if (seed.length === 0) seed.push({ key: Math.random().toString(36).slice(2), milestone_id: null, name: 'Full contract', paid_when: 'single payment on completion of the work', agreed: orderValue ? String(Math.round(orderValue)) : '', paid: totalPaid });
@@ -764,15 +776,15 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                   <tr key={r.m.milestone_id ?? 'synthetic'}>
                     <td className="n">{i + 1}</td>
                     <td className="name">
-                      <b>{r.m.name || 'Stage'}{r.measured && <span className="meas">MEASURED</span>}</b>
-                      <small>{r.measText ? r.measText + ' · ' : ''}{r.m.trigger_condition || r.m.description || ''}</small>
+                      <b>{r.name}{r.measured && <span className="meas">MEASURED</span>}</b>
+                      {(r.measText || r.note) && <small>{r.measText ? r.measText + (r.note ? ' · ' : '') : ''}{r.note}</small>}
                     </td>
                     <td className="prog">
                       <div className="bar"><span className="est" style={{ width: `${Math.round(r.estP * 100)}%` }} /><span className="paid" style={{ width: `${Math.min(100, paidPct)}%` }} /></div>
                       <div className="lbl">
                         {r.done ? <span className="hint">settled in full</span>
                           : r.estP > 0 ? <>{pct}% done{ahead > 1000 ? <> · <span className="ahead">~{fmt(ahead)} ahead of payment</span></> : ''}</>
-                          : <span className="hint">{r.m.trigger_condition || 'not started'}</span>}
+                          : <span className="hint">{r.note || 'not started'}</span>}
                       </div>
                     </td>
                     <td className="num">{fmt(r.agreed)}</td>
