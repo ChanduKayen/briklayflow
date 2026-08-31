@@ -2,9 +2,12 @@ import { useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 
 const NAV_SHORTCUTS: Record<string, string> = {
-  't': '/ledger',
+  't': '/ledger',          // Transactions
+  'd': '/logbook',         // Day book
+  'p': '/purchase-orders', // Purchase orders
+  'c': '/work-orders',     // Contracts
+  // legacy aliases kept so old muscle-memory still works
   'w': '/work-orders',
-  'p': '/purchase-orders',
   'l': '/logbook',
 };
 
@@ -59,7 +62,14 @@ export function useGlobalShortcuts(openCommandBar: () => void) {
         return;
       }
 
-      // T/W/P/L → navigate
+      // I / O → straight into a new money-IN / money-OUT transaction
+      if (key === 'i' || key === 'o') {
+        e.preventDefault();
+        navigate('/ledger/new', { state: { direction: key === 'i' ? 'in' : 'out' } });
+        return;
+      }
+
+      // T/D/P/C (+ legacy W/L) → navigate to the page
       const dest = NAV_SHORTCUTS[key];
       if (dest) {
         e.preventDefault();

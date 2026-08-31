@@ -19,6 +19,7 @@ export function NewTxnMenuButton({ children, className, style }: { children: Rea
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState<'out' | 'in' | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wrapRef = useRef<HTMLSpanElement>(null);
 
   const cancelClose = () => { if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; } };
   const openNow = () => { cancelClose(); setOpen(true); };
@@ -27,6 +28,14 @@ export function NewTxnMenuButton({ children, className, style }: { children: Rea
   const go = (direction: 'out' | 'in') => { cancelClose(); setOpen(false); navigate('/ledger/new', { state: { direction } }); };
 
   useEffect(() => () => cancelClose(), []);
+
+  // Close on a click/tap outside (so a CLICK-opened menu can be dismissed without a hover-out).
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => { if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false); };
+    window.addEventListener('pointerdown', onDown);
+    return () => window.removeEventListener('pointerdown', onDown);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -79,8 +88,9 @@ export function NewTxnMenuButton({ children, className, style }: { children: Rea
   };
 
   return (
-    <span className="relative inline-flex" onMouseEnter={openNow} onMouseLeave={closeSoon}>
-      <button type="button" onClick={() => setOpen((o) => !o)} className={className} style={style}>
+    <span ref={wrapRef} className="relative inline-flex" onMouseEnter={openNow} onMouseLeave={closeSoon}>
+      {/* Click OPENS the options (same menu hover shows) — never toggles the just-hovered menu shut. */}
+      <button type="button" onClick={() => setOpen(true)} className={className} style={style}>
         {children}
       </button>
 

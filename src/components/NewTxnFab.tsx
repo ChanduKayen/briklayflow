@@ -4,7 +4,7 @@
  * underlined O / I are keyboard shortcuts (press O → out, I → in) while it's open. Clicking one
  * jumps straight into the entry form with that direction pre-selected (skipping the picker).
  */
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 const CSS = `
@@ -30,8 +30,17 @@ export function DirLabel({ dir }: { dir: 'out' | 'in' }): ReactNode {
 export function NewTxnFab() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
 
   const go = (direction: 'out' | 'in') => { setOpen(false); navigate('/ledger/new', { state: { direction } }); };
+
+  // Close on a click/tap outside (so a CLICK-opened menu dismisses without a hover-out).
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => { if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false); };
+    window.addEventListener('pointerdown', onDown);
+    return () => window.removeEventListener('pointerdown', onDown);
+  }, [open]);
 
   // While open, O / I are shortcuts.
   useEffect(() => {
@@ -63,6 +72,7 @@ export function NewTxnFab() {
 
   return (
     <div
+      ref={wrapRef}
       className="fixed z-40 flex flex-col items-end gap-3"
       style={{ right: 'calc(20px + env(safe-area-inset-right))', bottom: 'calc(20px + env(safe-area-inset-bottom))' }}
       onMouseEnter={() => setOpen(true)}
@@ -76,7 +86,7 @@ export function NewTxnFab() {
       <button
         type="button"
         aria-label="New transaction"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => setOpen(true)}
         className="ntf-main inline-flex items-center justify-center rounded-full"
         style={{ width: 56, height: 56, background: '#C8603A', color: '#fff', boxShadow: '0 16px 34px -14px rgba(196,97,58,.7)' }}
       >
