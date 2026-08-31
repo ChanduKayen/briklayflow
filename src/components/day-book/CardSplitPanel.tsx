@@ -6,6 +6,7 @@
  * becomes its own transaction, all pointing back at this capture.
  */
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Loader2 } from 'lucide-react';
 import type { RoughEntry } from '../../types';
 import { V, font, nums } from './tokens';
@@ -40,6 +41,10 @@ export function CardSplitPanel({
     blank({ id: 's2' }),
   ]);
   const [openPayee, setOpenPayee] = useState<string | null>(null);
+  // The suggestion list is PORTALED to <body> (fixed position) so it floats above the rows below it,
+  // instead of being clipped/covered inside the scrolling table.
+  const [anchor, setAnchor] = useState<{ left: number; top: number; width: number } | null>(null);
+  const anchorTo = (el: HTMLElement) => { const r = el.getBoundingClientRect(); setAnchor({ left: r.left, top: r.bottom + 4, width: r.width }); };
   const [auto, setAuto] = useState(false);
   const [filing, setFiling] = useState(false);
 
@@ -160,30 +165,18 @@ export function CardSplitPanel({
           </div>
           {/* rows */}
           {rows.map((r, i) => {
-            const matches = openPayee === r.id ? searchPayees(stakeholders as any, r.payeeSearch || '').slice(0, 5) : [];
             const cellBorder = `1px solid ${V.line}`;
             return (
               <div key={r.id} style={{ display: 'grid', gridTemplateColumns: GRID, alignItems: 'stretch', borderTop: i > 0 ? cellBorder : 'none', background: V.surface }}>
                 <div className="grid place-items-center"><span style={{ width: 7, height: 7, borderRadius: '50%', background: DOTS[i % DOTS.length] }} /></div>
                 {/* Paid to */}
-                <div className="relative px-3 py-2" style={{ borderLeft: cellBorder }}>
+                <div className="px-3 py-2 flex items-center" style={{ borderLeft: cellBorder }}>
                   <input value={r.payeeSearch}
-                    onChange={(e) => { up(r.id, { payeeSearch: e.target.value, payeeId: '', payeeName: '' }); setOpenPayee(r.id); }}
-                    onFocus={() => setOpenPayee(r.id)}
+                    onChange={(e) => { up(r.id, { payeeSearch: e.target.value, payeeId: '', payeeName: '' }); setOpenPayee(r.id); anchorTo(e.currentTarget); }}
+                    onFocus={(e) => { setOpenPayee(r.id); anchorTo(e.currentTarget); }}
                     onBlur={() => setTimeout(() => setOpenPayee((o) => (o === r.id ? null : o)), 150)}
                     placeholder="Who was paid…"
                     style={{ ...cellInput, fontWeight: r.payeeId ? 600 : 400 }} />
-                  {openPayee === r.id && matches.length > 0 && (
-                    <div className="absolute z-30 left-2 right-2 mt-1 rounded-lg overflow-hidden shadow-lg" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
-                      {matches.map((m: any) => (
-                        <button key={m.stakeholder_id} type="button"
-                          onMouseDown={(e) => { e.preventDefault(); up(r.id, { payeeId: m.stakeholder_id, payeeName: m.name, payeeSearch: m.name }); setOpenPayee(null); }}
-                          className="w-full text-left px-2.5 py-1.5" style={{ ...font, fontSize: 13, color: V.ink }}>
-                          {m.name}{m.category ? <span style={{ color: V.faint, fontSize: 11 }}> · {m.category}</span> : null}
-                        </button>
-                      ))}
-                    </div>
-                  )}
                 </div>
                 {/* Site */}
                 <div className="px-2 py-2 flex items-center" style={{ borderLeft: cellBorder }}>
@@ -244,6 +237,25 @@ export function CardSplitPanel({
           {filing ? 'Filing…' : `File ${fileCount} transaction${fileCount !== 1 ? 's' : ''}`}
         </button>
       </div>
+
+      {/* payee suggestions — portaled to <body> so they float over the rows below, never clipped */}
+      {(() => {
+        const row = openPayee ? rows.find((r) => r.id === openPayee) : null;
+        const matches = row ? searchPayees(stakeholders as any, row.payeeSearch || '').slice(0, 6) : [];
+        if (!row || !anchor || matches.length === 0) return null;
+        return createPortal(
+          <div style={{ position: 'fixed', left: anchor.left, top: anchor.top, width: Math.max(anchor.width, 200), zIndex: 9999, background: V.surface, border: `1px solid ${V.line}`, borderRadius: 10, boxShadow: '0 12px 30px rgba(42,27,18,.18)', overflow: 'hidden' }}>
+            {matches.map((m: any) => (
+              <button key={m.stakeholder_id} type="button"
+                onMouseDown={(e) => { e.preventDefault(); up(row.id, { payeeId: m.stakeholder_id, payeeName: m.name, payeeSearch: m.name }); setOpenPayee(null); }}
+                className="w-full text-left px-2.5 py-2" style={{ ...font, fontSize: 13, color: V.ink }}>
+                {m.name}{m.category ? <span style={{ color: V.faint, fontSize: 11 }}> · {m.category}</span> : null}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        );
+      })()}
     </div>
   );
 }

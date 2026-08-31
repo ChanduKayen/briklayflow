@@ -38,6 +38,7 @@ import {
 } from './fileEntry';
 import { useSwipeTriage } from './useSwipeTriage';
 import { CardSplitPanel } from './CardSplitPanel';
+import { useSignedDocUrl } from '../../lib/storage';
 
 export interface StakeholderLite { stakeholder_id: string; name: string; type?: string; category?: string }
 export interface ProjectLite { project_id: string; name: string }
@@ -78,6 +79,10 @@ export function ReviewCard({
   onError: (message: string) => void;
 }) {
   const ai = entry.ai_extracted || {};
+  // The stored raw_image_url is a signed URL that can go stale (secret rotation / TTL). Re-sign it
+  // from its own bucket+path so the proof always renders — the Transaction Detail page already does
+  // this; the card used to trust the stored URL verbatim, which is why proofs could vanish.
+  const proofUrl = useSignedDocUrl(entry.raw_image_url) ?? entry.raw_image_url ?? null;
 
   // ── Triage / journey. Declared FIRST: `archived` below depends on the journey, not the other way
   // round — a card that is mid-flight is not an archive entry yet, whatever the row says.
@@ -583,7 +588,7 @@ export function ReviewCard({
           <div className="mt-2.5 flex gap-2.5 items-start min-w-0">
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); if (entry.raw_image_url) onLightbox(entry.raw_image_url); }}
+              onClick={(e) => { e.stopPropagation(); if (proofUrl) onLightbox(proofUrl); }}
               disabled={!entry.raw_image_url}
               className="flex-none grid place-items-center rounded-full"
               style={{ width: 17, height: 17, marginTop: 2, background: '#DFF0DD', cursor: entry.raw_image_url ? 'pointer' : 'default' }}
@@ -603,11 +608,11 @@ export function ReviewCard({
               </p>
               {entry.raw_image_url && (
                 <button
-                  onClick={(e) => { e.stopPropagation(); onLightbox(entry.raw_image_url!); }}
+                  onClick={(e) => { e.stopPropagation(); if (proofUrl) onLightbox(proofUrl); }}
                   className="db-shot mt-2 rounded-lg overflow-hidden block"
                   style={{ width: '100%', maxWidth: 168, height: 96, background: '#E8E2DA', border: `1px solid ${V.line}` }}
                 >
-                  <img src={entry.raw_image_url} alt="what was sent" className="w-full h-full object-cover" />
+                  <img src={proofUrl ?? undefined} alt="what was sent" className="w-full h-full object-cover" />
                 </button>
               )}
             </div>
