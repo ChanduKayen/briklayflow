@@ -177,7 +177,7 @@ async function downloadMedia(mediaId: string): Promise<{ bytes: Uint8Array; mime
 }
 
 /** Store bytes in the (now private) rough-entry-media bucket; return the path. */
-async function storeMedia(supabase: any, bytes: Uint8Array, mime: string, from: string): Promise<string> {
+export async function storeMedia(supabase: any, bytes: Uint8Array, mime: string, from: string): Promise<string> {
   const ext = (mime.split('/')[1] || 'bin').split(';')[0]
   const path = `wa_${from}_${Date.now()}.${ext}`
   const { error } = await supabase.storage.from(MEDIA_BUCKET).upload(path, bytes, {

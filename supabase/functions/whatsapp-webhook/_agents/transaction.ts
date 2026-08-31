@@ -21,7 +21,7 @@ import {
 import { parseSpokenAmount } from '../_amount.ts'
 import { matchPayee, matchProject, distinctiveTokens, type Match } from '../_match.ts'
 import { send, renderToWhatsApp, type OutMessage } from '../_format.ts'
-import { signedMediaUrl } from '../_normalize.ts'
+import { signedMediaUrl, storeMedia } from '../_normalize.ts'
 import { closeConversation, abandonConversation, type ConvoRow } from '../_conversation.ts'
 import { toLatinName } from '../_translit.ts'
 import { WriteCommitFailed } from '../_spine.ts'
@@ -50,9 +50,18 @@ const PROOF_URL_TTL = 315_360_000
  * so a missing/failed proof link must NEVER surface as a write failure.
  */
 async function attachProofImage(ctx: TxnCtx, entryId: string | null): Promise<void> {
-  const path = ctx.image?.storagePath
-  if (!entryId || !path) return
+  if (!entryId || !ctx.image) return
   try {
+    // Prefer the object _normalize already stored; if that upload didn't land (storagePath null), we
+    // still hold the image bytes — re-upload them now so the proof is never silently lost.
+    let path = ctx.image.storagePath ?? null
+    if (!path && ctx.image.base64) {
+      try {
+        const bytes = Uint8Array.from(atob(ctx.image.base64), (c) => c.charCodeAt(0))
+        path = await storeMedia(ctx.supabase, bytes, ctx.image.mime || 'image/jpeg', ctx.from)
+      } catch (e) { console.error('[txn] proof re-upload failed:', (e as Error).message) }
+    }
+    if (!path) { console.warn('[txn] no storage path for proof on', entryId); return }
     const url = await signedMediaUrl(ctx.supabase, path, PROOF_URL_TTL)
     if (!url) { console.warn('[txn] proof sign returned null for', path); return }
     const { error } = await ctx.supabase.from('rough_entries').update({ raw_image_url: url }).eq('id', entryId)
@@ -74,7 +83,7 @@ export type TxnCtx = {
   flowResponse?: Record<string, unknown> | null   // decoded nfm_reply.response_json (WhatsApp Flow completion)
   // present for payment images -> vision extraction; storagePath is the ALREADY-stored object
   // (rough-entry-media) we link onto the entry as PROOF.
-  image?: { base64: string; mime: string; caption: string; storagePath?: string | null }
+  image?: { base64: string; mime: string; caption: string; description?: string | null; storagePath?: string | null }
   audio?: { storagePath: string; mime: string }   // present for a VOICE note -> siteops records it as findable evidence (T7)
 }
 
@@ -405,10 +414,14 @@ function statusFor(plan: Plan): string {
  *  failed; a deterministic failure (or the test sentinel) exhausts the attempts and
  *  reports failed. Idempotency is by (org, keyWamid, entryIndex) — already-landed = success. */
 async function commitEntry(ctx: TxnCtx, status: string, text: string, ai: Record<string, unknown>, keyWamid: string, entryIndex: number): Promise<string | null> {
+  // For an image the routable `text` is only the caption (empty on a bare screenshot). Store the
+  // vision READ of the pixels (describeImage → ctx.image.description) as raw_text so the Day Book
+  // shows what the image said AND it flows into the transaction's notes on filing.
+  const rawText = (text && text.trim()) ? text : (ctx.image?.description || text || '')
   for (let attempt = 1; attempt <= 3; attempt++) {
     const { data, error } = await ctx.supabase.rpc('stage_entry_v3', {
       p_org_id: ctx.orgId, p_sender: ctx.from, p_wamid: keyWamid, p_entry_index: entryIndex,
-      p_status: status, p_source: SOURCE, p_sender_name: ctx.senderName, p_raw_text: text,
+      p_status: status, p_source: SOURCE, p_sender_name: ctx.senderName, p_raw_text: rawText,
       p_ai: ai, p_payload: null, p_rendered: null, p_link_base: LINK, p_reaction: null,
     })
     const res = (data ?? null) as { id?: string; committed?: boolean } | null
