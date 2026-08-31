@@ -271,8 +271,10 @@ export function ReviewCard({
     catch (err: unknown) { onError(errMessage(err, "Couldn't move it back, try again")); }
   };
 
+  // Swipe-to-file / swipe-to-reject is disabled — actions are the explicit Approve / Split / ⋯
+  // buttons only. (Kept for its reducedMotion signal used by the leave animation.)
   const swipe = useSwipeTriage({
-    enabled: !archived && canManage,
+    enabled: false,
     canFileRight: ready,
     onFileRight: runFile,
     onRejectLeft: runReject,

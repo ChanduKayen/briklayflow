@@ -238,18 +238,22 @@ export function CardSplitPanel({
         </button>
       </div>
 
-      {/* payee suggestions — portaled to <body> so they float over the rows below, never clipped */}
+      {/* payee suggestions — SAME matcher (searchPayees) and SAME item layout as the Approve/Edit
+          picker: name over a "type · category" sub-line, top 8. Portaled to <body> so it floats. */}
       {(() => {
         const row = openPayee ? rows.find((r) => r.id === openPayee) : null;
-        const matches = row ? searchPayees(stakeholders as any, row.payeeSearch || '').slice(0, 6) : [];
+        const matches = row ? searchPayees(stakeholders as any, row.payeeSearch || '').slice(0, 8) : [];
         if (!row || !anchor || matches.length === 0) return null;
         return createPortal(
-          <div style={{ position: 'fixed', left: anchor.left, top: anchor.top, width: Math.max(anchor.width, 200), zIndex: 9999, background: V.surface, border: `1px solid ${V.line}`, borderRadius: 10, boxShadow: '0 12px 30px rgba(42,27,18,.18)', overflow: 'hidden' }}>
+          <div style={{ position: 'fixed', left: anchor.left, top: anchor.top, width: Math.max(anchor.width, 220), maxHeight: 224, overflowY: 'auto', zIndex: 9999, background: V.surface, border: `1px solid ${V.line}`, borderRadius: 12, boxShadow: '0 12px 30px rgba(42,27,18,.18)' }}>
             {matches.map((m: any) => (
               <button key={m.stakeholder_id} type="button"
                 onMouseDown={(e) => { e.preventDefault(); up(row.id, { payeeId: m.stakeholder_id, payeeName: m.name, payeeSearch: m.name }); setOpenPayee(null); }}
-                className="w-full text-left px-2.5 py-2" style={{ ...font, fontSize: 13, color: V.ink }}>
-                {m.name}{m.category ? <span style={{ color: V.faint, fontSize: 11 }}> · {m.category}</span> : null}
+                className="w-full text-left px-3 py-2" style={{ borderBottom: `1px solid ${V.line}` }}>
+                <p className="truncate" style={{ ...font, fontSize: 13, fontWeight: 600, color: V.ink }}>{m.name}</p>
+                {(m.type || m.category) && (
+                  <p className="truncate" style={{ ...font, fontSize: 11, color: V.faint }}>{[m.type, m.category].filter(Boolean).join(' · ')}</p>
+                )}
               </button>
             ))}
           </div>,
