@@ -25,6 +25,21 @@ function baseNotes(entry: RoughEntry, description: string): string {
   return parts.join('\n');
 }
 
+/**
+ * Notes for ONE row of a split: the original WhatsApp transcript kept verbatim as the reference,
+ * then the row's own purpose appended below it as a clear, professional split note.
+ */
+function splitRowNotes(entry: RoughEntry, description: string): string {
+  const parts: string[] = [];
+  const msg = (entry.raw_text || (entry as any).transcribed_text || '').trim();
+  if (msg) parts.push(`WhatsApp: “${msg}”`);
+  const purpose = (description || '').trim();
+  parts.push(purpose
+    ? `This entry is one part of the payment above, allocated toward ${purpose}.`
+    : 'This entry is one part of the payment above.');
+  return parts.join('\n');
+}
+
 /** Read the payment-proof screenshot for its reference details (UTR / txn no · mode · platform). */
 async function readPaymentProof(imageUrl: string): Promise<string | null> {
   try {
@@ -238,8 +253,8 @@ export async function fileRoughEntrySplit(
       total_amount: s.amount,
       project_id: s.projectId,
       order_type: null, order_ref: null, milestone_id: null,
-      // notes carry the row's reason + the original WhatsApp message on every split
-      remarks: baseNotes(entry, (s.description ?? base.description) || ''),
+      // notes: the original WhatsApp transcript (reference), then this row's own split purpose below it
+      remarks: splitRowNotes(entry, (s.description ?? base.description) || ''),
     };
     if (s.payeeId !== undefined) row.stakeholder_id = rowGeneral ? '' : (s.payeeId || '');
     if (rowGeneral) row.category = s.generalExpenseHead || 'GEN-99';
