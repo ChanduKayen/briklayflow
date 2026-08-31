@@ -1009,7 +1009,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
             <div className="t">Paid</div>
             <div className="s">{paidTotal > 0 ? `${inr0(paidTotal)} paid · ${balNum > 0 ? inr0(balNum) + ' due' : 'settled'}` : 'Nothing paid'}</div>
             {!paidDone && !cancelled && (
-              <div className="act"><button className={`btn sm${nowStage === 'pay' ? ' primary' : ''}`} onClick={() => { setPayRowOpen(true); setBillingOpen(false); setPayAmount(String(Math.max(0, payBase - paidTotal))); setTimeout(() => document.getElementById('podxItems')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 30); }}>Record payment</button></div>
+              <div className="act"><button className={`btn sm${nowStage === 'pay' ? ' primary' : ''}`} onClick={() => { setPayRowOpen(true); setBillingOpen(false); setPayAmount(''); setTimeout(() => document.getElementById('podxItems')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 30); }}>Record payment</button></div>
             )}
           </div>
         </div>
@@ -1102,7 +1102,18 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
 
           {/* Payment row */}
           <div className={`inline pay${payRowOpen ? ' open' : ''}`}>
-            <div className="f"><label>Amount</label><input className="mono" inputMode="decimal" style={{ textAlign: 'right' }} value={payAmount} onChange={(e) => setPayAmount(e.target.value)} /></div>
+            <div className="f">
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                Amount
+                {(payBase - paidTotal) > 0 && (
+                  <button type="button" onClick={() => setPayAmount(String(Math.round(payBase - paidTotal)))}
+                    style={{ border: `1px solid var(--line)`, background: 'var(--paper)', color: 'var(--terra)', borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+                    Full {inr0(payBase - paidTotal)}
+                  </button>
+                )}
+              </label>
+              <input className="mono" inputMode="decimal" style={{ textAlign: 'right' }} placeholder="0" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
+            </div>
             <div className="f"><label>Paid on</label><input type="date" defaultValue={new Date().toISOString().split('T')[0]} /></div>
             <div className="f"><label>Mode</label>
               <select value={payMode} onChange={(e) => setPayMode(e.target.value as any)}>
