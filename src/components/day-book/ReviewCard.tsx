@@ -28,7 +28,7 @@
  * The file journey is bound to the REAL write — never a false "Filed".
  */
 import { useEffect, useRef, useState } from 'react';
-import { Check, X, Pencil, ArrowRight, Image as ImageIcon, Mic } from 'lucide-react';
+import { Check, X, Pencil, ArrowRight, Image as ImageIcon, Mic, Split } from 'lucide-react';
 import type { RoughEntry } from '../../types';
 import { V, WA, font, nums, display, mono, telugu, T } from './tokens';
 import { WhatsAppGlyph } from './atoms';
@@ -37,6 +37,7 @@ import {
   type ResolvedFields, type Gap,
 } from './fileEntry';
 import { useSwipeTriage } from './useSwipeTriage';
+import { CardSplitPanel } from './CardSplitPanel';
 
 export interface StakeholderLite { stakeholder_id: string; name: string; type?: string; category?: string }
 export interface ProjectLite { project_id: string; name: string }
@@ -177,6 +178,7 @@ export function ReviewCard({
   const [apHover, setApHover] = useState(false);   // Approve FILLS as you approach it
   const [menu, setMenu] = useState(false);         // the ⋯ — where "Not a transaction" now lives
   const [slide, setSlide] = useState(false);       // the card is leaving the desk
+  const [splitOpen, setSplitOpen] = useState(false); // the inline "split into transactions" panel
 
   /**
    * THE VOUCHER IS THREE COLUMNS WIDE, AND THREE COLUMNS NEED THE ROOM FOR IT.
@@ -270,6 +272,15 @@ export function ReviewCard({
     onFileRight: runFile,
     onRejectLeft: runReject,
   });
+
+  // The inline split filed N transactions and marked the entry POSTED — take the card's leave, exactly
+  // as a normal file does (green over → tick → slide → receipt).
+  const onSplitFiled = (ids: string[]) => {
+    setSplitOpen(false);
+    onFiled(ids[0] ?? '');
+    setLeaving('file');
+    leave(ids[0] ?? null, swipe.reducedMotion);
+  };
 
   useEffect(() => {
     if (phase !== 'collapsed' && phase !== 'rejected') return;
@@ -433,6 +444,7 @@ export function ReviewCard({
   const vno = `Nº DB-${entry.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase()}`;
 
   return (
+    <div className="select-none">
     <div className="relative rounded-2xl overflow-hidden select-none">
       {/* underneath: swipe trail OR filing -> filed confirmation */}
       {phase ? (
@@ -641,6 +653,23 @@ export function ReviewCard({
               <Pencil size={12} /> Edit
             </button>
 
+            {/* SPLIT — one entry, several transactions (different payees/sites). Opens an inline panel
+                on the card itself; no popup. Only meaningful once there's an amount to divide. */}
+            {amountNum > 0 && (
+              <button
+                onClick={(e) => { e.stopPropagation(); setSplitOpen((s) => !s); }}
+                title="Split into several transactions"
+                className="inline-flex items-center gap-1.5 rounded-[10px] transition-[background,box-shadow,color] duration-150 active:scale-[.96] hover:bg-[#FCF9F2]"
+                style={{
+                  ...font, fontWeight: 600, fontSize: 13.5, padding: '8px 15px', cursor: 'pointer', border: 'none',
+                  color: splitOpen ? V.terra : V.inkSoft, background: splitOpen ? V.terraWash : 'transparent',
+                  boxShadow: splitOpen ? 'none' : `inset 0 0 0 1px ${V.line}`,
+                }}
+              >
+                <Split size={12} /> Split
+              </button>
+            )}
+
             {/* THE THIRD THING. Setting an entry aside is rare, and irreversible-feeling, so it stops
                 sitting in the open beside the two things you do all day. */}
             <div className="relative">
@@ -673,6 +702,22 @@ export function ReviewCard({
         )}
       </div>
 
+    </div>
+
+    {/* THE SPLIT, ON THE CARD ITSELF — an inline panel below the voucher (outside the clipped card so
+        its payee dropdown isn't cut off). Files N transactions and takes the card's leave. */}
+    {splitOpen && !leaving && (
+      <CardSplitPanel
+        entry={entry}
+        orgId={orgId}
+        stakeholders={stakeholders}
+        projects={projects}
+        base={{ payeeId: payeeId || '', payeeName: payeeName || '', projectId: projectId || '', amount: amountNum, description }}
+        onFiled={onSplitFiled}
+        onClose={() => setSplitOpen(false)}
+        onError={onError}
+      />
+    )}
     </div>
   );
 }
