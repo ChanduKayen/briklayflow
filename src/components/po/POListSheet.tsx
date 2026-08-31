@@ -141,7 +141,7 @@ const POLX_CSS = `
 interface POItem { n: string; q: string; r: boolean }
 interface PORow {
   id: string; vendor: string; stakeholderId: string; vendorContact: string | null;
-  site: string; by: string; ordered: string;
+  site: string; by: string; ordered: string; createdAt: string;
   items: POItem[]; value: number; billed: number; paid: number;
   due: string | null; recv: string | null; sent: string | null; cancelled: boolean; rfq: boolean;
 }
@@ -253,6 +253,7 @@ function usePOListData(projectId?: string) {
         site: po.projects?.name || '',
         by: po.ordered_by || '',
         ordered: po.date_issued || po.created_at,
+        createdAt: po.created_at,
         items,
         value, billed,
         paid: paid[po.po_id] || 0,
@@ -360,13 +361,24 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   const rfqShown = useMemo(() => (filter === 'all' || filter === 'quotes')
     ? openRfqs.filter(r => !q || ('quote request enquiry ' + r.site + ' ' + r.summary + ' ' + r.rfq_id).toLowerCase().includes(q))
     : [], [openRfqs, filter, q]);
-  type MergedRow = { kind: 'po'; date: number; po: PORow } | { kind: 'rfq'; date: number; rfq: RfqRow };
+  type MergedRow = { kind: 'po'; po: PORow } | { kind: 'rfq'; rfq: RfqRow };
   const merged: MergedRow[] = useMemo(() => {
-    const rfqD = rfqShown.map(r => ({ kind: 'rfq' as const, date: D(r.created_at).getTime(), rfq: r }));
-    if (filter === 'quotes') return rfqD;
-    const poD = list.map(p => ({ kind: 'po' as const, date: D(p.ordered).getTime(), po: p }));
-    if (sortK === 'ordered') return [...poD, ...rfqD].sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : 0) * sortDir);
-    return [...rfqD, ...poD];   // non-date sorts: quotes pinned on top
+    if (filter === 'quotes') return rfqShown.map(r => ({ kind: 'rfq' as const, rfq: r }));
+    const rows: MergedRow[] = list.map(p => ({ kind: 'po' as const, po: p }));
+    if (rfqShown.length === 0) return rows;
+    // Slot each quote into the list by when it was created (real created_at, not
+    // the PO's issue date) so quotes appear in chronological place among the POs
+    // instead of all bunched at the top. POs keep their existing sort order.
+    const desc = !(sortK === 'ordered' && sortDir > 0);
+    const keyOf = (m: MergedRow) => D(m.kind === 'po' ? m.po.createdAt : m.rfq.created_at).getTime();
+    for (const r of rfqShown) {
+      const q: MergedRow = { kind: 'rfq', rfq: r };
+      const t = D(r.created_at).getTime();
+      let i = rows.findIndex(row => (desc ? keyOf(row) < t : keyOf(row) > t));
+      if (i < 0) i = rows.length;
+      rows.splice(i, 0, q);
+    }
+    return rows;
   }, [list, rfqShown, filter, sortK, sortDir]);
 
   const live = useMemo(() => rows.filter(p => !p.cancelled && !p.rfq), [rows]);
@@ -465,7 +477,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
             <button className={`chip${filter === 'all' ? ' on' : ''}`} onClick={() => setFilter('all')}>All <span className="n">{cAll}</span></button>
             <button className={`chip warn${filter === 'mine' ? ' on' : ''}`} onClick={() => setFilter('mine')}>To receive <span className="n">{cMine}</span></button>
             <button className={`chip${filter === 'vendor' ? ' on' : ''}`} onClick={() => setFilter('vendor')}>On the way <span className="n">{cVendor}</span></button>
-            {openRfqs.length > 0 && <button className={`chip quote${filter === 'quotes' ? ' on' : ''}`} onClick={() => setFilter('quotes')}>Quotes <span className="n">{openRfqs.length}</span></button>}
+            <button className={`chip quote${filter === 'quotes' ? ' on' : ''}`} onClick={() => setFilter('quotes')}>Quotations <span className="n">{openRfqs.length}</span></button>
             <button className={`chip${filter === 'done' ? ' on' : ''}`} onClick={() => setFilter('done')}>Received <span className="n">{cDone}</span></button>
           </div>
         </div>
