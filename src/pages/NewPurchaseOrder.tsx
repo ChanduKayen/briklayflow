@@ -4566,6 +4566,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
           tradeCategory={selectedVendor?.category ?? ((lineItems.find(li => (li as any).category) as any)?.category ?? null)}
           items={lineItems.filter(li => li.item_name.trim().length > 0).map((li, i) => ({ line: i + 1, item_name: li.item_name, unit: (li as any).unit, qty: (li as any).quantity_ordered, spec: (li as any).specification }))}
           onClose={() => setShowRfq(false)}
+          onSent={() => { setShowRfq(false); navigate('/purchase-orders'); }}
         />
       )}
 

@@ -10,12 +10,13 @@ import type { Session } from '@supabase/supabase-js';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { supabase } from '../lib/supabase';
+import { sendPoToVendor, normalizeWhatsApp } from '../lib/poVendorSend';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
 import RequestQuotesModal from '../components/po-new-ui/RequestQuotesModal';
 
 interface RfqItem { line: number; item_name: string; spec?: string; qty?: number | string; unit?: string }
-interface Recipient { recipient_id: string; stakeholder_id: string | null; vendor_name: string | null; status: string; source: string | null; sent_at: string | null; quoted_at: string | null; quoted_total: number | null; transport_included: boolean | null; gst_included: boolean | null; valid_days: number | null; vendor_note: string | null }
+interface Recipient { recipient_id: string; stakeholder_id: string | null; vendor_name: string | null; vendor_phone: string | null; status: string; source: string | null; sent_at: string | null; quoted_at: string | null; quoted_total: number | null; transport_included: boolean | null; gst_included: boolean | null; valid_days: number | null; vendor_note: string | null }
 interface QuoteRow { recipient_id: string; line: number; unit_rate: number | null; supplied: boolean; variant_note: string | null }
 
 const fmt = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
@@ -155,6 +156,7 @@ export default function RfqCompare({ session }: { session: Session }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [orderConfirm, setOrderConfirm] = useState<Recipient | null>(null);
   const [extendOpen, setExtendOpen] = useState(false);
   const [extendDate, setExtendDate] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
@@ -254,11 +256,20 @@ export default function RfqCompare({ session }: { session: Session }) {
   };
 
   const order = async (r: Recipient) => {
+    setOrderConfirm(null);
     setBusy(r.recipient_id);
     try {
       const po = await makePO(r, items);
       await closeRfq([{ po_id: po, recipient_id: r.recipient_id, vendor_name: r.vendor_name }]);
-      show('Purchase order created'); navigate(`/purchase-orders/${po}`, { state: { from: 'list' } });
+      // Send the order to the vendor on WhatsApp (they gave us a number for the enquiry).
+      const to = normalizeWhatsApp(r.vendor_phone);
+      if (to) {
+        const res = await sendPoToVendor({ poId: po, to, vendorName: r.vendor_name, totalLabel: fmt(vendorTot(r.recipient_id)), projectName: data?.projectName });
+        show(res.ok ? `Order sent to ${r.vendor_name} on WhatsApp` : `PO created — couldn't WhatsApp it: ${res.error}`, res.ok ? undefined : { type: 'error' });
+      } else {
+        show('Purchase order created — no WhatsApp number on file to send it');
+      }
+      navigate(`/purchase-orders/${po}`, { state: { from: 'list' } });
     } catch (e: any) { show(e.message || 'Could not create the PO', { type: 'error' }); setBusy(null); }
   };
   async function splitOrder() {
@@ -451,7 +462,7 @@ export default function RfqCompare({ session }: { session: Session }) {
                     <td key={r.recipient_id}>
                       <span className={`tot${isBest ? ' best' : ''}`}>{fmt(totalsById[r.recipient_id])}</span>
                       <span className="terms">{r.transport_included ? 'Transport included' : <span className="warn">Transport extra</span>} · {r.gst_included ? 'GST included' : 'GST extra'}{r.valid_days ? ` · valid ${r.valid_days}d` : ''}{r.vendor_note ? ` · ${r.vendor_note}` : ''}</span>
-                      {canConvert && !closed && <div><button className="order" disabled={busy !== null} onClick={() => order(r)}>{busy === r.recipient_id ? 'Ordering…' : `Order from ${(r.vendor_name || '').split(' ')[0]} →`}</button></div>}
+                      {canConvert && !closed && <div><button className="order" disabled={busy !== null} onClick={() => setOrderConfirm(r)}>{busy === r.recipient_id ? 'Ordering…' : `Order from ${(r.vendor_name || '').split(' ')[0]} →`}</button></div>}
                     </td>
                   );
                 })}
@@ -475,6 +486,14 @@ export default function RfqCompare({ session }: { session: Session }) {
           onClose={() => setShowAdd(false)}
           onSent={() => { setShowAdd(false); qc.invalidateQueries({ queryKey: ['rfq_compare', rfqId] }); }}
         />
+      )}
+
+      {orderConfirm && (
+        <div className="scrim" onClick={() => setOrderConfirm(null)}><div className="card" onClick={(e) => e.stopPropagation()}>
+          <h3>Send order to {orderConfirm.vendor_name} on WhatsApp?</h3>
+          <p>We'll raise the purchase order from {orderConfirm.vendor_name}'s quote (<b>{fmt(vendorTot(orderConfirm.recipient_id))}</b>){orderConfirm.vendor_phone ? <> and message it to <b>{orderConfirm.vendor_phone}</b> with the PO PDF</> : ''}. This closes the enquiry.</p>
+          <div className="row"><button className="btn" onClick={() => setOrderConfirm(null)}>Cancel</button><button className="btn" style={{ background: 'var(--sage)', color: '#fff', borderColor: 'var(--sage)' }} onClick={() => order(orderConfirm)}>Yes, send on WhatsApp</button></div>
+        </div></div>
       )}
 
       {extendOpen && (
