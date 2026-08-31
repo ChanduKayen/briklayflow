@@ -13,6 +13,55 @@ function genTxnId() {
 }
 
 /**
+ * The transaction's notes (remarks): the reason + the ORIGINAL WhatsApp message it was captured from,
+ * so the evidence travels with the record instead of being stranded on the rough entry.
+ */
+function baseNotes(entry: RoughEntry, description: string): string {
+  const parts: string[] = [];
+  const desc = (description || '').trim();
+  if (desc) parts.push(desc);
+  const msg = (entry.raw_text || (entry as any).transcribed_text || '').trim();
+  if (msg && msg !== desc) parts.push(`WhatsApp: “${msg}”`);
+  return parts.join('\n');
+}
+
+/** Read the payment-proof screenshot for its reference details (UTR / txn no · mode · platform). */
+async function readPaymentProof(imageUrl: string): Promise<string | null> {
+  try {
+    const { data } = await supabase.functions.invoke('read-payment-proof', { body: { image_url: imageUrl } });
+    const d = data as { ok?: boolean; platform?: string | null; mode?: string | null; ref_no?: string | null; utr?: string | null } | null;
+    if (!d?.ok) return null;
+    const bits: string[] = [];
+    if (d.platform) bits.push(String(d.platform));
+    if (d.mode) bits.push(String(d.mode));
+    const ref = d.utr || d.ref_no;
+    if (ref) bits.push(`${d.utr ? 'UTR' : 'Ref'} ${ref}`);
+    return bits.length ? bits.join(' · ') : null;
+  } catch { return null; }
+}
+
+/**
+ * Fire-and-forget: after a payment with a proof image is filed, read the proof (UTR / txn no · mode ·
+ * platform) and append it to each transaction's notes. Non-blocking so quick-file stays instant; a
+ * failure is swallowed (the notes just don't gain the extra line).
+ */
+function enrichProofNotes(entry: RoughEntry, txnIds: string[]): void {
+  if (!entry.raw_image_url || txnIds.length === 0) return;
+  void (async () => {
+    try {
+      const proof = await readPaymentProof(entry.raw_image_url!);
+      if (!proof) return;
+      for (const id of txnIds) {
+        const { data } = await supabase.from('transactions').select('remarks').eq('txn_id', id).maybeSingle();
+        const cur = ((data as { remarks?: string } | null)?.remarks || '').trim();
+        if (cur.includes(proof)) continue;
+        await supabase.from('transactions').update({ remarks: [cur, `Paid via ${proof}`].filter(Boolean).join('\n') }).eq('txn_id', id);
+      }
+    } catch { /* best-effort */ }
+  })();
+}
+
+/**
  * Best-effort human message from any thrown value. Supabase's PostgrestError is a
  * plain object (NOT an Error), so `instanceof Error` misses it and the real reason
  * gets swallowed behind a generic fallback. Surface message/details/hint/code.
@@ -102,7 +151,7 @@ export async function fileRoughEntry(entry: RoughEntry, orgId: string, resolved:
     total_amount: resolved.amount,
     payment_mode: mode,
     category: isGeneral ? (resolved.generalExpenseHead || 'GEN-99') : (ai.category_code || null),
-    remarks: resolved.description,
+    remarks: baseNotes(entry, resolved.description),
     bill_doc_url: null,
     proof_document_url: entry.raw_image_url || null,
     ai_flag_status: 'Clean',
@@ -130,6 +179,7 @@ export async function fileRoughEntry(entry: RoughEntry, orgId: string, resolved:
     .eq('id', entry.id);
   if (postErr) throw postErr;
 
+  enrichProofNotes(entry, [newTxnId]);   // fire-and-forget: append the proof's UTR/mode/platform
   return newTxnId;
 }
 
@@ -171,7 +221,7 @@ export async function fileRoughEntrySplit(
     date,
     payment_mode: mode,
     category: isGeneral ? (base.generalExpenseHead || 'GEN-99') : (ai.category_code || null),
-    remarks: base.description,
+    remarks: baseNotes(entry, base.description),
     bill_doc_url: null,
     proof_document_url: entry.raw_image_url || null,
     ai_flag_status: 'Clean',
@@ -188,9 +238,10 @@ export async function fileRoughEntrySplit(
       total_amount: s.amount,
       project_id: s.projectId,
       order_type: null, order_ref: null, milestone_id: null,
+      // notes carry the row's reason + the original WhatsApp message on every split
+      remarks: baseNotes(entry, (s.description ?? base.description) || ''),
     };
     if (s.payeeId !== undefined) row.stakeholder_id = rowGeneral ? '' : (s.payeeId || '');
-    if (s.description != null) row.remarks = s.description;
     if (rowGeneral) row.category = s.generalExpenseHead || 'GEN-99';
     return row;
   });
@@ -209,6 +260,7 @@ export async function fileRoughEntrySplit(
     .eq('id', entry.id);
   if (postErr) throw postErr;
 
+  enrichProofNotes(entry, ids);   // fire-and-forget: append the proof's UTR/mode/platform to each
   return ids;
 }
 

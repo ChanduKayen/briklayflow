@@ -56,7 +56,6 @@ export function CardSplitPanel({
   const remaining = total - sum;
   const over = remaining < -0.005;
   const balanced = Math.abs(remaining) < 0.005 && total > 0;
-  const used = new Set(rows.map((r) => r.projectId).filter(Boolean));
   const valid = rows.length >= 2 && rows.every((r) => r.payeeId && r.projectId && Number(r.amount) > 0) && balanced;
   const canAuto = !!(entry.raw_text || entry.raw_image_url);
   const fileCount = rows.filter((r) => r.payeeId).length || rows.length;
@@ -183,7 +182,8 @@ export function CardSplitPanel({
                   <select value={r.projectId} onChange={(e) => up(r.id, { projectId: e.target.value })}
                     style={{ ...cellInput, color: r.projectId ? V.ink : V.faint, appearance: 'none', cursor: 'pointer' }}>
                     <option value="">Select site…</option>
-                    {projects.map((p) => <option key={p.project_id} value={p.project_id} disabled={used.has(p.project_id) && p.project_id !== r.projectId}>{p.name}</option>)}
+                    {/* a site may repeat across rows — different payees can be paid for the same site */}
+                    {projects.map((p) => <option key={p.project_id} value={p.project_id}>{p.name}</option>)}
                   </select>
                 </div>
                 {/* For */}

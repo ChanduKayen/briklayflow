@@ -141,7 +141,8 @@ function SplitSites({ projects, api }: { projects: any[]; api: SplitApi }) {
               >
                 <option value="">Select site…</option>
                 {projects.map((p) => (
-                  <option key={p.project_id} value={p.project_id} disabled={used.has(p.project_id) && p.project_id !== r.projectId}>{p.name}</option>
+                  // a site may repeat across rows in a per-payee split (different payees, same site)
+                  <option key={p.project_id} value={p.project_id} disabled={!perPayee && used.has(p.project_id) && p.project_id !== r.projectId}>{p.name}</option>
                 ))}
               </select>
               <div className="relative shrink-0" style={{ width: 104 }}>
