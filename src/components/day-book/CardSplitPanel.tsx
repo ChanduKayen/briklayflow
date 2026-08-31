@@ -7,16 +7,28 @@
  */
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Loader2 } from 'lucide-react';
+import { X, Loader2, Receipt, ArrowRight } from 'lucide-react';
 import type { RoughEntry } from '../../types';
 import { V, font, nums } from './tokens';
 import { searchPayees } from '../../lib/payeeSearch';
 import { supabase } from '../../lib/supabase';
-import { fileRoughEntrySplit } from './fileEntry';
+import { fileRoughEntrySplit, createParty } from './fileEntry';
+import { GEN_HEADS } from '../../lib/costCodes';
 import type { StakeholderLite, ProjectLite } from './ReviewCard';
 
-interface Row { id: string; payeeId: string; payeeName: string; payeeSearch: string; projectId: string; amount: number | ''; description: string; }
+// A split row: an existing payee, OR a general-expense head (party-less), plus site/amount/note.
+interface Row { id: string; payeeId: string; payeeName: string; payeeSearch: string; genHead: string; genName: string; projectId: string; amount: number | ''; description: string; }
 const uid = () => Math.random().toString(36).slice(2, 8);
+// General-expense head match, mirroring the Approve/Edit picker.
+const normHead = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+function matchGenHeads(query: string): { code: string; name: string }[] {
+  const q = normHead(query);
+  if (!q) return [];
+  const compact = q.replace(/\s+/g, '');
+  const tokens = q.split(' ').filter(Boolean);
+  return GEN_HEADS.filter((h) => { const n = normHead(h.name); return n.replace(/\s+/g, '').includes(compact) || tokens.every((t) => n.includes(t)); })
+    .map((h) => ({ code: h.code, name: h.name }));
+}
 const inr = (n: number) => Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 const DOTS = ['#C75E32', '#C79A2E', '#4C6B47', '#6366F1', '#0EA5E9'];
 const GRID = '26px minmax(130px,1.4fr) minmax(120px,1fr) minmax(120px,1.2fr) 96px 30px';
@@ -35,7 +47,7 @@ export function CardSplitPanel({
 }) {
   const total = base.amount;
   const docRef = `DB-${entry.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase()}`;
-  const blank = (over: Partial<Row> = {}): Row => ({ id: uid(), payeeId: '', payeeName: '', payeeSearch: '', projectId: '', amount: '', description: '', ...over });
+  const blank = (over: Partial<Row> = {}): Row => ({ id: uid(), payeeId: '', payeeName: '', payeeSearch: '', genHead: '', genName: '', projectId: '', amount: '', description: '', ...over });
   const [rows, setRows] = useState<Row[]>(() => [
     blank({ id: 's1', payeeId: base.payeeId, payeeName: base.payeeName, payeeSearch: base.payeeName, projectId: base.projectId, description: base.description }),
     blank({ id: 's2' }),
@@ -47,18 +59,35 @@ export function CardSplitPanel({
   const anchorTo = (el: HTMLElement) => { const r = el.getBoundingClientRect(); setAnchor({ left: r.left, top: r.bottom + 4, width: r.width }); };
   const [auto, setAuto] = useState(false);
   const [filing, setFiling] = useState(false);
+  // Inline "create a new party", mirroring the Approve/Edit picker (name pre-filled, pick a type).
+  const [creating, setCreating] = useState<{ rowId: string; name: string; type: 'Worker' | 'Vendor' | 'Client' } | null>(null);
+  const [creatingBusy, setCreatingBusy] = useState(false);
 
   const up = (id: string, patch: Partial<Row>) => setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   const add = () => setRows((rs) => [...rs, blank({ projectId: rs[rs.length - 1]?.projectId || '' })]);
   const rm = (id: string) => setRows((rs) => (rs.length > 1 ? rs.filter((r) => r.id !== id) : rs));
 
+  // pick an existing party / a general-expense head / create a new party
+  const pickPayee = (rowId: string, id: string, name: string) => { up(rowId, { payeeId: id, payeeName: name, payeeSearch: name, genHead: '', genName: '' }); setOpenPayee(null); };
+  const pickGen = (rowId: string, code: string, name: string) => { up(rowId, { genHead: code, genName: name, payeeSearch: name, payeeId: '', payeeName: '' }); setOpenPayee(null); };
+  const doCreate = async () => {
+    if (!creating || creatingBusy) return;
+    const name = creating.name.trim();
+    if (!name) { onError('Enter a name'); return; }
+    setCreatingBusy(true);
+    try { const { id, name: n } = await createParty(name, creating.type, orgId); pickPayee(creating.rowId, id, n); setCreating(null); }
+    catch (e: any) { onError(e.message || 'Could not create the party'); }
+    finally { setCreatingBusy(false); }
+  };
+
   const sum = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
   const remaining = total - sum;
   const over = remaining < -0.005;
   const balanced = Math.abs(remaining) < 0.005 && total > 0;
-  const valid = rows.length >= 2 && rows.every((r) => r.payeeId && r.projectId && Number(r.amount) > 0) && balanced;
+  const rowDone = (r: Row) => (!!r.payeeId || !!r.genHead) && !!r.projectId && Number(r.amount) > 0;
+  const valid = rows.length >= 2 && rows.every(rowDone) && balanced;
   const canAuto = !!(entry.raw_text || entry.raw_image_url);
-  const fileCount = rows.filter((r) => r.payeeId).length || rows.length;
+  const fileCount = rows.filter((r) => r.payeeId || r.genHead).length || rows.length;
 
   // Even-split N rows across the total (last row soaks up the rounding remainder).
   const evenAmounts = (n: number) => { const each = Math.floor(total / n); const a = Array(n).fill(each); a[n - 1] += total - each * n; return a; };
@@ -111,7 +140,9 @@ export function CardSplitPanel({
       const ids = await fileRoughEntrySplit(
         entry, orgId,
         { payeeId: base.payeeId, amount: total, description: base.description, generalExpense: false },
-        rows.map((r) => ({ projectId: r.projectId, amount: Number(r.amount), payeeId: r.payeeId, description: r.description.trim() || undefined })),
+        rows.map((r) => r.genHead
+          ? { projectId: r.projectId, amount: Number(r.amount), generalExpense: true, generalExpenseHead: r.genHead, description: r.description.trim() || undefined }
+          : { projectId: r.projectId, amount: Number(r.amount), payeeId: r.payeeId, description: r.description.trim() || undefined }),
       );
       onFiled(ids);
     } catch (e: any) { setFiling(false); onError(e.message || "Couldn't file the split, try again"); }
@@ -171,11 +202,11 @@ export function CardSplitPanel({
                 {/* Paid to */}
                 <div className="px-3 py-2 flex items-center" style={{ borderLeft: cellBorder }}>
                   <input value={r.payeeSearch}
-                    onChange={(e) => { up(r.id, { payeeSearch: e.target.value, payeeId: '', payeeName: '' }); setOpenPayee(r.id); anchorTo(e.currentTarget); }}
+                    onChange={(e) => { up(r.id, { payeeSearch: e.target.value, payeeId: '', payeeName: '', genHead: '', genName: '' }); setOpenPayee(r.id); anchorTo(e.currentTarget); }}
                     onFocus={(e) => { setOpenPayee(r.id); anchorTo(e.currentTarget); }}
                     onBlur={() => setTimeout(() => setOpenPayee((o) => (o === r.id ? null : o)), 150)}
-                    placeholder="Who was paid…"
-                    style={{ ...cellInput, fontWeight: r.payeeId ? 600 : 400 }} />
+                    placeholder="Who was paid / an expense…"
+                    style={{ ...cellInput, fontWeight: (r.payeeId || r.genHead) ? 600 : 400 }} />
                 </div>
                 {/* Site */}
                 <div className="px-2 py-2 flex items-center" style={{ borderLeft: cellBorder }}>
@@ -238,26 +269,104 @@ export function CardSplitPanel({
         </button>
       </div>
 
-      {/* payee suggestions — SAME matcher (searchPayees) and SAME item layout as the Approve/Edit
-          picker: name over a "type · category" sub-line, top 8. Portaled to <body> so it floats. */}
+      {/* payee suggestions — full parity with the Approve/Edit picker: searchPayees matches (name over
+          a "type · category" sub-line), general-expense heads below, and a create-new-party action
+          (hero when empty, footer when matches exist), with an inline "pick a type" create form.
+          Portaled to <body> so it floats above the rows. */}
       {(() => {
         const row = openPayee ? rows.find((r) => r.id === openPayee) : null;
-        const matches = row ? searchPayees(stakeholders as any, row.payeeSearch || '').slice(0, 8) : [];
-        if (!row || !anchor || matches.length === 0) return null;
-        return createPortal(
-          <div style={{ position: 'fixed', left: anchor.left, top: anchor.top, width: Math.max(anchor.width, 220), maxHeight: 224, overflowY: 'auto', zIndex: 9999, background: V.surface, border: `1px solid ${V.line}`, borderRadius: 12, boxShadow: '0 12px 30px rgba(42,27,18,.18)' }}>
+        if (!row || !anchor) return null;
+        const q = (row.payeeSearch || '').trim();
+        const matches = searchPayees(stakeholders as any, q).slice(0, 8);
+        const gens = matchGenHeads(q).slice(0, 5);
+        const hasMatches = matches.length > 0 || gens.length > 0;
+        const typedName = q;
+        const creatingHere = creating?.rowId === row.id;
+        if (!hasMatches && !typedName && !creatingHere) return null;
+
+        const box = (children: React.ReactNode) => createPortal(
+          <div style={{ position: 'fixed', left: anchor.left, top: anchor.top, width: Math.max(anchor.width, 240), maxHeight: 288, overflowY: 'auto', zIndex: 9999, background: V.surface, border: `1px solid ${V.line}`, borderRadius: 12, boxShadow: '0 12px 30px rgba(42,27,18,.18)' }}
+            onMouseDown={(e) => e.stopPropagation()}>
+            {children}
+          </div>, document.body);
+
+        // ── inline create form (pick a type) ──
+        if (creatingHere) {
+          return box(
+            <div className="p-3">
+              <p style={{ ...font, fontSize: 13, fontWeight: 700, color: V.ink }}>Create “{creating!.name}”</p>
+              <p style={{ ...font, fontSize: 11, color: V.faint, marginTop: 1 }}>What kind of party?</p>
+              <div className="flex gap-1.5 mt-2">
+                {(['Worker', 'Vendor', 'Client'] as const).map((t) => (
+                  <button key={t} type="button" onMouseDown={(e) => { e.preventDefault(); setCreating((c) => c && { ...c, type: t }); }}
+                    className="flex-1 rounded-lg py-1.5" style={{ ...font, fontSize: 12, fontWeight: 600,
+                      color: creating!.type === t ? '#FFF6EF' : V.inkSoft, background: creating!.type === t ? V.terra : V.field, border: `1px solid ${creating!.type === t ? V.terra : V.line}` }}>{t}</button>
+                ))}
+              </div>
+              <div className="flex gap-2 mt-2.5">
+                <button type="button" onMouseDown={(e) => { e.preventDefault(); doCreate(); }} disabled={creatingBusy}
+                  className="flex-1 inline-flex items-center justify-center gap-1 rounded-lg py-2" style={{ ...font, fontSize: 12.5, fontWeight: 600, color: '#FFF6EF', background: V.terra, border: 'none', opacity: creatingBusy ? 0.6 : 1 }}>
+                  {creatingBusy ? <Loader2 size={13} className="animate-spin" /> : null} Create &amp; select
+                </button>
+                <button type="button" onMouseDown={(e) => { e.preventDefault(); setCreating(null); }} className="rounded-lg px-3 py-2" style={{ ...font, fontSize: 12.5, fontWeight: 600, color: V.inkSoft, background: 'transparent', border: `1px solid ${V.line}` }}>Cancel</button>
+              </div>
+            </div>,
+          );
+        }
+
+        const startCreate = () => setCreating({ rowId: row.id, name: typedName, type: 'Vendor' });
+
+        return box(
+          <>
+            {/* zero matches → create is the hero */}
+            {!hasMatches && (
+              <button type="button" onMouseDown={(e) => { e.preventDefault(); startCreate(); }}
+                className="w-full flex items-center gap-2.5 px-3 py-3 text-left" style={{ background: V.terraWash }}>
+                <span className="grid place-items-center rounded-full shrink-0" style={{ width: 34, height: 34, background: V.ink, color: '#F3EADB', ...font, fontSize: 14, fontWeight: 800 }}>{typedName ? typedName[0].toUpperCase() : '+'}</span>
+                <span className="flex-1 min-w-0">
+                  <p className="truncate" style={{ ...font, fontSize: 13, fontWeight: 700, color: V.ink }}>{typedName ? `Create “${typedName}”` : 'Add a new party'}</p>
+                  <p style={{ ...font, fontSize: 11, color: V.faint }}>New contact · pick a type</p>
+                </span>
+                <ArrowRight size={16} style={{ color: V.terra }} className="shrink-0" />
+              </button>
+            )}
+
+            {/* party matches */}
             {matches.map((m: any) => (
               <button key={m.stakeholder_id} type="button"
-                onMouseDown={(e) => { e.preventDefault(); up(row.id, { payeeId: m.stakeholder_id, payeeName: m.name, payeeSearch: m.name }); setOpenPayee(null); }}
+                onMouseDown={(e) => { e.preventDefault(); pickPayee(row.id, m.stakeholder_id, m.name); }}
                 className="w-full text-left px-3 py-2" style={{ borderBottom: `1px solid ${V.line}` }}>
                 <p className="truncate" style={{ ...font, fontSize: 13, fontWeight: 600, color: V.ink }}>{m.name}</p>
-                {(m.type || m.category) && (
-                  <p className="truncate" style={{ ...font, fontSize: 11, color: V.faint }}>{[m.type, m.category].filter(Boolean).join(' · ')}</p>
-                )}
+                {(m.type || m.category) && <p className="truncate" style={{ ...font, fontSize: 11, color: V.faint }}>{[m.type, m.category].filter(Boolean).join(' · ')}</p>}
               </button>
             ))}
-          </div>,
-          document.body,
+
+            {/* general-expense heads */}
+            {gens.length > 0 && (
+              <>
+                <div className="px-3 pt-2 pb-1" style={{ ...font, fontSize: 9, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: V.faint, borderTop: `1px solid ${V.line}` }}>General expense · overhead</div>
+                {gens.map((h) => (
+                  <button key={h.code} type="button" onMouseDown={(e) => { e.preventDefault(); pickGen(row.id, h.code, h.name); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-left" style={{ borderBottom: `1px solid ${V.line}` }}>
+                    <Receipt size={14} className="shrink-0" style={{ color: V.faint }} />
+                    <span className="flex-1 min-w-0 truncate" style={{ ...font, fontSize: 13, fontWeight: 500, color: V.ink }}>{h.name}</span>
+                    <span className="shrink-0" style={{ ...font, ...nums, fontSize: 10, color: V.faint }}>{h.code}</span>
+                  </button>
+                ))}
+              </>
+            )}
+
+            {/* subtle create footer when matches exist */}
+            {hasMatches && (
+              <button type="button" onMouseDown={(e) => { e.preventDefault(); startCreate(); }}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left" style={{ borderTop: `1px solid ${V.line}` }}>
+                <span className="grid place-items-center rounded-full shrink-0" style={{ width: 24, height: 24, background: V.terraWash, color: V.terra, ...font, fontSize: 12, fontWeight: 800 }}>{typedName ? typedName[0].toUpperCase() : '+'}</span>
+                <span className="flex-1 min-w-0" style={{ ...font, fontSize: 12, color: V.inkSoft }}>
+                  {typedName ? <>Not here? Add <b style={{ color: V.ink }}>{typedName}</b> · new party</> : 'Add a new party'}
+                </span>
+              </button>
+            )}
+          </>,
         );
       })()}
     </div>
