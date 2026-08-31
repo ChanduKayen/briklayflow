@@ -88,12 +88,19 @@ const POLX_CSS = `
 .polx .dlv{white-space:nowrap}
 .polx .dlv .late{color:var(--terra);font-weight:500}
 .polx .dlv .due{color:var(--gold);font-weight:500}
-.polx .dlv .ok{color:var(--sage);font-weight:500}
-.polx .dlv .sent{color:#3b7bb5;font-weight:500}
+.polx .dlv .ok{display:inline-flex;align-items:center;gap:5px;color:var(--sage);font-weight:500}
+/* Delivery colour system: gold = underway (sent / partial / awaiting), sage = done,
+   terracotta = needs your action, muted ink = dormant. One meaning per hue. */
+.polx .dlv .sent{display:inline-flex;align-items:center;gap:5px;color:var(--gold);font-weight:500}
+.polx .dlv .sent svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .polx .dlv .none{color:var(--ink-2)}
 .polx .dlv small{display:block;color:var(--ink-3);font-size:12px}
-.polx .dlv .send-link{display:inline-block;margin-top:4px;background:none;border:0;padding:0;font-family:inherit;font-size:12px;color:#1a9d5a;text-decoration:underline;text-underline-offset:2px;cursor:pointer;transition:color .14s}
-.polx .dlv .send-link:hover{color:#127c46;text-decoration-thickness:2px}
+.polx .dlv .send-link{display:inline-flex;align-items:center;gap:5px;margin-top:5px;background:none;border:0;padding:0;font-family:inherit;font-size:12px;font-weight:500;color:var(--terra);cursor:pointer;transition:color .15s}
+.polx .dlv .send-link svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;transition:transform .28s cubic-bezier(.34,1.56,.64,1)}
+.polx .dlv .send-link:hover{color:var(--terra-deep)}
+.polx .dlv .send-link:hover svg{transform:translate(2px,-2px) rotate(8deg)}
+.polx .dlv .send-link:active svg{transform:translate(5px,-5px) rotate(12deg) scale(.9)}
+@media(prefers-reduced-motion:reduce){.polx .dlv .send-link svg{transition:none}}
 .polx .dlv small b{font-weight:500}
 .polx .dlv .partial{display:inline-flex;align-items:center;gap:8px;font-weight:500;color:var(--gold)}
 .polx .dlv .partial i{width:44px;height:6px;border-radius:3px;background:var(--line-2);position:relative;overflow:hidden}
@@ -424,7 +431,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
       </>
     );
     // Sent to the vendor (ordered, on its way) — wins over the "awaiting price" RFQ label.
-    else if (p.sent) status = <><span className="sent">✓ PO sent</span><small>to vendor · {dstr(D(p.sent))} · {dueLabel(p)}</small></>;
+    else if (p.sent) status = <><span className="sent"><svg viewBox="0 0 24 24"><path d="M21 3L3 10.5l6 2.5 2.5 6L21 3z" /><path d="M9 13l3-3" /></svg>PO sent</span><small>to vendor · {dstr(D(p.sent))} · {dueLabel(p)}</small></>;
     else if (p.rfq) status = <><span className="dim">Not ordered yet</span><small>awaiting price</small></>;
     else status = <><span className={late(p) ? 'late' : 'none'}>Not received</span><small>{n} item{n !== 1 ? 's' : ''} · {dueLabel(p)}</small></>;
 
@@ -435,7 +442,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
         {status}
         {canSend && (
           <button type="button" className="send-link" onClick={(e) => { e.stopPropagation(); setSendRow(p); }}>
-            Send PO to vendor
+            <svg viewBox="0 0 24 24"><path d="M21 3L3 10.5l6 2.5 2.5 6L21 3z" /><path d="M9 13l3-3" /></svg>Send PO to vendor
           </button>
         )}
       </div>
