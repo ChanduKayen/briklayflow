@@ -88,7 +88,7 @@ export default function Logbook({ session }: { session: Session }) {
 
   const canManage = profile?.role === 'management' || profile?.role === 'principal' || profile?.role === 'accountant';
 
-  const [tab, setTab] = useState<TabKey>('all');
+  const [tab, setTab] = useState<TabKey>('review');
   /**
    * ONE EDITOR, TWO ERRANDS.
    *
@@ -235,6 +235,18 @@ export default function Logbook({ session }: { session: Session }) {
     }
     return [...groups.entries()];
   }, [shown]);
+
+  // ── ALL-tab table helpers: a compact row per entry + the day's total ──────────
+  const amtOf = (e: RoughEntry) => parseFloat(String(e.ai_extracted?.amount ?? '').replace(/[^\d.]/g, '')) || 0;
+  const fmtRs = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
+  const entryView = (e: RoughEntry) => {
+    const ai = e.ai_extracted || {};
+    const payee = stakeholders.find((s) => s.stakeholder_id === ai.payee_id)?.name || ai.payee_name || ai.payee_raw || 'Unknown';
+    const proj = projects.find((p) => p.project_id === ai.project_id)?.name || ai.project_name || ai.project_raw || '';
+    const desc = (ai.description || ai.description_raw || '').trim();
+    return { payee, proj, desc, amount: amtOf(e), filed: e.status === 'POSTED', txnId: e.resolved_txn_id ?? null };
+  };
+  const dayTotal = (es: RoughEntry[]) => es.reduce((s, e) => s + amtOf(e), 0);
 
   /** What is standing in the book unposted. The number that turns a chore into a reason to sit down. */
   const unpostedTotal = useMemo(
@@ -410,9 +422,36 @@ export default function Logbook({ session }: { session: Session }) {
                     {group.weekday} · {group.entries.length} {tab === 'review' ? `to review` : group.entries.length === 1 ? 'entry' : 'entries'}
                   </span>
                   <span className="flex-1" style={{ height: 1, background: V.line, transform: 'translateY(-3px)' }} />
+                  {/* ALL: the day's total is the headline of the row (the point of this view). */}
+                  {tab === 'all' && <span style={{ ...display, ...nums, fontSize: 17, fontWeight: 700, color: V.ink }}>{fmtRs(dayTotal(group.entries))}</span>}
                 </div>
 
-                {group.entries.map((r) => (
+                {/* ── ALL: a compact table of the day's entries (to-review + filed, filed muted) ── */}
+                {tab === 'all' ? (
+                  <div style={{ background: V.surface, border: `1px solid ${V.line}`, borderRadius: 12, overflow: 'hidden' }}>
+                    {group.entries.map((e, i) => {
+                      const v = entryView(e);
+                      return (
+                        <div
+                          key={e.id}
+                          id={`db-entry-${e.id}`}
+                          onClick={() => (v.filed ? (v.txnId && viewTxn(v.txnId)) : setEditor({ entry: e }))}
+                          className="db-allrow"
+                          style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', alignItems: 'center', gap: '0 14px', padding: '11px 14px', cursor: 'pointer', borderTop: i > 0 ? `1px solid ${V.line}` : 'none', opacity: v.filed ? 0.66 : 1 }}
+                        >
+                          <div className="min-w-0">
+                            <div style={{ ...font, fontSize: 14, fontWeight: 600, color: V.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.payee}</div>
+                            <div style={{ ...font, fontSize: 12, color: V.faint, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{[v.proj, v.desc].filter(Boolean).join(' · ') || '—'}</div>
+                          </div>
+                          <div style={{ ...font, ...nums, fontSize: 14.5, fontWeight: 600, color: v.filed ? V.sys : V.ink, whiteSpace: 'nowrap', textAlign: 'right' }}>{v.amount > 0 ? fmtRs(v.amount) : '—'}</div>
+                          <div style={{ ...font, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap', color: v.filed ? V.sage : V.terra }}>
+                            {v.filed ? '✓ Filed' : 'To review'}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : group.entries.map((r) => (
                   <div
                     key={r.id}
                     id={`db-entry-${r.id}`}

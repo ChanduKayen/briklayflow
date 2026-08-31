@@ -20,6 +20,8 @@ export function markRevealed(): void {
 }
 
 export const ANIM = `
+.db-allrow{transition:background .12s ease}
+.db-allrow:hover{background:#FBF7EF}
 @keyframes dbFade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @keyframes dbPop { 0% { transform: scale(0); } 60% { transform: scale(1.15); } 100% { transform: scale(1); } }
 @keyframes dbSpin { to { transform: rotate(360deg); } }
