@@ -30,9 +30,10 @@ import { Invitation, ManageTeam } from '../components/day-book/Invitation';
 import { StartOnWhatsAppButton } from '../components/day-book/StartOnWhatsApp';
 import { ReviewCard, type StakeholderLite, type ProjectLite } from '../components/day-book/ReviewCard';
 
-type TabKey = 'review' | 'filed' | 'rejected' | 'requests';
+type TabKey = 'all' | 'review' | 'filed' | 'rejected' | 'requests';
 
 const TABS: { key: TabKey; label: string }[] = [
+  { key: 'all',      label: 'All' },
   { key: 'review',   label: 'To review' },
   { key: 'filed',    label: 'Filed' },
   { key: 'rejected', label: 'Not a transaction' },
@@ -87,7 +88,7 @@ export default function Logbook({ session }: { session: Session }) {
 
   const canManage = profile?.role === 'management' || profile?.role === 'principal' || profile?.role === 'accountant';
 
-  const [tab, setTab] = useState<TabKey>('review');
+  const [tab, setTab] = useState<TabKey>('all');
   /**
    * ONE EDITOR, TWO ERRANDS.
    *
@@ -197,7 +198,17 @@ export default function Logbook({ session }: { session: Session }) {
   const review   = useMemo(() => entries.filter(e => e.status === 'PENDING' || e.status === 'AWAITING_CONTEXT' || lingering.has(e.id)), [entries, lingering]);
   const filed     = useMemo(() => entries.filter(e => e.status === 'POSTED').sort(byRecent), [entries]);
   const rejected  = useMemo(() => entries.filter(e => e.status === 'DISMISSED').sort(byRecent), [entries]);
-  const shown = tab === 'review' ? review : tab === 'filed' ? filed : rejected;
+  // ALL — one unified feed of to-review + filed, newest first. To-review render as full vouchers;
+  // filed render as ReviewCard's compact, muted, action-less "in your books · View" row, so you
+  // never have to cue between the day book and the transactions page. (A just-filed entry can be in
+  // both buckets while it lingers mid-leave — dedupe by id, keeping its review instance.)
+  const all = useMemo(() => {
+    const seen = new Set<string>();
+    return [...review, ...filed]
+      .filter((e) => (seen.has(e.id) ? false : (seen.add(e.id), true)))
+      .sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+  }, [review, filed]);
+  const shown = tab === 'all' ? all : tab === 'review' ? review : tab === 'filed' ? filed : rejected;
 
   /**
    * THE DAY BOOK IS KEPT BY THE DAY — that is what makes it a day book and not an inbox.
@@ -242,7 +253,7 @@ export default function Logbook({ session }: { session: Session }) {
     requestAnimationFrame(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   }, [focusId, isLoading, shown]);
 
-  const counts: Record<TabKey, number> = { review: review.length, filed: filed.length, rejected: rejected.length, requests: prs.length };
+  const counts: Record<TabKey, number> = { all: all.length, review: review.length, filed: filed.length, rejected: rejected.length, requests: prs.length };
 
   // ── One-time reveal: first time the owner opens a Day Book with work to do ──
   const [reveal, setReveal] = useState(false);
@@ -340,7 +351,7 @@ export default function Logbook({ session }: { session: Session }) {
         ) : (
           <div className="space-y-4 mt-6">
             {shown.length === 0 && (
-              tab === 'review' ? (
+              (tab === 'review' || tab === 'all') ? (
                 entries.length === 0 ? (
                   // never used yet — show a lay builder, in plain words, how it works
                   <div className="text-center py-12 mx-auto" style={{ maxWidth: 420 }}>
