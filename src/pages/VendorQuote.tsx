@@ -191,6 +191,17 @@ const CSS = `
 .vq .term input{flex:1}
 .vq .total{display:flex;justify-content:space-between;align-items:baseline;padding:14px 16px;border-top:1px solid var(--line);background:var(--soft);font-weight:700}
 .vq .total b{font-size:22px;font-weight:800;letter-spacing:-.02em}
+/* Terms is secondary to the rates — quieter: no card frame/shadow, hairline rows,
+   smaller muted labels and controls so "Your rates" stays the hero. */
+.vq .card.terms{background:transparent;border:0;box-shadow:none;border-radius:0;margin:2px 2px 8px}
+.vq .card.terms .ttl{padding:2px 2px 6px;color:var(--ink3)}
+.vq .card.terms .term{padding:11px 2px;gap:10px;border-top:1px solid var(--line)}
+.vq .card.terms .term .l{font-size:14px;color:var(--ink2)}
+.vq .card.terms .term .l small{font-size:11.5px;color:var(--ink3);margin-top:1px}
+.vq .card.terms .tgl{width:42px;height:24px}
+.vq .card.terms .tgl::after{width:18px;height:18px}
+.vq .card.terms .tgl[aria-checked=true]::after{transform:translateX(18px)}
+.vq .card.terms select,.vq .card.terms .term input{height:38px;font-size:14px;border-radius:10px;border-color:var(--line);background:transparent}
 .vq .bigok{width:88px;height:88px;border-radius:50%;background:var(--ok);margin:0 auto 18px;display:grid;place-items:center;box-shadow:0 16px 36px -16px rgba(31,157,92,.7)}
 .vq .bigok svg{width:42px;height:42px;stroke:#fff;fill:none;stroke-width:2.8;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:30;stroke-dashoffset:30;animation:vqdraw .55s .2s var(--ease) forwards}
 @keyframes vqdraw{to{stroke-dashoffset:0}}
@@ -505,7 +516,7 @@ export default function VendorQuote({ token }: { token: string }) {
               </div>
               <div className="total"><span>Total quoted</span><b>{fmt(c.tot)}</b></div>
             </div>
-            <div className="card">
+            <div className="card terms">
               <div className="ttl">Terms</div>
               <div className="term" style={{ borderTop: 0 }}>
                 <span className="l">Transport included<small>off = you'll bill it separately</small></span>
