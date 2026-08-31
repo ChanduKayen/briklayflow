@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 
@@ -197,6 +197,19 @@ export default function ReceiveAtSiteDrawer({ isOpen, onClose, onSuccess, po, se
   const [submitting, setSubmitting] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
+
+  // Line items load from a separate query, so re-seed a fresh form every time the modal OPENS —
+  // otherwise the one-time useState initializer can capture an empty list and show no items.
+  useEffect(() => {
+    if (!isOpen) return;
+    setItems(po.line_items.map((li) => {
+      const pending = Math.max(0, li.quantity_ordered - li.qty_received_so_far);
+      return { ...li, received: pending, damaged: 0, rejected: 0, splitOpen: false, note: '' };
+    }));
+    setReceiptDate(todayStr()); setDc(''); setUsingRef(false); setVehicle(''); setDriver(''); setNotes('');
+    setPhotos([]); setSaved(null); setSubmitting(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
