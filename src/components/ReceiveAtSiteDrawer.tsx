@@ -398,12 +398,12 @@ export default function ReceiveAtSiteDrawer({ isOpen, onClose, onSuccess, po, se
                 <div className="input">
                   <input id="ras-dc" type="text" placeholder="As printed on the delivery challan" autoComplete="off"
                     value={dc} onChange={(e) => { setDc(e.target.value); if (e.target.value !== dc) setUsingRef(false); }} />
-                  <span className="tag">{usingRef ? 'Babai reference' : dc ? 'From vendor' : ''}</span>
+                  <span className="tag">{usingRef ? 'Briklay reference' : dc ? 'From vendor' : ''}</span>
                 </div>
                 <div className="ref-line">
                   {usingRef
-                    ? <span>Using a Babai reference. <button className="linkish" onClick={() => { setUsingRef(false); setDc(''); }}>Enter the vendor&apos;s number instead</button></span>
-                    : <span>No challan came with the load? <button className="linkish" onClick={() => { setDc(babaiRef()); setUsingRef(true); }}>Use a Babai reference</button></span>}
+                    ? <span>Using a Briklay reference. <button className="linkish" onClick={() => { setUsingRef(false); setDc(''); }}>Enter the vendor&apos;s number instead</button></span>
+                    : <span>No challan came with the load? <button className="linkish" onClick={() => { setDc(babaiRef()); setUsingRef(true); }}>Use a Briklay reference</button></span>}
                 </div>
               </div>
 
