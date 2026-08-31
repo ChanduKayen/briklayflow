@@ -16,6 +16,7 @@ import { useOrgId } from '../lib/auth/AuthProvider';
 import type { POLineItem } from '../types';
 import ReceiveAtSiteDrawer from '../components/ReceiveAtSiteDrawer';
 import SendToVendorModal from '../components/po-new-ui/SendToVendorModal';
+import { RateCheckModal } from '../components/po/RateCheckModal';
 import {
   fmtDate as pdfFmtDate, fmtRupee, amountInWords,
   MARGIN, CONTENT, RIGHT, C,
@@ -269,6 +270,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const [, setShowRecordPayment] = useState(false);
   const [showReceiveModal,     setShowReceiveModal]    = useState(false);
   const [showSendModal,        setShowSendModal]       = useState(false);
+  const [showRateCheck,        setShowRateCheck]       = useState(false);
   const [billLightbox,         setBillLightbox]        = useState<string | null>(null);
 
   // Open the vendor bill in a beautiful popup: images → lightbox, PDFs → new tab.
@@ -916,6 +918,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
               <div className={`menu${menuOpen ? ' open' : ''}`}>
                 <button className="wa-send" onClick={() => { setMenuOpen(false); setShowSendModal(true); }}><span className="ic"><svg viewBox="0 0 24 24"><path d="M21 3L3 10.5l6 2.5 2.5 6L21 3z" /><path d="M9 13l3-3" /></svg></span>Send to vendor<span className="wa-dot" aria-hidden="true" /></button>
                 <button onClick={() => { setMenuOpen(false); handleDownloadPDF(); }}><svg viewBox="0 0 24 24"><path d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" /></svg>Download PDF</button>
+                <button onClick={() => { setMenuOpen(false); setShowRateCheck(true); }}><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3M11 8v6M8 11h6" /></svg>Check prices</button>
                 <button onClick={() => { setMenuOpen(false); navigate('/purchase-orders/new', { state: { projectId: po.project_id, stakeholderId: po.stakeholder_id } }); }}><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 1 8 8M4 20l4-4M4 20v-4h4" /></svg>Duplicate order</button>
                 <button onClick={() => { setMenuOpen(false); navigate('/purchase-orders/new', { state: { projectId: po.project_id, stakeholderId: po.stakeholder_id } }); }}><svg viewBox="0 0 24 24"><path d="M4 6h16M8 6V4h8v2M6 6l1 14h10l1-14" /></svg>Edit items</button>
                 <hr />
@@ -1187,6 +1190,15 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
         projectName={project?.name}
         totalLabel={inr0(orderValue)}
         onClose={() => { setShowSendModal(false); qc.invalidateQueries({ queryKey: ['po_detail', poId] }); }}
+      />
+
+      <RateCheckModal
+        open={showRateCheck}
+        onClose={() => setShowRateCheck(false)}
+        poId={po.po_id}
+        vendorName={vendor?.name || 'Vendor'}
+        defaultRegion={project?.site_location || project?.name || 'India'}
+        items={(lineItems ?? []).map((li: any) => ({ id: String(li.id), name: li.item_name, unit: li.unit || 'Nos', rate: Number(li.unit_rate) || 0, qty: Number(li.quantity_ordered) || 0 })).filter((i: any) => i.name && i.rate > 0)}
       />
     </div>
   );
