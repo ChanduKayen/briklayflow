@@ -7,8 +7,11 @@ import type React from 'react';
 import { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
+import { useUserProfile } from '../../App';
+import { useAuth } from '../../lib/auth/AuthProvider';
+import { useSnackbar } from '../Snackbar';
 import SendToVendorModal from '../po-new-ui/SendToVendorModal';
 
 const POLX_CSS = `
@@ -129,6 +132,12 @@ const POLX_CSS = `
 .polx .tip li.r .g::before{content:"✓";color:#9DBB98}
 .polx .tip li.p .g::before{content:"○";color:#E0B45B}
 .polx .tip::after{content:"";position:absolute;left:18px;top:-5px;width:10px;height:10px;background:var(--ink);transform:rotate(45deg);border-radius:2px}
+/* pending-approval PO: amber left accent + a badge, with an inline Approve for approvers */
+.polx tbody tr.pending td:first-child{box-shadow:inset 3px 0 0 var(--gold)}
+.polx .po .pend{display:inline-block;margin-top:3px;font-size:10.5px;font-weight:600;letter-spacing:.02em;color:var(--gold);background:var(--gold-tint);border-radius:5px;padding:1px 7px}
+.polx .dlv .approve-btn{display:inline-block;margin-top:5px;background:var(--terra);color:#fff;border:0;border-radius:7px;padding:5px 12px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:background .15s}
+.polx .dlv .approve-btn:hover:not(:disabled){background:var(--terra-deep)}
+.polx .dlv .approve-btn:disabled{opacity:.6;cursor:default}
 .polx tbody tr.rfq td{background:var(--paper-2)}
 .polx tbody tr.rfq:hover td{background:var(--gold-tint)}
 .polx tbody tr.rfq td:first-child{box-shadow:inset 3px 0 0 var(--terra)}
@@ -148,7 +157,7 @@ const POLX_CSS = `
 interface POItem { n: string; q: string; r: boolean }
 interface PORow {
   id: string; vendor: string; stakeholderId: string; vendorContact: string | null;
-  site: string; by: string; ordered: string; createdAt: string;
+  site: string; by: string; ordered: string; createdAt: string; approvalStatus: string;
   items: POItem[]; value: number; billed: number; paid: number;
   due: string | null; recv: string | null; sent: string | null; cancelled: boolean; rfq: boolean;
 }
@@ -169,8 +178,9 @@ function usePOListData(projectId?: string) {
       if (projectId) q = q.eq('project_id', projectId);
       const { data, error } = await q;
       if (error) throw error;
-      // Strict reference has no approval queue — hide pending-approval drafts (but never hide a cancelled PO).
-      return (data ?? []).filter((po: any) => (po.approval_status ?? 'APPROVED') !== 'PENDING' || po.status === 'CANCELLED');
+      // Pending-approval POs are shown (with a badge + inline Approve), not hidden — otherwise a
+      // management-created PO would vanish with no way to release it.
+      return data ?? [];
     },
   });
   const pos = posQ.data ?? [];
@@ -261,6 +271,7 @@ function usePOListData(projectId?: string) {
         by: po.ordered_by || '',
         ordered: po.date_issued || po.created_at,
         createdAt: po.created_at,
+        approvalStatus: (po.approval_status ?? 'APPROVED') as string,
         items,
         value, billed,
         paid: paid[po.po_id] || 0,
@@ -322,6 +333,27 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   const [tip, setTip] = useState<{ id: string; pending: boolean; x: number; y: number } | null>(null);
   // The PO whose "Send PO to vendor" link was tapped — opens the send dialog over the list.
   const [sendRow, setSendRow] = useState<PORow | null>(null);
+
+  // Approve a pending PO inline (management / principal). The RPC enforces SoD (a non-principal
+  // creator can't approve their own), so we surface its message rather than pre-hiding the button.
+  const { userId } = useAuth();
+  const { data: profile } = useUserProfile(userId ?? '');
+  const canApprove = profile?.role === 'management' || profile?.role === 'principal';
+  const qc = useQueryClient();
+  const { show } = useSnackbar();
+  const [approving, setApproving] = useState<string | null>(null);
+  const approve = async (poId: string) => {
+    setApproving(poId);
+    const { data, error } = await supabase.rpc('decide_purchase_order', { p_po_id: poId, p_action: 'APPROVE' });
+    setApproving(null);
+    const r = data as { success?: boolean; error?: string } | null;
+    if (error || !r?.success) {
+      show(r?.error === 'The creator of a PO cannot approve it' ? "You can't approve a PO you created — ask another approver." : (r?.error || error?.message || 'Could not approve'), { type: 'error' });
+      return;
+    }
+    show('Purchase order approved');
+    qc.invalidateQueries({ queryKey: ['po_list_sheet'] });
+  };
 
   const TODAY = useMemo(() => new Date(), []);
   const balance = (p: PORow) => (p.billed || p.value) - p.paid;
@@ -531,13 +563,18 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
                 const shown = p.items.slice(0, 2).map(i => i.n).join(', ');
                 const rest = p.items.length - 2;
                 const siteShort = p.site.replace(' Residence', '').replace("'s", '');
+                const pend = p.approvalStatus === 'PENDING' && !p.cancelled;
                 return (
-                  <tr key={p.id} tabIndex={0} className={p.cancelled ? 'cancelled' : ''} onClick={() => openPO(p.id)} onKeyDown={(e) => { if (e.key === 'Enter') openPO(p.id); }}>
-                    <td className="po"><b>{p.vendor}</b><span className="mono">{p.id}</span></td>
+                  <tr key={p.id} tabIndex={0} className={`${p.cancelled ? 'cancelled' : ''}${pend ? ' pending' : ''}`} onClick={() => openPO(p.id)} onKeyDown={(e) => { if (e.key === 'Enter') openPO(p.id); }}>
+                    <td className="po"><b>{p.vendor}</b><span className="mono">{p.id}</span>{pend && <span className="pend">Pending approval</span>}</td>
                     <td><div className="items"><span className="t">{shown || <span className="dim">No items</span>}</span>{rest > 0 && <span className="more" onMouseEnter={(e) => showTip(e, p.id, false)} onMouseLeave={() => setTip(null)}>+{rest} item{rest > 1 ? 's' : ''}</span>}</div></td>
                     <td className="site" title={p.site}>{siteShort}</td>
                     <td className="when">{dstr(D(p.ordered))}<small>{p.by}</small></td>
-                    <td>{recvCell(p)}</td>
+                    <td>{pend
+                      ? <div className="dlv"><span className="due">Awaiting approval</span>{canApprove
+                          ? <button type="button" className="approve-btn" disabled={approving === p.id} onClick={(e) => { e.stopPropagation(); approve(p.id); }}>{approving === p.id ? 'Approving…' : 'Approve'}</button>
+                          : <small>needs an approver</small>}</div>
+                      : recvCell(p)}</td>
                     <td className="num val">{p.rfq ? <span className="dim">—</span> : p.cancelled ? <span className="dim">{fmt(p.value)}</span> : fmt(p.value)}</td>
                     <td className="num">{balCell(p)}</td>
                   </tr>
