@@ -119,6 +119,21 @@ const PODX_CSS = `
 .podx .menu button.danger:hover{background:var(--terra-tint)}
 .podx .menu hr{border:0;border-top:1px solid var(--line-2);margin:4px 0}
 .podx .menu svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.7}
+/* pending-approval banner */
+.podx .approval-banner{display:flex;gap:12px;align-items:center;padding:12px 16px;border-radius:12px;background:var(--gold-tint);border:1px solid #EBD9B4;margin:0 0 16px}
+.podx .approval-banner>svg{width:20px;height:20px;stroke:var(--gold);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.podx .approval-banner .txt{flex:1;min-width:0}
+.podx .approval-banner .txt b{display:block;font-size:13.5px;font-weight:600;color:var(--ink)}
+.podx .approval-banner .txt span{display:block;font-size:12.5px;color:var(--ink-2);margin-top:2px;line-height:1.5}
+.podx .approval-banner .acts{display:flex;gap:8px;flex:none;flex-wrap:wrap;justify-content:flex-end}
+.podx .approval-banner button{height:34px;padding:0 14px;border-radius:8px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:background .15s,border-color .15s}
+.podx .approval-banner button:disabled{opacity:.6;cursor:default}
+.podx .approval-banner .ghost{background:var(--paper);border:1px solid var(--line);color:var(--ink-2)}
+.podx .approval-banner .ghost:hover:not(:disabled){background:var(--paper-2)}
+.podx .approval-banner .ghost.danger{color:var(--terra)}
+.podx .approval-banner .ghost.danger:hover:not(:disabled){background:var(--terra-tint);border-color:transparent}
+.podx .approval-banner .primary{background:var(--terra);border:1px solid var(--terra);color:#fff}
+.podx .approval-banner .primary:hover:not(:disabled){background:var(--terra-deep)}
 /* Send to vendor — the vendor's WhatsApp is the headline action, so this line reads green
    and the paper-plane lifts off on hover. */
 .podx .menu button.wa-send{color:#0E9F52;font-weight:600;position:relative;overflow:hidden}
@@ -246,6 +261,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const { show: showSnackbar } = useSnackbar();
   const { data: profile } = useUserProfile(session.user.id);
   const orgId = useOrgId();
+  const [deciding, setDeciding] = useState<'APPROVE' | 'SEND_BACK' | 'REJECT' | null>(null);
 
   const currentUserName: string = (profile as any)?.display_name || (profile as any)?.name || session.user.email || 'Unknown';
 
@@ -783,6 +799,23 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   // A PO created from a paid bill (the "Attach bill" flow) — recorded after the purchase, not raised
   // or approved in advance. The banner below states this so owners don't read it as a pre-placed order.
   const postPurchase = !!po.created_after_payment;
+  // Pending-approval: a management-created PO waits for a second pair of eyes (P4). It's live only
+  // once an approver releases it. Approvers (management/principal) get inline decide actions here.
+  const pendingApproval = (po.approval_status ?? 'APPROVED') === 'PENDING' && !cancelled;
+  const canApprove = profile?.role === 'management' || profile?.role === 'principal';
+  const decidePO = async (action: 'APPROVE' | 'SEND_BACK' | 'REJECT') => {
+    setDeciding(action);
+    const { data, error } = await supabase.rpc('decide_purchase_order', { p_po_id: po.po_id, p_action: action });
+    setDeciding(null);
+    const r = data as { success?: boolean; error?: string } | null;
+    if (error || !r?.success) {
+      showSnackbar(r?.error === 'The creator of a PO cannot approve it' ? "You can't approve a PO you created — ask another approver." : (r?.error || error?.message || 'Could not update the PO'), { type: 'error' });
+      return;
+    }
+    showSnackbar(action === 'APPROVE' ? 'Purchase order approved' : action === 'REJECT' ? 'Purchase order rejected' : 'Sent back for changes');
+    qc.invalidateQueries({ queryKey: ['po_detail', po.po_id] });
+    qc.invalidateQueries({ queryKey: ['po_list_sheet'] });
+  };
   const orderValue = totalValue;
   const gstValue = Number(po.gst_value) || 0;
   const subTotal = Number(po.order_value) || (lineItems ?? []).reduce((s, li: any) => s + (Number(li.total_amount) || (Number(li.quantity_ordered) || 0) * (Number(li.unit_rate) || 0)), 0);
@@ -880,6 +913,24 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
             </div>
           </div>
         </div>
+
+        {/* pending-approval banner — a management PO awaiting release; approvers decide here */}
+        {pendingApproval && (
+          <div className="approval-banner">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+            <div className="txt">
+              <b>Pending approval</b>
+              <span>{canApprove ? 'This order isn’t live yet — review and approve to release it.' : 'This order isn’t live yet. An approver (management or principal) needs to approve it.'}</span>
+            </div>
+            {canApprove && (
+              <div className="acts">
+                <button className="ghost" disabled={!!deciding} onClick={() => decidePO('SEND_BACK')}>{deciding === 'SEND_BACK' ? '…' : 'Send back'}</button>
+                <button className="ghost danger" disabled={!!deciding} onClick={() => { if (window.confirm('Reject this purchase order?')) decidePO('REJECT'); }}>{deciding === 'REJECT' ? '…' : 'Reject'}</button>
+                <button className="primary" disabled={!!deciding} onClick={() => decidePO('APPROVE')}>{deciding === 'APPROVE' ? 'Approving…' : 'Approve'}</button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* post-purchase notice — this PO documents a completed purchase, not a pre-placed order */}
         {postPurchase && (
