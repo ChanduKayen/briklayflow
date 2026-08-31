@@ -820,12 +820,23 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const gstValue = Number(po.gst_value) || 0;
   const subTotal = Number(po.order_value) || (lineItems ?? []).reduce((s, li: any) => s + (Number(li.total_amount) || (Number(li.quantity_ordered) || 0) * (Number(li.unit_rate) || 0)), 0);
 
-  const received = !!(po.received_at_site || (grns?.length ?? 0) > 0);
   const receivedWhen = po.received_at_site || grns?.[grns.length - 1]?.receipt_date || grns?.[0]?.receipt_date || null;
   const receivedBy = po.received_by_name || grns?.[0]?.received_by || '';
   // Per-line quantity already received across prior GRNs — fed to the receive wizard as the baseline.
   const recvByLine: Record<string, number> = {};
   (grnItems ?? []).forEach((g: any) => { if (g.po_line_item_id) recvByLine[String(g.po_line_item_id)] = (recvByLine[String(g.po_line_item_id)] || 0) + (Number(g.qty_received) || 0); });
+  // "Received" means FULLY received — every ordered line's received qty covers what was ordered.
+  // A partial receipt (a GRN exists but not all quantities are in) keeps the PO in the receive stage,
+  // so the "Receive" button stays until it's complete. No measurable lines → fall back to the flag.
+  const _rlines = (lineItems ?? []) as any[];
+  const lineGot = (li: any) => recvByLine[String(li.id)] || 0;
+  const lineOrd = (li: any) => Number(li.quantity_ordered) || 0;
+  const totalLines = _rlines.length;
+  const gotLines = _rlines.filter((li) => lineOrd(li) > 0 && lineGot(li) + 1e-6 >= lineOrd(li)).length;
+  const fullyReceived = totalLines > 0 ? gotLines === totalLines : !!po.received_at_site;
+  const anyReceipt = (grns?.length ?? 0) > 0 || !!po.received_at_site;
+  const received = fullyReceived;
+  const partlyReceived = anyReceipt && !fullyReceived;
   const hasBill = billAmt > 0;
   const billNo = po.vendor_bill_number || po.vendor_bill_no || '';
   // Balance is owed against the BILL, not the order. Prefer the saved bill amount; if none is saved
@@ -956,9 +967,13 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
           <div className={`stage ${received ? 'done' : nowStage === 'recv' ? 'now' : 'next-later'}`}>
             <div className="ico"><span>2</span><Check /></div>
             <div className="t">Received at site</div>
-            <div className="s">{received ? `${fmtDate(receivedWhen)}${receivedBy ? ` · ${receivedBy}` : ''}` : 'Material not yet checked in'}</div>
+            <div className="s">{received
+              ? `${fmtDate(receivedWhen)}${receivedBy ? ` · ${receivedBy}` : ''}`
+              : partlyReceived
+                ? `${gotLines} of ${totalLines} item${totalLines !== 1 ? 's' : ''} received · rest pending`
+                : 'Material not yet checked in'}</div>
             {!received && !cancelled && nowStage === 'recv' && (
-              <div className="act"><button className="btn primary sm" onClick={() => setShowReceiveModal(true)}>Receive items</button></div>
+              <div className="act"><button className="btn primary sm" onClick={() => setShowReceiveModal(true)}>{partlyReceived ? 'Receive remaining' : 'Receive items'}</button></div>
             )}
           </div>
 
