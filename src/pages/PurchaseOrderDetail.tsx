@@ -119,6 +119,18 @@ const PODX_CSS = `
 .podx .menu button.danger:hover{background:var(--terra-tint)}
 .podx .menu hr{border:0;border-top:1px solid var(--line-2);margin:4px 0}
 .podx .menu svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.7}
+/* Send to vendor — the vendor's WhatsApp is the headline action, so this line reads green
+   and the paper-plane lifts off on hover. */
+.podx .menu button.wa-send{color:#0E9F52;font-weight:600;position:relative;overflow:hidden}
+.podx .menu button.wa-send .ic{display:grid;place-items:center;width:22px;height:22px;border-radius:7px;background:#E7F8EE;transition:background .18s var(--ease)}
+.podx .menu button.wa-send svg{stroke:#12B65C;overflow:visible;transition:transform .28s cubic-bezier(.34,1.56,.64,1)}
+.podx .menu button.wa-send:hover{background:linear-gradient(90deg,#EAFBF1,transparent)}
+.podx .menu button.wa-send:hover .ic{background:#D3F3E0}
+.podx .menu button.wa-send:hover svg{transform:translate(3px,-3px) rotate(10deg)}
+.podx .menu button.wa-send:active svg{transform:translate(7px,-7px) rotate(14deg) scale(.9)}
+.podx .menu button.wa-send .wa-dot{width:6px;height:6px;border-radius:50%;background:#12B65C;margin-left:auto;opacity:.0;transform:scale(.4);transition:opacity .2s,transform .28s var(--ease)}
+.podx .menu button.wa-send:hover .wa-dot{opacity:1;transform:scale(1)}
+@media(prefers-reduced-motion:reduce){.podx .menu button.wa-send svg{transition:none}}
 @keyframes podxpop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
 .podx .strip{background:var(--paper);border:1px solid var(--line);border-radius:10px;display:grid;grid-template-columns:repeat(4,1fr);position:relative;overflow:hidden;margin-bottom:22px;box-shadow:0 1px 2px rgba(47,38,34,.04),0 8px 24px -18px rgba(47,38,34,.25)}
 .podx .strip::before{content:"";position:absolute;left:0;top:0;height:3px;width:var(--p,25%);background:var(--sage);transition:width .6s var(--ease)}
@@ -858,7 +870,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
               </button>
               <div className={`menu${menuOpen ? ' open' : ''}`}>
-                <button onClick={() => { setMenuOpen(false); setShowSendModal(true); }}><svg viewBox="0 0 24 24"><path d="M21 3L3 10.5l6 2.5 2.5 6L21 3z" /><path d="M9 13l3-3" /></svg>Send to vendor</button>
+                <button className="wa-send" onClick={() => { setMenuOpen(false); setShowSendModal(true); }}><span className="ic"><svg viewBox="0 0 24 24"><path d="M21 3L3 10.5l6 2.5 2.5 6L21 3z" /><path d="M9 13l3-3" /></svg></span>Send to vendor<span className="wa-dot" aria-hidden="true" /></button>
                 <button onClick={() => { setMenuOpen(false); handleDownloadPDF(); }}><svg viewBox="0 0 24 24"><path d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" /></svg>Download PDF</button>
                 <button onClick={() => { setMenuOpen(false); navigate('/purchase-orders/new', { state: { projectId: po.project_id, stakeholderId: po.stakeholder_id } }); }}><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 1 8 8M4 20l4-4M4 20v-4h4" /></svg>Duplicate order</button>
                 <button onClick={() => { setMenuOpen(false); navigate('/purchase-orders/new', { state: { projectId: po.project_id, stakeholderId: po.stakeholder_id } }); }}><svg viewBox="0 0 24 24"><path d="M4 6h16M8 6V4h8v2M6 6l1 14h10l1-14" /></svg>Edit items</button>
