@@ -444,8 +444,7 @@ export function ReviewCard({
   const vno = `Nº DB-${entry.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase()}`;
 
   return (
-    <div className="select-none">
-    <div className="relative rounded-2xl overflow-hidden select-none">
+    <div className={`relative rounded-2xl select-none ${splitOpen ? '' : 'overflow-hidden'}`}>
       {/* underneath: swipe trail OR filing -> filed confirmation */}
       {phase ? (
         <div className="absolute inset-0 overflow-hidden db-reveal" style={{ background: V.sageWash }} />
@@ -659,11 +658,10 @@ export function ReviewCard({
               <button
                 onClick={(e) => { e.stopPropagation(); setSplitOpen((s) => !s); }}
                 title="Split into several transactions"
-                className="inline-flex items-center gap-1.5 rounded-[10px] transition-[background,box-shadow,color] duration-150 active:scale-[.96] hover:bg-[#FCF9F2]"
+                className="inline-flex items-center gap-1.5 rounded-[10px] transition-[background,box-shadow,color,transform] duration-150 active:scale-[.96]"
                 style={{
                   ...font, fontWeight: 600, fontSize: 13.5, padding: '8px 15px', cursor: 'pointer', border: 'none',
-                  color: splitOpen ? V.terra : V.inkSoft, background: splitOpen ? V.terraWash : 'transparent',
-                  boxShadow: splitOpen ? 'none' : `inset 0 0 0 1px ${V.line}`,
+                  color: splitOpen ? V.terra : '#FBF7F1', background: splitOpen ? V.terraWash : V.ink,
                 }}
               >
                 <Split size={12} /> Split
@@ -700,24 +698,24 @@ export function ReviewCard({
             </div>
           </div>
         )}
+        {/* THE SPLIT, ON THE CARD ITSELF — a full-width section inside the voucher grid, so it reads as
+            one continuous card. The container drops its overflow clip while open so the payee dropdown
+            isn't cut off. Files N transactions and takes the card's leave. */}
+        {splitOpen && !leaving && (
+          <div style={{ gridColumn: '1 / -1', marginTop: 14 }}>
+            <CardSplitPanel
+              entry={entry}
+              orgId={orgId}
+              stakeholders={stakeholders}
+              projects={projects}
+              base={{ payeeId: payeeId || '', payeeName: payeeName || '', projectId: projectId || '', amount: amountNum, description }}
+              onFiled={onSplitFiled}
+              onClose={() => setSplitOpen(false)}
+              onError={onError}
+            />
+          </div>
+        )}
       </div>
-
-    </div>
-
-    {/* THE SPLIT, ON THE CARD ITSELF — an inline panel below the voucher (outside the clipped card so
-        its payee dropdown isn't cut off). Files N transactions and takes the card's leave. */}
-    {splitOpen && !leaving && (
-      <CardSplitPanel
-        entry={entry}
-        orgId={orgId}
-        stakeholders={stakeholders}
-        projects={projects}
-        base={{ payeeId: payeeId || '', payeeName: payeeName || '', projectId: projectId || '', amount: amountNum, description }}
-        onFiled={onSplitFiled}
-        onClose={() => setSplitOpen(false)}
-        onError={onError}
-      />
-    )}
     </div>
   );
 }
