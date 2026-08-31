@@ -14,6 +14,7 @@ import { GenHeadPicker } from '../components/GenHeadPicker';
 import { DirLabel } from '../components/NewTxnFab';
 import { getCostCode, costCodeLabel, ALL_COST_CODES, GEN_HEADS, GEN_FALLBACK } from '../lib/costCodes';
 import { autoCloseWOIfFullyPaid } from '../lib/woAutoClose';
+import { readVendorBill, findPOsByBill, type BillPOMatch } from '../lib/vendorTrackingApi';
 
 // ── New Transaction UI redesign — four-voice + money-direction tokens ──────────
 // Visual only (NewTransaction_v1.jsx reference). Applied via inline styles; never
@@ -557,6 +558,23 @@ export default function NewTransaction({ session: _session }: { session: Session
   const [category, setCategory] = useState('');
   const [remarks, setRemarks] = useState('');
   const [billFile, setBillFile] = useState<File | null>(null);
+  const [billDup, setBillDup] = useState<BillPOMatch[] | null>(null);   // this bill already on a PO for the payee?
+  const billDupSeq = useRef(0);
+  // When a bill is picked, OCR it and check whether it's already on a PO for the chosen payee
+  // (warn-only — the payment can still be recorded). Skips when no payee is selected yet.
+  const handleBillFile = (f: File | null) => {
+    setBillFile(f); setBillDup(null);
+    const seq = ++billDupSeq.current;
+    if (!f || !stkId) return;
+    void (async () => {
+      try {
+        const b64 = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onerror = rej; r.onload = () => res(String(r.result).split(',')[1] || ''); r.readAsDataURL(f); });
+        const read = await readVendorBill(b64, f.type || 'image/jpeg');
+        const matches = await findPOsByBill(stkId, read);
+        if (seq === billDupSeq.current && matches.length) setBillDup(matches);
+      } catch { /* OCR is best-effort — never block the entry */ }
+    })();
+  };
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [allocs, setAllocs] = useState<AllocDraft[]>([
     { id: '1', project_id: initialProjectId, order_type: '', order_ref: '', milestone_id: '', allocated_amount: 0 },
@@ -939,7 +957,7 @@ export default function NewTransaction({ session: _session }: { session: Session
         const keptProject = allocs[0]?.project_id || '';
         setTxnId(genTxnId()); setStkId(''); setStkSearch(''); setShowSug(false); setShowCreate(false);
         setNewStkTrade(''); setNewStkTradeOther('');
-        setTotalAmt(0); setCategory(''); setRemarks(''); setBillFile(null); setProofFile(null);
+        setTotalAmt(0); setCategory(''); setRemarks(''); setBillFile(null); setBillDup(null); setProofFile(null);
         setSaveAttempted(false); setSplitMode(false);
         setDate(new Date().toISOString().split('T')[0]);
         setAllocs([{ id: Math.random().toString(), project_id: keptProject, order_type: '', order_ref: '', milestone_id: '', allocated_amount: 0 }]);
@@ -2125,7 +2143,29 @@ export default function NewTransaction({ session: _session }: { session: Session
               <div className="space-y-4">
                 <div>
                   <p className="text-[11px] font-semibold text-on-surface-variant/60 mb-2 uppercase tracking-wide">Bill</p>
-                  <DocUpload id="bill-upload" file={billFile} onFile={setBillFile} cta="Upload bill / invoice" />
+                  <DocUpload id="bill-upload" file={billFile} onFile={handleBillFile} cta="Upload bill / invoice" />
+                  {billDup && billDup.length > 0 && (
+                    <div className="mt-2 rounded-2xl px-3.5 py-3 border" style={{ background: '#FBF3EE', borderColor: '#EBD0C2' }}>
+                      <p className="text-[12.5px] font-semibold" style={{ color: '#A94E2B' }}>
+                        {billDup[0].confidence === 'strong' ? 'This bill is already on a purchase order' : 'This might be a duplicate bill'}
+                      </p>
+                      <p className="text-[11.5px] mt-0.5" style={{ color: '#6E635B' }}>
+                        {billDup[0].confidence === 'strong'
+                          ? <>An order already carries this bill for {selName || 'this party'}{billDup.length > 1 ? ` (across ${billDup.length} sites)` : ''}.</>
+                          : <>{selName || 'This party'} already has an order with the same date and amount.</>}
+                      </p>
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {billDup.map((m) => (
+                          <button key={m.poId} type="button" onClick={() => navigate(`/purchase-orders/${m.poId}`)}
+                            className="inline-flex items-center gap-1 text-[11.5px] font-semibold px-2.5 py-1.5 rounded-lg"
+                            style={{ background: '#fff', border: '1px solid #EBD0C2', color: '#A94E2B' }}>
+                            Open {m.poId}{m.billNo ? ` · #${m.billNo}` : ''} →
+                          </button>
+                        ))}
+                        <button type="button" onClick={() => setBillDup(null)} className="text-[11.5px] font-medium px-2.5 py-1.5" style={{ color: '#6E635B' }}>Different bill — dismiss</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <p className="text-[11px] font-semibold text-on-surface-variant/60 mb-2 uppercase tracking-wide">Proof of payment</p>

@@ -14,15 +14,16 @@
  * transaction (bill_doc_url) so it shows in Transaction Detail. MONEY + bill image only.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { X, Camera, Loader2, Check, Plus, FileText, ChevronRight } from 'lucide-react';
+import { X, Camera, Loader2, Check, Plus, FileText, ChevronRight, AlertTriangle } from 'lucide-react';
 import { V, font } from './ledgerTokens';
 import { useOrgId } from '../../lib/auth/AuthProvider';
 import type { TrackTxn } from '../../lib/trackingApi';
 import {
   getTxnAllocations, readVendorBill, uploadBillDoc, createDeliveredBillPO,
-  commitBillSplit, getVendorPOs, linkBillToExistingPO, attachBillDocToTxn,
-  type BillRead, type VendorPO,
+  commitBillSplit, getVendorPOs, linkBillToExistingPO, attachBillDocToTxn, findPOsByBill,
+  type BillRead, type VendorPO, type BillPOMatch,
 } from '../../lib/vendorTrackingApi';
 
 const num = (n: unknown) => Number(n) || 0;
@@ -37,6 +38,7 @@ export function AttachBillSheet({
   const linkOnly = mode === 'link'; // "Link to PO": no bill, just point this payment at an order
   const orgId = useOrgId();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const payment = num(txn.total_amount);
   const vendor = txn.stakeholders?.name || 'this vendor';
   const seedProject = txn.txn_allocations?.[0]?.project_id || '';
@@ -58,6 +60,8 @@ export function AttachBillSheet({
   });
 
   const [bill, setBill] = useState<BillRead | null>(null);
+  const [dupMatches, setDupMatches] = useState<BillPOMatch[] | null>(null); // this bill already on a PO?
+  const [dupDismissed, setDupDismissed] = useState(false);                  // "different bill — continue"
   const [status, setStatus] = useState<Status>('reading');
   const [pickedPO, setPickedPO] = useState<VendorPO | null>(null); // the order being attached (for the selected-row state)
   const [err, setErr] = useState<string | null>(null);
@@ -69,11 +73,14 @@ export function AttachBillSheet({
   async function readFile(f: File) {
     pickedRef.current = f;
     decidedRef.current = false;
-    setStatus('reading'); setErr(null); setBill(null);
+    setStatus('reading'); setErr(null); setBill(null); setDupMatches(null); setDupDismissed(false);
     try {
       const b64 = await fileToBase64(f);
       const r = await readVendorBill(b64, f.type || 'image/jpeg');
       setBill(r);
+      // Is this same bill already on a PO for this vendor? Warn (never block) before we create one.
+      const matches = await findPOsByBill(txn?.stakeholder_id, r).catch(() => [] as BillPOMatch[]);
+      if (matches.length) setDupMatches(matches);
     } catch (e) {
       setErr(errMsg(e) || 'Could not read the bill — try another photo.');
     }
@@ -97,10 +104,11 @@ export function AttachBillSheet({
       return;
     }
     if (!bill) return;
+    if (dupMatches && !dupDismissed) return; // hold: let the user resolve the "already recorded" warning first
     decidedRef.current = true;
     if ((vendorPOs?.length ?? 0) === 0) void run('new'); else setStatus('ready');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bill, vendorPOs, linkOnly]);
+  }, [bill, vendorPOs, linkOnly, dupMatches, dupDismissed]);
 
   async function createNewPOs(billUrl: string | null) {
     if (!bill) return;
@@ -158,6 +166,7 @@ export function AttachBillSheet({
   const summary = bill
     ? `${bill.total > 0 ? inr(bill.total) : 'Bill'}${bill.vendor ? ` · ${bill.vendor}` : ''}${bill.billNo ? ` · #${bill.billNo}` : ''}`
     : '';
+  const dupBlocking = !linkOnly && !!dupMatches && !dupDismissed && status !== 'attaching' && status !== 'done';
 
   return (
     <div style={{ ...font }}>
@@ -201,8 +210,52 @@ export function AttachBillSheet({
           </div>
         )}
 
+        {/* ── this bill is already on a PO — warn, show it, and let them open it or continue ── */}
+        {!err && dupBlocking && dupMatches && (
+          <div className="space-y-2">
+            <div className="rounded-xl px-3 py-2.5" style={{ background: V.askWash, border: `1px solid ${V.askLine}` }}>
+              <div className="flex items-center gap-2">
+                <AlertTriangle size={15} className="shrink-0" style={{ color: V.terraDeep }} />
+                <p className="text-[13px] font-semibold" style={{ color: V.terraDeep }}>
+                  {dupMatches[0].confidence === 'strong' ? 'This bill is already recorded' : 'This might be a duplicate bill'}
+                </p>
+              </div>
+              <p className="text-[11.5px] mt-1" style={{ color: V.sys }}>
+                {dupMatches[0].confidence === 'strong'
+                  ? <>An order already carries {bill?.billNo ? <>bill <b style={{ color: V.ink }}>#{bill.billNo}</b></> : 'this bill'} for {vendor}{dupMatches.length > 1 ? <> (across {dupMatches.length} sites)</> : ''}. Open it instead of recording it again.</>
+                  : <>{vendor} already has an order with the same date and amount — check before recording a new one.</>}
+              </p>
+            </div>
+            {dupMatches.map((m) => (
+              <button
+                key={m.poId}
+                type="button"
+                onClick={() => { navigate(`/purchase-orders/${m.poId}`); onClose(); }}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-left db-attach-row"
+                style={{ background: V.surface, border: `1px solid ${V.line}` }}
+              >
+                <FileText size={16} className="shrink-0" style={{ color: V.faint }} />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[12.5px] font-medium truncate" style={{ color: V.ink }}>{inr(m.billAmount)} order{m.projectName ? ` · ${m.projectName}` : ''}</span>
+                  <span className="block text-[11px] truncate" style={{ color: V.faint }}>{m.poId}{m.billNo ? ` · #${m.billNo}` : ''}</span>
+                </span>
+                <span className="shrink-0 text-[11px] font-medium" style={{ color: V.terraDeep }}>Open PO</span>
+                <ChevronRight size={15} className="shrink-0" style={{ color: V.faint }} />
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setDupDismissed(true)}
+              className="w-full py-2.5 rounded-xl text-[12.5px] font-medium"
+              style={{ color: V.sys, border: `1px solid ${V.line}` }}
+            >
+              Different bill — continue
+            </button>
+          </div>
+        )}
+
         {/* ── busy / done pill (reading, or create-new attach) ── */}
-        {!err && status !== 'ready' && !pickedPO && (
+        {!err && !dupBlocking && status !== 'ready' && !pickedPO && (
           <div
             className="w-full inline-flex items-center justify-center gap-2 py-3 rounded-xl text-[13px] font-semibold"
             style={status === 'done'
@@ -216,7 +269,7 @@ export function AttachBillSheet({
         )}
 
         {/* ── the choice: attach this bill to an existing order, or make a new one ── */}
-        {!err && status === 'ready' && (
+        {!err && !dupBlocking && status === 'ready' && (
           <div className="space-y-1.5">
             <p className="text-[13px] font-medium mb-1.5" style={{ color: V.ink }}>
               {linkOnly

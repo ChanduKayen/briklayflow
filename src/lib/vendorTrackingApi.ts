@@ -177,6 +177,49 @@ export async function getVendorPOs(txn: TrackTxn, projectIds?: string[]): Promis
     }));
 }
 
+/** Has this bill already been recorded on a PO for this vendor? Matches on the bill NUMBER
+ *  (normalised — case/spacing/leading-zeros ignored) for the same vendor, corroborated by the
+ *  bill date; when the bill carries no number, falls back to a WEAK (same date + ~same amount)
+ *  hint. Cancelled POs are excluded. A bill split across sites returns all its per-site POs.
+ *  Returns [] when nothing matches or there isn't enough to compare on — the check only ever
+ *  warns, it never blocks. */
+export interface BillPOMatch {
+  poId: string; projectId: string | null; projectName: string | null;
+  billNo: string | null; billDate: string | null; billAmount: number;
+  status: string | null; confidence: 'strong' | 'weak';
+}
+const normBillNo = (s?: string | null) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '').replace(/^0+/, '');
+export async function findPOsByBill(
+  stakeholderId: string | null | undefined,
+  bill: { billNo?: string | null; billDate?: string | null; total?: number },
+): Promise<BillPOMatch[]> {
+  if (!stakeholderId) return [];
+  const wantNo = normBillNo(bill.billNo);
+  const wantDate = bill.billDate || null;
+  const wantTotal = num(bill.total);
+  if (!wantNo && !(wantDate && wantTotal > 0)) return []; // nothing reliable to compare on → don't guess
+  const { data } = await supabase.from('purchase_orders')
+    .select('po_id, project_id, status, vendor_bill_number, vendor_bill_no, vendor_bill_date, vendor_bill_amount, projects(name)')
+    .eq('stakeholder_id', stakeholderId)
+    .not('status', 'in', '("CANCELLED","Cancelled","cancelled")');
+  const rows = (data ?? []) as Array<{ po_id: string; project_id: string | null; status: string | null; vendor_bill_number: string | null; vendor_bill_no: string | null; vendor_bill_date: string | null; vendor_bill_amount: number | null; projects: { name?: string | null } | null }>;
+  const out: BillPOMatch[] = [];
+  for (const p of rows) {
+    const poNo = normBillNo(p.vendor_bill_number || p.vendor_bill_no);
+    let confidence: 'strong' | 'weak' | null = null;
+    if (wantNo && poNo && poNo === wantNo) {
+      // number matches; a conflicting date downgrades it (reused number), otherwise it's a strong hit
+      confidence = (wantDate && p.vendor_bill_date && wantDate !== p.vendor_bill_date) ? 'weak' : 'strong';
+    } else if (!wantNo && wantDate && wantTotal > 0) {
+      const amt = num(p.vendor_bill_amount);
+      const amtClose = amt > 0 && Math.abs(amt - wantTotal) <= Math.max(1, wantTotal * 0.01);
+      if (p.vendor_bill_date === wantDate && amtClose) confidence = 'weak';
+    }
+    if (confidence) out.push({ poId: p.po_id, projectId: p.project_id, projectName: p.projects?.name ?? null, billNo: p.vendor_bill_number || p.vendor_bill_no, billDate: p.vendor_bill_date, billAmount: num(p.vendor_bill_amount), status: p.status, confidence });
+  }
+  return out.sort((a, b) => (a.confidence === b.confidence ? 0 : a.confidence === 'strong' ? -1 : 1));
+}
+
 /** Pin the (already-uploaded) bill image + number/date onto an EXISTING PO. Non-destructive: it does
  *  not touch the PO's amount or status — just attaches the picture and the bill's identifiers. */
 export async function attachBillDocToPO(poId: string, doc: { billUrl?: string | null; billNo?: string | null; billDate?: string | null }): Promise<void> {
