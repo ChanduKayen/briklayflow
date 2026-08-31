@@ -179,8 +179,8 @@ function usePOListData(projectId?: string) {
       const { data, error } = await q;
       if (error) throw error;
       // Pending-approval POs are shown (with a badge + inline Approve), not hidden — otherwise a
-      // management-created PO would vanish with no way to release it.
-      return data ?? [];
+      // management-created PO would vanish with no way to release it. Cancelled POs ARE hidden.
+      return (data ?? []).filter((po: any) => String(po.status).toUpperCase() !== 'CANCELLED');
     },
   });
   const pos = posQ.data ?? [];
