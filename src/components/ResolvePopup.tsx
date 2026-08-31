@@ -52,8 +52,9 @@ type PayeeState = 'A' | 'B' | 'C' | 'confirmed';
 /** The four things the editor can ask about. `only` narrows the popup to a subset of them. */
 export type GapKey = 'amount' | 'payee' | 'description' | 'project';
 
-/** One site-slice while splitting a capture across projects. */
-interface SplitRow { id: string; projectId: string; amount: number | ''; }
+/** One slice while splitting a capture. Every row has a project + amount; a payee-split row
+ *  also carries its own payee + description (so it becomes its own distinct transaction). */
+interface SplitRow { id: string; projectId: string; amount: number | ''; payeeId?: string; payeeName?: string; payeeSearch?: string; description?: string; }
 interface SplitApi {
   mode: boolean;
   enable: (on: boolean) => void;
@@ -61,6 +62,11 @@ interface SplitApi {
   setSplits: React.Dispatch<React.SetStateAction<SplitRow[]>>;
   total: number;
   remaining: number;
+  stakeholders: any[];
+  isGeneral: boolean;
+  autoSplit: () => void;
+  autoSplitting: boolean;
+  canAutoSplit: boolean;
 }
 
 // Names read better title-cased — capitalise the first letter of each word as the
@@ -76,19 +82,32 @@ function FieldQuestion({ text, missing }: { text: string; missing?: boolean }) {
   );
 }
 
-// ── Split among sites — the beautiful editor: segmented balance bar + per-site rows ──
+// ── Split editor — segmented balance bar + per-row slices. When the entry has a single payee
+//    (general or one party) rows are project + amount. Otherwise each row is its own transaction:
+//    payee + project + description + amount. "Auto-split" seeds the rows from the message/proof. ──
 function SplitSites({ projects, api }: { projects: any[]; api: SplitApi }) {
-  const { splits, setSplits, total, remaining } = api;
+  const { splits, setSplits, total, remaining, stakeholders, isGeneral, autoSplit, autoSplitting, canAutoSplit } = api;
+  const perPayee = !isGeneral; // different-payee split → each row carries its own payee + note
   const uid = () => Math.random().toString(36).slice(2, 8);
   const up = (id: string, patch: Partial<SplitRow>) => setSplits((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
-  const add = () => setSplits((rows) => [...rows, { id: uid(), projectId: '', amount: '' }]);
+  const add = () => setSplits((rows) => [...rows, { id: uid(), projectId: rows[rows.length - 1]?.projectId || '', amount: '', payeeSearch: '' }]);
   const rm = (id: string) => setSplits((rows) => (rows.length > 1 ? rows.filter((r) => r.id !== id) : rows));
   const colors = ['#C75E32', '#4C6B47', '#6366F1', '#0EA5E9', '#C79A2E'];
   const over = remaining < -0.005;
   const balanced = Math.abs(remaining) < 0.005 && total > 0;
   const used = new Set(splits.map((r) => r.projectId).filter(Boolean));
+  const [openPayee, setOpenPayee] = useState<string | null>(null);
   return (
     <div>
+      {perPayee && canAutoSplit && (
+        <button type="button" onClick={autoSplit} disabled={autoSplitting}
+          className="w-full mb-2.5 inline-flex items-center justify-center gap-1.5 py-2 rounded-lg text-[12.5px] font-semibold disabled:opacity-60"
+          style={{ background: VOICE.askWash, border: `1px solid ${VOICE.outLine}`, color: VOICE.accentDeep }}>
+          <span className="material-symbols-outlined text-[15px]">{autoSplitting ? 'progress_activity' : 'auto_awesome'}</span>
+          {autoSplitting ? 'Reading the entry…' : 'Auto-split from the message'}
+        </button>
+      )}
+
       {total > 0 && (
         <div className="rounded-xl p-3 mb-2.5" style={{ background: VOICE.surface, border: `1px solid ${VOICE.line}` }}>
           <div className="flex h-2 w-full rounded-full overflow-hidden" style={{ background: 'rgba(0,0,0,0.06)' }}>
@@ -110,48 +129,94 @@ function SplitSites({ projects, api }: { projects: any[]; api: SplitApi }) {
       )}
 
       <div className="space-y-2">
-        {splits.map((r, i) => (
-          <div key={r.id} className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: colors[i % colors.length] }} />
-            <select
-              value={r.projectId}
-              onChange={(e) => up(r.id, { projectId: e.target.value })}
-              className="flex-1 min-w-0 text-[13px] px-2.5 py-2 rounded-lg outline-none appearance-none"
-              style={{ background: VOICE.field, border: `1px solid ${r.projectId ? VOICE.line : VOICE.outLine}`, color: VOICE.user }}
-            >
-              <option value="">Select site…</option>
-              {projects.map((p) => (
-                <option key={p.project_id} value={p.project_id} disabled={used.has(p.project_id) && p.project_id !== r.projectId}>{p.name}</option>
-              ))}
-            </select>
-            <div className="relative shrink-0" style={{ width: 104 }}>
-              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[12px] pointer-events-none" style={{ color: VOICE.systemFaint }}>₹</span>
+        {splits.map((r, i) => {
+          const matches = perPayee && openPayee === r.id ? searchPayees(stakeholders, r.payeeSearch || '').slice(0, 5) : [];
+          const projAmt = (
+            <div className="flex items-center gap-2">
+              <select
+                value={r.projectId}
+                onChange={(e) => up(r.id, { projectId: e.target.value })}
+                className="flex-1 min-w-0 text-[13px] px-2.5 py-2 rounded-lg outline-none appearance-none"
+                style={{ background: VOICE.field, border: `1px solid ${r.projectId ? VOICE.line : VOICE.outLine}`, color: VOICE.user }}
+              >
+                <option value="">Select site…</option>
+                {projects.map((p) => (
+                  <option key={p.project_id} value={p.project_id} disabled={used.has(p.project_id) && p.project_id !== r.projectId}>{p.name}</option>
+                ))}
+              </select>
+              <div className="relative shrink-0" style={{ width: 104 }}>
+                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[12px] pointer-events-none" style={{ color: VOICE.systemFaint }}>₹</span>
+                <input
+                  inputMode="numeric"
+                  value={r.amount === '' ? '' : String(r.amount)}
+                  onChange={(e) => { const v = e.target.value.replace(/[^0-9.]/g, ''); up(r.id, { amount: v === '' ? '' : Number(v) }); }}
+                  placeholder="0"
+                  className="w-full text-[13px] pl-5 pr-2 py-2 rounded-lg outline-none text-right"
+                  style={{ ...VNUMS, background: VOICE.field, border: `1px solid ${Number(r.amount) > 0 ? VOICE.line : VOICE.outLine}`, color: VOICE.user }}
+                />
+              </div>
+            </div>
+          );
+
+          if (!perPayee) {
+            return (
+              <div key={r.id} className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: colors[i % colors.length] }} />
+                <div className="flex-1 min-w-0">{projAmt}</div>
+                <button type="button" onClick={() => rm(r.id)} disabled={splits.length <= 1} className="shrink-0 w-7 h-7 grid place-items-center rounded-lg disabled:opacity-25" style={{ color: VOICE.systemFaint }} aria-label="Remove row">
+                  <span className="material-symbols-outlined text-[16px]">close</span>
+                </button>
+              </div>
+            );
+          }
+
+          return (
+            <div key={r.id} className="rounded-xl p-2.5" style={{ background: VOICE.surface, border: `1px solid ${VOICE.line}` }}>
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: colors[i % colors.length] }} />
+                <div className="relative flex-1 min-w-0">
+                  <input
+                    value={r.payeeSearch ?? r.payeeName ?? ''}
+                    onChange={(e) => { up(r.id, { payeeSearch: e.target.value, payeeId: '', payeeName: '' }); setOpenPayee(r.id); }}
+                    onFocus={() => setOpenPayee(r.id)}
+                    onBlur={() => setTimeout(() => setOpenPayee((o) => (o === r.id ? null : o)), 150)}
+                    placeholder="Who was paid…"
+                    className="w-full text-[13px] pr-7 pl-2.5 py-2 rounded-lg outline-none"
+                    style={{ background: VOICE.field, border: `1px solid ${r.payeeId ? VOICE.line : VOICE.outLine}`, color: VOICE.user }}
+                  />
+                  {r.payeeId && <span className="absolute right-2 top-1/2 -translate-y-1/2 material-symbols-outlined text-[15px]" style={{ color: VOICE.confirm, fontVariationSettings: "'FILL' 1" }}>check_circle</span>}
+                  {openPayee === r.id && matches.length > 0 && (
+                    <div className="absolute z-20 left-0 right-0 mt-1 rounded-lg overflow-hidden shadow-lg" style={{ background: VOICE.page, border: `1px solid ${VOICE.line}` }}>
+                      {matches.map((m: any) => (
+                        <button key={m.stakeholder_id} type="button"
+                          onMouseDown={(e) => { e.preventDefault(); up(r.id, { payeeId: m.stakeholder_id, payeeName: m.name, payeeSearch: m.name }); setOpenPayee(null); }}
+                          className="w-full text-left px-2.5 py-1.5 text-[13px]" style={{ color: VOICE.user }}>
+                          {m.name}{m.category ? <span className="text-[11px]" style={{ color: VOICE.systemFaint }}> · {m.category}</span> : null}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <button type="button" onClick={() => rm(r.id)} disabled={splits.length <= 1} className="shrink-0 w-7 h-7 grid place-items-center rounded-lg disabled:opacity-25" style={{ color: VOICE.systemFaint }} aria-label="Remove transaction">
+                  <span className="material-symbols-outlined text-[16px]">close</span>
+                </button>
+              </div>
+              <div className="mt-2">{projAmt}</div>
               <input
-                inputMode="numeric"
-                value={r.amount === '' ? '' : String(r.amount)}
-                onChange={(e) => { const v = e.target.value.replace(/[^0-9.]/g, ''); up(r.id, { amount: v === '' ? '' : Number(v) }); }}
-                placeholder="0"
-                className="w-full text-[13px] pl-5 pr-2 py-2 rounded-lg outline-none text-right"
-                style={{ ...VNUMS, background: VOICE.field, border: `1px solid ${Number(r.amount) > 0 ? VOICE.line : VOICE.outLine}`, color: VOICE.user }}
+                value={r.description ?? ''}
+                onChange={(e) => up(r.id, { description: e.target.value })}
+                placeholder="What for? (optional)"
+                className="w-full mt-2 text-[13px] px-2.5 py-2 rounded-lg outline-none"
+                style={{ background: VOICE.field, border: `1px solid ${VOICE.line}`, color: VOICE.user }}
               />
             </div>
-            <button
-              type="button"
-              onClick={() => rm(r.id)}
-              disabled={splits.length <= 1}
-              className="shrink-0 w-7 h-7 grid place-items-center rounded-lg disabled:opacity-25"
-              style={{ color: VOICE.systemFaint }}
-              aria-label="Remove site"
-            >
-              <span className="material-symbols-outlined text-[16px]">close</span>
-            </button>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="flex items-center gap-3 mt-2">
         <button type="button" onClick={add} className="inline-flex items-center gap-1 text-[12px] font-semibold" style={{ color: VOICE.accentDeep }}>
-          <span className="material-symbols-outlined text-[15px]">add</span> Add another site
+          <span className="material-symbols-outlined text-[15px]">add</span> Add another {perPayee ? 'transaction' : 'site'}
         </button>
         {remaining > 0.005 && splits.length >= 1 && (
           <button
@@ -490,26 +555,33 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
   const [projectId, setProjectId] = useState(ai.project_id || '');
   const [mode, setMode] = useState<'Cash' | 'NEFT' | 'UPI' | 'Cheque'>(ai.mode || 'Cash');
 
-  // ── Split among sites ── file one capture as N transactions (one per site), via
-  //    fileRoughEntrySplit. Off by default; the split amounts must sum to the total.
+  // ── Split ── file one capture as N transactions, via fileRoughEntrySplit. Off by default; the
+  //    split amounts must sum to the total. A single-payee (general) split varies project + amount;
+  //    otherwise each row carries its own payee + description (a distinct transaction).
   const [splitMode, setSplitMode] = useState(false);
   const [splits, setSplits] = useState<SplitRow[]>([{ id: 's1', projectId: '', amount: '' }]);
   const enableSplit = (on: boolean) => {
     setSplitMode(on);
     if (on) setSplits((prev) => {
-      const kept = prev.filter((r) => r.projectId || r.amount !== '');
+      const kept = prev.filter((r) => r.projectId || r.amount !== '' || r.payeeId);
       if (kept.length >= 2) return kept;
-      return [{ id: 's1', projectId, amount: '' }, { id: 's2', projectId: '', amount: '' }];
+      // Seed the first row from what's already resolved (payee + project); leave the second open.
+      return [
+        { id: 's1', projectId, amount: '', payeeId, payeeName, payeeSearch: payeeName, description },
+        { id: 's2', projectId: '', amount: '', payeeSearch: '' },
+      ];
     });
   };
   const splitTotal = Number(amount) || 0;
   const splitSum = splits.reduce((s, r) => s + (Number(r.amount) || 0), 0);
   const splitRemaining = splitTotal - splitSum;
   const splitValid = splitMode && splits.length >= 2
-    && splits.every((r) => r.projectId && Number(r.amount) > 0)
+    && splits.every((r) => r.projectId && Number(r.amount) > 0 && (isGeneral || !!r.payeeId))
     && Math.abs(splitRemaining) < 0.005;
   const [showDismissConfirm, setShowDismissConfirm] = useState(false);
   const [posting, setPosting] = useState(false);
+  const [autoSplitting, setAutoSplitting] = useState(false);
+  const canAutoSplit = !isGeneral && !!(entry.raw_text || entry.raw_image_url);
 
   // ── Drag-to-dismiss / swipe-to-full-height (mobile) ────────────────────────
   // Down-drag past a threshold dismisses (existing). Up-drag expands the sheet
@@ -561,6 +633,39 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
       return (data ?? []) as any[];
     },
   });
+
+  // ── Auto-split: read the original message/proof and seed the split rows (payee · amount · project · note) ──
+  const autoSplit = useCallback(async () => {
+    if (autoSplitting) return;
+    setAutoSplitting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('split-daybook-entry', {
+        body: { text: entry.raw_text || '', image_url: entry.raw_image_url || null, total: Number(amount) || 0 },
+      });
+      if (error) throw error;
+      const parts = ((data as any)?.splits ?? []) as { payee_name?: string; amount?: number; project_name?: string; description?: string }[];
+      if (!parts.length) { showSnackbar('Could not read separate payments from this entry', { type: 'error' }); return; }
+      const rows: SplitRow[] = parts.map((p) => {
+        const pm = p.payee_name ? searchPayees(stakeholders, p.payee_name)[0] : null;
+        const proj = p.project_name ? projects.find((pr) => (pr.name || '').toLowerCase() === p.project_name!.toLowerCase()) : null;
+        return {
+          id: Math.random().toString(36).slice(2, 8),
+          projectId: proj?.project_id || projectId || '',
+          amount: p.amount && p.amount > 0 ? p.amount : '',
+          payeeId: pm?.stakeholder_id || '',
+          payeeName: pm?.name || '',
+          payeeSearch: pm?.name || p.payee_name || '',
+          description: p.description || '',
+        };
+      });
+      setSplits(rows.length >= 2 ? rows : [...rows, { id: 's-extra', projectId: '', amount: '', payeeSearch: '' }]);
+    } catch (e: any) {
+      showSnackbar(e.message || 'Could not auto-split this entry', { type: 'error' });
+    } finally {
+      setAutoSplitting(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSplitting, entry.raw_text, entry.raw_image_url, amount, stakeholders, projects, projectId]);
 
   /**
    * ══ THE AI'S IDS ARE GUESSES. VERIFY THEM, OR THE DATABASE WILL. ══════════════════════════════
@@ -756,7 +861,12 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
         await fileRoughEntrySplit(
           updatedEntry as RoughEntry, orgId ?? '',
           { payeeId, amount: Number(amount), description: description.trim(), generalExpense: isGeneral, generalExpenseHead: genHead || undefined },
-          splits.map((s) => ({ projectId: s.projectId, amount: Number(s.amount) })),
+          splits.map((s) => ({
+            projectId: s.projectId,
+            amount: Number(s.amount),
+            // per-row payee/note only when this is a different-payee split (not a general split)
+            ...(isGeneral ? {} : { payeeId: s.payeeId || null, description: (s.description ?? '').trim() || undefined }),
+          })),
         );
       } else {
         await fileRoughEntry(updatedEntry as RoughEntry, orgId ?? '', {
@@ -835,7 +945,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
     missingPayee, missingAmount, missingDescription, missingProject,
     payeeUnmatched, projectUnmatched,
     mandatoryFilled: canFile, posting,
-    splitApi: { mode: splitMode, enable: enableSplit, splits, setSplits, total: splitTotal, remaining: splitRemaining },
+    splitApi: { mode: splitMode, enable: enableSplit, splits, setSplits, total: splitTotal, remaining: splitRemaining, stakeholders, isGeneral, autoSplit, autoSplitting, canAutoSplit },
     showDismissConfirm, setShowDismissConfirm,
     onClose, handleDismiss,
     payeeRef, advanceAfter, nextGap, goToGap,
@@ -1477,7 +1587,7 @@ function PopupContents({
         {/* 4. Project (single) OR split among sites */}
         {show('project') && (
         <div>
-          <FieldQuestion text={splitApi.mode ? 'Split this across sites' : 'Which project is this for?'} missing={!splitApi.mode && missingProject && !projectUnmatched} />
+          <FieldQuestion text={splitApi.mode ? (splitApi.isGeneral ? 'Split this across sites' : 'Split into separate transactions') : 'Which project is this for?'} missing={!splitApi.mode && missingProject && !projectUnmatched} />
 
           {!splitApi.mode ? (
             <>
@@ -1531,7 +1641,7 @@ function PopupContents({
               style={{ color: VOICE.accentDeep }}
             >
               <span className="material-symbols-outlined text-[15px]">{splitApi.mode ? 'undo' : 'call_split'}</span>
-              {splitApi.mode ? 'Use a single site' : 'Split among sites'}
+              {splitApi.mode ? (splitApi.isGeneral ? 'Use a single site' : 'Undo the split') : (splitApi.isGeneral ? 'Split among sites' : 'Split into transactions')}
             </button>
           )}
         </div>

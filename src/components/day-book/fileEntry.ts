@@ -133,15 +133,26 @@ export async function fileRoughEntry(entry: RoughEntry, orgId: string, resolved:
   return newTxnId;
 }
 
-/** One project slice of a split file. */
-export interface ProjectSplit { projectId: string; amount: number; }
+/**
+ * One slice of a split file. Every slice needs a project + amount. It MAY also carry its own
+ * payee / description / general-expense head — when it does, that row becomes its own distinct
+ * transaction (the "split into multiple transactions" case). When it doesn't, the row inherits
+ * the shared payee/description from `base` (the "same payee across sites" case).
+ */
+export interface ProjectSplit {
+  projectId: string;
+  amount: number;
+  payeeId?: string | null;
+  description?: string | null;
+  generalExpense?: boolean;
+  generalExpenseHead?: string;
+}
 
 /**
- * File a captured entry as a SPLIT across projects — N separate transactions, one
- * per project (just project + amount; the Day Book keeps it simple, no order
- * linking). Atomic via insert_split_transactions. `base` carries the shared fields
- * (payee/description/amount-total/general-expense) minus the per-split project.
- * Returns the new txn_ids.
+ * File a captured entry as a SPLIT — N separate transactions, atomic via
+ * insert_split_transactions. `base` carries the shared fallback fields (payee/description/
+ * general-expense); each split may override payee/description/category per row. Returns the
+ * new txn_ids.
  */
 export async function fileRoughEntrySplit(
   entry: RoughEntry,
@@ -169,12 +180,20 @@ export async function fileRoughEntrySplit(
   };
   const baseTs = Date.now();
   const rnd = Math.random().toString(36).slice(2, 5).toUpperCase();
-  const p_splits = splits.map((s, i) => ({
-    txn_id: `TXN-${new Date().getFullYear()}-${String(baseTs + i).slice(-6)}-${rnd}`,
-    total_amount: s.amount,
-    project_id: s.projectId,
-    order_type: null, order_ref: null, milestone_id: null,
-  }));
+  const p_splits = splits.map((s, i) => {
+    const rowGeneral = !!s.generalExpense;
+    // Per-row overrides — omitted keys fall back to p_base inside the RPC (COALESCE).
+    const row: Record<string, unknown> = {
+      txn_id: `TXN-${new Date().getFullYear()}-${String(baseTs + i).slice(-6)}-${rnd}${i}`,
+      total_amount: s.amount,
+      project_id: s.projectId,
+      order_type: null, order_ref: null, milestone_id: null,
+    };
+    if (s.payeeId !== undefined) row.stakeholder_id = rowGeneral ? '' : (s.payeeId || '');
+    if (s.description != null) row.remarks = s.description;
+    if (rowGeneral) row.category = s.generalExpenseHead || 'GEN-99';
+    return row;
+  });
 
   const { data, error: rpcErr } = await supabase.rpc('insert_split_transactions', { p_base, p_splits });
   if (rpcErr) throw rpcErr;
