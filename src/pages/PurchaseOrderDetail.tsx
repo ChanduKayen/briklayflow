@@ -1198,7 +1198,12 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
         poId={po.po_id}
         vendorName={vendor?.name || 'Vendor'}
         defaultRegion={project?.site_location || project?.name || 'India'}
-        items={(lineItems ?? []).map((li: any) => ({ id: String(li.id), name: li.item_name, unit: li.unit || 'Nos', rate: Number(li.unit_rate) || 0, qty: Number(li.quantity_ordered) || 0 })).filter((i: any) => i.name && i.rate > 0)}
+        items={(lineItems ?? []).map((li: any) => {
+          const qty = Number(li.quantity_ordered) || 0;
+          // prefer the per-unit rate; if it's blank (bill/RFQ POs bill per-total), derive it from the line total
+          const rate = Number(li.unit_rate) || (qty > 0 ? (Number(li.total_amount) || 0) / qty : 0);
+          return { id: String(li.id), name: li.item_name, unit: li.unit || 'Nos', rate: Math.round(rate * 100) / 100, qty };
+        }).filter((i: any) => i.name && i.rate > 0)}
       />
     </div>
   );

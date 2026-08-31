@@ -4,7 +4,7 @@
  * billed rate against ONLY those listings, and we present the verdict with an honest confidence + the
  * sources. Built to the rate-check.html design (mineral-slate). Advisory — it flags, never blocks.
  */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../../lib/supabase';
 
@@ -93,6 +93,15 @@ export function RateCheckModal({ open, onClose, poId, vendorName, defaultRegion,
   const [results, setResults] = useState<Record<string, Result>>({});
   const [openWhy, setOpenWhy] = useState<Record<string, boolean>>({});
   const [err, setErr] = useState<string | null>(null);
+
+  // Line items load async, so seed a fresh (all-selected) state each time the modal opens — otherwise
+  // the one-time useState initializer can capture an empty list and show "0 of 0".
+  useEffect(() => {
+    if (!open) return;
+    setSel(Object.fromEntries(items.map((i) => [i.id, true])));
+    setResults({}); setOpenWhy({}); setErr(null); setRegion(defaultRegion || 'India');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, items.length]);
 
   if (!open) return null;
   const chosen = items.filter((i) => sel[i.id]);
