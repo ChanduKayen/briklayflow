@@ -425,16 +425,23 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     const crew = DATA.current[si].crews[ci]; const site = DATA.current[si];
     const lbl = q(`[data-wageslbl="${si}.${ci}"]`); if (!lbl) return;
     lbl.textContent = 'Loading contracts…';
+    const startNew = () => navigate('/work-orders/new', { state: { projectId: site.site, stakeholderId: crew.stakeholderId } });
     let wos;
     try { wos = await loadWorkOrdersForProject(site.site); } catch (e) { fail(e); return; }
-    // Contracts for this crew's party come first.
-    wos.sort((a, b) => Number(b.stakeholderId === crew.stakeholderId) - Number(a.stakeholderId === crew.stakeholderId));
+    // Only contracts for THIS crew's party on THIS project (the query already scopes the project).
+    wos = crew.stakeholderId ? wos.filter(w => w.stakeholderId === crew.stakeholderId) : [];
+    if (wos.length === 0) {
+      lbl.innerHTML = `No contract for this party yet · <button class="oncontract ocnew">start a contract</button> · <button class="x ocx">cancel</button>`;
+      (lbl.querySelector('.ocnew') as HTMLButtonElement).addEventListener('click', startNew);
+      (lbl.querySelector('.ocx') as HTMLButtonElement).addEventListener('click', () => render());
+      return;
+    }
     const opts = wos.map(w => `<option value="${w.wo_id}">${escapeHtml(w.label)}${w.orderValue ? ` · ${inr(w.orderValue)}` : ''}</option>`).join('');
-    lbl.innerHTML = `<select class="stsel ocsel"><option value="">Link a contract…</option>${opts}<option value="__new">+ New contract…</option></select> <button class="x ocx">cancel</button>`;
+    lbl.innerHTML = `<select class="stsel ocsel"><option value="">Link this party's contract…</option>${opts}<option value="__new">+ New contract…</option></select> <button class="x ocx">cancel</button>`;
     const sel = lbl.querySelector('.ocsel') as HTMLSelectElement;
     (lbl.querySelector('.ocx') as HTMLButtonElement).addEventListener('click', () => render());
     sel.addEventListener('change', async () => {
-      if (sel.value === '__new') { navigate('/work-orders/new', { state: { projectId: site.site, stakeholderId: crew.stakeholderId } }); return; }
+      if (sel.value === '__new') { startNew(); return; }
       if (!sel.value) return;
       try { await linkCrewToWorkOrder(crew.crewId, sel.value); await load(); } catch (e) { fail(e); }
     });

@@ -68,8 +68,8 @@
     "hash": "520a6a362920ebeeea713886f59ab308"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\App.tsx": {
-    "mtime": 1788195788.9823506,
-    "hash": "daf77cc7b8858d0c7b20f3212fb23939"
+    "mtime": 1788236225.0316086,
+    "hash": "33122379609f208e9da814e96123785c"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\main.tsx": {
     "mtime": 1787833016.782637,
@@ -271,6 +271,10 @@
     "mtime": 1784050450.4687383,
     "hash": "95360524f3377c983a82922f67ddac77"
   },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\components\\attendance\\AttendanceSheet.tsx": {
+    "mtime": 1788236317.873334,
+    "hash": "171eb32d0e05f4d04615754abb45577d"
+  },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\components\\day-book\\atoms.tsx": {
     "mtime": 1781324498.713073,
     "hash": "cc99cf944c452dd621e050e5935d32f0"
@@ -412,8 +416,8 @@
     "hash": "e74fff1e0ecdaa72b0c7abe8d86815e2"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\components\\nav\\BriklayRail.tsx": {
-    "mtime": 1788093806.9614217,
-    "hash": "7d0ef7c6e32ef10e559ce29c64e71e5e"
+    "mtime": 1788237650.3385198,
+    "hash": "359f3aa00cd18a4fd26de951363b0e5c"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\components\\po\\POListSheet.tsx": {
     "mtime": 1788174404.033924,
@@ -587,6 +591,10 @@
     "mtime": 1779456364.254872,
     "hash": "65ccb83226abe488379edb24e6177580"
   },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\attendanceApi.ts": {
+    "mtime": 1788236278.1974957,
+    "hash": "79437474556d47cf8af90b119010c9a7"
+  },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\billingMode.ts": {
     "mtime": 1778570020.2658143,
     "hash": "0c77d419329d081d7039603f5243975d"
@@ -662,6 +670,10 @@
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\partyLedger.ts": {
     "mtime": 1784276078.9493325,
     "hash": "c8d24545cedac2c18a2b2f8bce5be01e"
+  },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\payablesApi.ts": {
+    "mtime": 1788236152.0594501,
+    "hash": "d4c33184ae2c5604196b73eda39ef240"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\payeeSearch.ts": {
     "mtime": 1787730375.990823,
@@ -1071,6 +1083,10 @@
     "mtime": 1784263698.7420766,
     "hash": "02c5d43e366941b75059f2b40084f62a"
   },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\Attendance.tsx": {
+    "mtime": 1788233677.6491995,
+    "hash": "8b57c741cc3c5e34d01906f6ab4f249a"
+  },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\BillDetail.tsx": {
     "mtime": 1782718704.5861585,
     "hash": "5a5b12d6654caaa88758d4693a4f1e91"
@@ -1167,6 +1183,10 @@
     "mtime": 1782185666.2108378,
     "hash": "de2e2af8d1443d12f62b28040c32b1b6"
   },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\Payables.tsx": {
+    "mtime": 1788236186.9976492,
+    "hash": "f553e1cb7d904d5f840098b24e8bcdae"
+  },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\Pending.tsx": {
     "mtime": 1787807635.6541038,
     "hash": "8167d89ceee87e31ff3decfb631f37fe"
@@ -1236,8 +1256,8 @@
     "hash": "340be530d1d3885d4bec7c2ccba6c888"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\PurchaseOrderDetail.tsx": {
-    "mtime": 1788199760.509738,
-    "hash": "7a57ed637d238ae41b76f69b284f739d"
+    "mtime": 1788227173.8014162,
+    "hash": "d6a7e1d6cfa50107e0a77af4a2300ff4"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\PurchaseOrders.tsx": {
     "mtime": 1787838231.891287,
@@ -2806,6 +2826,10 @@
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\migrations\\20260831000005_split_txn_per_row.sql": {
     "mtime": 1788177762.8337502,
     "hash": "a515720a3b8bada6b2cecde997c415e9"
+  },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\supabase\\migrations\\20260901000000_labour_attendance.sql": {
+    "mtime": 1788233836.0139046,
+    "hash": "aa24152a2f0add5e1ba582ab6e65f5df"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\diff.txt": {
     "mtime": 1779510146.5580544,
