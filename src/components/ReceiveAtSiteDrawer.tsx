@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 
@@ -292,7 +293,9 @@ export default function ReceiveAtSiteDrawer({ isOpen, onClose, onSuccess, po, se
     setTimeout(() => onSuccess(grnId), 1200);
   };
 
-  return (
+  // Portal to <body> so the PO-detail's .podx CSS (which has its own .item/.field/.sub/.input rules)
+  // can't bleed onto this modal's identically-named classes and collapse the content.
+  return createPortal(
     <div className="ras" onClick={onClose}>
       <style>{CSS}</style>
       <section className="sheet" onClick={(e) => e.stopPropagation()} aria-labelledby="ras-title">
@@ -454,6 +457,7 @@ export default function ReceiveAtSiteDrawer({ isOpen, onClose, onSuccess, po, se
           </>
         )}
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
