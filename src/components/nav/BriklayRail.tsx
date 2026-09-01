@@ -24,7 +24,7 @@ import {
   IconChevronDown, IconChevronLeft, IconDots,
   IconSettings, IconLogout, IconUser,
   IconBox, IconListNumbers, IconTruck, IconLoader2, IconChecklist, IconAlertTriangle,
-  IconListCheck, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand,
+  IconListCheck, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconReceipt2,
 } from '@tabler/icons-react';
 import { supabase } from '../../lib/supabase';
 import { clearPersistedCache } from '../../lib/queryClient';
@@ -85,13 +85,16 @@ function AttentionBadge({ n }: { n?: number }) {
 }
 
 // ── one rail row (icon spine, label appears on expand) ────────────────────────
-type Item = { route: string; label: string; icon?: React.ElementType; node?: React.ReactNode; badge?: number; accent?: boolean; hasPanel?: boolean };
+type Item = { route: string; label: string; icon?: React.ElementType; node?: React.ReactNode; badge?: number; accent?: boolean; hasPanel?: boolean; special?: boolean };
 
 function RailItem({ item, active, open, onNavigate }: { item: Item; active: boolean; open: boolean; onNavigate: () => void }) {
   const [hov, setHov] = useState(false);
   const Icon = item.icon;
   // Active is signalled by the icon + label alone (terra icon, bright label) — no
   // filled chip. Hover gets a soft wash with a clear lift in text/icon contrast.
+  // A "special" entry (Site Desk) is set apart by a subtle NEUTRAL pill + hairline — never
+  // terracotta and never a bright label, so it can't be mistaken for the selected state.
+  const special = !!item.special;
   const iconColor = active ? N.terra : (hov ? N.text : 'rgba(247,243,236,0.62)');
   const labelColor = active ? N.text : (hov ? N.text : N.textSoft);
   return (
@@ -101,7 +104,9 @@ function RailItem({ item, active, open, onNavigate }: { item: Item; active: bool
       style={{
         height: 34, paddingLeft: open ? 10 : 0, paddingRight: open ? 8 : 0, gap: 10,
         justifyContent: open ? 'flex-start' : 'center', borderRadius: 8, textDecoration: 'none',
-        background: hov && !active ? 'rgba(247,243,236,0.10)' : 'transparent', transition: 'background .12s ease', ...font,
+        background: active ? 'transparent' : (hov ? 'rgba(247,243,236,0.12)' : special ? 'rgba(247,243,236,0.05)' : 'transparent'),
+        border: special ? `1px solid ${N.keyline}` : '1px solid transparent',
+        transition: 'background .12s ease', ...font,
       }}
     >
       <span className="flex items-center justify-center shrink-0" style={{ width: 28, height: 28, color: iconColor, transition: 'color .12s ease' }}>
@@ -229,32 +234,21 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
   // ── sections (semantic grouping; all real routes + roles + badges) ──
   const SECTIONS: { label?: string; items: Item[] }[] = [
     {
-      label: 'The books',
+      label: 'Payments',
       items: ([
         can(role !== 'supervisor') && { route: '/ledger', label: 'Transactions', icon: IconArrowsExchange, accent: true },
         { route: '/logbook', label: 'Day book', node: <DayBookIcon />, badge: inbox },
-        /**
-         * SITE MANAGEMENT IS GONE, AND THE DESK IS WHAT IT WAS TRYING TO BE.
-         *
-         * It was a HUB — a nav entry whose only job was to open another nav, offering three doors
-         * (Task Manager · Snags & Issues · Follow-up Rules) into one building. The desk is that
-         * building: its Plan tab is the task manager, its Problems tab is the snags and the issues in
-         * the one number space they always shared, and the follow-up rules live behind its own settings
-         * gear, which is where a rule belongs.
-         *
-         * A menu that leads to a menu is a menu nobody needed.
-         */
-        SITE_DESK_ENABLED && { route: '/desk', label: 'Site Desk', icon: IconLayoutGrid },
         can(role !== 'supervisor') && { route: '/billing', label: 'Client billing', icon: IconFileInvoice, badge: billOverdue },
-        { route: '/insights', label: 'Insights', icon: IconChartPie },
+        can(role !== 'supervisor') && { route: '/payables', label: 'Payables', icon: IconReceipt2 },
       ].filter(Boolean) as Item[]),
     },
     {
-      label: 'Orders & work',
+      label: 'Purchases & work',
       items: ([
         can(role !== 'supervisor' && role !== 'accountant') && { route: '/purchase-orders', label: 'Purchase orders', icon: IconShoppingBag, badge: poUntallied, hasPanel: true },
         // Inward register lives in the per-project nav (see projBase/inward below), not the main rail.
         { route: '/work-orders', label: 'Contracts', icon: IconClipboardList, badge: woPending },
+        { route: '/attendance', label: 'Attendance', icon: IconChecklist },
       ].filter(Boolean) as Item[]),
     },
     {
@@ -262,6 +256,15 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
       items: ([
         can(role !== 'supervisor') && { route: '/stakeholders', label: 'Parties', icon: IconUsersGroup },
         can(role === 'principal' || role === 'management') && { route: '/team', label: 'Team & access', icon: IconShieldLock },
+      ].filter(Boolean) as Item[]),
+    },
+    {
+      // Sits at the bottom of the rail (pinned via margin-top:auto below). The Site Desk is the
+      // day-to-day home for site work, so it reads slightly special (a terracotta-tinted pill).
+      label: 'Site',
+      items: ([
+        { route: '/insights', label: 'Insights', icon: IconChartPie },
+        SITE_DESK_ENABLED && { route: '/desk', label: 'Site Desk', icon: IconLayoutGrid, special: true },
       ].filter(Boolean) as Item[]),
     },
   ];
@@ -407,10 +410,11 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
 
         {/* sections — the PRIMARY rail always shows the top-level nav (icon spine when collapsed).
             In-project / Site-Management sub-navs live in the secondary navbar beside it. */}
-        <nav className="nav-scroll flex-1 overflow-y-auto overflow-x-hidden mt-4" style={pad}>
+        <nav className="nav-scroll flex-1 overflow-y-auto overflow-x-hidden mt-4 flex flex-col" style={pad}>
           {SECTIONS.map((s, i) => (
             s.items.length === 0 ? null : (
-              <div key={i} style={{ marginTop: i > 0 ? (open ? 18 : 0) : 0 }}>
+              // The last section ("Site") is pushed to the bottom of the rail when there's room.
+              <div key={i} style={{ marginTop: i === SECTIONS.length - 1 ? 'auto' : (i > 0 ? (open ? 18 : 0) : 0), paddingTop: i === SECTIONS.length - 1 ? (open ? 18 : 12) : 0 }}>
                 {s.label && (
                   <p className="uppercase font-medium truncate" style={{ color: N.textFaint, letterSpacing: '0.11em', fontSize: 10.5, paddingLeft: 10, marginBottom: open ? 7 : 0, height: open ? 12 : 0, overflow: 'hidden', opacity: open ? 1 : 0, transition: 'opacity .15s' }}>{s.label}</p>
                 )}

@@ -220,6 +220,16 @@ const PODX_CSS = `
 .podx .money .bal .mono{font-size:26px}
 .podx .money .bal.owe .mono{color:var(--terra)}.podx .money .bal.nil .mono{color:var(--sage)}
 .podx .money .sub{font-size:12px;color:var(--ink-3);margin-top:2px}
+.podx .delivered{display:flex;gap:11px;align-items:flex-start;margin:0 0 16px;padding:12px 15px;border-radius:10px;border:1px solid var(--line)}
+.podx .delivered svg{width:20px;height:20px;flex-shrink:0;margin-top:1px}
+.podx .delivered .dtext{display:flex;flex-direction:column;gap:2px}
+.podx .delivered .dtext>b{font-size:14.5px;font-weight:600;line-height:1.35}
+.podx .delivered .dtext>span{font-size:13px;line-height:1.5;color:var(--ink-2)}
+.podx .delivered .dtext>span b{font-weight:600}
+.podx .delivered.full{background:color-mix(in srgb,var(--sage) 12%,var(--paper));border-color:color-mix(in srgb,var(--sage) 40%,var(--line))}
+.podx .delivered.full svg,.podx .delivered.full .dtext>b{color:var(--sage)}
+.podx .delivered.partial{background:color-mix(in srgb,var(--terra) 9%,var(--paper));border-color:color-mix(in srgb,var(--terra) 35%,var(--line))}
+.podx .delivered.partial svg,.podx .delivered.partial .dtext>b,.podx .delivered.partial .dtext>span b{color:var(--terra)}
 .podx .log{list-style:none;margin:0;padding:6px 0}
 .podx .log li{display:grid;grid-template-columns:130px 14px 1fr;gap:10px;padding:10px 16px;font-size:13.5px;color:var(--ink-2);align-items:start}
 .podx .log i{width:8px;height:8px;border-radius:50%;background:var(--line);border:2px solid var(--paper);box-shadow:0 0 0 1px var(--line);margin-top:6px}
@@ -827,6 +837,10 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   // Per-line quantity already received across prior GRNs — fed to the receive wizard as the baseline.
   const recvByLine: Record<string, number> = {};
   (grnItems ?? []).forEach((g: any) => { if (g.po_line_item_id) recvByLine[String(g.po_line_item_id)] = (recvByLine[String(g.po_line_item_id)] || 0) + (Number(g.qty_received) || 0); });
+  // Accepted qty per line — excludes rejected returns (damaged-but-kept still counts, it's a
+  // price negotiation, not a non-delivery). This, valued, is what you should be paying for.
+  const acceptedByLine: Record<string, number> = {};
+  (grnItems ?? []).forEach((g: any) => { if (g.po_line_item_id && g.condition !== 'rejected') acceptedByLine[String(g.po_line_item_id)] = (acceptedByLine[String(g.po_line_item_id)] || 0) + (Number(g.qty_received) || 0); });
   // "Received" means FULLY received — every ordered line's received qty covers what was ordered.
   // A partial receipt (a GRN exists but not all quantities are in) keeps the PO in the receive stage,
   // so the "Receive" button stays until it's complete. No measurable lines → fall back to the flag.
@@ -849,6 +863,27 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const payBase = billForBalance > 0 ? billForBalance : orderValue;
   const balNum = payBase - paidTotal;
   const paidDone = paidTotal > 0 && balNum <= 0;
+
+  // ── Delivered-vs-paying: what's actually landed (and accepted) against what you're about to pay ──
+  // Value the accepted quantities at the ordered rate, capped per line at what was ordered — anything
+  // over the order is surfaced separately, never treated as more to pay. POs with no measurable line
+  // items (e.g. a post-purchase "attach bill" PO with only a jsonb snapshot) can't be measured; we
+  // show nothing there rather than a false 0%.
+  let deliveredValue = 0, overDeliveredValue = 0;
+  (lineItems ?? []).forEach((li: any) => {
+    const ord = Number(li.quantity_ordered) || 0;
+    const rate = Number(li.unit_rate) || 0;
+    const got = acceptedByLine[String(li.id)] || 0;
+    deliveredValue += Math.min(got, ord) * rate;
+    if (got > ord) overDeliveredValue += (got - ord) * rate;
+  });
+  const deliveryMeasurable = totalLines > 0 && subTotal > 0;
+  const deliveredRatio = deliveryMeasurable ? (deliveredValue / subTotal) * 100 : 0;
+  const deliveredPct = deliveryMeasurable ? Math.round(deliveredRatio) : null;
+  // A tiny delivery (₹230 of ₹91,060) rounds to 0% and reads as broken — say "under 1%" instead.
+  const deliveredPctLabel = deliveredPct === null ? '' : deliveredRatio >= 1 ? `${deliveredPct}%` : deliveredValue > 0 ? 'under 1%' : '0%';
+  const payingFor = billForBalance > 0 ? billForBalance : orderValue;
+  const aheadOfDelivery = Math.max(0, payingFor - deliveredValue); // ₹ that would be paid for goods not yet at site
   const doneCount = 1 + (received ? 1 : 0) + (hasBill ? 1 : 0) + (paidDone ? 1 : 0);
   const progressPct = cancelled ? 100 : doneCount * 25;
   const nowStage = cancelled ? null : (!received ? 'recv' : !hasBill ? 'bill' : !paidDone ? 'pay' : null);
@@ -1017,6 +1052,27 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
           </div>
         </div>
 
+        {/* delivery-vs-payment — plain check: how much material is actually at site vs what you're paying */}
+        {deliveredPct !== null && (
+          deliveredPct >= 100 ? (
+            <div className="delivered full">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 6L9 17l-5-5" /></svg>
+              <div className="dtext">
+                <b>All material received</b>
+                <span>{inr0(deliveredValue)} of {inr0(subTotal)} is at site{overDeliveredValue > 0 ? ` · ${inr0(overDeliveredValue)} extra delivered` : ''}.</span>
+              </div>
+            </div>
+          ) : (
+            <div className="delivered partial">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L14.7 3.9a2 2 0 00-3.4 0z" /></svg>
+              <div className="dtext">
+                <b>Only {deliveredPctLabel} of this order has arrived at site</b>
+                <span>{inr0(deliveredValue)} received so far{payingFor > 0 ? <> · you're set to pay {inr0(payingFor)}</> : null}{aheadOfDelivery > 0 ? <> — that's <b>{inr0(aheadOfDelivery)} for material not yet delivered</b></> : null}.</span>
+              </div>
+            </div>
+          )
+        )}
+
         {/* items */}
         <div className="sec">
           <h2>Items</h2>
@@ -1124,6 +1180,13 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
               </select>
             </div>
             <div className="f"><label>Reference / note</label><input placeholder="UTR, cheque no, or who paid" value={payRef} onChange={(e) => setPayRef(e.target.value)} /></div>
+            {/* Heads-up (never a block): this payment would run ahead of what's actually delivered + accepted. */}
+            {deliveryMeasurable && (parseFloat(payAmount) > 0) && (paidTotal + (parseFloat(payAmount) || 0)) > deliveredValue + 1 && (
+              <div className="delivered partial" style={{ gridColumn: '1 / -1' }}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L14.7 3.9a2 2 0 00-3.4 0z" /></svg>
+                <div className="dtext"><span>Only <b>{deliveredPctLabel}</b> ({inr0(deliveredValue)}) has been delivered and accepted. This payment takes the total paid to {inr0(paidTotal + (parseFloat(payAmount) || 0))} — <b>{inr0(Math.max(0, paidTotal + (parseFloat(payAmount) || 0) - deliveredValue))} for material not yet at site</b>.</span></div>
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn ghost" onClick={() => setPayRowOpen(false)}>Discard</button>
               <button className="btn primary" disabled={recordPayment.isPending || !(parseFloat(payAmount) > 0)} onClick={() => recordPayment.mutate(undefined, { onSuccess: () => setPayRowOpen(false) })}>{recordPayment.isPending ? <span className="spinner" /> : 'Save payment'}</button>

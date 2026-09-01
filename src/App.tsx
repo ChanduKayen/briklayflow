@@ -23,7 +23,7 @@ import {
   IconShieldLock,
   IconLogout, IconChevronLeft, IconDots,
   IconRepeat, IconLayoutGrid, IconFiles, IconUsers, IconUser,
-  IconCircleDot, IconClock, IconFileText, IconChecklist,
+  IconCircleDot, IconClock, IconFileText, IconChecklist, IconReceipt2,
 } from '@tabler/icons-react';
 
 // Route pages are lazy-loaded so the dev server (and the prod bundle) only transform/ship
@@ -52,6 +52,8 @@ const InwardRegister = lazy(() => import('./pages/InwardRegister'));
 const NewProjectWizard = lazy(() => import('./components/NewProjectWizard'));
 const TransactionDetail = lazy(() => import('./pages/TransactionDetail'));
 const PurchaseOrders = lazy(() => import('./pages/PurchaseOrders'));
+const Attendance = lazy(() => import('./pages/Attendance'));
+const Payables = lazy(() => import('./pages/Payables'));
 const NewPurchaseOrder = lazy(() => import('./pages/NewPurchaseOrder'));
 const PurchaseOrderDetail = lazy(() => import('./pages/PurchaseOrderDetail'));
 const RfqCompare = lazy(() => import('./pages/RfqCompare'));
@@ -585,6 +587,8 @@ function App() {
           <Route path="/purchase-requests" element={<Navigate to="/purchase-orders?status=draft" replace />} />
           <Route path="/purchase-orders/new" element={<NewPurchaseOrder session={session} />} />
           <Route path="/purchase-orders/:poId" element={<PurchaseOrderDetail session={session} />} />
+          <Route path="/attendance" element={<Attendance session={session} />} />
+          <Route path="/payables" element={<Payables session={session} />} />
           <Route path="/rfq/:rfqId" element={<RfqCompare session={session} />} />
           <Route path="/inward-register" element={<InwardRegister session={session} />} />
           <Route path="/team" element={<Team session={session} />} />
@@ -674,6 +678,7 @@ function getMobileTitle(pathname: string): string {
     '/invoices':            'Invoices',
     '/invoices/new':        'New Invoice',
     '/attendance':               'Attendance',
+    '/payables':                 'Payables',
     '/cost-codes':               'Cost Codes',
     '/procurement/requests':     'Requests',
     '/procurement/quotes':       'Quotes',
@@ -1043,9 +1048,11 @@ function MoreNavSheet({
   const globalItems = [
     { path: '/site-desk',     icon: IconClipboardList,         label: 'Site Desk',       show: true },
     { path: '/tasks',         icon: IconChecklist,             label: 'Task Manager',    show: true },
+    { path: '/attendance',    icon: IconChecklist,             label: 'Attendance',      show: true },
     { path: '/stakeholders',  icon: IconUsers,                 label: 'Parties',         show: role !== 'supervisor' },
     { path: '/inward-register', icon: IconLayoutGrid,          label: 'Inward Register', show: role !== 'supervisor' && role !== 'accountant' },
     { path: '/billing',       icon: IconFileInvoice,           label: 'Client Billing', show: role !== 'supervisor' },
+    { path: '/payables',      icon: IconReceipt2,              label: 'Payables',        show: role !== 'supervisor' },
     { path: '/insights',      icon: IconChartPie,              label: 'Insights',       show: true },
     { path: '/team',          icon: IconShieldLock,            label: 'Team & Access',  show: role === 'principal' || role === 'management' },
     { path: '/follow-up-rules', icon: IconClock,               label: 'Follow-up Rules', show: role === 'principal' || role === 'management' },
