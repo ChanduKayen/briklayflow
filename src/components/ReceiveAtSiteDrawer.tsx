@@ -98,6 +98,9 @@ const CSS = `
 .ras .close{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;color:var(--ink-3);flex:none}
 .ras .close:hover{background:var(--line);color:var(--ink)}
 .ras .body{padding:8px 24px 24px;display:flex;flex-direction:column;gap:22px;overflow-y:auto;flex:1;min-height:0}
+/* the body is a flex-column scroll region — stop its children shrinking to fit, or many item cards
+   collapse into thin lines; they should keep their height and let the body scroll instead. */
+.ras .body>*{flex-shrink:0}
 .ras .muted{color:var(--ink-2)}
 .ras .quiet{color:var(--ink-3);font-size:13px}
 .ras .linkish{color:var(--ink-2);text-decoration:underline;text-decoration-color:var(--line-strong);text-underline-offset:3px;font-size:14px}
