@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useSnackbar } from '../Snackbar';
+import PhoneInput from '../PhoneInput';
 import { useOrgId } from '../../lib/auth/AuthProvider';
 import { useUserProfile } from '../../App';
 import { emailInviteLink, whatsappInviteLink } from '../../lib/team/invites';
@@ -721,11 +722,7 @@ export default function TeamAccess({ session }: { session: Session }) {
                   <Mail size={14} style={{ color: V.faint }} />
                   <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email address (optional)" className="bg-transparent outline-none flex-1 min-w-0" style={{ color: V.ink, ...font, ...T.sm }} />
                 </div>
-                <div className="inline-flex items-center gap-2 px-3 rounded-xl" style={{ background: V.field, height: 42 }}>
-                  <WhatsAppGlyph size={13} color={WA} />
-                  <span style={{ color: V.faint, ...font, ...nums, ...T.sm }}>+91</span>
-                  <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="98765 43210" className="bg-transparent outline-none flex-1 min-w-0" style={{ color: V.ink, ...font, ...nums, ...T.sm }} />
-                </div>
+                <PhoneInput value={phone} onChange={setPhone} placeholder="98765 43210" style={{ height: 42 }} />
                 <select value={role} onChange={(e) => setRole(e.target.value)} className="px-3 py-2.5 rounded-xl outline-none" style={{ background: V.field, color: V.ink, ...font, ...T.sm }}>
                   {INVITE_ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </select>

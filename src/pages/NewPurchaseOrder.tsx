@@ -3483,6 +3483,10 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
 
   async function handleSubmit(status: string) {
     setIsGlobalMatching(true);
+    // Everything runs inside try/finally so the full-screen "Matching items…" overlay
+    // ALWAYS comes down — a thrown RPC/network error here used to strand the user on a
+    // spinner forever with no message. Now it closes and the error is shown.
+    try {
     let hasUnresolved = false;
     const updatedLines = [...lineItems];
 
@@ -3519,7 +3523,6 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
 
     if (hasUnresolved) {
       setLineItems(updatedLines);
-      setIsGlobalMatching(false);
       setSkuResolutionMode(true);
       const firstUnresolved = updatedLines.find(li => li.needs_sku_badge);
       if (firstUnresolved) {
@@ -3536,8 +3539,12 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
     }
 
     setLineItems(updatedLines);
-    setIsGlobalMatching(false);
     saveMutation.mutate(status);
+    } catch (e: any) {
+      showSnackbar(e?.message || 'Something went wrong preparing the order. Please try again.', { type: 'error' });
+    } finally {
+      setIsGlobalMatching(false);
+    }
   }
 
   return (
@@ -4533,7 +4540,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
             <button
               type="button"
               onClick={() => handleSubmit('DRAFT')}
-              disabled={saveMutation.isPending}
+              disabled={saveMutation.isPending || isGlobalMatching}
               className="text-[14px] font-medium transition-colors disabled:opacity-50"
               style={{ color: uiV.system }}
             >
@@ -4542,7 +4549,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
             <button
               type="button"
               onClick={() => handleSubmit('ORDERED')}
-              disabled={!canSubmit || saveMutation.isPending}
+              disabled={!canSubmit || saveMutation.isPending || isGlobalMatching}
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[14px] font-semibold transition-all disabled:cursor-not-allowed"
               style={{ background: canSubmit && !saveMutation.isPending ? uiV.accent : uiV.line, color: canSubmit && !saveMutation.isPending ? '#fff' : uiV.systemFaint }}
               title={!canSubmit ? (!vendorId ? 'Select a vendor' : !projectId ? 'Select a project' : 'Add at least one item') : undefined}

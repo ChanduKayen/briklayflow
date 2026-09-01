@@ -12,6 +12,7 @@ import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { useSnackbar } from '../Snackbar';
+import PhoneInput from '../PhoneInput';
 
 export interface RfqLineItem { line?: number; item_name?: string; unit?: string; qty?: number | string; spec?: string }
 
@@ -36,9 +37,9 @@ function tradeWords(s: string | null | undefined): string[] {
 }
 
 const IcSearch = () => <svg className="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>;
-const IcPhone = () => <svg className="ic" viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2.4" /><path d="M11 18.5h2" /></svg>;
 const IcPlane = () => <svg className="ic" viewBox="0 0 24 24"><path d="M21 3L3 10.5l6 2.5 2.5 6L21 3z" /><path d="M9 13l3-3" /></svg>;
 const IcCheck = () => <svg className="ic" viewBox="0 0 24 24"><path d="M4 12l5 5L20 6" /></svg>;
+const IcAlert = () => <svg className="ic" viewBox="0 0 24 24" fill="none"><path d="M12 8v5M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h16.9a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" /></svg>;
 const IcClose = () => <svg className="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>;
 const IcCaret = () => <svg className="ic caret" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg>;
 
@@ -197,8 +198,12 @@ const RQX_CSS = `
 .rqx .done .fail{margin-top:14px;text-align:left;background:var(--terra-tint);border:1px solid var(--terra-tint);border-radius:12px;padding:12px 14px}
 .rqx .done .fail p{margin:0;font-size:12.5px;color:var(--terra-deep)}
 .rqx .done .fail p.h{font-weight:600;margin-bottom:3px}
-.rqx .done .ok-btn{margin-top:22px;height:44px;padding:0 26px;border:0;border-radius:12px;background:var(--ink);color:var(--paper);
+.rqx .seal.fail-seal{background:var(--terra-tint)}
+.rqx .seal.fail-seal .ic{stroke:var(--terra);fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.rqx .done-acts{display:flex;gap:10px;justify-content:center;align-items:center;margin-top:22px}
+.rqx .done .ok-btn{height:44px;padding:0 26px;border:0;border-radius:12px;background:var(--ink);color:var(--paper);
   font-family:inherit;font-size:14px;font-weight:600;cursor:pointer}
+.rqx .done .ok-btn.ghost{background:var(--paper-2);color:var(--ink);border:1px solid var(--line-strong)}
 `;
 
 export default function RequestQuotesModal({ orgId, projectId, deliveryLocation, tradeCategory, items, rfqId, onClose, onSent }: Props) {
@@ -209,12 +214,11 @@ export default function RequestQuotesModal({ orgId, projectId, deliveryLocation,
   const [showAll, setShowAll] = useState(false);
   const [search, setSearch] = useState('');
   const [phase, setPhase] = useState<'pick' | 'sending' | 'done'>('pick');
-  const [result, setResult] = useState<{ sent: string[]; failed: { name?: string; error: string }[] } | null>(null);
+  const [result, setResult] = useState<{ sent: string[]; failed: { name?: string; error: string }[]; rfqId?: string } | null>(null);
 
   // selection + per-vendor (possibly edited) phone + which no-number rows are being filled
   const [sel, setSel] = useState<Record<string, boolean>>({});
   const [phones, setPhones] = useState<Record<string, string>>({});
-  const [openPhone, setOpenPhone] = useState<Record<string, boolean>>({});
 
   // add-a-vendor row
   const [newName, setNewName] = useState('');
@@ -327,9 +331,13 @@ export default function RequestQuotesModal({ orgId, projectId, deliveryLocation,
       if (error) throw error;
       const res = data as { ok: boolean; rfq_id?: string; sent: string[]; failed: { name?: string; error: string }[]; error?: string };
       if (!res.ok) throw new Error(res.error || 'Failed to send');
-      setResult({ sent: res.sent ?? [], failed: res.failed ?? [] });
+      const sent = res.sent ?? [], failed = res.failed ?? [];
+      setResult({ sent, failed, rfqId: res.rfq_id });
       setPhase('done');
-      if (res.rfq_id) onSent?.(res.rfq_id);
+      // Hand off to the parent (which may navigate away) ONLY on a clean, complete send.
+      // If any vendor failed, we keep the user on the done screen so they actually SEE it —
+      // the handoff then happens when they acknowledge with "Done".
+      if (failed.length === 0 && res.rfq_id) onSent?.(res.rfq_id);
     } catch (e: any) {
       show(e.message || 'Could not send the request', { type: 'error' });
       setPhase('pick');
@@ -353,16 +361,29 @@ export default function RequestQuotesModal({ orgId, projectId, deliveryLocation,
 
         {phase === 'done' && result ? (
           <div className="done">
-            <div className="seal"><IcCheck /></div>
-            <h4>Request sent to {result.sent.length} vendor{result.sent.length !== 1 ? 's' : ''}</h4>
-            {result.sent.length > 0 && <p className="who">{result.sent.join(', ')}</p>}
+            {result.sent.length > 0 ? (
+              <>
+                <div className="seal"><IcCheck /></div>
+                <h4>Request sent to {result.sent.length} vendor{result.sent.length !== 1 ? 's' : ''}</h4>
+                <p className="who">{result.sent.join(', ')}</p>
+              </>
+            ) : (
+              <>
+                <div className="seal fail-seal"><IcAlert /></div>
+                <h4>Couldn&apos;t reach any vendor</h4>
+                <p className="who">No requests went out — nothing was sent. You can fix the numbers and try again.</p>
+              </>
+            )}
             {result.failed.length > 0 && (
               <div className="fail">
-                <p className="h">Couldn&apos;t reach {result.failed.length}:</p>
+                <p className="h">Couldn&apos;t reach {result.failed.length}{result.sent.length > 0 ? ` of ${result.sent.length + result.failed.length}` : ''}:</p>
                 {result.failed.map((f, i) => <p key={i}>{f.name || 'Vendor'} — {f.error}</p>)}
               </div>
             )}
-            <button className="ok-btn" onClick={onClose}>Done</button>
+            <div className="done-acts">
+              {result.sent.length === 0 && <button className="ok-btn ghost" onClick={() => { setResult(null); setPhase('pick'); }}>Back &amp; retry</button>}
+              <button className="ok-btn" onClick={() => { if (result.failed.length > 0 && result.rfqId) onSent?.(result.rfqId); onClose(); }}>Done</button>
+            </div>
           </div>
         ) : (
           <>
@@ -393,7 +414,6 @@ export default function RequestQuotesModal({ orgId, projectId, deliveryLocation,
                 {shown.map((v) => {
                   const on = !!sel[v.stakeholder_id];
                   const ph = phoneOf(v);
-                  const showInput = !!ph || !!openPhone[v.stakeholder_id];
                   return (
                     <div key={v.stakeholder_id} className={`vrow${on ? ' on' : !ph ? ' need' : ''}`}>
                       <button className={`cbx${on ? ' on' : ''}`} onClick={() => setSel((s) => ({ ...s, [v.stakeholder_id]: !on }))} aria-label={on ? 'Deselect' : 'Select'}>
@@ -403,20 +423,13 @@ export default function RequestQuotesModal({ orgId, projectId, deliveryLocation,
                         <b>{v.name}</b>
                         {ph ? <span>{v.category || 'Vendor'}</span> : <span className="warn">no mobile on file</span>}
                       </div>
-                      {showInput ? (
-                        <div className="phone">
-                          <IcPhone />
-                          <input
-                            value={ph} inputMode="tel" placeholder="mobile"
-                            autoFocus={!!openPhone[v.stakeholder_id] && !v.contact}
-                            onChange={(e) => setPhones((p) => ({ ...p, [v.stakeholder_id]: e.target.value }))}
-                          />
-                        </div>
-                      ) : (
-                        <button className="addmob" onClick={() => { setOpenPhone((o) => ({ ...o, [v.stakeholder_id]: true })); setSel((s) => ({ ...s, [v.stakeholder_id]: true })); }}>
-                          <IcPhone /> add mobile
-                        </button>
-                      )}
+                      <PhoneInput
+                        value={ph} placeholder="mobile" style={{ width: 208, height: 38 }}
+                        onChange={(local) => {
+                          setPhones((p) => ({ ...p, [v.stakeholder_id]: local }));
+                          if (local.length === 10) setSel((s) => ({ ...s, [v.stakeholder_id]: true })); // a typed number opts the row in
+                        }}
+                      />
                     </div>
                   );
                 })}
@@ -426,7 +439,7 @@ export default function RequestQuotesModal({ orgId, projectId, deliveryLocation,
               {/* add a vendor */}
               <div className="newrow">
                 <input className="nm" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New vendor — name" />
-                <input className="ph" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} placeholder="+91 mobile" inputMode="tel" />
+                <PhoneInput value={newPhone} onChange={setNewPhone} placeholder="mobile" style={{ width: 190, height: 40 }} />
                 <button
                   className={`addsel${newName.trim() && isValid(newPhone) ? ' ready' : ''}`}
                   onClick={addVendor}

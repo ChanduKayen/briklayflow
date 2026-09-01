@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase';
 import { useUserProfile } from '../App';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import { useSnackbar } from '../components/Snackbar';
+import PhoneInput from '../components/PhoneInput';
 import { useBillingMode, type BillingMode } from '../lib/billingMode';
 
 const MEMBERSHIP_CACHE_KEY = 'briklay_membership_ctx';
@@ -275,12 +276,7 @@ export default function Profile({ session }: { session: Session }) {
               {phoneStep === 'number' && (
                 <>
                   <div className="flex gap-2">
-                    <div className="bk-input flex-1 flex items-center gap-2">
-                      <span className="text-[13px] text-on-surface-variant shrink-0">+91</span>
-                      <input inputMode="numeric" maxLength={10} autoFocus value={newPhone}
-                        onChange={e => setNewPhone(e.target.value.replace(/\D/g, ''))}
-                        placeholder="10-digit mobile number" className="flex-1 min-w-0 bg-transparent outline-none text-on-surface" />
-                    </div>
+                    <PhoneInput value={newPhone} onChange={setNewPhone} autoFocus placeholder="10-digit mobile number" variant="material" style={{ flex: 1 }} />
                     <button type="button" onClick={sendPhoneOtp} disabled={phoneBusy || newPhone.length < 10}
                       className="shrink-0 px-4 rounded-xl text-[13px] font-semibold text-on-primary bg-primary disabled:opacity-40 transition-opacity">
                       {phoneBusy ? 'Sending…' : 'Send code'}

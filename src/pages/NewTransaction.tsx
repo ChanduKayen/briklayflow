@@ -12,6 +12,7 @@ import { useUserProfile } from '../App';
 import { CostCodePicker } from '../components/CostCodePicker';
 import { GenHeadPicker } from '../components/GenHeadPicker';
 import { DirLabel } from '../components/NewTxnFab';
+import PhoneInput from '../components/PhoneInput';
 import { getCostCode, costCodeLabel, ALL_COST_CODES, GEN_HEADS, GEN_FALLBACK } from '../lib/costCodes';
 import { autoCloseWOIfFullyPaid } from '../lib/woAutoClose';
 import { readVendorBill, findPOsByBill, type BillPOMatch } from '../lib/vendorTrackingApi';
@@ -552,6 +553,7 @@ export default function NewTransaction({ session: _session }: { session: Session
   const [newStkType, setNewStkType] = useState<'Worker' | 'Vendor' | 'GeneralExpense'>('Vendor');
   const [newStkTrade, setNewStkTrade] = useState('');
   const [newStkTradeOther, setNewStkTradeOther] = useState('');
+  const [newStkContact, setNewStkContact] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [mode, setMode] = useState<PayMode>('NEFT');
   const [totalAmt, setTotalAmt] = useState<number>(0);
@@ -1625,12 +1627,12 @@ export default function NewTransaction({ session: _session }: { session: Session
                             </div>
                             <div className="mb-5">
                               <label className="text-[10px] font-semibold text-on-surface-variant/60 block mb-1.5 uppercase tracking-wide">Contact (optional)</label>
-                              <input id="stk_contact" className="bk-input focus:ring-4 focus:ring-primary/5 transition-all duration-200" placeholder="Phone" />
+                              <PhoneInput inputId="stk_contact" variant="material" value={newStkContact} onChange={setNewStkContact} placeholder="Phone" />
                             </div>
                           </>
                         )}
                         <div className="flex gap-2 justify-end">
-                          <button type="button" className="bk-btn-ghost px-4 py-2 rounded-xl text-[13px] border border-outline-variant/30" onClick={() => { setShowCreate(false); setNewStkTrade(''); setNewStkTradeOther(''); }}>Cancel</button>
+                          <button type="button" className="bk-btn-ghost px-4 py-2 rounded-xl text-[13px] border border-outline-variant/30" onClick={() => { setShowCreate(false); setNewStkTrade(''); setNewStkTradeOther(''); setNewStkContact(''); }}>Cancel</button>
                           {newStkType === 'GeneralExpense' ? (
                             <button
                               type="button"

@@ -15,6 +15,7 @@
 import { useState } from 'react';
 import { Package, ChevronLeft } from 'lucide-react';
 import { V, nums } from './voiceTokens';
+import PhoneInput from '../PhoneInput';
 import {
   normalizeWhatsApp, vendorWhatsAppFrom, saveVendorWhatsApp, sendPoToVendor,
 } from '../../lib/poVendorSend';
@@ -159,18 +160,7 @@ export default function SendToVendorPanel({
           <label className="block text-xs font-medium mb-1.5" style={{ color: V.userSoft }}>
             Vendor's WhatsApp number
           </label>
-          <div className="flex items-center rounded-xl overflow-hidden" style={{ border: `1px solid ${V.lineStrong}`, background: V.surface }}>
-            <span className="px-3 py-2.5 text-sm" style={{ background: V.field, color: V.system, borderRight: `1px solid ${V.line}` }}>+</span>
-            <input
-              autoFocus
-              inputMode="tel"
-              value={input}
-              onChange={(e) => { setInput(e.target.value.replace(/[^\d+\s]/g, '')); setErr(null); }}
-              placeholder="91 98765 43210"
-              className="flex-1 px-3 py-2.5 text-sm outline-none"
-              style={{ color: V.user, background: 'transparent', ...nums }}
-            />
-          </div>
+          <PhoneInput autoFocus value={input} placeholder="98765 43210" onChange={(local) => { setInput(local); setErr(null); }} />
           <p className="text-xs mt-1.5" style={{ color: V.systemFaint }}>
             Saved to this vendor — we won't ask again.
           </p>

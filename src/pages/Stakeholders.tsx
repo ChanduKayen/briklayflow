@@ -8,6 +8,7 @@ import { useUserProfile } from '../App';
 import { useAuth } from '../lib/auth/AuthProvider';
 import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 import PartySpreadsheet from '../components/PartySpreadsheet';
+import PhoneInput from '../components/PhoneInput';
 import { usePrefetchStakeholder } from '../hooks/usePrefetch';
 
 // ── helpers ─────────────────────────────────────────────────────────────────────
@@ -475,8 +476,8 @@ export default function Stakeholders({ session }: { session: Session }) {
           )}
 
           <div className="field"><label>Phone</label>
-            <input className="m" inputMode="tel" placeholder="+91 …" value={form.contact}
-              disabled={!canManage} onChange={(e) => set('contact', e.target.value)} /></div>
+            <PhoneInput value={form.contact} disabled={!canManage} placeholder="98765 43210"
+              style={{ width: 210, height: 38 }} onChange={(local) => set('contact', local)} /></div>
 
           <div className="field"><label>Bank / UPI</label>
             <input className="m" placeholder="Account no / UPI id" value={form.bank}

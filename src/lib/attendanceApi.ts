@@ -31,7 +31,7 @@ export interface CrewRow {
   contract: boolean; basis: 'contract' | 'labour'; woId: string | null; paidThrough?: number;
   head: Cell[]; cats: CatRow[]; stages: StageRow[];
 }
-export interface DirectRow { id: string; n: string; d: string; cat: string; rate: number; own?: boolean; cells: Cell[] }
+export interface DirectRow { id: string; n: string; d: string; cat: string; rate: number; own?: boolean; stakeholderId: string | null; cells: Cell[] }
 export interface SiteRow { site: string; label: string; hint: string; crews: CrewRow[]; direct: DirectRow[] }
 
 export interface WeekData { sites: SiteRow[]; card: RateCard }
@@ -147,7 +147,11 @@ export async function loadWeek(monday: Date): Promise<WeekData> {
       const crewCats = cats.filter((k: any) => k.crew_id === c.crew_id).map((k: any): CatRow => ({
         id: k.id, n: k.category, rate: Number(k.rate) || 0, own: k.own_rate, cells: cellsFor(byCat[k.id] ?? [], dates),
       }));
-      const crewStages = milestones.filter((m: any) => m.wo_id === c.wo_id).map((m: any): StageRow => {
+      // Show the phases the crew was set to work (labour_crews.stage_ids); null/empty = all phases.
+      const pickedStages: string[] | null = Array.isArray(c.stage_ids) && c.stage_ids.length ? c.stage_ids : null;
+      const crewStages = milestones
+        .filter((m: any) => m.wo_id === c.wo_id && (!pickedStages || pickedStages.includes(m.milestone_id)))
+        .map((m: any): StageRow => {
         const isLump = (m.unit_type ?? 'LS') === 'LS';
         return {
           milestoneId: m.milestone_id, n: m.name, type: isLump ? 'lump' : 'measured',
@@ -170,7 +174,7 @@ export async function loadWeek(monday: Date): Promise<WeekData> {
       };
     });
     const projectDirect = direct.filter((w: any) => w.project_id === p.project_id).map((w: any): DirectRow => ({
-      id: w.id, n: w.name, d: w.category, cat: w.category, rate: Number(w.rate) || 0, own: w.own_rate, cells: cellsFor(byDirect[w.id] ?? [], dates),
+      id: w.id, n: w.name, d: w.category, cat: w.category, rate: Number(w.rate) || 0, own: w.own_rate, stakeholderId: w.stakeholder_id ?? null, cells: cellsFor(byDirect[w.id] ?? [], dates),
     }));
     return { site: p.project_id, label: p.name, hint: p.site_location || '', crews: projectCrews, direct: projectDirect };
   });
@@ -290,8 +294,52 @@ export async function loadWorkOrdersForProject(projectId: string): Promise<WOLit
   if (error) throw error;
   return (data ?? []).map((w: any) => ({ wo_id: w.wo_id, label: w.title || w.scope_of_work || w.wo_id, orderValue: Number(w.order_value) || 0, stakeholderId: w.stakeholder_id ?? null }));
 }
-export async function linkCrewToWorkOrder(crewId: string, woId: string): Promise<void> {
-  const { error } = await supabase.from('labour_crews').update({ wo_id: woId, is_contract: true, basis: 'contract' }).eq('crew_id', crewId);
+// A work order's phases/stages — for the "which phases apply" multi-select.
+export interface WOStage { milestone_id: string; name: string; seq_no: number }
+export async function loadWorkOrderStages(woId: string): Promise<WOStage[]> {
+  const { data, error } = await supabase.from('wo_milestones').select('milestone_id, name, seq_no').eq('wo_id', woId).order('seq_no');
+  if (error) throw error;
+  return (data ?? []).map((m: any) => ({ milestone_id: m.milestone_id, name: m.name, seq_no: m.seq_no }));
+}
+// stageIds = the phases the crew works (null/empty → all phases).
+export async function linkCrewToWorkOrder(crewId: string, woId: string, stageIds?: string[] | null): Promise<void> {
+  const { error } = await supabase.from('labour_crews')
+    .update({ wo_id: woId, is_contract: true, basis: 'contract', stage_ids: stageIds && stageIds.length ? stageIds : null })
+    .eq('crew_id', crewId);
+  if (error) throw error;
+}
+
+// Promote a single direct worker into a one-person crew on contract (so it gains the
+// Contract/Labour toggle + stages). The old direct-worker row is removed (its attendance
+// cascades away) — from here the person is tracked by the crew's % completion, not days.
+export async function promoteDirectToCrew(
+  orgId: string, projectId: string,
+  worker: { id: string; name: string; category: string; rate: number; stakeholderId: string | null },
+  woId: string, trade: string | null, stageIds?: string[] | null,
+): Promise<void> {
+  const { data, error } = await supabase.from('labour_crews')
+    .insert({ org_id: orgId, project_id: projectId, name: worker.name, stakeholder_id: worker.stakeholderId, trade, description: worker.category, is_contract: true, basis: 'contract', wo_id: woId, stage_ids: stageIds && stageIds.length ? stageIds : null })
+    .select('crew_id').single();
+  if (error) throw error;
+  const { error: e2 } = await supabase.from('labour_crew_categories').insert({ org_id: orgId, crew_id: data!.crew_id, category: worker.category, rate: worker.rate });
+  if (e2) throw e2;
+  const { error: e3 } = await supabase.from('labour_direct_workers').delete().eq('id', worker.id);
+  if (e3) throw e3;
+}
+
+/** Remove a crew from the sheet (cascades its categories + attendance). */
+export async function removeCrew(crewId: string): Promise<void> {
+  const { error } = await supabase.from('labour_crews').delete().eq('crew_id', crewId);
+  if (error) throw error;
+}
+/** Remove a direct worker from the sheet (cascades its attendance). */
+export async function removeDirectWorker(id: string): Promise<void> {
+  const { error } = await supabase.from('labour_direct_workers').delete().eq('id', id);
+  if (error) throw error;
+}
+/** Remove a skill (category) row from a crew (cascades its attendance). */
+export async function removeCategory(id: string): Promise<void> {
+  const { error } = await supabase.from('labour_crew_categories').delete().eq('id', id);
   if (error) throw error;
 }
 

@@ -1,106 +1,536 @@
-// Payables — "who do we owe, and how much", read from dues that already exist in the
-// ledger (approved-PO balances + work-order balances + this week's labour muster).
-// See src/lib/payablesApi.ts for the assembly. Lives under the Payments nav group.
-import { useMemo } from 'react';
+// Payables — the weekly payment run (labour-first). Rows are party × project, rolled up from
+// the attendance week; each figure shows its basis + arithmetic on expand; paying ≠ the computed
+// figure asks WHY (carried / advance / re-agreed); Mark-paid records a REAL transaction.
+// Vendors, salaries, bills and the WhatsApp receipt are the next slices.
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
 import type { Session } from '@supabase/supabase-js';
-import { loadPayables } from '../lib/payablesApi';
-
-const PAYLX_CSS = `
-.paylx{background:var(--cream,#f6f2ea);color:var(--walnut,#3b2f27);font:15px/1.45 "DM Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased;padding:34px 28px 80px;
-  --cream:#f6f2ea;--paper:#fdfbf7;--line:#e6dfd2;--line-2:#d5cbb9;--walnut:#3b2f27;--walnut-2:#6d5f54;--walnut-3:#9c9083;--terracotta:#b8613a;--sage:#5f7a5e}
-.paylx *{box-sizing:border-box}
-.paylx .wrap{width:100%;max-width:920px;margin:0 auto}
-.paylx .mono{font-family:"DM Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
-.paylx h1{font:400 38px/1.05 "Playfair Display",serif;margin:0}
-.paylx .lede{color:var(--walnut-2);margin-top:8px;font-size:15px}
-.paylx .totals{display:flex;gap:26px;margin:20px 0 26px;padding:16px 20px;background:var(--paper);border:1px solid var(--line);border-radius:12px;align-items:center;flex-wrap:wrap}
-.paylx .totals .t .l{font-size:12px;color:var(--walnut-3)}
-.paylx .totals .t .v{font-size:24px;font-weight:500;margin-top:2px}
-.paylx .totals .t.grand .v{color:var(--terracotta)}
-.paylx .totals .sp{flex:1}
-.paylx .sec{margin:26px 0 10px;display:flex;align-items:baseline;gap:12px}
-.paylx .sec h2{font:500 19px "Playfair Display",serif;margin:0}
-.paylx .sec .s{font-size:13px;color:var(--walnut-3)}
-.paylx .card{background:var(--paper);border:1px solid var(--line);border-radius:14px;overflow:hidden}
-.paylx .row{display:flex;align-items:center;gap:14px;padding:14px 18px;border-top:1px solid var(--line);cursor:pointer;transition:background .12s ease}
-.paylx .row:first-child{border-top:0}
-.paylx .row:hover{background:var(--cream)}
-.paylx .row .nm{font-weight:500;font-size:15px}
-.paylx .row .sub{font-size:12.5px;color:var(--walnut-3);margin-top:2px}
-.paylx .row .amt{margin-left:auto;text-align:right}
-.paylx .row .amt .v{font-size:17px;font-weight:500}
-.paylx .row .amt .k{font-size:12px;color:var(--walnut-3);margin-top:1px}
-.paylx .row .amt .k b{color:var(--walnut-2);font-weight:500}
-.paylx .empty{padding:26px 18px;text-align:center;color:var(--walnut-3);font-size:14px}
-.paylx .state{padding:70px 18px;text-align:center;color:var(--walnut-3);font-size:14px}
-`;
+import { supabase } from '../lib/supabase';
+import { useOrgId } from '../lib/auth/AuthProvider';
+import { useSnackbar } from '../components/Snackbar';
+import { searchPayees } from '../lib/payeeSearch';
+import { createParty } from '../components/day-book/fileEntry';
+import {
+  loadWeeklyPayments, recordWeeklyPayment, mondayOf, weekLabel,
+  loadRecurring, recurringToRow, addRecurring, removeRecurring, loadVendorRows,
+  type PayRow, type PaySection,
+} from '../lib/weeklyPaymentsApi';
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
+const MODES = ['UPI', 'NEFT', 'Cash', 'Cheque'];
+
+const CSS = `
+.wpx{--cream:#f6f2ea;--paper:#fdfbf7;--line:#e6dfd2;--line-2:#d5cbb9;--walnut:#3b2f27;--walnut-2:#6d5f54;--walnut-3:#9c9083;--terracotta:#b8613a;--sage:#5f7a5e;
+  background:var(--cream);color:var(--walnut);font:14.5px/1.45 "DM Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased;padding:34px 28px 44px;min-height:100vh}
+.wpx *{box-sizing:border-box}
+.wpx .wrap{width:100%;max-width:1180px;margin:0 auto}
+.wpx .mono{font-family:"DM Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.wpx .top{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:22px;gap:20px;flex-wrap:wrap}
+.wpx h1{font:400 36px/1.05 "Playfair Display",serif}
+.wpx .sub{color:var(--walnut-3);margin-top:8px;font-size:14px;display:flex;gap:10px;align-items:center}
+.wpx .sub button{background:none;border:0;color:var(--walnut-2);cursor:pointer;text-decoration:underline;text-decoration-color:var(--line-2);text-underline-offset:3px;font:inherit}
+.wpx .stats{display:flex;gap:28px;text-align:right}
+.wpx .st .l{font-size:12.5px;color:var(--walnut-3)}
+.wpx .st .v{font-size:22px;font-weight:500;margin-top:2px}
+.wpx .st.paid .v{color:var(--sage)}.wpx .st.left .v{color:var(--terracotta)}
+.wpx .site{background:var(--paper);border:1px solid var(--line);border-radius:14px;margin-bottom:16px}
+.wpx .site-h{display:flex;justify-content:space-between;align-items:baseline;padding:12px 18px;background:var(--cream);border-bottom:1px solid var(--line);border-radius:14px 14px 0 0}
+.wpx .site-h .n{font:500 17px "Playfair Display",serif}
+.wpx .site-h .s{font-size:13px;color:var(--walnut-3)}.wpx .site-h .s b{color:var(--walnut);font-weight:500}
+.wpx .hdr,.wpx .row{display:grid;grid-template-columns:minmax(120px,168px) minmax(0,1fr) 88px 124px 92px 104px;gap:12px;align-items:center;padding:9px 16px}
+.wpx .who,.wpx .what{min-width:0}
+.wpx .who .n,.wpx .who .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* a quiet source hint that fades in on hover — where the figure comes from */
+.wpx .what .srchint{color:var(--walnut-3);font-style:italic;opacity:0;transition:opacity .15s ease}
+.wpx .row:hover .what .srchint{opacity:1}
+.wpx .hdr{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--walnut-3);height:30px;border-bottom:1px solid var(--line)}
+.wpx .hdr .r{text-align:right}
+.wpx .row{min-height:56px;padding:9px 18px;border-bottom:1px solid var(--line);cursor:pointer;position:relative}
+.wpx .row:hover{background:#faf8f2}
+.wpx .row .chev{position:absolute;left:4px;top:50%;transform:translateY(-50%);color:var(--line-2);font-size:12px;transition:transform .15s,color .15s}
+.wpx .row.exp .chev{transform:translateY(-50%) rotate(90deg);color:var(--walnut-2)}
+.wpx .row.exp{background:#faf8f2;border-bottom-color:transparent}
+.wpx .row.paid{background:#fbfaf5}.wpx .row.paid .who,.wpx .row.paid .what,.wpx .row.paid .bf{opacity:.55}
+.wpx .who .n{font-weight:600}.wpx .who .t{font-size:12.5px;color:var(--walnut-3)}
+.wpx .what{font-size:13px;color:var(--walnut-2);display:flex;flex-direction:column;gap:2px}
+.wpx .what .basis .m{color:var(--walnut-3)}
+.wpx .what input{border:0;background:transparent;font-size:13px;color:var(--walnut-2);width:100%;padding:0;border-bottom:1px dashed transparent}
+.wpx .what input::placeholder{color:var(--line-2)}
+.wpx .what input:hover,.wpx .what input:focus{border-bottom-color:var(--line-2);outline:none}
+.wpx .bf{text-align:right;color:var(--walnut-2)}.wpx .bf .m{display:block;font-size:11.5px;color:var(--walnut-3)}
+.wpx .plan{display:flex;justify-content:flex-end;position:relative}
+.wpx .in{display:flex;align-items:center;border:1px solid var(--line);background:#fff;border-radius:9px;height:38px;padding:0 10px;gap:4px;width:120px;max-width:100%}
+.wpx .in:focus-within{border-color:var(--walnut)}
+.wpx .in span{color:var(--walnut-3)}
+.wpx .in input{border:0;background:transparent;width:100%;text-align:right;font-size:15px;font-weight:500}
+.wpx .in input:focus{outline:none}.wpx .in input::placeholder{color:var(--line-2)}
+.wpx .row.paid .in{border-color:transparent;background:transparent}
+.wpx .after{text-align:right;color:var(--walnut-2)}.wpx .after .m{display:block;font-size:11.5px;color:var(--walnut-3)}.wpx .after.zero{color:var(--sage)}
+.wpx .status{display:flex;justify-content:flex-end}
+.wpx .mark{border:1px solid var(--line-2);border-radius:999px;padding:7px 14px;font-size:13px;font-weight:500;color:var(--walnut);background:var(--paper);white-space:nowrap;cursor:pointer}
+.wpx .mark:hover{border-color:var(--walnut)}.wpx .mark:disabled{opacity:.4;cursor:default}
+.wpx .done{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--sage);font-weight:500;white-space:nowrap}
+.wpx .rat{padding:0 18px 16px 34px;border-bottom:1px solid var(--line);background:#faf8f2}
+.wpx .rat .box{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:12px 16px;display:grid;grid-template-columns:1fr 300px;gap:20px;font-size:13px}
+.wpx .cap{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--walnut-3);margin-bottom:8px}
+.wpx .mini{border-collapse:collapse;width:100%}
+.wpx .mini th,.wpx .mini td{text-align:center;padding:4px 6px;font-size:12.5px;border-bottom:1px solid var(--line)}
+.wpx .mini th{color:var(--walnut-3);font-weight:500;font-size:11.5px}
+.wpx .mini td:first-child,.wpx .mini th:first-child{text-align:left;color:var(--walnut-2);width:120px}
+.wpx .mini td:last-child,.wpx .mini th:last-child{text-align:right;font-weight:500}
+.wpx .mini .off{color:var(--line-2)}
+.wpx .ledger .ln{display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-top:1px dashed var(--line)}
+.wpx .ledger .ln:first-child{border-top:0}
+.wpx .ledger .ln.sum{border-top:1px solid var(--line-2);font-weight:500;margin-top:3px;padding-top:6px}
+.wpx .ledger .minus{color:var(--walnut-3)}.wpx .ledger .tag{font-size:11.5px;color:var(--walnut-3);margin-left:6px}
+.wpx .pop{position:absolute;right:0;top:44px;z-index:20;width:320px;background:var(--paper);border:1px solid var(--line-2);border-radius:12px;padding:14px 16px;box-shadow:0 14px 40px -18px rgba(59,47,39,.45);font-size:13.5px;cursor:default;text-align:left}
+.wpx .pop .h{color:var(--walnut-2);margin-bottom:10px}.wpx .pop .h b{color:var(--walnut);font-weight:500}
+.wpx .pop label{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border:1px solid var(--line);border-radius:9px;margin-bottom:6px;cursor:pointer}
+.wpx .pop label.on{border-color:var(--walnut);background:#fbf9f3}
+.wpx .pop label .t{font-weight:500}.wpx .pop label .d{font-size:12.5px;color:var(--walnut-3);margin-top:1px}
+.wpx .pop .why{width:100%;border:1px solid var(--line-2);border-radius:8px;background:#fff;font:inherit;font-size:13px;padding:8px 10px;margin-top:4px;color:var(--walnut);resize:none}
+.wpx .pop .why:focus{outline:none;border-color:var(--walnut)}
+.wpx .pop .acts{display:flex;justify-content:flex-end;gap:14px;margin-top:12px;align-items:center}
+.wpx .pop .acts .cancel{background:none;border:0;color:var(--walnut-3);font-size:13px;cursor:pointer}
+.wpx .pop .acts .ok{background:var(--walnut);color:var(--paper);border:0;border-radius:999px;padding:7px 14px;font-weight:500;font-size:13px;cursor:pointer}
+.wpx .pop .acts .ok:disabled{background:var(--line-2)}
+.wpx .foot{background:var(--paper);border:1px solid var(--line);border-radius:14px;margin-top:6px}
+.wpx .foot-in{padding:14px 20px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+.wpx .foot .s{color:var(--walnut-2);font-size:14px}.wpx .foot .s b{color:var(--walnut);font-weight:500}
+.wpx .modesel{border:1px solid var(--line-2);border-radius:9px;height:38px;padding:0 10px;background:var(--paper);font:inherit;font-size:13.5px}
+.wpx .state{padding:70px 18px;text-align:center;color:var(--walnut-3);font-size:14px}
+.wpx .emptyrow{padding:14px 18px;color:var(--walnut-3);font-size:13px;border-bottom:1px solid var(--line)}
+.wpx .recbody{padding:6px 18px 14px}
+.wpx .recitem{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px dashed var(--line);font-size:13.5px}
+.wpx .recitem b{font-weight:600}
+.wpx .recitem .rm-proj{color:var(--walnut-3);font-size:12.5px}
+.wpx .recitem .mono{margin-left:auto;font-weight:500}
+.wpx .rm-x{width:22px;height:22px;border-radius:7px;font-size:16px;line-height:1;color:var(--line-2);background:none;border:0;cursor:pointer}
+.wpx .rm-x:hover{color:var(--terracotta);background:color-mix(in srgb,var(--terracotta) 12%,transparent)}
+.wpx .recadd{margin-top:10px;color:var(--terracotta);font-weight:600;font-size:13.5px;border:1px dashed color-mix(in srgb,var(--terracotta) 45%,transparent);background:color-mix(in srgb,var(--terracotta) 5%,transparent);border-radius:9px;padding:8px 14px;cursor:pointer}
+.wpx .recadd:hover{border-color:var(--terracotta)}
+.wpx .recform{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
+.wpx .recform select,.wpx .recform input{height:38px;border:1px solid var(--line-2);border-radius:8px;background:var(--paper);padding:0 10px;font:inherit;font-size:13.5px}
+.wpx .recform input:focus,.wpx .recform select:focus{outline:none;border-color:var(--walnut)}
+.wpx .recform input.amt{width:120px;text-align:right}
+.wpx .recform .go{background:var(--walnut);color:var(--paper);border-radius:999px;padding:9px 16px;font-weight:500;font-size:13px;cursor:pointer;border:0}
+.wpx .recform .go:disabled{background:var(--line-2);cursor:default}
+.wpx .recform .x{color:var(--walnut-3);font-size:13px;background:none;border:0;cursor:pointer}
+.wpx .addrow{padding:12px 16px;background:var(--cream);border-top:1px solid var(--line);border-radius:0 0 14px 14px}
+.wpx .addpill{display:inline-flex;align-items:center;gap:8px;color:var(--terracotta);font-weight:600;font-size:13.5px;border:1px dashed color-mix(in srgb,var(--terracotta) 45%,transparent);background:color-mix(in srgb,var(--terracotta) 5%,transparent);border-radius:9px;padding:8px 14px;cursor:pointer}
+.wpx .addpill:hover{border-color:var(--terracotta)}
+.wpx .addpill .hint{color:var(--walnut-3);font-weight:400;font-size:12.5px}
+.wpx .addform{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.wpx .addform select,.wpx .addform input{height:38px;border:1px solid var(--line-2);border-radius:8px;background:var(--paper);padding:0 10px;font:inherit;font-size:13.5px}
+.wpx .addform input:focus,.wpx .addform select:focus{outline:none;border-color:var(--walnut)}
+.wpx .addform input.amt{width:120px;text-align:right}
+.wpx .addform input.note{flex:1;min-width:160px}
+.wpx .addform .go{background:var(--walnut);color:var(--paper);border-radius:999px;padding:9px 16px;font-weight:500;font-size:13px;cursor:pointer;border:0}
+.wpx .addform .go:disabled{background:var(--line-2);cursor:default}
+.wpx .addform .x{color:var(--walnut-3);font-size:13px;background:none;border:0;cursor:pointer}
+.wpx .psrch{position:relative;display:inline-block}
+.wpx .psrch>input{height:38px;border:1px solid var(--line-2);border-radius:8px;background:var(--paper);padding:0 12px;font:inherit;font-size:13.5px;width:220px}
+.wpx .psrch>input:focus{outline:none;border-color:var(--walnut)}
+.wpx .psrch-menu{position:absolute;left:0;top:calc(100% + 4px);z-index:15;min-width:260px;background:var(--paper);border:1px solid var(--line-2);border-radius:10px;box-shadow:0 12px 30px -14px rgba(59,47,39,.4);padding:4px;max-height:280px;overflow:auto}
+.wpx .psrch-item{display:block;width:100%;text-align:left;padding:8px 10px;border:0;background:none;border-radius:7px;font:inherit;font-size:13.5px;color:var(--walnut);cursor:pointer}
+.wpx .psrch-item:hover{background:var(--cream)}
+.wpx .psrch-item small{color:var(--walnut-3)}
+.wpx .psrch-item.psrch-create{color:var(--walnut-2);border-top:1px solid var(--line);margin-top:2px;font-weight:500}
+.wpx .psrch-item.psrch-create b{color:var(--walnut)}
+.wpx .psrch-empty{padding:8px 10px;color:var(--walnut-3);font-size:13px}
+/* ── mobile: stack each row into a card ── */
+@media (max-width:960px){
+  .wpx{padding:20px 12px 40px}
+  .wpx h1{font-size:30px}
+  .wpx .top{flex-direction:column;align-items:flex-start;gap:14px}
+  .wpx .stats{gap:20px;text-align:left}
+  .wpx .hdr{display:none}
+  .wpx .row{grid-template-columns:1fr auto;grid-template-areas:'who status' 'what what' 'plan after';gap:8px 12px;padding:12px 14px 12px 22px;min-height:0}
+  .wpx .row .who{grid-area:who;min-width:0}
+  .wpx .row .what{grid-area:what}
+  .wpx .row .bf{display:none}
+  .wpx .row .plan{grid-area:plan;justify-content:flex-start}
+  .wpx .row .after{grid-area:after;text-align:right;align-self:center}
+  .wpx .row .status{grid-area:status;justify-content:flex-end}
+  .wpx .in{width:150px}
+  .wpx .rat{padding:0 14px 14px 22px;overflow-x:auto}
+  .wpx .rat .box{grid-template-columns:1fr;gap:14px}
+  .wpx .pop{right:auto;left:0;width:min(320px,calc(100vw - 40px))}
+  .wpx .foot-in{flex-direction:column;align-items:flex-start;gap:10px}
+  .wpx .recform{flex-direction:column;align-items:stretch}
+  .wpx .recform input,.wpx .recform select,.wpx .recform input.amt{width:100%}
+  .wpx .addform{flex-direction:column;align-items:stretch}
+  .wpx .addform input,.wpx .addform select,.wpx .addform input.amt,.wpx .addform input.note{width:100%}
+  .wpx .psrch,.wpx .psrch>input{width:100%}
+  .wpx .addpill{width:100%;flex-wrap:wrap}
+  .wpx .addpill .hint{flex-basis:100%}
+}
+`;
+
+type Diff = { kind: 'carry' | 'advance' | 're'; reason: string };
 
 export default function Payables(_props: { session: Session }) {
-  const navigate = useNavigate();
-  const { data, isLoading, error } = useQuery({ queryKey: ['payables'], queryFn: loadPayables, staleTime: 60_000 });
+  const orgId = useOrgId();
+  const { show: showSnackbar } = useSnackbar();
+  const [monday, setMonday] = useState<Date>(() => mondayOf(new Date()));
+  const [plan, setPlan] = useState<Record<string, number>>({});
+  const [paid, setPaid] = useState<Record<string, number>>({});
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [diffs, setDiffs] = useState<Record<string, Diff>>({});
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [why, setWhy] = useState<string | null>(null);       // row key with an open why-popover
+  const [mode, setMode] = useState('UPI');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [extra, setExtra] = useState<Record<string, PayRow[]>>({});  // ad-hoc "Add a payment" rows, per project
 
-  const grand = useMemo(() => (data ? data.totalParties + data.totalLabour : 0), [data]);
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['weekly_payments', monday.toISOString().slice(0, 10)],
+    queryFn: () => loadWeeklyPayments(monday),
+  });
+  const { data: recurring, refetch: refetchRec } = useQuery({ queryKey: ['recurring_payments'], queryFn: loadRecurring });
+  const { data: vendorRows } = useQuery({ queryKey: ['vendor_payables'], queryFn: loadVendorRows });
+  const { data: parties } = useQuery({
+    queryKey: ['payables_parties'],
+    queryFn: async () => (await supabase.from('stakeholders').select('stakeholder_id, name, type, category').order('name')).data ?? [] as any[],
+  });
+  const { data: projects } = useQuery({
+    queryKey: ['projects_active_min'],
+    queryFn: async () => (await supabase.from('projects').select('project_id, name').eq('status', 'Active').order('name')).data ?? [],
+  });
+
+  // Labour sections + a Vendors section (open bills) + a Recurring & fixed section.
+  const sections: PaySection[] = useMemo(() => {
+    const out = (data?.sections ?? []).map(s => ({ ...s, rows: [...s.rows, ...(extra[s.projectId] ?? [])] }));
+    if ((vendorRows ?? []).length) out.push({ projectId: '__vendors__', projectName: 'Vendors — bills to pay', rows: vendorRows! });
+    const recRows = (recurring ?? []).map(recurringToRow);
+    if (recRows.length) out.push({ projectId: '__recurring__', projectName: 'Recurring & fixed', rows: recRows });
+    return out;
+  }, [data, vendorRows, recurring, extra]);
+
+  const planned = (r: PayRow) => paid[r.key] ?? plan[r.key] ?? Math.round(r.thisWeek);
+  const owed = (r: PayRow) => r.balanceBf + r.thisWeek;
+  const afterOf = (r: PayRow, isPaid: boolean): { v: number; m: string; cls: string } | null => {
+    const rem = owed(r) - planned(r);
+    if (isPaid) {
+      if (Math.abs(rem) < 1) return { v: 0, m: 'settled', cls: 'zero' };
+      return rem > 0 ? { v: rem, m: 'carried', cls: '' } : { v: -rem, m: 'advance to them', cls: '' };
+    }
+    // Not paid yet — never say "settled". A pure wage row has no running balance to show.
+    if (r.balanceBf < 1 && Math.abs(rem) < 1) return null;
+    if (Math.abs(rem) < 1) return { v: 0, m: 'clears the balance', cls: 'zero' };
+    return rem > 0 ? { v: rem, m: 'would carry', cls: '' } : { v: -rem, m: 'advance', cls: '' };
+  };
+
+  const totals = useMemo(() => {
+    let pl = 0, pd = 0, n = 0;
+    sections.forEach(s => s.rows.forEach(r => { pl += planned(r); if (paid[r.key]) pd += paid[r.key]; else if (planned(r)) n++; }));
+    return { planned: pl, paid: pd, left: pl - pd, count: n };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sections, plan, paid]);
+
+  const doPay = async (r: PayRow) => {
+    const amt = planned(r);
+    if (!amt) return;
+    setBusy(r.key);
+    try {
+      await recordWeeklyPayment(orgId, r, amt, mode, diffs[r.key]?.reason || '');
+      setPaid(p => ({ ...p, [r.key]: amt }));
+      showSnackbar(`Paid ${inr(amt)} to ${r.party}`);
+      refetch();
+    } catch (e: any) {
+      showSnackbar(e?.message || 'Could not record the payment', { type: 'error' });
+    } finally { setBusy(null); }
+  };
+
+  const onMark = (r: PayRow) => {
+    if (Math.abs(planned(r) - r.thisWeek) >= 1 && !diffs[r.key]) { setWhy(r.key); return; }
+    doPay(r);
+  };
+
+  const shiftWeek = (d: number) => setMonday(m => { const x = new Date(m); x.setDate(x.getDate() + d * 7); return x; });
+  // Where a row's figure comes from — shown subtly on hover so the source is clear.
+  const sourceHint = (r: PayRow) => r.att ? 'from the attendance sheet' : r.stage ? 'from the contract stages' : r.bills ? 'from open purchase orders' : r.kind === 'recurring' ? 'a standing recurring line' : 'typed here';
 
   return (
-    <div className="paylx">
-      <style>{PAYLX_CSS}</style>
+    <div className="wpx">
+      <style>{CSS}</style>
       <div className="wrap">
-        <h1>Payables</h1>
-        <p className="lede">What you owe right now — vendor and contract balances from the ledger, plus this week's unpaid site wages.</p>
-
-        <div className="totals">
-          <div className="t grand"><div className="l">Total owed</div><div className="v mono">{isLoading ? '—' : inr(grand)}</div></div>
-          <div className="t"><div className="l">Vendors &amp; contractors</div><div className="v mono">{isLoading ? '—' : inr(data?.totalParties || 0)}</div></div>
-          <div className="t"><div className="l">Labour · this week</div><div className="v mono">{isLoading ? '—' : inr(data?.totalLabour || 0)}</div></div>
+        <div className="top">
+          <div>
+            <h1>Payments</h1>
+            <div className="sub">Week of {weekLabel(monday)} · <button onClick={() => shiftWeek(-1)}>‹ last week</button><button onClick={() => shiftWeek(1)}>next week ›</button><button onClick={() => setMonday(mondayOf(new Date()))}>this week</button></div>
+          </div>
+          <div className="stats">
+            <div className="st"><div className="l">Planned</div><div className="v mono">{inr(totals.planned)}</div></div>
+            <div className="st paid"><div className="l">Paid</div><div className="v mono">{inr(totals.paid)}</div></div>
+            <div className="st left"><div className="l">Still to pay</div><div className="v mono">{inr(totals.left)}</div></div>
+          </div>
         </div>
 
-        {isLoading && <div className="state">Loading payables…</div>}
-        {error && <div className="state" style={{ color: 'var(--terracotta)' }}>Could not load payables — {(error as any)?.message || 'try again'}</div>}
+        {isLoading && <div className="state">Loading the week…</div>}
+        {error && <div className="state" style={{ color: 'var(--terracotta)' }}>Could not load — {(error as any)?.message || 'try again'}</div>}
+        {!isLoading && !error && sections.length === 0 && <div className="state">No active projects yet — create a project to start the payment run.</div>}
 
-        {!isLoading && !error && data && (
-          <>
-            <div className="sec"><h2>Vendors &amp; contractors</h2><span className="s">Approved-PO and work-order balances, by party</span></div>
-            <div className="card">
-              {data.parties.length === 0 ? (
-                <div className="empty">Nothing outstanding — every vendor and contractor is settled.</div>
-              ) : data.parties.map(p => (
-                <div key={p.stakeholderId} className="row" onClick={() => navigate(`/stakeholders/${p.stakeholderId}`)}>
-                  <div>
-                    <div className="nm">{p.name}</div>
-                    <div className="sub">{p.projects.length ? p.projects.join(' · ') : 'No project tag'}</div>
+        {sections.map(section => {
+          const sPlan = section.rows.reduce((a, r) => a + planned(r), 0);
+          const sPaid = section.rows.reduce((a, r) => a + (paid[r.key] || 0), 0);
+          return (
+            <section className="site" key={section.projectId}>
+              <div className="site-h"><span className="n">{section.projectName}</span><span className="s"><b className="mono">{inr(sPlan)}</b> this week{sPaid ? ` · ${inr(sPaid)} paid` : ''}</span></div>
+              {section.rows.length > 0 && <div className="hdr"><div>Who</div><div>For</div><div className="r">Balance b/f</div><div className="r">This week</div><div className="r">After</div><div className="r" /></div>}
+              {section.rows.length === 0 && !section.projectId.startsWith('__') && <div className="emptyrow">No labour on the attendance sheet this week — add a payment below.</div>}
+              {section.rows.map(r => {
+                const isPaid = !!paid[r.key], isExp = expanded.has(r.key), af = afterOf(r, isPaid);
+                const unexplained = Math.abs(planned(r) - r.thisWeek) >= 1 && !diffs[r.key];
+                return (
+                  <div key={r.key}>
+                    <div className={`row${isPaid ? ' paid' : ''}${isExp ? ' exp' : ''}`} onClick={(e) => { if ((e.target as HTMLElement).closest('input,button,select')) return; setExpanded(s => { const n = new Set(s); n.has(r.key) ? n.delete(r.key) : n.add(r.key); return n; }); }}>
+                      <span className="chev">›</span>
+                      <div className="who"><div className="n">{r.party}</div><div className="t">{r.trade}</div></div>
+                      <div className="what">
+                        <div className="basis">{r.basis} <span className="srchint">· {sourceHint(r)}</span></div>
+                        <input placeholder="note…" value={notes[r.key] ?? ''} onChange={(e) => setNotes(n => ({ ...n, [r.key]: e.target.value }))} />
+                      </div>
+                      <div className="bf mono">{r.balanceBf ? inr(r.balanceBf) : <span style={{ color: 'var(--line-2)' }}>—</span>}{r.balanceBf ? <span className="m">carried</span> : null}</div>
+                      <div className="plan">
+                        {isPaid
+                          ? <div className="in"><span /><input className="mono" value={paid[r.key].toLocaleString('en-IN')} disabled /></div>
+                          : <div className="in"><span>₹</span><input className="mono" inputMode="numeric" value={planned(r) || ''} placeholder="0"
+                              onChange={(e) => { const v = parseInt(e.target.value.replace(/[^\d]/g, ''), 10) || 0; setPlan(p => ({ ...p, [r.key]: v })); setDiffs(d => { const n = { ...d }; delete n[r.key]; return n; }); }}
+                              onBlur={() => { setTimeout(() => { if (!paid[r.key] && Math.abs(planned(r) - r.thisWeek) >= 1 && !diffs[r.key] && why !== r.key) setWhy(r.key); }, 120); }}
+                              onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} /></div>}
+                        {why === r.key && !isPaid && (
+                          <WhyPopover row={r} planned={planned(r)} owed={owed(r)}
+                            onPutBack={() => { setPlan(p => ({ ...p, [r.key]: Math.round(r.thisWeek) })); setDiffs(d => { const n = { ...d }; delete n[r.key]; return n; }); setWhy(null); }}
+                            onDone={(diff) => { setDiffs(d => ({ ...d, [r.key]: diff })); setWhy(null); }} />
+                        )}
+                      </div>
+                      <div className={`after mono ${af?.cls || ''}`}>{af ? <>{inr(af.v)}<span className="m">{af.m}</span></> : <span style={{ color: 'var(--line-2)' }}>—</span>}</div>
+                      <div className="status">
+                        {isPaid
+                          ? <span className="done">✓ Paid</span>
+                          : <button className="mark" disabled={!planned(r) || unexplained || busy === r.key} title={unexplained ? 'say what the difference is first' : ''} onClick={() => onMark(r)}>{busy === r.key ? '…' : 'Mark paid'}</button>}
+                      </div>
+                    </div>
+                    {isExp && <div className="rat"><Rationale row={r} planned={planned(r)} diff={diffs[r.key]} /></div>}
                   </div>
-                  <div className="amt">
-                    <div className="v mono">{inr(p.total)}</div>
-                    <div className="k">{[p.poOwed > 0.5 ? `POs ${inr(p.poOwed)}` : '', p.woOwed > 0.5 ? `contract ${inr(p.woOwed)}` : ''].filter(Boolean).join(' · ')}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
+                );
+              })}
+              {!section.projectId.startsWith('__') && (
+                <AddPaymentRow projectId={section.projectId} projectName={section.projectName} parties={(parties ?? []) as any[]} orgId={orgId}
+                  onError={(m) => showSnackbar(m, { type: 'error' })}
+                  onAdd={(row) => setExtra(x => ({ ...x, [section.projectId]: [...(x[section.projectId] ?? []), row] }))} />
+              )}
+            </section>
+          );
+        })}
 
-            <div className="sec"><h2>Labour · this week</h2><span className="s">Unpaid wages and contract-earned from the attendance muster</span></div>
-            <div className="card">
-              {data.labour.length === 0 ? (
-                <div className="empty">No unpaid labour recorded this week.</div>
-              ) : data.labour.map(l => (
-                <div key={l.projectId} className="row" onClick={() => navigate('/attendance')}>
-                  <div>
-                    <div className="nm">{l.projectName}</div>
-                    <div className="sub">This week's muster</div>
-                  </div>
-                  <div className="amt">
-                    <div className="v mono">{inr(l.total)}</div>
-                    <div className="k">{[l.wages > 0.5 ? `wages ${inr(l.wages)}` : '', l.contract > 0.5 ? `contract ${inr(l.contract)}` : ''].filter(Boolean).join(' · ')}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
+        <RecurringManager orgId={orgId} recurring={recurring ?? []} projects={(projects ?? []) as { project_id: string; name: string }[]}
+          onChanged={() => refetchRec()} onError={(m) => showSnackbar(m, { type: 'error' })} />
+
+        <div className="foot"><div className="foot-in">
+          <div className="s">{totals.count ? <><b>{totals.count}</b> payments planned, not yet made · <b className="mono">{inr(totals.left)}</b></> : 'Everything planned is paid.'}</div>
+          <div className="acts" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <span style={{ fontSize: 12.5, color: 'var(--walnut-3)' }}>pay by</span>
+            <select className="modesel" value={mode} onChange={(e) => setMode(e.target.value)}>{MODES.map(m => <option key={m}>{m}</option>)}</select>
+            <span style={{ fontSize: 12.5, color: 'var(--walnut-3)' }}>· each payment is recorded to the ledger</span>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  );
+}
+
+// Manage the standing recurring/fixed lines that surface on the run each week.
+function RecurringManager({ orgId, recurring, projects, onChanged, onError }: {
+  orgId: string; recurring: import('../lib/weeklyPaymentsApi').Recurring[];
+  projects: { project_id: string; name: string }[]; onChanged: () => void; onError: (m: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [f, setF] = useState({ project_id: '', who: '', party: '', label: '', amount: '', cadence: 'weekly' as 'weekly' | 'monthly' });
+  const [busy, setBusy] = useState(false);
+  const { data: parties } = useQuery({
+    queryKey: ['payables_parties'],
+    queryFn: async () => (await supabase.from('stakeholders').select('stakeholder_id, name, type').order('name')).data ?? [],
+  });
+  const amt = parseInt((f.amount || '').replace(/[^\d]/g, ''), 10) || 0;
+  const whoOk = f.who && (f.who !== '__other' || f.party.trim());
+  const ready = !!f.project_id && !!whoOk && amt > 0;
+  const add = async () => {
+    if (!ready) return; setBusy(true);
+    const picked = (parties ?? []).find((p: any) => p.stakeholder_id === f.who) as any;
+    const partyName = f.who === '__other' ? f.party.trim() : (picked?.name || '');
+    const stakeholderId = f.who === '__other' ? null : f.who;
+    try {
+      await addRecurring(orgId, { projectId: f.project_id, stakeholderId, partyName, label: f.label.trim(), amount: amt, cadence: f.cadence, category: 'Recurring' });
+      setF({ project_id: '', who: '', party: '', label: '', amount: '', cadence: 'weekly' }); setOpen(false); onChanged();
+    } catch (e: any) { onError(e?.message || 'Could not add the recurring payment'); } finally { setBusy(false); }
+  };
+  const remove = async (id: string, name: string) => {
+    if (!window.confirm(`Stop the recurring payment for ${name}?`)) return;
+    try { await removeRecurring(id); onChanged(); } catch (e: any) { onError(e?.message || 'Could not remove'); }
+  };
+  return (
+    <section className="site recmgr">
+      <div className="site-h"><span className="n">Recurring & fixed — manage</span><span className="s">{recurring.length} standing line{recurring.length !== 1 ? 's' : ''}</span></div>
+      <div className="recbody">
+        {recurring.map(r => (
+          <div className="recitem" key={r.id}>
+            <span><b>{r.partyName}</b>{r.label ? ` · ${r.label}` : ''} <span className="rm-proj">· {r.projectName} · {r.cadence}</span></span>
+            <span className="mono">{inr(r.amount)}</span>
+            <button className="rm-x" title="Stop this recurring payment" onClick={() => remove(r.id, r.partyName)}>×</button>
+          </div>
+        ))}
+        {recurring.length === 0 && <div className="recitem" style={{ color: 'var(--walnut-3)' }}>No recurring payments yet — add rent, a watchman, a utility, a weekly supervisor.</div>}
+        {open ? (
+          <div className="recform">
+            <select value={f.project_id} onChange={(e) => setF({ ...f, project_id: e.target.value })}><option value="">Project…</option>{projects.map(p => <option key={p.project_id} value={p.project_id}>{p.name}</option>)}</select>
+            <select value={f.who} onChange={(e) => setF({ ...f, who: e.target.value })}>
+              <option value="">Who…</option>
+              {(parties ?? []).map((p: any) => <option key={p.stakeholder_id} value={p.stakeholder_id}>{p.name}{p.type ? ` · ${p.type}` : ''}</option>)}
+              <option value="__other">Other (a utility, rent)…</option>
+            </select>
+            {f.who === '__other' && <input placeholder="Name — e.g. Office rent, Power bill" value={f.party} onChange={(e) => setF({ ...f, party: e.target.value })} />}
+            <input placeholder="note (optional)" value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} />
+            <input className="amt mono" placeholder="₹ amount" inputMode="numeric" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
+            <select value={f.cadence} onChange={(e) => setF({ ...f, cadence: e.target.value as 'weekly' | 'monthly' })}><option value="weekly">weekly</option><option value="monthly">monthly</option></select>
+            <button className="go" disabled={!ready || busy} onClick={add}>{busy ? '…' : 'Add'}</button>
+            <button className="x" onClick={() => setOpen(false)}>cancel</button>
+          </div>
+        ) : (
+          <button className="recadd" onClick={() => setOpen(true)}>＋ Add a recurring payment</button>
         )}
       </div>
+    </section>
+  );
+}
+
+// A type-to-search party picker — ranked suggestions + "create new", the same pattern the
+// transaction payee field and the attendance add flow use. Scoped to workers here.
+function PartySearch({ parties, orgId, onPick, onError }: { parties: any[]; orgId: string; onPick: (p: { id: string | null; name: string }) => void; onError: (m: string) => void }) {
+  const [q, setQ] = useState('');
+  const [openList, setOpenList] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const workers = useMemo(() => parties.filter(p => p.type === 'Worker'), [parties]);
+  const matches = (q.trim() ? searchPayees(workers as any, q) : workers).slice(0, 8);
+  const pick = (p: { id: string | null; name: string }) => { setQ(p.name); setOpenList(false); onPick(p); };
+  const create = async () => {
+    if (busy || !q.trim()) return; setBusy(true);
+    try { const c = await createParty(q.trim(), 'Worker', orgId); pick({ id: c.id, name: c.name }); }
+    catch (e: any) { onError(e?.message || 'Could not create the party'); } finally { setBusy(false); }
+  };
+  return (
+    <div className="psrch">
+      <input value={q} placeholder="Search a worker…" autoComplete="off"
+        onChange={(e) => { setQ(e.target.value); setOpenList(true); onPick({ id: null, name: '' }); }}
+        onFocus={() => setOpenList(true)} onBlur={() => setTimeout(() => setOpenList(false), 150)} />
+      {openList && (
+        <div className="psrch-menu">
+          {matches.map((m: any) => (
+            <button key={m.stakeholder_id} className="psrch-item" onMouseDown={(e) => { e.preventDefault(); pick({ id: m.stakeholder_id, name: m.name }); }}>{m.name}{m.category ? <small> · {m.category}</small> : null}</button>
+          ))}
+          {q.trim() && <button className="psrch-item psrch-create" onMouseDown={(e) => { e.preventDefault(); create(); }}>{matches.length ? 'Not here? ' : ''}Create <b>{q.trim()}</b> · new worker</button>}
+          {!q.trim() && matches.length === 0 && <div className="psrch-empty">Type a name to search…</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Per-section "Add a payment request" — an ad-hoc row for something the register doesn't know.
+function AddPaymentRow({ projectId, projectName, parties, orgId, onError, onAdd }: { projectId: string; projectName: string; parties: any[]; orgId: string; onError: (m: string) => void; onAdd: (row: PayRow) => void }) {
+  const [open, setOpen] = useState(false);
+  const [picked, setPicked] = useState<{ id: string | null; name: string }>({ id: null, name: '' });
+  const [amount, setAmount] = useState(''); const [note, setNote] = useState('');
+  const amt = parseInt(amount.replace(/[^\d]/g, ''), 10) || 0;
+  const ready = !!picked.name.trim() && amt > 0;
+  const add = () => {
+    if (!ready) return;
+    onAdd({ key: `x-${projectId}-${Date.now()}`, projectId, projectName, stakeholderId: picked.id, party: picked.name.trim(), trade: note.trim() || 'added here', kind: 'wages', basis: 'added here · not from the register', thisWeek: amt, balanceBf: 0, woId: null, milestoneId: null });
+    setPicked({ id: null, name: '' }); setAmount(''); setNote(''); setOpen(false);
+  };
+  return (
+    <div className="addrow">
+      {open ? (
+        <div className="addform">
+          <PartySearch parties={parties} orgId={orgId} onPick={setPicked} onError={onError} />
+          <input className="amt mono" placeholder="₹ amount" inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          <input className="note" placeholder="for what — e.g. advance, flat 501 tiles" value={note} onChange={(e) => setNote(e.target.value)} />
+          <button className="go" disabled={!ready} onClick={add}>Add to {projectName}</button>
+          <button className="x" onClick={() => setOpen(false)}>cancel</button>
+        </div>
+      ) : (
+        <button className="addpill" onClick={() => setOpen(true)}>＋ Add a payment request</button>
+      )}
+    </div>
+  );
+}
+
+// The arithmetic + provenance shown when a row is expanded.
+function Rationale({ row, planned, diff }: { row: PayRow; planned: number; diff?: Diff }) {
+  const exp = row.thisWeek, d = exp - planned;
+  const left = (
+    row.bills ? (
+      <div>
+        <div className="cap">Open bills · paid oldest first</div>
+        <div className="ledger">
+          {(() => { let rem = planned; return row.bills!.map((b, i) => { const a = Math.min(b.balance, Math.max(0, rem)); rem -= a; return (
+            <div className="ln" key={i}><span>Bill {b.no}{b.date ? <span style={{ color: 'var(--walnut-3)' }}> · {new Date(b.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span> : null}</span><span className="mono">{inr(b.balance)}{a > 0.5 ? <span className="tag" style={{ color: 'var(--terracotta)' }}> ← {inr(a)}</span> : null}</span></div>
+          ); }); })()}
+        </div>
+      </div>
+    ) : row.att ? (
+      <div>
+        <div className="cap">From the attendance register · {row.att.period}</div>
+        <table className="mini"><thead><tr><th /> {row.att.days.map(dn => <th key={dn}>{dn}</th>)}<th>Days × rate</th></tr></thead>
+          <tbody>{row.att.cats.map((c, i) => { const days = c.cells.reduce((a, v) => a + (v || 0), 0); return (
+            <tr key={i}><td>{c.name}</td>{c.cells.map((v, j) => <td key={j}>{v ? v : <span className="off">·</span>}</td>)}<td className="mono">{days} × ₹{c.rate} = {inr(days * c.rate)}</td></tr>
+          ); })}</tbody></table>
+      </div>
+    ) : row.stage ? (
+      <div>
+        <div className="cap">Stage readings on the contract</div>
+        <div className="ledger">{row.stage.readings.map(([n, m, v], i) => <div className="ln" key={i}><span>{n}<span style={{ color: 'var(--walnut-3)' }}> · {m}</span></span><span className="mono">{inr(v)}</span></div>)}</div>
+      </div>
+    ) : <div><div className="cap">Where this comes from</div><div style={{ color: 'var(--walnut-3)' }}>{row.kind === 'recurring' ? `A standing recurring payment · ${row.basis}. Paying it records a transaction like any other row.` : 'Recorded on the attendance page.'}</div></div>
+  );
+  const ledger = (row.att?.ledger ?? row.stage?.ledger ?? (row.bills ? [['Bills due', row.thisWeek]] : [['This week', row.thisWeek]])) as [string, number][];
+  return (
+    <div className="box">
+      {left}
+      <div>
+        <div className="cap">Arithmetic</div>
+        <div className="ledger">
+          {ledger.map(([t, v], i) => <div className="ln" key={i}><span>{t}</span><span className={`mono ${v < 0 ? 'minus' : ''}`}>{v < 0 ? '− ' + inr(-v) : inr(v)}</span></div>)}
+          <div className="ln sum"><span>This week's figure</span><span className="mono">{inr(exp)}</span></div>
+          {Math.abs(d) >= 1 && <div className="ln"><span>Paying{diff ? <span className="tag">· {diff.kind === 'carry' ? `${inr(Math.abs(d))} carried` : diff.kind === 'advance' ? `${inr(Math.abs(d))} advance` : 're-agreed'}{diff.reason ? ` — ${diff.reason}` : ''}</span> : <span className="tag" style={{ color: 'var(--terracotta)' }}>· say why</span>}</span><span className="mono">{inr(planned)}</span></div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// The "why is it different" popover.
+function WhyPopover({ row, planned, onPutBack, onDone }: { row: PayRow; planned: number; owed: number; onPutBack: () => void; onDone: (d: Diff) => void }) {
+  const d = row.thisWeek - planned;
+  const less = d > 0;
+  const opts: [Diff['kind'], string, string][] = less
+    ? [['carry', 'Still owed to them', `${inr(d)} of this week's work carries to next week`], ['re', `This week's figure is actually ${inr(planned)}`, 'Not the computed amount — say why below']]
+    : [['advance', 'Advance on next week', `${inr(-d)} over this week's work — recovers next week`], ['re', `This week's figure is actually ${inr(planned)}`, 'Not the computed amount — say why below']];
+  const [kind, setKind] = useState<Diff['kind']>(opts[0][0]);
+  const [reason, setReason] = useState('');
+  const needReason = kind === 're';
+  return (
+    <div className="pop" onClick={(e) => e.stopPropagation()}>
+      <div className="h">This week's figure is <b className="mono">{inr(row.thisWeek)}</b>. Paying <b className="mono">{inr(planned)}</b> — the {inr(Math.abs(d))} {less ? 'less' : 'more'} is…</div>
+      {opts.map(([k, t, dd]) => (
+        <label key={k} className={kind === k ? 'on' : ''} onClick={() => setKind(k)}>
+          <input type="radio" checked={kind === k} onChange={() => setKind(k)} />
+          <span><div className="t">{t}</div><div className="d">{dd}</div></span>
+        </label>
+      ))}
+      {needReason && <textarea className="why" rows={2} placeholder="Why is it different? e.g. 2nd floor plaster redone at their cost" value={reason} onChange={(e) => setReason(e.target.value)} />}
+      <div className="acts"><button className="cancel" onClick={onPutBack}>put it back</button><button className="ok" disabled={needReason && !reason.trim()} onClick={() => onDone({ kind, reason: reason.trim() })}>Done</button></div>
     </div>
   );
 }

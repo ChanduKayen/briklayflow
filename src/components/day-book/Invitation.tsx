@@ -20,6 +20,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { UserPlus, X, Phone, Mail, Copy, Check, Clock, Loader2, ArrowRight, Pencil } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useSnackbar } from '../Snackbar';
+import PhoneInput from '../PhoneInput';
 import { useOrgId } from '../../lib/auth/AuthProvider';
 import { N, V, WA, font, serif, nums, terraGrad, T } from './tokens';
 import { WhatsAppGlyph } from './atoms';
@@ -645,11 +646,7 @@ export function ManageTeam({ onClose }: { onClose: () => void }) {
                 <Mail size={14} style={{ color: V.faint }} />
                 <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email address (optional)" className="bg-transparent outline-none flex-1" style={{ color: V.ink, ...font, ...T.sm }} />
               </div>
-              <div className="inline-flex items-center gap-2 px-3 rounded-lg w-full" style={{ background: V.field, height: 40 }}>
-                <WhatsAppGlyph size={13} color={WA} />
-                <span style={{ color: V.faint, ...font, ...nums, ...T.sm }}>+91</span>
-                <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="98765 43210" className="bg-transparent outline-none flex-1" style={{ color: V.ink, ...font, ...nums, ...T.sm }} />
-              </div>
+              <PhoneInput value={phone} onChange={setPhone} placeholder="98765 43210" style={{ height: 40 }} />
               <select value={role} onChange={(e) => setRole(e.target.value)} className="w-full px-3 py-2 rounded-lg outline-none" style={{ background: V.field, color: V.ink, ...font, ...T.sm }}>
                 {INVITE_ROLES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
               </select>

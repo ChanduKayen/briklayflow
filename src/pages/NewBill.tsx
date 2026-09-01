@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useSnackbar } from '../components/Snackbar';
+import PhoneInput from '../components/PhoneInput';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import type { Session } from '@supabase/supabase-js';
 import type { Stakeholder, Project } from '../types';
@@ -93,6 +94,7 @@ export default function NewBill({ session }: { session: Session }) {
   const [billType, setBillType] = useState<BillType>('progress');
   const [clientId, setClientId] = useState<string>(navState.clientId || '');
   const [clientSearch, setClientSearch] = useState('');
+  const [clContact, setClContact] = useState('');
   const [showClientSug, setShowClientSug] = useState(false);
   const [showClientCreate, setShowClientCreate] = useState(false);
   const [projectId, setProjectId] = useState<string>(navState.projectId || '');
@@ -472,7 +474,7 @@ export default function NewBill({ session }: { session: Session }) {
                         <div className="grid grid-cols-2 gap-3">
                           <div>
                             <label className="text-[10px] font-medium text-on-surface-variant/60 block mb-1.5">Phone (optional)</label>
-                            <input id="cl_contact" className="bk-input" placeholder="Contact number" />
+                            <PhoneInput inputId="cl_contact" variant="material" value={clContact} onChange={setClContact} placeholder="Contact number" />
                           </div>
                           <div>
                             <label className="text-[10px] font-medium text-on-surface-variant/60 block mb-1.5">GSTIN (optional)</label>

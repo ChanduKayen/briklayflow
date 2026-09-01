@@ -1,0 +1,236 @@
+// Weekly Payments (Payables) data layer — the "who do we pay this week, how much, and why"
+// run, labour-first. Rows are party × project, rolled up from the attendance week:
+//   • daily-wage crews / direct workers → wages (days × rate), allocate to the project
+//   • contract crews → this-week earned + carried balance, allocate to the work order + milestone
+// Mark-paid records a REAL transaction via insert_transaction_with_allocations.
+import { supabase } from './supabase';
+import { loadWeek, mondayOf, weekDates, weekLabel, type Cell } from './attendanceApi';
+
+export { mondayOf, weekLabel };
+
+const sumCells = (cells: Cell[]) => cells.reduce((s, c) => s + ((c && c !== 'off') ? c.v : 0), 0);
+const latestPct = (st: { cells: Cell[]; before: number }) => st.cells.reduce((p, c) => (c && c !== 'off') ? c.v : p, st.before);
+
+export interface AttDetail {
+  period: string;
+  days: string[];                                  // Mon…Sat labels
+  cats: { name: string; rate: number; cells: (number | null)[] }[];
+  ledger: [string, number][];
+  sum: number;
+}
+export interface StageDetail {
+  readings: [string, string, number][];            // [stage name, "70% of ₹58,000", earned]
+  ledger: [string, number][];
+  sum: number;
+}
+export interface PayRow {
+  key: string;
+  projectId: string; projectName: string;
+  stakeholderId: string | null;
+  party: string; trade: string;
+  kind: 'wages' | 'contract' | 'recurring' | 'vendor';
+  recurringId?: string;
+  basis: string;
+  thisWeek: number;                                // computed figure (prefill)
+  balanceBf: number;                               // carried from before (contract only)
+  woId: string | null; milestoneId: string | null; // allocation target for a contract payment
+  bills?: VendorBill[];                            // open POs for a vendor (oldest-first)
+  att?: AttDetail;
+  stage?: StageDetail;
+}
+export interface VendorBill { poId: string; no: string; date: string; amount: number; balance: number }
+export interface PaySection { projectId: string; projectName: string; rows: PayRow[] }
+export interface WeeklyPayments { sections: PaySection[]; monday: Date }
+
+const inrShort = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
+
+export async function loadWeeklyPayments(monday: Date): Promise<WeeklyPayments> {
+  const { sites } = await loadWeek(monday);
+  const dates = weekDates(monday);
+  const dayLabels = dates.slice(0, 6).map(d => new Date(d).toLocaleString('en-US', { weekday: 'short' }));
+  const period = `${new Date(dates[0]).toLocaleString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(dates[5]).toLocaleString('en-US', { month: 'short', day: 'numeric' })}`;
+
+  const sections: PaySection[] = sites.map(site => {
+    const rows: PayRow[] = [];
+
+    site.crews.forEach((crew, ci) => {
+      if (crew.basis === 'contract') {
+        // This-week earned vs prior earned, per stage; carried b/f = prior earned − paid.
+        let thisWeekEarned = 0, priorEarned = 0, paid = 0;
+        const readings: [string, string, number][] = [];
+        crew.stages.forEach(st => {
+          if (st.type === 'lump') {
+            const pct = latestPct(st), amt = st.amount || 0;
+            const earned = amt * pct / 100, before = amt * st.before / 100;
+            thisWeekEarned += earned - before; priorEarned += before; paid += st.paid;
+            readings.push([st.n, `${pct}% of ${inrShort(amt)}`, earned]);
+          } else {
+            const done = st.before + sumCells(st.cells), rate = st.rate || 0;
+            const earned = done * rate, before = st.before * rate;
+            thisWeekEarned += earned - before; priorEarned += before; paid += st.paid;
+            readings.push([st.n, `${done} ${st.unit || ''} · ${inrShort(earned)}`, earned]);
+          }
+        });
+        const balanceBf = Math.max(0, priorEarned - paid);
+        const thisWeek = Math.max(0, thisWeekEarned);
+        if (thisWeek <= 0 && balanceBf <= 0) return;
+        // Allocate a contract payment to the WO + the first stage that still has a balance.
+        const target = crew.stages.find(st => {
+          const e = st.type === 'lump' ? (st.amount || 0) * latestPct(st) / 100 : (st.before + sumCells(st.cells)) * (st.rate || 0);
+          return e - st.paid > 0.5;
+        }) ?? crew.stages[0];
+        rows.push({
+          key: `c${site.site}-${ci}`, projectId: site.site, projectName: site.label,
+          stakeholderId: crew.stakeholderId, party: crew.n, trade: crew.trade || crew.d || 'Contract',
+          kind: 'contract', basis: `contract · ${crew.stages.length} phase${crew.stages.length !== 1 ? 's' : ''}`,
+          thisWeek, balanceBf, woId: crew.woId, milestoneId: target?.milestoneId ?? null,
+          stage: { readings, ledger: [['Certified so far', priorEarned + thisWeekEarned], ['Paid so far', -paid]], sum: (priorEarned + thisWeekEarned) - paid },
+        });
+      } else {
+        const cats = crew.cats.map(cat => ({ name: cat.n, rate: cat.rate, cells: cat.cells.slice(0, 6).map(c => (c && c !== 'off') ? c.v : null) }));
+        const wage = crew.cats.reduce((s, cat) => s + sumCells(cat.cells) * cat.rate, 0);
+        if (wage <= 0) return;
+        const ledger = crew.cats.map(cat => [`${sumCells(cat.cells)} × ${inrShort(cat.rate)}`, sumCells(cat.cells) * cat.rate] as [string, number]).filter(l => l[1] > 0);
+        rows.push({
+          key: `w${site.site}-${ci}`, projectId: site.site, projectName: site.label,
+          stakeholderId: crew.stakeholderId, party: crew.n, trade: crew.trade || crew.d || 'Labour',
+          kind: 'wages', basis: 'attendance', thisWeek: wage, balanceBf: 0, woId: null, milestoneId: null,
+          att: { period, days: dayLabels, cats, ledger, sum: wage },
+        });
+      }
+    });
+
+    site.direct.forEach((w, wi) => {
+      const wage = sumCells(w.cells) * w.rate;
+      if (wage <= 0) return;
+      const days = sumCells(w.cells);
+      rows.push({
+        key: `d${site.site}-${wi}`, projectId: site.site, projectName: site.label,
+        stakeholderId: w.stakeholderId, party: w.n, trade: w.cat || 'Direct',
+        kind: 'wages', basis: 'attendance', thisWeek: wage, balanceBf: 0, woId: null, milestoneId: null,
+        att: { period, days: dayLabels, cats: [{ name: w.cat, rate: w.rate, cells: w.cells.slice(0, 6).map(c => (c && c !== 'off') ? c.v : null) }], ledger: [[`${days} × ${inrShort(w.rate)}`, wage]], sum: wage },
+      });
+    });
+
+    return { projectId: site.site, projectName: site.label, rows };
+  }); // keep every active project — an empty one still shows its "add a payment" row
+
+  return { sections, monday };
+}
+
+// ── vendor payments — open PO bills, paid oldest-first ───────────────────────
+export async function loadVendorRows(): Promise<PayRow[]> {
+  const [poR, stkR, projR] = await Promise.all([
+    supabase.from('purchase_orders').select('po_id, stakeholder_id, project_id, total_value, order_value, vendor_bill_amount, vendor_bill_number, date_issued, status').eq('approval_status', 'APPROVED'),
+    supabase.from('stakeholders').select('stakeholder_id, name'),
+    supabase.from('projects').select('project_id, name'),
+  ]);
+  if (poR.error) throw poR.error;
+  const pos = (poR.data ?? []).filter((p: any) => p.stakeholder_id && (p.status || '').toUpperCase() !== 'CANCELLED');
+  const poIds = pos.map((p: any) => p.po_id);
+  const stkName: Record<string, string> = {}; (stkR.data ?? []).forEach((s: any) => { stkName[s.stakeholder_id] = s.name; });
+  const projName: Record<string, string> = {}; (projR.data ?? []).forEach((p: any) => { projName[p.project_id] = p.name; });
+
+  const paidByPo: Record<string, number> = {};
+  if (poIds.length) {
+    const alR = await supabase.from('txn_allocations').select('order_ref, allocated_amount, transactions(status)').eq('order_type', 'PO').in('order_ref', poIds);
+    (alR.data ?? []).forEach((a: any) => { if (a.transactions?.status === 'Voided') return; paidByPo[a.order_ref] = (paidByPo[a.order_ref] || 0) + Number(a.allocated_amount || 0); });
+  }
+
+  const groups: Record<string, { stakeholderId: string; projectId: string; bills: VendorBill[] }> = {};
+  pos.forEach((p: any) => {
+    const base = Number(p.vendor_bill_amount || p.total_value || p.order_value || 0);
+    const due = base - (paidByPo[p.po_id] || 0);
+    if (due <= 0.5) return;
+    const k = `${p.stakeholder_id}|${p.project_id}`;
+    (groups[k] ||= { stakeholderId: p.stakeholder_id, projectId: p.project_id, bills: [] })
+      .bills.push({ poId: p.po_id, no: p.vendor_bill_number || p.po_id, date: p.date_issued || '', amount: base, balance: due });
+  });
+
+  return Object.values(groups).map(g => {
+    g.bills.sort((a, b) => (a.date || '').localeCompare(b.date || '')); // oldest first
+    const due = g.bills.reduce((s, b) => s + b.balance, 0);
+    return {
+      key: `v-${g.stakeholderId}-${g.projectId}`, projectId: g.projectId, projectName: projName[g.projectId] || g.projectId,
+      stakeholderId: g.stakeholderId, party: stkName[g.stakeholderId] || 'Vendor', trade: `${g.bills.length} bill${g.bills.length !== 1 ? 's' : ''} open · ${projName[g.projectId] || ''}`,
+      kind: 'vendor' as const, basis: 'vendor bills · oldest first', thisWeek: due, balanceBf: 0, woId: null, milestoneId: null, bills: g.bills,
+    };
+  }).sort((a, b) => b.thisWeek - a.thisWeek);
+}
+
+// ── recurring / fixed payments ───────────────────────────────────────────────
+export interface Recurring {
+  id: string; projectId: string; projectName: string; stakeholderId: string | null;
+  partyName: string; label: string; amount: number; cadence: 'weekly' | 'monthly'; category: string;
+}
+export async function loadRecurring(): Promise<Recurring[]> {
+  const [recR, projR] = await Promise.all([
+    supabase.from('recurring_payments').select('*').eq('active', true).order('created_at'),
+    supabase.from('projects').select('project_id, name'),
+  ]);
+  if (recR.error) throw recR.error; if (projR.error) throw projR.error;
+  const pn: Record<string, string> = {}; (projR.data ?? []).forEach((p: any) => { pn[p.project_id] = p.name; });
+  return (recR.data ?? []).map((r: any) => ({
+    id: r.id, projectId: r.project_id, projectName: pn[r.project_id] || r.project_id, stakeholderId: r.stakeholder_id ?? null,
+    partyName: r.party_name, label: r.label || r.category, amount: Number(r.amount) || 0, cadence: r.cadence, category: r.category,
+  }));
+}
+/** A recurring line as a payable row (same UI + payment path as any other row). */
+export function recurringToRow(r: Recurring): PayRow {
+  return {
+    key: `rec-${r.id}`, recurringId: r.id, projectId: r.projectId, projectName: r.projectName,
+    stakeholderId: r.stakeholderId, party: r.partyName, trade: r.label,
+    kind: 'recurring', basis: `${r.cadence} · recurring`, thisWeek: r.amount, balanceBf: 0,
+    woId: null, milestoneId: null,
+  };
+}
+export async function addRecurring(orgId: string, r: { projectId: string; stakeholderId: string | null; partyName: string; label: string; amount: number; cadence: 'weekly' | 'monthly'; category: string }): Promise<void> {
+  const { error } = await supabase.from('recurring_payments').insert({
+    org_id: orgId, project_id: r.projectId, stakeholder_id: r.stakeholderId, party_name: r.partyName,
+    label: r.label || null, amount: r.amount, cadence: r.cadence, category: r.category || 'Recurring',
+  });
+  if (error) throw error;
+}
+export async function removeRecurring(id: string): Promise<void> {
+  const { error } = await supabase.from('recurring_payments').update({ active: false }).eq('id', id);
+  if (error) throw error;
+}
+
+// Record a real payment for a row. Wages/recurring → project allocation; contract → WO + milestone.
+export async function recordWeeklyPayment(
+  orgId: string, row: PayRow,
+  amount: number, mode: string, reason: string,
+): Promise<void> {
+  const txnId = `TXN-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const category = row.kind === 'contract' ? 'Running Bill' : row.kind === 'vendor' ? 'Purchase Payment' : row.kind === 'recurring' ? 'Recurring' : 'Wages';
+  // Write the computed provenance into the ledger comment so the transaction carries WHY.
+  const detail = row.att
+    ? row.att.cats.map(c => { const days = c.cells.reduce((a, v) => a + (v || 0), 0); return days ? `${c.name} ${days}×₹${c.rate}` : ''; }).filter(Boolean).join(', ')
+    : row.stage ? row.stage.readings.map(([n, m]) => `${n} · ${m}`).join('; ')
+    : row.bills ? row.bills.map(b => `Bill ${b.no} ${inrShort(b.balance)}`).join(', ')
+    : row.basis;
+  const remarks = [row.party, detail, reason].filter(Boolean).join(' · ');
+  // Contract → the work order + milestone. Vendor → spread across the open POs, oldest bill first
+  // (anything beyond stays on account = a bare project allocation). Wages/recurring → project only.
+  let allocations: Record<string, unknown>[];
+  if (row.kind === 'contract' && row.woId) {
+    allocations = [{ project_id: row.projectId, order_type: 'WO', order_ref: row.woId, milestone_id: row.milestoneId, allocated_amount: amount }];
+  } else if (row.kind === 'vendor' && row.bills?.length) {
+    allocations = []; let left = amount;
+    for (const b of row.bills) { const a = Math.min(b.balance, left); if (a > 0.5) { allocations.push({ project_id: row.projectId, order_type: 'PO', order_ref: b.poId, allocated_amount: a }); left -= a; } if (left <= 0.5) break; }
+    if (left > 0.5) allocations.push({ project_id: row.projectId, allocated_amount: left }); // on account
+  } else {
+    allocations = [{ project_id: row.projectId, allocated_amount: amount }];
+  }
+  const { data, error } = await supabase.rpc('insert_transaction_with_allocations', {
+    p_txn: {
+      txn_id: txnId, org_id: orgId, stakeholder_id: row.stakeholderId,
+      date: new Date().toISOString().split('T')[0], total_amount: amount,
+      payment_mode: mode, category, remarks, ai_flag_status: 'Clean', ai_flag_data: {},
+    },
+    p_allocations: allocations,
+  });
+  if (error) throw error;
+  const r = data as { success?: boolean; error?: string } | null;
+  if (!r?.success) throw new Error(r?.error || 'Could not record the payment');
+}

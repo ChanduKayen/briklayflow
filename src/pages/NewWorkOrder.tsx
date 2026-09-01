@@ -9,6 +9,7 @@ import { useOrgId } from '../lib/auth/AuthProvider';
 import { multiply, parseAmount } from '../lib/money';
 import { WORKER_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 import { useSnackbar } from '../components/Snackbar';
+import PhoneInput from '../components/PhoneInput';
 
 // ─── Work Stage types ──────────────────────────────────────────────────────
 
@@ -709,7 +710,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
               {newWorkerTrade === OTHER_TRADE && (
                 <input value={newWorkerTradeOther} onChange={e => setNewWorkerTradeOther(e.target.value)} placeholder="Specify trade…" />
               )}
-              <input value={newWorkerContact} onChange={e => setNewWorkerContact(e.target.value)} placeholder="Contact (optional)" />
+              <PhoneInput value={newWorkerContact} onChange={setNewWorkerContact} placeholder="Contact (optional)" style={{ height: 40 }} />
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button type="button" className="btn ghost sm" onClick={() => { setShowAddWorker(false); setNewWorkerName(''); setNewWorkerTrade(''); setNewWorkerTradeOther(''); setNewWorkerContact(''); }}>Cancel</button>
                 <button type="button" className="btn primary sm" disabled={!newWorkerName.trim() || !newWorkerTrade || (newWorkerTrade === OTHER_TRADE && !newWorkerTradeOther.trim()) || createWorker.isPending} onClick={() => createWorker.mutate()}>
