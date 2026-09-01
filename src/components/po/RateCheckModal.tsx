@@ -52,7 +52,7 @@ const CSS = `
 .rcx .primary{background:var(--ink);color:#fff;border-radius:999px;padding:11px 20px;font-weight:500;flex:none;display:inline-flex;align-items:center;gap:8px}
 .rcx .primary:hover{background:#0f171b}
 .rcx .primary:disabled{background:var(--line-strong);cursor:not-allowed}
-.rcx .card{background:var(--field);border:1px solid var(--line);border-radius:14px;overflow-y:auto}
+.rcx .card{background:var(--field);border:1px solid var(--line);border-radius:14px;overflow-y:auto;flex:1;min-height:0}
 .rcx .item{border-bottom:1px solid var(--line);padding:14px 16px;display:flex;gap:12px;align-items:flex-start}
 .rcx .item:last-child{border-bottom:0}
 .rcx .cbx{width:18px;height:18px;border-radius:5px;border:1.5px solid var(--line-strong);display:grid;place-items:center;flex:none;margin-top:2px;background:var(--field)}
