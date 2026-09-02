@@ -4,6 +4,9 @@ export interface SKUMatchResult {
   item_raw:      string
   item_name:     string
   specification: string | null
+  dimension:     string | null
+  variant:       string | null
+  grade:         string | null
   quantity:      number | null
   unit:          string | null
   category_hint: string

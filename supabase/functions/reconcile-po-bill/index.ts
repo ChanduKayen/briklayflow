@@ -37,7 +37,8 @@ Return ONLY valid JSON — no markdown, no explanation outside the JSON:
       "po_rate": number,
       "bill_rate": number or null,
       "po_amount": number,
-      "bill_amount": number or null
+      "bill_amount": number or null,
+      "rate_basis": "per_unit" or "lot"
     }
   ],
   "ghost_items": [
@@ -54,8 +55,16 @@ Flag codes:
   UNIT_MISMATCH        — unit changed between PO and bill (bag→MT, Nos→Set)
   GHOST_ITEM           — bill has item not in PO
   DUPLICATE_ITEM       — same item appears twice in bill
-  AMOUNT_ARITHMETIC_ERROR — qty × rate ≠ bill line total by >1%
+  AMOUNT_ARITHMETIC_ERROR — for a PER-UNIT line only, qty × rate ≠ bill line total by >1% (never flag a lot-priced line, where the price is for the whole lot)
   HSN_MISMATCH         — HSN/SAC code does not match item type
+
+PRICING BASIS (do not always assume per-piece):
+  "bill_amount" is ALWAYS the true printed total for that bill line, exactly as written.
+  rate_basis = "per_unit" when bill_rate is the price of ONE unit (bill_amount = bill_qty × bill_rate).
+  rate_basis = "lot" when the printed price is for the WHOLE line/lot regardless of qty (e.g.
+  "Door set — 4 Nos — ₹8,000" where ₹8,000 is the total, not per door). For a lot line put the whole
+  price in bill_amount and set bill_rate = bill_amount / bill_qty (or null). NEVER multiply a lot price
+  by qty, and never raise AMOUNT_ARITHMETIC_ERROR on a lot line.
 
 Risk level rules:
   LOW    — no flags or only cosmetic differences; safe to approve payment
@@ -75,13 +84,21 @@ Return ONLY valid JSON — no markdown, no prose outside the JSON:
   "bill_total_extracted": number or null,   // the grand total payable (incl. taxes) if printed
   "gst_amount": number or null,             // total GST if shown, else null
   "line_items": [
-    { "item": "standard item name", "qty": number or null, "unit": "string or null", "rate": number or null, "amount": number or null }
+    { "item": "standard item name", "qty": number or null, "unit": "string or null", "rate": number or null, "amount": number or null, "rate_basis": "per_unit" or "lot" }
   ]
 }
 
 Rules: item names should be the standard industry name, not vendor shorthand. Numbers are plain
 (no currency symbols/commas). If the grand total is not clearly printed, sum the line amounts. Do NOT
-invent values that aren't on the bill.`;
+invent values that aren't on the bill.
+
+PRICING BASIS (critical — do not always assume per-piece):
+- "amount" is ALWAYS the true printed total for that line, exactly as written on the bill.
+- rate_basis = "per_unit" when the rate is the price of ONE unit and the line total = qty × rate.
+- rate_basis = "lot" when the printed price is for the WHOLE line/lot regardless of qty (e.g. one
+  "Door set — 4 Nos — ₹8,000" line where ₹8,000 is the total, not per door). For a lot line, put the
+  whole-line price in "amount" and set rate = amount / qty (or null if qty unknown). NEVER multiply a
+  lot price by qty.`;
 
 // Convert ArrayBuffer to base64 in chunks to avoid call-stack limits
 function bufToBase64(buf: ArrayBuffer): string {

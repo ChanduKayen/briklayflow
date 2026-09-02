@@ -176,7 +176,17 @@ export default function RfqCompare({ session }: { session: Session }) {
       if (rfq.project_id) { const { data: p } = await supabase.from('projects').select('name').eq('project_id', rfq.project_id).maybeSingle(); projectName = p?.name || ''; }
       let creator = '';
       if (rfq.created_by) { const { data: u } = await supabase.from('user_profiles').select('name').eq('id', rfq.created_by).maybeSingle(); creator = u?.name || ''; }
-      return { rfq, projectName, creator, recipients: (rcptQ.data ?? []) as Recipient[], quotes: (quoteQ.data ?? []) as QuoteRow[] };
+      // The enquiry's trade = the most common category among the vendors already on it. Drives both
+      // the "same trade first" suggestions and the trade stamped on any vendor added here.
+      let trade = '';
+      const stkIds = [...new Set((rcptQ.data ?? []).map((r: any) => r.stakeholder_id).filter(Boolean))];
+      if (stkIds.length) {
+        const { data: stks } = await supabase.from('stakeholders').select('category').in('stakeholder_id', stkIds);
+        const counts: Record<string, number> = {};
+        (stks ?? []).forEach((s: any) => { if (s.category) counts[s.category] = (counts[s.category] || 0) + 1; });
+        trade = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+      }
+      return { rfq, projectName, creator, recipients: (rcptQ.data ?? []) as Recipient[], quotes: (quoteQ.data ?? []) as QuoteRow[], trade };
     },
   });
 
@@ -482,7 +492,7 @@ export default function RfqCompare({ session }: { session: Session }) {
 
       {showAdd && (
         <RequestQuotesModal
-          orgId={data.rfq.org_id} rfqId={rfqId} items={[]}
+          orgId={data.rfq.org_id} rfqId={rfqId} items={[]} tradeCategory={data.trade || undefined}
           onClose={() => setShowAdd(false)}
           onSent={() => { setShowAdd(false); qc.invalidateQueries({ queryKey: ['rfq_compare', rfqId] }); }}
         />

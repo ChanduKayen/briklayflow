@@ -83,8 +83,9 @@ serve(async (req) => {
     if (body.resendRecipientId) {
       const { data: r } = await admin.from('rfq_recipients').select('token, vendor_name, vendor_phone').eq('recipient_id', body.resendRecipientId).maybeSingle();
       if (!r) return json({ ok: false, error: 'Recipient not found' }, 404);
-      const dest = String(r.vendor_phone ?? '').replace(/[^\d]/g, '');
-      if (dest.length < 11) return json({ ok: false, error: 'That vendor has no valid number' }, 400);
+      let dest = String(r.vendor_phone ?? '').replace(/[^\d]/g, '').replace(/^0+/, '');
+      if (dest.length === 10) dest = '91' + dest;   // bare Indian mobile → E.164 (matches the PO path)
+      if (dest.length < 11 || dest.length > 15) return json({ ok: false, error: 'That vendor has no valid number' }, 400);
       try { await wa(dest, r.vendor_name ?? 'there', r.token); await admin.from('rfq_recipients').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('recipient_id', body.resendRecipientId); }
       catch (e) { return json({ ok: false, error: (e as Error).message }, 500); }
       return json({ ok: true, resent: r.vendor_name });
@@ -107,7 +108,8 @@ serve(async (req) => {
     const sent: string[] = [];
     const failed: { name?: string; error: string }[] = [];
     for (const r of recipients) {
-      const dest = String(r.phone ?? '').replace(/[^\d]/g, '');
+      let dest = String(r.phone ?? '').replace(/[^\d]/g, '').replace(/^0+/, '');
+      if (dest.length === 10) dest = '91' + dest;   // bare Indian mobile → E.164 (matches the PO path)
       if (dest.length < 11 || dest.length > 15) { failed.push({ name: r.name, error: `Invalid number: "${r.phone}"` }); continue; }
       const { data: rcpt, error: rcptErr } = await admin.from('rfq_recipients').insert({
         rfq_id: rfqId, org_id: orgId, stakeholder_id: r.stakeholderId ?? null, vendor_name: r.name ?? null, vendor_phone: dest,

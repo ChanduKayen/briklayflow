@@ -12,6 +12,8 @@ import { DocThumb } from '../components/DocThumb';
 import { autoCloseWOIfFullyPaid } from '../lib/woAutoClose';
 import jsPDF from 'jspdf';
 import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
+import { AttachBillSheet } from '../components/txn-ledger/AttachBillSheet';
+import { ContractHub, CONTRACT_HUB_CSS } from '../components/txn-ledger/ContractHub';
 
 // ─── Scoped stylesheet — a faithful port of the txn-detail reference (cream/terracotta).
 //     Every selector is prefixed with `.txnx` so nothing leaks into the rest of the app. ──
@@ -374,6 +376,8 @@ export default function TransactionDetail({ session }: { session: Session }) {
 
   const navigate = useNavigate();
   const [mappingAllocId, setMappingAllocId] = useState<string | null>(null);
+  const [contractHubOpen, setContractHubOpen] = useState(false);                       // worker: link to a WO
+  const [attachBill, setAttachBill] = useState<{ file: File | null; mode: 'upload' | 'link' } | null>(null); // vendor: dup-check + PO create
   const [, setSelectedObligation] = useState<SelectedObligation | null>(null);
   const [, setProjectWOs] = useState<any[]>([]);
   const [projectPOs, setProjectPOs] = useState<any[]>([]);
@@ -520,23 +524,11 @@ export default function TransactionDetail({ session }: { session: Session }) {
     },
   });
 
-  // "Upload a new bill": store the file and stamp transactions.bill_doc_url.
-  const billUploadMutation = useMutation({
-    mutationFn: async (file: File) => {
-      const ext = file.name.split('.').pop();
-      const path = `bills/${txnId}-${Date.now()}.${ext}`;
-      const { error: upErr } = await supabase.storage.from('documents').upload(path, file, { contentType: file.type });
-      if (upErr) throw upErr;
-      const { data: pub } = supabase.storage.from('documents').getPublicUrl(path);
-      const { error } = await supabase.from('transactions').update({ bill_doc_url: pub.publicUrl }).eq('txn_id', txnId);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['transaction', txnId] });
-      qc.invalidateQueries({ queryKey: ['ledger'] });
-      setMappingAllocId(null);
-    },
-  });
+  const afterAttach = () => {
+    qc.invalidateQueries({ queryKey: ['transaction', txnId] });
+    qc.invalidateQueries({ queryKey: ['txn_allocations', txnId] });
+    qc.invalidateQueries({ queryKey: ['ledger'] });
+  };
 
   // Proof of payment is a SEPARATE document from the bill (receipt / UPI screenshot / Day-Book
   // photo) — stored on transactions.proof_document_url.
@@ -603,6 +595,11 @@ export default function TransactionDetail({ session }: { session: Session }) {
   const payeeName: string = txn.stakeholders?.name || (isGeneralExpense(txn) ? ((txn as any).ai_flag_data?.general_payee || generalExpenseLabel(txn)) : 'Unknown');
   const payeeType: string = txn.stakeholders?.type || '';
   const payeeCategory: string = txn.stakeholders?.category || '';
+  const isVendor = payeeType === 'Vendor';
+  // Shape the detail-page transaction into the TrackTxn the shared sheets expect (they read
+  // stakeholders + txn_allocations), so workers link to a contract and vendors get the real
+  // bill flow — duplicate-check + auto-PO — instead of the bespoke picker.
+  const trackTxn = { ...txn, txn_allocations: allocs ?? [] } as any;
   const initials = (payeeName.split(/\s+/).map((w: string) => w[0]).filter(Boolean).slice(0, 2).join('') || '—').toUpperCase();
   const recordedBy: string = (txn as any).created_by_name || (txn as any).recorded_by_name || (txn as any).ordered_by || '';
   const totalAllocated = (allocs || []).reduce((s, a) => s + Number(a.allocated_amount), 0);
@@ -630,7 +627,9 @@ export default function TransactionDetail({ session }: { session: Session }) {
               <span className="sep" />
               <span className="chip sage" style={isVoided ? { color: 'var(--terra)', background: 'var(--terra-tint)' } : undefined}><i style={isVoided ? { background: 'var(--terra)' } : undefined} />{isVoided ? 'Voided' : (txn.status || 'Active')}</span>
               {!isVoided && !billLinked && (
-                <span className="chip warn" onClick={() => { document.getElementById('txnx-alloc')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); const a = allAllocs.find((x) => !x.order_type); if (a) setTimeout(() => openPicker(a.allocation_id), 350); }}><i />No bill attached — attach now</span>
+                isVendor
+                  ? <span className="chip warn" onClick={() => setAttachBill({ file: null, mode: 'upload' })}><i />No bill attached — attach now</span>
+                  : <span className="chip warn" onClick={() => setContractHubOpen(true)}><i />Not linked to a contract — link now</span>
               )}
               {txn.ai_flag_status === 'Flagged' && <span className="chip gold"><i />Flagged</span>}
             </div>
@@ -726,10 +725,14 @@ export default function TransactionDetail({ session }: { session: Session }) {
                         )}
                         {!isVoided && (
                           <span className="pickwrap">
-                            {hasBill
-                              ? <button className="ghost" onClick={() => openPicker(a.allocation_id)}>Change</button>
-                              : <button className="linkbtn" onClick={() => openPicker(a.allocation_id)}>Attach bill</button>}
-                            {picking && (
+                            {isVendor
+                              ? (hasBill
+                                ? <button className="ghost" onClick={() => openPicker(a.allocation_id)}>Change</button>
+                                : <button className="linkbtn" onClick={() => openPicker(a.allocation_id)}>Attach bill</button>)
+                              : (hasBill
+                                ? <button className="ghost" onClick={() => setContractHubOpen(true)}>Change</button>
+                                : <button className="linkbtn" onClick={() => setContractHubOpen(true)}>Link to contract</button>)}
+                            {isVendor && picking && (
                               <>
                                 <div style={{ position: 'fixed', inset: 0, zIndex: 35 }} onClick={() => setMappingAllocId(null)} />
                                 <div className="picker">
@@ -769,7 +772,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
             <tfoot><tr><td colSpan={2} style={{ textAlign: 'right' }}>Total allocated</td><td className="num">{rupee(totalAllocated)}</td></tr></tfoot>
           </table>
         </div>
-        <input ref={billInputRef} type="file" accept="image/*,.pdf" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) billUploadMutation.mutate(f); }} />
+        <input ref={billInputRef} type="file" accept="image/*,.pdf" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) { setMappingAllocId(null); setAttachBill({ file: f, mode: 'upload' }); } }} />
 
         {/* proof of payment — a SEPARATE doc from the bill (receipt / UPI screenshot / Day-Book
             photo captured while recording the payment). Lives on transactions.proof_document_url. */}
@@ -992,6 +995,20 @@ export default function TransactionDetail({ session }: { session: Session }) {
           onClose={() => setShowStakeholderDrawer(false)}
           stakeholderId={txn.stakeholder_id}
         />
+      )}
+
+      {/* Worker → link to a work order; Vendor → the real bill flow (duplicate-check + auto-PO). Same
+          sheets the transactions list uses, so the two pages never behave differently. */}
+      {(contractHubOpen || attachBill) && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(30,26,21,0.35)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '6vh 16px', overflow: 'auto' }}
+          onClick={() => { setContractHubOpen(false); setAttachBill(null); }}>
+          <style>{CONTRACT_HUB_CSS}</style>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(94vw, 480px)', borderRadius: 16, overflow: 'hidden', background: '#FFFCF7', border: '1px solid #E7DCC9', boxShadow: '0 24px 60px rgba(30,26,21,0.22)' }}>
+            {contractHubOpen
+              ? <ContractHub txn={trackTxn} onClose={() => setContractHubOpen(false)} onLinked={() => { afterAttach(); setContractHubOpen(false); }} />
+              : <AttachBillSheet txn={trackTxn} initialFile={attachBill?.file} mode={attachBill?.mode} onClose={() => setAttachBill(null)} onLinked={() => { afterAttach(); setAttachBill(null); }} />}
+          </div>
+        </div>
       )}
     </div>
   );

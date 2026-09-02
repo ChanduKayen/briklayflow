@@ -38,6 +38,7 @@ interface ReconLineMatch {
   bill_rate:    number | null;
   po_amount:    number;
   bill_amount:  number | null;
+  rate_basis?:  'per_unit' | 'lot';   // 'lot' = printed price is for the whole line, not per unit
 }
 
 interface ReconGhostItem {
@@ -312,6 +313,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const [refBillAmt,   setRefBillAmt]   = useState('');
   const [billedQty,    setBilledQty]    = useState<Record<string, string>>({});
   const [billedRate,   setBilledRate]   = useState<Record<string, string>>({});
+  const [billedLot,    setBilledLot]    = useState<Record<string, string>>({});   // lot-priced lines: the whole-line total
   const [savingBill,   setSavingBill]   = useState(false);
   const refBillFileInputRef = useRef<HTMLInputElement>(null);
   const refScanInputRef     = useRef<HTMLInputElement>(null);
@@ -707,14 +709,18 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     if (!reconResult || !reconResult.line_matches?.length) return;
     const q: Record<string, string> = {};
     const r: Record<string, string> = {};
+    const lot: Record<string, string> = {};
     reconResult.line_matches.forEach((m, i) => {
       const li = (lineItems ?? [])[i];
       if (!li) return;
       if (m.bill_qty != null)  q[String(li.id)] = String(m.bill_qty);
       if (m.bill_rate != null) r[String(li.id)] = String(m.bill_rate);
+      // A lot-priced line carries the WHOLE-line total, not qty × rate.
+      if (m.rate_basis === 'lot' && m.bill_amount != null) lot[String(li.id)] = String(m.bill_amount);
     });
     setBilledQty(prev => ({ ...prev, ...q }));
     setBilledRate(prev => ({ ...prev, ...r }));
+    setBilledLot(prev => ({ ...prev, ...lot }));
     if (reconResult.bill_total_extracted != null) setRefBillAmt(String(reconResult.bill_total_extracted));
     setBillingOpen(true);
   }, [reconResult]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -735,6 +741,8 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   async function saveRefBill(): Promise<void> {
     const typed = parseAmount(refBillAmt);
     const computed = (lineItems ?? []).reduce((s, li: any) => {
+      const lotVal = parseFloat(billedLot[String(li.id)] || '') || 0;
+      if (lotVal > 0) return s + lotVal;   // lot-priced line: the whole-line total
       const q = parseFloat(billedQty[String(li.id)] || '') || Number(li.quantity_ordered) || 0;
       const rt = parseFloat(billedRate[String(li.id)] || '') || Number(li.unit_rate) || 0;
       return s + q * rt;
@@ -894,11 +902,13 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     const orr = Number(li.unit_rate) || 0;
     const bq = billedQty[String(li.id)] !== undefined && billedQty[String(li.id)] !== '' ? parseFloat(billedQty[String(li.id)]) : oq;
     const br = billedRate[String(li.id)] !== undefined && billedRate[String(li.id)] !== '' ? parseFloat(billedRate[String(li.id)]) : orr;
-    const amt = bq * br;
+    const lotVal = billedLot[String(li.id)] !== undefined && billedLot[String(li.id)] !== '' ? parseFloat(billedLot[String(li.id)]) : null;
+    const isLot = lotVal != null && lotVal > 0;
+    const amt = isLot ? lotVal : bq * br;   // lot line = the whole-line total, never qty × rate
     const why: string[] = [];
     if (bq > oq) why.push(`qty +${+(bq - oq).toFixed(2)}`);
-    if (br > orr) why.push(`rate +${inr0(br - orr)}`);
-    return { li, oq, orr, bq, br, amt, why, ordAmt: oq * orr };
+    if (!isLot && br > orr) why.push(`rate +${inr0(br - orr)}`);
+    return { li, oq, orr, bq, br, amt, why, ordAmt: oq * orr, isLot };
   });
   const billedTotal = billedLines.reduce((s, r) => s + r.amt, 0);
   const billedFlags = billedLines.filter(r => r.why.length).length;
@@ -1104,7 +1114,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
               <th className="bill-col num">Billed qty</th><th className="bill-col num">Billed rate</th><th className="bill-col num">Billed amt</th>
             </tr></thead>
             <tbody>
-              {billedLines.map(({ li, oq, orr, amt, why, ordAmt }, i) => (
+              {billedLines.map(({ li, oq, orr, amt, why, ordAmt, isLot }, i) => (
                 <tr key={li.id}>
                   <td className="n">{li.line_number ?? i + 1}</td>
                   <td className="item"><b>{li.item_name}</b>{li.specification ? <small>{li.specification}</small> : null}</td>
@@ -1112,9 +1122,9 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
                   <td><span className="unit">{li.unit || '—'}</span></td>
                   <td className="num dim">{inr0(orr)}</td>
                   <td className="num amt">{inr0(Number(li.total_amount) || ordAmt)}</td>
-                  <td className="bill-col"><div className="cell"><input className="mono" inputMode="decimal" placeholder={String(oq)} value={billedQty[String(li.id)] ?? ''} disabled={hasBill && !billEditOpen} onChange={(e) => setBilledQty(p => ({ ...p, [String(li.id)]: e.target.value }))} /></div></td>
-                  <td className="bill-col"><div className="cell"><input className="mono" inputMode="decimal" placeholder={String(orr)} value={billedRate[String(li.id)] ?? ''} disabled={hasBill && !billEditOpen} onChange={(e) => setBilledRate(p => ({ ...p, [String(li.id)]: e.target.value }))} /></div></td>
-                  <td className={`bill-col num${why.length ? ' diff' : (amt === ordAmt ? ' ok-match' : '')}`}>{inr0(amt)}{why.length ? <span className="why">{why.join(' · ')}</span> : null}</td>
+                  <td className="bill-col"><div className="cell"><input className="mono" inputMode="decimal" placeholder={String(oq)} value={billedQty[String(li.id)] ?? ''} disabled={hasBill && !billEditOpen} onChange={(e) => { setBilledQty(p => ({ ...p, [String(li.id)]: e.target.value })); setBilledLot(p => { const n = { ...p }; delete n[String(li.id)]; return n; }); }} /></div></td>
+                  <td className="bill-col"><div className="cell"><input className="mono" inputMode="decimal" placeholder={String(orr)} value={billedRate[String(li.id)] ?? ''} disabled={hasBill && !billEditOpen} onChange={(e) => { setBilledRate(p => ({ ...p, [String(li.id)]: e.target.value })); setBilledLot(p => { const n = { ...p }; delete n[String(li.id)]; return n; }); }} /></div></td>
+                  <td className={`bill-col num${why.length ? ' diff' : (amt === ordAmt ? ' ok-match' : '')}`}>{inr0(amt)}{isLot ? <span className="why">whole-lot price</span> : why.length ? <span className="why">{why.join(' · ')}</span> : null}</td>
                 </tr>
               ))}
             </tbody>
@@ -1151,7 +1161,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
                 <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16" /></svg>
                 <span>{refBillFile ? refBillFile.name : (billEditOpen && (po.vendor_bill_url || po.vendor_bill_doc_url) ? 'Replace bill — PDF / photo' : 'Upload PDF / photo')}</span>
               </div>
-              <input ref={refBillFileInputRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }} onChange={(e) => setRefBillFile(e.target.files?.[0] || null)} />
+              <input ref={refBillFileInputRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0] || null; setRefBillFile(f); if (f) runReconciliation(f); }} />
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn ghost" onClick={() => { setBillingOpen(false); setBillEditOpen(false); }}>Discard</button>

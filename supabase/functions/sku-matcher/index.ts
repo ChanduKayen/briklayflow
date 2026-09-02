@@ -54,6 +54,9 @@ interface MatchedItem {
   item_raw:      string
   item_name:     string
   specification: string | null
+  dimension:     string | null
+  variant:       string | null
+  grade:         string | null
   quantity:      number | null
   unit:          string | null
   category_hint: string
@@ -466,11 +469,17 @@ Return ONLY a valid JSON array, one object PER written line, IN ORDER:
 [{
   "item_raw": "verbatim text from the document line",
   "item_name": "standard industry name",
-  "specification": "size / grade / variant, or null",
+  "specification": "size + grade + variant combined for display, or null",
+  "dimension": "SIZE only — e.g. 32mm, 18x14, 2 feet, 8x4, 100mm — or null",
+  "variant": "MATERIAL / COLOUR / TYPE — e.g. White, SS, Long body, Swan neck, 3 phase — or null",
+  "grade": "GRADE / CLASS / SCHEDULE — e.g. Fe500, OPC 53, SCH40, Class B — or null",
   "quantity": number_or_null,   // the EXACT written quantity — never invent, never default to 1
   "unit": "Bags|MT|kg|Nos|Set|Box|Rmt|Sqft|Ltr|m³|m²|null",
   "category_hint": "Cement|Steel|Sand|Aggregate|Brick|Block|Paint|Tile|Plumbing|Electrical|Hardware|Plywood|Waterproofing"
 }]
+Every size/grade/variant present in the line MUST be broken out into its structured field
+(dimension / grade / variant) AND kept in "specification". Never drop a spec the line shows, and
+never bake it silently into item_name.
 
 If no items found, return [].`.trim()
 }
@@ -752,6 +761,9 @@ async function matchItems(
       item_raw:      item.item_raw,
       item_name:     item.item_name,
       specification: item.specification,
+      dimension:     (item as any).dimension ?? null,
+      variant:       (item as any).variant ?? null,
+      grade:         (item as any).grade ?? null,
       quantity:      item.quantity,
       unit:          item.unit,
       category_hint: item.category_hint,
