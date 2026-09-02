@@ -257,7 +257,6 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
   if (error || !L) return <div className={`plx${compact ? ' compact' : ''}`}><style>{CSS}</style><div className="page"><div className="state" style={{ color: 'var(--terra)' }}>Could not load — {(error as any)?.message || 'try again'}</div></div></div>;
 
   const isEmpty = L.entries.length === 0;
-  const aheadPositive = L.aheadNow >= 0;
   const T = terms(L.kind);
   const newLedger = L.entries.some(e => e.kind === 'payment' && e.unclassified !== undefined);
   const toClassify = newLedger ? L.entries.filter(e => e.kind === 'payment' && e.unclassified) : [];
@@ -286,7 +285,12 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
             <button className="btn" onClick={() => showSnackbar('Send statement on WhatsApp — coming soon')}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.4 8.5 8.5 0 0 1-4-1L3 21l2.1-5.4A8.4 8.4 0 1 1 21 11.5z" /></svg>Send statement
             </button>
-            <button className="btn" onClick={() => window.print()}>
+            <button className="btn" onClick={async () => {
+              try {
+                const { downloadPartyStatement } = await import('../lib/ledgerStatementPdf');
+                downloadPartyStatement(L);
+              } catch (e) { showSnackbar((e as Error)?.message || 'Could not build the statement', { type: 'error' }); }
+            }}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>Download
             </button>
             <div className={`menu-wrap${menuOpen ? ' open' : ''}`} onClick={(e) => e.stopPropagation()}>
@@ -317,10 +321,18 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
         ) : (
           <section className="hero">
             <div>
-              <p className="lead"><span className="big">₹{inr(Math.abs(L.aheadNow))}</span>{aheadPositive ? T.aheadPos : T.aheadNeg}</p>
+              {/* Lead with what's owed: obligation (wages accrued + work certified) beyond what's paid is
+                  "to pay"; paid beyond obligation is an advance held with the worker. */}
+              <p className="lead">
+                {L.toPay > 0
+                  ? <><span className="big due">₹{inr(L.toPay)} <span style={{ fontSize: 26 }}>to pay</span></span>wages and certified work not yet paid</>
+                  : L.advance > 0
+                    ? <><span className="big">₹{inr(L.advance)} <span style={{ fontSize: 26 }}>in advance</span></span>paid ahead of work done</>
+                    : <><span className="big">₹0 <span style={{ fontSize: 26 }}>to pay</span></span>everything owed is settled</>}
+              </p>
               <ul className="facts">
                 <li><span className="v num">₹{inr(L.totalPaid)}</span><span className="l">paid, {L.paidCount} payment{L.paidCount !== 1 ? 's' : ''}</span></li>
-                <li><span className="v num">₹{inr(L.totalCert)}</span><span className="l">{T.creditWord}, {L.contractCount} {T.contract}{L.contractCount !== 1 ? 's' : ''}</span></li>
+                <li><span className="v num">₹{inr(L.totalCert)}</span><span className="l">owed for work{L.contractCount > 0 ? `, ${L.contractCount} ${T.contract}${L.contractCount !== 1 ? 's' : ''}` : ' (wages + certified)'}</span></li>
                 <li><span className="v">{L.lastPaid ? fmtDate(L.lastPaid.date) : '—'}</span><span className="l">{L.lastPaid ? `last paid, ₹${inr(L.lastPaid.amount)} ${L.lastPaid.mode.toLowerCase()}` : 'last paid'}</span></li>
               </ul>
               {L.unlinkedCount > 0 && L.contractCount > 0 && (

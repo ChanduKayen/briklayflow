@@ -234,7 +234,11 @@ export async function setDirectRate(id: string, rate: number): Promise<void> {
   if (error) throw error;
 }
 export async function setCrewBasis(crewId: string, basis: 'contract' | 'labour'): Promise<void> {
-  const { error } = await supabase.from('labour_crews').update({ basis }).eq('crew_id', crewId);
+  // The toggle IS the basis declaration: Contract → work (certified), Labour → day (attendance wage).
+  // Setting it confirms the engagement's accrual basis (clears the "assumed" chip).
+  const { error } = await supabase.from('labour_crews')
+    .update({ basis, accrual_basis: basis === 'contract' ? 'work' : 'day', basis_confirmed: true })
+    .eq('crew_id', crewId);
   if (error) throw error;
 }
 export async function addCategory(orgId: string, crewId: string, category: string, rate: number): Promise<void> {
@@ -242,7 +246,8 @@ export async function addCategory(orgId: string, crewId: string, category: strin
   if (error) throw error;
 }
 export async function addDirectWorker(orgId: string, projectId: string, name: string, category: string, rate: number, stakeholderId?: string): Promise<void> {
-  const { error } = await supabase.from('labour_direct_workers').insert({ org_id: orgId, project_id: projectId, name, category, rate, stakeholder_id: stakeholderId ?? null });
+  // A single worker added here is a day-wage engagement (confirmed basis).
+  const { error } = await supabase.from('labour_direct_workers').insert({ org_id: orgId, project_id: projectId, name, category, rate, stakeholder_id: stakeholderId ?? null, accrual_basis: 'day', basis_confirmed: true });
   if (error) throw error;
 }
 export async function addCrew(
@@ -250,7 +255,7 @@ export async function addCrew(
   cats: { category: string; rate: number }[], stakeholderId?: string,
 ): Promise<void> {
   const { data, error } = await supabase.from('labour_crews')
-    .insert({ org_id: orgId, project_id: projectId, name, trade, description: trade || 'Labour', stakeholder_id: stakeholderId ?? null })
+    .insert({ org_id: orgId, project_id: projectId, name, trade, description: trade || 'Labour', stakeholder_id: stakeholderId ?? null, accrual_basis: 'day', basis_confirmed: true })
     .select('crew_id').single();
   if (error) throw error;
   if (cats.length) {
@@ -304,7 +309,7 @@ export async function loadWorkOrderStages(woId: string): Promise<WOStage[]> {
 // stageIds = the phases the crew works (null/empty → all phases).
 export async function linkCrewToWorkOrder(crewId: string, woId: string, stageIds?: string[] | null): Promise<void> {
   const { error } = await supabase.from('labour_crews')
-    .update({ wo_id: woId, is_contract: true, basis: 'contract', stage_ids: stageIds && stageIds.length ? stageIds : null })
+    .update({ wo_id: woId, is_contract: true, basis: 'contract', accrual_basis: 'work', basis_confirmed: true, stage_ids: stageIds && stageIds.length ? stageIds : null })
     .eq('crew_id', crewId);
   if (error) throw error;
 }
@@ -318,7 +323,7 @@ export async function promoteDirectToCrew(
   woId: string, trade: string | null, stageIds?: string[] | null,
 ): Promise<void> {
   const { data, error } = await supabase.from('labour_crews')
-    .insert({ org_id: orgId, project_id: projectId, name: worker.name, stakeholder_id: worker.stakeholderId, trade, description: worker.category, is_contract: true, basis: 'contract', wo_id: woId, stage_ids: stageIds && stageIds.length ? stageIds : null })
+    .insert({ org_id: orgId, project_id: projectId, name: worker.name, stakeholder_id: worker.stakeholderId, trade, description: worker.category, is_contract: true, basis: 'contract', accrual_basis: 'work', basis_confirmed: true, wo_id: woId, stage_ids: stageIds && stageIds.length ? stageIds : null })
     .select('crew_id').single();
   if (error) throw error;
   const { error: e2 } = await supabase.from('labour_crew_categories').insert({ org_id: orgId, crew_id: data!.crew_id, category: worker.category, rate: worker.rate });

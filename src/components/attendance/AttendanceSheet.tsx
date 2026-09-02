@@ -17,6 +17,7 @@ import {
 } from '../../lib/attendanceApi';
 import { searchPayees } from '../../lib/payeeSearch';
 import { createParty } from '../day-book/fileEntry';
+import { CertificationWizard, type CertifyContext } from './CertificationWizard';
 
 const ATDX_CSS = `
 .atdx{background:#FBF9F6;color:var(--walnut);font:15px/1.45 "DM Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased;padding:34px 28px 80px;
@@ -284,6 +285,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   const [rcOpen, setRcOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [certCtx, setCertCtx] = useState<CertifyContext | null>(null);   // the certify-work wizard's open context
 
   const dates = weekDates(monday);
   const todayISO = isoOf(new Date());
@@ -518,33 +520,19 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     try { await saveCell(orgId, projectId, dates[i], subject, value, byName); } catch (e) { fail(e); }
   }
 
-  // A subtle % slider for a contract stage's daily completion reading. Pops above the cell so
-  // the narrow column stays legible; commits on "set", Enter, or clicking away.
-  function openPctSlider(div: HTMLElement, t: ReturnType<typeof resolve>, i: number) {
-    const st = t.target as any;
-    let prev = st.before; for (let k = 0; k < i; k++) { const c = st.cells[k]; if (c && c !== 'off') prev = c.v; }
-    const cell = st.cells[i];
-    const cur = (cell && cell !== 'off') ? cell.v : prev;
-    div.innerHTML = `<div class="pctpop">
-        <input type="range" min="0" max="100" step="1" value="${cur}">
-        <div class="pctrow"><span class="pctval mono">${cur}%</span><button class="pctok">set</button></div>
-      </div>`;
-    const range = div.querySelector('input') as HTMLInputElement;
-    const valEl = div.querySelector('.pctval') as HTMLElement;
-    let done = false;
-    function onDocDown(e: MouseEvent) { if (!div.contains(e.target as Node)) commit(); }
-    const commit = () => {
-      if (done) return; done = true;
-      document.removeEventListener('mousedown', onDocDown);
-      const v = parseInt(range.value, 10);
-      t.cells[i] = { v, src: 'office', by: byName, at: 'just now' };
-      persistCell(t.subject, t.projectId, i, v); render();
-    };
-    range.addEventListener('input', () => { valEl.textContent = range.value + '%'; });
-    (div.querySelector('.pctok') as HTMLButtonElement).addEventListener('mousedown', (e) => { e.preventDefault(); commit(); });
-    range.addEventListener('keydown', e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { done = true; document.removeEventListener('mousedown', onDocDown); render(); } });
-    setTimeout(() => document.addEventListener('mousedown', onDocDown), 0);
-    range.focus();
+  // Open the certification wizard for a stage cell — the contract-stage reading is now an accountable,
+  // evidenced, role-gated event (submit → auto-approve within rights, else the Works Approver).
+  function openCertWizard(ref: string) {
+    const [si, part, ki] = ref.split('.');
+    const site = DATA.current[+si]; const crew = site.crews[+part.slice(1)]; const st = crew.stages[+ki] as any;
+    setCertCtx({
+      orgId, projectId: site.site, projectName: site.label,
+      woId: crew.woId ?? null, milestoneId: st.milestoneId, crewId: crew.crewId, stakeholderId: crew.stakeholderId ?? null,
+      partyName: crew.n, milestoneName: st.n,
+      kind: st.type === 'lump' ? 'lump' : 'measured',
+      planned: st.amount || 0, rate: st.rate || 0, unit: st.unit,
+      priorReading: st.type === 'lump' ? (st.before || 0) : 0,
+    });
   }
 
   function bind() {
@@ -552,8 +540,9 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     body.querySelectorAll('[data-edit]').forEach(div => div.addEventListener('click', () => {
       if (div.querySelector('input')) return;
       const t = resolve((div as HTMLElement).dataset.edit!), i = colOf(div);
-      // A lump-sum contract stage records % completion → a subtle slider, not a bare number.
-      if (t.subject.type === 'stage' && (t.target as any)?.type === 'lump') { openPctSlider(div as HTMLElement, t, i); return; }
+      // A contract stage's reading launches the Certification Wizard (slider/qty → evidence → submit),
+      // replacing the bare slider/number: the reading now MINTS a governed obligation.
+      if (t.subject.type === 'stage') { openCertWizard((div as HTMLElement).dataset.edit!); return; }
       const cur = t.cells[i] && t.cells[i] !== 'off' ? (t.cells[i] as any).v : '';
       div.innerHTML = `<input class="mono" value="${cur}" inputmode="numeric">`;
       const inp = div.querySelector('input') as HTMLInputElement; inp.focus(); inp.select();
@@ -868,6 +857,13 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   return (
     <div className="atdx" ref={rootRef}>
       <style>{ATDX_CSS}</style>
+      {certCtx && <CertificationWizard ctx={certCtx}
+        onClose={() => setCertCtx(null)}
+        onDone={() => { setCertCtx(null); load(); }}
+        onReading={(value, date) => {
+          // Keep the muster grid + progress bar populated (display-only; the obligation is the cert).
+          if (certCtx.projectId && certCtx.milestoneId) void saveCell(orgId, certCtx.projectId, date, { type: 'stage', milestone_id: certCtx.milestoneId }, value, byName).catch(() => {});
+        }} />}
       <div className="wrap">
         <div className="top">
           <div>

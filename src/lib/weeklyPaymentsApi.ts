@@ -118,6 +118,48 @@ export async function loadWeeklyPayments(monday: Date): Promise<WeeklyPayments> 
     return { projectId: site.site, projectName: site.label, rows };
   }); // keep every active project — an empty one still shows its "add a payment" row
 
+  // ── Worker carry-forward — the ledger's single source (v_party_balance) decides what each worker is
+  //    owed; whatever this week's rows don't already represent is carried in. This surfaces a worker
+  //    owed from earlier weeks (NMR wages that accrue in the ledger but whose weekly rows carry nothing
+  //    forward, OR a worker with no attendance at all this week). Contract rows already carry their own
+  //    balance, so their remainder here is ~0. Falls back silently if the view isn't applied yet. ──
+  try {
+    const balR = await supabase.from('v_party_balance').select('stakeholder_id, to_pay').gt('to_pay', 0);
+    const owed: Record<string, number> = {};
+    (balR.data ?? []).forEach((b: any) => { owed[b.stakeholder_id] = Number(b.to_pay || 0); });
+    const owedIds = Object.keys(owed);
+    if (owedIds.length) {
+      // What the week's labour rows already represent as owed, per worker (balance b/f + this week).
+      const represented: Record<string, number> = {};
+      sections.forEach(s => s.rows.forEach(r => { if (r.stakeholderId) represented[r.stakeholderId] = (represented[r.stakeholderId] || 0) + r.balanceBf + r.thisWeek; }));
+      // Restrict to WORKERS (vendors are handled by loadVendorRows) and carry the unrepresented remainder.
+      const wkrR = await supabase.from('stakeholders').select('stakeholder_id, name, category, type').in('stakeholder_id', owedIds).eq('type', 'Worker');
+      const carryRows: PayRow[] = [];
+      for (const w of (wkrR.data ?? [])) {
+        const carried = Math.round((owed[w.stakeholder_id] || 0) - (represented[w.stakeholder_id] || 0));
+        if (carried <= 0.5) continue;
+        carryRows.push({
+          key: `carry-${w.stakeholder_id}`, projectId: '', projectName: '—',
+          stakeholderId: w.stakeholder_id, party: w.name || 'Worker', trade: w.category || 'Worker',
+          kind: 'wages', basis: 'carried from the ledger · owed from earlier', thisWeek: 0, balanceBf: carried,
+          woId: null, milestoneId: null,
+        });
+      }
+      // Label each carried row with the worker's most recent project (for the Site column).
+      if (carryRows.length) {
+        const ids = carryRows.map(r => r.stakeholderId!).filter(Boolean);
+        const lineR = await supabase.from('v_party_ledger_line').select('stakeholder_id, project_id, line_date').in('stakeholder_id', ids).not('project_id', 'is', null).order('line_date', { ascending: false });
+        const lastProj: Record<string, string> = {};
+        (lineR.data ?? []).forEach((l: any) => { if (!lastProj[l.stakeholder_id] && l.project_id) lastProj[l.stakeholder_id] = l.project_id; });
+        const projIds = [...new Set(Object.values(lastProj))];
+        const projName: Record<string, string> = {};
+        if (projIds.length) { const pr = await supabase.from('projects').select('project_id, name').in('project_id', projIds); (pr.data ?? []).forEach((p: any) => { projName[p.project_id] = p.name; }); }
+        carryRows.forEach(r => { const pid = lastProj[r.stakeholderId!]; if (pid) { r.projectId = pid; r.projectName = projName[pid] || pid; } });
+        sections.push({ projectId: '__carry__', projectName: 'Carried forward', rows: carryRows });
+      }
+    }
+  } catch { /* v_party_balance not applied yet — no carry-forward */ }
+
   return { sections, monday };
 }
 

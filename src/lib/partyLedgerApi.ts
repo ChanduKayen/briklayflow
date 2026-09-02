@@ -8,7 +8,7 @@
 import { supabase } from './supabase';
 import { billDateOf, BILL_DATE_COLUMNS } from './partyLedger';
 
-export type EntryKind = 'payment' | 'certified' | 'bill' | 'adjustment' | 'opening' | 'start' | 'consolidated';
+export type EntryKind = 'payment' | 'certified' | 'wage' | 'bill' | 'adjustment' | 'opening' | 'start' | 'consolidated';
 export interface LedgerEntry {
   id: string; date: string | null;           // ISO date, null for the permanent "start" row
   kind: EntryKind;
@@ -49,7 +49,7 @@ export interface PartyLedger {
 const num = (v: any) => Number(v) || 0;
 
 export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedger> {
-  const [stkR, txnR, woR, poR, obR, adjR, cbR] = await Promise.all([
+  const [stkR, txnR, woR, poR, obR, adjR, cbR, wcR, balR] = await Promise.all([
     supabase.from('stakeholders').select('stakeholder_id, name, type, category').eq('stakeholder_id', stakeholderId).single(),
     supabase.from('transactions').select('*, txn_allocations(project_id, order_type, order_ref, milestone_id, allocated_amount, projects(name))').eq('stakeholder_id', stakeholderId).order('date', { ascending: false }),
     supabase.from('work_orders').select('wo_id, project_id, title, scope_of_work, order_value, projects(name), wo_milestones(milestone_id, name, planned_amount, unit_type, quantity, rate, seq_no)').eq('stakeholder_id', stakeholderId),
@@ -57,6 +57,10 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
     supabase.from('stakeholder_opening_balances').select('*').eq('stakeholder_id', stakeholderId).maybeSingle(),
     supabase.from('party_adjustments').select('*').eq('stakeholder_id', stakeholderId),
     supabase.from('consolidated_bills').select('*').eq('stakeholder_id', stakeholderId).order('period_to'),
+    // Approved work certifications = the governed certified obligation (replaces raw stage readings).
+    supabase.from('work_certifications').select('id, wo_id, milestone_id, reading_kind, computed_amount, reading_date, project_id, status').eq('stakeholder_id', stakeholderId).eq('status', 'approved'),
+    // The single-source balance (cutover-applied) — authoritative for the hero's to_pay / advance.
+    supabase.from('v_party_balance').select('billed, paid, without_bills, to_pay, advance').eq('stakeholder_id', stakeholderId).maybeSingle(),
   ]);
   if (stkR.error) throw stkR.error;
   const stk = stkR.data as any;
@@ -91,45 +95,100 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
     });
   }
 
-  // ── Certified: inferred from attendance contract-stage readings (defensive: labour_* may be absent) ──
+  // ── Certified: APPROVED work certifications (the governed obligation source; a pending one is not
+  //    owed, exactly like a pending PO). measured/piece each count; lump = latest per milestone. ──
   const contractCert: Record<string, number> = {}; // wo_id → total certified
-  try {
-    const crewR = await supabase.from('labour_crews').select('crew_id, wo_id, project_id').eq('stakeholder_id', stakeholderId).not('wo_id', 'is', null);
-    const crews = crewR.data ?? [];
-    const woIds = [...new Set(crews.map((c: any) => c.wo_id))];
-    if (woIds.length) {
-      const msByWo: Record<string, any[]> = {};
-      (woR.data ?? []).forEach((w: any) => { if (woIds.includes(w.wo_id)) msByWo[w.wo_id] = (w.wo_milestones ?? []); });
-      const msIds = Object.values(msByWo).flat().map((m: any) => m.milestone_id);
-      const msMeta: Record<string, any> = {}; Object.values(msByWo).flat().forEach((m: any) => { msMeta[m.milestone_id] = m; });
-      const woOfMs: Record<string, string> = {}; for (const [wo, ms] of Object.entries(msByWo)) (ms as any[]).forEach(m => { woOfMs[m.milestone_id] = wo; });
-      if (msIds.length) {
-        const attR = await supabase.from('labour_attendance').select('milestone_id, value, work_date').eq('subject_type', 'stage').in('milestone_id', msIds).order('work_date');
-        const byMs: Record<string, { work_date: string; value: number }[]> = {};
-        (attR.data ?? []).forEach((a: any) => { (byMs[a.milestone_id] ||= []).push({ work_date: a.work_date, value: num(a.value) }); });
-        for (const [mid, readings] of Object.entries(byMs)) {
-          const m = msMeta[mid]; if (!m) continue;
-          const lump = (m.unit_type ?? 'LS') === 'LS';
-          let prevEarned = 0;
-          for (const r of readings) {
-            const earned = lump ? num(m.planned_amount) * r.value / 100 : (num(m.rate) * r.value);
-            const delta = lump ? (earned - prevEarned) : earned; // lump = cumulative %, measured = per-day qty
-            if (delta > 0.5) {
-              const wo = woOfMs[mid];
-              const w = (woR.data ?? []).find((x: any) => x.wo_id === wo);
-              entries.push({
-                id: `cert-${mid}-${r.work_date}`, date: r.work_date, kind: 'certified',
-                particulars: `${m.name} certified`, projectId: w?.project_id ?? null, projectName: w?.project_id ? (projName[w.project_id] || w.project_id) : null,
-                contractId: wo, paid: 0, cert: delta,
-              });
-              contractCert[wo] = (contractCert[wo] || 0) + delta;
-            }
-            if (lump) prevEarned = earned;
-          }
-        }
+  {
+    const certs = (wcR.data ?? []) as any[];
+    const latestLump: Record<string, any> = {};
+    const certLines: any[] = [];
+    for (const wc of certs) {
+      if (wc.reading_kind === 'lump' && wc.milestone_id) {
+        const cur = latestLump[wc.milestone_id];
+        if (!cur || (wc.reading_date || '') > (cur.reading_date || '')) latestLump[wc.milestone_id] = wc;
+      } else {
+        certLines.push(wc);
       }
     }
-  } catch { /* labour tables not present — no certified feed */ }
+    Object.values(latestLump).forEach(wc => certLines.push(wc));
+    for (const wc of certLines) {
+      const amt = num(wc.computed_amount);
+      if (amt <= 0.5) continue;
+      const pid = wc.project_id ?? null;
+      entries.push({
+        id: `cert-${wc.id}`, date: wc.reading_date, kind: 'certified',
+        particulars: 'Work certified', projectId: pid, projectName: pid ? (projName[pid] || pid) : null,
+        contractId: wc.wo_id ?? null, paid: 0, cert: amt,
+      });
+      if (wc.wo_id) contractCert[wc.wo_id] = (contractCert[wc.wo_id] || 0) + amt;
+    }
+  }
+
+  // ── Wage accrual (workers only) — the NMR / day-work obligation ────────────────────────────────
+  // The locked model (see the worker-payable-accrual spec): a NO-CONTRACT worker's attendance IS the
+  // measured value, so each day present accrues a wage credit (units × rate). A CONTRACT crew records
+  // PRESENCE ONLY and accrues nothing here — its obligation is the certified stage readings above; a
+  // payment before certification simply reads as an advance. This closes the gap where a daily-wage
+  // worker's "to pay" was always ₹0 because attendance never became an obligation. Same figure the
+  // weekly payment run computes (attendance × rate), so the ledger and the run agree.
+  if (!isVendor) {
+    try {
+      // The worker's crews (a gang keyed to this party) + their per-skill rate rows, and any direct
+      // workers keyed to this party. Only DAY-basis engagements accrue a wage per attendance; work /
+      // measurement / piece engagements accrue via approved certifications instead (skipped here).
+      const [crewAllR, directAllR] = await Promise.all([
+        supabase.from('labour_crews').select('crew_id, project_id, accrual_basis').eq('stakeholder_id', stakeholderId),
+        supabase.from('labour_direct_workers').select('id, project_id, rate, accrual_basis').eq('stakeholder_id', stakeholderId),
+      ]);
+      // Day-basis engagements accrue a wage per attendance; work/measurement/piece accrue via certifications.
+      const nmrCrews = (crewAllR.data ?? []).filter((c: any) => c.accrual_basis === 'day');
+      const crewProj: Record<string, string | null> = {};
+      nmrCrews.forEach((c: any) => { crewProj[c.crew_id] = c.project_id ?? null; });
+      const directs = (directAllR.data ?? []).filter((w: any) => w.accrual_basis === 'day');
+      const directMeta: Record<string, { projectId: string | null; rate: number }> = {};
+      directs.forEach((w: any) => { directMeta[w.id] = { projectId: w.project_id ?? null, rate: num(w.rate) }; });
+
+      // Resolve names for any project not already known from the payment/contract joins.
+      const wageProjIds = [...new Set([...nmrCrews.map((c: any) => c.project_id), ...directs.map((w: any) => w.project_id)].filter((p): p is string => !!p && !projName[p]))];
+      if (wageProjIds.length) {
+        const pr = await supabase.from('projects').select('project_id, name').in('project_id', wageProjIds);
+        (pr.data ?? []).forEach((p: any) => { projName[p.project_id] = p.name; });
+      }
+
+      // Rate per NMR crew skill row (category_id → rate + crew).
+      const catRate: Record<string, { rate: number; crewId: string }> = {};
+      if (nmrCrews.length) {
+        const catR = await supabase.from('labour_crew_categories').select('id, crew_id, rate').in('crew_id', nmrCrews.map((c: any) => c.crew_id));
+        (catR.data ?? []).forEach((k: any) => { catRate[k.id] = { rate: num(k.rate), crewId: k.crew_id }; });
+      }
+
+      // Attendance for those skill rows + direct workers, folded to wage = value × rate per (subject, day).
+      // Grouped to ONE credit per crew (or direct worker) per work_date so the ledger reads cleanly.
+      const catIds = Object.keys(catRate);
+      const directIds = directs.map((w: any) => w.id);
+      const wageByKey: Record<string, { date: string; projectId: string | null; amount: number; label: string }> = {};
+      const addWage = (key: string, date: string, projectId: string | null, amount: number, label: string) => {
+        if (amount <= 0) return;
+        const k = `${key}|${date}`;
+        (wageByKey[k] ||= { date, projectId, amount: 0, label }).amount += amount;
+      };
+      if (catIds.length) {
+        const aR = await supabase.from('labour_attendance').select('category_id, value, work_date').eq('subject_type', 'crew_category').in('category_id', catIds);
+        (aR.data ?? []).forEach((a: any) => { const c = catRate[a.category_id]; if (!c) return; addWage(`crew-${c.crewId}`, a.work_date, crewProj[c.crewId] ?? null, num(a.value) * c.rate, 'Wages'); });
+      }
+      if (directIds.length) {
+        const aR = await supabase.from('labour_attendance').select('direct_worker_id, value, work_date').eq('subject_type', 'direct').in('direct_worker_id', directIds);
+        (aR.data ?? []).forEach((a: any) => { const m = directMeta[a.direct_worker_id]; if (!m) return; addWage(`direct-${a.direct_worker_id}`, a.work_date, m.projectId, num(a.value) * m.rate, 'Wages'); });
+      }
+      for (const [k, w] of Object.entries(wageByKey)) {
+        entries.push({
+          id: `wage-${k}`, date: w.date, kind: 'wage', particulars: w.label,
+          projectId: w.projectId, projectName: w.projectId ? (projName[w.projectId] || w.projectId) : null,
+          contractId: null, paid: 0, cert: Math.round(w.amount),
+        });
+      }
+    } catch { /* labour tables not present — no wage feed */ }
+  }
 
   // ── Billed: a vendor's recorded PO bills (as the certified/credit side) ──
   if (isVendor) {
@@ -207,7 +266,9 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
   // billed total here; otherwise the hero's to-pay/advance diverge from the ledger's own balance
   // (payments counted as paid, but the bill that accounts for them dropped from billed → a phantom
   // "advance" that hides a real amount owed).
-  const totalCert = withRun.filter(e => e.kind === 'certified' || e.kind === 'bill' || e.kind === 'consolidated').reduce((s, e) => s + e.cert, 0);
+  // A worker's wage accrual is a real obligation (a credit) — it counts as "certified" alongside stage
+  // certifications and vendor bills, so to_pay/advance are computed on the true obligation base.
+  const totalCert = withRun.filter(e => e.kind === 'certified' || e.kind === 'wage' || e.kind === 'bill' || e.kind === 'consolidated').reduce((s, e) => s + e.cert, 0);
   const lastPaidEntry = payments[0];
   const lastPaid = lastPaidEntry ? { date: lastPaidEntry.date!, amount: lastPaidEntry.paid, mode: lastPaidEntry.mode || '' } : null;
 
@@ -245,8 +306,12 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
   const unlinkedCount = unlinked.length;
   const unlinkedTotal = unlinked.reduce((s, e) => s + e.paid, 0);
 
-  const toPay = Math.max(0, totalCert - totalPaid);
-  const advance = Math.max(0, totalPaid - totalCert - unbilledTotal);
+  // The single source of record for the hero's dues is v_party_balance (it applies the ledger cutover
+  // and the exact same formulas). Prefer it so the party page and Payables can never disagree; fall
+  // back to the locally-derived figures only when the view isn't available yet (migration pending).
+  const bal = balR?.data as { billed?: number; paid?: number; to_pay?: number; advance?: number } | null | undefined;
+  const toPay   = bal ? num(bal.to_pay)  : Math.max(0, totalCert - totalPaid);
+  const advance = bal ? num(bal.advance) : Math.max(0, totalPaid - totalCert - unbilledTotal);
   return {
     kind: isVendor ? 'vendor' : 'worker',
     stakeholder: { id: stk.stakeholder_id, name: stk.name, type: stk.type, category: stk.category },
