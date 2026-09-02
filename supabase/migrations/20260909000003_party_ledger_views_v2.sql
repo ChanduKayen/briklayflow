@@ -64,13 +64,16 @@ SELECT wc.org_id, wc.stakeholder_id, wc.project_id, wc.reading_date, 'certified'
   FROM public.work_certifications wc
  WHERE wc.status = 'approved' AND wc.reading_kind IN ('measured','piece') AND wc.stakeholder_id IS NOT NULL
 UNION ALL
--- CERTIFIED — approved LUMP certifications: only the latest per milestone (cumulative %).
-SELECT DISTINCT ON (wc.milestone_id)
-       wc.org_id, wc.stakeholder_id, wc.project_id, wc.reading_date, 'certified'::text, wc.id::text,
-       'Certified work'::text, wc.computed_amount, 0::numeric
-  FROM public.work_certifications wc
- WHERE wc.status = 'approved' AND wc.reading_kind = 'lump' AND wc.stakeholder_id IS NOT NULL
- ORDER BY wc.milestone_id, wc.reading_date DESC;
+-- CERTIFIED — approved LUMP certifications: only the latest per milestone (cumulative %). Wrapped in a
+-- subquery so DISTINCT ON + ORDER BY scope to THIS select, not the whole UNION.
+SELECT * FROM (
+  SELECT DISTINCT ON (wc.milestone_id)
+         wc.org_id, wc.stakeholder_id, wc.project_id, wc.reading_date, 'certified'::text AS kind, wc.id::text AS ref_id,
+         'Certified work'::text AS label, wc.computed_amount AS billed, 0::numeric AS paid
+    FROM public.work_certifications wc
+   WHERE wc.status = 'approved' AND wc.reading_kind = 'lump' AND wc.stakeholder_id IS NOT NULL
+   ORDER BY wc.milestone_id, wc.reading_date DESC
+) lump_latest;
 
 GRANT SELECT ON public.v_party_ledger_line TO authenticated;
 
