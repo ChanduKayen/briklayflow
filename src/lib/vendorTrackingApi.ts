@@ -315,24 +315,59 @@ export async function readVendorBill(base64: string, mime: string): Promise<Bill
   return { vendor: d.vendor_name ?? null, billNo: d.bill_number ?? null, billDate: d.bill_date ?? null, total, gst, lines };
 }
 
+/** Turn a bill's extracted line items into a PO's `items` blob + `po_line_items` rows. The bill is
+ *  read by reconcile-po-bill (readVendorBill → BillRead.lines), so a bill with 30 items lands on the
+ *  PO as 30 lines, not a single "Bill — Vendor" lump. Line amounts are the printed (usually pre-GST)
+ *  line totals, so we also return the header split — `basic` (Σ lines) and `gstValue` (the gap up to
+ *  the gross `poAmount`) — keeping the PO balanced: Σ line_items = order_value, + GST = total_value.
+ *  Returns null when there are no usable lines OR when Σ lines can't describe `poAmount` (e.g. a
+ *  proportional multi-site slice, where item-level attribution is unknowable) → caller keeps the lump. */
+function billLinesToPO(
+  lines: BillLine[] | undefined, poAmount: number,
+): { items: Array<Record<string, unknown>>; lineItems: Array<Record<string, unknown>>; basic: number; gstValue: number } | null {
+  const usable = (lines ?? []).filter(l => (l.item ?? '').trim());
+  if (usable.length === 0) return null;
+  const linesSum = usable.reduce((s, l) => s + num(l.amount ?? (num(l.qty) * num(l.rate))), 0);
+  if (linesSum <= 0) return null;
+  // The line subtotal must plausibly be THIS PO's taxable base: at most a hair over the gross (rounding)
+  // and at least ~60% of it (a wide GST/rounding gap). Outside that band the lines describe a different
+  // amount than the PO carries → don't itemize.
+  if (linesSum < poAmount * 0.6 || linesSum > poAmount * 1.02) return null;
+  const items = usable.map(l => {
+    const qty = num(l.qty) || 1;
+    const amount = Math.round(num(l.amount ?? qty * num(l.rate)));
+    const rate = num(l.rate) || (qty ? amount / qty : amount);
+    return { name: (l.item ?? '').trim(), quantity: qty, rate, amount };
+  });
+  const lineItems = items.map((it, i) => ({
+    line_number: i + 1, item_name: it.name as string, unit: (usable[i].unit ?? 'Nos') || 'Nos',
+    quantity_ordered: it.quantity, unit_rate: it.rate, basic_amount: it.amount,
+    discount_percent: 0, discount_amount: 0, gst_rate: 0, cgst: 0, sgst: 0, igst: 0, total_amount: it.amount,
+  }));
+  const basic = Math.min(Math.round(linesSum), poAmount);
+  return { items, lineItems, basic, gstValue: Math.max(0, poAmount - basic) };
+}
+
 /** One site's slice of an attached bill: a delivered PO for `projectId` billed `billAmount`, of
  *  which `paidAmount` is covered by this payment (balance = billAmount − paidAmount). Creates an
  *  auto-approved, RECEIVED PO (money + received marker only; no GRN/stock lines beyond the bill
- *  line). Returns the new PO id. */
+ *  line). Passes `lines` (the bill's extracted items) to itemize the PO when they reconcile with
+ *  the amount; otherwise a single lump line. Returns the new PO id. */
 export async function createDeliveredBillPO(
   txn: TrackTxn, orgId: string,
-  row: { projectId: string; name: string; billAmount: number; paidAmount: number; gst?: number; billUrl?: string | null; billNo?: string | null },
+  row: { projectId: string; name: string; billAmount: number; paidAmount: number; gst?: number; billUrl?: string | null; billNo?: string | null; lines?: BillLine[] },
 ): Promise<{ poId: string }> {
   assertLinkable(txn);
   const stakeholderId = txn?.stakeholder_id ?? null;
   const { data: u } = await supabase.auth.getUser();
   const createdBy = u?.user?.id ?? null;
-  const items = [{ name: row.name, quantity: 1, rate: row.billAmount, amount: row.billAmount }];
-  const lineItems = [{ line_number: 1, item_name: row.name, unit: 'Nos', quantity_ordered: 1, unit_rate: row.billAmount, basic_amount: row.billAmount, discount_percent: 0, discount_amount: 0, gst_rate: 0, cgst: 0, sgst: 0, igst: 0, total_amount: row.billAmount }];
+  const itemized = billLinesToPO(row.lines, row.billAmount);
+  const items = itemized?.items ?? [{ name: row.name, quantity: 1, rate: row.billAmount, amount: row.billAmount }];
+  const lineItems = itemized?.lineItems ?? [{ line_number: 1, item_name: row.name, unit: 'Nos', quantity_ordered: 1, unit_rate: row.billAmount, basic_amount: row.billAmount, discount_percent: 0, discount_amount: 0, gst_rate: 0, cgst: 0, sgst: 0, igst: 0, total_amount: row.billAmount }];
   const { data, error } = await supabase.rpc('create_purchase_order', {
     p_po_data: {
       org_id: orgId, project_id: row.projectId, stakeholder_id: stakeholderId,
-      items, order_value: row.billAmount, total_value: row.billAmount, gst_value: row.gst ?? 0,
+      items, order_value: itemized?.basic ?? row.billAmount, total_value: row.billAmount, gst_value: itemized?.gstValue ?? (row.gst ?? 0),
       status: 'BILLED',
       date_issued: new Date().toISOString().split('T')[0], payment_terms_days: 0, created_by: createdBy,
     },
@@ -366,18 +401,19 @@ export async function createDeliveredBillPO(
  *  bill total ran ahead of what this payment covered. MONEY + image only; no GRN/stock. */
 export async function createPendingBillPO(
   txn: TrackTxn, orgId: string,
-  row: { projectId: string; name: string; amount: number; gst?: number; billUrl?: string | null; billNo?: string | null },
+  row: { projectId: string; name: string; amount: number; gst?: number; billUrl?: string | null; billNo?: string | null; lines?: BillLine[] },
 ): Promise<{ poId: string }> {
   assertLinkable(txn);
   const stakeholderId = txn?.stakeholder_id ?? null;
   const { data: u } = await supabase.auth.getUser();
   const createdBy = u?.user?.id ?? null;
-  const items = [{ name: row.name, quantity: 1, rate: row.amount, amount: row.amount }];
-  const lineItems = [{ line_number: 1, item_name: row.name, unit: 'Nos', quantity_ordered: 1, unit_rate: row.amount, basic_amount: row.amount, discount_percent: 0, discount_amount: 0, gst_rate: 0, cgst: 0, sgst: 0, igst: 0, total_amount: row.amount }];
+  const itemized = billLinesToPO(row.lines, row.amount);
+  const items = itemized?.items ?? [{ name: row.name, quantity: 1, rate: row.amount, amount: row.amount }];
+  const lineItems = itemized?.lineItems ?? [{ line_number: 1, item_name: row.name, unit: 'Nos', quantity_ordered: 1, unit_rate: row.amount, basic_amount: row.amount, discount_percent: 0, discount_amount: 0, gst_rate: 0, cgst: 0, sgst: 0, igst: 0, total_amount: row.amount }];
   const { data, error } = await supabase.rpc('create_purchase_order', {
     p_po_data: {
       org_id: orgId, project_id: row.projectId, stakeholder_id: stakeholderId,
-      items, order_value: row.amount, total_value: row.amount, gst_value: row.gst ?? 0,
+      items, order_value: itemized?.basic ?? row.amount, total_value: row.amount, gst_value: itemized?.gstValue ?? (row.gst ?? 0),
       status: 'BILLED',
       date_issued: new Date().toISOString().split('T')[0], payment_terms_days: 0, created_by: createdBy,
     },

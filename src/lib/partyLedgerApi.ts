@@ -202,7 +202,12 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
   // ── Facts / rollups ──
   const payments = withRun.filter(e => e.kind === 'payment');
   const totalPaid = payments.reduce((s, e) => s + e.paid, 0);
-  const totalCert = withRun.filter(e => e.kind === 'certified' || e.kind === 'bill').reduce((s, e) => s + e.cert, 0);
+  // A consolidated bill IS billing — its amount is a real certified figure. The running Balance
+  // column already accumulates its cert (see the withRun reduce above), so it MUST also enter the
+  // billed total here; otherwise the hero's to-pay/advance diverge from the ledger's own balance
+  // (payments counted as paid, but the bill that accounts for them dropped from billed → a phantom
+  // "advance" that hides a real amount owed).
+  const totalCert = withRun.filter(e => e.kind === 'certified' || e.kind === 'bill' || e.kind === 'consolidated').reduce((s, e) => s + e.cert, 0);
   const lastPaidEntry = payments[0];
   const lastPaid = lastPaidEntry ? { date: lastPaidEntry.date!, amount: lastPaidEntry.paid, mode: lastPaidEntry.mode || '' } : null;
 

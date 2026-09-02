@@ -36,10 +36,12 @@ export interface PayRow {
   balanceBf: number;                               // carried from before (contract only)
   woId: string | null; milestoneId: string | null; // allocation target for a contract payment
   bills?: VendorBill[];                            // open POs for a vendor (oldest-first)
+  advance?: number;                                // vendor: paid ahead of billing (shown SEPARATELY from dues)
+  withoutBills?: number;                           // vendor: paid with no bill on file
   att?: AttDetail;
   stage?: StageDetail;
 }
-export interface VendorBill { poId: string; no: string; date: string; amount: number; balance: number }
+export interface VendorBill { poId: string; no: string; date: string; amount: number; balance: number; projectId: string | null; projectName: string | null }
 export interface PaySection { projectId: string; projectName: string; rows: PayRow[] }
 export interface WeeklyPayments { sections: PaySection[]; monday: Date }
 
@@ -119,12 +121,18 @@ export async function loadWeeklyPayments(monday: Date): Promise<WeeklyPayments> 
   return { sections, monday };
 }
 
-// ── vendor payments — open PO bills, paid oldest-first ───────────────────────
+// ── vendor payments — ONE net-payable row per vendor, from the party-ledger view ─────────────
+// The headline due is the vendor's NET to-pay (billed − paid across ALL bills: POs, consolidated,
+// opening, adjustments), read from v_party_balance so Payables and the party-ledger hero can't drift.
+// Advance (paid ahead) rides along SEPARATELY, never netted into the due. The open PO bills come too,
+// for the expand + the oldest-first payment allocation. If the view isn't present yet (migration not
+// applied), it falls back to the sum of open PO dues so the page still works.
 export async function loadVendorRows(): Promise<PayRow[]> {
-  const [poR, stkR, projR] = await Promise.all([
+  const [poR, stkR, projR, balR] = await Promise.all([
     supabase.from('purchase_orders').select('po_id, stakeholder_id, project_id, total_value, order_value, vendor_bill_amount, vendor_bill_number, date_issued, status').eq('approval_status', 'APPROVED'),
     supabase.from('stakeholders').select('stakeholder_id, name'),
     supabase.from('projects').select('project_id, name'),
+    supabase.from('v_party_balance').select('stakeholder_id, to_pay, advance, without_bills'),
   ]);
   if (poR.error) throw poR.error;
   const pos = (poR.data ?? []).filter((p: any) => p.stakeholder_id && (p.status || '').toUpperCase() !== 'CANCELLED');
@@ -132,31 +140,49 @@ export async function loadVendorRows(): Promise<PayRow[]> {
   const stkName: Record<string, string> = {}; (stkR.data ?? []).forEach((s: any) => { stkName[s.stakeholder_id] = s.name; });
   const projName: Record<string, string> = {}; (projR.data ?? []).forEach((p: any) => { projName[p.project_id] = p.name; });
 
+  // Ledger net figures per vendor (view absent → {} → fall back to open PO dues below).
+  const bal: Record<string, { toPay: number; advance: number; without: number }> = {};
+  (balR.data ?? []).forEach((b: any) => { bal[b.stakeholder_id] = { toPay: Number(b.to_pay || 0), advance: Number(b.advance || 0), without: Number(b.without_bills || 0) }; });
+
   const paidByPo: Record<string, number> = {};
   if (poIds.length) {
     const alR = await supabase.from('txn_allocations').select('order_ref, allocated_amount, transactions(status)').eq('order_type', 'PO').in('order_ref', poIds);
     (alR.data ?? []).forEach((a: any) => { if (a.transactions?.status === 'Voided') return; paidByPo[a.order_ref] = (paidByPo[a.order_ref] || 0) + Number(a.allocated_amount || 0); });
   }
 
-  const groups: Record<string, { stakeholderId: string; projectId: string; bills: VendorBill[] }> = {};
+  // Open PO bills grouped by VENDOR (across projects) — each bill keeps its own project.
+  const byVendor: Record<string, VendorBill[]> = {};
   pos.forEach((p: any) => {
     const base = Number(p.vendor_bill_amount || p.total_value || p.order_value || 0);
     const due = base - (paidByPo[p.po_id] || 0);
     if (due <= 0.5) return;
-    const k = `${p.stakeholder_id}|${p.project_id}`;
-    (groups[k] ||= { stakeholderId: p.stakeholder_id, projectId: p.project_id, bills: [] })
-      .bills.push({ poId: p.po_id, no: p.vendor_bill_number || p.po_id, date: p.date_issued || '', amount: base, balance: due });
+    (byVendor[p.stakeholder_id] ||= []).push({
+      poId: p.po_id, no: p.vendor_bill_number || p.po_id, date: p.date_issued || '', amount: base, balance: due,
+      projectId: p.project_id ?? null, projectName: p.project_id ? (projName[p.project_id] || p.project_id) : null,
+    });
   });
 
-  return Object.values(groups).map(g => {
-    g.bills.sort((a, b) => (a.date || '').localeCompare(b.date || '')); // oldest first
-    const due = g.bills.reduce((s, b) => s + b.balance, 0);
-    return {
-      key: `v-${g.stakeholderId}-${g.projectId}`, projectId: g.projectId, projectName: projName[g.projectId] || g.projectId,
-      stakeholderId: g.stakeholderId, party: stkName[g.stakeholderId] || 'Vendor', trade: `${g.bills.length} bill${g.bills.length !== 1 ? 's' : ''} open · ${projName[g.projectId] || ''}`,
-      kind: 'vendor' as const, basis: 'vendor bills · oldest first', thisWeek: due, balanceBf: 0, woId: null, milestoneId: null, bills: g.bills,
-    };
-  }).sort((a, b) => b.thisWeek - a.thisWeek);
+  const vendorIds = new Set<string>([...Object.keys(byVendor), ...Object.keys(bal)]);
+  const rows: PayRow[] = [];
+  for (const vid of vendorIds) {
+    const bills = (byVendor[vid] ?? []).sort((a, b) => (a.date || '').localeCompare(b.date || '')); // oldest first
+    const openDue = bills.reduce((s, b) => s + b.balance, 0);
+    const b = bal[vid];
+    // Net to-pay from the ledger view; fall back to open PO dues when the view is unavailable.
+    const due = b ? b.toPay : openDue;
+    if (due <= 0.5) continue; // a payment run lists only what's owed; advance-only vendors live on the party page
+    const projects = Array.from(new Set(bills.map(x => x.projectId).filter(Boolean))) as string[];
+    const primaryProject = bills[0]?.projectId ?? null;
+    const projectLabel = projects.length > 1 ? 'Multiple sites' : (projects[0] ? (projName[projects[0]] || projects[0]) : '—');
+    rows.push({
+      key: `v-${vid}`, projectId: primaryProject ?? '', projectName: projectLabel,
+      stakeholderId: vid, party: stkName[vid] || 'Vendor',
+      trade: `${bills.length} bill${bills.length !== 1 ? 's' : ''} open${projects.length > 1 ? ` · ${projects.length} sites` : ''}`,
+      kind: 'vendor' as const, basis: 'vendor bills · oldest first', thisWeek: due, balanceBf: 0, woId: null, milestoneId: null,
+      bills, advance: b?.advance ?? 0, withoutBills: b?.without ?? 0,
+    });
+  }
+  return rows.sort((a, b) => b.thisWeek - a.thisWeek);
 }
 
 // ── recurring / fixed payments ───────────────────────────────────────────────
@@ -217,9 +243,10 @@ export async function recordWeeklyPayment(
   if (row.kind === 'contract' && row.woId) {
     allocations = [{ project_id: row.projectId, order_type: 'WO', order_ref: row.woId, milestone_id: row.milestoneId, allocated_amount: amount }];
   } else if (row.kind === 'vendor' && row.bills?.length) {
+    // Oldest bill first — each PO allocation carries THAT bill's own project (a vendor row spans sites).
     allocations = []; let left = amount;
-    for (const b of row.bills) { const a = Math.min(b.balance, left); if (a > 0.5) { allocations.push({ project_id: row.projectId, order_type: 'PO', order_ref: b.poId, allocated_amount: a }); left -= a; } if (left <= 0.5) break; }
-    if (left > 0.5) allocations.push({ project_id: row.projectId, allocated_amount: left }); // on account
+    for (const b of row.bills) { const a = Math.min(b.balance, left); if (a > 0.5) { allocations.push({ project_id: b.projectId ?? row.projectId, order_type: 'PO', order_ref: b.poId, allocated_amount: a }); left -= a; } if (left <= 0.5) break; }
+    if (left > 0.5) allocations.push({ project_id: row.bills[0]?.projectId ?? row.projectId, allocated_amount: left }); // on account
   } else {
     allocations = [{ project_id: row.projectId, allocated_amount: amount }];
   }

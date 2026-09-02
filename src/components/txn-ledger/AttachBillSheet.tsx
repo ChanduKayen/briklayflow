@@ -114,6 +114,9 @@ export function AttachBillSheet({
     if (!bill) return;
     if (!workSites.length) throw new Error("This payment isn't on a site yet — open it to set one, then attach.");
     const billName = bill.billNo ? `Bill ${bill.billNo} — ${vendor}` : `Bill — ${vendor}`;
+    // Itemize only when the whole bill goes on a single PO — a bill split proportionally across
+    // several sites can't attribute its line items per site, so those keep the single-lump line.
+    const wholeBillOnOnePO = workSites.length === 1;
     const parts: Array<{ projectId: string; poId: string; amount: number }> = [];
     for (const s of workSites) {
       // Bill amount for this site = the bill's total apportioned by this site's paid share (so a
@@ -124,6 +127,7 @@ export function AttachBillSheet({
       const { poId } = await createDeliveredBillPO(txn, orgId ?? '', {
         projectId: s.projectId, name: billName,
         billAmount, paidAmount: s.paid, gst: 0, billUrl, billNo: bill.billNo,
+        lines: wholeBillOnOnePO ? bill.lines : undefined,
       });
       parts.push({ projectId: s.projectId, poId, amount: s.paid });
     }

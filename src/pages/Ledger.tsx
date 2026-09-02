@@ -1394,8 +1394,16 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                           ? async () => {
                               try {
                                 await unlinkTxnOrder({ txn_id: txn.txn_id, status: txn.status }, orgId ?? '');
+                                // Every dimension derives from txn_allocations, so refresh each view that
+                                // reads them — the list, the txn detail page's allocations, the party
+                                // ledger, the PO paid/balance — so an already-open page reflects the unlink.
                                 qc.invalidateQueries({ queryKey: ['ledger'] });
                                 qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
+                                qc.invalidateQueries({ queryKey: ['txn_allocations', txn.txn_id] });
+                                qc.invalidateQueries({ queryKey: ['transactions'] });
+                                qc.invalidateQueries({ queryKey: ['party_ledger'] });
+                                if (anchor && anchor.kind === 'PO') { qc.invalidateQueries({ queryKey: ['po_detail', anchor.ref] }); qc.invalidateQueries({ queryKey: ['po_linked_txns', anchor.ref] }); }
+                                if (anchor && anchor.kind === 'WO') qc.invalidateQueries({ queryKey: ['wo_allocations', anchor.ref] });
                               } catch (e) { window.alert(e instanceof Error ? e.message : 'Could not unlink'); }
                             }
                           : undefined}

@@ -428,60 +428,111 @@ function buildExtractionPrompt(vendorCategory?: string): string {
     ? `\nVendor type: "${vendorCategory}" (likely trades: [${cats.join(', ')}]) — use this ONLY as a soft hint to disambiguate an unclear name. Still extract EVERY item written, including any outside this list.\n`
     : ''
 
-  return `You are a senior procurement manager for Indian construction projects with deep knowledge of material trade names across Andhra Pradesh, Telangana, and pan-India.${categoryContext}
+  return ` You are a senior procurement manager and site engineer for Indian construction projects with deep knowledge of material trade names across Andhra Pradesh, Telangana, and pan-India — across ALL trades (civil, plumbing, electrical, steel, tiling, painting, waterproofing, sanitaryware, hardware, carpentry, fabrication, formwork, glass, aluminium, roofing, safety...) and ALL languages/scripts seen on Indian sites (English, Telugu, Hindi, Tamil, romanized mixes, local-script numerals).${categoryContext}
 
-TASK: Read the document and extract EVERY material line item. DO NOT match to SKUs yet — just extract.
+TASK: Extract EVERY material line item from the document. Extraction only — DO NOT match to SKUs.
 
-THE DOCUMENT IS OFTEN A PHOTO OF A HANDWRITTEN SITE ORDER in rough Indian plumbing/hardware/site
-shorthand (mixed spellings, no punctuation). Read it like an experienced site engineer would.
+THE INPUT is usually a photo of one or more HANDWRITTEN site orders/slips: phonetic spellings, shorthand, no punctuation, columns, margin notes, ditto marks, size lists under a heading, multiple slips in one photo. Printed header tables (Bill To / PO No / Site) may also appear — those are not items.
 
-FAITHFULNESS RULES — follow EXACTLY:
-1. TRANSCRIBE, DON'T INVENT. Every item you output MUST correspond to a real line in the document.
-   Never add items that are not written. Never split one line into two, never merge two lines into one.
-2. READ EVERY REGION. There may be MULTIPLE handwritten notes / pages / slips — extract items from ALL
-   of them. A printed header table (Bill To / PO Number / Site) is NOT an item — skip it.
-3. QUANTITY IS CRITICAL — transcribe it EXACTLY as written. It is the number written near the end of
-   the line, usually before "No / Nos / No. / Set / Box / Kg". Examples: "— 30No" → 30, "8No" → 8,
-   "4No" → 4, "1 Box" → 1 (unit Box). NEVER default a quantity to 1. If a line truly has no number,
-   set quantity to null (do not guess 1).
-4. If a word is illegible, still include the line: put your best-guess standard name in item_name and
-   the verbatim scribble in item_raw. Do not drop the line.
-5. item_name = the STANDARD Indian construction industry name (expand the shorthand). item_raw = the
-   verbatim text as written. Put size/grade/variant into "specification" (e.g. "32mm", "18x14",
-   "2 feet", "Fe500", "OPC 53", "Long body", "Swan neck").
+──────────── PASS 1 — SCAN AND COUNT (before extracting) ────────────
+1. Identify every distinct written region: every slip, page, column, margin, corner note. Do not stop after the first block.
+2. In each region, COUNT the candidate item lines (handwritten lines naming a material). Keep these counts — you must reconcile your output against them in the final check.
+3. Reading order = regions left-to-right then top-to-bottom; lines top-to-bottom within a region. Output in this order.
 
-NAMING THE ITEM (trade-agnostic — the note may be about ANY trade: civil, plumbing, electrical,
-steel, tiling/finishing, waterproofing, hardware, carpentry, painting…):
-- Read what is ACTUALLY written and name that exact item. Expand the writer's phonetic/abbreviated
-  shorthand into the STANDARD Indian construction-industry product name for it, using your own domain
-  knowledge — the same way an experienced site engineer for that trade would read it.
-- Do NOT bias toward any single trade or a fixed vocabulary, and never bend an item into a category
-  just to fit. Infer the category from the item itself (and from neighbouring lines, which usually
-  share a trade). Set category_hint to its real category.
-- Apply these GENERAL transforms to whatever the word is: phonetic misspelling → correct spelling;
-  local/brand word → the generic material; abbreviation/code → the full standard name.
-- Any grade / size / dimension / type written inline (e.g. "53", "12mm", "Fe500", "18x14", "2 feet",
-  "3 phase", "1BHK", "8x4") belongs in "specification", not baked silently into the name.
-- When genuinely unsure of the standard name, keep item_name close to the legible words rather than
-  guessing a different product — accuracy over polish.
+──────────── WHAT COUNTS AS ONE ITEM ────────────
+DEFAULT: one written line = one JSON object. But recognize these real note patterns:
+- HEADER + SIZE LIST: a material name followed by indented or bracketed size-qty lines ("PVC pipe" then "110mm — 10", "90mm — 6") → one object PER size line, each inheriting the header material name. The bare header (no qty/size of its own) is not a separate object.
+- DITTO: "-do-", "〃", ",,", "same" inherit the previous line's item name; the size/qty written on the ditto line belong to it.
+- MULTI-ITEM LINE: one line clearly containing two or more distinct items, each with its own qty ("teflon tape 4, solution 2") → one object per item; repeat the full written line as item_raw for each.
+- Never merge two separately written lines into one object. Never output an item that is not written.
+- Struck-through or clearly cancelled lines: exclude. If unsure whether it is cancelled, include it with needs_review: true.
 
-Return ONLY a valid JSON array, one object PER written line, IN ORDER:
+SKIP entirely (never output as items): printed header tables, Bill To / PO / site / vendor names, dates, phone numbers, signatures, totals, rates and amounts (₹, /-, @, "rate", "amt"), standalone notes like "urgent" — unless the text modifies a specific item, in which case fold it into that item.
+
+──────────── QUANTITY (critical) ────────────
+- Transcribe EXACTLY as written. NEVER default to 1. If a line truly has no quantity, set quantity: null.
+- Position varies: end of line ("elbow ½ inch — 30No"), start of line ("2 Nos elbow"), a separate column, after a dash.
+- Fractions and decimals: ½ → 0.5, 1½ → 1.5, 2.5 stays 2.5.
+- Local-script numerals (Telugu / Hindi / Tamil) → convert to standard digits.
+- SIZE vs QUANTITY: a number fused to a size marker — mm, cm, inch, ", ft, feet, sqft, x (as in 8x4, 18x14) — is a SIZE and goes to dimension. A number adjacent to a unit word (No, Nos, Set, Box, Bag, Bundle, Kg, Ltr, Coil, Length, Pkt...) or standing alone in the qty position is the QUANTITY.
+- ₹ amounts, @-rates, and page totals are NEVER quantities.
+- If two numbers are both plausible quantities and it is genuinely ambiguous: quantity: null, needs_review: true, and state both candidates in review_reason. Do not guess.
+
+──────────── UNITS ────────────
+- unit_raw = the verbatim unit text as written ("bandal", "gattu", "pcs", "leng", "tin").
+- unit = normalized to one of: Nos | Set | Box | Pair | Packet | Bundle | Coil | Roll | Length | Sheet | Bag | kg | Quintal | MT | Ltr | Tin | Drum | Rmt | Feet | Sqft | m2 | m3 | cft | Unit | Trip | Dozen | Gross — or null.
+  (AP/TS note: sand/aggregate "1 unit" is the local volume measure — normalize to "Unit", do not convert it.)
+- If the written unit maps to nothing cleanly, keep unit_raw verbatim and set unit to the closest match or null — never bend it silently.
+- Do NOT infer an unwritten unit from the material. "Cement 20" is quantity 20, unit null — NOT 20 bags.
+
+──────────── NAMING (trade-agnostic) ────────────
+- Read what is ACTUALLY written and expand the writer's phonetic/abbreviated shorthand into the standard Indian construction-industry English name — exactly as an experienced engineer of THAT trade would read it.
+- Infer the trade from the item itself and its neighbouring lines (lines on one slip usually share a trade). Never bend an item into a category to make it fit.
+- Transforms: phonetic misspelling → correct spelling; local-language word → standard English material name; abbreviation/code → full standard name.
+- BRANDS: if a brand is written (Ashirvad, Finolex, Ultratech, Fevicol...) record it in "brand" and keep it in item_raw; item_name is the generic product. Where a brand IS the site-generic word (e.g. "Fevicol" for wood adhesive), item_name is still the generic, brand recorded.
+- Every size / grade / variant / colour written inline goes into its structured field AND into "specification". Never bake a spec silently into item_name; never drop a spec the line shows.
+- Genuinely unsure of the standard name → keep item_name close to the legible words and set needs_review: true. Accuracy over polish.
+
+──────────── LANGUAGE ────────────
+- item_raw: verbatim in the ORIGINAL script — Telugu stays Telugu, Hindi stays Hindi. Never translate item_raw.
+- item_raw_translit: Latin transliteration when item_raw is in a non-Latin script; null otherwise.
+- item_name: always the standard English industry name.
+
+──────────── OUTPUT ────────────
+Return ONLY a valid JSON array — no markdown fences, no commentary, no trailing commas. Escape quotes and newlines inside strings. Use JSON null, never the string "null".
+
 [{
-  "item_raw": "verbatim text from the document line",
-  "item_name": "standard industry name",
-  "specification": "size + grade + variant combined for display, or null",
-  "dimension": "SIZE only — e.g. 32mm, 18x14, 2 feet, 8x4, 100mm — or null",
-  "variant": "MATERIAL / COLOUR / TYPE — e.g. White, SS, Long body, Swan neck, 3 phase — or null",
-  "grade": "GRADE / CLASS / SCHEDULE — e.g. Fe500, OPC 53, SCH40, Class B — or null",
-  "quantity": number_or_null,   // the EXACT written quantity — never invent, never default to 1
-  "unit": "Bags|MT|kg|Nos|Set|Box|Rmt|Sqft|Ltr|m³|m²|null",
-  "category_hint": "Cement|Steel|Sand|Aggregate|Brick|Block|Paint|Tile|Plumbing|Electrical|Hardware|Plywood|Waterproofing"
+  "item_raw": "verbatim text of the written line, original script",
+  "item_raw_translit": "Latin transliteration, or null",
+  "item_name": "standard English industry name",
+  "specification": "all specs combined for display, or null",
+  "dimension": "SIZE only — 32mm, 18x14, 2 feet, 8x4, half inch — or null",
+  "variant": "MATERIAL / COLOUR / TYPE — White, SS, Long body, Swan neck, 3 phase — or null",
+  "grade": "GRADE / CLASS / SCHEDULE — Fe500, OPC 53, SCH40, Class B, ISI — or null",
+  "brand": "brand if written, or null",
+  "quantity": number_or_null,
+  "unit": "normalized unit from the list above, or null",
+  "unit_raw": "verbatim unit text, or null",
+  "category_hint": "Cement|Steel|Sand|Aggregate|Brick|Block|Concrete|Paint|Tile|Stone|Plumbing|Sanitaryware|Electrical|Hardware|Fasteners|Plywood|Carpentry|Glass|Aluminium|Roofing|Waterproofing|Adhesives|Formwork|Scaffolding|Tools|Safety|Other",
+  "needs_review": true_or_false,
+  "review_reason": "why this line is uncertain, or null"
 }]
-Every size/grade/variant present in the line MUST be broken out into its structured field
-(dimension / grade / variant) AND kept in "specification". Never drop a spec the line shows, and
-never bake it silently into item_name.
 
-If no items found, return [].`.trim()
+──────────── EXAMPLES (patterns, not vocabulary — the note may be any trade, any language) ────────────
+Written: "GI elbo 1/2 inch — 30No"
+→ item_name "GI Elbow", dimension "1/2 inch", quantity 30, unit "Nos", category_hint "Plumbing".
+
+Written (header + size list):
+"PVC pipe
+  110mm — 10
+  90mm — 6"
+→ TWO objects, both item_name "PVC Pipe", dimensions "110mm" and "90mm", quantities 10 and 6.
+
+Written: "-do- 3/4 inch — 8No" (previous line was GI Elbow)
+→ item_name "GI Elbow", dimension "3/4 inch", quantity 8.
+
+Written: "సిమెంట్ 20"
+→ item_raw "సిమెంట్ 20", item_raw_translit "cement 20", item_name "Cement", quantity 20, unit null (unit not written — do NOT assume Bags).
+
+Written: "cement 50 bags @390"
+→ quantity 50, unit "Bag". 390 is a rate — ignored, never a quantity.
+
+Written: "8x4 ply 18mm - 6"
+→ item_name "Plywood", dimension "8x4 ft, 18mm", quantity 6, category_hint "Plywood".
+
+Written: "teflon tape 4, solution 2"
+→ TWO objects: Teflon Tape qty 4 (Plumbing); Solvent Cement qty 2 (Plumbing) — same item_raw on both.
+
+Written: "vier 18x14 - 4" (tiling context from neighbouring lines)
+→ item_name kept close to legible words if unsure, dimension "18x14", quantity 4, needs_review true with reason.
+
+──────────── FINAL CHECK (mandatory before answering) ────────────
+1. Re-scan the photo edges, margins, second slips, and every region for lines not yet output.
+2. Reconcile your object count against the per-region line counts from Pass 1. Every counted item line must be represented (allowing for legitimate header/multi-item splits). If short, find the missing lines.
+3. Re-verify every quantity against the written digits. No invented 1s, no rates as quantities.
+4. Verify the JSON parses: single array, escaped strings, JSON null not "null".
+
+If no items are found, return [].`.trim()
 }
 
 function buildReRankPrompt(

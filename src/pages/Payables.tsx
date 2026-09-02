@@ -38,8 +38,9 @@ const CSS = `
 .wpx .site-h{display:flex;justify-content:space-between;align-items:baseline;padding:12px 18px;background:var(--cream);border-bottom:1px solid var(--line);border-radius:14px 14px 0 0}
 .wpx .site-h .n{font:500 17px "Playfair Display",serif}
 .wpx .site-h .s{font-size:13px;color:var(--walnut-3)}.wpx .site-h .s b{color:var(--walnut);font-weight:500}
-.wpx .hdr,.wpx .row{display:grid;grid-template-columns:minmax(120px,168px) minmax(0,1fr) 88px 124px 92px 104px;gap:12px;align-items:center;padding:9px 16px}
-.wpx .who,.wpx .what{min-width:0}
+.wpx .hdr,.wpx .row{display:grid;grid-template-columns:minmax(110px,150px) minmax(80px,118px) minmax(0,1fr) 84px 116px 88px 100px;gap:12px;align-items:center;padding:9px 16px}
+.wpx .who,.wpx .what,.wpx .sitecol{min-width:0}
+.wpx .sitecol{font-size:12.5px;color:var(--walnut-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wpx .who .n,.wpx .who .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* a quiet source hint that fades in on hover — where the figure comes from */
 .wpx .what .srchint{color:var(--walnut-3);font-style:italic;opacity:0;transition:opacity .15s ease}
@@ -146,8 +147,9 @@ const CSS = `
   .wpx .top{flex-direction:column;align-items:flex-start;gap:14px}
   .wpx .stats{gap:20px;text-align:left}
   .wpx .hdr{display:none}
-  .wpx .row{grid-template-columns:1fr auto;grid-template-areas:'who status' 'what what' 'plan after';gap:8px 12px;padding:12px 14px 12px 22px;min-height:0}
+  .wpx .row{grid-template-columns:1fr auto;grid-template-areas:'who status' 'sitecol sitecol' 'what what' 'plan after';gap:8px 12px;padding:12px 14px 12px 22px;min-height:0}
   .wpx .row .who{grid-area:who;min-width:0}
+  .wpx .row .sitecol{grid-area:sitecol;color:var(--walnut-3);font-size:12px}
   .wpx .row .what{grid-area:what}
   .wpx .row .bf{display:none}
   .wpx .row .plan{grid-area:plan;justify-content:flex-start}
@@ -204,9 +206,16 @@ export default function Payables(_props: { session: Session }) {
     queryFn: async () => (await supabase.from('projects').select('project_id, name').eq('status', 'Active').order('name')).data ?? [],
   });
 
-  // Labour sections + a Vendors section (open bills) + a Recurring & fixed section.
+  // One Workers group (all projects, project shown as a column) + a Vendors section (open bills)
+  // + a Recurring & fixed section. Labour is no longer split into a card per project.
   const sections: PaySection[] = useMemo(() => {
-    const out = (data?.sections ?? []).map(s => ({ ...s, rows: [...s.rows, ...(extra[s.projectId] ?? [])] }));
+    const labourRows = (data?.sections ?? []).flatMap(s => s.rows);
+    const extraRows  = Object.values(extra).flat();
+    const workerRows = [...labourRows, ...extraRows]
+      .sort((a, b) => a.projectName.localeCompare(b.projectName) || b.thisWeek - a.thisWeek);
+    const out: PaySection[] = [];
+    if ((data?.sections ?? []).length || workerRows.length)
+      out.push({ projectId: '__workers__', projectName: 'Workers — this week', rows: workerRows });
     if ((vendorRows ?? []).length) out.push({ projectId: '__vendors__', projectName: 'Vendors — bills to pay', rows: vendorRows! });
     const recRows = (recurring ?? []).map(recurringToRow);
     if (recRows.length) out.push({ projectId: '__recurring__', projectName: 'Recurring & fixed', rows: recRows });
@@ -216,7 +225,12 @@ export default function Payables(_props: { session: Session }) {
   const planned = (r: PayRow) => paid[r.key] ?? plan[r.key] ?? Math.round(r.thisWeek);
   const owed = (r: PayRow) => r.balanceBf + r.thisWeek;
   const afterOf = (r: PayRow, isPaid: boolean): { v: number; m: string; cls: string } | null => {
-    const rem = owed(r) - planned(r);
+    // "This week's figure is actually ₹X" (re-agreed): the paid amount IS the correct figure, so the
+    // difference is NOT carried/advanced — only any prior balance remains. Otherwise the shortfall/
+    // surplus carries as usual (kind 'carry' / 'advance', or an unexplained change).
+    const reAgreed = diffs[r.key]?.kind === 're';
+    const thisWeekFig = reAgreed ? planned(r) : r.thisWeek;
+    const rem = (r.balanceBf + thisWeekFig) - planned(r);
     if (isPaid) {
       if (Math.abs(rem) < 1) return { v: 0, m: 'settled', cls: 'zero' };
       return rem > 0 ? { v: rem, m: 'carried', cls: '' } : { v: -rem, m: 'advance to them', cls: '' };
@@ -284,8 +298,8 @@ export default function Payables(_props: { session: Session }) {
           return (
             <section className="site" key={section.projectId}>
               <div className="site-h"><span className="n">{section.projectName}</span><span className="s"><b className="mono">{inr(sPlan)}</b> this week{sPaid ? ` · ${inr(sPaid)} paid` : ''}</span></div>
-              {section.rows.length > 0 && <div className="hdr"><div>Who</div><div>For</div><div className="r">Balance b/f</div><div className="r">This week</div><div className="r">After</div><div className="r" /></div>}
-              {section.rows.length === 0 && !section.projectId.startsWith('__') && <div className="emptyrow">No labour on the attendance sheet this week — add a payment below.</div>}
+              {section.rows.length > 0 && <div className="hdr"><div>Who</div><div>Site</div><div>For</div><div className="r">Balance b/f</div><div className="r">This week</div><div className="r">After</div><div className="r" /></div>}
+              {section.rows.length === 0 && section.projectId === '__workers__' && <div className="emptyrow">No labour on the attendance sheet this week — add a payment below.</div>}
               {section.rows.map(r => {
                 const isPaid = !!paid[r.key], isExp = expanded.has(r.key), af = afterOf(r, isPaid);
                 const unexplained = Math.abs(planned(r) - r.thisWeek) >= 1 && !diffs[r.key];
@@ -294,8 +308,12 @@ export default function Payables(_props: { session: Session }) {
                     <div className={`row${isPaid ? ' paid' : ''}${isExp ? ' exp' : ''}`} onClick={(e) => { if ((e.target as HTMLElement).closest('input,button,select')) return; setExpanded(s => { const n = new Set(s); n.has(r.key) ? n.delete(r.key) : n.add(r.key); return n; }); }}>
                       <span className="chev">›</span>
                       <div className="who"><div className="n">{r.party}</div><div className="t">{r.trade}</div></div>
+                      <div className="sitecol" title={r.projectName}>{r.projectName}</div>
                       <div className="what">
                         <div className="basis">{r.basis} <span className="srchint">· {sourceHint(r)}</span></div>
+                        {/* Advance / paid-without-bills shown SEPARATELY from the due — never netted into it */}
+                        {(r.advance ?? 0) > 0.5 && <div className="basis" style={{ color: 'var(--sage)' }}>₹{inr(r.advance!)} paid ahead · advance</div>}
+                        {(r.withoutBills ?? 0) > 0.5 && <div className="basis" style={{ color: 'var(--terracotta)' }}>₹{inr(r.withoutBills!)} paid without bills</div>}
                         <input placeholder="note…" value={notes[r.key] ?? ''} onChange={(e) => setNotes(n => ({ ...n, [r.key]: e.target.value }))} />
                       </div>
                       <div className="bf mono">{r.balanceBf ? inr(r.balanceBf) : <span style={{ color: 'var(--line-2)' }}>—</span>}{r.balanceBf ? <span className="m">carried</span> : null}</div>
@@ -323,10 +341,10 @@ export default function Payables(_props: { session: Session }) {
                   </div>
                 );
               })}
-              {!section.projectId.startsWith('__') && (
-                <AddPaymentRow projectId={section.projectId} projectName={section.projectName} parties={(parties ?? []) as any[]} orgId={orgId}
+              {section.projectId === '__workers__' && (
+                <AddPaymentRow projects={(projects ?? []) as { project_id: string; name: string }[]} parties={(parties ?? []) as any[]} orgId={orgId}
                   onError={(m) => showSnackbar(m, { type: 'error' })}
-                  onAdd={(row) => setExtra(x => ({ ...x, [section.projectId]: [...(x[section.projectId] ?? []), row] }))} />
+                  onAdd={(row) => setExtra(x => ({ ...x, [row.projectId]: [...(x[row.projectId] ?? []), row] }))} />
               )}
             </section>
           );
@@ -444,26 +462,30 @@ function PartySearch({ parties, orgId, onPick, onError }: { parties: any[]; orgI
   );
 }
 
-// Per-section "Add a payment request" — an ad-hoc row for something the register doesn't know.
-function AddPaymentRow({ projectId, projectName, parties, orgId, onError, onAdd }: { projectId: string; projectName: string; parties: any[]; orgId: string; onError: (m: string) => void; onAdd: (row: PayRow) => void }) {
+// "Add a payment request" — an ad-hoc row for something the register doesn't know. Now that all
+// workers live in one group, the payment must say which site it belongs to, so it carries a project picker.
+function AddPaymentRow({ projects, parties, orgId, onError, onAdd }: { projects: { project_id: string; name: string }[]; parties: any[]; orgId: string; onError: (m: string) => void; onAdd: (row: PayRow) => void }) {
   const [open, setOpen] = useState(false);
+  const [projectId, setProjectId] = useState('');
   const [picked, setPicked] = useState<{ id: string | null; name: string }>({ id: null, name: '' });
   const [amount, setAmount] = useState(''); const [note, setNote] = useState('');
   const amt = parseInt(amount.replace(/[^\d]/g, ''), 10) || 0;
-  const ready = !!picked.name.trim() && amt > 0;
+  const ready = !!projectId && !!picked.name.trim() && amt > 0;
   const add = () => {
     if (!ready) return;
+    const projectName = projects.find(p => p.project_id === projectId)?.name || projectId;
     onAdd({ key: `x-${projectId}-${Date.now()}`, projectId, projectName, stakeholderId: picked.id, party: picked.name.trim(), trade: note.trim() || 'added here', kind: 'wages', basis: 'added here · not from the register', thisWeek: amt, balanceBf: 0, woId: null, milestoneId: null });
-    setPicked({ id: null, name: '' }); setAmount(''); setNote(''); setOpen(false);
+    setProjectId(''); setPicked({ id: null, name: '' }); setAmount(''); setNote(''); setOpen(false);
   };
   return (
     <div className="addrow">
       {open ? (
         <div className="addform">
+          <select value={projectId} onChange={(e) => setProjectId(e.target.value)}><option value="">Site…</option>{projects.map(p => <option key={p.project_id} value={p.project_id}>{p.name}</option>)}</select>
           <PartySearch parties={parties} orgId={orgId} onPick={setPicked} onError={onError} />
           <input className="amt mono" placeholder="₹ amount" inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
           <input className="note" placeholder="for what — e.g. advance, flat 501 tiles" value={note} onChange={(e) => setNote(e.target.value)} />
-          <button className="go" disabled={!ready} onClick={add}>Add to {projectName}</button>
+          <button className="go" disabled={!ready} onClick={add}>Add payment</button>
           <button className="x" onClick={() => setOpen(false)}>cancel</button>
         </div>
       ) : (
@@ -482,7 +504,7 @@ function Rationale({ row, planned, diff }: { row: PayRow; planned: number; diff?
         <div className="cap">Open bills · paid oldest first</div>
         <div className="ledger">
           {(() => { let rem = planned; return row.bills!.map((b, i) => { const a = Math.min(b.balance, Math.max(0, rem)); rem -= a; return (
-            <div className="ln" key={i}><span>Bill {b.no}{b.date ? <span style={{ color: 'var(--walnut-3)' }}> · {new Date(b.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span> : null}</span><span className="mono">{inr(b.balance)}{a > 0.5 ? <span className="tag" style={{ color: 'var(--terracotta)' }}> ← {inr(a)}</span> : null}</span></div>
+            <div className="ln" key={i}><span>Bill {b.no}{b.projectName ? <span style={{ color: 'var(--walnut-3)' }}> · {b.projectName}</span> : null}{b.date ? <span style={{ color: 'var(--walnut-3)' }}> · {new Date(b.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span> : null}</span><span className="mono">{inr(b.balance)}{a > 0.5 ? <span className="tag" style={{ color: 'var(--terracotta)' }}> ← {inr(a)}</span> : null}</span></div>
           ); }); })()}
         </div>
       </div>
