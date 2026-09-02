@@ -10,6 +10,7 @@ import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/tr
 import PartySpreadsheet from '../components/PartySpreadsheet';
 import PhoneInput from '../components/PhoneInput';
 import { usePrefetchStakeholder } from '../hooks/usePrefetch';
+import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
 
 // ── helpers ─────────────────────────────────────────────────────────────────────
 const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$/;
@@ -85,6 +86,7 @@ export default function Stakeholders({ session }: { session: Session }) {
   // drawer
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);   // null = new
+  const [ledgerId, setLedgerId] = useState<string | null>(null);     // party ledger side drawer
   const [form, setForm] = useState<DrawerForm>(EMPTY_FORM);
   const [gstErr, setGstErr] = useState('');
   const [showSub, setShowSub] = useState(false);
@@ -365,8 +367,8 @@ export default function Stakeholders({ session }: { session: Session }) {
                 const pf = prefetchStakeholder(p.stakeholder_id);
                 return (
                   <tr key={p.stakeholder_id} className="row" tabIndex={0}
-                    onClick={() => openDrawer(p)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') openDrawer(p); }}
+                    onClick={() => setLedgerId(p.stakeholder_id)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') setLedgerId(p.stakeholder_id); }}
                     onMouseEnter={pf.onMouseEnter} onTouchStart={pf.onTouchStart} onPointerDown={pf.onPointerDown}>
                     <td>
                       <div className="pid">
@@ -375,6 +377,10 @@ export default function Stakeholders({ session }: { session: Session }) {
                           <div className="pname">{p.name}{p.gstin ? <span className="gst">✓ GST</span> : null}</div>
                           <div className="psub">{p.contact || p.stakeholder_id}</div>
                         </div>
+                        <button className="edit-ic" aria-label={`Edit ${p.name}`} title="Edit party"
+                          onClick={(e) => { e.stopPropagation(); openDrawer(p); }}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+                        </button>
                       </div>
                     </td>
                     <td className="hide-sm"><span className="cat">{p.type}</span></td>
@@ -399,7 +405,7 @@ export default function Stakeholders({ session }: { session: Session }) {
 
           <div className="tfoot">
             <span>Showing {rows.length} of {all.length} parties</span>
-            <span>Tap any row to edit</span>
+            <span>Tap a row to open the ledger · pencil to edit</span>
           </div>
         </div>
       </div>
@@ -543,6 +549,9 @@ export default function Stakeholders({ session }: { session: Session }) {
       </aside>
       </div>
 
+      {/* party ledger — the same ledger as the /stakeholders/:id page, opened from the side */}
+      <StakeholderLedgerDrawer isOpen={!!ledgerId} onClose={() => setLedgerId(null)} stakeholderId={ledgerId ?? ''} />
+
       {/* toast */}
       <div className={`toast ${toastMsg ? 'show' : ''}`}>{toastMsg}</div>
 
@@ -566,7 +575,7 @@ const CSS = `
   --cream:#F6F1E8;--paper:#FCFAF4;--ink:#332A20;--ink-soft:#77695A;--ink-faint:#A2937F;
   --line:#E7DCC9;--line-soft:#EFE7D7;--terracotta:#B65C38;--terracotta-tint:#F3E2D7;
   --sage:#77875F;--sage-tint:#E7EBDC;--walnut:#6E5B44;--walnut-tint:#EDE4D5;
-  background:var(--cream);color:var(--ink);font-family:'DM Sans',sans-serif;font-size:14.5px;line-height:1.5;
+  background:#FBF9F6;color:var(--ink);font-family:'DM Sans',sans-serif;font-size:14.5px;line-height:1.5;
   min-height:100vh;-webkit-font-smoothing:antialiased;
 }
 .pt *{box-sizing:border-box}
@@ -619,6 +628,11 @@ const CSS = `
 .pt .mono-cell.zero{color:var(--ink-faint)}
 .pt .mono-cell.due{color:var(--terracotta);font-weight:500}
 .pt .pid{display:flex;align-items:center;gap:14px}
+.pt .edit-ic{margin-left:auto;width:30px;height:30px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;color:var(--ink-faint);background:transparent;border:0;cursor:pointer;opacity:0;transition:opacity .15s,background .15s,color .15s;flex-shrink:0}
+.pt .row:hover .edit-ic,.pt .row:focus-within .edit-ic{opacity:1}
+.pt .edit-ic:hover{background:var(--line);color:var(--ink)}
+.pt .edit-ic svg{width:15px;height:15px}
+@media (hover:none){.pt .edit-ic{opacity:1}}
 .pt .avatar{width:38px;height:38px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-family:'Playfair Display',serif;font-size:15px;font-weight:600}
 .pt .avatar.vendor{background:var(--terracotta-tint);color:var(--terracotta)}
 .pt .avatar.worker{background:var(--sage-tint);color:var(--sage)}

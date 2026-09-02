@@ -21,7 +21,7 @@ const MODES = ['UPI', 'NEFT', 'Cash', 'Cheque'];
 
 const CSS = `
 .wpx{--cream:#f6f2ea;--paper:#fdfbf7;--line:#e6dfd2;--line-2:#d5cbb9;--walnut:#3b2f27;--walnut-2:#6d5f54;--walnut-3:#9c9083;--terracotta:#b8613a;--sage:#5f7a5e;
-  background:var(--cream);color:var(--walnut);font:14.5px/1.45 "DM Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased;padding:34px 28px 44px;min-height:100vh}
+  background:#FBF9F6;color:var(--walnut);font:14.5px/1.45 "DM Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased;padding:34px 28px 44px;min-height:100vh}
 .wpx *{box-sizing:border-box}
 .wpx .wrap{width:100%;max-width:1180px;margin:0 auto}
 .wpx .mono{font-family:"DM Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}

@@ -114,7 +114,7 @@ const WOX_CSS = `
   --gold:#B8862E;
   --r:8px; --ease:cubic-bezier(.2,.7,.2,1);
   --shadow:0 1px 2px rgba(47,38,34,.04),0 8px 24px -18px rgba(47,38,34,.25);
-  background:var(--cream); color:var(--ink);
+  background:#FBF9F6; color:var(--ink);
   font:15px/1.45 "DM Sans",system-ui,sans-serif; -webkit-font-smoothing:antialiased; min-height:100vh;
 }
 .wox .page{max-width:1020px;margin:0 auto;padding:26px 32px 120px}

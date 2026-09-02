@@ -344,7 +344,8 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   const [filterType, setFilterType] = useState<string[]>([]);
   const [activeFilterDropdown, setActiveFilterDropdown] = useState<string | null>(null);
   const [chipDropPos, setChipDropPos] = useState<{ top: number; left: number } | null>(null);
-  const [datePreset, setDatePreset] = useState<DatePreset>('month');
+  const [datePreset, setDatePreset] = useState<DatePreset>('all');
+  const [customRange, setCustomRange] = useState<{ from: string; to: string }>({ from: '', to: '' });
   const [filtersOpen, setFiltersOpen] = useState(false);   // mobile: all filters in one sheet
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   // Infinite scroll: a sentinel near the end auto-reveals the next page (with a brief
@@ -696,7 +697,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   // Reset selection + pagination when the active filters change — the React-sanctioned
   // "adjust state during render" pattern (https://react.dev/learn/you-might-not-need-an-effect),
   // which avoids the extra commit (and cascading-render lint) of doing it in an effect.
-  const filterKey = JSON.stringify([searchTerm, filterProject, filterType, datePreset, filterFlagged, filterNeedsAction, filterUnlinked]);
+  const filterKey = JSON.stringify([searchTerm, filterProject, filterType, datePreset, customRange, filterFlagged, filterNeedsAction, filterUnlinked]);
   const [seenFilterKey, setSeenFilterKey] = useState(filterKey);
   if (filterKey !== seenFilterKey) {
     setSeenFilterKey(filterKey);
@@ -743,7 +744,11 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
       case 'last_month': return { from: new Date(today.getFullYear(), today.getMonth() - 1, 1), to: new Date(today.getFullYear(), today.getMonth(), 0) };
       case 'quarter': { const qm = Math.floor(today.getMonth() / 3) * 3; return { from: new Date(today.getFullYear(), qm, 1), to: new Date(today.getFullYear(), qm + 3, 0) }; }
       case 'fy': { const fyY = today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1; return { from: new Date(fyY, 3, 1), to: new Date(fyY + 1, 2, 31) }; }
-      case 'custom': return { from: null, to: null };
+      case 'custom': {
+        const from = customRange.from ? new Date(customRange.from + 'T00:00:00') : null;
+        const to = customRange.to ? new Date(customRange.to + 'T00:00:00') : null;
+        return { from, to };
+      }
       default: return { from: null, to: null };
     }
   };
@@ -759,6 +764,14 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
     if (datePreset === 'last_month') { const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1); return lm.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }); }
     if (datePreset === 'quarter') return 'This quarter';
     if (datePreset === 'fy') { const fyY = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1; return `FY ${fyY}-${String(fyY + 1).slice(2)}`; }
+    if (datePreset === 'custom') {
+      const f = customRange.from, t = customRange.to;
+      const nice = (s: string) => new Date(s + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+      if (f && t) return `${nice(f)} – ${nice(t)}`;
+      if (f) return `From ${nice(f)}`;
+      if (t) return `Until ${nice(t)}`;
+      return 'Custom range';
+    }
     return 'Custom';
   })();
 
@@ -775,9 +788,11 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
     const matchesProject = filterProject.length ? (txn.txn_allocations || []).some((a: TxnAlloc) => filterProject.includes(a.projects?.name || '')) : true;
     const matchesDate = (() => {
       const { from, to } = activeDateRange;
-      if (!from || !to) return true;
+      if (!from && !to) return true;
       const d = new Date(txn.date); d.setHours(0, 0, 0, 0);
-      return d >= from && d <= to;
+      if (from && d < from) return false;
+      if (to && d > to) return false;
+      return true;
     })();
     return matchesSearch && matchesFlagged && matchesNeedsAction && matchesType && matchesProject && matchesDate;
   };
@@ -954,6 +969,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   const datePresets: { k: DatePreset; label: string }[] = [
     { k: 'today', label: 'Today' }, { k: 'week', label: 'This week' }, { k: 'month', label: 'This month' },
     { k: 'last_month', label: 'Last month' }, { k: 'quarter', label: 'This quarter' }, { k: 'fy', label: 'Financial year' }, { k: 'all', label: 'All time' },
+    { k: 'custom', label: 'Custom range…' },
   ];
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -1085,13 +1101,27 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
         <div ref={filterBarRef} className="hidden sm:flex items-center gap-2 flex-wrap mt-7">
           <FilterChip active onClick={(e) => openDrop('date', e)}>{periodLabel}</FilterChip>
           {activeFilterDropdown === 'date' && chipDropPos && createPortal(
-            <div ref={chipDropRef} className="rounded-xl overflow-hidden py-1" style={{ position: 'fixed', top: chipDropPos.top, left: chipDropPos.left, zIndex: 9999, width: 200, background: V.surface, border: `1px solid ${V.line}`, boxShadow: '0 10px 30px rgba(30,26,21,0.12)' }}>
+            <div ref={chipDropRef} className="rounded-xl overflow-hidden py-1" style={{ position: 'fixed', top: chipDropPos.top, left: chipDropPos.left, zIndex: 9999, width: datePreset === 'custom' ? 250 : 200, background: V.surface, border: `1px solid ${V.line}`, boxShadow: '0 10px 30px rgba(30,26,21,0.12)' }}>
               {datePresets.map(d => (
                 <button key={d.k} type="button" className="w-full text-left px-3 py-2 text-sm" style={{ color: datePreset === d.k ? V.terraDeep : V.ink, background: datePreset === d.k ? V.terraWash : 'transparent', ...font }}
-                  onClick={() => { setDatePreset(d.k); setActiveFilterDropdown(null); }}>
+                  onClick={() => { setDatePreset(d.k); if (d.k !== 'custom') setActiveFilterDropdown(null); }}>
                   {d.label}
                 </button>
               ))}
+              {datePreset === 'custom' && (
+                <div className="px-3 pt-2 pb-1 mt-1" style={{ borderTop: `1px solid ${V.line}` }}>
+                  <label className="block text-[11px] mb-1" style={{ color: V.faint, ...font }}>From</label>
+                  <input type="date" value={customRange.from} max={customRange.to || undefined}
+                    onChange={e => setCustomRange(r => ({ ...r, from: e.target.value }))}
+                    className="w-full mb-2 px-2 py-1.5 text-sm rounded-lg" style={{ border: `1px solid ${V.line}`, background: V.surface, color: V.ink, ...font }} />
+                  <label className="block text-[11px] mb-1" style={{ color: V.faint, ...font }}>To</label>
+                  <input type="date" value={customRange.to} min={customRange.from || undefined}
+                    onChange={e => setCustomRange(r => ({ ...r, to: e.target.value }))}
+                    className="w-full px-2 py-1.5 text-sm rounded-lg" style={{ border: `1px solid ${V.line}`, background: V.surface, color: V.ink, ...font }} />
+                  <button type="button" className="mt-2 w-full text-center text-sm font-semibold py-1.5 rounded-lg" style={{ color: V.terraDeep, background: V.terraWash, ...font }}
+                    onClick={() => setActiveFilterDropdown(null)}>Done</button>
+                </div>
+              )}
             </div>,
             document.body,
           )}
@@ -1132,7 +1162,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
         {(() => {
           const activeFilterCount =
             (filterType.length ? 1 : 0) + (!lockedProject && filterProject.length ? 1 : 0) +
-            (filterUnlinked ? 1 : 0) + (datePreset !== 'month' ? 1 : 0);
+            (filterUnlinked ? 1 : 0) + (datePreset !== 'all' ? 1 : 0);
           return (
             <div className="sm:hidden mt-5 space-y-2.5">
               {/* in/out/net — one quiet line: net hero (serif) + colour-coded in/out */}
@@ -1189,6 +1219,17 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                   <div className="flex flex-wrap gap-2">
                     {datePresets.map(d => chip(d.label, datePreset === d.k, () => setDatePreset(d.k)))}
                   </div>
+                  {datePreset === 'custom' && (
+                    <div className="flex items-center gap-2 mt-3">
+                      <input type="date" value={customRange.from} max={customRange.to || undefined}
+                        onChange={e => setCustomRange(r => ({ ...r, from: e.target.value }))}
+                        className="flex-1 min-w-0 px-3 rounded-xl text-sm" style={{ height: 44, border: `1px solid ${V.line}`, background: V.field, color: V.ink, ...font }} />
+                      <span style={{ color: V.faint }}>–</span>
+                      <input type="date" value={customRange.to} min={customRange.from || undefined}
+                        onChange={e => setCustomRange(r => ({ ...r, to: e.target.value }))}
+                        className="flex-1 min-w-0 px-3 rounded-xl text-sm" style={{ height: 44, border: `1px solid ${V.line}`, background: V.field, color: V.ink, ...font }} />
+                    </div>
+                  )}
                 </div>
                 {uniqueTypes.length > 0 && (
                   <div>
@@ -1214,7 +1255,8 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                     // standing in — that is not a filter, it is the address. Wiping it would silently
                     // show him every site's money on a page titled with one site's name.
                     onClick={() => {
-                      setDatePreset('month');
+                      setDatePreset('all');
+                      setCustomRange({ from: '', to: '' });
                       setFilterType([]);
                       setFilterProject(lockedProject ? [lockedProject] : []);
                       setFilterUnlinked(false);

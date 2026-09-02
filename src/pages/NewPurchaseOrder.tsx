@@ -3584,7 +3584,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
 
       <div
         className="px-4 md:px-6 pt-6 pb-36 mx-auto"
-        style={{ maxWidth: '100%', background: uiV.page }}
+        style={{ maxWidth: '100%', background: '#FBF9F6' }}
         onClick={(e) => {
           if (!(e.target as HTMLElement).closest('.po-sheet-row') && !(e.target as HTMLElement).closest('.po-row-expansion')) {
             setActiveCardId(null);

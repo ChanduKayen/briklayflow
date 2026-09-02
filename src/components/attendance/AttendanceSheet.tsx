@@ -19,7 +19,7 @@ import { searchPayees } from '../../lib/payeeSearch';
 import { createParty } from '../day-book/fileEntry';
 
 const ATDX_CSS = `
-.atdx{background:var(--cream);color:var(--walnut);font:15px/1.45 "DM Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased;padding:34px 28px 80px;
+.atdx{background:#FBF9F6;color:var(--walnut);font:15px/1.45 "DM Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased;padding:34px 28px 80px;
   --cream:#f6f2ea;--paper:#fdfbf7;--line:#e6dfd2;--line-2:#d5cbb9;--walnut:#3b2f27;--walnut-2:#6d5f54;--walnut-3:#9c9083;
   --terracotta:#b8613a;--terracotta-bg:#f7e9e1;--sage:#5f7a5e;--sage-bg:#e9efe6;--slate:#5b6b78;--slate-bg:#e8ecef}
 .atdx *{box-sizing:border-box}
@@ -57,7 +57,7 @@ const ATDX_CSS = `
 .atdx th.tot{text-align:right;padding-right:18px;width:200px}
 .atdx td.cell{width:72px;position:relative;font-size:15px}
 .atdx td.cell.is-today{box-shadow:inset 2px 0 0 var(--terracotta-bg),inset -2px 0 0 var(--terracotta-bg)}
-.atdx tr.gap td{background:var(--cream);height:16px;padding:0;border:0}
+.atdx tr.gap td{background:#FBF9F6;height:16px;padding:0;border:0}
 .atdx tr.site td{background:var(--paper);text-align:left;padding:13px 18px 11px;font:500 16px "Playfair Display",serif;letter-spacing:0;text-transform:none;color:var(--walnut);border-top:2px solid var(--line-2);box-shadow:inset 4px 0 0 var(--terracotta)}
 .atdx tr.site td span{letter-spacing:0;text-transform:none;font:400 12.5px "DM Sans",sans-serif;color:var(--walnut-3);margin-left:12px}
 .atdx .wageslbl{margin-top:6px;font-size:12px;color:var(--walnut-3)}
