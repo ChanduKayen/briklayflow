@@ -18,25 +18,28 @@ export const V = {
   page: '#FBF9F6', surface: '#FFFFFF', field: '#F4F2EE', line: '#EAE6E0',
 } as const;
 
-/** Warm-dark palette — the rail (the night binding). */
+/** Warm-dark palette — the rail (the night binding). "Bitter chocolate" ground. */
 export const N = {
-  bg: 'linear-gradient(180deg, #383029 0%, #2F2820 100%)',
-  text: '#F7F3EC',
-  textSoft: 'rgba(247,243,236,0.66)',
-  textFaint: 'rgba(247,243,236,0.40)',
-  hover: 'rgba(247,243,236,0.055)',
-  activeBg: 'rgba(247,243,236,0.08)',
-  keyline: 'rgba(247,243,236,0.10)',
-  terra: '#E07A4F',
+  bg: 'linear-gradient(180deg, #191009 0%, #140D07 100%)',
+  text: '#F5F0E7',
+  textSoft: 'rgba(245,240,231,0.80)',
+  textFaint: 'rgba(245,240,231,0.52)',
+  hover: 'rgba(245,240,231,0.07)',
+  activeBg: 'rgba(245,240,231,0.13)',
+  keyline: 'rgba(245,240,231,0.10)',
+  terra: '#B4532F',
+  // the rail's right edge — a fine warm keyline, applied as an inset shadow (no layout width).
+  edge: '#302014',
+  // light-glass fill for monograms / the org plaque.
+  well: 'rgba(245,240,231,0.09)',
   // a warm, recessed pocket for nested contexts (projects tray / in-project drawer)
   // — a touch warmer + deeper than the rail, with a faint top highlight for depth.
-  recess: 'rgba(28,18,11,0.55)',
-  recessLine: 'rgba(247,243,236,0.05)',
-  // the secondary navbar surface — SAME dark family as the rail, only a HAIR warmer/lighter so
-  // it reads as a quiet step beside the spine (an elegant difference, not a contrast). A whisper
-  // of terra glow at its head (panelGlow) for warmth.
-  panel: 'linear-gradient(180deg, #3A312A 0%, #322A22 100%)',
-  panelGlow: 'radial-gradient(ellipse 85% 38% at 50% 0%, rgba(224,122,79,0.055) 0%, transparent 70%)',
+  recess: 'rgba(20,13,7,0.55)',
+  recessLine: 'rgba(245,240,231,0.05)',
+  // the secondary navbar surface — SAME bitter-chocolate family as the rail, only a HAIR
+  // warmer/lighter so it reads as a quiet step beside the spine. A whisper of terra glow at its head.
+  panel: 'linear-gradient(180deg, #221812 0%, #1B120B 100%)',
+  panelGlow: 'radial-gradient(ellipse 85% 38% at 50% 0%, rgba(180,83,47,0.06) 0%, transparent 70%)',
 } as const;
 
 /** WhatsApp brand green — channel signature only. */
@@ -68,6 +71,25 @@ export function isSecondaryNavRoute(pathname: string): boolean {
 export const NAV_ANIM = `
 .nav-scroll { scrollbar-width: none; -ms-overflow-style: none; }
 .nav-scroll::-webkit-scrollbar { width: 0; height: 0; display: none; }
+/* ── the cursor-following "lamp": a warm glow + a latent drafting sheet, visible only under the
+   pointer. Two absolute fx layers behind the rail content; the JS eases --mx/--my to the cursor. ── */
+.briklay-rail { --mx: 50%; --my: 30%; }
+.briklay-rail > *:not(.rail-fx) { position: relative; z-index: 1; }
+.rail-fx { position: absolute; inset: 0; z-index: 0; pointer-events: none; opacity: 0; transition: opacity .45s ease; }
+.briklay-rail.lit .rail-fx { opacity: 1; }
+.rail-glow {
+  background:
+    radial-gradient(115px circle at var(--mx) var(--my), rgba(180,83,47,.13), rgba(180,83,47,.05) 55%, transparent 75%),
+    radial-gradient(215px circle at var(--mx) var(--my), rgba(245,240,231,.04), transparent 74%);
+}
+.rail-draft {
+  background:
+    repeating-linear-gradient(0deg, rgba(245,240,231,.055) 0 1px, transparent 1px 26px),
+    repeating-linear-gradient(90deg, rgba(245,240,231,.055) 0 1px, transparent 1px 26px);
+  -webkit-mask-image: radial-gradient(115px circle at var(--mx) var(--my), #000 0%, rgba(0,0,0,.55) 55%, transparent 82%);
+          mask-image: radial-gradient(115px circle at var(--mx) var(--my), #000 0%, rgba(0,0,0,.55) 55%, transparent 82%);
+}
+@media (prefers-reduced-motion: reduce) { .rail-fx { transition: none; } }
 @keyframes navPanelIn { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: none; } }
 .nav-panel-in { animation: navPanelIn .22s cubic-bezier(.32,.72,0,1) both; }
 @keyframes navPop { 0% { opacity: 0; transform: translateY(4px) scale(.98); } 100% { opacity: 1; transform: none; } }

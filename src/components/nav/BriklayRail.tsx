@@ -41,7 +41,7 @@ const initials = (name: string) =>
   (name || '').trim().split(/\s+/).filter(Boolean).map(w => w[0]).join('').toUpperCase().slice(0, 2) || '?';
 // One quiet, monochrome avatar treatment for the dark rail — light glass, not a
 // coloured blob, so org / user / project monograms sit calmly in the binding.
-const railChip = { background: 'rgba(247,243,236,0.09)', color: N.text, border: '1px solid rgba(247,243,236,0.12)' } as const;
+const railChip = { background: N.well, color: N.text, border: '1px solid rgba(245,240,231,0.12)' } as const;
 
 // Underline the keyboard-shortcut letter inside a label (T-ransactions, etc.).
 const SHORTCUTS: Record<string, string> = {
@@ -95,20 +95,25 @@ function RailItem({ item, active, open, onNavigate }: { item: Item; active: bool
   // A "special" entry (Site Desk) is set apart by a subtle NEUTRAL pill + hairline — never
   // terracotta and never a bright label, so it can't be mistaken for the selected state.
   const special = !!item.special;
-  const iconColor = active ? N.terra : (hov ? N.text : 'rgba(247,243,236,0.62)');
-  const labelColor = active ? N.text : (hov ? N.text : N.textSoft);
+  // Selected (HTML "exactly as shown"): a soft filled wash + a terracotta left-bar + a cream label
+  // (the icon reads cream too — terra lives only in the bar). Hover: a lighter wash + cream lift.
+  const iconColor = (active || hov) ? N.text : N.textSoft;
+  const labelColor = (active || hov) ? N.text : N.textSoft;
   return (
     <Link to={item.route} onClick={onNavigate} title={item.label}
       onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
       className="w-full flex items-center"
       style={{
+        position: 'relative',
         height: 34, paddingLeft: open ? 10 : 0, paddingRight: open ? 8 : 0, gap: 10,
         justifyContent: open ? 'flex-start' : 'center', borderRadius: 8, textDecoration: 'none',
-        background: active ? 'transparent' : (hov ? 'rgba(247,243,236,0.12)' : special ? 'rgba(247,243,236,0.05)' : 'transparent'),
+        background: active ? N.activeBg : (hov ? N.hover : special ? 'rgba(245,240,231,0.05)' : 'transparent'),
         border: special ? `1px solid ${N.keyline}` : '1px solid transparent',
         transition: 'background .12s ease', ...font,
       }}
     >
+      {/* the terracotta selection bar, riding the left edge (HTML .item.on::before) */}
+      {active && <span aria-hidden style={{ position: 'absolute', left: 0, top: 8, bottom: 8, width: 2, borderRadius: '0 2px 2px 0', background: N.terra }} />}
       <span className="flex items-center justify-center shrink-0" style={{ width: 28, height: 28, color: iconColor, transition: 'color .12s ease' }}>
         {item.node ?? (Icon ? <Icon size={17} strokeWidth={active ? 1.9 : 1.6} style={{ flexShrink: 0 }} /> : null)}
       </span>
@@ -154,6 +159,7 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
   const [signingOut, setSigningOut] = useState(false);
   const [orgName, setOrgName] = useState('');
   const userRef = useRef<HTMLDivElement>(null);
+  const railRef = useRef<HTMLElement>(null);
 
   // Sign out in place — no full-screen veil, no blur. The button shows a calm
   // loader; when the session actually clears, the auth listener swaps in Login.
@@ -191,6 +197,37 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
     measure();
     const fonts = (document as Document & { fonts?: { ready: Promise<unknown> } }).fonts;
     fonts?.ready?.then(measure).catch(() => {});
+  }, []);
+
+  // ── the cursor-following lamp — eases --mx/--my toward the pointer over a rAF loop, lighting the
+  //    two fx layers only while the pointer is over the rail. Fine-pointer devices only (no touch). ──
+  useEffect(() => {
+    const rail = railRef.current;
+    if (!rail || !window.matchMedia('(pointer:fine)').matches) return;
+    let rect: DOMRect | null = null, tx = 0, ty = 0, cx = 0, cy = 0, running = false, raf = 0;
+    const loop = () => {
+      cx += (tx - cx) * 0.14; cy += (ty - cy) * 0.14;
+      rail.style.setProperty('--mx', cx.toFixed(1) + 'px');
+      rail.style.setProperty('--my', cy.toFixed(1) + 'px');
+      if (rail.classList.contains('lit') || Math.hypot(tx - cx, ty - cy) > 0.5) raf = requestAnimationFrame(loop);
+      else running = false;
+    };
+    const start = () => { if (!running) { running = true; raf = requestAnimationFrame(loop); } };
+    const onEnter = (e: PointerEvent) => { rect = rail.getBoundingClientRect(); tx = cx = e.clientX - rect.left; ty = cy = e.clientY - rect.top + rail.scrollTop; rail.classList.add('lit'); start(); };
+    const onLeave = () => { rail.classList.remove('lit'); rect = null; };
+    const onMove = (e: PointerEvent) => { if (!rect) rect = rail.getBoundingClientRect(); tx = e.clientX - rect.left; ty = e.clientY - rect.top + rail.scrollTop; };
+    const onScroll = () => { rect = rail.getBoundingClientRect(); };
+    rail.addEventListener('pointerenter', onEnter);
+    rail.addEventListener('pointerleave', onLeave);
+    rail.addEventListener('pointermove', onMove);
+    rail.addEventListener('scroll', onScroll);
+    return () => {
+      cancelAnimationFrame(raf);
+      rail.removeEventListener('pointerenter', onEnter);
+      rail.removeEventListener('pointerleave', onLeave);
+      rail.removeEventListener('pointermove', onMove);
+      rail.removeEventListener('scroll', onScroll);
+    };
   }, []);
 
   // ── live badges (same query keys as the mobile bar → React Query dedupes) ──
@@ -340,20 +377,26 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
 
       {/* the rail */}
       <aside
+        ref={railRef}
         onMouseEnter={collapsible ? () => setHovered(true) : undefined}
         onMouseLeave={() => { setHovered(false); if (!signingOut) { setProjOpen(false); close(); } }}
-        className="hidden md:flex flex-col py-4"
+        className="hidden md:flex flex-col py-4 briklay-rail"
         style={{
           position: 'fixed', top: 0, left: 0, height: '100vh',
           width: open ? RAIL_OPEN : RAIL_W, background: N.bg,
           // width animates on toggle/collapse; the spine and panel both push content.
           transition: 'width .26s cubic-bezier(.32,.72,0,1), box-shadow .22s ease',
-          borderRight: collapsible ? 'none' : `1px solid ${N.keyline}`,
+          borderRight: 'none',
           overflow: 'hidden', zIndex: 50,
-          boxShadow: collapsible && open ? '6px 0 28px rgba(20,16,12,0.28)' : 'none',
+          // fine warm right-edge keyline (inset shadow, no layout width) + the collapsible drop shadow.
+          boxShadow: `inset -1px 0 0 ${N.edge}${collapsible && open ? ', 6px 0 28px rgba(20,16,12,0.28)' : ''}`,
           ...font,
         }}
       >
+        {/* the cursor-following lamp — latent drafting sheet + warm glow, behind all rail content */}
+        <div className="rail-fx rail-draft" aria-hidden="true" />
+        <div className="rail-fx rail-glow" aria-hidden="true" />
+
         {/* brand — the logo wordmark; "Briklay." ⇄ "B." with the dot riding home */}
         <div className="flex items-center" style={{ height: 32, paddingLeft: open ? 12 : 0, paddingRight: open ? 8 : 0, justifyContent: open ? 'flex-start' : 'center' }}>
           <span className="font-semibold" style={{ ...font, fontSize: 19, letterSpacing: '-0.01em', color: N.text, whiteSpace: 'nowrap', userSelect: 'none', display: 'inline-flex', alignItems: 'baseline' }}>
@@ -481,7 +524,7 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
             position: 'fixed', top: 0, left: open ? RAIL_OPEN : RAIL_W, height: '100vh', width: PANEL_W,
             // solid dark fill + (glow over panel gradient) stacked in ONE property — never split a
             // `background` shorthand and `backgroundImage`, the latter wipes the former's image.
-            backgroundColor: '#342B23',
+            backgroundColor: '#1E1610',
             backgroundImage: `${N.panelGlow}, ${N.panel}`,
             borderRight: `1px solid ${N.keyline}`,
             boxShadow: `inset 1px 0 0 ${N.recessLine}`, zIndex: 40,
