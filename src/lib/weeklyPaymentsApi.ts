@@ -5,6 +5,7 @@
 // Mark-paid records a REAL transaction via insert_transaction_with_allocations.
 import { supabase } from './supabase';
 import { loadWeek, mondayOf, weekDates, weekLabel, type Cell } from './attendanceApi';
+import { createCredit, allocateToCredit, allocateToPool, settleFIFO } from './ledgerWrite';
 
 export { mondayOf, weekLabel };
 
@@ -200,7 +201,7 @@ export async function removeRecurring(id: string): Promise<void> {
 export async function recordWeeklyPayment(
   orgId: string, row: PayRow,
   amount: number, mode: string, reason: string,
-): Promise<void> {
+): Promise<string> {
   const txnId = `TXN-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   const category = row.kind === 'contract' ? 'Running Bill' : row.kind === 'vendor' ? 'Purchase Payment' : row.kind === 'recurring' ? 'Recurring' : 'Wages';
   // Write the computed provenance into the ledger comment so the transaction carries WHY.
@@ -233,4 +234,21 @@ export async function recordWeeklyPayment(
   if (error) throw error;
   const r = data as { success?: boolean; error?: string } | null;
   if (!r?.success) throw new Error(r?.error || 'Could not record the payment');
+  return txnId;
+}
+
+// ── Phase 2: mirror a weekly payment onto the allocation ledger (new-ledger orgs) ──
+// The plan IS the accrual (§2.3): a wage/recurring payment mints a plan credit and settles it. A
+// contract payment is an advance against measurement (§3.2 → the pool). A vendor payment settles the
+// open bill credits, oldest first. Called only when the org has flipped to the new ledger.
+export async function settleWeeklyPaymentOnLedger(txnId: string, row: PayRow, amount: number, monday: Date): Promise<void> {
+  if (row.kind === 'contract' && row.woId) { await allocateToPool(txnId, row.woId, amount); return; }
+  if (row.kind === 'vendor') { await settleFIFO(txnId); return; }         // settle open vendor bills oldest-first
+  if (!row.stakeholderId) return;                                          // an ad-hoc payee with no party can't accrue
+  // wages / recurring — a plan credit for what was paid, settled by this payment
+  const creditId = await createCredit({
+    stakeholderId: row.stakeholderId, kind: 'plan', amount, entryDate: mondayOf(monday).toISOString().slice(0, 10),
+    projectId: row.projectId, note: `${row.trade} · weekly plan`, source: 'plan',
+  });
+  await allocateToCredit(txnId, creditId, amount);
 }

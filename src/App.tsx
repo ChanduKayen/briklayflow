@@ -32,6 +32,7 @@ import {
 // DataDeletion, the auth/entry screens) stay eager below.
 const Stakeholders = lazy(() => import('./pages/Stakeholders'));
 const StakeholderDetail = lazy(() => import('./pages/StakeholderDetail'));
+const LedgerParity = lazy(() => import('./pages/LedgerParity'));   // dev: Phase-1 parity gate
 const WorkOrders = lazy(() => import('./pages/WorkOrders'));
 const WorkOrderDetail = lazy(() => import('./pages/WorkOrderDetail'));
 const ProjectDetail = lazy(() => import('./pages/ProjectDetail'));
@@ -578,6 +579,7 @@ function App() {
           )}
           <Route path="/stakeholders" element={<Stakeholders session={session} />} />
           <Route path="/stakeholders/:stakeholderId" element={<StakeholderDetail session={session} />} />
+          <Route path="/dev/ledger-parity" element={<LedgerParity />} />
           <Route path="/orders" element={<Orders session={session} />} />
           <Route path="/work-orders" element={<WorkOrders session={session} />} />
           <Route path="/work-orders/new" element={<NewWorkOrder session={session} />} />

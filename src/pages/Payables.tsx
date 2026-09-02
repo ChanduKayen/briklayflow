@@ -11,10 +11,11 @@ import { useSnackbar } from '../components/Snackbar';
 import { searchPayees } from '../lib/payeeSearch';
 import { createParty } from '../components/day-book/fileEntry';
 import {
-  loadWeeklyPayments, recordWeeklyPayment, mondayOf, weekLabel,
+  loadWeeklyPayments, recordWeeklyPayment, settleWeeklyPaymentOnLedger, mondayOf, weekLabel,
   loadRecurring, recurringToRow, addRecurring, removeRecurring, loadVendorRows,
   type PayRow, type PaySection,
 } from '../lib/weeklyPaymentsApi';
+import { isNewLedgerOrg } from '../lib/ledgerRead';
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 const MODES = ['UPI', 'NEFT', 'Cash', 'Cheque'];
@@ -187,6 +188,11 @@ export default function Payables(_props: { session: Session }) {
     queryKey: ['weekly_payments', monday.toISOString().slice(0, 10)],
     queryFn: () => loadWeeklyPayments(monday),
   });
+  const { data: newLedger } = useQuery({
+    queryKey: ['org_new_ledger', orgId],
+    queryFn: () => isNewLedgerOrg(orgId),
+    enabled: !!orgId,
+  });
   const { data: recurring, refetch: refetchRec } = useQuery({ queryKey: ['recurring_payments'], queryFn: loadRecurring });
   const { data: vendorRows } = useQuery({ queryKey: ['vendor_payables'], queryFn: loadVendorRows });
   const { data: parties } = useQuery({
@@ -233,7 +239,8 @@ export default function Payables(_props: { session: Session }) {
     if (!amt) return;
     setBusy(r.key);
     try {
-      await recordWeeklyPayment(orgId, r, amt, mode, diffs[r.key]?.reason || '');
+      const txnId = await recordWeeklyPayment(orgId, r, amt, mode, diffs[r.key]?.reason || '');
+      if (newLedger) { try { await settleWeeklyPaymentOnLedger(txnId, r, amt, monday); } catch (e: any) { showSnackbar(`Paid, but ledger link failed: ${e?.message || 'error'}`, { type: 'error' }); } }
       setPaid(p => ({ ...p, [r.key]: amt }));
       showSnackbar(`Paid ${inr(amt)} to ${r.party}`);
       refetch();

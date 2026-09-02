@@ -11,6 +11,7 @@ import PartySpreadsheet from '../components/PartySpreadsheet';
 import PhoneInput from '../components/PhoneInput';
 import { usePrefetchStakeholder } from '../hooks/usePrefetch';
 import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
+import { isNewLedgerOrg, loadProjectionMap } from '../lib/ledgerRead';
 
 // ── helpers ─────────────────────────────────────────────────────────────────────
 const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$/;
@@ -142,11 +143,16 @@ export default function Stakeholders({ session }: { session: Session }) {
     },
   });
 
+  // New-ledger orgs read the real dues from the allocation projection (INV-12); old orgs keep the
+  // billed−paid netting. One switch, so the Parties list and the party ledger never disagree.
+  const { data: newLedger } = useQuery({ queryKey: ['org_new_ledger', orgId], enabled: !!orgId, queryFn: () => isNewLedgerOrg(orgId!) });
+  const { data: projMap } = useQuery({ queryKey: ['party_projection', orgId], enabled: !!orgId && !!newLedger, queryFn: () => loadProjectionMap(orgId!) });
+
   const all = stakeholders || [];
   const paidOf = (id: string) => paidMap?.[id] ?? 0;
   const billedOf = (id: string) => billedMap?.[id] ?? 0;
-  const outstandingOf = (id: string) => Math.max(billedOf(id) - paidOf(id), 0);   // we still owe
-  const creditOf = (id: string) => Math.max(paidOf(id) - billedOf(id), 0);        // in credit to you
+  const outstandingOf = (id: string) => newLedger ? (projMap?.[id]?.toPay ?? 0) : Math.max(billedOf(id) - paidOf(id), 0);
+  const creditOf = (id: string) => newLedger ? (projMap?.[id]?.unclassifiedAhead ?? 0) : Math.max(paidOf(id) - billedOf(id), 0);
 
   // open ?new=1 → new-party drawer
   useEffect(() => {

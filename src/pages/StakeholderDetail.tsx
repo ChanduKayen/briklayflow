@@ -2,7 +2,7 @@
 // Paid / Certified / "ahead" running balance, in By-date / By-contract / By-site views, with
 // period + search filters. Certified is inferred from the attendance stage readings. Opening
 // balance and Adjustments are recorded here; Payment reuses QuickTransactionSheet.
-import { useMemo, useState, type ReactElement } from 'react';
+import { useMemo, useState, useEffect, type ReactElement } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import type { Session } from '@supabase/supabase-js';
@@ -10,6 +10,8 @@ import { useOrgId } from '../lib/auth/AuthProvider';
 import { useSnackbar } from '../components/Snackbar';
 import { QuickTransactionSheet } from '../components/QuickTransactionSheet';
 import { loadPartyLedger, saveOpeningBalance, addAdjustment, bookConsolidatedBill, type LedgerEntry, type PartyLedger } from '../lib/partyLedgerApi';
+import { readParty, isNewLedgerOrg } from '../lib/ledgerRead';
+import { createCredit, fillCredit, allocateToCredit, allocateToPool, openCreditsFor, certifyStage, type OpenCredit } from '../lib/ledgerWrite';
 
 const inr = (n: number) => n.toLocaleString('en-IN');
 const initials = (name: string) => name.split(' ').slice(0, 2).map(w => w[0] || '').join('').toUpperCase();
@@ -174,6 +176,19 @@ const CSS = `
 .plx .doc label.on{border-color:var(--walnut);box-shadow:inset 0 0 0 1px var(--walnut)}
 .plx .doc input{margin-top:3px;accent-color:var(--walnut)}
 .plx .doc b{font-weight:500;display:block}.plx .doc span{font-size:12.5px;color:var(--walnut-2)}
+/* money-to-classify band (new engine) */
+.plx .classify-band{margin-top:26px;border:1px solid #EBD3C6;background:var(--terra-wash);border-radius:12px;overflow:hidden}
+.plx .classify-band .cb-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:13px 18px;border-bottom:1px solid #EBD3C6;flex-wrap:wrap}
+.plx .classify-band .cb-t{font-weight:600;color:#7E3A20}
+.plx .classify-band .cb-sum{font-size:12.5px;color:#7E3A20;opacity:.85}
+.plx .classify-band .cb-list{padding:6px 8px}
+.plx .classify-band .cb-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 10px;border-radius:8px}
+.plx .classify-band .cb-row:hover{background:rgba(255,255,255,.45)}
+.plx .classify-band .cb-info{display:flex;flex-direction:column;min-width:0}
+.plx .classify-band .cb-amt{font-weight:600;color:var(--walnut)}
+.plx .classify-band .cb-meta{font-size:12px;color:var(--walnut-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.plx .classify-band .cb-row .btn{height:30px;padding:0 13px;background:#fff;flex:none}
+.plx .classify-band .cb-more{padding:8px 10px;font-size:12.5px;color:var(--walnut-2)}
 @media (max-width:820px){
   .plx .page{padding:20px 16px 60px}
   .plx .hero{grid-template-columns:1fr;gap:22px}
@@ -211,8 +226,15 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
   const [obOpen, setObOpen] = useState(false);
   const [adjOpen, setAdjOpen] = useState(false);
   const [cbOpen, setCbOpen] = useState(false);
+  const [billOpen, setBillOpen] = useState(false);
+  const [classifyEntry, setClassifyEntry] = useState<LedgerEntry | null>(null);
+  const [certifyOpen, setCertifyOpen] = useState(false);
 
-  const { data: L, isLoading, error, refetch } = useQuery({ queryKey: ['party_ledger', stakeholderId], queryFn: () => loadPartyLedger(stakeholderId), enabled: !!stakeholderId });
+  const { data: L, isLoading, error, refetch } = useQuery({
+    queryKey: ['party_ledger', stakeholderId, orgId],
+    queryFn: async () => (orgId && await isNewLedgerOrg(orgId)) ? readParty(stakeholderId) : loadPartyLedger(stakeholderId),
+    enabled: !!stakeholderId,
+  });
 
   const entries = useMemo(() => {
     if (!L) return [];
@@ -237,6 +259,9 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
   const isEmpty = L.entries.length === 0;
   const aheadPositive = L.aheadNow >= 0;
   const T = terms(L.kind);
+  const newLedger = L.entries.some(e => e.kind === 'payment' && e.unclassified !== undefined);
+  const toClassify = newLedger ? L.entries.filter(e => e.kind === 'payment' && e.unclassified) : [];
+  const toClassifySum = toClassify.reduce((s, e) => s + (e.remainder ?? e.paid), 0);
 
   return (
     <div className={`plx${compact ? ' compact' : ''}`}>
@@ -268,7 +293,9 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
               <button className="btn primary" onClick={() => setMenuOpen(o => !o)}>Record <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" /></svg></button>
               <div className="menu">
                 <button onClick={() => { setMenuOpen(false); setTxnSheet(true); }}>Payment to {L.stakeholder.name.split(' ')[0]}</button>
-                {L.kind === 'worker' && <button onClick={() => { setMenuOpen(false); navigate('/attendance'); }}>Work certified</button>}
+                {newLedger && L.contracts.length > 0 && <button onClick={() => { setMenuOpen(false); setCertifyOpen(true); }}>Certify work</button>}
+                {!newLedger && L.kind === 'worker' && <button onClick={() => { setMenuOpen(false); navigate('/attendance'); }}>Work certified</button>}
+                {L.kind === 'vendor' && <button onClick={() => { setMenuOpen(false); setBillOpen(true); }}>Enter a bill</button>}
                 {L.kind === 'vendor' && L.unbilledCount > 0 && <button onClick={() => { setMenuOpen(false); setCbOpen(true); }}>Consolidated bill</button>}
                 <button onClick={() => { setMenuOpen(false); setAdjOpen(true); }}>Adjustment</button>
                 {!L.opening && <button className="ob" onClick={() => { setMenuOpen(false); setObOpen(true); }}>Opening balance</button>}
@@ -323,6 +350,25 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
           </section>
         )}
 
+        {/* money to classify — new-engine orgs only */}
+        {newLedger && toClassify.length > 0 && (
+          <div className="classify-band">
+            <div className="cb-head">
+              <span className="cb-t">Money to classify</span>
+              <span className="cb-sum">{toClassify.length} payment{toClassify.length !== 1 ? 's' : ''} · ₹{inr(toClassifySum)} not yet pointed anywhere</span>
+            </div>
+            <div className="cb-list">
+              {toClassify.slice(0, 8).map(e => (
+                <div className="cb-row" key={e.id}>
+                  <div className="cb-info"><span className="cb-amt num">₹{inr(e.remainder ?? e.paid)}</span><span className="cb-meta">{e.date ? fmtDate(e.date) : ''}{e.mode ? ` · ${e.mode}` : ''}{e.projectName ? ` · ${e.projectName}` : ''}{e.narr ? ` · ${e.narr}` : ''}</span></div>
+                  <button className="btn" onClick={() => setClassifyEntry(e)}>Classify</button>
+                </div>
+              ))}
+              {toClassify.length > 8 && <div className="cb-more">…and {toClassify.length - 8} more</div>}
+            </div>
+          </div>
+        )}
+
         {/* controls */}
         <div className="ledger-head">
           <h2>Ledger</h2>
@@ -370,6 +416,9 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
       {obOpen && <OpeningModal orgId={orgId} L={L} onClose={() => setObOpen(false)} onSaved={() => { setObOpen(false); refetch(); }} onError={m => showSnackbar(m, { type: 'error' })} />}
       {adjOpen && <AdjustmentModal orgId={orgId} L={L} onClose={() => setAdjOpen(false)} onSaved={() => { setAdjOpen(false); refetch(); }} onError={m => showSnackbar(m, { type: 'error' })} />}
       {cbOpen && <ConsolidatedModal orgId={orgId} L={L} onClose={() => setCbOpen(false)} onSaved={() => { setCbOpen(false); refetch(); }} onError={m => showSnackbar(m, { type: 'error' })} />}
+      {billOpen && <BillModal L={L} onClose={() => setBillOpen(false)} onSaved={(msg) => { setBillOpen(false); showSnackbar(msg); refetch(); }} onError={m => showSnackbar(m, { type: 'error' })} />}
+      {classifyEntry && <ClassifyModal L={L} entry={classifyEntry} onClose={() => setClassifyEntry(null)} onSaved={(msg) => { setClassifyEntry(null); showSnackbar(msg); refetch(); }} onError={m => showSnackbar(m, { type: 'error' })} />}
+      {certifyOpen && <CertifyModal L={L} onClose={() => setCertifyOpen(false)} onSaved={(msg) => { setCertifyOpen(false); showSnackbar(msg); refetch(); }} onError={m => showSnackbar(m, { type: 'error' })} />}
     </div>
   );
 }
@@ -619,6 +668,162 @@ function AdjustmentModal({ orgId, L, onClose, onSaved, onError }: { orgId: strin
           <div className="field"><label>Why</label><textarea className="in" placeholder="e.g. ₹5,000 deducted for tiles broken on site, agreed 2 Sep" value={note} onChange={e => setNote(e.target.value)} /></div>
         </div>
         <footer><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy || amt <= 0 || !note.trim()} onClick={save}>{busy ? '…' : 'Add adjustment'}</button></footer>
+      </div>
+    </div>
+  );
+}
+
+// Enter one vendor bill → mints a bill credit, and (optionally) settles the earlier "paid without a
+// bill" money against it, oldest first. The forward-model way to record the bills that arrive late.
+function BillModal({ L, onClose, onSaved, onError }: { L: PartyLedger; onClose: () => void; onSaved: (msg: string) => void; onError: (m: string) => void }) {
+  const [amount, setAmount] = useState('');
+  const [billDate, setBillDate] = useState(new Date().toISOString().slice(0, 10));
+  const [billNo, setBillNo] = useState('');
+  const [docType, setDocType] = useState<'vendor' | 'kacha' | 'none'>('vendor');
+  const [projectId, setProjectId] = useState('');
+  const [settle, setSettle] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const amt = parseInr(amount);
+
+  const save = async () => {
+    if (busy || amt <= 0) return; setBusy(true);
+    try {
+      const creditId = await createCredit({
+        stakeholderId: L.stakeholder.id, kind: 'vendor_bill', amount: amt, entryDate: billDate,
+        projectId: projectId || null, docFlag: docType, note: billNo.trim() || null, source: 'manual',
+      });
+      let msg = `Bill ₹${inr(amt)} recorded`;
+      if (settle) { const r = await fillCredit(creditId); if (r.touched > 0) msg += ` · ₹${inr(r.allocated)} of earlier payments settled it`; else msg += ' · nothing earlier to settle'; }
+      onSaved(msg);
+    } catch (e: any) { onError(e?.message || 'Could not record the bill'); setBusy(false); }
+  };
+
+  const docOpts: { key: 'vendor' | 'kacha' | 'none'; b: string; s: string }[] = [
+    { key: 'vendor', b: 'Proper vendor bill', s: 'A GST invoice or a printed bill.' },
+    { key: 'kacha', b: 'Kacha statement', s: 'An informal note, not a proper bill.' },
+    { key: 'none', b: 'No document', s: 'Booked on your figures. Stays flagged for your CA.' },
+  ];
+
+  return (
+    <div className="scrim" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal" role="dialog">
+        <header><h3>Enter a bill from {L.stakeholder.name}</h3><p>Records what {L.stakeholder.name.split(' ')[0]} has billed you. Payments already made can settle against it.</p></header>
+        <div className="body">
+          <div className="field"><label>Bill amount</label><div className="amount" style={{ maxWidth: 220 }}><input className="in num" inputMode="numeric" value={amount} onChange={e => setAmount(e.target.value)} autoFocus /></div></div>
+          <div className="field" style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+            <div style={{ flex: '1 1 160px' }}><label>Bill date</label><input className="in" type="date" value={billDate} onChange={e => setBillDate(e.target.value)} /></div>
+            <div style={{ flex: '1 1 160px' }}><label>Bill number <span style={{ color: 'var(--walnut-3)', fontWeight: 400 }}>(optional)</span></label><input className="in" value={billNo} onChange={e => setBillNo(e.target.value)} placeholder="e.g. INV-0912" /></div>
+          </div>
+          {L.sites.length > 0 && <div className="field"><label>Site <span style={{ color: 'var(--walnut-3)', fontWeight: 400 }}>(optional)</span></label><select className="in" value={projectId} onChange={e => setProjectId(e.target.value)} style={{ maxWidth: 280 }}><option value="">Whole party</option>{L.sites.map(s => <option key={s.projectId} value={s.projectId}>{s.projectName}</option>)}</select></div>}
+          <div className="field doc"><div className="lbl">What backs this bill?</div>{docOpts.map(o => (
+            <label key={o.key} className={docType === o.key ? 'on' : ''} onClick={() => setDocType(o.key)}><input type="radio" name="billdoc" checked={docType === o.key} onChange={() => setDocType(o.key)} /><span><b>{o.b}</b><span>{o.s}</span></span></label>
+          ))}</div>
+          <label className="check"><input type="checkbox" checked={settle} onChange={e => setSettle(e.target.checked)} /><span><b>Settle earlier payments against this bill.</b> Points the money already paid without a bill at this one, oldest first.</span></label>
+        </div>
+        <footer><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy || amt <= 0} onClick={save}>{busy ? '…' : 'Record bill'}</button></footer>
+      </div>
+    </div>
+  );
+}
+
+// Certify a contract stage (§2.4 / §6.2): mints the certified credit and settles the advance pool
+// against it, oldest first. Shortfall → the remainder is to-pay; excess advances stay for next stage.
+function CertifyModal({ L, onClose, onSaved, onError }: { L: PartyLedger; onClose: () => void; onSaved: (m: string) => void; onError: (m: string) => void }) {
+  const [contractRef, setContractRef] = useState(L.contracts[0]?.woId || '');
+  const [amount, setAmount] = useState('');
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const amt = parseInr(amount);
+  const c = L.contracts.find(x => x.woId === contractRef);
+  const advanced = c?.paidLinked ?? 0;
+
+  const save = async () => {
+    if (busy || amt <= 0 || !contractRef) return; setBusy(true);
+    try {
+      const r = await certifyStage({ stakeholderId: L.stakeholder.id, contractRef, amount: amt, entryDate: date, projectId: c?.projectId ?? null, note: note.trim() || null });
+      let msg = `Certified ₹${inr(amt)}`;
+      if (r.settled > 0) msg += ` · ₹${inr(r.settled)} of advances settled`;
+      if (r.open > 0.5) msg += ` · ₹${inr(r.open)} now to pay`;
+      onSaved(msg);
+    } catch (e: any) { onError(e?.message || 'Could not certify'); setBusy(false); }
+  };
+
+  return (
+    <div className="scrim" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal" role="dialog">
+        <header><h3>Certify work for {L.stakeholder.name}</h3><p>Records measured work as certified. Advances already paid on the contract settle against it, oldest first.</p></header>
+        <div className="body">
+          <div className="field"><label>Contract</label><select className="in" value={contractRef} onChange={e => setContractRef(e.target.value)}>{L.contracts.map(x => <option key={x.woId} value={x.woId}>{x.title}</option>)}</select>
+            {c && <div className="help">Advanced so far ₹{inr(advanced)} · certified so far ₹{inr(c.value)}{advanced > c.value ? ` · ₹${inr(advanced - c.value)} paid beyond certified` : ''}</div>}
+          </div>
+          <div className="field"><label>Certified this time</label><div className="amount" style={{ maxWidth: 220 }}><input className="in num" inputMode="numeric" value={amount} onChange={e => setAmount(e.target.value)} autoFocus /></div>
+            {amt > 0 && advanced > 0 && <div className="help">{advanced >= amt ? `Fully covered by advances — nothing new to pay.` : `₹${inr(amt - advanced)} will remain to pay after advances.`}</div>}
+          </div>
+          <div className="field"><label>Date</label><input className="in" type="date" value={date} onChange={e => setDate(e.target.value)} style={{ maxWidth: 200 }} /></div>
+          <div className="field"><label>Note <span style={{ color: 'var(--walnut-3)', fontWeight: 400 }}>(optional)</span></label><textarea className="in" placeholder="e.g. slab concreting, 2nd floor — measured 2 Sep" value={note} onChange={e => setNote(e.target.value)} /></div>
+        </div>
+        <footer><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy || amt <= 0 || !contractRef} onClick={save}>{busy ? '…' : 'Certify'}</button></footer>
+      </div>
+    </div>
+  );
+}
+
+// Classify one payment (§4.4): point it at an open bill, an advance on a contract, or declare it
+// self-settled (work done / goods received, no bill). "Bill expected later" leaves it honestly open.
+function ClassifyModal({ L, entry, onClose, onSaved, onError }: { L: PartyLedger; entry: LedgerEntry; onClose: () => void; onSaved: (m: string) => void; onError: (m: string) => void }) {
+  const paymentId = entry.id.replace(/^t-/, '');
+  const remainder = entry.remainder ?? entry.paid;
+  const [mode, setMode] = useState<'bill' | 'advance' | 'self' | 'later'>('bill');
+  const [openC, setOpenC] = useState<OpenCredit[]>([]);
+  const [creditId, setCreditId] = useState('');
+  const [contractRef, setContractRef] = useState(L.contracts[0]?.woId || '');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => { openCreditsFor(L.stakeholder.id).then(cs => { setOpenC(cs); if (cs[0]) setCreditId(cs[0].creditId); if (!cs.length) setMode(m => m === 'bill' ? (L.contracts.length ? 'advance' : 'self') : m); }).catch(() => {}); }, [L.stakeholder.id, L.contracts.length]);
+
+  const save = async () => {
+    if (busy) return; setBusy(true);
+    try {
+      if (mode === 'bill') {
+        const c = openC.find(x => x.creditId === creditId);
+        const amt = Math.min(remainder, c?.open ?? remainder);
+        await allocateToCredit(paymentId, creditId, amt);
+        onSaved(`₹${inr(amt)} settled against the bill`);
+      } else if (mode === 'advance') {
+        await allocateToPool(paymentId, contractRef, remainder);
+        onSaved(`₹${inr(remainder)} recorded as an advance on ${contractRef}`);
+      } else if (mode === 'self') {
+        const cid = await createCredit({ stakeholderId: L.stakeholder.id, kind: 'self_settle', amount: remainder, entryDate: entry.date ?? new Date().toISOString().slice(0, 10), projectId: entry.projectId, parentPaymentId: paymentId, docFlag: 'none', note: 'Work done / goods received, no bill', source: 'manual' });
+        await allocateToCredit(paymentId, cid, remainder);
+        onSaved(`₹${inr(remainder)} booked as work done, no bill`);
+      } else { onClose(); return; }
+    } catch (e: any) { onError(e?.message || 'Could not classify'); setBusy(false); }
+  };
+
+  const opts: { key: typeof mode; b: string; s: string; disabled?: boolean }[] = [
+    { key: 'bill', b: 'Against a bill', s: 'It pays down a bill already recorded.', disabled: openC.length === 0 },
+    { key: 'advance', b: 'Advance on a contract', s: 'Paid ahead of measurement on a contract.', disabled: L.contracts.length === 0 },
+    { key: 'self', b: 'Work done — no bill', s: 'Goods received or labour done, no bill will come.' },
+    { key: 'later', b: 'A bill is expected', s: 'Leave it open until the bill arrives.' },
+  ];
+
+  return (
+    <div className="scrim" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal" role="dialog">
+        <header><h3>Classify ₹{inr(remainder)}</h3><p>{entry.date ? fmtDate(entry.date) : ''}{entry.mode ? ` · ${entry.mode}` : ''}{entry.narr ? ` · ${entry.narr}` : ''} — where should this money go?</p></header>
+        <div className="body">
+          <div className="dir" style={{ gridTemplateColumns: '1fr 1fr' }}>
+            {opts.map(o => <label key={o.key} className={mode === o.key ? 'on' : ''} style={o.disabled ? { opacity: .4, pointerEvents: 'none' } : undefined} onClick={() => !o.disabled && setMode(o.key)}><b>{o.b}</b><span>{o.s}</span></label>)}
+          </div>
+          {mode === 'bill' && openC.length > 0 && (
+            <div className="field"><label>Which bill?</label><select className="in" value={creditId} onChange={e => setCreditId(e.target.value)}>{openC.map(c => <option key={c.creditId} value={c.creditId}>{c.kind === 'vendor_bill' ? 'Bill' : c.kind === 'consolidated' ? 'Consolidated' : c.kind} · {fmtDate(c.entryDate)} · ₹{inr(c.open)} open</option>)}</select></div>
+          )}
+          {mode === 'advance' && L.contracts.length > 0 && (
+            <div className="field"><label>Which contract?</label><select className="in" value={contractRef} onChange={e => setContractRef(e.target.value)}>{L.contracts.map(c => <option key={c.woId} value={c.woId}>{c.title}</option>)}</select></div>
+          )}
+        </div>
+        <footer><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy} onClick={save}>{busy ? '…' : mode === 'later' ? 'Leave open' : 'Classify'}</button></footer>
       </div>
     </div>
   );

@@ -21,6 +21,8 @@ export interface LedgerEntry {
   unbilled?: boolean;                          // vendor payment with no bill on file
   covered?: boolean;                           // covered by a consolidated bill
   state?: string;                              // a short status note for the sub-line
+  unclassified?: boolean;                      // new-engine payment with an unallocated remainder (set only by readParty)
+  remainder?: number;                          // the unallocated amount, for the classify flow
 }
 export interface SiteBalance { projectId: string; projectName: string; paid: number; cert: number; unbilled: number; ahead: number; hasContract: boolean }
 export interface ConsolidatedBill { id: string; from: string; to: string; amount: number; docType: 'vendor' | 'kacha' | 'none'; note: string; confirmed: boolean; coversCount: number; coversTotal: number }
