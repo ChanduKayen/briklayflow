@@ -159,7 +159,6 @@ export async function readParty(stakeholderId: string): Promise<PartyLedger> {
   const unallocatedCash = pays.reduce((s, e) => s + Math.max(0, e.paid - (allocByPayment[e.id.replace(/^t-/, '')] || 0)), 0) + correctionDebits;
   const advance = Object.values(perContractAdvance).reduce((s, v) => s + v, 0);
   const toPay = Math.max(0, openCredits - unallocatedCash);
-  const unclassifiedAhead = Math.max(0, unallocatedCash - openCredits);
   const unbilledPays = pays.filter(e => !(allocByPayment[e.id.replace(/^t-/, '')] > 0));
   const unbilledTotal = unbilledPays.reduce((s, e) => s + e.paid, 0);
   const lastPaidE = pays[0];

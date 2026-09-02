@@ -206,7 +206,7 @@ export async function recordWeeklyPayment(
   const category = row.kind === 'contract' ? 'Running Bill' : row.kind === 'vendor' ? 'Purchase Payment' : row.kind === 'recurring' ? 'Recurring' : 'Wages';
   // Write the computed provenance into the ledger comment so the transaction carries WHY.
   const detail = row.att
-    ? row.att.cats.map(c => { const days = c.cells.reduce((a, v) => a + (v || 0), 0); return days ? `${c.name} ${days}×₹${c.rate}` : ''; }).filter(Boolean).join(', ')
+    ? row.att.cats.map(c => { const days = c.cells.reduce((a: number, v) => a + (v || 0), 0); return days ? `${c.name} ${days}×₹${c.rate}` : ''; }).filter(Boolean).join(', ')
     : row.stage ? row.stage.readings.map(([n, m]) => `${n} · ${m}`).join('; ')
     : row.bills ? row.bills.map(b => `Bill ${b.no} ${inrShort(b.balance)}`).join(', ')
     : row.basis;

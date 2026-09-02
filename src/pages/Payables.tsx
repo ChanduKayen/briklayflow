@@ -490,7 +490,7 @@ function Rationale({ row, planned, diff }: { row: PayRow; planned: number; diff?
       <div>
         <div className="cap">From the attendance register · {row.att.period}</div>
         <table className="mini"><thead><tr><th /> {row.att.days.map(dn => <th key={dn}>{dn}</th>)}<th>Days × rate</th></tr></thead>
-          <tbody>{row.att.cats.map((c, i) => { const days = c.cells.reduce((a, v) => a + (v || 0), 0); return (
+          <tbody>{row.att.cats.map((c, i) => { const days = c.cells.reduce((a: number, v) => a + (v || 0), 0); return (
             <tr key={i}><td>{c.name}</td>{c.cells.map((v, j) => <td key={j}>{v ? v : <span className="off">·</span>}</td>)}<td className="mono">{days} × ₹{c.rate} = {inr(days * c.rate)}</td></tr>
           ); })}</tbody></table>
       </div>
