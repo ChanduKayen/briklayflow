@@ -1,12 +1,12 @@
 # Graph Report - Briklay Fly  (2026-09-03)
 
 ## Corpus Check
-- 733 files · ~1,341,226 words
+- 734 files · ~1,342,392 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 3189 nodes · 4980 edges · 76 communities detected
-- Extraction: 86% EXTRACTED · 14% INFERRED · 0% AMBIGUOUS · INFERRED: 715 edges (avg confidence: 0.8)
+- 3194 nodes · 4987 edges · 76 communities detected
+- Extraction: 86% EXTRACTED · 14% INFERRED · 0% AMBIGUOUS · INFERRED: 717 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Community Hubs (Navigation)
@@ -68,7 +68,7 @@
 - [[_COMMUNITY_Community 61|Community 61]]
 - [[_COMMUNITY_Community 62|Community 62]]
 - [[_COMMUNITY_Community 63|Community 63]]
-- [[_COMMUNITY_Community 65|Community 65]]
+- [[_COMMUNITY_Community 64|Community 64]]
 - [[_COMMUNITY_Community 68|Community 68]]
 - [[_COMMUNITY_Community 76|Community 76]]
 - [[_COMMUNITY_Community 78|Community 78]]
@@ -95,7 +95,7 @@
 5. `runSiteops()` - 32 edges
 6. `applyTerminals()` - 27 edges
 7. `resolveAgainstSingleFamily()` - 24 edges
-8. `show()` - 23 edges
+8. `show()` - 24 edges
 9. `handlePillSelection()` - 22 edges
 10. `sendNowDurable()` - 22 edges
 
@@ -114,100 +114,100 @@
 ## Communities
 
 ### Community 0 - "Community 0"
-Cohesion: 0.01
-Nodes (155): composeLLM(), fallbackReply(), isGreeting(), runConcierge(), systemFor(), userContent(), answerSiteops(), answerWithPhoto() (+147 more)
+Cohesion: 0.02
+Nodes (105): answerSiteops(), answerWithPhoto(), applyBatchResolution(), applyQcFailures(), applyTaskBlockedById(), applyTaskProgressById(), applyTaskUpdate(), applyTerminals() (+97 more)
 
 ### Community 1 - "Community 1"
-Cohesion: 0.01
-Nodes (40): baseSeed(), twoAskSeed(), ask(), ctxFor(), model(), tUpdated(), upd(), ctxFor() (+32 more)
+Cohesion: 0.02
+Nodes (131): bindingKey(), graphIsMaterialized(), materializeProjectTasksUncached(), placeOfTask(), gatesByTask(), gatesFromBinding(), safeGeometry(), safeInstantiate() (+123 more)
 
 ### Community 2 - "Community 2"
-Cohesion: 0.02
-Nodes (127): bindingKey(), graphIsMaterialized(), materializeProjectTasksUncached(), placeOfTask(), gatesByTask(), gatesFromBinding(), safeGeometry(), safeInstantiate() (+119 more)
+Cohesion: 0.01
+Nodes (34): baseSeed(), twoAskSeed(), ask(), ctxFor(), model(), tUpdated(), upd(), ctxFor() (+26 more)
 
 ### Community 3 - "Community 3"
 Cohesion: 0.02
-Nodes (73): classifyPhotoFollowup(), d(), call(), issue(), prog(), seed(), task(), decideAssociation() (+65 more)
+Nodes (81): submit(), decide(), inr(), submit(), daysLeft(), digits(), doEnable(), intlPhone() (+73 more)
 
 ### Community 4 - "Community 4"
+Cohesion: 0.03
+Nodes (102): composeLLM(), fallbackReply(), isGreeting(), runConcierge(), systemFor(), userContent(), commitInterruptedProc(), stampPossibleFollowup() (+94 more)
+
+### Community 5 - "Community 5"
 Cohesion: 0.04
 Nodes (77): isStopWord(), addCustomBrand(), brandsFor(), getCustomBrands(), LS_KEY(), buildConflictPills(), buildNovelVariantPills(), buildPills() (+69 more)
 
-### Community 5 - "Community 5"
-Cohesion: 0.03
-Nodes (71): daysLeft(), digits(), doEnable(), intlPhone(), local10(), onToggle(), prettyPhone(), roleLabel() (+63 more)
-
 ### Community 6 - "Community 6"
-Cohesion: 0.04
-Nodes (84): answerProcurement(), commitInterruptedProc(), finalizeDirectVendor(), flowIdFor(), handleSingle(), loadApprover(), loadProjects(), loadVendors() (+76 more)
+Cohesion: 0.03
+Nodes (61): classifyPhotoFollowup(), wa(), buildComponents(), buildTemplateMessage(), sendTemplate(), line(), promptFor(), withTask() (+53 more)
 
 ### Community 7 - "Community 7"
 Cohesion: 0.03
 Nodes (74): allocIdOf(), assertLinkable(), attachToContract(), clearOneTime(), createContract(), fallbackTitle(), fileAsLabour(), generateContractTitle() (+66 more)
 
 ### Community 8 - "Community 8"
+Cohesion: 0.05
+Nodes (83): answerProcurement(), finalizeDirectVendor(), flowIdFor(), handleSingle(), loadApprover(), loadProjects(), loadVendors(), markReadyForApproval() (+75 more)
+
+### Community 9 - "Community 9"
+Cohesion: 0.05
+Nodes (70): commitEdit(), imageDeterministic(), parseDigitToken(), parseSpokenAmount(), callClaude(), callOpenAI(), classifyImage(), classifyImageAnthropic() (+62 more)
+
+### Community 10 - "Community 10"
 Cohesion: 0.04
 Nodes (53): createParty(), backfillOrg(), backfillParty(), deriveCertified(), num(), today(), deriveParty(), num() (+45 more)
 
-### Community 9 - "Community 9"
-Cohesion: 0.06
-Nodes (68): imageDeterministic(), parseDigitToken(), parseSpokenAmount(), callClaude(), callOpenAI(), classifyImage(), classifyImageAnthropic(), classifyImageOpenAI() (+60 more)
-
-### Community 10 - "Community 10"
-Cohesion: 0.05
-Nodes (67): clean(), dayBookLink(), entryLink(), partyLedgerLink(), problemLink(), reviewLink(), taskLink(), tasksLink() (+59 more)
-
 ### Community 11 - "Community 11"
 Cohesion: 0.04
-Nodes (42): handler(), close(), go(), handleClose(), handleOpen(), toggle(), close(), handleSave() (+34 more)
+Nodes (32): call(), issue(), prog(), seed(), task(), bestTokenOverlap(), pickTokens(), resolveTypedPick() (+24 more)
 
 ### Community 12 - "Community 12"
 Cohesion: 0.04
-Nodes (33): parseAmount(), readStoredSession(), useAuth(), useCan(), useOrgId(), classifyRefreshError(), extractErrorCode(), parseStoredSession() (+25 more)
+Nodes (38): openDoc(), parseStoredPath(), resolveDocUrl(), async(), patchProblem(), toggleSnag(), fileToBase64Str(), fireCelebration() (+30 more)
 
 ### Community 13 - "Community 13"
-Cohesion: 0.06
-Nodes (33): balStr(), buildPartyStatementDoc(), downloadPartyStatement(), money(), ordered(), amountInWords(), amountText(), dataPair() (+25 more)
+Cohesion: 0.04
+Nodes (42): handler(), close(), go(), handleClose(), handleOpen(), toggle(), close(), handleSave() (+34 more)
 
 ### Community 14 - "Community 14"
+Cohesion: 0.04
+Nodes (28): answerPaymentTotal(), answerReporting(), groupBySite(), loadProjects(), loadStakeholders(), num(), orderRows(), pickFrom() (+20 more)
+
+### Community 15 - "Community 15"
+Cohesion: 0.05
+Nodes (33): balStr(), buildPartyStatementDoc(), downloadPartyStatement(), money(), ordered(), amountInWords(), amountText(), dataPair() (+25 more)
+
+### Community 16 - "Community 16"
 Cohesion: 0.05
 Nodes (38): addDepartment(), addEntity(), applyFilter(), bind(), chooseKind(), clear(), col(), dayCell() (+30 more)
 
-### Community 15 - "Community 15"
+### Community 17 - "Community 17"
 Cohesion: 0.04
 Nodes (26): handleSave(), suggestCostCode(), costCodeLabel(), getCostCode(), classifyExpenseHead(), deriveDirection(), escapeRegExp(), generalExpenseLabel() (+18 more)
-
-### Community 16 - "Community 16"
-Cohesion: 0.06
-Nodes (38): useDeskApi(), useMockDeskApi(), ago(), assignReasonOf(), bucketRef(), buildChase(), buildStory(), buildTaskStory() (+30 more)
-
-### Community 17 - "Community 17"
-Cohesion: 0.05
-Nodes (29): patchProblem(), toggleSnag(), patchProblem(), toggleSnag(), appendEvent(), legacyToFollowupType(), notifyAssignment(), trailKey() (+21 more)
 
 ### Community 18 - "Community 18"
 Cohesion: 0.06
 Nodes (34): applyAll(), imgCtx(), runTurn(), seed(), task(), checkExprAt(), findMigrationsDir(), loadEnumChecks() (+26 more)
 
 ### Community 19 - "Community 19"
-Cohesion: 0.05
-Nodes (15): wa(), buildComponents(), buildTemplateMessage(), sendTemplate(), line(), promptFor(), withTask(), cadenceFor() (+7 more)
-
-### Community 20 - "Community 20"
 Cohesion: 0.07
 Nodes (28): autoSplit(), blank(), doCreate(), evenAmounts(), file(), matchGenHeads(), normHead(), pickGen() (+20 more)
 
+### Community 20 - "Community 20"
+Cohesion: 0.09
+Nodes (28): ago(), assignReasonOf(), bucketRef(), buildChase(), buildStory(), buildTaskStory(), capitalise(), chaseWhen() (+20 more)
+
 ### Community 21 - "Community 21"
+Cohesion: 0.07
+Nodes (19): readStoredSession(), useAuth(), useCan(), useOrgId(), classifyRefreshError(), extractErrorCode(), parseStoredSession(), useSnackbar() (+11 more)
+
+### Community 22 - "Community 22"
 Cohesion: 0.07
 Nodes (21): addStage(), attemptCreate(), blankStage(), calcAmount(), clearBad(), fmt(), getMode(), h() (+13 more)
 
-### Community 22 - "Community 22"
+### Community 23 - "Community 23"
 Cohesion: 0.1
 Nodes (16): byTypeFor(), commitMove(), goTo(), loop(), measure(), moveTo(), nearestTo(), onLeave() (+8 more)
-
-### Community 23 - "Community 23"
-Cohesion: 0.14
-Nodes (20): saidAsOf(), buildCandidateSet(), buildResolutionUser(), disposeRawResponse(), isBool(), isStr(), isStrOrNull(), loadGeometry() (+12 more)
 
 ### Community 24 - "Community 24"
 Cohesion: 0.13
@@ -218,8 +218,8 @@ Cohesion: 0.14
 Nodes (20): buildClassifierPrompt(), clamp01(), classifyUserTask(), dedupe(), gatewayAnchor(), introducesCycle(), resolveFreedomSet(), sanitizeScope() (+12 more)
 
 ### Community 26 - "Community 26"
-Cohesion: 0.08
-Nodes (3): taskStatus(), upNextRefs(), statusOf()
+Cohesion: 0.15
+Nodes (16): fanOutQc(), persistGraph(), reconcile(), toPersistRows(), buildStack(), expand(), habitableLabels(), unitLabels() (+8 more)
 
 ### Community 27 - "Community 27"
 Cohesion: 0.19
@@ -230,52 +230,52 @@ Cohesion: 0.11
 Nodes (4): clearPersistedCache(), doSignOut(), onEnter(), start()
 
 ### Community 29 - "Community 29"
-Cohesion: 0.11
-Nodes (4): submit(), decide(), decideWorkCertification(), submitWorkCertification()
-
-### Community 30 - "Community 30"
 Cohesion: 0.2
 Nodes (3): Evaluator, messageFor(), verdictFor()
 
-### Community 31 - "Community 31"
+### Community 30 - "Community 30"
 Cohesion: 0.19
 Nodes (14): buildExtractionPrompt(), buildReRankPrompt(), cleanExtractionResult(), extractItems(), generateStructuredSkuWithContext(), generateVectorEmbedding(), looksLikePlaceholder(), matchItems() (+6 more)
 
-### Community 32 - "Community 32"
-Cohesion: 0.18
-Nodes (10): src(), stripComments(), classifyWithLLM(), detectLanguage(), extractJson(), looksActionableProcurement(), looksActionableTxn(), pendingSummary() (+2 more)
-
-### Community 33 - "Community 33"
+### Community 31 - "Community 31"
 Cohesion: 0.12
 Nodes (2): seed(), SEED2()
 
-### Community 34 - "Community 34"
+### Community 32 - "Community 32"
 Cohesion: 0.17
 Nodes (7): addPhotos(), fmt(), goodOf(), handleSubmit(), parseTiffDate(), readExifDate(), readPhotoDate()
 
-### Community 35 - "Community 35"
+### Community 33 - "Community 33"
 Cohesion: 0.14
 Nodes (2): matchGenHeads(), normHead()
 
-### Community 36 - "Community 36"
+### Community 34 - "Community 34"
 Cohesion: 0.15
 Nodes (3): cand(), floorSeed(), fourFloors()
 
-### Community 37 - "Community 37"
+### Community 35 - "Community 35"
 Cohesion: 0.16
 Nodes (5): ProjectHome(), useProjectCode(), if(), isClientReceipt(), isExcludedFromSpent()
 
-### Community 38 - "Community 38"
+### Community 36 - "Community 36"
+Cohesion: 0.19
+Nodes (6): useDeskApi(), useMockDeskApi(), deskCoreQuery(), deskPlanQuery(), DeskUnsupported, useLiveDeskApi()
+
+### Community 37 - "Community 37"
 Cohesion: 0.18
 Nodes (3): BI(), chaseSeed(), seed()
 
-### Community 39 - "Community 39"
+### Community 38 - "Community 38"
 Cohesion: 0.32
 Nodes (11): act(), briklayChat(), checkRegistration(), greetOnce(), local10(), onlyDigits(), onTap(), prettyPhone() (+3 more)
 
-### Community 40 - "Community 40"
+### Community 39 - "Community 39"
 Cohesion: 0.2
 Nodes (4): amtOf(), dismiss(), entryView(), invalidateEntries()
+
+### Community 40 - "Community 40"
+Cohesion: 0.21
+Nodes (5): base(), nearest(), upd(), updResolve(), withNearest()
 
 ### Community 42 - "Community 42"
 Cohesion: 0.24
@@ -286,16 +286,16 @@ Cohesion: 0.29
 Nodes (7): bandRange(), buildRationale(), draftStages(), extractMeasured(), normalizeWeights(), templateKeyForTrade(), titleCase()
 
 ### Community 45 - "Community 45"
-Cohesion: 0.27
-Nodes (6): PeekLink(), fmtDate(), Label(), summarizeScope(), woTone(), usePeek()
-
-### Community 46 - "Community 46"
 Cohesion: 0.31
 Nodes (6): confirmSpawn(), invalidate(), invalidateObjects(), onPickFile(), post(), quickAction()
 
-### Community 47 - "Community 47"
+### Community 46 - "Community 46"
 Cohesion: 0.22
 Nodes (2): closed(), openLive()
+
+### Community 47 - "Community 47"
+Cohesion: 0.27
+Nodes (6): PeekLink(), fmtDate(), Label(), summarizeScope(), woTone(), usePeek()
 
 ### Community 50 - "Community 50"
 Cohesion: 0.25
@@ -342,12 +342,12 @@ Cohesion: 0.43
 Nodes (4): genId(), handleKeyDown(), patchRow(), saveRow()
 
 ### Community 63 - "Community 63"
-Cohesion: 0.48
-Nodes (5): usePrefetchPO(), usePrefetchStakeholder(), usePrefetchTxn(), usePrefetchWO(), useThrottledPrefetch()
-
-### Community 65 - "Community 65"
 Cohesion: 0.43
 Nodes (5): TxnRow(), dot(), formatShortDate(), formatTxn(), isCostCode()
+
+### Community 64 - "Community 64"
+Cohesion: 0.48
+Nodes (5): usePrefetchPO(), usePrefetchStakeholder(), usePrefetchTxn(), usePrefetchWO(), useThrottledPrefetch()
 
 ### Community 68 - "Community 68"
 Cohesion: 0.33
@@ -418,11 +418,11 @@ Cohesion: 1.0
 Nodes (2): placeOf(), stageOfFloorless()
 
 ## Knowledge Gaps
-- **Thin community `Community 33`** (17 nodes): `no_such_floor_ask.test.ts`, `base()`, `blindModel()`, `convoOf()`, `ctxPin()`, `geo()`, `imgCtx()`, `model()`, `preambleOf()`, `projConvoOf()`, `row()`, `seed()`, `SEED2()`, `shortlist()`, `stateWrites()`, `textCtx()`, `tUpd()`
+- **Thin community `Community 31`** (17 nodes): `no_such_floor_ask.test.ts`, `base()`, `blindModel()`, `convoOf()`, `ctxPin()`, `geo()`, `imgCtx()`, `model()`, `preambleOf()`, `projConvoOf()`, `row()`, `seed()`, `SEED2()`, `shortlist()`, `stateWrites()`, `textCtx()`, `tUpd()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 35`** (15 nodes): `add()`, `capitalizeWords()`, `FieldQuestion()`, `fieldStyle()`, `h()`, `matchGenHeads()`, `normHead()`, `openCreate()`, `pickGeneralHead()`, `rm()`, `selectPayee()`, `uid()`, `up()`, `update()`, `ResolvePopup.tsx`
+- **Thin community `Community 33`** (15 nodes): `add()`, `capitalizeWords()`, `FieldQuestion()`, `fieldStyle()`, `h()`, `matchGenHeads()`, `normHead()`, `openCreate()`, `pickGeneralHead()`, `rm()`, `selectPayee()`, `uid()`, `up()`, `update()`, `ResolvePopup.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 47`** (10 nodes): `WOListSheet.tsx`, `balance()`, `closed()`, `D()`, `doneStages()`, `dstr()`, `fmt()`, `openLive()`, `pctPaid()`, `useWOListData()`
+- **Thin community `Community 46`** (10 nodes): `WOListSheet.tsx`, `balance()`, `closed()`, `D()`, `doneStages()`, `dstr()`, `fmt()`, `openLive()`, `pctPaid()`, `useWOListData()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 50`** (9 nodes): `advanceFromName()`, `choose()`, `onRowClick()`, `pickExisting()`, `settle()`, `tick()`, `toMatch()`, `undo()`, `ResolveRow.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
@@ -460,12 +460,12 @@ Nodes (2): placeOf(), stageOfFloorless()
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `parseAmount()` connect `Community 12` to `Community 6`?**
-  _High betweenness centrality (0.142) - this node is a cross-community bridge._
-- **Why does `NewInvoice()` connect `Community 12` to `Community 8`?**
-  _High betweenness centrality (0.111) - this node is a cross-community bridge._
-- **Why does `add()` connect `Community 8` to `Community 12`?**
-  _High betweenness centrality (0.076) - this node is a cross-community bridge._
+- **Why does `parseAmount()` connect `Community 4` to `Community 9`, `Community 21`?**
+  _High betweenness centrality (0.154) - this node is a cross-community bridge._
+- **Why does `NewInvoice()` connect `Community 21` to `Community 9`, `Community 10`, `Community 4`?**
+  _High betweenness centrality (0.104) - this node is a cross-community bridge._
+- **Why does `add()` connect `Community 10` to `Community 21`?**
+  _High betweenness centrality (0.071) - this node is a cross-community bridge._
 - **Are the 41 inferred relationships involving `send()` (e.g. with `processJob()` and `resurfacePending()`) actually correct?**
   _`send()` has 41 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 29 inferred relationships involving `dispatch()` (e.g. with `processJob()` and `send()`) actually correct?**

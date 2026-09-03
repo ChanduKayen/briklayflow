@@ -291,6 +291,10 @@
     "mtime": 1788392859.7824361,
     "hash": "68a505b1f52a1ff708a551e9e23499da"
   },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\components\\attendance\\PieceWorkEntry.tsx": {
+    "mtime": 1788408686.8594885,
+    "hash": "5ff9587e70cfa462273e15ad766cab59"
+  },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\components\\day-book\\atoms.tsx": {
     "mtime": 1781324498.713073,
     "hash": "cc99cf944c452dd621e050e5935d32f0"
@@ -808,8 +812,8 @@
     "hash": "6b99c5ed377687de17cc2c1b7adf41d1"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\workCertification.ts": {
-    "mtime": 1788392832.1029477,
-    "hash": "8f22077b17db6e4c863e5c2e72ff2f57"
+    "mtime": 1788408779.7279701,
+    "hash": "c1410926439f94792c4be3999b5e31e7"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\auth\\AuthProvider.tsx": {
     "mtime": 1787802922.6352646,
@@ -1332,8 +1336,8 @@
     "hash": "1743cd0d00f47a27cde5ea9b1423038f"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\StakeholderDetail.tsx": {
-    "mtime": 1788388086.8779685,
-    "hash": "149e373f75d72483736d9f0f03217d1f"
+    "mtime": 1788408856.082896,
+    "hash": "cf911a90c98749c226ab56cf2fd034c1"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\Stakeholders.tsx": {
     "mtime": 1788323240.8656712,

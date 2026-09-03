@@ -18,6 +18,7 @@ import {
 import { searchPayees } from '../../lib/payeeSearch';
 import { createParty } from '../day-book/fileEntry';
 import { CertificationWizard, type CertifyContext } from './CertificationWizard';
+import { setEngagementBasis, submitWorkCertification } from '../../lib/workCertification';
 
 const ATDX_CSS = `
 .atdx{background:#FBF9F6;color:var(--walnut);font:15px/1.45 "DM Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased;padding:34px 28px 80px;
@@ -112,6 +113,9 @@ const ATDX_CSS = `
 .atdx tr.hot-main td{background:color-mix(in srgb,var(--terracotta) 8%,var(--paper))}
 .atdx tr.hot-main td:first-child{box-shadow:inset 3px 0 0 var(--terracotta)}
 .atdx .assumed{font-size:11px;color:#a9781c;font-style:italic;margin-left:6px;cursor:help}
+.atdx .measurebasis{margin-left:8px;font-size:11px;color:var(--walnut-3);background:none;border:0;cursor:pointer;text-decoration:underline;text-decoration-color:var(--line-2);text-underline-offset:2px}
+.atdx .measurebasis:hover{color:var(--terracotta);text-decoration-color:var(--terracotta)}
+.atdx .measurebasis.on{color:var(--sage);font-weight:500;text-decoration-color:color-mix(in srgb,var(--sage) 45%,transparent)}
 .atdx .seg{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:2px;background:var(--cream);margin-top:6px}
 .atdx .seg button{padding:2px 10px;border-radius:999px;font-size:12px;color:var(--walnut-3)}
 .atdx .seg button[aria-pressed=true]{background:var(--paper);color:var(--walnut);font-weight:500;box-shadow:0 1px 2px rgba(59,47,39,.08)}
@@ -437,8 +441,14 @@ export default function AttendanceSheet({ session }: { session: Session }) {
         // An unconfirmed engagement (basis assumed at go-live) wears a quiet nudge — clicking the
         // Contract/Labour toggle confirms it. Only shown until confirmed.
         const assumed = !crew.basisConfirmed ? ` <span class="assumed" title="Basis assumed — pick Contract or Labour to confirm">· assumed</span>` : '';
+        // For a contract crew, offer "measured by attendance" — a measurement engagement auto-certifies
+        // each measured muster day (the day is the reading), vs certifying milestones explicitly.
+        const measuring = crew.accrualBasis === 'measurement';
+        const measureToggle = (crew.contract && onContract)
+          ? ` <button class="measurebasis${measuring ? ' on' : ''}" data-measurebasis="${si}.${ci}" title="${measuring ? 'Measured by attendance — each measured day auto-certifies. Click to switch back to milestone certification.' : 'Certify by milestones. Click to measure by attendance instead.'}">${measuring ? '✓ measured by attendance' : 'measure by attendance'}</button>`
+          : '';
         const seg = crew.contract
-          ? `<div class="seg"><button data-basis="${si}.${ci}.contract" aria-pressed="${onContract}">Contract</button><button data-basis="${si}.${ci}.labour" aria-pressed="${!onContract}">Labour</button>${assumed}</div>`
+          ? `<div class="seg"><button data-basis="${si}.${ci}.contract" aria-pressed="${onContract}">Contract</button><button data-basis="${si}.${ci}.labour" aria-pressed="${!onContract}">Labour</button>${assumed}${measureToggle}</div>`
           : `<div class="wageslbl" data-wageslbl="${si}.${ci}">Daily wages · not on a contract${assumed} · <button class="oncontract" data-oncontract="${si}.${ci}">put on contract</button></div>`;
         // The heading row's day cells are muted — attendance is entered on the skill rows beneath it.
         const headCells = crew.head.map((_c, i) => `<td class="cell${col(i)}"><div class="c off">·</div></td>`).join('');
@@ -539,14 +549,53 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     });
   }
 
+  // MEASUREMENT basis, measured stage — the muster day IS the reading. Enter the qty inline and it
+  // auto-certifies (qty × rate) through the governed path, no wizard ceremony: the certification is
+  // auto-approved within the marker's authority, else it routes Pending to the Works Approver.
+  function openMeasuredEntry(div: HTMLElement, ref: string, i: number) {
+    const [si, part, ki] = ref.split('.');
+    const site = DATA.current[+si]; const crew = site.crews[+part.slice(1)]; const st = crew.stages[+ki] as any;
+    const t = resolve(ref);
+    const cur = t.cells[i] && t.cells[i] !== 'off' ? (t.cells[i] as any).v : '';
+    const wasEmpty = cur === '';   // certify ONLY the first entry of a day — never double-accrue on a correction
+    div.innerHTML = `<input class="mono" value="${cur}" inputmode="decimal" placeholder="qty">`;
+    const inp = div.querySelector('input') as HTMLInputElement; inp.focus(); inp.select();
+    let doneOnce = false;
+    const commit = async () => {
+      if (doneOnce) return; doneOnce = true;
+      const v = parseFloat(inp.value);
+      if (isNaN(v) || v <= 0) { render(); return; }
+      t.cells[i] = { v, src: 'office', by: byName, at: 'just now' };
+      persistCell(t.subject, t.projectId, i, v);          // the reading (display + progress)
+      if (!wasEmpty) { showSnackbar('Reading updated (already certified for that day)'); render(); return; }
+      const amount = Math.round((st.rate || 0) * v);       // the certified value
+      try {
+        const r = await submitWorkCertification({
+          orgId, projectId: site.site, woId: crew.woId ?? null, milestoneId: st.milestoneId, crewId: crew.crewId,
+          stakeholderId: crew.stakeholderId ?? null, readingKind: 'measured', readingValue: v, computedAmount: amount,
+          readingDate: dates[i], note: `${st.n} · measured`,
+        });
+        showSnackbar(r.status === 'approved' ? `Certified ${inr(amount)}` : `${inr(amount)} sent for approval`);
+      } catch (e) { showSnackbar((e as any)?.message || 'Could not certify', { type: 'error' }); }
+      render();
+    };
+    inp.addEventListener('blur', commit);
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { doneOnce = true; inp.removeEventListener('blur', commit); render(); } });
+  }
+
   function bind() {
     const body = q('#atdxBody'); if (!body) return;
     body.querySelectorAll('[data-edit]').forEach(div => div.addEventListener('click', () => {
       if (div.querySelector('input')) return;
       const t = resolve((div as HTMLElement).dataset.edit!), i = colOf(div);
-      // A contract stage's reading launches the Certification Wizard (slider/qty → evidence → submit),
-      // replacing the bare slider/number: the reading now MINTS a governed obligation.
-      if (t.subject.type === 'stage') { openCertWizard((div as HTMLElement).dataset.edit!); return; }
+      // A contract stage's reading MINTS a governed obligation. Measurement-basis + a measured stage
+      // auto-certifies inline (the day is the reading); everything else opens the Certification Wizard.
+      if (t.subject.type === 'stage') {
+        const ref = (div as HTMLElement).dataset.edit!;
+        const [si, part] = ref.split('.'); const crew = DATA.current[+si].crews[+part.slice(1)]; const st = t.target as any;
+        if (crew.accrualBasis === 'measurement' && st?.type !== 'lump') { openMeasuredEntry(div as HTMLElement, ref, i); return; }
+        openCertWizard(ref); return;
+      }
       const cur = t.cells[i] && t.cells[i] !== 'off' ? (t.cells[i] as any).v : '';
       div.innerHTML = `<input class="mono" value="${cur}" inputmode="numeric">`;
       const inp = div.querySelector('input') as HTMLInputElement; inp.focus(); inp.select();
@@ -595,7 +644,17 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     }));
     body.querySelectorAll('[data-basis]').forEach(b => b.addEventListener('click', () => {
       const [si, ci, basis] = (b as HTMLElement).dataset.basis!.split('.'); const crew = DATA.current[+si].crews[+ci];
-      crew.basis = basis as 'contract' | 'labour'; setCrewBasis(crew.crewId, crew.basis).catch(fail); render();
+      crew.basis = basis as 'contract' | 'labour'; crew.accrualBasis = basis === 'contract' ? 'work' : 'day'; crew.basisConfirmed = true;
+      setCrewBasis(crew.crewId, crew.basis).catch(fail); render();
+    }));
+    // Toggle a contract crew between milestone certification ('work') and attendance measurement ('measurement').
+    body.querySelectorAll('[data-measurebasis]').forEach(b => b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const [si, ci] = (b as HTMLElement).dataset.measurebasis!.split('.'); const crew = DATA.current[+si].crews[+ci];
+      const next = crew.accrualBasis === 'measurement' ? 'work' : 'measurement';
+      crew.accrualBasis = next; crew.basisConfirmed = true;
+      setEngagementBasis('crew', crew.crewId, next).catch(fail); render();
+      showSnackbar(next === 'measurement' ? 'Measured by attendance — each measured day auto-certifies' : 'Certify by milestones');
     }));
     body.querySelectorAll('[data-add]').forEach(b => b.addEventListener('click', () => addEntity(+(b as HTMLElement).dataset.add!)));
     body.querySelectorAll('[data-oncontract]').forEach(b => b.addEventListener('click', () => { const [si, ci] = (b as HTMLElement).dataset.oncontract!.split('.'); onContractForm(+si, +ci); }));
