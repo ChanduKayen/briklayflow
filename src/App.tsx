@@ -1127,14 +1127,20 @@ function MoreNavSheet({
 export function useUserProfile(userId: string) {
   return useQuery({
     queryKey: ['profile', userId],
+    // Only run for a real id; an empty id would query id=eq. and 406.
+    enabled: !!userId,
     queryFn: async () => {
+      // maybeSingle, NOT single: a profile that doesn't exist yet, or one hidden by the org-read RLS
+      // (e.g. looking up another member whose profile.org_id hasn't synced), returns 0 rows — with
+      // .single() that's a 406 the query THROWS on. maybeSingle returns null so callers degrade
+      // gracefully (profile?.role) instead of erroring.
       const { data, error } = await supabase
         .from('user_profiles')
         .select('*')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
       if (error) throw error;
-      return data as UserProfile;
+      return (data ?? null) as UserProfile | null;
     },
   });
 }
