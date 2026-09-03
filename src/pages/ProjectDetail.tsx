@@ -407,6 +407,8 @@ export default function ProjectDetail({ session }: { session: Session }) {
   const [editStatus, setEditStatus] = useState('Active');
   const [editSupervisor, setEditSupervisor] = useState<string | null>(null);
   const [supervisorPick, setSupervisorPick] = useState(false);
+  const [editWorksApprover, setEditWorksApprover] = useState<string | null>(null);
+  const [worksApproverPick, setWorksApproverPick] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => { const t = setTimeout(() => setMounted(true), 40); return () => clearTimeout(t); }, []);
@@ -567,7 +569,7 @@ export default function ProjectDetail({ session }: { session: Session }) {
               Transaction
             </button>
             {canManage && (
-              <button onClick={() => { setEditName(project.name); setEditLoc(project.site_location); setEditDate(project.start_date?.split('T')[0] ?? ''); setEditStatus(project.status); setEditSupervisor(project.supervisor_id ?? null); setShowEditSheet(true); }}
+              <button onClick={() => { setEditName(project.name); setEditLoc(project.site_location); setEditDate(project.start_date?.split('T')[0] ?? ''); setEditStatus(project.status); setEditSupervisor(project.supervisor_id ?? null); setEditWorksApprover((project as any).works_approver_id ?? null); setShowEditSheet(true); }}
                 style={{ width: 38, height: 38, borderRadius: 99, background: 'rgba(0,0,0,0.05)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(0,0,0,0.45)', transition: 'all 150ms' }}
                 onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,0,0,0.08)'; (e.currentTarget as HTMLButtonElement).style.color = '#0b1c30' }}
                 onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,0,0,0.05)'; (e.currentTarget as HTMLButtonElement).style.color = 'rgba(0,0,0,0.45)' }}>
@@ -761,12 +763,22 @@ export default function ProjectDetail({ session }: { session: Session }) {
                   <span style={{ fontSize: 12, color: '#C8603A', fontWeight: 600 }}>Change</span>
                 </button>
               </div>
+              {/* Works Approver — signs off work certifications for this site (project-first escalation) */}
+              <div>
+                <label style={{ display: 'block', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(0,0,0,0.35)', marginBottom: 6 }}>Works Approver</label>
+                <button type="button" onClick={() => setWorksApproverPick(true)}
+                  style={{ width: '100%', height: 44, padding: '0 12px', borderRadius: 12, border: '1.5px solid rgba(0,0,0,0.10)', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, fontFamily: 'inherit' }}>
+                  {editWorksApprover ? <MemberAvatar name={supervisorName(editWorksApprover)} size={24} /> : <span style={{ width: 24, height: 24, borderRadius: '50%', border: '1.5px dashed rgba(0,0,0,0.30)' }} />}
+                  <span style={{ flex: 1, textAlign: 'left', fontSize: 14, color: editWorksApprover ? '#0b1c30' : 'rgba(0,0,0,0.45)' }}>{editWorksApprover ? supervisorName(editWorksApprover) : 'None — certifications escalate to the submitter’s approver'}</span>
+                  <span style={{ fontSize: 12, color: '#C8603A', fontWeight: 600 }}>Change</span>
+                </button>
+              </div>
               <div style={{ display: 'flex', gap: 10, paddingTop: 4 }}>
                 <button onClick={() => setShowEditSheet(false)}
                   style={{ flex: '0 0 auto', height: 46, padding: '0 18px', borderRadius: 12, border: '1.5px solid rgba(0,0,0,0.10)', background: 'transparent', color: 'rgba(0,0,0,0.50)', cursor: 'pointer', fontSize: 14, fontFamily: 'inherit' }}>
                   Cancel
                 </button>
-                <button onClick={() => updateProject.mutate({ name: editName, site_location: editLoc, start_date: editDate, status: editStatus, supervisor_id: editSupervisor })} disabled={updateProject.isPending}
+                <button onClick={() => updateProject.mutate({ name: editName, site_location: editLoc, start_date: editDate, status: editStatus, supervisor_id: editSupervisor, works_approver_id: editWorksApprover })} disabled={updateProject.isPending}
                   style={{ flex: 1, height: 46, borderRadius: 12, border: 'none', background: '#0b1c30', color: '#fff', cursor: 'pointer', fontSize: 14, fontWeight: 600, fontFamily: 'inherit', opacity: updateProject.isPending ? 0.5 : 1 }}>
                   {updateProject.isPending ? 'Saving…' : 'Save Changes'}
                 </button>
@@ -779,6 +791,11 @@ export default function ProjectDetail({ session }: { session: Session }) {
       {supervisorPick && (
         <UserPicker orgId={(project?.org_id as string) ?? ''} currentId={editSupervisor} title="Assign supervisor"
           onPick={(id) => { setEditSupervisor(id); setSupervisorPick(false); }} onClose={() => setSupervisorPick(false)} />
+      )}
+
+      {worksApproverPick && (
+        <UserPicker orgId={(project?.org_id as string) ?? ''} currentId={editWorksApprover} title="Works Approver"
+          onPick={(id) => { setEditWorksApprover(id); setWorksApproverPick(false); }} onClose={() => setWorksApproverPick(false)} />
       )}
 
       {/* ── Quick transaction drawer ────────────────────────────────────── */}

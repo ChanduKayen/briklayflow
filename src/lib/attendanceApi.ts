@@ -28,7 +28,7 @@ export interface StageRow {
 }
 export interface CrewRow {
   crewId: string; n: string; d: string; trade: string | null; stakeholderId: string | null;
-  contract: boolean; basis: 'contract' | 'labour'; woId: string | null; paidThrough?: number;
+  contract: boolean; basis: 'contract' | 'labour'; basisConfirmed: boolean; woId: string | null; paidThrough?: number;
   head: Cell[]; cats: CatRow[]; stages: StageRow[];
 }
 export interface DirectRow { id: string; n: string; d: string; cat: string; rate: number; own?: boolean; stakeholderId: string | null; cells: Cell[] }
@@ -169,6 +169,7 @@ export async function loadWeek(monday: Date): Promise<WeekData> {
         // "On contract" only when there's a real work order behind it (that's where stages come
         // from). A plain gang added by search has none — it's daily wages, no toggle.
         contract: c.is_contract || !!c.wo_id, basis: c.wo_id || c.is_contract ? c.basis : 'labour',
+        basisConfirmed: !!c.basis_confirmed,
         woId: c.wo_id ?? null, paidThrough: paidThroughIdx(c.paid_through),
         head: cellsFor(byHead[c.crew_id] ?? [], dates), cats: crewCats, stages: crewStages,
       };

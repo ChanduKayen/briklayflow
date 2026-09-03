@@ -111,7 +111,8 @@ const ATDX_CSS = `
 .atdx tr.hot td{background:color-mix(in srgb,var(--terracotta) 4%,var(--paper))}
 .atdx tr.hot-main td{background:color-mix(in srgb,var(--terracotta) 8%,var(--paper))}
 .atdx tr.hot-main td:first-child{box-shadow:inset 3px 0 0 var(--terracotta)}
-.atdx .seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:2px;background:var(--cream);margin-top:6px}
+.atdx .assumed{font-size:11px;color:#a9781c;font-style:italic;margin-left:6px;cursor:help}
+.atdx .seg{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:2px;background:var(--cream);margin-top:6px}
 .atdx .seg button{padding:2px 10px;border-radius:999px;font-size:12px;color:var(--walnut-3)}
 .atdx .seg button[aria-pressed=true]{background:var(--paper);color:var(--walnut);font-weight:500;box-shadow:0 1px 2px rgba(59,47,39,.08)}
 .atdx tr.sub td{height:38px}
@@ -433,9 +434,12 @@ export default function AttendanceSheet({ session }: { session: Session }) {
         const stageVal = crew.stages.reduce((s, st) => s + (st.type === 'lump' ? (st.amount || 0) : (st.total || 0) * (st.rate || 0)), 0);
         const stageEarnedGross = crew.stages.reduce((s, st) => s + stageMath(st).earned, 0);
         const overallPct = stageVal ? Math.round(stageEarnedGross / stageVal * 100) : 0;
+        // An unconfirmed engagement (basis assumed at go-live) wears a quiet nudge — clicking the
+        // Contract/Labour toggle confirms it. Only shown until confirmed.
+        const assumed = !crew.basisConfirmed ? ` <span class="assumed" title="Basis assumed — pick Contract or Labour to confirm">· assumed</span>` : '';
         const seg = crew.contract
-          ? `<div class="seg"><button data-basis="${si}.${ci}.contract" aria-pressed="${onContract}">Contract</button><button data-basis="${si}.${ci}.labour" aria-pressed="${!onContract}">Labour</button></div>`
-          : `<div class="wageslbl" data-wageslbl="${si}.${ci}">Daily wages · not on a contract · <button class="oncontract" data-oncontract="${si}.${ci}">put on contract</button></div>`;
+          ? `<div class="seg"><button data-basis="${si}.${ci}.contract" aria-pressed="${onContract}">Contract</button><button data-basis="${si}.${ci}.labour" aria-pressed="${!onContract}">Labour</button>${assumed}</div>`
+          : `<div class="wageslbl" data-wageslbl="${si}.${ci}">Daily wages · not on a contract${assumed} · <button class="oncontract" data-oncontract="${si}.${ci}">put on contract</button></div>`;
         // The heading row's day cells are muted — attendance is entered on the skill rows beneath it.
         const headCells = crew.head.map((_c, i) => `<td class="cell${col(i)}"><div class="c off">·</div></td>`).join('');
         html += `<tr class="crew" data-site="${site.site}" data-grp="c${si}-${ci}">

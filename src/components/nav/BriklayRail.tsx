@@ -254,6 +254,12 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
     queryFn: async () => (await supabase.from('rough_entries').select('*', { count: 'exact', head: true }).eq('status', 'PENDING')).count ?? 0,
     staleTime: 30_000,
   });
+  // Work certifications awaiting sign-off — surfaced on Payables (where they mint what's owed).
+  const { data: pendingCerts = 0 } = useQuery({
+    queryKey: ['nav_pending_certs'],
+    queryFn: async () => (await supabase.from('work_certifications').select('*', { count: 'exact', head: true }).eq('status', 'pending')).count ?? 0,
+    staleTime: 60_000, enabled: role !== 'supervisor',
+  });
   const { data: projects = [] } = useQuery({
     queryKey: ['sidebar_projects'],
     queryFn: async () => {
@@ -276,7 +282,7 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
         can(role !== 'supervisor') && { route: '/ledger', label: 'Transactions', icon: IconArrowsExchange, accent: true },
         { route: '/logbook', label: 'Day book', node: <DayBookIcon />, badge: inbox },
         can(role !== 'supervisor') && { route: '/billing', label: 'Client billing', icon: IconFileInvoice, badge: billOverdue },
-        can(role !== 'supervisor') && { route: '/payables', label: 'Payables', icon: IconReceipt2 },
+        can(role !== 'supervisor') && { route: '/payables', label: 'Payables', icon: IconReceipt2, badge: pendingCerts },
       ].filter(Boolean) as Item[]),
     },
     {

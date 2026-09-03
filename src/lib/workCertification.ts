@@ -12,6 +12,22 @@ export const BASIS_LABEL: Record<AccrualBasis, string> = {
   day: 'Day-wage (attendance)', work: 'Contract (certified work)', measurement: 'Measured by attendance', piece: 'Piece / lump (gutha)',
 };
 
+// ── the current user's certification authority (gates the approval UI) ───────
+export interface CertAuthority { canCertify: boolean; limit: number | null; isManager: boolean }
+export async function loadMyCertAuthority(orgId: string, userId: string): Promise<CertAuthority> {
+  const { data } = await supabase.from('org_memberships')
+    .select('can_certify_work, work_certification_limit, role')
+    .eq('org_id', orgId).eq('user_id', userId).eq('status', 'active').maybeSingle();
+  const r = (data ?? {}) as any;
+  return { canCertify: !!r.can_certify_work, limit: r.work_certification_limit ?? null, isManager: r.role === 'management' || r.role === 'principal' };
+}
+/** May this user approve a certification of `amount`? (holds the power + within cap, or is management.) */
+export function canApproveAmount(a: CertAuthority | undefined, amount: number): boolean {
+  if (!a) return false;
+  if (a.isManager) return true;
+  return a.canCertify && (a.limit == null || amount <= a.limit);
+}
+
 // ── engagement basis ────────────────────────────────────────────────────────
 export async function setEngagementBasis(kind: 'crew' | 'direct', id: string, basis: AccrualBasis): Promise<void> {
   const table = kind === 'crew' ? 'labour_crews' : 'labour_direct_workers';

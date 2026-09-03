@@ -16,6 +16,9 @@ import {
   type PayRow, type PaySection,
 } from '../lib/weeklyPaymentsApi';
 import { isNewLedgerOrg } from '../lib/ledgerRead';
+import { PendingCertifications } from '../components/attendance/PendingCertifications';
+import { LedgerCutoverControl } from '../components/attendance/LedgerCutoverControl';
+import { useUserProfile } from '../App';
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 const MODES = ['UPI', 'NEFT', 'Cash', 'Cheque'];
@@ -172,9 +175,11 @@ const CSS = `
 
 type Diff = { kind: 'carry' | 'advance' | 're'; reason: string };
 
-export default function Payables(_props: { session: Session }) {
+export default function Payables({ session }: { session: Session }) {
   const orgId = useOrgId();
   const { show: showSnackbar } = useSnackbar();
+  const { data: profile } = useUserProfile(session.user.id);
+  const isManager = profile?.role === 'management' || profile?.role === 'principal';
   const [monday, setMonday] = useState<Date>(() => mondayOf(new Date()));
   const [plan, setPlan] = useState<Record<string, number>>({});
   const [paid, setPaid] = useState<Record<string, number>>({});
@@ -280,6 +285,7 @@ export default function Payables(_props: { session: Session }) {
           <div>
             <h1>Payments</h1>
             <div className="sub">Week of {weekLabel(monday)} · <button onClick={() => shiftWeek(-1)}>‹ last week</button><button onClick={() => shiftWeek(1)}>next week ›</button><button onClick={() => setMonday(mondayOf(new Date()))}>this week</button></div>
+            {orgId && <div className="sub" style={{ marginTop: 4 }}><LedgerCutoverControl orgId={orgId} isManager={isManager} /></div>}
           </div>
           <div className="stats">
             <div className="st"><div className="l">Planned</div><div className="v mono">{inr(totals.planned)}</div></div>
@@ -287,6 +293,9 @@ export default function Payables(_props: { session: Session }) {
             <div className="st left"><div className="l">Still to pay</div><div className="v mono">{inr(totals.left)}</div></div>
           </div>
         </div>
+
+        {/* Work awaiting sign-off — approving here mints the obligation into the run below. */}
+        {orgId && session.user?.id && <PendingCertifications orgId={orgId} userId={session.user.id} />}
 
         {isLoading && <div className="state">Loading the week…</div>}
         {error && <div className="state" style={{ color: 'var(--terracotta)' }}>Could not load — {(error as any)?.message || 'try again'}</div>}
