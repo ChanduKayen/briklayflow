@@ -192,7 +192,20 @@ async function recordInbound(
   body: unknown,
 ): Promise<Inbound> {
   const messages = (body as any)?.entry?.[0]?.changes?.[0]?.value?.messages
-  if (!messages?.length) return { kind: 'ignore' }
+  if (!messages?.length) {
+    // Meta reports DELIVERY outcomes (sent/delivered/read/FAILED) via `statuses`, not `messages`.
+    // We used to drop these silently — which is why a failed send (e.g. error 131030 "recipient not
+    // in the allowed list", the signature of a number in DEVELOPMENT mode) showed no error anywhere.
+    // Log failures loudly so a non-delivering send is never invisible again.
+    const statuses = (body as any)?.entry?.[0]?.changes?.[0]?.value?.statuses
+    for (const s of (statuses ?? [])) {
+      if (s?.status === 'failed') {
+        const err = s?.errors?.[0] ?? {}
+        console.error('[wa-delivery-failed]', JSON.stringify({ to: s?.recipient_id, wamid: s?.id, code: err?.code, title: err?.title, detail: err?.error_data?.details ?? err?.message }))
+      }
+    }
+    return { kind: 'ignore' }
+  }
 
   const message     = messages[0]
   const from        = message.from        as string
