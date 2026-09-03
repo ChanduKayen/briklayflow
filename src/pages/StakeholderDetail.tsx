@@ -6,7 +6,8 @@ import { useMemo, useState, useEffect, type ReactElement } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import type { Session } from '@supabase/supabase-js';
-import { useOrgId } from '../lib/auth/AuthProvider';
+import { useOrgId, useAuth } from '../lib/auth/AuthProvider';
+import { LedgerCutoverControl } from '../components/attendance/LedgerCutoverControl';
 import { useSnackbar } from '../components/Snackbar';
 import { QuickTransactionSheet } from '../components/QuickTransactionSheet';
 import { loadPartyLedger, saveOpeningBalance, addAdjustment, bookConsolidatedBill, type LedgerEntry, type PartyLedger } from '../lib/partyLedgerApi';
@@ -218,6 +219,8 @@ const fyLabel = () => { const now = new Date(); const s = now.getMonth() >= 3 ? 
 export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { stakeholderId: string; compact?: boolean; onClose?: () => void }) {
   const navigate = useNavigate();
   const orgId = useOrgId();
+  const { isRole } = useAuth();
+  const isManager = isRole('management') || isRole('principal');
   const { show: showSnackbar } = useSnackbar();
   const [view, setView] = useState<View>('date');
   const [period, setPeriod] = useState<Period>('all');
@@ -282,6 +285,7 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
             <div>
               <h1 className="name">{L.stakeholder.name}</h1>
               <div className="meta">{[L.stakeholder.category, L.stakeholder.type].filter(Boolean).join(', ')} <span className="uid">{L.stakeholder.id}</span></div>
+              {!compact && orgId && <div style={{ marginTop: 6 }}><LedgerCutoverControl orgId={orgId} isManager={isManager} /></div>}
             </div>
           </div>
           <div className="actions">
