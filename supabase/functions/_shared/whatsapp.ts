@@ -105,9 +105,19 @@ export async function sendTemplate(
 
   const components = buildComponents(def, params);
 
+  // Meta needs a full E.164 number. The platform PhoneInput emits BARE 10-digit locals, and a 10-digit
+  // send is ACCEPTED by Meta (returns a wamid → looks like success) but NEVER delivered. Add the
+  // country code here — the one choke point for every proactive template — so a caller passing a bare
+  // local (PO, RFQ, welcome/invite) still reaches the recipient. Strips a leading trunk 0 too.
+  const dest = (() => {
+    let d = String(to).replace(/\D/g, "").replace(/^0+/, "");
+    if (d.length === 10) d = "91" + d;   // bare Indian mobile → E.164
+    return d;
+  })();
+
   const body: Record<string, unknown> = {
     messaging_product: "whatsapp",
-    to,
+    to: dest,
     type: "template",
     template: {
       name: def.name,
@@ -127,7 +137,7 @@ export async function sendTemplate(
 
   const data = await res.json();
   // Always log the result so a send is never invisible (matches the [wa-send] norm).
-  console.log("[wa-template]", res.status, def.name, "->", to, JSON.stringify(data));
+  console.log("[wa-template]", res.status, def.name, "->", dest, JSON.stringify(data));
   if (!res.ok) {
     console.error("WA template send failed", { key, to, error: data?.error });
     throw new Error(data?.error?.message ?? "WA send failed");

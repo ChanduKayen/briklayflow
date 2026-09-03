@@ -20,6 +20,15 @@ const BATCH = 20
  *  OUTBOUND message id WhatsApp assigns (response messages[0].id) — Step 4a captures it for the map. */
 async function postToMeta(body: unknown): Promise<{ ok: boolean; error?: string; wamid?: string | null }> {
   try {
+    // Defensive E.164: a BARE 10-digit local (what the platform PhoneInput emits) is accepted by Meta
+    // but never delivered. Add the country code on the way out so a target enqueued without it (e.g. an
+    // RPC that built v_to as digits-only) still reaches the recipient. Strips a leading trunk 0 too.
+    if (body && typeof body === 'object' && 'to' in body) {
+      const b = body as { to?: unknown }
+      let d = String(b.to ?? '').replace(/\D/g, '').replace(/^0+/, '')
+      if (d.length === 10) d = '91' + d
+      if (d) b.to = d
+    }
     const res = await fetch(
       `https://graph.facebook.com/v18.0/${WA_PHONE_NUMBER_ID}/messages`,
       {

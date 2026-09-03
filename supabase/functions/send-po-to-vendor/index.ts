@@ -42,8 +42,10 @@ serve(async (req) => {
     console.log('[send-po-to-vendor] request', { poId, to, pdfBytes: pdfBase64 ? String(pdfBase64).length : 0 });
     if (!poId || !to || !pdfBase64) return json({ ok: false, error: 'poId, to and pdfBase64 are required' }, 400);
 
-    // Destination must be E.164 digits, no "+".
-    const dest = String(to).replace(/[^\d]/g, '');
+    // Destination must be E.164 digits, no "+". A bare 10-digit Indian mobile (what the platform
+    // PhoneInput emits) gets its country code here, or Meta accepts the send but never delivers it.
+    let dest = String(to).replace(/[^\d]/g, '').replace(/^0+/, '');
+    if (dest.length === 10) dest = '91' + dest;
     if (dest.length < 11 || dest.length > 15) return json({ ok: false, error: `Invalid destination number: "${to}"` }, 400);
 
     // 1. PO → vendor + builder names.
