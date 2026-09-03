@@ -139,7 +139,11 @@ export const TEMPLATES = {
   // https://www.briklay.app/quote/<token> (matches the /quote/:token route).
   //   {{1}} vendor name · {{2}} builder (user org) name · {{3}} items summary + count · {{4}} delivery address
   request_for_quotation: {
-    name: "rfq_vendor_v1",   // the approved Meta template name (dynamic URL button)
+    // UTILITY-category template (same shape as the old Marketing `rfq_vendor_v1`: 4 body vars +
+    // dynamic URL button). rfq_vendor_v1 was Marketing → Meta throttled it with error 131049 ("not
+    // delivered to maintain healthy ecosystem engagement"), so quotations reached only engaged
+    // numbers. This Utility copy isn't subject to the marketing cap and delivers to everyone.
+    name: "request_for_quotation",
     language: "en_US",
     header: { kind: "none" },
     bodyParams: ["vendor_name", "builder_name", "items_summary", "delivery_location"],
