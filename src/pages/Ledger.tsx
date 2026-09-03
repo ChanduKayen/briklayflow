@@ -24,6 +24,7 @@ import { DirMedallion, Amount, AnchorChip, FilterChip, FlowBar } from '../compon
 import { TrackChip, TRACK_CHIP_CSS } from '../components/txn-ledger/TrackChip';
 import { unlinkTxnOrder } from '../lib/trackingApi';
 import { useOrgId } from '../lib/auth/AuthProvider';
+import { LedgerCutoverControl } from '../components/attendance/LedgerCutoverControl';
 import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
 import { NewTxnFab } from '../components/NewTxnFab';
 import { NewTxnMenuButton } from '../components/NewTxnMenuButton';
@@ -993,6 +994,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
             <p className="text-sm mt-2" style={{ color: V.sys, ...font, ...nums }}>
               {periodLabel} · {filteredTransactions.length} {filteredTransactions.length === 1 ? 'entry' : 'entries'}
             </p>
+            {orgId && !lockedProject && <div className="mt-1"><LedgerCutoverControl orgId={orgId} isManager={canManageTeam} /></div>}
             <div className="hidden sm:block min-[1700px]:hidden">
               <FlowBar inLabel={inr(monthIn)} outLabel={inr(monthOut)} net={netLabel} outPct={outPct} />
             </div>
