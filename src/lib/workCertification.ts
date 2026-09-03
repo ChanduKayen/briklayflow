@@ -46,6 +46,24 @@ export async function setLedgerCutover(orgId: string, date: string | null): Prom
   if (error) throw error;
 }
 
+// ── opening balances at the cutover (the carried amounts) ────────────────────
+export interface OpeningRow { stakeholderId: string; name: string; type: string; direction: 'paid_ahead' | 'work_owed'; total: number; note: string | null }
+export async function loadOpeningBalances(): Promise<OpeningRow[]> {
+  const { data, error } = await supabase
+    .from('stakeholder_opening_balances')
+    .select('stakeholder_id, direction, total_amount, note, stakeholders(name, type)')
+    .order('total_amount', { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((r: any) => ({
+    stakeholderId: r.stakeholder_id, name: r.stakeholders?.name ?? 'Party', type: r.stakeholders?.type ?? '',
+    direction: r.direction, total: Number(r.total_amount) || 0, note: r.note,
+  }));
+}
+export async function removeOpeningBalance(stakeholderId: string): Promise<void> {
+  const { error } = await supabase.from('stakeholder_opening_balances').delete().eq('stakeholder_id', stakeholderId);
+  if (error) throw error;
+}
+
 // ── certification ─────────────────────────────────────────────────────────────
 export interface CertifyInput {
   orgId: string; projectId: string | null; woId: string | null; milestoneId: string | null;
