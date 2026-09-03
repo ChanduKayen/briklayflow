@@ -11,6 +11,8 @@ import { useSnackbar } from '../components/Snackbar';
 import { QuickTransactionSheet } from '../components/QuickTransactionSheet';
 import { loadPartyLedger, saveOpeningBalance, addAdjustment, bookConsolidatedBill, type LedgerEntry, type PartyLedger } from '../lib/partyLedgerApi';
 import { readParty, isNewLedgerOrg } from '../lib/ledgerRead';
+import { PieceWorkEntry } from '../components/attendance/PieceWorkEntry';
+import { loadPartyCertifications } from '../lib/workCertification';
 import { createCredit, fillCredit, allocateToCredit, allocateToPool, openCreditsFor, certifyStage, type OpenCredit } from '../lib/ledgerWrite';
 
 const inr = (n: number) => n.toLocaleString('en-IN');
@@ -229,6 +231,7 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
   const [billOpen, setBillOpen] = useState(false);
   const [classifyEntry, setClassifyEntry] = useState<LedgerEntry | null>(null);
   const [certifyOpen, setCertifyOpen] = useState(false);
+  const [pieceOpen, setPieceOpen] = useState(false);
 
   const { data: L, isLoading, error, refetch } = useQuery({
     queryKey: ['party_ledger', stakeholderId, orgId],
@@ -299,6 +302,7 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
                 <button onClick={() => { setMenuOpen(false); setTxnSheet(true); }}>Payment to {L.stakeholder.name.split(' ')[0]}</button>
                 {newLedger && L.contracts.length > 0 && <button onClick={() => { setMenuOpen(false); setCertifyOpen(true); }}>Certify work</button>}
                 {!newLedger && L.kind === 'worker' && <button onClick={() => { setMenuOpen(false); navigate('/attendance'); }}>Work certified</button>}
+                {L.kind === 'worker' && <button onClick={() => { setMenuOpen(false); setPieceOpen(true); }}>Record piece / gutha work</button>}
                 {L.kind === 'vendor' && <button onClick={() => { setMenuOpen(false); setBillOpen(true); }}>Enter a bill</button>}
                 {L.kind === 'vendor' && L.unbilledCount > 0 && <button onClick={() => { setMenuOpen(false); setCbOpen(true); }}>Consolidated bill</button>}
                 <button onClick={() => { setMenuOpen(false); setAdjOpen(true); }}>Adjustment</button>
@@ -416,6 +420,8 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
         ) : (
           <SiteView entries={entries} L={L} T={T} />
         )}
+
+        {L.kind === 'worker' && <CertHistory stakeholderId={L.stakeholder.id} />}
       </div>
 
       {txnSheet && (
@@ -429,8 +435,44 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
       {adjOpen && <AdjustmentModal orgId={orgId} L={L} onClose={() => setAdjOpen(false)} onSaved={() => { setAdjOpen(false); refetch(); }} onError={m => showSnackbar(m, { type: 'error' })} />}
       {cbOpen && <ConsolidatedModal orgId={orgId} L={L} onClose={() => setCbOpen(false)} onSaved={() => { setCbOpen(false); refetch(); }} onError={m => showSnackbar(m, { type: 'error' })} />}
       {billOpen && <BillModal L={L} onClose={() => setBillOpen(false)} onSaved={(msg) => { setBillOpen(false); showSnackbar(msg); refetch(); }} onError={m => showSnackbar(m, { type: 'error' })} />}
+      {pieceOpen && <PieceWorkEntry stakeholderId={L.stakeholder.id} partyName={L.stakeholder.name} onClose={() => setPieceOpen(false)} onDone={() => refetch()} />}
       {classifyEntry && <ClassifyModal L={L} entry={classifyEntry} onClose={() => setClassifyEntry(null)} onSaved={(msg) => { setClassifyEntry(null); showSnackbar(msg); refetch(); }} onError={m => showSnackbar(m, { type: 'error' })} />}
       {certifyOpen && <CertifyModal L={L} onClose={() => setCertifyOpen(false)} onSaved={(msg) => { setCertifyOpen(false); showSnackbar(msg); refetch(); }} onError={m => showSnackbar(m, { type: 'error' })} />}
+    </div>
+  );
+}
+
+// The certification audit trail — who certified this worker's contract/piece work, when, and its
+// approval state. Read-only provenance (the money event lives in the ledger above).
+function CertHistory({ stakeholderId }: { stakeholderId: string }) {
+  const { data: certs = [] } = useQuery({ queryKey: ['party_certs', stakeholderId], queryFn: () => loadPartyCertifications(stakeholderId) });
+  if (!certs.length) return null;
+  const badge = (s: string) => s === 'approved' ? { c: '#2F5D34', b: '#E9F2E7', t: 'Approved' }
+    : s === 'pending' ? { c: '#8A5A0B', b: '#FBF3E0', t: 'Pending' } : { c: '#8F3318', b: '#FBEFE9', t: 'Rejected' };
+  const kindLabel = (k: string) => k === 'lump' ? 'Progress' : k === 'measured' ? 'Measured' : 'Piece';
+  return (
+    <div style={{ marginTop: 22 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink, #1E1A15)', marginBottom: 8 }}>Certification history</div>
+      <div style={{ border: '1px solid #EAE6E0', borderRadius: 12, overflow: 'hidden', background: '#fff' }}>
+        {certs.map((c, i) => {
+          const bd = badge(c.status);
+          return (
+            <div key={c.id} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, padding: '10px 14px', borderTop: i ? '1px solid #F1EEE8' : 'none', alignItems: 'center' }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, color: '#1E1A15' }}>
+                  ₹{Math.round(c.amount).toLocaleString('en-IN')} <span style={{ color: '#6B6258' }}>· {kindLabel(c.kind)}{c.projectName ? ` · ${c.projectName}` : ''}</span>
+                </div>
+                <div style={{ fontSize: 11.5, color: '#9A9186', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {new Date(c.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  {c.status === 'approved' && c.approvedBy ? ` · approved by ${c.approvedBy}` : c.submittedBy ? ` · by ${c.submittedBy}` : ''}
+                  {c.note ? ` · ${c.note}` : ''}
+                </div>
+              </div>
+              <span style={{ fontSize: 11, fontWeight: 600, color: bd.c, background: bd.b, borderRadius: 999, padding: '3px 10px', whiteSpace: 'nowrap' }}>{bd.t}</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

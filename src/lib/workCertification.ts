@@ -104,6 +104,33 @@ export async function loadPendingCertifications(): Promise<PendingCert[]> {
   }));
 }
 
+export interface PartyCert {
+  id: string; date: string; amount: number; kind: string; status: string;
+  projectName: string | null; note: string | null; submittedBy: string | null; approvedBy: string | null; approvedAt: string | null;
+}
+/** A party's certification history (all statuses) with submitter/approver names — the audit trail. */
+export async function loadPartyCertifications(stakeholderId: string): Promise<PartyCert[]> {
+  const { data, error } = await supabase
+    .from('work_certifications')
+    .select('id, reading_date, computed_amount, reading_kind, status, note, submitted_by, approved_by, approved_at, projects(name)')
+    .eq('stakeholder_id', stakeholderId).order('reading_date', { ascending: false }).limit(60);
+  if (error) throw error;
+  const rows = (data ?? []) as any[];
+  const ids = [...new Set(rows.flatMap(r => [r.submitted_by, r.approved_by]).filter(Boolean))];
+  const names: Record<string, string> = {};
+  if (ids.length) {
+    const { data: profs } = await supabase.from('user_profiles').select('id, name').in('id', ids);
+    (profs ?? []).forEach((p: any) => { names[p.id] = p.name; });
+  }
+  return rows.map(r => ({
+    id: r.id, date: r.reading_date, amount: Number(r.computed_amount) || 0, kind: r.reading_kind, status: r.status,
+    projectName: r.projects?.name ?? null, note: r.note,
+    submittedBy: r.submitted_by ? (names[r.submitted_by] ?? 'Someone') : null,
+    approvedBy: r.approved_by ? (names[r.approved_by] ?? 'Someone') : null,
+    approvedAt: r.approved_at ?? null,
+  }));
+}
+
 /** A milestone's approved-certified total + latest reading, for the wizard's "certified so far" context. */
 export async function loadMilestoneCertified(milestoneId: string): Promise<{ total: number; latestPct: number }> {
   const { data } = await supabase.from('work_certifications')
