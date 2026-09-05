@@ -319,8 +319,9 @@ const LEDGER_BAND_CSS = `
 @media (max-width:640px){.tb-in,.txn-rhythm{padding-left:18px;padding-right:18px}.tb-h1{font-size:25px}}
 `;
 
-// 14-day daily-outflow bars — grows on mount, hover shows the day + amount (matches the reference rhythm).
-function Rhythm({ data }: { data: { k: string; v: number }[] }) {
+// 14-day daily-outflow bars — grows on mount, hover shows the day + amount, click jumps to that day
+// in the feed (matches the reference rhythm).
+function Rhythm({ data, onPick }: { data: { k: string; v: number; iso: string }[]; onPick?: (iso: string) => void }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(1040);
   const [up, setUp] = useState(false);
@@ -344,7 +345,7 @@ function Rhythm({ data }: { data: { k: string; v: number }[] }) {
           const h = Math.max(3, Math.round(d.v / max * (CH - TOP)));
           const x = Math.round(i * pitch + (pitch - bw) / 2);
           const cls = 'bar' + (d.v > max * 0.8 ? ' hot' : '') + (i === N - 1 ? ' today' : '');
-          return <rect key={i} className={cls} x={x} y={CH - h} width={bw} height={h + 4} rx="2" style={{ transitionDelay: `${i * 22}ms` }} onPointerEnter={() => setHover(i)} />;
+          return <rect key={i} className={cls} x={x} y={CH - h} width={bw} height={h + 4} rx="2" style={{ transitionDelay: `${i * 22}ms`, cursor: onPick ? 'pointer' : 'default' }} onPointerEnter={() => setHover(i)} onClick={() => onPick?.(data[i].iso)} />;
         })}
       </svg>
       {hover != null && <div className="txn-tip" style={{ left: 40 + ((hover + 0.5) / N) * w }}>{data[hover].k} · {fmt(data[hover].v)} out</div>}
@@ -862,12 +863,12 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
       if (deriveDirection(t) !== 'out') continue;
       byDay.set(String(t.date).slice(0, 10), (byDay.get(String(t.date).slice(0, 10)) || 0) + Number(t.total_amount || 0));
     }
-    const out: { k: string; v: number }[] = [];
+    const out: { k: string; v: number; iso: string }[] = [];
     const today = new Date(); today.setHours(0, 0, 0, 0);
     for (let i = 13; i >= 0; i--) {
       const d = new Date(today); d.setDate(d.getDate() - i);
       const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      out.push({ k: d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }), v: byDay.get(iso) || 0 });
+      out.push({ k: d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }), v: byDay.get(iso) || 0, iso });
     }
     return out;
   }, [filteredTransactions]);
@@ -1049,7 +1050,15 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
         <div className="in">
           <span className="t">Transactions</span>
           <span className="p">{periodLabel} · <span className="num">{netLabel}</span></span>
-          <span className="mc">{filteredTransactions.length} {filteredTransactions.length === 1 ? 'entry' : 'entries'}</span>
+          <span className="mc">
+            {unlinkedCount > 0 && (
+              <button onClick={() => setFilterUnlinked(v => !v)} style={{ color: 'inherit', textDecoration: filterUnlinked ? 'underline' : 'none', textUnderlineOffset: 3 }}>
+                <span className="num">{unlinkedCount}</span> not linked
+              </button>
+            )}
+            <span style={{ opacity: 0.45 }}>{unlinkedCount > 0 ? ' · ' : ''}</span>
+            {filteredTransactions.length} {filteredTransactions.length === 1 ? 'entry' : 'entries'}
+          </span>
         </div>
       </div>
 
@@ -1072,7 +1081,10 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
             </div>
           </div>
         </div>
-        <Rhythm data={spark} />
+        <Rhythm data={spark} onPick={(iso) => {
+          const el = document.getElementById(`txn-day-${iso}`);
+          if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 56, behavior: 'smooth' });
+        }} />
       </header>
 
       <div className="mx-auto px-5 sm:px-8 py-8 max-w-[880px] lg:max-w-[1040px] xl:max-w-[1200px] min-[1700px]:max-w-[1640px] min-[1700px]:grid min-[1700px]:grid-cols-[minmax(0,1fr)_340px] min-[1700px]:gap-12 min-[1700px]:items-start">
@@ -1192,18 +1204,20 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
           </FilterChip>
           {activeFilterDropdown === 'type' && multiDropdown(uniqueTypes, filterType, setFilterType)}
 
-          {/* The project filter is for CHOOSING a project, and under one it is already chosen. */}
+          {/* The site filter is for CHOOSING a project, and under one it is already chosen. */}
           {!lockedProject && (
             <>
               <FilterChip active={filterProject.length > 0} onClick={(e) => openDrop('project', e)}>
-                {filterProject.length === 1 ? filterProject[0] : filterProject.length > 1 ? `Project: ${filterProject.length}` : 'Project'}
+                {filterProject.length === 1 ? filterProject[0] : filterProject.length > 1 ? `Site: ${filterProject.length}` : 'Site'}
               </FilterChip>
               {activeFilterDropdown === 'project' && multiDropdown(uniqueProjects, filterProject, setFilterProject)}
             </>
           )}
 
+          {/* "not linked" is a quiet, neutral toggle here (and echoed in the slim scroll bar) — never a
+              loud yellow pill; it's a housekeeping cue, not a warning. */}
           {unlinkedCount > 0 && (
-            <FilterChip tone="ask" active={filterUnlinked} onClick={() => setFilterUnlinked(v => !v)}>
+            <FilterChip active={filterUnlinked} hasDropdown={false} onClick={() => setFilterUnlinked(v => !v)}>
               {unlinkedCount} not linked
             </FilterChip>
           )}
@@ -1364,7 +1378,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
             const weekday = new Date(day.date).toLocaleDateString('en-IN', { weekday: 'long' });
             const dshort = new Date(day.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
             return (
-              <section className="mt-7" key={day.date}>
+              <section className="mt-7" key={day.date} id={`txn-day-${day.date}`} style={{ scrollMarginTop: 60 }}>
                 <p className="px-4 py-2 text-sm sticky top-0" style={{ background: V.page, color: V.ink, zIndex: 2, ...serif }}>
                   {dshort} <span className="text-xs" style={{ color: V.faint, ...font }}>· {weekday}</span>
                 </p>
@@ -1546,7 +1560,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
               <button
                 onClick={() => setFilterUnlinked(v => !v)}
                 className="mt-4 w-full text-left text-xs px-3 py-2 rounded-xl"
-                style={{ background: filterUnlinked ? V.askWash : V.field, border: `1px solid ${filterUnlinked ? V.askLine : 'transparent'}`, color: V.ask, ...font }}
+                style={{ background: filterUnlinked ? V.terraWash : V.field, border: `1px solid ${filterUnlinked ? '#EFD6C9' : 'transparent'}`, color: filterUnlinked ? V.terraDeep : V.inkSoft, ...font }}
               >
                 {unlinkedCount} not linked yet · {filterUnlinked ? 'showing' : 'review'}
               </button>
