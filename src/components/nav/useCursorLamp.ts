@@ -5,8 +5,11 @@
 // reduced-motion handling. Recaches geometry on scroll so a page-scrolled band stays aligned.
 import { useEffect, useRef } from 'react';
 
-export function useCursorLamp<T extends HTMLElement>() {
+// `scrolls`: the element scrolls INTERNALLY (the rail) — add its scrollTop to the y and recache on its
+// own scroll. Otherwise (a page-scrolled band) recache on window scroll so geometry stays aligned.
+export function useCursorLamp<T extends HTMLElement>(opts: { scrolls?: boolean } = {}) {
   const ref = useRef<T | null>(null);
+  const scrolls = !!opts.scrolls;
   useEffect(() => {
     const el = ref.current;
     if (!el || !window.matchMedia('(pointer:fine)').matches) return;
@@ -19,21 +22,22 @@ export function useCursorLamp<T extends HTMLElement>() {
       else running = false;
     };
     const start = () => { if (!running) { running = true; raf = requestAnimationFrame(loop); } };
-    const onEnter = (e: PointerEvent) => { rect = el.getBoundingClientRect(); tx = cx = e.clientX - rect.left; ty = cy = e.clientY - rect.top; el.classList.add('lit'); start(); };
+    const onEnter = (e: PointerEvent) => { rect = el.getBoundingClientRect(); tx = cx = e.clientX - rect.left; ty = cy = e.clientY - rect.top + (scrolls ? el.scrollTop : 0); el.classList.add('lit'); start(); };
     const onLeave = () => { el.classList.remove('lit'); rect = null; };
-    const onMove = (e: PointerEvent) => { if (!rect) rect = el.getBoundingClientRect(); tx = e.clientX - rect.left; ty = e.clientY - rect.top; };
-    const onScroll = () => { if (rect) rect = el.getBoundingClientRect(); };
+    const onMove = (e: PointerEvent) => { if (!rect) rect = el.getBoundingClientRect(); tx = e.clientX - rect.left; ty = e.clientY - rect.top + (scrolls ? el.scrollTop : 0); };
+    const onScroll = () => { rect = el.getBoundingClientRect(); };
     el.addEventListener('pointerenter', onEnter);
     el.addEventListener('pointerleave', onLeave);
     el.addEventListener('pointermove', onMove);
-    window.addEventListener('scroll', onScroll, { passive: true });
+    const scrollTarget: HTMLElement | Window = scrolls ? el : window;
+    scrollTarget.addEventListener('scroll', onScroll, { passive: true } as AddEventListenerOptions);
     return () => {
       cancelAnimationFrame(raf);
       el.removeEventListener('pointerenter', onEnter);
       el.removeEventListener('pointerleave', onLeave);
       el.removeEventListener('pointermove', onMove);
-      window.removeEventListener('scroll', onScroll);
+      scrollTarget.removeEventListener('scroll', onScroll);
     };
-  }, []);
+  }, [scrolls]);
   return ref;
 }

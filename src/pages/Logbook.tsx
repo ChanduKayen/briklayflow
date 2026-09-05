@@ -26,7 +26,7 @@ import { V, font, serif, nums, display, mono, T } from '../components/day-book/t
 import { ANIM, hasRevealed, markRevealed } from '../components/day-book/motion';
 import { prefersReducedMotion } from '../components/day-book/useSwipeTriage';
 import { WhatsAppGlyph } from '../components/day-book/atoms';
-import { Invitation, ManageTeam } from '../components/day-book/Invitation';
+import { ManageTeam } from '../components/day-book/Invitation';
 import { StartOnWhatsAppButton } from '../components/day-book/StartOnWhatsApp';
 import { useCursorLamp } from '../components/nav/useCursorLamp';
 
@@ -111,6 +111,27 @@ interface PRPointer {
   id: string; status: string; title: string | null; site_raw: string | null;
   purchase_request_items: { item_name: string; quantity: number | null; unit: string | null }[];
   projects: { name: string } | null;
+}
+
+// Ease a number toward its target (cubic-out, ~340ms) so the band's unposted figure + count tick when
+// a card files — the reference's setFigure. Snaps instantly under reduced-motion.
+function useCountUp(value: number, ms = 340): number {
+  const [display, setDisplay] = useState(value);
+  const fromRef = useRef(value);
+  useEffect(() => {
+    const from = fromRef.current, to = value;
+    if (from === to) return;
+    if (window.matchMedia('(prefers-reduced-motion:reduce)').matches) { setDisplay(to); fromRef.current = to; return; }
+    let raf = 0; const t0 = performance.now();
+    const step = (t: number) => {
+      const p = Math.min(1, (t - t0) / ms), e = 1 - Math.pow(1 - p, 3);
+      setDisplay(Math.round(from + (to - from) * e));
+      if (p < 1) raf = requestAnimationFrame(step); else fromRef.current = to;
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [value, ms]);
+  return display;
 }
 
 export default function Logbook({ session }: { session: Session }) {
@@ -313,6 +334,8 @@ export default function Logbook({ session }: { session: Session }) {
     () => new Set(entries.map(e => e.sender_number || e.sender_name).filter(Boolean)).size,
     [entries],
   );
+  const amtDisplay = useCountUp(Math.round(unpostedTotal));   // tween the unposted figure
+  const countDisplay = useCountUp(reviewCount);               // tween the to-review count
 
   // ── One-time reveal: first time the owner opens a Day Book with work to do ──
   const [reveal, setReveal] = useState(false);
@@ -358,9 +381,6 @@ export default function Logbook({ session }: { session: Session }) {
       <style>{ANIM}</style>
       <style>{BAND_CSS}</style>
 
-      {/* full-bleed invitation */}
-      <Invitation canManage={canManage} />
-
       {/* ── For-review header band — bitter chocolate + the nav's cursor lamp ── */}
       <header ref={bandRef} className="review-band">
         <div className="rb-fx rb-draft" aria-hidden="true" />
@@ -382,8 +402,12 @@ export default function Logbook({ session }: { session: Session }) {
           </div>
           <div className="rb-sub">Everything you and your team send to Briklay on <span className="wa">WhatsApp</span> lands here — file each one and it enters your books.</div>
           <div className="rb-lead">
-            <span className="rb-amt">₹{Math.round(unpostedTotal).toLocaleString('en-IN')}<span className="k">unposted</span></span>
-            <div className="rb-meta"><span className="num">{reviewCount}</span> to review{oldestLabel ? <> <i>·</i> oldest {oldestLabel}</> : null}</div>
+            <span className="rb-amt">₹{amtDisplay.toLocaleString('en-IN')}<span className="k">unposted</span></span>
+            <div className="rb-meta">
+              {reviewCount > 0
+                ? <><span className="num">{countDisplay}</span> to review{oldestLabel ? <> <i>·</i> oldest {oldestLabel}</> : null}</>
+                : <span style={{ color: '#7CCB96' }}>All caught up — every message is in your books</span>}
+            </div>
           </div>
         </div>
       </header>

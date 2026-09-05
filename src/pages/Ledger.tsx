@@ -10,17 +10,17 @@ import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
 import { getCostCode } from '../lib/costCodes';
-import { Plus, Search, Download, Paperclip, Check, ArrowRight, X, SlidersHorizontal, Upload, FileSpreadsheet } from 'lucide-react';
+import { Plus, Search, Download, Paperclip, Check, ArrowRight, X, SlidersHorizontal } from 'lucide-react';
 import BottomSheet from '../components/BottomSheet';
 import { WhatsAppGlyph } from '../components/day-book/atoms';
 import { StartOnWhatsAppButton } from '../components/day-book/StartOnWhatsApp';
-import { ShortcutTicker } from '../components/ShortcutTicker';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { PageSkeleton } from '../components/SkeletonLoader';
 import { useQueryGate } from '../components/QueryGate';
 import { deriveDirection, isNotLinked, resolveAnchor, isGeneralExpense, generalExpenseLabel, payeeLabel, type TxnAnchor, type TxnDirection } from '../lib/transactions';
 import { V, font, serif, nums, terraGrad } from '../components/txn-ledger/ledgerTokens';
-import { DirMedallion, Amount, AnchorChip, FilterChip, FlowBar } from '../components/txn-ledger/LedgerAtoms';
+import { useCursorLamp } from '../components/nav/useCursorLamp';
+import { DirMedallion, Amount, AnchorChip, FilterChip } from '../components/txn-ledger/LedgerAtoms';
 import { TrackChip, TRACK_CHIP_CSS } from '../components/txn-ledger/TrackChip';
 import { unlinkTxnOrder } from '../lib/trackingApi';
 import { useOrgId } from '../lib/auth/AuthProvider';
@@ -68,45 +68,6 @@ function summarizeItems(items: Array<{ item_name?: string | null; specification?
 
 /* ---------- Import button: outline secondary with a tooltip + micro-interactions ----------
    Rest → hover (lifts, turns terra, the arrow rises and gently bobs) → active (presses in). */
-const IMPORT_BTN_CSS = `
-.imp-btn{position:relative;display:inline-flex;align-items:center;gap:8px;font-size:14px;font-weight:500;
-  padding:10px 16px;border-radius:12px;border:1px solid ${V.line};color:${V.ink};background:#fff;cursor:pointer;
-  transition:transform .18s cubic-bezier(.34,1.56,.64,1),box-shadow .2s ease,border-color .2s ease,background .2s ease,color .2s ease}
-.imp-btn:hover{border-color:${V.terra};color:${V.terra};background:${V.terraWash};transform:translateY(-1.5px);
-  box-shadow:0 6px 16px rgba(188,75,39,.16)}
-.imp-btn:active{transform:translateY(0) scale(.97);background:#F7E0D6;box-shadow:0 2px 6px rgba(188,75,39,.14);transition-duration:.08s}
-.imp-btn .imp-ico{display:inline-flex;transition:transform .25s cubic-bezier(.34,1.56,.64,1);will-change:transform}
-.imp-btn:hover .imp-ico{animation:imp-bob 1.1s ease-in-out .25s infinite}
-.imp-btn:active .imp-ico{animation:none;transform:translateY(-1px) scale(.88)}
-@keyframes imp-bob{0%,100%{transform:translateY(-2px)}50%{transform:translateY(-4px)}}
-`;
-
-function ImportButton({ onClick }: { onClick: () => void }) {
-  const [show, setShow] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  return (
-    <div
-      className="relative inline-block"
-      onMouseEnter={() => { timer.current = setTimeout(() => setShow(true), 300); }}
-      onMouseLeave={() => { if (timer.current) clearTimeout(timer.current); setShow(false); }}
-    >
-      <style>{IMPORT_BTN_CSS}</style>
-      <button className="imp-btn" onClick={onClick} style={{ ...font }}>
-        <span className="imp-ico"><Upload size={15} /></span> Import
-      </button>
-      {show && (
-        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 pointer-events-none">
-          <div style={{ background: 'rgba(11,28,48,0.92)', color: 'white', fontSize: 11.5, padding: '9px 12px', borderRadius: 9, display: 'flex', alignItems: 'center', gap: 9, boxShadow: '0 10px 26px rgba(11,28,48,0.28)', width: 232, whiteSpace: 'normal' }}>
-            <FileSpreadsheet size={15} style={{ color: '#86E0AC', flexShrink: 0 }} />
-            <span style={{ color: 'rgba(255,255,255,0.9)', lineHeight: 1.4 }}>Upload an Excel or CSV file to import all your financial data</span>
-          </div>
-          <div style={{ position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)', width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: '5px solid rgba(11,28,48,0.92)' }} />
-        </div>
-      )}
-    </div>
-  );
-}
-
 /* ---------- the entry: machine-set, threaded on the spine ---------- */
 
 type EntryProps = {
@@ -315,6 +276,82 @@ function LedgerEmpty({ reviewCount, onReview, onNew }: { reviewCount: number; on
  *                   disappears — you are already inside the project, and offering to filter by a
  *                   different one is offering to leave without saying so.
  */
+// The Transactions header band — bitter-chocolate (the rail's night binding) + the cursor lamp, the
+// lead net/in/out figures, and a 14-day daily-outflow sparkline. Scoped to .txn-band / .txn-mini.
+const LEDGER_BAND_CSS = `
+.txn-band{position:relative;overflow:hidden;color:#F5F0E7;background:linear-gradient(180deg,#191009,#140D07);box-shadow:inset 0 -1px 0 #302014;--mx:50%;--my:50%}
+.txn-band>*{position:relative;z-index:1}
+.tb-fx{position:absolute;inset:0;z-index:0;pointer-events:none;opacity:0;transition:opacity .45s ease}
+.txn-band.lit .tb-fx{opacity:1}
+.tb-glow{background:radial-gradient(185px circle at var(--mx) var(--my), rgba(180,83,47,.10), rgba(180,83,47,.04) 55%, transparent 75%),radial-gradient(340px circle at var(--mx) var(--my), rgba(245,240,231,.04), transparent 74%)}
+.tb-grid{background:repeating-linear-gradient(0deg, rgba(245,240,231,.05) 0 1px, transparent 1px 26px),repeating-linear-gradient(90deg, rgba(245,240,231,.05) 0 1px, transparent 1px 26px);-webkit-mask-image:radial-gradient(185px circle at var(--mx) var(--my), #000 0%, rgba(0,0,0,.55) 55%, transparent 82%);mask-image:radial-gradient(185px circle at var(--mx) var(--my), #000 0%, rgba(0,0,0,.55) 55%, transparent 82%)}
+.tb-in{max-width:1120px;margin:0 auto;padding:26px 40px 0}
+.tb-top{display:flex;align-items:baseline;gap:14px}
+.tb-h1{font-family:"Playfair Display",Georgia,serif;font-size:30px;font-weight:500;margin:0;color:#F5F0E7}
+.tb-date{font-size:13px;color:rgba(245,240,231,.5)}
+.tb-actions{margin-left:auto;display:flex;gap:8px}
+.tb-btn{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 14px;border-radius:9px;font-weight:500;font-size:13.5px;color:rgba(245,240,231,.72);background:rgba(245,240,231,.07);box-shadow:inset 0 0 0 1px rgba(245,240,231,.14);border:0;cursor:pointer}
+.tb-btn:hover{color:#F5F0E7;background:rgba(245,240,231,.11)}
+.tb-btn.primary{background:#B4532F;box-shadow:none;color:#fff}
+.tb-btn.primary:hover{background:#9C4526}
+.tb-lead{margin-top:26px}
+.tb-amt{display:block;font-family:"DM Mono",ui-monospace,monospace;font-size:31px;font-variant-numeric:tabular-nums;letter-spacing:-.01em;line-height:1;color:#F5F0E7}
+.tb-amt .k{font-size:12.5px;color:rgba(245,240,231,.5);font-family:"DM Sans",system-ui,sans-serif;margin-left:10px;vertical-align:4px}
+.tb-meta{font-size:13px;color:rgba(245,240,231,.5);margin-top:11px}
+.tb-meta .num{color:rgba(245,240,231,.72)}
+.tb-meta i{font-style:normal;color:rgba(245,240,231,.28);margin:0 7px}
+.txn-rhythm{position:relative;max-width:1120px;margin:26px auto 0;padding:0 40px}
+.txn-rhythm svg{display:block;width:100%;height:66px}
+.txn-rhythm .bar{fill:rgba(245,240,231,.16);transition:transform .45s cubic-bezier(.2,.7,.3,1),fill .15s;transform:scaleY(0);transform-origin:bottom;transform-box:fill-box;cursor:default}
+.txn-rhythm svg.up .bar{transform:scaleY(1)}
+.txn-rhythm .bar:hover{fill:rgba(245,240,231,.34)}
+.txn-rhythm .bar.hot{fill:url(#tbbarhot)}
+.txn-rhythm .bar.today{fill:#F5F0E7}
+.txn-tip{position:absolute;bottom:74px;transform:translateX(-50%);background:#F5F0E7;color:#33251B;font-size:12px;padding:5px 9px;border-radius:7px;white-space:nowrap;pointer-events:none;box-shadow:0 6px 18px -8px rgba(43,29,19,.5);z-index:2}
+.txn-mini{position:fixed;top:0;left:var(--shell-ml,220px);right:0;z-index:20;transform:translateY(-100%);transition:transform .22s ease;background:linear-gradient(180deg,#191009,#140D07);box-shadow:inset 0 -1px 0 #302014;color:#F5F0E7}
+.txn-mini.show{transform:translateY(0)}
+.txn-mini .in{max-width:1120px;margin:0 auto;padding:0 40px;height:48px;display:flex;align-items:center;gap:14px}
+.txn-mini .t{font-family:"Playfair Display",Georgia,serif;font-size:15.5px}
+.txn-mini .p{font-size:13px;color:rgba(245,240,231,.72)}
+.txn-mini .mc{margin-left:auto;font-size:12.5px;color:rgba(245,240,231,.72)}
+@media (prefers-reduced-motion:reduce){.txn-rhythm .bar{transform:none}.tb-fx,.txn-mini{transition:none}}
+@media (max-width:767px){.txn-mini{left:0}}
+@media (max-width:640px){.tb-in,.txn-rhythm{padding-left:18px;padding-right:18px}.tb-h1{font-size:25px}}
+`;
+
+// 14-day daily-outflow bars — grows on mount, hover shows the day + amount (matches the reference rhythm).
+function Rhythm({ data }: { data: { k: string; v: number }[] }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [w, setW] = useState(1040);
+  const [up, setUp] = useState(false);
+  const [hover, setHover] = useState<number | null>(null);
+  useEffect(() => {
+    const el = wrapRef.current; if (!el) return;
+    const measure = () => setW(Math.max(200, (el.clientWidth || 1120) - 80));   // minus the 40px L/R padding
+    measure();
+    const ro = new ResizeObserver(measure); ro.observe(el); return () => ro.disconnect();
+  }, []);
+  useEffect(() => { const r = requestAnimationFrame(() => requestAnimationFrame(() => setUp(true))); return () => cancelAnimationFrame(r); }, []);
+  const N = data.length, CH = 66, TOP = 8;
+  const max = Math.max(1, ...data.map(d => d.v));
+  const pitch = w / N, bw = Math.max(8, Math.round(pitch * 0.42));
+  const fmt = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
+  return (
+    <div className="txn-rhythm" ref={wrapRef}>
+      <svg viewBox={`0 0 ${w} ${CH}`} className={up ? 'up' : ''} onPointerLeave={() => setHover(null)}>
+        <defs><linearGradient id="tbbarhot" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#C46038" /><stop offset="1" stopColor="#8F3D1F" /></linearGradient></defs>
+        {data.map((d, i) => {
+          const h = Math.max(3, Math.round(d.v / max * (CH - TOP)));
+          const x = Math.round(i * pitch + (pitch - bw) / 2);
+          const cls = 'bar' + (d.v > max * 0.8 ? ' hot' : '') + (i === N - 1 ? ' today' : '');
+          return <rect key={i} className={cls} x={x} y={CH - h} width={bw} height={h + 4} rx="2" style={{ transitionDelay: `${i * 22}ms` }} onPointerEnter={() => setHover(i)} />;
+        })}
+      </svg>
+      {hover != null && <div className="txn-tip" style={{ left: 40 + ((hover + 0.5) / N) * w }}>{data[hover].k} · {fmt(data[hover].v)} out</div>}
+    </div>
+  );
+}
+
 export default function Ledger({ session, lockedProject }: { session: Session; lockedProject?: string }) {
   const qc = useQueryClient();
   const orgId = useOrgId();
@@ -811,6 +848,30 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   const monthNet = monthIn - monthOut;
   const netLabel = `${monthNet < 0 ? '−' : '+'} ₹${inr(Math.abs(monthNet))}`;
 
+  // ── Header band: the cursor lamp, the slim scroll bar, and the 14-day outflow sparkline ──
+  const bandRef = useCursorLamp<HTMLElement>();
+  const [miniShow, setMiniShow] = useState(false);
+  useEffect(() => {
+    const el = bandRef.current; if (!el) return;
+    const io = new IntersectionObserver(([e]) => setMiniShow(!e.isIntersecting), { rootMargin: '-40px 0px 0px 0px' });
+    io.observe(el); return () => io.disconnect();
+  }, [bandRef]);
+  const spark = useMemo(() => {
+    const byDay = new Map<string, number>();
+    for (const t of filteredTransactions) {
+      if (deriveDirection(t) !== 'out') continue;
+      byDay.set(String(t.date).slice(0, 10), (byDay.get(String(t.date).slice(0, 10)) || 0) + Number(t.total_amount || 0));
+    }
+    const out: { k: string; v: number }[] = [];
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(today); d.setDate(d.getDate() - i);
+      const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      out.push({ k: d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }), v: byDay.get(iso) || 0 });
+    }
+    return out;
+  }, [filteredTransactions]);
+
   const sortedTxns = [...filteredTransactions].sort((a, b) => {
     if (a.date !== b.date) return a.date < b.date ? 1 : -1;
     return (a.created_at || '') < (b.created_at || '') ? 1 : -1;
@@ -981,43 +1042,43 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
           <ImportTransactions session={session} onClose={closeImport} />
         </Suspense>
       )}
+      <style>{LEDGER_BAND_CSS}</style>
+
+      {/* slim espresso bar — slides in once the band scrolls away */}
+      <div className={`txn-mini${miniShow ? ' show' : ''}`}>
+        <div className="in">
+          <span className="t">Transactions</span>
+          <span className="p">{periodLabel} · <span className="num">{netLabel}</span></span>
+          <span className="mc">{filteredTransactions.length} {filteredTransactions.length === 1 ? 'entry' : 'entries'}</span>
+        </div>
+      </div>
+
+      {/* ── header band — bitter chocolate + the nav's cursor lamp + a 14-day outflow sparkline ── */}
+      <header ref={bandRef} className="txn-band">
+        <div className="tb-fx tb-grid" aria-hidden="true" />
+        <div className="tb-fx tb-glow" aria-hidden="true" />
+        <div className="tb-in">
+          <div className="tb-top">
+            <h1 className="tb-h1">Transactions</h1>
+            <div className="tb-actions">
+              <button className="tb-btn" onClick={() => setImportOpen(true)}>Import</button>
+              <NewTxnMenuButton className="tb-btn primary"><Plus size={15} /> New transaction</NewTxnMenuButton>
+            </div>
+          </div>
+          <div className="tb-lead">
+            <span className="tb-amt">{netLabel}<span className="k">net</span></span>
+            <div className="tb-meta">
+              <span className="num">+ ₹{inr(monthIn)}</span> in <i>|</i> <span className="num">− ₹{inr(monthOut)}</span> out <i>·</i> {periodLabel} <i>·</i> {filteredTransactions.length} {filteredTransactions.length === 1 ? 'entry' : 'entries'}
+            </div>
+          </div>
+        </div>
+        <Rhythm data={spark} />
+      </header>
+
       <div className="mx-auto px-5 sm:px-8 py-8 max-w-[880px] lg:max-w-[1040px] xl:max-w-[1200px] min-[1700px]:max-w-[1640px] min-[1700px]:grid min-[1700px]:grid-cols-[minmax(0,1fr)_340px] min-[1700px]:gap-12 min-[1700px]:items-start">
 
         {/* ── main column: the day-book ── */}
         <div className="min-w-0">
-
-        {/* header */}
-        <div className="flex items-end justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-3xl" style={{ color: V.ink, ...serif }}>Transactions</h1>
-            <p className="text-sm mt-2" style={{ color: V.sys, ...font, ...nums }}>
-              {periodLabel} · {filteredTransactions.length} {filteredTransactions.length === 1 ? 'entry' : 'entries'}
-            </p>
-            <div className="hidden sm:block min-[1700px]:hidden">
-              <FlowBar inLabel={inr(monthIn)} outLabel={inr(monthOut)} net={netLabel} outPct={outPct} />
-            </div>
-          </div>
-          <div className="flex flex-col items-end gap-1">
-            <div className="flex items-center gap-2">
-              <ImportButton onClick={() => setImportOpen(true)} />
-              <NewTxnMenuButton
-                className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl"
-                style={{ background: terraGrad, color: '#fff', ...font }}
-              >
-                <Plus size={15} /> New transaction
-              </NewTxnMenuButton>
-            </div>
-            <div className="hidden md:block">
-              <ShortcutTicker hints={[
-                { key: '/', label: 'new transaction' },
-                { key: 'T', label: 'view transactions' },
-                { key: 'P', label: 'view purchase orders' },
-                { key: 'W', label: 'view contracts' },
-                { key: 'L', label: 'view day book' },
-              ]} className="w-full" />
-            </div>
-          </div>
-        </div>
 
         {/* nudge: WhatsApp captures waiting in the Day book (when the ledger has
             entries; an empty ledger makes the case more fully in its empty state) */}

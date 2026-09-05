@@ -33,6 +33,7 @@ import { useAuth } from '../../lib/auth/AuthProvider';
 import { useUserProfile } from '../../App';
 import { WhatsAppGlyph } from '../day-book/atoms';
 import { V, N, font, serif, nums, RAIL_W, RAIL_OPEN, PANEL_W, NAV_ANIM } from './navTokens';
+import { useCursorLamp } from './useCursorLamp';
 
 type Role = string;
 
@@ -159,7 +160,8 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
   const [signingOut, setSigningOut] = useState(false);
   const [orgName, setOrgName] = useState('');
   const userRef = useRef<HTMLDivElement>(null);
-  const railRef = useRef<HTMLElement>(null);
+  // The cursor-following lamp — the shared hook (scrolls: the rail scrolls internally).
+  const railRef = useCursorLamp<HTMLElement>({ scrolls: true });
 
   // Sign out in place — no full-screen veil, no blur. The button shows a calm
   // loader; when the session actually clears, the auth listener swaps in Login.
@@ -197,37 +199,6 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
     measure();
     const fonts = (document as Document & { fonts?: { ready: Promise<unknown> } }).fonts;
     fonts?.ready?.then(measure).catch(() => {});
-  }, []);
-
-  // ── the cursor-following lamp — eases --mx/--my toward the pointer over a rAF loop, lighting the
-  //    two fx layers only while the pointer is over the rail. Fine-pointer devices only (no touch). ──
-  useEffect(() => {
-    const rail = railRef.current;
-    if (!rail || !window.matchMedia('(pointer:fine)').matches) return;
-    let rect: DOMRect | null = null, tx = 0, ty = 0, cx = 0, cy = 0, running = false, raf = 0;
-    const loop = () => {
-      cx += (tx - cx) * 0.14; cy += (ty - cy) * 0.14;
-      rail.style.setProperty('--mx', cx.toFixed(1) + 'px');
-      rail.style.setProperty('--my', cy.toFixed(1) + 'px');
-      if (rail.classList.contains('lit') || Math.hypot(tx - cx, ty - cy) > 0.5) raf = requestAnimationFrame(loop);
-      else running = false;
-    };
-    const start = () => { if (!running) { running = true; raf = requestAnimationFrame(loop); } };
-    const onEnter = (e: PointerEvent) => { rect = rail.getBoundingClientRect(); tx = cx = e.clientX - rect.left; ty = cy = e.clientY - rect.top + rail.scrollTop; rail.classList.add('lit'); start(); };
-    const onLeave = () => { rail.classList.remove('lit'); rect = null; };
-    const onMove = (e: PointerEvent) => { if (!rect) rect = rail.getBoundingClientRect(); tx = e.clientX - rect.left; ty = e.clientY - rect.top + rail.scrollTop; };
-    const onScroll = () => { rect = rail.getBoundingClientRect(); };
-    rail.addEventListener('pointerenter', onEnter);
-    rail.addEventListener('pointerleave', onLeave);
-    rail.addEventListener('pointermove', onMove);
-    rail.addEventListener('scroll', onScroll);
-    return () => {
-      cancelAnimationFrame(raf);
-      rail.removeEventListener('pointerenter', onEnter);
-      rail.removeEventListener('pointerleave', onLeave);
-      rail.removeEventListener('pointermove', onMove);
-      rail.removeEventListener('scroll', onScroll);
-    };
   }, []);
 
   // ── live badges (same query keys as the mobile bar → React Query dedupes) ──
