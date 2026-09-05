@@ -280,7 +280,7 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
       label: 'Payments',
       items: ([
         can(role !== 'supervisor') && { route: '/ledger', label: 'Transactions', icon: IconArrowsExchange, accent: true },
-        { route: '/logbook', label: 'Day book', node: <DayBookIcon />, badge: inbox },
+        { route: '/logbook', label: 'For review', node: <DayBookIcon />, badge: inbox },
         can(role !== 'supervisor') && { route: '/billing', label: 'Client billing', icon: IconFileInvoice, badge: billOverdue },
         can(role !== 'supervisor') && { route: '/payables', label: 'Payables', icon: IconReceipt2, badge: pendingCerts },
       ].filter(Boolean) as Item[]),

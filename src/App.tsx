@@ -659,7 +659,7 @@ function getMobileTitle(pathname: string): string {
   const routes: Record<string, string> = {
     '/':                    'Transactions',
     '/insights':            'Insights',
-    '/logbook':             'Day book',
+    '/logbook':             'For review',
     '/site-desk':           'Site Desk',
     '/ledger':              'Transactions',
     '/ledger/new':          'New Transaction',
@@ -992,7 +992,7 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
     { path: '/ledger',   icon: IconRepeat,     label: 'Txns',     show: role !== 'supervisor' },
     { path: '/projects', icon: IconLayoutGrid, label: 'Projects', show: true },
     { path: '/orders',   icon: IconFiles,      label: 'Orders',   show: true, badge: ordersBadge },
-    { path: '/logbook',  icon: IconNotebook,   label: 'Day book', show: true },
+    { path: '/logbook',  icon: IconNotebook,   label: 'For review', show: true },
   ].filter(t => t.show);
 
   return (

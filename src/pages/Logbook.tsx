@@ -28,6 +28,46 @@ import { prefersReducedMotion } from '../components/day-book/useSwipeTriage';
 import { WhatsAppGlyph } from '../components/day-book/atoms';
 import { Invitation, ManageTeam } from '../components/day-book/Invitation';
 import { StartOnWhatsAppButton } from '../components/day-book/StartOnWhatsApp';
+import { useCursorLamp } from '../components/nav/useCursorLamp';
+
+// Briklay's WhatsApp business number (same single source the invitation uses) — the band's "Open WhatsApp".
+const BRIKLAY_WA = '917330872705';
+
+// The "For review" header band — bitter-chocolate (the rail's night binding) + the cursor-following lamp.
+// Scoped to .review-band so it can't leak into the cream page below.
+const BAND_CSS = `
+.review-band{position:relative;overflow:hidden;color:#F5F0E7;
+  background:linear-gradient(180deg,#191009,#140D07);box-shadow:inset 0 -1px 0 #302014;--mx:50%;--my:30%}
+.review-band>*{position:relative;z-index:1}
+.rb-fx{position:absolute;inset:0;z-index:0;pointer-events:none;opacity:0;transition:opacity .45s ease}
+.review-band.lit .rb-fx{opacity:1}
+.rb-glow{background:
+  radial-gradient(115px circle at var(--mx) var(--my), rgba(180,83,47,.13), rgba(180,83,47,.05) 55%, transparent 75%),
+  radial-gradient(215px circle at var(--mx) var(--my), rgba(245,240,231,.04), transparent 74%)}
+.rb-draft{background:
+  repeating-linear-gradient(0deg, rgba(245,240,231,.055) 0 1px, transparent 1px 26px),
+  repeating-linear-gradient(90deg, rgba(245,240,231,.055) 0 1px, transparent 1px 26px);
+  -webkit-mask-image:radial-gradient(115px circle at var(--mx) var(--my), #000 0%, rgba(0,0,0,.55) 55%, transparent 82%);
+          mask-image:radial-gradient(115px circle at var(--mx) var(--my), #000 0%, rgba(0,0,0,.55) 55%, transparent 82%)}
+.rb-in{max-width:1120px;margin:0 auto;padding:26px 40px}
+.rb-top{display:flex;align-items:baseline;gap:14px}
+.rb-h1{font-family:"Playfair Display",Georgia,serif;font-size:30px;font-weight:500;margin:0;color:#F5F0E7}
+.rb-actions{margin-left:auto;display:flex;gap:8px;align-items:center}
+.rb-btn{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 14px;border-radius:9px;font-weight:500;font-size:13.5px;
+  color:rgba(245,240,231,.72);background:rgba(245,240,231,.07);box-shadow:inset 0 0 0 1px rgba(245,240,231,.14);text-decoration:none;cursor:pointer;border:0}
+.rb-btn:hover{color:#F5F0E7;background:rgba(245,240,231,.11)}
+.rb-btn svg{width:15px;height:15px}
+.rb-sub{font-size:14px;color:rgba(245,240,231,.72);margin-top:10px;max-width:62ch}
+.rb-sub .wa{color:#7CCB96;font-weight:500}
+.rb-lead{margin-top:22px}
+.rb-amt{display:block;font-family:"DM Mono",ui-monospace,monospace;font-size:31px;font-variant-numeric:tabular-nums;letter-spacing:-.01em;line-height:1}
+.rb-amt .k{font-size:12.5px;color:rgba(245,240,231,.5);font-family:"DM Sans",system-ui,sans-serif;margin-left:10px;vertical-align:4px}
+.rb-meta{font-size:13px;color:rgba(245,240,231,.5);margin-top:11px}
+.rb-meta .num{color:rgba(245,240,231,.72)}
+.rb-meta i{font-style:normal;color:rgba(245,240,231,.28);margin:0 7px}
+@media(max-width:640px){.rb-in{padding:20px 18px}.rb-h1{font-size:25px}.rb-actions{gap:6px}.rb-btn{padding:0 10px}}
+@media (prefers-reduced-motion:reduce){.rb-fx{transition:none}}
+`;
 import { ReviewCard, type StakeholderLite, type ProjectLite } from '../components/day-book/ReviewCard';
 
 type TabKey = 'all' | 'review' | 'filed' | 'rejected' | 'requests';
@@ -72,12 +112,6 @@ interface PRPointer {
   purchase_request_items: { item_name: string; quantity: number | null; unit: string | null }[];
   projects: { name: string } | null;
 }
-
-const STEPS = [
-  { n: '1', t: 'Send it on WhatsApp', s: 'a payment, a bill photo, a voice note' },
-  { n: '2', t: 'It lands here', s: 'recorded as it comes, on its own' },
-  { n: '3', t: 'Review and file', s: 'file it, and it appears in your ledger' },
-];
 
 export default function Logbook({ session }: { session: Session }) {
   const qc = useQueryClient();
@@ -267,6 +301,19 @@ export default function Logbook({ session }: { session: Session }) {
 
   const counts: Record<TabKey, number> = { all: all.length, review: review.length, filed: filed.length, rejected: rejected.length, requests: prs.length };
 
+  // ── Band figures: what's unposted, how many to review, the oldest one, and how many people send ──
+  const bandRef = useCursorLamp<HTMLElement>();   // the same cursor lamp the nav rail wears
+  const reviewCount = review.length;
+  const oldestLabel = useMemo(() => {
+    if (!review.length) return null;
+    const oldest = review.reduce((a, e) => (a.created_at < e.created_at ? a : e));
+    return new Date(oldest.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
+  }, [review]);
+  const senderCount = useMemo(
+    () => new Set(entries.map(e => e.sender_number || e.sender_name).filter(Boolean)).size,
+    [entries],
+  );
+
   // ── One-time reveal: first time the owner opens a Day Book with work to do ──
   const [reveal, setReveal] = useState(false);
   useEffect(() => {
@@ -309,33 +356,39 @@ export default function Logbook({ session }: { session: Session }) {
   return (
     <div className="db-scope min-h-screen" style={{ background: V.page, ...font }}>
       <style>{ANIM}</style>
+      <style>{BAND_CSS}</style>
 
       {/* full-bleed invitation */}
       <Invitation canManage={canManage} />
 
-      <div className="mx-auto py-6 sm:py-8" style={{ width: '92%', maxWidth: 1100 }}>
-        <h1 style={{ color: V.ink, ...serif, ...T.h1 }}>Day book</h1>
-        <p className="mt-2 leading-relaxed flex flex-wrap items-center gap-x-1.5" style={{ color: V.sys, ...font, ...T.body }}>
-          Everything you and your team sent to Briklay on
-          <span className="inline-flex items-center gap-1 font-medium" style={{ color: V.inkSoft }}>
-            <WhatsAppGlyph size={13} color="#1FA855" /> WhatsApp
-          </span>
-          lands here. Check each one, and it files into your books.
-        </p>
-
-        {/* three steps — side by side wide, stacked narrow */}
-        <div className="mt-4 grid gap-3 sm:gap-5" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))' }}>
-          {STEPS.map((step) => (
-            <div key={step.n} className="flex items-start gap-3">
-              <span className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 mt-0.5" style={{ background: V.line, color: V.sys, border: `1px solid ${V.line}`, fontWeight: 500, ...font, ...nums, ...T.xs }}>{step.n}</span>
-              <span>
-                <span className="block leading-snug" style={{ color: V.inkSoft, ...font, ...T.sm }}>{step.t}</span>
-                <span className="block leading-snug mt-0.5" style={{ color: V.faint, ...font, ...T.xs }}>{step.s}</span>
-              </span>
+      {/* ── For-review header band — bitter chocolate + the nav's cursor lamp ── */}
+      <header ref={bandRef} className="review-band">
+        <div className="rb-fx rb-draft" aria-hidden="true" />
+        <div className="rb-fx rb-glow" aria-hidden="true" />
+        <div className="rb-in">
+          <div className="rb-top">
+            <h1 className="rb-h1">For review</h1>
+            <div className="rb-actions">
+              {canManage && (
+                <button className="rb-btn" onClick={() => setTeamOpen(true)}>
+                  {senderCount} sender{senderCount !== 1 ? 's' : ''} · Manage
+                </button>
+              )}
+              <a className="rb-btn" href={`https://wa.me/${BRIKLAY_WA}`} target="_blank" rel="noopener noreferrer">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.4 8.5 8.5 0 0 1-4-1L3 21l2.1-5.4A8.4 8.4 0 1 1 21 11.5z" /></svg>
+                Open WhatsApp
+              </a>
             </div>
-          ))}
+          </div>
+          <div className="rb-sub">Everything you and your team send to Briklay on <span className="wa">WhatsApp</span> lands here — file each one and it enters your books.</div>
+          <div className="rb-lead">
+            <span className="rb-amt">₹{Math.round(unpostedTotal).toLocaleString('en-IN')}<span className="k">unposted</span></span>
+            <div className="rb-meta"><span className="num">{reviewCount}</span> to review{oldestLabel ? <> <i>·</i> oldest {oldestLabel}</> : null}</div>
+          </div>
         </div>
+      </header>
 
+      <div className="mx-auto pt-5 pb-6 sm:pt-6 sm:pb-8" style={{ width: '92%', maxWidth: 1100 }}>
         {/* tabs */}
         <div className="flex items-center gap-1 mt-8 overflow-x-auto" style={{ borderBottom: `1px solid ${V.line}` }}>
           {TABS.map((t) => {
