@@ -984,22 +984,23 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
   }
 
   // ── Global context bottom bar ──────────────────────────────────────────
-  const isOrdersActive = isActivePath('/orders') || isActivePath('/purchase-orders') || isActivePath('/work-orders');
-  const moreActive = ['/billing', '/team', '/profile', '/stakeholders', '/invoices', '/insights', '/inward-register'].some(p => isActivePath(p));
+  // Three primary destinations only — Transactions, For review, Purchase orders — everything else
+  // (Projects, Contracts, Attendance, Payables, Billing, Parties, Team, Insights…) lives in More.
+  void ordersBadge;
+  const moreActive = ['/projects', '/work-orders', '/orders', '/attendance', '/payables', '/billing', '/team', '/profile', '/stakeholders', '/invoices', '/insights', '/inward-register'].some(p => isActivePath(p));
 
   type Tab = { path: string; icon: React.ElementType; label: string; show: boolean; badge?: number };
   const tabs: Tab[] = [
-    { path: '/ledger',   icon: IconRepeat,     label: 'Txns',     show: role !== 'supervisor' },
-    { path: '/projects', icon: IconLayoutGrid, label: 'Projects', show: true },
-    { path: '/orders',   icon: IconFiles,      label: 'Orders',   show: true, badge: ordersBadge },
-    { path: '/logbook',  icon: IconNotebook,   label: 'For review', show: true },
+    { path: '/ledger',          icon: IconRepeat,      label: 'Txns',      show: role !== 'supervisor' },
+    { path: '/logbook',         icon: IconNotebook,    label: 'For review', show: true },
+    { path: '/purchase-orders', icon: IconShoppingBag, label: 'POs',       show: role !== 'supervisor' && role !== 'accountant', badge: poUntalliedCount },
   ].filter(t => t.show);
 
   return (
     <nav className={shellClass} style={shellStyle}>
       <div className="flex items-stretch h-[56px]" style={innerStyle}>
         {tabs.map(tab => {
-          const active = tab.path === '/orders' ? isOrdersActive : isActivePath(tab.path);
+          const active = isActivePath(tab.path);
           return (
             <TabItem
               key={tab.path}
@@ -1048,6 +1049,8 @@ function MoreNavSheet({
   ] : [];
 
   const globalItems = [
+    { path: '/projects',      icon: IconLayoutGrid,            label: 'Projects',        show: true },
+    { path: '/work-orders',   icon: IconClipboardList,         label: 'Contracts',       show: true },
     { path: '/site-desk',     icon: IconClipboardList,         label: 'Site Desk',       show: true },
     { path: '/tasks',         icon: IconChecklist,             label: 'Task Manager',    show: true },
     { path: '/attendance',    icon: IconChecklist,             label: 'Attendance',      show: true },

@@ -623,7 +623,7 @@ export function ReviewCard({
 
         {/* ═══ COLUMN 3 — THE ACTION ══════════════════════════════════════════════════════════════ */}
         {canManage && (
-          <div className="flex items-center gap-2" style={{ paddingTop: wide ? 16 : 8 }}>
+          <div className="flex items-center gap-2 flex-wrap" style={{ paddingTop: wide ? 16 : 8 }}>
             {/* APPROVE. Tinted at rest, and it FILLS on hover — the button gets more certain as you
                 approach it, which is the whole feeling of signing something off.
                 It is NEVER disabled. If we know everything, it files. If we do not, it asks. */}

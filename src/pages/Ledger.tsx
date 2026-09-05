@@ -234,7 +234,7 @@ function LedgerEmpty({ reviewCount, onReview, onNew }: { reviewCount: number; on
         <JourneyStop
           wash={V.terraWash} accent={V.terraDeep}
           icon={<Check size={15} strokeWidth={2.5} />}
-          title="It lands in your Day book"
+          title="It lands in For review"
           body="checked once, by you, whenever it suits you"
         />
         <JourneyStop
@@ -248,7 +248,7 @@ function LedgerEmpty({ reviewCount, onReview, onNew }: { reviewCount: number; on
       <div className="flex items-center gap-3 flex-wrap mt-7">
         {waiting ? (
           <button onClick={onReview} className="inline-flex items-center gap-2 text-sm font-medium px-4 py-2.5 rounded-xl" style={{ background: terraGrad, color: '#fff', ...font }}>
-            Review {reviewCount} in Day book <ArrowRight size={15} />
+            Review {reviewCount} in For review <ArrowRight size={15} />
           </button>
         ) : (
           <StartOnWhatsAppButton size="sm" tone="solid" />
@@ -1097,7 +1097,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
         {dayBookReviewCount > 0 && (ledger?.length ?? 0) > 0 && (
           (() => {
             const slides = [
-              { text: `${dayBookReviewCount} ${dayBookReviewCount === 1 ? 'entry' : 'entries'} from WhatsApp ${dayBookReviewCount === 1 ? 'is' : 'are'} waiting to be reviewed`, cta: 'Review in Day book →', action: () => navigate('/logbook'), wa: false },
+              { text: `${dayBookReviewCount} ${dayBookReviewCount === 1 ? 'entry' : 'entries'} from WhatsApp ${dayBookReviewCount === 1 ? 'is' : 'are'} waiting to be reviewed`, cta: 'Review in For review →', action: () => navigate('/logbook'), wa: false },
               { text: 'Send a bill, a voice note, or a message on WhatsApp — never miss a transaction', cta: '', action: null as null, wa: true },
             ];
             const s = slides[nudgeSlide % slides.length];
@@ -1161,7 +1161,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
               <WhatsAppGlyph size={14} color="#1FA855" />
             </span>
             <p className="text-sm min-w-0 flex-1" style={{ color: V.sys }}>
-              You or your team can now message Briklay on WhatsApp. Each one waits in your Day book, and once you approve it, it lands here.
+              You or your team can now message Briklay on WhatsApp. Each one waits in For review, and once you approve it, it lands here.
             </p>
             <span className="shrink-0"><StartOnWhatsAppButton tone="link" label="Start sending" /></span>
             <button onClick={dismissWaIdle} aria-label="Dismiss" className="shrink-0">
