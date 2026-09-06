@@ -4,13 +4,14 @@
 // arrives as props, so linking, amending, voiding and the proof upload keep running through the
 // code that already owns them.
 import { useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 const CSS = `
 .txm{--tint:#C4502B;--tint-press:#A8431F;--ink:#1B1713;--ink-2:#87807A;--ink-3:#B5AEA7;
   --bg:#F8F6F3;--card:#FFFFFF;--hair:rgba(50,42,35,.1);--good:#2FA04C;--good-bg:#EAF6EE;
   --warn:#B45309;--warn-bg:#FDF3E6;--r:18px;
   --spring:cubic-bezier(.32,1.4,.5,1);--ease:cubic-bezier(.25,.1,.25,1);--sheet:cubic-bezier(.32,.72,0,1);
-  position:fixed;inset:0;z-index:60;background:var(--bg);color:var(--ink);
+  position:fixed;inset:0;z-index:45;background:var(--bg);color:var(--ink);
   display:flex;flex-direction:column;overflow:hidden;
   font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','DM Sans',system-ui,sans-serif;
   -webkit-font-smoothing:antialiased}
@@ -185,7 +186,15 @@ export default function TxnDetailMobile(p: TxnDetailMobileProps) {
   const [noteOpen, setNoteOpen] = useState(false);
   const close = () => setSheet(null);
 
-  return (
+  // Portalled to <body> for two reasons, both of which cost real behaviour when they were not:
+  //  · TransactionDetail's own `.txnx` sheet styles a lot of short class names — `.amount`,
+  //    `.row`, `.note`, and a bare `.txnx button` — and every one of them reached in here while
+  //    this markup sat inside that host. `.txnx .amount{text-align:left}` is what pushed the hero
+  //    figure off centre. Out at <body>, nothing scoped to a page can touch this.
+  //  · The layer. This page is fixed and opaque, so anything the host renders at a lower z-index
+  //    is not merely behind it, it is unreachable — that is why Edit and Amend appeared dead. It
+  //    now sits at 45: above the tab bar (40), below every overlay the page opens (50 and up).
+  return createPortal(
     <div className="txm">
       <style>{CSS}</style>
 
@@ -336,6 +345,7 @@ export default function TxnDetailMobile(p: TxnDetailMobileProps) {
         </button>
         <button type="button" className="b2 ghost" style={{ width: '100%', marginTop: 8 }} onClick={close}>Cancel</button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
