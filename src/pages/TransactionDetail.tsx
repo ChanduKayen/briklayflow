@@ -120,10 +120,19 @@ const TXNX_CSS = `
 .txnx .log b{color:var(--ink);font-weight:500}
 .txnx .voided-mark .amount .mono{text-decoration:line-through;color:var(--ink-3)}
 @media (max-width:760px){
-  .txnx .page{padding:16px 14px 60px}
+  .txnx .page{padding:16px 14px calc(74px + env(safe-area-inset-bottom))}
   .txnx .head{grid-template-columns:1fr auto}.txnx .amount{text-align:left;grid-column:1}
   .txnx .picker{width:min(92vw,380px)}
-  .txnx .sheet{overflow-x:auto}.txnx .alloc table{min-width:640px}
+  .txnx .sheet{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  /* Allocation rows: stop forcing a wide table — stack status + action so the buttons breathe. */
+  .txnx .alloc table{min-width:0}
+  .txnx .alloc .lnk{display:flex;flex-wrap:wrap;align-items:flex-start;gap:8px}
+  .txnx .alloc .pickwrap{width:100%;margin-top:2px}
+  .txnx .linkbtn,.txnx .ghost{height:38px;padding:0 16px;font-size:14px}
+  .txnx .alloc td,.txnx .alloc th{padding-left:12px;padding-right:12px}
+  /* Detail (label/value) table: let long values wrap instead of overflowing. */
+  .txnx .hdr th{width:96px}
+  .txnx td,.txnx th{white-space:normal;word-break:break-word}
 }
 @media (prefers-reduced-motion:reduce){.txnx *{animation-duration:.01ms !important;transition-duration:.01ms !important}}
 `;

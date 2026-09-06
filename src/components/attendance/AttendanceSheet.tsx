@@ -268,6 +268,30 @@ const ATDX_CSS = `
 .atdx .rc-f button:hover{color:var(--walnut)}
 .atdx .state{padding:60px 18px;text-align:center;color:var(--walnut-3);font-size:14px}
 .atdx .hide{display:none!important}
+@media (max-width:760px){
+  .atdx{padding:18px 12px calc(78px + env(safe-area-inset-bottom))}
+  .atdx h1{font-size:28px}
+  .atdx .lede{font-size:13.5px}
+  .atdx .top{gap:14px;align-items:flex-start}
+  /* week + rate-card controls: wrap and give each a real tap target instead of a cramped row */
+  .atdx .week{flex-wrap:wrap;gap:8px}
+  .atdx .week .range{min-width:0;flex:1;font-size:16px}
+  .atdx .week .today{margin-left:0}
+  .atdx .week .today[style]{margin-left:0 !important}
+  /* summary stats: two-per-row grid, filters scroll on their own line */
+  .atdx .summ{gap:14px 20px;padding:13px 14px}
+  .atdx .summ .sp{display:none}
+  .atdx .filters{flex:1 0 100%;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px}
+  .atdx .filters::-webkit-scrollbar{display:none}
+  .atdx .chip{flex:0 0 auto}
+  /* the weekly register is wider than a phone — let it scroll horizontally as one unit */
+  .atdx .reg{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .atdx .reg>table{min-width:820px}
+  .atdx th.name{width:200px;padding-left:14px}
+  .atdx th.tot{width:130px;padding-right:14px}
+  .atdx td.cell{width:60px}
+  .atdx .phasepick,.atdx .ocsel{max-width:100%}
+}
 `;
 
 const inr = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
