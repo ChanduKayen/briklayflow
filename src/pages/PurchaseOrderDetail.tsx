@@ -24,6 +24,7 @@ import {
   setColor, drawRule, sectionLabel, valueText, drawHeader, drawFooter, drawSignatures,
 } from '../lib/pdfHelpers';
 import { parseAmount } from '../lib/money';
+import { WHATSAPP_MARK_PATH } from '../lib/whatsappMark';
 
 // ── Reconciliation types ──────────────────────────────────────────────────────
 
@@ -315,9 +316,22 @@ const PODX_CSS = `
 .podx .m-arow b{font-weight:600;color:var(--ink)}
 .podx .m-abar{position:fixed;left:0;right:0;bottom:0;z-index:41;display:flex;gap:10px;padding:12px 14px calc(14px + env(safe-area-inset-bottom));background:rgba(255,253,249,.96);backdrop-filter:blur(14px);border-top:1px solid var(--line)}
 .podx .m-abar .m-note{position:absolute;top:-32px;left:14px;right:14px;text-align:center;font-size:12px;color:var(--ink-2);background:var(--gold-tint);border:1px solid #EBD9B4;border-radius:10px;padding:6px}
-.podx .m-abtn{height:52px;min-width:0;padding:0 12px;overflow:hidden;border-radius:14px;font-weight:600;font-size:14.5px;display:flex;align-items:center;justify-content:center;gap:9px;border:0;cursor:pointer;transition:transform .12s var(--ease),box-shadow .18s var(--ease),filter .16s var(--ease)}
+.podx .m-abtn{height:52px;min-width:0;padding:0 12px;border-radius:14px;font-weight:600;font-size:14.5px;display:flex;align-items:center;justify-content:center;gap:9px;border:0;cursor:pointer;transition:transform .12s var(--ease),box-shadow .18s var(--ease),filter .16s var(--ease)}
 .podx .m-abtn:active{transform:translateY(1px) scale(.985)}
 .podx .m-abtn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;flex-shrink:0}
+/* the WhatsApp mark is a solid brand glyph, not a stroked icon like its neighbours */
+.podx .m-abtn svg.wa-mark{fill:currentColor;stroke:none;border-radius:50%}
+/* a slow breath + one ring, every 4.4s: enough to say "this is still waiting to be sent"
+   without pulling the eye off the primary action beside it */
+.podx .m-abtn.tone-wa svg.wa-mark{animation:podxwa 4.4s cubic-bezier(.4,0,.2,1) infinite}
+.podx .m-abtn.sec.tone-wa{--wa-ring:rgba(15,124,61,.26)}
+.podx .m-abtn.pri.tone-wa{--wa-ring:rgba(255,255,255,.34)}
+@keyframes podxwa{
+  0%,58%{transform:scale(1);box-shadow:0 0 0 0 var(--wa-ring)}
+  70%{transform:scale(1.09);box-shadow:0 0 0 3px var(--wa-ring)}
+  100%{transform:scale(1);box-shadow:0 0 0 7px transparent}
+}
+@media (prefers-reduced-motion:reduce){.podx .m-abtn.tone-wa svg.wa-mark{animation:none}}
 .podx .m-abtn .lbl{display:flex;flex-direction:column;align-items:flex-start;line-height:1.08;text-align:left;min-width:0;max-width:100%}
 .podx .m-abtn .lbl .t{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .podx .m-abtn.pri .lbl,.podx .m-abtn.sec .lbl{align-items:flex-start}
@@ -1082,7 +1096,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     })();
 
     const barSvg: Record<BarIcon, React.ReactNode> = {
-      wa: <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.4 8.5 8.5 0 0 1-4-1L3 21l2.1-5.4A8.4 8.4 0 1 1 21 11.5z" />,
+      wa: <path d={WHATSAPP_MARK_PATH} />,
       receive: <><path d="M21 8l-9-5-9 5 9 5 9-5zM3 8v8l9 5 9-5V8" /><path d="m9 12 2 2 4-4" /></>,
       bill: <><path d="M6 3h9l4 4v14H6z" /><path d="M14 3v5h5M9 13h6M9 17h4" /></>,
       pay: <><rect x="2" y="6" width="20" height="13" rx="2" /><path d="M2 10h20M7 15h3" /></>,
@@ -1093,7 +1107,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     };
     const renderBarBtn = (b: BarBtn, slot: 'pri' | 'sec') => (
       <button className={`m-abtn ${slot} tone-${b.tone}`} disabled={b.disabled || b.loading} onClick={b.onClick}>
-        {b.loading ? <span className="m-spin" /> : <svg viewBox="0 0 24 24">{barSvg[b.icon]}</svg>}
+        {b.loading ? <span className="m-spin" /> : <svg className={b.icon === 'wa' ? 'wa-mark' : undefined} viewBox="0 0 24 24">{barSvg[b.icon]}</svg>}
         <span className="lbl"><span className="t">{slot === 'sec' ? (b.short ?? b.label) : b.label}</span>{b.sub && <small>{b.sub}</small>}</span>
       </button>
     );
