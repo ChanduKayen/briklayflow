@@ -102,6 +102,14 @@ const CSS = `
 .plm .erow{display:flex;justify-content:space-between;gap:12px;font-size:14px;padding:5px 0;font-variant-numeric:tabular-nums}
 .plm .erow .l{color:var(--ink-2)}
 .plm .erow.tt{border-top:1px solid var(--hair);margin-top:4px;padding-top:9px;font-weight:600}
+.plm .rownote{display:block;width:100%;height:44px;margin-top:12px;border:0;border-radius:12px;
+  background:var(--card);padding:0 14px;font:inherit;font-size:16px;color:var(--ink);outline:none;
+  transition:box-shadow .18s var(--ease)}
+.plm .rownote::placeholder{color:var(--ink-3)}
+.plm .rownote:focus{box-shadow:inset 0 0 0 1.5px var(--tint)}
+/* a note that has been paid is a statement, not a field — no box to type into */
+.plm .rownote.said{height:auto;background:none;padding:10px 0 0;margin-top:10px;
+  border-top:1px solid var(--hair);border-radius:0;font-size:13.5px;color:var(--ink-2);line-height:1.45}
 .plm .ledgerlink{display:block;width:100%;text-align:left;border:0;background:none;margin-top:12px;
   padding:4px 0;font-size:13.5px;font-weight:600;color:var(--tint);cursor:pointer}
 .plm .ledgerlink:active{opacity:.4}
@@ -242,6 +250,8 @@ export interface PlmRow {
   balanceBf: number;
   /** where paying this amount leaves them — the desktop run's "After" column */
   after?: { v: number; m: string } | null;
+  /** one note per row, shared with the pay sheet — the desktop keeps it beside the figure */
+  note?: string | null;
   flag?: string | null;
   advanceNote?: string | null;
   paidAmount?: number | null;
@@ -275,6 +285,7 @@ export interface PayablesMobileProps {
   mode: string;
   onMode: (m: string) => void;
   onPay: (row: PlmRow, amount: number, diff: PlmDiff | null, note: string) => Promise<void>;
+  onNote: (key: string, value: string) => void;
   onOpenParty: (row: PlmRow) => void;
   /** the "Add a payment request" line / the empty section's action */
   onAdd: (sectionId: string) => void;
@@ -325,7 +336,7 @@ export default function PayablesMobile(p: PayablesMobileProps) {
     setAmtText(String(row.amount || ''));
     setDiffKind(row.amount < row.computed ? 'carry' : 'advance');
     setReason('');
-    setNote('');
+    setNote(row.note ?? '');
     setStage('idle');
   };
   const closePay = () => { if (stage !== 'saving') setPayFor(null); };
@@ -470,6 +481,12 @@ export default function PayablesMobile(p: PayablesMobileProps) {
                             </div>
                           )}
                           {row.detail && <div className="rat">{row.detail}</div>}
+                          {/* the same note the pay sheet opens with — one per row, either place */}
+                          {isPaid
+                            ? (row.note?.trim() ? <div className="rownote said">{row.note}</div> : null)
+                            : <input className="rownote" value={row.note ?? ''} placeholder="Add a note (optional)"
+                                aria-label={`Note for ${row.name}`}
+                                onChange={(e) => p.onNote(row.key, e.target.value)} />}
                           <button type="button" className="ledgerlink" onClick={() => p.onOpenParty(row)}>
                             Open {row.name}'s ledger →
                           </button>
@@ -511,7 +528,8 @@ export default function PayablesMobile(p: PayablesMobileProps) {
 
         {/* the desktop row carries a note beside the figure; on a phone it belongs here, where
             the payment is actually made — it rides on the transaction with the rest of the why */}
-        <input className="note" value={note} onChange={(e) => setNote(e.target.value)}
+        <input className="note" value={note}
+          onChange={(e) => { setNote(e.target.value); if (payFor) p.onNote(payFor.key, e.target.value); }}
           placeholder="Add a note (optional)" aria-label="Note" />
 
         {needsWhy && payFor && (

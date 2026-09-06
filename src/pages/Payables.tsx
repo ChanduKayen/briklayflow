@@ -459,6 +459,7 @@ export default function Payables({ session }: { session: Session }) {
       // readings, the open bills, and the arithmetic that lands on this week's figure.
       detail: <Rationale row={r} planned={planned(r)} diff={diffs[r.key]} />,
       after: afterOf(r, paidOf(r) != null),
+      note: notes[r.key] ?? '',
     });
     const sectionOf = (id: string, title: string): PlmSection | null => {
       const sec = sections.find(x => x.projectId === id);
@@ -518,6 +519,7 @@ export default function Payables({ session }: { session: Session }) {
           const id = byKey.get(row.key)?.stakeholderId;
           if (id) navigate(`/ledger?stakeholder=${id}`);
         }}
+        onNote={(key, value) => setNotes(n => ({ ...n, [key]: value }))}
         onAdd={(id) => setAddSheet(id === '__recurring__' ? 'recurring' : 'worker')}
         formSheet={formSheet}
         onCloseForm={() => setAddSheet(null)}
