@@ -286,11 +286,12 @@ const LEDGER_BAND_CSS = `
 .tb-glow{background:radial-gradient(185px circle at var(--mx) var(--my), rgba(180,83,47,.10), rgba(180,83,47,.04) 55%, transparent 75%),radial-gradient(340px circle at var(--mx) var(--my), rgba(245,240,231,.04), transparent 74%)}
 .tb-grid{background:repeating-linear-gradient(0deg, rgba(245,240,231,.05) 0 1px, transparent 1px 26px),repeating-linear-gradient(90deg, rgba(245,240,231,.05) 0 1px, transparent 1px 26px);-webkit-mask-image:radial-gradient(185px circle at var(--mx) var(--my), #000 0%, rgba(0,0,0,.55) 55%, transparent 82%);mask-image:radial-gradient(185px circle at var(--mx) var(--my), #000 0%, rgba(0,0,0,.55) 55%, transparent 82%)}
 .tb-in{max-width:1120px;margin:0 auto;padding:26px 40px 0}
-.tb-top{display:flex;align-items:baseline;gap:14px}
-.tb-h1{font-family:"Playfair Display",Georgia,serif;font-size:30px;font-weight:500;margin:0;color:#F5F0E7}
+.tb-top{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+.tb-h1{font-family:"Playfair Display",Georgia,serif;font-size:30px;font-weight:500;margin:0;color:#F5F0E7;min-width:0}
 .tb-date{font-size:13px;color:rgba(245,240,231,.5)}
-.tb-actions{margin-left:auto;display:flex;gap:8px}
-.tb-btn{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 14px;border-radius:9px;font-weight:500;font-size:13.5px;color:rgba(245,240,231,.72);background:rgba(245,240,231,.07);box-shadow:inset 0 0 0 1px rgba(245,240,231,.14);border:0;cursor:pointer}
+.tb-actions{margin-left:auto;display:flex;gap:8px;flex-shrink:0}
+.tb-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 14px;border-radius:9px;font-weight:500;font-size:13.5px;line-height:1;white-space:nowrap;color:rgba(245,240,231,.72);background:rgba(245,240,231,.07);box-shadow:inset 0 0 0 1px rgba(245,240,231,.14);border:0;cursor:pointer}
+.tb-btn svg{flex-shrink:0}
 .tb-btn:hover{color:#F5F0E7;background:rgba(245,240,231,.11)}
 .tb-btn.primary{background:#B4532F;box-shadow:none;color:#fff}
 .tb-btn.primary:hover{background:#9C4526}
@@ -316,7 +317,8 @@ const LEDGER_BAND_CSS = `
 .txn-mini .mc{margin-left:auto;font-size:12.5px;color:rgba(245,240,231,.72)}
 @media (prefers-reduced-motion:reduce){.txn-rhythm .bar{transform:none}.tb-fx,.txn-mini{transition:none}}
 @media (max-width:767px){.txn-mini{left:0}}
-@media (max-width:640px){.tb-in,.txn-rhythm{padding-left:18px;padding-right:18px}.tb-h1{font-size:25px}}
+@media (max-width:640px){.tb-in,.txn-rhythm{padding-left:18px;padding-right:18px}.tb-in{padding-top:20px}.tb-h1{font-size:25px;flex:1 1 100%}.tb-actions{margin-left:0;flex:1 1 100%;margin-top:12px;gap:10px}.tb-btn{flex:1;min-width:0;height:40px;padding:0 10px}.tb-lead{margin-top:20px}.tb-amt{font-size:28px}}
+@media (max-width:380px){.tb-amt{font-size:24px}.tb-btn{font-size:13px;gap:6px}}
 `;
 
 // 14-day daily-outflow bars — grows on mount, hover shows the day + amount, click jumps to that day

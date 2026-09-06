@@ -313,18 +313,24 @@ const PODX_CSS = `
 .podx .m-arow:last-child{border-bottom:0}
 .podx .m-arow .t{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);flex-shrink:0;padding-top:1px}
 .podx .m-arow b{font-weight:600;color:var(--ink)}
-.podx .m-abar{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;gap:10px;padding:12px 14px calc(14px + env(safe-area-inset-bottom));background:rgba(255,253,249,.96);backdrop-filter:blur(14px);border-top:1px solid var(--line)}
+.podx .m-abar{position:fixed;left:0;right:0;bottom:0;z-index:41;display:flex;gap:10px;padding:12px 14px calc(14px + env(safe-area-inset-bottom));background:rgba(255,253,249,.96);backdrop-filter:blur(14px);border-top:1px solid var(--line)}
 .podx .m-abar .m-note{position:absolute;top:-32px;left:14px;right:14px;text-align:center;font-size:12px;color:var(--ink-2);background:var(--gold-tint);border:1px solid #EBD9B4;border-radius:10px;padding:6px}
-.podx .m-abtn{height:52px;border-radius:14px;font-weight:600;font-size:14.5px;display:flex;align-items:center;justify-content:center;gap:9px;border:0;cursor:pointer;transition:transform .12s var(--ease),box-shadow .18s var(--ease),filter .16s var(--ease)}
+.podx .m-abtn{height:52px;min-width:0;padding:0 12px;overflow:hidden;border-radius:14px;font-weight:600;font-size:14.5px;display:flex;align-items:center;justify-content:center;gap:9px;border:0;cursor:pointer;transition:transform .12s var(--ease),box-shadow .18s var(--ease),filter .16s var(--ease)}
 .podx .m-abtn:active{transform:translateY(1px) scale(.985)}
 .podx .m-abtn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;flex-shrink:0}
-.podx .m-abtn .lbl{display:flex;flex-direction:column;align-items:flex-start;line-height:1.08;text-align:left}
+.podx .m-abtn .lbl{display:flex;flex-direction:column;align-items:flex-start;line-height:1.08;text-align:left;min-width:0;max-width:100%}
+.podx .m-abtn .lbl .t{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .podx .m-abtn.pri .lbl,.podx .m-abtn.sec .lbl{align-items:flex-start}
-.podx .m-abtn .lbl small{font-weight:500;font-size:10.5px;letter-spacing:.01em;opacity:.82;margin-top:2px;font-family:var(--sans);max-width:16ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* the ch cap also keeps a long vendor name out of the button's intrinsic width, so the
+   sub-line never steals row space from the labels above it */
+.podx .m-abtn .lbl small{font-weight:500;font-size:10.5px;letter-spacing:.01em;opacity:.82;margin-top:2px;font-family:var(--sans);max-width:14ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .podx .m-abtn:disabled{opacity:.55;cursor:not-allowed}
 .podx .m-abtn:disabled:active{transform:none}
-.podx .m-abtn.pri{flex:1.7}
-.podx .m-abtn.sec{flex:1}
+/* auto basis: each button starts at its own label width and the primary takes the surplus,
+   so a long label only truncates when the row genuinely cannot fit it */
+.podx .m-abtn.pri{flex:1.6 1 auto}
+.podx .m-abtn.sec{flex:1 1 auto}
+@media (max-width:380px){.podx .m-abar{gap:8px;padding-left:12px;padding-right:12px}.podx .m-abtn{font-size:13px;gap:6px;padding:0 9px}.podx .m-abtn svg{width:16px;height:16px}}
 /* filled tones — one strong action at a time; the send action carries WhatsApp green on purpose */
 .podx .m-abtn.pri.tone-terra{background:var(--terra);color:#fff;box-shadow:0 10px 22px -12px rgba(196,97,58,.75)}
 .podx .m-abtn.pri.tone-terra:active{filter:brightness(.94)}
@@ -1046,9 +1052,12 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     const overOrder = billForBalance > subTotal + 0.5;
     type BarTone = 'terra' | 'sage' | 'wa' | 'neutral';
     type BarIcon = 'wa' | 'receive' | 'bill' | 'pay' | 'check' | 'back' | 'pdf' | 'eye';
-    type BarBtn = { label: string; sub?: string; onClick: () => void; disabled?: boolean; loading?: boolean; icon: BarIcon; tone: BarTone };
+    // `short` is the label used in the narrow secondary slot, where the full one would be clipped.
+    type BarBtn = { label: string; short?: string; sub?: string; onClick: () => void; disabled?: boolean; loading?: boolean; icon: BarIcon; tone: BarTone };
     // "Send on WhatsApp" — the PO PDF goes to the vendor over WhatsApp; clearer than "send to vendor".
-    const sendBtn: BarBtn = { label: 'Send on WhatsApp', sub: vendor?.name || undefined, icon: 'wa', tone: 'wa', onClick: () => setShowSendModal(true) };
+    // Beside a primary action it shortens to "WhatsApp"; the green tone, the bubble icon and the
+    // vendor name underneath already carry the rest of the meaning.
+    const sendBtn: BarBtn = { label: 'Send on WhatsApp', short: 'WhatsApp', sub: vendor?.name || undefined, icon: 'wa', tone: 'wa', onClick: () => setShowSendModal(true) };
     const bar: { note?: string; ghost?: BarBtn; primary?: BarBtn } | null = (() => {
       if (cancelled) return null;
       if (pendingApproval && canApprove) return {
@@ -1085,7 +1094,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     const renderBarBtn = (b: BarBtn, slot: 'pri' | 'sec') => (
       <button className={`m-abtn ${slot} tone-${b.tone}`} disabled={b.disabled || b.loading} onClick={b.onClick}>
         {b.loading ? <span className="m-spin" /> : <svg viewBox="0 0 24 24">{barSvg[b.icon]}</svg>}
-        <span className="lbl">{b.label}{b.sub && <small>{b.sub}</small>}</span>
+        <span className="lbl"><span className="t">{slot === 'sec' ? (b.short ?? b.label) : b.label}</span>{b.sub && <small>{b.sub}</small>}</span>
       </button>
     );
 

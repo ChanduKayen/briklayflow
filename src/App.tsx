@@ -94,6 +94,7 @@ const ProcurementRequests = lazy(() => import('./pages/ProcurementRequests'));
 const ProcurementQuotes = lazy(() => import('./pages/ProcurementQuotes'));
 const ProcurementOrders = lazy(() => import('./pages/ProcurementOrders'));
 import { FloatingActionButton } from './components/FloatingActionButton';
+import { ownsBottomBar } from './lib/bottomChrome';
 import BottomSheet from './components/BottomSheet';
 import GlobalRefetchIndicator from './components/GlobalRefetchIndicator';
 import { clearPersistedCache } from './lib/queryClient';
@@ -903,9 +904,7 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
   // Hide the global nav on full-screen forms (/…/new) and on detail pages that carry their own
   // bottom action bar (PO detail, transaction detail) so the two never stack; the back button
   // returns to the list, which restores the nav.
-  const hideForRoute = /\/new$/.test(location.pathname)
-    || /^\/purchase-orders\/[^/]+$/.test(location.pathname)
-    || /^\/ledger\/(?!new$|import$)[^/]+$/.test(location.pathname);
+  const hideForRoute = ownsBottomBar(location.pathname);
   useEffect(() => {
     let last = window.scrollY;
     const onScroll = () => {

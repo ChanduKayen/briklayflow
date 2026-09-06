@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { IconReceipt2, IconFileInvoice, IconHammer, IconUserPlus } from '@tabler/icons-react';
+import { hidesGlobalFab } from '../lib/bottomChrome';
 
 const OPTIONS = [
   { icon: IconFileInvoice, label: 'New Purchase Order', path: '/purchase-orders/new', highlight: false },
@@ -51,9 +52,10 @@ export function FloatingActionButton() {
 
   const go = (path: string) => { navigate(path); handleClose(); };
 
-  // Full-screen create forms own their own actions; the Ledger has its dedicated NewTxnFab
-  // (money in / out) — hide the generic FAB there to avoid two overlapping buttons.
-  if (/\/new$/.test(location.pathname) || location.pathname === '/ledger') return null;
+  // Pages that own the bottom corner — full-screen create forms, detail pages with their own
+  // action bar, and lists with their own create button (the Ledger's NewTxnFab, the PO list's
+  // "New PO" pill) — get no generic FAB, so nothing ever stacks on top of their buttons.
+  if (hidesGlobalFab(location.pathname)) return null;
 
   return (
     <div

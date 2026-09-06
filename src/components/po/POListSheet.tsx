@@ -206,7 +206,7 @@ const POLX_CSS = `
 .polx .m-pcard .r3 .sub{color:var(--walnut-3);font-size:12.5px}
 .polx .m-pcard .r3 .chev{margin-left:auto;color:var(--walnut-3);width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2}
 .polx .m-empty{text-align:center;color:var(--walnut-3);font-size:14px;padding:48px 20px}
-.polx .m-fab{position:fixed;right:16px;bottom:calc(74px + env(safe-area-inset-bottom));z-index:30;height:52px;padding:0 20px;border-radius:26px;background:var(--terra);color:#fff;font-weight:600;font-size:15px;display:inline-flex;align-items:center;gap:8px;border:0;box-shadow:0 12px 28px -8px rgba(180,83,47,.55)}
+.polx .m-fab{position:fixed;right:16px;bottom:calc(76px + env(safe-area-inset-bottom));z-index:30;height:52px;padding:0 20px;border-radius:26px;background:var(--terra);color:#fff;font-weight:600;font-size:15px;display:inline-flex;align-items:center;gap:8px;border:0;box-shadow:0 12px 28px -8px rgba(180,83,47,.55)}
 .polx .m-fab svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2.4}
 .polx .m-fab:active{transform:scale(.96)}
 `;

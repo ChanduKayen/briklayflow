@@ -8,6 +8,10 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import { useNavigate } from 'react-router-dom';
 
 const CSS = `
+/* Clear of the mobile bottom tab bar (56px + safe area) below md, where that bar exists;
+   on desktop the rail is on the left, so the FAB sits in the corner proper. */
+.ntf-wrap{right:calc(20px + env(safe-area-inset-right));bottom:calc(20px + env(safe-area-inset-bottom))}
+@media (max-width:767px){.ntf-wrap{bottom:calc(76px + env(safe-area-inset-bottom))}}
 .ntf-main{transition:transform .15s ease,box-shadow .18s ease}
 .ntf-main:hover{transform:scale(1.05)}
 .ntf-main:active{transform:scale(.94)}
@@ -73,8 +77,7 @@ export function NewTxnFab() {
   return (
     <div
       ref={wrapRef}
-      className="fixed z-40 flex flex-col items-end gap-3"
-      style={{ right: 'calc(20px + env(safe-area-inset-right))', bottom: 'calc(20px + env(safe-area-inset-bottom))' }}
+      className="ntf-wrap fixed z-40 flex flex-col items-end gap-3"
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
     >
