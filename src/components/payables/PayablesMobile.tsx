@@ -89,7 +89,7 @@ const CSS = `
   padding:9px 4px;cursor:pointer;flex-shrink:0}
 .plm .expl{display:grid;grid-template-rows:0fr;transition:grid-template-rows .38s var(--sheet)}
 .plm .expl.open{grid-template-rows:1fr}
-.plm .expl>*{overflow:hidden;min-height:0}
+.plm .expl>.expl-w{overflow:hidden;min-height:0;margin:0;padding:0;border:0}
 .plm .expl-in{margin:0 18px 16px;background:var(--bg);border-radius:14px;padding:14px 16px}
 .plm .expl-in .e0{font-size:13.5px;color:var(--ink-2);line-height:1.5;margin-bottom:10px}
 .plm .erow{display:flex;justify-content:space-between;gap:12px;font-size:14px;padding:5px 0;font-variant-numeric:tabular-nums}
@@ -117,8 +117,9 @@ const CSS = `
 .plm .rat .ledger .tag{font-size:11.5px;color:var(--ink-2);margin-left:6px}
 .plm .rat .mono{font-variant-numeric:tabular-nums}
 
-/* said once, under the first group: these rows open */
-.plm .sect-hint{font-size:12.5px;color:var(--ink-3);margin:0 4px 8px;line-height:1.4}
+/* the row answers the finger before the panel moves — the quietest way to say it opens */
+.plm .p .main{transition:background .2s var(--ease)}
+.plm .p:not(.open) .main:active{background:#F4F0EB}
 
 .plm .addline{display:block;width:100%;border:0;background:none;font-size:15px;font-weight:600;
   color:var(--tint);padding:15px;cursor:pointer;transition:background .15s;position:relative}
@@ -379,10 +380,6 @@ export default function PayablesMobile(p: PayablesMobileProps) {
               <div className="t">{s.rows.length ? inr(s.total) : 'None yet'}</div>
             </div>
 
-            {s.rows.length > 0 && s.id === p.sections.find(x => x.rows.length)?.id && (
-              <div className="sect-hint">Tap a row to see how its figure was reached.</div>
-            )}
-
             {s.rows.length === 0 && s.empty ? (
               <div className="empty">
                 <p>{s.empty.text}</p>
@@ -425,6 +422,8 @@ export default function PayablesMobile(p: PayablesMobileProps) {
                         </div>
                       </div>
                       <div className={`expl${open ? ' open' : ''}`} aria-hidden={!open}>
+                        {/* a bare box to clip against: the padded card inside it must not size the row */}
+                        <div className="expl-w">
                         <div className="expl-in">
                           {carries && (
                             <>
@@ -438,6 +437,7 @@ export default function PayablesMobile(p: PayablesMobileProps) {
                           <button type="button" className="ledgerlink" onClick={() => p.onOpenParty(row)}>
                             Open {row.name}'s ledger →
                           </button>
+                        </div>
                         </div>
                       </div>
                     </div>
