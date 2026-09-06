@@ -17,6 +17,7 @@ import type { POLineItem } from '../types';
 import ReceiveAtSiteDrawer from '../components/ReceiveAtSiteDrawer';
 import SendToVendorModal from '../components/po-new-ui/SendToVendorModal';
 import { RateCheckModal } from '../components/po/RateCheckModal';
+import { useIsMobile } from '../lib/useIsMobile';
 import {
   fmtDate as pdfFmtDate, fmtRupee, amountInWords,
   MARGIN, CONTENT, RIGHT, C,
@@ -262,6 +263,85 @@ const PODX_CSS = `
   .podx .sheet{overflow-x:auto}.podx .sheet table{min-width:720px}
 }
 @media (prefers-reduced-motion:reduce){.podx *{animation-duration:.01ms !important;transition-duration:.01ms !important}}
+
+/* ── app-native mobile detail (matches po-mobile.html) ── */
+.podx .m-dtop{display:flex;align-items:center;gap:4px;padding:12px 6px 8px;position:sticky;top:0;z-index:5;background:var(--cream)}
+.podx .m-back,.podx .m-dots{width:40px;height:40px;display:grid;place-items:center;color:var(--ink-2);border-radius:50%;background:none;border:0;cursor:pointer}
+.podx .m-back:active,.podx .m-dots:active{background:var(--line-2)}
+.podx .m-pono{font-family:var(--mono);font-size:12.5px;color:var(--ink-3)}
+.podx .m-dots{margin-left:auto}
+.podx .m-body{padding:0 16px 150px}
+.podx .m-h2{font-family:var(--serif);font-size:23px;font-weight:600;margin:2px 0 6px;color:var(--ink);letter-spacing:-.01em}
+.podx .m-meta{font-size:13px;color:var(--ink-3);line-height:1.5}
+.podx .m-meta b{color:var(--ink-2);font-weight:500}
+.podx .m-pill{display:inline-flex;align-items:center;gap:6px;margin-top:10px;height:28px;padding:0 11px;border-radius:14px;font-size:12.5px;font-weight:500;background:var(--gold-tint);color:var(--gold)}
+.podx .m-pill svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2}
+.podx .m-track{display:flex;align-items:flex-start;margin:20px 2px 4px}
+.podx .m-node{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;position:relative}
+.podx .m-node::before{content:"";position:absolute;top:11px;left:calc(50% + 14px);right:calc(-50% + 14px);height:2px;background:var(--line);border-radius:1px}
+.podx .m-node:last-child::before{display:none}
+.podx .m-node.done::before{background:var(--sage)}
+.podx .m-node .c{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--paper);border:1.5px solid var(--line);color:var(--ink-3);font-size:11px;z-index:1}
+.podx .m-node.done .c{background:var(--sage);border-color:var(--sage);color:#fff}
+.podx .m-node.now .c{border-color:var(--terra);color:var(--terra);font-weight:600}
+.podx .m-node span{font-size:11px;color:var(--ink-3);text-align:center}
+.podx .m-node.done span{color:var(--sage)}
+.podx .m-node.now span{color:var(--terra);font-weight:500}
+.podx .m-node .c svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:3}
+.podx .m-sec{margin-top:18px}
+.podx .m-hh{font-size:11.5px;letter-spacing:.06em;color:var(--ink-3);text-transform:uppercase;margin-bottom:8px}
+.podx .m-card{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:4px 15px}
+.podx .m-row{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line-2);font-size:14px}
+.podx .m-row:last-child{border-bottom:0}
+.podx .m-row .k{color:var(--ink-2)}
+.podx .m-row .flag{font-size:11.5px;color:var(--gold);background:var(--gold-tint);border-radius:8px;padding:1px 7px}
+.podx .m-row .v{margin-left:auto;font-family:var(--mono);font-size:14.5px;color:var(--ink)}
+.podx .m-row.hero .k,.podx .m-row.hero .v{font-weight:600;color:var(--terra)}
+.podx .m-row .zero{color:var(--ink-3)}
+.podx .m-irow{display:flex;gap:10px;padding:12px 0;border-bottom:1px solid var(--line-2)}
+.podx .m-irow:last-child{border-bottom:0}
+.podx .m-irow .n{color:var(--ink);font-weight:500}
+.podx .m-irow .sub{font-size:12.5px;color:var(--ink-3);margin-top:2px}
+.podx .m-irow .amt{margin-left:auto;text-align:right}
+.podx .m-irow .amt .a{font-family:var(--mono)}
+.podx .m-irow .amt .q{font-size:12px;color:var(--ink-3);margin-top:2px}
+.podx .m-billrow{display:flex;gap:10px;margin-top:8px}
+.podx .m-brbtn{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;height:44px;border:1px solid var(--line);border-radius:12px;background:var(--paper);font-size:13.5px;font-weight:500;color:var(--ink-2);cursor:pointer}
+.podx .m-brbtn:active{background:var(--line-2)}
+.podx .m-brbtn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2}
+.podx .m-arow{display:flex;gap:12px;padding:11px 0;border-bottom:1px solid var(--line-2);font-size:13px;color:var(--ink-2)}
+.podx .m-arow:last-child{border-bottom:0}
+.podx .m-arow .t{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);flex-shrink:0;padding-top:1px}
+.podx .m-arow b{font-weight:600;color:var(--ink)}
+.podx .m-abar{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;gap:9px;padding:12px 14px calc(14px + env(safe-area-inset-bottom));background:rgba(255,253,249,.95);backdrop-filter:blur(12px);border-top:1px solid var(--line)}
+.podx .m-abar .m-note{position:absolute;top:-30px;left:14px;right:14px;text-align:center;font-size:12px;color:var(--ink-2);background:var(--gold-tint);border:1px solid #EBD9B4;border-radius:10px;padding:5px}
+.podx .m-abtn{height:48px;border-radius:13px;font-weight:600;font-size:14.5px;display:flex;align-items:center;justify-content:center;gap:8px;border:0;cursor:pointer}
+.podx .m-abtn:active{transform:scale(.97)}
+.podx .m-abtn.ghost{flex:1;border:1px solid var(--line);background:var(--paper);color:var(--ink-2)}
+.podx .m-abtn.primary{flex:1.6;background:var(--terra);color:#fff;box-shadow:0 10px 24px -10px rgba(196,97,58,.5)}
+.podx .m-abtn.wa{flex:1.6;background:#129E4E;color:#fff}
+.podx .m-abtn:disabled{opacity:.5}
+/* mobile bottom-sheet for record bill / payment */
+.podx .m-scrim{position:fixed;inset:0;z-index:50;background:rgba(30,26,21,.5);display:flex;align-items:flex-end;animation:podxfade .18s var(--ease)}
+@keyframes podxfade{from{opacity:0}to{opacity:1}}
+.podx .m-shell{width:100%;background:var(--paper);border-radius:20px 20px 0 0;padding:8px 16px calc(16px + env(safe-area-inset-bottom));max-height:88dvh;overflow-y:auto;animation:podxrise .26s var(--ease)}
+@keyframes podxrise{from{transform:translateY(30px);opacity:.6}to{transform:none;opacity:1}}
+.podx .m-grab{width:38px;height:4px;border-radius:2px;background:var(--line);margin:6px auto 12px}
+.podx .m-shell h3{font-family:var(--serif);font-size:19px;font-weight:600;margin:0 0 14px;color:var(--ink)}
+.podx .m-fld{margin-bottom:12px}
+.podx .m-fld label{display:block;font-size:12px;color:var(--ink-2);margin-bottom:5px;font-weight:500}
+.podx .m-fld input,.podx .m-fld select{width:100%;height:46px;border:1px solid var(--line);border-radius:11px;background:var(--paper-2);padding:0 13px;font-size:15px;color:var(--ink);outline:none}
+.podx .m-fld input:focus,.podx .m-fld select:focus{border-color:var(--terra);box-shadow:0 0 0 3px var(--terra-tint);background:var(--paper)}
+.podx .m-fld input.amt{font-family:var(--mono);text-align:right;font-size:18px}
+.podx .m-full{display:inline-flex;align-items:center;height:26px;padding:0 10px;border:1px solid var(--line);background:var(--paper);color:var(--terra);border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;margin-left:8px}
+.podx .m-up{display:flex;align-items:center;gap:9px;height:52px;border:1.5px dashed var(--line);border-radius:12px;background:var(--paper-2);padding:0 14px;color:var(--ink-2);font-size:13.5px;cursor:pointer}
+.podx .m-up.has{border-style:solid;border-color:var(--sage);color:var(--sage)}
+.podx .m-up svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.9;flex-shrink:0}
+.podx .m-sheet-acts{display:flex;gap:10px;margin-top:16px}
+.podx .m-sheet-acts .m-abtn.ghost{flex:1}
+.podx .m-sheet-acts .m-abtn.primary{flex:1.6}
+.podx .m-warn{display:flex;gap:9px;align-items:flex-start;background:color-mix(in srgb,var(--terra) 9%,var(--paper));border:1px solid color-mix(in srgb,var(--terra) 35%,var(--line));border-radius:11px;padding:10px 12px;font-size:12.5px;line-height:1.5;color:var(--ink-2);margin-bottom:12px}
+.podx .m-warn b{color:var(--terra);font-weight:600}
 `;
 
 export default function PurchaseOrderDetail({ session }: { session: Session }) {
@@ -304,6 +384,9 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
 
   // ── Reference PO-detail redesign (po-detail.html) UI state ──────────────────
   const [menuOpen,     setMenuOpen]     = useState(false);
+  const isMobile = useIsMobile();
+  const [showMobileBill, setShowMobileBill] = useState(false);
+  const [showMobilePay,  setShowMobilePay]  = useState(false);
   const [billingOpen,  setBillingOpen]  = useState(false);   // unfolds the bill columns + bill row
   const [billEditOpen, setBillEditOpen] = useState(false);   // editing/replacing an already-recorded bill
   const [payRowOpen,   setPayRowOpen]   = useState(false);
@@ -937,9 +1020,208 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const backTo = navState.from === 'project' && navState.projectId ? `/projects/${navState.projectId}/purchase-orders` : '/purchase-orders';
   const Check = () => (<svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7" /></svg>);
 
+  // ── app-native mobile detail (po-mobile.html) ──────────────────────────────
+  const renderMobile = () => {
+    const sent = !!po.sent_to_vendor_at;
+    const overOrder = billForBalance > subTotal + 0.5;
+    type BarBtn = { label: string; onClick: () => void; disabled?: boolean; wa?: boolean };
+    const bar: { note?: string; ghost?: BarBtn; primary?: BarBtn } | null = (() => {
+      if (cancelled) return null;
+      if (pendingApproval && canApprove) return {
+        note: 'Review and approve to release this order',
+        ghost: { label: deciding === 'SEND_BACK' ? '…' : 'Send back', onClick: () => decidePO('SEND_BACK'), disabled: !!deciding },
+        primary: { label: deciding === 'APPROVE' ? 'Approving…' : 'Approve', onClick: () => decidePO('APPROVE'), disabled: !!deciding },
+      };
+      if (pendingApproval) return { note: 'Waiting for an approver to release this order.' };
+      if (nowStage === 'recv') return {
+        ghost: !sent ? { label: 'Send to vendor', onClick: () => setShowSendModal(true), wa: true } : undefined,
+        primary: { label: partlyReceived ? 'Receive remaining' : 'Receive items', onClick: () => setShowReceiveModal(true) },
+      };
+      if (nowStage === 'bill') return {
+        ghost: !sent ? { label: 'Send to vendor', onClick: () => setShowSendModal(true), wa: true } : undefined,
+        primary: { label: 'Record bill', onClick: () => setShowMobileBill(true) },
+      };
+      if (nowStage === 'pay') return {
+        ghost: (po.vendor_bill_url || po.vendor_bill_doc_url) ? { label: 'View bill', onClick: () => previewBill(po.vendor_bill_doc_url || po.vendor_bill_url) } : undefined,
+        primary: { label: 'Record payment', onClick: () => setShowMobilePay(true) },
+      };
+      return { ghost: { label: 'Download PDF', onClick: handleDownloadPDF }, primary: !sent ? { label: 'Send to vendor', onClick: () => setShowSendModal(true), wa: true } : undefined };
+    })();
+
+    const node = (label: string, num: number, done: boolean, now: boolean) => (
+      <div className={`m-node${done ? ' done' : now ? ' now' : ''}`}>
+        <span className="c">{done ? <Check /> : num}</span><span>{label}</span>
+      </div>
+    );
+
+    return (
+      <>
+        <div className="m-dtop">
+          <button className="m-back" aria-label="Back" onClick={() => navigate(backTo)}>
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M15 18l-6-6 6-6" /></svg>
+          </button>
+          <span className="m-pono">{po.po_id}</span>
+          <div className="more" style={{ marginLeft: 'auto' }} onClick={(e) => e.stopPropagation()}>
+            <button className="m-dots" aria-label="More actions" onClick={() => setMenuOpen(o => !o)}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
+            </button>
+            <div className={`menu${menuOpen ? ' open' : ''}`}>
+              <button className="wa-send" onClick={() => { setMenuOpen(false); setShowSendModal(true); }}><span className="ic"><svg viewBox="0 0 24 24"><path d="M21 3L3 10.5l6 2.5 2.5 6L21 3z" /><path d="M9 13l3-3" /></svg></span>Send to vendor<span className="wa-dot" aria-hidden="true" /></button>
+              <button onClick={() => { setMenuOpen(false); handleDownloadPDF(); }}><svg viewBox="0 0 24 24"><path d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" /></svg>Download PDF</button>
+              <button onClick={() => { setMenuOpen(false); setShowRateCheck(true); }}><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3M11 8v6M8 11h6" /></svg>Check prices</button>
+              <button onClick={() => { setMenuOpen(false); navigate('/purchase-orders/new', { state: { projectId: po.project_id, stakeholderId: po.stakeholder_id } }); }}><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 1 8 8M4 20l4-4M4 20v-4h4" /></svg>Duplicate order</button>
+              <hr />
+              <button className="danger" disabled={cancelled} onClick={() => { setMenuOpen(false); if (!cancelled && window.confirm('Cancel this PO?')) updateStatus.mutate('CANCELLED'); }}><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M9 9l6 6M15 9l-6 6" /></svg>Cancel PO</button>
+            </div>
+          </div>
+        </div>
+
+        <div className="m-body">
+          <div>
+            <h2 className="m-h2">{vendor?.name || 'Vendor'}</h2>
+            <div className="m-meta">
+              <b>{project?.name || '—'}</b>{project?.site_location ? ` · ${project.site_location}` : ''}<br />
+              {postPurchase ? 'Recorded' : 'Ordered'} {fmtDate(po.date_issued)}{po.ordered_by ? ` by ${po.ordered_by}` : ''}
+            </div>
+            {cancelled ? (
+              <span className="m-pill" style={{ background: 'var(--terra-tint)', color: 'var(--terra)' }}>
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M9 9l6 6M15 9l-6 6" /></svg>Cancelled
+              </span>
+            ) : pendingApproval ? (
+              <span className="m-pill"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>Pending approval — not live yet</span>
+            ) : null}
+          </div>
+
+          <div className="m-track">
+            {node(postPurchase ? 'Recorded' : 'Ordered', 1, true, false)}
+            {node('At site', 2, received, nowStage === 'recv')}
+            {node('Billed', 3, hasBill, nowStage === 'bill')}
+            {node('Paid', 4, paidDone, nowStage === 'pay')}
+          </div>
+
+          <div className="m-sec">
+            <div className="m-hh">Money</div>
+            <div className="m-card">
+              <div className="m-row"><span className="k">Ordered</span><span className={`v${orderValue > 0 ? '' : ' zero'}`}>{orderValue > 0 ? inr0(orderValue) : '₹0 · no rates'}</span></div>
+              <div className="m-row"><span className="k">Billed</span>{overOrder && <span className="flag">over order</span>}<span className={`v${billForBalance > 0 ? '' : ' zero'}`}>{billForBalance > 0 ? inr0(billForBalance) : '—'}</span></div>
+              <div className="m-row"><span className="k">Paid</span><span className={`v${paidTotal > 0 ? '' : ' zero'}`}>{inr0(paidTotal)}</span></div>
+              <div className="m-row hero"><span className="k">{balNum < 0 ? 'Advance' : 'To pay'}</span><span className="v">{balNum > 0 ? inr0(balNum) : balNum < 0 ? inr0(-balNum) : 'Settled'}</span></div>
+            </div>
+          </div>
+
+          <div className="m-sec">
+            <div className="m-hh">Items</div>
+            <div className="m-card">
+              {billedLines.map(({ li, oq, orr, ordAmt }) => (
+                <div className="m-irow" key={li.id}>
+                  <div><div className="n">{li.item_name}</div>{li.specification ? <div className="sub">{li.specification}</div> : null}</div>
+                  <div className="amt"><div className="a">{inr0(Number(li.total_amount) || ordAmt)}</div><div className="q">{oq} {li.unit || 'nos'} × {inr0(orr)}</div></div>
+                </div>
+              ))}
+              {billedLines.length === 0 && <div className="m-irow"><div className="sub">No line items.</div></div>}
+            </div>
+          </div>
+
+          {hasBill && (
+            <div className="m-sec">
+              <div className="m-hh">Vendor bill{billNo ? ` · ${billNo}` : ''}</div>
+              <div className="m-billrow">
+                {(po.vendor_bill_url || po.vendor_bill_doc_url) && (
+                  <button className="m-brbtn" onClick={() => previewBill(po.vendor_bill_doc_url || po.vendor_bill_url)}>
+                    <svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" /><circle cx="12" cy="12" r="3" /></svg>View bill
+                  </button>
+                )}
+                {!cancelled && (
+                  <button className="m-brbtn" onClick={() => { openBillEdit(); setShowMobileBill(true); }}>
+                    <svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>Edit / replace
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="m-sec">
+            <div className="m-hh">Activity</div>
+            <div className="m-card">
+              {activity.map((a, i) => (
+                <div className="m-arow" key={i}><span className="t">{logTime(a.when)}</span><span><b>{a.who}</b> {a.what}</span></div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {bar && (
+          <div className="m-abar">
+            {bar.note && <div className="m-note">{bar.note}</div>}
+            {bar.ghost && <button className={bar.ghost.wa ? 'm-abtn wa' : 'm-abtn ghost'} disabled={bar.ghost.disabled} onClick={bar.ghost.onClick}>{bar.ghost.label}</button>}
+            {bar.primary && <button className="m-abtn primary" disabled={bar.primary.disabled} onClick={bar.primary.onClick}>{bar.primary.label}</button>}
+          </div>
+        )}
+      </>
+    );
+  };
+
+  // Mobile record-bill / record-payment bottom-sheets (reuse the desktop state + mutations).
+  const renderMobileSheets = () => (
+    <>
+      {showMobileBill && (
+        <div className="m-scrim" onClick={() => setShowMobileBill(false)}>
+          <div className="m-shell" onClick={(e) => e.stopPropagation()}>
+            <div className="m-grab" />
+            <h3>{billEditOpen ? 'Edit vendor bill' : 'Record vendor bill'}</h3>
+            <div className="m-fld"><label>Bill / invoice no</label><input placeholder="INV-…" value={refBillNo} onChange={(e) => setRefBillNo(e.target.value)} /></div>
+            <div className="m-fld"><label>Bill date</label><input type="date" value={refBillDate} onChange={(e) => setRefBillDate(e.target.value)} /></div>
+            <div className="m-fld"><label>Bill amount</label><input className="amt" inputMode="decimal" placeholder="₹" value={refBillAmt} onChange={(e) => setRefBillAmt(e.target.value)} /></div>
+            <div className="m-fld"><label>Document</label>
+              <div className={`m-up${refBillFile ? ' has' : ''}`} onClick={() => refBillFileInputRef.current?.click()}>
+                <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16" /></svg>
+                <span>{reconciling ? 'Reading bill…' : refBillFile ? refBillFile.name : 'Upload PDF / photo — we read it'}</span>
+              </div>
+              <input ref={refBillFileInputRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0] || null; setRefBillFile(f); if (f) runReconciliation(f); }} />
+            </div>
+            <div className="m-sheet-acts">
+              <button className="m-abtn ghost" onClick={() => setShowMobileBill(false)}>Cancel</button>
+              <button className="m-abtn primary" disabled={savingBill} onClick={async () => { await saveRefBill(); setShowMobileBill(false); }}>{savingBill ? 'Saving…' : billEditOpen ? 'Update bill' : 'Save bill'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMobilePay && (
+        <div className="m-scrim" onClick={() => setShowMobilePay(false)}>
+          <div className="m-shell" onClick={(e) => e.stopPropagation()}>
+            <div className="m-grab" />
+            <h3>Record payment</h3>
+            <div className="m-fld">
+              <label>Amount{(payBase - paidTotal) > 0 && <button type="button" className="m-full" onClick={() => setPayAmount(String(Math.round(payBase - paidTotal)))}>Full {inr0(payBase - paidTotal)}</button>}</label>
+              <input className="amt" inputMode="decimal" placeholder="0" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
+            </div>
+            <div className="m-fld"><label>Mode</label>
+              <select value={payMode} onChange={(e) => setPayMode(e.target.value as any)}>
+                <option value="UPI">UPI</option><option value="NEFT">NEFT / RTGS</option><option value="Cash">Cash</option><option value="Cheque">Cheque</option>
+              </select>
+            </div>
+            <div className="m-fld"><label>Reference / note</label><input placeholder="UTR, cheque no, or who paid" value={payRef} onChange={(e) => setPayRef(e.target.value)} /></div>
+            {deliveryMeasurable && (parseFloat(payAmount) > 0) && (paidTotal + (parseFloat(payAmount) || 0)) > deliveredValue + 1 && (
+              <div className="m-warn">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, marginTop: 1, color: 'var(--terra)' }}><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L14.7 3.9a2 2 0 00-3.4 0z" /></svg>
+                <span>Only <b>{deliveredPctLabel}</b> ({inr0(deliveredValue)}) is at site. This takes total paid to {inr0(paidTotal + (parseFloat(payAmount) || 0))} — <b>{inr0(Math.max(0, paidTotal + (parseFloat(payAmount) || 0) - deliveredValue))} ahead of delivery</b>.</span>
+              </div>
+            )}
+            <div className="m-sheet-acts">
+              <button className="m-abtn ghost" onClick={() => setShowMobilePay(false)}>Cancel</button>
+              <button className="m-abtn primary" disabled={recordPayment.isPending || !(parseFloat(payAmount) > 0)} onClick={() => recordPayment.mutate(undefined, { onSuccess: () => setShowMobilePay(false) })}>{recordPayment.isPending ? 'Saving…' : 'Save payment'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
   return (
     <div className="podx" onClick={() => menuOpen && setMenuOpen(false)}>
       <style>{PODX_CSS}</style>
+      {isMobile ? renderMobile() : (
       <div className="page">
         {/* crumbs */}
         <div className="crumb"><a onClick={() => navigate(backTo)}>Purchase orders</a> › <b>{po.po_id}</b></div>
@@ -1220,6 +1502,9 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
           ))}
         </ul></div>
       </div>
+      )}
+
+      {renderMobileSheets()}
 
       <ReceiveAtSiteDrawer
         isOpen={showReceiveModal}

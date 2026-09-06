@@ -13,6 +13,7 @@ import { useUserProfile } from '../../App';
 import { useAuth } from '../../lib/auth/AuthProvider';
 import { useSnackbar } from '../Snackbar';
 import SendToVendorModal from '../po-new-ui/SendToVendorModal';
+import { useIsMobile } from '../../lib/useIsMobile';
 
 const POLX_CSS = `
 .polx{
@@ -152,6 +153,62 @@ const POLX_CSS = `
   .polx .sheet{overflow-x:auto}.polx table{min-width:1080px}
 }
 @media (prefers-reduced-motion:reduce){.polx *{animation-duration:.01ms !important;transition-duration:.01ms !important}}
+
+/* ============ MOBILE (app-native, ported from po-mobile.html) ============ */
+.polx.m{background:var(--cream);min-height:100dvh;display:flex;flex-direction:column;
+  --cream:#F5F0E7;--paper:#FFFCF7;--line:#E5DCCD;--line-soft:#EFE8DB;
+  --walnut:#33251B;--walnut-2:#6A5A4C;--walnut-3:#9A8B7B;--terra:#B4532F;--terra-soft:#F6E7DF;
+  --sage:#5F7F5C;--gold:#8A6A1F;--gold-soft:#F3EAD2;}
+.polx.m *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+.polx .m-mast{padding:18px 18px 0}
+.polx .m-mast .r1{display:flex;align-items:center;gap:10px}
+.polx .m-mast h1{font:500 25px/1.1 var(--serif);margin:0;color:var(--walnut);letter-spacing:-.01em}
+.polx .m-mast .count{font:500 12px var(--mono);color:var(--walnut-3);border:1px solid var(--line);border-radius:7px;padding:2px 7px}
+.polx .m-mast .ico{margin-left:auto;width:38px;height:38px;border-radius:50%;border:1px solid var(--line);background:var(--paper);display:grid;place-items:center;color:var(--walnut-2)}
+.polx .m-mast .ico svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2}
+.polx .m-mast .ico.on{background:var(--walnut);border-color:var(--walnut);color:var(--paper)}
+.polx .m-money{margin-top:8px;font-size:13px;color:var(--walnut-3)}
+.polx .m-money b{font-family:var(--mono);font-weight:500;color:var(--walnut)}
+.polx .m-search{margin:12px 18px 0;position:relative}
+.polx .m-search svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:15px;height:15px;stroke:var(--walnut-3);fill:none;stroke-width:1.8}
+.polx .m-search input{width:100%;height:42px;border:1px solid var(--line);border-radius:12px;background:var(--paper);padding:0 12px 0 34px;outline:none;font-size:15px;color:var(--walnut)}
+.polx .m-search input:focus{border-color:var(--terra);box-shadow:0 0 0 3px var(--terra-soft)}
+.polx .m-chips{display:flex;gap:8px;overflow-x:auto;padding:14px 18px 10px;scrollbar-width:none}
+.polx .m-chips::-webkit-scrollbar{display:none}
+.polx .m-chip{flex-shrink:0;display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 14px;border-radius:18px;border:1px solid var(--line);background:var(--paper);font-size:13.5px;font-weight:500;color:var(--walnut-2);transition:transform .12s}
+.polx .m-chip em{font-style:normal;font-family:var(--mono);font-size:12px;color:var(--walnut-3)}
+.polx .m-chip.on{background:var(--walnut);border-color:var(--walnut);color:var(--paper)}
+.polx .m-chip.on em{color:rgba(255,252,247,.6)}
+.polx .m-chip.gold{background:var(--gold-soft);border-color:#E4D5A8;color:var(--gold)}
+.polx .m-chip.gold em{color:var(--gold)}
+.polx .m-chip.gold.on{background:var(--gold);border-color:var(--gold);color:#fff}
+.polx .m-chip.gold.on em{color:rgba(255,255,255,.7)}
+.polx .m-chip:active{transform:scale(.97)}
+.polx .m-list{flex:1;overflow-y:auto;padding:2px 14px 108px}
+.polx .m-pcard{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:14px 15px;margin-bottom:10px;transition:transform .12s,background .12s;width:100%;text-align:left;display:block}
+.polx .m-pcard:active{transform:scale(.985);background:#FBF6EC}
+.polx .m-pcard .r1{display:flex;align-items:baseline;gap:8px}
+.polx .m-pcard .v{font-weight:600;font-size:15.5px;color:var(--walnut);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.polx .m-pcard .amt{font-family:var(--mono);font-size:15px;color:var(--walnut);flex-shrink:0}
+.polx .m-pcard .amt.pay{color:var(--terra)}
+.polx .m-pcard .amt.zero{color:var(--walnut-3)}
+.polx .m-pcard .r2{display:flex;align-items:center;gap:8px;margin-top:5px;font-size:12.5px;color:var(--walnut-3);min-width:0}
+.polx .m-pcard .r2 .po{font-family:var(--mono);font-size:11px;flex-shrink:0}
+.polx .m-pcard .r2 .st-site{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.polx .m-pcard .items{margin-top:6px;font-size:13px;color:var(--walnut-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.polx .m-pcard .r3{display:flex;align-items:center;gap:7px;margin-top:10px;font-size:13px}
+.polx .m-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.polx .m-st{font-weight:500}
+.polx .m-pcard.needs .m-dot{background:var(--terra)} .polx .m-pcard.needs .m-st{color:var(--terra)}
+.polx .m-pcard.gold-s .m-dot{background:var(--gold)} .polx .m-pcard.gold-s .m-st{color:var(--gold)}
+.polx .m-pcard.motion .m-dot{background:var(--walnut-3)} .polx .m-pcard.motion .m-st{color:var(--walnut-2)}
+.polx .m-pcard.landed .m-dot{background:var(--sage)} .polx .m-pcard.landed .m-st{color:var(--sage)}
+.polx .m-pcard .r3 .sub{color:var(--walnut-3);font-size:12.5px}
+.polx .m-pcard .r3 .chev{margin-left:auto;color:var(--walnut-3);width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2}
+.polx .m-empty{text-align:center;color:var(--walnut-3);font-size:14px;padding:48px 20px}
+.polx .m-fab{position:fixed;right:16px;bottom:calc(74px + env(safe-area-inset-bottom));z-index:30;height:52px;padding:0 20px;border-radius:26px;background:var(--terra);color:#fff;font-weight:600;font-size:15px;display:inline-flex;align-items:center;gap:8px;border:0;box-shadow:0 12px 28px -8px rgba(180,83,47,.55)}
+.polx .m-fab svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2.4}
+.polx .m-fab:active{transform:scale(.96)}
 `;
 
 interface POItem { n: string; q: string; r: boolean }
@@ -326,13 +383,15 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   const navigate = useNavigate();
   const { rows, isLoading } = usePOListData(projectId);
   const { data: openRfqs = [] } = useOpenRfqs(projectId);
-  const [filter, setFilter] = useState<'all' | 'mine' | 'late' | 'open' | 'vendor' | 'done' | 'quotes'>('all');
+  const [filter, setFilter] = useState<'all' | 'mine' | 'late' | 'open' | 'vendor' | 'done' | 'quotes' | 'approvals' | 'tosend' | 'onway'>('all');
   const [sortK, setSortK] = useState<'vendor' | 'site' | 'ordered' | 'delivery' | 'value' | 'balance'>('ordered');
   const [sortDir, setSortDir] = useState(-1);
   const [q, setQ] = useState('');
   const [tip, setTip] = useState<{ id: string; pending: boolean; x: number; y: number } | null>(null);
   // The PO whose "Send PO to vendor" link was tapped — opens the send dialog over the list.
   const [sendRow, setSendRow] = useState<PORow | null>(null);
+  const isMobile = useIsMobile();
+  const [mSearch, setMSearch] = useState(false);
 
   // Approve a pending PO inline (management / principal). The RPC enforces SoD (a non-principal
   // creator can't approve their own), so we surface its message rather than pre-hiding the button.
@@ -379,6 +438,10 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
     open: (p) => !p.cancelled && !p.rfq && !full(p),
     vendor: (p) => p.rfq || (!p.cancelled && !full(p) && !late(p) && got(p) === 0),
     done: full,
+    // Mobile chip set (po-mobile.html): Approvals / All / To send / On the way / Received.
+    approvals: (p) => p.approvalStatus === 'PENDING' && !p.cancelled,
+    tosend: (p) => !p.cancelled && !p.rfq && !full(p) && !p.sent && p.approvalStatus !== 'PENDING',
+    onway: (p) => !p.cancelled && !p.rfq && !full(p) && !!p.sent,
   };
   const KEY: Record<string, (p: PORow) => number | string> = {
     vendor: (p) => p.vendor,
@@ -429,6 +492,9 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   const cMine = fMine;
   const cVendor = rows.filter(FILTERS.vendor).length;
   const cDone = rows.filter(FILTERS.done).length;
+  const cApprovals = rows.filter(FILTERS.approvals).length;
+  const cToSend = rows.filter(FILTERS.tosend).length;
+  const cOnWay = rows.filter(FILTERS.onway).length;
   const footTotal = list.reduce((a, p) => a + (p.cancelled ? 0 : p.value), 0);
 
   const openPO = (id: string) => navigate(`/purchase-orders/${id}`, { state: projectId ? { from: 'project', projectId } : { from: 'list' } });
@@ -444,6 +510,14 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
     if (d < 0) return <b className="late">{-d} day{-d > 1 ? 's' : ''} late</b>;
     if (d === 0) return <b className="due">due today</b>;
     return <>due {dstr(D(p.due))}</>;
+  };
+  // Plain-text delivery-date label (mobile cards, no markup).
+  const dueLabelText = (p: PORow): string => {
+    if (!p.due) return 'no date from vendor';
+    const d = days(TODAY, D(p.due));
+    if (d < 0) return `${-d} day${-d > 1 ? 's' : ''} late`;
+    if (d === 0) return 'due today';
+    return `vendor gave ${dstr(D(p.due))}`;
   };
   const recvCell = (p: PORow): React.ReactNode => {
     if (p.cancelled) return <span className="dim">—</span>;
@@ -487,6 +561,94 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   }
 
   const tipRow = tip ? rows.find(r => r.id === tip.id) : null;
+
+  // ---- Mobile card list (po-mobile.html) ----------------------------------
+  if (isMobile) {
+    // Status pill + amount tone for one PO card.
+    const cardOf = (p: PORow) => {
+      const n = p.items.length, g = got(p), b = balance(p);
+      let tone: string, st: string, sub = '';
+      if (p.approvalStatus === 'PENDING') { tone = 'gold-s'; st = 'Awaiting approval'; sub = `· ${dstr(D(p.createdAt))}${p.by ? ', ' + p.by : ''}`; }
+      else if (full(p)) { tone = 'landed'; st = b > 0.5 ? 'Received' : 'Received · settled'; sub = b > 0.5 ? '· bill to pay' : `· ${dstr(D(p.recv))}`; }
+      else if (p.rfq) { tone = 'motion'; st = 'Awaiting price'; }
+      else if (!p.sent) { tone = 'needs'; st = 'Not sent — send to vendor'; }
+      else if (g > 0) { tone = 'motion'; st = `${g} of ${n} received`; sub = `· ${dueLabelText(p)}`; }
+      else { tone = 'motion'; st = 'On the way'; sub = `· ${dueLabelText(p)}`; }
+      // Amount: red "to pay" once there's a real bill / it's landed; plain ordered value in transit; — when nothing owed.
+      let amtNode: React.ReactNode = <span className="amt zero">—</span>;
+      if (b > 0.5) amtNode = <span className={`amt${p.billed || full(p) ? ' pay' : ''}`}>{fmt(b)}</span>;
+      const shown = p.items.slice(0, 1).map(i => i.n).join(', ');
+      const more = p.items.length - 1;
+      return { tone, st, sub, amtNode, itemsText: shown + (more > 0 ? ` · +${more} item${more > 1 ? 's' : ''}` : '') };
+    };
+    const mChips: { k: typeof filter; label: string; n: number; gold?: boolean }[] = [
+      { k: 'approvals', label: 'Approvals', n: cApprovals, gold: true },
+      { k: 'all', label: 'All', n: cAll },
+      { k: 'tosend', label: 'To send', n: cToSend },
+      { k: 'onway', label: 'On the way', n: cOnWay },
+      { k: 'done', label: 'Received', n: cDone },
+    ];
+    const mFilter = FILTERS[filter] ? filter : 'all';
+    const mList = (() => {
+      let l = rows.filter(FILTERS[mFilter]);
+      if (q) l = l.filter(p => (p.vendor + p.id + p.site + p.items.map(i => i.n).join(' ')).toLowerCase().includes(q));
+      return l.slice().sort((a, b) => D(b.createdAt).getTime() - D(a.createdAt).getTime());
+    })();
+    return (
+      <div className="polx m">
+        <style>{POLX_CSS}</style>
+        <div className="m-mast">
+          <div className="r1">
+            <h1>Purchase orders</h1>
+            <span className="count">{rows.length}</span>
+            <button className={`ico${mSearch ? ' on' : ''}`} onClick={() => { setMSearch(s => !s); if (mSearch) setQ(''); }} aria-label="Search">
+              <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+            </button>
+          </div>
+          <div className="m-money"><b>{fmt(fBal)}</b> open with vendors · <b>{fmt(fOpen)}</b> on the way</div>
+        </div>
+
+        {mSearch && (
+          <div className="m-search">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+            <input autoFocus placeholder="Search vendor, PO, item…" value={q} onChange={e => setQ(e.target.value.toLowerCase())} />
+          </div>
+        )}
+
+        <div className="m-chips">
+          {mChips.map(c => (
+            <button key={c.k} className={`m-chip${c.gold ? ' gold' : ''}${mFilter === c.k ? ' on' : ''}`} onClick={() => setFilter(c.k)}>
+              {c.label}<em>{c.n}</em>
+            </button>
+          ))}
+        </div>
+
+        <div className="m-list">
+          {mList.length === 0 ? (
+            <div className="m-empty">{q ? 'No orders match your search.' : filter === 'approvals' ? 'Nothing waiting on you.' : 'Nothing here yet.'}</div>
+          ) : mList.map(p => {
+            const c = cardOf(p);
+            return (
+              <button key={p.id} className={`m-pcard ${c.tone}`} onClick={() => openPO(p.id)}>
+                <div className="r1"><span className="v">{p.vendor}</span>{c.amtNode}</div>
+                <div className="r2"><span className="po">{p.id}</span><span>·</span><span className="st-site">{p.site}</span></div>
+                {c.itemsText && <div className="items">{c.itemsText}</div>}
+                <div className="r3">
+                  <span className="m-dot" /><span className="m-st">{c.st}</span>
+                  {c.sub && <span className="sub">{c.sub}</span>}
+                  <svg className="chev" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6" /></svg>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        <button className="m-fab" onClick={() => navigate('/purchase-orders/new', projectId ? { state: { projectId } } : undefined)}>
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>New PO
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="polx">
