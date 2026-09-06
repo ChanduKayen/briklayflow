@@ -39,6 +39,7 @@ import {
 import { useSwipeTriage } from './useSwipeTriage';
 import { CardSplitPanel } from './CardSplitPanel';
 import { useSignedDocUrl } from '../../lib/storage';
+import { resolveEntry } from './resolveEntry';
 
 export interface StakeholderLite { stakeholder_id: string; name: string; type?: string; category?: string }
 export interface ProjectLite { project_id: string; name: string }
@@ -78,7 +79,6 @@ export function ReviewCard({
   onLightbox: (url: string) => void;
   onError: (message: string) => void;
 }) {
-  const ai = entry.ai_extracted || {};
   // The stored raw_image_url is a signed URL that can go stale (secret rotation / TTL). Re-sign it
   // from its own bucket+path so the proof always renders — the Transaction Detail page already does
   // this; the card used to trust the stored URL verbatim, which is why proofs could vanish.
@@ -137,33 +137,10 @@ export function ReviewCard({
    * is still verification — a phantom id whose name matches no row we can see stays unresolved — it
    * only rescues a real, named row the id lookup happened to miss.
    */
-  const nrm = (s?: string | null) => (s ?? '').trim().toLowerCase();
-  const projectByName = (() => {
-    const q = nrm(ai.project_name);
-    if (!q) return null;
-    const hits = projects.filter((p) => nrm(p.name) === q);
-    return hits.length === 1 ? hits[0] : null;
-  })();
-  const projectById = ai.project_id ? projects.find((p) => p.project_id === ai.project_id) ?? null : null;
-  const projectRow = projectById ?? projectByName;
-  const payeeRow = ai.payee_id ? stakeholders.find((s) => s.stakeholder_id === ai.payee_id) ?? null : null;
-
-  const payeeId = payeeRow?.stakeholder_id ?? null;
-  // the name is still worth showing even when the id was a phantom — it is what the site SAID
-  const payeeName = payeeRow?.name ?? ai.payee_name ?? ai.payee_raw ?? null;
-  const projectId = projectRow?.project_id ?? null;
-  const projectName = projectRow?.name ?? null;
-  const projectRaw = projectRow ? null : (ai.project_name || ai.project_raw || null);
-  const description = (ai.description || ai.description_raw || '').trim();
-  const amountNum = parseFloat(String(ai.amount ?? '').replace(/[^\d.]/g, '')) || 0;
-
-  const resolved: ResolvedFields = {
-    payeeId: payeeId || '',
-    projectId: projectId || '',
-    amount: amountNum,
-    description,
-    generalExpense: false,
-  };
+  // The AI's ids are guesses, not foreign keys — resolveEntry checks them against the org's real
+  // rows and is shared with the phone's review deck so the two can never disagree.
+  const { payeeId, payeeName, projectId, projectName, projectRaw, description, amount: amountNum, resolved } =
+    resolveEntry(entry, stakeholders, projects);
   const gaps = archived ? [] : gapsOf(resolved);
   const ready = !archived && isResolved(resolved);
 

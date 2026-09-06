@@ -29,6 +29,8 @@ import { WhatsAppGlyph } from '../components/day-book/atoms';
 import { ManageTeam } from '../components/day-book/Invitation';
 import { StartOnWhatsAppButton } from '../components/day-book/StartOnWhatsApp';
 import { useCursorLamp } from '../components/nav/useCursorLamp';
+import { useIsMobile } from '../lib/useIsMobile';
+import ReviewMobile from '../components/day-book/ReviewMobile';
 
 // Briklay's WhatsApp business number (same single source the invitation uses) — the band's "Open WhatsApp".
 const BRIKLAY_WA = '917330872705';
@@ -170,6 +172,8 @@ export default function Logbook({ session }: { session: Session }) {
   const [flyOut, setFlyOut] = useState<string | null>(null);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [teamOpen, setTeamOpen] = useState(false);
+  // 640px, the width at which the review list becomes the reference's one-card deck.
+  const isPhone = useIsMobile(640);
 
   // ── Data (unchanged hooks) ───────────────────────────────────────────────
   const { data: entries = [], isLoading } = useQuery({
@@ -385,6 +389,30 @@ export default function Logbook({ session }: { session: Session }) {
     qc.invalidateQueries({ queryKey: ['rough_entries'] });
     qc.invalidateQueries({ queryKey: ['inbox_badge'] });
   };
+
+  // ── the phone: the review deck, built to the for-review reference ─────────
+  if (isPhone) {
+    const senders = [...new Set(review.map(e => e.sender_name).filter(Boolean))] as string[];
+    const senderLine = senders.length === 0 ? null
+      : senders.length === 1 ? `Messages from ${senders[0]} land here`
+      : `Messages from ${senders[0]} and ${senders.length - 1} other${senders.length > 2 ? 's' : ''} land here`;
+    return (
+      <>
+        <ReviewMobile
+          entries={review}
+          filed={filed}
+          orgId={orgId}
+          stakeholders={stakeholders}
+          projects={projects}
+          onChanged={invalidateEntries}
+          onError={(m) => showSnackbar(m, { type: 'error' })}
+          senderLine={senderLine}
+          onManageSenders={() => setTeamOpen(true)}
+        />
+        {teamOpen && <ManageTeam onClose={() => setTeamOpen(false)} />}
+      </>
+    );
+  }
 
   return (
     <div className="db-scope min-h-screen" style={{ background: V.page, ...font }}>
