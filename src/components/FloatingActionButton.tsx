@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useTransition } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { IconReceipt2, IconFileInvoice, IconHammer, IconUserPlus } from '@tabler/icons-react';
 import { hidesGlobalFab } from '../lib/bottomChrome';
@@ -31,7 +31,7 @@ export function FloatingActionButton() {
     timerRef.current = setTimeout(() => setVisible(false), 220);
   };
 
-  const toggle = () => (visible ? handleClose() : handleOpen());
+  const toggle = () => (visible ? handleClose() : (setGoing(null), handleOpen()));
 
   useEffect(() => {
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
@@ -50,7 +50,17 @@ export function FloatingActionButton() {
     };
   }, [visible]);
 
-  const go = (path: string) => { navigate(path); handleClose(); };
+  // Every one of these routes is a lazily-loaded chunk. Navigating inside a transition keeps the
+  // menu on screen while the chunk arrives, so the option that was tapped can hold a chosen +
+  // working state instead of the sheet vanishing into a blank wait.
+  const [pending, startPending] = useTransition();
+  const [going, setGoing] = useState<string | null>(null);
+  const go = (path: string) => {
+    setGoing(path);
+    startPending(() => { navigate(path); });
+    handleClose();
+  };
+
 
   // Pages that own the bottom corner — full-screen create forms, detail pages with their own
   // action bar, and lists with their own create button (the Ledger's NewTxnFab, the PO list's
@@ -63,6 +73,17 @@ export function FloatingActionButton() {
       ref={ref}
       style={{ position: 'fixed', bottom: 76, right: 16, zIndex: 49 }}
     >
+      <style>{`
+        .fab-spin{width:15px;height:15px;border-radius:50%;display:block;
+          border:2px solid rgba(200,96,58,.28);border-top-color:${TERRACOTTA};
+          animation:fabspin .68s linear infinite}
+        @keyframes fabspin{to{transform:rotate(360deg)}}
+        /* the trigger keeps spinning after the menu has closed, for as long as the page is coming */
+        .fab-spin-lg{width:22px;height:22px;border-width:2.5px;
+          border-color:rgba(255,255,255,.38);border-top-color:#fff}
+        @media (prefers-reduced-motion:reduce){.fab-spin{animation-duration:1.6s}}
+      `}</style>
+
       {/* Options panel */}
       {visible && (
         <div
@@ -92,22 +113,28 @@ export function FloatingActionButton() {
                   display: 'flex', alignItems: 'center', gap: 12,
                   width: '100%',
                   padding: opt.highlight ? '12px 16px' : '11px 16px',
-                  background: opt.highlight ? 'rgba(200,96,58,0.05)' : 'transparent',
+                  background: going === opt.path ? 'rgba(200,96,58,0.13)' : opt.highlight ? 'rgba(200,96,58,0.05)' : 'transparent',
+                  opacity: going && going !== opt.path ? 0.42 : 1,
+                  transition: 'background 140ms ease, opacity 140ms ease',
                   border: 'none',
                   borderTop: opt.highlight ? '0.5px solid rgba(200,96,58,0.12)' : 'none',
                   borderBottom: isLast ? 'none' : '0.5px solid rgba(0,0,0,0.06)',
                   cursor: 'pointer', textAlign: 'left',
                   WebkitTapHighlightColor: 'transparent',
                 }}
-                onTouchStart={e => (e.currentTarget.style.background = 'rgba(200,96,58,0.10)')}
-                onTouchEnd={e => (e.currentTarget.style.background = opt.highlight ? 'rgba(200,96,58,0.05)' : 'transparent')}
+                onTouchStart={e => { if (!going) e.currentTarget.style.background = 'rgba(200,96,58,0.10)'; }}
+                onTouchEnd={e => { if (!going) e.currentTarget.style.background = opt.highlight ? 'rgba(200,96,58,0.05)' : 'transparent'; }}
+                disabled={!!going}
+                aria-busy={going === opt.path}
               >
                 <div style={{
                   width: 30, height: 30, borderRadius: 8,
                   background: opt.highlight ? 'rgba(200,96,58,0.12)' : 'rgba(200,96,58,0.08)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
                 }}>
-                  <Icon size={15} strokeWidth={1.75} style={{ color: TERRACOTTA }} />
+                  {going === opt.path
+                    ? <span className="fab-spin" aria-hidden="true" />
+                    : <Icon size={15} strokeWidth={1.75} style={{ color: TERRACOTTA }} />}
                 </div>
                 <span style={{
                   fontSize: 13,
@@ -126,6 +153,8 @@ export function FloatingActionButton() {
       {/* FAB button */}
       <button
         onClick={toggle}
+        disabled={pending}
+        aria-busy={pending}
         style={{
           width: 52, height: 52,
           borderRadius: '50%',
@@ -140,15 +169,19 @@ export function FloatingActionButton() {
           WebkitTapHighlightColor: 'transparent',
         }}
       >
-        <span style={{
-          display: 'block',
-          color: '#fff',
-          fontSize: 24,
-          fontWeight: 300,
-          lineHeight: 1,
-          transform: open ? 'rotate(45deg)' : 'rotate(0deg)',
-          transition: 'transform 220ms cubic-bezier(0.0,0,0.2,1)',
-        }}>+</span>
+        {pending
+          ? <span className="fab-spin fab-spin-lg" aria-hidden="true" />
+          : (
+            <span style={{
+              display: 'block',
+              color: '#fff',
+              fontSize: 24,
+              fontWeight: 300,
+              lineHeight: 1,
+              transform: open ? 'rotate(45deg)' : 'rotate(0deg)',
+              transition: 'transform 220ms cubic-bezier(0.0,0,0.2,1)',
+            }}>+</span>
+          )}
       </button>
     </div>
   );

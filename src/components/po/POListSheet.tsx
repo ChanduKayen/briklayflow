@@ -4,7 +4,7 @@
 //
 // Used by both the main /purchase-orders page and the per-project PO list — pass projectId to scope.
 import type React from 'react';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useTransition } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -209,6 +209,14 @@ const POLX_CSS = `
 .polx .m-fab{position:fixed;right:16px;bottom:calc(76px + env(safe-area-inset-bottom));z-index:30;height:52px;padding:0 20px;border-radius:26px;background:var(--terra);color:#fff;font-weight:600;font-size:15px;display:inline-flex;align-items:center;gap:8px;border:0;box-shadow:0 12px 28px -8px rgba(180,83,47,.55)}
 .polx .m-fab svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2.4}
 .polx .m-fab:active{transform:scale(.96)}
+/* held state — the button stays pressed and spins for as long as the page is coming */
+.polx .m-fab.busy,.polx .btn.busy{opacity:1;cursor:default}
+.polx .m-fab.busy{transform:scale(.97);box-shadow:0 6px 16px -8px rgba(180,83,47,.5)}
+.polx .btn.busy{color:var(--walnut-3)}
+.polx .m-spin{width:16px;height:16px;border-radius:50%;border:2px solid rgba(255,255,255,.42);border-top-color:#fff;animation:polxspin .68s linear infinite;flex:none}
+.polx .btn .m-spin{border-color:rgba(51,37,27,.25);border-top-color:var(--walnut)}
+@keyframes polxspin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.polx .m-spin{animation-duration:1.6s}}
 /* the chip row and the search button are deliberately compact; .tap44 keeps the look and
    gives the finger the full 44px it needs */
 .polx .m-chip,.polx .m-mast .ico{position:relative}
@@ -395,6 +403,12 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   // The PO whose "Send PO to vendor" link was tapped — opens the send dialog over the list.
   const [sendRow, setSendRow] = useState<PORow | null>(null);
   const isMobile = useIsMobile();
+  // /purchase-orders/new is a lazily-loaded chunk, so between the tap and the form there is a
+  // real wait. Inside a transition React keeps this list on screen and reports the wait through
+  // isPending, so the button that was pressed is the thing that shows it is working — instead of
+  // the tap seeming to do nothing and then the whole page being replaced by a skeleton.
+  const [opening, startOpening] = useTransition();
+  const openNewPO = () => startOpening(() => navigate('/purchase-orders/new', projectId ? { state: { projectId } } : undefined));
   const [mSearch, setMSearch] = useState(false);
 
   // Approve a pending PO inline (management / principal). The RPC enforces SoD (a non-principal
@@ -647,8 +661,9 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
           })}
         </div>
 
-        <button className="m-fab" onClick={() => navigate('/purchase-orders/new', projectId ? { state: { projectId } } : undefined)}>
-          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>New PO
+        <button className={`m-fab${opening ? ' busy' : ''}`} onClick={openNewPO} disabled={opening} aria-busy={opening}>
+          {opening ? <span className="m-spin" aria-hidden="true" /> : <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>}
+          New PO
         </button>
       </div>
     );
@@ -661,8 +676,9 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
         <div className="top">
           <h1>Purchase orders</h1>
           <span className="count">{rows.length}</span>
-          <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => navigate('/purchase-orders/new', projectId ? { state: { projectId } } : undefined)}>
-            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>New PO
+          <button className={`btn${opening ? ' busy' : ''}`} style={{ marginLeft: 'auto' }} onClick={openNewPO} disabled={opening} aria-busy={opening}>
+            {opening ? <span className="m-spin" aria-hidden="true" /> : <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>}
+            New PO
           </button>
         </div>
 
