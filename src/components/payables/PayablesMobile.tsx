@@ -199,6 +199,11 @@ const CSS = `
 
 /* paying something other than the computed figure has to be explained — the desktop run
    asks the same question in a popover; on a phone it belongs in the sheet, above the button */
+.plm .sheet .note{width:100%;height:48px;border:0;border-radius:16px;background:var(--card);
+  padding:0 16px;font:inherit;font-size:16px;color:var(--ink);outline:none;margin-bottom:16px;
+  transition:box-shadow .18s var(--ease)}
+.plm .sheet .note::placeholder{color:var(--ink-3)}
+.plm .sheet .note:focus{box-shadow:inset 0 0 0 1.5px var(--tint)}
 .plm .why{background:var(--card);border-radius:16px;padding:14px 16px;margin-bottom:16px}
 .plm .why .wh{font-size:13.5px;color:var(--ink-2);line-height:1.5;margin-bottom:10px}
 .plm .why .wh b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
@@ -269,7 +274,7 @@ export interface PayablesMobileProps {
   modes: string[];
   mode: string;
   onMode: (m: string) => void;
-  onPay: (row: PlmRow, amount: number, diff: PlmDiff | null) => Promise<void>;
+  onPay: (row: PlmRow, amount: number, diff: PlmDiff | null, note: string) => Promise<void>;
   onOpenParty: (row: PlmRow) => void;
   /** the "Add a payment request" line / the empty section's action */
   onAdd: (sectionId: string) => void;
@@ -307,6 +312,7 @@ export default function PayablesMobile(p: PayablesMobileProps) {
   const [amtText, setAmtText] = useState('');
   const [diffKind, setDiffKind] = useState<PlmDiff['kind']>('carry');
   const [reason, setReason] = useState('');
+  const [note, setNote] = useState('');
   const [stage, setStage] = useState<'idle' | 'saving' | 'done'>('idle');
   const [openExpl, setOpenExpl] = useState<string | null>(null);
 
@@ -319,6 +325,7 @@ export default function PayablesMobile(p: PayablesMobileProps) {
     setAmtText(String(row.amount || ''));
     setDiffKind(row.amount < row.computed ? 'carry' : 'advance');
     setReason('');
+    setNote('');
     setStage('idle');
   };
   const closePay = () => { if (stage !== 'saving') setPayFor(null); };
@@ -333,7 +340,7 @@ export default function PayablesMobile(p: PayablesMobileProps) {
     if (!payFor || !canPay || stage !== 'idle') return;
     setStage('saving');
     try {
-      await p.onPay(payFor, amount, needsWhy ? { kind: diffKind, reason: reason.trim() } : null);
+      await p.onPay(payFor, amount, needsWhy ? { kind: diffKind, reason: reason.trim() } : null, note.trim());
       setStage('done');
       setTimeout(() => setPayFor(null), 620);
     } catch {
@@ -501,6 +508,11 @@ export default function PayablesMobile(p: PayablesMobileProps) {
             <button type="button" key={m} className={m === p.mode ? 'on' : ''} onClick={() => p.onMode(m)}>{m}</button>
           ))}
         </div>
+
+        {/* the desktop row carries a note beside the figure; on a phone it belongs here, where
+            the payment is actually made — it rides on the transaction with the rest of the why */}
+        <input className="note" value={note} onChange={(e) => setNote(e.target.value)}
+          placeholder="Add a note (optional)" aria-label="Note" />
 
         {needsWhy && payFor && (
           <div className="why">

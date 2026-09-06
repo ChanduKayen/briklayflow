@@ -415,11 +415,11 @@ export default function Payables({ session }: { session: Session }) {
 
   // The one place a payment is recorded. The desktop row and the phone's pay sheet both come
   // through here, so a payment made on a phone is the same transaction, settled the same way.
-  const payRow = async (r: PayRow, amt: number, reason: string) => {
+  const payRow = async (r: PayRow, amt: number, reason: string, note: string) => {
     if (!amt) return;
     setBusy(r.key);
     try {
-      const txnId = await recordWeeklyPayment(orgId, r, amt, mode, reason, monday, notes[r.key] ?? '');
+      const txnId = await recordWeeklyPayment(orgId, r, amt, mode, reason, monday, note);
       if (newLedger) { try { await settleWeeklyPaymentOnLedger(txnId, r, amt, monday); } catch (e: any) { showSnackbar(`Paid, but ledger link failed: ${e?.message || 'error'}`, { type: 'error' }); } }
       setPaid(p => ({ ...p, [r.key]: amt }));
       showSnackbar(`Paid ${inr(amt)} to ${r.party}`);
@@ -429,7 +429,7 @@ export default function Payables({ session }: { session: Session }) {
       throw e;                                   // the sheet keeps itself open so it can be retried
     } finally { setBusy(null); }
   };
-  const doPay = (r: PayRow) => payRow(r, planned(r), diffs[r.key]?.reason || '').catch(() => {});
+  const doPay = (r: PayRow) => payRow(r, planned(r), diffs[r.key]?.reason || '', notes[r.key] ?? '').catch(() => {});
 
   const onMark = (r: PayRow) => {
     if (Math.abs(planned(r) - r.thisWeek) >= 1 && !diffs[r.key]) { setWhy(r.key); return; }
@@ -506,12 +506,13 @@ export default function Payables({ session }: { session: Session }) {
         left={totals.left} paid={totals.paid} plannedTotal={totals.planned} countLeft={totals.count}
         sections={plmSections}
         modes={MODES} mode={mode} onMode={setMode}
-        onPay={async (row, amount, diff) => {
+        onPay={async (row, amount, diff, note) => {
           const r = byKey.get(row.key);
           if (!r) return;
           if (diff) setDiffs(d => ({ ...d, [r.key]: diff as Diff }));
           setPlan(pp => ({ ...pp, [r.key]: amount }));
-          await payRow(r, amount, diff?.reason || '');
+          if (note) setNotes(n => ({ ...n, [r.key]: note }));
+          await payRow(r, amount, diff?.reason || '', note);
         }}
         onOpenParty={(row) => {
           const id = byKey.get(row.key)?.stakeholderId;
