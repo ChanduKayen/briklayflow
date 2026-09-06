@@ -65,7 +65,17 @@ const BAND_CSS = `
 .rb-meta{font-size:13px;color:rgba(245,240,231,.5);margin-top:11px}
 .rb-meta .num{color:rgba(245,240,231,.72)}
 .rb-meta i{font-style:normal;color:rgba(245,240,231,.28);margin:0 7px}
-@media(max-width:640px){.rb-in{padding:20px 18px}.rb-h1{font-size:25px}.rb-actions{gap:6px}.rb-btn{padding:0 10px}}
+@media(max-width:640px){
+  .rb-in{padding:18px 16px}
+  .rb-h1{font-size:24px}
+  /* Title on its own line; the two actions drop below it and split the row evenly, so nothing crams. */
+  .rb-top{flex-wrap:wrap;align-items:center}
+  .rb-actions{margin-left:0;flex-basis:100%;margin-top:12px;gap:8px}
+  .rb-btn{flex:1;justify-content:center;height:40px;padding:0 12px}
+  .rb-sub{font-size:13px;margin-top:8px}
+  .rb-lead{margin-top:18px}
+  .rb-amt{font-size:27px}
+}
 @media (prefers-reduced-motion:reduce){.rb-fx{transition:none}}
 `;
 import { ReviewCard, type StakeholderLite, type ProjectLite } from '../components/day-book/ReviewCard';

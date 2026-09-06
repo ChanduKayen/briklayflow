@@ -483,7 +483,9 @@ export function ReviewCard({
           borderRadius: 16, position: 'relative',
           cursor: swipe.dragging ? 'grabbing' : 'grab', touchAction: 'pan-y',
           display: 'grid', alignItems: 'start', gap: '0 28px',
-          gridTemplateColumns: wide ? '212px minmax(0,1fr) auto' : '1fr',
+          // minmax(0,…) on every track so a wide child (e.g. the split table) scrolls inside its
+          // own box instead of stretching the card past the viewport and bleeding the page.
+          gridTemplateColumns: wide ? '212px minmax(0,1fr) auto' : 'minmax(0,1fr)',
           padding: wide ? '20px 26px 18px' : '18px',
         }}
       >
@@ -709,7 +711,7 @@ export function ReviewCard({
             one continuous card. The container drops its overflow clip while open so the payee dropdown
             isn't cut off. Files N transactions and takes the card's leave. */}
         {splitOpen && !leaving && (
-          <div style={{ gridColumn: '1 / -1', marginTop: 14 }}>
+          <div style={{ gridColumn: '1 / -1', marginTop: 14, minWidth: 0, maxWidth: '100%' }}>
             <CardSplitPanel
               entry={entry}
               orgId={orgId}
