@@ -19,6 +19,7 @@ import { isNewLedgerOrg } from '../lib/ledgerRead';
 import { PendingCertifications } from '../components/attendance/PendingCertifications';
 import { LedgerCutoverControl } from '../components/attendance/LedgerCutoverControl';
 import { useUserProfile } from '../App';
+import { RateCardPanel } from '../components/attendance/RateCardPanel';
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 const MODES = ['UPI', 'NEFT', 'Cash', 'Cheque'];
@@ -107,6 +108,32 @@ const CSS = `
 .wpx .foot .acts{display:flex;gap:12px;align-items:center}
 .wpx .foot .acts .lbl,.wpx .foot .acts .hint{font-size:12.5px;color:var(--walnut-3)}
 .wpx .modesel{border:1px solid var(--line-2);border-radius:9px;height:38px;padding:0 10px;background:var(--paper);font:inherit;font-size:13.5px}
+/* ── rate card — the day rates behind the labour figures ── */
+.wpx .ratecard{background:var(--paper);border:1px solid var(--line);border-radius:14px;margin-bottom:16px;overflow:hidden}
+.wpx .rc-head{width:100%;display:flex;align-items:center;gap:10px;padding:13px 18px;background:none;border:0;cursor:pointer;text-align:left;font:inherit}
+.wpx .rc-head:active{background:var(--cream)}
+.wpx .rc-t{font:500 15px "Playfair Display",serif;color:var(--walnut);flex-shrink:0}
+.wpx .rc-s{font-size:12.5px;color:var(--walnut-3);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wpx .rc-chev{color:var(--line-2);font-size:15px;transition:transform .18s ease;flex-shrink:0}
+.wpx .rc-chev.on{transform:rotate(90deg);color:var(--walnut-2)}
+.wpx .rc-body{border-top:1px solid var(--line);padding:4px 18px 12px}
+.wpx .rc-row{display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px dashed var(--line);font-size:13.5px}
+.wpx .rc-row:last-of-type{border-bottom:0}
+.wpx .rc-n{flex:1;min-width:0;color:var(--walnut-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wpx .rc-v{border:0;background:none;font:inherit;font-weight:500;color:var(--walnut);padding:6px 2px;cursor:default}
+.wpx .rc-v.edit{cursor:pointer;border-bottom:1px dashed var(--line-2)}
+.wpx .rc-v.edit:active{color:var(--terracotta)}
+.wpx .rc-per{color:var(--walnut-3);font-weight:400;font-size:12px;margin-left:2px}
+.wpx .rc-in{width:104px;text-align:right;border:1px solid var(--walnut);border-radius:9px;background:#fff;font:inherit;font-size:15px;padding:7px 10px;outline:none}
+.wpx .rc-foot{margin:10px 0 0;font-size:12px;line-height:1.45;color:var(--walnut-3)}
+@media (max-width:640px){
+  .wpx .ratecard{border-radius:16px;margin-bottom:14px}
+  .wpx .rc-head{padding:13px 15px;min-height:52px}
+  .wpx .rc-body{padding:4px 15px 12px}
+  .wpx .rc-row{padding:11px 0}
+  .wpx .rc-v{padding:9px 2px}
+  .wpx .rc-in{width:118px;height:44px}
+}
 .wpx .state{padding:70px 18px;text-align:center;color:var(--walnut-3);font-size:14px}
 .wpx .emptyrow{padding:14px 18px;color:var(--walnut-3);font-size:13px;border-bottom:1px solid var(--line)}
 .wpx .recbody{padding:6px 18px 14px}
@@ -241,7 +268,17 @@ const CSS = `
   .wpx .row .status{grid-area:status;align-self:center;margin-top:9px}
   /* the source hint only ever appears on hover, which a touch screen has not got */
   .wpx .row .what .srchint{display:none}
-  .wpx .row .chev{left:6px;font-size:13px}
+  /* the row opens to show how the figure was reached — say so with a real affordance
+     rather than a 12px caret hiding in the gutter */
+  .wpx .row .chev{left:6px;font-size:15px;color:var(--walnut-3);width:14px;text-align:center}
+  .wpx .row.exp .chev{color:var(--terracotta)}
+  /* a tap anywhere on the card reads as a press, and the card lifts a hair while open */
+  .wpx .row{transition:transform .14s cubic-bezier(.2,.7,.3,1),background-color .14s ease}
+  .wpx .row:active{transform:scale(.992)}
+  .wpx .row.exp{box-shadow:inset 3px 0 0 var(--terracotta)}
+  /* Mark paid is the row's job — give it the full width of its column and a real target */
+  .wpx .status{width:100%}
+  .wpx .mark{width:100%;min-height:46px;justify-content:center}
   /* 16px keeps iOS Safari from zooming the page when a field takes focus */
   .wpx .in{width:126px;height:44px;border-radius:12px;padding:0 11px}
   /* a settled row shows the figure as text, so the column hugs it instead of reserving a field */
@@ -409,6 +446,9 @@ export default function Payables({ session }: { session: Session }) {
 
         {/* Work awaiting sign-off — approving here mints the obligation into the run below. */}
         {orgId && session.user?.id && <PendingCertifications orgId={orgId} userId={session.user.id} />}
+
+        {/* The day rates that produced the labour figures below — collapsed until asked for. */}
+        {orgId && <RateCardPanel orgId={orgId} isManager={isManager} />}
 
         {isLoading && <div className="state">Loading the week…</div>}
         {error && <div className="state" style={{ color: 'var(--terracotta)' }}>Could not load — {(error as any)?.message || 'try again'}</div>}

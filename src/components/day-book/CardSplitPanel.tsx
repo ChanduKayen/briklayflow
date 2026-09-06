@@ -15,6 +15,7 @@ import { supabase } from '../../lib/supabase';
 import { fileRoughEntrySplit, createParty } from './fileEntry';
 import { GEN_HEADS } from '../../lib/costCodes';
 import type { StakeholderLite, ProjectLite } from './ReviewCard';
+import { useIsMobile } from '../../lib/useIsMobile';
 
 // A split row: an existing payee, OR a general-expense head (party-less), plus site/amount/note.
 interface Row { id: string; payeeId: string; payeeName: string; payeeSearch: string; genHead: string; genName: string; projectId: string; amount: number | ''; description: string; }
@@ -32,6 +33,11 @@ function matchGenHeads(query: string): { code: string; name: string }[] {
 const inr = (n: number) => Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 const DOTS = ['#C75E32', '#C79A2E', '#4C6B47', '#6366F1', '#0EA5E9'];
 const GRID = '26px minmax(130px,1.4fr) minmax(120px,1fr) minmax(120px,1.2fr) 96px 30px';
+// On a phone the same six cells stack into a card: who was paid on the first line with the
+// remove button, then site, what for, and the amount — no sideways scrolling to reach the
+// field that actually matters.
+const GRID_M = '20px minmax(0,1fr) 30px';
+const AREAS_M = '"dot paid rm" "dot site site" "dot for for" "dot amt amt"';
 
 export function CardSplitPanel({
   entry, orgId, stakeholders, projects, base, onFiled, onClose, onError,
@@ -55,6 +61,7 @@ export function CardSplitPanel({
   const [openPayee, setOpenPayee] = useState<string | null>(null);
   // The suggestion list is PORTALED to <body> (fixed position) so it floats above the rows below it,
   // instead of being clipped/covered inside the scrolling table.
+  const isMobile = useIsMobile(700);
   const [anchor, setAnchor] = useState<{ left: number; top: number; width: number } | null>(null);
   const anchorTo = (el: HTMLElement) => { const r = el.getBoundingClientRect(); setAnchor({ left: r.left, top: r.bottom + 4, width: r.width }); };
   const [auto, setAuto] = useState(false);
@@ -185,10 +192,10 @@ export function CardSplitPanel({
       </div>
 
       {/* table */}
-      <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${V.line}`, overflowX: 'auto' }}>
-        <div style={{ minWidth: 620 }}>
-          {/* head */}
-          <div style={{ display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', background: V.field, borderBottom: `1px solid ${V.line}` }}>
+      <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${V.line}`, overflowX: isMobile ? 'visible' : 'auto' }}>
+        <div style={{ minWidth: isMobile ? 0 : 620 }}>
+          {/* head — the placeholders name every field, so the phone drops the header row */}
+          <div style={{ display: isMobile ? 'none' : 'grid', gridTemplateColumns: GRID, alignItems: 'center', background: V.field, borderBottom: `1px solid ${V.line}` }}>
             {['#', 'Paid to', 'Site', 'For', 'Amount', ''].map((h, i) => (
               <div key={i} className="px-3 py-2" style={{ ...font, fontSize: 11, fontWeight: 600, letterSpacing: '.02em', color: V.faint, textAlign: i === 4 ? 'right' : 'left', borderLeft: i > 0 && i < 5 ? `1px solid ${V.line}` : 'none' }}>{h}</div>
             ))}
@@ -197,10 +204,14 @@ export function CardSplitPanel({
           {rows.map((r, i) => {
             const cellBorder = `1px solid ${V.line}`;
             return (
-              <div key={r.id} style={{ display: 'grid', gridTemplateColumns: GRID, alignItems: 'stretch', borderTop: i > 0 ? cellBorder : 'none', background: V.surface }}>
-                <div className="grid place-items-center"><span style={{ width: 7, height: 7, borderRadius: '50%', background: DOTS[i % DOTS.length] }} /></div>
+              <div key={r.id} style={{ display: 'grid',
+                gridTemplateColumns: isMobile ? GRID_M : GRID,
+                ...(isMobile ? { gridTemplateAreas: AREAS_M, padding: '4px 8px 8px' } : null),
+                alignItems: isMobile ? 'center' : 'stretch',
+                borderTop: i > 0 ? cellBorder : 'none', background: V.surface }}>
+                <div className="grid place-items-center" style={isMobile ? { gridArea: 'dot', alignSelf: 'start', paddingTop: 15 } : undefined}><span style={{ width: 7, height: 7, borderRadius: '50%', background: DOTS[i % DOTS.length] }} /></div>
                 {/* Paid to */}
-                <div className="px-3 py-2 flex items-center" style={{ borderLeft: cellBorder }}>
+                <div className="px-3 py-2 flex items-center" style={isMobile ? { gridArea: 'paid' } : { borderLeft: cellBorder }}>
                   <input value={r.payeeSearch}
                     onChange={(e) => { up(r.id, { payeeSearch: e.target.value, payeeId: '', payeeName: '', genHead: '', genName: '' }); setOpenPayee(r.id); anchorTo(e.currentTarget); }}
                     onFocus={(e) => { setOpenPayee(r.id); anchorTo(e.currentTarget); }}
@@ -209,7 +220,7 @@ export function CardSplitPanel({
                     style={{ ...cellInput, fontWeight: (r.payeeId || r.genHead) ? 600 : 400 }} />
                 </div>
                 {/* Site */}
-                <div className="px-2 py-2 flex items-center" style={{ borderLeft: cellBorder }}>
+                <div className="px-2 py-2 flex items-center" style={isMobile ? { gridArea: 'site', borderTop: cellBorder } : { borderLeft: cellBorder }}>
                   <select value={r.projectId} onChange={(e) => up(r.id, { projectId: e.target.value })}
                     style={{ ...cellInput, color: r.projectId ? V.ink : V.faint, appearance: 'none', cursor: 'pointer' }}>
                     <option value="">Select site…</option>
@@ -218,20 +229,20 @@ export function CardSplitPanel({
                   </select>
                 </div>
                 {/* For */}
-                <div className="px-3 py-2 flex items-center" style={{ borderLeft: cellBorder }}>
+                <div className="px-3 py-2 flex items-center" style={isMobile ? { gridArea: 'for', borderTop: cellBorder } : { borderLeft: cellBorder }}>
                   <input value={r.description} onChange={(e) => up(r.id, { description: e.target.value })}
                     placeholder="What for? (optional)" style={{ ...cellInput, color: r.description ? V.ink : V.faint }} />
                 </div>
                 {/* Amount */}
-                <div className="px-3 py-2 flex items-center gap-1" style={{ borderLeft: cellBorder }}>
-                  <span style={{ color: V.faint, fontSize: 12 }}>₹</span>
+                <div className="px-3 py-2 flex items-center gap-1" style={isMobile ? { gridArea: 'amt', borderTop: cellBorder } : { borderLeft: cellBorder }}>
+                  <span style={{ color: V.faint, fontSize: isMobile ? 14 : 12 }}>₹</span>
                   <input inputMode="numeric" value={r.amount === '' ? '' : String(r.amount)}
                     onChange={(e) => { const v = e.target.value.replace(/[^0-9.]/g, ''); up(r.id, { amount: v === '' ? '' : Number(v) }); }}
                     onKeyDown={(e) => { if (e.key === 'Enter' && i === rows.length - 1) { e.preventDefault(); add(); } }}
                     placeholder="0" style={{ ...cellInput, ...nums, textAlign: 'right', color: Number(r.amount) > 0 ? V.ink : V.faint }} />
                 </div>
                 {/* remove */}
-                <div className="grid place-items-center" style={{ borderLeft: cellBorder }}>
+                <div className="grid place-items-center" style={isMobile ? { gridArea: 'rm', alignSelf: 'start', paddingTop: 8 } : { borderLeft: cellBorder }}>
                   <button type="button" onClick={() => rm(r.id)} disabled={rows.length <= 1} className="grid place-items-center rounded disabled:opacity-20" style={{ width: 22, height: 22, color: V.faint }} aria-label="Remove row"><X size={13} /></button>
                 </div>
               </div>
@@ -241,32 +252,45 @@ export function CardSplitPanel({
       </div>
 
       {/* add another / put remaining on the last */}
-      <div className="flex items-center justify-between px-1 mt-2" style={{ ...font, fontSize: 12.5 }}>
-        <button type="button" onClick={add} className="inline-flex items-center gap-1.5" style={{ color: V.inkSoft }}>
+      <div className={`px-1 mt-2 ${isMobile ? 'grid gap-2' : 'flex items-center justify-between'}`} style={{ ...font, fontSize: 12.5 }}>
+        <button type="button" onClick={add}
+          className={isMobile ? 'flex items-center justify-center gap-1.5 rounded-[10px]' : 'inline-flex items-center gap-1.5'}
+          style={isMobile
+            ? { color: V.inkSoft, height: 44, border: `1px dashed ${V.line}`, background: V.field, fontWeight: 600 }
+            : { color: V.inkSoft }}>
           <span style={{ fontWeight: 700, color: V.terra }}>+</span> Add another
-          <kbd style={{ ...font, fontSize: 10.5, padding: '1px 5px', borderRadius: 4, border: `1px solid ${V.line}`, color: V.faint, background: V.field }}>Enter</kbd>
-          <span style={{ color: V.faint }}>on the last row</span>
+          {/* the Enter shortcut only means something with a hardware keyboard */}
+          {!isMobile && <>
+            <kbd style={{ ...font, fontSize: 10.5, padding: '1px 5px', borderRadius: 4, border: `1px solid ${V.line}`, color: V.faint, background: V.field }}>Enter</kbd>
+            <span style={{ color: V.faint }}>on the last row</span>
+          </>}
         </button>
         {remaining > 0.005 && (
           <button type="button" onClick={() => { const last = rows[rows.length - 1]; up(last.id, { amount: (Number(last.amount) || 0) + remaining }); }}
-            className="font-medium" style={{ color: V.terra, textDecoration: 'underline', textUnderlineOffset: 2, ...nums }}>
+            className={isMobile ? 'flex items-center justify-center rounded-[10px] font-semibold' : 'font-medium'}
+            style={isMobile
+              ? { ...nums, height: 44, color: V.terra, background: 'color-mix(in srgb, ' + V.terra + ' 8%, transparent)', border: `1px solid color-mix(in srgb, ${V.terra} 30%, transparent)` }
+              : { color: V.terra, textDecoration: 'underline', textUnderlineOffset: 2, ...nums }}>
             Put ₹{inr(remaining)} on the last row
           </button>
         )}
       </div>
 
       {/* footer */}
-      <div className="flex items-center gap-3 mt-3.5 px-1">
-        <span style={{ ...font, fontSize: 12, color: V.faint }}>Each row becomes its own transaction, all linked back to {docRef}.</span>
-        <span className="flex-1" />
-        <button type="button" onClick={onClose} className="font-semibold rounded-[10px]" style={{ ...font, fontSize: 13.5, padding: '9px 14px', color: V.inkSoft, background: 'transparent', border: 'none', cursor: 'pointer' }}>Cancel</button>
+      <div className={isMobile ? 'mt-3.5 px-1' : 'flex items-center gap-3 mt-3.5 px-1'}>
+        <span className={isMobile ? 'block mb-2.5' : ''} style={{ ...font, fontSize: 12, color: V.faint, lineHeight: 1.45 }}>Each row becomes its own transaction, all linked back to {docRef}.</span>
+        {!isMobile && <span className="flex-1" />}
+        <div className={isMobile ? 'flex items-center gap-2.5' : 'contents'}>
+        <button type="button" onClick={onClose} className="font-semibold rounded-[10px]" style={{ ...font, fontSize: 13.5, padding: '9px 14px', color: V.inkSoft, background: 'transparent', border: isMobile ? `1px solid ${V.line}` : 'none', height: isMobile ? 46 : undefined, flex: isMobile ? '0 0 auto' : undefined, minWidth: isMobile ? 96 : undefined, cursor: 'pointer' }}>Cancel</button>
         <button type="button" onClick={file} disabled={!valid || filing}
-          className="inline-flex items-center gap-1.5 rounded-[10px] transition-opacity"
+          className="inline-flex items-center justify-center gap-1.5 rounded-[10px] transition-opacity"
           style={{ ...font, fontWeight: 600, fontSize: 13.5, padding: '9px 16px', border: 'none',
+            height: isMobile ? 46 : undefined, flex: isMobile ? '1 1 auto' : undefined,
             color: '#FFF6EF', background: V.terra, opacity: valid && !filing ? 1 : 0.5, cursor: valid && !filing ? 'pointer' : 'default' }}>
           {filing ? <Loader2 size={14} className="animate-spin" /> : <span style={{ fontWeight: 700 }}>✓</span>}
           {filing ? 'Filing…' : `File ${fileCount} transaction${fileCount !== 1 ? 's' : ''}`}
         </button>
+        </div>
       </div>
 
       {/* payee suggestions — full parity with the Approve/Edit picker: searchPayees matches (name over

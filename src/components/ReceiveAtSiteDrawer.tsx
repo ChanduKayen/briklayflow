@@ -172,6 +172,42 @@ const CSS = `
 .ras .primary{background:var(--ink);color:#fff;border-radius:999px;padding:11px 20px;font-weight:500;transition:background .15s,opacity .15s;display:inline-flex;align-items:center;gap:8px}
 .ras .primary:hover{background:#0f171b}
 .ras .primary:disabled{background:var(--line-strong);color:#fff;cursor:not-allowed}
+/* ── phone (≤560px) ─────────────────────────────────────────────────────
+   The sheet was drawn for a 540px desktop panel: 24px gutters, the three split figures
+   side by side, the extra fields in two columns, and a footer that puts the primary
+   action in a pill beside a ghost link. At 390px that leaves the split boxes about
+   100px each and squeezes the item name against the quantity. On a phone the sheet
+   takes the full screen from the bottom, the gutters come in, the figures and extras
+   stack, the preset chips become real tap targets and the primary action spans the
+   footer. */
+@media (max-width:560px){
+  .ras{align-items:flex-end}
+  .ras .sheet{max-width:none;max-height:94dvh;border-radius:18px 18px 0 0;border-bottom:0;
+    animation:rasUp .26s cubic-bezier(.16,1,.3,1)}
+  .ras .head{padding:16px 16px 14px}
+  .ras .body{padding:8px 16px 20px;gap:18px}
+  .ras .item-top{padding:14px 14px 12px;gap:10px}
+  /* the figure no longer competes with the item name for the same line */
+  .ras .qty input{min-width:78px;font-size:28px}
+  .ras .presets{padding:0 14px 12px;gap:7px}
+  .ras .chip{padding:11px 15px;font-size:13.5px}
+  .ras .cond{padding:11px 14px}
+  /* received / damaged / short read as three cards down the sheet, not three slivers */
+  .ras .split{grid-template-columns:1fr;padding:12px 14px 14px;gap:8px}
+  .ras .sp{padding:11px 13px;display:grid;grid-template-columns:1fr auto;align-items:center;gap:2px 10px}
+  .ras .sp input{font-size:20px;text-align:right}
+  .ras .split-note{flex-direction:column;align-items:flex-start;gap:4px}
+  .ras .balance{padding:10px 14px 12px}
+  /* two half-width fields on a phone are two cramped fields */
+  .ras .extras{grid-template-columns:1fr;gap:14px}
+  .ras .tile{width:68px;height:68px}
+  .ras .foot{padding:12px 16px calc(12px + env(safe-area-inset-bottom));gap:10px}
+  .ras .actions{flex:1;gap:10px}
+  .ras .ghost{padding:12px 10px;min-height:46px;display:inline-flex;align-items:center}
+  .ras .primary{flex:1;justify-content:center;min-height:46px;padding:11px 18px}
+}
+@keyframes rasUp{from{transform:translateY(14px);opacity:0}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.ras .sheet{animation:none}}
 .ras .saved{padding:48px 24px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px}
 .ras .saved .ring{width:56px;height:56px;border-radius:50%;background:var(--good-bg);color:var(--good);display:grid;place-items:center}
 .ras .saved h2{font-size:20px;font-weight:600}
