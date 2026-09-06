@@ -313,21 +313,41 @@ const PODX_CSS = `
 .podx .m-arow:last-child{border-bottom:0}
 .podx .m-arow .t{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);flex-shrink:0;padding-top:1px}
 .podx .m-arow b{font-weight:600;color:var(--ink)}
-.podx .m-abar{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;gap:9px;padding:12px 14px calc(14px + env(safe-area-inset-bottom));background:rgba(255,253,249,.95);backdrop-filter:blur(12px);border-top:1px solid var(--line)}
-.podx .m-abar .m-note{position:absolute;top:-30px;left:14px;right:14px;text-align:center;font-size:12px;color:var(--ink-2);background:var(--gold-tint);border:1px solid #EBD9B4;border-radius:10px;padding:5px}
-.podx .m-abtn{height:48px;border-radius:13px;font-weight:600;font-size:14.5px;display:flex;align-items:center;justify-content:center;gap:8px;border:0;cursor:pointer}
-.podx .m-abtn:active{transform:scale(.97)}
-.podx .m-abtn.ghost{flex:1;border:1px solid var(--line);background:var(--paper);color:var(--ink-2)}
-.podx .m-abtn.primary{flex:1.6;background:var(--terra);color:#fff;box-shadow:0 10px 24px -10px rgba(196,97,58,.5)}
-.podx .m-abtn.wa{flex:1.6;background:#129E4E;color:#fff}
-.podx .m-abtn:disabled{opacity:.5}
+.podx .m-abar{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;gap:10px;padding:12px 14px calc(14px + env(safe-area-inset-bottom));background:rgba(255,253,249,.96);backdrop-filter:blur(14px);border-top:1px solid var(--line)}
+.podx .m-abar .m-note{position:absolute;top:-32px;left:14px;right:14px;text-align:center;font-size:12px;color:var(--ink-2);background:var(--gold-tint);border:1px solid #EBD9B4;border-radius:10px;padding:6px}
+.podx .m-abtn{height:52px;border-radius:14px;font-weight:600;font-size:14.5px;display:flex;align-items:center;justify-content:center;gap:9px;border:0;cursor:pointer;transition:transform .12s var(--ease),box-shadow .18s var(--ease),filter .16s var(--ease)}
+.podx .m-abtn:active{transform:translateY(1px) scale(.985)}
+.podx .m-abtn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;flex-shrink:0}
+.podx .m-abtn .lbl{display:flex;flex-direction:column;align-items:flex-start;line-height:1.08;text-align:left}
+.podx .m-abtn.pri .lbl,.podx .m-abtn.sec .lbl{align-items:flex-start}
+.podx .m-abtn .lbl small{font-weight:500;font-size:10.5px;letter-spacing:.01em;opacity:.82;margin-top:2px;font-family:var(--sans);max-width:16ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.podx .m-abtn:disabled{opacity:.55;cursor:not-allowed}
+.podx .m-abtn:disabled:active{transform:none}
+.podx .m-abtn.pri{flex:1.7}
+.podx .m-abtn.sec{flex:1}
+/* filled tones — one strong action at a time; the send action carries WhatsApp green on purpose */
+.podx .m-abtn.pri.tone-terra{background:var(--terra);color:#fff;box-shadow:0 10px 22px -12px rgba(196,97,58,.75)}
+.podx .m-abtn.pri.tone-terra:active{filter:brightness(.94)}
+.podx .m-abtn.pri.tone-sage{background:#5F7F5B;color:#fff;box-shadow:0 10px 22px -12px rgba(95,127,91,.75)}
+.podx .m-abtn.pri.tone-sage:active{filter:brightness(.94)}
+.podx .m-abtn.pri.tone-wa{background:#1FAF5A;color:#fff;box-shadow:0 10px 22px -12px rgba(31,175,90,.8)}
+.podx .m-abtn.pri.tone-wa:active{filter:brightness(.94)}
+.podx .m-abtn.pri.tone-neutral{background:var(--ink);color:var(--paper)}
+/* secondary — quiet outline, except the WhatsApp send which stays recognisably green */
+.podx .m-abtn.sec{border:1px solid var(--line);background:var(--paper);color:var(--ink-2)}
+.podx .m-abtn.sec:active{background:var(--paper-2)}
+.podx .m-abtn.sec.tone-wa{background:#EAF7EF;border-color:#BFE6CE;color:#0F7C3D}
+.podx .m-abtn.sec.tone-sage{background:var(--sage-tint);border-color:transparent;color:var(--sage)}
+.podx .m-spin{width:17px;height:17px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:podxspin .7s linear infinite;flex-shrink:0}
+.podx .m-abtn.sec .m-spin{border-color:rgba(110,99,91,.3);border-top-color:var(--ink-2)}
 /* mobile bottom-sheet for record bill / payment */
 .podx .m-scrim{position:fixed;inset:0;z-index:50;background:rgba(30,26,21,.5);display:flex;align-items:flex-end;animation:podxfade .18s var(--ease)}
 @keyframes podxfade{from{opacity:0}to{opacity:1}}
 .podx .m-shell{width:100%;background:var(--paper);border-radius:20px 20px 0 0;padding:8px 16px calc(16px + env(safe-area-inset-bottom));max-height:88dvh;overflow-y:auto;animation:podxrise .26s var(--ease)}
 @keyframes podxrise{from{transform:translateY(30px);opacity:.6}to{transform:none;opacity:1}}
 .podx .m-grab{width:38px;height:4px;border-radius:2px;background:var(--line);margin:6px auto 12px}
-.podx .m-shell h3{font-family:var(--serif);font-size:19px;font-weight:600;margin:0 0 14px;color:var(--ink)}
+.podx .m-shell h3{font-family:var(--serif);font-size:19px;font-weight:600;margin:0 0 3px;color:var(--ink)}
+.podx .m-shsub{font-size:12.5px;color:var(--ink-3);margin:0 0 15px}
 .podx .m-fld{margin-bottom:12px}
 .podx .m-fld label{display:block;font-size:12px;color:var(--ink-2);margin-bottom:5px;font-weight:500}
 .podx .m-fld input,.podx .m-fld select{width:100%;height:46px;border:1px solid var(--line);border-radius:11px;background:var(--paper-2);padding:0 13px;font-size:15px;color:var(--ink);outline:none}
@@ -338,8 +358,8 @@ const PODX_CSS = `
 .podx .m-up.has{border-style:solid;border-color:var(--sage);color:var(--sage)}
 .podx .m-up svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.9;flex-shrink:0}
 .podx .m-sheet-acts{display:flex;gap:10px;margin-top:16px}
-.podx .m-sheet-acts .m-abtn.ghost{flex:1}
-.podx .m-sheet-acts .m-abtn.primary{flex:1.6}
+.podx .m-sheet-acts .m-abtn.sec{flex:1}
+.podx .m-sheet-acts .m-abtn.pri{flex:1.6}
 .podx .m-warn{display:flex;gap:9px;align-items:flex-start;background:color-mix(in srgb,var(--terra) 9%,var(--paper));border:1px solid color-mix(in srgb,var(--terra) 35%,var(--line));border-radius:11px;padding:10px 12px;font-size:12.5px;line-height:1.5;color:var(--ink-2);margin-bottom:12px}
 .podx .m-warn b{color:var(--terra);font-weight:600}
 `;
@@ -1024,29 +1044,50 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const renderMobile = () => {
     const sent = !!po.sent_to_vendor_at;
     const overOrder = billForBalance > subTotal + 0.5;
-    type BarBtn = { label: string; onClick: () => void; disabled?: boolean; wa?: boolean };
+    type BarTone = 'terra' | 'sage' | 'wa' | 'neutral';
+    type BarIcon = 'wa' | 'receive' | 'bill' | 'pay' | 'check' | 'back' | 'pdf' | 'eye';
+    type BarBtn = { label: string; sub?: string; onClick: () => void; disabled?: boolean; loading?: boolean; icon: BarIcon; tone: BarTone };
+    // "Send on WhatsApp" — the PO PDF goes to the vendor over WhatsApp; clearer than "send to vendor".
+    const sendBtn: BarBtn = { label: 'Send on WhatsApp', sub: vendor?.name || undefined, icon: 'wa', tone: 'wa', onClick: () => setShowSendModal(true) };
     const bar: { note?: string; ghost?: BarBtn; primary?: BarBtn } | null = (() => {
       if (cancelled) return null;
       if (pendingApproval && canApprove) return {
         note: 'Review and approve to release this order',
-        ghost: { label: deciding === 'SEND_BACK' ? '…' : 'Send back', onClick: () => decidePO('SEND_BACK'), disabled: !!deciding },
-        primary: { label: deciding === 'APPROVE' ? 'Approving…' : 'Approve', onClick: () => decidePO('APPROVE'), disabled: !!deciding },
+        ghost: { label: 'Send back', icon: 'back', tone: 'neutral', onClick: () => decidePO('SEND_BACK'), disabled: !!deciding, loading: deciding === 'SEND_BACK' },
+        primary: { label: 'Approve', icon: 'check', tone: 'sage', onClick: () => decidePO('APPROVE'), disabled: !!deciding, loading: deciding === 'APPROVE' },
       };
       if (pendingApproval) return { note: 'Waiting for an approver to release this order.' };
       if (nowStage === 'recv') return {
-        ghost: !sent ? { label: 'Send to vendor', onClick: () => setShowSendModal(true), wa: true } : undefined,
-        primary: { label: partlyReceived ? 'Receive remaining' : 'Receive items', onClick: () => setShowReceiveModal(true) },
+        ghost: !sent ? sendBtn : undefined,
+        primary: { label: partlyReceived ? 'Receive remaining' : 'Receive at site', sub: partlyReceived ? undefined : 'mark material in', icon: 'receive', tone: 'sage', onClick: () => setShowReceiveModal(true) },
       };
       if (nowStage === 'bill') return {
-        ghost: !sent ? { label: 'Send to vendor', onClick: () => setShowSendModal(true), wa: true } : undefined,
-        primary: { label: 'Record bill', onClick: () => setShowMobileBill(true) },
+        ghost: !sent ? sendBtn : undefined,
+        primary: { label: 'Record bill', sub: 'from the vendor', icon: 'bill', tone: 'terra', onClick: () => setShowMobileBill(true) },
       };
       if (nowStage === 'pay') return {
-        ghost: (po.vendor_bill_url || po.vendor_bill_doc_url) ? { label: 'View bill', onClick: () => previewBill(po.vendor_bill_doc_url || po.vendor_bill_url) } : undefined,
-        primary: { label: 'Record payment', onClick: () => setShowMobilePay(true) },
+        ghost: (po.vendor_bill_url || po.vendor_bill_doc_url) ? { label: 'View bill', icon: 'eye', tone: 'neutral', onClick: () => previewBill(po.vendor_bill_doc_url || po.vendor_bill_url) } : undefined,
+        primary: { label: 'Record payment', sub: balNum > 0 ? `${inr0(balNum)} due` : undefined, icon: 'pay', tone: 'terra', onClick: () => setShowMobilePay(true) },
       };
-      return { ghost: { label: 'Download PDF', onClick: handleDownloadPDF }, primary: !sent ? { label: 'Send to vendor', onClick: () => setShowSendModal(true), wa: true } : undefined };
+      return { ghost: { label: 'Download PDF', icon: 'pdf', tone: 'neutral', onClick: handleDownloadPDF }, primary: !sent ? sendBtn : undefined };
     })();
+
+    const barSvg: Record<BarIcon, React.ReactNode> = {
+      wa: <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.4 8.5 8.5 0 0 1-4-1L3 21l2.1-5.4A8.4 8.4 0 1 1 21 11.5z" />,
+      receive: <><path d="M21 8l-9-5-9 5 9 5 9-5zM3 8v8l9 5 9-5V8" /><path d="m9 12 2 2 4-4" /></>,
+      bill: <><path d="M6 3h9l4 4v14H6z" /><path d="M14 3v5h5M9 13h6M9 17h4" /></>,
+      pay: <><rect x="2" y="6" width="20" height="13" rx="2" /><path d="M2 10h20M7 15h3" /></>,
+      check: <path d="M20 6 9 17l-5-5" />,
+      back: <path d="M11 17l-5-5 5-5M6 12h13" />,
+      pdf: <path d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" />,
+      eye: <><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" /><circle cx="12" cy="12" r="3" /></>,
+    };
+    const renderBarBtn = (b: BarBtn, slot: 'pri' | 'sec') => (
+      <button className={`m-abtn ${slot} tone-${b.tone}`} disabled={b.disabled || b.loading} onClick={b.onClick}>
+        {b.loading ? <span className="m-spin" /> : <svg viewBox="0 0 24 24">{barSvg[b.icon]}</svg>}
+        <span className="lbl">{b.label}{b.sub && <small>{b.sub}</small>}</span>
+      </button>
+    );
 
     const node = (label: string, num: number, done: boolean, now: boolean) => (
       <div className={`m-node${done ? ' done' : now ? ' now' : ''}`}>
@@ -1153,8 +1194,8 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
         {bar && (
           <div className="m-abar">
             {bar.note && <div className="m-note">{bar.note}</div>}
-            {bar.ghost && <button className={bar.ghost.wa ? 'm-abtn wa' : 'm-abtn ghost'} disabled={bar.ghost.disabled} onClick={bar.ghost.onClick}>{bar.ghost.label}</button>}
-            {bar.primary && <button className="m-abtn primary" disabled={bar.primary.disabled} onClick={bar.primary.onClick}>{bar.primary.label}</button>}
+            {bar.ghost && renderBarBtn(bar.ghost, 'sec')}
+            {bar.primary && renderBarBtn(bar.primary, 'pri')}
           </div>
         )}
       </>
@@ -1169,6 +1210,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
           <div className="m-shell" onClick={(e) => e.stopPropagation()}>
             <div className="m-grab" />
             <h3>{billEditOpen ? 'Edit vendor bill' : 'Record vendor bill'}</h3>
+            <div className="m-shsub">{vendor?.name || 'Vendor'} · {po.po_id}</div>
             <div className="m-fld"><label>Bill / invoice no</label><input placeholder="INV-…" value={refBillNo} onChange={(e) => setRefBillNo(e.target.value)} /></div>
             <div className="m-fld"><label>Bill date</label><input type="date" value={refBillDate} onChange={(e) => setRefBillDate(e.target.value)} /></div>
             <div className="m-fld"><label>Bill amount</label><input className="amt" inputMode="decimal" placeholder="₹" value={refBillAmt} onChange={(e) => setRefBillAmt(e.target.value)} /></div>
@@ -1180,8 +1222,8 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
               <input ref={refBillFileInputRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0] || null; setRefBillFile(f); if (f) runReconciliation(f); }} />
             </div>
             <div className="m-sheet-acts">
-              <button className="m-abtn ghost" onClick={() => setShowMobileBill(false)}>Cancel</button>
-              <button className="m-abtn primary" disabled={savingBill} onClick={async () => { await saveRefBill(); setShowMobileBill(false); }}>{savingBill ? 'Saving…' : billEditOpen ? 'Update bill' : 'Save bill'}</button>
+              <button className="m-abtn sec tone-neutral" onClick={() => setShowMobileBill(false)}>Cancel</button>
+              <button className="m-abtn pri tone-terra" disabled={savingBill} onClick={async () => { await saveRefBill(); setShowMobileBill(false); }}>{savingBill ? 'Saving…' : billEditOpen ? 'Update bill' : 'Save bill'}</button>
             </div>
           </div>
         </div>
@@ -1192,6 +1234,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
           <div className="m-shell" onClick={(e) => e.stopPropagation()}>
             <div className="m-grab" />
             <h3>Record payment</h3>
+            <div className="m-shsub">{vendor?.name || 'Vendor'} · {balNum > 0 ? `${inr0(balNum)} due` : 'settled'}</div>
             <div className="m-fld">
               <label>Amount{(payBase - paidTotal) > 0 && <button type="button" className="m-full" onClick={() => setPayAmount(String(Math.round(payBase - paidTotal)))}>Full {inr0(payBase - paidTotal)}</button>}</label>
               <input className="amt" inputMode="decimal" placeholder="0" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
@@ -1209,8 +1252,8 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
               </div>
             )}
             <div className="m-sheet-acts">
-              <button className="m-abtn ghost" onClick={() => setShowMobilePay(false)}>Cancel</button>
-              <button className="m-abtn primary" disabled={recordPayment.isPending || !(parseFloat(payAmount) > 0)} onClick={() => recordPayment.mutate(undefined, { onSuccess: () => setShowMobilePay(false) })}>{recordPayment.isPending ? 'Saving…' : 'Save payment'}</button>
+              <button className="m-abtn sec tone-neutral" onClick={() => setShowMobilePay(false)}>Cancel</button>
+              <button className="m-abtn pri tone-terra" disabled={recordPayment.isPending || !(parseFloat(payAmount) > 0)} onClick={() => recordPayment.mutate(undefined, { onSuccess: () => setShowMobilePay(false) })}>{recordPayment.isPending ? 'Saving…' : 'Save payment'}</button>
             </div>
           </div>
         </div>
