@@ -212,14 +212,8 @@ html, body {
   transition: transform .26s cubic-bezier(.34, 1.32, .4, 1);
 }
 
-/* the payee, pressed — tints on its own so a thumb can tell which of the row's two
-   destinations it just chose */
-.bk-party { position: relative; border-radius: 7px; transition: background .16s ease; }
-.bk-party.is-press { background: rgba(200, 96, 58, .13); }
-.bk-party-go { display: none; flex-shrink: 0; margin-left: 2px; opacity: .5; }
-
 @media (prefers-reduced-motion: reduce) {
-  .bk-ledger-row, .bk-ledger-row::before, .bk-go, .bk-party { transition: none; }
+  .bk-ledger-row, .bk-ledger-row::before, .bk-go { transition: none; }
   .bk-ledger-row.is-press { transform: none; }
 }
 
@@ -243,18 +237,8 @@ html, body {
      that it opens something. It leans right under the finger. */
   .bk-go { display: flex; }
 
-  /* The payee opens that party's ledger — a different destination from the rest of
-     the row, so on a phone it needs both a visible affordance and a hit box a thumb
-     can find. The negative margins buy 32px of height without moving a pixel of
-     layout; the dotted rule is the touch equivalent of the desktop hover underline. */
-  .bk-party { padding: 8px 5px; margin: -8px -5px; }
-  .bk-party-nm {
-    text-decoration: underline;
-    text-decoration-style: dotted;
-    text-decoration-color: rgba(33, 28, 23, 0.28);
-    text-underline-offset: 3px;
-  }
-  .bk-party-go { display: inline-flex; }
+  /* A phone row is one target: the transaction. The payee's ledger link is handed over
+     only on a desktop, so the name here is plain text with nothing to aim at. */
 }
 
 /* ── Inbox entry bar positioning ── */

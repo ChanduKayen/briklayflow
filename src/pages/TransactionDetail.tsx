@@ -641,6 +641,11 @@ export default function TransactionDetail({ session }: { session: Session }) {
     },
   });
 
+  // Above the loading guards: this renders once while the transaction is in flight and again
+  // when it lands, and a hook called only on the second pass changes the hook count between
+  // the two renders — React #310, which took the whole page down on every open.
+  const isMobile = useIsMobile();
+
   const isLoading = txnLoading || allocsLoading;
   if (isLoading) return <div className="flex justify-center py-20"><Loader2 className="animate-spin text-primary/40" size={28} /></div>;
   if (!txn) return <div className="p-8 text-center text-on-surface-variant/50 text-[14px]">Transaction not found.</div>;
@@ -701,7 +706,6 @@ export default function TransactionDetail({ session }: { session: Session }) {
   const rupee = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
   const openPicker = (allocId: string) => { setPickerStep('menu'); setMappingAllocId(allocId); };
   const openLightbox = (url: string, title: string) => { setLightboxTitle(title); setLightboxUrl(url); };
-  const isMobile = useIsMobile();
 
   // Per-allocation link status (mirrors the desktop allocation cell), for the mobile card.
   const allocStatus = (a: any): { linked: boolean; k: string; sub: string } => {

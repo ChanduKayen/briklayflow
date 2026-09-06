@@ -11,6 +11,7 @@ import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
 import { getCostCode } from '../lib/costCodes';
 import { Plus, Search, Download, Paperclip, Check, ArrowRight, ChevronRight, X, SlidersHorizontal } from 'lucide-react';
+import { useIsMobile } from '../lib/useIsMobile';
 import BottomSheet from '../components/BottomSheet';
 import { WhatsAppGlyph } from '../components/day-book/atoms';
 import { StartOnWhatsAppButton } from '../components/day-book/StartOnWhatsApp';
@@ -153,37 +154,29 @@ function EntryRow(p: EntryProps) {
       </div>
 
       <div className="bk-ledger-main">
-        {/* The name truncates on its own rather than the whole line, so it can carry the
-            padding that makes it a real target on a phone — a `truncate` on the <p> would
-            clip any hit area grown outside the text. */}
-        <p className="text-sm font-medium flex items-center min-w-0" style={{ color: V.ink, ...font }}>
+        <p className="text-sm font-medium truncate" style={{ color: V.ink, ...font }}>
           {/* Mobile-only: the "flagged" badge lives in the (hidden) anchor cell on a phone, so
               carry a subtle amber dot beside the name instead. Desktop keeps the full badge. */}
           {p.flagged && (
-            <span className="sm:hidden shrink-0" title="AI-flagged" style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: V.ask, marginRight: 6 }} />
+            <span className="sm:hidden" title="AI-flagged" style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: V.ask, marginRight: 6, verticalAlign: 'middle' }} />
           )}
+          {/* The party ledger is a pointer affordance: the page hands over onPayeeClick only on a
+              desktop, where a hover can announce it and a cursor can hit it. On a phone the whole
+              row is one target — the transaction — and the party is reached from inside it. */}
           {p.stakeholderId && p.onPayeeClick ? (
             <span
               role="button"
               tabIndex={0}
               title={`View ${p.payee}'s ledger`}
               onClick={(e) => { e.stopPropagation(); p.onPayeeClick!(e); }}
-              onPointerDown={(e) => { e.stopPropagation(); e.currentTarget.classList.add('is-press'); }}
-              onPointerUp={unpress}
-              onPointerCancel={unpress}
-              onPointerLeave={unpress}
-              className="bk-party flex items-center min-w-0 cursor-pointer"
+              className="cursor-pointer hover:underline underline-offset-2 decoration-dotted"
             >
-              <span className="bk-party-nm truncate min-w-0 hover:underline underline-offset-2 decoration-dotted">{p.payee}</span>
-              {/* the standing sign that this name is its own destination — a phone has no hover
-                  to reveal the desktop's underline. Outside the underlined text, so the rule
-                  runs under the name and stops there. */}
-              <ChevronRight className="bk-party-go" size={11} strokeWidth={2.5} aria-hidden="true" />
+              {p.payee}
             </span>
           ) : (
-            <span className="truncate min-w-0">{p.payee}</span>
+            p.payee
           )}
-          {p.voided && <span className="ml-1.5 text-xs shrink-0" style={{ color: V.faint, ...font }}>· voided</span>}
+          {p.voided && <span className="ml-1.5 text-xs" style={{ color: V.faint, ...font }}>· voided</span>}
         </p>
         <p className="text-xs truncate" style={{ color: V.faint, ...font }}>{p.context}</p>
       </div>
@@ -445,6 +438,8 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   const qc = useQueryClient();
   const orgId = useOrgId();
   const navigate = useNavigate();
+  // Matches the row's own 639px layout switch, not the app-wide 760px one.
+  const isPhone = useIsMobile(640);
   const { openPeek, prefetchPeek } = usePeek();
   const [searchParams] = useSearchParams();
   const { data: profile } = useUserProfile(session.user.id);
@@ -1461,7 +1456,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                         dir={dir}
                         payee={genExp ? genLabel : (txn.stakeholders?.name || 'Unknown')}
                         stakeholderId={genExp ? null : (txn.stakeholder_id ?? null)}
-                        onPayeeClick={() => { if (txn.stakeholder_id) { setDrawerProject(txn.stakeholder_id === deepLinkStk ? deepLinkProject : null); setDrawerStk(txn.stakeholder_id); } }}
+                        onPayeeClick={isPhone ? undefined : () => { if (txn.stakeholder_id) { setDrawerProject(txn.stakeholder_id === deepLinkStk ? deepLinkProject : null); setDrawerStk(txn.stakeholder_id); } }}
                         context={context}
                         anchor={anchor}
                         info={linkedInfo}
