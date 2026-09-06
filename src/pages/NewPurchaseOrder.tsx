@@ -40,7 +40,7 @@ import { UiResolutionStrip, UiStripEscapes, UiDemotedSuggestion } from '../compo
 import UiAttributeFieldsHost from '../components/po-new-ui/UiAttributeFieldsHost';
 import { UiMoney, UiTotalExclGst } from '../components/po-new-ui/UiMoney';
 import UiSaveHint from '../components/po-new-ui/UiSaveHint';
-import { PoQuickStart } from '../components/po-new-ui/PoQuickStart';
+import NewPoMobile, { type MobileLine } from '../components/po-new-ui/NewPoMobile';
 import { useIsMobile } from '../lib/useIsMobile';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -760,6 +760,9 @@ interface ExtractedItem {
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
 }
 
+/** The vendor rows the mobile screen reads — the query hands them back untyped. */
+type VendorRow = { stakeholder_id: string; name: string; category?: string | null; is_approved?: boolean | null };
+
 function newLine(lineNumber: number): DraftLineItem {
   return {
     id: crypto.randomUUID(),
@@ -902,10 +905,8 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
   // with the catalog search, never blocked by it.
   const dymDebounceRef     = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const fileInputRef      = useRef<HTMLInputElement>(null);
-  // On a phone the order starts by voice or camera, not by typing into a table. The quick
-  // start stands in front of the item grid until something is in it, or the user asks to type.
+  // Below the phone breakpoint the whole screen is replaced — see NewPoMobile.
   const isMobile          = useIsMobile();
-  const [typeItOut, setTypeItOut] = useState(false);
   const itemRefs          = useRef<Map<string, HTMLDivElement>>(new Map());
   const lineItemsRef      = useRef<DraftLineItem[]>([]);
   // Line ids that should NOT auto-open their match dropdown (bulk bill extract → many lines at
@@ -3493,6 +3494,91 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
     void ingestExtraction(() => matchSKUsFromFile(file, 'po_creation', selectedVendor?.category));
   }
 
+  // ── the phone screen ─────────────────────────────────────────────────────────
+  // Same order, same data, same submit — laid out the way the reference asks for it.
+  // Everything below this point is the desktop form and is not rendered on a phone.
+  const mobileLines: MobileLine[] = lineItems
+    .filter(l => l.item_name.trim())
+    .map(l => ({ id: l.id, name: l.item_name, unit: l.unit || 'Nos',
+                 qty: Number(l.quantity_ordered) || 0, rate: Number(l.unit_rate) || 0,
+                 total: Number(l.total_amount) || 0 }));
+
+  const bumpQty = (id: string, delta: number) => {
+    const li = lineItems.find(l => l.id === id); if (!li) return;
+    const next = (Number(li.quantity_ordered) || 0) + delta;
+    if (next <= 0) { removeLine(id); return; }
+    updateLine(id, { quantity_ordered: next });
+  };
+
+  const addManualLine = ({ name, qty, unit, rate }: { name: string; qty: number; unit: string; rate: number }) => {
+    const base = lineItems.filter(l => l.item_name.trim()).length;
+    const line = computeLine({ ...newLine(base + 1), item_name: capFirst(name), unit, quantity_ordered: qty, unit_rate: rate });
+    setLineItems(prev => [...prev.filter(l => l.item_name.trim()), line]);
+    // resolve it against the catalog exactly as a typed row would be
+    if (poMatchMode !== 'typed' && name.trim().length >= 2) {
+      noAutoOpenRef.current.add(line.id);
+      window.setTimeout(() => startFreshResolution(line.id, line.item_name, line.item_name, extractAttrs(line.item_name)), 300);
+    } else {
+      updateLine(line.id, { skipped_linking: true });
+    }
+  };
+
+  if (isMobile) {
+    return (
+      <>
+        <NewPoMobile
+          mode={poMode}
+          onMode={setPoMode}
+          vendors={(vendors ?? []).map((v: VendorRow) => ({
+            id: v.stakeholder_id, name: v.name,
+            sub: [v.category, v.is_approved ? null : 'not approved'].filter(Boolean).join(' · '),
+          }))}
+          vendorId={vendorId}
+          onVendor={(id) => { const v = (vendors ?? []).find((x: VendorRow) => x.stakeholder_id === id); if (v) selectVendor(v); }}
+          projects={(projects ?? []).map(pr => ({ id: pr.project_id, name: pr.name, sub: pr.site_location || '' }))}
+          projectId={projectId}
+          onProject={(id) => {
+            setProjectId(id);
+            const pr = (projects ?? []).find(x => x.project_id === id);
+            if (pr?.site_location && !deliveryLocation) setDeliveryLocation(pr.site_location);
+          }}
+          dateLabel={`Today, ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`}
+          deliverTo={deliveryLocation || selectedProjectObj?.site_location || ''}
+          lines={mobileLines}
+          onQty={bumpQty}
+          total={grandTotal}
+          busy={docExtracting}
+          error={docExtractError}
+          onSpoken={(text) => void ingestExtraction(() => matchSKUsFromText(text, 'po_creation', selectedVendor?.category))}
+          onFile={(file) => void ingestExtraction(() => matchSKUsFromFile(file, 'po_creation', selectedVendor?.category))}
+          onManualAdd={addManualLine}
+          unresolved={lineItems.filter(l => l.item_name.trim() && !l.sku_id && !l.skipped_linking).length}
+          onSubmitAsTyped={() => {
+            // handleSubmit's unresolved path drives the desktop item grid, which this screen does not
+            // render — so the choice the grid would offer is made here, then it submits cleanly.
+            lineItems.filter(l => l.item_name.trim() && !l.sku_id).forEach(l => updateLine(l.id, { skipped_linking: true }));
+            window.setTimeout(() => void handleSubmit('ORDERED'), 0);
+          }}
+          onSubmit={() => { if (poMode === 'rfq') setShowRfq(true); else void handleSubmit('ORDERED'); }}
+          submitting={isGlobalMatching}
+          onBack={() => navigate(-1)}
+        />
+        {/* Requesting quotes goes out through the same modal the desktop uses. */}
+        {showRfq && (
+          <RequestQuotesModal
+            orgId={orgId ?? ''}
+            projectId={projectId || null}
+            deliveryLocation={deliveryLocation || null}
+            tradeCategory={selectedVendor?.category ?? (lineItems.find(li => li.category)?.category ?? null)}
+            items={lineItems.filter(li => li.item_name.trim().length > 0).map((li, i) => ({ line: i + 1, item_name: li.item_name, unit: li.unit, qty: li.quantity_ordered, spec: li.specification }))}
+            onClose={() => setShowRfq(false)}
+            onSent={() => { setShowRfq(false); navigate('/purchase-orders'); }}
+          />
+        )}
+      </>
+    );
+  }
+
   async function handleSubmit(status: string) {
     setIsGlobalMatching(true);
     // Everything runs inside try/finally so the full-screen "Matching items…" overlay
@@ -3606,15 +3692,12 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
           .npo-drow > :nth-child(3) { border-left: 0 !important; border-top: 1px solid ${uiV.line} !important; }
           .npo-drow > :nth-child(4) { border-top: 1px solid ${uiV.line} !important; }
         }
-        /* While the phone quick start is showing, the desktop item table and its heading stand
-           down — the order has not been started yet, and a spreadsheet is not how it starts here. */
-        .po-quickstart-on .po-items-chrome { display: none; }
         /* the sticky footer must clear the home indicator */
         .npo-foot { padding-bottom: env(safe-area-inset-bottom); }
       `}</style>
 
       <div
-        className={`px-4 md:px-6 pt-6 pb-36 mx-auto${isMobile && !typeItOut && lineItems.filter(l => l.item_name.trim()).length === 0 ? ' po-quickstart-on' : ''}`}
+        className="px-4 md:px-6 pt-6 pb-36 mx-auto"
         style={{ maxWidth: '100%', background: '#FBF9F6' }}
         onClick={(e) => {
           if (!(e.target as HTMLElement).closest('.po-sheet-row') && !(e.target as HTMLElement).closest('.po-row-expansion')) {
@@ -3832,23 +3915,8 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
         )}
 
         {/* ── Items ──────────────────────────────────────────────── */}
-        {isMobile && !typeItOut && lineItems.filter(l => l.item_name.trim()).length === 0 && (
-          <div className="mt-6 mb-5">
-              <SheetSectionLabel title="Items" />
-              <PoQuickStart
-                busy={docExtracting}
-                error={docExtractError}
-                onSpoken={(text) => void ingestExtraction(() => matchSKUsFromText(text, 'po_creation', selectedVendor?.category))}
-                onFile={(file) => void ingestExtraction(() => matchSKUsFromFile(file, 'po_creation', selectedVendor?.category))}
-                onType={() => setTypeItOut(true)}
-                tokens={{ ink: uiV.user, system: uiV.system, systemFaint: uiV.systemFaint, line: uiV.line,
-                          surface: uiV.surface, field: uiV.field, accent: uiV.accent, accentDeep: uiV.accentDeep,
-                          accentSoft: uiV.accentSoft, accentLine: uiV.accentLine }}
-              />
-          </div>
-        )}
 
-        <div className="mt-6 po-items-chrome">
+        <div className="mt-6">
           <SheetSectionLabel
             title="Items"
             right={(
@@ -3914,7 +3982,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
 
         {/* The sheet */}
         <div
-          className="rounded-2xl overflow-hidden po-items-chrome"
+          className="rounded-2xl overflow-hidden"
           style={{ border: `1px solid ${uiV.line}`, background: uiV.surface }}
           onFocusCapture={(e) => {
             // Focusing an item cell with no vendor bounces up to the vendor field, guided not hidden.
