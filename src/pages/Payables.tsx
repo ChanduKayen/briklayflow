@@ -204,6 +204,9 @@ const CSS = `
     background:var(--paper);color:var(--walnut-2);font-size:12.5px;font-weight:500;
     text-decoration:none;white-space:nowrap;-webkit-tap-highlight-color:transparent}
   .wpx .wknav .wknow:active{background:var(--cream)}
+  /* 38px reads right beside 14px text; the hit area is still a full 44 */
+  .wpx .wknav .wkstep,.wpx .wknav .wknow,.wpx .rm-x{position:relative}
+  .wpx .wknav .wkstep::after,.wpx .wknav .wknow::after,.wpx .rm-x::after{content:"";position:absolute;top:50%;left:50%;width:max(100%,44px);height:44px;transform:translate(-50%,-50%)}
   .wpx .cutover{margin-top:10px;font-size:12px;line-height:1.45;color:var(--walnut-3);display:block}
 
   /* money card — what is still owed leads; planned and paid support it underneath */

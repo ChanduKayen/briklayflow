@@ -353,7 +353,7 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
             </div>
             <div className="bysite">
               <h3>Balance by site</h3>
-              <table className="sites">
+              <div className="tscroll"><table className="sites">
                 <thead><tr><th /><th>Paid</th><th>{T.credit}</th><th>{T.aheadCol}</th></tr></thead>
                 <tbody>
                   {L.sites.map(s => (
@@ -365,7 +365,7 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </table></div>
             </div>
           </section>
         )}
@@ -518,7 +518,7 @@ function VendorHero({ L, onBook }: { L: PartyLedger; onBook: () => void }) {
       </div>
       <div className="bysite">
         <h3>Balance by site</h3>
-        <table className="sites">
+        <div className="tscroll"><table className="sites">
           <thead><tr><th /><th>Paid</th><th>Billed</th><th>Without bills</th></tr></thead>
           <tbody>
             {L.sites.map(s => (
@@ -530,7 +530,7 @@ function VendorHero({ L, onBook }: { L: PartyLedger; onBook: () => void }) {
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       </div>
     </section>
   );
@@ -597,7 +597,7 @@ function DateView({ entries, L, T, onEdit }: { entries: LedgerEntry[]; L: PartyL
     }
     rows.push(<Row key={e.id} e={e} first={first} />); first = false;
   }
-  return <div className="sheet"><table className="ledger"><Head showContract T={T} /><tbody>{rows}<OpeningRow L={L} onEdit={onEdit} sub={L.opening ? `As of ${fmtDate(L.entries.find(x => x.kind === 'opening')!.date!)}` : ''} /></tbody></table></div>;
+  return <div className="sheet"><div className="tscroll"><table className="ledger"><Head showContract T={T} /><tbody>{rows}<OpeningRow L={L} onEdit={onEdit} sub={L.opening ? `As of ${fmtDate(L.entries.find(x => x.kind === 'opening')!.date!)}` : ''} /></tbody></table></div></div>;
 }
 
 function ContractView({ entries, L, T, onBook }: { entries: LedgerEntry[]; L: PartyLedger; T: Terms; onBook?: () => void }) {
@@ -618,7 +618,7 @@ function ContractView({ entries, L, T, onBook }: { entries: LedgerEntry[]; L: Pa
               <div className="bar"><span>{L.kind === 'vendor' ? 'Billed' : 'Work certified'}</span><div className="track"><div className="fill sage" style={{ width: `${Math.min(100, certPct)}%` }} /></div><span className="pct">{certPct}% of {T.contract}</span></div>
               <div className="bar"><span>Paid against {T.contract}</span><div className="track"><div className="fill walnut" style={{ width: `${Math.min(100, paidPct)}%` }} /></div><span className="pct">{paidPct}% of {T.contract}</span></div>
             </div>
-            <table className="ledger"><Head showContract={false} T={T} /><tbody>{rows.map(e => <Row key={e.id} e={e} showContract={false} />)}{rows.length === 0 && <tr className="row"><td colSpan={5} style={{ color: 'var(--walnut-3)' }}>No entries linked to this {T.contract} yet.</td></tr>}</tbody></table>
+            <div className="tscroll"><table className="ledger"><Head showContract={false} T={T} /><tbody>{rows.map(e => <Row key={e.id} e={e} showContract={false} />)}{rows.length === 0 && <tr className="row"><td colSpan={5} style={{ color: 'var(--walnut-3)' }}>No entries linked to this {T.contract} yet.</td></tr>}</tbody></table></div>
           </div>
         );
       })}
@@ -629,7 +629,7 @@ function ContractView({ entries, L, T, onBook }: { entries: LedgerEntry[]; L: Pa
               <div className="desc">{L.kind === 'vendor' && L.unbilledCount > 0 ? `₹${inr(L.unbilledTotal)} paid without bills. A consolidated bill can settle the billing; linking to POs is separate.` : `₹${inr(L.unlinkedTotal)}. Linking them moves the ${T.contract}'s paid figure.`}</div></div>
             {L.kind === 'vendor' && L.unbilledCount > 0 && onBook && <div><button className="btn terra" onClick={onBook}>Book consolidated bill</button></div>}
           </div>
-          <table className="ledger"><Head showContract T={T} /><tbody>{entries.filter(e => e.kind === 'payment' && !e.contractId).map(e => <Row key={e.id} e={e} />)}</tbody></table>
+          <div className="tscroll"><table className="ledger"><Head showContract T={T} /><tbody>{entries.filter(e => e.kind === 'payment' && !e.contractId).map(e => <Row key={e.id} e={e} />)}</tbody></table></div>
         </div>
       )}
       {L.contracts.length === 0 && L.unlinkedCount === 0 && <div className="state">No contract entries.</div>}
@@ -648,7 +648,7 @@ function SiteView({ entries, L, T }: { entries: LedgerEntry[]; L: PartyLedger; T
               <div><div className="title">{s.projectName}</div><div className="desc">{s.hasContract ? (L.kind === 'vendor' ? 'Has POs' : 'On a contract') : T.noContract}</div></div>
               <div className="gstats"><div><div className="v num">₹{inr(s.paid)}</div><div className="l">paid</div></div><div><div className="v num">{s.cert ? '₹' + inr(s.cert) : '—'}</div><div className="l">{T.creditWord}</div></div><div><div className="v num" style={{ color: 'var(--terra)' }}>₹{inr(s.ahead)}</div><div className="l">{T.aheadCol.toLowerCase()}</div></div></div>
             </div>
-            <table className="ledger"><Head showContract T={T} /><tbody>{rows.map(e => <Row key={e.id} e={e} showSite={false} />)}</tbody></table>
+            <div className="tscroll"><table className="ledger"><Head showContract T={T} /><tbody>{rows.map(e => <Row key={e.id} e={e} showSite={false} />)}</tbody></table></div>
           </div>
         );
       })}

@@ -355,7 +355,7 @@ export default function Stakeholders({ session }: { session: Session }) {
 
         {/* ── table ── */}
         <div className="tablecard">
-          <table>
+          <div className="tscroll"><table>
             <thead>
               <tr>
                 <th style={{ width: '34%' }}>Party</th>
@@ -398,7 +398,7 @@ export default function Stakeholders({ session }: { session: Session }) {
                 );
               })}
             </tbody>
-          </table>
+          </table></div>
 
           {!isLoading && rows.length === 0 && (
             <div className="empty">

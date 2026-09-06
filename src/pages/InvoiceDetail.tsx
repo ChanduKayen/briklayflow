@@ -293,7 +293,7 @@ export default function InvoiceDetail({ session: _session }: { session: Session 
         {invoice.line_items.length === 0 ? (
           <p className="px-6 py-5 text-[13px] text-on-surface-variant/40">No line items</p>
         ) : (
-          <table className="w-full text-[13px]">
+          <div className="tscroll"><table className="w-full text-[13px]">
             <thead>
               <tr className="text-[10px] font-bold text-on-surface-variant/40 uppercase tracking-wide border-b border-outline-variant/[0.07]">
                 <th className="px-5 py-2.5 text-left">Description</th>
@@ -314,7 +314,7 @@ export default function InvoiceDetail({ session: _session }: { session: Session 
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         )}
 
         {/* Totals */}

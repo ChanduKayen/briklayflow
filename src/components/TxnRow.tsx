@@ -23,7 +23,9 @@ export function TxnRow({
   return (
     <div
       onClick={onClick}
-      className={`flex items-center justify-between border-b border-black/[0.06] last:border-0 group transition-colors ${onClick ? 'cursor-pointer hover:bg-black/[0.02]' : ''} ${py} ${px} ${className}`}
+      // a tappable row needs an answer to the finger: hover never fires on a touch screen,
+      // so the row also takes a pressed tint and the small mo-press push
+      className={`flex items-center justify-between border-b border-black/[0.06] last:border-0 group transition-colors ${onClick ? 'cursor-pointer hover:bg-black/[0.02] active:bg-black/[0.045] mo-press' : ''} ${py} ${px} ${className}`}
     >
       <div className="min-w-0 flex-1 pr-4">
         <p className="text-[13px] font-[500] text-on-surface truncate">{primary}</p>

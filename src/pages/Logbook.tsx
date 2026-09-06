@@ -71,7 +71,7 @@ const BAND_CSS = `
   /* Title on its own line; the two actions drop below it and split the row evenly, so nothing crams. */
   .rb-top{flex-wrap:wrap;align-items:center}
   .rb-actions{margin-left:0;flex-basis:100%;margin-top:12px;gap:8px}
-  .rb-btn{flex:1;justify-content:center;height:40px;padding:0 12px}
+  .rb-btn{flex:1;justify-content:center;height:44px;padding:0 12px}
   .rb-sub{font-size:13px;margin-top:8px}
   .rb-lead{margin-top:18px}
   .rb-amt{font-size:27px}
@@ -442,13 +442,13 @@ export default function Logbook({ session }: { session: Session }) {
         {isLoading ? (
           <div className="mt-6"><PageSkeleton /></div>
         ) : tab === 'requests' ? (
-          <div className="space-y-2.5 mt-6">
+          <div className="space-y-2.5 mt-6 mo-stagger">
             {prs.length === 0
               ? <p className="text-center py-12" style={{ color: V.faint, ...font, ...T.sm }}>No purchase requests yet. Ask Briklay to order materials on WhatsApp.</p>
               : prs.map((pr) => <PRPointerRow key={pr.id} pr={pr} onOpen={() => navigate('/purchase-orders?status=draft')} />)}
           </div>
         ) : (
-          <div className="space-y-4 mt-6">
+          <div className="space-y-4 mt-6 mo-stagger">
             {shown.length === 0 && (
               (tab === 'review' || tab === 'all') ? (
                 entries.length === 0 ? (
@@ -523,7 +523,7 @@ export default function Logbook({ session }: { session: Session }) {
                           key={e.id}
                           id={`db-entry-${e.id}`}
                           onClick={() => (v.filed ? (v.txnId && viewTxn(v.txnId)) : setEditor({ entry: e }))}
-                          className="db-allrow"
+                          className="db-allrow mo-row"
                           style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', alignItems: 'center', gap: '0 14px', padding: '11px 14px', cursor: 'pointer', borderTop: i > 0 ? `1px solid ${V.line}` : 'none', opacity: v.filed ? 0.66 : 1 }}
                         >
                           <div className="min-w-0">

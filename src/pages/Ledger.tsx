@@ -292,6 +292,13 @@ const LEDGER_BAND_CSS = `
 .tb-actions{margin-left:auto;display:flex;gap:8px;flex-shrink:0}
 .tb-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 14px;border-radius:9px;font-weight:500;font-size:13.5px;line-height:1;white-space:nowrap;color:rgba(245,240,231,.72);background:rgba(245,240,231,.07);box-shadow:inset 0 0 0 1px rgba(245,240,231,.14);border:0;cursor:pointer}
 .tb-btn svg{flex-shrink:0}
+/* each day of the book arrives rather than appearing — one beat per day, not per row,
+   so a long ledger settles quickly instead of rippling for a second */
+.mo-rise-day{animation:mo-rise .34s cubic-bezier(.22,.8,.28,1) both}
+.mo-rise-day:nth-of-type(2){animation-delay:40ms}
+.mo-rise-day:nth-of-type(3){animation-delay:80ms}
+.mo-rise-day:nth-of-type(n+4){animation-delay:110ms}
+@media (prefers-reduced-motion:reduce){.mo-rise-day{animation:none}}
 .tb-btn:hover{color:#F5F0E7;background:rgba(245,240,231,.11)}
 .tb-btn.primary{background:#B4532F;box-shadow:none;color:#fff}
 .tb-btn.primary:hover{background:#9C4526}
@@ -317,7 +324,7 @@ const LEDGER_BAND_CSS = `
 .txn-mini .mc{margin-left:auto;font-size:12.5px;color:rgba(245,240,231,.72)}
 @media (prefers-reduced-motion:reduce){.txn-rhythm .bar{transform:none}.tb-fx,.txn-mini{transition:none}}
 @media (max-width:767px){.txn-mini{left:0}}
-@media (max-width:640px){.tb-in,.txn-rhythm{padding-left:18px;padding-right:18px}.tb-in{padding-top:20px}.tb-h1{font-size:25px;flex:1 1 100%}.tb-actions{margin-left:0;flex:1 1 100%;margin-top:12px;gap:10px}.tb-btn{flex:1;min-width:0;height:40px;padding:0 10px}.tb-lead{margin-top:20px}.tb-amt{font-size:28px}}
+@media (max-width:640px){.tb-in,.txn-rhythm{padding-left:18px;padding-right:18px}.tb-in{padding-top:20px}.tb-h1{font-size:25px;flex:1 1 100%}.tb-actions{margin-left:0;flex:1 1 100%;margin-top:12px;gap:10px}.tb-btn{flex:1;min-width:0;height:44px;padding:0 10px}.tb-lead{margin-top:20px}.tb-amt{font-size:28px}}
 @media (max-width:380px){.tb-amt{font-size:24px}.tb-btn{font-size:13px;gap:6px}}
 `;
 
@@ -1316,7 +1323,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
             const weekday = new Date(day.date).toLocaleDateString('en-IN', { weekday: 'long' });
             const dshort = new Date(day.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
             return (
-              <section className="mt-7" key={day.date} id={`txn-day-${day.date}`} style={{ scrollMarginTop: 60 }}>
+              <section className="mt-7 mo-rise-day" key={day.date} id={`txn-day-${day.date}`} style={{ scrollMarginTop: 60 }}>
                 <p className="px-4 py-2 text-sm sticky top-0" style={{ background: V.page, color: V.ink, zIndex: 2, ...serif }}>
                   {dshort} <span className="text-xs" style={{ color: V.faint, ...font }}>· {weekday}</span>
                 </p>

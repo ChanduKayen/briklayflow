@@ -32,6 +32,75 @@ html, body {
   }
 }
 
+/* ── Touch interaction & motion ──────────────────────────────────────────
+   Two things separate a web page from an app on a phone: a surface that answers the
+   finger before the screen changes, and content that arrives rather than appearing.
+   Both are opt-in classes so nothing moves that was not asked to, and both stand down
+   completely under prefers-reduced-motion. */
+@keyframes mo-rise { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: none; } }
+
+/* Items arrive in sequence, 28ms apart. The delay is capped after the eighth so a long
+   list never feels like it is still loading — everything past the fold lands together. */
+.mo-stagger > * { animation: mo-rise 0.34s cubic-bezier(0.22, 0.8, 0.28, 1) both; }
+.mo-stagger > :nth-child(1) { animation-delay: 0ms; }
+.mo-stagger > :nth-child(2) { animation-delay: 28ms; }
+.mo-stagger > :nth-child(3) { animation-delay: 56ms; }
+.mo-stagger > :nth-child(4) { animation-delay: 84ms; }
+.mo-stagger > :nth-child(5) { animation-delay: 112ms; }
+.mo-stagger > :nth-child(6) { animation-delay: 140ms; }
+.mo-stagger > :nth-child(7) { animation-delay: 168ms; }
+.mo-stagger > :nth-child(8) { animation-delay: 196ms; }
+.mo-stagger > :nth-child(n + 9) { animation-delay: 224ms; }
+
+/* The press response. Scale is small on purpose — enough to read as a physical push,
+   not so much that the row appears to jump away from the finger. */
+.mo-press { transition: transform 0.14s cubic-bezier(0.2, 0.7, 0.3, 1), background-color 0.14s ease; }
+.mo-press:active { transform: scale(0.978); }
+
+/* A tappable row inside a list: the same push, plus a wash, so the row itself reads as
+   pressed rather than the whole card shrinking. */
+.mo-row { transition: transform 0.14s cubic-bezier(0.2, 0.7, 0.3, 1), background-color 0.14s ease; }
+.mo-row:active { transform: scale(0.988); background-color: rgba(30, 26, 21, 0.045); }
+
+@media (prefers-reduced-motion: reduce) {
+  .mo-stagger > * { animation: none; }
+  .mo-press, .mo-row { transition: none; }
+  .mo-press:active, .mo-row:active { transform: none; }
+}
+
+/* ── Minimum touch target ───────────────────────────────────────────────
+   Apple asks for 44pt, Material for 48dp. Several controls here are visually smaller on
+   purpose — a 36px filter chip, a 38px icon button — and growing them would coarsen the
+   design. .tap44 instead extends the HIT area with a centred pseudo-element, so the
+   control looks the same and the finger still lands. Applied only where the extra few
+   pixels cannot reach a neighbouring control. */
+.tap44 { position: relative; }
+.tap44::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100%, 44px);
+  height: max(100%, 44px);
+  transform: translate(-50%, -50%);
+}
+
+/* ── Wide tables on a phone ──────────────────────────────────────────────
+   A desktop table that is wider than the screen does not just overflow itself: it widens
+   the whole document, so the PAGE scrolls sideways and every other element is dragged out
+   of view with it. Wrapping the table in .tscroll moves that scrolling into the table's own
+   box. The table stays display:table, so its columns stay aligned and a table that fits
+   still fills the width — only content that genuinely cannot fit scrolls under the finger. */
+.tscroll { max-width: 100%; }
+@media (max-width: 767px) {
+  .tscroll {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .tscroll > table { min-width: 100%; }
+}
+
 /* ── Mobile utility primitives ── */
 .pb-safe {
   padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);

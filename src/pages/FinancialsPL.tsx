@@ -143,7 +143,7 @@ export default function FinancialsPL() {
             <span className="text-body-sm font-bold text-on-surface">Other / Uncategorised</span>
             <span className="font-data-mono text-body-sm font-bold">{fmt(legacyTotal)}</span>
           </div>
-          <table className="w-full">
+          <div className="tscroll"><table className="w-full">
             <tbody>
               {Object.entries(legacySpend).map(([code, amt]) => (
                 <tr key={code} className="border-b border-outline-variant/10 last:border-0">
@@ -152,7 +152,7 @@ export default function FinancialsPL() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         </div>
       )}
 

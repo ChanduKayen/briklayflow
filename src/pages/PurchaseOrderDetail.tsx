@@ -321,6 +321,9 @@ const PODX_CSS = `
 .podx .m-abar .m-note{position:absolute;top:-32px;left:14px;right:14px;text-align:center;font-size:12px;color:var(--ink-2);background:var(--gold-tint);border:1px solid #EBD9B4;border-radius:10px;padding:6px}
 .podx .m-abtn{height:52px;min-width:0;padding:0 12px;border-radius:14px;font-weight:600;font-size:14.5px;display:flex;align-items:center;justify-content:center;gap:9px;border:0;cursor:pointer;transition:transform .12s var(--ease),box-shadow .18s var(--ease),filter .16s var(--ease)}
 .podx .m-abtn:active{transform:translateY(1px) scale(.985)}
+/* back and kebab sit at 40px by design — extend the hit area, not the button */
+.podx .m-back,.podx .m-dots{position:relative}
+.podx .m-back::after,.podx .m-dots::after{content:"";position:absolute;top:50%;left:50%;width:44px;height:44px;transform:translate(-50%,-50%)}
 .podx .m-abtn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2;flex-shrink:0}
 /* the WhatsApp mark is a solid brand glyph, not a stroked icon like its neighbours */
 .podx .m-abtn svg.wa-mark{fill:currentColor;stroke:none;border-radius:50%}

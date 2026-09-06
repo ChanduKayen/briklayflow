@@ -166,7 +166,7 @@ export default function FinancialsCashflow() {
           <div className="px-5 py-3 bg-surface-container-low border-b border-outline-variant/20">
             <h3 className="text-body-sm font-bold text-on-surface">Monthly Breakdown</h3>
           </div>
-          <table className="w-full">
+          <div className="tscroll"><table className="w-full">
             <thead>
               <tr className="border-b border-outline-variant/20">
                 <th className="px-5 py-2 text-left text-label-caps font-label-caps text-on-surface-variant">Month</th>
@@ -194,7 +194,7 @@ export default function FinancialsCashflow() {
                 );
               })}
             </tbody>
-          </table>
+          </table></div>
         </div>
       )}
 

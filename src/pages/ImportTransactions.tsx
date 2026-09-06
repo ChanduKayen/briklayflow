@@ -512,7 +512,7 @@ export default function ImportTransactions({ onClose }: { session: Session; onCl
                 </div>
               )}
               <p>Every name in your sheet. <span className="mut">Click a row to change it. New ones need a tick. <span className="doubt">?</span> means we’re not fully sure.</span></p>
-              <table><thead><tr><th style={{ width: 210 }}>In your sheet</th><th>In Briklay</th><th style={{ width: 64 }}>Rows</th></tr></thead>
+              <div className="tscroll"><table><thead><tr><th style={{ width: 210 }}>In your sheet</th><th>In Briklay</th><th style={{ width: 64 }}>Rows</th></tr></thead>
                 <tbody>{nameGroups.map((g) => nameRes[g.key] && (
                   <ResolveRow key={g.key} src={g.src} count={g.rowNos.length} doubt={g.match.doubt}
                     hasBest={!!g.match.best} bestId={g.match.best?.id} bestLabel={g.match.best ? labelForStkId(g.match.best.id, stkById, g.match.best.name) : undefined}
@@ -520,7 +520,7 @@ export default function ImportTransactions({ onClose }: { session: Session; onCl
                     value={nameRes[g.key]} onChange={(v) => onNameChange(g.key, v)}
                     focused={focusKey === g.key} onTicked={() => advanceFocus(nameGroups, nameRes, g.key)} />
                 ))}</tbody>
-              </table>
+              </table></div>
             </>
           )}
 
@@ -551,13 +551,13 @@ export default function ImportTransactions({ onClose }: { session: Session; onCl
 
               {siteGroups.length > 0 ? <>
                 <p style={{ marginTop: 18 }}>Sites named in your sheet. <span className="mut">Map each to one of your projects, or add it as a new site. These override the whole-sheet project above.</span></p>
-                <table><thead><tr><th style={{ width: 240 }}>In your sheet</th><th>Map to a project in Briklay</th><th style={{ width: 64 }}>Rows</th></tr></thead>
+                <div className="tscroll"><table><thead><tr><th style={{ width: 240 }}>In your sheet</th><th>Map to a project in Briklay</th><th style={{ width: 64 }}>Rows</th></tr></thead>
                   <tbody>{siteGroups.map((g) => siteRes[g.key] && (
                     <SiteResolveRow key={g.key} src={g.src} count={g.rowNos.length} doubt={g.match.doubt}
                       projects={allProj.map((p) => ({ id: p.id, name: p.name }))}
                       value={siteRes[g.key]} onChange={(v) => onSiteChange(g.key, v)} />
                   ))}</tbody>
-                </table>
+                </table></div>
               </> : (
                 <p className="mut" style={{ marginTop: 14 }}>
                   Your sheet has no per-row site column. {bulkProject.kind === 'none'
@@ -572,7 +572,7 @@ export default function ImportTransactions({ onClose }: { session: Session; onCl
             <>
               {fixRows.length > 0 && <>
                 <h3>A few rows need a hand <span className="mut">— {fixRows.length} of {rows.length}. Sort each one or skip it; the other {rows.length - fixRows.length} import as-is.</span></h3>
-                <table><thead><tr><th style={{ width: 46 }}>Row</th><th>Name / party</th><th style={{ width: 110 }}>Amount</th><th>What’s missing — your fix</th><th style={{ width: 64 }} /></tr></thead>
+                <div className="tscroll"><table><thead><tr><th style={{ width: 46 }}>Row</th><th>Name / party</th><th style={{ width: 110 }}>Amount</th><th>What’s missing — your fix</th><th style={{ width: 64 }} /></tr></thead>
                   <tbody>{fixRows.map((r) => { const issue = validateRow(r)!; const done = fixResolved(r) && !fixSkip[r.rowNo]; return (
                     <tr key={r.rowNo} className={fixSkip[r.rowNo] ? 'skip' : ''}>
                       <td className="num">{r.rowNo}</td>
@@ -593,11 +593,11 @@ export default function ImportTransactions({ onClose }: { session: Session; onCl
                       <td><span className="lnk" onClick={() => setFixSkip({ ...fixSkip, [r.rowNo]: !fixSkip[r.rowNo] })}>{fixSkip[r.rowNo] ? 'Undo' : 'Skip'}</span></td>
                     </tr>
                   ); })}</tbody>
-                </table>
+                </table></div>
               </>}
               {dupHits.length > 0 && <>
                 <h3>Already in your books <span className="mut">— skipped unless you switch them on</span></h3>
-                <table><thead><tr><th style={{ width: 46 }}>Row</th><th>In your sheet</th><th>Already in Briklay</th><th style={{ width: 70 }}>Import</th></tr></thead>
+                <div className="tscroll"><table><thead><tr><th style={{ width: 46 }}>Row</th><th>In your sheet</th><th>Already in Briklay</th><th style={{ width: 70 }}>Import</th></tr></thead>
                   <tbody>{dupHits.map((h) => { const r = parsedForGroups.find((x) => x.rowNo === h.rowNo)!; return (
                     <tr key={h.rowNo} className={dupKeep[h.rowNo] ? '' : 'skip'}>
                       <td className="num">{h.rowNo}</td>
@@ -606,7 +606,7 @@ export default function ImportTransactions({ onClose }: { session: Session; onCl
                       <td><input type="checkbox" checked={!!dupKeep[h.rowNo]} onChange={(e) => setDupKeep({ ...dupKeep, [h.rowNo]: e.target.checked })} /></td>
                     </tr>
                   ); })}</tbody>
-                </table>
+                </table></div>
               </>}
               {blankModeCount > 0 && (
                 <div className="imp-mode">
@@ -643,7 +643,7 @@ export default function ImportTransactions({ onClose }: { session: Session; onCl
               </div>
 
               {/* The two systems, side by side — the checksum the user asked for. */}
-              <table className="imp-recontable"><tbody>
+              <div className="tscroll"><table className="imp-recontable"><tbody>
                 <tr><td>Your Excel file</td><td className="num"><b>{rows.length}</b> rows</td></tr>
                 <tr><td className="ind">selected to import <span className="mut">(after fixes, skips & duplicates)</span></td><td className="num">{selectedCount}</td></tr>
                 <tr className="sep"><td>Imported into the app</td><td className="num"><b>{ins}</b></td></tr>
@@ -653,7 +653,7 @@ export default function ImportTransactions({ onClose }: { session: Session; onCl
                     <td className="num">{selectedCount} {checksumOK ? '=' : '≠'} {ins}+{skp}+{fld} {checksumOK ? '✓' : '✗'}</td></tr>
                 <tr><td>App now holds for this import <span className="mut">(counted in the database)</span></td>
                     <td className="num">{verifiedCount == null ? 'unverified' : <>{verifiedCount} {appOK ? '✓' : '✗'}</>}</td></tr>
-              </tbody></table>
+              </tbody></table></div>
 
               <p className="mut" style={{ marginTop: 12 }}>
                 {Object.keys(result.createdIds).length} new {Object.keys(result.createdIds).length === 1 ? 'party' : 'parties'}
@@ -668,11 +668,11 @@ export default function ImportTransactions({ onClose }: { session: Session; onCl
 
               {fld > 0 && <>
                 <h3>Rows that failed — {fld} of {selectedCount}, grouped by reason</h3>
-                <table><thead><tr><th style={{ width: 60 }}>Count</th><th>Reason (exact database error)</th><th>Rows</th></tr></thead>
+                <div className="tscroll"><table><thead><tr><th style={{ width: 60 }}>Count</th><th>Reason (exact database error)</th><th>Rows</th></tr></thead>
                   <tbody>{reasons.map(({ reason, rowsArr }) => (
                     <tr key={reason}><td className="num">{rowsArr.length}</td><td className="bad">{reason}</td><td className="mut" style={{ wordBreak: 'break-word' }}>{fmtRows(rowsArr)}</td></tr>
                   ))}</tbody>
-                </table>
+                </table></div>
               </>}
 
               {skp > 0 && <>

@@ -209,6 +209,10 @@ const POLX_CSS = `
 .polx .m-fab{position:fixed;right:16px;bottom:calc(76px + env(safe-area-inset-bottom));z-index:30;height:52px;padding:0 20px;border-radius:26px;background:var(--terra);color:#fff;font-weight:600;font-size:15px;display:inline-flex;align-items:center;gap:8px;border:0;box-shadow:0 12px 28px -8px rgba(180,83,47,.55)}
 .polx .m-fab svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2.4}
 .polx .m-fab:active{transform:scale(.96)}
+/* the chip row and the search button are deliberately compact; .tap44 keeps the look and
+   gives the finger the full 44px it needs */
+.polx .m-chip,.polx .m-mast .ico{position:relative}
+.polx .m-chip::after,.polx .m-mast .ico::after{content:"";position:absolute;top:50%;left:50%;width:max(100%,44px);height:44px;transform:translate(-50%,-50%)}
 `;
 
 interface POItem { n: string; q: string; r: boolean }
@@ -623,7 +627,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
           ))}
         </div>
 
-        <div className="m-list">
+        <div className="m-list mo-stagger">
           {mList.length === 0 ? (
             <div className="m-empty">{q ? 'No orders match your search.' : filter === 'approvals' ? 'Nothing waiting on you.' : 'Nothing here yet.'}</div>
           ) : mList.map(p => {

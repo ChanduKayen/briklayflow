@@ -203,6 +203,8 @@ const TXNX_CSS = `
 .txnx .m-abar{position:fixed;left:0;right:0;bottom:0;z-index:41;display:flex;gap:9px;padding:12px 14px calc(14px + env(safe-area-inset-bottom));background:rgba(255,252,247,.94);backdrop-filter:blur(12px);border-top:1px solid var(--line)}
 .txnx .m-abtn{height:48px;min-width:0;padding:0 12px;overflow:hidden;border-radius:13px;font-weight:600;font-size:14.5px;line-height:1.15;white-space:nowrap;text-overflow:ellipsis;display:flex;align-items:center;justify-content:center;gap:8px;border:0;cursor:pointer}
 .txnx .m-abtn:active{transform:scale(.97)}
+.txnx .m-back,.txnx .m-dots{position:relative}
+.txnx .m-back::after,.txnx .m-dots::after{content:"";position:absolute;top:50%;left:50%;width:44px;height:44px;transform:translate(-50%,-50%)}
 .txnx .m-abtn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2;flex-shrink:0}
 .txnx .m-abtn.is-ghost{flex:0 1 auto;border:1px solid var(--line);background:var(--paper);color:var(--walnut-2)}
 .txnx .m-abtn.is-link{flex:1 1 auto;background:var(--terra);color:#fff;box-shadow:0 10px 24px -10px rgba(180,83,47,.5)}
