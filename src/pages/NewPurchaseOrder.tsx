@@ -3582,6 +3582,22 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
         </div>
       )}
 
+      <style>{`
+        /* Order details is two label/value pairs on one row: 116px + 1fr + 116px + 1fr. On a phone
+           that leaves each value about 70px — too narrow for a vendor or a project name. Below the
+           phone breakpoint each pair takes its own row instead. The tracks are set inline, so the
+           override has to outrank them. */
+        @media (max-width: 760px) {
+          .npo-drow { grid-template-columns: 100px minmax(0, 1fr) !important; }
+          /* the third cell was a middle label on desktop; as a new first cell it takes the row
+             rule above it rather than an edge on its left */
+          .npo-drow > :nth-child(3) { border-left: 0 !important; border-top: 1px solid ${uiV.line} !important; }
+          .npo-drow > :nth-child(4) { border-top: 1px solid ${uiV.line} !important; }
+        }
+        /* the sticky footer must clear the home indicator */
+        .npo-foot { padding-bottom: env(safe-area-inset-bottom); }
+      `}</style>
+
       <div
         className="px-4 md:px-6 pt-6 pb-36 mx-auto"
         style={{ maxWidth: '100%', background: '#FBF9F6' }}
@@ -3638,7 +3654,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
         <SheetSectionLabel title="Order details" />
         <div className="rounded-2xl overflow-hidden mb-2" style={{ border: `1px solid ${uiV.line}`, background: uiV.surface }}>
           {/* Row 1: Vendor | Project */}
-          <div className="grid" style={{ gridTemplateColumns: '116px minmax(0,1fr) 116px minmax(0,1fr)', borderBottom: `1px solid ${uiV.line}` }}>
+          <div className="grid npo-drow" style={{ gridTemplateColumns: '116px minmax(0,1fr) 116px minmax(0,1fr)', borderBottom: `1px solid ${uiV.line}` }}>
             <div className="flex items-center px-3.5 py-3 text-[13px]" style={{ background: uiV.field, borderRight: `1px solid ${uiV.line}`, color: uiV.system }}>Vendor</div>
             <div className="relative flex items-center">
               {selectedVendor && !showVendorResults && !vendorSearch ? (
@@ -3739,7 +3755,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
             </div>
           </div>
           {/* Row 2: Order date | Deliver to */}
-          <div className="grid" style={{ gridTemplateColumns: '116px minmax(0,1fr) 116px minmax(0,1fr)' }}>
+          <div className="grid npo-drow" style={{ gridTemplateColumns: '116px minmax(0,1fr) 116px minmax(0,1fr)' }}>
             <div className="flex items-center px-3.5 py-3 text-[13px]" style={{ background: uiV.field, borderRight: `1px solid ${uiV.line}`, color: uiV.system }}>Order date</div>
             <div className="flex items-center">
               <input
@@ -4509,7 +4525,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
       </div>
 
       {/* ── Sticky footer bar ──────────────────────────────────── */}
-      <div className="fixed bottom-0 left-0 right-0 z-40" style={{ background: 'rgba(251,250,248,0.96)', backdropFilter: 'blur(12px)', borderTop: `1px solid ${uiV.line}`, paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 10px)' }}>
+      <div className="fixed bottom-0 left-0 right-0 z-40 npo-foot" style={{ background: 'rgba(251,250,248,0.96)', backdropFilter: 'blur(12px)', borderTop: `1px solid ${uiV.line}`, paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 10px)' }}>
         <div className="flex items-center justify-between gap-3 px-4 md:px-6 py-3 mx-auto" style={{ maxWidth: '100%' }}>
           <div className="flex items-baseline gap-2">
             <span className="text-[13px]" style={{ color: uiV.system }}>

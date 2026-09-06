@@ -143,7 +143,13 @@ const TXNX_CSS = `
 .txnx.m{min-height:100dvh;display:flex;flex-direction:column;background:var(--cream)
   ;--cream:#F5F0E7;--paper:#FFFCF7;--line:#E5DCCD;--line-soft:#EFE8DB
   ;--walnut:#33251B;--walnut-2:#6A5A4C;--walnut-3:#9A8B7B;--terra:#B4532F;--terra-soft:#F6E7DF
-  ;--sage:#5F7F5C;--sage-soft:#E7EEE3;--wa:#1FAF5A}
+  ;--sage:#5F7F5C;--sage-soft:#E7EEE3;--wa:#1FAF5A
+  /* the mobile block asks for these eight times (the hero amount, the txn number, the
+     activity timestamps, the allocation figures, the WhatsApp quote) but nothing declared
+     them, so every one fell back to the body face — figures were not tabular. */
+  ;--mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace
+  ;--sans:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif
+  ;--serif:Georgia,'Times New Roman',serif}
 .txnx.m *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 .txnx .m-dtop{display:flex;align-items:center;gap:4px;padding:12px 8px 8px;position:sticky;top:0;z-index:6;background:var(--cream)}
 .txnx .m-back,.txnx .m-dots{width:40px;height:40px;display:grid;place-items:center;color:var(--walnut-2);border-radius:50%;background:none;border:0;cursor:pointer}
@@ -188,6 +194,8 @@ const TXNX_CSS = `
 .txnx .m-origin{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:14px 15px;display:flex;gap:11px}
 .txnx .m-origin .glyph{width:26px;height:26px;border-radius:50%;background:#E8F5EC;color:var(--wa);display:grid;place-items:center;flex-shrink:0;margin-top:1px}
 .txnx .m-origin .glyph svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2}
+/* a typed note keeps its own line breaks, and a long unbroken string still wraps */
+.txnx .m-note{margin:0;padding:11px 0;font-size:13.5px;line-height:1.55;color:var(--walnut-2);white-space:pre-wrap;overflow-wrap:anywhere}
 .txnx .m-origin .q{font-family:var(--serif);font-style:italic;font-size:14px;line-height:1.55;color:var(--walnut-2)}
 .txnx .m-origin .q a{color:var(--terra)}
 .txnx .m-origin .s{font-size:12px;color:var(--walnut-3);margin-top:7px;font-family:var(--sans)}
@@ -781,6 +789,13 @@ export default function TransactionDetail({ session }: { session: Session }) {
                   {waWho && <div className="s">{waWho}</div>}
                 </div>
               </div>
+            </div>
+          )}
+
+          {effective.remarks && (
+            <div className="m-sec">
+              <div className="hh">Note</div>
+              <div className="m-card"><p className="m-note">{effective.remarks}</p></div>
             </div>
           )}
 
