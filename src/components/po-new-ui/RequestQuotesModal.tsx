@@ -439,7 +439,9 @@ export default function RequestQuotesModal({ orgId, projectId, deliveryLocation,
               {/* add a vendor */}
               <div className="newrow">
                 <input className="nm" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New vendor — name" />
-                <PhoneInput value={newPhone} onChange={setNewPhone} placeholder="mobile" style={{ width: 190, height: 40 }} />
+                <PhoneInput value={newPhone} onChange={setNewPhone} placeholder="mobile" style={{ width: 190, height: 40 }}
+                  /* picking a contact fills the vendor name too, so adding a vendor is one tap */
+                  onPickName={(nm) => { if (!newName.trim()) setNewName(nm); }} />
                 <button
                   className={`addsel${newName.trim() && isValid(newPhone) ? ' ready' : ''}`}
                   onClick={addVendor}

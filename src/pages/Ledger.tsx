@@ -1082,7 +1082,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
         }} />
       </header>
 
-      <div className="mx-auto px-5 sm:px-8 py-8 max-w-[880px] lg:max-w-[1040px] xl:max-w-[1200px] min-[1700px]:max-w-[1640px] min-[1700px]:grid min-[1700px]:grid-cols-[minmax(0,1fr)_340px] min-[1700px]:gap-12 min-[1700px]:items-start">
+      <div className="mx-auto px-5 sm:px-8 py-4 sm:py-8 max-w-[880px] lg:max-w-[1040px] xl:max-w-[1200px] min-[1700px]:max-w-[1640px] min-[1700px]:grid min-[1700px]:grid-cols-[minmax(0,1fr)_340px] min-[1700px]:gap-12 min-[1700px]:items-start">
 
         {/* ── main column: the day-book ── */}
         <div className="min-w-0">
@@ -1193,7 +1193,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
             (filterType.length ? 1 : 0) + (!lockedProject && filterProject.length ? 1 : 0) +
             (filterUnlinked ? 1 : 0) + (datePreset !== 'all' ? 1 : 0);
           return (
-            <div className="sm:hidden mt-5 space-y-2.5">
+            <div className="sm:hidden mt-2 space-y-2.5">
               {/* filter · search · download — one aligned row */}
               <div className="flex items-center gap-2">
                 <button
@@ -1323,7 +1323,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
             const weekday = new Date(day.date).toLocaleDateString('en-IN', { weekday: 'long' });
             const dshort = new Date(day.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
             return (
-              <section className="mt-7 mo-rise-day" key={day.date} id={`txn-day-${day.date}`} style={{ scrollMarginTop: 60 }}>
+              <section className="mt-4 sm:mt-7 mo-rise-day" key={day.date} id={`txn-day-${day.date}`} style={{ scrollMarginTop: 60 }}>
                 <p className="px-4 py-2 text-sm sticky top-0" style={{ background: V.page, color: V.ink, zIndex: 2, ...serif }}>
                   {dshort} <span className="text-xs" style={{ color: V.faint, ...font }}>· {weekday}</span>
                 </p>

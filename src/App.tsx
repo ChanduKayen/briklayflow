@@ -1,4 +1,4 @@
-import React, { createContext, lazy, Suspense, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, lazy, Suspense, useCallback, useContext, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from './lib/auth/AuthProvider';
 import { LOGIN_ROUTE, loginRouteFor } from './lib/auth/routes';
@@ -493,8 +493,6 @@ function App() {
         style={{ ['--shell-ml' as string]: isSecondaryNavRoute(location.pathname) ? `${(railExpanded ? 220 : 56) + 224}px` : '220px' } as React.CSSProperties}
         className={`min-h-screen mobile-main-pb transition-[margin-left] duration-[220ms] ease-[cubic-bezier(0.4,0,0.6,1)] md:ml-[var(--shell-ml)]`}
       >
-        {/* Mobile topbar (phones only â€" replaces sidebar hamburger) */}
-        <MobileTopbar session={session} />
         {/* WhatsApp entry deep-links bake their base URL at send time; a base without
             /logbook (e.g. a misconfigured WA_APP_LINK) lands on "/" -> /ledger and drops
             the param. Honor ?entry= here, BEFORE the "/" rule fires, so the link always
@@ -656,151 +654,7 @@ function GlobalShortcuts() {
 
 // â"€â"€ Sidebar shell â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
-function getMobileTitle(pathname: string): string {
-  const routes: Record<string, string> = {
-    '/':                    'Transactions',
-    '/insights':            'Insights',
-    '/logbook':             'For review',
-    '/site-desk':           'Site Desk',
-    '/ledger':              'Transactions',
-    '/ledger/new':          'New Transaction',
-    '/ledger/import':       'Import Transactions',
-    '/projects':            'Projects',
-    '/work-orders':         'Contracts',
-    '/work-orders/new':     'New Contract',
-    '/purchase-orders':     'Purchase Orders',
-    '/purchase-orders/new': 'New Purchase Order',
-    '/billing':             'Billing',
-    '/billing/new':         'New Bill',
-    '/stakeholders':        'Parties',
-    '/profile':             'Profile',
-    '/team':                'Team & Access',
-    '/financials':          'Financials',
-    '/financials/pl':       'P&L',
-    '/financials/cashflow': 'Cashflow',
-    '/invoices':            'Invoices',
-    '/invoices/new':        'New Invoice',
-    '/attendance':               'Attendance',
-    '/payables':                 'Payables',
-    '/cost-codes':               'Cost Codes',
-    '/procurement/requests':     'Requests',
-    '/procurement/quotes':       'Quotes',
-    '/procurement/orders':       'Orders',
-  };
-  if (routes[pathname]) return routes[pathname];
-  const seg = pathname.split('/').filter(Boolean);
-  const detailTitles: Record<string, string> = {
-    'ledger': 'Transaction', 'projects': 'Project', 'work-orders': 'Contract',
-    'purchase-orders': 'Purchase Order', 'billing': 'Bill', 'stakeholders': 'Stakeholder',
-    'invoices': 'Invoice', 'procurement': 'Procurement',
-  };
-  return detailTitles[seg[0]] ?? 'Briklay';
-}
 
-function MobileTopbar({ session }: { session: Session }) {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const { data: profile } = useUserProfile(session.user.id);
-
-  const pathSegments = location.pathname.split('/').filter(Boolean);
-  const isDetailPage = pathSegments.length >= 2;
-  const title = getMobileTitle(location.pathname);
-
-  const avatarColor: Record<string, string> = {
-    principal: 'bg-[#C45B39] text-white', management: 'bg-blue-500 text-white',
-    supervisor: 'bg-teal-500 text-white', accountant: 'bg-purple-500 text-white',
-  };
-  const initials = (name: string) =>
-    name.split(' ').filter(Boolean).map(w => w[0]).join('').toUpperCase().slice(0, 2) || '?';
-
-  // Account menu (mirrors the desktop avatar dropdown: Settings + Sign out).
-  const { triggerSignOut } = useSignOut();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!menuOpen) return;
-    const h = (e: Event) => { if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false); };
-    document.addEventListener('pointerdown', h);
-    return () => document.removeEventListener('pointerdown', h);
-  }, [menuOpen]);
-
-  return (
-    <header
-      className="md:hidden sticky top-0 z-30 bg-white/90 backdrop-blur-xl supports-[backdrop-filter]:bg-white/75"
-      style={{
-        paddingTop: 'env(safe-area-inset-top)',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.02)',
-      }}
-    >
-      <div className="flex items-center gap-2 px-4 h-12">
-        {isDetailPage && (
-          <button
-            onClick={() => navigate(-1)}
-            aria-label="Back"
-            className="flex items-center justify-center w-10 h-10 -ml-2 rounded-full text-on-surface-variant touch-active"
-          >
-            <IconChevronLeft size={24} strokeWidth={2} />
-          </button>
-        )}
-        <h1
-          className="flex-1 min-w-0 text-[17px] font-semibold text-on-surface leading-none truncate tracking-tight"
-        >
-          {title}
-        </h1>
-        {profile && (
-          <div className="relative shrink-0" ref={menuRef}>
-            <button
-              onClick={() => setMenuOpen(o => !o)}
-              aria-label="Account"
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold touch-active transition-transform active:scale-95 ${avatarColor[profile.role] ?? 'bg-surface-container-high text-on-surface'}`}
-            >
-              {initials(profile.name ?? 'U')}
-            </button>
-            {/* Email-pending bubble — mirrors the desktop rail; points at the "add your email" item in Profile. */}
-            {!session.user.email && (
-              <span aria-label="Email update needed" className="absolute -top-0.5 -right-0.5 rounded-full" style={{ width: 9, height: 9, background: '#E0603A', boxShadow: '0 0 0 2px #fff' }} />
-            )}
-            {menuOpen && (
-              <div
-                role="menu"
-                className="absolute right-0 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150"
-                style={{ top: 'calc(100% + 8px)', minWidth: 208, background: '#FFFFFF', border: '1px solid #EAE6E0', borderRadius: 14, boxShadow: '0 14px 36px rgba(20,16,12,0.20)', zIndex: 50, transformOrigin: 'top right' }}
-              >
-                <div className="flex items-center gap-2.5 px-3.5 py-3" style={{ borderBottom: '1px solid #F0ECE6' }}>
-                  <span className={`w-9 h-9 rounded-full flex items-center justify-center text-[12px] font-bold shrink-0 ${avatarColor[profile.role] ?? 'bg-surface-container-high text-on-surface'}`}>
-                    {initials(profile.name ?? 'U')}
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-[13.5px] font-semibold text-on-surface truncate leading-tight">{profile.name ?? 'User'}</p>
-                    <p className="text-[11px] text-on-surface-variant capitalize truncate">{profile.role}</p>
-                  </div>
-                </div>
-                <button
-                  role="menuitem"
-                  onClick={() => { setMenuOpen(false); navigate('/profile'); }}
-                  className="w-full flex items-center gap-3 px-3.5 py-3 text-left text-[14px] text-on-surface touch-active"
-                >
-                  <IconUser size={17} strokeWidth={1.7} style={{ color: '#9A9186', flexShrink: 0 }} /> Profile
-                </button>
-                <div style={{ borderTop: '1px solid #F0ECE6' }} />
-                <button
-                  role="menuitem"
-                  onClick={() => { setMenuOpen(false); triggerSignOut(); }}
-                  className="w-full flex items-center gap-3 px-3.5 py-3 text-left text-[14px] font-medium touch-active"
-                  style={{ color: '#B2402A' }}
-                >
-                  <IconLogout size={17} strokeWidth={1.7} style={{ flexShrink: 0 }} /> Sign out
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </header>
-  );
-}
 
 const TERRACOTTA = '#C45B39';
 

@@ -21,6 +21,16 @@ const CSS = `
 /* progress underline — grows as the 10 digits arrive, warm while typing, sage when complete */
 .phin .phin-fill{position:absolute;left:0;bottom:0;height:2px;background:var(--phin-terra);opacity:.28;
   transition:width .32s cubic-bezier(.33,1,.68,1),background .35s ease,opacity .35s ease}
+/* Choose-from-contacts — only rendered where the browser actually has the picker
+   (Chrome on Android today), so it never appears as a button that does nothing. */
+.phin .phin-pick{position:absolute;right:5px;width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;
+  border:0;background:transparent;border-radius:10px;cursor:pointer;color:var(--phin-muted);
+  transition:color .18s ease,background .18s ease,transform .12s ease}
+.phin .phin-pick:hover{color:var(--phin-terra);background:color-mix(in srgb,var(--phin-terra) 8%,transparent)}
+.phin .phin-pick:active{transform:scale(.92)}
+.phin .phin-pick svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.phin.haspick .phin-ok{right:47px}
+@media (prefers-reduced-motion:reduce){.phin .phin-pick{transition:none}}
 .phin .phin-ok{position:absolute;right:15px;display:inline-flex;opacity:0;transform:translateX(5px);transition:opacity .32s ease,transform .4s cubic-bezier(.34,1.15,.5,1)}
 .phin .phin-ok svg{width:15px;height:15px;stroke:var(--phin-sage);fill:none;stroke-width:2.3;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:20;stroke-dashoffset:20}
 .phin:focus-within{border-color:var(--phin-terra);box-shadow:0 1px 2px rgba(59,47,39,.04),0 0 0 3px color-mix(in srgb,var(--phin-terra) 11%,transparent)}
@@ -58,11 +68,14 @@ export interface PhoneInputProps {
   style?: React.CSSProperties;
   inputId?: string;
   name?: string;
+  /** Called with the picked contact's name when the phone came from the OS contact picker,
+   *  so a caller that also has a name field can fill it in the same tap. */
+  onPickName?: (name: string) => void;
 }
 
 export default function PhoneInput({
   value, onChange, onValidChange, placeholder = '98765 43210',
-  autoFocus, disabled, variant = 'cream', className = '', style, inputId, name,
+  autoFocus, disabled, variant = 'cream', className = '', style, inputId, name, onPickName,
 }: PhoneInputProps) {
   useEffect(ensureStyle, []);
   const local = localDigits(value);
@@ -78,9 +91,41 @@ export default function PhoneInput({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [valid]);
 
+  // The Contact Picker API is Chrome-on-Android only, needs a secure context, and must be
+  // called from a user gesture. Feature-detect once on mount so the button is absent — not
+  // present-but-dead — everywhere else.
+  const [canPick, setCanPick] = useState(false);
+  useEffect(() => {
+    setCanPick(typeof navigator !== 'undefined' && 'contacts' in navigator && 'ContactsManager' in window);
+  }, []);
+
+  const pickFromContacts = async () => {
+    const api = (navigator as unknown as { contacts?: {
+      select: (p: string[], o?: { multiple?: boolean }) => Promise<Array<{ name?: string[]; tel?: string[] }>>;
+      getProperties?: () => Promise<string[]>;
+    } }).contacts;
+    if (!api) return;
+    try {
+      // Not every build exposes every property; ask for what this one supports.
+      const supported = (await api.getProperties?.()) ?? ['name', 'tel'];
+      const want = ['tel', 'name'].filter(pr => supported.includes(pr));
+      if (!want.includes('tel')) return;
+      const [picked] = await api.select(want, { multiple: false });
+      if (!picked) return;
+      const tels = picked.tel ?? [];
+      // Prefer a number that is actually a valid Indian mobile; fall back to the first listed.
+      const chosen = tels.map(localDigits).find(isValidMobile) ?? localDigits(tels[0]);
+      if (chosen) onChange(chosen);
+      const nm = (picked.name ?? [])[0];
+      if (nm && onPickName) onPickName(nm);
+    } catch {
+      // The picker was dismissed, or the browser refused it — leave whatever is typed alone.
+    }
+  };
+
   const progress = Math.min(local.length, 10) / 10;
   return (
-    <div className={`phin ${variant}${valid ? ' valid' : ''}${pulse ? ' pulse' : ''}${disabled ? ' disabled' : ''} ${className}`} style={style}>
+    <div className={`phin ${variant}${valid ? ' valid' : ''}${pulse ? ' pulse' : ''}${disabled ? ' disabled' : ''}${canPick ? ' haspick' : ''} ${className}`} style={style}>
       <span className="phin-cc">+91</span>
       <span className="phin-div" />
       <input
@@ -88,11 +133,16 @@ export default function PhoneInput({
         maxLength={10} value={local} placeholder={placeholder} autoFocus={autoFocus} disabled={disabled}
         onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, 10))}
         // pinned inline so a page's scoped `input {…}` rules can't override the field's look
-        style={{ flex: 1, minWidth: 0, border: 0, outline: 'none', background: 'transparent', height: '100%', padding: '0 30px 0 0', color: '#3b2f27', fontFamily: '"DM Mono", ui-monospace, monospace', fontSize: 15.5, letterSpacing: '.1em' }}
+        style={{ flex: 1, minWidth: 0, border: 0, outline: 'none', background: 'transparent', height: '100%', padding: `0 ${canPick ? 76 : 30}px 0 0`, color: '#3b2f27', fontFamily: '"DM Mono", ui-monospace, monospace', fontSize: 15.5, letterSpacing: '.1em' }}
       />
       <span className="phin-ok" aria-hidden={!valid}>
         <svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7" /></svg>
       </span>
+      {canPick && !disabled && (
+        <button type="button" className="phin-pick" onClick={pickFromContacts} aria-label="Choose from contacts" title="Choose from contacts">
+          <svg viewBox="0 0 24 24"><path d="M17 20v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1" /><circle cx="10" cy="7" r="3.2" /><path d="M18 8.5v5M20.5 11h-5" /></svg>
+        </button>
+      )}
       <span className="phin-fill" style={{ width: `${progress * 100}%` }} />
     </div>
   );
