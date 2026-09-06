@@ -1015,8 +1015,8 @@ export default function TransactionDetail({ session }: { session: Session }) {
           {isVoided && txn.voided_at && (
             <li><span className="mono">{new Date(txn.voided_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span><i /><span><b>Voided</b> — reversed in the books</span></li>
           )}
-          {[...existingAmendments].reverse().map((am: any) => (
-            <li key={am.id}><span className="mono">{new Date(am.amended_at || am.moved_at || txn.created_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span><i /><span><b>{am.amended_by || am.moved_by || 'Someone'}</b> amended {Object.keys(am.changes || {}).join(', ') || 'this transaction'}</span></li>
+          {[...existingAmendments].reverse().map((am) => (
+            <li key={am.id}><span className="mono">{new Date(am.amended_at || txn.created_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span><i /><span><b>{am.amended_by || 'Someone'}</b> amended {Object.keys(am.changes || {}).join(', ') || 'this transaction'}</span></li>
           ))}
           <li><span className="mono">{new Date(txn.created_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span><i /><span><b>{recordedBy || 'Recorded'}</b> {rupee(Number(txn.total_amount))} {isIn ? 'received from' : 'paid to'} {payeeName}{effective.payment_mode ? ` by ${effective.payment_mode}` : ''}</span></li>
         </ul></div>

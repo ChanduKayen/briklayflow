@@ -176,6 +176,53 @@ html, body {
 .bk-ledger-anchor { grid-area: anchor; min-width: 0; }
 .bk-ledger-amount { grid-area: amount; }
 
+/* ── the row under a finger ──
+   A tap must answer instantly and settle like a physical thing: the surface tints
+   from the point of contact, the row gives a little, then springs back. Press is
+   driven by a class rather than :active because iOS withholds :active from
+   non-anchor elements unless a touch listener is bound to them. */
+.bk-ledger-row {
+  -webkit-tap-highlight-color: transparent;
+  transition: background .2s ease, transform .34s cubic-bezier(.34, 1.32, .4, 1);
+}
+.bk-ledger-row::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(130px circle at var(--px, 50%) var(--py, 50%), rgba(200, 96, 58, .15), rgba(200, 96, 58, .05) 55%, transparent 74%);
+  transition: opacity .4s ease;
+}
+.bk-ledger-row.is-press {
+  transform: scale(.977);
+  transition: background .1s ease, transform .13s cubic-bezier(.3, 0, .2, 1);
+}
+.bk-ledger-row.is-press::before { opacity: 1; transition: opacity .07s ease; }
+.bk-ledger-row.is-press .bk-go { transform: translateX(2px); }
+
+.bk-go {
+  display: none;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: 2px;
+  margin-right: -4px;
+  color: #C4BDB4;
+  transition: transform .26s cubic-bezier(.34, 1.32, .4, 1);
+}
+
+/* the payee, pressed — tints on its own so a thumb can tell which of the row's two
+   destinations it just chose */
+.bk-party { position: relative; border-radius: 7px; transition: background .16s ease; }
+.bk-party.is-press { background: rgba(200, 96, 58, .13); }
+.bk-party-go { display: none; flex-shrink: 0; margin-left: 2px; opacity: .5; }
+
+@media (prefers-reduced-motion: reduce) {
+  .bk-ledger-row, .bk-ledger-row::before, .bk-go, .bk-party { transition: none; }
+  .bk-ledger-row.is-press { transform: none; }
+}
+
 @media (max-width: 639px) {
   .bk-ledger-row {
     grid-template-columns: 28px minmax(0, 1fr) auto;
@@ -191,6 +238,23 @@ html, body {
      and no linked PO/contract reference chip — so the phone list is a clean payee + amount
      line. Linking happens on the transaction page. Desktop grid is untouched. */
   .bk-ledger-anchor { display: none; }
+
+  /* The disclosure chevron: a phone row has no hover, so it needs a standing sign
+     that it opens something. It leans right under the finger. */
+  .bk-go { display: flex; }
+
+  /* The payee opens that party's ledger — a different destination from the rest of
+     the row, so on a phone it needs both a visible affordance and a hit box a thumb
+     can find. The negative margins buy 32px of height without moving a pixel of
+     layout; the dotted rule is the touch equivalent of the desktop hover underline. */
+  .bk-party { padding: 8px 5px; margin: -8px -5px; }
+  .bk-party-nm {
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-decoration-color: rgba(33, 28, 23, 0.28);
+    text-underline-offset: 3px;
+  }
+  .bk-party-go { display: inline-flex; }
 }
 
 /* ── Inbox entry bar positioning ── */

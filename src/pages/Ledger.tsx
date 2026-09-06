@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, lazy, Suspense, type ReactNode, type MouseEvent } from 'react';
+import { useState, useRef, useEffect, useMemo, lazy, Suspense, type ReactNode, type MouseEvent, type PointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -10,7 +10,7 @@ import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
 import { getCostCode } from '../lib/costCodes';
-import { Plus, Search, Download, Paperclip, Check, ArrowRight, X, SlidersHorizontal } from 'lucide-react';
+import { Plus, Search, Download, Paperclip, Check, ArrowRight, ChevronRight, X, SlidersHorizontal } from 'lucide-react';
 import BottomSheet from '../components/BottomSheet';
 import { WhatsAppGlyph } from '../components/day-book/atoms';
 import { StartOnWhatsAppButton } from '../components/day-book/StartOnWhatsApp';
@@ -103,16 +103,30 @@ type EntryProps = {
 function EntryRow(p: EntryProps) {
   const [hover, setHover] = useState(false);
   const showCheck = p.selectionMode || hover;
+  // The press is toggled by hand rather than left to :active — iOS never gives :active
+  // to a plain div — and the contact point is written onto the element so the tint
+  // blooms from under the thumb instead of from the middle of the row.
+  const press = (e: PointerEvent<HTMLElement>) => {
+    const el = e.currentTarget;
+    const r = el.getBoundingClientRect();
+    el.style.setProperty('--px', `${e.clientX - r.left}px`);
+    el.style.setProperty('--py', `${e.clientY - r.top}px`);
+    el.classList.add('is-press');
+  };
+  const unpress = (e: PointerEvent<HTMLElement>) => e.currentTarget.classList.remove('is-press');
   return (
     <div
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       onClick={p.onRowClick}
+      onPointerDown={press}
+      onPointerUp={unpress}
+      onPointerCancel={unpress}
+      onPointerLeave={unpress}
       className="bk-ledger-row rounded-xl relative cursor-pointer"
       style={{
         background: p.sumSelected ? V.terraWash : hover ? V.field : 'transparent',
         opacity: p.voided ? 0.45 : 1,
-        transition: 'background .15s',
       }}
     >
       {/* select ↔ medallion swap: the direction medallion BECOMES the checkbox on
@@ -139,11 +153,14 @@ function EntryRow(p: EntryProps) {
       </div>
 
       <div className="bk-ledger-main">
-        <p className="text-sm font-medium truncate" style={{ color: V.ink, ...font }}>
+        {/* The name truncates on its own rather than the whole line, so it can carry the
+            padding that makes it a real target on a phone — a `truncate` on the <p> would
+            clip any hit area grown outside the text. */}
+        <p className="text-sm font-medium flex items-center min-w-0" style={{ color: V.ink, ...font }}>
           {/* Mobile-only: the "flagged" badge lives in the (hidden) anchor cell on a phone, so
               carry a subtle amber dot beside the name instead. Desktop keeps the full badge. */}
           {p.flagged && (
-            <span className="sm:hidden" title="AI-flagged" style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: V.ask, marginRight: 6, verticalAlign: 'middle' }} />
+            <span className="sm:hidden shrink-0" title="AI-flagged" style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: V.ask, marginRight: 6 }} />
           )}
           {p.stakeholderId && p.onPayeeClick ? (
             <span
@@ -151,14 +168,22 @@ function EntryRow(p: EntryProps) {
               tabIndex={0}
               title={`View ${p.payee}'s ledger`}
               onClick={(e) => { e.stopPropagation(); p.onPayeeClick!(e); }}
-              className="cursor-pointer hover:underline underline-offset-2 decoration-dotted"
+              onPointerDown={(e) => { e.stopPropagation(); e.currentTarget.classList.add('is-press'); }}
+              onPointerUp={unpress}
+              onPointerCancel={unpress}
+              onPointerLeave={unpress}
+              className="bk-party flex items-center min-w-0 cursor-pointer"
             >
-              {p.payee}
+              <span className="bk-party-nm truncate min-w-0 hover:underline underline-offset-2 decoration-dotted">{p.payee}</span>
+              {/* the standing sign that this name is its own destination — a phone has no hover
+                  to reveal the desktop's underline. Outside the underlined text, so the rule
+                  runs under the name and stops there. */}
+              <ChevronRight className="bk-party-go" size={11} strokeWidth={2.5} aria-hidden="true" />
             </span>
           ) : (
-            p.payee
+            <span className="truncate min-w-0">{p.payee}</span>
           )}
-          {p.voided && <span className="ml-1.5 text-xs" style={{ color: V.faint, ...font }}>· voided</span>}
+          {p.voided && <span className="ml-1.5 text-xs shrink-0" style={{ color: V.faint, ...font }}>· voided</span>}
         </p>
         <p className="text-xs truncate" style={{ color: V.faint, ...font }}>{p.context}</p>
       </div>
@@ -185,6 +210,7 @@ function EntryRow(p: EntryProps) {
         >
           <Amount dir={p.dir} value={p.amount} />
         </div>
+        <ChevronRight className="bk-go" size={16} strokeWidth={2} aria-hidden="true" />
       </div>
     </div>
   );
