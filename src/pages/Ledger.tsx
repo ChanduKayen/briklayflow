@@ -308,14 +308,20 @@ const LEDGER_BAND_CSS = `
 .tb-meta{font-size:13px;color:rgba(245,240,231,.5);margin-top:11px}
 .tb-meta .num{color:rgba(245,240,231,.72)}
 .tb-meta i{font-style:normal;color:rgba(245,240,231,.28);margin:0 7px}
-.txn-rhythm{position:relative;max-width:1120px;margin:26px auto 0;padding:0 40px}
+.txn-rhythm{position:relative;max-width:1120px;margin:22px auto 0;padding:0 40px 14px}
 .txn-rhythm svg{display:block;width:100%;height:66px}
 .txn-rhythm .bar{fill:rgba(245,240,231,.16);transition:transform .45s cubic-bezier(.2,.7,.3,1),fill .15s;transform:scaleY(0);transform-origin:bottom;transform-box:fill-box;cursor:default}
 .txn-rhythm svg.up .bar{transform:scaleY(1)}
 .txn-rhythm .bar:hover{fill:rgba(245,240,231,.34)}
 .txn-rhythm .bar.hot{fill:url(#tbbarhot)}
 .txn-rhythm .bar.today{fill:#F5F0E7}
-.txn-tip{position:absolute;bottom:74px;transform:translateX(-50%);background:#F5F0E7;color:#33251B;font-size:12px;padding:5px 9px;border-radius:7px;white-space:nowrap;pointer-events:none;box-shadow:0 6px 18px -8px rgba(43,29,19,.5);z-index:2}
+/* the chosen day — a mouse hovers it, a finger leaves it selected */
+.txn-rhythm .bar.on{fill:#F5F0E7}
+.txn-rhythm .bar.hot.on{fill:#E2865C}
+/* the readout: what the bars are, or what the chosen one says */
+.txn-cap{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-top:8px;font-size:12px;line-height:1.3}
+.txn-cap .d{color:rgba(245,240,231,.62);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.txn-cap .v{color:rgba(245,240,231,.82);white-space:nowrap;flex-shrink:0}
 .txn-mini{position:fixed;top:0;left:var(--shell-ml,220px);right:0;z-index:20;transform:translateY(-100%);transition:transform .22s ease;background:linear-gradient(180deg,#191009,#140D07);box-shadow:inset 0 -1px 0 #302014;color:#F5F0E7}
 .txn-mini.show{transform:translateY(0)}
 .txn-mini .in{max-width:1120px;margin:0 auto;padding:0 40px;height:48px;display:flex;align-items:center;gap:14px}
@@ -334,7 +340,7 @@ const LEDGER_BAND_CSS = `
   .txn-mini .p .sep{display:none}
   .txn-mini .mc{grid-column:1/-1;grid-row:2;margin-left:0;font-size:11.5px;margin-top:2px}
 }
-@media (max-width:640px){.tb-in,.txn-rhythm{padding-left:18px;padding-right:18px}.tb-in{padding-top:20px}.tb-h1{font-size:25px;flex:1 1 100%}.tb-actions{margin-left:0;flex:1 1 100%;margin-top:12px;gap:10px}.tb-btn{flex:1;min-width:0;height:44px;padding:0 10px}.tb-lead{margin-top:20px}.tb-amt{font-size:28px}}
+@media (max-width:640px){.tb-in,.txn-rhythm{padding-left:18px;padding-right:18px}.txn-rhythm{margin-top:18px;padding-bottom:13px}.txn-rhythm svg{height:58px}.txn-cap{font-size:11.5px;margin-top:7px}.tb-in{padding-top:20px}.tb-h1{font-size:25px;flex:1 1 100%}.tb-actions{margin-left:0;flex:1 1 100%;margin-top:12px;gap:10px}.tb-btn{flex:1;min-width:0;height:44px;padding:0 10px}.tb-lead{margin-top:20px}.tb-amt{font-size:28px}}
 @media (max-width:380px){.tb-amt{font-size:24px}.tb-btn{font-size:13px;gap:6px}}
 `;
 
@@ -344,18 +350,33 @@ function Rhythm({ data, onPick }: { data: { k: string; v: number; iso: string }[
   const wrapRef = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(1040);
   const [up, setUp] = useState(false);
+  // hover is for a mouse; sel is what a finger leaves behind. A touch has no "leave",
+  // so a tapped bar stays chosen until another is tapped — and the caption, not a
+  // floating tip, is what reports it.
   const [hover, setHover] = useState<number | null>(null);
+  const [sel, setSel] = useState<number | null>(null);
   useEffect(() => {
     const el = wrapRef.current; if (!el) return;
-    const measure = () => setW(Math.max(200, (el.clientWidth || 1120) - 80));   // minus the 40px L/R padding
+    // measure the real content box — the side padding differs between phone and desktop,
+    // and assuming the desktop value put the old tooltip in the wrong place on a phone
+    const measure = () => {
+      const cs = getComputedStyle(el);
+      const pad = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+      setW(Math.max(200, (el.clientWidth || 1120) - pad));
+    };
     measure();
     const ro = new ResizeObserver(measure); ro.observe(el); return () => ro.disconnect();
   }, []);
   useEffect(() => { const r = requestAnimationFrame(() => requestAnimationFrame(() => setUp(true))); return () => cancelAnimationFrame(r); }, []);
   const N = data.length, CH = 66, TOP = 8;
   const max = Math.max(1, ...data.map(d => d.v));
+  const total = data.reduce((a, d) => a + d.v, 0);
   const pitch = w / N, bw = Math.max(8, Math.round(pitch * 0.42));
   const fmt = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
+  const active = hover ?? sel;
+
+  const pick = (i: number) => { setSel(i); onPick?.(data[i].iso); };
+
   return (
     <div className="txn-rhythm" ref={wrapRef}>
       <svg viewBox={`0 0 ${w} ${CH}`} className={up ? 'up' : ''} onPointerLeave={() => setHover(null)}>
@@ -363,11 +384,33 @@ function Rhythm({ data, onPick }: { data: { k: string; v: number; iso: string }[
         {data.map((d, i) => {
           const h = Math.max(3, Math.round(d.v / max * (CH - TOP)));
           const x = Math.round(i * pitch + (pitch - bw) / 2);
-          const cls = 'bar' + (d.v > max * 0.8 ? ' hot' : '') + (i === N - 1 ? ' today' : '');
-          return <rect key={i} className={cls} x={x} y={CH - h} width={bw} height={h + 4} rx="2" style={{ transitionDelay: `${i * 22}ms`, cursor: onPick ? 'pointer' : 'default' }} onPointerEnter={() => setHover(i)} onClick={() => onPick?.(data[i].iso)} />;
+          const cls = 'bar' + (d.v > max * 0.8 ? ' hot' : '') + (i === N - 1 ? ' today' : '') + (active === i ? ' on' : '');
+          return <rect key={i} className={cls} x={x} y={CH - h} width={bw} height={h} rx="2" style={{ transitionDelay: `${i * 22}ms` }} />;
         })}
+        {/* one full-height hit column per day, so a finger does not have to find an 8px bar */}
+        {data.map((d, i) => (
+          <rect key={`h${i}`} x={Math.round(i * pitch)} y={0} width={Math.ceil(pitch)} height={CH}
+            fill="transparent" style={{ cursor: onPick ? 'pointer' : 'default' }}
+            onPointerEnter={(e) => { if (e.pointerType === 'mouse') setHover(i); }}
+            onClick={() => pick(i)}>
+            <title>{d.k} · {fmt(d.v)} out</title>
+          </rect>
+        ))}
       </svg>
-      {hover != null && <div className="txn-tip" style={{ left: 40 + ((hover + 0.5) / N) * w }}>{data[hover].k} · {fmt(data[hover].v)} out</div>}
+      {/* the caption is the readout: what the bars are, and what the chosen one says */}
+      <div className="txn-cap">
+        {active != null ? (
+          <>
+            <span className="d">{data[active].k}{active === N - 1 ? ' · today' : ''}</span>
+            <span className="v num">{data[active].v > 0 ? `${fmt(data[active].v)} out` : 'nothing out'}</span>
+          </>
+        ) : (
+          <>
+            <span className="d">Last {N} days</span>
+            <span className="v num">{fmt(total)} out · busiest {fmt(max)}</span>
+          </>
+        )}
+      </div>
     </div>
   );
 }
