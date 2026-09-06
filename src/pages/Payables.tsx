@@ -447,6 +447,9 @@ export default function Payables({ session }: { session: Session }) {
       advanceNote: (r.advance ?? 0) > 0.5 ? `${inr(r.advance!)} paid ahead · advance` : null,
       paidAmount: paid[r.key] ?? null,
       paidMode: paid[r.key] ? mode : null,
+      // The same Rationale the desktop table opens — the attendance register, the stage
+      // readings, the open bills, and the arithmetic that lands on this week's figure.
+      detail: <Rationale row={r} planned={planned(r)} diff={diffs[r.key]} />,
     });
     const sectionOf = (id: string, title: string): PlmSection | null => {
       const sec = sections.find(x => x.projectId === id);

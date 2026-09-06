@@ -55,8 +55,15 @@ const CSS = `
   background:var(--hair);transform:scaleY(.5)}
 .plm .p .main{display:flex;align-items:center;gap:12px;padding:14px 18px;min-height:64px}
 .plm .p .who{flex:1;min-width:0;cursor:pointer;border:0;background:none;text-align:left;padding:0;color:inherit}
+/* every row opens to show how its figure was reached, so every row says so */
+.plm .p .rl .chev{flex-shrink:0;color:var(--ink-3);font-size:14px;line-height:1;
+  transition:transform .25s var(--ease),color .2s}
+.plm .p.open .rl .chev{transform:rotate(90deg);color:var(--tint)}
+.plm .p.open{background:#FCFAF8}
+.plm .p.open::after{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--tint)}
 .plm .p .nm{font-size:16px;font-weight:600;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.plm .p .rl{font-size:13.5px;color:var(--ink-2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.plm .p .rl{font-size:13.5px;color:var(--ink-2);margin-top:2px;display:flex;align-items:center;gap:5px}
+.plm .p .rl .rt{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .plm .p .flag{font-size:13px;font-weight:500;color:var(--warn);margin-top:3px}
 .plm .p .flag.calm{color:var(--ink-2)}
 .plm .p .flag.good{color:var(--good)}
@@ -80,13 +87,38 @@ const CSS = `
 .plm .p.carried .amt{color:var(--ink-3);font-weight:600}
 .plm .carrybtn{border:0;background:none;font-size:14.5px;font-weight:600;color:var(--ink-3);
   padding:9px 4px;cursor:pointer;flex-shrink:0}
-.plm .expl{max-height:0;overflow:hidden;transition:max-height .38s var(--sheet)}
-.plm .expl.open{max-height:260px}
+.plm .expl{display:grid;grid-template-rows:0fr;transition:grid-template-rows .38s var(--sheet)}
+.plm .expl.open{grid-template-rows:1fr}
+.plm .expl>*{overflow:hidden;min-height:0}
 .plm .expl-in{margin:0 18px 16px;background:var(--bg);border-radius:14px;padding:14px 16px}
 .plm .expl-in .e0{font-size:13.5px;color:var(--ink-2);line-height:1.5;margin-bottom:10px}
 .plm .erow{display:flex;justify-content:space-between;gap:12px;font-size:14px;padding:5px 0;font-variant-numeric:tabular-nums}
 .plm .erow .l{color:var(--ink-2)}
 .plm .erow.tt{border-top:1px solid var(--hair);margin-top:4px;padding-top:9px;font-weight:600}
+.plm .ledgerlink{display:block;width:100%;text-align:left;border:0;background:none;margin-top:12px;
+  padding:4px 0;font-size:13.5px;font-weight:600;color:var(--tint);cursor:pointer}
+.plm .ledgerlink:active{opacity:.4}
+
+/* the desktop's Rationale, wearing this design — same component, same arithmetic */
+.plm .rat{margin-top:2px}
+.plm .rat .box{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;font-size:13px}
+.plm .rat .box>div{min-width:0;overflow-x:auto}
+.plm .rat .cap{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);margin-bottom:7px}
+.plm .rat .mini{border-collapse:collapse;width:100%}
+.plm .rat .mini th,.plm .rat .mini td{text-align:center;padding:4px 6px;font-size:12.5px;border-bottom:1px solid var(--hair)}
+.plm .rat .mini th{color:var(--ink-3);font-weight:500;font-size:11.5px}
+.plm .rat .mini td:first-child,.plm .rat .mini th:first-child{text-align:left;color:var(--ink-2);width:110px}
+.plm .rat .mini td:last-child,.plm .rat .mini th:last-child{text-align:right;font-weight:500;white-space:nowrap}
+.plm .rat .mini .off{color:var(--ink-3)}
+.plm .rat .ledger .ln{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-top:1px dashed var(--hair)}
+.plm .rat .ledger .ln:first-child{border-top:0}
+.plm .rat .ledger .ln.sum{border-top:1px solid var(--hair);font-weight:600;margin-top:3px;padding-top:7px}
+.plm .rat .ledger .minus{color:var(--ink-2)}
+.plm .rat .ledger .tag{font-size:11.5px;color:var(--ink-2);margin-left:6px}
+.plm .rat .mono{font-variant-numeric:tabular-nums}
+
+/* said once, under the first group: these rows open */
+.plm .sect-hint{font-size:12.5px;color:var(--ink-3);margin:0 4px 8px;line-height:1.4}
 
 .plm .addline{display:block;width:100%;border:0;background:none;font-size:15px;font-weight:600;
   color:var(--tint);padding:15px;cursor:pointer;transition:background .15s;position:relative}
@@ -199,6 +231,8 @@ export interface PlmRow {
   advanceNote?: string | null;
   paidAmount?: number | null;
   paidMode?: string | null;
+  /** how this figure was reached — the page's own Rationale, shown when the row opens */
+  detail?: ReactNode;
 }
 
 export interface PlmSection {
@@ -345,6 +379,10 @@ export default function PayablesMobile(p: PayablesMobileProps) {
               <div className="t">{s.rows.length ? inr(s.total) : 'None yet'}</div>
             </div>
 
+            {s.rows.length > 0 && s.id === p.sections.find(x => x.rows.length)?.id && (
+              <div className="sect-hint">Tap a row to see how its figure was reached.</div>
+            )}
+
             {s.rows.length === 0 && s.empty ? (
               <div className="empty">
                 <p>{s.empty.text}</p>
@@ -355,24 +393,25 @@ export default function PayablesMobile(p: PayablesMobileProps) {
                 {s.rows.map(row => {
                   const isPaid = row.paidAmount != null;
                   const carries = !isPaid && row.amount < 1 && row.balanceBf > 0.5;
+                  const open = openExpl === row.key;
+                  const toggle = () => setOpenExpl(o => (o === row.key ? null : row.key));
                   return (
-                    <div className={`p${isPaid ? ' paid' : ''}${carries ? ' carried' : ''}`} key={row.key}>
+                    <div className={`p${isPaid ? ' paid' : ''}${carries ? ' carried' : ''}${open ? ' open' : ''}`} key={row.key}>
                       <div className="main">
-                        <button type="button" className="who"
-                          onClick={() => (carries ? setOpenExpl(o => (o === row.key ? null : row.key)) : p.onOpenParty(row))}>
+                        <button type="button" className="who" onClick={toggle}
+                          aria-expanded={open} aria-label={`${row.name} — how this figure was reached`}>
                           <div className="nm">{row.name}</div>
-                          <div className="rl">{row.role}</div>
+                          <div className="rl"><span className="rt">{row.role}</span><span className="chev" aria-hidden="true">›</span></div>
                           {carries && <div className="flag calm">Owed {inr(row.balanceBf)} from earlier — carries forward</div>}
                           {!carries && row.flag && <div className="flag">{row.flag}</div>}
                           {!carries && row.advanceNote && <div className="flag good">{row.advanceNote}</div>}
                         </button>
-                        <div className="amt">
+                        <div className="amt" onClick={toggle}>
                           {carries ? '₹0' : inr(isPaid ? row.paidAmount! : row.amount)}
                           {carries && <span>this week</span>}
                         </div>
                         {carries ? (
-                          <button type="button" className="carrybtn"
-                            onClick={() => setOpenExpl(o => (o === row.key ? null : row.key))}>Why?</button>
+                          <button type="button" className="carrybtn" onClick={toggle}>Why?</button>
                         ) : (
                           <button type="button" className="pay" disabled={!row.amount} onClick={() => openPay(row)}>Pay</button>
                         )}
@@ -385,16 +424,22 @@ export default function PayablesMobile(p: PayablesMobileProps) {
                           <span>Paid{row.paidMode ? ` · ${row.paidMode}` : ''}</span>
                         </div>
                       </div>
-                      {carries && (
-                        <div className={`expl${openExpl === row.key ? ' open' : ''}`}>
-                          <div className="expl-in">
-                            <div className="e0">Nothing recorded on attendance this week, so there is nothing new to pay. The earlier balance stays on their ledger.</div>
-                            <div className="erow"><span className="l">This week's work</span><span>₹0</span></div>
-                            <div className="erow"><span className="l">Carried from ledger</span><span>{inr(row.balanceBf)}</span></div>
-                            <div className="erow tt"><span className="l">Carries forward</span><span>{inr(row.balanceBf)}</span></div>
-                          </div>
+                      <div className={`expl${open ? ' open' : ''}`} aria-hidden={!open}>
+                        <div className="expl-in">
+                          {carries && (
+                            <>
+                              <div className="e0">Nothing recorded on attendance this week, so there is nothing new to pay. The earlier balance stays on their ledger.</div>
+                              <div className="erow"><span className="l">This week's work</span><span>₹0</span></div>
+                              <div className="erow"><span className="l">Carried from ledger</span><span>{inr(row.balanceBf)}</span></div>
+                              <div className="erow tt"><span className="l">Carries forward</span><span>{inr(row.balanceBf)}</span></div>
+                            </>
+                          )}
+                          {row.detail && <div className="rat">{row.detail}</div>}
+                          <button type="button" className="ledgerlink" onClick={() => p.onOpenParty(row)}>
+                            Open {row.name}'s ledger →
+                          </button>
                         </div>
-                      )}
+                      </div>
                     </div>
                   );
                 })}
