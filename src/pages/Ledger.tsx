@@ -394,13 +394,6 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   const [loadingMore, setLoadingMore] = useState(false);
   // Elastic over-pull at either end (Android-style), applied to the page content.
   const elasticRef = useRef<HTMLDivElement>(null);
-  // The WhatsApp review nudge rotates BOTH its message and its CTA together:
-  // slide 0 = "X waiting" → Review in Day book; slide 1 = the invite → Start on WhatsApp (QR).
-  // Rotation pauses while the cursor is over the banner so the CTA can't flip out from
-  // under a click (each slide has a DIFFERENT action).
-  const [nudgeSlide, setNudgeSlide] = useState(0);
-  const nudgePaused = useRef(false);
-
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   // Tapping a party name opens their running ledger in a side drawer (as on Txn Detail).
   // `?stakeholder=<id>` opens it on arrival — the landing point for the "View ledger" button on a WhatsApp
@@ -890,13 +883,6 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   const visibleTxns = sortedTxns.slice(0, visibleCount);
   const hasMore = !isLoading && sortedTxns.length > visibleCount;
 
-  // Rotate the review-nudge slide every 4s (text + CTA switch together), unless paused
-  // (hovering the banner) so a deliberate click always lands on the slide you aimed at.
-  useEffect(() => {
-    const t = setInterval(() => { if (!nudgePaused.current) setNudgeSlide((p) => (p + 1) % 2); }, 4000);
-    return () => clearInterval(t);
-  }, []);
-
   // Auto-load the next page when the sentinel nears the viewport (a 300px lead-in),
   // with a short spinner beat so the reveal reads as a deliberate motion, not a jump.
   useEffect(() => {
@@ -1094,47 +1080,6 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
         {/* ── main column: the day-book ── */}
         <div className="min-w-0">
 
-        {/* nudge: WhatsApp captures waiting in the Day book (when the ledger has
-            entries; an empty ledger makes the case more fully in its empty state) */}
-        {dayBookReviewCount > 0 && (ledger?.length ?? 0) > 0 && (
-          (() => {
-            const slides = [
-              { text: `${dayBookReviewCount} ${dayBookReviewCount === 1 ? 'entry' : 'entries'} from WhatsApp ${dayBookReviewCount === 1 ? 'is' : 'are'} waiting to be reviewed`, cta: 'Review in For review →', action: () => navigate('/logbook'), wa: false },
-              { text: 'Send a bill, a voice note, or a message on WhatsApp — never miss a transaction', cta: '', action: null as null, wa: true },
-            ];
-            const s = slides[nudgeSlide % slides.length];
-            return (
-              <div
-                onMouseEnter={() => { nudgePaused.current = true; }}
-                onMouseLeave={() => { nudgePaused.current = false; }}
-                className="flex items-center gap-2.5 w-full mt-6 px-3.5 rounded-xl"
-                style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, minHeight: 54, ...font }}
-              >
-                <WhatsAppGlyph size={16} color="#1FA855" />
-                {s.wa ? (
-                  <span className="text-sm min-w-0 flex-1" style={{ color: V.ask }}>
-                    <span key={`t${nudgeSlide}`} className="block truncate nudge-rotate-in">{s.text}</span>
-                  </span>
-                ) : (
-                  <button onClick={s.action ?? undefined} className="text-sm min-w-0 flex-1 text-left" style={{ color: V.ask }}>
-                    <span key={`t${nudgeSlide}`} className="block truncate nudge-rotate-in">{s.text}</span>
-                  </button>
-                )}
-                {s.wa ? (
-                  // keeps rotation paused while the user is mid-flow (number entry / opening WhatsApp)
-                  <span key={`c${nudgeSlide}`} className="shrink-0 nudge-rotate-in">
-                    <StartOnWhatsAppButton tone="link" onBusyChange={(b) => { nudgePaused.current = b; }} />
-                  </span>
-                ) : (
-                  <button onClick={s.action ?? undefined} className="text-sm font-medium whitespace-nowrap shrink-0" style={{ color: V.ask }}>
-                    <span key={`c${nudgeSlide}`} className="inline-block nudge-rotate-in">{s.cta}</span>
-                  </button>
-                )}
-              </div>
-            );
-          })()
-        )}
-
         {/* subtle invite: has entries, but never set up WhatsApp capture. Quiet,
             dismissible, manager-only — a builder typing every entry by hand may
             not know the site can send them in. */}
@@ -1242,15 +1187,6 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
             (filterUnlinked ? 1 : 0) + (datePreset !== 'all' ? 1 : 0);
           return (
             <div className="sm:hidden mt-5 space-y-2.5">
-              {/* in/out/net — one quiet line: net hero (serif) + colour-coded in/out */}
-              <div className="flex items-baseline gap-2 px-0.5 whitespace-nowrap overflow-hidden" style={{ ...font, ...nums }}>
-                <span style={{ ...serif, fontSize: 18, color: monthNet < 0 ? V.terraDeep : V.sage }}>{netLabel}</span>
-                <span className="uppercase" style={{ fontSize: 9.5, letterSpacing: '0.1em', color: V.faint }}>net</span>
-                <span aria-hidden style={{ color: V.line, padding: '0 2px' }}>·</span>
-                <span className="text-[12.5px]" style={{ color: V.sage }}>+₹{inr(monthIn)}</span>
-                <span className="text-[12.5px]" style={{ color: V.terraDeep }}>−₹{inr(monthOut)}</span>
-              </div>
-
               {/* filter · search · download — one aligned row */}
               <div className="flex items-center gap-2">
                 <button
