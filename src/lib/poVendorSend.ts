@@ -13,7 +13,6 @@
  *    `po_to_vendor` template is approved — no caller changes.
  */
 import { supabase } from './supabase';
-import { buildPoPdfBase64 } from './poPdf';
 import { queryClient } from './queryClient';
 
 /** Normalise a typed number to E.164 (+<cc><national>). Assumes India (+91) for a bare
@@ -65,6 +64,10 @@ export interface SendPoResult { ok: boolean; error?: string }
  */
 export async function sendPoToVendor(args: SendPoArgs): Promise<SendPoResult> {
   try {
+    // jsPDF is ~125 kB gzipped. Statically importing the builder here put the whole of it behind
+    // the purchase-orders LIST, which most people open far more often than they send a PDF.
+    // Loading it at the moment a PDF is actually built keeps that weight off the tab.
+    const { buildPoPdfBase64 } = await import('./poPdf');
     const pdfBase64 = await buildPoPdfBase64(args.poId);
     const { data, error } = await supabase.functions.invoke('send-po-to-vendor', {
       body: { poId: args.poId, to: args.to.replace(/^\+/, ''), pdfBase64 },

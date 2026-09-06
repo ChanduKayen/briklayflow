@@ -1,4 +1,4 @@
-import React, { createContext, lazy, Suspense, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, lazy, Suspense, useCallback, useContext, useEffect, useState, useTransition } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from './lib/auth/AuthProvider';
 import { LOGIN_ROUTE, loginRouteFor } from './lib/auth/routes';
@@ -52,13 +52,14 @@ const ProjectInward = lazy(() => import('./pages/ProjectInward'));
 const InwardRegister = lazy(() => import('./pages/InwardRegister'));
 const NewProjectWizard = lazy(() => import('./components/NewProjectWizard'));
 const TransactionDetail = lazy(() => import('./pages/TransactionDetail'));
-const PurchaseOrders = lazy(() => import('./pages/PurchaseOrders'));
+import { loadLedger, loadLogbook, loadPurchaseOrders, loadPayables, warmAllTabs, warmRoute } from './lib/routeChunks';
+const PurchaseOrders = lazy(loadPurchaseOrders);
 const Attendance = lazy(() => import('./pages/Attendance'));
-const Payables = lazy(() => import('./pages/Payables'));
+const Payables = lazy(loadPayables);
 const NewPurchaseOrder = lazy(() => import('./pages/NewPurchaseOrder'));
 const PurchaseOrderDetail = lazy(() => import('./pages/PurchaseOrderDetail'));
 const RfqCompare = lazy(() => import('./pages/RfqCompare'));
-const Ledger = lazy(() => import('./pages/Ledger'));
+const Ledger = lazy(loadLedger);
 const NewTransaction = lazy(() => import('./pages/NewTransaction'));
 const ImportTransactions = lazy(() => import('./pages/ImportTransactions'));
 const Insights = lazy(() => import('./pages/Insights'));
@@ -74,7 +75,7 @@ const InvoiceDetail = lazy(() => import('./pages/InvoiceDetail'));
 const Billing = lazy(() => import('./pages/Billing'));
 const NewBill = lazy(() => import('./pages/NewBill'));
 const BillDetail = lazy(() => import('./pages/BillDetail'));
-const Logbook = lazy(() => import('./pages/Logbook'));
+const Logbook = lazy(loadLogbook);
 import { BriklayDesktopNav } from './components/nav/BriklayRail';
 import { isSecondaryNavRoute } from './components/nav/navTokens';
 const Orders = lazy(() => import('./pages/Orders'));
@@ -670,6 +671,9 @@ function TabItem({
   onClick?: () => void;
   to?: string;
 }) {
+  const navigate = useNavigate();
+  // Per-tab, so the tab that was tapped is the one that shows the wait.
+  const [pending, startNav] = useTransition();
   // Dark bitter-chocolate bar (matches the desktop rail): terracotta top-pill, cream label when active,
   // muted cream at rest.
   const pillColor = accentActive ? TERRACOTTA : '#F5F0E7';
@@ -678,10 +682,10 @@ function TabItem({
     <>
       {/* Top indicator pill */}
       <span
-        className="absolute top-0 h-[2px] rounded-full transition-all duration-200"
+        className="tabpill absolute top-0 h-[2px] rounded-full"
         style={{
-          width: active ? 20 : 0,
-          opacity: active ? 1 : 0,
+          width: active ? 20 : pending ? 14 : 0,
+          opacity: active ? 1 : pending ? 0.55 : 0,
           background: pillColor,
         }}
         aria-hidden
@@ -705,10 +709,26 @@ function TabItem({
       </span>
     </>
   );
-  const cls = `flex-1 flex flex-col items-center justify-center gap-0.5 relative touch-active select-none transition-colors duration-150`;
+  const cls = `tabitem flex-1 flex flex-col items-center justify-center gap-0.5 relative touch-active select-none transition-colors duration-150${pending ? ' loading' : ''}${active ? ' on' : ''}`;
   const style = { color: active ? activeColor : 'rgba(245,240,231,0.55)' };
   return to ? (
-    <Link to={to} className={cls} style={style}>{content}</Link>
+    <Link
+      to={to}
+      className={cls}
+      style={style}
+      aria-current={active ? 'page' : undefined}
+      aria-busy={pending || undefined}
+      // Warm the chunk the moment a finger lands, in case idle prefetch has not reached it yet.
+      onPointerDown={() => warmRoute(to)}
+      onClick={(e) => {
+        // Leave modified clicks and non-primary buttons to the browser — this is still a link.
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0 || active) return;
+        e.preventDefault();
+        // Inside a transition React keeps the current screen up while the next one mounts, instead
+        // of tearing it down for a skeleton — which is what made switching tabs feel like a reload.
+        startNav(() => navigate(to));
+      }}
+    >{content}</Link>
   ) : (
     <button onClick={onClick} className={cls} style={style} type="button">{content}</button>
   );
@@ -716,6 +736,9 @@ function TabItem({
 
 function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () => void }) {
   const location = useLocation();
+  // Every tab's chunk is fetched while the browser is idle, one at a time, so the first tap on
+  // each is a module-cache hit rather than an 11–33 kB download.
+  useEffect(() => warmAllTabs(), []);
   const { data: profile } = useUserProfile(session.user.id);
   const role = profile?.role ?? '';
 

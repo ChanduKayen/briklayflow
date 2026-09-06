@@ -68,6 +68,21 @@ html, body {
   .mo-press:active, .mo-row:active { transform: none; }
 }
 
+/* ── Bottom tab bar: pressed, loading, selected ─────────────────────────
+   The indicator travels and settles rather than blinking on, a tab that is still fetching
+   its screen shows a short dim bar in the indicator's place, and the icon gives one small
+   nudge when the tab actually becomes the current one. */
+.tabpill { transition: width .28s cubic-bezier(.32,1.4,.5,1), opacity .18s ease, background .2s ease; }
+.tabitem.loading .tabpill { animation: tab-wait 1s ease-in-out infinite; }
+@keyframes tab-wait { 0%, 100% { opacity: .3 } 50% { opacity: .75 } }
+.tabitem.on > div > svg { animation: tab-land .32s cubic-bezier(.32,1.4,.5,1); }
+@keyframes tab-land { 0% { transform: scale(.86) } 60% { transform: scale(1.06) } 100% { transform: none } }
+.tabitem:active { opacity: .75; }
+@media (prefers-reduced-motion: reduce) {
+  .tabpill { transition: none; }
+  .tabitem.loading .tabpill, .tabitem.on > div > svg { animation: none; }
+}
+
 /* ── Minimum touch target ───────────────────────────────────────────────
    Apple asks for 44pt, Material for 48dp. Several controls here are visually smaller on
    purpose — a 36px filter chip, a 38px icon button — and growing them would coarsen the
