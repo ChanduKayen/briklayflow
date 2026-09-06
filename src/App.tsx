@@ -900,9 +900,12 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
   //    and hide it entirely on full-screen "/…/new" forms (New Transaction, New PO/WO/
   //    Bill/Invoice) which own their own bottom action bar, so the two never stack. ──
   const [navHidden, setNavHidden] = useState(false);
-  // Hide the global nav on full-screen forms (/…/new) and on the PO detail (its own bottom action bar
-  // owns the bottom; the back button returns to the list, which restores the nav).
-  const hideForRoute = /\/new$/.test(location.pathname) || /^\/purchase-orders\/[^/]+$/.test(location.pathname);
+  // Hide the global nav on full-screen forms (/…/new) and on detail pages that carry their own
+  // bottom action bar (PO detail, transaction detail) so the two never stack; the back button
+  // returns to the list, which restores the nav.
+  const hideForRoute = /\/new$/.test(location.pathname)
+    || /^\/purchase-orders\/[^/]+$/.test(location.pathname)
+    || /^\/ledger\/(?!new$|import$)[^/]+$/.test(location.pathname);
   useEffect(() => {
     let last = window.scrollY;
     const onScroll = () => {

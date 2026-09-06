@@ -14,6 +14,7 @@ import jsPDF from 'jspdf';
 import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
 import { AttachBillSheet } from '../components/txn-ledger/AttachBillSheet';
 import { ContractHub, CONTRACT_HUB_CSS } from '../components/txn-ledger/ContractHub';
+import { useIsMobile } from '../lib/useIsMobile';
 
 // ─── Scoped stylesheet — a faithful port of the txn-detail reference (cream/terracotta).
 //     Every selector is prefixed with `.txnx` so nothing leaks into the rest of the app. ──
@@ -135,6 +136,75 @@ const TXNX_CSS = `
   .txnx td,.txnx th{white-space:normal;word-break:break-word}
 }
 @media (prefers-reduced-motion:reduce){.txnx *{animation-duration:.01ms !important;transition-duration:.01ms !important}}
+
+/* ============ MOBILE (app-native, ported from txn-detail-mobile.html) ============ */
+.txnx.m{min-height:100dvh;display:flex;flex-direction:column;background:var(--cream)
+  ;--cream:#F5F0E7;--paper:#FFFCF7;--line:#E5DCCD;--line-soft:#EFE8DB
+  ;--walnut:#33251B;--walnut-2:#6A5A4C;--walnut-3:#9A8B7B;--terra:#B4532F;--terra-soft:#F6E7DF
+  ;--sage:#5F7F5C;--sage-soft:#E7EEE3;--wa:#1FAF5A}
+.txnx.m *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+.txnx .m-dtop{display:flex;align-items:center;gap:4px;padding:12px 8px 8px;position:sticky;top:0;z-index:6;background:var(--cream)}
+.txnx .m-back,.txnx .m-dots{width:40px;height:40px;display:grid;place-items:center;color:var(--walnut-2);border-radius:50%;background:none;border:0;cursor:pointer}
+.txnx .m-back:active,.txnx .m-dots:active{background:var(--line-soft)}
+.txnx .m-dtop .t{font-size:14px;font-weight:500;color:var(--walnut-2)}
+.txnx .m-dtop .no{font-family:var(--mono);font-size:11.5px;color:var(--walnut-3);margin-left:6px}
+.txnx .m-dots{margin-left:auto}
+.txnx .m-more{position:relative;margin-left:auto}
+.txnx .m-more .menu{right:6px}
+.txnx .m-body{flex:1;overflow-y:auto;padding:0 16px 132px}
+.txnx .m-hero{padding:10px 2px 4px}
+.txnx .m-hero .amt{font-family:var(--mono);font-size:33px;letter-spacing:-.01em;color:var(--walnut);line-height:1}
+.txnx .m-hero .amt.in{color:var(--sage)}
+.txnx .m-hero .amt .dir{font-family:var(--sans);font-size:12px;color:var(--walnut-3);margin-left:9px;vertical-align:5px;letter-spacing:.02em}
+.txnx .m-hero.void .amt{text-decoration:line-through;color:var(--walnut-3)}
+.txnx .m-who{display:flex;align-items:center;gap:11px;margin-top:14px}
+.txnx .m-av{width:40px;height:40px;border-radius:50%;background:var(--terra-soft);color:#7E3A20;display:grid;place-items:center;font-weight:600;font-size:14px;flex-shrink:0}
+.txnx .m-who .n{font-weight:600;font-size:16px;color:var(--walnut)}
+.txnx .m-who .r{font-size:12.5px;color:var(--walnut-3);margin-top:1px}
+.txnx .m-hmeta{margin-top:12px;font-size:12.5px;color:var(--walnut-3)}
+.txnx .m-hmeta .mono{color:var(--walnut-2);font-family:var(--mono)}
+.txnx .m-hmeta i{font-style:normal;color:var(--line);margin:0 6px}
+.txnx .m-site{display:inline-flex;align-items:center;gap:6px;margin-top:10px;height:28px;padding:0 11px;border-radius:14px;background:var(--paper);border:1px solid var(--line);font-size:12.5px;color:var(--walnut-2)}
+.txnx .m-site svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2}
+.txnx .m-sec{margin-top:20px}
+.txnx .m-sec>.hh{font-size:11.5px;letter-spacing:.06em;color:var(--walnut-3);text-transform:uppercase;margin-bottom:8px}
+.txnx .m-card{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:4px 15px}
+.txnx .m-arow{display:flex;align-items:center;gap:10px;padding:13px 0;border-bottom:1px solid var(--line-soft)}
+.txnx .m-arow:last-child{border-bottom:0}
+.txnx .m-arow .k{color:var(--walnut);font-weight:500}
+.txnx .m-arow .sub{font-size:12.5px;color:var(--walnut-3);margin-top:2px}
+.txnx .m-arow .v{margin-left:auto;font-family:var(--mono);color:var(--walnut);flex-shrink:0}
+.txnx .m-arow .th{margin-left:auto}
+.txnx .m-arow.ask .dot{width:7px;height:7px;border-radius:50%;background:var(--terra);flex-shrink:0}
+.txnx .m-arow.ask .k{color:#7E3A20}
+.txnx .m-arow.ask .sub{color:#A2643F}
+.txnx .m-arow.linked .dot{width:7px;height:7px;border-radius:50%;background:var(--sage);flex-shrink:0}
+.txnx .m-arow.linked .k{color:#3E5C3B}
+.txnx .m-arow.linked .sub{color:var(--walnut-3)}
+.txnx .m-arow.tap{cursor:pointer}
+.txnx .m-arow.tap:active{background:#FBF6EC;border-radius:8px}
+.txnx .m-origin{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:14px 15px;display:flex;gap:11px}
+.txnx .m-origin .glyph{width:26px;height:26px;border-radius:50%;background:#E8F5EC;color:var(--wa);display:grid;place-items:center;flex-shrink:0;margin-top:1px}
+.txnx .m-origin .glyph svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2}
+.txnx .m-origin .q{font-family:var(--serif);font-style:italic;font-size:14px;line-height:1.55;color:var(--walnut-2)}
+.txnx .m-origin .q a{color:var(--terra)}
+.txnx .m-origin .s{font-size:12px;color:var(--walnut-3);margin-top:7px;font-family:var(--sans)}
+.txnx .m-proof{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:13px 15px;display:flex;align-items:center;gap:13px}
+.txnx .m-proof .n{font-weight:500;color:var(--walnut)}
+.txnx .m-proof .sub{font-size:12.5px;color:var(--walnut-3);margin-top:2px}
+.txnx .m-proof .rep{margin-left:auto;font-size:13px;color:var(--walnut-2);border:1px solid var(--line);border-radius:9px;height:34px;padding:0 12px;display:grid;place-items:center;background:none;cursor:pointer}
+.txnx .m-proof .up{margin-left:auto;font-size:13px;color:#fff;background:var(--terra);border-radius:9px;height:36px;padding:0 14px;display:grid;place-items:center;font-weight:600;border:0;cursor:pointer}
+.txnx .m-trow{display:flex;gap:12px;padding:11px 0;border-bottom:1px solid var(--line-soft);font-size:13px;color:var(--walnut-2)}
+.txnx .m-trow:last-child{border-bottom:0}
+.txnx .m-trow .t{font-family:var(--mono);font-size:11.5px;color:var(--walnut-3);flex-shrink:0;padding-top:1px}
+.txnx .m-trow b{font-weight:600;color:var(--walnut)}
+.txnx .m-abar{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;gap:9px;padding:12px 14px calc(14px + env(safe-area-inset-bottom));background:rgba(255,252,247,.94);backdrop-filter:blur(12px);border-top:1px solid var(--line)}
+.txnx .m-abtn{height:48px;border-radius:13px;font-weight:600;font-size:14.5px;display:flex;align-items:center;justify-content:center;gap:8px;border:0;cursor:pointer}
+.txnx .m-abtn:active{transform:scale(.97)}
+.txnx .m-abtn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2}
+.txnx .m-abtn.ghost{flex:1;border:1px solid var(--line);background:var(--paper);color:var(--walnut-2)}
+.txnx .m-abtn.link{flex:1.7;background:var(--terra);color:#fff;box-shadow:0 10px 24px -10px rgba(180,83,47,.5)}
+.txnx .m-abtn:disabled{opacity:.5}
 `;
 
 // ─── Amendment types ──────────────────────────────────────────────────────────
@@ -617,10 +687,164 @@ export default function TransactionDetail({ session }: { session: Session }) {
   const rupee = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
   const openPicker = (allocId: string) => { setPickerStep('menu'); setMappingAllocId(allocId); };
   const openLightbox = (url: string, title: string) => { setLightboxTitle(title); setLightboxUrl(url); };
+  const isMobile = useIsMobile();
+
+  // Per-allocation link status (mirrors the desktop allocation cell), for the mobile card.
+  const allocStatus = (a: any): { linked: boolean; k: string; sub: string } => {
+    const linked = a.order_type;
+    const isPO = linked === 'PO', isWO = linked === 'WO', isAdv = linked === 'ADVANCE';
+    const milestoneName = a.wo_milestones?.name ?? null;
+    if (isPO || isWO) return { linked: true, k: `✓ ${a.order_ref}`, sub: `${isPO ? 'Bill on PO' : 'Contract'}${milestoneName ? ` · ${milestoneName}` : ''}` };
+    if (isAdv) return { linked: true, k: `Advance to ${payeeName}`, sub: 'No bill yet · adjusts into the next bill' };
+    if (txn.bill_doc_url) return { linked: true, k: '✓ Bill attached', sub: 'Uploaded · tap to preview' };
+    return { linked: false, k: 'Not linked to work yet', sub: `link ${payeeName}'s ${isVendor ? 'bill' : 'contract'}, and this settles against it` };
+  };
+  const linkAction = () => { if (isVendor) setAttachBill({ file: null, mode: 'upload' }); else setContractHubOpen(true); };
+  const shortDate = txnDate ? txnDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '';
+  // WhatsApp origin, only when the ingest actually captured the source message.
+  const waText: string | null = (txn as any).ai_flag_data?.source_text || (txn as any).ai_flag_data?.raw_message || (txn as any).ai_flag_data?.wa_message || null;
+  const waWho: string | null = (txn as any).ai_flag_data?.source_sender || (txn as any).ai_flag_data?.sender || null;
+  const canAmend = (isManagement || profile?.role === 'accountant') && !isVoided;
+
+  // ── app-native mobile detail (txn-detail-mobile.html) ──────────────────────
+  const renderMobile = () => {
+    const roleLine = [payeeType, payeeCategory].filter(Boolean).join(' · ') || (isGeneralExpense(txn) ? 'Overhead · no linked party' : '—');
+    const siteName = allAllocs.length > 1 ? `${allAllocs.length} sites` : (primaryAlloc?.projects?.name || '');
+    const kebab = (
+      <div className="m-more" onClick={(e) => e.stopPropagation()}>
+        <button className="m-dots" aria-label="More actions" onClick={() => setMenuOpen(o => !o)}>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
+        </button>
+        {menuOpen && (
+          <>
+            <div style={{ position: 'fixed', inset: 0, zIndex: 25 }} onClick={() => setMenuOpen(false)} />
+            <div className="menu">
+              <button onClick={() => { setMenuOpen(false); generatePDF(txn, allocs || [], effective, isAmended); }}><svg viewBox="0 0 24 24"><path d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" /></svg>Download voucher PDF</button>
+              {canAmend && <button onClick={() => { setMenuOpen(false); openAmendModal(); }}><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z" /></svg>Amend</button>}
+              {canVoid && !isVoided && (<><hr /><button className="danger" onClick={() => { setMenuOpen(false); setVoidConfirm(true); }}><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M9 9l6 6M15 9l-6 6" /></svg>Void transaction</button></>)}
+            </div>
+          </>
+        )}
+      </div>
+    );
+
+    // Activity, newest first (mirrors the desktop log).
+    const acts: { t: string; node: React.ReactNode }[] = [];
+    const fmt = (d: string) => new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    if (isVoided && txn.voided_at) acts.push({ t: fmt(txn.voided_at), node: <><b>Voided</b> — reversed in the books</> });
+    [...existingAmendments].reverse().forEach((am: any, i) => acts.push({ t: fmt(am.amended_at || am.moved_at || txn.created_at), node: <span key={i}><b>{am.amended_by || am.moved_by || 'Someone'}</b> amended {Object.keys(am.changes || {}).join(', ') || 'this transaction'}</span> }));
+    acts.push({ t: fmt(txn.created_at), node: <><b>{recordedBy || 'Recorded'}</b> {rupee(Number(txn.total_amount))} {isIn ? 'received from' : 'paid to'} {payeeName}{effective.payment_mode ? ` by ${effective.payment_mode}` : ''}</> });
+
+    const showBar = !isVoided && !billLinked;
+
+    return (
+      <>
+        <div className="m-dtop">
+          <button className="m-back" aria-label="Back" onClick={() => navigate(backTo)}>
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M15 18l-6-6 6-6" /></svg>
+          </button>
+          <span className="t">Transaction</span><span className="no">Nº {txn.txn_id}</span>
+          {kebab}
+        </div>
+
+        <div className="m-body">
+          <div className={`m-hero${isVoided ? ' void' : ''}`}>
+            <div className={`amt${isIn ? ' in' : ''}`}>{isIn ? '+ ₹' : '− ₹'}{(Number(effective.total_amount) || 0).toLocaleString('en-IN')}<span className="dir">{isIn ? 'IN' : 'OUT'}</span></div>
+            <div className="m-who">
+              <span className="m-av">{initials}</span>
+              <div>
+                <div className="n">{txn.stakeholder_id ? <a onClick={() => setShowStakeholderDrawer(true)} style={{ color: 'inherit', textDecoration: 'none' }}>{payeeName}</a> : payeeName}</div>
+                <div className="r">{roleLine}</div>
+              </div>
+            </div>
+            <div className="m-hmeta">
+              {effective.payment_mode && <span className="mono">{effective.payment_mode}</span>}
+              {effective.payment_mode && (shortDate || timeStr) && <i>·</i>}
+              {shortDate}{timeStr ? `, ${timeStr}` : ''}
+              {recordedBy && <><i>·</i>by {recordedBy}</>}
+            </div>
+            {siteName && <div><span className="m-site"><svg viewBox="0 0 24 24"><path d="M3 11 12 4l9 7v9H3z" /></svg>{siteName}</span></div>}
+          </div>
+
+          {waText && (
+            <div className="m-sec">
+              <div className="hh">From WhatsApp</div>
+              <div className="m-origin">
+                <span className="glyph"><svg viewBox="0 0 24 24"><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.4 8.5 8.5 0 0 1-4-1L3 21l2.1-5.4A8.4 8.4 0 1 1 21 11.5z" /></svg></span>
+                <div>
+                  <div className="q">“{waText}”</div>
+                  {waWho && <div className="s">{waWho}</div>}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="m-sec">
+            <div className="hh">Where this money went</div>
+            <div className="m-card">
+              {allAllocs.map((a: any) => {
+                const st = allocStatus(a);
+                return (
+                  <div key={a.allocation_id}>
+                    <div className="m-arow">
+                      <div><div className="k">{a.projects?.name || 'Unassigned'}</div><div className="sub">{allAllocs.length > 1 ? 'share of this payment' : 'full amount, one site'}</div></div>
+                      <span className="v">{rupee(Number(a.allocated_amount))}</span>
+                    </div>
+                    {st.linked ? (
+                      <div className="m-arow linked"><span className="dot" /><div><div className="k">{st.k}</div><div className="sub">{st.sub}</div></div></div>
+                    ) : !isVoided ? (
+                      <div className="m-arow ask tap" onClick={linkAction}><span className="dot" /><div><div className="k">{st.k}</div><div className="sub">{st.sub}</div></div></div>
+                    ) : null}
+                  </div>
+                );
+              })}
+              {allAllocs.length === 0 && <div className="m-arow"><div className="sub">No allocation.</div></div>}
+            </div>
+          </div>
+
+          <div className="m-sec">
+            <div className="hh">Proof of payment</div>
+            {txn.proof_document_url ? (
+              <div className="m-proof">
+                <DocThumb stored={txn.proof_document_url} onImageClick={(u) => openLightbox(u, 'Proof of payment')} w={52} h={64} label="View proof" />
+                <div><div className="n">Receipt attached</div><div className="sub">tap to preview</div></div>
+                {!isVoided && <button className="rep" onClick={() => proofInputRef.current?.click()}>Replace</button>}
+              </div>
+            ) : (
+              <div className="m-proof">
+                <div><div className="n">No receipt attached</div><div className="sub">add the payment proof</div></div>
+                {!isVoided && <button className="up" disabled={proofUploadMutation.isPending} onClick={() => proofInputRef.current?.click()}>{proofUploadMutation.isPending ? 'Uploading…' : 'Upload'}</button>}
+              </div>
+            )}
+          </div>
+
+          <div className="m-sec">
+            <div className="hh">Activity</div>
+            <div className="m-card">
+              {acts.map((a, i) => (<div className="m-trow" key={i}><span className="t">{a.t}</span><span>{a.node}</span></div>))}
+            </div>
+          </div>
+        </div>
+
+        {showBar && (
+          <div className="m-abar">
+            {canAmend && <button className="m-abtn ghost" onClick={openAmendModal}>Edit</button>}
+            <button className="m-abtn link" onClick={linkAction}>
+              <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" /></svg>
+              {isVendor ? 'Link to a bill' : 'Link to contract'}
+            </button>
+          </div>
+        )}
+
+        <input ref={proofInputRef} type="file" accept="image/*,.pdf" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) proofUploadMutation.mutate(f); }} />
+      </>
+    );
+  };
 
   return (
-    <div className={`txnx${isVoided ? ' voided-mark' : ''}`}>
+    <div className={`txnx${isMobile ? ' m' : ''}${isVoided ? ' voided-mark' : ''}`} onClick={() => menuOpen && setMenuOpen(false)}>
       <style>{TXNX_CSS}</style>
+      {isMobile ? renderMobile() : (
       <div className="page">
 
         <div className="crumb"><a onClick={() => navigate(backTo)}>{backLabel}</a> › <b>{txn.txn_id}</b></div>
@@ -821,6 +1045,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
           <li><span className="mono">{new Date(txn.created_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span><i /><span><b>{recordedBy || 'Recorded'}</b> {rupee(Number(txn.total_amount))} {isIn ? 'received from' : 'paid to'} {payeeName}{effective.payment_mode ? ` by ${effective.payment_mode}` : ''}</span></li>
         </ul></div>
       </div>
+      )}
 
       {/* ── VOID STAMP ─────────────────────────────────────────────── */}
       {isVoided && (
