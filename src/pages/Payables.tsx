@@ -12,7 +12,7 @@ import { useSnackbar } from '../components/Snackbar';
 import { searchPayees } from '../lib/payeeSearch';
 import { createParty } from '../components/day-book/fileEntry';
 import {
-  loadWeeklyPayments, recordWeeklyPayment, settleWeeklyPaymentOnLedger, mondayOf, weekLabel,
+  loadWeeklyPayments, recordWeeklyPayment, settleWeeklyPaymentOnLedger, loadWeeklyPaid, mondayOf, weekLabel,
   loadRecurring, recurringToRow, addRecurring, removeRecurring, loadVendorRows,
   type PayRow, type PaySection,
 } from '../lib/weeklyPaymentsApi';
@@ -352,6 +352,13 @@ export default function Payables({ session }: { session: Session }) {
     queryFn: () => isNewLedgerOrg(orgId),
     enabled: !!orgId,
   });
+  // What this run has already settled, read back from the payments themselves. Without it a
+  // wage row — whose figure comes from the attendance register — returns at its full amount on
+  // the next load, with no sign it has been paid.
+  const { data: serverPaid = {}, refetch: refetchPaid } = useQuery({
+    queryKey: ['weekly_paid', monday.toISOString().slice(0, 10)],
+    queryFn: () => loadWeeklyPaid(monday),
+  });
   const { data: recurring, refetch: refetchRec } = useQuery({ queryKey: ['recurring_payments'], queryFn: loadRecurring });
   const { data: vendorRows } = useQuery({ queryKey: ['vendor_payables'], queryFn: loadVendorRows });
   const { data: parties } = useQuery({
@@ -379,7 +386,8 @@ export default function Payables({ session }: { session: Session }) {
     return out;
   }, [data, vendorRows, recurring, extra]);
 
-  const planned = (r: PayRow) => paid[r.key] ?? plan[r.key] ?? Math.round(r.thisWeek);
+  const paidOf = (r: PayRow): number | null => paid[r.key] ?? serverPaid[r.key] ?? null;
+  const planned = (r: PayRow) => paidOf(r) ?? plan[r.key] ?? Math.round(r.thisWeek);
   const owed = (r: PayRow) => r.balanceBf + r.thisWeek;
   const afterOf = (r: PayRow, isPaid: boolean): { v: number; m: string; cls: string } | null => {
     // "This week's figure is actually ₹X" (re-agreed): the paid amount IS the correct figure, so the
@@ -400,10 +408,10 @@ export default function Payables({ session }: { session: Session }) {
 
   const totals = useMemo(() => {
     let pl = 0, pd = 0, n = 0;
-    sections.forEach(s => s.rows.forEach(r => { pl += planned(r); if (paid[r.key]) pd += paid[r.key]; else if (planned(r)) n++; }));
+    sections.forEach(s => s.rows.forEach(r => { pl += planned(r); const done = paidOf(r); if (done) pd += done; else if (planned(r)) n++; }));
     return { planned: pl, paid: pd, left: pl - pd, count: n };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sections, plan, paid]);
+  }, [sections, plan, paid, serverPaid]);
 
   // The one place a payment is recorded. The desktop row and the phone's pay sheet both come
   // through here, so a payment made on a phone is the same transaction, settled the same way.
@@ -411,11 +419,11 @@ export default function Payables({ session }: { session: Session }) {
     if (!amt) return;
     setBusy(r.key);
     try {
-      const txnId = await recordWeeklyPayment(orgId, r, amt, mode, reason);
+      const txnId = await recordWeeklyPayment(orgId, r, amt, mode, reason, monday, notes[r.key] ?? '');
       if (newLedger) { try { await settleWeeklyPaymentOnLedger(txnId, r, amt, monday); } catch (e: any) { showSnackbar(`Paid, but ledger link failed: ${e?.message || 'error'}`, { type: 'error' }); } }
       setPaid(p => ({ ...p, [r.key]: amt }));
       showSnackbar(`Paid ${inr(amt)} to ${r.party}`);
-      refetch();
+      refetch(); refetchPaid();
     } catch (e: any) {
       showSnackbar(e?.message || 'Could not record the payment', { type: 'error' });
       throw e;                                   // the sheet keeps itself open so it can be retried
@@ -445,11 +453,12 @@ export default function Payables({ session }: { session: Session }) {
       balanceBf: r.balanceBf,
       flag: (r.withoutBills ?? 0) > 0.5 ? `${inr(r.withoutBills!)} paid without bills` : null,
       advanceNote: (r.advance ?? 0) > 0.5 ? `${inr(r.advance!)} paid ahead · advance` : null,
-      paidAmount: paid[r.key] ?? null,
-      paidMode: paid[r.key] ? mode : null,
+      paidAmount: paidOf(r),
+      paidMode: paidOf(r) != null ? mode : null,
       // The same Rationale the desktop table opens — the attendance register, the stage
       // readings, the open bills, and the arithmetic that lands on this week's figure.
       detail: <Rationale row={r} planned={planned(r)} diff={diffs[r.key]} />,
+      after: afterOf(r, paidOf(r) != null),
     });
     const sectionOf = (id: string, title: string): PlmSection | null => {
       const sec = sections.find(x => x.projectId === id);
@@ -554,14 +563,14 @@ export default function Payables({ session }: { session: Session }) {
 
         {sections.map(section => {
           const sPlan = section.rows.reduce((a, r) => a + planned(r), 0);
-          const sPaid = section.rows.reduce((a, r) => a + (paid[r.key] || 0), 0);
+          const sPaid = section.rows.reduce((a, r) => a + (paidOf(r) || 0), 0);
           return (
             <section className="site" key={section.projectId}>
               <div className="site-h"><span className="n">{section.projectName}</span><span className="s"><b className="mono">{inr(sPlan)}</b> this week{sPaid ? ` · ${inr(sPaid)} paid` : ''}</span></div>
               {section.rows.length > 0 && <div className="hdr"><div>Who</div><div>Site</div><div>For</div><div className="r">Balance b/f</div><div className="r">This week</div><div className="r">After</div><div className="r" /></div>}
               {section.rows.length === 0 && section.projectId === '__workers__' && <div className="emptyrow">No labour on the attendance sheet this week — add a payment below.</div>}
               {section.rows.map(r => {
-                const isPaid = !!paid[r.key], isExp = expanded.has(r.key), af = afterOf(r, isPaid);
+                const settled = paidOf(r), isPaid = settled != null, isExp = expanded.has(r.key), af = afterOf(r, isPaid);
                 const unexplained = Math.abs(planned(r) - r.thisWeek) >= 1 && !diffs[r.key];
                 return (
                   <div key={r.key}>
@@ -574,12 +583,14 @@ export default function Payables({ session }: { session: Session }) {
                         {/* Advance / paid-without-bills shown SEPARATELY from the due — never netted into it */}
                         {(r.advance ?? 0) > 0.5 && <div className="basis" style={{ color: 'var(--sage)' }}>₹{inr(r.advance!)} paid ahead · advance</div>}
                         {(r.withoutBills ?? 0) > 0.5 && <div className="basis" style={{ color: 'var(--terracotta)' }}>₹{inr(r.withoutBills!)} paid without bills</div>}
-                        <input placeholder="note…" value={notes[r.key] ?? ''} onChange={(e) => setNotes(n => ({ ...n, [r.key]: e.target.value }))} />
+                        {isPaid
+                          ? (notes[r.key]?.trim() ? <div className="basis" style={{ color: 'var(--walnut-2)' }}>{notes[r.key]}</div> : null)
+                          : <input placeholder="note…" value={notes[r.key] ?? ''} onChange={(e) => setNotes(n => ({ ...n, [r.key]: e.target.value }))} />}
                       </div>
                       <div className="bf mono">{r.balanceBf ? inr(r.balanceBf) : <span style={{ color: 'var(--line-2)' }}>—</span>}{r.balanceBf ? <span className="m">carried</span> : null}</div>
                       <div className="plan">
                         {isPaid
-                          ? <div className="in paid-v"><span>₹</span><b className="mono">{paid[r.key].toLocaleString('en-IN')}</b></div>
+                          ? <div className="in paid-v"><span>₹</span><b className="mono">{settled!.toLocaleString('en-IN')}</b></div>
                           : <div className="in"><span>₹</span><input className="mono" inputMode="numeric" value={planned(r) || ''} placeholder="0"
                               onChange={(e) => { const v = parseInt(e.target.value.replace(/[^\d]/g, ''), 10) || 0; setPlan(p => ({ ...p, [r.key]: v })); setDiffs(d => { const n = { ...d }; delete n[r.key]; return n; }); }}
                               onBlur={() => { setTimeout(() => { if (!paid[r.key] && Math.abs(planned(r) - r.thisWeek) >= 1 && !diffs[r.key] && why !== r.key) setWhy(r.key); }, 120); }}

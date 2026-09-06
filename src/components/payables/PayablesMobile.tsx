@@ -70,6 +70,13 @@ const CSS = `
 .plm .p .amt{font-size:16px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.01em;
   text-align:right;flex-shrink:0}
 .plm .p .amt span{display:block;font-size:11.5px;font-weight:500;color:var(--ink-3)}
+/* what is owed from before — stated beside the party, never added into this week's figure */
+.plm .p .flag.bf{color:var(--warn)}
+.plm .p.paid .flag.bf{color:var(--ink-3);font-weight:400}
+.plm .sums{margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--hair)}
+.plm .sums:last-child{margin-bottom:0;padding-bottom:0;border-bottom:0}
+.plm .erow.af{margin-top:6px;padding-top:8px;border-top:1px dashed var(--hair);color:var(--ink-2)}
+.plm .erow.af .l{color:var(--ink-2)}
 .plm .pay{border:0;border-radius:999px;background:rgba(196,80,43,.1);color:var(--tint);
   font-size:14.5px;font-weight:600;padding:9px 18px;cursor:pointer;flex-shrink:0;
   transition:transform .15s var(--spring),background .2s}
@@ -228,6 +235,8 @@ export interface PlmRow {
   basis: string;
   /** carried from before; drives the reference's "carries forward" row */
   balanceBf: number;
+  /** where paying this amount leaves them — the desktop run's "After" column */
+  after?: { v: number; m: string } | null;
   flag?: string | null;
   advanceNote?: string | null;
   paidAmount?: number | null;
@@ -400,6 +409,9 @@ export default function PayablesMobile(p: PayablesMobileProps) {
                           <div className="nm">{row.name}</div>
                           <div className="rl"><span className="rt">{row.role}</span><span className="chev" aria-hidden="true">›</span></div>
                           {carries && <div className="flag calm">Owed {inr(row.balanceBf)} from earlier — carries forward</div>}
+                          {!carries && row.balanceBf > 0.5 && (
+                            <div className="flag bf">{inr(row.balanceBf)} from earlier</div>
+                          )}
                           {!carries && row.flag && <div className="flag">{row.flag}</div>}
                           {!carries && row.advanceNote && <div className="flag good">{row.advanceNote}</div>}
                         </button>
@@ -432,6 +444,23 @@ export default function PayablesMobile(p: PayablesMobileProps) {
                               <div className="erow"><span className="l">Carried from ledger</span><span>{inr(row.balanceBf)}</span></div>
                               <div className="erow tt"><span className="l">Carries forward</span><span>{inr(row.balanceBf)}</span></div>
                             </>
+                          )}
+                          {!carries && (row.balanceBf > 0.5 || row.after) && (
+                            <div className="sums">
+                              <div className="erow"><span className="l">This week's work</span><span>{inr(row.computed)}</span></div>
+                              {row.balanceBf > 0.5 && (
+                                <>
+                                  <div className="erow"><span className="l">Balance carried in</span><span>{inr(row.balanceBf)}</span></div>
+                                  <div className="erow tt"><span className="l">Owed in total</span><span>{inr(row.computed + row.balanceBf)}</span></div>
+                                </>
+                              )}
+                              {row.after && (
+                                <div className="erow af">
+                                  <span className="l">{isPaid ? 'After this payment' : 'After paying this'}</span>
+                                  <span>{row.after.v > 0.5 ? `${inr(row.after.v)} ${row.after.m}` : row.after.m}</span>
+                                </div>
+                              )}
+                            </div>
                           )}
                           {row.detail && <div className="rat">{row.detail}</div>}
                           <button type="button" className="ledgerlink" onClick={() => p.onOpenParty(row)}>

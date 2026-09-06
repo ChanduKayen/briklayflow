@@ -163,6 +163,25 @@ export async function loadWeeklyPayments(monday: Date): Promise<WeeklyPayments> 
   return { sections, monday };
 }
 
+/** What this week's run has already settled, by row key. Read back from the stamp
+ *  recordWeeklyPayment writes, so a paid row stays paid across a reload — on every surface.
+ *  Payments made before that stamp existed carry no key and cannot be matched. */
+export async function loadWeeklyPaid(monday: Date): Promise<Record<string, number>> {
+  const key = mondayOf(monday).toISOString().slice(0, 10);
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('total_amount, status, ai_flag_data')
+    .eq('ai_flag_data->>weekly_run', key);
+  if (error) return {};
+  const out: Record<string, number> = {};
+  for (const t of (data ?? []) as { total_amount: number; status: string | null; ai_flag_data: { row_key?: string } | null }[]) {
+    if (t.status === 'Voided') continue;                   // a voided payment leaves the row owing again
+    const rk = t.ai_flag_data?.row_key;
+    if (rk) out[rk] = (out[rk] || 0) + Number(t.total_amount || 0);
+  }
+  return out;
+}
+
 // ── vendor payments — ONE net-payable row per vendor, from the party-ledger view ─────────────
 // The headline due is the vendor's NET to-pay (billed − paid across ALL bills: POs, consolidated,
 // opening, adjustments), read from v_party_balance so Payables and the party-ledger hero can't drift.
@@ -269,6 +288,7 @@ export async function removeRecurring(id: string): Promise<void> {
 export async function recordWeeklyPayment(
   orgId: string, row: PayRow,
   amount: number, mode: string, reason: string,
+  monday: Date, note = '',
 ): Promise<string> {
   const txnId = `TXN-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   const category = row.kind === 'contract' ? 'Running Bill' : row.kind === 'vendor' ? 'Purchase Payment' : row.kind === 'recurring' ? 'Recurring' : 'Wages';
@@ -278,7 +298,7 @@ export async function recordWeeklyPayment(
     : row.stage ? row.stage.readings.map(([n, m]) => `${n} · ${m}`).join('; ')
     : row.bills ? row.bills.map(b => `Bill ${b.no} ${inrShort(b.balance)}`).join(', ')
     : row.basis;
-  const remarks = [row.party, detail, reason].filter(Boolean).join(' · ');
+  const remarks = [row.party, detail, reason, note.trim()].filter(Boolean).join(' · ');
   // Contract → the work order + milestone. Vendor → spread across the open POs, oldest bill first
   // (anything beyond stays on account = a bare project allocation). Wages/recurring → project only.
   let allocations: Record<string, unknown>[];
@@ -296,7 +316,11 @@ export async function recordWeeklyPayment(
     p_txn: {
       txn_id: txnId, org_id: orgId, stakeholder_id: row.stakeholderId,
       date: new Date().toISOString().split('T')[0], total_amount: amount,
-      payment_mode: mode, category, remarks, ai_flag_status: 'Clean', ai_flag_data: {},
+      payment_mode: mode, category, remarks, ai_flag_status: 'Clean',
+      // Stamp the run and the row this settles. A wage figure comes from the attendance
+      // register, which knows nothing about payments, so without this the row comes back at
+      // its full amount on the next load and asks to be paid again.
+      ai_flag_data: { weekly_run: mondayOf(monday).toISOString().slice(0, 10), row_key: row.key },
     },
     p_allocations: allocations,
   });
