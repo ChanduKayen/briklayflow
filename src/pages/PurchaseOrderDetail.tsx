@@ -168,6 +168,9 @@ const PODX_CSS = `
 .podx .stage.done .s{color:var(--ink-2)}
 .podx .stage .act{grid-column:2;margin-top:8px}
 .podx .stage.next-later .t{color:var(--ink-3)}
+/* NB: .sec here is the desktop SECTION header (note the margin). The mobile action-bar and
+   sheet buttons deliberately use .is-sec / .is-pri so this rule cannot leak into them —
+   it used to, and its 22px top margin pushed the secondary button out of line with the primary. */
 .podx .sec{display:flex;align-items:center;justify-content:space-between;margin:22px 0 10px}
 .podx .sec h2{margin:0;font:600 11.5px/1 var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2);padding-left:10px;border-left:3px solid var(--terra);display:flex;align-items:center;gap:14px;flex:1}
 .podx .sec h2::after{content:"";flex:1;height:1px;background:var(--line);margin-right:14px}
@@ -324,8 +327,8 @@ const PODX_CSS = `
 /* a slow breath + one ring, every 4.4s: enough to say "this is still waiting to be sent"
    without pulling the eye off the primary action beside it */
 .podx .m-abtn.tone-wa svg.wa-mark{animation:podxwa 4.4s cubic-bezier(.4,0,.2,1) infinite}
-.podx .m-abtn.sec.tone-wa{--wa-ring:rgba(15,124,61,.26)}
-.podx .m-abtn.pri.tone-wa{--wa-ring:rgba(255,255,255,.34)}
+.podx .m-abtn.is-sec.tone-wa{--wa-ring:rgba(15,124,61,.26)}
+.podx .m-abtn.is-pri.tone-wa{--wa-ring:rgba(255,255,255,.34)}
 @keyframes podxwa{
   0%,58%{transform:scale(1);box-shadow:0 0 0 0 var(--wa-ring)}
   70%{transform:scale(1.09);box-shadow:0 0 0 3px var(--wa-ring)}
@@ -334,7 +337,7 @@ const PODX_CSS = `
 @media (prefers-reduced-motion:reduce){.podx .m-abtn.tone-wa svg.wa-mark{animation:none}}
 .podx .m-abtn .lbl{display:flex;flex-direction:column;align-items:flex-start;line-height:1.08;text-align:left;min-width:0;max-width:100%}
 .podx .m-abtn .lbl .t{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.podx .m-abtn.pri .lbl,.podx .m-abtn.sec .lbl{align-items:flex-start}
+.podx .m-abtn.is-pri .lbl,.podx .m-abtn.is-sec .lbl{align-items:flex-start}
 /* the ch cap also keeps a long vendor name out of the button's intrinsic width, so the
    sub-line never steals row space from the labels above it */
 .podx .m-abtn .lbl small{font-weight:500;font-size:10.5px;letter-spacing:.01em;opacity:.82;margin-top:2px;font-family:var(--sans);max-width:14ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -342,24 +345,24 @@ const PODX_CSS = `
 .podx .m-abtn:disabled:active{transform:none}
 /* auto basis: each button starts at its own label width and the primary takes the surplus,
    so a long label only truncates when the row genuinely cannot fit it */
-.podx .m-abtn.pri{flex:1.6 1 auto}
-.podx .m-abtn.sec{flex:1 1 auto}
+.podx .m-abtn.is-pri{flex:1.6 1 auto}
+.podx .m-abtn.is-sec{flex:1 1 auto}
 @media (max-width:380px){.podx .m-abar{gap:8px;padding-left:12px;padding-right:12px}.podx .m-abtn{font-size:13px;gap:6px;padding:0 9px}.podx .m-abtn svg{width:16px;height:16px}}
 /* filled tones — one strong action at a time; the send action carries WhatsApp green on purpose */
-.podx .m-abtn.pri.tone-terra{background:var(--terra);color:#fff;box-shadow:0 10px 22px -12px rgba(196,97,58,.75)}
-.podx .m-abtn.pri.tone-terra:active{filter:brightness(.94)}
-.podx .m-abtn.pri.tone-sage{background:#5F7F5B;color:#fff;box-shadow:0 10px 22px -12px rgba(95,127,91,.75)}
-.podx .m-abtn.pri.tone-sage:active{filter:brightness(.94)}
-.podx .m-abtn.pri.tone-wa{background:#1FAF5A;color:#fff;box-shadow:0 10px 22px -12px rgba(31,175,90,.8)}
-.podx .m-abtn.pri.tone-wa:active{filter:brightness(.94)}
-.podx .m-abtn.pri.tone-neutral{background:var(--ink);color:var(--paper)}
+.podx .m-abtn.is-pri.tone-terra{background:var(--terra);color:#fff;box-shadow:0 10px 22px -12px rgba(196,97,58,.75)}
+.podx .m-abtn.is-pri.tone-terra:active{filter:brightness(.94)}
+.podx .m-abtn.is-pri.tone-sage{background:#5F7F5B;color:#fff;box-shadow:0 10px 22px -12px rgba(95,127,91,.75)}
+.podx .m-abtn.is-pri.tone-sage:active{filter:brightness(.94)}
+.podx .m-abtn.is-pri.tone-wa{background:#1FAF5A;color:#fff;box-shadow:0 10px 22px -12px rgba(31,175,90,.8)}
+.podx .m-abtn.is-pri.tone-wa:active{filter:brightness(.94)}
+.podx .m-abtn.is-pri.tone-neutral{background:var(--ink);color:var(--paper)}
 /* secondary — quiet outline, except the WhatsApp send which stays recognisably green */
-.podx .m-abtn.sec{border:1px solid var(--line);background:var(--paper);color:var(--ink-2)}
-.podx .m-abtn.sec:active{background:var(--paper-2)}
-.podx .m-abtn.sec.tone-wa{background:#EAF7EF;border-color:#BFE6CE;color:#0F7C3D}
-.podx .m-abtn.sec.tone-sage{background:var(--sage-tint);border-color:transparent;color:var(--sage)}
+.podx .m-abtn.is-sec{border:1px solid var(--line);background:var(--paper);color:var(--ink-2)}
+.podx .m-abtn.is-sec:active{background:var(--paper-2)}
+.podx .m-abtn.is-sec.tone-wa{background:#EAF7EF;border-color:#BFE6CE;color:#0F7C3D}
+.podx .m-abtn.is-sec.tone-sage{background:var(--sage-tint);border-color:transparent;color:var(--sage)}
 .podx .m-spin{width:17px;height:17px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:podxspin .7s linear infinite;flex-shrink:0}
-.podx .m-abtn.sec .m-spin{border-color:rgba(110,99,91,.3);border-top-color:var(--ink-2)}
+.podx .m-abtn.is-sec .m-spin{border-color:rgba(110,99,91,.3);border-top-color:var(--ink-2)}
 /* mobile bottom-sheet for record bill / payment */
 .podx .m-scrim{position:fixed;inset:0;z-index:50;background:rgba(30,26,21,.5);display:flex;align-items:flex-end;animation:podxfade .18s var(--ease)}
 @keyframes podxfade{from{opacity:0}to{opacity:1}}
@@ -378,8 +381,8 @@ const PODX_CSS = `
 .podx .m-up.has{border-style:solid;border-color:var(--sage);color:var(--sage)}
 .podx .m-up svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.9;flex-shrink:0}
 .podx .m-sheet-acts{display:flex;gap:10px;margin-top:16px}
-.podx .m-sheet-acts .m-abtn.sec{flex:1}
-.podx .m-sheet-acts .m-abtn.pri{flex:1.6}
+.podx .m-sheet-acts .m-abtn.is-sec{flex:1}
+.podx .m-sheet-acts .m-abtn.is-pri{flex:1.6}
 .podx .m-warn{display:flex;gap:9px;align-items:flex-start;background:color-mix(in srgb,var(--terra) 9%,var(--paper));border:1px solid color-mix(in srgb,var(--terra) 35%,var(--line));border-radius:11px;padding:10px 12px;font-size:12.5px;line-height:1.5;color:var(--ink-2);margin-bottom:12px}
 .podx .m-warn b{color:var(--terra);font-weight:600}
 `;
@@ -1106,7 +1109,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
       eye: <><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" /><circle cx="12" cy="12" r="3" /></>,
     };
     const renderBarBtn = (b: BarBtn, slot: 'pri' | 'sec') => (
-      <button className={`m-abtn ${slot} tone-${b.tone}`} disabled={b.disabled || b.loading} onClick={b.onClick}>
+      <button className={`m-abtn is-${slot} tone-${b.tone}`} disabled={b.disabled || b.loading} onClick={b.onClick}>
         {b.loading ? <span className="m-spin" /> : <svg className={b.icon === 'wa' ? 'wa-mark' : undefined} viewBox="0 0 24 24">{barSvg[b.icon]}</svg>}
         <span className="lbl"><span className="t">{slot === 'sec' ? (b.short ?? b.label) : b.label}</span>{b.sub && <small>{b.sub}</small>}</span>
       </button>
@@ -1245,8 +1248,8 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
               <input ref={refBillFileInputRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0] || null; setRefBillFile(f); if (f) runReconciliation(f); }} />
             </div>
             <div className="m-sheet-acts">
-              <button className="m-abtn sec tone-neutral" onClick={() => setShowMobileBill(false)}>Cancel</button>
-              <button className="m-abtn pri tone-terra" disabled={savingBill} onClick={async () => { await saveRefBill(); setShowMobileBill(false); }}>{savingBill ? 'Saving…' : billEditOpen ? 'Update bill' : 'Save bill'}</button>
+              <button className="m-abtn is-sec tone-neutral" onClick={() => setShowMobileBill(false)}>Cancel</button>
+              <button className="m-abtn is-pri tone-terra" disabled={savingBill} onClick={async () => { await saveRefBill(); setShowMobileBill(false); }}>{savingBill ? 'Saving…' : billEditOpen ? 'Update bill' : 'Save bill'}</button>
             </div>
           </div>
         </div>
@@ -1275,8 +1278,8 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
               </div>
             )}
             <div className="m-sheet-acts">
-              <button className="m-abtn sec tone-neutral" onClick={() => setShowMobilePay(false)}>Cancel</button>
-              <button className="m-abtn pri tone-terra" disabled={recordPayment.isPending || !(parseFloat(payAmount) > 0)} onClick={() => recordPayment.mutate(undefined, { onSuccess: () => setShowMobilePay(false) })}>{recordPayment.isPending ? 'Saving…' : 'Save payment'}</button>
+              <button className="m-abtn is-sec tone-neutral" onClick={() => setShowMobilePay(false)}>Cancel</button>
+              <button className="m-abtn is-pri tone-terra" disabled={recordPayment.isPending || !(parseFloat(payAmount) > 0)} onClick={() => recordPayment.mutate(undefined, { onSuccess: () => setShowMobilePay(false) })}>{recordPayment.isPending ? 'Saving…' : 'Save payment'}</button>
             </div>
           </div>
         </div>

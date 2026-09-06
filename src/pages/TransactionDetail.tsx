@@ -93,6 +93,8 @@ const TXNX_CSS = `
 .txnx .linkbtn{height:32px;padding:0 14px;border-radius:6px;border:1px solid var(--terra);background:var(--terra);color:#fff;font-size:13px;font-weight:500;cursor:pointer;transition:background .15s,transform .12s,box-shadow .15s}
 .txnx .linkbtn:hover{background:var(--terra-deep);transform:translateY(-1px);box-shadow:0 5px 12px -6px rgba(196,97,58,.7)}
 .txnx .linkbtn:active{transform:scale(.96)}
+/* .ghost is the desktop inline button; the action-bar buttons use .is-ghost / .is-link
+   so this rule (and its hover) cannot reach them. */
 .txnx .ghost{height:30px;padding:0 10px;border-radius:6px;border:1px solid var(--line);background:var(--paper);font-size:13px;font-weight:500;color:var(--ink-2);cursor:pointer;transition:background .15s,color .15s}
 .txnx .ghost:hover{background:var(--terra-tint);color:var(--terra);border-color:transparent}
 .txnx tfoot td{background:var(--paper-2);font-size:13.5px;color:var(--ink-2);height:42px;border-top:2px solid var(--line)}
@@ -202,8 +204,8 @@ const TXNX_CSS = `
 .txnx .m-abtn{height:48px;min-width:0;padding:0 12px;overflow:hidden;border-radius:13px;font-weight:600;font-size:14.5px;line-height:1.15;white-space:nowrap;text-overflow:ellipsis;display:flex;align-items:center;justify-content:center;gap:8px;border:0;cursor:pointer}
 .txnx .m-abtn:active{transform:scale(.97)}
 .txnx .m-abtn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2;flex-shrink:0}
-.txnx .m-abtn.ghost{flex:0 1 auto;border:1px solid var(--line);background:var(--paper);color:var(--walnut-2)}
-.txnx .m-abtn.link{flex:1 1 auto;background:var(--terra);color:#fff;box-shadow:0 10px 24px -10px rgba(180,83,47,.5)}
+.txnx .m-abtn.is-ghost{flex:0 1 auto;border:1px solid var(--line);background:var(--paper);color:var(--walnut-2)}
+.txnx .m-abtn.is-link{flex:1 1 auto;background:var(--terra);color:#fff;box-shadow:0 10px 24px -10px rgba(180,83,47,.5)}
 @media (max-width:380px){.txnx .m-abar{gap:8px;padding-left:12px;padding-right:12px}.txnx .m-abtn{font-size:13.5px;gap:7px;padding:0 10px}}
 .txnx .m-abtn:disabled{opacity:.5}
 `;
@@ -829,8 +831,8 @@ export default function TransactionDetail({ session }: { session: Session }) {
 
         {showBar && (
           <div className="m-abar">
-            {canAmend && <button className="m-abtn ghost" onClick={openAmendModal}>Edit</button>}
-            <button className="m-abtn link" onClick={linkAction}>
+            {canAmend && <button className="m-abtn is-ghost" onClick={openAmendModal}>Edit</button>}
+            <button className="m-abtn is-link" onClick={linkAction}>
               <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" /></svg>
               {isVendor ? 'Link to a bill' : 'Link to contract'}
             </button>
