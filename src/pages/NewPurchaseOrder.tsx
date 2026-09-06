@@ -11,7 +11,7 @@ import { useOrgId } from '../lib/auth/AuthProvider';
 import { VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 import { brandsFor, addCustomBrand, BRANDS_BY_CATEGORY } from '../lib/brandsByCategory';
 import { multiply, subtract, applyPercent, sum } from '../lib/money';
-import { matchSKUsFromFile, matchSKUsFromText } from '../lib/skuMatcher';
+import { matchSKUsFromFile, matchSKUsFromText, type SKUMatcherResponse } from '../lib/skuMatcher';
 import { SKU_AUTO_COMMIT, SKU_CLEAN_MATCH, SKU_CHIP_DISPLAY, SKU_LOW_DISPLAY, SKU_QUERY_THRESHOLD, DYM_CONFIDENCE_FLOOR } from '../lib/skuThresholds';
 import { extractAttributesFromInput } from '../lib/skuAttributeExtractor';
 import type { ExtractedAttributes } from '../lib/skuAttributeExtractor';
@@ -40,6 +40,8 @@ import { UiResolutionStrip, UiStripEscapes, UiDemotedSuggestion } from '../compo
 import UiAttributeFieldsHost from '../components/po-new-ui/UiAttributeFieldsHost';
 import { UiMoney, UiTotalExclGst } from '../components/po-new-ui/UiMoney';
 import UiSaveHint from '../components/po-new-ui/UiSaveHint';
+import { PoQuickStart } from '../components/po-new-ui/PoQuickStart';
+import { useIsMobile } from '../lib/useIsMobile';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -900,6 +902,10 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
   // with the catalog search, never blocked by it.
   const dymDebounceRef     = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const fileInputRef      = useRef<HTMLInputElement>(null);
+  // On a phone the order starts by voice or camera, not by typing into a table. The quick
+  // start stands in front of the item grid until something is in it, or the user asks to type.
+  const isMobile          = useIsMobile();
+  const [typeItOut, setTypeItOut] = useState(false);
   const itemRefs          = useRef<Map<string, HTMLDivElement>>(new Map());
   const lineItemsRef      = useRef<DraftLineItem[]>([]);
   // Line ids that should NOT auto-open their match dropdown (bulk bill extract → many lines at
@@ -3425,13 +3431,13 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
     onError: (err: any) => showSnackbar(err.message || 'Failed to create vendor', { type: 'error' }),
   });
 
-  async function handleDocumentUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  /** Run one extraction and fold its lines into the order. The source — a scanned bill, a photo
+   *  from the camera, or a spoken order transcribed on the phone — makes no difference past here. */
+  async function ingestExtraction(run: () => Promise<SKUMatcherResponse>) {
     setDocExtracting(true);
     setDocExtractError(null);
     try {
-      const result = await matchSKUsFromFile(file, 'po_creation', selectedVendor?.category);
+      const result = await run();
       if (result.error) {
         setDocExtractError(result.error);
         return;
@@ -3473,12 +3479,18 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
           });
       }
     } catch (err: any) {
-      console.error('[handleDocumentUpload]', err);
-      setDocExtractError(err?.message || 'Failed to process document. Try again.');
+      console.error('[ingestExtraction]', err);
+      setDocExtractError(err?.message || 'Failed to process that. Try again.');
     } finally {
       setDocExtracting(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
+  }
+
+  function handleDocumentUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    void ingestExtraction(() => matchSKUsFromFile(file, 'po_creation', selectedVendor?.category));
   }
 
   async function handleSubmit(status: string) {
@@ -3594,12 +3606,15 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
           .npo-drow > :nth-child(3) { border-left: 0 !important; border-top: 1px solid ${uiV.line} !important; }
           .npo-drow > :nth-child(4) { border-top: 1px solid ${uiV.line} !important; }
         }
+        /* While the phone quick start is showing, the desktop item table and its heading stand
+           down — the order has not been started yet, and a spreadsheet is not how it starts here. */
+        .po-quickstart-on .po-items-chrome { display: none; }
         /* the sticky footer must clear the home indicator */
         .npo-foot { padding-bottom: env(safe-area-inset-bottom); }
       `}</style>
 
       <div
-        className="px-4 md:px-6 pt-6 pb-36 mx-auto"
+        className={`px-4 md:px-6 pt-6 pb-36 mx-auto${isMobile && !typeItOut && lineItems.filter(l => l.item_name.trim()).length === 0 ? ' po-quickstart-on' : ''}`}
         style={{ maxWidth: '100%', background: '#FBF9F6' }}
         onClick={(e) => {
           if (!(e.target as HTMLElement).closest('.po-sheet-row') && !(e.target as HTMLElement).closest('.po-row-expansion')) {
@@ -3817,7 +3832,23 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
         )}
 
         {/* ── Items ──────────────────────────────────────────────── */}
-        <div className="mt-6">
+        {isMobile && !typeItOut && lineItems.filter(l => l.item_name.trim()).length === 0 && (
+          <div className="mt-6 mb-5">
+              <SheetSectionLabel title="Items" />
+              <PoQuickStart
+                busy={docExtracting}
+                error={docExtractError}
+                onSpoken={(text) => void ingestExtraction(() => matchSKUsFromText(text, 'po_creation', selectedVendor?.category))}
+                onFile={(file) => void ingestExtraction(() => matchSKUsFromFile(file, 'po_creation', selectedVendor?.category))}
+                onType={() => setTypeItOut(true)}
+                tokens={{ ink: uiV.user, system: uiV.system, systemFaint: uiV.systemFaint, line: uiV.line,
+                          surface: uiV.surface, field: uiV.field, accent: uiV.accent, accentDeep: uiV.accentDeep,
+                          accentSoft: uiV.accentSoft, accentLine: uiV.accentLine }}
+              />
+          </div>
+        )}
+
+        <div className="mt-6 po-items-chrome">
           <SheetSectionLabel
             title="Items"
             right={(
@@ -3883,7 +3914,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
 
         {/* The sheet */}
         <div
-          className="rounded-2xl overflow-hidden"
+          className="rounded-2xl overflow-hidden po-items-chrome"
           style={{ border: `1px solid ${uiV.line}`, background: uiV.surface }}
           onFocusCapture={(e) => {
             // Focusing an item cell with no vendor bounces up to the vendor field, guided not hidden.

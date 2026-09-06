@@ -323,7 +323,17 @@ const LEDGER_BAND_CSS = `
 .txn-mini .p{font-size:13px;color:rgba(245,240,231,.72)}
 .txn-mini .mc{margin-left:auto;font-size:12.5px;color:rgba(245,240,231,.72)}
 @media (prefers-reduced-motion:reduce){.txn-rhythm .bar{transform:none}.tb-fx,.txn-mini{transition:none}}
-@media (max-width:767px){.txn-mini{left:0}}
+@media (max-width:767px){
+  .txn-mini{left:0;padding-top:env(safe-area-inset-top)}
+  /* the slim bar carries the same three facts as the desktop one, in the room a phone has:
+     the title and the net figure on the first line, the period and the count under it */
+  .txn-mini .in{padding:0 18px;height:auto;min-height:52px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:0 12px;align-content:center;padding-top:7px;padding-bottom:7px}
+  .txn-mini .t{grid-column:1;font-size:15px;line-height:1.15}
+  .txn-mini .p{grid-column:2;grid-row:1;text-align:right;font-size:13.5px;font-weight:500;color:#F5F0E7;white-space:nowrap}
+  /* the period is already stated in the band; the slim bar keeps the money and the count */
+  .txn-mini .p .sep{display:none}
+  .txn-mini .mc{grid-column:1/-1;grid-row:2;margin-left:0;font-size:11.5px;margin-top:2px}
+}
 @media (max-width:640px){.tb-in,.txn-rhythm{padding-left:18px;padding-right:18px}.tb-in{padding-top:20px}.tb-h1{font-size:25px;flex:1 1 100%}.tb-actions{margin-left:0;flex:1 1 100%;margin-top:12px;gap:10px}.tb-btn{flex:1;min-width:0;height:44px;padding:0 10px}.tb-lead{margin-top:20px}.tb-amt{font-size:28px}}
 @media (max-width:380px){.tb-amt{font-size:24px}.tb-btn{font-size:13px;gap:6px}}
 `;
@@ -1044,7 +1054,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
       <div className={`txn-mini${miniShow ? ' show' : ''}`}>
         <div className="in">
           <span className="t">Transactions</span>
-          <span className="p">{periodLabel} · <span className="num">{netLabel}</span></span>
+          <span className="p"><span className="sep">{periodLabel} · </span><span className="num">{netLabel}</span></span>
           <span className="mc">
             {unlinkedCount > 0 && (
               <button onClick={() => setFilterUnlinked(v => !v)} style={{ color: 'inherit', textDecoration: filterUnlinked ? 'underline' : 'none', textUnderlineOffset: 3 }}>
@@ -1053,6 +1063,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
             )}
             <span style={{ opacity: 0.45 }}>{unlinkedCount > 0 ? ' · ' : ''}</span>
             {filteredTransactions.length} {filteredTransactions.length === 1 ? 'entry' : 'entries'}
+            <span className="sm:hidden"> · {periodLabel}</span>
           </span>
         </div>
       </div>
