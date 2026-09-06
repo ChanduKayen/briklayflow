@@ -3,6 +3,7 @@
 // figure asks WHY (carried / advance / re-agreed); Mark-paid records a REAL transaction.
 // Vendors, salaries, bills and the WhatsApp receipt are the next slices.
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
@@ -20,6 +21,8 @@ import { PendingCertifications } from '../components/attendance/PendingCertifica
 import { LedgerCutoverControl } from '../components/attendance/LedgerCutoverControl';
 import { useUserProfile } from '../App';
 import { RateCardPanel } from '../components/attendance/RateCardPanel';
+import { useIsMobile } from '../lib/useIsMobile';
+import PayablesMobile, { type PlmRow, type PlmSection } from '../components/payables/PayablesMobile';
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 const MODES = ['UPI', 'NEFT', 'Cash', 'Cheque'];
@@ -335,6 +338,10 @@ export default function Payables({ session }: { session: Session }) {
   const [mode, setMode] = useState('UPI');
   const [busy, setBusy] = useState<string | null>(null);
   const [extra, setExtra] = useState<Record<string, PayRow[]>>({});  // ad-hoc "Add a payment" rows, per project
+  const navigate = useNavigate();
+  // 640px, the width at which the run stops being a table and becomes the phone design.
+  const isPhone = useIsMobile(640);
+  const [addSheet, setAddSheet] = useState<null | 'worker' | 'recurring'>(null);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['weekly_payments', monday.toISOString().slice(0, 10)],
@@ -398,20 +405,23 @@ export default function Payables({ session }: { session: Session }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sections, plan, paid]);
 
-  const doPay = async (r: PayRow) => {
-    const amt = planned(r);
+  // The one place a payment is recorded. The desktop row and the phone's pay sheet both come
+  // through here, so a payment made on a phone is the same transaction, settled the same way.
+  const payRow = async (r: PayRow, amt: number, reason: string) => {
     if (!amt) return;
     setBusy(r.key);
     try {
-      const txnId = await recordWeeklyPayment(orgId, r, amt, mode, diffs[r.key]?.reason || '');
+      const txnId = await recordWeeklyPayment(orgId, r, amt, mode, reason);
       if (newLedger) { try { await settleWeeklyPaymentOnLedger(txnId, r, amt, monday); } catch (e: any) { showSnackbar(`Paid, but ledger link failed: ${e?.message || 'error'}`, { type: 'error' }); } }
       setPaid(p => ({ ...p, [r.key]: amt }));
       showSnackbar(`Paid ${inr(amt)} to ${r.party}`);
       refetch();
     } catch (e: any) {
       showSnackbar(e?.message || 'Could not record the payment', { type: 'error' });
+      throw e;                                   // the sheet keeps itself open so it can be retried
     } finally { setBusy(null); }
   };
+  const doPay = (r: PayRow) => payRow(r, planned(r), diffs[r.key]?.reason || '').catch(() => {});
 
   const onMark = (r: PayRow) => {
     if (Math.abs(planned(r) - r.thisWeek) >= 1 && !diffs[r.key]) { setWhy(r.key); return; }
@@ -421,6 +431,91 @@ export default function Payables({ session }: { session: Session }) {
   const shiftWeek = (d: number) => setMonday(m => { const x = new Date(m); x.setDate(x.getDate() + d * 7); return x; });
   // Where a row's figure comes from — shown subtly on hover so the source is clear.
   const sourceHint = (r: PayRow) => r.att ? 'from the attendance sheet' : r.stage ? 'from the contract stages' : r.bills ? 'from open purchase orders' : r.kind === 'recurring' ? 'a standing recurring line' : 'typed here';
+
+  if (isPhone) {
+    const byKey = new Map<string, PayRow>();
+    sections.forEach(sec => sec.rows.forEach(r => byKey.set(r.key, r)));
+    const toPlm = (r: PayRow): PlmRow => ({
+      key: r.key,
+      name: r.party,
+      role: [r.trade, r.projectName].filter(Boolean).join(' · '),
+      amount: planned(r),
+      computed: Math.round(r.thisWeek),
+      basis: r.basis,
+      balanceBf: r.balanceBf,
+      flag: (r.withoutBills ?? 0) > 0.5 ? `${inr(r.withoutBills!)} paid without bills` : null,
+      advanceNote: (r.advance ?? 0) > 0.5 ? `${inr(r.advance!)} paid ahead · advance` : null,
+      paidAmount: paid[r.key] ?? null,
+      paidMode: paid[r.key] ? mode : null,
+    });
+    const sectionOf = (id: string, title: string): PlmSection | null => {
+      const sec = sections.find(x => x.projectId === id);
+      const rows = (sec?.rows ?? []).map(toPlm);
+      const total = rows.reduce((a, r) => a + (r.paidAmount ?? r.amount), 0);
+      if (id === '__workers__') return { id, title, total, rows, addLabel: 'Add a payment request' };
+      if (id === '__recurring__') return {
+        id, title, total, rows,
+        empty: { text: 'Rent, a watchman, a weekly supervisor — standing payments appear here every week on their own.', action: 'Add a recurring payment' },
+      };
+      return rows.length ? { id, title, total, rows } : null;
+    };
+    const plmSections = [
+      sectionOf('__workers__', 'Workers'),
+      sectionOf('__vendors__', 'Vendor bills'),
+      sectionOf('__recurring__', 'Recurring'),
+    ].filter(Boolean) as PlmSection[];
+
+    // The add forms have no design in the reference — only the line that opens them — so the
+    // sheet hosts the page's own forms, in a .wpx scope of their own so those styles reach them
+    // and nothing else.
+    const formScope = (body: React.ReactNode) => (
+      <div className="wpx" style={{ padding: 0, minHeight: 0, background: 'transparent' }}>
+        <style>{CSS}</style>
+        {body}
+      </div>
+    );
+    const formSheet = addSheet === 'worker'
+      ? { title: 'Add a payment request', body: formScope(
+          <AddPaymentRow defaultOpen projects={(projects ?? []) as { project_id: string; name: string }[]} parties={parties ?? []} orgId={orgId}
+            onError={(m) => showSnackbar(m, { type: 'error' })}
+            onAdd={(row) => { setExtra(x => ({ ...x, [row.projectId]: [...(x[row.projectId] ?? []), row] })); setAddSheet(null); }} />) }
+      : addSheet === 'recurring'
+      ? { title: 'Recurring & fixed', body: formScope(
+          <RecurringManager defaultOpen orgId={orgId} recurring={recurring ?? []} projects={(projects ?? []) as { project_id: string; name: string }[]}
+            onChanged={() => { refetchRec(); setAddSheet(null); }} onError={(m) => showSnackbar(m, { type: 'error' })} />) }
+      : null;
+
+    return (
+      <PayablesMobile
+        weekLabel={weekLabel(monday)}
+        onPrevWeek={() => shiftWeek(-1)}
+        onNextWeek={() => shiftWeek(1)}
+        onThisWeek={() => setMonday(mondayOf(new Date()))}
+        left={totals.left} paid={totals.paid} plannedTotal={totals.planned} countLeft={totals.count}
+        sections={plmSections}
+        modes={MODES} mode={mode} onMode={setMode}
+        onPay={async (row, amount, diff) => {
+          const r = byKey.get(row.key);
+          if (!r) return;
+          if (diff) setDiffs(d => ({ ...d, [r.key]: diff as Diff }));
+          setPlan(pp => ({ ...pp, [r.key]: amount }));
+          await payRow(r, amount, diff?.reason || '');
+        }}
+        onOpenParty={(row) => {
+          const id = byKey.get(row.key)?.stakeholderId;
+          if (id) navigate(`/ledger?stakeholder=${id}`);
+        }}
+        onAdd={(id) => setAddSheet(id === '__recurring__' ? 'recurring' : 'worker')}
+        formSheet={formSheet}
+        onCloseForm={() => setAddSheet(null)}
+        rateCard={orgId ? <RateCardPanel orgId={orgId} isManager={isManager} /> : null}
+        aboveRun={orgId && session.user?.id ? <PendingCertifications orgId={orgId} userId={session.user.id} /> : null}
+        loading={isLoading}
+        errorText={error ? `Could not load — ${(error as { message?: string } | null)?.message || 'try again'}` : null}
+        emptyText={!isLoading && !error && sections.length === 0 ? 'No active projects yet — create a project to start the payment run.' : null}
+      />
+    );
+  }
 
   return (
     <div className="wpx">
@@ -529,11 +624,12 @@ export default function Payables({ session }: { session: Session }) {
 }
 
 // Manage the standing recurring/fixed lines that surface on the run each week.
-function RecurringManager({ orgId, recurring, projects, onChanged, onError }: {
+function RecurringManager({ orgId, recurring, projects, onChanged, onError, defaultOpen = false }: {
   orgId: string; recurring: import('../lib/weeklyPaymentsApi').Recurring[];
   projects: { project_id: string; name: string }[]; onChanged: () => void; onError: (m: string) => void;
+  defaultOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [f, setF] = useState({ project_id: '', who: '', party: '', label: '', amount: '', cadence: 'weekly' as 'weekly' | 'monthly' });
   const [busy, setBusy] = useState(false);
   const { data: parties } = useQuery({
@@ -626,8 +722,8 @@ function PartySearch({ parties, orgId, onPick, onError }: { parties: any[]; orgI
 
 // "Add a payment request" — an ad-hoc row for something the register doesn't know. Now that all
 // workers live in one group, the payment must say which site it belongs to, so it carries a project picker.
-function AddPaymentRow({ projects, parties, orgId, onError, onAdd }: { projects: { project_id: string; name: string }[]; parties: any[]; orgId: string; onError: (m: string) => void; onAdd: (row: PayRow) => void }) {
-  const [open, setOpen] = useState(false);
+function AddPaymentRow({ projects, parties, orgId, onError, onAdd, defaultOpen = false }: { projects: { project_id: string; name: string }[]; parties: any[]; orgId: string; onError: (m: string) => void; onAdd: (row: PayRow) => void; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   const [projectId, setProjectId] = useState('');
   const [picked, setPicked] = useState<{ id: string | null; name: string }>({ id: null, name: '' });
   const [amount, setAmount] = useState(''); const [note, setNote] = useState('');

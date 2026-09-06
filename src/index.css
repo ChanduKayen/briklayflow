@@ -25,9 +25,12 @@ html, body {
   overscroll-behavior: none;
   -webkit-overflow-scrolling: touch;
 }
-/* Prevent iOS input zoom (16px minimum) */
+/* Prevent iOS input zoom (16px minimum).
+   The floor is the point, so a field that deliberately sets a LARGER size opts out with
+   .own-size rather than being clamped down to 16px by this rule's !important. Only ever put
+   .own-size on a field whose own size is 16px or more. */
 @media (max-width: 767px) {
-  input, textarea, select {
+  input:not(.own-size), textarea:not(.own-size), select:not(.own-size) {
     font-size: 16px !important;
   }
 }
