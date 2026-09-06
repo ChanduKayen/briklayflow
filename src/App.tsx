@@ -23,7 +23,7 @@ import {
   IconShieldLock,
   IconLogout, IconChevronLeft, IconDots,
   IconRepeat, IconLayoutGrid, IconFiles, IconUsers, IconUser,
-  IconCircleDot, IconClock, IconFileText, IconChecklist, IconReceipt2,
+  IconCircleDot, IconClock, IconChecklist, IconReceipt2,
 } from '@tabler/icons-react';
 
 // Route pages are lazy-loaded so the dev server (and the prod bundle) only transform/ship
@@ -815,7 +815,10 @@ function TabItem({
   onClick?: () => void;
   to?: string;
 }) {
-  const activeColor = accentActive ? TERRACOTTA : '#0b1c30';
+  // Dark bitter-chocolate bar (matches the desktop rail): terracotta top-pill, cream label when active,
+  // muted cream at rest.
+  const pillColor = accentActive ? TERRACOTTA : '#F5F0E7';
+  const activeColor = '#F5F0E7';
   const content = (
     <>
       {/* Top indicator pill */}
@@ -824,7 +827,7 @@ function TabItem({
         style={{
           width: active ? 20 : 0,
           opacity: active ? 1 : 0,
-          background: activeColor,
+          background: pillColor,
         }}
         aria-hidden
       />
@@ -848,7 +851,7 @@ function TabItem({
     </>
   );
   const cls = `flex-1 flex flex-col items-center justify-center gap-0.5 relative touch-active select-none transition-colors duration-150`;
-  const style = { color: active ? activeColor : 'var(--nav-text-muted)' };
+  const style = { color: active ? activeColor : 'rgba(245,240,231,0.55)' };
   return to ? (
     <Link to={to} className={cls} style={style}>{content}</Link>
   ) : (
@@ -890,12 +893,6 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
     enabled: role !== 'supervisor' && role !== 'accountant',
   });
 
-  const { data: poDraftCount = 0 } = useQuery({
-    queryKey: ['nav_po_draft'],
-    queryFn: async () => (await supabase.from('purchase_orders').select('*', { count: 'exact', head: true }).eq('approval_status', 'PENDING')).count ?? 0,
-    staleTime: 60_000,
-    enabled: role === 'management' || role === 'principal',
-  });
 
   const ordersBadge = (woPendingCount ?? 0) + (poUntalliedCount ?? 0);
 
@@ -917,11 +914,12 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
   }, []);
   const navTucked = navHidden || hideForRoute;
 
-  // Glass shell shared by both context tab bars
+  // Bitter-chocolate shell — the mobile mirror of the desktop rail (same night-binding gradient + edge).
   const shellClass =
-    "md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/90 backdrop-blur-xl supports-[backdrop-filter]:bg-white/75";
+    "md:hidden fixed bottom-0 left-0 right-0 z-40";
   const shellStyle: React.CSSProperties = {
-    boxShadow: '0 -1px 3px rgba(0,0,0,0.04), 0 -8px 24px rgba(0,0,0,0.04)',
+    background: 'linear-gradient(180deg,#191009,#140D07)',
+    boxShadow: 'inset 0 1px 0 #302014, 0 -10px 30px rgba(20,16,12,0.35)',
     height: 'calc(56px + env(safe-area-inset-bottom))',
     transform: navTucked ? 'translateY(115%)' : 'translateY(0)',
     transition: 'transform .28s cubic-bezier(.4,0,.2,1)',
@@ -945,12 +943,12 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
           <Link
             to="/projects"
             className="flex flex-col items-center justify-center gap-0.5 touch-active select-none"
-            style={{ minWidth: 48, paddingLeft: 4, paddingRight: 4, color: 'var(--nav-text-muted)' }}
+            style={{ minWidth: 48, paddingLeft: 4, paddingRight: 4, color: 'rgba(245,240,231,0.55)' }}
           >
             <IconChevronLeft size={18} strokeWidth={2} />
             <span className="text-[9px] font-medium leading-none" style={{ letterSpacing: '0.02em' }}>Projects</span>
           </Link>
-          <div style={{ width: 1, background: 'var(--nav-border)', margin: '12px 0', flexShrink: 0 }} />
+          <div style={{ width: 1, background: 'rgba(245,240,231,0.12)', margin: '12px 0', flexShrink: 0 }} />
 
           <TabItem to={base}                       Icon={IconLayoutGrid}      label="Overview" active={isOverview} />
           <TabItem to={`${base}/transactions`}     Icon={IconArrowsExchange}  label="Txns"     active={isTxns} />
@@ -962,38 +960,21 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
     );
   }
 
-  // ── Purchase-orders context bottom bar (the mobile mirror of the desktop
-  //    secondary panel: Draft → Sent for quotes → Live) ────────────────────────
-  const inPO = (location.pathname.startsWith('/purchase-orders') && location.pathname !== '/purchase-orders/new')
-            || location.pathname.startsWith('/procurement/quotes');
-  if (inPO) {
-    const onList = location.pathname === '/purchase-orders';
-    const onQuotes = location.pathname.startsWith('/procurement/quotes');
-    const status = new URLSearchParams(location.search).get('status') ?? 'all';
-    const isApprover = role === 'management' || role === 'principal';
-    return (
-      <nav className={shellClass} style={shellStyle}>
-        <div className="flex items-stretch h-[56px]" style={innerStyle}>
-          {isApprover && <TabItem to="/purchase-orders?status=draft" Icon={IconFileText} label="Approvals" active={onList && status === 'draft'} badge={poDraftCount} />}
-          <TabItem to="/procurement/quotes" Icon={IconClock}      label="Quotes" active={onQuotes} />
-          <TabItem to="/purchase-orders"    Icon={IconCircleDot}  label="Live"   active={onList && status !== 'draft'} />
-          <TabItem onClick={onMoreTap}      Icon={IconDots}       label="More"   active={false} />
-        </div>
-      </nav>
-    );
-  }
+  // The PO pages keep the SAME home nav (no separate PO-context bar) — POs stays highlighted in the
+  // home bar instead of swapping the whole navigation out from under the user.
 
   // ── Global context bottom bar ──────────────────────────────────────────
   // Three primary destinations only — Transactions, For review, Purchase orders — everything else
-  // (Projects, Contracts, Attendance, Payables, Billing, Parties, Team, Insights…) lives in More.
+  // (Projects, Contracts, Attendance, Billing, Parties, Team, Insights…) lives in More.
   void ordersBadge;
-  const moreActive = ['/projects', '/work-orders', '/orders', '/attendance', '/payables', '/billing', '/team', '/profile', '/stakeholders', '/invoices', '/insights', '/inward-register'].some(p => isActivePath(p));
+  const moreActive = ['/projects', '/work-orders', '/orders', '/attendance', '/billing', '/team', '/profile', '/stakeholders', '/invoices', '/insights', '/inward-register'].some(p => isActivePath(p));
 
   type Tab = { path: string; icon: React.ElementType; label: string; show: boolean; badge?: number };
   const tabs: Tab[] = [
     { path: '/ledger',          icon: IconRepeat,      label: 'Txns',      show: role !== 'supervisor' },
     { path: '/logbook',         icon: IconNotebook,    label: 'For review', show: true },
     { path: '/purchase-orders', icon: IconShoppingBag, label: 'POs',       show: role !== 'supervisor' && role !== 'accountant', badge: poUntalliedCount },
+    { path: '/payables',        icon: IconReceipt2,    label: 'Payables',  show: role !== 'supervisor' },
   ].filter(t => t.show);
 
   return (
@@ -1057,7 +1038,6 @@ function MoreNavSheet({
     { path: '/stakeholders',  icon: IconUsers,                 label: 'Parties',         show: role !== 'supervisor' },
     { path: '/inward-register', icon: IconLayoutGrid,          label: 'Inward Register', show: role !== 'supervisor' && role !== 'accountant' },
     { path: '/billing',       icon: IconFileInvoice,           label: 'Client Billing', show: role !== 'supervisor' },
-    { path: '/payables',      icon: IconReceipt2,              label: 'Payables',        show: role !== 'supervisor' },
     { path: '/insights',      icon: IconChartPie,              label: 'Insights',       show: true },
     { path: '/team',          icon: IconShieldLock,            label: 'Team & Access',  show: role === 'principal' || role === 'management' },
     { path: '/follow-up-rules', icon: IconClock,               label: 'Follow-up Rules', show: role === 'principal' || role === 'management' },
