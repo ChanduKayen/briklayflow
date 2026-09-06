@@ -70,6 +70,8 @@ const CSS = `
 .wpx .in input{border:0;background:transparent;width:100%;text-align:right;font-size:15px;font-weight:500}
 .wpx .in input:focus{outline:none}.wpx .in input::placeholder{color:var(--line-2)}
 .wpx .row.paid .in{border-color:transparent;background:transparent}
+.wpx .in.paid-v{justify-content:flex-end;gap:3px}
+.wpx .in.paid-v b{font-size:15px;font-weight:500}
 .wpx .after{text-align:right;color:var(--walnut-2)}.wpx .after .m{display:block;font-size:11.5px;color:var(--walnut-3)}.wpx .after.zero{color:var(--sage)}
 .wpx .status{display:flex;justify-content:flex-end}
 .wpx .mark{border:1px solid var(--line-2);border-radius:999px;padding:7px 14px;font-size:13px;font-weight:500;color:var(--walnut);background:var(--paper);white-space:nowrap;cursor:pointer}
@@ -102,6 +104,8 @@ const CSS = `
 .wpx .foot{background:var(--paper);border:1px solid var(--line);border-radius:14px;margin-top:6px}
 .wpx .foot-in{padding:14px 20px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
 .wpx .foot .s{color:var(--walnut-2);font-size:14px}.wpx .foot .s b{color:var(--walnut);font-weight:500}
+.wpx .foot .acts{display:flex;gap:12px;align-items:center}
+.wpx .foot .acts .lbl,.wpx .foot .acts .hint{font-size:12.5px;color:var(--walnut-3)}
 .wpx .modesel{border:1px solid var(--line-2);border-radius:9px;height:38px;padding:0 10px;background:var(--paper);font:inherit;font-size:13.5px}
 .wpx .state{padding:70px 18px;text-align:center;color:var(--walnut-3);font-size:14px}
 .wpx .emptyrow{padding:14px 18px;color:var(--walnut-3);font-size:13px;border-bottom:1px solid var(--line)}
@@ -170,6 +174,107 @@ const CSS = `
   .wpx .psrch,.wpx .psrch>input{width:100%}
   .wpx .addpill{width:100%;flex-wrap:wrap}
   .wpx .addpill .hint{flex-basis:100%}
+}
+
+/* ── phone (≤640px): the run reads as a native payables app — a week stepper, one money
+   card led by what is still owed, and each person as a card with the amount to the right
+   and one clear action. Everything above stays the desktop table. ── */
+@media (max-width:640px){
+  /* room for the bottom tab bar and the FAB, so the last card is never covered */
+  .wpx{padding:16px 12px calc(96px + env(safe-area-inset-bottom))}
+  .wpx h1{font-size:27px;letter-spacing:-.01em}
+  .wpx .top{gap:12px;margin-bottom:16px;width:100%}
+  .wpx .lead{width:100%;min-width:0}
+
+  /* week stepper — ‹ · 31 Aug – 6 Sep · › · this week — one row that never wraps.
+     DOM order is label-first for the desktop line; flex order puts the arrows either side here. */
+  .wpx .wknav{margin-top:12px;gap:8px;width:100%;flex-wrap:nowrap}
+  .wpx .wknav .wkw{display:none}
+  .wpx .wknav .wkstep.prev{order:1}
+  .wpx .wknav .wklab{order:2}
+  .wpx .wknav .wkstep.next{order:3}
+  .wpx .wknav .wknow{order:4}
+  .wpx .wknav .wkstep{flex:0 0 38px;width:38px;height:38px;display:flex;align-items:center;justify-content:center;
+    border:1px solid var(--line);border-radius:11px;background:var(--paper);color:var(--walnut-2);
+    font-size:21px;line-height:1;padding-bottom:2px;text-decoration:none;-webkit-tap-highlight-color:transparent}
+  .wpx .wknav .wkstep:active{background:var(--cream)}
+  .wpx .wknav .wklab{flex:1;min-width:0;text-align:center;font-size:14px;font-weight:500;color:var(--walnut);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .wpx .wknav .wknow{flex:0 0 auto;height:38px;padding:0 13px;border:1px solid var(--line);border-radius:11px;
+    background:var(--paper);color:var(--walnut-2);font-size:12.5px;font-weight:500;
+    text-decoration:none;white-space:nowrap;-webkit-tap-highlight-color:transparent}
+  .wpx .wknav .wknow:active{background:var(--cream)}
+  .wpx .cutover{margin-top:10px;font-size:12px;line-height:1.45;color:var(--walnut-3);display:block}
+
+  /* money card — what is still owed leads; planned and paid support it underneath */
+  .wpx .stats{width:100%;display:grid;grid-template-columns:1fr 1fr;gap:0 14px;text-align:left;
+    background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:15px 16px 13px}
+  .wpx .stats .st.left{grid-column:1/-1;order:-1;padding-bottom:12px}
+  .wpx .stats .st.left .l{font-size:10.5px;letter-spacing:.11em;text-transform:uppercase}
+  .wpx .stats .st.left .v{font-size:31px;line-height:1.02;margin-top:4px;letter-spacing:-.02em}
+  .wpx .stats .st:not(.left){border-top:1px solid var(--line);padding-top:11px}
+  .wpx .stats .st:not(.left) .l{font-size:11px}
+  .wpx .stats .st:not(.left) .v{font-size:16px;margin-top:1px}
+
+  /* site card */
+  .wpx .site{border-radius:16px;margin-bottom:14px}
+  .wpx .site-h{padding:12px 15px;border-radius:16px 16px 0 0;gap:10px}
+  .wpx .site-h .n{font-size:16px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wpx .site-h .s{font-size:12px;text-align:right;flex-shrink:0}
+
+  /* a person's card: who + amount on top, then the note and one action on a divided line */
+  .wpx .row{grid-template-columns:minmax(0,1fr) auto;
+    grid-template-areas:'who plan' 'sitecol plan' 'what what' 'after status';
+    gap:0 12px;padding:12px 14px 11px 20px;align-items:start;-webkit-tap-highlight-color:transparent}
+  .wpx .row:active{background:#faf8f2}
+  .wpx .row .who{grid-area:who}
+  .wpx .row .who .n{font-size:15px}
+  .wpx .row .who .t{font-size:12.5px;line-height:1.3;margin-top:1px}
+  .wpx .row .sitecol{grid-area:sitecol;font-size:12px;line-height:1.3;margin-top:1px}
+  .wpx .row .what{grid-area:what;margin-top:7px;gap:3px}
+  .wpx .row .plan{grid-area:plan;justify-content:flex-end;align-self:start}
+  .wpx .row .after{grid-area:after;text-align:left;align-self:center;font-size:12.5px;margin-top:9px}
+  .wpx .row .after .m{display:inline;margin-left:5px}
+  .wpx .row .status{grid-area:status;align-self:center;margin-top:9px}
+  /* the source hint only ever appears on hover, which a touch screen has not got */
+  .wpx .row .what .srchint{display:none}
+  .wpx .row .chev{left:6px;font-size:13px}
+  /* 16px keeps iOS Safari from zooming the page when a field takes focus */
+  .wpx .in{width:126px;height:44px;border-radius:12px;padding:0 11px}
+  /* a settled row shows the figure as text, so the column hugs it instead of reserving a field */
+  .wpx .row.paid .in{width:auto;padding:0}
+  .wpx .in.paid-v b{font-size:16px}
+  .wpx .in input{font-size:16px}
+  .wpx .what input{font-size:16px;border-bottom:1px dashed var(--line);padding-bottom:3px}
+  .wpx .mark{padding:10px 17px;font-size:13.5px;font-weight:600;color:var(--terracotta);
+    border-color:color-mix(in srgb,var(--terracotta) 34%,transparent);
+    background:color-mix(in srgb,var(--terracotta) 7%,transparent)}
+  .wpx .mark:active{background:color-mix(in srgb,var(--terracotta) 15%,transparent)}
+  .wpx .mark:disabled{background:transparent;border-color:var(--line);color:var(--walnut-3)}
+  .wpx .done{font-size:13.5px}
+  .wpx .emptyrow{padding:14px}
+  .wpx .state{padding:48px 16px}
+
+  /* the "why is this different" sheet opens leftward from the amount field it belongs to */
+  .wpx .pop{left:auto;right:0;width:min(300px,calc(100vw - 48px))}
+
+  /* footer — the pay-by control gets room, its caption drops to its own line */
+  .wpx .foot{border-radius:16px;margin-top:10px}
+  .wpx .foot-in{padding:14px 16px;gap:12px}
+  .wpx .foot .s{font-size:13.5px}
+  .wpx .foot .acts{width:100%;flex-wrap:wrap;gap:10px}
+  .wpx .foot .acts .modesel{flex:1;min-width:150px;height:44px;border-radius:11px;font-size:15px}
+  .wpx .foot .acts .hint{flex-basis:100%;order:3}
+
+  /* the add / recurring forms: full-width controls, real tap targets */
+  .wpx .addrow{padding:12px 14px;border-radius:0 0 16px 16px}
+  .wpx .addpill{justify-content:flex-start;gap:6px;padding:11px 14px;border-radius:11px}
+  .wpx .addpill .hint{text-align:left;margin-top:2px}
+  .wpx .addform input,.wpx .addform select,.wpx .recform input,.wpx .recform select{height:44px;font-size:16px}
+  .wpx .addform .go,.wpx .recform .go{height:44px;width:100%}
+  .wpx .addform .x,.wpx .recform .x{padding:8px}
+  .wpx .psrch>input{height:44px;font-size:16px}
+  .wpx .recitem{gap:10px;font-size:13.5px}
 }
 `;
 
@@ -282,10 +387,15 @@ export default function Payables({ session }: { session: Session }) {
       <style>{CSS}</style>
       <div className="wrap">
         <div className="top">
-          <div>
+          <div className="lead">
             <h1>Payments</h1>
-            <div className="sub">Week of {weekLabel(monday)} · <button onClick={() => shiftWeek(-1)}>‹ last week</button><button onClick={() => shiftWeek(1)}>next week ›</button><button onClick={() => setMonday(mondayOf(new Date()))}>this week</button></div>
-            {orgId && <div className="sub" style={{ marginTop: 4 }}><LedgerCutoverControl orgId={orgId} isManager={isManager} /></div>}
+            <div className="sub wknav">
+              <span className="wklab"><span className="wkw">Week of </span>{weekLabel(monday)}<span className="wkw"> ·</span></span>
+              <button className="wkstep prev" onClick={() => shiftWeek(-1)} aria-label="Previous week">‹<span className="wkw"> last week</span></button>
+              <button className="wkstep next" onClick={() => shiftWeek(1)} aria-label="Next week"><span className="wkw">next week </span>›</button>
+              <button className="wknow" onClick={() => setMonday(mondayOf(new Date()))}>this week</button>
+            </div>
+            {orgId && <div className="sub cutover"><LedgerCutoverControl orgId={orgId} isManager={isManager} /></div>}
           </div>
           <div className="stats">
             <div className="st"><div className="l">Planned</div><div className="v mono">{inr(totals.planned)}</div></div>
@@ -328,7 +438,7 @@ export default function Payables({ session }: { session: Session }) {
                       <div className="bf mono">{r.balanceBf ? inr(r.balanceBf) : <span style={{ color: 'var(--line-2)' }}>—</span>}{r.balanceBf ? <span className="m">carried</span> : null}</div>
                       <div className="plan">
                         {isPaid
-                          ? <div className="in"><span /><input className="mono" value={paid[r.key].toLocaleString('en-IN')} disabled /></div>
+                          ? <div className="in paid-v"><span>₹</span><b className="mono">{paid[r.key].toLocaleString('en-IN')}</b></div>
                           : <div className="in"><span>₹</span><input className="mono" inputMode="numeric" value={planned(r) || ''} placeholder="0"
                               onChange={(e) => { const v = parseInt(e.target.value.replace(/[^\d]/g, ''), 10) || 0; setPlan(p => ({ ...p, [r.key]: v })); setDiffs(d => { const n = { ...d }; delete n[r.key]; return n; }); }}
                               onBlur={() => { setTimeout(() => { if (!paid[r.key] && Math.abs(planned(r) - r.thisWeek) >= 1 && !diffs[r.key] && why !== r.key) setWhy(r.key); }, 120); }}
@@ -364,10 +474,10 @@ export default function Payables({ session }: { session: Session }) {
 
         <div className="foot"><div className="foot-in">
           <div className="s">{totals.count ? <><b>{totals.count}</b> payments planned, not yet made · <b className="mono">{inr(totals.left)}</b></> : 'Everything planned is paid.'}</div>
-          <div className="acts" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-            <span style={{ fontSize: 12.5, color: 'var(--walnut-3)' }}>pay by</span>
+          <div className="acts">
+            <span className="lbl">pay by</span>
             <select className="modesel" value={mode} onChange={(e) => setMode(e.target.value)}>{MODES.map(m => <option key={m}>{m}</option>)}</select>
-            <span style={{ fontSize: 12.5, color: 'var(--walnut-3)' }}>· each payment is recorded to the ledger</span>
+            <span className="hint">· each payment is recorded to the ledger</span>
           </div>
         </div></div>
       </div>
