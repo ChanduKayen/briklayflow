@@ -15,6 +15,7 @@ import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
 import { AttachBillSheet } from '../components/txn-ledger/AttachBillSheet';
 import { ContractHub, CONTRACT_HUB_CSS } from '../components/txn-ledger/ContractHub';
 import { useIsMobile } from '../lib/useIsMobile';
+import TxnDetailMobile from '../components/txn/TxnDetailMobile';
 
 // ─── Scoped stylesheet — a faithful port of the txn-detail reference (cream/terracotta).
 //     Every selector is prefixed with `.txnx` so nothing leaks into the rest of the app. ──
@@ -713,149 +714,104 @@ export default function TransactionDetail({ session }: { session: Session }) {
     return { linked: false, k: 'Not linked to work yet', sub: `link ${payeeName}'s ${isVendor ? 'bill' : 'contract'}, and this settles against it` };
   };
   const linkAction = () => { if (isVendor) setAttachBill({ file: null, mode: 'upload' }); else setContractHubOpen(true); };
-  const shortDate = txnDate ? txnDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '';
   // WhatsApp origin, only when the ingest actually captured the source message.
   const waText: string | null = (txn as any).ai_flag_data?.source_text || (txn as any).ai_flag_data?.raw_message || (txn as any).ai_flag_data?.wa_message || null;
   const waWho: string | null = (txn as any).ai_flag_data?.source_sender || (txn as any).ai_flag_data?.sender || null;
   const canAmend = (isManagement || profile?.role === 'accountant') && !isVoided;
 
-  // ── app-native mobile detail (txn-detail-mobile.html) ──────────────────────
+  // ── the phone screen, built to the transaction-detail reference ────────────
   const renderMobile = () => {
-    const roleLine = [payeeType, payeeCategory].filter(Boolean).join(' · ') || (isGeneralExpense(txn) ? 'Overhead · no linked party' : '—');
-    const siteName = allAllocs.length > 1 ? `${allAllocs.length} sites` : (primaryAlloc?.projects?.name || '');
-    const kebab = (
-      <div className="m-more" onClick={(e) => e.stopPropagation()}>
-        <button className="m-dots" aria-label="More actions" onClick={() => setMenuOpen(o => !o)}>
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
-        </button>
-        {menuOpen && (
-          <>
-            <div style={{ position: 'fixed', inset: 0, zIndex: 25 }} onClick={() => setMenuOpen(false)} />
-            <div className="menu">
-              <button onClick={() => { setMenuOpen(false); generatePDF(txn, allocs || [], effective, isAmended); }}><svg viewBox="0 0 24 24"><path d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" /></svg>Download voucher PDF</button>
-              {canAmend && <button onClick={() => { setMenuOpen(false); openAmendModal(); }}><svg viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z" /></svg>Amend</button>}
-              {canVoid && !isVoided && (<><hr /><button className="danger" onClick={() => { setMenuOpen(false); setVoidConfirm(true); }}><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M9 9l6 6M15 9l-6 6" /></svg>Void transaction</button></>)}
-            </div>
-          </>
-        )}
-      </div>
-    );
+    const st = primaryAlloc ? allocStatus(primaryAlloc) : { linked: false, k: 'Not linked to work yet', sub: `link ${payeeName}'s ${isVendor ? 'bill' : 'contract'}, and this settles against it` };
+    const canLink = !isVoided && !billLinked;
 
-    // Activity, newest first (mirrors the desktop log).
-    const acts: { t: string; node: React.ReactNode }[] = [];
-    const fmt = (d: string) => new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
-    if (isVoided && txn.voided_at) acts.push({ t: fmt(txn.voided_at), node: <><b>Voided</b> — reversed in the books</> });
-    [...existingAmendments].reverse().forEach((am: any, i) => acts.push({ t: fmt(am.amended_at || am.moved_at || txn.created_at), node: <span key={i}><b>{am.amended_by || am.moved_by || 'Someone'}</b> amended {Object.keys(am.changes || {}).join(', ') || 'this transaction'}</span> }));
-    acts.push({ t: fmt(txn.created_at), node: <><b>{recordedBy || 'Recorded'}</b> {rupee(Number(txn.total_amount))} {isIn ? 'received from' : 'paid to'} {payeeName}{effective.payment_mode ? ` by ${effective.payment_mode}` : ''}</> });
+    // "Cash · Friday 5 Sept, 5:30 pm"
+    const longDate = txnDate
+      ? txnDate.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })
+      : '';
+    const meta = [effective.payment_mode, [longDate, timeStr].filter(Boolean).join(', ')].filter(Boolean).join(' · ');
 
-    const showBar = !isVoided && !billLinked;
+    const details: { label: string; value: string }[] = [];
+    if (effective.category) details.push({ label: 'Category', value: String(effective.category) });
+    if (effective.payment_mode) details.push({ label: 'Method', value: String(effective.payment_mode) });
+    if (recordedBy) details.push({ label: 'Recorded by', value: recordedBy });
+    // The row is optional in the schema, so read it through a narrow shape rather than widening txn.
+    const txnRef = txn as unknown as { reference_number?: string | null; reference?: string | null; utr?: string | null };
+    const reference = txnRef.reference_number || txnRef.reference || txnRef.utr || null;
+    if (reference) details.push({ label: 'Reference', value: String(reference) });
+
+    // The reference shows the source quote and the note as one block of prose.
+    const noteText = [waText ? `“${waText}”` : null, effective.remarks || null].filter(Boolean).join(' ') || null;
+
+    // Activity, newest first — .e1 carries what happened, .e2 the time and who.
+    const fmtWhen = (d: string) => new Date(d).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true });
+    const events: { title: React.ReactNode; meta: string }[] = [];
+    if (isVoided && txn.voided_at) {
+      events.push({ title: <>Voided — reversed in the books</>, meta: fmtWhen(txn.voided_at) });
+    }
+    [...existingAmendments].reverse().forEach((am) => {
+      const who = am.amended_by || 'Someone';
+      events.push({
+        title: <>Amended {Object.keys(am.changes || {}).join(', ') || 'this transaction'}</>,
+        meta: `${fmtWhen(am.amended_at || txn.created_at)} · ${who}`,
+      });
+    });
+    events.push({
+      title: <>Recorded {rupee(Number(txn.total_amount))} {isIn ? 'received from' : 'paid to'} {payeeName}{effective.payment_mode ? ` by ${String(effective.payment_mode).toLowerCase()}` : ''}</>,
+      meta: [fmtWhen(txn.created_at), recordedBy].filter(Boolean).join(' · '),
+    });
+
+    const menu: { label: string; danger?: boolean; onSelect?: () => void }[] = [
+      { label: 'Share as PDF', onSelect: () => generatePDF(txn, allocs || [], effective, isAmended) },
+    ];
+    if (canAmend) menu.push({ label: 'Amend entry', onSelect: openAmendModal });
+    if (canVoid && !isVoided) menu.push({ label: 'Void transaction', danger: true });
 
     return (
       <>
-        <div className="m-dtop">
-          <button className="m-back" aria-label="Back" onClick={() => navigate(backTo)}>
-            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M15 18l-6-6 6-6" /></svg>
-          </button>
-          <span className="t">Transaction</span><span className="no">Nº {txn.txn_id}</span>
-          {kebab}
-        </div>
-
-        <div className="m-body">
-          <div className={`m-hero${isVoided ? ' void' : ''}`}>
-            <div className={`amt${isIn ? ' in' : ''}`}>{isIn ? '+ ₹' : '− ₹'}{(Number(effective.total_amount) || 0).toLocaleString('en-IN')}<span className="dir">{isIn ? 'IN' : 'OUT'}</span></div>
-            <div className="m-who">
-              <span className="m-av">{initials}</span>
-              <div>
-                <div className="n">{txn.stakeholder_id ? <a onClick={() => setShowStakeholderDrawer(true)} style={{ color: 'inherit', textDecoration: 'none' }}>{payeeName}</a> : payeeName}</div>
-                <div className="r">{roleLine}</div>
-              </div>
-            </div>
-            <div className="m-hmeta">
-              {effective.payment_mode && <span className="mono">{effective.payment_mode}</span>}
-              {effective.payment_mode && (shortDate || timeStr) && <i>·</i>}
-              {shortDate}{timeStr ? `, ${timeStr}` : ''}
-              {recordedBy && <><i>·</i>by {recordedBy}</>}
-            </div>
-            {siteName && <div><span className="m-site"><svg viewBox="0 0 24 24"><path d="M3 11 12 4l9 7v9H3z" /></svg>{siteName}</span></div>}
-          </div>
-
-          {waText && (
-            <div className="m-sec">
-              <div className="hh">From WhatsApp</div>
-              <div className="m-origin">
-                <span className="glyph"><svg viewBox="0 0 24 24"><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.4 8.5 8.5 0 0 1-4-1L3 21l2.1-5.4A8.4 8.4 0 1 1 21 11.5z" /></svg></span>
-                <div>
-                  <div className="q">“{waText}”</div>
-                  {waWho && <div className="s">{waWho}</div>}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {effective.remarks && (
-            <div className="m-sec">
-              <div className="hh">Note</div>
-              <div className="m-card"><p className="m-note">{effective.remarks}</p></div>
-            </div>
-          )}
-
-          <div className="m-sec">
-            <div className="hh">Where this money went</div>
-            <div className="m-card">
-              {allAllocs.map((a: any) => {
-                const st = allocStatus(a);
-                return (
-                  <div key={a.allocation_id}>
-                    <div className="m-arow">
-                      <div><div className="k">{a.projects?.name || 'Unassigned'}</div><div className="sub">{allAllocs.length > 1 ? 'share of this payment' : 'full amount, one site'}</div></div>
-                      <span className="v">{rupee(Number(a.allocated_amount))}</span>
-                    </div>
-                    {st.linked ? (
-                      <div className="m-arow linked"><span className="dot" /><div><div className="k">{st.k}</div><div className="sub">{st.sub}</div></div></div>
-                    ) : !isVoided ? (
-                      <div className="m-arow ask tap" onClick={linkAction}><span className="dot" /><div><div className="k">{st.k}</div><div className="sub">{st.sub}</div></div></div>
-                    ) : null}
-                  </div>
-                );
-              })}
-              {allAllocs.length === 0 && <div className="m-arow"><div className="sub">No allocation.</div></div>}
-            </div>
-          </div>
-
-          <div className="m-sec">
-            <div className="hh">Proof of payment</div>
-            {txn.proof_document_url ? (
-              <div className="m-proof">
-                <DocThumb stored={txn.proof_document_url} onImageClick={(u) => openLightbox(u, 'Proof of payment')} w={52} h={64} label="View proof" />
-                <div><div className="n">Receipt attached</div><div className="sub">tap to preview</div></div>
-                {!isVoided && <button className="rep" onClick={() => proofInputRef.current?.click()}>Replace</button>}
-              </div>
-            ) : (
-              <div className="m-proof">
-                <div><div className="n">No receipt attached</div><div className="sub">add the payment proof</div></div>
-                {!isVoided && <button className="up" disabled={proofUploadMutation.isPending} onClick={() => proofInputRef.current?.click()}>{proofUploadMutation.isPending ? 'Uploading…' : 'Upload'}</button>}
-              </div>
-            )}
-          </div>
-
-          <div className="m-sec">
-            <div className="hh">Activity</div>
-            <div className="m-card">
-              {acts.map((a, i) => (<div className="m-trow" key={i}><span className="t">{a.t}</span><span>{a.node}</span></div>))}
-            </div>
-          </div>
-        </div>
-
-        {showBar && (
-          <div className="m-abar">
-            {canAmend && <button className="m-abtn is-ghost" onClick={openAmendModal}>Edit</button>}
-            <button className="m-abtn is-link" onClick={linkAction}>
-              <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" /></svg>
-              {isVendor ? 'Link to a bill' : 'Link to contract'}
-            </button>
-          </div>
-        )}
-
+        <TxnDetailMobile
+          txnNo={txn.txn_id}
+          initials={initials}
+          payeeLine={`${isIn ? 'Received from' : 'Paid to'} ${payeeName}`}
+          amount={`${isIn ? '+' : '−'}₹${(Number(effective.total_amount) || 0).toLocaleString('en-IN')}`}
+          voided={isVoided}
+          meta={meta}
+          siteChip={primaryAlloc?.projects?.name || null}
+          onSiteChip={primaryAlloc?.project_id ? () => navigate(`/projects/${primaryAlloc.project_id}`) : null}
+          sites={allAllocs.length
+            ? allAllocs.map((a) => ({
+                name: a.projects?.name || 'Unassigned',
+                sub: allAllocs.length > 1 ? 'Share of this payment' : 'Full amount, one site',
+                amount: rupee(Number(a.allocated_amount)),
+              }))
+            : [{ name: 'Unassigned', sub: 'No allocation yet', amount: rupee(Number(effective.total_amount) || 0) }]}
+          linked={st.linked}
+          statusTitle={st.linked ? st.k : 'Not settled against a bill'}
+          statusSub={st.sub}
+          onLink={canLink ? linkAction : null}
+          details={details}
+          noteSource={waText ? 'From WhatsApp' : null}
+          noteText={noteText}
+          noteRef={waWho ? `Sent by ${waWho}` : null}
+          proofThumb={txn.proof_document_url
+            ? <DocThumb stored={txn.proof_document_url} onImageClick={(u) => openLightbox(u, 'Proof of payment')} w={52} h={64} label="View proof" />
+            : null}
+          proofTitle={txn.proof_document_url ? 'Receipt' : 'No receipt attached'}
+          proofSub={txn.proof_document_url ? 'tap to view' : 'add the payment proof'}
+          onProof={null}
+          onReplaceProof={isVoided ? null : () => proofInputRef.current?.click()}
+          replacing={proofUploadMutation.isPending}
+          events={events}
+          showBar={!isVoided && !billLinked}
+          canEdit={canAmend}
+          onEdit={openAmendModal}
+          ctaLabel={isVendor ? 'Link to a bill' : 'Link to contract'}
+          menu={menu}
+          deleteTitle="Void this transaction?"
+          deleteBody={`${rupee(Number(effective.total_amount) || 0)} ${isIn ? 'from' : 'to'} ${payeeName} will be reversed in the books. The entry stays on record, marked voided.`}
+          onDelete={canVoid && !isVoided ? () => voidMutation.mutate() : null}
+          deleting={voidMutation.isPending}
+          onBack={() => navigate(backTo)}
+        />
         <input ref={proofInputRef} type="file" accept="image/*,.pdf" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) proofUploadMutation.mutate(f); }} />
       </>
     );
