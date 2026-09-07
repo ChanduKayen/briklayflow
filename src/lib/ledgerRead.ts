@@ -6,6 +6,7 @@
 // the old netting untouched. Opening balance and paid-side adjustments (which have no first-class debit
 // row yet) are folded in from their own tables, exactly as the derivation does.
 import { supabase } from './supabase';
+import { loadWorkerWageEntries } from './partyLedgerApi';
 import type { LedgerEntry, PartyLedger, SiteBalance, ContractInfo, ConsolidatedBill, OpeningBalance, EntryKind } from './partyLedgerApi';
 
 const num = (v: any) => Number(v) || 0;
@@ -51,6 +52,13 @@ export async function readParty(stakeholderId: string): Promise<PartyLedger> {
   if (stkR.error) throw stkR.error;
   const stk = stkR.data as any;
   const isVendor = stk.type === 'Vendor';
+
+  // Day-wage lines from the muster (workers) — the new engine stores credits but never posted wages, so
+  // attendance never reached this reader (it was counted in v_party_balance yet invisible on the party
+  // page). Fold them in as real obligations: shown as lines AND added to openCredits so the hero reflects
+  // them. (We keep readParty's own dues math, which counts ledger_credits the balance view doesn't read.)
+  const wageEntries: Omit<LedgerEntry, 'running'>[] = isVendor ? [] : await loadWorkerWageEntries(stakeholderId);
+  const wageTotal = wageEntries.reduce((s, e) => s + e.cert, 0);
 
   const payments = (txnR.data ?? []).filter((t: any) => t.status !== 'Voided');
   const credits = (credR.data ?? []) as any[];
@@ -144,6 +152,9 @@ export async function readParty(stakeholderId: string): Promise<PartyLedger> {
   // paid-side adjustments (certified-side are ledger_credits)
   for (const a of (adjR.data ?? [])) if (a.side === 'paid') entries.push({ id: `adj-${a.id}`, date: a.adj_date, kind: 'adjustment', particulars: 'Adjustment', detail: a.note, projectId: a.project_id ?? null, projectName: pn(a.project_id ?? null), contractId: null, paid: num(a.amount), cert: 0 });
 
+  // day-wage accrual from the muster (workers only) — the obligation v_party_balance counts
+  for (const w of wageEntries) entries.push(w);
+
   // ── running "ahead" (paid − cert) oldest→newest, then newest-first ──
   const asc = [...entries].sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.kind === 'opening' ? -1 : 0));
   let run = 0;
@@ -155,7 +166,7 @@ export async function readParty(stakeholderId: string): Promise<PartyLedger> {
   const totalPaid = pays.reduce((s, e) => s + e.paid, 0);
   const creditsTotal = credits.reduce((s, c) => s + num(c.amount), 0);
   const correctionDebits = (opening?.direction === 'paid_ahead' ? opening.total : 0) + (adjR.data ?? []).filter((a: any) => a.side === 'paid').reduce((s: number, a: any) => s + num(a.amount), 0);
-  const openCredits = credits.reduce((s, c) => s + Math.max(0, num(c.amount) - (allocByCredit[c.credit_id] || 0)), 0) + (opening?.direction === 'work_owed' && !credits.some(c => c.kind === 'opening') ? opening.total : 0);
+  const openCredits = credits.reduce((s, c) => s + Math.max(0, num(c.amount) - (allocByCredit[c.credit_id] || 0)), 0) + (opening?.direction === 'work_owed' && !credits.some(c => c.kind === 'opening') ? opening.total : 0) + wageTotal;
   const unallocatedCash = pays.reduce((s, e) => s + Math.max(0, e.paid - (allocByPayment[e.id.replace(/^t-/, '')] || 0)), 0) + correctionDebits;
   const advance = Object.values(perContractAdvance).reduce((s, v) => s + v, 0);
   const toPay = Math.max(0, openCredits - unallocatedCash);
@@ -196,7 +207,7 @@ export async function readParty(stakeholderId: string): Promise<PartyLedger> {
   return {
     kind: isVendor ? 'vendor' : 'worker',
     stakeholder: { id: stk.stakeholder_id, name: stk.name, type: stk.type, category: stk.category },
-    entries: withRun, totalPaid, paidCount: pays.length, totalCert: creditsTotal, contractCount: contracts.length, lastPaid,
+    entries: withRun, totalPaid, paidCount: pays.length, totalCert: creditsTotal + wageTotal, contractCount: contracts.length, lastPaid,
     sites, contracts, unlinkedCount: unlinked.length, unlinkedTotal: unlinked.reduce((s, e) => s + e.paid, 0),
     opening, aheadNow: run,
     unbilledTotal, unbilledCount: unbilledPays.length, consolidated,

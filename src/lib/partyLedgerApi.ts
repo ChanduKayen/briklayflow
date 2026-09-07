@@ -49,6 +49,61 @@ export interface PartyLedger {
 
 const num = (v: any) => Number(v) || 0;
 
+// Day-wage ledger lines for one worker, derived from the muster (units × rate per attendance day),
+// grouped to ONE credit per crew/direct-worker per work_date. This is the SAME obligation the balance
+// view (v_party_ledger_line) counts — extracted so the new-engine reader (readParty) shows attendance
+// wages too, not just stored credits (they were counted in the balance but missing from the ledger
+// display). Only DAY-basis engagements accrue here; work/measurement/piece accrue via certifications.
+export async function loadWorkerWageEntries(stakeholderId: string): Promise<Omit<LedgerEntry, 'running'>[]> {
+  try {
+    const [crewAllR, directAllR] = await Promise.all([
+      supabase.from('labour_crews').select('crew_id, project_id, accrual_basis').eq('stakeholder_id', stakeholderId),
+      supabase.from('labour_direct_workers').select('id, project_id, rate, accrual_basis').eq('stakeholder_id', stakeholderId),
+    ]);
+    const nmrCrews = (crewAllR.data ?? []).filter((c: any) => c.accrual_basis === 'day');
+    const directs = (directAllR.data ?? []).filter((w: any) => w.accrual_basis === 'day');
+    if (!nmrCrews.length && !directs.length) return [];
+
+    const crewProj: Record<string, string | null> = {};
+    nmrCrews.forEach((c: any) => { crewProj[c.crew_id] = c.project_id ?? null; });
+    const directMeta: Record<string, { projectId: string | null; rate: number }> = {};
+    directs.forEach((w: any) => { directMeta[w.id] = { projectId: w.project_id ?? null, rate: num(w.rate) }; });
+
+    // Resolve project names for the site column.
+    const projName: Record<string, string> = {};
+    const pids = [...new Set([...nmrCrews.map((c: any) => c.project_id), ...directs.map((w: any) => w.project_id)].filter((p): p is string => !!p))];
+    if (pids.length) { const pr = await supabase.from('projects').select('project_id, name').in('project_id', pids); (pr.data ?? []).forEach((p: any) => { projName[p.project_id] = p.name; }); }
+
+    const catRate: Record<string, { rate: number; crewId: string }> = {};
+    if (nmrCrews.length) {
+      const catR = await supabase.from('labour_crew_categories').select('id, crew_id, rate').in('crew_id', nmrCrews.map((c: any) => c.crew_id));
+      (catR.data ?? []).forEach((k: any) => { catRate[k.id] = { rate: num(k.rate), crewId: k.crew_id }; });
+    }
+
+    const wageByKey: Record<string, { date: string; projectId: string | null; amount: number }> = {};
+    const addWage = (key: string, date: string, projectId: string | null, amount: number) => {
+      if (amount <= 0) return;
+      const k = `${key}|${date}`;
+      (wageByKey[k] ||= { date, projectId, amount: 0 }).amount += amount;
+    };
+    const catIds = Object.keys(catRate);
+    if (catIds.length) {
+      const aR = await supabase.from('labour_attendance').select('category_id, value, work_date').eq('subject_type', 'crew_category').in('category_id', catIds);
+      (aR.data ?? []).forEach((a: any) => { const c = catRate[a.category_id]; if (!c) return; addWage(`crew-${c.crewId}`, a.work_date, crewProj[c.crewId] ?? null, num(a.value) * c.rate); });
+    }
+    const directIds = directs.map((w: any) => w.id);
+    if (directIds.length) {
+      const aR = await supabase.from('labour_attendance').select('direct_worker_id, value, work_date').eq('subject_type', 'direct').in('direct_worker_id', directIds);
+      (aR.data ?? []).forEach((a: any) => { const m = directMeta[a.direct_worker_id]; if (!m) return; addWage(`direct-${a.direct_worker_id}`, a.work_date, m.projectId, num(a.value) * m.rate); });
+    }
+    return Object.entries(wageByKey).map(([k, w]) => ({
+      id: `wage-${k}`, date: w.date, kind: 'wage' as const, particulars: 'Wages',
+      projectId: w.projectId, projectName: w.projectId ? (projName[w.projectId] || w.projectId) : null,
+      contractId: null, paid: 0, cert: Math.round(w.amount),
+    }));
+  } catch { return []; }
+}
+
 export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedger> {
   const [stkR, txnR, woR, poR, obR, adjR, cbR, wcR, balR] = await Promise.all([
     supabase.from('stakeholders').select('stakeholder_id, name, type, category').eq('stakeholder_id', stakeholderId).single(),

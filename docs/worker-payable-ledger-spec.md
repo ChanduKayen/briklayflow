@@ -151,6 +151,22 @@ party carries a correct B/F and the “carried from the ledger” row appears in
 
 ---
 
+## 5a. Everything reaches the ledger
+
+Two feeds used to fall outside the single source; both are now folded in so the party page, the balance
+view and Payables agree:
+
+- **Day wages on the new engine.** The allocation engine stores obligations as `ledger_credits` and
+  never posted a wage — so a day-basis worker's attendance was counted in `v_party_balance` (the view
+  derives it) yet was **invisible** on the party page (the new-engine reader read only `ledger_credits`).
+  `readParty` now folds in the same muster-derived wage lines (`loadWorkerWageEntries`, day-basis only,
+  so no double-count with certifications) and adds them to open credits, so the hero and the lines both
+  show them.
+- **Payment requests.** "Add a payment request" for a known party is a real obligation, so it now
+  **persists** as a certified-side `party_adjustment` (amount, site, note) instead of a throwaway local
+  row — it enters `v_party_balance`, shows on the party ledger and in the week's carry, and can be
+  removed like any other line (§6a). A party-less ad-hoc entry stays a local-only row.
+
 ## 6a. Correcting a stray line
 
 The ledger is derived, so a wrong line is only ever a wrong **source row** — you don't post a

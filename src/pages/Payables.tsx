@@ -17,6 +17,7 @@ import {
   type PayRow, type PaySection,
 } from '../lib/weeklyPaymentsApi';
 import { isNewLedgerOrg } from '../lib/ledgerRead';
+import { addAdjustment } from '../lib/partyLedgerApi';
 import { PendingCertifications } from '../components/attendance/PendingCertifications';
 import { LedgerCutoverControl } from '../components/attendance/LedgerCutoverControl';
 import { useUserProfile } from '../App';
@@ -491,6 +492,7 @@ export default function Payables({ session }: { session: Session }) {
       ? { title: 'Add a payment request', body: formScope(
           <AddPaymentRow defaultOpen projects={(projects ?? []) as { project_id: string; name: string }[]} parties={parties ?? []} orgId={orgId}
             onError={(m) => showSnackbar(m, { type: 'error' })}
+            onPersisted={() => { setAddSheet(null); showSnackbar('Payment request added to the ledger'); refetch(); }}
             onAdd={(row) => { setExtra(x => ({ ...x, [row.projectId]: [...(x[row.projectId] ?? []), row] })); setAddSheet(null); }} />) }
       : addSheet === 'recurring'
       ? { title: 'Recurring & fixed', body: formScope(
@@ -618,6 +620,7 @@ export default function Payables({ session }: { session: Session }) {
               {section.projectId === '__workers__' && (
                 <AddPaymentRow projects={(projects ?? []) as { project_id: string; name: string }[]} parties={(parties ?? []) as any[]} orgId={orgId}
                   onError={(m) => showSnackbar(m, { type: 'error' })}
+                  onPersisted={() => { showSnackbar('Payment request added to the ledger'); refetch(); }}
                   onAdd={(row) => setExtra(x => ({ ...x, [row.projectId]: [...(x[row.projectId] ?? []), row] }))} />
               )}
             </section>
@@ -739,16 +742,30 @@ function PartySearch({ parties, orgId, onPick, onError }: { parties: any[]; orgI
 
 // "Add a payment request" — an ad-hoc row for something the register doesn't know. Now that all
 // workers live in one group, the payment must say which site it belongs to, so it carries a project picker.
-function AddPaymentRow({ projects, parties, orgId, onError, onAdd, defaultOpen = false }: { projects: { project_id: string; name: string }[]; parties: any[]; orgId: string; onError: (m: string) => void; onAdd: (row: PayRow) => void; defaultOpen?: boolean }) {
+function AddPaymentRow({ projects, parties, orgId, onError, onAdd, onPersisted, defaultOpen = false }: { projects: { project_id: string; name: string }[]; parties: any[]; orgId: string; onError: (m: string) => void; onAdd: (row: PayRow) => void; onPersisted?: () => void; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   const [projectId, setProjectId] = useState('');
   const [picked, setPicked] = useState<{ id: string | null; name: string }>({ id: null, name: '' });
   const [amount, setAmount] = useState(''); const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
   const amt = parseInt(amount.replace(/[^\d]/g, ''), 10) || 0;
   const ready = !!projectId && !!picked.name.trim() && amt > 0;
-  const add = () => {
-    if (!ready) return;
+  const add = async () => {
+    if (!ready || busy) return;
     const projectName = projects.find(p => p.project_id === projectId)?.name || projectId;
+    // A payment request for a KNOWN party is a real obligation — persist it as a certified-side party
+    // adjustment so it enters the ledger (v_party_balance → the party page + this run's carry) and can be
+    // removed later. Only a party-less request stays an ephemeral local row.
+    if (picked.id) {
+      setBusy(true);
+      try {
+        await addAdjustment(orgId, picked.id, { projectId, adjDate: new Date().toISOString().slice(0, 10), side: 'certified', amount: amt, note: note.trim() || 'Payment request' });
+        setProjectId(''); setPicked({ id: null, name: '' }); setAmount(''); setNote(''); setOpen(false);
+        onPersisted?.();
+      } catch (e) { onError((e as Error)?.message || 'Could not add the payment request'); }
+      finally { setBusy(false); }
+      return;
+    }
     onAdd({ key: `x-${projectId}-${Date.now()}`, projectId, projectName, stakeholderId: picked.id, party: picked.name.trim(), trade: note.trim() || 'added here', kind: 'wages', basis: 'added here · not from the register', thisWeek: amt, balanceBf: 0, woId: null, milestoneId: null });
     setProjectId(''); setPicked({ id: null, name: '' }); setAmount(''); setNote(''); setOpen(false);
   };
@@ -760,7 +777,7 @@ function AddPaymentRow({ projects, parties, orgId, onError, onAdd, defaultOpen =
           <PartySearch parties={parties} orgId={orgId} onPick={setPicked} onError={onError} />
           <input className="amt mono" placeholder="₹ amount" inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
           <input className="note" placeholder="for what — e.g. advance, flat 501 tiles" value={note} onChange={(e) => setNote(e.target.value)} />
-          <button className="go" disabled={!ready} onClick={add}>Add payment</button>
+          <button className="go" disabled={!ready || busy} onClick={add}>{busy ? 'Adding…' : 'Add payment'}</button>
           <button className="x" onClick={() => setOpen(false)}>cancel</button>
         </div>
       ) : (
