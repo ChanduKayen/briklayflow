@@ -123,6 +123,13 @@ opening keeps its **full history** — because dropping history you haven't capt
 (`20260910000002`, superseding the org-wide filter in `20260910000001`), and the party page's line
 display floors on the same per-party opening.
 
+**Pre-cutover history is collapsed, not deleted.** When a party has an opening, the running balance is
+scoped to the opening onward (matching `v_party_balance`), but the earlier rows aren't thrown away — the
+party ledger keeps them in a muted, collapsed *"N entries before the cutover · settled by the opening"*
+section you open on demand (their own historical running, read-only). Same instinct as Tally/QuickBooks/
+bank statements: the opening carries the prior period, the detail stays one tap away.
+(`loadPartyLedger.preOpening` → `PreCutoverSection`.)
+
 **The org date is only a default, never a silent filter.** `organizations.ledger_start_date` supplies
 the date the opening editor pre-fills — so you set it once for the business and rarely retype it — but
 it does **not** gate any party on its own. To deliberately start a party clean at a date, set their

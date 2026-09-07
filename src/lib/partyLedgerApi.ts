@@ -33,6 +33,7 @@ export interface PartyLedger {
   kind: 'worker' | 'vendor';
   stakeholder: { id: string; name: string; type: string; category: string | null };
   entries: LedgerEntry[];                      // newest first, with running "ahead"
+  preOpening?: LedgerEntry[];                  // pre-cutover rows, settled by the opening — shown collapsed/muted, not in the running
   totalPaid: number; paidCount: number;
   totalCert: number; contractCount: number;
   lastPaid: { date: string; amount: number; mode: string } | null;
@@ -308,17 +309,25 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
     }
   }
 
-  // ── The opening's as-of date is THIS party's cutover floor: everything before it is settled by the
-  //    opening, so drop pre-opening lines (the opening row itself is kept). This makes the displayed
-  //    running balance match v_party_balance, which applies the same per-party floor. ──
+  // ── The opening's as-of date is THIS party's cutover floor: everything before it is SETTLED by the
+  //    opening. We don't delete those rows — the running balance is scoped to the opening onward (so it
+  //    matches v_party_balance), and the pre-cutover rows are returned separately to show collapsed and
+  //    muted (their own historical running, for reference/audit — the "before the books started" tail). ──
   const floor = opening?.asOf ?? null;
   const scoped = floor ? entries.filter(e => e.kind === 'opening' || !e.date || e.date >= floor) : entries;
+  const preRows = floor ? entries.filter(e => e.kind !== 'opening' && !!e.date && e.date < floor) : [];
 
   // ── Sort oldest→newest, accumulate running "ahead" (paid − cert), then flip to newest-first ──
   const asc = [...scoped].sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.kind === 'opening' ? -1 : 0));
   let run = 0;
   const withRun: LedgerEntry[] = asc.map(e => { run += e.paid - e.cert; return { ...e, running: run }; });
   withRun.reverse(); // newest first
+
+  // Pre-cutover tail: its own running (paid − cert) so it reads as a self-contained prior statement.
+  const preAsc = [...preRows].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  let preRun = 0;
+  const preOpening: LedgerEntry[] = preAsc.map(e => { preRun += e.paid - e.cert; return { ...e, running: preRun }; });
+  preOpening.reverse();
 
   // ── Facts / rollups ──
   const payments = withRun.filter(e => e.kind === 'payment');
@@ -377,7 +386,7 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
   return {
     kind: isVendor ? 'vendor' : 'worker',
     stakeholder: { id: stk.stakeholder_id, name: stk.name, type: stk.type, category: stk.category },
-    entries: withRun, totalPaid, paidCount: payments.length, totalCert, contractCount, lastPaid,
+    entries: withRun, preOpening, totalPaid, paidCount: payments.length, totalCert, contractCount, lastPaid,
     sites, contracts, unlinkedCount, unlinkedTotal, opening, aheadNow: run,
     unbilledTotal, unbilledCount, consolidated, toPay, advance,
   };

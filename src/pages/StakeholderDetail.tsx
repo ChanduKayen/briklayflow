@@ -191,6 +191,17 @@ const CSS = `
 .plx .uncert-band .ub-txt span{font-size:12.5px;color:#8A6A1F;margin-top:2px}
 .plx .uncert-band .ub-go{flex-shrink:0;height:34px;padding:0 14px;border-radius:9px;background:#8A6A1F;color:#fff;font-size:13px;font-weight:600;border:0;cursor:pointer}
 .plx .uncert-band .ub-go:hover{background:#6E520F}
+.plx .precut{margin-top:14px}
+.plx .precut-head{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:10px 14px;border:1px dashed var(--line-2);background:transparent;border-radius:10px;cursor:pointer;transition:background .12s,border-color .12s;flex-wrap:wrap}
+.plx .precut-head:hover{background:var(--cream);border-color:var(--line)}
+.plx .precut-head .chev{width:15px;height:15px;flex-shrink:0;color:var(--walnut-3);transition:transform .18s}
+.plx .precut-head.open .chev{transform:rotate(90deg)}
+.plx .precut-head .lbl{font-weight:500;color:var(--walnut-2);font-size:13.5px}
+.plx .precut-head .sub{font-size:12px;color:var(--walnut-3)}
+.plx .precut-head .amt{margin-left:auto;font-size:12.5px;color:var(--walnut-3);font-family:var(--mono);font-variant-numeric:tabular-nums}
+.plx .precut-body{margin-top:8px;opacity:.58;filter:saturate(.72);border-left:2px solid var(--line-2);transition:opacity .16s}
+.plx .precut-body:hover{opacity:.9}
+.plx .precut-body .now{background:transparent}
 .plx .classify-band{margin-top:26px;border:1px solid #EBD3C6;background:var(--terra-wash);border-radius:12px;overflow:hidden}
 .plx .classify-band .cb-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:13px 18px;border-bottom:1px solid #EBD3C6;flex-wrap:wrap}
 .plx .classify-band .cb-t{font-weight:600;color:#7E3A20}
@@ -474,6 +485,10 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
           <SiteView entries={entries} L={L} T={T} />
         )}
 
+        {L.preOpening && L.preOpening.length > 0 && L.opening && (
+          <PreCutoverSection rows={L.preOpening} asOf={L.opening.asOf} T={T} />
+        )}
+
         {L.kind === 'worker' && <CertHistory stakeholderId={L.stakeholder.id} />}
       </div>
 
@@ -654,6 +669,34 @@ function DateView({ entries, L, T, onEdit }: { entries: LedgerEntry[]; L: PartyL
     rows.push(<Row key={e.id} e={e} first={first} />); first = false;
   }
   return <div className="sheet"><div className="tscroll"><table className="ledger"><Head showContract T={T} /><tbody>{rows}<OpeningRow L={L} onEdit={onEdit} sub={L.opening ? `As of ${fmtDate(L.entries.find(x => x.kind === 'opening')!.date!)}` : ''} /></tbody></table></div></div>;
+}
+
+// Pre-cutover tail — the history settled BY the opening. Kept, not deleted (world-class ledgers carry
+// it into the opening and keep the detail one tap away): a muted, collapsed section you open on demand.
+// Rows are read-only here (settled) — RowActionsCtx is nulled so no remove affordance shows.
+function PreCutoverSection({ rows, asOf, T }: { rows: LedgerEntry[]; asOf: string; T: Terms }) {
+  const [open, setOpen] = useState(false);
+  const paid = rows.reduce((s, e) => s + e.paid, 0);
+  const cert = rows.reduce((s, e) => s + e.cert, 0);
+  return (
+    <div className="precut">
+      <button className={`precut-head${open ? ' open' : ''}`} onClick={() => setOpen(o => !o)} aria-expanded={open}>
+        <svg className="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m9 18 6-6-6-6" /></svg>
+        <span className="lbl">{rows.length} entr{rows.length !== 1 ? 'ies' : 'y'} before the cutover</span>
+        <span className="sub">settled by the opening · up to {fmtDate(asOf)}</span>
+        <span className="amt">{paid ? `${inr(paid)} paid` : ''}{paid && cert ? ' · ' : ''}{cert ? `${inr(cert)} ${T.credit.toLowerCase()}` : ''}</span>
+      </button>
+      {open && (
+        <RowActionsCtx.Provider value={null}>
+          <div className="sheet precut-body">
+            <div className="tscroll"><table className="ledger"><Head showContract T={T} />
+              <tbody>{rows.map(e => <Row key={e.id} e={e} />)}</tbody>
+            </table></div>
+          </div>
+        </RowActionsCtx.Provider>
+      )}
+    </div>
+  );
 }
 
 function ContractView({ entries, L, T, onBook }: { entries: LedgerEntry[]; L: PartyLedger; T: Terms; onBook?: () => void }) {
