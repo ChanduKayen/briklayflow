@@ -77,6 +77,9 @@ type EntryProps = {
   stakeholderId?: string | null;
   onPayeeClick?: (e: MouseEvent) => void;
   context: string;
+  /** phone only: the site, then the note — a line each, instead of one crammed line */
+  site: string | null;
+  note: string | null;
   anchor: TxnAnchor;
   info?: OrderInfo;
   siblings?: number;
@@ -178,7 +181,12 @@ function EntryRow(p: EntryProps) {
           )}
           {p.voided && <span className="ml-1.5 text-xs" style={{ color: V.faint, ...font }}>· voided</span>}
         </p>
-        <p className="text-xs truncate" style={{ color: V.faint, ...font }}>{p.context}</p>
+        {/* A phone has no room for trade · note · site on one truncated line. It gets the two
+            that place the money — the site, then what it was for — a line each, each with its
+            own truncation. The desktop grid keeps its single context line. */}
+        <p className="text-xs truncate hidden sm:block" style={{ color: V.faint, ...font }}>{p.context}</p>
+        {p.site && <p className="text-xs truncate sm:hidden" style={{ color: V.sys, ...font }}>{p.site}</p>}
+        {p.note && <p className="text-xs truncate sm:hidden" style={{ color: V.faint, ...font }}>{p.note}</p>}
       </div>
 
       <div className="bk-ledger-anchor flex items-center gap-2">
@@ -1458,6 +1466,8 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                         stakeholderId={genExp ? null : (txn.stakeholder_id ?? null)}
                         onPayeeClick={isPhone ? undefined : () => { if (txn.stakeholder_id) { setDrawerProject(txn.stakeholder_id === deepLinkStk ? deepLinkProject : null); setDrawerStk(txn.stakeholder_id); } }}
                         context={context}
+                        site={projName}
+                        note={txn.remarks || null}
                         anchor={anchor}
                         info={linkedInfo}
                         siblings={siblings}
