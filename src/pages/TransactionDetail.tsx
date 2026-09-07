@@ -1314,7 +1314,10 @@ export default function TransactionDetail({ session }: { session: Session }) {
               </span>
             </button>
             <button type="button" className="w-full flex items-center gap-3 p-3 rounded-2xl text-left hover:bg-surface-container-low transition-colors"
-              onClick={() => { setLinkChoice(false); setAttachBill({ file: null, mode: 'upload' }); }}>
+              // The sheet reads a file the CALLER has already picked — with none it waits on a bill
+              // that never arrives, which is the "reading" screen with nothing to read. Pop the
+              // picker first, exactly as the chip does; its onChange opens the sheet with the file.
+              onClick={() => { setLinkChoice(false); billInputRef.current?.click(); }}>
               <span className="shrink-0 grid place-items-center rounded-xl" style={{ width: 36, height: 36, background: '#F8E7DE' }}>
                 <span className="material-symbols-outlined text-[18px]" style={{ color: '#C4613A' }}>photo_camera</span>
               </span>
