@@ -237,6 +237,21 @@ export interface NewPoMobileProps {
   onBack: () => void;
 }
 
+// Speech engines restate the whole phrase as they go — "iron", then "iron 20", then
+// "iron 20 bags" — and deliver each restatement as its own result, on Android often marked
+// final. Laying them end to end is what turned "iron 20 bags" into
+// "iron iron 20 iron 20 bag iron 20 bags". A restatement that extends what we already have
+// replaces it; one that adds nothing is dropped; only genuinely new words are appended.
+function joinHeard(acc: string, next: string): string {
+  const a = acc.trim(), b = next.trim();
+  if (!b) return a;
+  if (!a) return b;
+  const la = a.toLowerCase(), lb = b.toLowerCase();
+  if (lb.startsWith(la)) return b;                       // a fuller telling of the same phrase
+  if (la.startsWith(lb) || la.endsWith(lb)) return a;    // nothing in it we do not already have
+  return `${a} ${b}`;                                    // new words
+}
+
 export default function NewPoMobile(p: NewPoMobileProps) {
   const [drawer, setDrawer] = useState<'v' | 'p' | null>(null);
   const [sheet, setSheet] = useState<'add' | 'discard' | 'typed' | null>(null);
@@ -295,18 +310,20 @@ export default function NewPoMobile(p: NewPoMobileProps) {
   const startPass = (Ctor: new () => Recognition): boolean => {
     const r = new Ctor();
     recRef.current = r;
+    sessFinal.current = carryRef.current;
     r.lang = 'en-IN'; r.continuous = true; r.interimResults = true;
     r.onresult = (e) => {
-      let finals = '', interim = '';
-      // e.results is the whole pass, cumulatively — so the finals are REBUILT from it, never
-      // appended to. The API re-delivers results that are already final, and appending them
-      // turned "iron 20kg" into "iron iron iron 20kg".
+      // e.results is the whole pass, cumulatively, so the transcript is REBUILT from it on every
+      // event rather than appended to — the API re-delivers results that are already final, and
+      // appending them repeated the words.
+      let finals = carryRef.current, all = carryRef.current;
       for (let i = 0; i < e.results.length; i++) {
         const res = e.results[i]; const txt = res[0]?.transcript ?? '';
-        if (res.isFinal) finals += txt + ' '; else interim += txt;
+        all = joinHeard(all, txt);
+        if (res.isFinal) finals = joinHeard(finals, txt);
       }
       sessFinal.current = finals;
-      heardRef.current = (carryRef.current + finals + interim).replace(/\s+/g, ' ').trim();
+      heardRef.current = all.replace(/\s+/g, ' ').trim();
       setHeard(heardRef.current);
     };
     r.onerror = (e) => {
@@ -314,8 +331,7 @@ export default function NewPoMobile(p: NewPoMobileProps) {
       else if (e?.error !== 'aborted' && e?.error !== 'no-speech') { toldRef.current = true; say('Could not hear that'); }
     };
     r.onend = () => {
-      carryRef.current = carryRef.current + sessFinal.current;
-      sessFinal.current = '';
+      carryRef.current = sessFinal.current;   // already includes the earlier passes
       // Still listening as far as the user is concerned — the card says "Tap to finish".
       if (wantRef.current && restartsRef.current < 40) {
         restartsRef.current++;
