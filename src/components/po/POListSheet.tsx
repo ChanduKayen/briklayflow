@@ -195,6 +195,19 @@ const POLX_CSS = `
 .polx .m-chip.gold em{color:var(--gold)}
 .polx .m-chip.gold.on{background:var(--gold);border-color:var(--gold);color:#fff}
 .polx .m-chip.gold.on em{color:rgba(255,255,255,.7)}
+/* Money owed is the one thing on this row that earns a colour of its own. */
+.polx .m-chip.terra{background:var(--terra-tint);border-color:#E8C5B4;color:var(--terra)}
+.polx .m-chip.terra em{color:var(--terra)}
+.polx .m-chip.terra.on{background:var(--terra);border-color:var(--terra);color:#fff}
+.polx .m-chip.terra.on em{color:rgba(255,255,255,.72)}
+
+/* "not sent" is a nudge, not an alarm: a small grey tag beside the PO number. It used to be the
+   whole status line, in red, above the bill and the money it was hiding. */
+.polx .m-unsent{flex-shrink:0;font-size:10.5px;font-weight:600;letter-spacing:.02em;
+  color:var(--walnut-3);background:var(--paper-2);border:1px solid var(--line-2);
+  border-radius:5px;padding:0 5px;line-height:15px}
+.polx .m-pcard.dim-s .m-dot{background:var(--walnut-3)}
+.polx .m-pcard.dim-s .m-st{color:var(--walnut-3)}
 .polx .m-chip:active{transform:scale(.97)}
 .polx .m-list{flex:1;overflow-y:auto;padding:2px 14px 108px}
 .polx .m-pcard{background:var(--paper);border:1px solid var(--line);border-radius:18px;padding:14px 15px;margin-bottom:10px;transition:transform .12s,background .12s;width:100%;text-align:left;display:block}
@@ -261,7 +274,7 @@ const POLX_CSS = `
 
 interface POItem { n: string; q: string; r: boolean }
 interface PORow {
-  id: string; vendor: string; stakeholderId: string; vendorContact: string | null; trade: string;
+  id: string; vendor: string; stakeholderId: string; vendorContact: string | null;
   site: string; by: string; ordered: string; createdAt: string; approvalStatus: string;
   items: POItem[]; value: number; billed: number; paid: number;
   due: string | null; recv: string | null; sent: string | null; cancelled: boolean; rfq: boolean;
@@ -278,7 +291,7 @@ function usePOListData(projectId?: string) {
     queryFn: async () => {
       let q = supabase
         .from('purchase_orders')
-        .select('po_id, status, approval_status, date_issued, created_at, ordered_by, expected_delivery, total_value, order_value, vendor_bill_amount, received_at_site, sent_to_vendor_at, stakeholder_id, project_id, items, projects(name), stakeholders(name, contact, category), po_line_items(id, item_name, unit, quantity_ordered)')
+        .select('po_id, status, approval_status, date_issued, created_at, ordered_by, expected_delivery, total_value, order_value, vendor_bill_amount, received_at_site, sent_to_vendor_at, stakeholder_id, project_id, items, projects(name), stakeholders(name, contact), po_line_items(id, item_name, unit, quantity_ordered)')
         .order('created_at', { ascending: false });
       if (projectId) q = q.eq('project_id', projectId);
       const { data, error } = await q;
@@ -372,7 +385,6 @@ function usePOListData(projectId?: string) {
         vendor: po.stakeholders?.name || 'Vendor',
         stakeholderId: po.stakeholder_id,
         vendorContact: po.stakeholders?.contact ?? null,
-        trade: (po.stakeholders?.category || '').trim(),
         site: po.projects?.name || '',
         by: po.ordered_by || '',
         ordered: po.date_issued || po.created_at,
@@ -432,9 +444,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   const navigate = useNavigate();
   const { rows, isLoading } = usePOListData(projectId);
   const { data: openRfqs = [] } = useOpenRfqs(projectId);
-  const [filter, setFilter] = useState<'all' | 'mine' | 'late' | 'open' | 'vendor' | 'done' | 'quotes' | 'approvals' | 'tosend' | 'onway' | 'live' | 'archive'>('all');
-  // The phone filters by trade as well — null is every trade.
-  const [trade, setTrade] = useState<string | null>(null);
+  const [filter, setFilter] = useState<'all' | 'mine' | 'late' | 'open' | 'vendor' | 'done' | 'quotes' | 'approvals' | 'tosend' | 'onway' | 'live' | 'archive' | 'nobill' | 'topay' | 'atsite'>('all');
   const [sortK, setSortK] = useState<'vendor' | 'site' | 'ordered' | 'delivery' | 'value' | 'balance'>('ordered');
   const [sortDir, setSortDir] = useState(-1);
   const [q, setQ] = useState('');
@@ -512,6 +522,12 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
     // Everything with something still outstanding — the phone's default list.
     live: (p) => !p.cancelled && !settled(p),
     archive: settled,
+    // The two the money hangs on, in the order it happens: a bill you have not been given, then
+    // money you still owe against one you have.
+    nobill: (p) => !p.cancelled && p.approvalStatus !== 'PENDING' && p.billed <= 0,
+    topay: (p) => !p.cancelled && p.approvalStatus !== 'PENDING' && p.billed > 0 && balance(p) > 0.5,
+    // Goods, once the money is not the question.
+    atsite: (p) => !p.cancelled && full(p),
   };
   const KEY: Record<string, (p: PORow) => number | string> = {
     vendor: (p) => p.vendor,
@@ -641,39 +657,46 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
       const n = p.items.length, g = got(p), b = balance(p);
       const goodsSub = n > 0 && g < n ? (g > 0 ? `· ${g} of ${n} at site` : `· ${dueLabelText(p)}`) : '';
       let tone: string, st: string, sub = '';
-      if (p.cancelled) { tone = 'needs'; st = 'Cancelled'; }
+      // Not sent is no longer a status. It was the loudest thing on the card — red, and the whole
+      // line — for what is a small nudge, and it pushed the bill and the payment out of the way.
+      // It rides as a quiet tag beside the PO number instead, and the status says what it always
+      // should have: the bill, then the money, then the goods. Red is reserved for money owed.
+      if (p.cancelled) { tone = 'dim-s'; st = 'Cancelled'; }
       else if (p.approvalStatus === 'PENDING') { tone = 'gold-s'; st = 'Awaiting approval'; sub = `· ${dstr(D(p.createdAt))}${p.by ? ', ' + p.by : ''}`; }
-      else if (!p.sent) { tone = 'needs'; st = 'Not sent — send to vendor'; sub = goodsSub; }
       else if (p.billed <= 0) { tone = 'motion'; st = 'Awaiting bill'; sub = goodsSub || (full(p) ? `· all at site ${dstr(D(p.recv))}` : ''); }
       else if (b > 0.5) { tone = 'needs'; st = p.paid > 0 ? `Part paid · ${fmt(b)} pending` : `Payment pending · ${fmt(b)}`; sub = goodsSub; }
       else if (!full(p)) { tone = 'motion'; st = 'Yet to receive at site'; sub = goodsSub; }
       else { tone = 'landed'; st = 'Done'; sub = `· ${dstr(D(p.recv))}`; }
+      const notSent = !p.cancelled && !p.sent && p.approvalStatus !== 'PENDING';
       // Amount: red "to pay" once there's a real bill / it's landed; plain ordered value in transit; — when nothing owed.
       let amtNode: React.ReactNode = <span className="amt zero">—</span>;
       if (b > 0.5) amtNode = <span className={`amt${p.billed || full(p) ? ' pay' : ''}`}>{fmt(b)}</span>;
       const shown = p.items.slice(0, 1).map(i => i.n).join(', ');
       const more = p.items.length - 1;
-      return { tone, st, sub, amtNode, itemsText: shown + (more > 0 ? ` · +${more} item${more > 1 ? 's' : ''}` : '') };
+      return { tone, st, sub, amtNode, notSent, itemsText: shown + (more > 0 ? ` · +${more} item${more > 1 ? 's' : ''}` : '') };
     };
-    // The chips are the trades being bought, taken from each vendor's category — that is the cut
-    // people actually think in ("what cement is outstanding"). The workflow counts they replaced
-    // did not vanish: they moved to the money line under the title, still one tap.
+    // Chips are states again — a trade per chip made a row nobody could scan. They are ordered the
+    // way the money moves: what has no bill, then what is owed, and only then the goods. Approvals
+    // and Quotes lead when they exist because they are somebody waiting on you.
     const mFilter = FILTERS[filter] ? filter : 'live';
     const liveRows = rows.filter(FILTERS.live);
-    const tradeCounts = (() => {
-      const m = new Map<string, number>();
-      for (const p of liveRows) { const t = p.trade || 'Other'; m.set(t, (m.get(t) ?? 0) + 1); }
-      return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-    })();
+    const mChips: { k: typeof filter; label: string; n: number; tone?: 'gold' | 'terra' }[] = [
+      ...(cApprovals > 0 ? [{ k: 'approvals' as const, label: 'To approve', n: cApprovals, tone: 'gold' as const }] : []),
+      ...(rfqShown.length > 0 ? [{ k: 'quotes' as const, label: 'Quotes', n: rfqShown.length, tone: 'gold' as const }] : []),
+      { k: 'live', label: 'All', n: liveRows.length },
+      { k: 'nobill', label: 'Awaiting bill', n: rows.filter(FILTERS.nobill).length },
+      { k: 'topay', label: 'To pay', n: rows.filter(FILTERS.topay).length, tone: 'terra' as const },
+      { k: 'atsite', label: 'At site', n: rows.filter(FILTERS.atsite).length },
+      { k: 'archive', label: 'Archive', n: rows.filter(settled).length },
+    ];
     // A quote request is not a PO — it lives in its own table and has no vendor, value or
     // delivery — so the desktop merges the two lists by date rather than joining them. The phone
     // was iterating POs alone, which is why enquiries were nowhere to be seen here.
     const mList: MergedRow[] = (() => {
       const pos = rows.filter(FILTERS[mFilter])
-        .filter(p => !trade || (p.trade || 'Other') === trade)
         .filter(p => !q || (p.vendor + p.id + p.site + p.items.map(i => i.n).join(' ')).toLowerCase().includes(q))
         .map(p => ({ kind: 'po' as const, po: p }));
-      const quotes = ((mFilter === 'live' && !trade) || mFilter === 'quotes')
+      const quotes = (mFilter === 'live' || mFilter === 'quotes')
         ? rfqShown
             .filter(r => !q || (r.site + r.summary).toLowerCase().includes(q))
             .map(r => ({ kind: 'rfq' as const, rfq: r }))
@@ -696,13 +719,9 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
           </div>
           <div className="m-money">
             <b>{fmt(fBal)}</b> open with vendors · <b>{fmt(fOpen)}</b> on the way
-            {cApprovals > 0 && (
-              <button type="button" className={`m-wf gold${mFilter === 'approvals' ? ' on' : ''}`}
-                onClick={() => { setTrade(null); setFilter(mFilter === 'approvals' ? 'live' : 'approvals'); }}>{cApprovals} to approve</button>
-            )}
             {cToSend > 0 && (
               <button type="button" className={`m-wf${mFilter === 'tosend' ? ' on' : ''}`}
-                onClick={() => { setTrade(null); setFilter(mFilter === 'tosend' ? 'live' : 'tosend'); }}>{cToSend} to send</button>
+                onClick={() => setFilter(mFilter === 'tosend' ? 'live' : 'tosend')}>{cToSend} to send</button>
             )}
           </div>
         </div>
@@ -715,18 +734,12 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
         )}
 
         <div className="m-chips">
-          <button className={`m-chip${!trade && mFilter !== 'quotes' && mFilter !== 'archive' ? ' on' : ''}`}
-            onClick={() => { setTrade(null); setFilter('live'); }}>All<em>{liveRows.length}</em></button>
-          {tradeCounts.map(([t, n]) => (
-            <button key={t} className={`m-chip${trade === t && mFilter !== 'quotes' && mFilter !== 'archive' ? ' on' : ''}`}
-              onClick={() => { setTrade(trade === t ? null : t); setFilter('live'); }}>{t}<em>{n}</em></button>
+          {mChips.map(c => (
+            <button key={c.k} className={`m-chip${c.tone ? ' ' + c.tone : ''}${mFilter === c.k ? ' on' : ''}`}
+              onClick={() => setFilter(mFilter === c.k && c.k !== 'live' ? 'live' : c.k)}>
+              {c.label}<em>{c.n}</em>
+            </button>
           ))}
-          {rfqShown.length > 0 && (
-            <button className={`m-chip gold${mFilter === 'quotes' ? ' on' : ''}`}
-              onClick={() => { setTrade(null); setFilter(mFilter === 'quotes' ? 'live' : 'quotes'); }}>Quotes<em>{rfqShown.length}</em></button>
-          )}
-          <button className={`m-chip${mFilter === 'archive' ? ' on' : ''}`}
-            onClick={() => { setTrade(null); setFilter(mFilter === 'archive' ? 'live' : 'archive'); }}>Archive<em>{rows.filter(settled).length}</em></button>
         </div>
 
         <div className="m-list mo-stagger">
@@ -755,7 +768,11 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
             return (
               <button key={p.id} className={`m-pcard ${c.tone}`} onClick={() => openPO(p.id)}>
                 <div className="r1"><span className="v">{p.vendor}</span>{c.amtNode}</div>
-                <div className="r2"><span className="po">{p.id}</span><span>·</span><span className="st-site">{p.site}</span></div>
+                <div className="r2">
+                  <span className="po">{p.id}</span>
+                  {c.notSent && <span className="m-unsent">not sent</span>}
+                  <span>·</span><span className="st-site">{p.site}</span>
+                </div>
                 {c.itemsText && <div className="items">{c.itemsText}</div>}
                 <div className="r3">
                   <span className="m-dot" /><span className="m-st">{c.st}</span>
