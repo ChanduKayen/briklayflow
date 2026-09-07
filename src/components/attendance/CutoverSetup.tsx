@@ -11,7 +11,7 @@ import { V, font } from '../txn-ledger/ledgerTokens';
 import { useSnackbar } from '../Snackbar';
 import { searchPayees } from '../../lib/payeeSearch';
 import { saveOpeningBalance } from '../../lib/partyLedgerApi';
-import { loadLedgerCutover, setLedgerCutover, loadOpeningBalances, removeOpeningBalance } from '../../lib/workCertification';
+import { loadLedgerCutover, setLedgerCutover, loadOpeningBalances, removeOpeningBalance, loadPreCutoverBalances, type PreCutoverRow } from '../../lib/workCertification';
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 
@@ -34,6 +34,29 @@ export function CutoverSetup({ orgId, onClose }: { orgId: string; onClose: () =>
 
   const haveOpening = useMemo(() => new Set(openings.map(o => o.stakeholderId)), [openings]);
   const matches = useMemo(() => (q.trim() ? searchPayees(parties as any, q) : []).filter((p: any) => !haveOpening.has(p.stakeholder_id)).slice(0, 6), [q, parties, haveOpening]);
+
+  // The guided path: once the date is set, compute what every party carried across it (from the same
+  // ledger the app uses) and offer each as an opening balance to confirm — so no one is silently dropped.
+  const { data: suggested = [], isFetching: sugLoading, refetch: refetchSug } = useQuery({
+    queryKey: ['precutover_balances', cutover],
+    queryFn: () => loadPreCutoverBalances(cutover as string),
+    enabled: !!cutover,
+  });
+  const pending = useMemo(() => suggested.filter(s => !haveOpening.has(s.stakeholderId)), [suggested, haveOpening]);
+
+  const carry = async (rows: PreCutoverRow[]) => {
+    if (!cutover || rows.length === 0) return;
+    setBusy(true);
+    try {
+      for (const s of rows) {
+        await saveOpeningBalance(orgId, s.stakeholderId, { asOf: cutover, direction: s.direction, total: s.total, bySite: {}, note: 'Carried at cutover' });
+      }
+      show(rows.length === 1 ? `Carried ${rows[0].name}` : `Carried ${rows.length} balances`);
+      refetchOpen(); refetchSug();
+      qc.invalidateQueries({ queryKey: ['party_ledger'] }); qc.invalidateQueries({ queryKey: ['weekly_payments'] });
+    } catch (e) { show((e as Error)?.message || 'Could not carry', { type: 'error' }); }
+    finally { setBusy(false); }
+  };
 
   const saveDate = async (d: string | null) => {
     setBusy(true);
@@ -82,8 +105,39 @@ export function CutoverSetup({ orgId, onClose }: { orgId: string; onClose: () =>
           <p style={{ fontSize: 11.5, color: V.faint }}>{cutover ? `Currently opens ${new Date(cutover).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}.` : 'No cutover set — the ledger counts all history.'}</p>
         </div>
 
+        {/* GUIDED CARRY — what each party carried across the cutover, computed from the ledger. Confirm to
+            lock each in as an opening balance so nothing before the date is silently ignored. */}
+        {cutover && (
+          <div style={{ padding: '4px 18px 8px', borderTop: `1px solid ${V.line}` }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, margin: '12px 0 4px' }}>
+              <p style={{ fontSize: 13, fontWeight: 600, color: V.ink }}>Carried as of this date</p>
+              {pending.length > 1 && (
+                <button disabled={busy} onClick={() => carry(pending)}
+                  style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 600, color: V.terra, background: 'none', border: 0, cursor: 'pointer' }}>Carry all {pending.length}</button>
+              )}
+            </div>
+            <p style={{ fontSize: 11.5, color: V.faint, margin: '0 0 8px' }}>From your records before {new Date(cutover).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}. Confirm each to set it as the opening balance; unconfirmed history is ignored after the cutover.</p>
+            {sugLoading ? (
+              <p style={{ fontSize: 12.5, color: V.faint, padding: '8px 0' }}>Reading the ledger…</p>
+            ) : pending.length === 0 ? (
+              <p style={{ fontSize: 12.5, color: V.sage, padding: '4px 0 8px' }}>Nothing outstanding before this date — every party starts clean.</p>
+            ) : (
+              <div style={{ border: `1px solid ${V.line}`, borderRadius: 10, overflow: 'hidden' }}>
+                {pending.map((s, i) => (
+                  <div key={s.stakeholderId} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 10, alignItems: 'center', padding: '9px 12px', borderTop: i ? `1px solid ${V.line}` : 'none' }}>
+                    <span style={{ fontSize: 13.5, color: V.ink, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name} <span style={{ color: V.faint, fontSize: 12 }}>· {s.type}{s.category ? ` · ${s.category}` : ''}</span></span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: s.direction === 'work_owed' ? V.terraDeep : V.sage }}>{inr(s.total)} <span style={{ fontWeight: 400, fontSize: 11.5 }}>{s.direction === 'work_owed' ? 'we owe' : 'advance'}</span></span>
+                    <button disabled={busy} onClick={() => carry([s])}
+                      style={{ fontSize: 12.5, fontWeight: 600, color: '#fff', background: V.terra, border: 0, borderRadius: 999, padding: '5px 12px', cursor: 'pointer' }}>Carry</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <div style={{ padding: '4px 18px 16px', borderTop: `1px solid ${V.line}` }}>
-          <p style={{ fontSize: 13, fontWeight: 600, color: V.ink, margin: '12px 0 8px' }}>Opening balances</p>
+          <p style={{ fontSize: 13, fontWeight: 600, color: V.ink, margin: '12px 0 8px' }}>Opening balances {openings.length > 0 && <span style={{ fontWeight: 400, fontSize: 12, color: V.faint }}>· {openings.length} set</span>}</p>
 
           {/* add a party's opening balance */}
           {!pick ? (
