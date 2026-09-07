@@ -218,6 +218,11 @@ const POLX_CSS = `
 .polx .m-pcard .r3 .sub{color:var(--walnut-3);font-size:12.5px}
 .polx .m-pcard .r3 .chev{margin-left:auto;color:var(--walnut-3);width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2}
 .polx .m-empty{text-align:center;color:var(--walnut-3);font-size:14px;padding:48px 20px}
+/* A quote request is not an order — it wears the gold the desktop table gives its enquiry rows,
+   through the same dot-and-status the other card states use. */
+.polx .m-pcard.m-quote .m-dot{background:var(--gold)}
+.polx .m-pcard.m-quote .m-st{color:var(--gold)}
+.polx .m-pcard.m-quote .po{color:var(--gold)}
 .polx .m-fab{position:fixed;right:16px;bottom:calc(76px + env(safe-area-inset-bottom));z-index:30;height:52px;padding:0 20px;border-radius:26px;background:var(--terra);color:#fff;font-weight:600;font-size:15px;display:inline-flex;align-items:center;gap:8px;border:0;box-shadow:0 12px 28px -8px rgba(196,80,43,.55)}
 .polx .m-fab svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2.4}
 .polx .m-fab:active{transform:scale(.96)}
@@ -636,12 +641,25 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
       { k: 'tosend', label: 'To send', n: cToSend },
       { k: 'onway', label: 'On the way', n: cOnWay },
       { k: 'done', label: 'Received', n: cDone },
+      { k: 'quotes', label: 'Quotes', n: rfqShown.length },
     ];
     const mFilter = FILTERS[filter] ? filter : 'all';
-    const mList = (() => {
-      let l = rows.filter(FILTERS[mFilter]);
-      if (q) l = l.filter(p => (p.vendor + p.id + p.site + p.items.map(i => i.n).join(' ')).toLowerCase().includes(q));
-      return l.slice().sort((a, b) => D(b.createdAt).getTime() - D(a.createdAt).getTime());
+    // A quote request is not a PO — it lives in its own table and has no vendor, value or
+    // delivery — so the desktop merges the two lists by date rather than joining them. The phone
+    // was iterating POs alone, which is why enquiries were nowhere to be seen here.
+    const mList: MergedRow[] = (() => {
+      const pos = rows.filter(FILTERS[mFilter])
+        .filter(p => !q || (p.vendor + p.id + p.site + p.items.map(i => i.n).join(' ')).toLowerCase().includes(q))
+        .map(p => ({ kind: 'po' as const, po: p }));
+      const quotes = (mFilter === 'all' || mFilter === 'quotes')
+        ? rfqShown
+            .filter(r => !q || (r.site + r.summary).toLowerCase().includes(q))
+            .map(r => ({ kind: 'rfq' as const, rfq: r }))
+        : [];
+      if (mFilter === 'quotes') return quotes;
+      return [...pos, ...quotes].sort((a, b) =>
+        D(b.kind === 'po' ? b.po.createdAt : b.rfq.created_at).getTime()
+        - D(a.kind === 'po' ? a.po.createdAt : a.rfq.created_at).getTime());
     })();
     return (
       <div className="polx m">
@@ -675,7 +693,25 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
         <div className="m-list mo-stagger">
           {mList.length === 0 ? (
             <div className="m-empty">{q ? 'No orders match your search.' : filter === 'approvals' ? 'Nothing waiting on you.' : 'Nothing here yet.'}</div>
-          ) : mList.map(p => {
+          ) : mList.map(row => {
+            if (row.kind === 'rfq') {
+              const r = row.rfq;
+              const ref = 'ENQ-' + r.rfq_id.slice(0, 6).toUpperCase();
+              return (
+                <button key={'rfq-' + r.rfq_id} className="m-pcard m-quote" onClick={() => navigate(`/rfq/${r.rfq_id}`)}>
+                  <div className="r1"><span className="v">{r.sent} vendor{r.sent !== 1 ? 's' : ''} asked</span><span className="amt zero">—</span></div>
+                  <div className="r2"><span className="po">{ref}</span><span>·</span><span className="st-site">{r.site}</span></div>
+                  {(r.summary || r.itemCount > 0) && <div className="items">{r.summary || `${r.itemCount} items`}</div>}
+                  <div className="r3">
+                    <span className="m-dot" />
+                    <span className="m-st">{r.replied > 0 ? `${r.replied} of ${r.sent} quoted` : 'Awaiting quotes'}</span>
+                    <span className="sub">{r.replied > 0 ? (r.best != null ? `· best ${fmt(r.best)}` : '· tap to compare') : `· ${dstr(D(r.created_at))}`}</span>
+                    <svg className="chev" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6" /></svg>
+                  </div>
+                </button>
+              );
+            }
+            const p = row.po;
             const c = cardOf(p);
             return (
               <button key={p.id} className={`m-pcard ${c.tone}`} onClick={() => openPO(p.id)}>
