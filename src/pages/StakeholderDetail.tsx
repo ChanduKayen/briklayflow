@@ -5,6 +5,8 @@
 import { useMemo, useState, useEffect, createContext, useContext, type ReactElement } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useIsMobile } from '../lib/useIsMobile';
+import PartyLedgerMobile, { type PartyMenuItem } from '../components/party/PartyLedgerMobile';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Session } from '@supabase/supabase-js';
 import { useOrgId, useAuth } from '../lib/auth/AuthProvider';
@@ -253,6 +255,8 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
   // which is where this button went regardless of how you got here.
   const location = useLocation();
   const cameFrom = (location.state ?? null) as { backTo?: string; backLabel?: string } | null;
+  // The drawer keeps the desktop layout at any width — it is a panel inside a desktop page.
+  const isMobile = useIsMobile() && !compact;
   const orgId = useOrgId();
   const { isRole } = useAuth();
   const isManager = isRole('management') || isRole('principal');
@@ -328,10 +332,37 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
     } catch (err) { showSnackbar((err as Error)?.message || 'Could not remove this line', { type: 'error' }); }
   };
 
+  const mobileMenu: PartyMenuItem[] = [
+    ...(newLedger && L.contracts.length > 0 ? [{ label: 'Certify work', onSelect: () => setCertifyOpen(true) }] : []),
+    ...(!newLedger && L.kind === 'worker' ? [{ label: 'Work certified', onSelect: () => navigate('/attendance') }] : []),
+    ...(L.kind === 'worker' ? [{ label: 'Record piece / gutha work', onSelect: () => setPieceOpen(true) }] : []),
+    ...(L.kind === 'vendor' ? [{ label: 'Enter a bill', onSelect: () => setBillOpen(true) }] : []),
+    ...(L.kind === 'vendor' && L.unbilledCount > 0 ? [{ label: 'Consolidated bill', onSelect: () => setCbOpen(true) }] : []),
+    { label: 'Adjustment', onSelect: () => setAdjOpen(true) },
+    ...(!L.opening ? [{ label: 'Opening balance', onSelect: () => setObOpen(true) }] : []),
+    { label: 'All parties', onSelect: () => navigate('/stakeholders'), group: 'party' as const },
+  ];
+
   return (
     <RowActionsCtx.Provider value={isManager ? { onRemove: onRemoveLine } : null}>
     <div className={`plx${compact ? ' compact' : ''}`}>
       <style>{CSS}</style>
+      {isMobile ? (
+        <PartyLedgerMobile
+          L={L}
+          onBack={() => (onClose ? onClose() : navigate(cameFrom?.backTo ?? '/stakeholders'))}
+          onRecordPayment={() => setTxnSheet(true)}
+          onDownloadStatement={async () => {
+            try {
+              const { downloadPartyStatement } = await import('../lib/ledgerStatementPdf');
+              downloadPartyStatement(L);
+            } catch (e) { showSnackbar((e as Error)?.message || 'Could not build the statement', { type: 'error' }); }
+          }}
+          onOpenRef={(ref) => navigate(L.kind === 'vendor' ? `/purchase-orders/${ref}` : `/work-orders/${ref}`)}
+          onOpeningBalance={() => setObOpen(true)}
+          menu={mobileMenu}
+        />
+      ) : (
       <div className="page" onClick={() => menuOpen && setMenuOpen(false)}>
         <button className="back" onClick={() => (compact && onClose ? onClose() : navigate(cameFrom?.backTo ?? '/stakeholders'))}>
           {compact
@@ -504,6 +535,7 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
 
         {L.kind === 'worker' && <CertHistory stakeholderId={L.stakeholder.id} />}
       </div>
+      )}
 
       {txnSheet && (
         <QuickTransactionSheet
