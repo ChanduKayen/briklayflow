@@ -106,25 +106,27 @@ QuickBooks/Zoho’s opening-balance-as-of-a-date). Two rules make it correct:
    Ramesh’s books start Aug 31 at ₹1000; his earlier attendance/bills are settled and ignored, and
    accrual runs from Aug 31.
 
-**Our model — a per-party floor with an org default.** The boundary for any line is:
+**Our model — the cutover takes effect per party, only via that party's opening.** The boundary for
+any line is:
 
 ```
-floor = COALESCE( this party's opening as_of ,   -- the party's own cutover, if set
-                  org ledger_start_date ,        -- else the org-wide books-start default
-                  the line's own date )          -- else no floor → count all history
-count a line  ⇔  kind = 'opening'  OR  line_date >= floor
+count a line  ⇔  kind = 'opening'                       -- the opening always counts
+              OR  this party has NO opening              -- → count ALL its history (nothing dropped)
+              OR  line_date >= this party's opening as_of -- opening set → opening + everything after
 ```
 
-So the **org `ledger_start_date`** is a bulk *default* for parties you haven’t touched, and each
-**opening balance carries its own `as_of`** that overrides it locally. `v_party_balance` applies this
-per-party floor (`20260910000001`), and the party page’s line display drops pre-opening lines to
-match.
+So an **opening balance IS the cutover for that party**: set one (any figure, even ₹0) and the party's
+books start on its date; before it is settled by the figure, after it accrues. A party with **no**
+opening keeps its **full history** — because dropping history you haven't captured as an opening
+*invents money* (a worker paid ₹1.79L against ₹35k of work, cut off with no opening, wrongly read as
+"₹11k to pay" — the advance that covered it was thrown away). `v_party_balance` applies this
+(`20260910000002`, superseding the org-wide filter in `20260910000001`), and the party page's line
+display floors on the same per-party opening.
 
-**One date in practice.** These are not two boundaries to reconcile — the org date is a *default* and
-the per-party date is an *override*. The opening editor defaults its *starts-on* date to the org
-books-start date, so you set the date once for the business and only ever retype it for the rare party
-that started on a different day. A party that carried nothing needs no opening at all — the org date
-already floors them.
+**The org date is only a default, never a silent filter.** `organizations.ledger_start_date` supplies
+the date the opening editor pre-fills — so you set it once for the business and rarely retype it — but
+it does **not** gate any party on its own. To deliberately start a party clean at a date, set their
+opening to ₹0 as of that date; to ignore the whole idea, set no opening and the full history stands.
 
 **Where you set it.** On **each party’s ledger** (`StakeholderDetail` → *Opening balance*): amount +
 *starts-on* date + direction (we owe / advance), optionally split by site. This is the primary

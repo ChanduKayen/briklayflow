@@ -67,11 +67,11 @@ export function CutoverSetup({ orgId, onClose }: { orgId: string; onClose: () =>
       <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(520px,100%)', maxHeight: '88vh', overflow: 'auto', background: V.surface, border: `1px solid ${V.line}`, borderRadius: 16, boxShadow: '0 24px 60px -20px rgba(20,16,12,0.5)' }}>
         <div style={{ padding: '16px 18px 12px', borderBottom: `1px solid ${V.line}` }}>
           <p style={{ fontSize: 15, fontWeight: 700, color: V.ink }}>Ledger cutover</p>
-          <p style={{ fontSize: 12.5, color: V.sys, marginTop: 2 }}>Set where the books start. Everything before is settled; enter what each party carries as of that day.</p>
+          <p style={{ fontSize: 12.5, color: V.sys, marginTop: 2 }}>A party is cut off only once you set their opening balance — before that date is settled by the figure, after it accrues. A party with no opening keeps its full history. The date below is just the default an opening pre-fills.</p>
         </div>
 
         <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <label style={{ fontSize: 12, color: V.faint }}>Ledger start date</label>
+          <label style={{ fontSize: 12, color: V.faint }}>Default opening date</label>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <input type="date" value={dateVal} onChange={(e) => setDateVal(e.target.value)}
               style={{ padding: '9px 11px', borderRadius: 10, border: `1px solid ${V.line}`, fontSize: 14, color: V.ink, outline: 'none' }} />
@@ -79,7 +79,7 @@ export function CutoverSetup({ orgId, onClose }: { orgId: string; onClose: () =>
               style={{ fontSize: 13, fontWeight: 600, color: '#fff', background: V.terra, border: 0, borderRadius: 999, padding: '8px 14px', cursor: 'pointer' }}>Save date</button>
             {cutover && <button disabled={busy} onClick={() => saveDate(null)} style={{ fontSize: 12.5, color: V.sys, background: 'none', border: 0, cursor: 'pointer' }}>clear</button>}
           </div>
-          <p style={{ fontSize: 11.5, color: V.faint }}>{cutover ? `Currently opens ${new Date(cutover).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}.` : 'No cutover set — the ledger counts all history.'}</p>
+          <p style={{ fontSize: 11.5, color: V.faint }}>{cutover ? `New opening balances default to ${new Date(cutover).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}.` : 'No default set — new openings use today.'}</p>
         </div>
 
         <div style={{ padding: '4px 18px 16px', borderTop: `1px solid ${V.line}` }}>

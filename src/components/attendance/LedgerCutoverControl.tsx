@@ -17,12 +17,12 @@ export function LedgerCutoverControl({ orgId, isManager }: { orgId: string; isMa
   const [open, setOpen] = useState(false);
 
   if (!isManager) {
-    return cutover ? <span style={{ fontSize: 12.5, color: V.sys }}>Ledger opens {fmt(cutover)}</span> : null;
+    return cutover ? <span style={{ fontSize: 12.5, color: V.sys }}>Opening balances dated {fmt(cutover)}</span> : null;
   }
 
   return (
     <span style={{ fontSize: 12.5, color: V.sys }}>
-      {cutover ? <>Ledger opens {fmt(cutover)}</> : 'No ledger start set — counting all history'}
+      {cutover ? <>Opening balances default to {fmt(cutover)}</> : 'No default opening date set'}
       {' · '}
       <button onClick={() => setOpen(true)}
         style={{ color: V.inkSoft, textDecoration: 'underline', textDecorationColor: V.line, textUnderlineOffset: 3, background: 'none', border: 0, cursor: 'pointer', font: 'inherit' }}>
