@@ -20,7 +20,11 @@ const POLX_CSS = `
   --cream:#F6F2EA; --paper:#FFFDF9; --paper-2:#FBF8F2;
   --ink:#2F2622; --ink-2:#6E635B; --ink-3:#A39A91;
   --line:#E4DCD0; --line-2:#EFE9DF;
-  --terra:#C4613A; --terra-deep:#A94E2B; --terra-tint:#F8E7DE;
+  /* One terracotta across the app: the tint the reference pages use, its pressed shade,
+     and the 10% wash they fill a quiet tinted control with. Translucent so it composites
+     over the cream desktop ground and the white phone card alike. */
+  --terra:#C4502B; --terra-deep:#A8431F;
+  --terra-tint:rgba(196,80,43,.1); --terra-soft:rgba(196,80,43,.16);
   --sage:#5F7F5B; --sage-tint:#E7EFE4;
   --gold:#B8862E; --gold-tint:#F7EEDA;
   --r:8px; --ease:cubic-bezier(.2,.7,.2,1);
@@ -62,7 +66,7 @@ const POLX_CSS = `
 .polx .chip.on .n{color:rgba(255,253,249,.6)}
 .polx .chip.on.warn{background:var(--terra);border-color:var(--terra)}
 .polx .btn{display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 16px;border-radius:var(--r);border:1px solid var(--terra);background:var(--terra);color:#fff;font-weight:500;cursor:pointer;transition:background .16s,transform .12s var(--ease),box-shadow .16s}
-.polx .btn:hover{background:var(--terra-deep);border-color:var(--terra-deep);transform:translateY(-1px);box-shadow:0 6px 16px -8px rgba(196,97,58,.7)}
+.polx .btn:hover{background:var(--terra-deep);border-color:var(--terra-deep);transform:translateY(-1px);box-shadow:0 6px 16px -8px rgba(196,80,43,.7)}
 .polx .btn:active{transform:translateY(0) scale(.97);box-shadow:none;background:#93441F}
 .polx .btn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2}
 .polx .sheet{background:var(--paper);border:1px solid var(--line);border-radius:10px;overflow:hidden;box-shadow:var(--shadow)}
@@ -162,7 +166,7 @@ const POLX_CSS = `
    move: the walnut text, the terracotta and the status colours are untouched. */
 .polx.m{background:var(--cream);min-height:100dvh;display:flex;flex-direction:column;
   --cream:#F8F6F3;--paper:#FFFFFF;--line:rgba(50,42,35,.1);--line-soft:rgba(50,42,35,.06);
-  --walnut:#33251B;--walnut-2:#6A5A4C;--walnut-3:#9A8B7B;--terra:#B4532F;--terra-soft:#F6E7DF;
+  --walnut:#33251B;--walnut-2:#6A5A4C;--walnut-3:#9A8B7B;
   --sage:#5F7F5C;--gold:#8A6A1F;--gold-soft:#F3EAD2;}
 .polx.m *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 .polx .m-mast{padding:18px 18px 0}
@@ -211,12 +215,12 @@ const POLX_CSS = `
 .polx .m-pcard .r3 .sub{color:var(--walnut-3);font-size:12.5px}
 .polx .m-pcard .r3 .chev{margin-left:auto;color:var(--walnut-3);width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2}
 .polx .m-empty{text-align:center;color:var(--walnut-3);font-size:14px;padding:48px 20px}
-.polx .m-fab{position:fixed;right:16px;bottom:calc(76px + env(safe-area-inset-bottom));z-index:30;height:52px;padding:0 20px;border-radius:26px;background:var(--terra);color:#fff;font-weight:600;font-size:15px;display:inline-flex;align-items:center;gap:8px;border:0;box-shadow:0 12px 28px -8px rgba(180,83,47,.55)}
+.polx .m-fab{position:fixed;right:16px;bottom:calc(76px + env(safe-area-inset-bottom));z-index:30;height:52px;padding:0 20px;border-radius:26px;background:var(--terra);color:#fff;font-weight:600;font-size:15px;display:inline-flex;align-items:center;gap:8px;border:0;box-shadow:0 12px 28px -8px rgba(196,80,43,.55)}
 .polx .m-fab svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2.4}
 .polx .m-fab:active{transform:scale(.96)}
 /* held state — the button stays pressed and spins for as long as the page is coming */
 .polx .m-fab.busy,.polx .btn.busy{opacity:1;cursor:default}
-.polx .m-fab.busy{transform:scale(.97);box-shadow:0 6px 16px -8px rgba(180,83,47,.5)}
+.polx .m-fab.busy{transform:scale(.97);box-shadow:0 6px 16px -8px rgba(196,80,43,.5)}
 .polx .btn.busy{color:var(--walnut-3)}
 .polx .m-spin{width:16px;height:16px;border-radius:50%;border:2px solid rgba(255,255,255,.42);border-top-color:#fff;animation:polxspin .68s linear infinite;flex:none}
 .polx .btn .m-spin{border-color:rgba(51,37,27,.25);border-top-color:var(--walnut)}

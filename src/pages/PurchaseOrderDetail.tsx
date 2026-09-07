@@ -81,7 +81,9 @@ const PODX_CSS = `
   --cream:#F6F2EA; --paper:#FFFDF9; --paper-2:#FBF8F2;
   --ink:#2F2622; --ink-2:#6E635B; --ink-3:#A39A91;
   --line:#E4DCD0; --line-2:#EFE9DF;
-  --terra:#C4613A; --terra-deep:#A94E2B; --terra-tint:#F8E7DE;
+  /* One terracotta across the app — see the note in POListSheet. */
+  --terra:#C4502B; --terra-deep:#A8431F;
+  --terra-tint:rgba(196,80,43,.1); --terra-soft:rgba(196,80,43,.16);
   --sage:#5F7F5B; --sage-tint:#E7EFE4;
   --gold:#B8862E; --gold-tint:#F7EEDA;
   --r:8px; --ease:cubic-bezier(.2,.7,.2,1);
@@ -248,11 +250,11 @@ const PODX_CSS = `
 .podx .btn:disabled{opacity:.55;cursor:not-allowed;transform:none;box-shadow:none}
 .podx .btn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8}
 .podx .btn.primary{--bg:var(--terra);--fg:#fff;--bd:var(--terra)}
-.podx .btn.primary:hover{--bg:var(--terra-deep);--bd:var(--terra-deep);box-shadow:0 6px 16px -8px rgba(196,97,58,.7)}
+.podx .btn.primary:hover{--bg:var(--terra-deep);--bd:var(--terra-deep);box-shadow:0 6px 16px -8px rgba(196,80,43,.7)}
 .podx .btn.soft{--bg:var(--terra-tint);--fg:var(--terra);--bd:transparent}.podx .btn.soft:hover{--bg:#F2D9CC}
 .podx .btn.ghost{--bd:transparent;--bg:transparent;color:var(--ink-2)}.podx .btn.ghost:hover{--bg:var(--paper)}
 .podx .btn.sm{height:30px;padding:0 10px;font-size:13px}
-.podx .spinner{width:15px;height:15px;border:2px solid rgba(196,97,58,.3);border-top-color:var(--terra);border-radius:50%;animation:podxspin .7s linear infinite}
+.podx .spinner{width:15px;height:15px;border:2px solid rgba(196,80,43,.3);border-top-color:var(--terra);border-radius:50%;animation:podxspin .7s linear infinite}
 .podx .btn.primary .spinner{border-color:rgba(255,255,255,.35);border-top-color:#fff}
 @keyframes podxspin{to{transform:rotate(360deg)}}
 .podx .chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:12.5px;font-weight:500;background:var(--paper);border:1px solid var(--line);color:var(--ink-2)}
@@ -349,8 +351,8 @@ const PODX_CSS = `
 .podx.m .m-abtn.is-sec.tone-wa{background:rgba(31,175,90,.1);border:0;color:#0F7C3D}
 .podx.m .m-abtn.is-sec.tone-sage{background:rgba(47,160,76,.1);border:0;color:#2F5D34}
 /* filled tones, flat — a shadow under a button that already fills is a second shadow */
-.podx.m .m-abtn.is-pri.tone-terra{background:#C4502B;box-shadow:none}
-.podx.m .m-abtn.is-pri.tone-terra:active{background:#A8431F;filter:none}
+.podx.m .m-abtn.is-pri.tone-terra{background:var(--terra);box-shadow:none}
+.podx.m .m-abtn.is-pri.tone-terra:active{background:var(--terra-deep);filter:none}
 .podx.m .m-abtn.is-pri.tone-sage{background:#2FA04C;box-shadow:none}
 .podx.m .m-abtn.is-pri.tone-sage:active{background:#268A40;filter:none}
 .podx.m .m-abtn.is-pri.tone-wa{background:#1FAF5A;box-shadow:none}
@@ -393,7 +395,7 @@ const PODX_CSS = `
 .podx .m-abtn.is-sec{flex:1 1 auto}
 @media (max-width:380px){.podx .m-abar{gap:8px;padding-left:12px;padding-right:12px}.podx .m-abtn{font-size:13px;gap:6px;padding:0 9px}.podx .m-abtn svg{width:16px;height:16px}}
 /* filled tones — one strong action at a time; the send action carries WhatsApp green on purpose */
-.podx .m-abtn.is-pri.tone-terra{background:var(--terra);color:#fff;box-shadow:0 10px 22px -12px rgba(196,97,58,.75)}
+.podx .m-abtn.is-pri.tone-terra{background:var(--terra);color:#fff;box-shadow:0 10px 22px -12px rgba(196,80,43,.75)}
 .podx .m-abtn.is-pri.tone-terra:active{filter:brightness(.94)}
 .podx .m-abtn.is-pri.tone-sage{background:#5F7F5B;color:#fff;box-shadow:0 10px 22px -12px rgba(95,127,91,.75)}
 .podx .m-abtn.is-pri.tone-sage:active{filter:brightness(.94)}
