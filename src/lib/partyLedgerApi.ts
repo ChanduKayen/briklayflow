@@ -252,8 +252,14 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
     }
   }
 
+  // ── The opening's as-of date is THIS party's cutover floor: everything before it is settled by the
+  //    opening, so drop pre-opening lines (the opening row itself is kept). This makes the displayed
+  //    running balance match v_party_balance, which applies the same per-party floor. ──
+  const floor = opening?.asOf ?? null;
+  const scoped = floor ? entries.filter(e => e.kind === 'opening' || !e.date || e.date >= floor) : entries;
+
   // ── Sort oldest→newest, accumulate running "ahead" (paid − cert), then flip to newest-first ──
-  const asc = [...entries].sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.kind === 'opening' ? -1 : 0));
+  const asc = [...scoped].sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.kind === 'opening' ? -1 : 0));
   let run = 0;
   const withRun: LedgerEntry[] = asc.map(e => { run += e.paid - e.cert; return { ...e, running: run }; });
   withRun.reverse(); // newest first

@@ -87,41 +87,48 @@ ledger must actually *hold* every party’s dues. Which is where the cutover com
 
 ---
 
-## 5. The cutover — carry every party across the boundary
+## 5. Opening balance IS the cutover — per party
 
-Turning accrual on must not resurrect months of raw history as fresh dues. The cutover
-(`organizations.ledger_start_date`) treats everything **before** the boundary as settled and counts
-live accrual only **on/after** it:
+**Opening balance and cutover are two halves of one act, not two features.**
+
+- The **cutover** (a.k.a. books-start / go-live date) is the *when*: the boundary before which
+  history is settled and after which the system tracks transactionally.
+- The **opening balance** is the *how much*: the figure that account carried *into* the system at
+  that boundary — the seed of its running balance.
+
+Every real system works this way (Tally’s *Books beginning from* + per-ledger opening balances;
+QuickBooks/Zoho’s opening-balance-as-of-a-date). Two rules make it correct:
+
+1. **The figure is entered by hand, not derived.** You are cutting over *because* the pre-system
+   history is incomplete or untrusted; auto-summing it would seed the books with the very numbers you
+   don’t believe. The owner asserts *“₹1000 as of Aug 31.”*
+2. **The opening’s date is that account’s floor.** Setting *“₹1000 as of Aug 31 for Ramesh”* means
+   Ramesh’s books start Aug 31 at ₹1000; his earlier attendance/bills are settled and ignored, and
+   accrual runs from Aug 31.
+
+**Our model — a per-party floor with an org default.** The boundary for any line is:
 
 ```
-count a line  ⇔  ledger_start_date IS NULL          -- no cutover: count all history
-              OR  line_date >= ledger_start_date     -- on/after the boundary
-              OR  kind = 'opening'                    -- the opening always counts
+floor = COALESCE( this party's opening as_of ,   -- the party's own cutover, if set
+                  org ledger_start_date ,        -- else the org-wide books-start default
+                  the line's own date )          -- else no floor → count all history
+count a line  ⇔  kind = 'opening'  OR  line_date >= floor
 ```
 
-**This is exactly why the daily workers showed ₹0 carried:** a cutover date was set, their
-pre-cutover attendance was (correctly) excluded, and **no opening balance was captured for them**, so
-their genuine carried dues vanished. The one contract worker carried ₹85,001 because his certified
-work landed on/after the boundary (or he had an opening). Contracts looked fine; daily wages didn’t.
+So the **org `ledger_start_date`** is a bulk *default* for parties you haven’t touched, and each
+**opening balance carries its own `as_of`** that overrides it locally. `v_party_balance` applies this
+per-party floor (`20260910000001`), and the party page’s line display drops pre-opening lines to
+match.
 
-**The rule:** *every* party’s carried balance across the cutover must be captured as a
-`stakeholder_opening_balance`, or it is lost. Making the owner search for each party one-by-one
-guarantees some get missed.
+**Where you set it.** On **each party’s ledger** (`StakeholderDetail` → *Opening balance*): amount +
+*starts-on* date + direction (we owe / advance), optionally split by site. This is the primary
+surface — you set the figure yourself, for the one party in front of you. The org-wide
+`CutoverSetup` (in Payables/Attendance) sets the *default* books-start date and lists the openings.
 
-**The guided cutover (this change).** When a cutover date is set, the system computes what *every*
-worker and vendor carried across it — from the same ledger the app uses — and offers each as an
-opening balance to confirm:
-
-- **RPC `party_balances_before(p_cutover date)`** returns, per party, `Σ(billed − paid)` over
-  `v_party_ledger_line` for lines strictly **before** the cutover (excluding prior `opening` lines).
-  `net > 0` → *we owe them* (`work_owed`); `net < 0` → *advance with them* (`paid_ahead`).
-- **`CutoverSetup`** lists these as **“Carried as of this date,”** pre-filled, with a **Carry**
-  button per party and **Carry all**. Confirming writes a `stakeholder_opening_balance`
-  (`as_of = cutover`), after which that party’s pre-cutover history is ignored and their opening +
-  post-cutover accrual is the running balance.
-
-The result: after the cutover, every unpaid party — daily workers included — carries a correct B/F,
-and the “carried from the ledger” rows appear in Payables by construction.
+**Why the daily workers showed ₹0:** the org cutover excluded their pre-cutover attendance, and no
+opening balance carried them across — so their dues vanished. Under this model you set each party’s
+opening (₹X as of the date), which both seeds the balance *and* starts their accrual, so every unpaid
+party carries a correct B/F and the “carried from the ledger” row appears in Payables.
 
 ---
 
@@ -131,9 +138,9 @@ and the “carried from the ledger” rows appear in Payables by construction.
    party’s dues anywhere else.
 2. **Declared, not inferred.** Accrual follows `accrual_basis`; a `work` crew never accrues a day wage.
 3. **Approved only.** A pending certification is not owed (like a pending PO).
-4. **Cutover completeness.** If `ledger_start_date` is set, every party with a non-zero pre-cutover
-   balance must have an opening balance, or their carry is lost. The guided flow enforces this by
-   surfacing them all.
+4. **Opening = per-party cutover.** A party’s opening balance is entered by hand and its `as_of`
+   date is that party’s accrual floor (org `ledger_start_date` is only the default for parties
+   without one). Pre-floor history is settled by the figure, never re-summed.
 5. **Payment = debit, FIFO.** Marking paid records a real transaction allocated oldest-first.
 
 ---

@@ -679,9 +679,9 @@ function OpeningModal({ orgId, L, onClose, onSaved, onError }: { orgId: string; 
   return (
     <div className="scrim" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal" role="dialog">
-        <header><h3>Opening balance for {L.stakeholder.name}</h3><p>Where your old books left off. Everything before this date stays in them.</p></header>
+        <header><h3>Opening balance for {L.stakeholder.name}</h3><p>This is {L.stakeholder.name.split(' ')[0]}&apos;s cutover: the figure you set becomes the balance on the date you choose, and the ledger accrues from that day. Everything before it is settled and ignored.</p></header>
         <div className="body">
-          <div className="field"><label>As of</label><input className="in" type="date" value={asOf} onChange={e => setAsOf(e.target.value)} style={{ maxWidth: 200 }} /><div className="help">1 April matches a financial year. Use today's date if starting mid-year.</div></div>
+          <div className="field"><label>Starts on</label><input className="in" type="date" value={asOf} onChange={e => setAsOf(e.target.value)} style={{ maxWidth: 200 }} /><div className="help">The books begin for this party on this date — attendance, bills and payments count from here on; anything earlier is treated as already settled by this figure.</div></div>
           <div className="field"><div className="lbl">Which way does it run?</div><div className="dir">
             <label className={dir === 'paid_ahead' ? 'on' : ''} onClick={() => setDir('paid_ahead')}><b>Paid ahead of work</b><span>You've paid them more than the work certified so far.</span></label>
             <label className={dir === 'work_owed' ? 'on' : ''} onClick={() => setDir('work_owed')}><b>Work done, not yet paid</b><span>They've certified work you still owe them for.</span></label>

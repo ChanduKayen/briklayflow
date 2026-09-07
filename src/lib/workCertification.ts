@@ -64,25 +64,6 @@ export async function removeOpeningBalance(stakeholderId: string): Promise<void>
   if (error) throw error;
 }
 
-// Each party's CARRIED (closing) balance strictly before a cutover date, from the same single
-// source the ledger uses (v_party_ledger_line via the party_balances_before RPC). The cutover
-// screen proposes these so the owner confirms what everyone carried across the boundary instead
-// of it silently vanishing. net > 0 = we owe them; net < 0 = advance with them.
-export interface PreCutoverRow { stakeholderId: string; name: string; type: string; category: string | null; direction: 'work_owed' | 'paid_ahead'; total: number }
-export async function loadPreCutoverBalances(cutover: string): Promise<PreCutoverRow[]> {
-  const { data, error } = await supabase.rpc('party_balances_before', { p_cutover: cutover });
-  if (error) throw error;
-  return (data ?? [])
-    .map((r: any) => {
-      const net = Number(r.net) || 0;
-      return {
-        stakeholderId: r.stakeholder_id, name: r.name ?? 'Party', type: r.type ?? '', category: r.category ?? null,
-        direction: (net >= 0 ? 'work_owed' : 'paid_ahead') as 'work_owed' | 'paid_ahead', total: Math.abs(Math.round(net)),
-      };
-    })
-    .sort((a: PreCutoverRow, b: PreCutoverRow) => b.total - a.total);
-}
-
 // ── certification ─────────────────────────────────────────────────────────────
 export interface CertifyInput {
   orgId: string; projectId: string | null; woId: string | null; milestoneId: string | null;
