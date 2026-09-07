@@ -3566,6 +3566,14 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
           heard={lastHeard}
           onFile={(file) => void ingestExtraction(() => matchSKUsFromFile(file, 'po_creation', selectedVendor?.category))}
           onManualAdd={addManualLine}
+          onEditLine={(id, patch) => updateLine(id, {
+            item_name: capFirst(patch.name),
+            quantity_ordered: patch.qty,
+            unit: patch.unit,
+            // Absent in quote mode — leave whatever rate the line already had alone.
+            ...(patch.rate === undefined ? {} : { unit_rate: patch.rate }),
+          })}
+          onRemoveLine={(id) => removeLine(id)}
           unresolved={lineItems.filter(l => l.item_name.trim() && !l.sku_id && !l.skipped_linking).length}
           onSubmitAsTyped={() => {
             // handleSubmit's unresolved path drives the desktop item grid, which this screen does not

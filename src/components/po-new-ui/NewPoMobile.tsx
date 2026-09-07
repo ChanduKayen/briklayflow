@@ -134,6 +134,10 @@ const CSS = `
 .npm-stp button:active{opacity:.35}
 .npm-stp .q{min-width:26px;text-align:center;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
 .npm-amt{font-size:15.5px;font-weight:600;min-width:78px;text-align:right;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+/* An item row reopens the card it was made in, so it presses like something you can tap. */
+.npm-item{cursor:pointer;transition:background .16s,transform .12s var(--ease)}
+.npm-item:active{background:var(--bg);transform:scale(.995)}
+.npm-item:focus-visible{outline:2px solid var(--tint);outline-offset:-2px;border-radius:10px}
 
 .npm-bar{position:absolute;left:0;right:0;bottom:0;z-index:30;
   padding:12px 20px calc(14px + env(safe-area-inset-bottom));
@@ -219,6 +223,9 @@ export interface NewPoMobileProps {
   heard?: string;
   onFile: (file: File) => void;
   onManualAdd: (item: { name: string; qty: number; unit: string; rate: number }) => void;
+  /** Save a tapped-open item. `rate` is absent in quote mode, where it is never shown or edited. */
+  onEditLine: (id: string, patch: { name: string; qty: number; unit: string; rate?: number }) => void;
+  onRemoveLine: (id: string) => void;
   /** Items named but not yet matched to the catalogue. The desktop resolves these in the item
    *  grid, which this screen does not render — so it asks instead of dead-ending. */
   unresolved: number;
@@ -239,6 +246,9 @@ export default function NewPoMobile(p: NewPoMobileProps) {
   const [toast, setToast] = useState<string | null>(null);
   const [fName, setFName] = useState(''); const [fQty, setFQty] = useState(''); const [fRate, setFRate] = useState('');
   const [unit, setUnit] = useState('Nos');
+  // The id the item sheet is editing, or null when it is adding a new one. An item is not
+  // something you can only ever append to — tapping it opens the same card again.
+  const [editingId, setEditingId] = useState<string | null>(null);
   const waveRef = useRef<HTMLSpanElement>(null);
   const camRef = useRef<HTMLInputElement>(null);
   const docRef = useRef<HTMLInputElement>(null);
@@ -289,12 +299,42 @@ export default function NewPoMobile(p: NewPoMobileProps) {
   const dirty = !!p.vendorId || !!p.projectId || p.lines.length > 0;
   const closeSheets = () => setSheet(null);
 
-  const addManual = (again: boolean) => {
+  const clearForm = () => { setFName(''); setFQty(''); setFRate(''); setUnit('Nos'); };
+
+  const openAdd = () => { setEditingId(null); clearForm(); setSheet('add'); };
+
+  // Tapping an item reopens the card it was created in, filled with what is there now.
+  const openEdit = (l: MobileLine) => {
+    setEditingId(l.id);
+    setFName(l.name);
+    setFQty(String(l.qty || ''));
+    setFRate(l.rate ? String(l.rate) : '');
+    setUnit(l.unit || 'Nos');
+    setSheet('add');
+  };
+
+  const commit = (again: boolean) => {
     const name = fName.trim(); const qty = parseInt(fQty, 10) || 0;
     if (!name || !qty) { say('Add an item name and quantity'); return; }
-    p.onManualAdd({ name, qty, unit, rate: parseInt(fRate, 10) || 0 });
-    setFName(''); setFQty(''); setFRate('');
+    // In quote mode the rate is not on screen, so it is left exactly as it was rather than
+    // being saved back as zero from a field the user never saw.
+    const rate = quoting ? undefined : parseInt(fRate, 10) || 0;
+    if (editingId) {
+      p.onEditLine(editingId, { name, qty, unit, rate });
+      setEditingId(null); clearForm(); closeSheets();
+      say('Updated');
+      return;
+    }
+    p.onManualAdd({ name, qty, unit, rate: rate ?? 0 });
+    clearForm();
     if (again) say('Added — keep going'); else closeSheets();
+  };
+
+  const removeEditing = () => {
+    if (!editingId) return;
+    p.onRemoveLine(editingId);
+    setEditingId(null); clearForm(); closeSheets();
+    say('Removed');
   };
 
   const chev = (
@@ -400,7 +440,7 @@ export default function NewPoMobile(p: NewPoMobileProps) {
           {p.heard && !rec && <p className="npm-heard">Heard “{p.heard}”</p>}
 
           <div className="npm-alt">
-            <button type="button" disabled={p.busy} onClick={() => setSheet('add')}>Type items</button>
+            <button type="button" disabled={p.busy} onClick={openAdd}>Type items</button>
             <span>·</span>
             <button type="button" disabled={p.busy} onClick={() => camRef.current?.click()}>Scan a quote</button>
             <span>·</span>
@@ -417,15 +457,21 @@ export default function NewPoMobile(p: NewPoMobileProps) {
           {p.lines.length > 0 && (
             <div className="npm-items">
               {p.lines.map((l, i) => (
-                <div className="npm-item" key={l.id} style={{ animationDelay: `${Math.min(i, 8) * 0.06}s` }}>
+                <div className="npm-item" key={l.id} style={{ animationDelay: `${Math.min(i, 8) * 0.06}s` }}
+                  role="button" tabIndex={0} aria-label={`Edit ${l.name}`}
+                  onClick={() => openEdit(l)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openEdit(l); } }}>
                   <div className="inf">
                     <div className="nm">{l.name || 'Untitled item'}</div>
                     <div className="pr">{quoting ? l.unit : l.rate > 0 ? `${inr(l.rate)} per ${l.unit}` : `Rate to be confirmed · ${l.unit}`}</div>
                   </div>
+                  {/* Only the ± buttons swallow the tap — they change the quantity in place. The
+                      number between them sits at the dead centre of the row, which is where a
+                      thumb lands, so it opens the card like the rest of the row does. */}
                   <div className="npm-stp">
-                    <button type="button" aria-label={`One less ${l.name}`} onClick={() => p.onQty(l.id, -1)}>−</button>
+                    <button type="button" aria-label={`One less ${l.name}`} onClick={(e) => { e.stopPropagation(); p.onQty(l.id, -1); }}>−</button>
                     <div className="q">{l.qty}</div>
-                    <button type="button" aria-label={`One more ${l.name}`} onClick={() => p.onQty(l.id, 1)}>+</button>
+                    <button type="button" aria-label={`One more ${l.name}`} onClick={(e) => { e.stopPropagation(); p.onQty(l.id, 1); }}>+</button>
                   </div>
                   {!quoting && <div className="npm-amt">{l.total > 0 ? inr(l.total) : '—'}</div>}
                 </div>
@@ -456,9 +502,9 @@ export default function NewPoMobile(p: NewPoMobileProps) {
 
       <div className={`npm-scrim${sheet ? ' show' : ''}`} onClick={closeSheets} />
 
-      <DragSheet open={sheet === 'add'} onDismiss={() => setSheet(null)} className={`npm-sheet${sheet === 'add' ? ' show' : ''}`} role="dialog" aria-label="Add item">
+      <DragSheet open={sheet === 'add'} onDismiss={() => { setSheet(null); setEditingId(null); }} className={`npm-sheet${sheet === 'add' ? ' show' : ''}`} role="dialog" aria-label={editingId ? 'Edit item' : 'Add item'}>
         <div className="npm-grab" />
-        <h3>Add item</h3>
+        <h3>{editingId ? 'Edit item' : 'Add item'}</h3>
         <div className="npm-field">
           <label htmlFor="npm-name">Item</label>
           <input id="npm-name" value={fName} onChange={e => setFName(e.target.value)} placeholder="OPC 53 cement" autoComplete="off" />
@@ -476,10 +522,14 @@ export default function NewPoMobile(p: NewPoMobileProps) {
         <div className="npm-units">
           {UNITS.map(u => <button type="button" key={u} className={u === unit ? 'on' : ''} onClick={() => setUnit(u)}>{u}</button>)}
         </div>
-        <p className="npm-hint2">Leave the rate empty — the price is confirmed against the vendor before the order goes out.</p>
+        {!quoting && <p className="npm-hint2">Leave the rate empty — the price is confirmed against the vendor before the order goes out.</p>}
         <div className="npm-acts">
-          <button type="button" className="npm-b2 ghost" onClick={() => addManual(true)}>Add another</button>
-          <button type="button" className="npm-b2 pri" onClick={() => addManual(false)}>Add to order</button>
+          {editingId
+            ? <button type="button" className="npm-b2 danger" onClick={removeEditing}>Remove</button>
+            : <button type="button" className="npm-b2 ghost" onClick={() => commit(true)}>Add another</button>}
+          <button type="button" className="npm-b2 pri" onClick={() => commit(false)}>
+            {editingId ? 'Save changes' : quoting ? 'Add to request' : 'Add to order'}
+          </button>
         </div>
       </DragSheet>
 
