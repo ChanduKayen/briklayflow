@@ -43,7 +43,7 @@ export interface PayRow {
 }
 export interface VendorBill { poId: string; no: string; date: string; amount: number; balance: number; projectId: string | null; projectName: string | null }
 export interface PaySection { projectId: string; projectName: string; rows: PayRow[] }
-export interface WeeklyPayments { sections: PaySection[]; monday: Date }
+export interface WeeklyPayments { sections: PaySection[]; monday: Date; isCurrentWeek: boolean }
 
 const inrShort = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
 
@@ -118,49 +118,65 @@ export async function loadWeeklyPayments(monday: Date): Promise<WeeklyPayments> 
     return { projectId: site.site, projectName: site.label, rows };
   }); // keep every active project — an empty one still shows its "add a payment" row
 
-  // ── Worker carry-forward — the ledger's single source (v_party_balance) decides what each worker is
-  //    owed; whatever this week's rows don't already represent is carried in. This surfaces a worker
-  //    owed from earlier weeks (NMR wages that accrue in the ledger but whose weekly rows carry nothing
-  //    forward, OR a worker with no attendance at all this week). Contract rows already carry their own
-  //    balance, so their remainder here is ~0. Falls back silently if the view isn't applied yet. ──
-  try {
+  // ── One row per worker: fold the ledger's prior balance INTO this week's row ───────────────────────
+  //    v_party_balance (the single source) says what each worker is owed in total; this week's rows
+  //    already represent part of it. The remainder ("owed from earlier") is FOLDED INTO the worker's own
+  //    row as its Balance B/F — so the ledger and the run show one row, not a duplicate "this week" row
+  //    plus a separate "carried from the ledger" row. A worker owed from before with NO work this week
+  //    gets a single row (B/F only). The live balance is only meaningful for the CURRENT week, so past
+  //    weeks stay a plain record of that week's attendance (no carry). Falls back silently if the view
+  //    isn't applied yet. ──
+  const isCurrentWeek = mondayOf(new Date()).getTime() === monday.getTime();
+  if (isCurrentWeek) try {
     const balR = await supabase.from('v_party_balance').select('stakeholder_id, to_pay').gt('to_pay', 0);
     const owed: Record<string, number> = {};
     (balR.data ?? []).forEach((b: any) => { owed[b.stakeholder_id] = Number(b.to_pay || 0); });
     const owedIds = Object.keys(owed);
     if (owedIds.length) {
-      // What the week's labour rows already represent as owed, per worker (balance b/f + this week).
+      // Per worker: what this week's rows already represent (b/f + this week), and the row to fold into.
       const represented: Record<string, number> = {};
-      sections.forEach(s => s.rows.forEach(r => { if (r.stakeholderId) represented[r.stakeholderId] = (represented[r.stakeholderId] || 0) + r.balanceBf + r.thisWeek; }));
-      // Restrict to WORKERS (vendors are handled by loadVendorRows) and carry the unrepresented remainder.
+      const primaryRow: Record<string, PayRow> = {};
+      sections.forEach(s => s.rows.forEach(r => {
+        if (!r.stakeholderId) return;
+        represented[r.stakeholderId] = (represented[r.stakeholderId] || 0) + r.balanceBf + r.thisWeek;
+        if (!primaryRow[r.stakeholderId]) primaryRow[r.stakeholderId] = r;
+      }));
+      // Restrict to WORKERS (vendors are handled by loadVendorRows).
       const wkrR = await supabase.from('stakeholders').select('stakeholder_id, name, category, type').in('stakeholder_id', owedIds).eq('type', 'Worker');
-      const carryRows: PayRow[] = [];
+      const standalone: PayRow[] = [];
       for (const w of (wkrR.data ?? [])) {
         const carried = Math.round((owed[w.stakeholder_id] || 0) - (represented[w.stakeholder_id] || 0));
         if (carried <= 0.5) continue;
-        carryRows.push({
-          key: `carry-${w.stakeholder_id}`, projectId: '', projectName: '—',
-          stakeholderId: w.stakeholder_id, party: w.name || 'Worker', trade: w.category || 'Worker',
-          kind: 'wages', basis: 'carried from the ledger · owed from earlier', thisWeek: 0, balanceBf: carried,
-          woId: null, milestoneId: null,
-        });
+        const row = primaryRow[w.stakeholder_id];
+        if (row) {
+          // Fold the earlier balance into this worker's existing row — one row, B/F + This week together.
+          row.balanceBf += carried;
+        } else {
+          // Owed from before, no work logged this week → a single row (B/F only).
+          standalone.push({
+            key: `carry-${w.stakeholder_id}`, projectId: '', projectName: '—',
+            stakeholderId: w.stakeholder_id, party: w.name || 'Worker', trade: w.category || 'Worker',
+            kind: 'wages', basis: 'owed from earlier · no work logged this week', thisWeek: 0, balanceBf: carried,
+            woId: null, milestoneId: null,
+          });
+        }
       }
-      // Label each carried row with the worker's most recent project (for the Site column).
-      if (carryRows.length) {
-        const ids = carryRows.map(r => r.stakeholderId!).filter(Boolean);
+      // Label the standalone rows with the worker's most recent project (for the Site column).
+      if (standalone.length) {
+        const ids = standalone.map(r => r.stakeholderId!).filter(Boolean);
         const lineR = await supabase.from('v_party_ledger_line').select('stakeholder_id, project_id, line_date').in('stakeholder_id', ids).not('project_id', 'is', null).order('line_date', { ascending: false });
         const lastProj: Record<string, string> = {};
         (lineR.data ?? []).forEach((l: any) => { if (!lastProj[l.stakeholder_id] && l.project_id) lastProj[l.stakeholder_id] = l.project_id; });
         const projIds = [...new Set(Object.values(lastProj))];
         const projName: Record<string, string> = {};
         if (projIds.length) { const pr = await supabase.from('projects').select('project_id, name').in('project_id', projIds); (pr.data ?? []).forEach((p: any) => { projName[p.project_id] = p.name; }); }
-        carryRows.forEach(r => { const pid = lastProj[r.stakeholderId!]; if (pid) { r.projectId = pid; r.projectName = projName[pid] || pid; } });
-        sections.push({ projectId: '__carry__', projectName: 'Carried forward', rows: carryRows });
+        standalone.forEach(r => { const pid = lastProj[r.stakeholderId!]; if (pid) { r.projectId = pid; r.projectName = projName[pid] || pid; } });
+        sections.push({ projectId: '__carry__', projectName: 'Owed from earlier', rows: standalone });
       }
     }
   } catch { /* v_party_balance not applied yet — no carry-forward */ }
 
-  return { sections, monday };
+  return { sections, monday, isCurrentWeek };
 }
 
 /** What this week's run has already settled, by row key. Read back from the stamp

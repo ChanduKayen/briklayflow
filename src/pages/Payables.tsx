@@ -348,6 +348,9 @@ export default function Payables({ session }: { session: Session }) {
     queryKey: ['weekly_payments', monday.toISOString().slice(0, 10)],
     queryFn: () => loadWeeklyPayments(monday),
   });
+  // A past (or future) week is a read-only RECORD of that week's activity — the live balance is "now",
+  // so we never let you pay or carry against it here; the ledger holds the live position.
+  const readOnly = data ? !data.isCurrentWeek : false;
   const { data: newLedger } = useQuery({
     queryKey: ['org_new_ledger', orgId],
     queryFn: () => isNewLedgerOrg(orgId),
@@ -380,12 +383,12 @@ export default function Payables({ session }: { session: Session }) {
       .sort((a, b) => a.projectName.localeCompare(b.projectName) || b.thisWeek - a.thisWeek);
     const out: PaySection[] = [];
     if ((data?.sections ?? []).length || workerRows.length)
-      out.push({ projectId: '__workers__', projectName: 'Workers — this week', rows: workerRows });
+      out.push({ projectId: '__workers__', projectName: readOnly ? `Workers — ${weekLabel(monday)}` : 'Workers — this week', rows: workerRows });
     if ((vendorRows ?? []).length) out.push({ projectId: '__vendors__', projectName: 'Vendors — bills to pay', rows: vendorRows! });
     const recRows = (recurring ?? []).map(recurringToRow);
     if (recRows.length) out.push({ projectId: '__recurring__', projectName: 'Recurring & fixed', rows: recRows });
     return out;
-  }, [data, vendorRows, recurring, extra]);
+  }, [data, vendorRows, recurring, extra, readOnly, monday]);
 
   const paidOf = (r: PayRow): number | null => paid[r.key] ?? serverPaid[r.key] ?? null;
   const planned = (r: PayRow) => paidOf(r) ?? plan[r.key] ?? Math.round(r.thisWeek);
@@ -548,6 +551,7 @@ export default function Payables({ session }: { session: Session }) {
               <button className="wknow" onClick={() => setMonday(mondayOf(new Date()))}>this week</button>
             </div>
             {orgId && <div className="sub cutover"><LedgerCutoverControl orgId={orgId} isManager={isManager} /></div>}
+            {readOnly && <div className="sub" style={{ color: 'var(--gold, #8A6A1F)' }}>A past week — a record of what was logged and paid then. The live balance is on each party&apos;s ledger.</div>}
           </div>
           <div className="stats">
             <div className="st"><div className="l">Planned</div><div className="v mono">{inr(totals.planned)}</div></div>
@@ -596,6 +600,8 @@ export default function Payables({ session }: { session: Session }) {
                       <div className="plan">
                         {isPaid
                           ? <div className="in paid-v"><span>₹</span><b className="mono">{settled!.toLocaleString('en-IN')}</b></div>
+                          : readOnly
+                          ? <div className="in paid-v"><span>₹</span><b className="mono">{(Math.round(r.thisWeek) || 0).toLocaleString('en-IN')}</b></div>
                           : <div className="in"><span>₹</span><input className="mono" inputMode="numeric" value={planned(r) || ''} placeholder="0"
                               onChange={(e) => { const v = parseInt(e.target.value.replace(/[^\d]/g, ''), 10) || 0; setPlan(p => ({ ...p, [r.key]: v })); setDiffs(d => { const n = { ...d }; delete n[r.key]; return n; }); }}
                               onBlur={() => { setTimeout(() => { if (!paid[r.key] && Math.abs(planned(r) - r.thisWeek) >= 1 && !diffs[r.key] && why !== r.key) setWhy(r.key); }, 120); }}
@@ -610,6 +616,8 @@ export default function Payables({ session }: { session: Session }) {
                       <div className="status">
                         {isPaid
                           ? <span className="done">✓ Paid</span>
+                          : readOnly
+                          ? <span className="done" style={{ color: 'var(--walnut-3)' }}>record</span>
                           : <button className="mark" disabled={!planned(r) || unexplained || busy === r.key} title={unexplained ? 'say what the difference is first' : ''} onClick={() => onMark(r)}>{busy === r.key ? '…' : 'Mark paid'}</button>}
                       </div>
                     </div>

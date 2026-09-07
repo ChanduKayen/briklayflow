@@ -76,11 +76,16 @@ is not required for correctness.)
 - **This week** = credits dated inside the week (contract stages certified this week; day wages from
   this week’s muster).
 - **Balance B/F** = the ledger balance the week rows don’t already represent. A carry-forward pass
-  reads `v_party_balance.to_pay` and adds a **“carried from the ledger · owed from earlier”** row for
-  `to_pay − represented`, where `represented` is what this week’s rows already show. This surfaces
-  any worker owed from earlier weeks (or with no attendance this week at all).
+  reads `v_party_balance.to_pay` and **folds the remainder (`to_pay − represented`) INTO that worker’s
+  own row** as its B/F — so the run shows **one row per worker** (B/F + This week together), never a
+  “this week” row plus a duplicate “carried from the ledger” row. A worker owed from before with no
+  work this week gets a single B/F-only row ("owed from earlier").
 - **After** = B/F + this week − paid, with the existing *carried / advance / re-agreed* WHY-on-pay.
 - **Mark paid** records a real transaction (a debit), FIFO against the oldest credit.
+- **Only the current week carries.** A live balance is "as of now", so past weeks are a **read-only
+  record** of that week's attendance and payments — the amount is static, Mark-paid becomes a quiet
+  "record", and a note points to the party ledger for the live position. The carry pass runs for the
+  current week alone (`WeeklyPayments.isCurrentWeek`).
 
 So the fix is **not on the Payables page** — it already reads the ledger correctly. It is that the
 ledger must actually *hold* every party’s dues. Which is where the cutover comes in.
