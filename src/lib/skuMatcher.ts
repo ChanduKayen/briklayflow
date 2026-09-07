@@ -90,7 +90,19 @@ export async function matchSKUsFromAudio(
   for (let i = 0; i < bytes.length; i += chunk) {
     b64 += String.fromCharCode(...bytes.subarray(i, i + chunk))
   }
-  return matchSKUs({ audio_base64: btoa(b64), audio_mime: audio.type || 'audio/webm', language, caller, vendor_category })
+  try {
+    return await matchSKUs({ audio_base64: btoa(b64), audio_mime: audio.type || 'audio/webm', language, caller, vendor_category })
+  } catch (e) {
+    // A sku-matcher deployed before voice existed ignores audio_base64 and then complains that
+    // nothing was sent at all. That contract string is meaningless to whoever is holding the
+    // phone, so translate it — and keep the real reason where a developer will find it.
+    const msg = (e as Error)?.message ?? ''
+    if (/image_base64|image_url/i.test(msg)) {
+      console.error('[voice] the deployed sku-matcher does not accept audio yet — deploy the function', e)
+      throw new Error('Voice is not live on the server yet. Type the items or scan a quote for now.')
+    }
+    throw e
+  }
 }
 
 export async function matchSKUsFromFile(
