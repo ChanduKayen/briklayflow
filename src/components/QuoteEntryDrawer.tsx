@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import DragSheet from './DragSheet';
 import { useSubmitQuote } from '../hooks/useProcurement';
 import type { RFQQuote, RFQItem, QuoteRate } from '../types/procurement';
 import { useSnackbar } from './Snackbar';
@@ -120,7 +121,9 @@ export default function QuoteEntryDrawer({ isOpen, onClose, quote, rfqItems, rfq
       />
 
       {/* Sheet */}
-      <div
+      <DragSheet
+        open={sheetVisible}
+        onDismiss={handleClose}
         style={{
           position: 'fixed', bottom: 0, left: 0, right: 0,
           zIndex: 50,
@@ -362,7 +365,7 @@ export default function QuoteEntryDrawer({ isOpen, onClose, quote, rfqItems, rfq
             </button>
           </div>
         </div>
-      </div>
+      </DragSheet>
     </>
   );
 }

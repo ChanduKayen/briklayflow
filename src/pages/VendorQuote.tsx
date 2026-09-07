@@ -4,6 +4,7 @@
 // (App.tsx). Exact port of the vendor-quote mockup, scoped under `.vq`; the data + submit
 // flow (rfq_by_token / submit_rfq_quote, closed-state, prior-quote prefill) is unchanged.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import DragSheet from '../components/DragSheet';
 import { supabase } from '../lib/supabase';
 
 interface RfqItem { line: number; item_name: string; spec?: string; qty?: number | string; unit?: string }
@@ -569,7 +570,7 @@ export default function VendorQuote({ token }: { token: string }) {
 
       {/* one persistent sheet */}
       <div className={`scrim${sheetOpen ? ' on' : ''}`} onClick={closeFromSheet} />
-      <div className={`sheet${sheetOpen ? ' on' : ''}`} role="dialog">
+      <DragSheet open={sheetOpen} onDismiss={closeFromSheet} className={`sheet${sheetOpen ? ' on' : ''}`} role="dialog">
         <div className="handle" />
         <div className="sh-top">
           <span className="k">ITEM {cur + 1} OF {items.length}</span>
@@ -605,7 +606,7 @@ export default function VendorQuote({ token }: { token: string }) {
           <input ref={varRef} value={sheetVar} placeholder="What are you offering instead? e.g. No. 8 size / Cera brand" onChange={(e) => setSheetVar(e.target.value)} />
         </div>
         <div className="sh-hint"><button className="prev" hidden={cur <= 0} onClick={prev}>‹ Previous</button><span>Enter also saves &amp; moves on</span></div>
-      </div>
+      </DragSheet>
 
       <div className={`toast${toastMsg ? ' show' : ''}`}>{toastMsg}</div>
     </div>

@@ -5,6 +5,7 @@
 // code that already owns them.
 import { useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import DragSheet from '../DragSheet';
 
 const CSS = `
 .txm{--tint:#C4502B;--tint-press:#A8431F;--ink:#1B1713;--ink-2:#87807A;--ink-3:#B5AEA7;
@@ -325,7 +326,7 @@ export default function TxnDetailMobile(p: TxnDetailMobileProps) {
 
       <div className={`scrim${sheet ? ' show' : ''}`} onClick={close} />
 
-      <div className={`sheet msheet${sheet === 'menu' ? ' show' : ''}`} role="dialog" aria-label="Transaction actions">
+      <DragSheet open={sheet === 'menu'} onDismiss={close} className={`sheet msheet${sheet === 'menu' ? ' show' : ''}`} role="dialog" aria-label="Transaction actions">
         <div className="grab" />
         {p.menu.map(m => (
           <button type="button" key={m.label} className={`mi${m.danger ? ' danger' : ''}`}
@@ -333,9 +334,9 @@ export default function TxnDetailMobile(p: TxnDetailMobileProps) {
             {m.label}
           </button>
         ))}
-      </div>
+      </DragSheet>
 
-      <div className={`sheet${sheet === 'delete' ? ' show' : ''}`} role="dialog" aria-label={p.deleteTitle}>
+      <DragSheet open={sheet === 'delete'} onDismiss={close} className={`sheet${sheet === 'delete' ? ' show' : ''}`} role="dialog" aria-label={p.deleteTitle}>
         <div className="grab" />
         <h3>{p.deleteTitle}</h3>
         <p className="sh2">{p.deleteBody}</p>
@@ -344,7 +345,7 @@ export default function TxnDetailMobile(p: TxnDetailMobileProps) {
           {p.deleting ? <span className="ring" aria-hidden="true" /> : <span className="txt">Delete</span>}
         </button>
         <button type="button" className="b2 ghost" style={{ width: '100%', marginTop: 8 }} onClick={close}>Cancel</button>
-      </div>
+      </DragSheet>
     </div>,
     document.body,
   );

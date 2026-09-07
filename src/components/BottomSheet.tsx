@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { useSheetDrag } from '../lib/sheetDrag';
 
 type BottomSheetProps = {
   open: boolean;
@@ -18,8 +19,10 @@ type BottomSheetProps = {
  * Mobile bottom sheet. Slides up from the bottom of the screen with a spring
  * curve. Renders to a portal so it escapes overflow/transform stacking contexts.
  *
- * Dismissal: scrim tap, swipe-down past 80px on the drag handle, or onClose()
- * from the consumer (e.g. an item click).
+ * Dismissal: scrim tap, swipe down anywhere on the sheet, or onClose() from the consumer
+ * (e.g. an item click). The swipe is the app-wide gesture in lib/sheetDrag, so it behaves the
+ * same here as on every hand-rolled sheet — and it works from the body, not only the 12px
+ * handle, which was the only part of this sheet that ever answered a thumb.
  */
 export default function BottomSheet({
   open,
@@ -33,9 +36,7 @@ export default function BottomSheet({
   // Mount lazily so the slide-down (close) animation can play before unmount.
   const [mounted, setMounted] = useState(open);
   const [visible, setVisible] = useState(false);
-  const sheetRef = useRef<HTMLDivElement>(null);
-  const dragStartY = useRef<number | null>(null);
-  const dragDeltaY = useRef(0);
+  const sheetRef = useSheetDrag<HTMLDivElement>(onClose, open);
 
   useEffect(() => {
     if (open) {
@@ -67,30 +68,6 @@ export default function BottomSheet({
 
   if (!mounted) return null;
 
-  const onTouchStart = (e: React.TouchEvent) => {
-    dragStartY.current = e.touches[0].clientY;
-    dragDeltaY.current = 0;
-  };
-  const onTouchMove = (e: React.TouchEvent) => {
-    if (dragStartY.current == null || !sheetRef.current) return;
-    const delta = e.touches[0].clientY - dragStartY.current;
-    if (delta <= 0) return;
-    dragDeltaY.current = delta;
-    sheetRef.current.style.transform = `translateY(${delta}px)`;
-    sheetRef.current.style.transition = 'none';
-  };
-  const onTouchEnd = () => {
-    if (!sheetRef.current) return;
-    sheetRef.current.style.transition = '';
-    if (dragDeltaY.current > 80) {
-      onClose();
-    } else {
-      sheetRef.current.style.transform = '';
-    }
-    dragStartY.current = null;
-    dragDeltaY.current = 0;
-  };
-
   const hiddenAboveDesktop = desktopAllowed ? '' : 'md:hidden';
 
   return createPortal(
@@ -113,13 +90,9 @@ export default function BottomSheet({
           maxHeight: `${maxHeightVh}vh`,
         }}
       >
-        {/* Drag handle (touch surface for swipe-to-dismiss) */}
-        <div
-          className="flex justify-center pt-3 pb-2 select-none touch-none"
-          onTouchStart={onTouchStart}
-          onTouchMove={onTouchMove}
-          onTouchEnd={onTouchEnd}
-        >
+        {/* Drag handle — the sign that the sheet can be pulled down; the gesture itself
+            listens on the whole sheet. */}
+        <div className="flex justify-center pt-3 pb-2 select-none">
           <div className="w-9 h-1 rounded-full bg-on-surface-variant/25" />
         </div>
 

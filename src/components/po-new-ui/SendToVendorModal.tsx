@@ -4,6 +4,7 @@
  * SendToVendorPanel, so there is ONE flow with two entry points (post-create + detail page).
  */
 import { V } from './voiceTokens';
+import DragSheet from '../DragSheet';
 import SendToVendorPanel from './SendToVendorPanel';
 
 interface Props {
@@ -22,7 +23,9 @@ export default function SendToVendorModal({ open, onClose, ...panel }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center">
       <div className="absolute inset-0" style={{ background: 'rgba(30,26,21,0.5)' }} onClick={onClose} aria-hidden="true" />
-      <div
+      <DragSheet
+        open={open}
+        onDismiss={onClose}
         className="relative w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-6 pb-8 sm:pb-6 motion-safe:animate-scale-in"
         style={{ background: V.surface }}
         role="dialog"
@@ -30,7 +33,7 @@ export default function SendToVendorModal({ open, onClose, ...panel }: Props) {
         aria-label="Send PO to vendor"
       >
         <SendToVendorPanel {...panel} onClose={onClose} />
-      </div>
+      </DragSheet>
     </div>
   );
 }

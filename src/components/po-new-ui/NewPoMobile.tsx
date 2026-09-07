@@ -10,6 +10,7 @@
 // arrive as props. This file owns presentation and the one piece of local state a screen like this
 // needs — which drawer is open, what the microphone is hearing, what the sheet is collecting.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import DragSheet from '../DragSheet';
 
 const CSS = `
 .npm-w{--tint:#C4502B;--tint-press:#A8431F;--ink:#1C1815;--ink-2:#8A8178;--ink-3:#B8AFA5;
@@ -478,7 +479,7 @@ export default function NewPoMobile(p: NewPoMobileProps) {
 
       <div className={`npm-scrim${sheet ? ' show' : ''}`} onClick={closeSheets} />
 
-      <div className={`npm-sheet${sheet === 'add' ? ' show' : ''}`} role="dialog" aria-label="Add item">
+      <DragSheet open={sheet === 'add'} onDismiss={() => setSheet(null)} className={`npm-sheet${sheet === 'add' ? ' show' : ''}`} role="dialog" aria-label="Add item">
         <div className="npm-grab" />
         <h3>Add item</h3>
         <div className="npm-field">
@@ -503,9 +504,9 @@ export default function NewPoMobile(p: NewPoMobileProps) {
           <button type="button" className="npm-b2 ghost" onClick={() => addManual(true)}>Add another</button>
           <button type="button" className="npm-b2 pri" onClick={() => addManual(false)}>Add to order</button>
         </div>
-      </div>
+      </DragSheet>
 
-      <div className={`npm-sheet npm-dsheet${sheet === 'typed' ? ' show' : ''}`} role="dialog" aria-label="Unmatched items">
+      <DragSheet open={sheet === 'typed'} onDismiss={() => setSheet(null)} className={`npm-sheet npm-dsheet${sheet === 'typed' ? ' show' : ''}`} role="dialog" aria-label="Unmatched items">
         <div className="npm-grab" />
         <h3>{p.unresolved === 1 ? 'One item is not in your catalogue' : `${p.unresolved} items are not in your catalogue`}</h3>
         <p>Matching an item to the catalogue keeps spend comparable across orders. You can place this
@@ -514,9 +515,9 @@ export default function NewPoMobile(p: NewPoMobileProps) {
           <button type="button" className="npm-b2 pri" onClick={() => { closeSheets(); p.onSubmitAsTyped(); }}>Place with names as typed</button>
           <button type="button" className="npm-b2 ghost" onClick={closeSheets}>Go back and edit</button>
         </div>
-      </div>
+      </DragSheet>
 
-      <div className={`npm-sheet npm-dsheet${sheet === 'discard' ? ' show' : ''}`} role="dialog" aria-label="Leave this order">
+      <DragSheet open={sheet === 'discard'} onDismiss={() => setSheet(null)} className={`npm-sheet npm-dsheet${sheet === 'discard' ? ' show' : ''}`} role="dialog" aria-label="Leave this order">
         <div className="npm-grab" />
         <h3>Leave this order?</h3>
         <p>You&rsquo;ve started an order. Nothing is saved until you place it — go back and it is gone.</p>
@@ -524,7 +525,7 @@ export default function NewPoMobile(p: NewPoMobileProps) {
           <button type="button" className="npm-b2 danger" onClick={() => { closeSheets(); p.onBack(); }}>Discard order</button>
           <button type="button" className="npm-b2 ghost" onClick={closeSheets}>Keep editing</button>
         </div>
-      </div>
+      </DragSheet>
 
       <div className={`npm-toast${toast ? ' show' : ''}`} role="status">{toast}</div>
     </div>

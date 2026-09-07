@@ -3,6 +3,7 @@
 // Presentation only. Every figure, every total and every action belongs to Payables and arrives as
 // props, so recording a payment still runs through recordWeeklyPayment / settleWeeklyPaymentOnLedger.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import DragSheet from '../DragSheet';
 
 const CSS = `
 .plm{--tint:#C4502B;--tint-press:#A8431F;--ink:#1B1713;--ink-2:#87807A;--ink-3:#B5AEA7;
@@ -509,7 +510,7 @@ export default function PayablesMobile(p: PayablesMobileProps) {
 
       <div className={`scrim${sheetOpen ? ' show' : ''}`} onClick={() => { closePay(); p.onCloseForm?.(); }} />
 
-      <div className={`sheet${payFor ? ' show' : ''}`} role="dialog" aria-label="Record a payment">
+      <DragSheet open={!!payFor} onDismiss={closePay} className={`sheet${payFor ? ' show' : ''}`} role="dialog" aria-label="Record a payment">
         <div className="grab" />
         <div className="to">Pay</div>
         <div className="toname">{payFor?.name ?? '—'}</div>
@@ -561,13 +562,13 @@ export default function PayablesMobile(p: PayablesMobileProps) {
           <span className="ring" aria-hidden="true" />
           <span className="txt">{stage === 'done' ? 'Paid' : `Pay ${inr(amount)}`}</span>
         </button>
-      </div>
+      </DragSheet>
 
-      <div className={`sheet${p.formSheet ? ' show' : ''}`} role="dialog" aria-label={p.formSheet?.title ?? 'Form'}>
+      <DragSheet open={!!p.formSheet} onDismiss={() => p.onCloseForm?.()} className={`sheet${p.formSheet ? ' show' : ''}`} role="dialog" aria-label={p.formSheet?.title ?? 'Form'}>
         <div className="grab" />
         <div className="toname" style={{ marginBottom: 14 }}>{p.formSheet?.title ?? ''}</div>
         {p.formSheet?.body}
-      </div>
+      </DragSheet>
     </div>
   );
 }

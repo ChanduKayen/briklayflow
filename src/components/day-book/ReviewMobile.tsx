@@ -8,6 +8,7 @@ import { useMemo, useRef, useState } from 'react';
 import type { RoughEntry } from '../../types';
 import { fileRoughEntry, fileRoughEntrySplit, rejectRoughEntry, createParty, errMessage, type ProjectSplit } from './fileEntry';
 import { resolveEntry, type ProjectLite, type StakeholderLite } from './resolveEntry';
+import DragSheet from '../DragSheet';
 
 const CSS = `
 .rvm{--tint:#C4502B;--tint-press:#A8431F;--ink:#1B1713;--ink-2:#87807A;--ink-3:#B5AEA7;
@@ -643,7 +644,7 @@ export default function ReviewMobile(p: ReviewMobileProps) {
 
       <div className={`scrim${anySheet ? ' show' : ''}`} onClick={() => setSheet(null)} />
 
-      <div className={`sheet${sheet === 'filed' ? ' show' : ''}`} role="dialog" aria-label="Filed">
+      <DragSheet open={sheet === 'filed'} onDismiss={() => setSheet(null)} className={`sheet${sheet === 'filed' ? ' show' : ''}`} role="dialog" aria-label="Filed">
         <div className="grab" />
         <h3>Filed</h3>
         <div className="flgroup">
@@ -661,17 +662,17 @@ export default function ReviewMobile(p: ReviewMobileProps) {
             );
           })}
         </div>
-      </div>
+      </DragSheet>
 
-      <div className={`sheet${sheet === 'menu' ? ' show' : ''}`} role="dialog" aria-label="Entry actions">
+      <DragSheet open={sheet === 'menu'} onDismiss={() => setSheet(null)} className={`sheet${sheet === 'menu' ? ' show' : ''}`} role="dialog" aria-label="Entry actions">
         <div className="grab" />
         <button type="button" className="mi" onClick={openEdit}>Edit details</button>
         <button type="button" className="mi" onClick={() => { if (active) openSplit(active); }}>Split into transactions</button>
         <button type="button" className="mi" onClick={() => { setSheet(null); p.onOpenWhatsApp(); }}>View in WhatsApp</button>
         <button type="button" className="mi dim" onClick={() => void doBin()}>Not a transaction</button>
-      </div>
+      </DragSheet>
 
-      <div className={`sheet${sheet === 'edit' ? ' show' : ''}`} role="dialog" aria-label="Edit details">
+      <DragSheet open={sheet === 'edit'} onDismiss={() => setSheet(null)} className={`sheet${sheet === 'edit' ? ' show' : ''}`} role="dialog" aria-label="Edit details">
         <div className="grab" />
         <h3 style={{ marginBottom: 14 }}>Edit details</h3>
         <div className="frow">
@@ -688,9 +689,9 @@ export default function ReviewMobile(p: ReviewMobileProps) {
           ))}
         </div>
         <button type="button" className="b2" onClick={saveEdit}>Save</button>
-      </div>
+      </DragSheet>
 
-      <div className={`sheet${sheet === 'np' ? ' show' : ''}`} role="dialog" aria-label="New party">
+      <DragSheet open={sheet === 'np'} onDismiss={() => setSheet(null)} className={`sheet${sheet === 'np' ? ' show' : ''}`} role="dialog" aria-label="New party">
         <div className="grab" />
         <h3>New party</h3>
         <p style={{ fontSize: 14, color: 'var(--ink-2)', lineHeight: 1.5, margin: '2px 0 16px' }}>
@@ -703,9 +704,9 @@ export default function ReviewMobile(p: ReviewMobileProps) {
         <button type="button" className="b2" disabled={busy || !npName.trim()} onClick={() => void npAdd()}>Add &amp; file</button>
         <button type="button" className="b2" style={{ background: 'rgba(27,23,19,.06)', color: 'var(--ink)', marginTop: 8 }}
           onClick={() => setSheet(null)}>Pick someone else</button>
-      </div>
+      </DragSheet>
 
-      <div className={`sheet${sheet === 'split' ? ' show' : ''}`} role="dialog" aria-label="Split into transactions">
+      <DragSheet open={sheet === 'split'} onDismiss={() => setSheet(null)} className={`sheet${sheet === 'split' ? ' show' : ''}`} role="dialog" aria-label="Split into transactions">
         <div className="grab" />
         <h3 style={{ marginBottom: 4 }}>Split into transactions</h3>
         <p style={{ fontSize: 13.5, color: 'var(--ink-2)', marginBottom: 14 }}>{inr(activeDraft?.amount ?? 0)} from the message — divide it below.</p>
@@ -732,7 +733,7 @@ export default function ReviewMobile(p: ReviewMobileProps) {
         </div>
         <button type="button" className="b2" disabled={!splitOk} onClick={doSplit}>File {spLines.length} entries</button>
         <div className="autonote">Each transaction is described automatically —<br />purpose · site · part of the original amount.</div>
-      </div>
+      </DragSheet>
     </div>
   );
 }

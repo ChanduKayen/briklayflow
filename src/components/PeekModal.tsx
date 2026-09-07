@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import DragSheet from './DragSheet';
 
 interface PeekModalProps {
   title: string;
@@ -26,7 +27,9 @@ export function PeekModal({ title, subtitle, fullPageHref, onClose, children }: 
       className="fixed inset-0 z-[90] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm"
       onClick={onClose}
     >
-      <div
+      <DragSheet
+        open
+        onDismiss={onClose}
         className="relative w-full sm:w-[700px] max-h-[90vh] sm:max-h-[85vh] flex flex-col
                    bg-surface rounded-t-2xl sm:rounded-2xl shadow-2xl
                    animate-peek-in"
@@ -59,7 +62,7 @@ export function PeekModal({ title, subtitle, fullPageHref, onClose, children }: 
         <div className="flex-1 overflow-y-auto overscroll-contain p-5">
           {children}
         </div>
-      </div>
+      </DragSheet>
     </div>
   );
 }
