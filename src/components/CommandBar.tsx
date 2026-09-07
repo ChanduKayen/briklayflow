@@ -160,7 +160,7 @@ export function CommandBar() {
     close();
     switch (r.type) {
       case 'project':        navigate(`/projects/${r.id}`); break;
-      case 'person':         openPeek('STAKEHOLDER', r.id); break;
+      case 'person':         navigate(`/stakeholders/${r.id}`); break;
       case 'work_order':     openPeek('WO', r.id);          break;
       case 'purchase_order': openPeek('PO', r.id);          break;
       case 'transaction':    openPeek('TRANSACTION', r.id); break;
