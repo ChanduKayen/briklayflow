@@ -15,6 +15,7 @@ import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
 import { AttachBillSheet } from '../components/txn-ledger/AttachBillSheet';
 import { ContractHub, CONTRACT_HUB_CSS } from '../components/txn-ledger/ContractHub';
 import { useIsMobile } from '../lib/useIsMobile';
+import { createPortal } from 'react-dom';
 import TxnDetailMobile from '../components/txn/TxnDetailMobile';
 
 // ─── Scoped stylesheet — a faithful port of the txn-detail reference (cream/terracotta).
@@ -1077,7 +1078,12 @@ export default function TransactionDetail({ session }: { session: Session }) {
       <ImageLightbox url={lightboxUrl} title={lightboxTitle} onClose={() => setLightboxUrl(null)} />
 
       {/* ── AMEND MODAL ─────────────────────────────────────────────── */}
-      {amendStep !== 'idle' && (
+      {/* Rendered into <body>, deliberately. This modal is styled with the app's own classes, and
+          `.txnx button{color:inherit}` — the reset that lets the ported design's buttons take the
+          page ink — was reaching into it and repainting "Review Changes" near-black on the black
+          primary. Outside the scope it keeps its own colours, and it escapes the stacking context
+          as well. */}
+      {amendStep !== 'idle' && createPortal((
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
           onClick={(e) => { if (e.target === e.currentTarget) { setAmendStep('idle'); setAmendError(null); } }}>
           <div className="bg-white rounded-2xl shadow-2xl border border-outline-variant/20 w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
@@ -1200,7 +1206,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
             )}
           </div>
         </div>
-      )}
+      ), document.body)}
 
       {/* Stakeholder Ledger Drawer */}
       {txn && txn.stakeholder_id && (
