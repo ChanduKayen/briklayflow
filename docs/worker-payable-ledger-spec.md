@@ -120,6 +120,12 @@ So the **org `ledger_start_date`** is a bulk *default* for parties you haven’t
 per-party floor (`20260910000001`), and the party page’s line display drops pre-opening lines to
 match.
 
+**One date in practice.** These are not two boundaries to reconcile — the org date is a *default* and
+the per-party date is an *override*. The opening editor defaults its *starts-on* date to the org
+books-start date, so you set the date once for the business and only ever retype it for the rare party
+that started on a different day. A party that carried nothing needs no opening at all — the org date
+already floors them.
+
 **Where you set it.** On **each party’s ledger** (`StakeholderDetail` → *Opening balance*): amount +
 *starts-on* date + direction (we owe / advance), optionally split by site. This is the primary
 surface — you set the figure yourself, for the one party in front of you. The org-wide

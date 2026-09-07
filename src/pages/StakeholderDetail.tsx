@@ -13,7 +13,7 @@ import { QuickTransactionSheet } from '../components/QuickTransactionSheet';
 import { loadPartyLedger, saveOpeningBalance, addAdjustment, bookConsolidatedBill, type LedgerEntry, type PartyLedger } from '../lib/partyLedgerApi';
 import { readParty, isNewLedgerOrg } from '../lib/ledgerRead';
 import { PieceWorkEntry } from '../components/attendance/PieceWorkEntry';
-import { loadPartyCertifications } from '../lib/workCertification';
+import { loadPartyCertifications, loadLedgerCutover } from '../lib/workCertification';
 import { createCredit, fillCredit, allocateToCredit, allocateToPool, openCreditsFor, certifyStage, type OpenCredit } from '../lib/ledgerWrite';
 
 const inr = (n: number) => n.toLocaleString('en-IN');
@@ -659,7 +659,13 @@ function SiteView({ entries, L, T }: { entries: LedgerEntry[]; L: PartyLedger; T
 
 // ── modals ─────────────────────────────────────────────────────────────────────
 function OpeningModal({ orgId, L, onClose, onSaved, onError }: { orgId: string; L: PartyLedger; onClose: () => void; onSaved: () => void; onError: (m: string) => void }) {
-  const [asOf, setAsOf] = useState(L.opening?.asOf || '2026-04-01');
+  // The business's books-start date is the default "starts on" for this party — set it once at the org
+  // level and it flows here, so you retype the date only when THIS party genuinely started on another
+  // day. (One date in practice; the per-party date is just the override.)
+  const { data: orgCutover } = useQuery({ queryKey: ['ledger_cutover', orgId], queryFn: () => loadLedgerCutover(orgId), enabled: !!orgId });
+  const [asOf, setAsOf] = useState(L.opening?.asOf || orgCutover || new Date().toISOString().slice(0, 10));
+  const [dateTouched, setDateTouched] = useState(false);
+  useEffect(() => { if (!L.opening && !dateTouched && orgCutover) setAsOf(orgCutover); }, [orgCutover, L.opening, dateTouched]);
   const [dir, setDir] = useState<'paid_ahead' | 'work_owed'>(L.opening?.direction || 'paid_ahead');
   const [amount, setAmount] = useState(L.opening ? inr(L.opening.total) : '');
   const [split, setSplit] = useState(!!(L.opening && Object.keys(L.opening.bySite).length));
@@ -681,7 +687,7 @@ function OpeningModal({ orgId, L, onClose, onSaved, onError }: { orgId: string; 
       <div className="modal" role="dialog">
         <header><h3>Opening balance for {L.stakeholder.name}</h3><p>This is {L.stakeholder.name.split(' ')[0]}&apos;s cutover: the figure you set becomes the balance on the date you choose, and the ledger accrues from that day. Everything before it is settled and ignored.</p></header>
         <div className="body">
-          <div className="field"><label>Starts on</label><input className="in" type="date" value={asOf} onChange={e => setAsOf(e.target.value)} style={{ maxWidth: 200 }} /><div className="help">The books begin for this party on this date — attendance, bills and payments count from here on; anything earlier is treated as already settled by this figure.</div></div>
+          <div className="field"><label>Starts on</label><input className="in" type="date" value={asOf} onChange={e => { setAsOf(e.target.value); setDateTouched(true); }} style={{ maxWidth: 200 }} /><div className="help">{orgCutover ? 'Defaults to your business books-start date — change it only if this party started on a different day. ' : ''}The books begin for this party on this date: attendance, bills and payments count from here on; anything earlier is settled by this figure.</div></div>
           <div className="field"><div className="lbl">Which way does it run?</div><div className="dir">
             <label className={dir === 'paid_ahead' ? 'on' : ''} onClick={() => setDir('paid_ahead')}><b>Paid ahead of work</b><span>You've paid them more than the work certified so far.</span></label>
             <label className={dir === 'work_owed' ? 'on' : ''} onClick={() => setDir('work_owed')}><b>Work done, not yet paid</b><span>They've certified work you still owe them for.</span></label>
