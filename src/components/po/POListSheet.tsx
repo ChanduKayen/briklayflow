@@ -223,6 +223,12 @@ const POLX_CSS = `
 .polx .m-pcard.m-quote .m-dot{background:var(--gold)}
 .polx .m-pcard.m-quote .m-st{color:var(--gold)}
 .polx .m-pcard.m-quote .po{color:var(--gold)}
+/* The workflow counts the trade chips displaced — small, tappable, in the money line. */
+.polx .m-wf{display:inline-flex;align-items:center;margin-left:8px;padding:1px 8px;border-radius:999px;
+  border:1px solid var(--line);background:var(--paper);color:var(--ink-2);font:inherit;font-size:11.5px;
+  font-weight:600;cursor:pointer;vertical-align:1px}
+.polx .m-wf.gold{border-color:#E4CE9A;background:var(--gold-tint);color:var(--gold)}
+.polx .m-wf.on{background:var(--terra);border-color:var(--terra);color:#fff}
 .polx .m-fab{position:fixed;right:16px;bottom:calc(76px + env(safe-area-inset-bottom));z-index:30;height:52px;padding:0 20px;border-radius:26px;background:var(--terra);color:#fff;font-weight:600;font-size:15px;display:inline-flex;align-items:center;gap:8px;border:0;box-shadow:0 12px 28px -8px rgba(196,80,43,.55)}
 .polx .m-fab svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2.4}
 .polx .m-fab:active{transform:scale(.96)}
@@ -255,7 +261,7 @@ const POLX_CSS = `
 
 interface POItem { n: string; q: string; r: boolean }
 interface PORow {
-  id: string; vendor: string; stakeholderId: string; vendorContact: string | null;
+  id: string; vendor: string; stakeholderId: string; vendorContact: string | null; trade: string;
   site: string; by: string; ordered: string; createdAt: string; approvalStatus: string;
   items: POItem[]; value: number; billed: number; paid: number;
   due: string | null; recv: string | null; sent: string | null; cancelled: boolean; rfq: boolean;
@@ -272,7 +278,7 @@ function usePOListData(projectId?: string) {
     queryFn: async () => {
       let q = supabase
         .from('purchase_orders')
-        .select('po_id, status, approval_status, date_issued, created_at, ordered_by, expected_delivery, total_value, order_value, vendor_bill_amount, received_at_site, sent_to_vendor_at, stakeholder_id, project_id, items, projects(name), stakeholders(name, contact), po_line_items(id, item_name, unit, quantity_ordered)')
+        .select('po_id, status, approval_status, date_issued, created_at, ordered_by, expected_delivery, total_value, order_value, vendor_bill_amount, received_at_site, sent_to_vendor_at, stakeholder_id, project_id, items, projects(name), stakeholders(name, contact, category), po_line_items(id, item_name, unit, quantity_ordered)')
         .order('created_at', { ascending: false });
       if (projectId) q = q.eq('project_id', projectId);
       const { data, error } = await q;
@@ -366,6 +372,7 @@ function usePOListData(projectId?: string) {
         vendor: po.stakeholders?.name || 'Vendor',
         stakeholderId: po.stakeholder_id,
         vendorContact: po.stakeholders?.contact ?? null,
+        trade: (po.stakeholders?.category || '').trim(),
         site: po.projects?.name || '',
         by: po.ordered_by || '',
         ordered: po.date_issued || po.created_at,
@@ -425,7 +432,9 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   const navigate = useNavigate();
   const { rows, isLoading } = usePOListData(projectId);
   const { data: openRfqs = [] } = useOpenRfqs(projectId);
-  const [filter, setFilter] = useState<'all' | 'mine' | 'late' | 'open' | 'vendor' | 'done' | 'quotes' | 'approvals' | 'tosend' | 'onway'>('all');
+  const [filter, setFilter] = useState<'all' | 'mine' | 'late' | 'open' | 'vendor' | 'done' | 'quotes' | 'approvals' | 'tosend' | 'onway' | 'live' | 'archive'>('all');
+  // The phone filters by trade as well — null is every trade.
+  const [trade, setTrade] = useState<string | null>(null);
   const [sortK, setSortK] = useState<'vendor' | 'site' | 'ordered' | 'delivery' | 'value' | 'balance'>('ordered');
   const [sortDir, setSortDir] = useState(-1);
   const [q, setQ] = useState('');
@@ -483,6 +492,10 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   const pend = (p: PORow) => p.items.filter(i => !i.r);
   const full = (p: PORow) => !p.cancelled && !p.rfq && p.items.length > 0 && got(p) === p.items.length;
   const late = (p: PORow) => !p.cancelled && !full(p) && !!p.due && D(p.due) < TODAY;
+  // full() is about GOODS only — every item at site. A purchase order is finished when the goods
+  // arrived, a bill was recorded against it, and nothing is left to pay. Those are three different
+  // facts and only all three together mean there is nothing more to do with it.
+  const settled = (p: PORow) => !p.cancelled && full(p) && p.billed > 0 && balance(p) <= 0.5;
   const mine = (p: PORow) => !p.cancelled && !p.rfq && !full(p) && (late(p) || got(p) > 0 || (!!p.due && days(TODAY, D(p.due)) <= 0));
 
   const FILTERS: Record<string, (p: PORow) => boolean> = {
@@ -496,6 +509,9 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
     approvals: (p) => p.approvalStatus === 'PENDING' && !p.cancelled,
     tosend: (p) => !p.cancelled && !p.rfq && !full(p) && !p.sent && p.approvalStatus !== 'PENDING',
     onway: (p) => !p.cancelled && !p.rfq && !full(p) && !!p.sent,
+    // Everything with something still outstanding — the phone's default list.
+    live: (p) => !p.cancelled && !settled(p),
+    archive: settled,
   };
   const KEY: Record<string, (p: PORow) => number | string> = {
     vendor: (p) => p.vendor,
@@ -548,7 +564,6 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   const cDone = rows.filter(FILTERS.done).length;
   const cApprovals = rows.filter(FILTERS.approvals).length;
   const cToSend = rows.filter(FILTERS.tosend).length;
-  const cOnWay = rows.filter(FILTERS.onway).length;
   const footTotal = list.reduce((a, p) => a + (p.cancelled ? 0 : p.value), 0);
 
   const openPO = (id: string) => navigate(`/purchase-orders/${id}`, { state: projectId ? { from: 'project', projectId } : { from: 'list' } });
@@ -618,16 +633,21 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
 
   // ---- Mobile card list (po-mobile.html) ----------------------------------
   if (isMobile) {
-    // Status pill + amount tone for one PO card.
+    // What is holding this order up, read from the money backwards: a bill you have not been
+    // given, then money you still owe, and only then goods still on the road. "Awaiting price"
+    // is gone — it was shown for any zero-value PO, which is a rate nobody typed, not a quote.
+    // The goods position is never lost: it rides along on the sub-line.
     const cardOf = (p: PORow) => {
       const n = p.items.length, g = got(p), b = balance(p);
+      const goodsSub = n > 0 && g < n ? (g > 0 ? `· ${g} of ${n} at site` : `· ${dueLabelText(p)}`) : '';
       let tone: string, st: string, sub = '';
-      if (p.approvalStatus === 'PENDING') { tone = 'gold-s'; st = 'Awaiting approval'; sub = `· ${dstr(D(p.createdAt))}${p.by ? ', ' + p.by : ''}`; }
-      else if (full(p)) { tone = 'landed'; st = b > 0.5 ? 'Received' : 'Received · settled'; sub = b > 0.5 ? '· bill to pay' : `· ${dstr(D(p.recv))}`; }
-      else if (p.rfq) { tone = 'motion'; st = 'Awaiting price'; }
-      else if (!p.sent) { tone = 'needs'; st = 'Not sent — send to vendor'; }
-      else if (g > 0) { tone = 'motion'; st = `${g} of ${n} received`; sub = `· ${dueLabelText(p)}`; }
-      else { tone = 'motion'; st = 'On the way'; sub = `· ${dueLabelText(p)}`; }
+      if (p.cancelled) { tone = 'needs'; st = 'Cancelled'; }
+      else if (p.approvalStatus === 'PENDING') { tone = 'gold-s'; st = 'Awaiting approval'; sub = `· ${dstr(D(p.createdAt))}${p.by ? ', ' + p.by : ''}`; }
+      else if (!p.sent) { tone = 'needs'; st = 'Not sent — send to vendor'; sub = goodsSub; }
+      else if (p.billed <= 0) { tone = 'motion'; st = 'Awaiting bill'; sub = goodsSub || (full(p) ? `· all at site ${dstr(D(p.recv))}` : ''); }
+      else if (b > 0.5) { tone = 'needs'; st = p.paid > 0 ? `Part paid · ${fmt(b)} pending` : `Payment pending · ${fmt(b)}`; sub = goodsSub; }
+      else if (!full(p)) { tone = 'motion'; st = 'Yet to receive at site'; sub = goodsSub; }
+      else { tone = 'landed'; st = 'Done'; sub = `· ${dstr(D(p.recv))}`; }
       // Amount: red "to pay" once there's a real bill / it's landed; plain ordered value in transit; — when nothing owed.
       let amtNode: React.ReactNode = <span className="amt zero">—</span>;
       if (b > 0.5) amtNode = <span className={`amt${p.billed || full(p) ? ' pay' : ''}`}>{fmt(b)}</span>;
@@ -635,23 +655,25 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
       const more = p.items.length - 1;
       return { tone, st, sub, amtNode, itemsText: shown + (more > 0 ? ` · +${more} item${more > 1 ? 's' : ''}` : '') };
     };
-    const mChips: { k: typeof filter; label: string; n: number; gold?: boolean }[] = [
-      { k: 'approvals', label: 'Approvals', n: cApprovals, gold: true },
-      { k: 'all', label: 'All', n: cAll },
-      { k: 'tosend', label: 'To send', n: cToSend },
-      { k: 'onway', label: 'On the way', n: cOnWay },
-      { k: 'done', label: 'Received', n: cDone },
-      { k: 'quotes', label: 'Quotes', n: rfqShown.length },
-    ];
-    const mFilter = FILTERS[filter] ? filter : 'all';
+    // The chips are the trades being bought, taken from each vendor's category — that is the cut
+    // people actually think in ("what cement is outstanding"). The workflow counts they replaced
+    // did not vanish: they moved to the money line under the title, still one tap.
+    const mFilter = FILTERS[filter] ? filter : 'live';
+    const liveRows = rows.filter(FILTERS.live);
+    const tradeCounts = (() => {
+      const m = new Map<string, number>();
+      for (const p of liveRows) { const t = p.trade || 'Other'; m.set(t, (m.get(t) ?? 0) + 1); }
+      return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    })();
     // A quote request is not a PO — it lives in its own table and has no vendor, value or
     // delivery — so the desktop merges the two lists by date rather than joining them. The phone
     // was iterating POs alone, which is why enquiries were nowhere to be seen here.
     const mList: MergedRow[] = (() => {
       const pos = rows.filter(FILTERS[mFilter])
+        .filter(p => !trade || (p.trade || 'Other') === trade)
         .filter(p => !q || (p.vendor + p.id + p.site + p.items.map(i => i.n).join(' ')).toLowerCase().includes(q))
         .map(p => ({ kind: 'po' as const, po: p }));
-      const quotes = (mFilter === 'all' || mFilter === 'quotes')
+      const quotes = ((mFilter === 'live' && !trade) || mFilter === 'quotes')
         ? rfqShown
             .filter(r => !q || (r.site + r.summary).toLowerCase().includes(q))
             .map(r => ({ kind: 'rfq' as const, rfq: r }))
@@ -672,7 +694,17 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
               <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
             </button>
           </div>
-          <div className="m-money"><b>{fmt(fBal)}</b> open with vendors · <b>{fmt(fOpen)}</b> on the way</div>
+          <div className="m-money">
+            <b>{fmt(fBal)}</b> open with vendors · <b>{fmt(fOpen)}</b> on the way
+            {cApprovals > 0 && (
+              <button type="button" className={`m-wf gold${mFilter === 'approvals' ? ' on' : ''}`}
+                onClick={() => { setTrade(null); setFilter(mFilter === 'approvals' ? 'live' : 'approvals'); }}>{cApprovals} to approve</button>
+            )}
+            {cToSend > 0 && (
+              <button type="button" className={`m-wf${mFilter === 'tosend' ? ' on' : ''}`}
+                onClick={() => { setTrade(null); setFilter(mFilter === 'tosend' ? 'live' : 'tosend'); }}>{cToSend} to send</button>
+            )}
+          </div>
         </div>
 
         {mSearch && (
@@ -683,11 +715,18 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
         )}
 
         <div className="m-chips">
-          {mChips.map(c => (
-            <button key={c.k} className={`m-chip${c.gold ? ' gold' : ''}${mFilter === c.k ? ' on' : ''}`} onClick={() => setFilter(c.k)}>
-              {c.label}<em>{c.n}</em>
-            </button>
+          <button className={`m-chip${!trade && mFilter !== 'quotes' && mFilter !== 'archive' ? ' on' : ''}`}
+            onClick={() => { setTrade(null); setFilter('live'); }}>All<em>{liveRows.length}</em></button>
+          {tradeCounts.map(([t, n]) => (
+            <button key={t} className={`m-chip${trade === t && mFilter !== 'quotes' && mFilter !== 'archive' ? ' on' : ''}`}
+              onClick={() => { setTrade(trade === t ? null : t); setFilter('live'); }}>{t}<em>{n}</em></button>
           ))}
+          {rfqShown.length > 0 && (
+            <button className={`m-chip gold${mFilter === 'quotes' ? ' on' : ''}`}
+              onClick={() => { setTrade(null); setFilter(mFilter === 'quotes' ? 'live' : 'quotes'); }}>Quotes<em>{rfqShown.length}</em></button>
+          )}
+          <button className={`m-chip${mFilter === 'archive' ? ' on' : ''}`}
+            onClick={() => { setTrade(null); setFilter(mFilter === 'archive' ? 'live' : 'archive'); }}>Archive<em>{rows.filter(settled).length}</em></button>
         </div>
 
         <div className="m-list mo-stagger">
