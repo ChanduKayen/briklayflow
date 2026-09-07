@@ -167,6 +167,15 @@ view and Payables agree:
   row — it enters `v_party_balance`, shows on the party ledger and in the week's carry, and can be
   removed like any other line (§6a). A party-less ad-hoc entry stays a local-only row.
 
+## 5b. Uncertified contract work is nudged, not hidden
+
+A contract crew's stage readings are captured in the muster but only reach the ledger once **certified
+and approved** (§2) — correct, but it can look like the reading was lost. The party ledger now shows a
+gold nudge — *“₹X of contract work recorded, not yet certified · Certify →”* — whenever recorded stage
+work exceeds what's been approved (`loadUncertifiedStage`: per milestone, readings-implied earned −
+approved certifications; measured/piece = Σ, lump = latest %). It links to Attendance to certify. Day
+wages need no such nudge — they accrue on attendance directly.
+
 ## 6a. Correcting a stray line
 
 The ledger is derived, so a wrong line is only ever a wrong **source row** — you don't post a

@@ -64,6 +64,58 @@ export async function removeOpeningBalance(stakeholderId: string): Promise<void>
   if (error) throw error;
 }
 
+// Contract work RECORDED in the muster (stage readings) but NOT yet certified & approved — so it is
+// captured, yet (correctly) not on the ledger. This powers the nudge that says "₹X of contract work is
+// waiting to be certified", closing the gap where a reading looks lost. Uncertified per milestone =
+// what the readings imply earned − what's already approved (measured/piece = Σ; lump = latest %).
+export interface UncertifiedStage { total: number; count: number; byProject: Record<string, number> }
+export async function loadUncertifiedStage(stakeholderId: string): Promise<UncertifiedStage> {
+  const empty: UncertifiedStage = { total: 0, count: 0, byProject: {} };
+  try {
+    const crewR = await supabase.from('labour_crews').select('wo_id').eq('stakeholder_id', stakeholderId).not('wo_id', 'is', null);
+    const woIds = [...new Set((crewR.data ?? []).map((c: any) => c.wo_id).filter(Boolean))];
+    if (!woIds.length) return empty;
+    const [msR, certR] = await Promise.all([
+      supabase.from('wo_milestones').select('milestone_id, planned_amount, unit_type, rate').in('wo_id', woIds),
+      supabase.from('work_certifications').select('milestone_id, reading_kind, computed_amount, status').eq('stakeholder_id', stakeholderId).eq('status', 'approved'),
+    ]);
+    const ms = (msR.data ?? []) as any[];
+    const msIds = ms.map((m) => m.milestone_id);
+    if (!msIds.length) return empty;
+    const attR = await supabase.from('labour_attendance').select('milestone_id, value, work_date, project_id').eq('subject_type', 'stage').in('milestone_id', msIds);
+
+    const measuredSum: Record<string, number> = {};        // Σ readings (measured)
+    const lumpLatest: Record<string, { d: string; v: number }> = {}; // latest % (lump)
+    const projOf: Record<string, string | null> = {};
+    (attR.data ?? []).forEach((a: any) => {
+      if (!projOf[a.milestone_id]) projOf[a.milestone_id] = a.project_id ?? null;
+      measuredSum[a.milestone_id] = (measuredSum[a.milestone_id] || 0) + Number(a.value || 0);
+      const cur = lumpLatest[a.milestone_id];
+      if (!cur || (a.work_date || '') > cur.d) lumpLatest[a.milestone_id] = { d: a.work_date, v: Number(a.value || 0) };
+    });
+    const approvedMeasured: Record<string, number> = {};
+    const approvedLump: Record<string, number> = {};
+    (certR.data ?? []).forEach((wc: any) => {
+      if (wc.reading_kind === 'lump') approvedLump[wc.milestone_id] = Number(wc.computed_amount || 0);
+      else approvedMeasured[wc.milestone_id] = (approvedMeasured[wc.milestone_id] || 0) + Number(wc.computed_amount || 0);
+    });
+
+    let total = 0, count = 0; const byProject: Record<string, number> = {};
+    for (const m of ms) {
+      const hasReading = measuredSum[m.milestone_id] !== undefined || lumpLatest[m.milestone_id] !== undefined;
+      if (!hasReading) continue;
+      const isLump = (m.unit_type ?? 'LS') === 'LS';
+      const earned = isLump
+        ? Number(m.planned_amount || 0) * (lumpLatest[m.milestone_id]?.v || 0) / 100
+        : Number(m.rate || 0) * (measuredSum[m.milestone_id] || 0);
+      const approved = isLump ? (approvedLump[m.milestone_id] || 0) : (approvedMeasured[m.milestone_id] || 0);
+      const unc = Math.round(earned - approved);
+      if (unc > 0.5) { total += unc; count++; const pid = projOf[m.milestone_id]; if (pid) byProject[pid] = (byProject[pid] || 0) + unc; }
+    }
+    return { total: Math.round(total), count, byProject };
+  } catch { return empty; }
+}
+
 // ── certification ─────────────────────────────────────────────────────────────
 export interface CertifyInput {
   orgId: string; projectId: string | null; woId: string | null; milestoneId: string | null;

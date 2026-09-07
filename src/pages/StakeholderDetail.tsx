@@ -13,7 +13,7 @@ import { QuickTransactionSheet } from '../components/QuickTransactionSheet';
 import { loadPartyLedger, saveOpeningBalance, addAdjustment, bookConsolidatedBill, removeLedgerLine, isRemovableLine, type LedgerEntry, type PartyLedger } from '../lib/partyLedgerApi';
 import { readParty, isNewLedgerOrg } from '../lib/ledgerRead';
 import { PieceWorkEntry } from '../components/attendance/PieceWorkEntry';
-import { loadPartyCertifications, loadLedgerCutover } from '../lib/workCertification';
+import { loadPartyCertifications, loadLedgerCutover, loadUncertifiedStage } from '../lib/workCertification';
 import { createCredit, fillCredit, allocateToCredit, allocateToPool, openCreditsFor, certifyStage, type OpenCredit } from '../lib/ledgerWrite';
 
 const inr = (n: number) => n.toLocaleString('en-IN');
@@ -184,6 +184,13 @@ const CSS = `
 .plx .doc input{margin-top:3px;accent-color:var(--walnut)}
 .plx .doc b{font-weight:500;display:block}.plx .doc span{font-size:12.5px;color:var(--walnut-2)}
 /* money-to-classify band (new engine) */
+.plx .uncert-band{margin-top:22px;display:flex;align-items:center;gap:13px;padding:13px 16px;border:1px solid #E4D5A8;background:var(--gold-soft,#F3EAD2);border-radius:12px}
+.plx .uncert-band>svg{width:20px;height:20px;color:#8A6A1F;flex-shrink:0}
+.plx .uncert-band .ub-txt{display:flex;flex-direction:column;min-width:0;flex:1}
+.plx .uncert-band .ub-txt b{font-weight:600;color:#6E520F;font-size:14px}
+.plx .uncert-band .ub-txt span{font-size:12.5px;color:#8A6A1F;margin-top:2px}
+.plx .uncert-band .ub-go{flex-shrink:0;height:34px;padding:0 14px;border-radius:9px;background:#8A6A1F;color:#fff;font-size:13px;font-weight:600;border:0;cursor:pointer}
+.plx .uncert-band .ub-go:hover{background:#6E520F}
 .plx .classify-band{margin-top:26px;border:1px solid #EBD3C6;background:var(--terra-wash);border-radius:12px;overflow:hidden}
 .plx .classify-band .cb-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:13px 18px;border-bottom:1px solid #EBD3C6;flex-wrap:wrap}
 .plx .classify-band .cb-t{font-weight:600;color:#7E3A20}
@@ -245,6 +252,13 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
     queryKey: ['party_ledger', stakeholderId, orgId],
     queryFn: async () => (orgId && await isNewLedgerOrg(orgId)) ? readParty(stakeholderId) : loadPartyLedger(stakeholderId),
     enabled: !!stakeholderId,
+  });
+  // Contract work recorded in the muster but not yet certified — captured, correctly off the ledger,
+  // and worth nudging so it doesn't look lost.
+  const { data: uncertified } = useQuery({
+    queryKey: ['uncertified_stage', stakeholderId],
+    queryFn: () => loadUncertifiedStage(stakeholderId),
+    enabled: !!stakeholderId && L?.kind === 'worker',
   });
 
   const entries = useMemo(() => {
@@ -391,6 +405,18 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
               </table></div>
             </div>
           </section>
+        )}
+
+        {/* contract work recorded but not yet certified — captured, off the ledger until certified */}
+        {uncertified && uncertified.total > 0 && (
+          <div className="uncert-band">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>
+            <div className="ub-txt">
+              <b>{inr(uncertified.total)} of contract work recorded, not yet certified</b>
+              <span>{uncertified.count} stage{uncertified.count !== 1 ? 's' : ''} read on the muster but awaiting certification — certify to add it to the ledger.</span>
+            </div>
+            <button className="ub-go" onClick={() => navigate('/attendance')}>Certify →</button>
+          </div>
         )}
 
         {/* money to classify — new-engine orgs only */}
