@@ -3,6 +3,7 @@
 // period + search filters. Certified is inferred from the attendance stage readings. Opening
 // balance and Adjustments are recorded here; Payment reuses QuickTransactionSheet.
 import { useMemo, useState, useEffect, createContext, useContext, type ReactElement } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Session } from '@supabase/supabase-js';
@@ -138,12 +139,20 @@ const CSS = `
 .plx .empty .ask button{color:var(--terra);font-weight:500;text-decoration:underline;text-underline-offset:3px}
 .plx .state{padding:70px;text-align:center;color:var(--walnut-3)}
 /* modal */
-.plx .scrim{position:fixed;inset:0;background:rgba(51,37,27,.28);display:flex;align-items:flex-start;justify-content:center;padding:6vh 16px;overflow:auto;z-index:60}
-.plx .modal{width:100%;max-width:520px;background:var(--paper);border:1px solid var(--line);border-radius:12px;box-shadow:0 24px 60px -20px rgba(51,37,27,.35)}
-.plx .modal header{padding:20px 22px 0}
+/* Portaled to <body>, so it's a clean fixed overlay above the whole app (incl. the side desk) — one
+   scroll, inside the modal body only, never the page behind it. */
+.plx .scrim{position:fixed;inset:0;background:rgba(51,37,27,.28);display:flex;align-items:center;justify-content:center;padding:4vh 16px;z-index:120}
+.plx .modal{width:100%;max-width:520px;max-height:92vh;display:flex;flex-direction:column;overflow:hidden;background:var(--paper);border:1px solid var(--line);border-radius:12px;box-shadow:0 24px 60px -20px rgba(51,37,27,.35)}
+.plx .modal header{padding:20px 22px 0;flex:0 0 auto}
 .plx .modal h3{font-family:var(--serif);font-size:22px;font-weight:500;margin:0}
 .plx .modal header p{margin:6px 0 0;color:var(--walnut-2);font-size:13px}
-.plx .modal .body{padding:18px 22px 6px;display:grid;gap:18px}
+.plx .modal .body{padding:18px 22px 6px;display:grid;gap:18px;overflow-y:auto;flex:1 1 auto;min-height:0}
+.plx .obsite{display:grid;gap:8px}
+.plx .obsite .row{display:grid;grid-template-columns:1fr 150px;gap:10px;align-items:center;font-size:13.5px}
+.plx .obsite .row .nm{color:var(--walnut-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.plx .obsite .row.tot{border-top:1px dashed var(--line);padding-top:9px;margin-top:2px}
+.plx .obsite .row.tot .nm{color:var(--walnut);font-weight:600}
+.plx .obsite .row.tot .v{text-align:right;font-weight:600;color:var(--walnut)}
 .plx .field label,.plx .field .lbl{display:block;font-size:13px;font-weight:500;margin-bottom:6px}
 .plx .field .help{font-size:12.5px;color:var(--walnut-3);margin-top:5px}
 .plx .in{height:38px;width:100%;padding:0 12px;border:1px solid var(--line);border-radius:8px;background:#fff;font:inherit;color:var(--walnut)}
@@ -160,7 +169,7 @@ const CSS = `
 .plx .split{display:grid;gap:8px;margin-top:10px;padding:12px;background:var(--cream);border-radius:8px}
 .plx .split .row{display:grid;grid-template-columns:1fr 150px;gap:10px;align-items:center;font-size:13px}
 .plx .split .sum{font-size:12.5px;color:var(--walnut-3);text-align:right}.plx .split .sum.bad{color:var(--terra)}.plx .split .sum.good{color:var(--sage)}
-.plx .modal footer{display:flex;justify-content:flex-end;gap:8px;padding:16px 22px 20px}
+.plx .modal footer{display:flex;justify-content:flex-end;gap:8px;padding:16px 22px 20px;flex:0 0 auto;border-top:1px solid var(--line-soft)}
 /* consolidated bill — states, without-bills column, modal */
 .plx .ledger .part .s .state{color:var(--walnut-2)}
 .plx .ledger .part .s .state.open{color:var(--terra)}
@@ -770,40 +779,60 @@ function OpeningModal({ orgId, L, onClose, onSaved, onError }: { orgId: string; 
   const [dateTouched, setDateTouched] = useState(false);
   useEffect(() => { if (!L.opening && !dateTouched && orgCutover) setAsOf(orgCutover); }, [orgCutover, L.opening, dateTouched]);
   const [dir, setDir] = useState<'paid_ahead' | 'work_owed'>(L.opening?.direction || 'paid_ahead');
-  const [amount, setAmount] = useState(L.opening ? inr(L.opening.total) : '');
-  const [split, setSplit] = useState(!!(L.opening && Object.keys(L.opening.bySite).length));
   const [note, setNote] = useState(L.opening?.note || '');
-  const [siteAmts, setSiteAmts] = useState<Record<string, string>>(() => { const o: Record<string, string> = {}; L.sites.forEach(s => { o[s.projectId] = L.opening?.bySite[s.projectId] ? inr(L.opening.bySite[s.projectId]) : ''; }); return o; });
+  const hasSites = L.sites.length > 0;
+  // Site-wise by default — one amount per site the party works on; the total is the opening balance.
+  // A party with no sites yet gets a single unassigned amount.
+  const [siteAmts, setSiteAmts] = useState<Record<string, string>>(() => {
+    const o: Record<string, string> = {};
+    if (hasSites) L.sites.forEach(s => { o[s.projectId] = L.opening?.bySite[s.projectId] ? String(L.opening.bySite[s.projectId]) : ''; });
+    else o.__none__ = L.opening ? String(L.opening.total) : '';
+    return o;
+  });
   const [busy, setBusy] = useState(false);
-  const total = parseInr(amount);
-  const partsSum = L.sites.reduce((a, s) => a + parseInr(siteAmts[s.projectId] || ''), 0);
-  const diff = total - partsSum;
+  const total = Object.values(siteAmts).reduce((a, v) => a + parseInr(v || ''), 0);
   const save = async () => {
     if (busy || total <= 0) return; setBusy(true);
     const bySite: Record<string, number> = {};
-    if (split) L.sites.forEach(s => { const v = parseInr(siteAmts[s.projectId] || ''); if (v) bySite[s.projectId] = v; });
+    if (hasSites) L.sites.forEach(s => { const v = parseInr(siteAmts[s.projectId] || ''); if (v) bySite[s.projectId] = v; });
     try { await saveOpeningBalance(orgId, L.stakeholder.id, { asOf, direction: dir, total, bySite, note }); onSaved(); }
     catch (e: any) { onError(e?.message || 'Could not save'); setBusy(false); }
   };
-  return (
-    <div className="scrim" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal" role="dialog">
-        <header><h3>Opening balance for {L.stakeholder.name}</h3><p>This is {L.stakeholder.name.split(' ')[0]}&apos;s cutover: the figure you set becomes the balance on the date you choose, and the ledger accrues from that day. Everything before it is settled and ignored.</p></header>
-        <div className="body">
-          <div className="field"><label>Starts on</label><input className="in" type="date" value={asOf} onChange={e => { setAsOf(e.target.value); setDateTouched(true); }} style={{ maxWidth: 200 }} /><div className="help">{orgCutover ? 'Defaults to your business books-start date — change it only if this party started on a different day. ' : ''}The books begin for this party on this date: attendance, bills and payments count from here on; anything earlier is settled by this figure.</div></div>
-          <div className="field"><div className="lbl">Which way does it run?</div><div className="dir">
-            <label className={dir === 'paid_ahead' ? 'on' : ''} onClick={() => setDir('paid_ahead')}><b>Paid ahead of work</b><span>You've paid them more than the work certified so far.</span></label>
-            <label className={dir === 'work_owed' ? 'on' : ''} onClick={() => setDir('work_owed')}><b>Work done, not yet paid</b><span>They've certified work you still owe them for.</span></label>
-          </div></div>
-          <div className="field"><label>Amount</label><div className="amount" style={{ maxWidth: 220 }}><input className="in num" inputMode="numeric" value={amount} onChange={e => setAmount(e.target.value)} /></div>
-            {L.sites.length > 1 && <label className="check" style={{ marginTop: 12 }}><input type="checkbox" checked={split} onChange={e => setSplit(e.target.checked)} /><span>Split by site <span style={{ color: 'var(--walnut-3)' }}>— each site keeps its own balance</span></span></label>}
-            {split && <div className="split">{L.sites.map(s => <div className="row" key={s.projectId}><span>{s.projectName}</span><div className="amount"><input className="in num" value={siteAmts[s.projectId] || ''} onChange={e => setSiteAmts(a => ({ ...a, [s.projectId]: e.target.value }))} /></div></div>)}<div className={`sum ${diff === 0 ? 'good' : 'bad'}`}>{diff === 0 ? 'Adds up to the total' : diff > 0 ? `₹${inr(diff)} not yet assigned to a site` : `₹${inr(-diff)} over the total`}</div></div>}
+  return createPortal(
+    <div className="plx">
+      <div className="scrim" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+        <div className="modal" role="dialog">
+          <header><h3>Opening balance for {L.stakeholder.name}</h3><p>This is {L.stakeholder.name.split(' ')[0]}&apos;s cutover: the figure you set becomes the balance on the date you choose, and the ledger accrues from that day. Everything before it is settled and ignored.</p></header>
+          <div className="body">
+            <div className="field"><label>Starts on</label><input className="in" type="date" value={asOf} onChange={e => { setAsOf(e.target.value); setDateTouched(true); }} style={{ maxWidth: 200 }} /><div className="help">{orgCutover ? 'Defaults to your business books-start date — change it only if this party started on a different day. ' : ''}The books begin for this party on this date: attendance, bills and payments count from here on; anything earlier is settled by this figure.</div></div>
+            <div className="field"><div className="lbl">Which way does it run?</div><div className="dir">
+              <label className={dir === 'paid_ahead' ? 'on' : ''} onClick={() => setDir('paid_ahead')}><b>Paid ahead of work</b><span>You've paid them more than the work certified so far.</span></label>
+              <label className={dir === 'work_owed' ? 'on' : ''} onClick={() => setDir('work_owed')}><b>Work done, not yet paid</b><span>They've certified work you still owe them for.</span></label>
+            </div></div>
+            <div className="field">
+              <label>{hasSites ? 'Carried by site' : 'Amount'}</label>
+              {hasSites ? (
+                <div className="obsite">
+                  {L.sites.map(s => (
+                    <div className="row" key={s.projectId}>
+                      <span className="nm">{s.projectName}</span>
+                      <div className="amount"><input className="in num" inputMode="numeric" placeholder="0" value={siteAmts[s.projectId] || ''} onChange={e => setSiteAmts(a => ({ ...a, [s.projectId]: e.target.value }))} /></div>
+                    </div>
+                  ))}
+                  <div className="row tot"><span className="nm">Opening balance</span><span className="v mono">{inr(total)}</span></div>
+                </div>
+              ) : (
+                <div className="amount" style={{ maxWidth: 220 }}><input className="in num" inputMode="numeric" placeholder="0" value={siteAmts.__none__ || ''} onChange={e => setSiteAmts({ __none__: e.target.value })} /></div>
+              )}
+              <div className="help">{hasSites ? 'What this party carries at each site — the total is the opening balance.' : 'What this party carries as of the start date.'}</div>
+            </div>
+            <div className="field"><label>Where this figure comes from</label><textarea className="in" placeholder="e.g. site ledger book, page 14, agreed on 28 March" value={note} onChange={e => setNote(e.target.value)} /></div>
           </div>
-          <div className="field"><label>Where this figure comes from</label><textarea className="in" placeholder="e.g. site ledger book, page 14, agreed on 28 March" value={note} onChange={e => setNote(e.target.value)} /></div>
+          <footer><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy || total <= 0} onClick={save}>{busy ? '…' : L.opening ? 'Save' : 'Add opening balance'}</button></footer>
         </div>
-        <footer><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy || total <= 0 || (split && diff !== 0)} onClick={save}>{busy ? '…' : L.opening ? 'Save' : 'Add opening balance'}</button></footer>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
