@@ -155,8 +155,13 @@ const POLX_CSS = `
 @media (prefers-reduced-motion:reduce){.polx *{animation-duration:.01ms !important;transition-duration:.01ms !important}}
 
 /* ============ MOBILE (app-native, ported from po-mobile.html) ============ */
+/* The ground and the cards are the app's, not this page's. Every other mobile page — the
+   transactions list, For review, Payables, a transaction — sits on #F8F6F3 with white cards;
+   this one sat on a cream two shades warmer (#F5F0E7) with off-white cards (#FFFCF7), which
+   next to the others reads as a different app rather than a different page. Only the surfaces
+   move: the walnut text, the terracotta and the status colours are untouched. */
 .polx.m{background:var(--cream);min-height:100dvh;display:flex;flex-direction:column;
-  --cream:#F5F0E7;--paper:#FFFCF7;--line:#E5DCCD;--line-soft:#EFE8DB;
+  --cream:#F8F6F3;--paper:#FFFFFF;--line:rgba(50,42,35,.1);--line-soft:rgba(50,42,35,.06);
   --walnut:#33251B;--walnut-2:#6A5A4C;--walnut-3:#9A8B7B;--terra:#B4532F;--terra-soft:#F6E7DF;
   --sage:#5F7F5C;--gold:#8A6A1F;--gold-soft:#F3EAD2;}
 .polx.m *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -185,8 +190,8 @@ const POLX_CSS = `
 .polx .m-chip.gold.on em{color:rgba(255,255,255,.7)}
 .polx .m-chip:active{transform:scale(.97)}
 .polx .m-list{flex:1;overflow-y:auto;padding:2px 14px 108px}
-.polx .m-pcard{background:var(--paper);border:1px solid var(--line);border-radius:14px;padding:14px 15px;margin-bottom:10px;transition:transform .12s,background .12s;width:100%;text-align:left;display:block}
-.polx .m-pcard:active{transform:scale(.985);background:#FBF6EC}
+.polx .m-pcard{background:var(--paper);border:1px solid var(--line);border-radius:18px;padding:14px 15px;margin-bottom:10px;transition:transform .12s,background .12s;width:100%;text-align:left;display:block}
+.polx .m-pcard:active{transform:scale(.985);background:#F4F0EB}
 .polx .m-pcard .r1{display:flex;align-items:baseline;gap:8px}
 .polx .m-pcard .v{font-weight:600;font-size:15.5px;color:var(--walnut);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .polx .m-pcard .amt{font-family:var(--mono);font-size:15px;color:var(--walnut);flex-shrink:0}
