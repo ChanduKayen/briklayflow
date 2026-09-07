@@ -13,8 +13,23 @@ const inr = (n: number) => Math.round(n).toLocaleString('en-IN');
 /** What the chip needs to render a title + burn-down (built in Ledger.tsx). */
 export type AnchorInfo = { kind: 'WO' | 'PO'; title: string; total: number; paid: number };
 
-export function DirMedallion({ dir }: { dir: TxnDirection }) {
+/**
+ * The mark at the head of a row.
+ *
+ * It used to be an arrow, which made the row's most prominent element the one thing the row
+ * already said twice — the amount carries a sign AND a colour. So the arrow was decoration
+ * competing with the payee's name for the eye, and a filled dark disc would only have competed
+ * harder: four black circles marching down the left edge outrank every name beside them.
+ *
+ * It is the payee's initials now. Each row gets an identity instead of a repeated glyph, and it
+ * is the same mark the transaction opens with on its own page, so the list and the detail share
+ * an object rather than merely a palette. Direction stays in the tint — and in the amount, where
+ * it always was. A row with no party to name (a general expense) keeps the arrow.
+ */
+export function DirMedallion({ dir, name }: { dir: TxnDirection; name?: string | null }) {
   const out = dir === 'out';
+  const initials = (name ?? '')
+    .trim().split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
   return (
     <span
       className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 relative"
@@ -23,9 +38,11 @@ export function DirMedallion({ dir }: { dir: TxnDirection }) {
         boxShadow: `0 0 0 3px ${V.surface}`, // ring masks the spine behind it
         zIndex: 1,
       }}
-      aria-label={out ? 'Money out' : 'Money in'}
+      aria-label={`${name ? `${name} — ` : ''}${out ? 'money out' : 'money in'}`}
     >
-      {out ? <ArrowUpRight size={14} color={V.terraDeep} /> : <ArrowDownLeft size={14} color={V.sage} />}
+      {initials
+        ? <span style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: '-0.01em', color: out ? V.terraDeep : V.sage, ...font }}>{initials}</span>
+        : out ? <ArrowUpRight size={14} color={V.terraDeep} /> : <ArrowDownLeft size={14} color={V.sage} />}
     </span>
   );
 }

@@ -152,7 +152,7 @@ function EntryRow(p: EntryProps) {
             {p.selected && <span style={{ color: '#fff', fontSize: 11, lineHeight: 1 }}>✓</span>}
           </button>
         ) : (
-          <DirMedallion dir={p.dir} />
+          <DirMedallion dir={p.dir} name={p.payee} />
         )}
       </div>
 
