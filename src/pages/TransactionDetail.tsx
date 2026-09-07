@@ -230,6 +230,8 @@ type AmendmentSnapshot = {
   payment_mode: string;
   category: string;
   remarks: string;
+  /** Optional: amendments made before the project could be changed do not carry one. */
+  project_id?: string;
 };
 
 type AmendmentRecord = {
@@ -478,7 +480,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
   const [loadingObligations, setLoadingObligations] = useState(false);
   const [voidConfirm, setVoidConfirm] = useState(false);
   const [amendStep, setAmendStep] = useState<'idle' | 'edit' | 'diff'>('idle');
-  const [amendForm, setAmendForm] = useState({ total_amount: '', date: '', payment_mode: '', category: '', remarks: '' });
+  const [amendForm, setAmendForm] = useState({ total_amount: '', date: '', payment_mode: '', category: '', remarks: '', project_id: '' });
   const [amendError, setAmendError] = useState<string | null>(null);
   const [, setShowAmendHistory] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
@@ -580,6 +582,15 @@ export default function TransactionDetail({ session }: { session: Session }) {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['transaction', txnId] }); qc.invalidateQueries({ queryKey: ['transactions'] }); setVoidConfirm(false); },
   });
 
+  // The list to move a transaction into. RLS scopes it to the org, same as everywhere else.
+  const { data: allProjects } = useQuery({
+    queryKey: ['projects'],
+    queryFn: async () => {
+      const { data } = await supabase.from('projects').select('project_id, name').order('name');
+      return (data ?? []) as { project_id: string; name: string }[];
+    },
+  });
+
   const amendMutation = useMutation({
     mutationFn: async () => {
       if (!txn) throw new Error('Transaction not loaded.');
@@ -588,13 +599,34 @@ export default function TransactionDetail({ session }: { session: Session }) {
       const newAmendment: AmendmentRecord = {
         id: String(Date.now()), amended_by: userName, amended_at: new Date().toISOString(),
         changes: amendDiff,
-        snapshot: { total_amount: Number(amendForm.total_amount), date: amendForm.date, payment_mode: amendForm.payment_mode, category: amendForm.category, remarks: amendForm.remarks },
+        snapshot: { total_amount: Number(amendForm.total_amount), date: amendForm.date, payment_mode: amendForm.payment_mode, category: amendForm.category, remarks: amendForm.remarks, project_id: amendForm.project_id },
       };
+
+      // Every other amended field is a SNAPSHOT — the row keeps its original values and the page
+      // reads the latest snapshot over the top. The project cannot work that way: it is a foreign
+      // key that decides which project's ledger, payables and reports this money appears in, so a
+      // snapshot alone would leave the transaction sitting in the old project everywhere except
+      // this screen. It is written for real.
+      const movingTo = amendForm.project_id;
+      const moved = canMoveProject && soleAlloc && movingTo && movingTo !== soleAlloc.project_id;
+      if (moved) {
+        const { error: allocErr } = await supabase.from('txn_allocations')
+          .update({ project_id: movingTo }).eq('allocation_id', soleAlloc.allocation_id);
+        if (allocErr) throw allocErr;
+        // The transaction row carries a project_id of its own; leaving it behind would make the
+        // two disagree. A failure here is reported rather than swallowed, because a half-moved
+        // transaction is worse than one that did not move.
+        const { error: txnErr } = await supabase.from('transactions')
+          .update({ project_id: movingTo }).eq('txn_id', txnId);
+        if (txnErr) throw new Error(`The allocation moved but the transaction row did not: ${txnErr.message}`);
+      }
+
       const existing: AmendmentRecord[] = (txn as any).amendments || [];
       const { error } = await supabase.from('transactions').update({ amendments: [...existing, newAmendment] }).eq('txn_id', txnId);
-      if (error) throw error;
+      // The move has already happened by this point; say so rather than implying nothing changed.
+      if (error) throw new Error(moved ? `The project was moved, but recording the amendment failed: ${error.message}` : error.message);
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['transaction', txnId] }); qc.invalidateQueries({ queryKey: ['transactions'] }); setAmendStep('idle'); setAmendError(null); setShowAmendHistory(true); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['transaction', txnId] }); qc.invalidateQueries({ queryKey: ['transactions'] }); qc.invalidateQueries({ queryKey: ['txn_allocations', txnId] }); qc.invalidateQueries({ queryKey: ['ledger'] }); setAmendStep('idle'); setAmendError(null); setShowAmendHistory(true); },
     onError: (err: any) => setAmendError(err.message || 'Amendment failed.'),
   });
 
@@ -653,13 +685,27 @@ export default function TransactionDetail({ session }: { session: Session }) {
 
   const existingAmendments: AmendmentRecord[] = (txn as any).amendments || [];
   const latestSnapshot = existingAmendments.length > 0 ? existingAmendments[existingAmendments.length - 1].snapshot : null;
-  const effective: AmendmentSnapshot = latestSnapshot ?? { total_amount: txn.total_amount, date: txn.date, payment_mode: txn.payment_mode, category: txn.category, remarks: txn.remarks };
+  // A transaction's project lives on its ALLOCATION, not on the transaction row, and a split
+  // transaction has one allocation per project. "The project" is therefore only a meaningful
+  // single value when there is exactly one — a split has to be re-spread allocation by
+  // allocation, which is not what this modal does.
+  const soleAlloc = allocs?.length === 1 ? allocs[0] : null;
+  const canMoveProject = !!soleAlloc;
+
+  const baseSnapshot: AmendmentSnapshot = { total_amount: txn.total_amount, date: txn.date, payment_mode: txn.payment_mode, category: txn.category, remarks: txn.remarks };
+  const effective: AmendmentSnapshot = {
+    ...(latestSnapshot ?? baseSnapshot),
+    // Older amendments predate the project field, so the live allocation is the fallback — and
+    // the allocation is the truth anyway; the snapshot only records what it was set to.
+    project_id: soleAlloc?.project_id ?? '',
+  };
   const isAmended = existingAmendments.length > 0;
 
   const amendDiff: Record<string, [any, any]> = {};
   if (amendStep === 'diff') {
     const LABELS: Record<string, [keyof AmendmentSnapshot, string]> = {
       Amount: ['total_amount', 'Amount'], Date: ['date', 'Date'], 'Payment Mode': ['payment_mode', 'Payment Mode'], Category: ['category', 'Category'], Remarks: ['remarks', 'Remarks'],
+      ...(canMoveProject ? { Project: ['project_id', 'Project'] as [keyof AmendmentSnapshot, string] } : {}),
     };
     for (const [label, [key]] of Object.entries(LABELS)) {
       const oldVal = String((effective as any)[key] ?? '');
@@ -669,8 +715,15 @@ export default function TransactionDetail({ session }: { session: Session }) {
   }
   const hasDiff = Object.keys(amendDiff).length > 0;
 
+  // A project id means nothing to a reader — show the name, and fall back to the id if the
+  // project is not one this user can list.
+  const fmtDiffVal = (label: string, val: unknown): string =>
+    label === 'Project'
+      ? ((allProjects ?? []).find(pr => pr.project_id === val)?.name ?? String(val || '—'))
+      : fmtAmendVal(label, val);
+
   const openAmendModal = () => {
-    setAmendForm({ total_amount: String(effective.total_amount ?? ''), date: effective.date ?? '', payment_mode: effective.payment_mode ?? '', category: effective.category ?? '', remarks: effective.remarks ?? '' });
+    setAmendForm({ total_amount: String(effective.total_amount ?? ''), date: effective.date ?? '', payment_mode: effective.payment_mode ?? '', category: effective.category ?? '', remarks: effective.remarks ?? '', project_id: effective.project_id ?? '' });
     setAmendError(null); setAmendStep('edit');
   };
 
@@ -1114,6 +1167,28 @@ export default function TransactionDetail({ session }: { session: Session }) {
                 </div>
 
                 <div className="space-y-4">
+                  {canMoveProject ? (
+                    <div>
+                      <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wide block mb-1.5">Project</label>
+                      <select value={amendForm.project_id} onChange={(e) => setAmendForm(f => ({ ...f, project_id: e.target.value }))} className="bk-input">
+                        {!amendForm.project_id && <option value="">Select a project…</option>}
+                        {(allProjects ?? []).map(pr => <option key={pr.project_id} value={pr.project_id}>{pr.name}</option>)}
+                        {/* The current project may be archived, or simply not in the list this user can see —
+                            never silently drop the value that is already set. */}
+                        {amendForm.project_id && !(allProjects ?? []).some(pr => pr.project_id === amendForm.project_id) &&
+                          <option value={amendForm.project_id}>{primaryAlloc?.projects?.name || amendForm.project_id}</option>}
+                      </select>
+                      <p className="text-[11px] text-on-surface-variant/70 mt-1.5">Moves this entry into another project's ledger.</p>
+                    </div>
+                  ) : (allocs && allocs.length > 1) ? (
+                    <div className="p-3.5 bg-surface-container-low rounded-xl border border-outline-variant/20">
+                      <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wide mb-1">Project</p>
+                      <p className="text-[13px] text-on-surface-variant">
+                        This entry is split across {allocs.length} projects, so there is no single project to change.
+                        Adjust it on the allocations instead.
+                      </p>
+                    </div>
+                  ) : null}
                   <div>
                     <label className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wide block mb-1.5">Amount (₹)</label>
                     <div className="relative">
@@ -1152,7 +1227,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
                   <button onClick={() => { setAmendStep('idle'); setAmendError(null); }}
                     className="px-5 py-2.5 rounded-xl border border-outline-variant/30 text-[13px] font-semibold text-on-surface hover:bg-surface-container-low transition-colors">Cancel</button>
                   <button onClick={() => {
-                    const LABELS: Record<string, keyof AmendmentSnapshot> = { Amount: 'total_amount', Date: 'date', 'Payment Mode': 'payment_mode', Category: 'category', Remarks: 'remarks' };
+                    const LABELS: Record<string, keyof AmendmentSnapshot> = { Amount: 'total_amount', Date: 'date', 'Payment Mode': 'payment_mode', Category: 'category', Remarks: 'remarks', ...(canMoveProject ? { Project: 'project_id' as keyof AmendmentSnapshot } : {}) };
                     const hasDifference = Object.entries(LABELS).some(([, key]) => String((effective as any)[key] ?? '') !== String((amendForm as any)[key] ?? ''));
                     if (!hasDifference) { setAmendError('No changes detected.'); return; }
                     setAmendError(null); setAmendStep('diff');
@@ -1182,8 +1257,8 @@ export default function TransactionDetail({ session }: { session: Session }) {
                         <div>
                           <p className="text-[10px] font-bold text-blue-500 uppercase tracking-wide mb-1">{label}</p>
                           <p className="text-[13px]">
-                            <span className="line-through text-on-surface-variant/50 mr-2">{fmtAmendVal(label, oldVal)}</span>
-                            <span className="text-blue-700 font-semibold">{fmtAmendVal(label, newVal)}</span>
+                            <span className="line-through text-on-surface-variant/50 mr-2">{fmtDiffVal(label, oldVal)}</span>
+                            <span className="text-blue-700 font-semibold">{fmtDiffVal(label, newVal)}</span>
                           </p>
                         </div>
                       </div>
