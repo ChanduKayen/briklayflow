@@ -32,7 +32,7 @@ const CSS = `
 .rvm .deck{flex:1;padding:18px 24px calc(88px + env(safe-area-inset-bottom));overflow-y:auto}
 .rvm .deck::-webkit-scrollbar{display:none}
 
-.rvm .rcard{position:relative;background:var(--card);border-radius:24px;padding:20px 20px 18px;
+.rvm .rcard{position:relative;z-index:1;background:var(--card);border-radius:24px;padding:20px 20px 18px;
   box-shadow:0 14px 36px -16px rgba(27,23,19,.22);touch-action:pan-y;will-change:transform}
 .rvm .rcard.enter{animation:rvmenter .5s var(--spring)}
 @keyframes rvmenter{from{transform:translateY(14px) scale(.965);opacity:0}to{transform:none;opacity:1}}
@@ -147,13 +147,28 @@ const CSS = `
 .rvm .stamp.L{left:16px;color:var(--good);border-color:var(--good);transform:rotate(-7deg)}
 .rvm .stamp.R{right:16px;color:var(--ink-3);border-color:var(--ink-3);transform:rotate(7deg)}
 
-.rvm .peek{margin:0 auto;display:flex;flex-direction:column;align-items:center}
+/* The stack behind the card. The strips carry z-index:-1, which paints them BEHIND the
+   nearest ancestor that has a background — so on a plain page they were invisible, and this
+   space read as empty. Giving .peek its own stacking context puts them behind the card and
+   in front of the page, which is where the depth cue was always meant to sit. */
+.rvm .peek{margin:0 auto;display:flex;flex-direction:column;align-items:center;
+  position:relative;z-index:0;isolation:isolate}
 .rvm .peek s{display:block;height:34px;border-radius:0 0 18px 18px;background:var(--card);
   box-shadow:0 10px 22px -14px rgba(27,23,19,.22);
   margin-top:-24px;transition:width .4s var(--spring),opacity .3s}
 .rvm .peek s:nth-child(1){width:91%;z-index:-1;position:relative}
 .rvm .peek s:nth-child(2){width:82%;opacity:.6;z-index:-2;position:relative}
 .rvm .peek s.off{opacity:0}
+.rvm .peek s{border:1px solid var(--hair);border-top:0}
+
+/* what is behind the card, said plainly: how many are left and that they arrive one at a time */
+.rvm .queue{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:16px;
+  font-size:12.5px;line-height:1.4;color:var(--ink-2);text-align:center}
+.rvm .queue .qd{display:flex;gap:4px;flex-shrink:0}
+.rvm .queue .qd i{width:5px;height:5px;border-radius:50%;background:var(--ink-3);opacity:.5}
+.rvm .queue .qd i.now{background:var(--tint);opacity:1}
+.rvm .queue b{color:var(--ink);font-weight:600}
+.rvm .queue .last{color:var(--ink-3)}
 
 .rvm .hint{text-align:center;font-size:12.5px;color:var(--ink-3);margin-top:18px;transition:opacity .4s}
 .rvm .hint.off{opacity:0}
@@ -683,10 +698,21 @@ export default function ReviewMobile(p: ReviewMobileProps) {
         )}
 
         {entry && (
-          <div className="peek">
-            <s className={left < 2 ? 'off' : ''} />
-            <s className={left < 3 ? 'off' : ''} />
-          </div>
+          <>
+            <div className="peek">
+              <s className={left < 2 ? 'off' : ''} />
+              <s className={left < 3 ? 'off' : ''} />
+            </div>
+            <div className="queue">
+              <span className="qd" aria-hidden="true">
+                {Array.from({ length: Math.min(left, 5) }, (_, i) => <i key={i} className={i === 0 ? 'now' : undefined} />)}
+                {left > 5 && <i />}
+              </span>
+              {left > 1
+                ? <span><b>{left - 1} more</b> after this · one at a time</span>
+                : <span className="last">Last one</span>}
+            </div>
+          </>
         )}
         <div className={`hint${acted || !left ? ' off' : ''}`}>Swipe right to file · left for later</div>
       </div>
