@@ -16,6 +16,7 @@ import { AttachBillSheet } from '../components/txn-ledger/AttachBillSheet';
 import { ContractHub, CONTRACT_HUB_CSS } from '../components/txn-ledger/ContractHub';
 import { useIsMobile } from '../lib/useIsMobile';
 import { createPortal } from 'react-dom';
+import DragSheet from '../components/DragSheet';
 import TxnDetailMobile from '../components/txn/TxnDetailMobile';
 
 // ─── Scoped stylesheet — a faithful port of the txn-detail reference (cream/terracotta).
@@ -474,6 +475,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
   const [mappingAllocId, setMappingAllocId] = useState<string | null>(null);
   const [contractHubOpen, setContractHubOpen] = useState(false);                       // worker: link to a WO
   const [attachBill, setAttachBill] = useState<{ file: File | null; mode: 'upload' | 'link' } | null>(null); // vendor: dup-check + PO create
+  const [linkChoice, setLinkChoice] = useState(false);                                 // vendor: which of the two
   const [, setSelectedObligation] = useState<SelectedObligation | null>(null);
   const [, setProjectWOs] = useState<any[]>([]);
   const [projectPOs, setProjectPOs] = useState<any[]>([]);
@@ -771,7 +773,13 @@ export default function TransactionDetail({ session }: { session: Session }) {
     if (txn.bill_doc_url) return { linked: true, k: '✓ Bill attached', sub: 'Uploaded · tap to preview' };
     return { linked: false, k: 'Not linked to work yet', sub: `link ${payeeName}'s ${isVendor ? 'bill' : 'contract'}, and this settles against it` };
   };
-  const linkAction = () => { if (isVendor) setAttachBill({ file: null, mode: 'upload' }); else setContractHubOpen(true); };
+  // A vendor payment can be tied to an order two ways, and AttachBillSheet has always supported
+  // both — mode 'link' picks an existing PO with no bill, mode 'upload' reads a new bill. Only
+  // TrackChip's menu on the desktop transactions list ever passed 'link', and that whole cell is
+  // display:none on a phone ("Linking happens on the transaction page", says the CSS) — which
+  // sent every phone here, where the choice was hardcoded to 'upload'. So linking a payment to an
+  // order it already has was unreachable on a phone entirely. Ask, the way the chip does.
+  const linkAction = () => { if (isVendor) setLinkChoice(true); else setContractHubOpen(true); };
   // WhatsApp origin, only when the ingest actually captured the source message.
   const waText: string | null = (txn as any).ai_flag_data?.source_text || (txn as any).ai_flag_data?.raw_message || (txn as any).ai_flag_data?.wa_message || null;
   const waWho: string | null = (txn as any).ai_flag_data?.source_sender || (txn as any).ai_flag_data?.sender || null;
@@ -895,7 +903,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
               <span className="chip sage" style={isVoided ? { color: 'var(--terra)', background: 'var(--terra-tint)' } : undefined}><i style={isVoided ? { background: 'var(--terra)' } : undefined} />{isVoided ? 'Voided' : (txn.status || 'Active')}</span>
               {!isVoided && !billLinked && (
                 isVendor
-                  ? <span className="chip warn" onClick={() => setAttachBill({ file: null, mode: 'upload' })}><i />No bill attached — attach now</span>
+                  ? <span className="chip warn" onClick={() => setLinkChoice(true)}><i />No bill attached — attach now</span>
                   : <span className="chip warn" onClick={() => setContractHubOpen(true)}><i />Not linked to a contract — link now</span>
               )}
               {txn.ai_flag_status === 'Flagged' && <span className="chip gold"><i />Flagged</span>}
@@ -1280,6 +1288,42 @@ export default function TransactionDetail({ session }: { session: Session }) {
               </>
             )}
           </div>
+        </div>
+      ), document.body)}
+
+      {/* Which of the two ways to tie this payment to an order. Same two choices, and the same
+          words, as the chip on the transactions list — that menu is desktop-only, so without this
+          the phone had one of them and no way to the other. */}
+      {linkChoice && createPortal((
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center">
+          <div className="absolute inset-0" style={{ background: 'rgba(30,26,21,0.5)' }} onClick={() => setLinkChoice(false)} aria-hidden="true" />
+          <DragSheet open={linkChoice} onDismiss={() => setLinkChoice(false)}
+            className="relative w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl bg-white p-5 pb-7 sm:pb-5"
+            role="dialog" aria-modal="true" aria-label="Link this payment">
+            <div className="w-9 h-1 rounded-full bg-outline-variant/40 mx-auto mb-4 sm:hidden" />
+            <h3 className="text-[17px] font-bold text-on-surface mb-1">Link this payment</h3>
+            <p className="text-[13px] text-on-surface-variant mb-4">It can point at an order you already have, or at a bill you are holding now.</p>
+            <button type="button" className="w-full flex items-center gap-3 p-3 rounded-2xl text-left hover:bg-surface-container-low transition-colors"
+              onClick={() => { setLinkChoice(false); setAttachBill({ file: null, mode: 'link' }); }}>
+              <span className="shrink-0 grid place-items-center rounded-xl" style={{ width: 36, height: 36, background: '#F8E7DE' }}>
+                <span className="material-symbols-outlined text-[18px]" style={{ color: '#C4613A' }}>link</span>
+              </span>
+              <span className="min-w-0">
+                <span className="block text-[14px] font-semibold text-on-surface">Link this payment to a PO</span>
+                <span className="block text-[12px] text-on-surface-variant mt-0.5">Pick an existing order — no bill</span>
+              </span>
+            </button>
+            <button type="button" className="w-full flex items-center gap-3 p-3 rounded-2xl text-left hover:bg-surface-container-low transition-colors"
+              onClick={() => { setLinkChoice(false); setAttachBill({ file: null, mode: 'upload' }); }}>
+              <span className="shrink-0 grid place-items-center rounded-xl" style={{ width: 36, height: 36, background: '#F8E7DE' }}>
+                <span className="material-symbols-outlined text-[18px]" style={{ color: '#C4613A' }}>photo_camera</span>
+              </span>
+              <span className="min-w-0">
+                <span className="block text-[14px] font-semibold text-on-surface">Upload a new bill</span>
+                <span className="block text-[12px] text-on-surface-variant mt-0.5">Read it &amp; attach or create a PO</span>
+              </span>
+            </button>
+          </DragSheet>
         </div>
       ), document.body)}
 
