@@ -207,7 +207,7 @@ export async function loadWeeklyPaid(monday: Date): Promise<Record<string, numbe
 export async function loadVendorRows(): Promise<PayRow[]> {
   const [poR, stkR, projR, balR] = await Promise.all([
     supabase.from('purchase_orders').select('po_id, stakeholder_id, project_id, total_value, order_value, vendor_bill_amount, vendor_bill_number, date_issued, status').eq('approval_status', 'APPROVED'),
-    supabase.from('stakeholders').select('stakeholder_id, name'),
+    supabase.from('stakeholders').select('stakeholder_id, name, type'),
     supabase.from('projects').select('project_id, name'),
     supabase.from('v_party_balance').select('stakeholder_id, to_pay, advance, without_bills'),
   ]);
@@ -215,6 +215,9 @@ export async function loadVendorRows(): Promise<PayRow[]> {
   const pos = (poR.data ?? []).filter((p: any) => p.stakeholder_id && (p.status || '').toUpperCase() !== 'CANCELLED');
   const poIds = pos.map((p: any) => p.po_id);
   const stkName: Record<string, string> = {}; (stkR.data ?? []).forEach((s: any) => { stkName[s.stakeholder_id] = s.name; });
+  // Only actual VENDORS belong in this section. v_party_balance covers vendors AND workers, so without
+  // this filter a worker with a balance but no PO leaked in as a "0 bills open" vendor row.
+  const isVendorId = new Set((stkR.data ?? []).filter((s: any) => s.type === 'Vendor').map((s: any) => s.stakeholder_id));
   const projName: Record<string, string> = {}; (projR.data ?? []).forEach((p: any) => { projName[p.project_id] = p.name; });
 
   // Ledger net figures per vendor (view absent → {} → fall back to open PO dues below).
@@ -239,7 +242,7 @@ export async function loadVendorRows(): Promise<PayRow[]> {
     });
   });
 
-  const vendorIds = new Set<string>([...Object.keys(byVendor), ...Object.keys(bal)]);
+  const vendorIds = new Set<string>([...Object.keys(byVendor), ...Object.keys(bal)].filter(id => isVendorId.has(id)));
   const rows: PayRow[] = [];
   for (const vid of vendorIds) {
     const bills = (byVendor[vid] ?? []).sort((a, b) => (a.date || '').localeCompare(b.date || '')); // oldest first
