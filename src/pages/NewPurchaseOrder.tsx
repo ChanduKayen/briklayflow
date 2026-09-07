@@ -3556,12 +3556,31 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
           onSubmitAsTyped={() => {
             // handleSubmit's unresolved path drives the desktop item grid, which this screen does not
             // render — so the choice the grid would offer is made here, then it submits cleanly.
-            lineItems.filter(l => l.item_name.trim() && !l.sku_id).forEach(l => updateLine(l.id, { skipped_linking: true }));
-            window.setTimeout(() => void handleSubmit('ORDERED'), 0);
+            // The marked lines go STRAIGHT to handleSubmit: setLineItems does not reach the closure
+            // this call already holds, so submitting on a later tick still read the unmarked lines,
+            // found them unresolved all over again, and bailed to a grid that isn't on screen.
+            const marked = lineItems.map(l => (l.item_name.trim() && !l.sku_id ? { ...l, skipped_linking: true } : l));
+            setLineItems(marked);
+            void handleSubmit('ORDERED', marked);
           }}
           onSubmit={() => { if (poMode === 'rfq') setShowRfq(true); else void handleSubmit('ORDERED'); }}
-          submitting={isGlobalMatching}
+          submitting={isGlobalMatching || saveMutation.isPending}
           onBack={() => navigate(-1)}
+        />
+        {/* The ceremony is what ENDS this page: saveMutation's onSuccess only opens it, and the
+            navigate lives in its onLeave. The phone rendered everything else and not this, so a
+            successful save wrote the PO, flashed a snackbar, and left the form sitting there
+            looking untouched — and a second tap wrote a second PO. Same component, same props
+            as the desktop below. */}
+        <UiSaveCeremony
+          open={uiCeremonyOpen}
+          poId={saveMutation.data}
+          vendorName={selectedVendor?.name}
+          vendorId={selectedVendor?.stakeholder_id}
+          vendorContact={selectedVendor?.contact}
+          projectName={selectedProjectObj?.name}
+          totalLabel={`₹${grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`}
+          onLeave={() => navigate(returnTo)}
         />
         {/* Requesting quotes goes out through the same modal the desktop uses. */}
         {showRfq && (
@@ -3579,14 +3598,14 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
     );
   }
 
-  async function handleSubmit(status: string) {
+  async function handleSubmit(status: string, linesOverride?: DraftLineItem[]) {
     setIsGlobalMatching(true);
     // Everything runs inside try/finally so the full-screen "Matching items…" overlay
     // ALWAYS comes down — a thrown RPC/network error here used to strand the user on a
     // spinner forever with no message. Now it closes and the error is shown.
     try {
     let hasUnresolved = false;
-    const updatedLines = [...lineItems];
+    const updatedLines = [...(linesOverride ?? lineItems)];
 
     for (let i = 0; i < updatedLines.length; i++) {
       const li = updatedLines[i];

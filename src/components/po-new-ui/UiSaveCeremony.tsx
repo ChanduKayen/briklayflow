@@ -13,6 +13,7 @@
 import { useState } from 'react';
 import { Check, Truck, FileText, Camera, ChevronRight, MessageCircle, Copy } from 'lucide-react';
 import { V, nums } from './voiceTokens';
+import DragSheet from '../DragSheet';
 import SendToVendorPanel from './SendToVendorPanel';
 
 interface UiSaveCeremonyProps {
@@ -53,7 +54,11 @@ export default function UiSaveCeremony({
         onClick={onLeave}
         aria-hidden="true"
       />
-      <div
+      {/* On a phone this is a bottom sheet, so it swipes down to dismiss like every other
+          sheet in the app. Dismissing is the same exit the scrim and "View PO" take. */}
+      <DragSheet
+        open={open}
+        onDismiss={onLeave}
         className="relative w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-6 pb-8 sm:pb-6 text-center motion-safe:animate-scale-in"
         style={{ background: V.surface }}
         role="dialog"
@@ -138,7 +143,7 @@ export default function UiSaveCeremony({
             </div>
           </>
         )}
-      </div>
+      </DragSheet>
     </div>
   );
 }
