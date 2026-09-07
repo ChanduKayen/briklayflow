@@ -408,6 +408,9 @@ export default function Logbook({ session }: { session: Session }) {
           onError={(m) => showSnackbar(m, { type: 'error' })}
           senderLine={senderLine}
           onManageSenders={() => setTeamOpen(true)}
+          // "View in WhatsApp" opens the Briklay chat — the number the site sends TO — not a
+          // chat with the payee. Same number the desktop band links to.
+          onOpenWhatsApp={() => window.open(`https://wa.me/${BRIKLAY_WA}`, '_blank', 'noopener,noreferrer')}
         />
         {teamOpen && <ManageTeam onClose={() => setTeamOpen(false)} />}
       </>

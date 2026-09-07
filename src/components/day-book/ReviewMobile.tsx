@@ -1,9 +1,10 @@
-// ReviewMobile — the phone's review deck, built to the for-review reference design.
+// ReviewMobile — the phone's review list, built to the for-review reference design.
 //
-// One card at a time: swipe right to file, left for later. Every action runs through the code that
-// already owns it — fileRoughEntry / fileRoughEntrySplit / rejectRoughEntry / createParty — and the
-// AI's guessed ids go through resolveEntry, the same check the desktop card makes.
-import { useEffect, useMemo, useRef, useState } from 'react';
+// Every captured entry is a card in one scrolling column: file them in any order, scroll past what
+// can wait. Actions run through the code that already owns them — fileRoughEntry /
+// fileRoughEntrySplit / rejectRoughEntry / createParty — and the AI's guessed ids go through
+// resolveEntry, the same check the desktop card makes.
+import { useMemo, useRef, useState } from 'react';
 import type { RoughEntry } from '../../types';
 import { fileRoughEntry, fileRoughEntrySplit, rejectRoughEntry, createParty, errMessage, type ProjectSplit } from './fileEntry';
 import { resolveEntry, type ProjectLite, type StakeholderLite } from './resolveEntry';
@@ -29,11 +30,19 @@ const CSS = `
 .rvm .meta .pbar{flex:1;height:4px;border-radius:4px;background:rgba(27,23,19,.07);overflow:hidden}
 .rvm .meta .pbar i{display:block;height:100%;border-radius:4px;background:var(--good);width:0;transition:width .6s var(--ease)}
 
-.rvm .deck{flex:1;padding:18px 24px calc(88px + env(safe-area-inset-bottom));overflow-y:auto}
+/* ---------- the column of cards ---------- */
+.rvm .deckwrap{flex:1;display:flex;flex-direction:column;min-height:0}
+.rvm .deck{flex:1;display:flex;flex-direction:column;gap:14px;overflow-y:auto;
+  padding:18px 24px 24px;scrollbar-width:none}
 .rvm .deck::-webkit-scrollbar{display:none}
+.rvm .cw{width:100%;
+  transition:opacity .35s,transform .35s var(--ease),height .35s var(--ease),margin .35s var(--ease)}
+.rvm .cw.leaving{opacity:0;transform:translateX(60px) scale(.97)}
+.rvm .cw.tuck{opacity:0;transform:translateY(24px) scale(.97)}
+.rvm .cw.collapse{height:0 !important;margin-top:-14px;overflow:hidden}
 
-.rvm .rcard{position:relative;z-index:1;background:var(--card);border-radius:24px;padding:20px 20px 18px;
-  box-shadow:0 14px 36px -16px rgba(27,23,19,.22);touch-action:pan-y;will-change:transform}
+.rvm .rcard{position:relative;background:var(--card);border-radius:24px;padding:20px 20px 18px;
+  box-shadow:0 14px 36px -16px rgba(27,23,19,.22)}
 .rvm .rcard.enter{animation:rvmenter .5s var(--spring)}
 @keyframes rvmenter{from{transform:translateY(14px) scale(.965);opacity:0}to{transform:none;opacity:1}}
 
@@ -73,7 +82,7 @@ const CSS = `
 .rvm .ddsearch svg{color:var(--ink-3);flex-shrink:0}
 .rvm .ddsearch input{flex:1;border:0;background:none;font:inherit;font-size:16px;outline:none;color:var(--ink)}
 .rvm .ddsearch input::placeholder{color:var(--ink-3)}
-.rvm .ddlist{padding-bottom:8px;max-height:224px;overflow-y:auto}
+.rvm .ddlist{padding-bottom:8px;max-height:238px;overflow-y:auto}
 .rvm .dd{display:flex;align-items:center;gap:10px;min-height:46px;padding:6px 4px;cursor:pointer;
   position:relative;transition:background .15s;border-radius:10px;width:100%;border:0;background:none;
   text-align:left;color:inherit}
@@ -89,7 +98,6 @@ const CSS = `
   font-size:13px;line-height:1.45;color:var(--ink-2)}
 .rvm .notice i{width:6px;height:6px;border-radius:50%;flex-shrink:0;background:var(--ink-3)}
 .rvm .notice.newp i{background:var(--warn)}
-.rvm .notice.split i{background:var(--good)}
 .rvm .notice b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
 
 .rvm .splits{margin-top:12px;background:var(--bg);border-radius:14px;padding:4px 14px;cursor:pointer;
@@ -104,21 +112,6 @@ const CSS = `
 .rvm .sprow .sw{flex:1;font-size:14px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink-2)}
 .rvm .sprow .sw b{color:var(--ink);font-weight:600}
 .rvm .spfoot{font-size:12px;color:var(--ink-3);padding:6px 0 10px}
-
-.rvm .spline{background:var(--card);border-radius:14px;padding:12px 14px;margin-bottom:10px}
-.rvm .spline .r1{display:flex;gap:10px}
-.rvm .spline .r1 input.pn{flex:1;border:0;background:var(--bg);border-radius:10px;font:inherit;font-size:16px;
-  font-weight:600;padding:10px 12px;outline:none;color:var(--ink);min-width:0}
-.rvm .spline .r1 input.pa{width:96px;border:0;background:var(--bg);border-radius:10px;font:inherit;font-size:16px;
-  font-weight:700;text-align:right;padding:10px 12px;outline:none;color:var(--ink);font-variant-numeric:tabular-nums}
-.rvm .spline input:focus{box-shadow:0 0 0 2px var(--tint)}
-.rvm .spline select{width:100%;margin-top:8px;border:0;background:var(--bg);border-radius:10px;font:inherit;
-  font-size:16px;font-weight:500;color:var(--ink-2);padding:9px 12px;outline:none;
-  -webkit-appearance:none;appearance:none}
-.rvm .addline2{display:block;width:100%;border:1.5px dashed rgba(27,23,19,.18);background:none;
-  border-radius:14px;font-size:14.5px;font-weight:600;color:var(--tint);
-  padding:13px;cursor:pointer;margin-bottom:12px;transition:background .15s}
-.rvm .addline2:active{background:rgba(196,80,43,.06)}
 
 .rvm .srcline{border:0;background:none;display:flex;align-items:center;gap:6px;
   font-size:13px;color:var(--ink-3);margin-top:12px;cursor:pointer;padding:3px 0}
@@ -136,41 +129,25 @@ const CSS = `
   transition:transform .15s var(--spring),background .25s}
 .rvm .cta:active{transform:scale(.97);background:var(--tint-press)}
 .rvm .cta:disabled{opacity:.55;pointer-events:none}
-.rvm .later{width:92px;height:52px;border:0;border-radius:16px;flex-shrink:0;
-  background:rgba(27,23,19,.05);color:var(--ink);font-size:15px;font-weight:600;
-  cursor:pointer;transition:transform .15s var(--spring),background .2s}
-.rvm .later:active{transform:scale(.95);background:rgba(27,23,19,.1)}
+.rvm .splitbtn{height:52px;border:0;border-radius:16px;flex-shrink:0;padding:0 16px;
+  background:rgba(27,23,19,.05);color:var(--ink-2);cursor:pointer;
+  display:flex;align-items:center;gap:7px;font-size:15px;font-weight:600;
+  transition:transform .15s var(--spring),background .2s,color .2s}
+.rvm .splitbtn:active{transform:scale(.92);background:rgba(27,23,19,.1)}
+.rvm .splitbtn svg rect,.rvm .splitbtn svg line{
+  stroke-dasharray:66;stroke-dashoffset:66;
+  animation:rvmdrawsplit 1.1s var(--ease) .35s forwards}
+.rvm .splitbtn svg line{stroke-dasharray:14;stroke-dashoffset:14;animation-delay:.9s;animation-duration:.4s}
+@keyframes rvmdrawsplit{to{stroke-dashoffset:0}}
+.rvm .splitbtn.has{background:rgba(196,80,43,.1);color:var(--tint);animation:rvmsplitpulse 3.2s ease-in-out infinite}
+@keyframes rvmsplitpulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(196,80,43,0)}
+  50%{box-shadow:0 0 0 5px rgba(196,80,43,.1)}}
 
-.rvm .stamp{position:absolute;top:16px;font-size:13px;font-weight:800;letter-spacing:.06em;
-  padding:7px 13px;border-radius:11px;border:2.5px solid;opacity:0;pointer-events:none;
-  text-transform:uppercase;background:var(--card);z-index:2}
-.rvm .stamp.L{left:16px;color:var(--good);border-color:var(--good);transform:rotate(-7deg)}
-.rvm .stamp.R{right:16px;color:var(--ink-3);border-color:var(--ink-3);transform:rotate(7deg)}
-
-/* The stack behind the card. The strips carry z-index:-1, which paints them BEHIND the
-   nearest ancestor that has a background — so on a plain page they were invisible, and this
-   space read as empty. Giving .peek its own stacking context puts them behind the card and
-   in front of the page, which is where the depth cue was always meant to sit. */
-.rvm .peek{margin:0 auto;display:flex;flex-direction:column;align-items:center;
-  position:relative;z-index:0;isolation:isolate}
-.rvm .peek s{display:block;height:34px;border-radius:0 0 18px 18px;background:var(--card);
-  box-shadow:0 10px 22px -14px rgba(27,23,19,.22);
-  margin-top:-24px;transition:width .4s var(--spring),opacity .3s}
-.rvm .peek s:nth-child(1){width:91%;z-index:-1;position:relative}
-.rvm .peek s:nth-child(2){width:82%;opacity:.6;z-index:-2;position:relative}
-.rvm .peek s.off{opacity:0}
-.rvm .peek s{border:1px solid var(--hair);border-top:0}
-
-/* what is behind the card, said plainly: how many are left and that they arrive one at a time */
-.rvm .queue{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:16px;
-  font-size:12.5px;line-height:1.4;color:var(--ink-2);text-align:center}
-.rvm .queue .qd{display:flex;gap:4px;flex-shrink:0}
-.rvm .queue .qd i{width:5px;height:5px;border-radius:50%;background:var(--ink-3);opacity:.5}
-.rvm .queue .qd i.now{background:var(--tint);opacity:1}
-.rvm .queue b{color:var(--ink);font-weight:600}
-.rvm .queue .last{color:var(--ink-3)}
-
-.rvm .hint{text-align:center;font-size:12.5px;color:var(--ink-3);margin-top:18px;transition:opacity .4s}
+/* The reference reserves 10px under the hint and then draws its own tab bar. Ours is the app's,
+   fixed and 56px tall over the safe area, so the hint keeps its 10px and clears that too. */
+.rvm .hint{text-align:center;font-size:12.5px;color:var(--ink-3);
+  padding-bottom:calc(10px + 56px + env(safe-area-inset-bottom));transition:opacity .4s}
 .rvm .hint.off{opacity:0}
 
 .rvm .zero{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -226,6 +203,20 @@ const CSS = `
   color:#fff;background:var(--tint);cursor:pointer;transition:transform .18s var(--spring),opacity .3s}
 .rvm .b2:active{transform:scale(.97)}
 .rvm .b2:disabled{opacity:.35;pointer-events:none}
+.rvm .spline{background:var(--card);border-radius:14px;padding:12px 14px;margin-bottom:10px}
+.rvm .spline .r1{display:flex;gap:10px}
+.rvm .spline .r1 input.pn{flex:1;border:0;background:var(--bg);border-radius:10px;font:inherit;font-size:16px;
+  font-weight:600;padding:10px 12px;outline:none;color:var(--ink);min-width:0}
+.rvm .spline .r1 input.pa{width:96px;border:0;background:var(--bg);border-radius:10px;font:inherit;font-size:16px;
+  font-weight:700;text-align:right;padding:10px 12px;outline:none;color:var(--ink);font-variant-numeric:tabular-nums}
+.rvm .spline input:focus{box-shadow:0 0 0 2px var(--tint)}
+.rvm .spline select{width:100%;margin-top:8px;border:0;background:var(--bg);border-radius:10px;font:inherit;
+  font-size:16px;font-weight:500;color:var(--ink-2);padding:9px 12px;outline:none;
+  -webkit-appearance:none;appearance:none}
+.rvm .addline2{display:block;width:100%;border:1.5px dashed rgba(27,23,19,.18);background:none;
+  border-radius:14px;font-size:14.5px;font-weight:600;color:var(--tint);
+  padding:13px;cursor:pointer;margin-bottom:12px;transition:background .15s}
+.rvm .addline2:active{background:rgba(196,80,43,.06)}
 .rvm .splitsum{text-align:center;font-size:13.5px;color:var(--ink-2);margin:2px 0 14px;font-variant-numeric:tabular-nums}
 .rvm .splitsum.err{color:#D0342C;font-weight:600}
 .rvm .autonote{font-size:13px;color:var(--ink-3);text-align:center;margin-top:10px;line-height:1.45}
@@ -238,8 +229,8 @@ const CSS = `
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 const CHEV = <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>;
 
-/** A card's local edits — the deck never writes to the row until it is filed. */
-interface Draft {
+/** A card's local edits — the list never writes to the row until it is filed. */
+export interface Draft {
   payeeId: string | null;
   payeeName: string | null;
   projectId: string | null;
@@ -259,80 +250,41 @@ export interface ReviewMobileProps {
   onError: (msg: string) => void;
   senderLine: string | null;
   onManageSenders: () => void;
+  onOpenWhatsApp: () => void;
 }
 
-export default function ReviewMobile(p: ReviewMobileProps) {
-  const projects = p.projects;
-
-  // "Later" moves a card to the back for this visit only — the deck order is the queue with the
-  // deferred ids moved to the end, so nothing has to be kept in step with the query.
-  const [deferred, setDeferred] = useState<string[]>([]);
-  /**
-   * Cards this visit has finished with. The write lands before the query refetches, so without
-   * this the filed card sits at the top of the deck for a beat — long enough to file it twice.
-   */
-  const [gone, setGone] = useState<string[]>([]);
-  const [drafts, setDrafts] = useState<Record<string, Draft>>({});
-  const [sheet, setSheet] = useState<null | 'filed' | 'menu' | 'edit' | 'np' | 'split'>(null);
+/** One entry's card. Its own open/closed state lives here so a long list stays independent. */
+function Card({
+  entry, draft, projects, stakeholders, busy, onPatch, onMenu, onSplit, onFile, register,
+}: {
+  entry: RoughEntry;
+  draft: Draft;
+  projects: ProjectLite[];
+  stakeholders: StakeholderLite[];
+  busy: boolean;
+  onPatch: (d: Partial<Draft>) => void;
+  onMenu: () => void;
+  onSplit: () => void;
+  onFile: (nudge: (which: 'to' | 'site') => void) => void;
+  register: (el: HTMLDivElement | null) => void;
+}) {
   const [sug, setSug] = useState<null | 'to' | 'site'>(null);
   const [ddq, setDdq] = useState('');
   const [msgOpen, setMsgOpen] = useState(false);
   const [flash, setFlash] = useState<null | 'to' | 'site'>(null);
-  const [busy, setBusy] = useState(false);
-  const [acted, setActed] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const ddRef = useRef<HTMLInputElement>(null);
 
-  const byId = useMemo(() => new Map(p.entries.map(e => [e.id, e])), [p.entries]);
+  const projectName = draft.projectId ? projects.find(x => x.project_id === draft.projectId)?.name ?? null : null;
+  const isNewParty = !draft.payeeId && !!draft.payeeName?.trim();
+  const senderName = entry.sender_name || 'Someone';
+  const via = entry.source?.startsWith('WHATSAPP') ? 'WhatsApp' : 'Briklay';
+  const sentTime = new Date(entry.created_at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
+  const message = (entry.transcribed_text || entry.raw_text || '').trim();
+  const projectRaw = resolveEntry(entry, stakeholders, projects).projectRaw;
 
-  const order = useMemo(() => {
-    const ids = p.entries.map(e => e.id).filter(id => !gone.includes(id));
-    const back = deferred.filter(id => ids.includes(id));
-    return [...ids.filter(id => !back.includes(id)), ...back];
-  }, [p.entries, deferred, gone]);
-
-  const entry = order.length ? byId.get(order[0]) ?? null : null;
-
-  const base = useMemo(
-    () => (entry ? resolveEntry(entry, p.stakeholders, projects) : null),
-    [entry, p.stakeholders, projects],
-  );
-
-  const draft: Draft | null = useMemo(() => {
-    if (!entry || !base) return null;
-    return drafts[entry.id] ?? {
-      payeeId: base.payeeId, payeeName: base.payeeName, projectId: base.projectId,
-      amount: base.amount, description: base.description, split: null,
-    };
-  }, [entry, base, drafts]);
-
-  const patch = (d: Partial<Draft>) => {
-    if (!entry || !draft) return;
-    setDrafts(s => ({ ...s, [entry.id]: { ...draft, ...d } }));
-  };
-
-  const projectName = draft?.projectId ? projects.find(x => x.project_id === draft.projectId)?.name ?? null : null;
-  const isNewParty = !!draft && !draft.payeeId && !!draft.payeeName?.trim();
-
-  // ── the card's own facts ────────────────────────────────────────────────────
-  const senderName = entry?.sender_name || 'Someone';
-  const via = entry?.source?.startsWith('WHATSAPP') ? 'WhatsApp' : 'Briklay';
-  const sentTime = entry ? new Date(entry.created_at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true }) : '';
-  const message = (entry?.transcribed_text || entry?.raw_text || '').trim();
-
-  const left = order.length;
-  const leftAmount = order.reduce((s, id) => {
-    const e = byId.get(id);
-    if (!e) return s;
-    const d = drafts[id];
-    return s + (d ? d.amount : resolveEntry(e, p.stakeholders, projects).amount);
-  }, 0);
-
-  const reset = () => { setSug(null); setDdq(''); setMsgOpen(false); setFlash(null); };
-
-  // ── name + site pickers ─────────────────────────────────────────────────────
   const suggestions = useMemo(() => {
-    const ai = entry?.ai_extracted || {};
+    const ai = entry.ai_extracted || {};
     const names: string[] = [];
     if (ai.suggested_payee?.name) names.push(ai.suggested_payee.name);
     (ai.payee_closest_match ?? []).forEach(m => { if (m?.name && !names.includes(m.name)) names.push(m.name); });
@@ -343,11 +295,11 @@ export default function ReviewMobile(p: ReviewMobileProps) {
     const q = ddq.trim(), ql = q.toLowerCase();
     const hit = (n: string) => n.toLowerCase().includes(ql);
     const sugNames = suggestions.filter(hit);
-    const rest = p.stakeholders.filter(s => !sugNames.includes(s.name) && hit(s.name)).slice(0, 4);
+    const rest = stakeholders.filter(s => !sugNames.includes(s.name) && hit(s.name)).slice(0, 4);
     const rows: { name: string; id: string | null; tag?: string; create?: boolean }[] = [];
     const exact = [...sugNames, ...rest.map(r => r.name)].some(n => n.toLowerCase() === ql);
     if (q && !exact) rows.push({ name: q, id: null, tag: 'new party', create: true });
-    sugNames.forEach(n => rows.push({ name: n, id: p.stakeholders.find(s => s.name === n)?.stakeholder_id ?? null, tag: 'suggested' }));
+    sugNames.forEach(n => rows.push({ name: n, id: stakeholders.find(s => s.name === n)?.stakeholder_id ?? null, tag: 'suggested' }));
     rest.forEach(s => rows.push({ name: s.name, id: s.stakeholder_id }));
     return rows;
   })();
@@ -359,133 +311,229 @@ export default function ReviewMobile(p: ReviewMobileProps) {
       return opening ? which : null;
     });
   };
-  const setPayee = (name: string, id: string | null) => { patch({ payeeName: name, payeeId: id }); setSug(null); setDdq(''); };
-  const setSite = (id: string) => { patch({ projectId: id }); setSug(null); };
 
-  // ── file / later / bin ──────────────────────────────────────────────────────
-  const wobble = () => {
+  /** The gentle speed bump, driven from the parent's file attempt. */
+  const nudge = (which: 'to' | 'site') => {
     cardRef.current?.animate(
       [{ transform: 'translateX(0)' }, { transform: 'translateX(9px)' }, { transform: 'translateX(-7px)' }, { transform: 'translateX(5px)' }, { transform: 'translateX(0)' }],
       { duration: 380, easing: 'ease' },
     );
+    setFlash(null);
+    requestAnimationFrame(() => setFlash(which));
+    if (sug !== which) toggleSug(which, false);
+  };
+
+  return (
+    <div className="cw" ref={register}>
+      <div className="rcard enter" ref={cardRef}>
+        <div className="top">
+          <i />
+          <div className="f">{senderName} · {via} · {sentTime}</div>
+          <button type="button" className="editpill" onClick={onMenu}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z" /></svg>
+            Edit
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+          </button>
+        </div>
+
+        <div className="amt">−{inr(draft.amount)}</div>
+
+        {draft.split ? (
+          <>
+            <button type="button" className="splits" onClick={onSplit}>
+              <div className="sph"><i />Splits into {draft.split.length} transactions<span className="e">Adjust</span></div>
+              {draft.split.map((s, i) => (
+                <div className="sprow" key={i}>
+                  <div className="sa">−{inr(s.amount)}</div>
+                  <div className="sw"><b>{s.payeeName || draft.payeeName}</b> · {(projects.find(x => x.project_id === s.projectId)?.name || '').replace(' Residence', '').replace(' Apartments', '')}</div>
+                </div>
+              ))}
+              <div className="spfoot">Payees &amp; sites as you set them · each entry described automatically</div>
+            </button>
+            <div className="kvs" style={{ marginTop: 4 }}>
+              <div className="kv"><div className="k">For</div><div className="v" style={{ fontWeight: 500 }}>{draft.description || '—'}</div></div>
+            </div>
+          </>
+        ) : (
+          <div className="kvs">
+            <button type="button" className={`kv tap${sug === 'to' ? ' open' : ''}${flash === 'to' ? ' flash' : ''}`} onClick={() => toggleSug('to')}>
+              <div className="k">To</div>
+              <div className={`v${draft.payeeName ? '' : ' dim'}`}>{draft.payeeName || 'Add a name'}</div>
+              <span className="chev">{CHEV}</span>
+            </button>
+            <div className={`sug${sug === 'to' ? ' open' : ''}`}>
+              <div className="sug-w">
+                <div className="ddsearch">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
+                  <input ref={ddRef} value={ddq} onChange={e => setDdq(e.target.value)} placeholder="Search or type a new name" />
+                </div>
+                <div className="ddlist">
+                  {nameRows.length === 0
+                    ? <div className="ddempty">No matches — keep typing to add a new name</div>
+                    : nameRows.map((r, i) => (
+                      <button type="button" className={`dd${r.create ? ' create' : ''}`} key={`${r.name}-${i}`}
+                        onClick={() => { onPatch({ payeeName: r.name, payeeId: r.id }); setSug(null); setDdq(''); }}>
+                        <div className="dn">{r.create ? `Add “${r.name}”` : r.name}</div>
+                        {r.tag && <div className="dt">{r.tag}</div>}
+                      </button>
+                    ))}
+                </div>
+              </div>
+            </div>
+
+            <button type="button" className={`kv tap${sug === 'site' ? ' open' : ''}${flash === 'site' ? ' flash' : ''}`} onClick={() => toggleSug('site')}>
+              <div className="k">Site</div>
+              <div className={`v${projectName ? '' : ' dim'}`}>{projectName || projectRaw || 'Pick a site'}</div>
+              <span className="chev">{CHEV}</span>
+            </button>
+            <div className={`sug${sug === 'site' ? ' open' : ''}`}>
+              <div className="sug-w">
+                <div className="ddlist">
+                  {projects.map(s => (
+                    <button type="button" className="dd" key={s.project_id}
+                      onClick={() => { onPatch({ projectId: s.project_id }); setSug(null); }}>
+                      <div className="dn">{s.name}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="kv"><div className="k">For</div><div className="v" style={{ fontWeight: 500 }}>{draft.description || '—'}</div></div>
+          </div>
+        )}
+
+        {!draft.split && !draft.payeeName?.trim() && (
+          <div className="notice newp"><i /><div>No name yet — add one and it is saved as a party when you file.</div></div>
+        )}
+        {!draft.split && isNewParty && (
+          <div className="notice newp"><i /><div><b>{draft.payeeName}</b> is new — saved as a party when you file. Editable anytime.</div></div>
+        )}
+
+        {message && (
+          <>
+            <button type="button" className={`srcline${msgOpen ? ' open' : ''}`} onClick={() => setMsgOpen(o => !o)}>
+              See the message
+              {CHEV}
+            </button>
+            <div className={`msg${msgOpen ? ' open' : ''}`}><div className="msg-w"><div className="m-in">“{message}”</div></div></div>
+          </>
+        )}
+
+        <div className="ctarow">
+          <button type="button" className="cta" disabled={busy} onClick={() => onFile(nudge)}>
+            {draft.split ? `File ${draft.split.length} entries` : 'File it'}
+          </button>
+          <button type="button" className={`splitbtn${draft.split ? ' has' : ''}`} onClick={onSplit}>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5" /><line x1="12" y1="5" x2="12" y2="19" /></svg>
+            Split
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function ReviewMobile(p: ReviewMobileProps) {
+  const projects = p.projects;
+  const [drafts, setDrafts] = useState<Record<string, Draft>>({});
+  /** Cards this visit has finished with — the write lands before the query refetches. */
+  const [gone, setGone] = useState<string[]>([]);
+  const [filedSum, setFiledSum] = useState(0);
+  const [sheet, setSheet] = useState<null | 'filed' | 'menu' | 'edit' | 'np' | 'split'>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [acted, setActed] = useState(false);
+  const wraps = useRef<Record<string, HTMLDivElement | null>>({});
+
+  const live = useMemo(() => p.entries.filter(e => !gone.includes(e.id)), [p.entries, gone]);
+
+  const draftOf = (e: RoughEntry): Draft => {
+    const d = drafts[e.id];
+    if (d) return d;
+    const r = resolveEntry(e, p.stakeholders, projects);
+    return { payeeId: r.payeeId, payeeName: r.payeeName, projectId: r.projectId, amount: r.amount, description: r.description, split: null };
+  };
+  const patch = (e: RoughEntry, d: Partial<Draft>) =>
+    setDrafts(s => ({ ...s, [e.id]: { ...draftOf(e), ...d } }));
+
+  const active = activeId ? live.find(e => e.id === activeId) ?? null : null;
+  const activeDraft = active ? draftOf(active) : null;
+
+  const left = live.length;
+  const leftAmount = live.reduce((s, e) => s + draftOf(e).amount, 0);
+  const total0 = left + gone.length;
+  const pct = total0 ? (gone.length / total0) * 100 : 0;
+
+  /** The leave: slide out, then collapse the gap it leaves behind. */
+  const leave = (id: string, how: 'file' | 'ignore') => {
+    const el = wraps.current[id];
+    if (el) {
+      el.classList.add(how === 'file' ? 'leaving' : 'tuck');
+      el.style.height = `${el.offsetHeight}px`;
+      setTimeout(() => el.classList.add('collapse'), 300);
+    }
+    setActed(true);
+    setTimeout(() => setGone(g => [...g, id]), 640);
+  };
+
+  const autoDesc = (d: Draft, projectId: string, part: boolean) => {
+    const siteName = projects.find(x => x.project_id === projectId)?.name || 'No site yet';
+    return part ? `${d.description} · ${siteName} · part of ${inr(d.amount)} (WhatsApp)` : `${d.description} · ${siteName}`;
   };
 
   /**
-   * The gentle speed bump. A missing name or site is NOT waved through: an allocation needs a real
-   * project row and a payment needs a real party, so "file anyway" would only fail at the foreign
-   * key. The card wobbles, the missing field flashes, and its picker opens.
+   * Filing with no name or no site is NOT waved through. An allocation needs a real project row
+   * and a payment needs a real party, so a "file anyway" would only fail at the foreign key. The
+   * card wobbles, the missing field flashes, and its picker opens.
    */
-  const preFileCheck = (): boolean => {
-    if (!draft) return false;
-    const noPayee = !draft.split && !draft.payeeId && !draft.payeeName?.trim();
-    const noSite = !draft.split && !draft.projectId;
-    if (noPayee || noSite) {
-      wobble();
-      const which = noPayee ? 'to' : 'site';
-      setFlash(null);
-      requestAnimationFrame(() => setFlash(which));
-      if (sug !== which) toggleSug(which, false);
-      return false;
-    }
-    if (!draft.split && isNewParty) { openNp(); return false; }
-    return true;
-  };
-
-  const autoDesc = (d: Draft, s?: { projectId: string }) => {
-    const siteName = projects.find(x => x.project_id === (s ? s.projectId : d.projectId))?.name || 'No site yet';
-    return s ? `${d.description} · ${siteName} · part of ${inr(d.amount)} (WhatsApp)` : `${d.description} · ${siteName}`;
-  };
-
-  const leave = (how: 'file' | 'later') => {
-    const el = cardRef.current;
-    if (!el) return;
-    if (how === 'later') {
-      el.style.transition = 'transform .4s ease-in, opacity .4s';
-      el.style.transform = 'translateY(46px) scale(.9)';
-      el.style.opacity = '0';
-    } else {
-      el.style.transition = 'transform .36s ease-in, opacity .36s';
-      el.style.transform = 'translateX(125%) rotate(5deg)';
-      el.style.opacity = '.25';
-    }
-  };
-
-  const advance = (how: 'file' | 'later', delay: number) => {
-    const id = order[0];
-    setActed(true);
-    setTimeout(() => {
-      if (how === 'later') setDeferred(d => [...d.filter(x => x !== id), id]);
-      else setGone(g => [...g, id]);
-      reset();
-    }, delay);
-  };
-
-  const doFile = async (already = false) => {
-    if (!entry || !draft || busy) return;
-    if (!preFileCheck()) {
-      if (already && cardRef.current) {
-        const el = cardRef.current;
-        el.style.transition = 'transform .4s cubic-bezier(.32,1.4,.5,1)';
-        el.style.transform = ''; el.style.opacity = '1';
-      }
-      return;
+  const doFile = async (e: RoughEntry, nudge: (which: 'to' | 'site') => void) => {
+    const d = draftOf(e);
+    if (busy) return;
+    if (!d.split) {
+      if (!d.payeeId && !d.payeeName?.trim()) { nudge('to'); return; }
+      if (!d.projectId) { nudge('site'); return; }
+      if (!d.payeeId) { setActiveId(e.id); setNpName(d.payeeName ?? ''); setSheet('np'); return; }
     }
     setBusy(true);
     try {
-      if (draft.split) {
-        const splits: ProjectSplit[] = draft.split.map(s => ({
+      if (d.split) {
+        const splits: ProjectSplit[] = d.split.map(s => ({
           projectId: s.projectId, amount: s.amount, payeeId: s.payeeId,
-          description: autoDesc(draft, { projectId: s.projectId }),
+          description: autoDesc(d, s.projectId, true),
         }));
-        await fileRoughEntrySplit(entry, p.orgId, { payeeId: draft.payeeId || '', amount: draft.amount, description: draft.description }, splits);
+        await fileRoughEntrySplit(e, p.orgId, { payeeId: d.payeeId || '', amount: d.amount, description: d.description }, splits);
       } else {
-        await fileRoughEntry(entry, p.orgId, {
-          payeeId: draft.payeeId || '', projectId: draft.projectId || '',
-          amount: draft.amount, description: draft.description,
-        });
+        await fileRoughEntry(e, p.orgId, { payeeId: d.payeeId || '', projectId: d.projectId || '', amount: d.amount, description: d.description });
       }
-      if (!already) leave('file');
-      advance('file', already ? 80 : 340);
+      setFiledSum(s => s + d.amount);
+      leave(e.id, 'file');
       p.onChanged();
-    } catch (e) {
-      p.onError(errMessage(e, 'Could not file this entry'));
-      if (cardRef.current) { cardRef.current.style.transition = 'transform .4s cubic-bezier(.32,1.4,.5,1)'; cardRef.current.style.transform = ''; cardRef.current.style.opacity = '1'; }
+    } catch (err) {
+      p.onError(errMessage(err, 'Could not file this entry'));
     } finally { setBusy(false); }
   };
 
-  const doLater = (already = false) => {
-    if (order.length === 1) {
-      cardRef.current?.animate(
-        [{ transform: 'translateY(0)' }, { transform: 'translateY(10px)' }, { transform: 'translateY(0)' }],
-        { duration: 340, easing: 'ease' },
-      );
-      return;
-    }
-    if (!already) leave('later');
-    advance('later', already ? 80 : 340);
-  };
-
   const doBin = async () => {
-    if (!entry) return;
+    if (!active) return;
+    const id = active.id;
     setSheet(null);
-    try { await rejectRoughEntry(entry); leave('file'); advance('file', 340); p.onChanged(); }
+    try { await rejectRoughEntry(active); leave(id, 'ignore'); p.onChanged(); }
     catch (e) { p.onError(errMessage(e, 'Could not bin this entry')); }
   };
 
-  // the new-party sheet — the one place a party is created from this deck
+  // ── new party ───────────────────────────────────────────────────────────────
   const [npName, setNpName] = useState('');
-  const openNp = () => { setNpName(draft?.payeeName ?? ''); setSheet('np'); };
   const npAdd = async () => {
     const name = npName.trim();
-    if (!entry || !name || busy) return;
+    if (!active || !activeDraft || !name || busy) return;
     setBusy(true);
     try {
       // The kind comes from what the extractor read, not from a guess about intent — and the
       // party stays editable afterwards, exactly as the sheet says.
-      const t = entry.ai_extracted?.transaction_type;
-      const kind = t === 'Material Purchase' ? 'Vendor' : 'Worker';
+      const kind = active.ai_extracted?.transaction_type === 'Material Purchase' ? 'Vendor' : 'Worker';
       const made = await createParty(name, kind, p.orgId);
-      setDrafts(s => ({ ...s, [entry.id]: { ...draft!, payeeId: made.id, payeeName: made.name } }));
+      setDrafts(s => ({ ...s, [active.id]: { ...activeDraft, payeeId: made.id, payeeName: made.name } }));
       setSheet(null);
       p.onChanged();
     } catch (e) { p.onError(errMessage(e, 'Could not add the party')); }
@@ -495,86 +543,49 @@ export default function ReviewMobile(p: ReviewMobileProps) {
   // ── edit sheet ──────────────────────────────────────────────────────────────
   const [ed, setEd] = useState({ amt: '', payee: '', forr: '', site: '' });
   const openEdit = () => {
-    if (!draft) return;
-    setEd({ amt: String(draft.amount || ''), payee: draft.payeeName ?? '', forr: draft.description, site: draft.projectId ?? '' });
+    if (!activeDraft) return;
+    setEd({ amt: String(activeDraft.amount || ''), payee: activeDraft.payeeName ?? '', forr: activeDraft.description, site: activeDraft.projectId ?? '' });
     setSheet('edit');
   };
   const saveEdit = () => {
-    if (!draft) return;
+    if (!active || !activeDraft) return;
     const name = ed.payee.trim();
-    patch({
-      amount: parseInt(ed.amt.replace(/[^\d]/g, ''), 10) || draft.amount,
-      payeeName: name || draft.payeeName,
-      payeeId: name && name !== draft.payeeName ? (p.stakeholders.find(s => s.name === name)?.stakeholder_id ?? null) : draft.payeeId,
-      description: ed.forr.trim() || draft.description,
-      projectId: ed.site || draft.projectId,
-      split: ed.site ? null : draft.split,
+    patch(active, {
+      amount: parseInt(ed.amt.replace(/[^\d]/g, ''), 10) || activeDraft.amount,
+      payeeName: name || activeDraft.payeeName,
+      payeeId: name && name !== activeDraft.payeeName ? (p.stakeholders.find(s => s.name === name)?.stakeholder_id ?? null) : activeDraft.payeeId,
+      description: ed.forr.trim() || activeDraft.description,
+      projectId: ed.site || activeDraft.projectId,
+      split: ed.site ? null : activeDraft.split,
     });
     setSheet(null);
   };
 
   // ── split sheet ─────────────────────────────────────────────────────────────
   const [spLines, setSpLines] = useState<{ payee: string; projectId: string; amt: number }[]>([]);
-  const openSplit = () => {
-    if (!draft) return;
-    setSpLines(draft.split
-      ? draft.split.map(s => ({ payee: s.payeeName, projectId: s.projectId, amt: s.amount }))
-      : [{ payee: draft.payeeName ?? '', projectId: draft.projectId || projects[0]?.project_id || '', amt: Math.round(draft.amount / 2) },
-         { payee: draft.payeeName ?? '', projectId: projects[1]?.project_id || projects[0]?.project_id || '', amt: draft.amount - Math.round(draft.amount / 2) }]);
+  const openSplit = (e: RoughEntry) => {
+    const d = draftOf(e);
+    setActiveId(e.id);
+    setSpLines(d.split
+      ? d.split.map(s => ({ payee: s.payeeName, projectId: s.projectId, amt: s.amount }))
+      : [{ payee: d.payeeName ?? '', projectId: d.projectId || projects[0]?.project_id || '', amt: Math.round(d.amount / 2) },
+         { payee: d.payeeName ?? '', projectId: projects[1]?.project_id || projects[0]?.project_id || '', amt: d.amount - Math.round(d.amount / 2) }]);
     setSheet('split');
   };
   const splitSum = spLines.reduce((s, l) => s + (l.amt || 0), 0);
-  const splitOk = !!draft && splitSum === draft.amount && spLines.every(l => l.projectId && l.amt > 0);
+  const splitOk = !!activeDraft && splitSum === activeDraft.amount && spLines.every(l => l.projectId && l.amt > 0);
   const doSplit = () => {
-    if (!draft || !splitOk) return;
-    patch({
+    if (!active || !activeDraft || !splitOk) return;
+    patch(active, {
       split: spLines.filter(l => l.amt > 0).map(l => ({
-        payeeName: l.payee.trim(), payeeId: p.stakeholders.find(s => s.name === l.payee.trim())?.stakeholder_id ?? draft.payeeId,
+        payeeName: l.payee.trim(),
+        payeeId: p.stakeholders.find(s => s.name === l.payee.trim())?.stakeholder_id ?? activeDraft.payeeId,
         projectId: l.projectId, amount: l.amt,
       })),
     });
     setSheet(null);
   };
 
-  // ── swipe ───────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    const el = cardRef.current;
-    if (!el || !entry) return;
-    const L = el.querySelector<HTMLElement>('.stamp.L'), R = el.querySelector<HTMLElement>('.stamp.R');
-    let sx = 0, sy = 0, dx = 0, drag = false, locked = false;
-    const skip = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest('button,input,select,.dd,.ddsearch,.sug');
-    const start = (x: number, y: number) => { sx = x; sy = y; dx = 0; drag = false; locked = false; el.style.transition = 'none'; };
-    const move = (x: number, y: number, ev?: Event) => {
-      if (locked) return;
-      const ddx = x - sx, ddy = y - sy;
-      if (!drag) {
-        if (Math.abs(ddx) > 10 && Math.abs(ddx) > Math.abs(ddy) * 1.4) drag = true;
-        else if (Math.abs(ddy) > 10) { locked = true; return; }
-        else return;
-      }
-      if (ev?.cancelable) ev.preventDefault();
-      dx = ddx;
-      el.style.transform = `translateX(${dx * .95}px) rotate(${dx * .02}deg)`;
-      if (L) L.style.opacity = dx > 34 ? String(Math.min(1, (dx - 34) / 56)) : '0';
-      if (R) R.style.opacity = dx < -34 ? String(Math.min(1, (-dx - 34) / 56)) : '0';
-    };
-    const end = () => {
-      el.style.transition = 'transform .4s cubic-bezier(.32,1.4,.5,1), opacity .35s';
-      if (drag && dx > 96) { el.style.transform = 'translateX(130%) rotate(6deg)'; el.style.opacity = '.25'; void doFile(true); }
-      else if (drag && dx < -96) { el.style.transform = 'translateX(-40px) translateY(46px) scale(.9)'; el.style.opacity = '0'; doLater(true); }
-      else { el.style.transform = ''; if (L) L.style.opacity = '0'; if (R) R.style.opacity = '0'; }
-    };
-    const ts = (e: TouchEvent) => { if (skip(e.target)) return; start(e.touches[0].clientX, e.touches[0].clientY); };
-    const tm = (e: TouchEvent) => { if (skip(e.target)) return; move(e.touches[0].clientX, e.touches[0].clientY, e); };
-    el.addEventListener('touchstart', ts, { passive: true });
-    el.addEventListener('touchmove', tm, { passive: false });
-    el.addEventListener('touchend', end);
-    return () => { el.removeEventListener('touchstart', ts); el.removeEventListener('touchmove', tm); el.removeEventListener('touchend', end); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entry?.id, draft, busy, order.length]);
-
-  const total0 = left + gone.length;
-  const pct = total0 ? (gone.length / total0) * 100 : 0;
   const anySheet = sheet !== null;
 
   return (
@@ -590,131 +601,25 @@ export default function ReviewMobile(p: ReviewMobileProps) {
         <div className="c">{left ? `${left} left · ${inr(leftAmount)}` : 'Done'}</div>
       </div>
 
-      <div className="deck">
-        {entry && draft && base && (
-          <div className="rcard enter" ref={cardRef} key={entry.id}>
-            <div className="stamp L">File</div>
-            <div className="stamp R">Later</div>
-
-            <div className="top">
-              <i />
-              <div className="f">{senderName} · {via} · {sentTime}</div>
-              <button type="button" className="editpill" onClick={() => setSheet('menu')}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z" /></svg>
-                Edit
-                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
-              </button>
-            </div>
-
-            <div className="amt">−{inr(draft.amount)}</div>
-
-            {draft.split ? (
-              <>
-                <button type="button" className="splits" onClick={openSplit}>
-                  <div className="sph"><i />Splits into {draft.split.length} transactions<span className="e">Adjust</span></div>
-                  {draft.split.map((s, i) => (
-                    <div className="sprow" key={i}>
-                      <div className="sa">−{inr(s.amount)}</div>
-                      <div className="sw"><b>{s.payeeName || draft.payeeName}</b> · {(projects.find(x => x.project_id === s.projectId)?.name || '').replace(' Residence', '').replace(' Apartments', '')}</div>
-                    </div>
-                  ))}
-                  <div className="spfoot">Payees &amp; sites as you set them · each entry described automatically</div>
-                </button>
-                <div className="kvs" style={{ marginTop: 4 }}>
-                  <div className="kv"><div className="k">For</div><div className="v" style={{ fontWeight: 500 }}>{draft.description || '—'}</div></div>
-                </div>
-              </>
-            ) : (
-              <div className="kvs">
-                <button type="button" className={`kv tap${sug === 'to' ? ' open' : ''}${flash === 'to' ? ' flash' : ''}`} onClick={() => toggleSug('to')}>
-                  <div className="k">To</div>
-                  <div className={`v${draft.payeeName ? '' : ' dim'}`}>{draft.payeeName || 'Add a name'}</div>
-                  <span className="chev">{CHEV}</span>
-                </button>
-                <div className={`sug${sug === 'to' ? ' open' : ''}`}>
-                  <div className="sug-w">
-                    <div className="ddsearch">
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
-                      <input ref={ddRef} value={ddq} onChange={e => setDdq(e.target.value)} placeholder="Search or type a new name" />
-                    </div>
-                    <div className="ddlist">
-                      {nameRows.length === 0
-                        ? <div className="ddempty">No matches — keep typing to add a new name</div>
-                        : nameRows.map((r, i) => (
-                          <button type="button" className={`dd${r.create ? ' create' : ''}`} key={`${r.name}-${i}`} onClick={() => setPayee(r.name, r.id)}>
-                            <div className="dn">{r.create ? `Add “${r.name}”` : r.name}</div>
-                            {r.tag && <div className="dt">{r.tag}</div>}
-                          </button>
-                        ))}
-                    </div>
-                  </div>
-                </div>
-
-                <button type="button" className={`kv tap${sug === 'site' ? ' open' : ''}${flash === 'site' ? ' flash' : ''}`} onClick={() => toggleSug('site')}>
-                  <div className="k">Site</div>
-                  <div className={`v${projectName ? '' : ' dim'}`}>{projectName || base.projectRaw || 'Pick a site'}</div>
-                  <span className="chev">{CHEV}</span>
-                </button>
-                <div className={`sug${sug === 'site' ? ' open' : ''}`}>
-                  <div className="sug-w">
-                    <div className="ddlist">
-                      {projects.map(s => (
-                        <button type="button" className="dd" key={s.project_id} onClick={() => setSite(s.project_id)}>
-                          <div className="dn">{s.name}</div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="kv"><div className="k">For</div><div className="v" style={{ fontWeight: 500 }}>{draft.description || '—'}</div></div>
-              </div>
-            )}
-
-            {!draft.split && !draft.payeeName?.trim() && (
-              <div className="notice newp"><i /><div>No name yet — add one and it is saved as a party when you file.</div></div>
-            )}
-            {!draft.split && isNewParty && (
-              <div className="notice newp"><i /><div><b>{draft.payeeName}</b> is new — saved as a party when you file. Editable anytime.</div></div>
-            )}
-
-            {message && (
-              <>
-                <button type="button" className={`srcline${msgOpen ? ' open' : ''}`} onClick={() => setMsgOpen(o => !o)}>
-                  See the message
-                  {CHEV}
-                </button>
-                <div className={`msg${msgOpen ? ' open' : ''}`}><div className="msg-w"><div className="m-in">“{message}”</div></div></div>
-              </>
-            )}
-
-            <div className="ctarow">
-              <button type="button" className="cta" disabled={busy} onClick={() => void doFile()}>
-                {draft.split ? `File ${draft.split.length} entries` : 'File it'}
-              </button>
-              <button type="button" className="later" onClick={() => doLater()}>Later</button>
-            </div>
-          </div>
-        )}
-
-        {entry && (
-          <>
-            <div className="peek">
-              <s className={left < 2 ? 'off' : ''} />
-              <s className={left < 3 ? 'off' : ''} />
-            </div>
-            <div className="queue">
-              <span className="qd" aria-hidden="true">
-                {Array.from({ length: Math.min(left, 5) }, (_, i) => <i key={i} className={i === 0 ? 'now' : undefined} />)}
-                {left > 5 && <i />}
-              </span>
-              {left > 1
-                ? <span><b>{left - 1} more</b> after this · one at a time</span>
-                : <span className="last">Last one</span>}
-            </div>
-          </>
-        )}
-        <div className={`hint${acted || !left ? ' off' : ''}`}>Swipe right to file · left for later</div>
+      <div className="deckwrap">
+        <div className="deck">
+          {live.map(e => (
+            <Card
+              key={e.id}
+              entry={e}
+              draft={draftOf(e)}
+              projects={projects}
+              stakeholders={p.stakeholders}
+              busy={busy}
+              onPatch={d => patch(e, d)}
+              onMenu={() => { setActiveId(e.id); setSheet('menu'); }}
+              onSplit={() => openSplit(e)}
+              onFile={nudge => void doFile(e, nudge)}
+              register={el => { wraps.current[e.id] = el; }}
+            />
+          ))}
+        </div>
+        <div className={`hint${acted || !left ? ' off' : ''}`}>File in any order — scroll past what can wait</div>
       </div>
 
       <div className={`zero${left ? '' : ' show'}`}>
@@ -722,7 +627,10 @@ export default function ReviewMobile(p: ReviewMobileProps) {
           <svg className="ck" width="42" height="42" viewBox="0 0 60 60" aria-hidden="true"><path d="M16 31 L26 41 L45 21" /></svg>
         </div>
         <h2>All caught up</h2>
-        <p>Come back when the next message lands.</p>
+        <p>
+          {filedSum > 0 && <>{inr(filedSum)} entered your books.<br /></>}
+          Come back when the next message lands.
+        </p>
         <button type="button" onClick={() => setSheet('filed')}>See what was filed</button>
         {p.senderLine && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 34, fontSize: 13, color: 'var(--ink-3)' }}>
@@ -758,7 +666,8 @@ export default function ReviewMobile(p: ReviewMobileProps) {
       <div className={`sheet${sheet === 'menu' ? ' show' : ''}`} role="dialog" aria-label="Entry actions">
         <div className="grab" />
         <button type="button" className="mi" onClick={openEdit}>Edit details</button>
-        <button type="button" className="mi" onClick={openSplit}>Split across sites</button>
+        <button type="button" className="mi" onClick={() => { if (active) openSplit(active); }}>Split into transactions</button>
+        <button type="button" className="mi" onClick={() => { setSheet(null); p.onOpenWhatsApp(); }}>View in WhatsApp</button>
         <button type="button" className="mi dim" onClick={() => void doBin()}>Not a transaction</button>
       </div>
 
@@ -785,7 +694,7 @@ export default function ReviewMobile(p: ReviewMobileProps) {
         <div className="grab" />
         <h3>New party</h3>
         <p style={{ fontSize: 14, color: 'var(--ink-2)', lineHeight: 1.5, margin: '2px 0 16px' }}>
-          “<b style={{ color: 'var(--ink)' }}>{draft?.payeeName}</b>” isn't in your parties yet. Add them to the system, or pick someone else.
+          “<b style={{ color: 'var(--ink)' }}>{activeDraft?.payeeName}</b>” isn't in your parties yet. Add them to the system, or pick someone else.
         </p>
         <div className="field">
           <label>Name — fix it if it's misspelt</label>
@@ -793,13 +702,13 @@ export default function ReviewMobile(p: ReviewMobileProps) {
         </div>
         <button type="button" className="b2" disabled={busy || !npName.trim()} onClick={() => void npAdd()}>Add &amp; file</button>
         <button type="button" className="b2" style={{ background: 'rgba(27,23,19,.06)', color: 'var(--ink)', marginTop: 8 }}
-          onClick={() => { setSheet(null); setTimeout(() => toggleSug('to'), 200); }}>Pick someone else</button>
+          onClick={() => setSheet(null)}>Pick someone else</button>
       </div>
 
       <div className={`sheet${sheet === 'split' ? ' show' : ''}`} role="dialog" aria-label="Split into transactions">
         <div className="grab" />
         <h3 style={{ marginBottom: 4 }}>Split into transactions</h3>
-        <p style={{ fontSize: 13.5, color: 'var(--ink-2)', marginBottom: 14 }}>{inr(draft?.amount ?? 0)} from the message — divide it below.</p>
+        <p style={{ fontSize: 13.5, color: 'var(--ink-2)', marginBottom: 14 }}>{inr(activeDraft?.amount ?? 0)} from the message — divide it below.</p>
         <div>
           {spLines.map((l, i) => (
             <div className="spline" key={i}>
@@ -819,7 +728,7 @@ export default function ReviewMobile(p: ReviewMobileProps) {
           Add another payee or site
         </button>
         <div className={`splitsum${splitOk ? '' : ' err'}`}>
-          {splitOk ? `Adds up — ${inr(draft?.amount ?? 0)}` : `${inr(splitSum)} of ${inr(draft?.amount ?? 0)} — adjust to match`}
+          {splitOk ? `Adds up — ${inr(activeDraft?.amount ?? 0)}` : `${inr(splitSum)} of ${inr(activeDraft?.amount ?? 0)} — adjust to match`}
         </div>
         <button type="button" className="b2" disabled={!splitOk} onClick={doSplit}>File {spLines.length} entries</button>
         <div className="autonote">Each transaction is described automatically —<br />purpose · site · part of the original amount.</div>
