@@ -13,6 +13,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { useSnackbar } from '../Snackbar';
 import PhoneInput from '../PhoneInput';
+import { useIsMobile } from '../../lib/useIsMobile';
+import RequestQuotesMobile from './RequestQuotesMobile';
 
 export interface RfqLineItem { line?: number; item_name?: string; unit?: string; qty?: number | string; spec?: string }
 
@@ -210,6 +212,7 @@ export default function RequestQuotesModal({ orgId, projectId, deliveryLocation,
   const { show } = useSnackbar();
   const qc = useQueryClient();
   const append = !!rfqId;
+  const isMobile = useIsMobile();
 
   const [showAll, setShowAll] = useState(false);
   const [search, setSearch] = useState('');
@@ -253,6 +256,12 @@ export default function RequestQuotesModal({ orgId, projectId, deliveryLocation,
     return q ? base.filter((v) => v.name.toLowerCase().includes(q)) : base;
   }, [base, search]);
 
+  // The phone's list: everyone, name or trade, search only.
+  const mobileShown = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return q ? vendors.filter((v) => `${v.name} ${v.category ?? ''}`.toLowerCase().includes(q)) : vendors;
+  }, [vendors, search]);
+
   const phoneOf = (v: Vendor) => phones[v.stakeholder_id] ?? v.contact ?? '';
   const isValid = (p: string) => p.replace(/\D/g, '').length >= 10;
 
@@ -291,8 +300,8 @@ export default function RequestQuotesModal({ orgId, projectId, deliveryLocation,
     return `${names.slice(0, 2).join(', ')} +${names.length - 2} more`;
   }, [items]);
 
-  const addVendor = async () => {
-    const name = newName.trim(); const phone = newPhone.trim();
+  const addVendor = async (nameArg?: string, phoneArg?: string) => {
+    const name = (nameArg ?? newName).trim(); const phone = (phoneArg ?? newPhone).trim();
     if (!name) { show('Enter the vendor name', { type: 'error' }); return; }
     if (!isValid(phone)) { show('Enter a valid mobile number', { type: 'error' }); return; }
     setAdding(true);
@@ -313,6 +322,15 @@ export default function RequestQuotesModal({ orgId, projectId, deliveryLocation,
       show(e.message || 'Could not add vendor', { type: 'error' });
     } finally { setAdding(false); }
   };
+
+  // The reference's success line, with this request's real numbers.
+  const doneMessage = (() => {
+    const sentN = result?.sent.length ?? 0;
+    const failedN = result?.failed.length ?? 0;
+    const base = `Quote request for ${items.length} item${items.length === 1 ? '' : 's'} went to ${sentN} vendor${sentN === 1 ? '' : 's'} on WhatsApp. Their rates will appear on this PO as they reply.`;
+    // Never let a partial send read as a clean one.
+    return failedN ? `${base} ${failedN} could not be reached.` : base;
+  })();
 
   const send = async () => {
     if (validChosen.length === 0) { show('Pick at least one vendor with a mobile number', { type: 'error' }); return; }
@@ -343,6 +361,38 @@ export default function RequestQuotesModal({ orgId, projectId, deliveryLocation,
       setPhase('pick');
     }
   };
+
+  // ── the phone ──────────────────────────────────────────────────────────────
+  // Hooks are all above this point; the return below is the desktop layout, unchanged.
+  if (isMobile) {
+    return createPortal(
+      <RequestQuotesMobile
+        title={append ? 'Ask another vendor' : 'Request quotes'}
+        // The reference lists every vendor, across all trades, with search as the only filter —
+        // no trade segmentation — so the phone shows all of them rather than the desktop's
+        // trade-matched default.
+        vendors={mobileShown.map((v) => ({
+          id: v.stakeholder_id, name: v.name, category: v.category || 'Vendor', phone: phoneOf(v),
+        }))}
+        search={search}
+        onSearch={setSearch}
+        selected={new Set(Object.keys(sel).filter((k) => sel[k]))}
+        onToggle={(id) => setSel((m) => ({ ...m, [id]: !m[id] }))}
+        onSaveNumber={(id, phone) => { setPhones((m) => ({ ...m, [id]: phone })); setSel((m) => ({ ...m, [id]: true })); }}
+        onAddVendor={(name, phone) => addVendor(name, phone)}
+        deadline={append ? null : {
+          label: quoteByLabel,
+          onPick: (k, custom) => { if (custom) { setCustomDate(custom); setPreset('pick'); } else setPreset(k); },
+        }}
+        sending={phase === 'sending'}
+        onSend={send}
+        onClose={onClose}
+        done={phase === 'done' && result ? { message: doneMessage } : null}
+        onDone={() => { if (result?.rfqId) onSent?.(result.rfqId); onClose(); }}
+      />,
+      document.body,
+    );
+  }
 
   return createPortal(
     <div className="rqx" onClick={onClose}>
@@ -444,7 +494,7 @@ export default function RequestQuotesModal({ orgId, projectId, deliveryLocation,
                   onPickName={(nm) => { if (!newName.trim()) setNewName(nm); }} />
                 <button
                   className={`addsel${newName.trim() && isValid(newPhone) ? ' ready' : ''}`}
-                  onClick={addVendor}
+                  onClick={() => void addVendor()}
                   disabled={adding || !newName.trim() || !isValid(newPhone)}
                 >
                   {adding ? '…' : 'Add & select'}
