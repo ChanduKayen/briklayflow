@@ -309,8 +309,8 @@ const PODX_CSS = `
 .podx .m-irow .n{color:var(--ink);font-weight:500}
 .podx .m-irow .sub{font-size:12.5px;color:var(--ink-3);margin-top:2px}
 .podx .m-irow .amt{margin-left:auto;text-align:right}
-.podx .m-irow .amt .a{font-family:var(--mono)}
-.podx .m-irow .amt .q{font-size:12px;color:var(--ink-3);margin-top:2px}
+.podx .m-irow .amt .a{font-family:var(--mono);font-weight:600;color:var(--ink)}
+.podx .m-irow .amt .q{font-family:var(--mono);font-size:12px;color:var(--ink-2);margin-top:2px;white-space:nowrap}
 .podx .m-billrow{display:flex;gap:10px;margin-top:8px}
 .podx .m-brbtn{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;height:44px;border:1px solid var(--line);border-radius:12px;background:var(--paper);font-size:13.5px;font-weight:500;color:var(--ink-2);cursor:pointer}
 .podx .m-brbtn:active{background:var(--line-2)}
@@ -1228,7 +1228,9 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
               {billedLines.map(({ li, oq, orr, ordAmt }) => (
                 <div className="m-irow" key={li.id}>
                   <div><div className="n">{li.item_name}</div>{li.specification ? <div className="sub">{li.specification}</div> : null}</div>
-                  <div className="amt"><div className="a">{inr0(Number(li.total_amount) || ordAmt)}</div><div className="q">{oq} {li.unit || 'nos'} × {inr0(orr)}</div></div>
+                  {/* Quantity leads: on site, what matters first is how much is coming, not what it
+                      cost. The money and the rate stay on the line under it. */}
+                  <div className="amt"><div className="a">{oq} {li.unit || 'nos'}</div><div className="q">{inr0(Number(li.total_amount) || ordAmt)} · {inr0(orr)} each</div></div>
                 </div>
               ))}
               {billedLines.length === 0 && <div className="m-irow"><div className="sub">No line items.</div></div>}
