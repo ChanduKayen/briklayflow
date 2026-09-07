@@ -317,6 +317,47 @@ const PODX_CSS = `
 .podx .m-arow:last-child{border-bottom:0}
 .podx .m-arow .t{font-family:var(--mono);font-size:11.5px;color:var(--ink-3);flex-shrink:0;padding-top:1px}
 .podx .m-arow b{font-weight:600;color:var(--ink)}
+/* ══ THE PHONE, IN THE APP'S LANGUAGE ═══════════════════════════════════════════════════════
+   On a phone this page is one of a set — For review, Payables, the transactions list, a
+   transaction — and every one of them sits on #F8F6F3 with white cards. This page sat on a
+   cream two shades warmer with off-white cards, and its action bar had grown into something
+   no phone has: icon + title + a truncating 10.5px caption, drop shadows under the filled
+   buttons, uneven widths, and a ring that pulsed every 4.4 seconds.
+   The buttons take the review card's own spec — 52px, 16px radius, a filled primary that
+   carries its verb and a quiet secondary beside it. The captions go: two of the four only
+   restated the label ("mark material in", "from the vendor"), the vendor's name is in the
+   header, and the amount due is the hero row of the card above. Nothing is lost from the
+   page — only from the buttons. Semantics (terracotta, sage, WhatsApp green) are untouched. */
+.podx.m{--cream:#F8F6F3;--paper:#FFFFFF;--paper-2:#F4F0EB;
+  --line:rgba(50,42,35,.1);--line-2:rgba(50,42,35,.06)}
+.podx.m .m-card{border-radius:18px}
+.podx.m .m-abar{background:rgba(248,246,243,.85);backdrop-filter:blur(20px) saturate(1.4);
+  -webkit-backdrop-filter:blur(20px) saturate(1.4)}
+
+.podx.m .m-abtn{height:52px;border-radius:16px;font-size:16px;font-weight:600;letter-spacing:-.01em;
+  transition:transform .15s cubic-bezier(.32,1.4,.5,1),background .25s}
+.podx.m .m-abtn:active{transform:scale(.97)}
+.podx.m .m-abtn.is-pri{flex:1 1 auto}
+.podx.m .m-abtn.is-pri .lbl{align-items:center}
+/* the primary carries its verb and nothing else — the review card's "File it" */
+.podx.m .m-abtn.is-pri svg{display:none}
+.podx.m .m-abtn .lbl small{display:none}
+/* the secondary is the review card's "Split": quiet fill, no border, sized to its label */
+.podx.m .m-abtn.is-sec{flex:0 0 auto;padding:0 16px;font-size:15px;
+  background:rgba(27,23,19,.05);border:0;color:var(--ink-2);box-shadow:none}
+.podx.m .m-abtn.is-sec:active{transform:scale(.92);background:rgba(27,23,19,.1)}
+.podx.m .m-abtn.is-sec.tone-wa{background:rgba(31,175,90,.1);border:0;color:#0F7C3D}
+.podx.m .m-abtn.is-sec.tone-sage{background:rgba(47,160,76,.1);border:0;color:#2F5D34}
+/* filled tones, flat — a shadow under a button that already fills is a second shadow */
+.podx.m .m-abtn.is-pri.tone-terra{background:#C4502B;box-shadow:none}
+.podx.m .m-abtn.is-pri.tone-terra:active{background:#A8431F;filter:none}
+.podx.m .m-abtn.is-pri.tone-sage{background:#2FA04C;box-shadow:none}
+.podx.m .m-abtn.is-pri.tone-sage:active{background:#268A40;filter:none}
+.podx.m .m-abtn.is-pri.tone-wa{background:#1FAF5A;box-shadow:none}
+.podx.m .m-abtn.is-pri.tone-wa:active{background:#199A4D;filter:none}
+.podx.m .m-abtn.is-pri.tone-neutral{background:var(--ink);color:#fff}
+/* an action bar is not a place for a loop */
+.podx.m .m-abtn.tone-wa svg.wa-mark{animation:none}
 .podx .m-abar{position:fixed;left:0;right:0;bottom:0;z-index:41;display:flex;gap:10px;padding:12px 14px calc(14px + env(safe-area-inset-bottom));background:rgba(255,253,249,.96);backdrop-filter:blur(14px);border-top:1px solid var(--line)}
 .podx .m-abar .m-note{position:absolute;top:-32px;left:14px;right:14px;text-align:center;font-size:12px;color:var(--ink-2);background:var(--gold-tint);border:1px solid #EBD9B4;border-radius:10px;padding:6px}
 .podx .m-abtn{height:52px;min-width:0;padding:0 12px;border-radius:14px;font-weight:600;font-size:14.5px;display:flex;align-items:center;justify-content:center;gap:9px;border:0;cursor:pointer;transition:transform .12s var(--ease),box-shadow .18s var(--ease),filter .16s var(--ease)}
@@ -1291,7 +1332,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   );
 
   return (
-    <div className="podx" onClick={() => menuOpen && setMenuOpen(false)}>
+    <div className={`podx${isMobile ? ' m' : ''}`} onClick={() => menuOpen && setMenuOpen(false)}>
       <style>{PODX_CSS}</style>
       {isMobile ? renderMobile() : (
       <div className="page">
