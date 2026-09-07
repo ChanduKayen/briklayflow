@@ -35,6 +35,18 @@ const CSS = `
   display:grid;place-items:center;font-size:22px;font-weight:700;color:var(--tint);
   box-shadow:0 6px 20px -8px rgba(27,23,19,.18)}
 .txm .payee{font-size:17px;font-weight:600}
+/* The party opens its ledger. It has to look like it does before it is touched — the app's
+   terracotta, an underline that sits off the text, and a chevron that leans on press. */
+.txm .party{font:inherit;color:var(--tint-press);background:none;border:0;cursor:pointer;
+  display:inline-flex;align-items:baseline;gap:2px;
+  /* The text sits where it always did; the padding only grows what a thumb can hit. */
+  padding:12px 4px;margin:-12px -4px;
+  text-decoration:underline;text-decoration-color:rgba(168,67,31,.42);text-underline-offset:3px;
+  text-decoration-thickness:1.5px}
+.txm .party svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2.4;
+  stroke-linecap:round;stroke-linejoin:round;align-self:center;transition:transform .18s var(--ease)}
+.txm .party:active{color:#8A3D1B}
+.txm .party:active svg{transform:translateX(2px)}
 .txm .amount{font-size:46px;font-weight:800;letter-spacing:-.04em;margin-top:6px;font-variant-numeric:tabular-nums}
 .txm .amount.void{text-decoration:line-through;color:var(--ink-3)}
 .txm .meta{font-size:14.5px;color:var(--ink-2);margin-top:6px}
@@ -146,7 +158,11 @@ export interface TxmMenuItem { label: string; danger?: boolean; onSelect?: () =>
 export interface TxnDetailMobileProps {
   txnNo: string;
   initials: string;
-  payeeLine: string;
+  /** "Paid to" / "Received from" — the words before the party. */
+  payeePrefix: string;
+  payeeName: string;
+  /** Given only when there is a party page to open. Null leaves the name as plain text. */
+  onParty?: (() => void) | null;
   amount: string;
   voided: boolean;
   meta: string;
@@ -216,7 +232,15 @@ export default function TxnDetailMobile(p: TxnDetailMobileProps) {
       <main>
         <div className="hero">
           <div className="avatar">{p.initials}</div>
-          <div className="payee">{p.payeeLine}</div>
+          <div className="payee">
+            {p.payeePrefix}{' '}
+            {p.onParty
+              ? <button type="button" className="party" onClick={p.onParty}>
+                  {p.payeeName}
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+                </button>
+              : p.payeeName}
+          </div>
           <div className={`amount${p.voided ? ' void' : ''}`}>{p.amount}</div>
           <div className="meta">{p.meta}</div>
           {p.siteChip && (

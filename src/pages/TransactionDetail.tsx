@@ -837,7 +837,12 @@ export default function TransactionDetail({ session }: { session: Session }) {
         <TxnDetailMobile
           txnNo={txn.txn_id}
           initials={initials}
-          payeeLine={`${isIn ? 'Received from' : 'Paid to'} ${payeeName}`}
+          payeePrefix={isIn ? 'Received from' : 'Paid to'}
+          payeeName={payeeName}
+          // The party's ledger, carrying where to come back to — this page, not the parties list.
+          onParty={txn.stakeholder_id
+            ? () => navigate(`/stakeholders/${txn.stakeholder_id}`, { state: { backTo: location.pathname, backLabel: 'Transaction' } })
+            : null}
           amount={`${isIn ? '+' : '−'}₹${(Number(effective.total_amount) || 0).toLocaleString('en-IN')}`}
           voided={isVoided}
           meta={meta}

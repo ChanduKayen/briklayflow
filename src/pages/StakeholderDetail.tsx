@@ -3,7 +3,7 @@
 // period + search filters. Certified is inferred from the attendance stage readings. Opening
 // balance and Adjustments are recorded here; Payment reuses QuickTransactionSheet.
 import { useMemo, useState, useEffect, createContext, useContext, type ReactElement } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Session } from '@supabase/supabase-js';
 import { useOrgId, useAuth } from '../lib/auth/AuthProvider';
@@ -240,6 +240,10 @@ const fyLabel = () => { const now = new Date(); const s = now.getMonth() >= 3 ? 
 // app. `compact` tightens it for the drawer; `onClose` (drawer only) turns the back link into a close.
 export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { stakeholderId: string; compact?: boolean; onClose?: () => void }) {
   const navigate = useNavigate();
+  // Arriving from a transaction or an order, "back" belongs to that page — not the parties list,
+  // which is where this button went regardless of how you got here.
+  const location = useLocation();
+  const cameFrom = (location.state ?? null) as { backTo?: string; backLabel?: string } | null;
   const orgId = useOrgId();
   const { isRole } = useAuth();
   const isManager = isRole('management') || isRole('principal');
@@ -320,10 +324,10 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
     <div className={`plx${compact ? ' compact' : ''}`}>
       <style>{CSS}</style>
       <div className="page" onClick={() => menuOpen && setMenuOpen(false)}>
-        <button className="back" onClick={() => (compact && onClose ? onClose() : navigate('/stakeholders'))}>
+        <button className="back" onClick={() => (compact && onClose ? onClose() : navigate(cameFrom?.backTo ?? '/stakeholders'))}>
           {compact
             ? <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l12 12M18 6L6 18" /></svg>Close</>
-            : <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>Parties</>}
+            : <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>{cameFrom?.backLabel ?? 'Parties'}</>}
         </button>
 
         {/* identity */}

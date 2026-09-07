@@ -278,6 +278,17 @@ const PODX_CSS = `
 .podx .m-dots{margin-left:auto}
 .podx .m-body{padding:0 16px 150px}
 .podx .m-h2{font-family:var(--serif);font-size:23px;font-weight:600;margin:2px 0 6px;color:var(--ink);letter-spacing:-.01em}
+/* Tapping the vendor opens its ledger, so it reads as openable before it is touched. */
+.podx .m-party{display:inline-flex;align-items:baseline;gap:3px;background:none;border:0;
+  cursor:pointer;text-align:left;color:var(--terra-deep);
+  /* Padding for the thumb, negative margin so the heading does not move. */
+  padding:10px 4px;margin:-10px -4px 0;
+  text-decoration:underline;text-decoration-color:rgba(168,67,31,.38);text-underline-offset:4px;
+  text-decoration-thickness:1.5px}
+.podx .m-party svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2.4;
+  stroke-linecap:round;stroke-linejoin:round;align-self:center;transition:transform .18s var(--ease)}
+.podx .m-party:active{color:var(--terra-deep)}
+.podx .m-party:active svg{transform:translateX(2px)}
 .podx .m-meta{font-size:13px;color:var(--ink-3);line-height:1.5}
 .podx .m-meta b{color:var(--ink-2);font-weight:500}
 .podx .m-pill{display:inline-flex;align-items:center;gap:6px;margin-top:10px;height:28px;padding:0 11px;border-radius:14px;font-size:12.5px;font-weight:500;background:var(--gold-tint);color:var(--gold)}
@@ -1191,7 +1202,15 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
 
         <div className="m-body">
           <div>
-            <h2 className="m-h2">{vendor?.name || 'Vendor'}</h2>
+            {/* The vendor opens its ledger, carrying where to come back to — this order, not the
+                parties list. The desktop line below already links; the phone had no way through. */}
+            {po.stakeholder_id
+              ? <button type="button" className="m-h2 m-party"
+                  onClick={() => navigate(`/stakeholders/${po.stakeholder_id}`, { state: { backTo: location.pathname, backLabel: 'Order' } })}>
+                  {vendor?.name || 'Vendor'}
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+                </button>
+              : <h2 className="m-h2">{vendor?.name || 'Vendor'}</h2>}
             <div className="m-meta">
               <b>{project?.name || '—'}</b>{project?.site_location ? ` · ${project.site_location}` : ''}<br />
               {postPurchase ? 'Recorded' : 'Ordered'} {fmtDate(po.date_issued)}{po.ordered_by ? ` by ${po.ordered_by}` : ''}
