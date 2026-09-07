@@ -7,6 +7,7 @@
 // Running "ahead" = cumulative(paid − certified) from the opening onward (paid ahead of certified).
 import { supabase } from './supabase';
 import { billDateOf, BILL_DATE_COLUMNS } from './partyLedger';
+import { removeCredit } from './ledgerWrite';
 
 export type EntryKind = 'payment' | 'certified' | 'wage' | 'bill' | 'adjustment' | 'opening' | 'start' | 'consolidated';
 export interface LedgerEntry {
@@ -347,6 +348,54 @@ export async function addAdjustment(orgId: string, stakeholderId: string, a: { p
   });
   if (error) throw error;
 }
+// Whether a ledger line can be removed in place (a mistaken credit / accrual). Payments, vendor PO
+// bills, opening and consolidated bills are NOT removed here — they have their own flows (void a
+// payment, edit the bill on its PO, edit the opening). Everything else is a correctable obligation.
+export function isRemovableLine(entryId: string): boolean {
+  return /^(c-|cert-|adj-|wage-)/.test(entryId);
+}
+
+// Remove a mistaken credit / accrual line at its SOURCE, so it truly disappears (not a reversal) — the
+// ledger is derived, so a stray line is only ever a stray source row. Dispatches by the entry id the
+// two readers mint:
+//   c-<creditId>   new-engine stored credit   → removeCredit (frees any settling payment, deletes it)
+//   cert-<wcId>    approved work certification → delete the work_certifications row
+//   adj-<id>       manual adjustment          → delete the party_adjustments row
+//   wage-<key>|<d> day-wage derived from muster→ delete that day's labour_attendance for the subject
+// (the derived wage line then vanishes because its source attendance is gone — closing the "removed
+// from attendance but the ledger kept it" gap for the derived path).
+export async function removeLedgerLine(entryId: string): Promise<void> {
+  if (entryId.startsWith('c-')) { await removeCredit(entryId.slice(2)); return; }
+  if (entryId.startsWith('cert-')) {
+    const { error } = await supabase.from('work_certifications').delete().eq('id', entryId.slice(5));
+    if (error) throw error; return;
+  }
+  if (entryId.startsWith('adj-')) {
+    const { error } = await supabase.from('party_adjustments').delete().eq('id', entryId.slice(4));
+    if (error) throw error; return;
+  }
+  if (entryId.startsWith('wage-')) {
+    const body = entryId.slice(5);
+    const bar = body.lastIndexOf('|');
+    const key = body.slice(0, bar), date = body.slice(bar + 1);
+    if (key.startsWith('crew-')) {
+      const crewId = key.slice(5);
+      const cats = await supabase.from('labour_crew_categories').select('id').eq('crew_id', crewId);
+      const ids = (cats.data ?? []).map((c: any) => c.id);
+      if (ids.length) {
+        const { error } = await supabase.from('labour_attendance').delete().eq('work_date', date).eq('subject_type', 'crew_category').in('category_id', ids);
+        if (error) throw error;
+      }
+      return;
+    }
+    if (key.startsWith('direct-')) {
+      const { error } = await supabase.from('labour_attendance').delete().eq('work_date', date).eq('subject_type', 'direct').eq('direct_worker_id', key.slice(7));
+      if (error) throw error; return;
+    }
+  }
+  throw new Error('This line can’t be removed here — void the payment or edit its bill instead.');
+}
+
 // Link a payment to a work-order contract (re-allocate). Mirrors trackingApi.attachToContract.
 export async function linkPaymentToContract(txnId: string, woId: string): Promise<void> {
   const { error } = await supabase.from('txn_allocations').update({ order_type: 'WO', order_ref: woId }).eq('txn_id', txnId).is('order_type', null);

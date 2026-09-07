@@ -151,9 +151,31 @@ party carries a correct B/F and the “carried from the ledger” row appears in
 
 ---
 
+## 6a. Correcting a stray line
+
+The ledger is derived, so a wrong line is only ever a wrong **source row** — you don't post a
+cosmetic reversal, you remove the thing that created it. Each credit/accrual line on a party's ledger
+carries a management-only **remove** (×), which deletes at the source, dispatched by the line's origin:
+
+| Line | Removed by |
+|---|---|
+| new-engine stored credit (`c-…`) | `removeCredit` — frees any settling payment (its allocation is deleted → reads as advance again), then deletes the credit |
+| approved certification (`cert-…`) | delete the `work_certifications` row |
+| manual adjustment (`adj-…`) | delete the `party_adjustments` row |
+| day wage (`wage-…`) | delete that day's `labour_attendance` for the subject — the derived line then vanishes |
+
+Payments, vendor PO bills, opening and consolidated bills are **not** removed here — they have their
+own flows (void the payment, edit the bill on its PO, edit the opening). This is what closes the
+*“I cleared it in attendance but the ledger kept it”* gap: a certification/credit minted from a muster
+reading is a separate governed object, so when the reading is a mistake you remove the resulting line
+directly. (`removeLedgerLine` in `partyLedgerApi`, `removeCredit` in `ledgerWrite`.)
+
 ## 7. Follow-ups (not in this change)
 
 - **Confirm-basis pass.** Backfilled `accrual_basis` is `basis_confirmed = false` (“assumed”). A crew
   wrongly assumed `work` will accrue nothing per day — a data-quality surface, not a ledger bug.
 - **Optional week-close freeze** for an immutable posting boundary (see §2).
 - **Advance recovery UX** — showing, at pay time, an advance being drawn down against new accrual.
+- **Auto-reconcile attendance → certification.** Today, editing/clearing a muster reading does not
+  reverse a certification/credit already minted from it; §6a is the manual correction. A future pass
+  could reverse or flag the dependent credit automatically when its source reading changes.

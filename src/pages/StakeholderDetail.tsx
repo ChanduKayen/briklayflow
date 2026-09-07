@@ -2,15 +2,15 @@
 // Paid / Certified / "ahead" running balance, in By-date / By-contract / By-site views, with
 // period + search filters. Certified is inferred from the attendance stage readings. Opening
 // balance and Adjustments are recorded here; Payment reuses QuickTransactionSheet.
-import { useMemo, useState, useEffect, type ReactElement } from 'react';
+import { useMemo, useState, useEffect, createContext, useContext, type ReactElement } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Session } from '@supabase/supabase-js';
 import { useOrgId, useAuth } from '../lib/auth/AuthProvider';
 import { LedgerCutoverControl } from '../components/attendance/LedgerCutoverControl';
 import { useSnackbar } from '../components/Snackbar';
 import { QuickTransactionSheet } from '../components/QuickTransactionSheet';
-import { loadPartyLedger, saveOpeningBalance, addAdjustment, bookConsolidatedBill, type LedgerEntry, type PartyLedger } from '../lib/partyLedgerApi';
+import { loadPartyLedger, saveOpeningBalance, addAdjustment, bookConsolidatedBill, removeLedgerLine, isRemovableLine, type LedgerEntry, type PartyLedger } from '../lib/partyLedgerApi';
 import { readParty, isNewLedgerOrg } from '../lib/ledgerRead';
 import { PieceWorkEntry } from '../components/attendance/PieceWorkEntry';
 import { loadPartyCertifications, loadLedgerCutover } from '../lib/workCertification';
@@ -111,6 +111,10 @@ const CSS = `
 .plx .ledger tr.month .t{text-align:right;color:var(--walnut-2)}.plx .ledger tr.month .t .cert{color:var(--sage)}
 .plx .ledger tr.opening td{border-top:1px solid var(--line)}
 .plx .ledger tr.opening .edit{margin-left:10px;color:var(--terra);font-size:12.5px;text-decoration:underline;text-underline-offset:3px}
+.plx .row .rm{margin-left:8px;color:var(--walnut-3);font-size:15px;line-height:1;opacity:0;background:none;border:0;cursor:pointer;padding:0 5px;border-radius:6px;transition:opacity .12s,color .12s,background .12s;vertical-align:1px}
+.plx .row.removable:hover .rm{opacity:.75}
+.plx .row .rm:hover{color:var(--terra);background:var(--terra-soft);opacity:1}
+@media (hover:none){.plx .row.removable .rm{opacity:.6}}
 .plx .group{background:var(--paper);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:16px}
 .plx .group-head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;padding:16px 18px 14px;border-bottom:1px solid var(--line)}
 .plx .group-head .title{font-weight:500;font-size:15px}
@@ -222,6 +226,7 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
   const { isRole } = useAuth();
   const isManager = isRole('management') || isRole('principal');
   const { show: showSnackbar } = useSnackbar();
+  const qc = useQueryClient();
   const [view, setView] = useState<View>('date');
   const [period, setPeriod] = useState<Period>('all');
   const [range, setRange] = useState({ from: '', to: '' });
@@ -268,7 +273,25 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
   const toClassify = newLedger ? L.entries.filter(e => e.kind === 'payment' && e.unclassified) : [];
   const toClassifySum = toClassify.reduce((s, e) => s + (e.remainder ?? e.paid), 0);
 
+  // Correct a mistaken credit / accrual line at its source (management-only). Wages that lingered after
+  // the muster was cleared, a wrong certification, a stray adjustment — remove it and it's gone.
+  const onRemoveLine = async (e: LedgerEntry) => {
+    if (!isManager) return;
+    const what = e.kind === 'wage' ? "this day's wages"
+      : e.kind === 'certified' ? 'this certified entry'
+      : e.kind === 'adjustment' ? 'this adjustment' : 'this entry';
+    if (!window.confirm(`Remove ${what} of ${inr(e.cert || e.paid)}? This corrects a mistaken entry at its source and can't be undone.`)) return;
+    try {
+      await removeLedgerLine(e.id);
+      showSnackbar('Line removed');
+      refetch();
+      qc.invalidateQueries({ queryKey: ['weekly_payments'] });
+      qc.invalidateQueries({ queryKey: ['party_certs', stakeholderId] });
+    } catch (err) { showSnackbar((err as Error)?.message || 'Could not remove this line', { type: 'error' }); }
+  };
+
   return (
+    <RowActionsCtx.Provider value={isManager ? { onRemove: onRemoveLine } : null}>
     <div className={`plx${compact ? ' compact' : ''}`}>
       <style>{CSS}</style>
       <div className="page" onClick={() => menuOpen && setMenuOpen(false)}>
@@ -443,6 +466,7 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
       {classifyEntry && <ClassifyModal L={L} entry={classifyEntry} onClose={() => setClassifyEntry(null)} onSaved={(msg) => { setClassifyEntry(null); showSnackbar(msg); refetch(); }} onError={m => showSnackbar(m, { type: 'error' })} />}
       {certifyOpen && <CertifyModal L={L} onClose={() => setCertifyOpen(false)} onSaved={(msg) => { setCertifyOpen(false); showSnackbar(msg); refetch(); }} onError={m => showSnackbar(m, { type: 'error' })} />}
     </div>
+    </RowActionsCtx.Provider>
   );
 }
 
@@ -539,15 +563,21 @@ function VendorHero({ L, onBook }: { L: PartyLedger; onBook: () => void }) {
 // ── ledger row + table pieces ─────────────────────────────────────────────────
 const ClipSvg = () => <span className="clip" title="Attachment"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m21.4 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg></span>;
 
+// Per-row correction affordance, provided by the ledger page (management-only). Kept in context so
+// the three views (date / contract / site) don't each have to thread a callback through.
+const RowActionsCtx = createContext<{ onRemove: (e: LedgerEntry) => void } | null>(null);
+
 function Row({ e, showContract = true, showSite = true, first = false }: { e: LedgerEntry; showContract?: boolean; showSite?: boolean; first?: boolean }) {
   const sub = [e.mode, showSite ? e.projectName : null, e.detail].filter(Boolean).join(', ');
   const stateCls = e.kind === 'consolidated' ? (e.state === 'confirmed' ? 'state ok' : 'state open')
     : e.unbilled ? 'state open' : e.covered ? 'state' : 'state ok';
+  const acts = useContext(RowActionsCtx);
+  const removable = !!acts && isRemovableLine(e.id);
   return (
-    <tr className={`row${e.kind === 'opening' ? ' opening' : ''}`}>
+    <tr className={`row${e.kind === 'opening' ? ' opening' : ''}${removable ? ' removable' : ''}`}>
       <td className="date">{e.date ? fmtDate(e.date) : '—'}</td>
       <td className="part">
-        <div className="p">{e.particulars}{e.clip ? <ClipSvg /> : null}</div>
+        <div className="p">{e.particulars}{e.clip ? <ClipSvg /> : null}{removable && <button className="rm" title="Remove this line — a mistaken entry" onClick={() => acts!.onRemove(e)} aria-label="Remove this line">×</button>}</div>
         {(sub || e.state) ? <div className="s">{sub}{sub && e.state ? ', ' : ''}{e.state ? <span className={stateCls}>{e.state}</span> : null}</div> : null}
         {e.narr ? <div className="s"><span className="narr">{e.narr}</span></div> : null}
       </td>

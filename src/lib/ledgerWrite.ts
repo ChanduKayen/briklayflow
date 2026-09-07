@@ -146,6 +146,16 @@ export async function reverseAllocations(paymentId: string): Promise<void> {
   if (error) throw error;
 }
 
+// Remove a stray credit (a wage/certified/plan/adjustment obligation entered by mistake). Any payment
+// that was settling it is freed back to unallocated (its allocation is deleted → it reads as an advance
+// again), then the credit row itself is deleted. Mirrors voidPayment's cascade philosophy, from the
+// credit side. Caller (feature layer) decides whether removal is allowed.
+export async function removeCredit(creditId: string): Promise<void> {
+  await supabase.from('ledger_allocations').delete().eq('credit_id', creditId);
+  const { error } = await supabase.from('ledger_credits').delete().eq('credit_id', creditId);
+  if (error) throw error;
+}
+
 // ── void a payment (the ONE void, §02·E) ────────────────────────────────────
 // Marks the transaction Voided (kept, hidden by default, provenance retained), deletes its
 // allocations, and voids any credit it minted (§2.5 self-settle child — deleting the child credit
