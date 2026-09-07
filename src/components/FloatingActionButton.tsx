@@ -1,10 +1,13 @@
 import { useState, useRef, useEffect, useTransition } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { IconReceipt2, IconFileInvoice, IconHammer, IconUserPlus } from '@tabler/icons-react';
+import { IconReceipt2, IconFileInvoice, IconHammer, IconUserPlus, IconMailForward } from '@tabler/icons-react';
 import { hidesGlobalFab } from '../lib/bottomChrome';
 
 const OPTIONS = [
   { icon: IconFileInvoice, label: 'New Purchase Order', path: '/purchase-orders/new', highlight: false },
+  // The same form, opened in quote mode — one more entry in this menu rather than a second
+  // button of its own, so every way into a create flow behaves the same way.
+  { icon: IconMailForward, label: 'Request Quotes',     path: '/purchase-orders/new?mode=rfq', highlight: false },
   { icon: IconHammer,      label: 'New Contract',     path: '/work-orders/new',     highlight: false },
   { icon: IconUserPlus,    label: 'New Party',          path: '/stakeholders?new=1',  highlight: false },
   { icon: IconReceipt2,    label: 'New Transaction',    path: '/ledger/new',          highlight: true  },

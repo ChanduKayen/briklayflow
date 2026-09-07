@@ -939,7 +939,16 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
   const [customTerms, setCustomTerms]           = useState('');
   const [deliveryLocation, setDeliveryLocation] = useState('');
   // Place a PO (you have a vendor + price) vs Request quotes (you have items, ask vendors to price).
-  const [poMode, setPoMode] = useState<'po' | 'rfq'>('po');
+  // Arriving from "Request quotes" lands straight in quote mode instead of making the user find
+  // the toggle after the page opens. Read from the router's location, not window's — the same
+  // value React rendered with.
+  const [poMode, setPoMode] = useState<'po' | 'rfq'>(
+    new URLSearchParams(location.search).get('mode') === 'rfq' ? 'rfq' : 'po',
+  );
+  // Asking vendors for prices is the whole point of an RFQ, so the page shows no prices in that
+  // mode. RfqLineItem carries { line, item_name, unit, qty, spec } and no rate — anything typed
+  // into a rate box here was being thrown away on send.
+  const quoting = poMode === 'rfq';
   const [showRfq, setShowRfq] = useState(false);
 
   const [showVendorCreate, setShowVendorCreate] = useState(false);
@@ -4031,7 +4040,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
                     { k: 'rate', t: 'Rate', w: 96, a: 'right' },
                     { k: 'amt', t: 'Amount', w: 104, a: 'right' },
                     { k: 'del', t: '', w: 40, a: 'left' },
-                  ].map((c) => (
+                  ].filter((c) => !quoting || (c.k !== 'rate' && c.k !== 'amt')).map((c) => (
                     <th
                       key={c.k}
                       className="px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.04em]"
@@ -4257,8 +4266,8 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
                           </div>
                         </td>
 
-                        {/* Rate */}
-                        <td className="px-2 py-2" style={{ ...cell, textAlign: 'right' }}>
+                        {/* Rate — not asked for when the vendor is the one being asked. */}
+                        {!quoting && <td className="px-2 py-2" style={{ ...cell, textAlign: 'right' }}>
                           <div className="relative flex items-center">
                             <span className="text-[12px] mr-0.5" style={{ color: uiV.systemFaint }}>₹</span>
                             <input
@@ -4271,12 +4280,12 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
                               onChange={(e) => updateLine(li.id, { unit_rate: parseFloat(e.target.value) || 0 })}
                             />
                           </div>
-                        </td>
+                        </td>}
 
                         {/* Amount */}
-                        <td className="px-3 py-2.5 text-[13px] font-semibold tabular-nums text-right" style={{ ...cell, color: uiV.user }}>
+                        {!quoting && <td className="px-3 py-2.5 text-[13px] font-semibold tabular-nums text-right" style={{ ...cell, color: uiV.user }}>
                           {amount > 0 ? `₹${amount.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : dash}
-                        </td>
+                        </td>}
 
                         {/* Delete */}
                         <td className="px-2 py-2 text-center" style={cell}>
@@ -4295,7 +4304,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
                       {/* Expansion — the full resolution UI for the active row */}
                       {isActive && li.item_name.trim().length > 0 && (
                         <tr className="po-row-expansion">
-                          <td colSpan={10} style={{ borderBottom: `1px solid ${uiV.line}`, background: '#FCFBFA' }}>
+                          <td colSpan={quoting ? 8 : 10} style={{ borderBottom: `1px solid ${uiV.line}`, background: '#FCFBFA' }}>
                             <div className="px-4 py-3 pl-12">
                               {/* Did you mean */}
                               {(() => {
@@ -4599,7 +4608,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
 
                 {/* Add row */}
                 <tr>
-                  <td colSpan={10}>
+                  <td colSpan={quoting ? 8 : 10}>
                     <button onClick={addLine} className="w-full flex items-center justify-center gap-2 py-3 text-[13px] font-medium transition-colors hover:brightness-95" style={{ color: uiV.accentDeep, background: uiV.surface }}>
                       <span className="material-symbols-outlined text-[16px]">add</span>
                       Add row
@@ -4654,7 +4663,9 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
             <span className="text-[13px]" style={{ color: uiV.system }}>
               {lineItems.filter((li) => li.item_name.trim()).length} item{lineItems.filter((li) => li.item_name.trim()).length !== 1 ? 's' : ''}
             </span>
-            <span className="text-[14px] font-semibold tabular-nums" style={{ color: uiV.user }}>₹{grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+            {quoting
+              ? <span className="text-[13px]" style={{ color: uiV.system }}>Vendors will quote the prices</span>
+              : <span className="text-[14px] font-semibold tabular-nums" style={{ color: uiV.user }}>₹{grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>}
           </div>
           {poMode === 'rfq' ? (
             <div className="flex items-center gap-4">

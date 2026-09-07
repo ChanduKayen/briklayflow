@@ -9,6 +9,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
+import DragSheet from '../DragSheet';
 import { useUserProfile } from '../../App';
 import { useAuth } from '../../lib/auth/AuthProvider';
 import { useSnackbar } from '../Snackbar';
@@ -69,6 +70,8 @@ const POLX_CSS = `
 .polx .btn:hover{background:var(--terra-deep);border-color:var(--terra-deep);transform:translateY(-1px);box-shadow:0 6px 16px -8px rgba(196,80,43,.7)}
 .polx .btn:active{transform:translateY(0) scale(.97);box-shadow:none;background:#93441F}
 .polx .btn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2}
+.polx .btn.ghost{background:transparent;border-color:var(--line);color:var(--ink-2);margin-right:8px}
+.polx .btn.ghost:hover{background:var(--paper-2);border-color:var(--terra);color:var(--terra);box-shadow:none}
 .polx .sheet{background:var(--paper);border:1px solid var(--line);border-radius:10px;overflow:hidden;box-shadow:var(--shadow)}
 .polx table{width:100%;border-collapse:collapse;table-layout:fixed}
 .polx thead th{position:sticky;top:0;z-index:2;font-weight:500;font-size:12px;color:var(--ink-2);text-align:left;padding:10px 12px;background:var(--paper-2);border-bottom:1px solid var(--line);letter-spacing:.02em;white-space:nowrap;cursor:pointer;user-select:none;transition:color .15s}
@@ -218,6 +221,19 @@ const POLX_CSS = `
 .polx .m-fab{position:fixed;right:16px;bottom:calc(76px + env(safe-area-inset-bottom));z-index:30;height:52px;padding:0 20px;border-radius:26px;background:var(--terra);color:#fff;font-weight:600;font-size:15px;display:inline-flex;align-items:center;gap:8px;border:0;box-shadow:0 12px 28px -8px rgba(196,80,43,.55)}
 .polx .m-fab svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2.4}
 .polx .m-fab:active{transform:scale(.96)}
+/* Two ways to start: place an order, or ask what it would cost. */
+.polx .m-cscrim{position:fixed;inset:0;background:rgba(30,26,21,.34);opacity:0;pointer-events:none;transition:opacity .24s var(--ease);z-index:40}
+.polx .m-cscrim.show{opacity:1;pointer-events:auto}
+.polx .m-csheet{position:fixed;left:0;right:0;bottom:0;z-index:41;background:var(--paper);border-radius:20px 20px 0 0;
+  padding:8px 14px calc(18px + env(safe-area-inset-bottom));transform:translateY(101%);transition:transform .3s var(--ease);
+  box-shadow:0 -14px 40px -18px rgba(47,38,34,.4)}
+.polx .m-csheet.show{transform:none}
+.polx .m-csheet .grab{width:38px;height:4px;border-radius:2px;background:var(--line);margin:6px auto 10px}
+.polx .m-csheet button{display:block;width:100%;text-align:left;background:none;border:0;padding:14px 8px;border-bottom:1px solid var(--line-2);cursor:pointer}
+.polx .m-csheet button:last-child{border-bottom:0}
+.polx .m-csheet button:active{background:var(--paper-2)}
+.polx .m-csheet b{display:block;font-size:16px;font-weight:600;color:var(--ink)}
+.polx .m-csheet small{display:block;font-size:13.5px;color:var(--ink-2);margin-top:2px}
 /* held state — the button stays pressed and spins for as long as the page is coming */
 .polx .m-fab.busy,.polx .btn.busy{opacity:1;cursor:default}
 .polx .m-fab.busy{transform:scale(.97);box-shadow:0 6px 16px -8px rgba(196,80,43,.5)}
@@ -417,7 +433,13 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   // isPending, so the button that was pressed is the thing that shows it is working — instead of
   // the tap seeming to do nothing and then the whole page being replaced by a skeleton.
   const [opening, startOpening] = useTransition();
-  const openNewPO = () => startOpening(() => navigate('/purchase-orders/new', projectId ? { state: { projectId } } : undefined));
+  // The global FAB is hidden on this page — it owns its own create button — so the second way in,
+  // asking vendors for quotes, has to hang off this button rather than the FAB's menu.
+  const openNewPO = (mode?: 'rfq') => startOpening(() => navigate(
+    mode === 'rfq' ? '/purchase-orders/new?mode=rfq' : '/purchase-orders/new',
+    projectId ? { state: { projectId } } : undefined,
+  ));
+  const [createOpen, setCreateOpen] = useState(false);
   const [mSearch, setMSearch] = useState(false);
 
   // Approve a pending PO inline (management / principal). The RPC enforces SoD (a non-principal
@@ -670,10 +692,24 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
           })}
         </div>
 
-        <button className={`m-fab${opening ? ' busy' : ''}`} onClick={openNewPO} disabled={opening} aria-busy={opening}>
+        <button className={`m-fab${opening ? ' busy' : ''}`} onClick={() => setCreateOpen(true)} disabled={opening} aria-busy={opening}>
           {opening ? <span className="m-spin" aria-hidden="true" /> : <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>}
           New PO
         </button>
+
+        <div className={`m-cscrim${createOpen ? ' show' : ''}`} onClick={() => setCreateOpen(false)} />
+        <DragSheet open={createOpen} onDismiss={() => setCreateOpen(false)}
+          className={`m-csheet${createOpen ? ' show' : ''}`} role="dialog" aria-label="Create">
+          <div className="grab" />
+          <button type="button" onClick={() => { setCreateOpen(false); openNewPO(); }}>
+            <b>New purchase order</b>
+            <small>You know the vendor and the price</small>
+          </button>
+          <button type="button" onClick={() => { setCreateOpen(false); openNewPO('rfq'); }}>
+            <b>Request quotes</b>
+            <small>Ask vendors what they would charge</small>
+          </button>
+        </DragSheet>
       </div>
     );
   }
@@ -685,7 +721,11 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
         <div className="top">
           <h1>Purchase orders</h1>
           <span className="count">{rows.length}</span>
-          <button className={`btn${opening ? ' busy' : ''}`} style={{ marginLeft: 'auto' }} onClick={openNewPO} disabled={opening} aria-busy={opening}>
+          <button className="btn ghost" style={{ marginLeft: 'auto' }} onClick={() => openNewPO('rfq')} disabled={opening}>
+            <svg viewBox="0 0 24 24"><path d="M3 8l9 6 9-6M3 6h18v12H3z" /></svg>
+            Request quotes
+          </button>
+          <button className={`btn${opening ? ' busy' : ''}`} onClick={() => openNewPO()} disabled={opening} aria-busy={opening}>
             {opening ? <span className="m-spin" aria-hidden="true" /> : <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>}
             New PO
           </button>

@@ -143,6 +143,8 @@ const CSS = `
 .npm-tot{min-width:80px}
 .npm-tot .k{font-size:12.5px;font-weight:500;color:var(--ink-2)}
 .npm-tot .v{font-size:20px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+/* Where the total sits in PO mode, an RFQ says who is going to fill it in. */
+.npm-quoting{font-size:12.5px;color:var(--ink-2);margin-top:2px;line-height:1.25;max-width:104px}
 .npm-cta{flex:1;height:52px;border:0;border-radius:16px;font-size:16.5px;font-weight:600;letter-spacing:-.01em;
   color:#fff;background:var(--tint);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;
   transition:transform .18s var(--spring),background .3s,opacity .3s}
@@ -280,7 +282,10 @@ export default function NewPoMobile(p: NewPoMobileProps) {
   const count = p.lines.reduce((s, l) => s + l.qty, 0);
   // Requesting quotes is how you find a vendor, so it cannot require one — it needs a project
   // and something to ask about. Placing an order needs the vendor as well.
-  const canSubmit = !!p.projectId && p.lines.length > 0 && !p.submitting && (p.mode === 'rfq' || !!p.vendorId);
+  // An RFQ asks the vendor for prices, so the screen shows none — and the request itself carries
+  // only item, unit and quantity, so a rate typed here would be discarded on send anyway.
+  const quoting = p.mode === 'rfq';
+  const canSubmit = !!p.projectId && p.lines.length > 0 && !p.submitting && (quoting || !!p.vendorId);
   const dirty = !!p.vendorId || !!p.projectId || p.lines.length > 0;
   const closeSheets = () => setSheet(null);
 
@@ -415,14 +420,14 @@ export default function NewPoMobile(p: NewPoMobileProps) {
                 <div className="npm-item" key={l.id} style={{ animationDelay: `${Math.min(i, 8) * 0.06}s` }}>
                   <div className="inf">
                     <div className="nm">{l.name || 'Untitled item'}</div>
-                    <div className="pr">{l.rate > 0 ? `${inr(l.rate)} per ${l.unit}` : `Rate to be confirmed · ${l.unit}`}</div>
+                    <div className="pr">{quoting ? l.unit : l.rate > 0 ? `${inr(l.rate)} per ${l.unit}` : `Rate to be confirmed · ${l.unit}`}</div>
                   </div>
                   <div className="npm-stp">
                     <button type="button" aria-label={`One less ${l.name}`} onClick={() => p.onQty(l.id, -1)}>−</button>
                     <div className="q">{l.qty}</div>
                     <button type="button" aria-label={`One more ${l.name}`} onClick={() => p.onQty(l.id, 1)}>+</button>
                   </div>
-                  <div className="npm-amt">{l.total > 0 ? inr(l.total) : '—'}</div>
+                  {!quoting && <div className="npm-amt">{l.total > 0 ? inr(l.total) : '—'}</div>}
                 </div>
               ))}
             </div>
@@ -438,7 +443,9 @@ export default function NewPoMobile(p: NewPoMobileProps) {
       <div className="npm-bar">
         <div className="npm-tot">
           <div className="k">{count} {count === 1 ? 'item' : 'items'}</div>
-          <div className="v">{inr(p.total)}</div>
+          {quoting
+            ? <div className="npm-quoting">Vendors quote</div>
+            : <div className="v">{inr(p.total)}</div>}
         </div>
         <button type="button" className="npm-cta" disabled={!canSubmit} aria-busy={p.submitting}
           onClick={() => (p.mode === 'po' && p.unresolved > 0 ? setSheet('typed') : p.onSubmit())}>
@@ -461,10 +468,10 @@ export default function NewPoMobile(p: NewPoMobileProps) {
             <label htmlFor="npm-qty">Quantity</label>
             <input id="npm-qty" value={fQty} onChange={e => setFQty(e.target.value.replace(/[^\d]/g, ''))} placeholder="20" inputMode="numeric" autoComplete="off" />
           </div>
-          <div className="npm-field">
+          {!quoting && (<div className="npm-field">
             <label htmlFor="npm-rate">Rate — optional</label>
             <input id="npm-rate" value={fRate} onChange={e => setFRate(e.target.value.replace(/[^\d]/g, ''))} placeholder="Last price fills in" inputMode="numeric" autoComplete="off" />
-          </div>
+          </div>)}
         </div>
         <div className="npm-units">
           {UNITS.map(u => <button type="button" key={u} className={u === unit ? 'on' : ''} onClick={() => setUnit(u)}>{u}</button>)}
