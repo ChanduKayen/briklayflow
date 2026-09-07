@@ -99,7 +99,7 @@ export async function matchSKUsFromAudio(
     const msg = (e as Error)?.message ?? ''
     if (/image_base64|image_url/i.test(msg)) {
       console.error('[voice] the deployed sku-matcher does not accept audio yet — deploy the function', e)
-      throw new Error('Voice is not live on the server yet. Type the items or scan a quote for now.')
+      throw new Error('Voice is not live on the server yet. Type the items or scan a quote for now.', { cause: e })
     }
     throw e
   }
