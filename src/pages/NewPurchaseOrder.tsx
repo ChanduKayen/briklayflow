@@ -11,7 +11,7 @@ import { useOrgId } from '../lib/auth/AuthProvider';
 import { VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 import { brandsFor, addCustomBrand, BRANDS_BY_CATEGORY } from '../lib/brandsByCategory';
 import { multiply, subtract, applyPercent, sum } from '../lib/money';
-import { matchSKUsFromFile, matchSKUsFromText, type SKUMatcherResponse } from '../lib/skuMatcher';
+import { matchSKUsFromFile, matchSKUsFromAudio, type SKUMatcherResponse } from '../lib/skuMatcher';
 import { SKU_AUTO_COMMIT, SKU_CLEAN_MATCH, SKU_CHIP_DISPLAY, SKU_LOW_DISPLAY, SKU_QUERY_THRESHOLD, DYM_CONFIDENCE_FLOOR } from '../lib/skuThresholds';
 import { extractAttributesFromInput } from '../lib/skuAttributeExtractor';
 import type { ExtractedAttributes } from '../lib/skuAttributeExtractor';
@@ -960,6 +960,9 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
 
   const [docExtracting, setDocExtracting] = useState(false);
   const [docExtractError, setDocExtractError] = useState<string | null>(null);
+  // What the transcriber made of the last recording. Shown once it is settled — the live transcript
+  // that used to rewrite itself on screen is exactly what this replaces.
+  const [lastHeard, setLastHeard] = useState('');
 
   const [vendorNotes, setVendorNotes]   = useState('');
   const [internalNotes, setInternalNotes] = useState('');
@@ -3439,6 +3442,7 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
     setDocExtractError(null);
     try {
       const result = await run();
+      if (result.transcript) setLastHeard(result.transcript);
       if (result.error) {
         setDocExtractError(result.error);
         return;
@@ -3549,7 +3553,8 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
           total={grandTotal}
           busy={docExtracting}
           error={docExtractError}
-          onSpoken={(text) => void ingestExtraction(() => matchSKUsFromText(text, 'po_creation', selectedVendor?.category))}
+          onRecorded={(audio) => void ingestExtraction(() => matchSKUsFromAudio(audio, 'po_creation', selectedVendor?.category))}
+          heard={lastHeard}
           onFile={(file) => void ingestExtraction(() => matchSKUsFromFile(file, 'po_creation', selectedVendor?.category))}
           onManualAdd={addManualLine}
           unresolved={lineItems.filter(l => l.item_name.trim() && !l.sku_id && !l.skipped_linking).length}

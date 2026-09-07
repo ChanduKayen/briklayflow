@@ -25,11 +25,16 @@ export interface SKUMatcherResponse {
   auto_matched:  number
   needs_review:  number
   trgm_resolved: number
+  /** What the transcriber heard, when the request was a recording. */
+  transcript?:   string
   error?:        string
 }
 
 export async function matchSKUs(params: {
   text?:            string
+  audio_base64?:    string
+  audio_mime?:      string
+  language?:        string
   image_base64?:    string
   image_url?:       string
   image_mime?:      string
@@ -65,6 +70,27 @@ export async function matchSKUsFromText(
   vendor_category?: string
 ): Promise<SKUMatcherResponse> {
   return matchSKUs({ text, caller, vendor_category })
+}
+
+/**
+ * A spoken order. The recording goes up whole and is transcribed on the server — the browser's
+ * own speech API cannot hold Telugu/Hindi code-mix, and transcribing live in the browser showed
+ * the user a half-heard sentence rewriting itself, which is worse than showing nothing.
+ */
+export async function matchSKUsFromAudio(
+  audio:            Blob,
+  caller:           string = 'manual',
+  vendor_category?: string,
+  language?:        string,
+): Promise<SKUMatcherResponse> {
+  const buffer = await audio.arrayBuffer()
+  const bytes  = new Uint8Array(buffer)
+  let b64 = ''
+  const chunk = 8192
+  for (let i = 0; i < bytes.length; i += chunk) {
+    b64 += String.fromCharCode(...bytes.subarray(i, i + chunk))
+  }
+  return matchSKUs({ audio_base64: btoa(b64), audio_mime: audio.type || 'audio/webm', language, caller, vendor_category })
 }
 
 export async function matchSKUsFromFile(

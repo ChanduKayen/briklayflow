@@ -8,8 +8,9 @@
 
 const WA_ACCESS_TOKEN  = Deno.env.get('WA_ACCESS_TOKEN')!
 const ANTHROPIC_KEY    = Deno.env.get('ANTHROPIC_API_KEY')
+import { transcribeAudio, canTranscribe } from '../_shared/transcribe.ts'
+
 const OPENAI_KEY       = Deno.env.get('OPENAI_API_KEY')
-const SARVAM_KEY       = Deno.env.get('SARVAM_API_KEY')
 
 const MEDIA_BUCKET = 'rough-entry-media'
 
@@ -113,7 +114,7 @@ export async function normalize(
     const mediaId = (message.audio?.id ?? message.voice?.id) as string
     const mime = (message.audio?.mime_type ?? message.voice?.mime_type ?? 'audio/ogg') as string
     // No transcription provider configured at all -> empty text, graceful reply upstream.
-    if (!SARVAM_KEY && !OPENAI_KEY) {
+    if (!canTranscribe()) {
       return { ...base, text: '', source_type: 'voice',
                attachments: [{ media_id: mediaId, mime }] }
     }
@@ -127,7 +128,7 @@ export async function normalize(
       // (gpt-4.1) reads native script directly and emits payee/amount/note already in
       // English (TXN_SYSTEM "OUTPUT LANGUAGE"), so the lossy transliteration hop that
       // mangled names ("రాజీవ్" -> "Rajeef") is gone: ONE understanding call decides.
-      const text = await transcribeAudio(bytes, realMime, language)
+      const text = await transcribeAudio(bytes, realMime, { language, prompt: STT_PROMPT })
       // TRACE 1/4 -- the native transcript handed downstream.
       console.log('[trace] voice', JSON.stringify({ lang: language ?? 'auto', transcript: text.slice(0, 300) }))
       let storage_path: string | undefined
@@ -259,25 +260,6 @@ async function describeImage(base64: string, mime: string, caption: string): Pro
   return ''
 }
 
-// ── Voice transcription ─────────────────────────────────────────────────────────
-// PRIMARY: Sarvam saarika -- purpose-built for Indian languages; it understands Telugu/
-// Hindi quirks + code-switching and AUTO-DETECTS the language ('unknown'). It needs a
-// language_code (omitting it is a 400 -- the cause of the earlier "sarvam failed"). If
-// Sarvam is absent/fails, we fall back to OpenAI (gpt-4o-transcribe -> whisper-1).
-// Disable Sarvam with WA_SARVAM_OFF=true.
-const SARVAM_OFF = Deno.env.get('WA_SARVAM_OFF') === 'true'
-const SARVAM_MODEL = Deno.env.get('WA_SARVAM_MODEL') ?? 'saarika:v2.5'
-const OPENAI_STT_MODELS = ['gpt-4o-transcribe', 'whisper-1']
-
-/** Map an ISO-639-1 hint to Sarvam's BCP-47 code; 'unknown' lets saarika auto-detect. */
-function sarvamLang(iso?: string): string {
-  const m: Record<string, string> = {
-    te: 'te-IN', hi: 'hi-IN', en: 'en-IN', ta: 'ta-IN', kn: 'kn-IN', ml: 'ml-IN',
-    bn: 'bn-IN', gu: 'gu-IN', mr: 'mr-IN', pa: 'pa-IN', or: 'od-IN',
-  }
-  return (iso && m[iso]) || 'unknown'
-}
-
 // The DEPLOYMENT's locale prior (ISO-639-1) -- a tiebreaker used only when we have no
 // per-person preference. Empty by default: the code assumes NO language. Set
 // WA_STT_LANGUAGE to your region's language (e.g. 'te' for coastal Andhra, 'hi' for a
@@ -345,56 +327,3 @@ async function resolveSpokenLanguage(supabase: any, sender: string): Promise<str
   return STT_LOCALE_PRIOR || undefined
 }
 
-async function transcribeAudio(bytes: Uint8Array, mime: string, language?: string): Promise<string> {
-  const ext = (mime.split('/')[1] || 'ogg').split(';')[0]
-  const file = () => { const fd = new FormData(); fd.append('file', new Blob([bytes], { type: mime }), `audio.${ext}`); return fd }
-
-  // 1) Sarvam saarika -- PRIMARY Indian-language model, with auto-detect.
-  if (!SARVAM_OFF && SARVAM_KEY) {
-    try {
-      const fd = file()
-      fd.append('model', SARVAM_MODEL)
-      fd.append('language_code', sarvamLang(language))   // resolved hint, else 'unknown' (auto-detect)
-      const res = await fetch('https://api.sarvam.ai/speech-to-text', {
-        method: 'POST', headers: { 'api-subscription-key': SARVAM_KEY }, body: fd,
-      })
-      if (res.ok) {
-        const t = ((await res.json()).transcript ?? '').trim()
-        if (t) return t
-        console.warn('[normalize] sarvam: empty transcript, falling back')
-      } else {
-        const body = await res.text().catch(() => '')
-        console.warn('[normalize] sarvam failed', res.status, body.slice(0, 200))
-      }
-    } catch (e) {
-      console.warn('[normalize] sarvam error, falling back:', (e as Error)?.message ?? e)
-    }
-  }
-
-  // 2) OpenAI -- best transcription model first, whisper-1 as the safety fallback.
-  if (OPENAI_KEY) {
-    for (const model of OPENAI_STT_MODELS) {
-      try {
-        const fd = file()
-        fd.append('model', model)
-        if (language) fd.append('language', language)   // resolved hint (pref -> locale); else auto-detect
-        fd.append('prompt', STT_PROMPT)                  // local-name + payment-word priming (neutral)
-        fd.append('temperature', '0')                   // deterministic transcription
-        const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-          method: 'POST', headers: { Authorization: `Bearer ${OPENAI_KEY}` }, body: fd,
-        })
-        if (res.ok) {
-          const d = await res.json()
-          const t = (d.text ?? '').trim()
-          if (t) return t
-        } else {
-          const body = await res.text().catch(() => '')
-          console.warn(`[normalize] openai ${model} failed`, res.status, body.slice(0, 200))
-        }
-      } catch (e) {
-        console.warn(`[normalize] openai ${model} error:`, (e as Error)?.message ?? e)
-      }
-    }
-  }
-  return ''
-}

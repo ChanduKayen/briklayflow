@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import OpenAI from 'https://esm.sh/openai@4'
+import { transcribeAudio, canTranscribe } from '../_shared/transcribe.ts'
 
 const openai  = new OpenAI({ apiKey: Deno.env.get('OPENAI_API_KEY') })
 
@@ -21,6 +22,22 @@ const supabase = createClient(
 const SKU_AUTO_COMMIT             = 0.82
 const SKU_CLEAN_MATCH             = 0.92
 const SKU_RERANK_REVIEW_THRESHOLD = 70   // Cohere/LLM rerank: confidence % below this → needs_review
+
+// What the speaker is talking about, for the transcriber to bias spelling and word choice against.
+// A SAMPLE of the domain, never an instruction — and deliberately NOT the WhatsApp site-report
+// priming, which is full of payment and progress words that would pull a materials order towards
+// money and away from quantities.
+const ORDER_STT_PROMPT =
+  'Someone at a construction site in Andhra Pradesh dictating a materials order to their supplier, ' +
+  'in Telugu or Hindi mixed with the English trade words a site actually uses. ' +
+  'They name a material, how much of it, and often a grade or size: ' +
+  'cement (సిమెంట్) OPC and PPC, బస్తాలు / bags, UltraTech, Ramco, Dalmia, Zuari; ' +
+  'steel (ఇనుము, స్టీల్), TMT bars, rods, 8mm 10mm 12mm 16mm 20mm 25mm, Fe500, tonnes, kg, బండిల్; ' +
+  'sand (ఇసుక), gravel (కంకర), metal 20mm 40mm, ట్రిప్పు / trip, cubic feet, ' +
+  'bricks (ఇటుకలు), blocks, AAC, fly ash; tiles (టైల్స్), putty (పుట్టీ), paint, primer; ' +
+  'pipes (పైపులు), PVC, CPVC, conduit (కండ్యూట్), wire (వైర్), 1.5 sq mm, 2.5 sq mm; ' +
+  'plywood, shuttering (షట్టరింగ్), nails, binding wire. ' +
+  'Quantities come as numbers with a unit — 20 bags, 5 ton, 2 trips, 100 numbers, 3 bundles.'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin':  '*',
@@ -71,6 +88,11 @@ interface MatchedItem {
 
 interface SKUMatcherRequest {
   text?:            string
+  /** A spoken order, recorded on the phone. Transcribed here, then read as if it were text. */
+  audio_base64?:    string
+  audio_mime?:      string
+  /** ISO-639-1 hint for the transcriber; omit to auto-detect. */
+  language?:        string
   image_base64?:    string
   image_url?:       string
   image_mime?:      string
@@ -80,6 +102,8 @@ interface SKUMatcherRequest {
   caller?:          string
   action?:          string
   documentSiblingItems?: string[]
+  /** Set by the audio path above so the response can tell the caller what was heard. */
+  transcript?:      string
   // classifyForDictionary inputs
   item_name?:       string
   specification?:   string
@@ -1292,6 +1316,38 @@ serve(async (req: Request) => {
   try {
     const body = await req.json() as SKUMatcherRequest
 
+    // ── a spoken order becomes text here, then follows the ordinary text path ──────
+    // The phone records audio and sends it whole; nothing is transcribed in the browser. The
+    // browser's own speech API cannot hold Telugu/Hindi code-mix, which is most of what gets
+    // said, so this uses the same Sarvam/Whisper path that has been reading site voice notes
+    // on WhatsApp. Everything downstream sees a plain `text` request and cannot tell the
+    // difference.
+    if (body.audio_base64) {
+      if (!canTranscribe()) {
+        return new Response(JSON.stringify({ error: 'Voice is not set up on this deployment.', items: [] }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      }
+      const mime = body.audio_mime || 'audio/webm'
+      let bytes: Uint8Array
+      try {
+        const bin = atob(body.audio_base64)
+        bytes = new Uint8Array(bin.length)
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+      } catch {
+        return new Response(JSON.stringify({ error: 'That recording could not be read.', items: [] }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      }
+      const heard = await transcribeAudio(bytes, mime, { language: body.language, prompt: ORDER_STT_PROMPT })
+      console.log('[sku-matcher] voice', JSON.stringify({ bytes: bytes.length, mime, lang: body.language ?? 'auto', transcript: heard.slice(0, 300) }))
+      if (!heard) {
+        return new Response(JSON.stringify({ error: 'Could not make out that recording. Try again, closer to the phone.', items: [] }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      }
+      body.text = heard
+      body.transcript = heard          // echoed back so the screen can show what was heard
+      delete body.audio_base64
+    }
+
     // ── identifyProduct: isolated Serper + LLM product identification ──────
     // Powers the parallel "Did you mean?" on the PO line. Serper web search +
     // one LLM call turns vernacular/garbled input ("ituka") into a CLEAN
@@ -1699,6 +1755,7 @@ Return ONLY this JSON object, no other text:
           items: [], total: 0, auto_matched: 0,
           needs_review: 0, trgm_resolved: 0,
           caller: body.caller ?? 'unknown',
+          transcript: body.transcript,
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
@@ -1719,6 +1776,7 @@ Return ONLY this JSON object, no other text:
         needs_review:  needsReview,
         trgm_resolved: trgmResolved,
         caller:        body.caller ?? 'unknown',
+        transcript:    body.transcript,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )

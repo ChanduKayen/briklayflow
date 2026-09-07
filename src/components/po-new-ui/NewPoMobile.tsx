@@ -11,6 +11,8 @@
 // needs — which drawer is open, what the microphone is hearing, what the sheet is collecting.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import DragSheet from '../DragSheet';
+import { useVoiceNote, canRecordVoice } from '../../lib/useVoiceNote';
+import { cueFail } from '../../lib/cue';
 
 const CSS = `
 .npm-w{--tint:#C4502B;--tint-press:#A8431F;--ink:#1C1815;--ink-2:#8A8178;--ink-3:#B8AFA5;
@@ -99,13 +101,10 @@ const CSS = `
 .npm-voice.rec .npm-vt .t2{color:rgba(255,255,255,.65)}
 .npm-wave{display:none;align-items:center;gap:3px;height:22px;margin-top:8px}
 .npm-voice.rec .npm-wave{display:flex}
-.npm-wave i{width:3px;border-radius:3px;background:rgba(255,255,255,.85);height:5px;animation:npm-wv 1s ease-in-out infinite}
-@keyframes npm-wv{0%,100%{height:4px}50%{height:var(--h)}}
-.npm-live{display:none;position:relative;z-index:2;padding:0 20px 20px;color:rgba(255,255,255,.92);
-  font-size:15px;font-weight:500;line-height:1.5;letter-spacing:-.01em}
-.npm-voice.rec .npm-live{display:block}
-.npm-cursor{display:inline-block;width:2px;height:14px;background:#fff;margin-left:1px;vertical-align:-2px;animation:npm-blink 1.1s steps(1) infinite}
-@keyframes npm-blink{50%{opacity:0}}
+.npm-wave i{width:3px;border-radius:3px;background:rgba(255,255,255,.85);height:4px;
+  transition:height .08s linear}
+/* What the server heard, shown only once it is settled — never a sentence rewriting itself. */
+.npm-heard{margin:10px 2px 0;font-size:14px;line-height:1.45;color:var(--ink-2);letter-spacing:-.01em}
 
 .npm-alt{display:flex;justify-content:center;align-items:center;gap:6px;margin-top:14px;font-size:15px;color:var(--ink-2)}
 .npm-alt button{border:0;background:none;font-size:15px;font-weight:500;color:var(--tint);
@@ -190,19 +189,6 @@ const CSS = `
 }
 `;
 
-/* ── the browser's own recogniser — the same one the quick start uses ── */
-type Recognition = {
-  lang: string; continuous: boolean; interimResults: boolean;
-  start: () => void; stop: () => void;
-  onresult: ((e: { resultIndex: number; results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }> }) => void) | null;
-  onerror: ((e: { error?: string }) => void) | null;
-  onend: (() => void) | null;
-};
-function recognitionCtor(): (new () => Recognition) | null {
-  const w = window as unknown as Record<string, unknown>;
-  return (w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null) as (new () => Recognition) | null;
-}
-
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 const UNITS = ['Nos', 'bag', 'ton', 'kg', 'load', 'sq ft', 'litre'];
 
@@ -225,7 +211,10 @@ export interface NewPoMobileProps {
   total: number;
   busy: boolean;
   error: string | null;
-  onSpoken: (text: string) => void;
+  /** A recorded voice note. Transcription happens on the server, not here. */
+  onRecorded: (audio: Blob) => void;
+  /** What the server heard, last time. Shown after the fact — never while speaking. */
+  heard?: string;
   onFile: (file: File) => void;
   onManualAdd: (item: { name: string; qty: number; unit: string; rate: number }) => void;
   /** Items named but not yet matched to the catalogue. The desktop resolves these in the item
@@ -242,59 +231,18 @@ export interface NewPoMobileProps {
 // final. Laying them end to end is what turned "iron 20 bags" into
 // "iron iron 20 iron 20 bag iron 20 bags". A restatement that extends what we already have
 // replaces it; one that adds nothing is dropped; only genuinely new words are appended.
-// How long the microphone may hear nothing new before we stop reopening it. Each reopen costs
-// the device's own start/stop tone, so this is what keeps a finished order from beeping on.
-const QUIET_MS = 8000;
-// A pass shorter than this that heard nothing counts as the microphone declining; a few in a row
-// end the recording rather than reopening (and re-chiming) on a loop.
-const SHORT_PASS_MS = 1200;
-const EMPTY_PASSES = 3;
-
-function joinHeard(acc: string, next: string): string {
-  const a = acc.trim(), b = next.trim();
-  if (!b) return a;
-  if (!a) return b;
-  const la = a.toLowerCase(), lb = b.toLowerCase();
-  if (lb.startsWith(la)) return b;                       // a fuller telling of the same phrase
-  if (la.startsWith(lb) || la.endsWith(lb)) return a;    // nothing in it we do not already have
-  // A pass that begins while the phrase is still being spoken picks it up part-way, so the
-  // fragment repeats the last few words rather than restating from the start. Drop the longest
-  // tail we already have that the fragment opens with — on word boundaries, so "cement" is
-  // never sliced out of "cementitious".
-  const aw = a.split(' '), bw = b.split(' ');
-  for (let n = Math.min(aw.length, bw.length); n > 0; n--) {
-    const tail = aw.slice(aw.length - n).join(' ').toLowerCase();
-    const head = bw.slice(0, n).join(' ').toLowerCase();
-    if (tail === head) return `${aw.slice(0, aw.length - n).join(' ')} ${b}`.trim();
-  }
-  return `${a} ${b}`;                                    // new words
-}
-
 export default function NewPoMobile(p: NewPoMobileProps) {
   const [drawer, setDrawer] = useState<'v' | 'p' | null>(null);
   const [sheet, setSheet] = useState<'add' | 'discard' | 'typed' | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [rec, setRec] = useState(false);
-  const [heard, setHeard] = useState('');
-  const [secs, setSecs] = useState(0);
   const [fName, setFName] = useState(''); const [fQty, setFQty] = useState(''); const [fRate, setFRate] = useState('');
   const [unit, setUnit] = useState('Nos');
-  const recRef = useRef<Recognition | null>(null);
-  const carryRef    = useRef('');   // finals from earlier passes of this recording
-  const sessFinal   = useRef('');   // finals from the pass running right now
-  const heardRef    = useRef('');   // exactly the text that will be submitted
-  const wantRef     = useRef(false);// the user has not tapped to finish yet
-  const doneRef     = useRef(false);// this recording has already been handed over
-  const toldRef     = useRef(false);// an error already explained itself, so don't talk over it
-  const lastWordRef = useRef(0);    // when we last heard anything new
-  const passOpenRef = useRef(0);    // when the pass running now was opened
-  const emptyRef    = useRef(0);    // passes in a row that opened and shut with nothing in them
-  const restartsRef = useRef(0);
+  const waveRef = useRef<HTMLSpanElement>(null);
   const camRef = useRef<HTMLInputElement>(null);
   const docRef = useRef<HTMLInputElement>(null);
   const segRef = useRef<HTMLDivElement>(null);
   const [pill, setPill] = useState({ left: 3, width: 0 });
-  const canSpeak = typeof window !== 'undefined' && !!recognitionCtor();
+  const canSpeak = canRecordVoice();
 
   const say = (m: string) => { setToast(m); window.setTimeout(() => setToast(t => (t === m ? null : t)), 2000); };
 
@@ -305,100 +253,27 @@ export default function NewPoMobile(p: NewPoMobileProps) {
     if (b) setPill({ left: b.offsetLeft, width: b.offsetWidth });
   }, [p.mode, p.vendors.length]);
 
-  useEffect(() => {
-    if (!rec) return;
-    const t = window.setInterval(() => setSecs(s => s + 1), 1000);
-    return () => window.clearInterval(t);
-  }, [rec]);
-  useEffect(() => () => { wantRef.current = false; try { recRef.current?.stop(); } catch { /* already stopped */ } }, []);
-
-  // One place hands the words over, whether the user tapped to finish or the microphone gave up
-  // on its own. It used to be the tap alone, so a recording that ended by itself collapsed the
-  // card and threw away everything that had been said.
-  const finish = (announce: boolean) => {
-    if (doneRef.current) return;
-    doneRef.current = true;
-    wantRef.current = false;
-    setRec(false);
-    const text = heardRef.current.trim();
-    heardRef.current = ''; carryRef.current = ''; sessFinal.current = '';
-    if (text) p.onSpoken(text);
-    else if (announce && !toldRef.current) say('Nothing was heard');
-  };
-
-  // A "pass" is one run of the speech API. Chrome ends a pass on its own after a pause, so a long
-  // order takes several — they are stitched together and only the tap ends the recording.
-  const startPass = (Ctor: new () => Recognition, openedAt: number): boolean => {
-    const r = new Ctor();
-    recRef.current = r;
-    sessFinal.current = carryRef.current;
-    passOpenRef.current = openedAt;
-    r.lang = 'en-IN'; r.continuous = true; r.interimResults = true;
-    r.onresult = (e) => {
-      if (recRef.current !== r) return;   // a pass we have already moved on from
-      // e.results is the whole pass, cumulatively, so the transcript is REBUILT from it on every
-      // event rather than appended to — the API re-delivers results that are already final, and
-      // appending them repeated the words.
-      let finals = carryRef.current, all = carryRef.current;
-      for (let i = 0; i < e.results.length; i++) {
-        const res = e.results[i]; const txt = res[0]?.transcript ?? '';
-        all = joinHeard(all, txt);
-        if (res.isFinal) finals = joinHeard(finals, txt);
-      }
-      sessFinal.current = finals;
-      const next = all.replace(/\s+/g, ' ').trim();
-      if (next !== heardRef.current) { lastWordRef.current = Date.now(); emptyRef.current = 0; }
-      heardRef.current = next;
-      setHeard(next);
-    };
-    r.onerror = (e) => {
-      if (recRef.current !== r) return;
-      if (e?.error === 'not-allowed') { wantRef.current = false; toldRef.current = true; say('Microphone permission is off'); }
-      else if (e?.error !== 'aborted' && e?.error !== 'no-speech') { toldRef.current = true; say('Could not hear that'); }
-    };
-    r.onend = () => {
-      if (recRef.current !== r) return;       // a pass we have already replaced
-      carryRef.current = sessFinal.current;   // already includes the earlier passes
-      // Still listening as far as the user is concerned — the card says "Tap to finish". But the
-      // device plays its own start/stop tone on every pass, so once the talking has clearly
-      // stopped we stop opening new ones and hand over what we have instead of chiming on.
-      // A pass that opens and shuts straight away with nothing in it means the microphone is not
-      // going to give us anything — reopening it just chimes. A few of those in a row is enough.
-      const now = Date.now();
-      if (now - passOpenRef.current < SHORT_PASS_MS) emptyRef.current++;
-      const quiet = now - lastWordRef.current > QUIET_MS || emptyRef.current >= EMPTY_PASSES;
-      if (wantRef.current && !quiet && restartsRef.current < 40) {
-        restartsRef.current++;
-        if (startPass(Ctor, now)) return;
-      }
-      finish(true);
-    };
-    try { r.start(); return true; } catch { return false; }
-  };
-
-  const toggleRec = () => {
-    if (rec) {
-      // Let the pass end so its last words land, then finish() runs from onend.
-      wantRef.current = false;
-      try { recRef.current?.stop(); } catch { finish(true); }
-      return;
+  // The meter is written straight to the DOM: twenty bars at sixty frames a second is not
+  // something to re-render a component for.
+  const showLevel = (level: number) => {
+    const el = waveRef.current; if (!el) return;
+    const bars = el.children;
+    for (let i = 0; i < bars.length; i++) {
+      const b = bars[i] as HTMLElement;
+      const shape = 0.45 + 0.55 * Math.sin((i / bars.length) * Math.PI);   // tallest in the middle
+      (b).style.height = `${Math.round(4 + level * 18 * shape)}px`;
     }
-    const Ctor = recognitionCtor(); if (!Ctor) return;
-    carryRef.current = ''; sessFinal.current = ''; heardRef.current = '';
-    doneRef.current = false; wantRef.current = true; restartsRef.current = 0; toldRef.current = false;
-    const now = Date.now();
-    lastWordRef.current = now; emptyRef.current = 0;
-    setHeard(''); setSecs(0);
-    if (startPass(Ctor, now)) setRec(true);
-    else { wantRef.current = false; say('Could not start the microphone'); }
   };
 
-  // The waveform wants to look irregular, not to BE random: a deterministic jitter keeps every
-  // render (and every device) identical, which Math.random in a component cannot promise.
-  const bars = useMemo(() => Array.from({ length: 20 }, (_, i) => {
-    const j = (n: number) => { const x = Math.sin(i * 12.9898 + n * 78.233) * 43758.5453; return x - Math.floor(x); };
-    return { h: 7 + j(1) * 15, d: j(2) * 0.9, dur: 0.55 + j(3) * 0.7 };
-  }), []);
+  const { recording: rec, secs, start: startRec, stop: stopRec } = useVoiceNote({
+    onLevel: showLevel,
+    onDone: (audio) => { showLevel(0); p.onRecorded(audio); },
+    onError: (m) => { showLevel(0); cueFail(); say(m); },
+  });
+
+  const toggleRec = () => { if (rec) stopRec(); else void startRec(); };
+
+  const bars = useMemo(() => Array.from({ length: 20 }, (_, i) => i), []);
 
   const vendorName = p.vendors.find(v => v.id === p.vendorId)?.name;
   const projectName = p.projects.find(x => x.id === p.projectId)?.name;
@@ -504,17 +379,20 @@ export default function NewPoMobile(p: NewPoMobileProps) {
                     : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="22" /></svg>}
                 </span>
                 <span className="npm-vt">
-                  <span className="t1" style={{ display: 'block' }}>{rec ? 'Listening' : 'Say the order'}</span>
-                  <span className="t2" style={{ display: 'block' }}>{rec ? 'Tap to finish' : '“20 bags cement, 5 ton 16 mm rod”'}</span>
-                  <span className="npm-wave" aria-hidden="true">
-                    {bars.map((b, i) => <i key={i} style={{ ['--h' as string]: `${b.h}px`, animationDelay: `${b.d}s`, animationDuration: `${b.dur}s` }} />)}
+                  <span className="t1" style={{ display: 'block' }}>{rec ? 'Recording' : 'Say the order'}</span>
+                  <span className="t2" style={{ display: 'block' }}>
+                    {rec ? 'Tap when you are done · any language' : '“20 bags cement, 5 ton 16 mm rod”'}
+                  </span>
+                  <span className="npm-wave" ref={waveRef} aria-hidden="true">
+                    {bars.map(i => <i key={i} />)}
                   </span>
                 </span>
                 <span className="npm-timer">{Math.floor(secs / 60)}:{String(secs % 60).padStart(2, '0')}</span>
               </span>
-              <span className="npm-live">{heard}<span className="npm-cursor" /></span>
             </button>
           )}
+
+          {p.heard && !rec && <p className="npm-heard">Heard “{p.heard}”</p>}
 
           <div className="npm-alt">
             <button type="button" disabled={p.busy} onClick={() => setSheet('add')}>Type items</button>
