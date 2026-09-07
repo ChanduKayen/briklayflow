@@ -242,6 +242,14 @@ export interface NewPoMobileProps {
 // final. Laying them end to end is what turned "iron 20 bags" into
 // "iron iron 20 iron 20 bag iron 20 bags". A restatement that extends what we already have
 // replaces it; one that adds nothing is dropped; only genuinely new words are appended.
+// How long the microphone may hear nothing new before we stop reopening it. Each reopen costs
+// the device's own start/stop tone, so this is what keeps a finished order from beeping on.
+const QUIET_MS = 8000;
+// A pass shorter than this that heard nothing counts as the microphone declining; a few in a row
+// end the recording rather than reopening (and re-chiming) on a loop.
+const SHORT_PASS_MS = 1200;
+const EMPTY_PASSES = 3;
+
 function joinHeard(acc: string, next: string): string {
   const a = acc.trim(), b = next.trim();
   if (!b) return a;
@@ -249,6 +257,16 @@ function joinHeard(acc: string, next: string): string {
   const la = a.toLowerCase(), lb = b.toLowerCase();
   if (lb.startsWith(la)) return b;                       // a fuller telling of the same phrase
   if (la.startsWith(lb) || la.endsWith(lb)) return a;    // nothing in it we do not already have
+  // A pass that begins while the phrase is still being spoken picks it up part-way, so the
+  // fragment repeats the last few words rather than restating from the start. Drop the longest
+  // tail we already have that the fragment opens with — on word boundaries, so "cement" is
+  // never sliced out of "cementitious".
+  const aw = a.split(' '), bw = b.split(' ');
+  for (let n = Math.min(aw.length, bw.length); n > 0; n--) {
+    const tail = aw.slice(aw.length - n).join(' ').toLowerCase();
+    const head = bw.slice(0, n).join(' ').toLowerCase();
+    if (tail === head) return `${aw.slice(0, aw.length - n).join(' ')} ${b}`.trim();
+  }
   return `${a} ${b}`;                                    // new words
 }
 
@@ -268,6 +286,9 @@ export default function NewPoMobile(p: NewPoMobileProps) {
   const wantRef     = useRef(false);// the user has not tapped to finish yet
   const doneRef     = useRef(false);// this recording has already been handed over
   const toldRef     = useRef(false);// an error already explained itself, so don't talk over it
+  const lastWordRef = useRef(0);    // when we last heard anything new
+  const passOpenRef = useRef(0);    // when the pass running now was opened
+  const emptyRef    = useRef(0);    // passes in a row that opened and shut with nothing in them
   const restartsRef = useRef(0);
   const camRef = useRef<HTMLInputElement>(null);
   const docRef = useRef<HTMLInputElement>(null);
@@ -307,12 +328,14 @@ export default function NewPoMobile(p: NewPoMobileProps) {
 
   // A "pass" is one run of the speech API. Chrome ends a pass on its own after a pause, so a long
   // order takes several — they are stitched together and only the tap ends the recording.
-  const startPass = (Ctor: new () => Recognition): boolean => {
+  const startPass = (Ctor: new () => Recognition, openedAt: number): boolean => {
     const r = new Ctor();
     recRef.current = r;
     sessFinal.current = carryRef.current;
+    passOpenRef.current = openedAt;
     r.lang = 'en-IN'; r.continuous = true; r.interimResults = true;
     r.onresult = (e) => {
+      if (recRef.current !== r) return;   // a pass we have already moved on from
       // e.results is the whole pass, cumulatively, so the transcript is REBUILT from it on every
       // event rather than appended to — the API re-delivers results that are already final, and
       // appending them repeated the words.
@@ -323,19 +346,30 @@ export default function NewPoMobile(p: NewPoMobileProps) {
         if (res.isFinal) finals = joinHeard(finals, txt);
       }
       sessFinal.current = finals;
-      heardRef.current = all.replace(/\s+/g, ' ').trim();
-      setHeard(heardRef.current);
+      const next = all.replace(/\s+/g, ' ').trim();
+      if (next !== heardRef.current) { lastWordRef.current = Date.now(); emptyRef.current = 0; }
+      heardRef.current = next;
+      setHeard(next);
     };
     r.onerror = (e) => {
+      if (recRef.current !== r) return;
       if (e?.error === 'not-allowed') { wantRef.current = false; toldRef.current = true; say('Microphone permission is off'); }
       else if (e?.error !== 'aborted' && e?.error !== 'no-speech') { toldRef.current = true; say('Could not hear that'); }
     };
     r.onend = () => {
+      if (recRef.current !== r) return;       // a pass we have already replaced
       carryRef.current = sessFinal.current;   // already includes the earlier passes
-      // Still listening as far as the user is concerned — the card says "Tap to finish".
-      if (wantRef.current && restartsRef.current < 40) {
+      // Still listening as far as the user is concerned — the card says "Tap to finish". But the
+      // device plays its own start/stop tone on every pass, so once the talking has clearly
+      // stopped we stop opening new ones and hand over what we have instead of chiming on.
+      // A pass that opens and shuts straight away with nothing in it means the microphone is not
+      // going to give us anything — reopening it just chimes. A few of those in a row is enough.
+      const now = Date.now();
+      if (now - passOpenRef.current < SHORT_PASS_MS) emptyRef.current++;
+      const quiet = now - lastWordRef.current > QUIET_MS || emptyRef.current >= EMPTY_PASSES;
+      if (wantRef.current && !quiet && restartsRef.current < 40) {
         restartsRef.current++;
-        if (startPass(Ctor)) return;
+        if (startPass(Ctor, now)) return;
       }
       finish(true);
     };
@@ -352,8 +386,10 @@ export default function NewPoMobile(p: NewPoMobileProps) {
     const Ctor = recognitionCtor(); if (!Ctor) return;
     carryRef.current = ''; sessFinal.current = ''; heardRef.current = '';
     doneRef.current = false; wantRef.current = true; restartsRef.current = 0; toldRef.current = false;
+    const now = Date.now();
+    lastWordRef.current = now; emptyRef.current = 0;
     setHeard(''); setSecs(0);
-    if (startPass(Ctor)) setRec(true);
+    if (startPass(Ctor, now)) setRec(true);
     else { wantRef.current = false; say('Could not start the microphone'); }
   };
 
