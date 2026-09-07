@@ -247,7 +247,13 @@ export default function NewPoMobile(p: NewPoMobileProps) {
   const [fName, setFName] = useState(''); const [fQty, setFQty] = useState(''); const [fRate, setFRate] = useState('');
   const [unit, setUnit] = useState('Nos');
   const recRef = useRef<Recognition | null>(null);
-  const finalRef = useRef('');
+  const carryRef    = useRef('');   // finals from earlier passes of this recording
+  const sessFinal   = useRef('');   // finals from the pass running right now
+  const heardRef    = useRef('');   // exactly the text that will be submitted
+  const wantRef     = useRef(false);// the user has not tapped to finish yet
+  const doneRef     = useRef(false);// this recording has already been handed over
+  const toldRef     = useRef(false);// an error already explained itself, so don't talk over it
+  const restartsRef = useRef(0);
   const camRef = useRef<HTMLInputElement>(null);
   const docRef = useRef<HTMLInputElement>(null);
   const segRef = useRef<HTMLDivElement>(null);
@@ -268,37 +274,71 @@ export default function NewPoMobile(p: NewPoMobileProps) {
     const t = window.setInterval(() => setSecs(s => s + 1), 1000);
     return () => window.clearInterval(t);
   }, [rec]);
-  useEffect(() => () => { try { recRef.current?.stop(); } catch { /* already stopped */ } }, []);
+  useEffect(() => () => { wantRef.current = false; try { recRef.current?.stop(); } catch { /* already stopped */ } }, []);
 
-  const stopRec = () => { try { recRef.current?.stop(); } catch { /* already stopped */ } setRec(false); };
+  // One place hands the words over, whether the user tapped to finish or the microphone gave up
+  // on its own. It used to be the tap alone, so a recording that ended by itself collapsed the
+  // card and threw away everything that had been said.
+  const finish = (announce: boolean) => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    wantRef.current = false;
+    setRec(false);
+    const text = heardRef.current.trim();
+    heardRef.current = ''; carryRef.current = ''; sessFinal.current = '';
+    if (text) p.onSpoken(text);
+    else if (announce && !toldRef.current) say('Nothing was heard');
+  };
 
-  const toggleRec = () => {
-    if (rec) {
-      const text = (finalRef.current + ' ' + heard).trim() || heard.trim();
-      stopRec();
-      if (text) p.onSpoken(text); else say('Nothing was heard');
-      return;
-    }
-    const Ctor = recognitionCtor(); if (!Ctor) return;
-    finalRef.current = ''; setHeard(''); setSecs(0);
+  // A "pass" is one run of the speech API. Chrome ends a pass on its own after a pause, so a long
+  // order takes several — they are stitched together and only the tap ends the recording.
+  const startPass = (Ctor: new () => Recognition): boolean => {
     const r = new Ctor();
     recRef.current = r;
     r.lang = 'en-IN'; r.continuous = true; r.interimResults = true;
     r.onresult = (e) => {
-      let interim = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
+      let finals = '', interim = '';
+      // e.results is the whole pass, cumulatively — so the finals are REBUILT from it, never
+      // appended to. The API re-delivers results that are already final, and appending them
+      // turned "iron 20kg" into "iron iron iron 20kg".
+      for (let i = 0; i < e.results.length; i++) {
         const res = e.results[i]; const txt = res[0]?.transcript ?? '';
-        if (res.isFinal) finalRef.current += txt + ' '; else interim += txt;
+        if (res.isFinal) finals += txt + ' '; else interim += txt;
       }
-      setHeard((finalRef.current + interim).trim());
+      sessFinal.current = finals;
+      heardRef.current = (carryRef.current + finals + interim).replace(/\s+/g, ' ').trim();
+      setHeard(heardRef.current);
     };
     r.onerror = (e) => {
-      setRec(false);
-      if (e?.error === 'not-allowed') say('Microphone permission is off');
-      else if (e?.error !== 'aborted' && e?.error !== 'no-speech') say('Could not hear that');
+      if (e?.error === 'not-allowed') { wantRef.current = false; toldRef.current = true; say('Microphone permission is off'); }
+      else if (e?.error !== 'aborted' && e?.error !== 'no-speech') { toldRef.current = true; say('Could not hear that'); }
     };
-    r.onend = () => setRec(false);
-    try { r.start(); setRec(true); } catch { say('Could not start the microphone'); }
+    r.onend = () => {
+      carryRef.current = carryRef.current + sessFinal.current;
+      sessFinal.current = '';
+      // Still listening as far as the user is concerned — the card says "Tap to finish".
+      if (wantRef.current && restartsRef.current < 40) {
+        restartsRef.current++;
+        if (startPass(Ctor)) return;
+      }
+      finish(true);
+    };
+    try { r.start(); return true; } catch { return false; }
+  };
+
+  const toggleRec = () => {
+    if (rec) {
+      // Let the pass end so its last words land, then finish() runs from onend.
+      wantRef.current = false;
+      try { recRef.current?.stop(); } catch { finish(true); }
+      return;
+    }
+    const Ctor = recognitionCtor(); if (!Ctor) return;
+    carryRef.current = ''; sessFinal.current = ''; heardRef.current = '';
+    doneRef.current = false; wantRef.current = true; restartsRef.current = 0; toldRef.current = false;
+    setHeard(''); setSecs(0);
+    if (startPass(Ctor)) setRec(true);
+    else { wantRef.current = false; say('Could not start the microphone'); }
   };
 
   // The waveform wants to look irregular, not to BE random: a deterministic jitter keeps every
