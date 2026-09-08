@@ -22,33 +22,29 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Hammer, Package, ChevronRight, Check, Link2, Camera } from 'lucide-react';
+import { Hammer, Package, ChevronRight, Check, Link2 } from 'lucide-react';
 import { V, font } from './ledgerTokens';
 import type { TrackTxn } from '../../lib/trackingApi';
 import { clearOneTime, getTrackingOptions, fileAsLabour } from '../../lib/trackingApi';
 import { getTxnAllocations } from '../../lib/vendorTrackingApi';
 import { ContractHub, CONTRACT_HUB_CSS } from './ContractHub';
 import { VENDOR_HUB_CSS } from './VendorHub';
-import { AttachBillSheet } from './AttachBillSheet';
+import { BillAllocateSheet } from './BillAllocateSheet';
+import { useOrgId } from '../../lib/auth/AuthProvider';
 
 type Kind = 'WO' | 'PO';
 
 export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => void }) {
+  const orgId = useOrgId();
   const [open, setOpen] = useState(false);
   // WO only: true once the owner marks this a one-time payment (persisted via is_one_time).
   const [chosenOneTime, setChosenOneTime] = useState(!!txn.is_one_time);
   const [busy, setBusy] = useState(false);
-  // Vendor "Attach bill": the chip opens the OS file picker DIRECTLY (a real user gesture), and the
-  // popover only opens once a bill is chosen — no intermediate "attach" step. The picked file rides
-  // into AttachBillSheet as initialFile so it starts reading immediately.
-  const [billFile, setBillFile] = useState<File | null>(null);
-  // Vendor chip reveals two subtle options on hover/tap: "Link to PO" (skip upload, pick an order) and
-  // "Upload bill" (the picker path). attachMode tells the sheet which flow to run.
+  // Worker chip reveals a two-item hover menu (Labour / Link contract). Vendor chip opens the bill
+  // picker (BillAllocateSheet) directly — it carries its own existing-bills / upload / advance choices.
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top?: number; bottom?: number; left: number }>({ left: 0 });
-  const [attachMode, setAttachMode] = useState<'upload' | 'link'>('upload');
   const closeTimer = useRef<number | undefined>(undefined);
-  const billInputRef = useRef<HTMLInputElement>(null);
   const btnRef = useRef<HTMLElement>(null);
   const [pos, setPos] = useState<{ top?: number; bottom?: number; left?: number; right?: number; maxH: number }>({ top: 0, right: 0, maxH: 480 });
 
@@ -87,7 +83,7 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
     const bottom = Math.max(M, window.innerHeight - r.top + 6);
     return { bottom, ...side, maxH: Math.max(160, window.innerHeight - bottom - M) };
   };
-  const close = () => { setOpen(false); setBillFile(null); };
+  const close = () => { setOpen(false); };
 
   // Vendor chip: a small floating menu (Link to PO / Upload bill) shown above the chip on hover/tap —
   // keeps the chip stable (no row reflow). Timer-based close so moving into the menu doesn't dismiss it.
@@ -116,11 +112,6 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
     document.addEventListener('pointerdown', onDown, true);
     return () => document.removeEventListener('pointerdown', onDown, true);
   }, [menuOpen]);
-
-  const openBillPicker = () => { closeMenu(); setAttachMode('upload'); const p = computePos(); if (p) setPos(p); billInputRef.current?.click(); };
-  const onBillPicked = (f: File | null) => { if (!f) return; setBillFile(f); setOpen(true); };
-  // "Link to PO": skip the upload — open the sheet straight to the vendor's orders.
-  const linkToPO = () => { closeMenu(); setAttachMode('link'); setBillFile(null); const p = computePos(); if (p) setPos(p); setOpen(true); };
 
   // WORKER menu — "Labour payment": file directly (the one-time mechanism), no panel. The chip
   // swaps to the resolved "✓ Labour payment". "Link to a contract": open the ContractHub.
@@ -201,19 +192,14 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
         <button
           ref={(el) => { btnRef.current = el; }}
           type="button"
-          onMouseEnter={openMenu}
-          onMouseLeave={scheduleCloseMenu}
-          onClick={(e) => { e.stopPropagation(); openMenu(); }}
+          onClick={(e) => { e.stopPropagation(); const p = computePos(); if (p) setPos(p); setOpen(true); }}
           className="db-link-btn inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg"
           style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.terraDeep, fontWeight: 600 }}
         >
           <Icon size={12} className="shrink-0" style={{ color: V.terra }} />
           <span>Attach bill</span>
-          <ChevronRight size={12} className="shrink-0" style={{ opacity: 0.7, transform: 'rotate(90deg)' }} />
+          <ChevronRight size={12} className="shrink-0" style={{ opacity: 0.7 }} />
         </button>
-      )}
-      {!isWO && (
-        <input ref={billInputRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => onBillPicked(e.target.files?.[0] || null)} />
       )}
     </span>
   );
@@ -223,7 +209,7 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
 
       {gate}
 
-      {menuOpen && !open && createPortal(
+      {menuOpen && !open && isWO && createPortal(
         <div
           className="db-attach-menu"
           onMouseEnter={cancelCloseMenu}
@@ -231,49 +217,24 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
           onClick={(e) => e.stopPropagation()}
           style={{ position: 'fixed', top: menuPos.top, bottom: menuPos.bottom, left: menuPos.left, zIndex: 9999, width: 228, display: 'flex', flexDirection: 'column', gap: 2, padding: 5, borderRadius: 14, background: V.surface, border: `1px solid ${V.line}`, boxShadow: '0 16px 40px -12px rgba(30,26,21,0.28)', ...font }}
         >
-          {isWO ? (
-            <>
-              <button type="button" disabled={busy} onClick={(e) => { e.stopPropagation(); void fileLabourNow(); }}
-                className="db-menu-row w-full flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] text-left disabled:opacity-60"
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}>
-                <span className="shrink-0 inline-flex items-center justify-center rounded-lg" style={{ width: 28, height: 28, background: V.terraWash }}><Hammer size={14} style={{ color: V.terra }} /></span>
-                <span className="min-w-0">
-                  <span className="block text-[12.5px] font-semibold leading-tight" style={{ color: V.ink }}>Labour payment</span>
-                  <span className="block text-[10.5px] leading-tight mt-0.5" style={{ color: V.faint }}>Standalone payout — nothing to track</span>
-                </span>
-              </button>
-              <button type="button" onClick={(e) => { e.stopPropagation(); openHub(); }}
-                className="db-menu-row w-full flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] text-left"
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}>
-                <span className="shrink-0 inline-flex items-center justify-center rounded-lg" style={{ width: 28, height: 28, background: V.terraWash }}><Link2 size={14} style={{ color: V.terra }} /></span>
-                <span className="min-w-0">
-                  <span className="block text-[12.5px] font-semibold leading-tight" style={{ color: V.ink }}>Link it to a contract</span>
-                  <span className="block text-[10.5px] leading-tight mt-0.5" style={{ color: V.faint }}>Pick an open one or start new</span>
-                </span>
-              </button>
-            </>
-          ) : (
-            <>
-              <button type="button" onClick={(e) => { e.stopPropagation(); linkToPO(); }}
-                className="db-menu-row w-full flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] text-left"
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}>
-                <span className="shrink-0 inline-flex items-center justify-center rounded-lg" style={{ width: 28, height: 28, background: V.terraWash }}><Link2 size={14} style={{ color: V.terra }} /></span>
-                <span className="min-w-0">
-                  <span className="block text-[12.5px] font-semibold leading-tight" style={{ color: V.ink }}>Link this payment to a PO</span>
-                  <span className="block text-[10.5px] leading-tight mt-0.5" style={{ color: V.faint }}>Pick an existing order — no bill</span>
-                </span>
-              </button>
-              <button type="button" onClick={(e) => { e.stopPropagation(); openBillPicker(); }}
-                className="db-menu-row w-full flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] text-left"
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}>
-                <span className="shrink-0 inline-flex items-center justify-center rounded-lg" style={{ width: 28, height: 28, background: V.terraWash }}><Camera size={14} style={{ color: V.terra }} /></span>
-                <span className="min-w-0">
-                  <span className="block text-[12.5px] font-semibold leading-tight" style={{ color: V.ink }}>Upload a new bill</span>
-                  <span className="block text-[10.5px] leading-tight mt-0.5" style={{ color: V.faint }}>Read it & attach or create a PO</span>
-                </span>
-              </button>
-            </>
-          )}
+          <button type="button" disabled={busy} onClick={(e) => { e.stopPropagation(); void fileLabourNow(); }}
+            className="db-menu-row w-full flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] text-left disabled:opacity-60"
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}>
+            <span className="shrink-0 inline-flex items-center justify-center rounded-lg" style={{ width: 28, height: 28, background: V.terraWash }}><Hammer size={14} style={{ color: V.terra }} /></span>
+            <span className="min-w-0">
+              <span className="block text-[12.5px] font-semibold leading-tight" style={{ color: V.ink }}>Labour payment</span>
+              <span className="block text-[10.5px] leading-tight mt-0.5" style={{ color: V.faint }}>Standalone payout — nothing to track</span>
+            </span>
+          </button>
+          <button type="button" onClick={(e) => { e.stopPropagation(); openHub(); }}
+            className="db-menu-row w-full flex items-center gap-2.5 px-2.5 py-2 rounded-[10px] text-left"
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}>
+            <span className="shrink-0 inline-flex items-center justify-center rounded-lg" style={{ width: 28, height: 28, background: V.terraWash }}><Link2 size={14} style={{ color: V.terra }} /></span>
+            <span className="min-w-0">
+              <span className="block text-[12.5px] font-semibold leading-tight" style={{ color: V.ink }}>Link it to a contract</span>
+              <span className="block text-[10.5px] leading-tight mt-0.5" style={{ color: V.faint }}>Pick an open one or start new</span>
+            </span>
+          </button>
         </div>,
         document.body,
       )}
@@ -290,7 +251,7 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
           >
             {kind === 'WO'
               ? <ContractHub txn={txn} onClose={close} onLinked={onLinked} />
-              : <AttachBillSheet txn={txn} initialFile={billFile} mode={attachMode} onClose={close} onLinked={onLinked} />}
+              : <BillAllocateSheet txnId={txn.txn_id ?? ''} orgId={orgId} stakeholderId={txn.stakeholder_id ?? ''} vendorName={txn.stakeholders?.name || 'this vendor'} amount={Number(txn.total_amount) || 0} defaultProjectId={txn.txn_allocations?.[0]?.project_id ?? null} onClose={close} onDone={onLinked} />}
           </div>
         </>,
         document.body,
