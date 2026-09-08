@@ -75,7 +75,7 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
         amount: ex.amount, lines: ex.lines, file,
       });
       const remaining = ex.amount;
-      const newBill: UnpaidBill = { id: billId, billNo: ex.billNo, billDate: ex.billDate, amount: ex.amount, paid: 0, remaining, projectId: defaultProjectId, site: null };
+      const newBill: UnpaidBill = { id: billId, kind: 'bill', billNo: ex.billNo, billDate: ex.billDate, amount: ex.amount, paid: 0, remaining, projectId: defaultProjectId, site: null };
       setBills(bs => [newBill, ...(bs ?? [])]);
       const leftover = Math.max(0, amount - allocated);
       setSel(s => ({ ...s, [billId]: Math.min(remaining, leftover) || remaining }));
@@ -87,9 +87,9 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
     if (over) return;
     setBusy('saving'); setErr(null);
     try {
-      const picks = Object.entries(sel).filter(([, v]) => num(v) > 0).map(([billId, v]) => {
-        const b = bills?.find(x => x.id === billId);
-        return { billId, projectId: b?.projectId ?? defaultProjectId, amount: num(v) };
+      const picks = Object.entries(sel).filter(([, v]) => num(v) > 0).map(([id, v]) => {
+        const b = bills?.find(x => x.id === id);
+        return { id, kind: (b?.kind ?? 'bill') as 'bill' | 'po', projectId: b?.projectId ?? defaultProjectId, amount: num(v) };
       });
       await saveBillAllocations(txnId, orgId, amount, picks, defaultProjectId);
       if (advanceMemoOn && poMemo.trim()) await setAdvanceMemo(txnId, poMemo.trim());
@@ -116,11 +116,31 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
 
         {bills == null ? (
           <div className="inline-flex items-center gap-2 text-[13px] py-4" style={{ color: V.sys }}><Loader2 size={15} className="animate-spin" /> Loading {vendorName}&apos;s bills…</div>
+        ) : noBills ? (
+          /* No existing bills — uploading is the hero; the advance is just the quiet fallback. */
+          <div className="text-center py-2">
+            <div className="mx-auto grid place-items-center rounded-full mb-3" style={{ width: 44, height: 44, background: V.field }}><FileText size={20} style={{ color: V.faint }} /></div>
+            <p className="text-[13px] font-medium" style={{ color: V.ink }}>No bills for {vendorName} yet</p>
+            <p className="text-[12px] mt-1 mb-4" style={{ color: V.sys }}>Upload the bill this payment is for.</p>
+            <button type="button" onClick={() => fileRef.current?.click()} disabled={busy === 'reading'}
+              className="w-full inline-flex items-center justify-center gap-2 py-3 rounded-xl text-[14px] font-semibold"
+              style={{ background: V.terra, color: '#fff', opacity: busy === 'reading' ? 0.6 : 1 }}>
+              {busy === 'reading' ? <><Loader2 size={16} className="animate-spin" /> Reading the bill…</> : <><Plus size={16} /> Upload a new bill</>}
+            </button>
+            {dup && <p className="text-[11.5px] mt-2" style={{ color: V.terraDeep }}>Heads up — {vendorName} already has a bill {dup.d.billNo ? <>no. <b>{dup.d.billNo}</b> </> : ''}on file{dup.d.amount ? ` (${inr(dup.d.amount)})` : ''}. Added anyway; remove it from Bills if it&apos;s the same one.</p>}
+            <label className="flex items-center justify-center gap-2 mt-4 text-[11.5px]" style={{ color: V.sys }}>
+              <input type="checkbox" checked={advanceMemoOn} onChange={(e) => setAdvanceMemoOn(e.target.checked)} style={{ accentColor: V.terra }} />
+              No bill — note it&apos;s towards an order
+            </label>
+            {advanceMemoOn && (
+              <input value={poMemo} onChange={(e) => setPoMemo(e.target.value)} placeholder="PO-… (optional memo, not a money link)"
+                className="w-full mt-2 rounded-lg px-2.5 py-1.5 text-[12.5px] outline-none text-center" style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.ink }} />
+            )}
+            {err && <p className="text-[12.5px] mt-2" style={{ color: V.terra }}>{err}</p>}
+          </div>
         ) : (
           <>
-            {noBills
-              ? <p className="text-[12.5px] mb-2" style={{ color: V.sys }}>No unpaid bills for {vendorName} yet. Upload the bill this payment is for, or record it as an advance.</p>
-              : <p className="text-[13px] font-medium mb-2" style={{ color: V.ink }}>Which bill{bills.length > 1 ? 's' : ''} is this payment for?</p>}
+            <p className="text-[13px] font-medium mb-2" style={{ color: V.ink }}>Which bill{bills.length > 1 ? 's' : ''} is this payment for?</p>
 
             <div className="space-y-1.5">
               {bills.map(b => {
@@ -186,12 +206,20 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
 
       <div className="flex items-center justify-between gap-3 px-4 py-3" style={{ borderTop: `1px solid ${V.line}` }}>
         <span className="text-[12px]" style={{ color: V.sys }}>
-          {allocated > 0.5 ? <><b style={{ color: V.ink }}>{inr(allocated)}</b> on bills{remainder > 0.5 ? ` · ${inr(remainder)} advance` : ''}</> : 'No bill — records as an advance'}
+          {allocated > 0.5 ? <><b style={{ color: V.ink }}>{inr(allocated)}</b> on bills{remainder > 0.5 ? ` · ${inr(remainder)} advance` : ''}</> : `Stays as an advance to ${vendorName}`}
         </span>
-        <button type="button" onClick={() => void confirm()} disabled={over || busy === 'saving' || busy === 'reading'}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-semibold" style={{ background: V.terra, color: '#fff', opacity: (over || busy === 'saving' || busy === 'reading') ? 0.5 : 1 }}>
-          {busy === 'saving' ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : busy === 'done' ? <><Check size={14} /> Done</> : allocated > 0.5 ? 'Attach' : 'Record advance'}
-        </button>
+        {allocated > 0.5 ? (
+          <button type="button" onClick={() => void confirm()} disabled={over || busy === 'saving' || busy === 'reading'}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-semibold" style={{ background: V.terra, color: '#fff', opacity: (over || busy === 'saving' || busy === 'reading') ? 0.5 : 1 }}>
+            {busy === 'saving' ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : busy === 'done' ? <><Check size={14} /> Done</> : 'Attach'}
+          </button>
+        ) : (
+          // No bill picked → it's already an advance; a quiet Done that only persists the optional memo.
+          <button type="button" onClick={() => void confirm()} disabled={busy === 'saving' || busy === 'reading'}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-medium" style={{ background: V.field, color: V.inkSoft, border: `1px solid ${V.line}` }}>
+            {busy === 'saving' ? 'Saving…' : busy === 'done' ? <><Check size={14} /> Done</> : 'Done'}
+          </button>
+        )}
       </div>
     </div>
   );

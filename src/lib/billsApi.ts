@@ -267,32 +267,58 @@ export async function createBill(input: NewBillInput): Promise<string> {
 }
 
 // ── payment → bill allocation (the tx "attach bill" picker) ────────────────────
-export interface UnpaidBill { id: string; billNo: string | null; billDate: string | null; amount: number; paid: number; remaining: number; projectId: string | null; site: string | null }
+// A pickable bill is either a first-class bills row ('bill') or an OLD PO-recorded bill still living on
+// the PO ('po') — so a payment can settle both. Settling a 'bill' writes bill_id; a 'po' writes the
+// legacy order_type='PO' allocation.
+export interface UnpaidBill { id: string; kind: 'bill' | 'po'; billNo: string | null; billDate: string | null; amount: number; paid: number; remaining: number; projectId: string | null; site: string | null }
 
-// A vendor's bills that still have something owed — the picker's menu, with remaining per bill.
 export async function loadUnpaidBillsForVendor(stakeholderId: string): Promise<UnpaidBill[]> {
-  const [bR, projR] = await Promise.all([
+  const [bR, projR, poR] = await Promise.all([
     supabase.from('bills').select('id, project_id, bill_no, bill_date, amount, created_at').eq('stakeholder_id', stakeholderId),
     supabase.from('projects').select('project_id, name'),
+    supabase.from('purchase_orders').select(`po_id, project_id, vendor_bill_number, ${BILL_DATE_COLUMNS}, status, approval_status`)
+      .eq('stakeholder_id', stakeholderId).eq('approval_status', 'APPROVED')
+      .not('status', 'in', '("CANCELLED","Cancelled","cancelled")').not('vendor_bill_amount', 'is', null).gt('vendor_bill_amount', 0),
   ]);
-  const rows = (bR.data ?? []) as any[];
-  if (!rows.length) return [];
+  const billRows = (bR.data ?? []) as any[];
   const projName: Record<string, string> = {}; (projR.data ?? []).forEach((p: any) => { projName[p.project_id] = p.name; });
+
+  // A PO named by a bills row is represented by that bill — don't also list the PO's own fallback bill.
+  const billedPoIds = new Set(billRows.map(b => b.po_id).filter(Boolean));
+  const pos = ((poR.data ?? []) as any[]).filter(p => !billedPoIds.has(p.po_id));
+
+  // paid per first-class bill (bill_id) and per PO (order_type='PO').
   const paidByBill: Record<string, number> = {};
-  const alR = await supabase.from('txn_allocations').select('bill_id, allocated_amount, transactions(status)').in('bill_id', rows.map(b => b.id));
-  (alR.data ?? []).forEach((a: any) => { if (a.transactions?.status === 'Voided' || !a.bill_id) return; paidByBill[a.bill_id] = (paidByBill[a.bill_id] || 0) + num(a.allocated_amount); });
-  return rows.map(b => {
+  if (billRows.length) {
+    const alR = await supabase.from('txn_allocations').select('bill_id, allocated_amount, transactions(status)').in('bill_id', billRows.map(b => b.id));
+    (alR.data ?? []).forEach((a: any) => { if (a.transactions?.status === 'Voided' || !a.bill_id) return; paidByBill[a.bill_id] = (paidByBill[a.bill_id] || 0) + num(a.allocated_amount); });
+  }
+  const paidByPo: Record<string, number> = {};
+  if (pos.length) {
+    const alR = await supabase.from('txn_allocations').select('order_ref, allocated_amount, transactions(status)').eq('order_type', 'PO').in('order_ref', pos.map(p => p.po_id));
+    (alR.data ?? []).forEach((a: any) => { if (a.transactions?.status === 'Voided') return; paidByPo[a.order_ref] = (paidByPo[a.order_ref] || 0) + num(a.allocated_amount); });
+  }
+
+  const out: UnpaidBill[] = [];
+  for (const b of billRows) {
     const amount = num(b.amount), paid = Math.min(amount, paidByBill[b.id] || 0);
-    return { id: b.id, billNo: b.bill_no || null, billDate: b.bill_date || (b.created_at ? String(b.created_at).slice(0, 10) : null), amount, paid, remaining: amount - paid, projectId: b.project_id ?? null, site: b.project_id ? (projName[b.project_id] || b.project_id) : null };
-  }).filter(b => b.remaining > 0.5).sort((a, b) => (a.billDate || '').localeCompare(b.billDate || '')); // oldest first
+    out.push({ id: b.id, kind: 'bill', billNo: b.bill_no || null, billDate: b.bill_date || (b.created_at ? String(b.created_at).slice(0, 10) : null), amount, paid, remaining: amount - paid, projectId: b.project_id ?? null, site: b.project_id ? (projName[b.project_id] || b.project_id) : null });
+  }
+  for (const p of pos) {
+    const amount = num(p.vendor_bill_amount), paid = Math.min(amount, paidByPo[p.po_id] || 0);
+    out.push({ id: p.po_id, kind: 'po', billNo: p.vendor_bill_number || p.po_id, billDate: billDateOf(p), amount, paid, remaining: amount - paid, projectId: p.project_id ?? null, site: p.project_id ? (projName[p.project_id] || p.project_id) : null });
+  }
+  return out.filter(b => b.remaining > 0.5).sort((a, b) => (a.billDate || '').localeCompare(b.billDate || '')); // oldest first
 }
 
 // Record a payment's bill allocation. Replaces the txn's full allocation set (must sum to its total):
 // each selected bill → an allocation carrying the bill's site; any remainder (payment larger than the
 // bills, or "no bill") → one unallocated part = the without-bills / advance bucket.
-export interface BillPick { billId: string; projectId: string | null; amount: number }
+export interface BillPick { id: string; kind: 'bill' | 'po'; projectId: string | null; amount: number }
 export async function saveBillAllocations(txnId: string, orgId: string, txnTotal: number, picks: BillPick[], remainderProjectId: string | null): Promise<void> {
-  const parts: any[] = picks.filter(p => p.amount > 0).map(p => ({ project_id: p.projectId ?? '', order_type: '', order_ref: '', milestone_id: '', bill_id: p.billId, allocated_amount: p.amount }));
+  const parts: any[] = picks.filter(p => p.amount > 0).map(p => p.kind === 'po'
+    ? { project_id: p.projectId ?? '', order_type: 'PO', order_ref: p.id, milestone_id: '', bill_id: '', allocated_amount: p.amount }
+    : { project_id: p.projectId ?? '', order_type: '', order_ref: '', milestone_id: '', bill_id: p.id, allocated_amount: p.amount });
   const allocated = picks.reduce((s, p) => s + (p.amount > 0 ? p.amount : 0), 0);
   const remainder = Math.round((txnTotal - allocated) * 100) / 100;
   if (remainder > 0.5) parts.push({ project_id: remainderProjectId ?? '', order_type: '', order_ref: '', milestone_id: '', bill_id: '', allocated_amount: remainder });
