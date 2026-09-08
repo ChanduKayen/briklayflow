@@ -81,7 +81,7 @@ import { isSecondaryNavRoute } from './components/nav/navTokens';
 const Orders = lazy(() => import('./pages/Orders'));
 import InviteAccept from './pages/InviteAccept';
 import VendorQuote from './pages/VendorQuote';
-import OnboardingWizard from './components/OnboardingWizard';
+import OnboardingFlow from './components/onboarding/OnboardingFlow';
 import Pending from './pages/Pending';
 import Welcome from './pages/Welcome';
 import CreateWorkspace from './pages/CreateWorkspace';
@@ -452,7 +452,7 @@ function App() {
     const orgName = authState.status === 'authenticated' ? authState.context.orgName : undefined;
     const orgId   = authState.status === 'authenticated' ? authState.context.orgId   : undefined;
     return (
-      <OnboardingWizard
+      <OnboardingFlow
         session={session}
         profile={appProfile}
         orgName={orgName}
