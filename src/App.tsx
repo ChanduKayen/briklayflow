@@ -16,6 +16,8 @@ import { PeekProvider } from './context/PeekContext';
 import { CommandBarProvider, useCommandBar } from './context/CommandBarContext';
 import { CommandBar } from './components/CommandBar';
 import { PageSkeleton } from './components/SkeletonLoader';
+import RouteRule from './components/brand/RouteRule';
+import { markBooted } from './components/brand/bootSignal';
 import {
   IconChartPie, IconArrowsExchange,
   IconNotebook, IconClipboardList, IconShoppingBag,
@@ -219,25 +221,17 @@ function SignOutOverlay({ onDismiss }: { onDismiss: () => void }) {
 }
 
 function SplashLoader() {
+  /**
+   * The quiet one.
+   *
+   * The full lockup — wordmark, dropping period, the ledger rule drawn end to end — belongs to the
+   * app opening, and it plays once, from above this component (see components/brand/BootLoader).
+   * Everything that lands here afterwards is a gate resolving, not an arrival, so it gets the same
+   * rule and nothing else: the brand moment stays rare enough to still mean something.
+   */
   return (
-    <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8f9ff' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-          <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="#0b1c30" strokeWidth="1.5" strokeLinejoin="round"/>
-          <path d="M2 17L12 22L22 17" stroke="#0b1c30" strokeWidth="1.5" strokeLinejoin="round"/>
-          <path d="M2 12L12 17L22 12" stroke="#0b1c30" strokeWidth="1.5" strokeLinejoin="round"/>
-        </svg>
-        <div style={{ width: '16px', height: '1.5px', background: 'rgba(0,0,0,0.10)', borderRadius: '1px', overflow: 'hidden' }}>
-          <div style={{ height: '100%', background: '#0b1c30', borderRadius: '1px', animation: 'bk-slide 1s ease-in-out infinite' }}/>
-        </div>
-      </div>
-      <style>{`
-        @keyframes bk-slide {
-          0%   { width: 0%;   margin-left: 0    }
-          50%  { width: 100%; margin-left: 0    }
-          100% { width: 0%;   margin-left: 100% }
-        }
-      `}</style>
+    <div style={{ height: '100vh', background: '#FAF7F0' }}>
+      <RouteRule />
     </div>
   );
 }
@@ -361,6 +355,24 @@ function App() {
     const t = setTimeout(prefetch, 1500);
     return () => clearTimeout(t);
   }, [session?.user?.id]);
+
+  /**
+   * THE OPENING IS OVER WHEN THERE IS SOMETHING TO SEE.
+   *
+   * The boot lockup is mounted above this component (main.tsx) so it can outlive the moment the app
+   * appears — completing its rule and fading, instead of being cut off mid-stroke by the very render
+   * it was waiting for. That only works if it is told, and only this component knows: every branch
+   * below that returns a splash is still the opening, and nothing else is.
+   */
+  const stillOpening =
+    !routerReady ||
+    authState.status === 'loading' || authState.status === 'resolving' ||
+    authState.status === 'no-org' || authState.status === 'pending' ||
+    (authState.status === 'authenticated' && !session) ||
+    (authState.status === 'authenticated' && authState.context.role === 'principal' &&
+      !hasLocalOnboardingFlag && profileLoading);
+
+  useEffect(() => { if (!stillOpening) markBooted(); }, [stillOpening]);
 
   // Public legal pages — no auth required (Meta/WhatsApp verification, footer
   // links). Render before any gate so they load regardless of session.
@@ -513,7 +525,7 @@ function App() {
             return <Navigate to={`/logbook?entry=${encodeURIComponent(entryId)}`} replace />;
           }
           return (
-        <Suspense fallback={<PageSkeleton />}>
+        <Suspense fallback={<RouteRule />}>
         <Routes>
           <Route path="/" element={<Navigate to="/ledger" replace />} />
           <Route path="/insights" element={<Insights />} />
