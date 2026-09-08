@@ -37,16 +37,17 @@ const BLZ_CSS = `
 @media (prefers-reduced-motion:reduce){.blz-sk::after{animation:none}}
 `;
 
-// A shimmering placeholder row shown while the vendor's bills load.
+// A shimmering placeholder row shown while the vendor's bills load. Uses block divs (not inline spans)
+// so the bars actually take up their width/height and the shimmer overlay has a box to cover.
 function SkeletonRow() {
   return (
     <div className="rounded-xl" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
       <div className="flex items-center gap-2.5 px-3 py-2.5">
-        <span className="blz-sk shrink-0" style={{ width: 18, height: 18, borderRadius: 5 }} />
-        <span className="min-w-0 flex-1">
-          <span className="blz-sk block" style={{ width: '55%', height: 11, marginBottom: 6 }} />
-          <span className="blz-sk block" style={{ width: '38%', height: 9 }} />
-        </span>
+        <div className="blz-sk" style={{ width: 18, height: 18, borderRadius: 5, flexShrink: 0 }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="blz-sk" style={{ width: '55%', height: 11, marginBottom: 7 }} />
+          <div className="blz-sk" style={{ width: '38%', height: 9 }} />
+        </div>
       </div>
     </div>
   );
