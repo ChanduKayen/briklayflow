@@ -228,7 +228,10 @@ export default function Bills() {
     patch(it.id, { state: 'saving' });
     try {
       const res = await intakeCommit(
-        { orgId, source: 'bills_page', file: it.file, vendorId, projectId, createdBy: userId ?? null, createdByName: (profile as any)?.full_name ?? null },
+        // NOTE: useAuth().userId is the ORG MEMBERSHIP id, not an auth.users id — writing it to
+        // bills.created_by (FK → auth.users) violates the constraint. Provenance rides on created_by_name;
+        // leave created_by null rather than send a non-auth id.
+        { orgId, source: 'bills_page', file: it.file, vendorId, projectId, createdBy: null, createdByName: (profile as any)?.full_name ?? (profile as any)?.name ?? null },
         { vendor: it.vendorName, billNo: it.billNo, billDate: it.billDate, amount: it.amount, lines: it.lines },
         vendorId, { allowDuplicate },
       );
