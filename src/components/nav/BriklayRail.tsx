@@ -24,7 +24,7 @@ import {
   IconChevronDown, IconChevronLeft, IconDots,
   IconSettings, IconLogout, IconUser,
   IconBox, IconListNumbers, IconTruck, IconLoader2, IconChecklist, IconAlertTriangle,
-  IconListCheck, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconReceipt2,
+  IconListCheck, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand, IconReceipt2, IconReceipt,
 } from '@tabler/icons-react';
 import { supabase } from '../../lib/supabase';
 import { clearPersistedCache } from '../../lib/queryClient';
@@ -253,6 +253,7 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
         can(role !== 'supervisor') && { route: '/ledger', label: 'Transactions', icon: IconArrowsExchange, accent: true },
         { route: '/logbook', label: 'For review', node: <DayBookIcon />, badge: inbox },
         can(role !== 'supervisor') && { route: '/billing', label: 'Client billing', icon: IconFileInvoice, badge: billOverdue },
+        can(role !== 'supervisor') && { route: '/bills', label: 'Bills', icon: IconReceipt },
         can(role !== 'supervisor') && { route: '/payables', label: 'Payables', icon: IconReceipt2, badge: pendingCerts },
       ].filter(Boolean) as Item[]),
     },

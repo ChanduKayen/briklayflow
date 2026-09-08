@@ -56,6 +56,7 @@ import { loadLedger, loadLogbook, loadPurchaseOrders, loadPayables, warmAllTabs,
 const PurchaseOrders = lazy(loadPurchaseOrders);
 const Attendance = lazy(() => import('./pages/Attendance'));
 const Payables = lazy(loadPayables);
+const Bills = lazy(() => import('./pages/Bills'));
 const NewPurchaseOrder = lazy(() => import('./pages/NewPurchaseOrder'));
 const PurchaseOrderDetail = lazy(() => import('./pages/PurchaseOrderDetail'));
 const RfqCompare = lazy(() => import('./pages/RfqCompare'));
@@ -599,6 +600,8 @@ function App() {
           <Route path="/purchase-orders/:poId" element={<PurchaseOrderDetail session={session} />} />
           <Route path="/attendance" element={<Attendance session={session} />} />
           <Route path="/payables" element={<Payables session={session} />} />
+          <Route path="/bills" element={<Bills />} />
+          <Route path="/bills/:billId" element={<Bills />} />
           <Route path="/rfq/:rfqId" element={<RfqCompare session={session} />} />
           <Route path="/inward-register" element={<InwardRegister session={session} />} />
           <Route path="/team" element={<Team session={session} />} />
@@ -927,6 +930,7 @@ function MoreNavSheet({
     { path: '/stakeholders',  icon: IconUsers,                 label: 'Parties',         show: role !== 'supervisor' },
     { path: '/inward-register', icon: IconLayoutGrid,          label: 'Inward Register', show: role !== 'supervisor' && role !== 'accountant' },
     { path: '/billing',       icon: IconFileInvoice,           label: 'Client Billing', show: role !== 'supervisor' },
+    { path: '/bills',         icon: IconReceipt2,              label: 'Bills',          show: role !== 'supervisor' },
     { path: '/insights',      icon: IconChartPie,              label: 'Insights',       show: true },
     { path: '/team',          icon: IconShieldLock,            label: 'Team & Access',  show: role === 'principal' || role === 'management' },
     { path: '/follow-up-rules', icon: IconClock,               label: 'Follow-up Rules', show: role === 'principal' || role === 'management' },
