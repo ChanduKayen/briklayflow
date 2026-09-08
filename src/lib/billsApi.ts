@@ -220,6 +220,28 @@ export async function loadBillDetail(id: string): Promise<BillDetail | null> {
   return null;
 }
 
+// Delete a bill. A first-class bill (bl~) is removed and any payment allocated to it is freed back to
+// unallocated (txn_allocations.bill_id → NULL via the FK, so the payment reverts to an advance). A
+// legacy PO-column bill (po~) clears the PO's bill fields. A consolidated bill (cb~) deletes its row.
+// The vendor's balance re-derives automatically (the bill leaves v_party_ledger_line).
+export async function deleteBill(id: string): Promise<void> {
+  const sep = id.indexOf('~');
+  const kind = sep >= 0 ? id.slice(0, sep) : 'bl';
+  const ref = sep >= 0 ? id.slice(sep + 1) : id;
+  if (kind === 'bl') {
+    const { error } = await supabase.from('bills').delete().eq('id', ref);
+    if (error) throw error;
+  } else if (kind === 'po') {
+    const { error } = await supabase.from('purchase_orders')
+      .update({ vendor_bill_amount: null, vendor_bill_number: null, vendor_bill_date: null, vendor_bill_doc_url: null, vendor_bill_url: null })
+      .eq('po_id', ref);
+    if (error) throw error;
+  } else if (kind === 'cb') {
+    const { error } = await supabase.from('consolidated_bills').delete().eq('id', ref);
+    if (error) throw error;
+  }
+}
+
 // ── PO-linked bills (the PO detail shows links to these; billed = Σ) ───────────
 export interface PoBill { id: string; billNo: string | null; billDate: string | null; amount: number; docUrl: string | null; lines: any[] }
 export async function loadBillsForPO(poId: string): Promise<PoBill[]> {

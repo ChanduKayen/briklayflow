@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { loadBills, loadBillDetail, extractBill, findDuplicateBill, type BillRow, type BillStatus, type DuplicateBill } from '../lib/billsApi';
+import { loadBills, loadBillDetail, deleteBill, extractBill, findDuplicateBill, type BillRow, type BillStatus, type DuplicateBill } from '../lib/billsApi';
 import { intakeCommit } from '../lib/billIntake';
 import { DocThumb } from '../components/DocThumb';
 import { ImageLightbox } from '../components/ImageLightbox';
@@ -65,6 +65,9 @@ const BLX_CSS = `
 .blx .detamount{text-align:right}
 .blx .detamount .num{font-family:'DM Mono',monospace;font-size:1.6rem;font-weight:500}
 .blx .detamount .state{font-size:.82rem;margin-top:4px}
+.blx .delbill{margin-top:10px;font-size:.78rem;color:var(--walnut-60);background:none;border:1px solid var(--line-strong);border-radius:7px;padding:5px 12px;cursor:pointer;transition:color .15s,border-color .15s,background .15s}
+.blx .delbill:hover{color:var(--terracotta);border-color:var(--terracotta);background:var(--terra-tint)}
+.blx .delbill:disabled{opacity:.5;cursor:default}
 .blx .detgrid{display:grid;grid-template-columns:380px 1fr;gap:28px;align-items:start}
 .blx .docpane{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:18px}
 .blx .docempty{min-height:200px;display:grid;place-items:center;color:var(--walnut-soft);font-size:.85rem;text-align:center;border:1px dashed var(--line-strong);border-radius:6px}
@@ -441,8 +444,11 @@ function RefCell({ row }: { row: BillRow }) {
 // ── detail ─────────────────────────────────────────────────────────────────
 function BillDetailView({ id }: { id: string }) {
   const navigate = useNavigate();
+  const qc = useQueryClient();
+  const { show } = useSnackbar();
   const { data: b, isLoading } = useQuery({ queryKey: ['bill', id], queryFn: () => loadBillDetail(id) });
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   if (isLoading) return <div className="blx"><style>{BLX_CSS}</style><div className="shell"><div className="empty">Loading…</div></div></div>;
   if (!b) return <div className="blx"><style>{BLX_CSS}</style><div className="shell"><button className="backline" onClick={() => navigate('/bills')}>← Bills</button><div className="empty">Bill not found.</div></div></div>;
@@ -450,6 +456,24 @@ function BillDetailView({ id }: { id: string }) {
   const remaining = Math.max(0, b.amount - b.paid);
   const pct = b.amount > 0 ? Math.min(100, Math.round((b.paid / b.amount) * 100)) : 0;
   const preview = (url: string) => { if (/\.pdf(\?|$)/i.test(url)) void openDoc(url); else setLightbox(url); };
+
+  const onDelete = async () => {
+    const msg = b.paid > 0.5
+      ? `Delete this bill? ${inr(b.paid)} was paid against it — that payment reverts to an unallocated advance. This can't be undone.`
+      : `Delete this bill? This can't be undone.`;
+    if (!window.confirm(msg)) return;
+    setDeleting(true);
+    try {
+      await deleteBill(id);
+      show('Bill deleted');
+      qc.invalidateQueries({ queryKey: ['bills'] });
+      qc.invalidateQueries({ queryKey: ['party_ledger'] });
+      qc.invalidateQueries({ queryKey: ['weekly_payments'] });
+      qc.invalidateQueries({ queryKey: ['po_detail'] });
+      qc.invalidateQueries({ queryKey: ['po_list_sheet'] });
+      navigate('/bills');
+    } catch (e) { show((e as Error)?.message || 'Could not delete the bill', { type: 'error' }); setDeleting(false); }
+  };
 
   return (
     <div className="blx">
@@ -471,6 +495,7 @@ function BillDetailView({ id }: { id: string }) {
             <div className={`state status ${b.status}`}>
               {b.status === 'settled' ? 'Settled' : b.status === 'part' ? `Part-paid — ${inr(remaining)} remaining` : `Unpaid — ${inr(b.amount)} due`}
             </div>
+            <button className="delbill" disabled={deleting} onClick={onDelete}>{deleting ? 'Deleting…' : 'Delete bill'}</button>
           </div>
         </header>
 
