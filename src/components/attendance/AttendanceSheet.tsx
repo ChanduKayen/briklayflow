@@ -21,47 +21,73 @@ import { CertificationWizard, type CertifyContext } from './CertificationWizard'
 import { setEngagementBasis, submitWorkCertification } from '../../lib/workCertification';
 
 const ATDX_CSS = `
-.atdx{background:#FBF9F6;color:var(--walnut);font:15px/1.45 "DM Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased;padding:34px 28px 80px;
-  --cream:#f6f2ea;--paper:#fdfbf7;--line:#e6dfd2;--line-2:#d5cbb9;--walnut:#3b2f27;--walnut-2:#6d5f54;--walnut-3:#9c9083;
-  --terracotta:#b8613a;--terracotta-bg:#f7e9e1;--sage:#5f7a5e;--sage-bg:#e9efe6;--slate:#5b6b78;--slate-bg:#e8ecef}
+.atdx{background:var(--cream);color:var(--ink);font:15px/1.45 "DM Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased;padding:44px 40px 80px;
+  --cream:#FAF7F0;--paper:#FFFDF7;--ink:#2A241C;--line:#E6DECD;--line-2:#D8CEBB;--today:#FBF4E6;
+  --walnut:#2A241C;--walnut-2:#6E5F4C;--walnut-3:#9A8C77;--soft:#9A8C77;
+  --terracotta:#C0603F;--terra:#C0603F;--terracotta-bg:#F7E9E2;--terra-soft:#F7E9E2;
+  --sage:#6E8260;--sage-bg:#E4EADD;--sage-soft:#E4EADD;--slate:#5b6b78;--slate-bg:#e8ecef}
 .atdx *{box-sizing:border-box}
 .atdx button,.atdx input,.atdx select{font:inherit;color:inherit}
 .atdx button{background:none;border:0;cursor:pointer;padding:0}
 .atdx :focus-visible{outline:2px solid var(--walnut);outline-offset:2px;border-radius:6px}
 .atdx .mono{font-family:"DM Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
 .atdx .wrap{width:100%;max-width:1180px;margin:0 auto}
-.atdx .top{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;margin-bottom:18px;flex-wrap:wrap}
-.atdx h1{font:400 38px/1.05 "Playfair Display",serif}
-.atdx .lede{color:var(--walnut-2);margin-top:8px;font-size:15px;max-width:640px}
+.atdx .top{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;margin-bottom:22px;flex-wrap:wrap}
+.atdx h1{font:600 36px/1.05 "Playfair Display",serif;color:var(--ink)}
+.atdx .lede{color:var(--soft);margin-top:6px;font-size:13.5px;max-width:640px}
 .atdx .lede .wa{color:#25a55a;font-weight:500}
-.atdx .week{display:flex;align-items:center;gap:10px}
+/* hero stat cluster, top-right */
+.atdx .hero{display:flex;gap:34px;text-align:right;align-items:flex-end}
+.atdx .hero .h b{display:block;font-family:"DM Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums;font-size:24px;font-weight:500;color:var(--ink)}
+.atdx .hero .h b.warn{color:var(--terracotta)}
+.atdx .hero .h span{font-family:"DM Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--soft)}
+.atdx .week{display:flex;align-items:center;gap:10px;margin-bottom:16px}
 .atdx .week .nav{width:32px;height:32px;border-radius:50%;border:1px solid var(--line);color:var(--walnut-2);display:grid;place-items:center}
-.atdx .week .range{font:500 18px "Playfair Display",serif;min-width:170px;text-align:center}
+.atdx .week .nav:hover{border-color:var(--walnut-2);color:var(--ink)}
+.atdx .week .range{font:600 18px "Playfair Display",serif;min-width:170px;text-align:center;color:var(--ink)}
 .atdx .week .today{font-size:13px;color:var(--walnut-2);text-decoration:underline;text-decoration-color:var(--line-2);text-underline-offset:3px;margin-left:6px}
-.atdx .summ{display:flex;gap:26px;margin:0 0 18px;padding:14px 18px;background:var(--paper);border:1px solid var(--line);border-radius:12px;align-items:center;flex-wrap:wrap}
-.atdx .summ .s .l{font-size:12px;color:var(--walnut-3)}
-.atdx .summ .s .v{font-size:19px;font-weight:500;margin-top:1px}
-.atdx .summ .s .v.warn{color:var(--terracotta)}
-.atdx .summ .sp{flex:1}
-.atdx .filters{display:flex;gap:6px;flex-wrap:wrap}
+.atdx .week .today:hover{color:var(--terracotta);text-decoration-color:var(--terracotta)}
+.atdx .filters{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 16px}
 .atdx .chip{border:1px solid var(--line);border-radius:999px;padding:4px 11px;font-size:13px;color:var(--walnut-2);background:var(--paper)}
-.atdx .chip[aria-pressed=true]{background:var(--walnut);color:var(--paper);border-color:var(--walnut)}
-.atdx .reg{background:var(--paper);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.atdx .chip[aria-pressed=true]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.atdx .reg{background:var(--paper);border:1px solid var(--line);border-radius:16px;overflow:hidden}
 .atdx table{width:100%;border-collapse:collapse}
 .atdx th,.atdx td{padding:0;text-align:center}
-.atdx thead th{font-size:12px;font-weight:500;color:var(--walnut-3);padding:10px 6px;border-bottom:1px solid var(--line)}
-.atdx thead th .dn{display:block;font:500 15px "Playfair Display",serif;color:var(--walnut-2);margin-top:1px}
+.atdx thead{position:sticky;top:0;z-index:5;background:var(--paper)}
+.atdx thead th{font-size:12px;font-weight:500;color:var(--walnut-3);padding:6px 4px;border-bottom:1px solid var(--ink)}
+.atdx thead th.day{cursor:pointer;border-radius:10px;transition:background .2s}
+.atdx thead th.day:hover{background:var(--cream)}
+.atdx thead th .wl{font-family:"DM Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--soft)}
+.atdx thead th .dn{display:block;font:600 17px "Playfair Display",serif;color:var(--walnut-2);margin-top:1px}
+.atdx thead th .fill-hint{display:block;font-size:9px;color:var(--terracotta);font-family:"DM Mono",ui-monospace,monospace;letter-spacing:.06em;height:11px;opacity:0;transition:opacity .15s}
+.atdx thead th.day:hover .fill-hint{opacity:1}
 .atdx thead th.is-today,.atdx thead th.is-today .dn{color:var(--terracotta)}
-.atdx thead th.sun,.atdx td.sun{background:#f9f6f0}
+.atdx thead th.is-today{background:var(--today);border-radius:10px 10px 0 0}
+.atdx thead th.sun,.atdx td.sun{background:#F8F3E9}
 .atdx th.sno{width:40px;text-align:center;color:var(--walnut-3);font-weight:500}
 .atdx td.sno{width:40px;text-align:center;vertical-align:top;padding-top:14px;color:var(--walnut-3);font-size:12.5px;font-family:"DM Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
 .atdx th.name{text-align:left;padding-left:18px;width:308px}
 .atdx th.tot{text-align:right;padding-right:18px;width:200px}
 .atdx td.cell{width:72px;position:relative;font-size:15px}
-.atdx td.cell.is-today{box-shadow:inset 2px 0 0 var(--terracotta-bg),inset -2px 0 0 var(--terracotta-bg)}
-.atdx tr.gap td{background:#FBF9F6;height:16px;padding:0;border:0}
-.atdx tr.site td{background:var(--paper);text-align:left;padding:13px 18px 11px;font:500 16px "Playfair Display",serif;letter-spacing:0;text-transform:none;color:var(--walnut);border-top:2px solid var(--line-2);box-shadow:inset 4px 0 0 var(--terracotta)}
-.atdx tr.site td span{letter-spacing:0;text-transform:none;font:400 12.5px "DM Sans",sans-serif;color:var(--walnut-3);margin-left:12px}
+.atdx td.cell.is-today{background:var(--today)}
+.atdx td.cell.colglow .c:not(.filled){background:var(--cream)}
+.atdx tr.gap td{background:var(--cream);height:16px;padding:0;border:0}
+.atdx tr.site td{background:var(--paper);text-align:left;padding:14px 18px 10px;font:600 19px "Playfair Display",serif;letter-spacing:0;text-transform:none;color:var(--ink);border-top:2px solid var(--line-2);box-shadow:inset 4px 0 0 var(--terracotta);position:relative}
+.atdx tr.site td span.area{letter-spacing:0;text-transform:none;font:400 12.5px "DM Sans",sans-serif;color:var(--soft);margin-left:12px}
+.atdx tr.site td .addcta{position:absolute;right:18px;top:50%;transform:translateY(-50%);font:500 12.5px "DM Sans",sans-serif;color:var(--walnut-2);border-bottom:1px solid transparent;letter-spacing:0;text-transform:none}
+.atdx tr.site td .addcta:hover{color:var(--ink);border-color:var(--line-2)}
+/* worker avatar in the name cell */
+.atdx .wav{width:32px;height:32px;border-radius:50%;background:var(--cream);border:1px solid var(--line);flex:none;display:grid;place-items:center;font:600 13px "Playfair Display",serif;color:var(--walnut-2)}
+.atdx .crewtag{font-family:"DM Mono",ui-monospace,monospace;font-size:10px;color:var(--terracotta);background:var(--terra-soft);border-radius:99px;padding:1px 7px;margin-left:6px;letter-spacing:.02em}
+.atdx .wnamewrap{display:flex;align-items:center;gap:12px;min-width:0}
+.atdx .wnamewrap .wmid{min-width:0}
+.atdx tr.crew td.name.crewhead .wav{margin-right:2px}
+/* site footer — daily headcount */
+.atdx tr.sitefoot td{border-top:1px solid var(--line);background:#FCFAF3;height:34px}
+.atdx tr.sitefoot td.lab{text-align:left;padding-left:18px;font-family:"DM Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--soft)}
+.atdx tr.sitefoot td.dc{font-family:"DM Mono",ui-monospace,monospace;font-size:12px;color:var(--walnut-2)}
+.atdx tr.sitefoot td.dc.is-today{color:var(--terracotta);font-weight:500}
+.atdx tr.sitefoot td.fsum{text-align:right;padding-right:18px;font-family:"DM Mono",ui-monospace,monospace;font-size:12px;color:var(--walnut-2)}
 .atdx .wageslbl{margin-top:6px;font-size:12px;color:var(--walnut-3)}
 .atdx .oncontract{font-size:12px;color:var(--terracotta);font-weight:500;text-decoration:underline;text-decoration-color:color-mix(in srgb,var(--terracotta) 40%,transparent);text-underline-offset:2px}
 .atdx .oncontract:hover{text-decoration-color:var(--terracotta)}
@@ -157,19 +183,42 @@ const ATDX_CSS = `
   .atdx tr.addrow.hot{display:table-row}
   .atdx tr.addrow.hot .addskill{animation:atdx-fade .18s ease}
 }
-.atdx .c{width:100%;height:100%;display:grid;place-items:center;cursor:text;border-radius:8px;min-height:34px}
-.atdx .c:hover{background:var(--cream)}
-.atdx .c.wa{font-weight:500;color:var(--walnut)}
+.atdx .c{position:relative;width:calc(100% - 8px);height:44px;margin:5px 4px;display:grid;place-items:center;cursor:text;border-radius:10px;font-family:"DM Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums;color:var(--line-2);
+  transition:background .15s,box-shadow .2s,transform .12s}
+.atdx .c:hover{background:var(--cream);box-shadow:inset 0 0 0 1.5px var(--line);color:var(--soft)}
+.atdx .c:active{transform:scale(.94)}
+/* a filled cell — sage-tinted, dark number; WhatsApp-sourced ones weigh a touch heavier */
+.atdx .c.filled{background:var(--sage-soft);color:var(--ink);font-weight:500}
+.atdx .c.filled:hover{background:var(--sage-soft);box-shadow:inset 0 0 0 1.5px var(--sage);color:var(--ink)}
+.atdx .c.wa{font-weight:500;color:var(--ink)}
 .atdx .c.office{color:var(--walnut-2)}
 .atdx .c.gap{color:var(--terracotta);font-size:14px}
 .atdx .c.off{color:var(--line-2);cursor:default}
 .atdx .c.paid::after{content:"";position:absolute;bottom:4px;left:50%;transform:translateX(-50%);width:14px;height:2px;border-radius:1px;background:var(--sage);opacity:.55}
+.atdx .c .src{position:absolute;top:5px;right:6px;width:5px;height:5px;border-radius:50%;background:var(--sage)}
+.atdx .c.pop{animation:atdx-cellpop .3s cubic-bezier(.2,.9,.3,1.6)}
+@keyframes atdx-cellpop{0%{transform:scale(.75)}100%{transform:scale(1)}}
 .atdx .c input{width:48px;text-align:center;border:0;border-bottom:1.5px solid var(--walnut);background:transparent;font-size:15px;padding:0}
 .atdx .c input:focus{outline:none}
 .atdx .c .half{color:var(--walnut-2)}
 .atdx .c .zero{color:var(--line-2)}
 .atdx .c.qty{font-size:13.5px}
 .atdx .c.qty small{font-size:11px;color:var(--walnut-3);margin-left:2px}
+/* crew breakdown stepper popover */
+.atdx .bpop{position:absolute;z-index:40;top:calc(100% + 6px);left:50%;transform:translateX(-50%) scale(.92);transform-origin:top center;width:236px;background:var(--paper);border:1px solid var(--line);border-radius:14px;box-shadow:0 26px 54px -24px rgba(42,36,28,.5);padding:12px 14px;opacity:0;pointer-events:none;transition:opacity .2s,transform .25s cubic-bezier(.2,.9,.3,1.25);text-align:left}
+.atdx .bpop.show{opacity:1;transform:translateX(-50%) scale(1);pointer-events:auto}
+.atdx .bpop .bp-title{font-family:"DM Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--soft);margin-bottom:9px}
+.atdx .bpop .bp-row{display:flex;align-items:center;gap:9px;padding:5px 0;font-size:13px;color:var(--ink)}
+.atdx .bpop .bp-row .t{flex:1}
+.atdx .bpop .bp-row .rate{font-family:"DM Mono",ui-monospace,monospace;font-size:11px;color:var(--soft)}
+.atdx .bpop .step{display:flex;align-items:center;gap:6px}
+.atdx .bpop .step button{width:24px;height:24px;border-radius:7px;border:1px solid var(--line);background:var(--paper);color:var(--walnut-2);cursor:pointer;font-size:13px;line-height:1;transition:all .15s}
+.atdx .bpop .step button:hover{border-color:var(--walnut-2);color:var(--ink)}
+.atdx .bpop .step b{font-family:"DM Mono",ui-monospace,monospace;font-size:13.5px;min-width:22px;text-align:center}
+.atdx .bpop .bp-foot{border-top:1px solid var(--line);margin-top:8px;padding-top:8px;display:flex;justify-content:space-between;align-items:center;font-family:"DM Mono",ui-monospace,monospace;font-size:12px;color:var(--walnut-2)}
+.atdx .bpop .bp-done{width:100%;margin-top:10px;background:var(--ink);color:var(--cream);border:0;border-radius:999px;padding:9px 0;font-family:"DM Sans",sans-serif;font-weight:600;font-size:13px;cursor:pointer;transition:transform .2s cubic-bezier(.2,.9,.3,1.4)}
+.atdx .bpop .bp-done:hover{transform:translateY(-1px)}
+.atdx .bpop .bp-done:active{transform:scale(.97)}
 .atdx .bar{height:4px;background:var(--line);border-radius:2px;margin-top:5px;position:relative;overflow:hidden;width:120px;margin-left:auto}
 .atdx .bar i{position:absolute;left:0;top:0;bottom:0;background:var(--slate)}
 .atdx .bar b{position:absolute;top:0;bottom:0;background:var(--terracotta)}
@@ -247,6 +296,7 @@ const ATDX_CSS = `
 .atdx .legend .sw.off{color:var(--walnut-2)}
 .atdx .legend .sw.gap{color:var(--terracotta)}
 .atdx .legend .pl{width:14px;height:2px;background:var(--sage);opacity:.6;display:inline-block}
+.atdx .legend .srcd{width:6px;height:6px;border-radius:50%;background:var(--sage);display:inline-block}
 .atdx .rc{background:var(--paper);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:18px}
 .atdx .rc-h{display:flex;align-items:baseline;gap:14px;padding:14px 18px 10px;flex-wrap:wrap}
 .atdx .rc-h .t{font:500 18px "Playfair Display",serif}
@@ -382,10 +432,16 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   useEffect(() => {
     const body = rootRef.current?.querySelector('#atdxBody') as HTMLElement | null;
     if (!body) return;
-    const clear = () => body.querySelectorAll('tr.hot, tr.hot-main').forEach(x => x.classList.remove('hot', 'hot-main'));
+    const clear = () => body.querySelectorAll('tr.hot, tr.hot-main, td.cell.colglow').forEach(x => x.classList.remove('hot', 'hot-main', 'colglow'));
     const over = (e: Event) => {
-      const tr = (e.target as HTMLElement).closest('tr[data-grp]') as HTMLElement | null;
       clear();
+      // column crosshair — glow the whole day column under the pointer
+      const td = (e.target as HTMLElement).closest('td.cell') as HTMLElement | null;
+      if (td && td.parentElement) {
+        const idx = [...td.parentElement.querySelectorAll('td.cell')].indexOf(td);
+        if (idx >= 0) body.querySelectorAll('tr').forEach(r => { const cs = r.querySelectorAll('td.cell'); cs[idx]?.classList.add('colglow'); });
+      }
+      const tr = (e.target as HTMLElement).closest('tr[data-grp]') as HTMLElement | null;
       const g = tr?.getAttribute('data-grp'); if (!g) return;
       body.querySelectorAll(`tr[data-grp="${g}"]`).forEach(x => x.classList.add('hot'));
       (body.querySelector(`tr.crew[data-grp="${g}"], tr.direct[data-grp="${g}"]`) as HTMLElement | null)?.classList.add('hot-main');
@@ -403,28 +459,33 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   const sum = (cells: Cell[]) => cells.reduce((s, c) => s + ((c && c !== 'off') ? c.v : 0), 0);
   const tip = (c: any) => c.by ? `<div class="tip">${c.v} · ${c.by} · ${c.at || ''}${c.photo ? ' · photo' : ''}</div>` : '';
 
+  const srcDot = (c: any) => c.src === 'wa' ? '<span class="src"></span>' : '';
   function numCell(c: Cell, i: number, ref: string, paidThrough?: number) {
     if (c === 'off') return `<td class="cell${col(i)}"><div class="c off">·</div></td>`;
     if (!c) return `<td class="cell${col(i)}"><div class="c ${i <= TODAY ? 'gap' : 'off'}" data-edit="${ref}">${i <= TODAY ? '—' : ''}</div></td>`;
     const paid = paidThrough != null && i <= paidThrough ? ' paid' : '';
-    return `<td class="cell${col(i)}"><div class="c ${c.src}${paid}" data-edit="${ref}">${c.v === 0 ? '<span class="zero">0</span>' : c.v}${tip(c)}</div></td>`;
+    const filled = c.v > 0 ? ' filled' : '';
+    return `<td class="cell${col(i)}"><div class="c${filled} ${c.src}${paid}" data-edit="${ref}">${c.v === 0 ? '<span class="zero">0</span>' : c.v}${srcDot(c)}${tip(c)}</div></td>`;
   }
   function dayCell(c: Cell, i: number, ref: string) {
     if (c === 'off') return `<td class="cell${col(i)}"><div class="c off">·</div></td>`;
     if (!c) return `<td class="cell${col(i)}"><div class="c ${i <= TODAY ? 'gap' : 'off'}" data-cycle="${ref}">${i <= TODAY ? '—' : ''}</div></td>`;
     const t = c.v === 1 ? '1' : c.v === 0.5 ? '<span class="half">½</span>' : '<span class="zero">0</span>';
-    return `<td class="cell${col(i)}"><div class="c ${c.src} mono" data-cycle="${ref}">${t}${c.at ? `<div class="tip">${c.at}</div>` : ''}</div></td>`;
+    const filled = c.v > 0 ? ' filled' : '';
+    return `<td class="cell${col(i)}"><div class="c${filled} ${c.src} mono" data-cycle="${ref}">${t}${srcDot(c)}${c.at ? `<div class="tip">${c.at}</div>` : ''}</div></td>`;
   }
   function qtyCell(c: Cell, i: number, ref: string, unit?: string) {
     if (c === 'off') return `<td class="cell${col(i)}"><div class="c off">·</div></td>`;
     if (!c) return `<td class="cell${col(i)}"><div class="c off qty" data-edit="${ref}"></div></td>`;
-    return `<td class="cell${col(i)}"><div class="c ${c.src} qty" data-edit="${ref}">${c.v}<small>${unit || ''}</small>${tip(c)}</div></td>`;
+    const filled = c.v > 0 ? ' filled' : '';
+    return `<td class="cell${col(i)}"><div class="c${filled} ${c.src} qty" data-edit="${ref}">${c.v}<small>${unit || ''}</small>${srcDot(c)}${tip(c)}</div></td>`;
   }
   function pctCell(c: Cell, i: number, ref: string, prev: number) {
     if (c === 'off') return `<td class="cell${col(i)}"><div class="c off">·</div></td>`;
     if (!c) return `<td class="cell${col(i)}"><div class="c off qty" data-edit="${ref}"></div></td>`;
     const drop = c.v < prev ? ' style="color:var(--terracotta)"' : '';
-    return `<td class="cell${col(i)}"><div class="c ${c.src} qty" data-edit="${ref}"${drop}>${c.v}<small>%</small>${tip(c)}</div></td>`;
+    const filled = c.v > 0 ? ' filled' : '';
+    return `<td class="cell${col(i)}"><div class="c${filled} ${c.src} qty" data-edit="${ref}"${drop}>${c.v}<small>%</small>${srcDot(c)}${tip(c)}</div></td>`;
   }
   const latestPct = (st: any) => st.cells.reduce((p: number, c: Cell) => (c && c !== 'off') ? c.v : p, st.before);
   function stageMath(st: any) {
@@ -439,12 +500,13 @@ export default function AttendanceSheet({ session }: { session: Session }) {
 
   function render() {
     const body = q('#atdxBody'); if (!body) return;
-    let wd = 0, wv = 0, we = 0, gaps = 0;
+    let wd = 0, wv = 0, we = 0, gaps = 0, todayCount = 0;
     body.innerHTML = DATA.current.map((site, si) => {
       // A clear gap band before every project except the first, so sites read as separate blocks.
-      let html = si > 0 ? `<tr class="gap" data-site="${site.site}"><td colspan="9"></td></tr>` : '';
-      html += `<tr class="site" data-site="${site.site}"><td colspan="10">${site.label}${site.hint ? `<span>${site.hint}</span>` : ''}</td></tr>`;
+      let html = si > 0 ? `<tr class="gap" data-site="${site.site}"><td colspan="10"></td></tr>` : '';
+      html += `<tr class="site" data-site="${site.site}"><td colspan="10">${site.label}${site.hint ? `<span class="area">${site.hint}</span>` : ''}<button class="addcta" data-add="${si}">＋ Add worker</button></td></tr>`;
       let sno = 0; // a running serial for the crews + direct workers on this project
+      const dayHead = [0, 0, 0, 0, 0, 0, 0]; let siteWage = 0;   // per-day headcount + labour wage for the footer
       site.crews.forEach((crew, ci) => {
         const onContract = crew.basis === 'contract';
         const catDays = crew.cats.reduce((s, cat) => s + sum(cat.cells), 0);
@@ -455,7 +517,8 @@ export default function AttendanceSheet({ session }: { session: Session }) {
         // is measured by % completion, so it contributes neither days nor gaps.
         if (onContract) { we += earned; }
         else {
-          wd += catDays; wv += wage;
+          wd += catDays; wv += wage; siteWage += wage;
+          for (let i = 0; i < 7; i++) crew.cats.forEach(cat => { const c = cat.cells[i]; if (c && c !== 'off') dayHead[i] += c.v; });
           if (crew.cats.length) for (let i = 0; i <= TODAY; i++) { if (i === 6) continue; if (!crew.cats.some(cat => { const c = cat.cells[i]; return c && c !== 'off'; })) gaps++; }
         }
         // Overall completion across the crew's stages, weighted by each stage's contract value.
@@ -478,7 +541,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
         const headCells = crew.head.map((_c, i) => `<td class="cell${col(i)}"><div class="c off">·</div></td>`).join('');
         html += `<tr class="crew" data-site="${site.site}" data-grp="c${si}-${ci}">
           <td class="sno snorm" data-rmc="${si}.${ci}" title="Remove from sheet" aria-label="Remove ${escapeHtml(crew.n)}"><span class="sno-n">${++sno}</span><span class="sno-x">×</span></td>
-          <td class="name crewhead"><div class="n">${crew.n}</div><div class="d">${crew.d}${crew.contract ? ' · contract' : ''}</div>${seg}</td>
+          <td class="name crewhead"><div class="wav">${avatarOf(crew.n)}</div><div class="n">${crew.n}</div><div class="d">${crew.d}${crew.contract ? ' · contract' : ''}</div>${seg}</td>
           ${headCells}
           <td class="tot">${onContract
             ? `<div class="v">${overallPct}% complete</div><div class="u"><b>earned, unpaid</b> ${inr(earned)}</div>`
@@ -527,19 +590,22 @@ export default function AttendanceSheet({ session }: { session: Session }) {
         }
       });
       site.direct.forEach((w, wi) => {
-        const d = sum(w.cells), amt = d * w.rate; wd += d; wv += amt;
-        w.cells.forEach((c, i) => { if (!c && i <= TODAY) gaps++; });
+        const d = sum(w.cells), amt = d * w.rate; wd += d; wv += amt; siteWage += amt;
+        w.cells.forEach((c, i) => { if (c && c !== 'off') dayHead[i] += c.v; if (!c && i <= TODAY) gaps++; });
         html += `<tr class="direct" data-site="${site.site}" data-grp="d${si}-${wi}">
           <td class="sno snorm" data-rmw="${si}.${wi}" title="Remove from sheet" aria-label="Remove ${escapeHtml(w.n)}"><span class="sno-n">${++sno}</span><span class="sno-x">×</span></td>
-          <td class="name"><div class="n">${w.n}</div><div class="d" data-ocwrap="${si}.${wi}">${w.d} · <span class="rt mono" data-rate="${si}.d${wi}" title="click to change rate" style="margin-left:0">₹${w.rate}</span>/day · direct · <button class="oncontract" data-ocw="${si}.${wi}">put on contract</button></div></td>
+          <td class="name"><div class="wnamewrap"><div class="wav">${avatarOf(w.n)}</div><div class="wmid"><div class="n">${w.n}</div><div class="d" data-ocwrap="${si}.${wi}">${w.d} · <span class="rt mono" data-rate="${si}.d${wi}" title="click to change rate" style="margin-left:0">₹${w.rate}</span>/day · direct · <button class="oncontract" data-ocw="${si}.${wi}">put on contract</button></div></div></div></td>
           ${w.cells.map((c, i) => dayCell(c, i, `${si}.d${wi}`)).join('')}
           <td class="tot"><div class="v">${d} ${d === 1 ? 'day' : 'days'}</div><div class="u"><b>wages, unpaid</b> ${inr(amt)}</div></td></tr>`;
       });
+      // Per-site headcount footer + a subtle add-worker row (hosts the inline picker the header CTA opens).
+      todayCount += TODAY >= 0 ? dayHead[TODAY] : 0;
+      html += `<tr class="sitefoot" data-site="${site.site}"><td class="lab">On site</td>${dates.map((_d, i) => `<td class="dc${col(i)}">${dayHead[i] || '·'}</td>`).join('')}<td class="fsum">${inr(siteWage)}</td></tr>`;
       html += `<tr class="add" data-site="${site.site}"><td colspan="10" id="add-${si}"><button class="addbtn" data-add="${si}"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg><span>Add worker or crew</span></button></td></tr>`;
       return html;
     }).join('') || `<tr><td colspan="10" class="state">No active projects yet — create a project to start tracking attendance.</td></tr>`;
     const setTxt = (id: string, v: string) => { const el = q('#' + id); if (el) el.textContent = v; };
-    setTxt('atdxWd', String(wd)); setTxt('atdxWv', inr(wv)); setTxt('atdxWe', inr(we)); setTxt('atdxGaps', String(gaps));
+    setTxt('atdxWd', String(wd)); setTxt('atdxAccrued', inr(wv + we)); setTxt('atdxToday', String(todayCount)); setTxt('atdxGaps', String(gaps));
     bind(); applyFilter();
   }
 
@@ -556,6 +622,30 @@ export default function AttendanceSheet({ session }: { session: Session }) {
 
   async function persistCell(subject: any, projectId: string, i: number, value: number) {
     try { await saveCell(orgId, projectId, dates[i], subject, value, byName); } catch (e) { fail(e); }
+  }
+
+  // Click a day header → mark everyone with an empty cell present (1) for that day. Only fills gaps
+  // (never overwrites a real mark), skips contract crews (measured, not mustered) and days off.
+  function fillDay(i: number) {
+    if (i < 0 || i > 6) return;
+    let marked = 0;
+    const saves: Promise<void>[] = [];
+    const mark = (cells: Cell[], subject: any, projectId: string) => {
+      const c = cells[i]; if (c === 'off' || c) return;
+      cells[i] = { v: 1, src: 'office', by: byName, at: 'just now' }; marked++;
+      saves.push(saveCell(orgId, projectId, dates[i], subject, 1, byName));
+    };
+    DATA.current.forEach(site => {
+      site.crews.forEach(crew => {
+        if (crew.basis === 'contract') return;
+        crew.cats.forEach(cat => mark(cat.cells, { type: 'crew_category', category_id: cat.id }, site.site));
+      });
+      site.direct.forEach(w => mark(w.cells, { type: 'direct', direct_worker_id: w.id }, site.site));
+    });
+    render();
+    Promise.all(saves).catch(fail);
+    const dayName = new Date(dates[i]).toLocaleString('en-US', { weekday: 'long' });
+    showSnackbar(marked ? `Marked ${marked} present on ${dayName} — tap any cell to adjust` : `Everyone already marked on ${dayName}`);
   }
 
   // Open the certification wizard for a stage cell — the contract-stage reading is now an accountable,
@@ -803,6 +893,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   // A single search box: type a name → ranked party matches (same searchPayees the
   // transaction payee field uses) → pick one, or create a new party if not found.
   const escapeHtml = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
+  const avatarOf = (n: string) => escapeHtml((n.trim()[0] || '?').toUpperCase());
   type Party = { stakeholder_id: string; name: string; category: string | null };
   function partyPicker(si: number, placeholder: string, excludeNames: string[], onPick: (p: Party) => Promise<void>) {
     const td = q('#add-' + si); if (!td) return;
@@ -955,32 +1046,32 @@ export default function AttendanceSheet({ session }: { session: Session }) {
         <div className="top">
           <div>
             <h1>Attendance</h1>
-            <p className="lede">What your supervisors send on <span className="wa">WhatsApp</span> fills in here — headcounts, and work done. Click any cell to correct it. Payables reads what's unpaid.</p>
+            <p className="lede">What your supervisors send on <span className="wa">WhatsApp</span> fills in here — click a cell to correct it, click a day to fill the site. Payables reads what&apos;s unpaid.</p>
           </div>
-          <div className="week">
-            <button className="nav" aria-label="Previous week" onClick={() => setMonday(m => { const d = new Date(m); d.setDate(d.getDate() - 7); return d; })}>‹</button>
-            <span className="range">{weekLabel(monday)}</span>
-            <button className="nav" aria-label="Next week" onClick={() => setMonday(m => { const d = new Date(m); d.setDate(d.getDate() + 7); return d; })}>›</button>
-            <button className="today" onClick={() => setMonday(mondayOf(new Date()))}>this week</button>
-            <button className="today" style={{ marginLeft: 14 }} onClick={() => setRcOpen(o => !o)}>{rcOpen ? 'hide rate card' : 'rate card'}</button>
+          <div className="hero">
+            <div className="h"><b id="atdxWd">—</b><span>worker-days</span></div>
+            <div className="h"><b id="atdxAccrued">—</b><span>accrued this week</span></div>
+            <div className="h"><b id="atdxToday">—</b><span>on site today</span></div>
+            <div className="h"><b className="warn" id="atdxGaps">—</b><span>gaps to fill</span></div>
           </div>
         </div>
 
-        <div className="summ">
-          <div className="s"><div className="l">Worker-days so far</div><div className="v mono" id="atdxWd">—</div></div>
-          <div className="s"><div className="l">Wage value (labour basis)</div><div className="v mono" id="atdxWv">—</div></div>
-          <div className="s"><div className="l">Work earned (contract basis)</div><div className="v mono" id="atdxWe">—</div></div>
-          <div className="s"><div className="l">Gaps to fill</div><div className="v mono warn" id="atdxGaps">—</div></div>
-          <div className="sp" />
-          <div className="filters" role="group">
-            {[{ k: 'all', l: 'All sites' }, ...sites.map(s => ({ k: s.site, l: s.label }))].map((c, i) => (
-              <button key={c.k} className="chip" aria-pressed={i === 0} onClick={(e) => {
-                filterRef.current = c.k;
-                rootRef.current?.querySelectorAll('.filters .chip').forEach(x => x.setAttribute('aria-pressed', String(x === e.currentTarget)));
-                applyFilter();
-              }}>{c.l}</button>
-            ))}
-          </div>
+        <div className="week">
+          <button className="nav" aria-label="Previous week" onClick={() => setMonday(m => { const d = new Date(m); d.setDate(d.getDate() - 7); return d; })}>‹</button>
+          <span className="range">{weekLabel(monday)}</span>
+          <button className="nav" aria-label="Next week" onClick={() => setMonday(m => { const d = new Date(m); d.setDate(d.getDate() + 7); return d; })}>›</button>
+          <button className="today" onClick={() => setMonday(mondayOf(new Date()))}>this week</button>
+          <button className="today" style={{ marginLeft: 14 }} onClick={() => setRcOpen(o => !o)}>{rcOpen ? 'hide rate card' : 'rate card'}</button>
+        </div>
+
+        <div className="filters" role="group">
+          {[{ k: 'all', l: 'All sites' }, ...sites.map(s => ({ k: s.site, l: s.label }))].map((c, i) => (
+            <button key={c.k} className="chip" aria-pressed={i === 0} onClick={(e) => {
+              filterRef.current = c.k;
+              rootRef.current?.querySelectorAll('.filters .chip').forEach(x => x.setAttribute('aria-pressed', String(x === e.currentTarget)));
+              applyFilter();
+            }}>{c.l}</button>
+          ))}
         </div>
 
         <section className="rc" id="atdxRc" hidden>
@@ -993,12 +1084,19 @@ export default function AttendanceSheet({ session }: { session: Session }) {
           <table>
             <thead>
               <tr>
-                <th className="sno">#</th>
+                <th className="sno" />
                 <th className="name">Crew · worker</th>
                 {dates.map((d, i) => {
                   const dt = new Date(d);
-                  const cls = (i === TODAY ? 'is-today' : '') + (i === 6 ? ' sun' : '');
-                  return <th key={d} className={cls.trim() || undefined}>{dt.toLocaleString('en-US', { weekday: 'short' })}<span className="dn">{dt.getDate()}</span></th>;
+                  const fillable = i <= TODAY && i !== 6;
+                  const cls = ['day', i === TODAY ? 'is-today' : '', i === 6 ? 'sun' : ''].filter(Boolean).join(' ');
+                  return (
+                    <th key={d} className={cls} onClick={fillable ? () => fillDay(i) : undefined} style={fillable ? undefined : { cursor: 'default' }}>
+                      <span className="wl">{dt.toLocaleString('en-US', { weekday: 'short' })}</span>
+                      <span className="dn">{dt.getDate()}</span>
+                      <span className="fill-hint">{fillable ? 'fill site ↓' : ''}</span>
+                    </th>
+                  );
                 })}
                 <th className="tot">This week</th>
               </tr>
@@ -1006,12 +1104,12 @@ export default function AttendanceSheet({ session }: { session: Session }) {
             <tbody id="atdxBody" />
           </table>
           <div className="legend">
-            <span><b className="sw wa">3</b> from site</span>
+            <span><i className="srcd" /> filed from WhatsApp</span>
             <span><b className="sw off">3</b> typed by office</span>
             <span><b className="sw gap">—</b> working day, nothing yet</span>
             <span><i className="pl" /> already paid</span>
             <span><b className="sw wa" style={{ fontSize: 12 }}>70%</b> stage reading, on the day it was assessed</span>
-            <span>Direct workers: <b className="mono">1</b> full · <b className="mono">½</b> half · <b className="mono">0</b> absent — click to cycle</span>
+            <span>Click a cell to correct · click a day header to fill the site · direct workers cycle 1 · ½ · 0</span>
           </div>
         </div>
 
