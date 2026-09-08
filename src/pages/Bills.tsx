@@ -12,6 +12,8 @@ import { useOrgId, useAuth } from '../lib/auth/AuthProvider';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
 import NewBillModal, { type BillDraft } from '../components/bills/NewBillModal';
+import { useSearchScope } from '../components/search/searchScope';
+import SearchHint from '../components/search/SearchHint';
 
 const BLX_CSS = `
 .blx{--cream:#F6F2EA;--paper:#FDFBF7;--walnut:#3B3128;--walnut-60:#7A6E61;--walnut-soft:#B4A897;--line:#E4DCCE;--line-strong:#D3C8B4;--terracotta:#B85C38;--sage:#6E7F5E;--sage-tint:#EEF1E8;--terra-tint:#F6E8E0;--amber-tint:#F3ECD9;
@@ -274,8 +276,15 @@ export default function Bills() {
 
   const sites = useMemo(() => [...new Set(bills.map(b => b.site).filter(Boolean))] as string[], [bills]);
   const vendors = useMemo(() => [...new Set(bills.map(b => b.vendor).filter(Boolean))], [bills]);
+  const [q, setQ] = useState('');
   const shown = useMemo(() => bills.filter(b =>
-    (!site || b.site === site) && (!vendor || b.vendor === vendor) && (!status || b.status === status)), [bills, site, vendor, status]);
+    (!site || b.site === site) && (!vendor || b.vendor === vendor) && (!status || b.status === status) &&
+    (!q || `${b.vendor} ${b.billNo ?? ''} ${b.site ?? ''}`.toLowerCase().includes(q.toLowerCase()))), [bills, site, vendor, status, q]);
+  useSearchScope('Bills', useMemo(() => shown.map(b => ({
+    id: b.id, title: b.vendor, sub: `${b.billNo || 'No number'}${b.site ? ' · ' + b.site : ''}`, right: inr(b.amount),
+    onPick: () => navigate(`/bills/${encodeURIComponent(b.id)}`),
+  })), [shown, navigate]), setQ);
+
   const unpaidTotal = useMemo(() => bills.filter(b => b.status !== 'settled').reduce((s, b) => s + (b.amount - b.paid), 0), [bills]);
   const unpaidCount = useMemo(() => bills.filter(b => b.status !== 'settled').length, [bills]);
 
@@ -316,6 +325,7 @@ export default function Bills() {
           <select value={site} onChange={e => setSite(e.target.value)}><option value="">All sites</option>{sites.map(s => <option key={s} value={s}>{s}</option>)}</select>
           <select value={vendor} onChange={e => setVendor(e.target.value)}><option value="">All vendors</option>{vendors.map(v => <option key={v} value={v}>{v}</option>)}</select>
           <select value={status} onChange={e => setStatus(e.target.value)}><option value="">Any status</option><option value="unpaid">Unpaid</option><option value="part">Part-paid</option><option value="settled">Settled</option></select>
+          <SearchHint label="bills" />
           <span className="count">{shown.length} bill{shown.length !== 1 ? 's' : ''}</span>
         </div>
 
@@ -331,7 +341,7 @@ export default function Bills() {
               ) : shown.length === 0 ? (
                 <tr><td colSpan={6} className="empty">{bills.length === 0 ? 'No bills recorded yet. A vendor bill on a PO, or a consolidated bill, appears here.' : 'No bills match these filters.'}</td></tr>
               ) : shown.map(b => (
-                <tr key={b.id} className="clk" onClick={() => navigate(`/bills/${encodeURIComponent(b.id)}`)}>
+                <tr key={b.id} data-search-row={b.id} className="clk" onClick={() => navigate(`/bills/${encodeURIComponent(b.id)}`)}>
                   <td className="vendor">{b.vendor}</td>
                   <td><div className="billno">{b.billNo || '—'}</div><div className="billdate">{fmtDate(b.billDate)}</div></td>
                   <td className="site">{b.site || '—'}</td>

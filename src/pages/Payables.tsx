@@ -10,6 +10,8 @@ import { supabase } from '../lib/supabase';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import { useSnackbar } from '../components/Snackbar';
 import { searchPayees } from '../lib/payeeSearch';
+import { useSearchScope } from '../components/search/searchScope';
+import SearchHint from '../components/search/SearchHint';
 import { createParty } from '../components/day-book/fileEntry';
 import {
   loadWeeklyPayments, recordWeeklyPayment, settleWeeklyPaymentOnLedger, loadWeeklyPaid, mondayOf, weekLabel,
@@ -376,7 +378,7 @@ export default function Payables({ session }: { session: Session }) {
 
   // One Workers group (all projects, project shown as a column) + a Vendors section (open bills)
   // + a Recurring & fixed section. Labour is no longer split into a card per project.
-  const sections: PaySection[] = useMemo(() => {
+  const allSections: PaySection[] = useMemo(() => {
     const labourRows = (data?.sections ?? []).flatMap(s => s.rows);
     const extraRows  = Object.values(extra).flat();
     const workerRows = [...labourRows, ...extraRows]
@@ -389,6 +391,22 @@ export default function Payables({ session }: { session: Session }) {
     if (recRows.length) out.push({ projectId: '__recurring__', projectName: 'Recurring & fixed', rows: recRows });
     return out;
   }, [data, vendorRows, recurring, extra, readOnly, monday]);
+
+  // The one search filters the run itself — every section's rows at once — and lends what is left
+  // to the panel above, which carries the rest of Briklay.
+  const [q, setQ] = useState('');
+  const sections = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    if (!t) return allSections;
+    return allSections
+      .map(sec => ({ ...sec, rows: sec.rows.filter(r => `${r.party} ${r.trade ?? ''} ${r.projectName ?? ''} ${r.basis ?? ''}`.toLowerCase().includes(t)) }))
+      .filter(sec => sec.rows.length > 0);
+  }, [allSections, q]);
+
+  useSearchScope('Payables', useMemo(() => sections.flatMap(sec => sec.rows.map(r => ({
+    id: r.key, title: r.party, sub: `${r.trade || ''}${r.projectName ? ' · ' + r.projectName : ''}`.replace(/^ · /, ''),
+    onPick: () => setExpanded(new Set([r.key])),
+  }))), [sections]), setQ);
 
   const paidOf = (r: PayRow): number | null => paid[r.key] ?? serverPaid[r.key] ?? null;
   const planned = (r: PayRow) => paidOf(r) ?? plan[r.key] ?? Math.round(r.thisWeek);
@@ -550,6 +568,7 @@ export default function Payables({ session }: { session: Session }) {
               <button className="wkstep next" onClick={() => shiftWeek(1)} aria-label="Next week"><span className="wkw">next week </span>›</button>
               <button className="wknow" onClick={() => setMonday(mondayOf(new Date()))}>this week</button>
             </div>
+            <div className="sub"><SearchHint label="the run" /></div>
             {orgId && <div className="sub cutover"><LedgerCutoverControl orgId={orgId} isManager={isManager} /></div>}
             {readOnly && <div className="sub" style={{ color: 'var(--gold, #8A6A1F)' }}>A past week — a record of what was logged and paid then. The live balance is on each party&apos;s ledger.</div>}
           </div>
@@ -582,7 +601,7 @@ export default function Payables({ session }: { session: Session }) {
                 const settled = paidOf(r), isPaid = settled != null, isExp = expanded.has(r.key), af = afterOf(r, isPaid);
                 const unexplained = Math.abs(planned(r) - r.thisWeek) >= 1 && !diffs[r.key];
                 return (
-                  <div key={r.key}>
+                  <div key={r.key} data-search-row={r.key}>
                     <div className={`row${isPaid ? ' paid' : ''}${isExp ? ' exp' : ''}`} onClick={(e) => { if ((e.target as HTMLElement).closest('input,button,select')) return; setExpanded(s => { const n = new Set(s); n.has(r.key) ? n.delete(r.key) : n.add(r.key); return n; }); }}>
                       <span className="chev">›</span>
                       <div className="who"><div className="n">{r.party}</div><div className="t">{r.trade}</div></div>

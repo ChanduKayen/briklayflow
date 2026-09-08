@@ -12,6 +12,8 @@ import PhoneInput from '../components/PhoneInput';
 import { usePrefetchStakeholder } from '../hooks/usePrefetch';
 import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
 import { isNewLedgerOrg, loadProjectionMap } from '../lib/ledgerRead';
+import { useSearchScope } from '../components/search/searchScope';
+import SearchHint from '../components/search/SearchHint';
 
 // ── helpers ─────────────────────────────────────────────────────────────────────
 const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$/;
@@ -178,6 +180,16 @@ export default function Stakeholders({ session }: { session: Session }) {
       const s = q.toLowerCase();
       return (p.name + ' ' + (p.category || '') + ' ' + (p.contact || '') + ' ' + p.stakeholder_id).toLowerCase().includes(s);
     });
+
+  // Lend the page to the search: the space bar filters THIS table, and the panel above it only
+  // carries what lives elsewhere. The old in-page search box is gone — one search, not two.
+  useSearchScope('Parties', rows.map((p) => ({
+    id: p.stakeholder_id,
+    title: p.name,
+    sub: `${p.type}${p.category ? ' · ' + p.category : ''}`,
+    right: outstandingOf(p.stakeholder_id) > 0 ? fmt(outstandingOf(p.stakeholder_id)) + ' due' : 'settled',
+    onPick: () => setLedgerId(p.stakeholder_id),
+  })), setQ);
 
   // ── drawer ──────────────────────────────────────────────────────────────────
   function openDrawer(party: Stakeholder | null) {
@@ -347,10 +359,7 @@ export default function Stakeholders({ session }: { session: Session }) {
               </button>
             ))}
           </div>
-          <div className="search">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-            <input type="text" placeholder="Search by name, trade or phone…" value={q} onChange={(e) => setQ(e.target.value)} />
-          </div>
+          <SearchHint label="parties" />
         </div>
 
         {/* ── table ── */}
@@ -372,7 +381,7 @@ export default function Stakeholders({ session }: { session: Session }) {
                 const out = outstandingOf(p.stakeholder_id);
                 const pf = prefetchStakeholder(p.stakeholder_id);
                 return (
-                  <tr key={p.stakeholder_id} className="row" tabIndex={0}
+                  <tr key={p.stakeholder_id} className="row" tabIndex={0} data-search-row={p.stakeholder_id}
                     onClick={() => setLedgerId(p.stakeholder_id)}
                     onKeyDown={(e) => { if (e.key === 'Enter') setLedgerId(p.stakeholder_id); }}
                     onMouseEnter={pf.onMouseEnter} onTouchStart={pf.onTouchStart} onPointerDown={pf.onPointerDown}>

@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useParams, useNavigate } from 'react-router-dom'
+import { useSearchScope } from '../components/search/searchScope'
+import SearchHint from '../components/search/SearchHint'
 import { useQuery } from '@tanstack/react-query'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
@@ -120,6 +122,12 @@ export default function ProjectWorkOrders({ session }: { session: Session }) {
     if (dateFrom && dateTo) { const d = new Date(wo.date_issued); d.setHours(0, 0, 0, 0); if (d < dateFrom || d > dateTo) return false }
     return true
   })
+
+  // Lend this project's contracts to the one search — same bar, same keys, everywhere.
+  useSearchScope('Contracts', filtered.map((wo: { wo_id: string; stakeholders?: { name?: string } | null }) => ({
+    id: wo.wo_id, title: wo.stakeholders?.name || wo.wo_id, sub: wo.wo_id,
+    onPick: () => navigate(`/work-orders/${wo.wo_id}`, { state: { from: 'project', projectId, projectName: project?.name } }),
+  })), setSearchTerm)
 
   const sorted = [...filtered].sort((a: any, b: any) => {
     let aVal: any, bVal: any
@@ -303,12 +311,7 @@ export default function ProjectWorkOrders({ session }: { session: Session }) {
           {renderFilterChip('status', 'Status', ALL_STATUSES, filterStatus, setFilterStatus)}
           {renderFilterChip('worker', 'Worker', uniqueWorkers, filterWorker, setFilterWorker)}
 
-          {/* Search */}
-          <div className="relative">
-            <span className="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-[15px] text-on-surface-variant/40 pointer-events-none">search</span>
-            <input type="text" placeholder="Search…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} autoComplete="new-password"
-              className="h-8 pl-8 pr-3 w-32 focus:w-52 transition-[width] duration-200 rounded-full border border-outline-variant/25 bg-white text-[12px] text-on-surface outline-none focus:border-primary/30 focus:ring-1 focus:ring-primary/10" />
-          </div>
+          <SearchHint label="contracts" />
 
           <button onClick={exportCSV} className="hidden md:flex items-center gap-1.5 h-8 px-3 rounded-full border border-outline-variant/25 bg-white text-[12px] font-medium text-on-surface-variant/55 hover:border-outline-variant/50 hover:text-on-surface/75 transition-all shrink-0">
             <span className="material-symbols-outlined" style={{ fontSize: 14 }}>download</span>
@@ -342,7 +345,7 @@ export default function ProjectWorkOrders({ session }: { session: Session }) {
                   const isCurrentYear = issued.getFullYear() === new Date().getFullYear()
                   const dateStr = issued.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', ...(!isCurrentYear ? { year: 'numeric' } : {}) })
                   return (
-                    <div key={wo.wo_id} className={`bg-white rounded-xl border border-black/[0.06] p-3 cursor-pointer bk-row-ripple ${wo.status === 'Cancelled' ? 'opacity-50' : ''}`} onClick={() => navigate(`/work-orders/${wo.wo_id}`, { state: { from: 'project', projectId, projectName: project?.name } })}>
+                    <div key={wo.wo_id} data-search-row={wo.wo_id} className={`bg-white rounded-xl border border-black/[0.06] p-3 cursor-pointer bk-row-ripple ${wo.status === 'Cancelled' ? 'opacity-50' : ''}`} onClick={() => navigate(`/work-orders/${wo.wo_id}`, { state: { from: 'project', projectId, projectName: project?.name } })}>
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-[13px] font-data-mono text-on-surface-variant/60">{wo.wo_id}</span>
                         <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${STATUS_BADGE[wo.status] || 'bg-surface-container text-on-surface'}`}>{wo.status}</span>
@@ -414,7 +417,7 @@ export default function ProjectWorkOrders({ session }: { session: Session }) {
                     const isCurrentYear = issued.getFullYear() === new Date().getFullYear()
                     const dateStr = issued.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', ...(!isCurrentYear ? { year: 'numeric' } : {}) })
                     return (
-                      <tr key={wo.wo_id}
+                      <tr key={wo.wo_id} data-search-row={wo.wo_id}
                         style={{ height: '52px', animationDelay: `${Math.min(idx, 20) * 18}ms` }}
                         className={`border-b border-black/[0.04] last:border-0 hover:bg-surface-container-low/40 transition-colors cursor-pointer bk-row-ripple wo-row-animate ${isChecked ? 'bg-primary/[0.02]' : ''} ${wo.status === 'Cancelled' ? 'opacity-50' : ''}`}
                         onClick={() => navigate(`/work-orders/${wo.wo_id}`, { state: { from: 'project', projectId, projectName: project?.name } })}>

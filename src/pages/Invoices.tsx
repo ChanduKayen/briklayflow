@@ -4,6 +4,8 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { ListSkeleton } from '../components/SkeletonLoader';
 import type { ClientInvoice, InvoiceStatus, Stakeholder, Project } from '../types';
+import { useSearchScope } from '../components/search/searchScope';
+import SearchHint from '../components/search/SearchHint';
 
 const STATUS_TABS: { label: string; value: InvoiceStatus | 'All' }[] = [
   { label: 'All',     value: 'All'     },
@@ -87,6 +89,13 @@ export default function Invoices() {
     return true;
   });
 
+  // Lend the list to the one search: the space bar filters these rows, and the panel over them
+  // carries the rest of Briklay.
+  useSearchScope('Invoices', filtered.map(inv => ({
+    id: inv.invoice_id, title: inv.invoice_id, sub: clientName(inv.client_id),
+    onPick: () => navigate(`/invoices/${inv.invoice_id}`),
+  })), setSearch);
+
   const totalOutstanding = (invoices ?? [])
     .filter(i => !['Paid', 'Void'].includes(i.status))
     .reduce((s, i) => s + Math.max(0, i.total_amount - i.paid_amount), 0);
@@ -115,16 +124,7 @@ export default function Invoices() {
 
       {/* Search + Status filter */}
       <div className="flex flex-col md:flex-row gap-3 mb-5">
-        <div className="relative flex-1 max-w-sm">
-          <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[18px] text-on-surface-variant/40 pointer-events-none">search</span>
-          <input
-            type="text"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search invoices…"
-            className="bk-input pl-9 w-full"
-          />
-        </div>
+        <SearchHint label="invoices" className="self-start" />
         <div className="flex gap-1 flex-wrap">
           {STATUS_TABS.map(tab => (
             <button
@@ -166,6 +166,7 @@ export default function Invoices() {
           return (
             <div
               key={inv.invoice_id}
+              data-search-row={inv.invoice_id}
               onClick={() => navigate(`/invoices/${inv.invoice_id}`)}
               className="bg-white rounded-xl border border-black/[0.06] shadow-sm hover:shadow-md transition-shadow cursor-pointer p-4 flex flex-col md:flex-row md:items-center gap-3"
             >

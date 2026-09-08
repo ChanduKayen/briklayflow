@@ -13,8 +13,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { UserProfile } from './types';
 import { SnackbarProvider } from './components/Snackbar';
 import { PeekProvider } from './context/PeekContext';
-import { CommandBarProvider, useCommandBar } from './context/CommandBarContext';
-import { CommandBar } from './components/CommandBar';
+import { useSearch } from './components/search/searchScope';
+import SearchProvider from './components/search/SearchProvider';
+import CommandSearch, { SearchRowStyles } from './components/search/CommandSearch';
 import { PageSkeleton } from './components/SkeletonLoader';
 import RouteRule from './components/brand/RouteRule';
 import { markBooted } from './components/brand/bootSignal';
@@ -498,7 +499,7 @@ function App() {
     {signingOut && <SignOutOverlay onDismiss={() => setSigningOut(false)} />}
     <SnackbarProvider>
     <PeekProvider>
-    <CommandBarProvider>
+    <SearchProvider>
     {/* Subtle recede while signing out: app breathes back as the veil descends */}
     <div
       className="bg-background text-on-surface min-h-screen"
@@ -659,10 +660,11 @@ function App() {
     <GlobalRefetchIndicator />
 
     {/* Command bar â€" rendered outside the scroll container, above everything */}
-    <CommandBar />
+    <CommandSearch />
+    <SearchRowStyles />
     <GlobalShortcuts />
 
-    </CommandBarProvider>
+    </SearchProvider>
     </PeekProvider>
     </SnackbarProvider>
     </SignOutContext.Provider>
@@ -672,8 +674,8 @@ function App() {
 // â"€â"€ Nav shortcut helpers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 function GlobalShortcuts() {
-  const { open } = useCommandBar();
-  useGlobalShortcuts(open);
+  const { openSearch } = useSearch();
+  useGlobalShortcuts(openSearch);
   return null;
 }
 

@@ -4,7 +4,9 @@
 //
 // Used by both the main /purchase-orders page and the per-project PO list — pass projectId to scope.
 import type React from 'react';
-import { useMemo, useState, useTransition } from 'react';
+import { useCallback, useMemo, useState, useTransition } from 'react';
+import { useSearch, useSearchScope } from '../search/searchScope';
+import SearchHint from '../search/SearchHint';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -458,6 +460,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   const [sortK, setSortK] = useState<'vendor' | 'site' | 'ordered' | 'delivery' | 'value' | 'balance'>('ordered');
   const [sortDir, setSortDir] = useState(-1);
   const [q, setQ] = useState('');
+  const { openSearch } = useSearch();
   const [tip, setTip] = useState<{ id: string; pending: boolean; x: number; y: number } | null>(null);
   // The PO whose "Send PO to vendor" link was tapped — opens the send dialog over the list.
   const [sendRow, setSendRow] = useState<PORow | null>(null);
@@ -474,7 +477,6 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
     projectId ? { state: { projectId } } : undefined,
   ));
   const [createOpen, setCreateOpen] = useState(false);
-  const [mSearch, setMSearch] = useState(false);
 
   // Approve a pending PO inline (management / principal). The RPC enforces SoD (a non-principal
   // creator can't approve their own), so we surface its message rather than pre-hiding the button.
@@ -592,7 +594,13 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   const cToSend = rows.filter(FILTERS.tosend).length;
   const footTotal = list.reduce((a, p) => a + (p.cancelled ? 0 : p.value), 0);
 
-  const openPO = (id: string) => navigate(`/purchase-orders/${id}`, { state: projectId ? { from: 'project', projectId } : { from: 'list' } });
+  const openPO = useCallback((id: string) => navigate(`/purchase-orders/${id}`, { state: projectId ? { from: 'project', projectId } : { from: 'list' } }), [navigate, projectId]);
+
+  // Lend the list to the search. `q` is stored lowercased here, so lowercase on the way in.
+  useSearchScope('Purchase orders', useMemo(() => list.map(p => ({
+    id: p.id, title: p.vendor, sub: `${p.id}${p.site ? ' · ' + p.site : ''}`,
+    onPick: () => openPO(p.id),
+  })), [list, openPO]), (v) => setQ(v.trim().toLowerCase()));
   const onSort = (k: typeof sortK) => {
     if (sortK === k) setSortDir(d => d * -1);
     else { setSortK(k); setSortDir(k === 'ordered' || k === 'value' || k === 'balance' ? -1 : 1); }
@@ -723,7 +731,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
           <div className="r1">
             <h1>Purchase orders</h1>
             <span className="count">{rows.length}</span>
-            <button className={`ico${mSearch ? ' on' : ''}`} onClick={() => { setMSearch(s => !s); if (mSearch) setQ(''); }} aria-label="Search">
+            <button className="ico" onClick={openSearch} aria-label="Search">
               <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
             </button>
           </div>
@@ -735,13 +743,6 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
             )}
           </div>
         </div>
-
-        {mSearch && (
-          <div className="m-search">
-            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
-            <input autoFocus placeholder="Search vendor, PO, item…" value={q} onChange={e => setQ(e.target.value.toLowerCase())} />
-          </div>
-        )}
 
         <div className="m-chips">
           {mChips.map(c => (
@@ -776,7 +777,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
             const p = row.po;
             const c = cardOf(p);
             return (
-              <button key={p.id} className={`m-pcard ${c.tone}`} onClick={() => openPO(p.id)}>
+              <button key={p.id} data-search-row={p.id} className={`m-pcard ${c.tone}`} onClick={() => openPO(p.id)}>
                 <div className="r1"><span className="v">{p.vendor}</span>{c.amtNode}</div>
                 <div className="r2">
                   <span className="po">{p.id}</span>
@@ -841,10 +842,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
         </div>
 
         <div className="tools">
-          <div className="search">
-            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
-            <input placeholder="Vendor, PO number, item, site" value={q} onChange={(e) => setQ(e.target.value.trim().toLowerCase())} />
-          </div>
+          <SearchHint label="orders" />
           <div className="chips">
             <button className={`chip${filter === 'all' ? ' on' : ''}`} onClick={() => setFilter('all')}>All <span className="n">{cAll}</span></button>
             <button className={`chip warn${filter === 'mine' ? ' on' : ''}`} onClick={() => setFilter('mine')}>To receive <span className="n">{cMine}</span></button>
@@ -898,7 +896,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
                 const siteShort = p.site.replace(' Residence', '').replace("'s", '');
                 const pend = p.approvalStatus === 'PENDING' && !p.cancelled;
                 return (
-                  <tr key={p.id} tabIndex={0} className={`${p.cancelled ? 'cancelled' : ''}${pend ? ' pending' : ''}`} onClick={() => openPO(p.id)} onKeyDown={(e) => { if (e.key === 'Enter') openPO(p.id); }}>
+                  <tr key={p.id} data-search-row={p.id} tabIndex={0} className={`${p.cancelled ? 'cancelled' : ''}${pend ? ' pending' : ''}`} onClick={() => openPO(p.id)} onKeyDown={(e) => { if (e.key === 'Enter') openPO(p.id); }}>
                     <td className="po"><b>{p.vendor}</b><span className="mono">{p.id}</span>{pend && <span className="pend">Pending approval</span>}</td>
                     <td><div className="items"><span className="t">{shown || <span className="dim">No items</span>}</span>{rest > 0 && <span className="more" onMouseEnter={(e) => showTip(e, p.id, false)} onMouseLeave={() => setTip(null)}>+{rest} item{rest > 1 ? 's' : ''}</span>}</div></td>
                     <td className="site" title={p.site}>{siteShort}</td>

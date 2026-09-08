@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useMemo, lazy, Suspense, type ReactNode, type MouseEvent, type PointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchScope } from '../components/search/searchScope';
+import SearchHint from '../components/search/SearchHint';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { resolveDocUrl } from '../lib/storage';
@@ -10,7 +12,7 @@ import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
 import { getCostCode } from '../lib/costCodes';
-import { Plus, Search, Download, Paperclip, Check, ArrowRight, ChevronRight, X, SlidersHorizontal } from 'lucide-react';
+import { Plus, Download, Paperclip, Check, ArrowRight, ChevronRight, X, SlidersHorizontal } from 'lucide-react';
 import { useIsMobile } from '../lib/useIsMobile';
 import BottomSheet from '../components/BottomSheet';
 import { WhatsAppGlyph } from '../components/day-book/atoms';
@@ -923,6 +925,15 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   const unlinkedCount = baseRows.filter(isNotLinked).length;
   const filteredTransactions = filterUnlinked ? baseRows.filter(isNotLinked) : baseRows;
 
+  // Lend the ledger to the one search: space filters these entries live, and the panel over them
+  // carries the rest of Briklay.
+  useSearchScope('Transactions', filteredTransactions.slice(0, 60).map((t: LedgerRow) => ({
+    id: t.txn_id,
+    title: t.stakeholders?.name || t.category || t.txn_id,
+    sub: `${new Date(t.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}${t.category ? ' · ' + t.category : ''}`,
+    onPick: () => navigate(`/ledger/${t.txn_id}`),
+  })), setSearchTerm);
+
   // ── Aggregations over the FULL filtered set (never the visible slice) ────────
   let monthOut = 0, monthIn = 0;
   for (const t of filteredTransactions) {
@@ -1261,10 +1272,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
 
           <span className="hidden sm:block flex-1" />
 
-          <div className="inline-flex items-center gap-2 px-3 rounded-full flex-1 sm:flex-initial" style={{ background: V.surface, border: `1px solid ${V.line}`, height: 36, minWidth: 180 }}>
-            <Search size={14} style={{ color: V.faint }} />
-            <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search payee, order, remark" className="bg-transparent text-sm outline-none flex-1 min-w-0" style={{ color: V.ink, ...font }} />
-          </div>
+          <SearchHint label="entries" />
           <button onClick={exportCSV} className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full" style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.inkSoft, ...font }}>
             <Download size={13} style={{ color: V.faint }} /> Export
           </button>
@@ -1290,11 +1298,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                     <span className="inline-flex items-center justify-center text-[11px] font-bold rounded-full" style={{ minWidth: 17, height: 17, padding: '0 5px', background: V.terra, color: '#fff' }}>{activeFilterCount}</span>
                   )}
                 </button>
-                <div className="inline-flex items-center gap-2 px-3 rounded-full flex-1 min-w-0" style={{ background: V.surface, border: `1px solid ${V.line}`, height: 40 }}>
-                  <Search size={15} style={{ color: V.faint, flexShrink: 0 }} />
-                  <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search" className="bg-transparent text-sm outline-none flex-1 min-w-0" style={{ color: V.ink, ...font }} />
-                  {searchTerm && <button onClick={() => setSearchTerm('')} aria-label="Clear search" className="shrink-0"><X size={15} style={{ color: V.faint }} /></button>}
-                </div>
+                <SearchHint label="entries" className="flex-1 min-w-0" />
                 <button onClick={exportCSV} aria-label="Export CSV" className="inline-flex items-center justify-center rounded-full shrink-0 active:scale-95 transition-transform" style={{ width: 40, height: 40, background: V.surface, border: `1px solid ${V.line}` }}>
                   <Download size={16} style={{ color: V.faint }} />
                 </button>
@@ -1458,6 +1462,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                       <div
                         key={txn.txn_id}
                         id={`ledger-txn-${txn.txn_id}`}
+                        data-search-row={txn.txn_id}
                         style={{ scrollMarginTop: 40, ...(focusTxn === txn.txn_id ? { borderRadius: 12, boxShadow: '0 0 0 2px #C8603A', transition: 'box-shadow .3s' } : {}) }}
                       >
                       <EntryRow

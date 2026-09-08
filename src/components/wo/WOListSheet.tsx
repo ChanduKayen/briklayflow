@@ -4,7 +4,9 @@
 //
 // Used by the main /work-orders page (pass projectId to scope to one project).
 import type React from 'react';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { useSearchScope } from '../search/searchScope';
+import SearchHint from '../search/SearchHint';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -268,7 +270,13 @@ export default function WOListSheet({ projectId }: { projectId?: string }) {
   const cClosed = rows.filter(closed).length;
   const footTotal = list.reduce((a, p) => a + (p.cancelled ? 0 : p.value), 0);
 
-  const openWO = (id: string) => navigate(`/work-orders/${id}`, { state: projectId ? { from: 'project', projectId } : { from: 'list' } });
+  const openWO = useCallback((id: string) => navigate(`/work-orders/${id}`, { state: projectId ? { from: 'project', projectId } : { from: 'list' } }), [navigate, projectId]);
+
+  // Lend the list to the one search. `q` is held lowercased here, so lowercase on the way in.
+  useSearchScope('Contracts', useMemo(() => list.map(p => ({
+    id: p.id, title: p.worker, sub: `${p.id}${p.site ? ' · ' + p.site : ''}`,
+    onPick: () => openWO(p.id),
+  })), [list, openWO]), (v) => setQ(v.trim().toLowerCase()));
   const onSort = (k: typeof sortK) => {
     if (sortK === k) setSortDir(d => d * -1);
     else { setSortK(k); setSortDir(k === 'issued' || k === 'value' || k === 'balance' || k === 'progress' ? -1 : 1); }
@@ -317,10 +325,7 @@ export default function WOListSheet({ projectId }: { projectId?: string }) {
         </div>
 
         <div className="tools">
-          <div className="search">
-            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
-            <input placeholder="Worker, WO number, stage, site" value={q} onChange={(e) => setQ(e.target.value.trim().toLowerCase())} />
-          </div>
+          <SearchHint label="contracts" />
           <div className="chips">
             <button className={`chip${filter === 'all' ? ' on' : ''}`} onClick={() => setFilter('all')}>All <span className="n">{cAll}</span></button>
             <button className={`chip warn${filter === 'active' ? ' on' : ''}`} onClick={() => setFilter('active')}>Active <span className="n">{cActive}</span></button>
@@ -351,7 +356,7 @@ export default function WOListSheet({ projectId }: { projectId?: string }) {
                 const rest = Math.max(0, p.stages.length - 2);
                 const siteShort = p.site.replace(' Residence', '').replace("'s", '');
                 return (
-                  <tr key={p.id} tabIndex={0} className={p.cancelled ? 'cancelled' : ''} onClick={() => openWO(p.id)} onKeyDown={(e) => { if (e.key === 'Enter') openWO(p.id); }}>
+                  <tr key={p.id} data-search-row={p.id} tabIndex={0} className={p.cancelled ? 'cancelled' : ''} onClick={() => openWO(p.id)} onKeyDown={(e) => { if (e.key === 'Enter') openWO(p.id); }}>
                     <td className="po"><b>{p.worker}</b><span className="mono">{p.id}</span></td>
                     <td><div className="items"><span className="t">{shown || <span className="dim">No stages</span>}</span>{rest > 0 && <span className="more" onMouseEnter={(e) => showTip(e, p.id)} onMouseLeave={() => setTip(null)}>+{rest} stage{rest > 1 ? 's' : ''}</span>}</div></td>
                     <td className="site" title={p.site}>{siteShort}</td>

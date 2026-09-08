@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useSearchScope } from '../components/search/searchScope';
+import SearchHint from '../components/search/SearchHint';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { Session } from '@supabase/supabase-js'
 import type { Project } from '../types'
@@ -33,6 +35,7 @@ function ProjectCard({
   canManage,
   onEdit,
   onDelete,
+  searchRowId,
 }: {
   project: Project
   stats: { spent: number; txnCount: number } | undefined
@@ -40,6 +43,8 @@ function ProjectCard({
   canManage: boolean
   onEdit: () => void
   onDelete: () => void
+  /** Marks the card so the one search can light it up and scroll to it. */
+  searchRowId?: string
 }) {
   const navigate = useNavigate()
   const [hovered, setHovered] = useState(false)
@@ -49,6 +54,7 @@ function ProjectCard({
 
   return (
     <div
+      data-search-row={searchRowId}
       style={{
         background: '#ffffff',
         borderRadius: 20,
@@ -391,7 +397,14 @@ export default function Projects({ session }: { session: Session }) {
     onError: (e: any) => showSnackbar(e.message || 'Could not delete the project', { type: 'error' }),
   })
 
-  const filtered = filter === 'all' ? projects : projects.filter(p => p.status === filter)
+  const [q, setQ] = useState('')
+  const filtered = (filter === 'all' ? projects : projects.filter(p => p.status === filter))
+    .filter(p => !q || `${p.name} ${p.status ?? ''}`.toLowerCase().includes(q.toLowerCase()))
+
+  useSearchScope('Sites', filtered.map(p => ({
+    id: p.project_id, title: p.name, sub: p.status || '',
+    onPick: () => navigate(`/projects/${p.project_id}`),
+  })), setQ)
   const counts = {
     all:       projects.length,
     Active:    projects.filter(p => p.status === 'Active').length,
@@ -461,6 +474,7 @@ export default function Projects({ session }: { session: Session }) {
               </button>
             )
           })}
+          <span style={{ marginLeft: 'auto' }}><SearchHint label="sites" /></span>
         </div>
       )}
 
@@ -490,6 +504,7 @@ export default function Projects({ session }: { session: Session }) {
           {filtered.map(p => (
             <ProjectCard
               key={p.project_id}
+              searchRowId={p.project_id}
               project={p}
               stats={projectStats[p.project_id]}
               woCount={openWOs[p.project_id] ?? 0}
