@@ -59,6 +59,7 @@ const PurchaseOrders = lazy(loadPurchaseOrders);
 const Attendance = lazy(() => import('./pages/Attendance'));
 const Payables = lazy(loadPayables);
 const Bills = lazy(() => import('./pages/Bills'));
+const BillDetailPage = lazy(() => import('./pages/Bills').then((m) => ({ default: m.BillDetailPage })));
 const NewPurchaseOrder = lazy(() => import('./pages/NewPurchaseOrder'));
 const PurchaseOrderDetail = lazy(() => import('./pages/PurchaseOrderDetail'));
 const RfqCompare = lazy(() => import('./pages/RfqCompare'));
@@ -613,7 +614,7 @@ function App() {
           <Route path="/attendance" element={<Attendance session={session} />} />
           <Route path="/payables" element={<Payables session={session} />} />
           <Route path="/bills" element={<Bills />} />
-          <Route path="/bills/:billId" element={<Bills />} />
+          <Route path="/bills/:billId" element={<BillDetailPage />} />
           <Route path="/rfq/:rfqId" element={<RfqCompare session={session} />} />
           <Route path="/inward-register" element={<InwardRegister session={session} />} />
           <Route path="/team" element={<Team session={session} />} />

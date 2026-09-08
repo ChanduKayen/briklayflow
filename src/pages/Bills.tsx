@@ -154,12 +154,16 @@ interface QItem {
 }
 let qseq = 0;
 
+// The /bills/:billId route — a SEPARATE component from the list so React never reuses one instance
+// across the two routes (which changed the hook count and crashed with "fewer hooks than expected").
+export function BillDetailPage() {
+  const { billId } = useParams();
+  return <BillDetailView id={decodeURIComponent(billId ?? '')} />;
+}
+
 // ── list ───────────────────────────────────────────────────────────────────
 export default function Bills() {
   const navigate = useNavigate();
-  const { billId } = useParams();
-  if (billId) return <BillDetailView id={decodeURIComponent(billId)} />;
-
   const qc = useQueryClient();
   const orgId = useOrgId();
   const { userId } = useAuth();
