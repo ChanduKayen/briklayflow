@@ -55,12 +55,14 @@ export async function intakeCommit(ctx: IntakeContext, extracted: ExtractedBill,
   // Dedupe on the full fingerprint (number OR amount+date), so a bill with no readable number is
   // still caught by the amount/date fallback — not only when a number was extracted.
   if (!opts?.allowDuplicate) {
-    const dup = await findDuplicateBill(vendorId, { billNo: extracted.billNo, amount: extracted.amount, billDate: extracted.billDate });
+    // Fingerprint the document org-wide (number OR header-name+amount+date OR amount+date), so the same
+    // paper is caught even when this door and another linked it to different vendor rows.
+    const dup = await findDuplicateBill({ orgId: ctx.orgId, billNo: extracted.billNo, amount: extracted.amount, billDate: extracted.billDate, vendorName: extracted.vendor });
     if (dup) return { status: 'duplicate', existing: dup, extracted };
   }
   const billId = await createBill({
     orgId: ctx.orgId, stakeholderId: vendorId, projectId: ctx.projectId ?? null, poId: ctx.poId ?? null,
-    billNo: extracted.billNo, billDate: extracted.billDate, amount: extracted.amount, lines: extracted.lines,
+    billNo: extracted.billNo, billDate: extracted.billDate, amount: extracted.amount, vendorName: extracted.vendor, lines: extracted.lines,
     createdBy: ctx.createdBy ?? null, createdByName: ctx.createdByName ?? null, file: ctx.file,
   });
   return { status: 'minted', billId, extracted };

@@ -332,6 +332,7 @@ export default function Bills() {
       {current && (
         <ConfirmBillSheet
           key={current.id}
+          orgId={orgId}
           item={current}
           vendors={vendorList as { stakeholder_id: string; name: string }[]}
           projects={projectList as { project_id: string; name: string }[]}
@@ -348,8 +349,8 @@ export default function Bills() {
 
 // Confirm sheet — after a bill is read, name the vendor & site, check the figures, warn on a duplicate,
 // then mint. One sheet at a time; the queue feeds the next 'ready' item in behind it.
-function ConfirmBillSheet({ item, vendors, projects, queueCount, onPatch, onCancel, onOpenBill, onConfirm }: {
-  item: QItem; vendors: { stakeholder_id: string; name: string }[]; projects: { project_id: string; name: string }[];
+function ConfirmBillSheet({ orgId, item, vendors, projects, queueCount, onPatch, onCancel, onOpenBill, onConfirm }: {
+  orgId: string; item: QItem; vendors: { stakeholder_id: string; name: string }[]; projects: { project_id: string; name: string }[];
   queueCount: number; onPatch: (p: Partial<QItem>) => void; onCancel: () => void; onOpenBill: (id: string) => void; onConfirm: (vendorId: string, projectId: string | null, allowDuplicate: boolean) => void;
 }) {
   const [vendorId, setVendorId] = useState<string>('');
@@ -366,15 +367,16 @@ function ConfirmBillSheet({ item, vendors, projects, queueCount, onPatch, onCanc
     if (hit) { setVendorId(hit.stakeholder_id); setVq(hit.name); }
   }, [item.vendorName, vendors, vendorId]);
 
-  // Already on file for this vendor? Check the full fingerprint (number OR amount+date), so a bill with
-  // no readable number is still caught — warn before minting.
+  // Already on file ANYWHERE in the org? Fingerprint the document itself — number, or header name +
+  // amount + date, or amount + date — not the vendor we happen to link, so the same paper is caught even
+  // if another door linked it to a different vendor. Runs before a vendor is picked; warns, never blocks.
   useEffect(() => {
     setDup(null); setDupAck(false);
-    if (!vendorId) return;
+    if (!(item.amount > 0) && !item.billNo) return;
     let live = true;
-    findDuplicateBill(vendorId, { billNo: item.billNo, amount: item.amount, billDate: item.billDate }).then(d => { if (live) setDup(d); });
+    findDuplicateBill({ orgId, billNo: item.billNo, amount: item.amount, billDate: item.billDate, vendorName: item.vendorName }).then(d => { if (live) setDup(d); });
     return () => { live = false; };
-  }, [vendorId, item.billNo, item.amount, item.billDate]);
+  }, [orgId, item.billNo, item.amount, item.billDate, item.vendorName]);
 
   const matches = vq.trim() ? searchPayees(vendors as any, vq).slice(0, 6) : vendors.slice(0, 6);
   const canSave = !!vendorId && item.amount > 0 && (!dup || dupAck);
@@ -412,7 +414,7 @@ function ConfirmBillSheet({ item, vendors, projects, queueCount, onPatch, onCanc
           <div className="fld"><label>Amount</label><input className="mono" inputMode="numeric" value={item.amount ? String(item.amount) : ''} placeholder="0" onChange={(e) => onPatch({ amount: parseInt(e.target.value.replace(/[^\d]/g, ''), 10) || 0 })} /></div>
           {dup && (
             <div className="dupwarn" style={{ flexDirection: 'column', gap: 8, alignItems: 'stretch' }}>
-              <span><b>This bill already exists.</b> {dup.billNo ? <>No. <b>{dup.billNo}</b> </> : null}for this vendor is already on file{dup.amount ? <> ({inr(dup.amount)}{dup.billDate ? `, ${fmtDate(dup.billDate)}` : ''})</> : ''}.</span>
+              <span><b>This bill already exists.</b> {dup.billNo ? <>No. <b>{dup.billNo}</b> </> : null}{dup.vendorName ? <>under <b>{dup.vendorName}</b> </> : null}is already on file{dup.amount ? <> ({inr(dup.amount)}{dup.billDate ? `, ${fmtDate(dup.billDate)}` : ''})</> : ''}{dup.via === 'amount' ? <> — same amount &amp; date</> : null}.</span>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <button type="button" className="btn-prim" style={{ padding: '6px 12px' }} onClick={() => onOpenBill(dup.id)}>Open the existing bill →</button>
                 <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: '.8rem', cursor: 'pointer' }}>
