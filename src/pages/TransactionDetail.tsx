@@ -12,7 +12,8 @@ import { DocThumb } from '../components/DocThumb';
 import { autoCloseWOIfFullyPaid } from '../lib/woAutoClose';
 import jsPDF from 'jspdf';
 import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
-import { AttachBillSheet } from '../components/txn-ledger/AttachBillSheet';
+import { BillAllocateSheet } from '../components/txn-ledger/BillAllocateSheet';
+import { useOrgId } from '../lib/auth/AuthProvider';
 import { ContractHub, CONTRACT_HUB_CSS } from '../components/txn-ledger/ContractHub';
 import { useIsMobile } from '../lib/useIsMobile';
 import { createPortal } from 'react-dom';
@@ -468,6 +469,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
   const focusProjectId = searchParams.get('project');
   const navState = (location.state as { from?: string; projectId?: string; projectName?: string; backTo?: string; backLabel?: string }) || {};
   const qc = useQueryClient();
+  const orgId = useOrgId();
 
   const { data: profile } = useUserProfile(session.user.id);
 
@@ -760,7 +762,8 @@ export default function TransactionDetail({ session }: { session: Session }) {
   const allAllocs = primaryAlloc ? [primaryAlloc, ...secondaryAllocs] : (allocs || []);
   const billLinked = !!primaryAlloc?.order_type || !!txn.bill_doc_url;
   const rupee = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
-  const openPicker = (allocId: string) => { setPickerStep('menu'); setMappingAllocId(allocId); };
+  // (vendor bill attach now routes to BillAllocateSheet; the old inline PO picker below is inert)
+  void setPickerStep; void setMappingAllocId;
   const openLightbox = (url: string, title: string) => { setLightboxTitle(title); setLightboxUrl(url); };
 
   // Per-allocation link status (mirrors the desktop allocation cell), for the mobile card.
@@ -1007,8 +1010,8 @@ export default function TransactionDetail({ session }: { session: Session }) {
                           <span className="pickwrap">
                             {isVendor
                               ? (hasBill
-                                ? <button className="ghost" onClick={() => openPicker(a.allocation_id)}>Change</button>
-                                : <button className="linkbtn" onClick={() => openPicker(a.allocation_id)}>Attach bill</button>)
+                                ? <button className="ghost" onClick={() => setAttachBill({ file: null, mode: 'upload' })}>Change</button>
+                                : <button className="linkbtn" onClick={() => setAttachBill({ file: null, mode: 'upload' })}>Attach bill</button>)
                               : (hasBill
                                 ? <button className="ghost" onClick={() => setContractHubOpen(true)}>Change</button>
                                 : <button className="linkbtn" onClick={() => setContractHubOpen(true)}>Link to contract</button>)}
@@ -1353,7 +1356,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
           <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(94vw, 480px)', borderRadius: 16, overflow: 'hidden', background: '#FFFCF7', border: '1px solid #E7DCC9', boxShadow: '0 24px 60px rgba(30,26,21,0.22)' }}>
             {contractHubOpen
               ? <ContractHub txn={trackTxn} onClose={() => setContractHubOpen(false)} onLinked={() => { afterAttach(); setContractHubOpen(false); }} />
-              : <AttachBillSheet txn={trackTxn} initialFile={attachBill?.file} mode={attachBill?.mode} onClose={() => setAttachBill(null)} onLinked={() => { afterAttach(); setAttachBill(null); }} />}
+              : <BillAllocateSheet txnId={txnId!} orgId={orgId} stakeholderId={txn.stakeholder_id} vendorName={payeeName} amount={Number(effective.total_amount) || 0} defaultProjectId={primaryAlloc?.project_id ?? null} onClose={() => setAttachBill(null)} onDone={() => { afterAttach(); }} />}
           </div>
         </div>
       )}

@@ -1,0 +1,198 @@
+/**
+ * BillAllocateSheet — attach a vendor payment to its BILLS (the payment→bill allocation writer).
+ *
+ * Doctrine (payments settle bills, not POs):
+ *   · shows the vendor's unpaid bills with remaining amounts;
+ *   · exact-match (payment == one bill's remaining) pre-selects it;
+ *   · multi-select to clear several bills with one payment; partial when the payment is smaller;
+ *   · "Upload a new one" mid-payment — vendor already known, so extract → mint → allocate in one motion;
+ *   · "No bill" is a legal exit — the remainder is the without-bills bucket, untouched;
+ *   · advance against an order → an optional inert "towards PO-xxx" memo (tracking, never a money link).
+ *
+ * Writes via set_txn_allocations (complete-set replace; parts sum to the txn total).
+ */
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { X, FileText, Plus, Loader2, Check } from 'lucide-react';
+import { V, font } from './ledgerTokens';
+import {
+  loadUnpaidBillsForVendor, extractBill, createBill, findDuplicateBill, saveBillAllocations, setAdvanceMemo,
+  type UnpaidBill, type DuplicateBill,
+} from '../../lib/billsApi';
+
+const num = (n: unknown) => Number(n) || 0;
+const inr = (n: number) => '₹' + Math.round(num(n)).toLocaleString('en-IN');
+const errMsg = (e: unknown) => (e instanceof Error ? e.message : '') || 'Something went wrong';
+
+export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amount, defaultProjectId, onClose, onDone }: {
+  txnId: string; orgId: string; stakeholderId: string; vendorName: string; amount: number;
+  defaultProjectId: string | null; onClose: () => void; onDone: () => void;
+}) {
+  const [bills, setBills] = useState<UnpaidBill[] | null>(null);
+  const [sel, setSel] = useState<Record<string, number>>({});     // billId → amount allocated
+  const [advanceMemoOn, setAdvanceMemoOn] = useState(false);
+  const [poMemo, setPoMemo] = useState('');
+  const [busy, setBusy] = useState<'idle' | 'reading' | 'saving' | 'done'>('idle');
+  const [err, setErr] = useState<string | null>(null);
+  const [dup, setDup] = useState<{ file: string; d: DuplicateBill } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  // Load the vendor's unpaid bills; pre-select on an exact remaining match.
+  useEffect(() => {
+    let live = true;
+    loadUnpaidBillsForVendor(stakeholderId).then(bs => {
+      if (!live) return;
+      setBills(bs);
+      const exact = bs.find(b => Math.abs(b.remaining - amount) < 1);
+      if (exact) setSel({ [exact.id]: exact.remaining });
+    }).catch(e => { if (live) setErr(errMsg(e)); });
+    return () => { live = false; };
+  }, [stakeholderId, amount]);
+
+  const allocated = useMemo(() => Object.values(sel).reduce((s, v) => s + num(v), 0), [sel]);
+  const remainder = Math.round((amount - allocated) * 100) / 100;
+  const over = allocated > amount + 0.5;
+
+  const toggle = (b: UnpaidBill) => {
+    setSel(s => {
+      if (s[b.id] != null) { const n = { ...s }; delete n[b.id]; return n; }
+      const leftover = Math.max(0, amount - Object.values(s).reduce((x, v) => x + num(v), 0));
+      return { ...s, [b.id]: Math.min(b.remaining, leftover) || b.remaining };
+    });
+  };
+  const setAmt = (b: UnpaidBill, v: number) => setSel(s => ({ ...s, [b.id]: Math.max(0, Math.min(b.remaining, v)) }));
+
+  // Upload a new bill mid-payment — vendor known, so extract → dup-check → mint → select it.
+  const onUpload = async (file: File) => {
+    setErr(null); setBusy('reading');
+    try {
+      const ex = await extractBill(file);
+      if (ex.billNo) {
+        const d = await findDuplicateBill(stakeholderId, ex.billNo);
+        if (d) { setDup({ file: file.name, d }); /* still mint below unless they cancel? keep simple: warn + proceed */ }
+      }
+      const billId = await createBill({
+        orgId, stakeholderId, projectId: defaultProjectId, billNo: ex.billNo, billDate: ex.billDate,
+        amount: ex.amount, lines: ex.lines, file,
+      });
+      const remaining = ex.amount;
+      const newBill: UnpaidBill = { id: billId, billNo: ex.billNo, billDate: ex.billDate, amount: ex.amount, paid: 0, remaining, projectId: defaultProjectId, site: null };
+      setBills(bs => [newBill, ...(bs ?? [])]);
+      const leftover = Math.max(0, amount - allocated);
+      setSel(s => ({ ...s, [billId]: Math.min(remaining, leftover) || remaining }));
+      setBusy('idle');
+    } catch (e) { setErr(errMsg(e)); setBusy('idle'); }
+  };
+
+  const confirm = async () => {
+    if (over) return;
+    setBusy('saving'); setErr(null);
+    try {
+      const picks = Object.entries(sel).filter(([, v]) => num(v) > 0).map(([billId, v]) => {
+        const b = bills?.find(x => x.id === billId);
+        return { billId, projectId: b?.projectId ?? defaultProjectId, amount: num(v) };
+      });
+      await saveBillAllocations(txnId, orgId, amount, picks, defaultProjectId);
+      if (advanceMemoOn && poMemo.trim()) await setAdvanceMemo(txnId, poMemo.trim());
+      setBusy('done');
+      onDone();
+      window.setTimeout(onClose, 700);
+    } catch (e) { setErr(errMsg(e)); setBusy('saving' === busy ? 'idle' : 'idle'); setBusy('idle'); }
+  };
+
+  const noBills = bills && bills.length === 0;
+
+  return (
+    <div style={{ ...font }}>
+      <div className="flex items-start justify-between px-4 pt-4 pb-3" style={{ borderBottom: `1px solid ${V.line}` }}>
+        <div className="min-w-0">
+          <p className="text-[15px] font-semibold" style={{ color: V.ink }}>Attach bill</p>
+          <p className="text-[12px] mt-0.5 truncate" style={{ color: V.sys }}>Paying {vendorName} · <span style={{ color: V.ink, fontWeight: 600 }}>{inr(amount)}</span></p>
+        </div>
+        <button onClick={onClose} className="p-1.5 rounded-lg shrink-0" style={{ color: V.faint }} aria-label="Close"><X size={16} /></button>
+      </div>
+
+      <div className="px-4 py-3.5" style={{ maxHeight: '62vh', overflowY: 'auto' }}>
+        <input ref={fileRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void onUpload(f); }} />
+
+        {bills == null ? (
+          <div className="inline-flex items-center gap-2 text-[13px] py-4" style={{ color: V.sys }}><Loader2 size={15} className="animate-spin" /> Loading {vendorName}&apos;s bills…</div>
+        ) : (
+          <>
+            {noBills
+              ? <p className="text-[12.5px] mb-2" style={{ color: V.sys }}>No unpaid bills for {vendorName} yet. Upload the bill this payment is for, or record it as an advance.</p>
+              : <p className="text-[13px] font-medium mb-2" style={{ color: V.ink }}>Which bill{bills.length > 1 ? 's' : ''} is this payment for?</p>}
+
+            <div className="space-y-1.5">
+              {bills.map(b => {
+                const on = sel[b.id] != null;
+                return (
+                  <div key={b.id} className="rounded-xl" style={{ background: V.surface, border: `1px solid ${on ? V.terra : V.line}`, transition: 'border-color .15s' }}>
+                    <button type="button" onClick={() => toggle(b)} className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left">
+                      <span className="grid place-items-center rounded-md shrink-0" style={{ width: 18, height: 18, border: `1.5px solid ${on ? V.terra : V.faint}`, background: on ? V.terra : 'transparent' }}>{on && <Check size={12} style={{ color: '#fff' }} />}</span>
+                      <FileText size={15} className="shrink-0" style={{ color: V.faint }} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[12.5px] font-medium truncate" style={{ color: V.ink }}>{b.billNo ? `#${b.billNo}` : 'Bill'}{b.site ? ` · ${b.site}` : ''}</span>
+                        <span className="block text-[11px] truncate" style={{ color: V.faint }}>{inr(b.remaining)} remaining{b.paid > 0.5 ? ` · ${inr(b.paid)} paid of ${inr(b.amount)}` : ''}</span>
+                      </span>
+                    </button>
+                    {on && (
+                      <div className="flex items-center gap-2 px-3 pb-2.5" style={{ marginLeft: 28 }}>
+                        <span className="text-[11.5px]" style={{ color: V.sys }}>Apply</span>
+                        <span className="inline-flex items-center rounded-lg px-2" style={{ border: `1px solid ${V.line}`, background: V.field }}>
+                          <span className="text-[12px]" style={{ color: V.faint }}>₹</span>
+                          <input inputMode="numeric" value={String(Math.round(sel[b.id]))} onChange={(e) => setAmt(b, parseInt(e.target.value.replace(/[^\d]/g, ''), 10) || 0)}
+                            className="bg-transparent outline-none text-[12.5px] py-1 w-20 text-right" style={{ color: V.ink, fontVariantNumeric: 'tabular-nums' }} />
+                        </span>
+                        {sel[b.id] < b.remaining - 0.5 && <span className="text-[11px]" style={{ color: V.faint }}>partial</span>}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* upload a new bill for this payment */}
+            <button type="button" onClick={() => fileRef.current?.click()} disabled={busy === 'reading'}
+              className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-left db-attach-row mt-2"
+              style={{ background: V.surface, border: `1px dashed ${V.askLine}` }}>
+              {busy === 'reading' ? <Loader2 size={15} className="animate-spin shrink-0" style={{ color: V.terraDeep }} /> : <Plus size={15} className="shrink-0" style={{ color: V.terraDeep }} />}
+              <span className="text-[12.5px] font-semibold" style={{ color: V.terraDeep }}>{busy === 'reading' ? 'Reading the bill…' : 'Upload a new bill for this payment'}</span>
+            </button>
+
+            {dup && (
+              <p className="text-[11.5px] mt-2" style={{ color: V.terraDeep }}>Heads up — {vendorName} already has a bill {dup.d.billNo ? <>no. <b>{dup.d.billNo}</b> </> : ''}on file{dup.d.amount ? ` (${inr(dup.d.amount)})` : ''}. Added anyway; remove it from Bills if it&apos;s the same one.</p>
+            )}
+
+            {/* advance memo */}
+            {remainder > 0.5 && (
+              <div className="mt-3 rounded-xl px-3 py-2.5" style={{ background: V.field, border: `1px solid ${V.line}` }}>
+                <p className="text-[12px]" style={{ color: V.sys }}>{inr(remainder)} of this payment isn&apos;t on a bill — it stays as an advance to {vendorName}.</p>
+                <label className="flex items-center gap-2 mt-2 text-[12px]" style={{ color: V.ink }}>
+                  <input type="checkbox" checked={advanceMemoOn} onChange={(e) => setAdvanceMemoOn(e.target.checked)} style={{ accentColor: V.terra }} />
+                  Note it&apos;s towards an order (tracking only)
+                </label>
+                {advanceMemoOn && (
+                  <input value={poMemo} onChange={(e) => setPoMemo(e.target.value)} placeholder="PO-… (optional memo, not a money link)"
+                    className="w-full mt-2 rounded-lg px-2.5 py-1.5 text-[12.5px] outline-none" style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.ink }} />
+                )}
+              </div>
+            )}
+
+            {err && <p className="text-[12.5px] mt-2" style={{ color: V.terra }}>{err}</p>}
+            {over && <p className="text-[12.5px] mt-2" style={{ color: V.terra }}>That&apos;s {inr(allocated - amount)} more than the payment — trim a bill.</p>}
+          </>
+        )}
+      </div>
+
+      <div className="flex items-center justify-between gap-3 px-4 py-3" style={{ borderTop: `1px solid ${V.line}` }}>
+        <span className="text-[12px]" style={{ color: V.sys }}>
+          {allocated > 0.5 ? <><b style={{ color: V.ink }}>{inr(allocated)}</b> on bills{remainder > 0.5 ? ` · ${inr(remainder)} advance` : ''}</> : 'No bill — records as an advance'}
+        </span>
+        <button type="button" onClick={() => void confirm()} disabled={over || busy === 'saving' || busy === 'reading'}
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-[13px] font-semibold" style={{ background: V.terra, color: '#fff', opacity: (over || busy === 'saving' || busy === 'reading') ? 0.5 : 1 }}>
+          {busy === 'saving' ? <><Loader2 size={14} className="animate-spin" /> Saving…</> : busy === 'done' ? <><Check size={14} /> Done</> : allocated > 0.5 ? 'Attach' : 'Record advance'}
+        </button>
+      </div>
+    </div>
+  );
+}

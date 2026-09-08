@@ -16,6 +16,7 @@ import PhoneInput from '../components/PhoneInput';
 import { getCostCode, costCodeLabel, ALL_COST_CODES, GEN_HEADS, GEN_FALLBACK } from '../lib/costCodes';
 import { autoCloseWOIfFullyPaid } from '../lib/woAutoClose';
 import { readVendorBill, findPOsByBill, type BillPOMatch } from '../lib/vendorTrackingApi';
+import { BillAllocateSheet } from '../components/txn-ledger/BillAllocateSheet';
 
 // ── New Transaction UI redesign — four-voice + money-direction tokens ──────────
 // Visual only (NewTransaction_v1.jsx reference). Applied via inline styles; never
@@ -546,6 +547,8 @@ export default function NewTransaction({ session: _session }: { session: Session
   const [stkId, setStkId]     = useState(initialStakeholderId);
   const [stkSearch, setStkSearch] = useState(initialStkName);
   const [showSug, setShowSug] = useState(false);
+  // A vendor payment's bill picker, opened on the just-saved txn before the create flow continues.
+  const [postSaveBill, setPostSaveBill] = useState<{ txnId: string; amount: number; stakeholderId: string; vendorName: string; projectId: string | null; after: () => void } | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   // The quick-add now owns the "what is this" choice (was inferred from the top-level txnType) — so
   // it stays correct once the top-level selector collapses into in/out. Vendor/Worker create a
@@ -953,6 +956,19 @@ export default function NewTransaction({ session: _session }: { session: Session
       if (autoCloseWoId) autoCloseWOIfFullyPaid(autoCloseWoId, qc);
       const stk = stakeholders?.find((s) => s.stakeholder_id === stkId);
       if (stk) setRecentPayees((prev) => [{ id: stk.stakeholder_id, name: stk.name, type: stk.type }, ...prev.filter((p) => p.id !== stk.stakeholder_id)].slice(0, 5));
+      // A vendor payment finishes by attaching its bill(s) — the picker opens on the just-saved txn,
+      // and the normal continuation (reset / navigate) runs when it's closed.
+      if (stk?.type === 'Vendor' && stkId && (Number(totalAmt) || 0) > 0) {
+        setPostSaveBill({ txnId: savedId, amount: Number(totalAmt) || 0, stakeholderId: stkId, vendorName: stk.name, projectId: allocs[0]?.project_id || null, after: () => runAfterSave(savedId, saveMode) });
+        return;
+      }
+      runAfterSave(savedId, saveMode);
+    },
+  });
+
+  // The post-save continuation (extracted so the bill picker can run before it for vendor payments).
+  const runAfterSave = (savedId: string, saveMode: 'exit' | 'new') => {
+    {
       if (saveMode === 'exit') {
         navigate(initialProjectId ? `/projects/${initialProjectId}/transactions` : '/ledger');
       } else {
@@ -973,8 +989,8 @@ export default function NewTransaction({ session: _session }: { session: Session
         showSnackbar(`${savedId} saved`, { action: { label: 'View', onClick: () => navigate(`/ledger/${savedId}`) } });
         setTimeout(() => document.getElementById('txn-amount-input')?.focus(), 80);
       }
-    },
-  });
+    }
+  };
 
   const addAlloc = () => setAllocs((prev) => [...prev, { id: Math.random().toString(), project_id: '', order_type: '', order_ref: '', milestone_id: '', allocated_amount: 0 }]);
   const rmAlloc = (id: string) => setAllocs((prev) => prev.filter((a) => a.id !== id));
@@ -1935,10 +1951,10 @@ export default function NewTransaction({ session: _session }: { session: Session
                         />
                       )}
 
-                      {/* ── Link hub — the ledger's "link vs one-time" gate, adapted to this page.
-                           Worker → contract; Material → order. Reuses LinkingPanel + `skipped`
-                           (= one-time / not linked). Shown once a project AND payee are chosen. ── */}
-                      {!splitMode && txnType !== 'expense' && a.project_id && stkId && (() => {
+                      {/* ── Link hub — WORKER contract linking only. Vendor/material payments no longer
+                           attach a PO here: they settle BILLS, attached right after save via the bill
+                           picker (BillAllocateSheet). Reuses LinkingPanel + `skipped` for workers. ── */}
+                      {!splitMode && txnType === 'worker' && a.project_id && stkId && (() => {
                         const isWorker = txnType === 'worker';
                         // Worker not on a contract = a one-time labour payment; a material buy not
                         // raised against a PO = a "direct purchase" (the accounting-sound term).
@@ -2617,6 +2633,20 @@ export default function NewTransaction({ session: _session }: { session: Session
           </div>
         </div>
       </div>
+
+      {postSaveBill && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(30,26,21,0.35)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '6vh 16px', overflow: 'auto' }}
+          onClick={() => { const a = postSaveBill.after; setPostSaveBill(null); a(); }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(94vw, 480px)', borderRadius: 16, overflow: 'hidden', background: '#FFFCF7', border: '1px solid #E7DCC9', boxShadow: '0 24px 60px rgba(30,26,21,0.22)' }}>
+            <BillAllocateSheet
+              txnId={postSaveBill.txnId} orgId={orgId} stakeholderId={postSaveBill.stakeholderId}
+              vendorName={postSaveBill.vendorName} amount={postSaveBill.amount} defaultProjectId={postSaveBill.projectId}
+              onClose={() => { const a = postSaveBill.after; setPostSaveBill(null); a(); }}
+              onDone={() => { qc.invalidateQueries({ queryKey: ['bills'] }); }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

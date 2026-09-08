@@ -68,8 +68,14 @@ export async function loadBills(): Promise<BillRow[]> {
   const stkName: Record<string, string> = {}; (stkR.data ?? []).forEach((s: any) => { stkName[s.stakeholder_id] = s.name; });
   const projName: Record<string, string> = {}; (projR.data ?? []).forEach((p: any) => { projName[p.project_id] = p.name; });
 
-  // Payments allocated to each PO (non-voided) — for both the fallback PO-bills and PO-linked bills.
-  const poIds = [...new Set([...pos.map(p => p.po_id), ...billRows.map(b => b.po_id).filter(Boolean)])];
+  // Per-bill paid — the RECORDED fact: payment→bill allocations (bill_id), non-voided.
+  const paidByBill: Record<string, number> = {};
+  if (billRows.length) {
+    const bR = await supabase.from('txn_allocations').select('bill_id, allocated_amount, transactions(status)').in('bill_id', billRows.map(b => b.id));
+    (bR.data ?? []).forEach((a: any) => { if (a.transactions?.status === 'Voided' || !a.bill_id) return; paidByBill[a.bill_id] = (paidByBill[a.bill_id] || 0) + num(a.allocated_amount); });
+  }
+  // Payments allocated to each PO (non-voided) — only the fallback PO-bills still settle via the PO.
+  const poIds = [...new Set(pos.map(p => p.po_id))];
   const paidByPo: Record<string, number> = {};
   if (poIds.length) {
     const alR = await supabase.from('txn_allocations').select('order_ref, allocated_amount, transactions(status)').eq('order_type', 'PO').in('order_ref', poIds);
@@ -92,10 +98,10 @@ export async function loadBills(): Promise<BillRow[]> {
   }
 
   const rows: BillRow[] = [];
-  // First-class bills.
+  // First-class bills — paid from recorded payment→bill allocations.
   for (const b of billRows) {
     const amount = num(b.amount);
-    const paid = b.po_id ? Math.min(amount, paidByPo[b.po_id] || 0) : 0;   // payments settle via the PO until payment→bill lands
+    const paid = Math.min(amount, paidByBill[b.id] || 0);
     rows.push({
       id: `bl~${b.id}`, kind: 'po', vendorId: b.stakeholder_id ?? null, vendor: stkName[b.stakeholder_id] || 'Vendor',
       billNo: b.bill_no || null, billDate: b.bill_date || (b.created_at ? String(b.created_at).slice(0, 10) : null),
@@ -140,13 +146,13 @@ export async function loadBillDetail(id: string): Promise<BillDetail | null> {
     const [stk, proj, alR] = await Promise.all([
       supabase.from('stakeholders').select('name').eq('stakeholder_id', b.stakeholder_id).maybeSingle(),
       b.project_id ? supabase.from('projects').select('name').eq('project_id', b.project_id).maybeSingle() : Promise.resolve({ data: null } as any),
-      b.po_id ? supabase.from('txn_allocations').select('allocated_amount, transactions(txn_id, date, payment_mode, status)').eq('order_type', 'PO').eq('order_ref', b.po_id) : Promise.resolve({ data: [] } as any),
+      supabase.from('txn_allocations').select('allocated_amount, transactions(txn_id, date, payment_mode, status)').eq('bill_id', ref),
     ]);
     const allocs = ((alR.data ?? []) as any[]).filter(a => a.transactions?.status !== 'Voided');
     const payments: BillPayment[] = allocs.map(a => ({ txnId: a.transactions?.txn_id, date: a.transactions?.date ?? null, mode: a.transactions?.payment_mode ?? null, amount: num(a.allocated_amount) }))
       .sort((x, y) => (x.date || '').localeCompare(y.date || ''));
     const amount = num(b.amount);
-    const paid = b.po_id ? Math.min(amount, payments.reduce((s, x) => s + x.amount, 0)) : 0;
+    const paid = Math.min(amount, payments.reduce((s, x) => s + x.amount, 0));
     const lines: BillLine[] = Array.isArray(b.lines) ? b.lines.map((l: any) => ({
       name: l.name ?? l.item ?? '—', spec: l.spec ?? null, unit: l.unit ?? null, qty: num(l.qty), rate: num(l.rate), amount: num(l.amount) || num(l.qty) * num(l.rate),
     })) : [];
@@ -258,6 +264,49 @@ export async function createBill(input: NewBillInput): Promise<string> {
   }).select('id').single();
   if (error) throw error;
   return (data as any).id;
+}
+
+// ── payment → bill allocation (the tx "attach bill" picker) ────────────────────
+export interface UnpaidBill { id: string; billNo: string | null; billDate: string | null; amount: number; paid: number; remaining: number; projectId: string | null; site: string | null }
+
+// A vendor's bills that still have something owed — the picker's menu, with remaining per bill.
+export async function loadUnpaidBillsForVendor(stakeholderId: string): Promise<UnpaidBill[]> {
+  const [bR, projR] = await Promise.all([
+    supabase.from('bills').select('id, project_id, bill_no, bill_date, amount, created_at').eq('stakeholder_id', stakeholderId),
+    supabase.from('projects').select('project_id, name'),
+  ]);
+  const rows = (bR.data ?? []) as any[];
+  if (!rows.length) return [];
+  const projName: Record<string, string> = {}; (projR.data ?? []).forEach((p: any) => { projName[p.project_id] = p.name; });
+  const paidByBill: Record<string, number> = {};
+  const alR = await supabase.from('txn_allocations').select('bill_id, allocated_amount, transactions(status)').in('bill_id', rows.map(b => b.id));
+  (alR.data ?? []).forEach((a: any) => { if (a.transactions?.status === 'Voided' || !a.bill_id) return; paidByBill[a.bill_id] = (paidByBill[a.bill_id] || 0) + num(a.allocated_amount); });
+  return rows.map(b => {
+    const amount = num(b.amount), paid = Math.min(amount, paidByBill[b.id] || 0);
+    return { id: b.id, billNo: b.bill_no || null, billDate: b.bill_date || (b.created_at ? String(b.created_at).slice(0, 10) : null), amount, paid, remaining: amount - paid, projectId: b.project_id ?? null, site: b.project_id ? (projName[b.project_id] || b.project_id) : null };
+  }).filter(b => b.remaining > 0.5).sort((a, b) => (a.billDate || '').localeCompare(b.billDate || '')); // oldest first
+}
+
+// Record a payment's bill allocation. Replaces the txn's full allocation set (must sum to its total):
+// each selected bill → an allocation carrying the bill's site; any remainder (payment larger than the
+// bills, or "no bill") → one unallocated part = the without-bills / advance bucket.
+export interface BillPick { billId: string; projectId: string | null; amount: number }
+export async function saveBillAllocations(txnId: string, orgId: string, txnTotal: number, picks: BillPick[], remainderProjectId: string | null): Promise<void> {
+  const parts: any[] = picks.filter(p => p.amount > 0).map(p => ({ project_id: p.projectId ?? '', order_type: '', order_ref: '', milestone_id: '', bill_id: p.billId, allocated_amount: p.amount }));
+  const allocated = picks.reduce((s, p) => s + (p.amount > 0 ? p.amount : 0), 0);
+  const remainder = Math.round((txnTotal - allocated) * 100) / 100;
+  if (remainder > 0.5) parts.push({ project_id: remainderProjectId ?? '', order_type: '', order_ref: '', milestone_id: '', bill_id: '', allocated_amount: remainder });
+  // Nothing picked at all → a single unallocated part (keeps the txn total intact; the without-bills bucket).
+  if (parts.length === 0) parts.push({ project_id: remainderProjectId ?? '', order_type: '', order_ref: '', milestone_id: '', bill_id: '', allocated_amount: txnTotal });
+  const { data, error } = await supabase.rpc('set_txn_allocations', { p_txn_id: txnId, p_org_id: orgId, p_parts: parts });
+  const r = data as { success?: boolean; error?: string } | null;
+  if (error || !r?.success) throw new Error(r?.error || error?.message || 'Could not record the allocation');
+}
+
+// The inert "towards PO-xxx" advance memo — pure tracking on the transaction, never a money link.
+export async function setAdvanceMemo(txnId: string, poRef: string | null): Promise<void> {
+  const { error } = await supabase.from('transactions').update({ advance_po_ref: poRef || null }).eq('txn_id', txnId);
+  if (error) throw error;
 }
 
 function fileToBase64(file: File): Promise<string> {

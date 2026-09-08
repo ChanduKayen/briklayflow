@@ -218,6 +218,25 @@ own `vendor_bill_amount` only as a **fallback when no bills row names that PO** 
 through the old PO flow still counts exactly once, and nothing is lost or doubled while write paths
 migrate (`20260911000000`). Consolidated / opening / adjustment sources are unchanged.
 
+## 5e. Payments settle bills (the allocation writer)
+
+Attaching a bill to a payment is the **payment→bill allocation**, so a bill's paid/unpaid stops being
+virtual FIFO and becomes recorded fact, one transaction at a time. A `txn_allocations` row can now point
+at a bill (`bill_id`, `20260912000000`); a bill's paid = Σ allocations to it. The vendor NET is
+unchanged (`v_party_balance` already nets at the party level) — `bill_id` only makes per-bill
+settlement real.
+
+**The picker (`BillAllocateSheet`)** is the doctrine, used from both the tx create flow and tx detail:
+shows the vendor's unpaid bills with remaining; exact-match (payment = one bill's remaining)
+pre-selects; multi-select to clear several bills with one payment; partial when the payment is smaller;
+**"upload a new one"** mid-payment (vendor known → extract → mint → allocate in one motion); **"no bill"**
+is a legal exit (the remainder is the without-bills bucket); and **advance against an order** → an
+optional inert *"towards PO-xxx"* memo (`transactions.advance_po_ref`), pure tracking, never a money
+link. Writes through `set_txn_allocations` (complete-set replace; parts sum to the txn total).
+
+Vendor payments **no longer attach a PO**: the create-time PO obligation hub is worker-only now; a
+vendor payment settles bills (attached right after save). Workers keep ContractHub unchanged.
+
 ## 6a. Correcting a stray line
 
 The ledger is derived, so a wrong line is only ever a wrong **source row** — you don't post a
