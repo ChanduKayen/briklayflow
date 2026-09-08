@@ -204,6 +204,20 @@ A line is a real obligation only if the document behind it is live. The ledger e
 Closed / Settled work orders are **not** excluded — work certified on them is still genuinely owed
 until paid; only *Cancelled* means "never happened."
 
+## 5d. Bills are a first-class entity
+
+A vendor bill is now its own row (`bills`: vendor + optional site + amount + document + lines,
+optionally naming one PO), not just columns on a PO. Standalone bills (no PO) are first-class. The
+**Bills** page (`/bills`) is the register; drag-and-drop anywhere on it (or **Add bill**) uploads one
+or many documents into a queue, each read by the extract-only AI (`reconcile-po-bill`), then a confirm
+sheet names the **vendor + site**, checks the figures, and **warns on a duplicate** (same vendor +
+same bill number) before minting.
+
+**Vendor credit comes from bills, not POs.** `v_party_ledger_line` reads every `bills` row, plus a PO's
+own `vendor_bill_amount` only as a **fallback when no bills row names that PO** — so a bill recorded
+through the old PO flow still counts exactly once, and nothing is lost or doubled while write paths
+migrate (`20260911000000`). Consolidated / opening / adjustment sources are unchanged.
+
 ## 6a. Correcting a stray line
 
 The ledger is derived, so a wrong line is only ever a wrong **source row** — you don't post a

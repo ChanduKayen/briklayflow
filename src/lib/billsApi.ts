@@ -8,6 +8,7 @@
 //   · consolidated → the vendor's covered payments inside the period (no PO/WO allocation)
 import { supabase } from './supabase';
 import { billDateOf, BILL_DATE_COLUMNS } from './partyLedger';
+import { readVendorBill, uploadBillDoc } from './vendorTrackingApi';
 
 export type BillStatus = 'unpaid' | 'part' | 'settled';
 export type BillRef =
@@ -47,7 +48,8 @@ const statusOf = (amount: number, paid: number): BillStatus =>
 
 // ── list ─────────────────────────────────────────────────────────────────────
 export async function loadBills(): Promise<BillRow[]> {
-  const [poR, stkR, projR, cbR] = await Promise.all([
+  const [billsR, poR, stkR, projR, cbR] = await Promise.all([
+    supabase.from('bills').select('id, stakeholder_id, project_id, po_id, bill_no, bill_date, amount, created_at'),
     supabase.from('purchase_orders')
       .select(`po_id, stakeholder_id, project_id, vendor_bill_number, ${BILL_DATE_COLUMNS}, status, approval_status`)
       .eq('approval_status', 'APPROVED')
@@ -58,13 +60,16 @@ export async function loadBills(): Promise<BillRow[]> {
     supabase.from('consolidated_bills').select('id, stakeholder_id, period_from, period_to, amount, note'),
   ]);
   if (poR.error) throw poR.error;
-  const pos = (poR.data ?? []) as any[];
+  const billRows = (billsR.data ?? []) as any[];   // first-class bills (empty if migration not applied)
+  // A PO named by a bills row is represented by that bill, not its own PO-bill row — suppress the dup.
+  const billedPoIds = new Set(billRows.map(b => b.po_id).filter(Boolean));
+  const pos = ((poR.data ?? []) as any[]).filter(p => !billedPoIds.has(p.po_id));
   const cbs = (cbR.data ?? []) as any[];
   const stkName: Record<string, string> = {}; (stkR.data ?? []).forEach((s: any) => { stkName[s.stakeholder_id] = s.name; });
   const projName: Record<string, string> = {}; (projR.data ?? []).forEach((p: any) => { projName[p.project_id] = p.name; });
 
-  // Payments allocated to each PO (non-voided).
-  const poIds = pos.map(p => p.po_id);
+  // Payments allocated to each PO (non-voided) — for both the fallback PO-bills and PO-linked bills.
+  const poIds = [...new Set([...pos.map(p => p.po_id), ...billRows.map(b => b.po_id).filter(Boolean)])];
   const paidByPo: Record<string, number> = {};
   if (poIds.length) {
     const alR = await supabase.from('txn_allocations').select('order_ref, allocated_amount, transactions(status)').eq('order_type', 'PO').in('order_ref', poIds);
@@ -87,6 +92,18 @@ export async function loadBills(): Promise<BillRow[]> {
   }
 
   const rows: BillRow[] = [];
+  // First-class bills.
+  for (const b of billRows) {
+    const amount = num(b.amount);
+    const paid = b.po_id ? Math.min(amount, paidByPo[b.po_id] || 0) : 0;   // payments settle via the PO until payment→bill lands
+    rows.push({
+      id: `bl~${b.id}`, kind: 'po', vendorId: b.stakeholder_id ?? null, vendor: stkName[b.stakeholder_id] || 'Vendor',
+      billNo: b.bill_no || null, billDate: b.bill_date || (b.created_at ? String(b.created_at).slice(0, 10) : null),
+      projectId: b.project_id ?? null, site: b.project_id ? (projName[b.project_id] || b.project_id) : null,
+      amount, paid, status: statusOf(amount, paid),
+      ref: b.po_id ? { kind: 'po', poId: b.po_id } : { kind: 'none' },
+    });
+  }
   for (const p of pos) {
     const amount = num(p.vendor_bill_amount);
     const paid = Math.min(amount, paidByPo[p.po_id] || 0);
@@ -116,6 +133,31 @@ export async function loadBills(): Promise<BillRow[]> {
 export async function loadBillDetail(id: string): Promise<BillDetail | null> {
   const sep = id.indexOf('~');
   const kind = id.slice(0, sep), ref = id.slice(sep + 1);
+
+  if (kind === 'bl') {
+    const bR = await supabase.from('bills').select('*').eq('id', ref).maybeSingle();
+    const b = bR.data as any; if (!b) return null;
+    const [stk, proj, alR] = await Promise.all([
+      supabase.from('stakeholders').select('name').eq('stakeholder_id', b.stakeholder_id).maybeSingle(),
+      b.project_id ? supabase.from('projects').select('name').eq('project_id', b.project_id).maybeSingle() : Promise.resolve({ data: null } as any),
+      b.po_id ? supabase.from('txn_allocations').select('allocated_amount, transactions(txn_id, date, payment_mode, status)').eq('order_type', 'PO').eq('order_ref', b.po_id) : Promise.resolve({ data: [] } as any),
+    ]);
+    const allocs = ((alR.data ?? []) as any[]).filter(a => a.transactions?.status !== 'Voided');
+    const payments: BillPayment[] = allocs.map(a => ({ txnId: a.transactions?.txn_id, date: a.transactions?.date ?? null, mode: a.transactions?.payment_mode ?? null, amount: num(a.allocated_amount) }))
+      .sort((x, y) => (x.date || '').localeCompare(y.date || ''));
+    const amount = num(b.amount);
+    const paid = b.po_id ? Math.min(amount, payments.reduce((s, x) => s + x.amount, 0)) : 0;
+    const lines: BillLine[] = Array.isArray(b.lines) ? b.lines.map((l: any) => ({
+      name: l.name ?? l.item ?? '—', spec: l.spec ?? null, unit: l.unit ?? null, qty: num(l.qty), rate: num(l.rate), amount: num(l.amount) || num(l.qty) * num(l.rate),
+    })) : [];
+    return {
+      id, kind: 'po', vendorId: b.stakeholder_id ?? null, vendor: (stk.data as any)?.name || 'Vendor',
+      billNo: b.bill_no || null, billDate: b.bill_date || (b.created_at ? String(b.created_at).slice(0, 10) : null),
+      projectId: b.project_id ?? null, site: (proj.data as any)?.name || null, amount, paid, status: statusOf(amount, paid),
+      ref: b.po_id ? { kind: 'po', poId: b.po_id } : { kind: 'none' }, docUrl: b.doc_url || null,
+      lines, payments, poId: b.po_id ?? null, poProjectId: b.project_id ?? null, note: b.note || undefined,
+    };
+  }
 
   if (kind === 'po') {
     const [poR, liR] = await Promise.all([
@@ -170,4 +212,65 @@ export async function loadBillDetail(id: string): Promise<BillDetail | null> {
     };
   }
   return null;
+}
+
+// ── minting a bill from an uploaded document ───────────────────────────────────
+export interface ExtractedBill {
+  vendor: string | null;         // vendor NAME as read (for display; user confirms/links a real party)
+  billNo: string | null;
+  billDate: string | null;       // ISO if parseable
+  amount: number;
+  lines: { name: string; spec: string | null; unit: string | null; qty: number; rate: number; amount: number }[];
+}
+
+// Read an uploaded bill (image/PDF) with the existing extract-only AI (reconcile-po-bill).
+export async function extractBill(file: File): Promise<ExtractedBill> {
+  const b64 = await fileToBase64(file);
+  const r = await readVendorBill(b64, file.type || 'image/jpeg');
+  return {
+    vendor: r.vendor, billNo: r.billNo, billDate: normDate(r.billDate), amount: num(r.total),
+    lines: (r.lines ?? []).map((l: any) => ({ name: l.item ?? '—', spec: null, unit: l.unit ?? null, qty: num(l.qty), rate: num(l.rate), amount: num(l.amount) || num(l.qty) * num(l.rate) })),
+  };
+}
+
+// Same vendor + same bill number already on a bill → the duplicate to warn about before minting.
+export interface DuplicateBill { id: string; billNo: string | null; billDate: string | null; amount: number }
+export async function findDuplicateBill(stakeholderId: string, billNo: string): Promise<DuplicateBill | null> {
+  const n = (billNo || '').trim();
+  if (!n) return null;
+  const { data } = await supabase.from('bills').select('id, bill_no, bill_date, amount').eq('stakeholder_id', stakeholderId).ilike('bill_no', n).limit(1);
+  const b = (data ?? [])[0] as any;
+  return b ? { id: b.id, billNo: b.bill_no, billDate: b.bill_date, amount: num(b.amount) } : null;
+}
+
+export interface NewBillInput {
+  orgId: string; stakeholderId: string; projectId: string | null; poId?: string | null;
+  billNo: string | null; billDate: string | null; amount: number;
+  lines: ExtractedBill['lines']; note?: string | null; createdBy?: string | null; createdByName?: string | null;
+  file: File | null;
+}
+export async function createBill(input: NewBillInput): Promise<string> {
+  const docUrl = input.file ? await uploadBillDoc(input.file, 'bill') : null;
+  const { data, error } = await supabase.from('bills').insert({
+    org_id: input.orgId, stakeholder_id: input.stakeholderId, project_id: input.projectId, po_id: input.poId ?? null,
+    bill_no: input.billNo, bill_date: input.billDate, amount: input.amount, doc_url: docUrl,
+    lines: input.lines, note: input.note ?? null, created_by: input.createdBy ?? null, created_by_name: input.createdByName ?? null,
+  }).select('id').single();
+  if (error) throw error;
+  return (data as any).id;
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1] || '');
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+// The AI returns a human date string; keep only a clean ISO yyyy-mm-dd (or null).
+function normDate(d: string | null): string | null {
+  if (!d) return null;
+  const t = new Date(d);
+  return isNaN(t.getTime()) ? null : t.toISOString().slice(0, 10);
 }

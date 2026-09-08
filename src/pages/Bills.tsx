@@ -1,12 +1,17 @@
 // Bills — vendor-bill register (list + detail), a port of bills-module-mock.html scoped under .blx.
 // Frontend-first over existing data (see billsApi). /bills is the list; /bills/:billId the detail.
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { loadBills, loadBillDetail, type BillRow, type BillStatus } from '../lib/billsApi';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { loadBills, loadBillDetail, extractBill, findDuplicateBill, createBill, type BillRow, type BillStatus, type DuplicateBill } from '../lib/billsApi';
 import { DocThumb } from '../components/DocThumb';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { openDoc } from '../lib/storage';
+import { supabase } from '../lib/supabase';
+import { useOrgId, useAuth } from '../lib/auth/AuthProvider';
+import { useUserProfile } from '../App';
+import { useSnackbar } from '../components/Snackbar';
+import { searchPayees } from '../lib/payeeSearch';
 
 const BLX_CSS = `
 .blx{--cream:#F6F2EA;--paper:#FDFBF7;--walnut:#3B3128;--walnut-60:#7A6E61;--walnut-soft:#B4A897;--line:#E4DCCE;--line-strong:#D3C8B4;--terracotta:#B85C38;--sage:#6E7F5E;--sage-tint:#EEF1E8;--terra-tint:#F6E8E0;--amber-tint:#F3ECD9;
@@ -86,6 +91,46 @@ const BLX_CSS = `
 .blx .settlebar .legend{display:flex;justify-content:space-between;font-size:.76rem;color:var(--walnut-60);margin-top:8px}
 .blx .settlebar .legend .m{font-family:'DM Mono',monospace;color:var(--walnut)}
 @media (max-width:900px){.blx .shell{padding:20px 16px 72px}.blx .detgrid{grid-template-columns:1fr}}
+/* drag-drop overlay */
+.blx .dropveil{position:fixed;inset:0;z-index:80;background:rgba(59,49,40,.45);display:grid;place-items:center;pointer-events:none}
+.blx .dropveil .card{background:var(--paper);border:2px dashed var(--terracotta);border-radius:16px;padding:38px 54px;text-align:center;box-shadow:0 24px 60px -20px rgba(43,29,19,.5)}
+.blx .dropveil .big{font-family:'Playfair Display',Georgia,serif;font-size:1.4rem;color:var(--walnut)}
+.blx .dropveil .sub{font-size:.85rem;color:var(--walnut-60);margin-top:6px}
+/* upload queue */
+.blx .queue{position:fixed;right:20px;bottom:20px;z-index:70;width:min(340px,calc(100vw - 32px));display:flex;flex-direction:column;gap:10px}
+.blx .qcard{background:var(--paper);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 30px -14px rgba(43,29,19,.4);padding:12px 14px;font-size:.83rem;animation:qin .2s ease}
+@keyframes qin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.blx .qcard .qtop{display:flex;align-items:center;gap:8px}
+.blx .qcard .qname{font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.blx .qcard .qx{background:none;border:none;color:var(--walnut-soft);cursor:pointer;font-size:1rem;line-height:1}
+.blx .qcard .qstate{color:var(--walnut-60);margin-top:4px;font-size:.78rem}
+.blx .qcard .qstate.err{color:var(--terracotta)}
+.blx .qspin{width:13px;height:13px;border:2px solid var(--terra-tint);border-top-color:var(--terracotta);border-radius:50%;animation:qspin .7s linear infinite;flex-shrink:0}
+@keyframes qspin{to{transform:rotate(360deg)}}
+/* confirm sheet */
+.blx .scrim{position:fixed;inset:0;z-index:90;background:rgba(59,49,40,.42);display:grid;place-items:center;padding:16px}
+.blx .sheet-m{width:min(560px,100%);max-height:92vh;display:flex;flex-direction:column;overflow:hidden;background:var(--paper);border:1px solid var(--line);border-radius:14px;box-shadow:0 24px 60px -20px rgba(43,29,19,.5)}
+.blx .sheet-m .sh{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;justify-content:space-between}
+.blx .sheet-m .sh h3{font-family:'Playfair Display',Georgia,serif;font-weight:500;font-size:1.25rem;margin:0}
+.blx .sheet-m .sh .qn{font-size:.78rem;color:var(--walnut-60)}
+.blx .sheet-m .sb{padding:18px 20px;overflow-y:auto;display:flex;flex-direction:column;gap:16px}
+.blx .fld label{display:block;font-size:.78rem;font-weight:500;color:var(--walnut-60);margin-bottom:6px}
+.blx .fld input,.blx .fld select{width:100%;height:42px;border:1px solid var(--line-strong);border-radius:8px;background:var(--paper);padding:0 12px;font-family:inherit;font-size:.9rem;color:var(--walnut);outline:none}
+.blx .fld input:focus,.blx .fld select:focus{border-color:var(--terracotta)}
+.blx .fld input.mono{font-family:'DM Mono',monospace}
+.blx .row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.blx .vsearch{position:relative}
+.blx .vmenu{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:5;background:var(--paper);border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 12px 30px -14px rgba(43,29,19,.4);max-height:220px;overflow-y:auto}
+.blx .vmenu button{display:block;width:100%;text-align:left;padding:9px 12px;background:none;border:none;font-size:.86rem;color:var(--walnut);cursor:pointer}
+.blx .vmenu button:hover{background:var(--cream)}
+.blx .dupwarn{display:flex;gap:10px;align-items:flex-start;background:var(--terra-tint);border:1px solid #E0BBA8;border-radius:10px;padding:11px 13px;font-size:.82rem;color:#7E3A20}
+.blx .dupwarn b{font-weight:600}
+.blx .sheet-m .sf{padding:14px 20px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:12px}
+.blx .sheet-m .sf .amt-tot{font-family:'DM Mono',monospace;font-size:1.05rem;font-weight:500}
+.blx .sheet-m .sf .acts{display:flex;gap:10px}
+.blx .btn-ghost{background:none;border:1px solid var(--line-strong);border-radius:8px;padding:9px 16px;font-size:.85rem;color:var(--walnut-60);cursor:pointer}
+.blx .btn-prim{background:var(--terracotta);border:none;border-radius:8px;padding:9px 18px;font-size:.85rem;font-weight:600;color:#fff;cursor:pointer}
+.blx .btn-prim:disabled{opacity:.5;cursor:default}
 `;
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
@@ -100,16 +145,94 @@ function StatusCell({ s, left }: { s: BillStatus; left: number }) {
   );
 }
 
+type QState = 'reading' | 'ready' | 'saving' | 'done' | 'error';
+interface QItem {
+  id: string; file: File; state: QState; error?: string;
+  vendorName: string | null; billNo: string | null; billDate: string | null; amount: number;
+  lines: { name: string; spec: string | null; unit: string | null; qty: number; rate: number; amount: number }[];
+}
+let qseq = 0;
+
 // ── list ───────────────────────────────────────────────────────────────────
 export default function Bills() {
   const navigate = useNavigate();
   const { billId } = useParams();
   if (billId) return <BillDetailView id={decodeURIComponent(billId)} />;
 
+  const qc = useQueryClient();
+  const orgId = useOrgId();
+  const { userId } = useAuth();
+  const { data: profile } = useUserProfile(userId ?? '');
+  const { show } = useSnackbar();
   const { data: bills = [], isLoading } = useQuery({ queryKey: ['bills'], queryFn: loadBills });
+  const { data: vendorList = [] } = useQuery({
+    queryKey: ['bill_vendors'],
+    queryFn: async () => (await supabase.from('stakeholders').select('stakeholder_id, name').eq('type', 'Vendor').order('name')).data ?? [],
+  });
+  const { data: projectList = [] } = useQuery({
+    queryKey: ['projects_active_min'],
+    queryFn: async () => (await supabase.from('projects').select('project_id, name').eq('status', 'Active').order('name')).data ?? [],
+  });
   const [site, setSite] = useState('');
   const [vendor, setVendor] = useState('');
   const [status, setStatus] = useState('');
+
+  // ── drag-drop upload + queue ──
+  const [dragging, setDragging] = useState(false);
+  const [queue, setQueue] = useState<QItem[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const dragDepth = useRef(0);
+
+  const enqueue = useCallback((files: FileList | File[]) => {
+    const list = Array.from(files).filter(f => /^image\/|application\/pdf/.test(f.type));
+    if (!list.length) return;
+    const items: QItem[] = list.map(f => ({ id: `q${++qseq}`, file: f, state: 'reading', vendorName: null, billNo: null, billDate: null, amount: 0, lines: [] }));
+    setQueue(q => [...q, ...items]);
+    // Read each in the background; the confirm sheet picks up 'ready' items one at a time.
+    items.forEach(async (it) => {
+      try {
+        const ex = await extractBill(it.file);
+        setQueue(q => q.map(x => x.id === it.id ? { ...x, state: 'ready', vendorName: ex.vendor, billNo: ex.billNo, billDate: ex.billDate, amount: ex.amount, lines: ex.lines } : x));
+      } catch (e) {
+        setQueue(q => q.map(x => x.id === it.id ? { ...x, state: 'error', error: (e as Error)?.message || 'Could not read the bill' } : x));
+      }
+    });
+  }, []);
+
+  // Page-wide drag-and-drop.
+  useEffect(() => {
+    const onOver = (e: DragEvent) => { if (e.dataTransfer?.types?.includes('Files')) { e.preventDefault(); } };
+    const onEnter = (e: DragEvent) => { if (e.dataTransfer?.types?.includes('Files')) { dragDepth.current++; setDragging(true); } };
+    const onLeave = () => { dragDepth.current = Math.max(0, dragDepth.current - 1); if (dragDepth.current === 0) setDragging(false); };
+    const onDrop = (e: DragEvent) => { e.preventDefault(); dragDepth.current = 0; setDragging(false); if (e.dataTransfer?.files?.length) enqueue(e.dataTransfer.files); };
+    window.addEventListener('dragover', onOver);
+    window.addEventListener('dragenter', onEnter);
+    window.addEventListener('dragleave', onLeave);
+    window.addEventListener('drop', onDrop);
+    return () => { window.removeEventListener('dragover', onOver); window.removeEventListener('dragenter', onEnter); window.removeEventListener('dragleave', onLeave); window.removeEventListener('drop', onDrop); };
+  }, [enqueue]);
+
+  // The confirm sheet shows the first item ready for review.
+  const current = queue.find(x => x.state === 'ready') ?? null;
+  const patch = (id: string, p: Partial<QItem>) => setQueue(q => q.map(x => x.id === id ? { ...x, ...p } : x));
+  const drop = (id: string) => setQueue(q => q.filter(x => x.id !== id));
+
+  const mint = async (it: QItem, vendorId: string, projectId: string | null) => {
+    patch(it.id, { state: 'saving' });
+    try {
+      await createBill({
+        orgId, stakeholderId: vendorId, projectId, billNo: it.billNo, billDate: it.billDate, amount: it.amount,
+        lines: it.lines, createdBy: userId ?? null, createdByName: (profile as any)?.full_name ?? null, file: it.file,
+      });
+      drop(it.id);
+      show('Bill added');
+      qc.invalidateQueries({ queryKey: ['bills'] });
+      qc.invalidateQueries({ queryKey: ['party_ledger'] });
+      qc.invalidateQueries({ queryKey: ['weekly_payments'] });
+    } catch (e) {
+      patch(it.id, { state: 'error', error: (e as Error)?.message || 'Could not save the bill' });
+    }
+  };
 
   const sites = useMemo(() => [...new Set(bills.map(b => b.site).filter(Boolean))] as string[], [bills]);
   const vendors = useMemo(() => [...new Set(bills.map(b => b.vendor).filter(Boolean))], [bills]);
@@ -132,6 +255,8 @@ export default function Bills() {
               <div className="num">{inr(unpaidTotal)}</div>
               <div className="cap">unpaid across {unpaidCount} bill{unpaidCount !== 1 ? 's' : ''}</div>
             </div>
+            <button className="btn-add" onClick={() => fileRef.current?.click()}>Add bill</button>
+            <input ref={fileRef} type="file" accept="image/*,application/pdf" multiple hidden onChange={(e) => { if (e.target.files?.length) enqueue(e.target.files); e.target.value = ''; }} />
           </div>
         </header>
 
@@ -165,6 +290,122 @@ export default function Bills() {
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {dragging && (
+        <div className="dropveil"><div className="card"><div className="big">Drop the bill{'’'}s here</div><div className="sub">We{'’'}ll read each one — image or PDF — then ask the vendor & site.</div></div></div>
+      )}
+
+      {queue.length > 0 && (
+        <div className="queue">
+          {queue.filter(q => q.id !== current?.id).map(q => (
+            <div className="qcard" key={q.id}>
+              <div className="qtop">
+                {(q.state === 'reading' || q.state === 'saving') && <span className="qspin" />}
+                <span className="qname">{q.file.name}</span>
+                {(q.state === 'error' || q.state === 'ready') && <button className="qx" onClick={() => drop(q.id)} aria-label="Remove">×</button>}
+              </div>
+              <div className={`qstate${q.state === 'error' ? ' err' : ''}`}>
+                {q.state === 'reading' ? 'Reading the bill…' : q.state === 'saving' ? 'Saving…' : q.state === 'ready' ? 'Ready — waiting to confirm' : q.state === 'error' ? (q.error || 'Failed') : 'Done'}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {current && (
+        <ConfirmBillSheet
+          key={current.id}
+          item={current}
+          vendors={vendorList as { stakeholder_id: string; name: string }[]}
+          projects={projectList as { project_id: string; name: string }[]}
+          queueCount={queue.filter(q => q.state === 'ready').length}
+          onPatch={(p) => patch(current.id, p)}
+          onCancel={() => drop(current.id)}
+          onConfirm={(vendorId, projectId) => mint(current, vendorId, projectId)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Confirm sheet — after a bill is read, name the vendor & site, check the figures, warn on a duplicate,
+// then mint. One sheet at a time; the queue feeds the next 'ready' item in behind it.
+function ConfirmBillSheet({ item, vendors, projects, queueCount, onPatch, onCancel, onConfirm }: {
+  item: QItem; vendors: { stakeholder_id: string; name: string }[]; projects: { project_id: string; name: string }[];
+  queueCount: number; onPatch: (p: Partial<QItem>) => void; onCancel: () => void; onConfirm: (vendorId: string, projectId: string | null) => void;
+}) {
+  const [vendorId, setVendorId] = useState<string>('');
+  const [vq, setVq] = useState(item.vendorName || '');
+  const [vOpen, setVOpen] = useState(false);
+  const [projectId, setProjectId] = useState<string>('');
+  const [dup, setDup] = useState<DuplicateBill | null>(null);
+  const [dupAck, setDupAck] = useState(false);
+
+  // Pre-match the read vendor name to a real party.
+  useEffect(() => {
+    if (vendorId || !item.vendorName) return;
+    const hit = searchPayees(vendors as any, item.vendorName)[0] as any;
+    if (hit) { setVendorId(hit.stakeholder_id); setVq(hit.name); }
+  }, [item.vendorName, vendors, vendorId]);
+
+  // Same vendor + same bill number → warn before minting.
+  useEffect(() => {
+    setDup(null); setDupAck(false);
+    if (!vendorId || !item.billNo) return;
+    let live = true;
+    findDuplicateBill(vendorId, item.billNo).then(d => { if (live) setDup(d); });
+    return () => { live = false; };
+  }, [vendorId, item.billNo]);
+
+  const matches = vq.trim() ? searchPayees(vendors as any, vq).slice(0, 6) : vendors.slice(0, 6);
+  const canSave = !!vendorId && item.amount > 0 && (!dup || dupAck);
+
+  return (
+    <div className="scrim" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="sheet-m" onClick={(e) => e.stopPropagation()}>
+        <div className="sh">
+          <h3>New bill</h3>
+          {queueCount > 1 && <span className="qn">{queueCount - 1} more in queue</span>}
+        </div>
+        <div className="sb">
+          <div className="fld vsearch">
+            <label>Vendor</label>
+            <input value={vq} placeholder="Search a vendor…" onChange={(e) => { setVq(e.target.value); setVendorId(''); setVOpen(true); }} onFocus={() => setVOpen(true)} />
+            {vOpen && matches.length > 0 && !vendorId && (
+              <div className="vmenu">
+                {matches.map((m: any) => (
+                  <button key={m.stakeholder_id} onClick={() => { setVendorId(m.stakeholder_id); setVq(m.name); setVOpen(false); }}>{m.name}</button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="fld">
+            <label>Site</label>
+            <select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+              <option value="">No site / unassigned</option>
+              {projects.map(p => <option key={p.project_id} value={p.project_id}>{p.name}</option>)}
+            </select>
+          </div>
+          <div className="row2">
+            <div className="fld"><label>Bill / invoice no</label><input className="mono" value={item.billNo ?? ''} placeholder="—" onChange={(e) => onPatch({ billNo: e.target.value || null })} /></div>
+            <div className="fld"><label>Bill date</label><input type="date" value={item.billDate ?? ''} onChange={(e) => onPatch({ billDate: e.target.value || null })} /></div>
+          </div>
+          <div className="fld"><label>Amount</label><input className="mono" inputMode="numeric" value={item.amount ? String(item.amount) : ''} placeholder="0" onChange={(e) => onPatch({ amount: parseInt(e.target.value.replace(/[^\d]/g, ''), 10) || 0 })} /></div>
+          {dup && (
+            <label className="dupwarn">
+              <input type="checkbox" checked={dupAck} onChange={(e) => setDupAck(e.target.checked)} style={{ marginTop: 2 }} />
+              <span><b>Possible duplicate.</b> A bill {dup.billNo ? <>no. <b>{dup.billNo}</b> </> : null}for this vendor already exists{dup.amount ? <> ({inr(dup.amount)}{dup.billDate ? `, ${fmtDate(dup.billDate)}` : ''})</> : ''}. Tick to add it anyway.</span>
+            </label>
+          )}
+        </div>
+        <div className="sf">
+          <span className="amt-tot">{inr(item.amount)}</span>
+          <div className="acts">
+            <button className="btn-ghost" onClick={onCancel}>Discard</button>
+            <button className="btn-prim" disabled={!canSave || (item.state === 'saving')} onClick={() => onConfirm(vendorId, projectId || null)}>{item.state === 'saving' ? 'Saving…' : 'Add bill'}</button>
+          </div>
         </div>
       </div>
     </div>
