@@ -15,6 +15,7 @@ import { useAuth } from '../../lib/auth/AuthProvider';
 import { useSnackbar } from '../Snackbar';
 import SendToVendorModal from '../po-new-ui/SendToVendorModal';
 import { useIsMobile } from '../../lib/useIsMobile';
+import { billedByPO } from '../../lib/billsApi';
 
 const POLX_CSS = `
 .polx{
@@ -330,6 +331,14 @@ function usePOListData(projectId?: string) {
     },
   });
 
+  // Billed per PO = Σ of its first-class bill entities (a PO can carry several). Falls back to the
+  // legacy vendor_bill_amount column only for POs with no entity yet.
+  const billsQ = useQuery({
+    queryKey: ['po_list_bills', poIds],
+    enabled: poIds.length > 0,
+    queryFn: () => billedByPO(poIds),
+  });
+
   // Per-line received quantities (drives the accurate got/pending counts + tooltip).
   const grnQ = useQuery({
     queryKey: ['po_list_grn', poIds],
@@ -356,10 +365,11 @@ function usePOListData(projectId?: string) {
     const receipt = receiptQ.data ?? {};
     const paid = paidQ.data ?? {};
     const recvByLine = grnQ.data ?? {};
+    const billsByPo = billsQ.data ?? {};
     return pos.map((po: any): PORow => {
       const cancelled = po.status === 'CANCELLED';
       const value = Number(po.total_value || po.order_value) || 0;
-      const billed = Number(po.vendor_bill_amount) || 0;
+      const billed = billsByPo[po.po_id] != null ? billsByPo[po.po_id] : (Number(po.vendor_bill_amount) || 0);
       const rfq = !cancelled && value === 0 && billed === 0;
       const pct = Number(receipt[po.po_id]?.receipt_pct ?? 0);
       const fullyReceived = pct >= 100 || !!po.received_at_site;
@@ -399,7 +409,7 @@ function usePOListData(projectId?: string) {
         cancelled, rfq,
       };
     });
-  }, [pos, receiptQ.data, paidQ.data, grnQ.data]);
+  }, [pos, receiptQ.data, paidQ.data, grnQ.data, billsQ.data]);
 
   return { rows, isLoading: posQ.isLoading };
 }

@@ -4,7 +4,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import confetti from 'canvas-confetti';
 import { supabase } from '../lib/supabase';
 import { openDoc, parseStoredPath, resolveDocUrl } from '../lib/storage';
-import { DocThumb } from '../components/DocThumb';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { useSnackbar } from '../components/Snackbar';
 import { PageSkeleton } from '../components/SkeletonLoader';
@@ -18,6 +17,8 @@ import ReceiveAtSiteDrawer from '../components/ReceiveAtSiteDrawer';
 import SendToVendorModal from '../components/po-new-ui/SendToVendorModal';
 import { RateCheckModal } from '../components/po/RateCheckModal';
 import { useIsMobile } from '../lib/useIsMobile';
+import { loadBillsForPO, convertLegacyPoBill } from '../lib/billsApi';
+import { PoBillSheet } from '../components/po/PoBillSheet';
 import {
   fmtDate as pdfFmtDate, fmtRupee, amountInWords,
   MARGIN, CONTENT, RIGHT, C,
@@ -488,6 +489,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const [showMobileBill, setShowMobileBill] = useState(false);
   const [showMobilePay,  setShowMobilePay]  = useState(false);
   const [billingOpen,  setBillingOpen]  = useState(false);   // unfolds the bill columns + bill row
+  const [poBillOpen,   setPoBillOpen]   = useState(false);   // the new upload→mint bill door
   const [billEditOpen, setBillEditOpen] = useState(false);   // editing/replacing an already-recorded bill
   const [payRowOpen,   setPayRowOpen]   = useState(false);
   const [refBillNo,    setRefBillNo]    = useState('');
@@ -516,6 +518,25 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     },
     enabled: !!poId,
   });
+
+  // Bills linked to this PO — first-class entities the PO shows as links; billed = Σ. Legacy column
+  // bills are converted to entities on view (below) so every PO is uniform.
+  const { data: poBills, refetch: refetchPoBills } = useQuery({
+    queryKey: ['po_bills', poId],
+    queryFn: () => loadBillsForPO(poId!),
+    enabled: !!poId,
+  });
+
+  // Convert a legacy PO-column bill into a first-class entity on view (idempotent), so the PO shows a
+  // link to its bill like every new one. Runs once the PO + its bills are loaded.
+  const convertedRef = useRef(false);
+  useEffect(() => {
+    if (convertedRef.current || !po || poBills === undefined) return;
+    if ((poBills?.length ?? 0) > 0) { convertedRef.current = true; return; }
+    if (!(Number(po.vendor_bill_amount) > 0) || !po.stakeholder_id) { convertedRef.current = true; return; }
+    convertedRef.current = true;
+    void convertLegacyPoBill(po).then(minted => { if (minted) refetchPoBills(); });
+  }, [po, poBills, refetchPoBills]);
 
   const { data: lineItems } = useQuery({
     queryKey: ['po_line_items', poId],
@@ -962,16 +983,8 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   }
 
   // Open the bill row to edit / replace an already-recorded bill (prefilled from the PO).
-  function openBillEdit() {
-    setRefBillNo(po?.vendor_bill_number || po?.vendor_bill_no || '');
-    setRefBillDate(po?.vendor_bill_date || new Date().toISOString().split('T')[0]);
-    setRefBillAmt(po?.vendor_bill_amount != null ? String(po.vendor_bill_amount) : '');
-    setRefBillFile(null);
-    setBillEditOpen(true);
-    setBillingOpen(true);
-    setPayRowOpen(false);
-    setTimeout(() => document.getElementById('podxItems')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 30);
-  }
+  // (legacy inline bill editor — superseded by the PoBillSheet upload→mint door; kept dormant)
+  void setBillEditOpen; void setRefBillNo; void setRefBillDate; void setRefBillAmt; void setRefBillFile;
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -994,7 +1007,10 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
 
   const activeTxns = (linkedTxns ?? []).filter((t: any) => t.transactions?.status !== 'Voided');
   const paidTotal = activeTxns.reduce((s: number, t: any) => s + (Number(t.allocated_amount) || 0), 0);
-  const billAmt   = Number(po.vendor_bill_amount) || 0;
+  // Billed = Σ of the PO's first-class bill entities (a PO can carry several). Fall back to the legacy
+  // column only until convert-on-view has minted an entity for an old bill.
+  const billEntities = poBills ?? [];
+  const billAmt   = billEntities.length ? billEntities.reduce((s, b) => s + (Number(b.amount) || 0), 0) : (Number(po.vendor_bill_amount) || 0);
 
   // ── Derived state for the redesign (real data behind the reference's look) ──
   const inr0 = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
@@ -1045,7 +1061,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const received = fullyReceived;
   const partlyReceived = anyReceipt && !fullyReceived;
   const hasBill = billAmt > 0;
-  const billNo = po.vendor_bill_number || po.vendor_bill_no || '';
+  const billNo = billEntities.length === 1 ? (billEntities[0].billNo || '') : billEntities.length > 1 ? `${billEntities.length} bills` : (po.vendor_bill_number || po.vendor_bill_no || '');
   // Balance is owed against the BILL, not the order. Prefer the saved bill amount; if none is saved
   // yet use the amount just read from the bill (OCR) or typed in the panel; fall back to the order.
   const readBill = reconResult?.bill_total_extracted != null ? Number(reconResult.bill_total_extracted) : 0;
@@ -1146,7 +1162,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
       };
       if (nowStage === 'bill') return {
         ghost: !sent ? sendBtn : undefined,
-        primary: { label: 'Record bill', sub: 'from the vendor', icon: 'bill', tone: 'terra', onClick: () => setShowMobileBill(true) },
+        primary: { label: 'Record bill', sub: 'from the vendor', icon: 'bill', tone: 'terra', onClick: () => setPoBillOpen(true) },
       };
       if (nowStage === 'pay') return {
         ghost: (po.vendor_bill_url || po.vendor_bill_doc_url) ? { label: 'View bill', icon: 'eye', tone: 'neutral', onClick: () => previewBill(po.vendor_bill_doc_url || po.vendor_bill_url) } : undefined,
@@ -1258,16 +1274,16 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
 
           {hasBill && (
             <div className="m-sec">
-              <div className="m-hh">Vendor bill{billNo ? ` · ${billNo}` : ''}</div>
-              <div className="m-billrow">
-                {(po.vendor_bill_url || po.vendor_bill_doc_url) && (
-                  <button className="m-brbtn" onClick={() => previewBill(po.vendor_bill_doc_url || po.vendor_bill_url)}>
-                    <svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" /><circle cx="12" cy="12" r="3" /></svg>View bill
+              <div className="m-hh">Vendor bill{billEntities.length > 1 ? 's' : ''}</div>
+              <div className="m-billrow" style={{ flexWrap: 'wrap' }}>
+                {billEntities.map(b => (
+                  <button key={b.id} className="m-brbtn" onClick={() => navigate(`/bills/${encodeURIComponent('bl~' + b.id)}`)}>
+                    <svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5" /></svg>{b.billNo ? `Bill ${b.billNo}` : 'Bill'} · {inr0(b.amount)}
                   </button>
-                )}
+                ))}
                 {!cancelled && (
-                  <button className="m-brbtn" onClick={() => { openBillEdit(); setShowMobileBill(true); }}>
-                    <svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>Edit / replace
+                  <button className="m-brbtn" onClick={() => setPoBillOpen(true)}>
+                    <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>Add bill
                   </button>
                 )}
               </div>
@@ -1448,23 +1464,20 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
             <div className="t">Bill recorded</div>
             <div className="s">{hasBill ? `${billNo ? billNo + ' · ' : ''}${inr0(billAmt)}` : `Est. ${inr0(orderValue)} · no bill yet`}</div>
             {!hasBill && !cancelled && (
-              <div className="act"><button className={`btn sm${nowStage === 'bill' ? ' primary' : ''}`} onClick={() => { setBillingOpen(true); setPayRowOpen(false); setTimeout(() => document.getElementById('podxItems')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 30); }}>Record bill</button></div>
+              <div className="act"><button className={`btn sm${nowStage === 'bill' ? ' primary' : ''}`} onClick={() => setPoBillOpen(true)}>Record bill</button></div>
             )}
             {hasBill && !cancelled && (
               <div className="act" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                {reconciling && <span className="chip"><span className="spinner" /> Reading bill…</span>}
-                {(po.vendor_bill_url || po.vendor_bill_doc_url) && (
-                  <DocThumb stored={po.vendor_bill_doc_url || po.vendor_bill_url} onImageClick={setBillLightbox} label="View bill" />
-                )}
-                {(po.vendor_bill_url || po.vendor_bill_doc_url) && (
-                  <button className="btn ghost sm" onClick={() => previewBill(po.vendor_bill_doc_url || po.vendor_bill_url)}>
-                    <svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" /><circle cx="12" cy="12" r="3" /></svg>
-                    View
+                {/* The PO holds LINKS to its bill entities, not the bill itself — each opens the bill. */}
+                {billEntities.map(b => (
+                  <button key={b.id} className="btn ghost sm" onClick={() => navigate(`/bills/${encodeURIComponent('bl~' + b.id)}`)}>
+                    <svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5" /></svg>
+                    {b.billNo ? `Bill ${b.billNo}` : 'Bill'} · {inr0(b.amount)}
                   </button>
-                )}
-                <button className="btn ghost sm" onClick={openBillEdit}>
-                  <svg viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4 12.5-12.5z" /></svg>
-                  Edit / replace
+                ))}
+                <button className="btn ghost sm" onClick={() => setPoBillOpen(true)}>
+                  <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
+                  Add another bill
                 </button>
               </div>
             )}
@@ -1641,6 +1654,15 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
       )}
 
       {renderMobileSheets()}
+
+      {poBillOpen && (
+        <PoBillSheet
+          poId={poId!} orgId={po.org_id} stakeholderId={po.stakeholder_id} projectId={po.project_id}
+          vendorName={vendor?.name || 'Vendor'}
+          onClose={() => setPoBillOpen(false)}
+          onDone={() => { refetchPoBills(); qc.invalidateQueries({ queryKey: ['po_detail', poId] }); qc.invalidateQueries({ queryKey: ['bills'] }); qc.invalidateQueries({ queryKey: ['po_list_sheet'] }); }}
+        />
+      )}
 
       <ReceiveAtSiteDrawer
         isOpen={showReceiveModal}

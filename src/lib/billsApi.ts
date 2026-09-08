@@ -220,6 +220,36 @@ export async function loadBillDetail(id: string): Promise<BillDetail | null> {
   return null;
 }
 
+// ── PO-linked bills (the PO detail shows links to these; billed = Σ) ───────────
+export interface PoBill { id: string; billNo: string | null; billDate: string | null; amount: number; docUrl: string | null; lines: any[] }
+export async function loadBillsForPO(poId: string): Promise<PoBill[]> {
+  const { data } = await supabase.from('bills').select('id, bill_no, bill_date, amount, doc_url, lines, created_at').eq('po_id', poId).order('bill_date', { ascending: true });
+  return ((data ?? []) as any[]).map(b => ({ id: b.id, billNo: b.bill_no || null, billDate: b.bill_date || (b.created_at ? String(b.created_at).slice(0, 10) : null), amount: num(b.amount), docUrl: b.doc_url || null, lines: Array.isArray(b.lines) ? b.lines : [] }));
+}
+// Σ billed per PO, for a batch of POs (the PO list). Only counts first-class bills.
+export async function billedByPO(poIds: string[]): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  if (!poIds.length) return out;
+  const { data } = await supabase.from('bills').select('po_id, amount').in('po_id', poIds);
+  (data ?? []).forEach((b: any) => { if (b.po_id) out[b.po_id] = (out[b.po_id] || 0) + num(b.amount); });
+  return out;
+}
+
+// Convert-on-view: a legacy PO bill (vendor_bill_amount on the PO, no bill entity yet) becomes a
+// first-class bills entity so every PO is uniform (a link to its bill). Idempotent — only mints when
+// the PO carries a bill amount and no bills row names it. Returns true if it minted one.
+export async function convertLegacyPoBill(po: { po_id: string; org_id: string; stakeholder_id: string | null; project_id: string | null; vendor_bill_amount: number | null; vendor_bill_number?: string | null; vendor_bill_date?: string | null; bill_recorded_at?: string | null; date_issued?: string | null; vendor_bill_doc_url?: string | null; vendor_bill_url?: string | null }): Promise<boolean> {
+  if (!po.stakeholder_id || !(num(po.vendor_bill_amount) > 0)) return false;
+  const existing = await supabase.from('bills').select('id').eq('po_id', po.po_id).limit(1);
+  if ((existing.data ?? []).length) return false;
+  const { error } = await supabase.from('bills').insert({
+    org_id: po.org_id, stakeholder_id: po.stakeholder_id, project_id: po.project_id, po_id: po.po_id,
+    bill_no: po.vendor_bill_number ?? null, bill_date: billDateOf(po as any), amount: num(po.vendor_bill_amount),
+    doc_url: po.vendor_bill_doc_url || po.vendor_bill_url || null, lines: [], note: 'Migrated from the PO',
+  });
+  return !error;
+}
+
 // ── minting a bill from an uploaded document ───────────────────────────────────
 export interface ExtractedBill {
   vendor: string | null;         // vendor NAME as read (for display; user confirms/links a real party)

@@ -253,8 +253,16 @@ door offers to **link it instead of minting a duplicate** — the tx picker sele
 this payment, the Bills page opens it — turning the duplicate into a free reconciliation. `allowDuplicate`
 lets the user deliberately proceed when it's genuinely a different bill sharing a number.
 
-Live wrappers today: the Bills-page drag-drop and the tx `BillAllocateSheet`. PO record-bill and
-WhatsApp intake stay on their parked flows, ready to become wrappers on the same pipeline.
+Live wrappers today: the Bills-page drag-drop, the tx `BillAllocateSheet`, and the **PO record-bill**
+door (`PoBillSheet`). WhatsApp intake stays parked, ready to become a wrapper on the same pipeline.
+
+**PO record-bill (un-parked).** A bill uploaded to a PO is a first-class `bills` entity (`po_id` set,
+vendor + site pre-filled) minted by the pipeline; the PO **holds links to its bills, not the bill
+itself**. It's extracted ONCE at upload — the PO never re-reads the image. A PO can carry several bills:
+the detail lists each as a link and its **Billed = Σ of its bill entities** (the PO-list billed and the
+balance derive from the same Σ, via `billedByPO`). Legacy PO-column bills **convert to entities on view**
+(`convertLegacyPoBill`, idempotent) so every PO is uniform. Dedupe still applies — the same paper
+uploaded to the PO links the existing bill instead of a duplicate.
 
 ## 6a. Correcting a stray line
 
