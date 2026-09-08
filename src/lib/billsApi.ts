@@ -270,13 +270,13 @@ export async function createBill(input: NewBillInput): Promise<string> {
 // A pickable bill is either a first-class bills row ('bill') or an OLD PO-recorded bill still living on
 // the PO ('po') — so a payment can settle both. Settling a 'bill' writes bill_id; a 'po' writes the
 // legacy order_type='PO' allocation.
-export interface UnpaidBill { id: string; kind: 'bill' | 'po'; billNo: string | null; billDate: string | null; amount: number; paid: number; remaining: number; projectId: string | null; site: string | null }
+export interface UnpaidBill { id: string; kind: 'bill' | 'po'; billNo: string | null; billDate: string | null; amount: number; paid: number; remaining: number; projectId: string | null; site: string | null; docUrl: string | null }
 
 export async function loadUnpaidBillsForVendor(stakeholderId: string): Promise<UnpaidBill[]> {
   const [bR, projR, poR] = await Promise.all([
-    supabase.from('bills').select('id, project_id, bill_no, bill_date, amount, created_at').eq('stakeholder_id', stakeholderId),
+    supabase.from('bills').select('id, project_id, bill_no, bill_date, amount, doc_url, created_at').eq('stakeholder_id', stakeholderId),
     supabase.from('projects').select('project_id, name'),
-    supabase.from('purchase_orders').select(`po_id, project_id, vendor_bill_number, ${BILL_DATE_COLUMNS}, status, approval_status`)
+    supabase.from('purchase_orders').select(`po_id, project_id, vendor_bill_number, vendor_bill_doc_url, vendor_bill_url, ${BILL_DATE_COLUMNS}, status, approval_status`)
       .eq('stakeholder_id', stakeholderId).eq('approval_status', 'APPROVED')
       .not('status', 'in', '("CANCELLED","Cancelled","cancelled")').not('vendor_bill_amount', 'is', null).gt('vendor_bill_amount', 0),
   ]);
@@ -302,11 +302,11 @@ export async function loadUnpaidBillsForVendor(stakeholderId: string): Promise<U
   const out: UnpaidBill[] = [];
   for (const b of billRows) {
     const amount = num(b.amount), paid = Math.min(amount, paidByBill[b.id] || 0);
-    out.push({ id: b.id, kind: 'bill', billNo: b.bill_no || null, billDate: b.bill_date || (b.created_at ? String(b.created_at).slice(0, 10) : null), amount, paid, remaining: amount - paid, projectId: b.project_id ?? null, site: b.project_id ? (projName[b.project_id] || b.project_id) : null });
+    out.push({ id: b.id, kind: 'bill', billNo: b.bill_no || null, billDate: b.bill_date || (b.created_at ? String(b.created_at).slice(0, 10) : null), amount, paid, remaining: amount - paid, projectId: b.project_id ?? null, site: b.project_id ? (projName[b.project_id] || b.project_id) : null, docUrl: b.doc_url || null });
   }
   for (const p of pos) {
     const amount = num(p.vendor_bill_amount), paid = Math.min(amount, paidByPo[p.po_id] || 0);
-    out.push({ id: p.po_id, kind: 'po', billNo: p.vendor_bill_number || p.po_id, billDate: billDateOf(p), amount, paid, remaining: amount - paid, projectId: p.project_id ?? null, site: p.project_id ? (projName[p.project_id] || p.project_id) : null });
+    out.push({ id: p.po_id, kind: 'po', billNo: p.vendor_bill_number || p.po_id, billDate: billDateOf(p), amount, paid, remaining: amount - paid, projectId: p.project_id ?? null, site: p.project_id ? (projName[p.project_id] || p.project_id) : null, docUrl: p.vendor_bill_doc_url || p.vendor_bill_url || null });
   }
   return out.filter(b => b.remaining > 0.5).sort((a, b) => (a.billDate || '').localeCompare(b.billDate || '')); // oldest first
 }

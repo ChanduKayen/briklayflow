@@ -12,8 +12,19 @@
  * Writes via set_txn_allocations (complete-set replace; parts sum to the txn total).
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { X, FileText, Plus, Loader2, Check } from 'lucide-react';
+import { X, FileText, Plus, Loader2, Check, Eye } from 'lucide-react';
 import { V, font } from './ledgerTokens';
+import { openDoc } from '../../lib/storage';
+
+const BLZ_CSS = `
+.blz-row{transition:border-color .14s ease, background .14s ease, box-shadow .16s ease}
+.blz-row:hover{background:#FBF7EF}
+.blz-row.on{box-shadow:0 6px 18px -12px rgba(180,83,47,.5)}
+.blz-head{transition:background .12s ease}
+.blz-peek{opacity:.55;transition:opacity .14s ease, background .14s ease, color .14s ease}
+.blz-row:hover .blz-peek{opacity:1}
+.blz-peek:hover{color:#B4532F}
+`;
 import {
   loadUnpaidBillsForVendor, extractBill, createBill, findDuplicateBill, saveBillAllocations, setAdvanceMemo,
   type UnpaidBill, type DuplicateBill,
@@ -75,7 +86,7 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
         amount: ex.amount, lines: ex.lines, file,
       });
       const remaining = ex.amount;
-      const newBill: UnpaidBill = { id: billId, kind: 'bill', billNo: ex.billNo, billDate: ex.billDate, amount: ex.amount, paid: 0, remaining, projectId: defaultProjectId, site: null };
+      const newBill: UnpaidBill = { id: billId, kind: 'bill', billNo: ex.billNo, billDate: ex.billDate, amount: ex.amount, paid: 0, remaining, projectId: defaultProjectId, site: null, docUrl: null };
       setBills(bs => [newBill, ...(bs ?? [])]);
       const leftover = Math.max(0, amount - allocated);
       setSel(s => ({ ...s, [billId]: Math.min(remaining, leftover) || remaining }));
@@ -101,8 +112,11 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
 
   const noBills = bills && bills.length === 0;
 
+  const peek = (url: string) => { void openDoc(url); };
+
   return (
     <div style={{ ...font }}>
+      <style>{BLZ_CSS}</style>
       <div className="flex items-start justify-between px-4 pt-4 pb-3" style={{ borderBottom: `1px solid ${V.line}` }}>
         <div className="min-w-0">
           <p className="text-[15px] font-semibold" style={{ color: V.ink }}>Attach bill</p>
@@ -146,15 +160,23 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
               {bills.map(b => {
                 const on = sel[b.id] != null;
                 return (
-                  <div key={b.id} className="rounded-xl" style={{ background: V.surface, border: `1px solid ${on ? V.terra : V.line}`, transition: 'border-color .15s' }}>
-                    <button type="button" onClick={() => toggle(b)} className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left">
-                      <span className="grid place-items-center rounded-md shrink-0" style={{ width: 18, height: 18, border: `1.5px solid ${on ? V.terra : V.faint}`, background: on ? V.terra : 'transparent' }}>{on && <Check size={12} style={{ color: '#fff' }} />}</span>
-                      <FileText size={15} className="shrink-0" style={{ color: V.faint }} />
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-[12.5px] font-medium truncate" style={{ color: V.ink }}>{b.billNo ? `#${b.billNo}` : 'Bill'}{b.site ? ` · ${b.site}` : ''}</span>
-                        <span className="block text-[11px] truncate" style={{ color: V.faint }}>{inr(b.remaining)} remaining{b.paid > 0.5 ? ` · ${inr(b.paid)} paid of ${inr(b.amount)}` : ''}</span>
-                      </span>
-                    </button>
+                  <div key={b.id} className={`blz-row rounded-xl${on ? ' on' : ''}`} style={{ background: V.surface, border: `1px solid ${on ? V.terra : V.line}` }}>
+                    <div className="blz-head flex items-center gap-2.5 px-3 py-2.5">
+                      <button type="button" onClick={() => toggle(b)} className="flex items-center gap-2.5 text-left flex-1 min-w-0">
+                        <span className="grid place-items-center rounded-md shrink-0" style={{ width: 18, height: 18, border: `1.5px solid ${on ? V.terra : V.faint}`, background: on ? V.terra : 'transparent' }}>{on && <Check size={12} style={{ color: '#fff' }} />}</span>
+                        <FileText size={15} className="shrink-0" style={{ color: V.faint }} />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[12.5px] font-medium truncate" style={{ color: V.ink }}>{b.billNo ? `#${b.billNo}` : 'Bill'}{b.site ? ` · ${b.site}` : ''}{b.kind === 'po' ? ' · on a PO' : ''}</span>
+                          <span className="block text-[11px] truncate" style={{ color: V.faint }}>{inr(b.remaining)} remaining{b.paid > 0.5 ? ` · ${inr(b.paid)} paid of ${inr(b.amount)}` : ''}</span>
+                        </span>
+                      </button>
+                      {b.docUrl && (
+                        <button type="button" onClick={(e) => { e.stopPropagation(); peek(b.docUrl!); }} title="Preview the bill"
+                          className="blz-peek shrink-0 grid place-items-center rounded-lg" style={{ width: 30, height: 30, color: V.faint, background: V.field }}>
+                          <Eye size={15} />
+                        </button>
+                      )}
+                    </div>
                     {on && (
                       <div className="flex items-center gap-2 px-3 pb-2.5" style={{ marginLeft: 28 }}>
                         <span className="text-[11.5px]" style={{ color: V.sys }}>Apply</span>
