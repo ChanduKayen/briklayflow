@@ -1,7 +1,7 @@
 // Bills — vendor-bill register (list + detail), a port of bills-module-mock.html scoped under .blx.
 // Frontend-first over existing data (see billsApi). /bills is the list; /bills/:billId the detail.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { loadBills, loadBillDetail, deleteBill, extractBill, type BillRow, type BillStatus } from '../lib/billsApi';
 import { intakeCommit } from '../lib/billIntake';
@@ -14,6 +14,7 @@ import { useSnackbar } from '../components/Snackbar';
 import NewBillModal, { type BillDraft } from '../components/bills/NewBillModal';
 import { useSearchScope } from '../components/search/searchScope';
 import SearchBar from '../components/search/SearchBar';
+import PartyFilterChip from '../components/search/PartyFilterChip';
 
 const BLX_CSS = `
 .blx{--cream:#F6F2EA;--paper:#FDFBF7;--walnut:#3B3128;--walnut-60:#7A6E61;--walnut-soft:#B4A897;--line:#E4DCCE;--line-strong:#D3C8B4;--terracotta:#B85C38;--sage:#6E7F5E;--sage-tint:#EEF1E8;--terra-tint:#F6E8E0;--amber-tint:#F3ECD9;
@@ -277,9 +278,13 @@ export default function Bills() {
   const sites = useMemo(() => [...new Set(bills.map(b => b.site).filter(Boolean))] as string[], [bills]);
   const vendors = useMemo(() => [...new Set(bills.map(b => b.vendor).filter(Boolean))], [bills]);
   const [q, setQ] = useState('');
+  // ?party=<id> — arriving from the search's "Bills" row for one vendor.
+  const [searchParams] = useSearchParams();
+  const partyId = searchParams.get('party');
   const shown = useMemo(() => bills.filter(b =>
+    (!partyId || b.vendorId === partyId) &&
     (!site || b.site === site) && (!vendor || b.vendor === vendor) && (!status || b.status === status) &&
-    (!q || `${b.vendor} ${b.billNo ?? ''} ${b.site ?? ''}`.toLowerCase().includes(q.toLowerCase()))), [bills, site, vendor, status, q]);
+    (!q || `${b.vendor} ${b.billNo ?? ''} ${b.site ?? ''}`.toLowerCase().includes(q.toLowerCase()))), [bills, site, vendor, status, q, partyId]);
   useSearchScope('Bills', useMemo(() => shown.map(b => ({
     id: b.id, title: b.vendor, sub: `${b.billNo || 'No number'}${b.site ? ' · ' + b.site : ''}`, right: inr(b.amount),
     onPick: () => navigate(`/bills/${encodeURIComponent(b.id)}`),
@@ -326,6 +331,7 @@ export default function Bills() {
           <select value={vendor} onChange={e => setVendor(e.target.value)}><option value="">All vendors</option>{vendors.map(v => <option key={v} value={v}>{v}</option>)}</select>
           <select value={status} onChange={e => setStatus(e.target.value)}><option value="">Any status</option><option value="unpaid">Unpaid</option><option value="part">Part-paid</option><option value="settled">Settled</option></select>
           <SearchBar label="bills" />
+          <PartyFilterChip what="Bills" />
           <span className="count">{shown.length} bill{shown.length !== 1 ? 's' : ''}</span>
         </div>
 

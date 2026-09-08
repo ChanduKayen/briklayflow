@@ -63,6 +63,12 @@ export const CSX_CSS = `
 .csx .item .imid span{display:block; font-size:12px; color:var(--soft); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 .csx .item .iright{font-family:var(--mono); font-size:12px; color:var(--walnut); flex:none}
 .csx .item .kbd{font-family:var(--mono); font-size:10px; color:var(--soft); border:1px solid var(--rule); border-radius:5px; padding:1px 6px; flex:none}
+/* Going somewhere else is a step up and out — say so, quietly. */
+.csx .item .go{color:#CFC4B0; font-size:13px; flex:none; transition:color .15s, transform .15s}
+.csx .item.hot .go{color:var(--terra); transform:translateX(2px)}
+/* Staying put is the obvious move, so it is the only filled mark and the only row with no arrow. */
+.csx .item.primary .iv{background:var(--terra); border-color:var(--terra); color:#fff}
+.csx .item.primary .imid b{color:var(--terra)}
 .csx .pfoot{display:flex; gap:16px; align-items:center; padding:9px 16px; border-top:1px solid var(--rule); font-size:11.5px; color:var(--soft)}
 .csx .pfoot .kbd{font-family:var(--mono); font-size:10px; border:1px solid var(--rule); border-radius:5px; padding:1px 6px; margin-right:5px}
 .csx .pfoot .tail{margin-left:auto; text-align:right}

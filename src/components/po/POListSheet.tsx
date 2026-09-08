@@ -7,8 +7,9 @@ import type React from 'react';
 import { useCallback, useMemo, useState, useTransition } from 'react';
 import { useSearch, useSearchScope } from '../search/searchScope';
 import SearchBar from '../search/SearchBar';
+import PartyFilterChip from '../search/PartyFilterChip';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import DragSheet from '../DragSheet';
@@ -461,6 +462,10 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   const [sortDir, setSortDir] = useState(-1);
   const [q, setQ] = useState('');
   const { openSearch } = useSearch();
+  // ?party=<id> — arriving from the search's "Orders" row for one vendor. A filter, not a search:
+  // it survives typing in the bar, and the chip says whose list this is.
+  const [searchParams] = useSearchParams();
+  const partyId = searchParams.get('party');
   const [tip, setTip] = useState<{ id: string; pending: boolean; x: number; y: number } | null>(null);
   // The PO whose "Send PO to vendor" link was tapped — opens the send dialog over the list.
   const [sendRow, setSendRow] = useState<PORow | null>(null);
@@ -552,10 +557,11 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
 
   const list = useMemo(() => {
     let l = rows.filter(FILTERS[filter] ?? (() => false));   // 'quotes' shows no POs
+    if (partyId) l = l.filter(p => p.stakeholderId === partyId);
     if (q) l = l.filter(p => (p.vendor + p.id + p.site + p.items.map(i => i.n).join(' ')).toLowerCase().includes(q));
     l = l.slice().sort((a, b) => { const x = KEY[sortK](a), y = KEY[sortK](b); return (x > y ? 1 : x < y ? -1 : 0) * sortDir; });
     return l;
-  }, [rows, filter, q, sortK, sortDir]);
+  }, [rows, filter, q, sortK, sortDir, partyId]);
 
   // RFQs awaiting quotes, interleaved with POs by date (only in All / Quotes).
   const rfqShown = useMemo(() => (filter === 'all' || filter === 'quotes')
@@ -736,6 +742,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
             </button>
           </div>
           <div className="m-money">
+            <PartyFilterChip what="Orders" />
             <b>{fmt(fBal)}</b> open with vendors · <b>{fmt(fOpen)}</b> on the way
             {cToSend > 0 && (
               <button type="button" className={`m-wf${mFilter === 'tosend' ? ' on' : ''}`}
@@ -843,6 +850,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
 
         <div className="tools">
           <SearchBar label="orders" />
+          <PartyFilterChip what="Orders" />
           <div className="chips">
             <button className={`chip${filter === 'all' ? ' on' : ''}`} onClick={() => setFilter('all')}>All <span className="n">{cAll}</span></button>
             <button className={`chip warn${filter === 'mine' ? ' on' : ''}`} onClick={() => setFilter('mine')}>To receive <span className="n">{cMine}</span></button>

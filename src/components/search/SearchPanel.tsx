@@ -1,6 +1,13 @@
 /**
- * The panel under the bar: what is elsewhere, and what you can do — never what the page is already
- * showing you. On a phone the page is behind a sheet, so there its hits are listed here too.
+ * The ladder under the bar.
+ *
+ *   1. Stay here — the page behind is already filtered to what you typed. The obvious move, and it
+ *      is drawn as one: filled mark, terracotta, no chevron, because it goes nowhere.
+ *   2. Then this party, elsewhere: their ledger, their orders, their bills. Quieter rows with a
+ *      chevron — each one is a step up and out of the page you are on.
+ *   3. Then anyone else the name matched, in case the top one wasn't who you meant.
+ *
+ * On a phone the page is behind a sheet, so step one becomes the rows themselves.
  */
 import { useEffect, useRef } from 'react';
 import type { Engine } from './searchEngine';
@@ -17,65 +24,76 @@ export default function SearchPanel({ e, listPageRows }: { e: Engine; listPageRo
   const listRef = useRef<HTMLDivElement>(null);
   useEffect(() => { listRef.current?.querySelector('[data-hot="1"]')?.scrollIntoView({ block: 'nearest' }); }, [e.hot]);
 
-  const { query, hot, setHot, pick, scope, scopeRows, shownElsewhere, actions, pageHits, idxOf, closeSearch } = e;
+  const { query, hot, setHot, pick, scope, scopeRows, pageHits, party, others, cuts, idxOf } = e;
+  const nothing = !!query && pageHits === 0 && !party;
 
-  const row = (key: string, i: number, icon: string, title: string, sub: string, right: string, onClick: () => void, kbd?: string) => (
+  const row = (
+    key: string, i: number, icon: string, title: React.ReactNode, sub: string,
+    onClick: () => void, cls = '',
+  ) => (
     <button
-      type="button" key={key} className={`item${i === hot ? ' hot' : ''}`} data-hot={i === hot ? '1' : undefined}
-      onMouseEnter={() => setHot(i)} onClick={onClick}
+      type="button" key={key} className={`item${cls ? ' ' + cls : ''}${i === hot ? ' hot' : ''}`}
+      data-hot={i === hot ? '1' : undefined} onMouseEnter={() => setHot(i)} onClick={onClick}
     >
       <div className="iv">{icon}</div>
-      <div className="imid"><b><Mark text={title} q={query} /></b>{sub && <span>{sub}</span>}</div>
-      {kbd ? <span className="kbd">{kbd}</span> : right ? <div className="iright">{right}</div> : null}
+      <div className="imid"><b>{title}</b>{sub && <span>{sub}</span>}</div>
+      {cls === 'primary' ? null : <span className="go">→</span>}
     </button>
   );
 
   return (
     <div className="panel">
       <div className="plist" ref={listRef}>
+        {/* 1 · what is on the page you are already looking at */}
         {listPageRows && pageHits > 0 && scope && (
           <>
             <div className="sect">{pageHits} on {scope.label.toLowerCase()}</div>
             {scopeRows.slice(0, 12).map((r, i) => row(
-              `p${r.id}`, idxOf('page', i), r.title.slice(0, 1).toUpperCase(), r.title, r.sub ?? '', r.right ?? '',
-              () => { closeSearch(); r.onPick(); },
+              `r${r.id}`, idxOf('row', i), r.title.slice(0, 1).toUpperCase(),
+              <Mark text={r.title} q={query} />, r.sub ?? '',
+              () => pick({ kind: 'row', row: r }),
+            ))}
+          </>
+        )}
+        {!listPageRows && !!query && pageHits > 0 && scope && row(
+          'page', idxOf('page', 0), '⌕',
+          <>{pageHits} on this page</>, `${scope.label} — filtered below`,
+          () => pick({ kind: 'page' }), 'primary',
+        )}
+
+        {/* 2 · the same party, everywhere else they live */}
+        {party && cuts.length > 0 && (
+          <>
+            <div className="sect">{party.name}</div>
+            {cuts.map((c, i) => row(c.key, idxOf('cut', i), c.icon, c.title, '', () => pick({ kind: 'cut', cut: c })))}
+          </>
+        )}
+
+        {/* 3 · in case the top one wasn't who you meant */}
+        {others.length > 0 && (
+          <>
+            <div className="sect">Also matching</div>
+            {others.map((p, i) => row(
+              `o${p.id}`, idxOf('party', i), p.name.slice(0, 1).toUpperCase(),
+              <Mark text={p.name} q={query} />, `${p.type}${p.category ? ' · ' + p.category : ''}`,
+              () => pick({ kind: 'party', party: p }),
             ))}
           </>
         )}
 
-        {/* On desktop the page itself is showing them — say how many and point down. */}
-        {!listPageRows && !!query && pageHits > 0 && scope && (
-          <div className="pgcount">{pageHits} on this page <span>— filtered below ↓</span></div>
-        )}
-
-        {shownElsewhere.length > 0 && (
-          <>
-            <div className="sect">Across Briklay</div>
-            {shownElsewhere.map((x, i) => row(x.id, idxOf('else', i), x.icon, x.title, x.sub, x.right, () => pick({ kind: 'else', e: x })))}
-          </>
-        )}
-
-        {actions.length > 0 && (
-          <>
-            <div className="sect">Actions</div>
-            {actions.map((a, i) => row(`a${a.key}`, idxOf('act', i), a.icon, a.title, '', '', () => pick({ kind: 'act', a }), a.key))}
-          </>
-        )}
-
-        {!!query && pageHits === 0 && shownElsewhere.length === 0 && actions.length === 0 && (
-          <div className="empty">Nothing matches “{query}”.</div>
-        )}
+        {nothing && <div className="empty">Nothing matches “{query}”.</div>}
+        {!query && <div className="empty">Type a name — this page filters as you go.</div>}
       </div>
 
       <div className="pfoot">
         {listPageRows ? (
-          <span className="tail">{scope ? `${scope.label} first · rest of Briklay below` : 'Everything in Briklay'}</span>
+          <span className="tail">{scope ? `${scope.label} first · then who it belongs to` : 'Search Briklay'}</span>
         ) : (
           <>
             <span><span className="kbd">↑↓</span>navigate</span>
             <span><span className="kbd">↵</span>open</span>
             <span><span className="kbd">esc</span>dismiss</span>
-            <span className="tail">{scope ? 'This page filters live · rest of Briklay above' : 'Everything in Briklay'}</span>
+            <span className="tail">{scope ? 'This page filters live · the party is above' : 'Search Briklay'}</span>
           </>
         )}
       </div>

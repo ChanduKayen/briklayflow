@@ -1,108 +1,85 @@
 /**
  * What the search knows, apart from how it looks.
  *
- * Two surfaces render this: the bar a page mounts in its own header, and the full-screen sheet a
- * phone gets. Both need the same three lists in the same order and the same keyboard path through
- * them, so the logic lives here once.
+ * SEARCH FINDS; IT DOESN'T CREATE.
+ * Typing a name gives you two things and nothing else: what is on the page in front of you, and —
+ * when that name is a party — the other places in Briklay that party lives. The first is the
+ * obvious move (stay here, see the matches); the rest are the upgrades (their ledger, their orders,
+ * their bills). There is no "New purchase order" row, because a search box is not where anyone
+ * starts an order, and no cross-table sweep of six tables, because that was six queries to answer
+ * a question the page in front of you had already answered.
+ *
+ * Two surfaces render this — the bar a page mounts in its own header, and the sheet a phone gets —
+ * so the order of the rows and the keyboard path through them live here once.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
+import { searchPayees } from '../../lib/payeeSearch';
 import { useSearch, type ScopeRow } from './searchScope';
+import { crossCutsFor, type CrossCut } from './partyRoutes';
 
-const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
-
-export interface Elsewhere { id: string; title: string; sub: string; right: string; icon: string; go: () => void }
-export interface Action { title: string; key: string; icon: string; href: string }
-export type Nav = { kind: 'page'; row: ScopeRow } | { kind: 'else'; e: Elsewhere } | { kind: 'act'; a: Action };
+export interface Party { id: string; name: string; type: string; category: string | null }
+export type { CrossCut };
+export { crossCutsFor };
+export type Nav =
+  | { kind: 'page' }                      // stay here — the page is already filtered
+  | { kind: 'row'; row: ScopeRow }        // one of the page's rows (the phone lists them)
+  | { kind: 'cut'; cut: CrossCut }        // this party, somewhere else
+  | { kind: 'party'; party: Party };      // another party who also matches
 
 export function useSearchEngine(opts: { listPageRows: boolean }) {
   const { scope, closeSearch, query: q, setQuery } = useSearch();
   const navigate = useNavigate();
   const [hot, setHot] = useState(0);
-  const [elsewhere, setElsewhere] = useState<Elsewhere[]>([]);
+  const [parties, setParties] = useState<Party[]>([]);
 
   const query = q.trim();
   const scopeRows = useMemo(() => scope?.rows ?? [], [scope]);
 
-  // ── everything else in Briklay ──────────────────────────────────────────────
+  // ── who this name belongs to ────────────────────────────────────────────────
+  // One query, not six. Ranked by the same matcher the payee fields use, so "vizag tmt" beats
+  // "vizag steels plumbing" here exactly as it does when recording a payment.
   useEffect(() => {
-    if (!query) return;              // nothing to fetch; the render below ignores stale results
+    if (query.length < 2) return;
     let live = true;
-    const like = `%${query}%`;
     const t = window.setTimeout(async () => {
       try {
-        const [stk, proj, po, wo, bill, txn] = await Promise.all([
-          supabase.from('stakeholders').select('stakeholder_id, name, type, category').ilike('name', like).limit(4),
-          supabase.from('projects').select('project_id, name, status').ilike('name', like).limit(3),
-          supabase.from('purchase_orders').select('po_id, total_value, stakeholders(name)').ilike('po_id', like).limit(3),
-          supabase.from('work_orders').select('wo_id, scope_of_work').ilike('wo_id', like).limit(2),
-          supabase.from('bills').select('id, bill_no, amount, stakeholders(name)').ilike('bill_no', like).limit(3),
-          supabase.from('transactions').select('txn_id, total_amount, date, stakeholders(name)').ilike('txn_id', like).limit(2),
-        ]);
+        const { data } = await supabase.from('stakeholders')
+          .select('stakeholder_id, name, type, category').ilike('name', `%${query}%`).limit(8);
         if (!live) return;
-        const named = (r: { stakeholders?: { name?: string } | { name?: string }[] | null }) => {
-          const s = r.stakeholders;
-          return (Array.isArray(s) ? s[0]?.name : s?.name) ?? '';
-        };
-        setElsewhere([
-          ...(stk.data ?? []).map((s) => ({
-            id: `stk${s.stakeholder_id}`, title: s.name, sub: `Parties · ${s.type}${s.category ? ' · ' + s.category : ''}`,
-            right: '', icon: '◍', go: () => navigate(`/stakeholders/${s.stakeholder_id}`),
-          })),
-          ...(bill.data ?? []).map((b) => ({
-            id: `bl${b.id}`, title: `Bill ${b.bill_no ?? ''}`.trim(), sub: `Bills${named(b) ? ' · ' + named(b) : ''}`,
-            right: inr(Number(b.amount)), icon: '▤', go: () => navigate(`/bills/${encodeURIComponent('bl~' + b.id)}`),
-          })),
-          ...(po.data ?? []).map((p) => ({
-            id: `po${p.po_id}`, title: p.po_id, sub: `Purchase orders${named(p) ? ' · ' + named(p) : ''}`,
-            right: inr(Number(p.total_value)), icon: '▦', go: () => navigate(`/purchase-orders/${p.po_id}`),
-          })),
-          ...(txn.data ?? []).map((t2) => ({
-            id: `tx${t2.txn_id}`, title: named(t2) || t2.txn_id,
-            sub: `Transactions${t2.date ? ' · ' + new Date(t2.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : ''}`,
-            right: inr(Number(t2.total_amount)), icon: '⇄', go: () => navigate(`/ledger/${t2.txn_id}`),
-          })),
-          ...(wo.data ?? []).map((w) => ({
-            id: `wo${w.wo_id}`, title: w.wo_id, sub: `Contracts${w.scope_of_work ? ' · ' + w.scope_of_work : ''}`,
-            right: '', icon: '▤', go: () => navigate(`/work-orders/${w.wo_id}`),
-          })),
-          ...(proj.data ?? []).map((p) => ({
-            id: `pj${p.project_id}`, title: p.name, sub: `Sites${p.status ? ' · ' + p.status : ''}`,
-            right: '', icon: '⌂', go: () => navigate(`/projects/${p.project_id}`),
-          })),
-        ].slice(0, 6));
-      } catch { if (live) setElsewhere([]); }
-    }, 220);
+        const ranked = searchPayees((data ?? []) as { name: string }[], query) as unknown as
+          { stakeholder_id: string; name: string; type: string; category: string | null }[];
+        setParties(ranked.slice(0, 3).map(s => ({ id: s.stakeholder_id, name: s.name, type: s.type, category: s.category })));
+      } catch { if (live) setParties([]); }
+    }, 200);
     return () => { live = false; window.clearTimeout(t); };
-  }, [query, navigate]);
-
-  const actions = useMemo<Action[]>(() => {
-    const all: Action[] = [
-      { title: 'New Transaction', key: 'T', icon: '⇄', href: '/ledger/new' },
-      { title: 'New Purchase Order', key: 'P', icon: '▦', href: '/purchase-orders/new' },
-      { title: 'Add New Party', key: 'N', icon: '＋', href: '/stakeholders?new=1' },
-      { title: 'New Contract', key: 'C', icon: '▤', href: '/work-orders/new' },
-    ];
-    if (!query) return all.slice(0, 3);
-    return all.filter(a => a.title.toLowerCase().includes(query.toLowerCase())).slice(0, 3);
   }, [query]);
 
-  // Results are only ever shown for the query that fetched them — so a cleared box shows nothing
-  // rather than the last search's leftovers, without an effect racing to blank the state.
-  const shownElsewhere = useMemo(() => (query ? elsewhere : []), [query, elsewhere]);
+  // Results are only ever shown for the query that fetched them, so a cleared box shows nothing
+  // rather than the last search's leftovers.
+  const shownParties = useMemo(() => (query.length >= 2 ? parties : []), [query, parties]);
+  const party = shownParties[0] ?? null;
+  const others = shownParties.slice(1);
+  const cuts = useMemo(() => (party ? crossCutsFor(party) : []), [party]);
+  const pageHits = scopeRows.length;
+
+  // ── the ladder: stay here, then this party elsewhere, then anyone else who matched ──────────
   const nav = useMemo<Nav[]>(() => [
-    ...scopeRows.map(row => ({ kind: 'page', row }) as Nav),
-    ...shownElsewhere.map(e => ({ kind: 'else', e }) as Nav),
-    ...actions.map(a => ({ kind: 'act', a }) as Nav),
-  ], [scopeRows, shownElsewhere, actions]);
+    ...(opts.listPageRows
+      ? scopeRows.slice(0, 12).map(row => ({ kind: 'row', row }) as Nav)
+      : (query && pageHits > 0 ? [{ kind: 'page' } as Nav] : [])),
+    ...cuts.map(cut => ({ kind: 'cut', cut }) as Nav),
+    ...others.map(p => ({ kind: 'party', party: p }) as Nav),
+  ], [opts.listPageRows, scopeRows, query, pageHits, cuts, others]);
 
   const pick = useCallback((n: Nav | undefined) => {
     if (!n) return;
-    closeSearch();
-    if (n.kind === 'page') n.row.onPick();
-    else if (n.kind === 'else') n.e.go();
-    else navigate(n.a.href);
+    closeSearch();                                   // the page keeps the filter; only the panel goes
+    if (n.kind === 'row') n.row.onPick();
+    else if (n.kind === 'cut') navigate(n.cut.href);
+    else if (n.kind === 'party') navigate(`/stakeholders/${n.party.id}`);
+    // 'page' — nothing to navigate to: the results are already behind the panel.
   }, [closeSearch, navigate]);
 
   useEffect(() => {
@@ -119,15 +96,14 @@ export function useSearchEngine(opts: { listPageRows: boolean }) {
   // The highlight lives OUT ON THE PAGE, because the page is the result list. Pages mark their rows
   // with data-search-row; nothing else is asked of them. (Not on a phone — the sheet covers it.)
   const hotNav = nav[hot];
-  const hotRowId = hotNav?.kind === 'page' ? hotNav.row.id : null;
+  const hotRowId = hotNav?.kind === 'row' ? hotNav.row.id : null;
   useEffect(() => {
-    if (opts.listPageRows) return;
+    if (!opts.listPageRows) return;
     document.querySelectorAll('[data-search-hot]').forEach(el => el.removeAttribute('data-search-hot'));
     if (!hotRowId) return;
     const el = document.querySelector(`[data-search-row="${CSS.escape(hotRowId)}"]`);
     if (!el) return;
     el.setAttribute('data-search-hot', '1');
-    el.scrollIntoView({ block: 'nearest' });
     return () => el.removeAttribute('data-search-hot');
   }, [hotRowId, opts.listPageRows]);
   useEffect(() => () => { document.querySelectorAll('[data-search-hot]').forEach(el => el.removeAttribute('data-search-hot')); }, []);
@@ -136,10 +112,15 @@ export function useSearchEngine(opts: { listPageRows: boolean }) {
 
   return {
     scope, query, rawQuery: q, setQuery: setQueryAndReset, closeSearch,
-    hot, setHot, nav, pick, scopeRows, shownElsewhere, actions,
-    pageHits: scopeRows.length,
-    idxOf: (kind: Nav['kind'], i: number) =>
-      (kind === 'page' ? i : kind === 'else' ? scopeRows.length + i : scopeRows.length + shownElsewhere.length + i),
+    hot, setHot, nav, pick, scopeRows, pageHits,
+    party, others, cuts,
+    /** Index of a nav entry, so a rendered row and the keyboard agree on what is hot. */
+    idxOf: (kind: Nav['kind'], i: number) => {
+      const head = opts.listPageRows ? Math.min(scopeRows.length, 12) : (query && pageHits > 0 ? 1 : 0);
+      if (kind === 'page' || kind === 'row') return i;
+      if (kind === 'cut') return head + i;
+      return head + cuts.length + i;
+    },
   };
 }
 

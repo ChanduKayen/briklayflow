@@ -7,8 +7,9 @@ import type React from 'react';
 import { useCallback, useMemo, useState } from 'react';
 import { useSearchScope } from '../search/searchScope';
 import SearchBar from '../search/SearchBar';
+import PartyFilterChip from '../search/PartyFilterChip';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 
@@ -124,7 +125,7 @@ const POLX_CSS = `
 
 interface Stage { n: string; q: string; done: boolean }
 interface WORow {
-  id: string; worker: string; workerCat: string;
+  id: string; worker: string; workerCat: string; stakeholderId: string;
   site: string; issued: string;
   stages: Stage[]; scope: string;
   value: number; paid: number;
@@ -198,6 +199,7 @@ function useWOListData(projectId?: string) {
       return {
         id: w.wo_id,
         worker: w.stakeholders?.name || 'Worker',
+        stakeholderId: w.stakeholder_id ?? '',
         workerCat: w.stakeholders?.category || '',
         site: w.projects?.name || '',
         issued: w.date_issued || w.created_at,
@@ -221,6 +223,9 @@ export default function WOListSheet({ projectId }: { projectId?: string }) {
   const [sortK, setSortK] = useState<'worker' | 'site' | 'issued' | 'progress' | 'value' | 'balance'>('issued');
   const [sortDir, setSortDir] = useState(-1);
   const [q, setQ] = useState('');
+  // ?party=<id> — arriving from the search's "Contracts" row for one worker.
+  const [searchParams] = useSearchParams();
+  const partyId = searchParams.get('party');
   const [tip, setTip] = useState<{ id: string; x: number; y: number } | null>(null);
 
   const balance = (p: WORow) => p.value - p.paid;
@@ -254,10 +259,11 @@ export default function WOListSheet({ projectId }: { projectId?: string }) {
 
   const list = useMemo(() => {
     let l = rows.filter(FILTERS[filter]);
+    if (partyId) l = l.filter(p => p.stakeholderId === partyId);
     if (q) l = l.filter(p => (p.worker + p.id + p.site + p.scope + p.stages.map(s => s.n).join(' ')).toLowerCase().includes(q));
     l = l.slice().sort((a, b) => { const x = KEY[sortK](a), y = KEY[sortK](b); return (x > y ? 1 : x < y ? -1 : 0) * sortDir; });
     return l;
-  }, [rows, filter, q, sortK, sortDir]);
+  }, [rows, filter, q, sortK, sortDir, partyId]);
 
   const live = useMemo(() => rows.filter(openLive), [rows]);
   const fActive = rows.filter(p => p.status === 'Active').length;
@@ -326,6 +332,7 @@ export default function WOListSheet({ projectId }: { projectId?: string }) {
 
         <div className="tools">
           <SearchBar label="contracts" />
+          <PartyFilterChip what="Contracts" />
           <div className="chips">
             <button className={`chip${filter === 'all' ? ' on' : ''}`} onClick={() => setFilter('all')}>All <span className="n">{cAll}</span></button>
             <button className={`chip warn${filter === 'active' ? ' on' : ''}`} onClick={() => setFilter('active')}>Active <span className="n">{cActive}</span></button>

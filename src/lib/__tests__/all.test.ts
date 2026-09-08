@@ -7,6 +7,7 @@ import './importResolve.test'
 import './importClassify.test'
 import './importSheet.test'
 import './importCommit.test'
+import './partyRoutes.test'
 import { runAll } from './harness'
 
 await runAll()

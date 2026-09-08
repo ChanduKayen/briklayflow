@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { ListSkeleton } from '../components/SkeletonLoader';
 import type { ClientInvoice, InvoiceStatus, Stakeholder, Project } from '../types';
 import { useSearchScope } from '../components/search/searchScope';
 import SearchBar from '../components/search/SearchBar';
+import PartyFilterChip from '../components/search/PartyFilterChip';
 
 const STATUS_TABS: { label: string; value: InvoiceStatus | 'All' }[] = [
   { label: 'All',     value: 'All'     },
@@ -76,7 +77,10 @@ export default function Invoices() {
   const projectName = (id?: string) =>
     projects?.find(p => p.project_id === id)?.name ?? '—';
 
+  const [searchParams] = useSearchParams();
+  const partyId = searchParams.get('party');       // the search's "Invoices" row for one client
   const filtered = (invoices ?? []).filter(inv => {
+    if (partyId && inv.client_id !== partyId) return false;
     if (statusFilter !== 'All' && inv.status !== statusFilter) return false;
     if (search) {
       const q = search.toLowerCase();
@@ -125,6 +129,7 @@ export default function Invoices() {
       {/* Search + Status filter */}
       <div className="flex flex-col md:flex-row gap-3 mb-5">
         <SearchBar label="invoices" className="self-start" />
+        <PartyFilterChip what="Invoices" />
         <div className="flex gap-1 flex-wrap">
           {STATUS_TABS.map(tab => (
             <button

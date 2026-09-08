@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSearchScope } from '../components/search/searchScope';
 import SearchBar from '../components/search/SearchBar';
+import PartyFilterChip from '../components/search/PartyFilterChip';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { resolveDocUrl } from '../lib/storage';
@@ -490,6 +491,9 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   // `?stakeholder=<id>` opens it on arrival — the landing point for the "View ledger" button on a WhatsApp
   // payment answer (partyLedgerLink), so the number he was told and the payments behind it are one tap apart.
   // Read once, as the initial state: closing the drawer must not re-open it, and must not touch the URL.
+  // ?party=<id> — the search's "Payments" row: this party's entries in the register, in place, not
+  // a drawer over it. (?stakeholder= is the older deep link and still opens the drawer.)
+  const partyFilter = searchParams.get('party');
   const [drawerStk, setDrawerStk] = useState<string | null>(() => searchParams.get('stakeholder'));
   // `&project=<id>` narrows that drawer to one site. A WhatsApp answer about a SITE quoted a site's number,
   // so its button must land on that site's ledger — a whole-party ledger behind a per-site figure reads as a
@@ -821,7 +825,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   // Reset selection + pagination when the active filters change — the React-sanctioned
   // "adjust state during render" pattern (https://react.dev/learn/you-might-not-need-an-effect),
   // which avoids the extra commit (and cascading-render lint) of doing it in an effect.
-  const filterKey = JSON.stringify([searchTerm, filterProject, filterType, datePreset, customRange, filterFlagged, filterNeedsAction, filterUnlinked]);
+  const filterKey = JSON.stringify([partyFilter, searchTerm, filterProject, filterType, datePreset, customRange, filterFlagged, filterNeedsAction, filterUnlinked]);
   const [seenFilterKey, setSeenFilterKey] = useState(filterKey);
   if (filterKey !== seenFilterKey) {
     setSeenFilterKey(filterKey);
@@ -904,6 +908,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
     // A voided transaction is a closed record — it must never count toward the entry count, the
     // in/out/net totals, or the visible ledger. It stays queryable on its own detail page.
     if (txn.status === 'Voided') return false;
+    if (partyFilter && txn.stakeholder_id !== partyFilter) return false;
     const term = searchTerm.toLowerCase();
     const matchesSearch = !term || txn.txn_id.toLowerCase().includes(term) || txn.stakeholders?.name?.toLowerCase().includes(term) || txn.category?.toLowerCase().includes(term) || (txn.remarks || '').toLowerCase().includes(term);
     const matchesFlagged = filterFlagged ? txn.ai_flag_status === 'Flagged' : true;
@@ -1273,6 +1278,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
           <span className="hidden sm:block flex-1" />
 
           <SearchBar label="entries" />
+          <PartyFilterChip what="Payments" />
           <button onClick={exportCSV} className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full" style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.inkSoft, ...font }}>
             <Download size={13} style={{ color: V.faint }} /> Export
           </button>
