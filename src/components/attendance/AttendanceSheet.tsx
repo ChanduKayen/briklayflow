@@ -219,6 +219,17 @@ const ATDX_CSS = `
 .atdx .bpop .bp-done{width:100%;margin-top:10px;background:var(--ink);color:var(--cream);border:0;border-radius:999px;padding:9px 0;font-family:"DM Sans",sans-serif;font-weight:600;font-size:13px;cursor:pointer;transition:transform .2s cubic-bezier(.2,.9,.3,1.4)}
 .atdx .bpop .bp-done:hover{transform:translateY(-1px)}
 .atdx .bpop .bp-done:active{transform:scale(.97)}
+.atdx .bpop .bp-row .rm{width:18px;height:18px;border-radius:6px;color:var(--walnut-3);font-size:14px;line-height:1;flex:none;opacity:0;transition:opacity .15s}
+.atdx .bpop .bp-row:hover .rm{opacity:1}
+.atdx .bpop .bp-row .rm:hover{color:var(--terracotta);background:var(--terra-soft)}
+.atdx .bpop .bp-row .rate{cursor:text;border-bottom:1px dashed transparent}
+.atdx .bpop .bp-row .rate:hover{border-bottom-color:var(--line-2);color:var(--walnut-2)}
+.atdx .bpop .bp-addskill{display:block;width:100%;text-align:left;margin-top:8px;font-size:12.5px;color:var(--terracotta);font-weight:500}
+.atdx .bpop .bp-addskill:hover{text-decoration:underline;text-underline-offset:2px}
+/* a labour crew's single collapsed row reads like a worker row */
+.atdx tr.crew.workerrow td{border-top:1px solid var(--line);padding-top:8px;padding-bottom:8px}
+.atdx tr.crew.workerrow td.name{padding:8px 18px}
+.atdx tr.crew.workerrow td.tot{text-align:right;padding:8px 18px}
 .atdx .bar{height:4px;background:var(--line);border-radius:2px;margin-top:5px;position:relative;overflow:hidden;width:120px;margin-left:auto}
 .atdx .bar i{position:absolute;left:0;top:0;bottom:0;background:var(--slate)}
 .atdx .bar b{position:absolute;top:0;bottom:0;background:var(--terracotta)}
@@ -230,7 +241,8 @@ const ATDX_CSS = `
 .atdx tr.direct td.tot .v{font-weight:500}
 .atdx tr.direct td.tot .u{font-size:12.5px;color:var(--walnut-3)}
 .atdx tr.direct td.tot .u b{color:var(--sage);font-weight:500}
-.atdx tr.add td{border-top:1px solid var(--line);text-align:left;padding:18px 18px 20px;background:var(--cream)}
+.atdx tr.add td{border-top:1px solid var(--line);text-align:left;padding:8px 18px;background:var(--paper)}
+.atdx tr.add td:empty{padding:0;border-top:0}
 .atdx tr.add button.pill{height:40px;padding:0 18px 0 14px;font-size:14px;font-weight:500;border-radius:10px;display:inline-flex;align-items:center;gap:9px;border:1px solid var(--line-2);background:var(--paper);color:var(--walnut)}
 .atdx tr.add button.pill:hover{border-color:var(--walnut)}
 .atdx tr.add button.pill.main{background:var(--walnut);color:var(--paper);border-color:var(--walnut)}
@@ -460,13 +472,6 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   const tip = (c: any) => c.by ? `<div class="tip">${c.v} · ${c.by} · ${c.at || ''}${c.photo ? ' · photo' : ''}</div>` : '';
 
   const srcDot = (c: any) => c.src === 'wa' ? '<span class="src"></span>' : '';
-  function numCell(c: Cell, i: number, ref: string, paidThrough?: number) {
-    if (c === 'off') return `<td class="cell${col(i)}"><div class="c off">·</div></td>`;
-    if (!c) return `<td class="cell${col(i)}"><div class="c ${i <= TODAY ? 'gap' : 'off'}" data-edit="${ref}">${i <= TODAY ? '—' : ''}</div></td>`;
-    const paid = paidThrough != null && i <= paidThrough ? ' paid' : '';
-    const filled = c.v > 0 ? ' filled' : '';
-    return `<td class="cell${col(i)}"><div class="c${filled} ${c.src}${paid}" data-edit="${ref}">${c.v === 0 ? '<span class="zero">0</span>' : c.v}${srcDot(c)}${tip(c)}</div></td>`;
-  }
   function dayCell(c: Cell, i: number, ref: string) {
     if (c === 'off') return `<td class="cell${col(i)}"><div class="c off">·</div></td>`;
     if (!c) return `<td class="cell${col(i)}"><div class="c ${i <= TODAY ? 'gap' : 'off'}" data-cycle="${ref}">${i <= TODAY ? '—' : ''}</div></td>`;
@@ -479,6 +484,18 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     if (!c) return `<td class="cell${col(i)}"><div class="c off qty" data-edit="${ref}"></div></td>`;
     const filled = c.v > 0 ? ' filled' : '';
     return `<td class="cell${col(i)}"><div class="c${filled} ${c.src} qty" data-edit="${ref}">${c.v}<small>${unit || ''}</small>${srcDot(c)}${tip(c)}</div></td>`;
+  }
+  // A labour crew shows ONE row; its day cell is the whole crew's headcount for that day (e.g. "1+2"),
+  // and a click opens the breakdown popover to set each skill. Keeps the grid uncluttered.
+  function crewDayCell(crew: any, i: number, si: number, ci: number) {
+    const ref = `${si}.${ci}.${i}`;
+    if (i === 6 || i > TODAY) return `<td class="cell${col(i)}"><div class="c off">·</div></td>`;   // Sunday / future
+    const nz = crew.cats.map((cat: any) => { const c = cat.cells[i]; return (c && c !== 'off') ? c.v : 0; });
+    const total = nz.reduce((a: number, b: number) => a + b, 0);
+    const wa = crew.cats.some((cat: any) => { const c = cat.cells[i]; return c && c !== 'off' && c.src === 'wa'; });
+    if (total <= 0) return `<td class="cell${col(i)}"><div class="c gap" data-crewcell="${ref}">—</div></td>`;
+    const disp = nz.filter((v: number) => v > 0).join('+');
+    return `<td class="cell${col(i)}"><div class="c filled" data-crewcell="${ref}">${disp}${wa ? '<span class="src"></span>' : ''}</div></td>`;
   }
   function pctCell(c: Cell, i: number, ref: string, prev: number) {
     if (c === 'off') return `<td class="cell${col(i)}"><div class="c off">·</div></td>`;
@@ -534,19 +551,27 @@ export default function AttendanceSheet({ session }: { session: Session }) {
         const measureToggle = (crew.contract && onContract)
           ? ` <button class="measurebasis${measuring ? ' on' : ''}" data-measurebasis="${si}.${ci}" title="${measuring ? 'Measured by attendance — each measured day auto-certifies. Click to switch back to milestone certification.' : 'Certify by milestones. Click to measure by attendance instead.'}">${measuring ? '✓ measured by attendance' : 'measure by attendance'}</button>`
           : '';
-        const seg = crew.contract
-          ? `<div class="seg"><button data-basis="${si}.${ci}.contract" aria-pressed="${onContract}">Contract</button><button data-basis="${si}.${ci}.labour" aria-pressed="${!onContract}">Labour</button>${assumed}${measureToggle}</div>`
-          : `<div class="wageslbl" data-wageslbl="${si}.${ci}">Daily wages · not on a contract${assumed} · <button class="oncontract" data-oncontract="${si}.${ci}">put on contract</button></div>`;
-        // The heading row's day cells are muted — attendance is entered on the skill rows beneath it.
-        const headCells = crew.head.map((_c, i) => `<td class="cell${col(i)}"><div class="c off">·</div></td>`).join('');
+        if (!onContract) {
+          // ── LABOUR crew → ONE collapsed row. Cells are the crew's daily headcount; a click opens the
+          //    stepper popover (the mockup) to set each skill. No sub-rows — the grid stays clean. ──
+          const contractLink = crew.contract
+            ? `<button class="oncontract" data-basis="${si}.${ci}.contract" title="This party has a contract — switch to tracking it by stages">on a contract?</button>`
+            : `<button class="oncontract" data-oncontract="${si}.${ci}">put on contract</button>`;
+          html += `<tr class="crew workerrow" data-site="${site.site}" data-grp="c${si}-${ci}">
+            <td class="sno snorm" data-rmc="${si}.${ci}" title="Remove from sheet" aria-label="Remove ${escapeHtml(crew.n)}"><span class="sno-n">${++sno}</span><span class="sno-x">×</span></td>
+            <td class="name"><div class="wnamewrap"><div class="wav">${avatarOf(crew.n)}</div><div class="wmid"><div class="n">${escapeHtml(crew.n)}<span class="crewtag">crew</span></div><div class="d">${escapeHtml(crew.trade || crew.d || 'Labour')} · daily wages · ${contractLink}</div></div></div></td>
+            ${crew.head.map((_c: Cell, i: number) => crewDayCell(crew, i, si, ci)).join('')}
+            <td class="tot"><div class="v">${catDays} worker-day${catDays === 1 ? '' : 's'}</div><div class="u">${wage ? `<b>wages, unpaid</b> ${inr(wage)}` : '<span style="color:var(--walnut-3)">tap a day to mark</span>'}</div></td></tr>`;
+          return; // no sub-rows for a labour crew
+        }
+        // ── CONTRACT crew → heading + stage rows (measured by % completion / certification) ──
+        const seg = `<div class="seg"><button data-basis="${si}.${ci}.contract" aria-pressed="${onContract}">Contract</button><button data-basis="${si}.${ci}.labour" aria-pressed="${!onContract}">Labour</button>${assumed}${measureToggle}</div>`;
         html += `<tr class="crew" data-site="${site.site}" data-grp="c${si}-${ci}">
           <td class="sno snorm" data-rmc="${si}.${ci}" title="Remove from sheet" aria-label="Remove ${escapeHtml(crew.n)}"><span class="sno-n">${++sno}</span><span class="sno-x">×</span></td>
-          <td class="name crewhead"><div class="wav">${avatarOf(crew.n)}</div><div class="n">${crew.n}</div><div class="d">${crew.d}${crew.contract ? ' · contract' : ''}</div>${seg}</td>
-          ${headCells}
-          <td class="tot">${onContract
-            ? `<div class="v">${overallPct}% complete</div><div class="u"><b>earned, unpaid</b> ${inr(earned)}</div>`
-            : `<div class="v">${catDays} worker-day${catDays === 1 ? '' : 's'}</div><div class="u">${wage ? `<b>wages, unpaid</b> ${inr(wage)}` : ''}</div>`}</td></tr>`;
-        if (onContract) {
+          <td class="name crewhead"><div class="wav">${avatarOf(crew.n)}</div><div class="n">${crew.n}</div><div class="d">${crew.d} · contract</div>${seg}</td>
+          ${crew.head.map((_c: Cell, i: number) => `<td class="cell${col(i)}"><div class="c off">·</div></td>`).join('')}
+          <td class="tot"><div class="v">${overallPct}% complete</div><div class="u"><b>earned, unpaid</b> ${inr(earned)}</div></td></tr>`;
+        {
           // Show every live stage by default so a staged contract reads as multiple stage rows
           // (each a select — "where they worked"), and a lump-sum-only contract shows its one row.
           // Only a stage that's fully done AND fully paid is folded away.
@@ -572,21 +597,6 @@ export default function AttendanceSheet({ session }: { session: Session }) {
           html += `<tr class="sub last" data-site="${site.site}" data-grp="c${si}-${ci}"><td class="sno"></td><td class="name" colspan="8" id="stadd-${si}-${ci}">
             <select class="stsel ghost" data-swap="${si}.${ci}.new"><option value="" selected>+ Stage…${hidden ? ` (${hidden} more on this contract)` : ''}</option>${opts(-1)}</select></td>
             <td class="tot"></td></tr>`;
-        } else {
-          crew.cats.forEach((cat, ki) => {
-            const ref = `${si}.c${ci}.${ki}`;
-            const cd = sum(cat.cells);
-            html += `<tr class="sub" data-site="${site.site}" data-grp="c${si}-${ci}">
-              <td class="sno snorm" data-rmcat="${si}.${ci}.${ki}" title="Remove this skill" aria-label="Remove ${escapeHtml(cat.n)}"><span class="sno-n"></span><span class="sno-x">×</span></td>
-              <td class="name catn"><span class="clab">${cat.n}</span><span class="ratechip mono" data-rate="${ref}" title="Tap to change the daily rate">₹${cat.rate}<small>/day</small></span>${cat.own ? '<span class="ownflag" title="Overridden from the rate card">custom</span>' : ''}</td>
-              ${cat.cells.map((c, i) => numCell(c, i, ref, crew.paidThrough)).join('')}
-              <td class="tot"><b class="mono">${inr(cd * cat.rate)}</b><span class="brk mono">${cd} × ₹${cat.rate}</span></td></tr>`;
-          });
-          const have = crew.cats.map(c => c.n);
-          const catOpts = ['Mason', 'Carpenter', 'Bar bender', 'Painter', 'Tiler', 'Electrician', 'Plumber', 'Helper · male', 'Helper · female']
-            .filter(n => !have.includes(n)).map(n => `<option value="${n}">${n}</option>`).join('');
-          html += `<tr class="sub last addrow" data-site="${site.site}" data-grp="c${si}-${ci}"><td class="sno"></td><td class="name" colspan="8">
-            <select class="stsel ghost addskill" data-addcat="${si}.${ci}"><option value="" selected>＋ Add a skilled worker</option>${catOpts}<option disabled>──────</option><option value="custom">Other…</option></select></td><td class="tot"></td></tr>`;
         }
       });
       site.direct.forEach((w, wi) => {
@@ -601,7 +611,8 @@ export default function AttendanceSheet({ session }: { session: Session }) {
       // Per-site headcount footer + a subtle add-worker row (hosts the inline picker the header CTA opens).
       todayCount += TODAY >= 0 ? dayHead[TODAY] : 0;
       html += `<tr class="sitefoot" data-site="${site.site}"><td class="lab">On site</td>${dates.map((_d, i) => `<td class="dc${col(i)}">${dayHead[i] || '·'}</td>`).join('')}<td class="fsum">${inr(siteWage)}</td></tr>`;
-      html += `<tr class="add" data-site="${site.site}"><td colspan="10" id="add-${si}"><button class="addbtn" data-add="${si}"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg><span>Add worker or crew</span></button></td></tr>`;
+      // Quiet host row for the inline add-worker picker (opened from the site header's "＋ Add worker").
+      html += `<tr class="add" data-site="${site.site}"><td colspan="10" id="add-${si}"></td></tr>`;
       return html;
     }).join('') || `<tr><td colspan="10" class="state">No active projects yet — create a project to start tracking attendance.</td></tr>`;
     const setTxt = (id: string, v: string) => { const el = q('#' + id); if (el) el.textContent = v; };
@@ -697,8 +708,93 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { doneOnce = true; inp.removeEventListener('blur', commit); render(); } });
   }
 
+  // The crew breakdown popover (the mockup): steppers per skill for ONE day, live count + cost, a
+  // clickable rate, and add/remove skill. Persists each change; the cell repaints live, totals on close.
+  function openCrewPopover(cellDiv: HTMLElement, si: number, ci: number, i: number) {
+    const td = cellDiv.closest('td.cell') as HTMLElement | null; if (!td) return;
+    td.querySelector('.bpop')?.remove();
+    const crew = DATA.current[si].crews[ci];
+    const dt = new Date(dates[i]);
+    const dayLbl = dt.toLocaleString('en-US', { weekday: 'short' }) + ' ' + dt.getDate();
+    const valOf = (ki: number) => { const c = crew.cats[ki].cells[i]; return (c && c !== 'off') ? c.v : 0; };
+    const pop = document.createElement('div');
+    pop.className = 'bpop';
+    pop.innerHTML =
+      `<div class="bp-title">${escapeHtml(crew.n)} · ${dayLbl}</div>` +
+      crew.cats.map((cat, ki) => `<div class="bp-row" data-ki="${ki}">
+          <button class="rm" data-rmk="${ki}" title="Remove this skill">×</button>
+          <div class="t">${escapeHtml(cat.n)}<div class="rate" data-poprate="${ki}" title="Tap to change the daily rate">${inr(cat.rate)}/day</div></div>
+          <div class="step"><button data-d="-1" data-ki="${ki}">−</button><b data-q="${ki}">${valOf(ki)}</b><button data-d="1" data-ki="${ki}">＋</button></div>
+        </div>`).join('') +
+      `<button class="bp-addskill" data-addcat="${si}.${ci}">＋ add a skill</button>` +
+      `<div class="bp-foot"><span data-foot-c></span><span data-foot-amt></span></div>` +
+      `<button class="bp-done">Done</button>`;
+    td.appendChild(pop);
+    requestAnimationFrame(() => pop.classList.add('show'));
+
+    const repaintCell = () => {
+      const nz = crew.cats.map(cat => { const c = cat.cells[i]; return (c && c !== 'off') ? c.v : 0; });
+      const total = nz.reduce((a, b) => a + b, 0);
+      const wa = crew.cats.some(cat => { const c = cat.cells[i]; return c && c !== 'off' && c.src === 'wa'; });
+      if (total <= 0) { cellDiv.className = 'c gap'; cellDiv.innerHTML = '—'; }
+      else { cellDiv.className = 'c filled'; cellDiv.innerHTML = nz.filter(v => v > 0).join('+') + (wa ? '<span class="src"></span>' : ''); }
+    };
+    const foot = () => {
+      const count = crew.cats.reduce((s, cat) => s + valOf(crew.cats.indexOf(cat)), 0);
+      const cost = crew.cats.reduce((s, cat, ki) => s + valOf(ki) * cat.rate, 0);
+      (pop.querySelector('[data-foot-c]') as HTMLElement).textContent = `${count} on site`;
+      (pop.querySelector('[data-foot-amt]') as HTMLElement).textContent = inr(cost);
+    };
+    foot();
+
+    let dirty = false;
+    const close = () => { document.removeEventListener('mousedown', onDoc); pop.remove(); if (dirty) render(); };
+    const onDoc = (e: MouseEvent) => { if (!pop.contains(e.target as Node) && e.target !== cellDiv) close(); };
+    setTimeout(() => document.addEventListener('mousedown', onDoc), 0);
+
+    pop.querySelectorAll('.step button').forEach(b => b.addEventListener('click', () => {
+      const ki = +(b as HTMLElement).dataset.ki!, d = +(b as HTMLElement).dataset.d!;
+      const v = Math.max(0, valOf(ki) + d);
+      crew.cats[ki].cells[i] = { v, src: 'office', by: byName, at: 'just now' };
+      (pop.querySelector(`b[data-q="${ki}"]`) as HTMLElement).textContent = String(v);
+      dirty = true; foot(); repaintCell();
+      persistCell({ type: 'crew_category', category_id: crew.cats[ki].id }, DATA.current[si].site, i, v);
+    }));
+    pop.querySelectorAll('[data-poprate]').forEach(r => r.addEventListener('click', () => {
+      if (r.querySelector('input')) return;
+      const ki = +(r as HTMLElement).dataset.poprate!;
+      (r as HTMLElement).innerHTML = `₹<input class="mono" value="${crew.cats[ki].rate}" inputmode="numeric" style="width:56px">`;
+      const inp = r.querySelector('input') as HTMLInputElement; inp.focus(); inp.select();
+      const commit = () => {
+        const v = parseInt(inp.value.replace(/,/g, ''), 10);
+        if (!isNaN(v)) { crew.cats[ki].rate = v; crew.cats[ki].own = true; setCategoryRate(crew.cats[ki].id, v).catch(fail); (r as HTMLElement).textContent = `${inr(v)}/day`; dirty = true; foot(); }
+        else (r as HTMLElement).textContent = `${inr(crew.cats[ki].rate)}/day`;
+      };
+      inp.addEventListener('blur', commit);
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.removeEventListener('blur', commit); (r as HTMLElement).textContent = `${inr(crew.cats[ki].rate)}/day`; } });
+    }));
+    pop.querySelectorAll('[data-rmk]').forEach(x => x.addEventListener('click', async () => {
+      const ki = +(x as HTMLElement).dataset.rmk!;
+      if (!window.confirm(`Remove the ${crew.cats[ki].n} skill? Its attendance will be deleted.`)) return;
+      close(); try { await removeCategory(crew.cats[ki].id); await load(); } catch (e) { fail(e); }
+    }));
+    (pop.querySelector('[data-addcat]') as HTMLElement).addEventListener('click', async () => {
+      const have = crew.cats.map(c => c.n);
+      const choices = ['Mason', 'Carpenter', 'Bar bender', 'Painter', 'Tiler', 'Electrician', 'Plumber', 'Helper · male', 'Helper · female'].filter(n => !have.includes(n));
+      const n = window.prompt(`Add a skill to ${crew.n} — e.g. ${choices.slice(0, 3).join(', ') || 'Mason'}`)?.trim();
+      if (!n) return;
+      close(); try { await addCategory(orgId, crew.crewId, n, rateFor(crew.trade, n)); await load(); } catch (e) { fail(e); }
+    });
+    (pop.querySelector('.bp-done') as HTMLElement).addEventListener('click', close);
+  }
+
   function bind() {
     const body = q('#atdxBody'); if (!body) return;
+    body.querySelectorAll('[data-crewcell]').forEach(div => div.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const [si, ci, i] = (div as HTMLElement).dataset.crewcell!.split('.').map(Number);
+      openCrewPopover(div as HTMLElement, si, ci, i);
+    }));
     body.querySelectorAll('[data-edit]').forEach(div => div.addEventListener('click', () => {
       if (div.querySelector('input')) return;
       const t = resolve((div as HTMLElement).dataset.edit!), i = colOf(div);
