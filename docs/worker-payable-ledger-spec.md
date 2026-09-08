@@ -237,6 +237,25 @@ link. Writes through `set_txn_allocations` (complete-set replace; parts sum to t
 Vendor payments **no longer attach a PO**: the create-time PO obligation hub is worker-only now; a
 vendor payment settles bills (attached right after save). Workers keep ContractHub unchanged.
 
+## 5f. One bill-intake pipeline, five doors
+
+Every door that records a vendor bill runs ONE pipeline (`billIntake.ts`) —
+**upload → extract → resolve vendor → dedupe → mint bill (credit emergent) → propose links** — so the
+flows can't drift into five behaviours and five bug surfaces. A door is a thin wrapper that only
+pre-fills **context**: the Bills page knows nothing (resolves + confirms the vendor); the tx pickers
+know the vendor + payment (no questions, allocation auto-written); the PO door (parked) knows vendor +
+PO; WhatsApp (parked) knows the sender.
+
+**Dedupe lives in the pipeline, never in a door** — the same paper genuinely arrives twice through
+different doors (site engineer WhatsApps the photo Tuesday; you attach it to the PO Friday). The
+fingerprint is **vendor + bill-number**; on a collision `intakeCommit` returns the existing bill and the
+door offers to **link it instead of minting a duplicate** — the tx picker selects the existing bill for
+this payment, the Bills page opens it — turning the duplicate into a free reconciliation. `allowDuplicate`
+lets the user deliberately proceed when it's genuinely a different bill sharing a number.
+
+Live wrappers today: the Bills-page drag-drop and the tx `BillAllocateSheet`. PO record-bill and
+WhatsApp intake stay on their parked flows, ready to become wrappers on the same pipeline.
+
 ## 6a. Correcting a stray line
 
 The ledger is derived, so a wrong line is only ever a wrong **source row** — you don't post a

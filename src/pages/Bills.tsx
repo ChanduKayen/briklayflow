@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { loadBills, loadBillDetail, extractBill, findDuplicateBill, createBill, type BillRow, type BillStatus, type DuplicateBill } from '../lib/billsApi';
+import { loadBills, loadBillDetail, extractBill, findDuplicateBill, type BillRow, type BillStatus, type DuplicateBill } from '../lib/billsApi';
+import { intakeCommit } from '../lib/billIntake';
 import { DocThumb } from '../components/DocThumb';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { openDoc } from '../lib/storage';
@@ -217,13 +218,17 @@ export default function Bills() {
   const patch = (id: string, p: Partial<QItem>) => setQueue(q => q.map(x => x.id === id ? { ...x, ...p } : x));
   const drop = (id: string) => setQueue(q => q.filter(x => x.id !== id));
 
-  const mint = async (it: QItem, vendorId: string, projectId: string | null) => {
+  // Mint through the shared pipeline (dedupe lives there). The confirm sheet gates on the dup-ack, so
+  // we pass allowDuplicate once the user has chosen to add it anyway.
+  const mint = async (it: QItem, vendorId: string, projectId: string | null, allowDuplicate: boolean) => {
     patch(it.id, { state: 'saving' });
     try {
-      await createBill({
-        orgId, stakeholderId: vendorId, projectId, billNo: it.billNo, billDate: it.billDate, amount: it.amount,
-        lines: it.lines, createdBy: userId ?? null, createdByName: (profile as any)?.full_name ?? null, file: it.file,
-      });
+      const res = await intakeCommit(
+        { orgId, source: 'bills_page', file: it.file, vendorId, projectId, createdBy: userId ?? null, createdByName: (profile as any)?.full_name ?? null },
+        { vendor: it.vendorName, billNo: it.billNo, billDate: it.billDate, amount: it.amount, lines: it.lines },
+        vendorId, { allowDuplicate },
+      );
+      if (res.status === 'duplicate') { patch(it.id, { state: 'ready' }); return; } // sheet shows the reconcile offer
       drop(it.id);
       show('Bill added');
       qc.invalidateQueries({ queryKey: ['bills'] });
@@ -323,7 +328,8 @@ export default function Bills() {
           queueCount={queue.filter(q => q.state === 'ready').length}
           onPatch={(p) => patch(current.id, p)}
           onCancel={() => drop(current.id)}
-          onConfirm={(vendorId, projectId) => mint(current, vendorId, projectId)}
+          onOpenBill={(id) => { drop(current.id); navigate(`/bills/${encodeURIComponent('bl~' + id)}`); }}
+          onConfirm={(vendorId, projectId, allowDuplicate) => mint(current, vendorId, projectId, allowDuplicate)}
         />
       )}
     </div>
@@ -332,9 +338,9 @@ export default function Bills() {
 
 // Confirm sheet — after a bill is read, name the vendor & site, check the figures, warn on a duplicate,
 // then mint. One sheet at a time; the queue feeds the next 'ready' item in behind it.
-function ConfirmBillSheet({ item, vendors, projects, queueCount, onPatch, onCancel, onConfirm }: {
+function ConfirmBillSheet({ item, vendors, projects, queueCount, onPatch, onCancel, onOpenBill, onConfirm }: {
   item: QItem; vendors: { stakeholder_id: string; name: string }[]; projects: { project_id: string; name: string }[];
-  queueCount: number; onPatch: (p: Partial<QItem>) => void; onCancel: () => void; onConfirm: (vendorId: string, projectId: string | null) => void;
+  queueCount: number; onPatch: (p: Partial<QItem>) => void; onCancel: () => void; onOpenBill: (id: string) => void; onConfirm: (vendorId: string, projectId: string | null, allowDuplicate: boolean) => void;
 }) {
   const [vendorId, setVendorId] = useState<string>('');
   const [vq, setVq] = useState(item.vendorName || '');
@@ -394,17 +400,23 @@ function ConfirmBillSheet({ item, vendors, projects, queueCount, onPatch, onCanc
           </div>
           <div className="fld"><label>Amount</label><input className="mono" inputMode="numeric" value={item.amount ? String(item.amount) : ''} placeholder="0" onChange={(e) => onPatch({ amount: parseInt(e.target.value.replace(/[^\d]/g, ''), 10) || 0 })} /></div>
           {dup && (
-            <label className="dupwarn">
-              <input type="checkbox" checked={dupAck} onChange={(e) => setDupAck(e.target.checked)} style={{ marginTop: 2 }} />
-              <span><b>Possible duplicate.</b> A bill {dup.billNo ? <>no. <b>{dup.billNo}</b> </> : null}for this vendor already exists{dup.amount ? <> ({inr(dup.amount)}{dup.billDate ? `, ${fmtDate(dup.billDate)}` : ''})</> : ''}. Tick to add it anyway.</span>
-            </label>
+            <div className="dupwarn" style={{ flexDirection: 'column', gap: 8, alignItems: 'stretch' }}>
+              <span><b>This bill already exists.</b> {dup.billNo ? <>No. <b>{dup.billNo}</b> </> : null}for this vendor is already on file{dup.amount ? <> ({inr(dup.amount)}{dup.billDate ? `, ${fmtDate(dup.billDate)}` : ''})</> : ''}.</span>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button type="button" className="btn-prim" style={{ padding: '6px 12px' }} onClick={() => onOpenBill(dup.id)}>Open the existing bill →</button>
+                <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: '.8rem', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={dupAck} onChange={(e) => setDupAck(e.target.checked)} />
+                  It&apos;s a different bill — add anyway
+                </label>
+              </div>
+            </div>
           )}
         </div>
         <div className="sf">
           <span className="amt-tot">{inr(item.amount)}</span>
           <div className="acts">
             <button className="btn-ghost" onClick={onCancel}>Discard</button>
-            <button className="btn-prim" disabled={!canSave || (item.state === 'saving')} onClick={() => onConfirm(vendorId, projectId || null)}>{item.state === 'saving' ? 'Saving…' : 'Add bill'}</button>
+            <button className="btn-prim" disabled={!canSave || (item.state === 'saving')} onClick={() => onConfirm(vendorId, projectId || null, !!dup && dupAck)}>{item.state === 'saving' ? 'Saving…' : 'Add bill'}</button>
           </div>
         </div>
       </div>

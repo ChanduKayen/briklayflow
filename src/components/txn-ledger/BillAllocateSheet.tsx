@@ -64,9 +64,10 @@ function BillPeekImg({ stored }: { stored: string }) {
   return <img src={signed} alt="Bill" style={{ maxWidth: '100%', maxHeight: 260, borderRadius: 8, border: `1px solid ${V.line}`, display: 'block' }} />;
 }
 import {
-  loadUnpaidBillsForVendor, extractBill, createBill, findDuplicateBill, saveBillAllocations, setAdvanceMemo,
+  loadUnpaidBillsForVendor, saveBillAllocations, setAdvanceMemo,
   type UnpaidBill, type DuplicateBill,
 } from '../../lib/billsApi';
+import { intakeExtract, intakeCommit } from '../../lib/billIntake';
 
 const num = (n: unknown) => Number(n) || 0;
 const inr = (n: number) => '₹' + Math.round(num(n)).toLocaleString('en-IN');
@@ -111,24 +112,29 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
   };
   const setAmt = (b: UnpaidBill, v: number) => setSel(s => ({ ...s, [b.id]: Math.max(0, Math.min(b.remaining, v)) }));
 
-  // Upload a new bill mid-payment — vendor known, so extract → dup-check → mint → select it.
+  // Upload a new bill mid-payment — one pipeline (vendor known). Dedupe lives in intakeCommit: on a
+  // collision we LINK the existing bill (select it) instead of minting a second; otherwise mint + select.
+  const selectBill = (b: UnpaidBill) => {
+    setBills(bs => (bs?.some(x => x.id === b.id) ? bs : [b, ...(bs ?? [])]));
+    setSel(s => { const leftover = Math.max(0, amount - Object.values(s).reduce((x, v) => x + num(v), 0)); return { ...s, [b.id]: Math.min(b.remaining, leftover) || b.remaining }; });
+  };
   const onUpload = async (file: File) => {
-    setErr(null); setBusy('reading');
+    setErr(null); setDup(null); setBusy('reading');
     try {
-      const ex = await extractBill(file);
-      if (ex.billNo) {
-        const d = await findDuplicateBill(stakeholderId, ex.billNo);
-        if (d) { setDup({ file: file.name, d }); /* still mint below unless they cancel? keep simple: warn + proceed */ }
+      const ex = await intakeExtract(file);
+      const res = await intakeCommit({ orgId, source: 'tx_picker', file, vendorId: stakeholderId, projectId: defaultProjectId }, ex, stakeholderId);
+      if (res.status === 'duplicate') {
+        // Same paper already recorded — reconcile: select the existing bill (if unpaid it's in the list;
+        // else surface that it's already settled), don't add a duplicate.
+        setDup({ file: file.name, d: res.existing });
+        const existing = (bills ?? []).find(x => x.id === res.existing.id);
+        if (existing) selectBill(existing);
+        else setErr(`Bill #${res.existing.billNo ?? ''} for ${vendorName} is already recorded${res.existing.amount ? ` (${inr(res.existing.amount)})` : ''} and settled — nothing to attach.`);
+        setBusy('idle');
+        return;
       }
-      const billId = await createBill({
-        orgId, stakeholderId, projectId: defaultProjectId, billNo: ex.billNo, billDate: ex.billDate,
-        amount: ex.amount, lines: ex.lines, file,
-      });
-      const remaining = ex.amount;
-      const newBill: UnpaidBill = { id: billId, kind: 'bill', billNo: ex.billNo, billDate: ex.billDate, amount: ex.amount, paid: 0, remaining, projectId: defaultProjectId, site: null, docUrl: null };
-      setBills(bs => [newBill, ...(bs ?? [])]);
-      const leftover = Math.max(0, amount - allocated);
-      setSel(s => ({ ...s, [billId]: Math.min(remaining, leftover) || remaining }));
+      // Minted — select it against this payment.
+      selectBill({ id: res.billId, kind: 'bill', billNo: ex.billNo, billDate: ex.billDate, amount: ex.amount, paid: 0, remaining: ex.amount, projectId: defaultProjectId, site: null, docUrl: null });
       setBusy('idle');
     } catch (e) { setErr(errMsg(e)); setBusy('idle'); }
   };
@@ -183,7 +189,7 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
               style={{ background: V.terra, color: '#fff', opacity: busy === 'reading' ? 0.6 : 1 }}>
               {busy === 'reading' ? <><Loader2 size={16} className="animate-spin" /> Reading the bill…</> : <><Plus size={16} /> Upload a new bill</>}
             </button>
-            {dup && <p className="text-[11.5px] mt-2" style={{ color: V.terraDeep }}>Heads up — {vendorName} already has a bill {dup.d.billNo ? <>no. <b>{dup.d.billNo}</b> </> : ''}on file{dup.d.amount ? ` (${inr(dup.d.amount)})` : ''}. Added anyway; remove it from Bills if it&apos;s the same one.</p>}
+            {dup && <p className="text-[11.5px] mt-2" style={{ color: V.terraDeep }}>This bill {dup.d.billNo ? <>no. <b>{dup.d.billNo}</b> </> : ''}already exists for {vendorName}{dup.d.amount ? ` (${inr(dup.d.amount)})` : ''} — selected it here instead of adding a duplicate.</p>}
             <label className="flex items-center justify-center gap-2 mt-4 text-[11.5px]" style={{ color: V.sys }}>
               <input type="checkbox" checked={advanceMemoOn} onChange={(e) => setAdvanceMemoOn(e.target.checked)} style={{ accentColor: V.terra }} />
               No bill — note it&apos;s towards an order
@@ -253,7 +259,7 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
             </button>
 
             {dup && (
-              <p className="text-[11.5px] mt-2" style={{ color: V.terraDeep }}>Heads up — {vendorName} already has a bill {dup.d.billNo ? <>no. <b>{dup.d.billNo}</b> </> : ''}on file{dup.d.amount ? ` (${inr(dup.d.amount)})` : ''}. Added anyway; remove it from Bills if it&apos;s the same one.</p>
+              <p className="text-[11.5px] mt-2" style={{ color: V.terraDeep }}>This bill {dup.d.billNo ? <>no. <b>{dup.d.billNo}</b> </> : ''}already exists for {vendorName}{dup.d.amount ? ` (${inr(dup.d.amount)})` : ''} — selected it here instead of adding a duplicate.</p>
             )}
 
             {/* advance memo */}
