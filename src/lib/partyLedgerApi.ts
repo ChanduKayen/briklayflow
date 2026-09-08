@@ -109,8 +109,10 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
   const [stkR, txnR, woR, poR, obR, adjR, cbR, wcR, balR] = await Promise.all([
     supabase.from('stakeholders').select('stakeholder_id, name, type, category').eq('stakeholder_id', stakeholderId).single(),
     supabase.from('transactions').select('*, txn_allocations(project_id, order_type, order_ref, milestone_id, allocated_amount, projects(name))').eq('stakeholder_id', stakeholderId).order('date', { ascending: false }),
-    supabase.from('work_orders').select('wo_id, project_id, title, scope_of_work, order_value, projects(name), wo_milestones(milestone_id, name, planned_amount, unit_type, quantity, rate, seq_no)').eq('stakeholder_id', stakeholderId),
-    supabase.from('purchase_orders').select(`po_id, project_id, vendor_bill_amount, vendor_bill_number, ${BILL_DATE_COLUMNS}`).eq('stakeholder_id', stakeholderId).not('vendor_bill_amount', 'is', null).gt('vendor_bill_amount', 0),
+    supabase.from('work_orders').select('wo_id, project_id, title, scope_of_work, order_value, status, projects(name), wo_milestones(milestone_id, name, planned_amount, unit_type, quantity, rate, seq_no)').eq('stakeholder_id', stakeholderId),
+    // Only APPROVED, non-cancelled POs are real bills — mirrors v_party_ledger_line + loadVendorRows so
+    // the ledger display can't show a cancelled/pending PO's bill as owed.
+    supabase.from('purchase_orders').select(`po_id, project_id, vendor_bill_amount, vendor_bill_number, ${BILL_DATE_COLUMNS}`).eq('stakeholder_id', stakeholderId).eq('approval_status', 'APPROVED').not('status', 'in', '("CANCELLED","Cancelled","cancelled")').not('vendor_bill_amount', 'is', null).gt('vendor_bill_amount', 0),
     supabase.from('stakeholder_opening_balances').select('*').eq('stakeholder_id', stakeholderId).maybeSingle(),
     supabase.from('party_adjustments').select('*').eq('stakeholder_id', stakeholderId),
     supabase.from('consolidated_bills').select('*').eq('stakeholder_id', stakeholderId).order('period_to'),
@@ -156,7 +158,9 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
   //    owed, exactly like a pending PO). measured/piece each count; lump = latest per milestone. ──
   const contractCert: Record<string, number> = {}; // wo_id → total certified
   {
-    const certs = (wcR.data ?? []) as any[];
+    // A cancelled contract owes nothing — drop its certifications (the WO its cert points to is Cancelled).
+    const cancelledWo = new Set((woR.data ?? []).filter((w: any) => w.status === 'Cancelled').map((w: any) => w.wo_id));
+    const certs = ((wcR.data ?? []) as any[]).filter((wc: any) => !cancelledWo.has(wc.wo_id));
     const latestLump: Record<string, any> = {};
     const certLines: any[] = [];
     for (const wc of certs) {
@@ -363,7 +367,7 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
           projectId: p.project_id ?? null, projectName: p.project_id ? (projName[p.project_id] || p.project_id) : null,
         };
       })
-    : (woR.data ?? []).map((w: any) => {
+    : (woR.data ?? []).filter((w: any) => w.status !== 'Cancelled').map((w: any) => {
         const value = num(w.order_value) || (w.wo_milestones ?? []).reduce((s: number, m: any) => s + num(m.planned_amount), 0);
         const paidLinkedEntries = payments.filter(e => e.contractId === w.wo_id);
         return {

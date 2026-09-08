@@ -190,6 +190,20 @@ work exceeds what's been approved (`loadUncertifiedStage`: per milestone, readin
 approved certifications; measured/piece = Σ, lump = latest %). It links to Attendance to certify. Day
 wages need no such nudge — they accrue on attendance directly.
 
+## 5c. Only LIVE obligations count
+
+A line is a real obligation only if the document behind it is live. The ledger excludes:
+
+- **Voided payments** — everywhere (`status IS DISTINCT FROM 'Voided'`).
+- **Cancelled POs** and **unapproved POs** (PENDING/REJECTED) — a PO bill counts only when
+  `approval_status = 'APPROVED'` and `status <> 'CANCELLED'`, matching `loadVendorRows` so the vendor
+  list and the ledger agree (`20260910000003` + the `loadPartyLedger` PO read).
+- **Certifications on a cancelled work order** — an approved cert is dropped if its WO is `Cancelled`
+  (the cert's `status='approved'` alone wasn't enough; the contract can die under it).
+
+Closed / Settled work orders are **not** excluded — work certified on them is still genuinely owed
+until paid; only *Cancelled* means "never happened."
+
 ## 6a. Correcting a stray line
 
 The ledger is derived, so a wrong line is only ever a wrong **source row** — you don't post a
