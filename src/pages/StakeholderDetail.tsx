@@ -9,6 +9,7 @@ import { useIsMobile } from '../lib/useIsMobile';
 import PartyLedgerMobile, { type PartyMenuItem } from '../components/party/PartyLedgerMobile';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Session } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase';
 import { useOrgId, useAuth } from '../lib/auth/AuthProvider';
 import { LedgerCutoverControl } from '../components/attendance/LedgerCutoverControl';
 import { useSnackbar } from '../components/Snackbar';
@@ -155,6 +156,12 @@ const CSS = `
 .plx .obsite .row.tot{border-top:1px dashed var(--line);padding-top:9px;margin-top:2px}
 .plx .obsite .row.tot .nm{color:var(--walnut);font-weight:600}
 .plx .obsite .row.tot .v{text-align:right;font-weight:600;color:var(--walnut)}
+.plx .obsite .erow{display:grid;grid-template-columns:1fr 130px 26px;gap:8px;align-items:center}
+.plx .obsite .erow select.in,.plx .obsite .erow input.in{margin:0;width:100%}
+.plx .obsite .erow .rm{background:none;border:none;color:var(--walnut-3);cursor:pointer;font-size:17px;line-height:1;padding:0;justify-self:center}
+.plx .obsite .erow .rm:hover{color:var(--terra)}
+.plx .obsite .addsite{justify-self:start;background:none;border:1px dashed var(--line);border-radius:8px;padding:6px 12px;font-size:12.5px;color:var(--walnut-2);cursor:pointer;margin-top:2px;transition:color .15s,border-color .15s}
+.plx .obsite .addsite:hover{border-color:var(--terra);color:var(--terra)}
 .plx .field label,.plx .field .lbl{display:block;font-size:13px;font-weight:500;margin-bottom:6px}
 .plx .field .help{font-size:12.5px;color:var(--walnut-3);margin-top:5px}
 .plx .in{height:38px;width:100%;padding:0 12px;border:1px solid var(--line);border-radius:8px;background:#fff;font:inherit;color:var(--walnut)}
@@ -812,21 +819,48 @@ function OpeningModal({ orgId, L, onClose, onSaved, onError }: { orgId: string; 
   useEffect(() => { if (!L.opening && !dateTouched && orgCutover) setAsOf(orgCutover); }, [orgCutover, L.opening, dateTouched]);
   const [dir, setDir] = useState<'paid_ahead' | 'work_owed'>(L.opening?.direction || 'paid_ahead');
   const [note, setNote] = useState(L.opening?.note || '');
-  const hasSites = L.sites.length > 0;
-  // Site-wise by default — one amount per site the party works on; the total is the opening balance.
-  // A party with no sites yet gets a single unassigned amount.
-  const [siteAmts, setSiteAmts] = useState<Record<string, string>>(() => {
-    const o: Record<string, string> = {};
-    if (hasSites) L.sites.forEach(s => { o[s.projectId] = L.opening?.bySite[s.projectId] ? String(L.opening.bySite[s.projectId]) : ''; });
-    else o.__none__ = L.opening ? String(L.opening.total) : '';
-    return o;
+
+  // Every active project is attributable — the site the opening carries is the anchor that drives
+  // site-wise balances and carry-forward in Payables, and an opening is usually for a party that
+  // hasn't transacted on that site in Briklay yet. Merge the org's active projects with any site the
+  // party already touches and any site already on the saved opening, so nothing is missing.
+  const { data: activeProjects = [] } = useQuery({
+    queryKey: ['projects_active_min'],
+    queryFn: async () => (await supabase.from('projects').select('project_id, name').eq('status', 'Active').order('name')).data ?? [],
   });
+  const projOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    (activeProjects as { project_id: string; name: string }[]).forEach(p => m.set(p.project_id, p.name));
+    L.sites.forEach(s => { if (!m.has(s.projectId)) m.set(s.projectId, s.projectName); });
+    if (L.opening) Object.keys(L.opening.bySite).forEach(pid => { if (!m.has(pid)) m.set(pid, pid); });
+    return [...m].map(([id, name]) => ({ id, name }));
+  }, [activeProjects, L.sites, L.opening]);
+
+  // A row per site the balance is split across; projectId '' = not site-specific (whole party).
+  type Row = { key: string; projectId: string; amount: string };
+  let rk = 0; const nk = () => `r${++rk}`;
+  const [rows, setRows] = useState<Row[]>(() => {
+    if (L.opening) {
+      const r: Row[] = Object.entries(L.opening.bySite).map(([pid, amt]) => ({ key: nk(), projectId: pid, amount: String(amt) }));
+      const rem = L.opening.total - Object.values(L.opening.bySite).reduce((a, v) => a + v, 0);
+      if (r.length === 0 || rem > 0) r.push({ key: nk(), projectId: '', amount: String(rem || L.opening.total) });
+      return r;
+    }
+    if (L.sites.length) return L.sites.map(s => ({ key: nk(), projectId: s.projectId, amount: '' }));
+    return [{ key: nk(), projectId: '', amount: '' }];
+  });
+  const setRow = (key: string, p: Partial<Row>) => setRows(rs => rs.map(x => x.key === key ? { ...x, ...p } : x));
+  const addRow = () => setRows(rs => [...rs, { key: nk(), projectId: '', amount: '' }]);
+  const rmRow = (key: string) => setRows(rs => rs.length > 1 ? rs.filter(x => x.key !== key) : rs);
+
   const [busy, setBusy] = useState(false);
-  const total = Object.values(siteAmts).reduce((a, v) => a + parseInr(v || ''), 0);
+  const total = rows.reduce((a, r) => a + parseInr(r.amount || ''), 0);
   const save = async () => {
     if (busy || total <= 0) return; setBusy(true);
+    // Site-specific rows fold into by_site (summing any repeats); rows left "not site-specific" become
+    // the unassigned remainder (total − Σ by_site) the view keeps as a NULL-project line.
     const bySite: Record<string, number> = {};
-    if (hasSites) L.sites.forEach(s => { const v = parseInr(siteAmts[s.projectId] || ''); if (v) bySite[s.projectId] = v; });
+    rows.forEach(r => { const v = parseInr(r.amount || ''); if (r.projectId && v) bySite[r.projectId] = (bySite[r.projectId] || 0) + v; });
     try { await saveOpeningBalance(orgId, L.stakeholder.id, { asOf, direction: dir, total, bySite, note }); onSaved(); }
     catch (e: any) { onError(e?.message || 'Could not save'); setBusy(false); }
   };
@@ -842,21 +876,22 @@ function OpeningModal({ orgId, L, onClose, onSaved, onError }: { orgId: string; 
               <label className={dir === 'work_owed' ? 'on' : ''} onClick={() => setDir('work_owed')}><b>Work done, not yet paid</b><span>They've certified work you still owe them for.</span></label>
             </div></div>
             <div className="field">
-              <label>{hasSites ? 'Carried by site' : 'Amount'}</label>
-              {hasSites ? (
-                <div className="obsite">
-                  {L.sites.map(s => (
-                    <div className="row" key={s.projectId}>
-                      <span className="nm">{s.projectName}</span>
-                      <div className="amount"><input className="in num" inputMode="numeric" placeholder="0" value={siteAmts[s.projectId] || ''} onChange={e => setSiteAmts(a => ({ ...a, [s.projectId]: e.target.value }))} /></div>
-                    </div>
-                  ))}
-                  <div className="row tot"><span className="nm">Opening balance</span><span className="v mono">{inr(total)}</span></div>
-                </div>
-              ) : (
-                <div className="amount" style={{ maxWidth: 220 }}><input className="in num" inputMode="numeric" placeholder="0" value={siteAmts.__none__ || ''} onChange={e => setSiteAmts({ __none__: e.target.value })} /></div>
-              )}
-              <div className="help">{hasSites ? 'What this party carries at each site — the total is the opening balance.' : 'What this party carries as of the start date.'}</div>
+              <label>Carried by site</label>
+              <div className="obsite">
+                {rows.map(r => (
+                  <div className="erow" key={r.key}>
+                    <select className="in" value={r.projectId} onChange={e => setRow(r.key, { projectId: e.target.value })}>
+                      <option value="">Not site-specific</option>
+                      {projOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                    <input className="in num" inputMode="numeric" placeholder="0" value={r.amount} onChange={e => setRow(r.key, { amount: e.target.value })} />
+                    <button type="button" className="rm" onClick={() => rmRow(r.key)} aria-label="Remove" title="Remove">×</button>
+                  </div>
+                ))}
+                <button type="button" className="addsite" onClick={addRow}>+ Add a site</button>
+                <div className="row tot"><span className="nm">Opening balance</span><span className="v mono">{inr(total)}</span></div>
+              </div>
+              <div className="help">Attribute the balance to the site(s) it belongs to — this is what drives each site&apos;s balance and its carry-forward in Payables. Leave a row &ldquo;not site-specific&rdquo; only if it truly isn&apos;t tied to one site.</div>
             </div>
             <div className="field"><label>Where this figure comes from</label><textarea className="in" placeholder="e.g. site ledger book, page 14, agreed on 28 March" value={note} onChange={e => setNote(e.target.value)} /></div>
           </div>
