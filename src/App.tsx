@@ -674,8 +674,8 @@ function App() {
 // â"€â"€ Nav shortcut helpers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 function GlobalShortcuts() {
-  const { openSearch } = useSearch();
-  useGlobalShortcuts(openSearch);
+  const { toggleSearch } = useSearch();
+  useGlobalShortcuts(toggleSearch);
   return null;
 }
 

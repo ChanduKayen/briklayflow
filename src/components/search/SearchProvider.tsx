@@ -38,12 +38,18 @@ export default function SearchProvider({ children }: { children: ReactNode }) {
     if (barFocus.current) window.setTimeout(() => barFocus.current?.(), 0);
   }, []);
 
+  // Space in, space out — but only while the box is empty. Once a word is in it the space bar is
+  // part of the word, and the way out is escape or the ✕.
+  const toggleSearch = useCallback(() => {
+    if (open && !query.trim()) setOpen(false); else openSearch();
+  }, [open, query, openSearch]);
+
   const value = useMemo(() => ({
     open, scope, query, setQuery, hasBar,
-    openSearch,
+    openSearch, toggleSearch,
     closeSearch: () => setOpen(false),
     publish, registerBar,
-  }), [open, scope, query, hasBar, openSearch, publish, registerBar]);
+  }), [open, scope, query, hasBar, openSearch, toggleSearch, publish, registerBar]);
 
   return <SearchCtx.Provider value={value}>{children}</SearchCtx.Provider>;
 }

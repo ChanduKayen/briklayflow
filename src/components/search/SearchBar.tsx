@@ -12,7 +12,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useSearch } from './searchScope';
+import { useSearch, spaceOut } from './searchScope';
 import { useSearchEngine } from './searchEngine';
 import SearchPanel from './SearchPanel';
 import { useIsMobile } from '../../lib/useIsMobile';
@@ -75,6 +75,7 @@ export default function SearchBar({ label, className }: { label: string; classNa
           <input
             ref={showOverlay ? undefined : inputRef}
             value={query} onChange={(e) => setQuery(e.target.value)} onFocus={openSearch}
+            onKeyDown={spaceOut(query, closeSearch)}
             // On a phone the typing happens in the sheet; tapping here only opens it, so the
             // keyboard doesn't come up against a field that is about to be covered.
             readOnly={isMobile}
@@ -109,6 +110,7 @@ function Overlay({ rect, label, scopeLabel, onClose }:
           {scopeLabel && <span className="scope">{scopeLabel} first</span>}
           <input
             ref={inputRef} value={e.rawQuery} onChange={(ev) => e.setQuery(ev.target.value)}
+            onKeyDown={spaceOut(e.rawQuery, onClose)}
             placeholder={`Search ${label} — or everything`}
             autoComplete="off" autoCorrect="off" spellCheck={false} aria-label={`Search ${label}`}
           />

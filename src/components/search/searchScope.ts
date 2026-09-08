@@ -32,6 +32,19 @@ export interface Scope {
   setQuery: (q: string) => void;
 }
 
+/**
+ * Space in, space out.
+ *
+ * The space bar opened this; while the box is still empty it is also the way out, so a thumb that
+ * reached for it once can reach for it again without hunting for escape. The moment there is a word
+ * in the box, space goes back to being a space — "vizag tmt" has one in the middle of it.
+ */
+export function spaceOut(query: string, close: () => void) {
+  return (e: { key: string; preventDefault: () => void }) => {
+    if (e.key === ' ' && !query) { e.preventDefault(); close(); }
+  };
+}
+
 export interface SearchCtxValue {
   open: boolean;
   scope: Scope | null;
@@ -40,6 +53,8 @@ export interface SearchCtxValue {
   setQuery: (q: string) => void;
   openSearch: () => void;
   closeSearch: () => void;
+  /** The space bar's own door: in when shut, out again while nothing has been typed. */
+  toggleSearch: () => void;
   publish: (s: Scope | null) => void;
   /** A page-mounted bar registers how to focus itself, so the space bar lands in the right place. */
   registerBar: (focus: (() => void) | null) => void;

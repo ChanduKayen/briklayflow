@@ -12,7 +12,7 @@ import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useIsMobile } from '../../lib/useIsMobile';
 import { useSheetDrag } from '../../lib/sheetDrag';
-import { useSearch } from './searchScope';
+import { useSearch, spaceOut } from './searchScope';
 import { useSearchEngine } from './searchEngine';
 import SearchPanel from './SearchPanel';
 import { CSX_CSS, CSX_ROW_CSS } from './csxCss';
@@ -44,6 +44,7 @@ function Surface({ isMobile }: { isMobile: boolean }) {
           {e.scope && !isMobile && <span className="scope">{e.scope.label} first</span>}
           <input
             ref={inputRef} value={e.rawQuery} onChange={(ev) => e.setQuery(ev.target.value)}
+            onKeyDown={spaceOut(e.rawQuery, e.closeSearch)}
             placeholder={placeholder} autoComplete="off" autoCorrect="off" spellCheck={false} aria-label="Search"
           />
           {isMobile && <button className="x" onClick={e.closeSearch} aria-label="Close">✕</button>}
