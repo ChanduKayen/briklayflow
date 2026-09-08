@@ -128,53 +128,93 @@ export async function loadWeeklyPayments(monday: Date): Promise<WeeklyPayments> 
   //    isn't applied yet. ──
   const isCurrentWeek = mondayOf(new Date()).getTime() === monday.getTime();
   if (isCurrentWeek) try {
-    const balR = await supabase.from('v_party_balance').select('stakeholder_id, to_pay').gt('to_pay', 0);
-    const owed: Record<string, number> = {};
-    (balR.data ?? []).forEach((b: any) => { owed[b.stakeholder_id] = Number(b.to_pay || 0); });
-    const owedIds = Object.keys(owed);
+    // Per-SITE carry-forward. v_party_site_balance says what each worker is owed ON each project — the
+    // opening's by_site split, certified work and wages there, minus payments allocated there. This
+    // week's rows already represent part of each site's figure; the earlier remainder is folded into the
+    // worker's row ON THAT SITE, or (no work there this week) a standalone row tagged to that site — so a
+    // carried balance lands on the site it belongs to, not lumped on the last-seen project. Falls back
+    // to the party-level lump when the per-site view isn't applied yet (siteOwed empty → siteless path).
+    const [siteR, partyR] = await Promise.all([
+      supabase.from('v_party_site_balance').select('stakeholder_id, project_id, to_pay').gt('to_pay', 0),
+      supabase.from('v_party_balance').select('stakeholder_id, to_pay').gt('to_pay', 0),
+    ]);
+    const siteOwed: Record<string, Record<string, number>> = {};
+    (siteR.data ?? []).forEach((b: any) => { if (b.project_id) (siteOwed[b.stakeholder_id] ||= {})[b.project_id] = Number(b.to_pay || 0); });
+    const partyOwed: Record<string, number> = {};
+    (partyR.data ?? []).forEach((b: any) => { partyOwed[b.stakeholder_id] = Number(b.to_pay || 0); });
+
+    const owedIds = [...new Set([...Object.keys(siteOwed), ...Object.keys(partyOwed)])];
     if (owedIds.length) {
-      // Per worker: what this week's rows already represent (b/f + this week), and the row to fold into.
-      const represented: Record<string, number> = {};
-      const primaryRow: Record<string, PayRow> = {};
+      // What this week's rows already represent (b/f + this week), per (worker, site) and per worker, plus
+      // the first row for each (worker, site) — the row a site's earlier balance folds into.
+      const repBySite: Record<string, Record<string, number>> = {};
+      const repByWorker: Record<string, number> = {};
+      const rowBySite: Record<string, Record<string, PayRow>> = {};
       sections.forEach(s => s.rows.forEach(r => {
         if (!r.stakeholderId) return;
-        represented[r.stakeholderId] = (represented[r.stakeholderId] || 0) + r.balanceBf + r.thisWeek;
-        if (!primaryRow[r.stakeholderId]) primaryRow[r.stakeholderId] = r;
+        const amt = r.balanceBf + r.thisWeek;
+        (repBySite[r.stakeholderId] ||= {})[r.projectId] = ((repBySite[r.stakeholderId] ||= {})[r.projectId] || 0) + amt;
+        repByWorker[r.stakeholderId] = (repByWorker[r.stakeholderId] || 0) + amt;
+        (rowBySite[r.stakeholderId] ||= {});
+        if (!rowBySite[r.stakeholderId][r.projectId]) rowBySite[r.stakeholderId][r.projectId] = r;
       }));
+
       // Restrict to WORKERS (vendors are handled by loadVendorRows).
       const wkrR = await supabase.from('stakeholders').select('stakeholder_id, name, category, type').in('stakeholder_id', owedIds).eq('type', 'Worker');
+      const workers = (wkrR.data ?? []) as any[];
+
+      // The last-seen project for a site-less remainder (an opening left "not site-specific"), and names
+      // for every project we might tag a carried row with.
+      const workerIds = workers.map(w => w.stakeholder_id);
+      const lastProj: Record<string, string> = {};
+      if (workerIds.length) {
+        const lineR = await supabase.from('v_party_ledger_line').select('stakeholder_id, project_id, line_date').in('stakeholder_id', workerIds).not('project_id', 'is', null).order('line_date', { ascending: false });
+        (lineR.data ?? []).forEach((l: any) => { if (!lastProj[l.stakeholder_id] && l.project_id) lastProj[l.stakeholder_id] = l.project_id; });
+      }
+      const needProj = new Set<string>();
+      workers.forEach(w => Object.keys(siteOwed[w.stakeholder_id] || {}).forEach(p => needProj.add(p)));
+      Object.values(lastProj).forEach(p => needProj.add(p));
+      const projName: Record<string, string> = {};
+      if (needProj.size) { const pr = await supabase.from('projects').select('project_id, name').in('project_id', [...needProj]); (pr.data ?? []).forEach((p: any) => { projName[p.project_id] = p.name; }); }
+
       const standalone: PayRow[] = [];
-      for (const w of (wkrR.data ?? [])) {
-        const carried = Math.round((owed[w.stakeholder_id] || 0) - (represented[w.stakeholder_id] || 0));
-        if (carried <= 0.5) continue;
-        const row = primaryRow[w.stakeholder_id];
-        if (row) {
-          // Fold the earlier balance into this worker's existing row — one row, B/F + This week together.
-          row.balanceBf += carried;
-        } else {
-          // Owed from before, no work logged this week → a single row (B/F only).
-          standalone.push({
-            key: `carry-${w.stakeholder_id}`, projectId: '', projectName: '—',
-            stakeholderId: w.stakeholder_id, party: w.name || 'Worker', trade: w.category || 'Worker',
+      for (const w of workers) {
+        const sid = w.stakeholder_id;
+        const sites = siteOwed[sid] || {};
+        let totalCarried = 0;
+        // Each site's earlier balance → fold into that site's row, else a standalone row tagged to it.
+        for (const proj of Object.keys(sites)) {
+          const carried = Math.round(sites[proj] - ((repBySite[sid]?.[proj]) || 0));
+          if (carried <= 0.5) continue;
+          totalCarried += carried;
+          const foldRow = rowBySite[sid]?.[proj];
+          if (foldRow) foldRow.balanceBf += carried;
+          else standalone.push({
+            key: `carry-${sid}-${proj}`, projectId: proj, projectName: projName[proj] || proj,
+            stakeholderId: sid, party: w.name || 'Worker', trade: w.category || 'Worker',
             kind: 'wages', basis: 'owed from earlier · no work logged this week', thisWeek: 0, balanceBf: carried,
             woId: null, milestoneId: null,
           });
         }
+        // Site-less remainder: the party owes MORE than this week's rows + the per-site carries account
+        // for (an opening amount left "not site-specific"). Never negative, so an advance on one site is
+        // never clawed back from another here. Fold into the last-seen project's row, else a standalone.
+        const siteless = Math.round((partyOwed[sid] || 0) - (repByWorker[sid] || 0) - totalCarried);
+        if (siteless > 0.5) {
+          const proj = lastProj[sid];
+          const foldRow = proj ? rowBySite[sid]?.[proj] : undefined;
+          if (foldRow) foldRow.balanceBf += siteless;
+          else standalone.push({
+            key: `carry-${sid}-none`, projectId: proj || '', projectName: proj ? (projName[proj] || proj) : '—',
+            stakeholderId: sid, party: w.name || 'Worker', trade: w.category || 'Worker',
+            kind: 'wages', basis: 'owed from earlier · no work logged this week', thisWeek: 0, balanceBf: siteless,
+            woId: null, milestoneId: null,
+          });
+        }
       }
-      // Label the standalone rows with the worker's most recent project (for the Site column).
-      if (standalone.length) {
-        const ids = standalone.map(r => r.stakeholderId!).filter(Boolean);
-        const lineR = await supabase.from('v_party_ledger_line').select('stakeholder_id, project_id, line_date').in('stakeholder_id', ids).not('project_id', 'is', null).order('line_date', { ascending: false });
-        const lastProj: Record<string, string> = {};
-        (lineR.data ?? []).forEach((l: any) => { if (!lastProj[l.stakeholder_id] && l.project_id) lastProj[l.stakeholder_id] = l.project_id; });
-        const projIds = [...new Set(Object.values(lastProj))];
-        const projName: Record<string, string> = {};
-        if (projIds.length) { const pr = await supabase.from('projects').select('project_id, name').in('project_id', projIds); (pr.data ?? []).forEach((p: any) => { projName[p.project_id] = p.name; }); }
-        standalone.forEach(r => { const pid = lastProj[r.stakeholderId!]; if (pid) { r.projectId = pid; r.projectName = projName[pid] || pid; } });
-        sections.push({ projectId: '__carry__', projectName: 'Owed from earlier', rows: standalone });
-      }
+      if (standalone.length) sections.push({ projectId: '__carry__', projectName: 'Owed from earlier', rows: standalone });
     }
-  } catch { /* v_party_balance not applied yet — no carry-forward */ }
+  } catch { /* v_party_site_balance / v_party_balance not applied yet — no carry-forward */ }
 
   return { sections, monday, isCurrentWeek };
 }
