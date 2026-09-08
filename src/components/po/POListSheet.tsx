@@ -6,7 +6,7 @@
 import type React from 'react';
 import { useCallback, useMemo, useState, useTransition } from 'react';
 import { useSearch, useSearchScope } from '../search/searchScope';
-import SearchHint from '../search/SearchHint';
+import SearchBar from '../search/SearchBar';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -842,7 +842,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
         </div>
 
         <div className="tools">
-          <SearchHint label="orders" />
+          <SearchBar label="orders" />
           <div className="chips">
             <button className={`chip${filter === 'all' ? ' on' : ''}`} onClick={() => setFilter('all')}>All <span className="n">{cAll}</span></button>
             <button className={`chip warn${filter === 'mine' ? ' on' : ''}`} onClick={() => setFilter('mine')}>To receive <span className="n">{cMine}</span></button>

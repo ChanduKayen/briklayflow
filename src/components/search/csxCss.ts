@@ -21,8 +21,13 @@ export const CSX_CSS = `
 @keyframes csx-veil{from{opacity:0}to{opacity:1}}
 
 /* ---------- search bar ---------- */
-.csx .searchwrap{position:absolute; left:50%; top:11vh; transform:translateX(-50%);
+/* Summoned from a page with no bar of its own — then, and only then, it floats. */
+.csx.floating .searchwrap{position:absolute; left:50%; top:11vh; transform:translateX(-50%);
   width:min(640px, calc(100vw - 40px)); z-index:20}
+/* Drawn on top of the page's own resting bar, at its exact box. */
+.csx.anchored{pointer-events:none}
+.csx.anchored .veil,.csx.anchored .searchwrap{pointer-events:auto}
+.csx.anchored .searchwrap{position:absolute; z-index:20}
 .csx .bar{display:flex; align-items:center; gap:11px; background:var(--paper); border:1px solid var(--walnut);
   border-radius:999px; padding:13px 20px; transform:scale(1.012);
   box-shadow:0 0 0 4px rgba(192,96,63,.08), 0 30px 60px -28px rgba(42,36,28,.4);
@@ -78,6 +83,34 @@ export const CSX_CSS = `
 .csx.sheet .plist{max-height:none; flex:1 1 auto; padding:4px 8px 8px; -webkit-overflow-scrolling:touch}
 .csx.sheet .item{padding:13px 12px; min-height:56px}
 .csx.sheet .pfoot{padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px)); flex:none}
+
+/* ---------- the resting bar, sitting in the page where its search always sat ---------- */
+.csx-rest{
+  --cream:#FAF7F0; --paper:#FFFDF7; --ink:#2A241C; --walnut:#6E5F4C; --soft:#9A8C77;
+  --rule:#E6DECD; --terra:#C0603F;
+  --sans:'DM Sans', -apple-system, sans-serif;
+  --mono:'DM Mono', 'SF Mono', Consolas, monospace;
+  width:100%; max-width:640px; font-family:var(--sans); color:var(--ink)
+}
+.csx-rest *{margin:0; padding:0; box-sizing:border-box}
+.csx-rest .bar{display:flex; align-items:center; gap:11px; background:var(--paper); border:1px solid var(--rule);
+  border-radius:999px; padding:13px 20px; cursor:text;
+  transition:box-shadow .35s cubic-bezier(.2,.8,.2,1), border-color .3s}
+.csx-rest .bar:hover{border-color:var(--walnut)}
+.csx-rest .ic{color:var(--soft); font-size:15px; flex:none; line-height:1}
+.csx-rest input{flex:1; min-width:0; border:0; outline:0; background:transparent; font-family:var(--sans);
+  font-size:15px; color:var(--ink); caret-color:var(--terra)}
+.csx-rest input::placeholder{color:#C9BDA6}
+.csx-rest .kbd{font-family:var(--mono); font-size:10.5px; color:var(--soft); border:1px solid var(--rule);
+  border-radius:6px; padding:2px 8px; flex:none}
+.csx-rest .clr{border:0; background:none; color:var(--soft); font-size:12px; cursor:pointer; flex:none;
+  width:20px; height:20px; border-radius:50%}
+.csx-rest .clr:hover{background:var(--cream); color:var(--ink)}
+@media (max-width:760px){
+  .csx-rest .bar{padding:10px 14px}
+  .csx-rest input{font-size:16px}
+  .csx-rest .kbd{display:none}
+}
 
 @media (prefers-reduced-motion:reduce){
   .csx .bar,.csx .panel,.csx .veil,.csx.sheet .searchwrap{animation:none}

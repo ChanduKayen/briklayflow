@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase';
 import { ListSkeleton } from '../components/SkeletonLoader';
 import type { ClientInvoice, InvoiceStatus, Stakeholder, Project } from '../types';
 import { useSearchScope } from '../components/search/searchScope';
-import SearchHint from '../components/search/SearchHint';
+import SearchBar from '../components/search/SearchBar';
 
 const STATUS_TABS: { label: string; value: InvoiceStatus | 'All' }[] = [
   { label: 'All',     value: 'All'     },
@@ -124,7 +124,7 @@ export default function Invoices() {
 
       {/* Search + Status filter */}
       <div className="flex flex-col md:flex-row gap-3 mb-5">
-        <SearchHint label="invoices" className="self-start" />
+        <SearchBar label="invoices" className="self-start" />
         <div className="flex gap-1 flex-wrap">
           {STATUS_TABS.map(tab => (
             <button

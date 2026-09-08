@@ -6,7 +6,7 @@
 import type React from 'react';
 import { useCallback, useMemo, useState } from 'react';
 import { useSearchScope } from '../search/searchScope';
-import SearchHint from '../search/SearchHint';
+import SearchBar from '../search/SearchBar';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -325,7 +325,7 @@ export default function WOListSheet({ projectId }: { projectId?: string }) {
         </div>
 
         <div className="tools">
-          <SearchHint label="contracts" />
+          <SearchBar label="contracts" />
           <div className="chips">
             <button className={`chip${filter === 'all' ? ' on' : ''}`} onClick={() => setFilter('all')}>All <span className="n">{cAll}</span></button>
             <button className={`chip warn${filter === 'active' ? ' on' : ''}`} onClick={() => setFilter('active')}>Active <span className="n">{cActive}</span></button>

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useMemo, lazy, Suspense, type ReactNode, t
 import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSearchScope } from '../components/search/searchScope';
-import SearchHint from '../components/search/SearchHint';
+import SearchBar from '../components/search/SearchBar';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { resolveDocUrl } from '../lib/storage';
@@ -1272,7 +1272,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
 
           <span className="hidden sm:block flex-1" />
 
-          <SearchHint label="entries" />
+          <SearchBar label="entries" />
           <button onClick={exportCSV} className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full" style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.inkSoft, ...font }}>
             <Download size={13} style={{ color: V.faint }} /> Export
           </button>
@@ -1298,7 +1298,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                     <span className="inline-flex items-center justify-center text-[11px] font-bold rounded-full" style={{ minWidth: 17, height: 17, padding: '0 5px', background: V.terra, color: '#fff' }}>{activeFilterCount}</span>
                   )}
                 </button>
-                <SearchHint label="entries" className="flex-1 min-w-0" />
+                <SearchBar label="entries" className="flex-1 min-w-0" />
                 <button onClick={exportCSV} aria-label="Export CSV" className="inline-flex items-center justify-center rounded-full shrink-0 active:scale-95 transition-transform" style={{ width: 40, height: 40, background: V.surface, border: `1px solid ${V.line}` }}>
                   <Download size={16} style={{ color: V.faint }} />
                 </button>

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useSearchScope } from '../components/search/searchScope';
-import SearchHint from '../components/search/SearchHint';
+import SearchBar from '../components/search/SearchBar';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { Session } from '@supabase/supabase-js'
 import type { Project } from '../types'
@@ -474,7 +474,7 @@ export default function Projects({ session }: { session: Session }) {
               </button>
             )
           })}
-          <span style={{ marginLeft: 'auto' }}><SearchHint label="sites" /></span>
+          <span style={{ marginLeft: 'auto' }}><SearchBar label="sites" /></span>
         </div>
       )}
 

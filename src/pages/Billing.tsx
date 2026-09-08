@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase';
 import { PageSkeleton } from '../components/SkeletonLoader';
 import type { ClientInvoice, InvoiceStatus, Stakeholder, Project } from '../types';
 import { useSearchScope } from '../components/search/searchScope';
-import SearchHint from '../components/search/SearchHint';
+import SearchBar from '../components/search/SearchBar';
 
 // ── Status config ─────────────────────────────────────────────────────────────
 
@@ -148,7 +148,7 @@ export default function Billing() {
 
       {/* ── Filters ─────────────────────────────────────────────────────────── */}
       <div className="flex flex-col md:flex-row gap-3 mb-5">
-        <SearchHint label="bills raised" className="self-start" />
+        <SearchBar label="bills raised" className="self-start" />
         <div className="flex gap-1 flex-wrap">
           {STATUS_TABS.map(tab => (
             <button

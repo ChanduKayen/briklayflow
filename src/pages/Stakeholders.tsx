@@ -13,7 +13,7 @@ import { usePrefetchStakeholder } from '../hooks/usePrefetch';
 import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
 import { isNewLedgerOrg, loadProjectionMap } from '../lib/ledgerRead';
 import { useSearchScope } from '../components/search/searchScope';
-import SearchHint from '../components/search/SearchHint';
+import SearchBar from '../components/search/SearchBar';
 
 // ── helpers ─────────────────────────────────────────────────────────────────────
 const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$/;
@@ -359,7 +359,7 @@ export default function Stakeholders({ session }: { session: Session }) {
               </button>
             ))}
           </div>
-          <SearchHint label="parties" />
+          <SearchBar label="parties" />
         </div>
 
         {/* ── table ── */}

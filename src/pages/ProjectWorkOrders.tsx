@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useSearchScope } from '../components/search/searchScope'
-import SearchHint from '../components/search/SearchHint'
+import SearchBar from '../components/search/SearchBar'
 import { useQuery } from '@tanstack/react-query'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
@@ -311,7 +311,7 @@ export default function ProjectWorkOrders({ session }: { session: Session }) {
           {renderFilterChip('status', 'Status', ALL_STATUSES, filterStatus, setFilterStatus)}
           {renderFilterChip('worker', 'Worker', uniqueWorkers, filterWorker, setFilterWorker)}
 
-          <SearchHint label="contracts" />
+          <SearchBar label="contracts" />
 
           <button onClick={exportCSV} className="hidden md:flex items-center gap-1.5 h-8 px-3 rounded-full border border-outline-variant/25 bg-white text-[12px] font-medium text-on-surface-variant/55 hover:border-outline-variant/50 hover:text-on-surface/75 transition-all shrink-0">
             <span className="material-symbols-outlined" style={{ fontSize: 14 }}>download</span>

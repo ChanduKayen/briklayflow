@@ -11,7 +11,7 @@ import { useOrgId } from '../lib/auth/AuthProvider';
 import { useSnackbar } from '../components/Snackbar';
 import { searchPayees } from '../lib/payeeSearch';
 import { useSearchScope } from '../components/search/searchScope';
-import SearchHint from '../components/search/SearchHint';
+import SearchBar from '../components/search/SearchBar';
 import { createParty } from '../components/day-book/fileEntry';
 import {
   loadWeeklyPayments, recordWeeklyPayment, settleWeeklyPaymentOnLedger, loadWeeklyPaid, mondayOf, weekLabel,
@@ -568,7 +568,7 @@ export default function Payables({ session }: { session: Session }) {
               <button className="wkstep next" onClick={() => shiftWeek(1)} aria-label="Next week"><span className="wkw">next week </span>›</button>
               <button className="wknow" onClick={() => setMonday(mondayOf(new Date()))}>this week</button>
             </div>
-            <div className="sub"><SearchHint label="the run" /></div>
+            <div className="sub"><SearchBar label="the run" /></div>
             {orgId && <div className="sub cutover"><LedgerCutoverControl orgId={orgId} isManager={isManager} /></div>}
             {readOnly && <div className="sub" style={{ color: 'var(--gold, #8A6A1F)' }}>A past week — a record of what was logged and paid then. The live balance is on each party&apos;s ledger.</div>}
           </div>
