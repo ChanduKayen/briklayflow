@@ -490,7 +490,11 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const [showMobileBill, setShowMobileBill] = useState(false);
   const [showMobilePay,  setShowMobilePay]  = useState(false);
   const [billingOpen,  setBillingOpen]  = useState(false);   // unfolds the bill columns + bill row
-  const [poBillOpen,   setPoBillOpen]   = useState(false);   // the new upload→mint bill door
+  const [poBillFile,   setPoBillFile]   = useState<File | null>(null);   // the bill picked to record on this PO
+  const poBillInputRef = useRef<HTMLInputElement | null>(null);
+  // Record bill = pop the OS picker straight from the click (a real user gesture); the sheet opens with
+  // the chosen file already attached + reading — no intermediate "upload" step.
+  const openPoBillPicker = () => poBillInputRef.current?.click();
   const [billEditOpen, setBillEditOpen] = useState(false);   // editing/replacing an already-recorded bill
   const [payRowOpen,   setPayRowOpen]   = useState(false);
   const [refBillNo,    setRefBillNo]    = useState('');
@@ -1163,7 +1167,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
       };
       if (nowStage === 'bill') return {
         ghost: !sent ? sendBtn : undefined,
-        primary: { label: 'Record bill', sub: 'from the vendor', icon: 'bill', tone: 'terra', onClick: () => setPoBillOpen(true) },
+        primary: { label: 'Record bill', sub: 'from the vendor', icon: 'bill', tone: 'terra', onClick: () => openPoBillPicker() },
       };
       if (nowStage === 'pay') return {
         ghost: (po.vendor_bill_url || po.vendor_bill_doc_url) ? { label: 'View bill', icon: 'eye', tone: 'neutral', onClick: () => previewBill(po.vendor_bill_doc_url || po.vendor_bill_url) } : undefined,
@@ -1289,7 +1293,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
                   </button>
                 ))}
                 {!cancelled && (
-                  <button className="m-brbtn" onClick={() => setPoBillOpen(true)}>
+                  <button className="m-brbtn" onClick={() => openPoBillPicker()}>
                     <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>Add bill
                   </button>
                 )}
@@ -1471,7 +1475,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
             <div className="t">Bill recorded</div>
             <div className="s">{hasBill ? `${billNo ? billNo + ' · ' : ''}${inr0(billAmt)}` : `Est. ${inr0(orderValue)} · no bill yet`}</div>
             {!hasBill && !cancelled && (
-              <div className="act"><button className={`btn sm${nowStage === 'bill' ? ' primary' : ''}`} onClick={() => setPoBillOpen(true)}>Record bill</button></div>
+              <div className="act"><button className={`btn sm${nowStage === 'bill' ? ' primary' : ''}`} onClick={() => openPoBillPicker()}>Record bill</button></div>
             )}
             {hasBill && !cancelled && (
               <div className="act" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1482,7 +1486,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
                     {b.billNo ? `Bill ${b.billNo}` : 'Bill'} · {inr0(b.amount)}
                   </button>
                 ))}
-                <button className="btn ghost sm" onClick={() => setPoBillOpen(true)}>
+                <button className="btn ghost sm" onClick={() => openPoBillPicker()}>
                   <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
                   Add another bill
                 </button>
@@ -1665,11 +1669,13 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
 
       {renderMobileSheets()}
 
-      {poBillOpen && (
+      {/* Direct file picker for Record bill — the sheet opens with the chosen file already attached. */}
+      <input ref={poBillInputRef} type="file" accept="image/*,application/pdf" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) setPoBillFile(f); }} />
+      {poBillFile && (
         <PoBillSheet
           poId={poId!} orgId={po.org_id} stakeholderId={po.stakeholder_id} projectId={po.project_id}
-          vendorName={vendor?.name || 'Vendor'}
-          onClose={() => setPoBillOpen(false)}
+          vendorName={vendor?.name || 'Vendor'} initialFile={poBillFile}
+          onClose={() => setPoBillFile(null)}
           onDone={() => { refetchPoBills(); qc.invalidateQueries({ queryKey: ['po_detail', poId] }); qc.invalidateQueries({ queryKey: ['bills'] }); qc.invalidateQueries({ queryKey: ['po_list_sheet'] }); }}
         />
       )}

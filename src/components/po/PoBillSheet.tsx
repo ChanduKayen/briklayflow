@@ -7,9 +7,9 @@ import { X, Plus, Check, FileText } from 'lucide-react';
 import { V, font } from '../txn-ledger/ledgerTokens';
 import { intakeExtract, intakeCommit } from '../../lib/billIntake';
 
-export function PoBillSheet({ poId, orgId, stakeholderId, projectId, vendorName, onClose, onDone }: {
+export function PoBillSheet({ poId, orgId, stakeholderId, projectId, vendorName, initialFile, onClose, onDone }: {
   poId: string; orgId: string; stakeholderId: string | null; projectId: string | null; vendorName: string;
-  onClose: () => void; onDone: () => void;
+  initialFile?: File | null; onClose: () => void; onDone: () => void;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);   // local object-URL preview of the attached bill
@@ -17,9 +17,12 @@ export function PoBillSheet({ poId, orgId, stakeholderId, projectId, vendorName,
   const [doneKind, setDoneKind] = useState<'minted' | 'linked'>('minted');
   const [err, setErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const startedRef = useRef(false);
 
   // Revoke the object URL when it changes / unmounts.
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
+  // The picker already ran (in the PO detail) — read the chosen file immediately on mount.
+  useEffect(() => { if (initialFile && !startedRef.current) { startedRef.current = true; void onFile(initialFile); } }, [initialFile]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onFile = async (f: File) => {
     if (!stakeholderId) { setErr('This PO has no vendor set.'); return; }
@@ -28,8 +31,15 @@ export function PoBillSheet({ poId, orgId, stakeholderId, projectId, vendorName,
     setPreview(f.type.startsWith('image/') ? URL.createObjectURL(f) : null);
     setPhase('reading');            // attached — now reading it
     try {
-      const ex = await intakeExtract(f);
-      const res = await intakeCommit({ orgId, source: 'po', file: f, vendorId: stakeholderId, poId, projectId }, ex, stakeholderId, { allowDuplicate: false });
+      // Never leave the reader hanging: cap extraction + mint so a stuck bill-reader surfaces an error
+      // instead of an endless "Reading…".
+      const withTimeout = <T,>(p: Promise<T>, ms: number, msg: string) =>
+        Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new Error(msg)), ms))]);
+      const ex = await withTimeout(intakeExtract(f), 60_000, 'Reading the bill took too long — the reader may be unavailable. Try again.');
+      const res = await withTimeout(
+        intakeCommit({ orgId, source: 'po', file: f, vendorId: stakeholderId, poId, projectId }, ex, stakeholderId, { allowDuplicate: false }),
+        30_000, 'Saving the bill took too long. Try again.',
+      );
       setDoneKind(res.status === 'duplicate' ? 'linked' : 'minted');
       setPhase('done');
       onDone();
@@ -81,11 +91,13 @@ export function PoBillSheet({ poId, orgId, stakeholderId, projectId, vendorName,
                 <div className="flex items-center gap-2.5 px-3 py-2.5" style={{ background: V.surface }}>
                   {phase === 'reading'
                     ? <span style={{ width: 15, height: 15, borderRadius: '50%', border: `2px solid ${V.terra}33`, borderTopColor: V.terra, animation: 'pbsSpin .7s linear infinite', flexShrink: 0 }} />
-                    : <Check size={15} className="shrink-0" style={{ color: V.sage }} />}
+                    : phase === 'done'
+                    ? <Check size={15} className="shrink-0" style={{ color: V.sage }} />
+                    : <span style={{ width: 8, height: 8, borderRadius: '50%', background: V.terra, flexShrink: 0 }} />}
                   <span className="min-w-0 flex-1">
                     <span className="block text-[12.5px] font-medium truncate" style={{ color: V.ink }}>{file.name}</span>
-                    <span className="block text-[11px]" style={{ color: phase === 'done' ? V.sage : V.sys }}>
-                      {phase === 'reading' ? 'Reading the attached bill…' : doneKind === 'linked' ? 'Linked the existing bill' : 'Bill recorded'}
+                    <span className="block text-[11px]" style={{ color: phase === 'done' ? V.sage : phase === 'reading' ? V.sys : V.terra }}>
+                      {phase === 'reading' ? 'Reading the attached bill…' : phase === 'idle' ? "Couldn't read this bill" : doneKind === 'linked' ? 'Linked the existing bill' : 'Bill recorded'}
                     </span>
                   </span>
                 </div>
