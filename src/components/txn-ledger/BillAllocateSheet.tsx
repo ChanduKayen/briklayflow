@@ -11,7 +11,7 @@
  *
  * Writes via set_txn_allocations (complete-set replace; parts sum to the txn total).
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { X, FileText, Plus, Loader2, Check, Eye } from 'lucide-react';
 import { V, font } from './ledgerTokens';
 import { openDoc, useSignedDocUrl } from '../../lib/storage';
@@ -65,9 +65,10 @@ function BillPeekImg({ stored }: { stored: string }) {
 }
 import {
   loadUnpaidBillsForVendor, saveBillAllocations, setAdvanceMemo,
-  type UnpaidBill, type DuplicateBill,
+  type UnpaidBill, type ExtractedBill,
 } from '../../lib/billsApi';
-import { intakeExtract, intakeCommit } from '../../lib/billIntake';
+import { intakeCommit } from '../../lib/billIntake';
+import NewBillModal from '../bills/NewBillModal';
 
 const num = (n: unknown) => Number(n) || 0;
 const inr = (n: number) => '₹' + Math.round(num(n)).toLocaleString('en-IN');
@@ -83,9 +84,8 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
   const [poMemo, setPoMemo] = useState('');
   const [busy, setBusy] = useState<'idle' | 'reading' | 'saving' | 'done'>('idle');
   const [err, setErr] = useState<string | null>(null);
-  const [dup, setDup] = useState<{ file: string; d: DuplicateBill } | null>(null);
   const [peekId, setPeekId] = useState<string | null>(null);   // hover/tap → inline bill preview
-  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
 
   // Load the vendor's unpaid bills; pre-select on an exact remaining match.
   useEffect(() => {
@@ -112,31 +112,30 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
   };
   const setAmt = (b: UnpaidBill, v: number) => setSel(s => ({ ...s, [b.id]: Math.max(0, Math.min(b.remaining, v)) }));
 
-  // Upload a new bill mid-payment — one pipeline (vendor known). Dedupe lives in intakeCommit: on a
-  // collision we LINK the existing bill (select it) instead of minting a second; otherwise mint + select.
+  // Put a bill in the list (if it isn't already) and allocate this payment against it.
   const selectBill = (b: UnpaidBill) => {
     setBills(bs => (bs?.some(x => x.id === b.id) ? bs : [b, ...(bs ?? [])]));
     setSel(s => { const leftover = Math.max(0, amount - Object.values(s).reduce((x, v) => x + num(v), 0)); return { ...s, [b.id]: Math.min(b.remaining, leftover) || b.remaining }; });
   };
-  const onUpload = async (file: File) => {
-    setErr(null); setDup(null); setBusy('reading');
-    try {
-      const ex = await intakeExtract(file);
-      const res = await intakeCommit({ orgId, source: 'tx_picker', file, vendorId: stakeholderId, projectId: defaultProjectId }, ex, stakeholderId);
-      if (res.status === 'duplicate') {
-        // Same paper already recorded — reconcile: select the existing bill (if unpaid it's in the list;
-        // else surface that it's already settled), don't add a duplicate.
-        setDup({ file: file.name, d: res.existing });
-        const existing = (bills ?? []).find(x => x.id === res.existing.id);
-        if (existing) selectBill(existing);
-        else setErr(`Bill #${res.existing.billNo ?? ''} for ${vendorName} is already recorded${res.existing.amount ? ` (${inr(res.existing.amount)})` : ''} and settled — nothing to attach.`);
-        setBusy('idle');
-        return;
-      }
-      // Minted — select it against this payment.
-      selectBill({ id: res.billId, kind: 'bill', billNo: ex.billNo, billDate: ex.billDate, amount: ex.amount, paid: 0, remaining: ex.amount, projectId: defaultProjectId, site: null, docUrl: null });
-      setBusy('idle');
-    } catch (e) { setErr(errMsg(e)); setBusy('idle'); }
+  // Uploading mid-payment goes through the same door as everywhere else — the vendor is already
+  // known, so it is locked; the figures are shown before anything is minted. Dedupe still lives in
+  // intakeCommit; here a collision reconciles (attach the bill already on file) rather than navigate.
+  const onUpload = async (d: { file: File | null; billNo: string | null; billDate: string | null; amount: number; projectId: string | null; lines: ExtractedBill['lines']; allowDuplicate: boolean }) => {
+    const res = await intakeCommit(
+      { orgId, source: 'tx_picker', file: d.file, vendorId: stakeholderId, projectId: d.projectId ?? defaultProjectId },
+      { vendor: vendorName, billNo: d.billNo, billDate: d.billDate, amount: d.amount, lines: d.lines },
+      stakeholderId, { allowDuplicate: d.allowDuplicate },
+    );
+    if (res.status === 'duplicate') return { duplicate: res.existing };
+    selectBill({ id: res.billId, kind: 'bill', billNo: d.billNo, billDate: d.billDate, amount: d.amount, paid: 0, remaining: d.amount, projectId: d.projectId ?? defaultProjectId, site: null, docUrl: null });
+  };
+
+  // "Attach that one instead" — the paper is already on the books, so settle against it.
+  const reconcile = (billId: string) => {
+    setUploadOpen(false);
+    const existing = (bills ?? []).find(x => x.id === billId);
+    if (existing) { selectBill(existing); setErr(null); }
+    else setErr(`That bill for ${vendorName} is already recorded and settled — nothing to attach.`);
   };
 
   const confirm = async () => {
@@ -169,7 +168,6 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
       </div>
 
       <div className="px-4 py-3.5" style={{ maxHeight: '62vh', overflowY: 'auto' }}>
-        <input ref={fileRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void onUpload(f); }} />
 
         {bills == null ? (
           <>
@@ -184,12 +182,11 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
             <div className="mx-auto grid place-items-center rounded-full mb-3" style={{ width: 44, height: 44, background: V.field }}><FileText size={20} style={{ color: V.faint }} /></div>
             <p className="text-[13px] font-medium" style={{ color: V.ink }}>No bills for {vendorName} yet</p>
             <p className="text-[12px] mt-1 mb-4" style={{ color: V.sys }}>Upload the bill this payment is for.</p>
-            <button type="button" onClick={() => fileRef.current?.click()} disabled={busy === 'reading'}
+            <button type="button" onClick={() => setUploadOpen(true)} disabled={busy === 'reading'}
               className="w-full inline-flex items-center justify-center gap-2 py-3 rounded-xl text-[14px] font-semibold"
               style={{ background: V.terra, color: '#fff', opacity: busy === 'reading' ? 0.6 : 1 }}>
               {busy === 'reading' ? <><Loader2 size={16} className="animate-spin" /> Reading the bill…</> : <><Plus size={16} /> Upload a new bill</>}
             </button>
-            {dup && <p className="text-[11.5px] mt-2" style={{ color: V.terraDeep }}>This bill {dup.d.billNo ? <>no. <b>{dup.d.billNo}</b> </> : ''}already exists for {vendorName}{dup.d.amount ? ` (${inr(dup.d.amount)})` : ''} — selected it here instead of adding a duplicate.</p>}
             <label className="flex items-center justify-center gap-2 mt-4 text-[11.5px]" style={{ color: V.sys }}>
               <input type="checkbox" checked={advanceMemoOn} onChange={(e) => setAdvanceMemoOn(e.target.checked)} style={{ accentColor: V.terra }} />
               No bill — note it&apos;s towards an order
@@ -251,16 +248,13 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
             </div>
 
             {/* Upload a new bill — the hero action, prominent even when bills exist. */}
-            <button type="button" onClick={() => fileRef.current?.click()} disabled={busy === 'reading'}
+            <button type="button" onClick={() => setUploadOpen(true)} disabled={busy === 'reading'}
               className="blz-upload w-full flex items-center justify-center gap-2 px-3 py-3 rounded-xl mt-3"
               style={{ background: V.terraWash, border: `1.5px dashed ${V.terra}`, opacity: busy === 'reading' ? 0.6 : 1 }}>
               {busy === 'reading' ? <Loader2 size={16} className="animate-spin shrink-0" style={{ color: V.terraDeep }} /> : <Plus size={16} className="shrink-0" style={{ color: V.terraDeep }} />}
               <span className="text-[13.5px] font-semibold" style={{ color: V.terraDeep }}>{busy === 'reading' ? 'Reading the bill…' : 'Upload a new bill'}</span>
             </button>
 
-            {dup && (
-              <p className="text-[11.5px] mt-2" style={{ color: V.terraDeep }}>This bill {dup.d.billNo ? <>no. <b>{dup.d.billNo}</b> </> : ''}already exists for {vendorName}{dup.d.amount ? ` (${inr(dup.d.amount)})` : ''} — selected it here instead of adding a duplicate.</p>
-            )}
 
             {/* advance memo */}
             {remainder > 0.5 && (
@@ -300,6 +294,19 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
           </button>
         )}
       </div>
+
+      {uploadOpen && (
+        <NewBillModal
+          open
+          title="New bill"
+          onClose={() => setUploadOpen(false)}
+          lockVendor={{ id: stakeholderId, name: vendorName }}
+          lockProject={defaultProjectId ? { id: defaultProjectId } : null}
+          onOpenBill={reconcile}
+          openBillLabel="Attach that one instead"
+          commit={onUpload}
+        />
+      )}
     </div>
   );
 }

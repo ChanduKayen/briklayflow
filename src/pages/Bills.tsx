@@ -3,16 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { loadBills, loadBillDetail, deleteBill, extractBill, findDuplicateBill, type BillRow, type BillStatus, type DuplicateBill } from '../lib/billsApi';
+import { loadBills, loadBillDetail, deleteBill, extractBill, type BillRow, type BillStatus } from '../lib/billsApi';
 import { intakeCommit } from '../lib/billIntake';
 import { DocThumb } from '../components/DocThumb';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { openDoc } from '../lib/storage';
-import { supabase } from '../lib/supabase';
 import { useOrgId, useAuth } from '../lib/auth/AuthProvider';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
-import { searchPayees } from '../lib/payeeSearch';
+import NewBillModal, { type BillDraft } from '../components/bills/NewBillModal';
 
 const BLX_CSS = `
 .blx{--cream:#F6F2EA;--paper:#FDFBF7;--walnut:#3B3128;--walnut-60:#7A6E61;--walnut-soft:#B4A897;--line:#E4DCCE;--line-strong:#D3C8B4;--terracotta:#B85C38;--sage:#6E7F5E;--sage-tint:#EEF1E8;--terra-tint:#F6E8E0;--amber-tint:#F3ECD9;
@@ -194,14 +193,6 @@ export default function Bills() {
   const { data: profile } = useUserProfile(userId ?? '');
   const { show } = useSnackbar();
   const { data: bills = [], isLoading } = useQuery({ queryKey: ['bills'], queryFn: loadBills });
-  const { data: vendorList = [] } = useQuery({
-    queryKey: ['bill_vendors'],
-    queryFn: async () => (await supabase.from('stakeholders').select('stakeholder_id, name').eq('type', 'Vendor').order('name')).data ?? [],
-  });
-  const { data: projectList = [] } = useQuery({
-    queryKey: ['projects_active_min'],
-    queryFn: async () => (await supabase.from('projects').select('project_id, name').eq('status', 'Active').order('name')).data ?? [],
-  });
   const [site, setSite] = useState('');
   const [vendor, setVendor] = useState('');
   const [status, setStatus] = useState('');
@@ -210,8 +201,13 @@ export default function Bills() {
   const [dragging, setDragging] = useState(false);
   const [queue, setQueue] = useState<QItem[]>([]);
   const [flash, setFlash] = useState(false);   // brief "Added ✓" pulse on the button after a mint
-  const fileRef = useRef<HTMLInputElement>(null);
   const dragDepth = useRef(0);
+  // The hero opens the door itself. Its stage one IS the drop — plus the way in for a bill that has
+  // no paper at all, which an OS file picker can never offer.
+  const [manualOpen, setManualOpen] = useState(false);
+
+  const current0 = queue.find(x => x.state === 'ready') ?? null;
+  const sheetOpen = !!current0 || manualOpen;
 
   const enqueue = useCallback((files: FileList | File[]) => {
     const list = Array.from(files).filter(f => /^image\/|application\/pdf/.test(f.type));
@@ -229,8 +225,10 @@ export default function Bills() {
     });
   }, []);
 
-  // Page-wide drag-and-drop.
+  // Page-wide drag-and-drop. Silent while the modal is open: it has its own dropzone, and two
+  // listeners reading the same file would read — and bill — it twice.
   useEffect(() => {
+    if (sheetOpen) return;
     const onOver = (e: DragEvent) => { if (e.dataTransfer?.types?.includes('Files')) { e.preventDefault(); } };
     const onEnter = (e: DragEvent) => { if (e.dataTransfer?.types?.includes('Files')) { dragDepth.current++; setDragging(true); } };
     const onLeave = () => { dragDepth.current = Math.max(0, dragDepth.current - 1); if (dragDepth.current === 0) setDragging(false); };
@@ -240,11 +238,10 @@ export default function Bills() {
     window.addEventListener('dragleave', onLeave);
     window.addEventListener('drop', onDrop);
     return () => { window.removeEventListener('dragover', onOver); window.removeEventListener('dragenter', onEnter); window.removeEventListener('dragleave', onLeave); window.removeEventListener('drop', onDrop); };
-  }, [enqueue]);
+  }, [enqueue, sheetOpen]);
 
-  // The confirm sheet shows the first item ready for review.
-  const current = queue.find(x => x.state === 'ready') ?? null;
-  const patch = (id: string, p: Partial<QItem>) => setQueue(q => q.map(x => x.id === id ? { ...x, ...p } : x));
+  // The modal confirms the first item ready for review; the rest stay counted on the button.
+  const current = current0;
   const drop = (id: string) => setQueue(q => q.filter(x => x.id !== id));
 
   // Live progress surfaced ON the button (no bottom-right toast): how many are being read / saved,
@@ -256,27 +253,23 @@ export default function Bills() {
 
   // Mint through the shared pipeline (dedupe lives there). The confirm sheet gates on the dup-ack, so
   // we pass allowDuplicate once the user has chosen to add it anyway.
-  const mint = async (it: QItem, vendorId: string, projectId: string | null, allowDuplicate: boolean) => {
-    patch(it.id, { state: 'saving' });
-    try {
-      const res = await intakeCommit(
-        // NOTE: useAuth().userId is the ORG MEMBERSHIP id, not an auth.users id — writing it to
-        // bills.created_by (FK → auth.users) violates the constraint. Provenance rides on created_by_name;
-        // leave created_by null rather than send a non-auth id.
-        { orgId, source: 'bills_page', file: it.file, vendorId, projectId, createdBy: null, createdByName: (profile as any)?.full_name ?? (profile as any)?.name ?? null },
-        { vendor: it.vendorName, billNo: it.billNo, billDate: it.billDate, amount: it.amount, lines: it.lines },
-        vendorId, { allowDuplicate },
-      );
-      if (res.status === 'duplicate') { patch(it.id, { state: 'ready' }); return; } // sheet shows the reconcile offer
-      drop(it.id);
-      setFlash(true); setTimeout(() => setFlash(false), 1800);
-      show('Bill added');
-      qc.invalidateQueries({ queryKey: ['bills'] });
-      qc.invalidateQueries({ queryKey: ['party_ledger'] });
-      qc.invalidateQueries({ queryKey: ['weekly_payments'] });
-    } catch (e) {
-      patch(it.id, { state: 'error', error: (e as Error)?.message || 'Could not save the bill' });
-    }
+  const mint = async (d: BillDraft) => {
+    const res = await intakeCommit(
+      // NOTE: useAuth().userId is the ORG MEMBERSHIP id, not an auth.users id — writing it to
+      // bills.created_by (FK → auth.users) violates the constraint. Provenance rides on created_by_name;
+      // leave created_by null rather than send a non-auth id.
+      { orgId, source: 'bills_page', file: d.file, vendorId: d.vendorId, projectId: d.projectId, createdBy: null, createdByName: (profile as { full_name?: string; name?: string } | undefined)?.full_name ?? (profile as { full_name?: string; name?: string } | undefined)?.name ?? null },
+      { vendor: d.vendorName, billNo: d.billNo, billDate: d.billDate, amount: d.amount, lines: d.lines },
+      d.vendorId, { allowDuplicate: d.allowDuplicate },
+    );
+    // The modal offers the reconcile ("open it") and the override; hand it the collision and let it ask.
+    if (res.status === 'duplicate') return { duplicate: res.existing };
+    setFlash(true); setTimeout(() => setFlash(false), 1800);
+    show('Bill added');
+    qc.invalidateQueries({ queryKey: ['bills'] });
+    qc.invalidateQueries({ queryKey: ['party_ledger'] });
+    qc.invalidateQueries({ queryKey: ['weekly_payments'] });
+    qc.invalidateQueries({ queryKey: ['party_topay_map'] });
   };
 
   const sites = useMemo(() => [...new Set(bills.map(b => b.site).filter(Boolean))] as string[], [bills]);
@@ -303,9 +296,9 @@ export default function Bills() {
             <div className="addwrap">
               <button
                 className={`btn-add${busy ? ' busy' : flash ? ' done' : ''}`}
-                onClick={() => fileRef.current?.click()}
+                onClick={() => setManualOpen(true)}
                 aria-busy={busy}
-                title="Upload a bill — image or PDF. You can also drop files anywhere on this page."
+                title="Add a bill — drop the paper and we'll read it, or type it in. You can also drop files anywhere on this page."
               >
                 {busy ? <span className="aspin" /> : flash ? <IconCheck /> : <IconUpload />}
                 <span>{saving > 0 ? (saving > 1 ? `Saving ${saving} bills…` : 'Saving…') : reading > 0 ? `Reading ${reading} bill${reading > 1 ? 's' : ''}…` : flash ? 'Added' : 'Add bill'}</span>
@@ -316,7 +309,6 @@ export default function Bills() {
                 <span className="addhint"><IconDrop />or drag &amp; drop bills anywhere</span>
               )}
             </div>
-            <input ref={fileRef} type="file" accept="image/*,application/pdf" multiple hidden onChange={(e) => { if (e.target.files?.length) enqueue(e.target.files); e.target.value = ''; }} />
           </div>
         </header>
 
@@ -358,109 +350,25 @@ export default function Bills() {
       )}
 
       {current && (
-        <ConfirmBillSheet
+        <NewBillModal
           key={current.id}
-          orgId={orgId}
-          item={current}
-          vendors={vendorList as { stakeholder_id: string; name: string }[]}
-          projects={projectList as { project_id: string; name: string }[]}
-          queueCount={queue.filter(q => q.state === 'ready').length}
-          onPatch={(p) => patch(current.id, p)}
-          onCancel={() => drop(current.id)}
+          open
+          onClose={() => drop(current.id)}
+          queueMore={queue.filter(q => q.state === 'ready').length - 1}
+          initialExtract={{ vendor: current.vendorName, billNo: current.billNo, billDate: current.billDate, amount: current.amount, lines: current.lines }}
           onOpenBill={(id) => { drop(current.id); navigate(`/bills/${encodeURIComponent('bl~' + id)}`); }}
-          onConfirm={(vendorId, projectId, allowDuplicate) => mint(current, vendorId, projectId, allowDuplicate)}
+          commit={(d) => mint({ ...d, file: current.file })}
         />
       )}
-    </div>
-  );
-}
 
-// Confirm sheet — after a bill is read, name the vendor & site, check the figures, warn on a duplicate,
-// then mint. One sheet at a time; the queue feeds the next 'ready' item in behind it.
-function ConfirmBillSheet({ orgId, item, vendors, projects, queueCount, onPatch, onCancel, onOpenBill, onConfirm }: {
-  orgId: string; item: QItem; vendors: { stakeholder_id: string; name: string }[]; projects: { project_id: string; name: string }[];
-  queueCount: number; onPatch: (p: Partial<QItem>) => void; onCancel: () => void; onOpenBill: (id: string) => void; onConfirm: (vendorId: string, projectId: string | null, allowDuplicate: boolean) => void;
-}) {
-  const [vendorId, setVendorId] = useState<string>('');
-  const [vq, setVq] = useState(item.vendorName || '');
-  const [vOpen, setVOpen] = useState(false);
-  const [projectId, setProjectId] = useState<string>('');
-  const [dup, setDup] = useState<DuplicateBill | null>(null);
-  const [dupAck, setDupAck] = useState(false);
-
-  // Pre-match the read vendor name to a real party.
-  useEffect(() => {
-    if (vendorId || !item.vendorName) return;
-    const hit = searchPayees(vendors as any, item.vendorName)[0] as any;
-    if (hit) { setVendorId(hit.stakeholder_id); setVq(hit.name); }
-  }, [item.vendorName, vendors, vendorId]);
-
-  // Already on file ANYWHERE in the org? Fingerprint the document itself — number, or header name +
-  // amount + date, or amount + date — not the vendor we happen to link, so the same paper is caught even
-  // if another door linked it to a different vendor. Runs before a vendor is picked; warns, never blocks.
-  useEffect(() => {
-    setDup(null); setDupAck(false);
-    if (!(item.amount > 0) && !item.billNo) return;
-    let live = true;
-    findDuplicateBill({ orgId, billNo: item.billNo, amount: item.amount, billDate: item.billDate, vendorName: item.vendorName }).then(d => { if (live) setDup(d); });
-    return () => { live = false; };
-  }, [orgId, item.billNo, item.amount, item.billDate, item.vendorName]);
-
-  const matches = vq.trim() ? searchPayees(vendors as any, vq).slice(0, 6) : vendors.slice(0, 6);
-  const canSave = !!vendorId && item.amount > 0 && (!dup || dupAck);
-
-  return (
-    <div className="scrim" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
-      <div className="sheet-m" onClick={(e) => e.stopPropagation()}>
-        <div className="sh">
-          <h3>New bill</h3>
-          {queueCount > 1 && <span className="qn">{queueCount - 1} more in queue</span>}
-        </div>
-        <div className="sb">
-          <div className="fld vsearch">
-            <label>Vendor</label>
-            <input value={vq} placeholder="Search a vendor…" onChange={(e) => { setVq(e.target.value); setVendorId(''); setVOpen(true); }} onFocus={() => setVOpen(true)} />
-            {vOpen && matches.length > 0 && !vendorId && (
-              <div className="vmenu">
-                {matches.map((m: any) => (
-                  <button key={m.stakeholder_id} onClick={() => { setVendorId(m.stakeholder_id); setVq(m.name); setVOpen(false); }}>{m.name}</button>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="fld">
-            <label>Site</label>
-            <select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-              <option value="">No site / unassigned</option>
-              {projects.map(p => <option key={p.project_id} value={p.project_id}>{p.name}</option>)}
-            </select>
-          </div>
-          <div className="row2">
-            <div className="fld"><label>Bill / invoice no</label><input className="mono" value={item.billNo ?? ''} placeholder="—" onChange={(e) => onPatch({ billNo: e.target.value || null })} /></div>
-            <div className="fld"><label>Bill date</label><input type="date" value={item.billDate ?? ''} onChange={(e) => onPatch({ billDate: e.target.value || null })} /></div>
-          </div>
-          <div className="fld"><label>Amount</label><input className="mono" inputMode="numeric" value={item.amount ? String(item.amount) : ''} placeholder="0" onChange={(e) => onPatch({ amount: parseInt(e.target.value.replace(/[^\d]/g, ''), 10) || 0 })} /></div>
-          {dup && (
-            <div className="dupwarn" style={{ flexDirection: 'column', gap: 8, alignItems: 'stretch' }}>
-              <span><b>This bill already exists.</b> {dup.billNo ? <>No. <b>{dup.billNo}</b> </> : null}{dup.vendorName ? <>under <b>{dup.vendorName}</b> </> : null}is already on file{dup.amount ? <> ({inr(dup.amount)}{dup.billDate ? `, ${fmtDate(dup.billDate)}` : ''})</> : ''}{dup.via === 'amount' ? <> — same amount &amp; date</> : null}.</span>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <button type="button" className="btn-prim" style={{ padding: '6px 12px' }} onClick={() => onOpenBill(dup.id)}>Open the existing bill →</button>
-                <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: '.8rem', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={dupAck} onChange={(e) => setDupAck(e.target.checked)} />
-                  It&apos;s a different bill — add anyway
-                </label>
-              </div>
-            </div>
-          )}
-        </div>
-        <div className="sf">
-          <span className="amt-tot">{inr(item.amount)}</span>
-          <div className="acts">
-            <button className="btn-ghost" onClick={onCancel}>Discard</button>
-            <button className="btn-prim" disabled={!canSave || (item.state === 'saving')} onClick={() => onConfirm(vendorId, projectId || null, !!dup && dupAck)}>{item.state === 'saving' ? 'Saving…' : 'Add bill'}</button>
-          </div>
-        </div>
-      </div>
+      {manualOpen && !current && (
+        <NewBillModal
+          open
+          onClose={() => setManualOpen(false)}
+          onOpenBill={(id) => { setManualOpen(false); navigate(`/bills/${encodeURIComponent('bl~' + id)}`); }}
+          commit={mint}
+        />
+      )}
     </div>
   );
 }
