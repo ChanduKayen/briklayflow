@@ -7,6 +7,7 @@
 // row yet) are folded in from their own tables, exactly as the derivation does.
 import { supabase } from './supabase';
 import { loadWorkerWageEntries } from './partyLedgerApi';
+import { loadVendorBills } from './billsApi';
 import type { LedgerEntry, PartyLedger, SiteBalance, ContractInfo, ConsolidatedBill, OpeningBalance, EntryKind } from './partyLedgerApi';
 
 const num = (v: any) => Number(v) || 0;
@@ -59,6 +60,20 @@ export async function readParty(stakeholderId: string): Promise<PartyLedger> {
   // them. (We keep readParty's own dues math, which counts ledger_credits the balance view doesn't read.)
   const wageEntries: Omit<LedgerEntry, 'running'>[] = isVendor ? [] : await loadWorkerWageEntries(stakeholderId);
   const wageTotal = wageEntries.reduce((s, e) => s + e.cert, 0);
+
+  // First-class bills (vendors) — the new engine stores ledger_credits and never posted the bills
+  // table, so a bill recorded via the pipeline was invisible here. Fold each in as a 'bill' line and
+  // read the authoritative dues from v_party_balance (which already nets bills + payments), so the hero
+  // reflects them and a deleted bill drops out.
+  const [vBills, vBalR] = await Promise.all([
+    isVendor ? loadVendorBills(stakeholderId) : Promise.resolve([] as Awaited<ReturnType<typeof loadVendorBills>>),
+    isVendor ? supabase.from('v_party_balance').select('to_pay, advance').eq('stakeholder_id', stakeholderId).maybeSingle() : Promise.resolve({ data: null } as any),
+  ]);
+  const billEntries: Omit<LedgerEntry, 'running'>[] = vBills.map(b => ({
+    id: `billv-${b.id}`, date: b.billDate, kind: 'bill', particulars: b.billNo ? `Bill ${b.billNo}` : 'Bill',
+    projectId: b.projectId, projectName: b.projectName, contractId: null, paid: 0, cert: b.amount,
+  }));
+  const vBal = (vBalR as any)?.data as { to_pay?: number; advance?: number } | null | undefined;
 
   const payments = (txnR.data ?? []).filter((t: any) => t.status !== 'Voided');
   const credits = (credR.data ?? []) as any[];
@@ -154,6 +169,7 @@ export async function readParty(stakeholderId: string): Promise<PartyLedger> {
 
   // day-wage accrual from the muster (workers only) — the obligation v_party_balance counts
   for (const w of wageEntries) entries.push(w);
+  for (const bl of billEntries) entries.push(bl);
 
   // ── running "ahead" (paid − cert) oldest→newest, then newest-first ──
   const asc = [...entries].sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.kind === 'opening' ? -1 : 0));
@@ -168,8 +184,13 @@ export async function readParty(stakeholderId: string): Promise<PartyLedger> {
   const correctionDebits = (opening?.direction === 'paid_ahead' ? opening.total : 0) + (adjR.data ?? []).filter((a: any) => a.side === 'paid').reduce((s: number, a: any) => s + num(a.amount), 0);
   const openCredits = credits.reduce((s, c) => s + Math.max(0, num(c.amount) - (allocByCredit[c.credit_id] || 0)), 0) + (opening?.direction === 'work_owed' && !credits.some(c => c.kind === 'opening') ? opening.total : 0) + wageTotal;
   const unallocatedCash = pays.reduce((s, e) => s + Math.max(0, e.paid - (allocByPayment[e.id.replace(/^t-/, '')] || 0)), 0) + correctionDebits;
-  const advance = Object.values(perContractAdvance).reduce((s, v) => s + v, 0);
-  const toPay = Math.max(0, openCredits - unallocatedCash);
+  const advanceLocal = Object.values(perContractAdvance).reduce((s, v) => s + v, 0);
+  const toPayLocal = Math.max(0, openCredits - unallocatedCash);
+  // For a vendor, v_party_balance is the single source that already nets first-class bills + payments
+  // (and applies the cutover) — prefer it so a new/deleted bill reflects immediately. Fall back to the
+  // engine-local figures when the view isn't available.
+  const toPay = isVendor && vBal ? num(vBal.to_pay) : toPayLocal;
+  const advance = isVendor && vBal ? num(vBal.advance) : advanceLocal;
   const unbilledPays = pays.filter(e => !(allocByPayment[e.id.replace(/^t-/, '')] > 0));
   const unbilledTotal = unbilledPays.reduce((s, e) => s + e.paid, 0);
   const lastPaidE = pays[0];

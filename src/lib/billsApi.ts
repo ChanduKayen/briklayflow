@@ -242,6 +242,26 @@ export async function deleteBill(id: string): Promise<void> {
   }
 }
 
+// A vendor's bills as ledger lines (for the new-engine reader, which reads ledger_credits and would
+// otherwise never show a first-class bill). Paid per bill comes from bill_id allocations.
+export interface VendorBillLine { id: string; billNo: string | null; billDate: string | null; amount: number; paid: number; projectId: string | null; projectName: string | null }
+export async function loadVendorBills(stakeholderId: string): Promise<VendorBillLine[]> {
+  const { data } = await supabase.from('bills').select('id, project_id, bill_no, bill_date, amount, created_at').eq('stakeholder_id', stakeholderId);
+  const rows = (data ?? []) as any[];
+  if (!rows.length) return [];
+  const pids = [...new Set(rows.map(b => b.project_id).filter(Boolean))];
+  const projName: Record<string, string> = {};
+  if (pids.length) { const pr = await supabase.from('projects').select('project_id, name').in('project_id', pids); (pr.data ?? []).forEach((p: any) => { projName[p.project_id] = p.name; }); }
+  const paidByBill: Record<string, number> = {};
+  const alR = await supabase.from('txn_allocations').select('bill_id, allocated_amount, transactions(status)').in('bill_id', rows.map(b => b.id));
+  (alR.data ?? []).forEach((a: any) => { if (a.transactions?.status === 'Voided' || !a.bill_id) return; paidByBill[a.bill_id] = (paidByBill[a.bill_id] || 0) + num(a.allocated_amount); });
+  return rows.map(b => ({
+    id: b.id, billNo: b.bill_no || null, billDate: b.bill_date || (b.created_at ? String(b.created_at).slice(0, 10) : null),
+    amount: num(b.amount), paid: Math.min(num(b.amount), paidByBill[b.id] || 0),
+    projectId: b.project_id ?? null, projectName: b.project_id ? (projName[b.project_id] || b.project_id) : null,
+  }));
+}
+
 // ── PO-linked bills (the PO detail shows links to these; billed = Σ) ───────────
 export interface PoBill { id: string; billNo: string | null; billDate: string | null; amount: number; docUrl: string | null; lines: any[] }
 export async function loadBillsForPO(poId: string): Promise<PoBill[]> {
