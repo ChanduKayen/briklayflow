@@ -23,12 +23,27 @@ const BLX_CSS = `
 .blx .pagehead{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:8px;gap:20px;flex-wrap:wrap}
 .blx .pagehead h1{font-family:'Playfair Display',Georgia,serif;font-weight:500;font-size:2rem;letter-spacing:-.01em;margin:0}
 .blx .pagehead .lede{font-size:.85rem;color:var(--walnut-60);margin-top:6px}
-.blx .headwrap{display:flex;align-items:center;gap:0}
+.blx .headwrap{display:flex;align-items:flex-end;gap:28px}
 .blx .headfigure{text-align:right}
 .blx .headfigure .num{font-family:'DM Mono',monospace;font-size:1.3rem;font-weight:500}
 .blx .headfigure .cap{font-size:.78rem;color:var(--walnut-60);margin-top:2px}
-.blx .btn-add{background:var(--walnut);color:var(--paper);border:none;border-radius:6px;font-size:.85rem;font-weight:500;padding:9px 16px;margin-left:26px;cursor:pointer;transition:background .15s}
-.blx .btn-add:hover{background:#2e261e}
+.blx .addwrap{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+.blx .btn-add{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-width:158px;background:var(--terracotta);color:#fff;border:none;border-radius:12px;font-family:inherit;font-size:.95rem;font-weight:600;letter-spacing:.004em;padding:13px 22px;cursor:pointer;box-shadow:0 7px 20px -9px rgba(184,92,56,.75);transition:transform .18s cubic-bezier(.2,.85,.3,1),box-shadow .18s,background .18s}
+.blx .btn-add:hover{background:#a44f2f;transform:translateY(-2px);box-shadow:0 14px 30px -10px rgba(184,92,56,.8)}
+.blx .btn-add:active{transform:translateY(0) scale(.985);box-shadow:0 4px 12px -8px rgba(184,92,56,.7)}
+.blx .btn-add:focus-visible{outline:2px solid var(--terracotta);outline-offset:3px}
+.blx .btn-add svg{width:18px;height:18px;flex-shrink:0}
+.blx .btn-add.busy{background:#a44f2f;cursor:progress}
+.blx .btn-add.busy:hover{transform:none;box-shadow:0 7px 20px -9px rgba(184,92,56,.75)}
+.blx .btn-add.done{background:var(--sage);box-shadow:0 7px 20px -9px rgba(110,127,94,.75)}
+.blx .btn-add.done:hover{background:#5f6f50}
+.blx .aspin{width:15px;height:15px;border:2px solid rgba(255,255,255,.38);border-top-color:#fff;border-radius:50%;animation:qspin .7s linear infinite}
+.blx .addhint{display:inline-flex;align-items:center;gap:6px;font-size:.76rem;color:var(--walnut-soft);user-select:none;transition:color .15s}
+.blx .addwrap:hover .addhint{color:var(--walnut-60)}
+.blx .addhint svg{width:13px;height:13px;opacity:.75;animation:hintbob 2.4s ease-in-out infinite}
+@keyframes hintbob{0%,100%{transform:translateY(0);opacity:.55}50%{transform:translateY(2px);opacity:.9}}
+.blx .adderr{display:inline-flex;align-items:center;gap:6px;font-size:.76rem;color:var(--terracotta)}
+.blx .adderr button{background:none;border:none;color:var(--terracotta);text-decoration:underline;text-underline-offset:2px;cursor:pointer;font-size:.76rem;padding:0}
 .blx .filters{display:flex;gap:10px;align-items:center;margin:26px 0 14px;flex-wrap:wrap}
 .blx .filters select{appearance:none;background:var(--paper);border:1px solid var(--line-strong);border-radius:6px;padding:7px 30px 7px 12px;font-family:inherit;font-size:.82rem;color:var(--walnut);cursor:pointer;
   background-image:url("data:image/svg+xml,%3Csvg width='9' height='6' viewBox='0 0 9 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l3.5 3.5L8 1' stroke='%237A6E61' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 11px center}
@@ -164,6 +179,12 @@ export function BillDetailPage() {
   return <BillDetailView id={decodeURIComponent(billId ?? '')} />;
 }
 
+// Small inline glyphs for the Add-bill control (no icon dep; stroke follows currentColor).
+const IconUpload = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M12 15V4" /><path d="m7.5 8.5 4.5-4.5 4.5 4.5" /><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" /></svg>);
+const IconCheck = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12.5 4.5 4.5L19 7" /></svg>);
+const IconDrop = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="4" width="16" height="16" rx="3" strokeDasharray="3 3" /><path d="M12 9v6M9 12h6" /></svg>);
+const IconAlert = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M12 8v5" /><circle cx="12" cy="16.5" r=".6" fill="currentColor" /><path d="M10.3 4.3 3.5 16a2 2 0 0 0 1.7 3h13.6a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0Z" /></svg>);
+
 // ── list ───────────────────────────────────────────────────────────────────
 export default function Bills() {
   const navigate = useNavigate();
@@ -188,6 +209,7 @@ export default function Bills() {
   // ── drag-drop upload + queue ──
   const [dragging, setDragging] = useState(false);
   const [queue, setQueue] = useState<QItem[]>([]);
+  const [flash, setFlash] = useState(false);   // brief "Added ✓" pulse on the button after a mint
   const fileRef = useRef<HTMLInputElement>(null);
   const dragDepth = useRef(0);
 
@@ -225,6 +247,13 @@ export default function Bills() {
   const patch = (id: string, p: Partial<QItem>) => setQueue(q => q.map(x => x.id === id ? { ...x, ...p } : x));
   const drop = (id: string) => setQueue(q => q.filter(x => x.id !== id));
 
+  // Live progress surfaced ON the button (no bottom-right toast): how many are being read / saved,
+  // and how many failed to read.
+  const reading = queue.filter(x => x.state === 'reading').length;
+  const saving = queue.filter(x => x.state === 'saving').length;
+  const errCount = queue.filter(x => x.state === 'error').length;
+  const busy = reading + saving > 0;
+
   // Mint through the shared pipeline (dedupe lives there). The confirm sheet gates on the dup-ack, so
   // we pass allowDuplicate once the user has chosen to add it anyway.
   const mint = async (it: QItem, vendorId: string, projectId: string | null, allowDuplicate: boolean) => {
@@ -240,6 +269,7 @@ export default function Bills() {
       );
       if (res.status === 'duplicate') { patch(it.id, { state: 'ready' }); return; } // sheet shows the reconcile offer
       drop(it.id);
+      setFlash(true); setTimeout(() => setFlash(false), 1800);
       show('Bill added');
       qc.invalidateQueries({ queryKey: ['bills'] });
       qc.invalidateQueries({ queryKey: ['party_ledger'] });
@@ -270,7 +300,22 @@ export default function Bills() {
               <div className="num">{inr(unpaidTotal)}</div>
               <div className="cap">unpaid across {unpaidCount} bill{unpaidCount !== 1 ? 's' : ''}</div>
             </div>
-            <button className="btn-add" onClick={() => fileRef.current?.click()}>Add bill</button>
+            <div className="addwrap">
+              <button
+                className={`btn-add${busy ? ' busy' : flash ? ' done' : ''}`}
+                onClick={() => fileRef.current?.click()}
+                aria-busy={busy}
+                title="Upload a bill — image or PDF. You can also drop files anywhere on this page."
+              >
+                {busy ? <span className="aspin" /> : flash ? <IconCheck /> : <IconUpload />}
+                <span>{saving > 0 ? (saving > 1 ? `Saving ${saving} bills…` : 'Saving…') : reading > 0 ? `Reading ${reading} bill${reading > 1 ? 's' : ''}…` : flash ? 'Added' : 'Add bill'}</span>
+              </button>
+              {errCount > 0 ? (
+                <span className="adderr"><IconAlert />{errCount} couldn{'’'}t be read — <button onClick={() => setQueue(q => q.filter(x => x.state !== 'error'))}>dismiss</button></span>
+              ) : (
+                <span className="addhint"><IconDrop />or drag &amp; drop bills anywhere</span>
+              )}
+            </div>
             <input ref={fileRef} type="file" accept="image/*,application/pdf" multiple hidden onChange={(e) => { if (e.target.files?.length) enqueue(e.target.files); e.target.value = ''; }} />
           </div>
         </header>
@@ -310,23 +355,6 @@ export default function Bills() {
 
       {dragging && (
         <div className="dropveil"><div className="card"><div className="big">Drop the bill{'’'}s here</div><div className="sub">We{'’'}ll read each one — image or PDF — then ask the vendor & site.</div></div></div>
-      )}
-
-      {queue.length > 0 && (
-        <div className="queue">
-          {queue.filter(q => q.id !== current?.id).map(q => (
-            <div className="qcard" key={q.id}>
-              <div className="qtop">
-                {(q.state === 'reading' || q.state === 'saving') && <span className="qspin" />}
-                <span className="qname">{q.file.name}</span>
-                {(q.state === 'error' || q.state === 'ready') && <button className="qx" onClick={() => drop(q.id)} aria-label="Remove">×</button>}
-              </div>
-              <div className={`qstate${q.state === 'error' ? ' err' : ''}`}>
-                {q.state === 'reading' ? 'Reading the bill…' : q.state === 'saving' ? 'Saving…' : q.state === 'ready' ? 'Ready — waiting to confirm' : q.state === 'error' ? (q.error || 'Failed') : 'Done'}
-              </div>
-            </div>
-          ))}
-        </div>
       )}
 
       {current && (
