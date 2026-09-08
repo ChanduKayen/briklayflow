@@ -230,17 +230,37 @@ export async function loadVendorRows(): Promise<PayRow[]> {
     (alR.data ?? []).forEach((a: any) => { if (a.transactions?.status === 'Voided') return; paidByPo[a.order_ref] = (paidByPo[a.order_ref] || 0) + Number(a.allocated_amount || 0); });
   }
 
-  // Open PO bills grouped by VENDOR (across projects) — each bill keeps its own project.
-  const byVendor: Record<string, VendorBill[]> = {};
+  // Bill lines grouped by VENDOR, from v_party_ledger_line — the SAME bills-union-fallback the balance
+  // sums, so the expand lists exactly what the net is derived from (a standalone bill shows here too).
+  // Falls back to the PO read only if the view isn't applied yet. Per-bill paid isn't split yet
+  // (payments settle bills is pending), so balance = full amount and the vendor NET (to_pay) is the truth.
+  const vendorIdList = [...isVendorId];
+  const byVendorView: Record<string, VendorBill[]> = {};
+  let viewOk = false;
+  if (vendorIdList.length) {
+    const blvR = await supabase.from('v_party_ledger_line').select('stakeholder_id, ref_id, project_id, line_date, label, billed').eq('kind', 'po_bill').in('stakeholder_id', vendorIdList);
+    if (!blvR.error) {
+      viewOk = true;
+      (blvR.data ?? []).forEach((l: any) => {
+        (byVendorView[l.stakeholder_id] ||= []).push({
+          poId: l.ref_id, no: (l.label || 'Bill').replace(/^Bill\s+/, ''), date: l.line_date || '', amount: Number(l.billed || 0), balance: Number(l.billed || 0),
+          projectId: l.project_id ?? null, projectName: l.project_id ? (projName[l.project_id] || l.project_id) : null,
+        });
+      });
+    }
+  }
+  // PO fallback (view not applied): open PO bills grouped by vendor, each netted per PO.
+  const byVendorPo: Record<string, VendorBill[]> = {};
   pos.forEach((p: any) => {
     const base = Number(p.vendor_bill_amount || p.total_value || p.order_value || 0);
     const due = base - (paidByPo[p.po_id] || 0);
     if (due <= 0.5) return;
-    (byVendor[p.stakeholder_id] ||= []).push({
+    (byVendorPo[p.stakeholder_id] ||= []).push({
       poId: p.po_id, no: p.vendor_bill_number || p.po_id, date: p.date_issued || '', amount: base, balance: due,
       projectId: p.project_id ?? null, projectName: p.project_id ? (projName[p.project_id] || p.project_id) : null,
     });
   });
+  const byVendor = viewOk ? byVendorView : byVendorPo;
 
   const vendorIds = new Set<string>([...Object.keys(byVendor), ...Object.keys(bal)].filter(id => isVendorId.has(id)));
   const rows: PayRow[] = [];

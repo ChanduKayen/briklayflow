@@ -106,12 +106,13 @@ export async function loadWorkerWageEntries(stakeholderId: string): Promise<Omit
 }
 
 export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedger> {
-  const [stkR, txnR, woR, poR, obR, adjR, cbR, wcR, balR] = await Promise.all([
+  const [stkR, txnR, woR, poR, obR, adjR, cbR, wcR, balR, blvR] = await Promise.all([
     supabase.from('stakeholders').select('stakeholder_id, name, type, category').eq('stakeholder_id', stakeholderId).single(),
     supabase.from('transactions').select('*, txn_allocations(project_id, order_type, order_ref, milestone_id, allocated_amount, projects(name))').eq('stakeholder_id', stakeholderId).order('date', { ascending: false }),
     supabase.from('work_orders').select('wo_id, project_id, title, scope_of_work, order_value, status, projects(name), wo_milestones(milestone_id, name, planned_amount, unit_type, quantity, rate, seq_no)').eq('stakeholder_id', stakeholderId),
-    // Only APPROVED, non-cancelled POs are real bills — mirrors v_party_ledger_line + loadVendorRows so
-    // the ledger display can't show a cancelled/pending PO's bill as owed.
+    // POs are read ONLY for the by-contract projection + paid-per-PO — NOT for the bill LINES. The bill
+    // lines come from v_party_ledger_line (blvR) so the visible rows and the balance are one definition
+    // (a standalone bills-row appears; the cancelled/pending/fallback rules live in the view, not here).
     supabase.from('purchase_orders').select(`po_id, project_id, vendor_bill_amount, vendor_bill_number, ${BILL_DATE_COLUMNS}`).eq('stakeholder_id', stakeholderId).eq('approval_status', 'APPROVED').not('status', 'in', '("CANCELLED","Cancelled","cancelled")').not('vendor_bill_amount', 'is', null).gt('vendor_bill_amount', 0),
     supabase.from('stakeholder_opening_balances').select('*').eq('stakeholder_id', stakeholderId).maybeSingle(),
     supabase.from('party_adjustments').select('*').eq('stakeholder_id', stakeholderId),
@@ -120,6 +121,9 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
     supabase.from('work_certifications').select('id, wo_id, milestone_id, reading_kind, computed_amount, reading_date, project_id, status').eq('stakeholder_id', stakeholderId).eq('status', 'approved'),
     // The single-source balance (cutover-applied) — authoritative for the hero's to_pay / advance.
     supabase.from('v_party_balance').select('billed, paid, without_bills, to_pay, advance').eq('stakeholder_id', stakeholderId).maybeSingle(),
+    // Bill LINES from the SAME view the balance sums — so headline and rows are two projections of one
+    // definition (bills-union-fallback). Falls back to POs below only if the view isn't applied yet.
+    supabase.from('v_party_ledger_line').select('ref_id, project_id, line_date, label, billed').eq('stakeholder_id', stakeholderId).eq('kind', 'po_bill'),
   ]);
   if (stkR.error) throw stkR.error;
   const stk = stkR.data as any;
@@ -129,6 +133,11 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
   const noteProj = (id: string | null, name?: string | null) => { if (id && name) projName[id] = name; };
   (woR.data ?? []).forEach((w: any) => noteProj(w.project_id, w.projects?.name));
   (txnR.data ?? []).forEach((t: any) => (t.txn_allocations ?? []).forEach((a: any) => noteProj(a.project_id, a.projects?.name)));
+  // Resolve names for any project referenced only by a view bill line (a standalone bill's site).
+  {
+    const need = [...new Set((blvR?.data ?? []).map((l: any) => l.project_id).filter((p: any): p is string => !!p && !projName[p]))];
+    if (need.length) { const pr = await supabase.from('projects').select('project_id, name').in('project_id', need); (pr.data ?? []).forEach((p: any) => { projName[p.project_id] = p.name; }); }
+  }
 
   const entries: Omit<LedgerEntry, 'running'>[] = [];
 
@@ -251,15 +260,28 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
     } catch { /* labour tables not present — no wage feed */ }
   }
 
-  // ── Billed: a vendor's recorded PO bills (as the certified/credit side) ──
+  // ── Billed lines — from v_party_ledger_line (the balance's own bill union: bills + PO fallback), so a
+  //    standalone bill shows as a row and the visible rows always re-derive the headline. If the view
+  //    isn't present yet (migration pending), fall back to the PO read so the page still renders. ──
   if (isVendor) {
-    for (const p of (poR.data ?? [])) {
-      const d = billDateOf(p);
-      entries.push({
-        id: `bill-${p.po_id}`, date: d, kind: 'bill', particulars: `Bill ${p.vendor_bill_number || p.po_id}`,
-        projectId: p.project_id ?? null, projectName: p.project_id ? (projName[p.project_id] || p.project_id) : null,
-        contractId: null, paid: 0, cert: num(p.vendor_bill_amount),
-      });
+    const viewBills = (blvR?.data ?? []) as any[];
+    if (viewBills.length || !blvR?.error) {
+      for (const l of viewBills) {
+        const pid = l.project_id ?? null;
+        entries.push({
+          id: `billv-${l.ref_id}`, date: l.line_date, kind: 'bill', particulars: l.label || 'Bill',
+          projectId: pid, projectName: pid ? (projName[pid] || pid) : null,
+          contractId: null, paid: 0, cert: num(l.billed),
+        });
+      }
+    } else {
+      for (const p of (poR.data ?? [])) {
+        entries.push({
+          id: `bill-${p.po_id}`, date: billDateOf(p), kind: 'bill', particulars: `Bill ${p.vendor_bill_number || p.po_id}`,
+          projectId: p.project_id ?? null, projectName: p.project_id ? (projName[p.project_id] || p.project_id) : null,
+          contractId: null, paid: 0, cert: num(p.vendor_bill_amount),
+        });
+      }
     }
   }
 
