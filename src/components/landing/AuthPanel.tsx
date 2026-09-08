@@ -54,6 +54,8 @@ export default function AuthPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [signupComplete, setSignupComplete] = useState(false);
+  // Password reset (email): 'forgot' shows the email-only form; 'sent' the check-your-email confirmation.
+  const [resetView, setResetView] = useState<null | 'forgot' | 'sent'>(null);
 
   // Phone (WhatsApp OTP) path — Supabase generates/verifies the code; delivery is our WhatsApp hook.
   const [authMethod, setAuthMethod] = useState<'email' | 'phone'>('email');
@@ -62,7 +64,17 @@ export default function AuthPanel({
   const [phoneStep, setPhoneStep] = useState<'number' | 'code'>('number');
 
   // Clear transient state when the mode flips or the panel (re)opens.
-  useEffect(() => { setError(null); setSignupComplete(false); }, [mode]);
+  useEffect(() => { setError(null); setSignupComplete(false); setResetView(null); }, [mode]);
+
+  // Send a password-reset link. The email lands on /reset-password (in a recovery session) where the
+  // new password is set. Always show the same confirmation, even on error, so an address can't be probed.
+  const handleForgot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email) return;
+    setLoading(true); setError(null);
+    await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/reset-password` });
+    setLoading(false); setResetView('sent');
+  };
   useEffect(() => { if (open) { setError(null); setSignupComplete(false); setLoading(false); setAuthMethod(initialMethod); setPhoneStep('number'); setPhone(''); setOtp(''); } }, [open, initialMethod]);
 
   // Google OAuth. Redirects the whole page to Google, then back to the app
@@ -180,7 +192,38 @@ export default function AuthPanel({
           </button>
         </div>
 
-        {signupComplete ? (
+        {resetView ? (
+          /* ── Password reset (email) ── */
+          <div className="mt-10">
+            {resetView === 'forgot' ? (
+              <>
+                <h2 className="text-2xl" style={{ color: V.ink, ...serif }}>Reset your password.</h2>
+                <p className="text-sm mt-3 leading-relaxed" style={{ color: V.sys }}>Enter your email and we'll send a link to set a new one.</p>
+                <form onSubmit={handleForgot}>
+                  <div className="flex items-center gap-2.5 px-4 rounded-xl mt-6" style={{ background: V.surface, border: `1px solid ${V.line}`, height: 50 }}>
+                    <Mail size={15} style={{ color: V.faint }} />
+                    <input value={email} onChange={(e) => setEmail(e.target.value)} required disabled={loading} placeholder="Email address" type="email" autoFocus aria-label="Email address" className="flex-1 bg-transparent text-sm outline-none" style={{ color: V.ink }} />
+                  </div>
+                  {error && <p className="text-sm mt-4" style={{ color: V.terraDeep }}>{error}</p>}
+                  <button type="submit" disabled={loading || !email} className="btnp mt-6 w-full py-3.5 rounded-xl text-sm font-medium inline-flex items-center justify-center gap-2" style={{ background: terraGrad, color: '#fff', opacity: (loading || !email) ? 0.7 : 1 }}>
+                    {loading ? 'Sending…' : <>Send reset link <ArrowRight size={15} className="arr" /></>}
+                  </button>
+                </form>
+                <div className="mt-4">
+                  <button onClick={() => { setResetView(null); setError(null); }} className="tlink text-sm" style={{ color: V.sys }}>Back to sign in</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 className="text-2xl" style={{ color: V.ink, ...serif }}>Check your email.</h2>
+                <p className="text-sm mt-3 leading-relaxed" style={{ color: V.sys }}>If an account exists for {email}, we've sent a link to reset your password. Open it to set a new one.</p>
+                <div className="mt-6">
+                  <button onClick={() => { setResetView(null); setError(null); }} className="tlink text-sm font-medium" style={{ color: V.ink }}>Back to sign in</button>
+                </div>
+              </>
+            )}
+          </div>
+        ) : signupComplete ? (
           /* Check-your-email state (ruling 6). */
           <div className="mt-10">
             <h2 className="text-2xl" style={{ color: V.ink, ...serif }}>
@@ -261,6 +304,11 @@ export default function AuthPanel({
                   <Lock size={15} style={{ color: V.faint }} />
                   <input value={password} onChange={(e) => setPassword(e.target.value)} required disabled={loading} minLength={signin ? undefined : 6} placeholder="Password" type="password" aria-label="Password" className="flex-1 bg-transparent text-sm outline-none" style={{ color: V.ink }} />
                 </div>
+                {signin && (
+                  <div className="flex justify-end">
+                    <button type="button" onClick={() => { setResetView('forgot'); setError(null); }} className="tlink text-xs" style={{ color: V.sys }}>Forgot password?</button>
+                  </div>
+                )}
               </div>
 
               {/* Real Supabase error text, plain, under the form. */}

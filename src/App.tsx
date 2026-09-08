@@ -91,6 +91,7 @@ import Landing from './pages/Landing';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
 import DataDeletion from './pages/DataDeletion';
+const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const ProcurementRequests = lazy(() => import('./pages/ProcurementRequests'));
 const ProcurementQuotes = lazy(() => import('./pages/ProcurementQuotes'));
 const ProcurementOrders = lazy(() => import('./pages/ProcurementOrders'));
@@ -407,6 +408,13 @@ function App() {
   // Welcome's "link expired" state instead of a blank root.
   if (location.pathname === '/welcome' || /error=access_denied|otp_expired/.test(location.hash)) {
     return <Welcome />;
+  }
+
+  // Password-reset landing — the email link drops the user here in a recovery session. Render before the
+  // auth gates (a recovery session is authenticated, but must NOT be swept into the app) so the new
+  // password can be set; the page routes into the app on success.
+  if (location.pathname === '/reset-password') {
+    return <Suspense fallback={<SplashLoader />}><ResetPassword /></Suspense>;
   }
 
   // Never render the full app while auth is still resolving — orgId/userId are
