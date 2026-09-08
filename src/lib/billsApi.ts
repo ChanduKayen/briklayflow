@@ -270,13 +270,34 @@ export async function extractBill(file: File): Promise<ExtractedBill> {
 }
 
 // Same vendor + same bill number already on a bill → the duplicate to warn about before minting.
-export interface DuplicateBill { id: string; billNo: string | null; billDate: string | null; amount: number }
-export async function findDuplicateBill(stakeholderId: string, billNo: string): Promise<DuplicateBill | null> {
-  const n = (billNo || '').trim();
-  if (!n) return null;
-  const { data } = await supabase.from('bills').select('id, bill_no, bill_date, amount').eq('stakeholder_id', stakeholderId).ilike('bill_no', n).limit(1);
-  const b = (data ?? [])[0] as any;
-  return b ? { id: b.id, billNo: b.bill_no, billDate: b.bill_date, amount: num(b.amount) } : null;
+export interface DuplicateBill { id: string; billNo: string | null; billDate: string | null; amount: number; via: 'number' | 'amount' }
+// Normalise a bill number so formatting/OCR variance can't hide a match: "SDS/1142", "sds 1142",
+// "SDS-1142" all fingerprint to "SDS1142".
+const normNo = (s: any) => String(s ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+// Is this bill already on file for the vendor? Two fingerprints, because bill numbers extract
+// unreliably: (1) same NORMALISED number; (2) same AMOUNT (±₹1) and a near date (±5 days) — the
+// fallback that catches a re-upload whose number wasn't read (or was read differently). Warns, never
+// blocks (the door lets the user add it anyway).
+export async function findDuplicateBill(stakeholderId: string, fp: { billNo?: string | null; amount?: number; billDate?: string | null }): Promise<DuplicateBill | null> {
+  const { data } = await supabase.from('bills').select('id, bill_no, bill_date, amount').eq('stakeholder_id', stakeholderId);
+  const rows = (data ?? []) as any[];
+  if (!rows.length) return null;
+  const toDup = (b: any, via: 'number' | 'amount'): DuplicateBill => ({ id: b.id, billNo: b.bill_no, billDate: b.bill_date, amount: num(b.amount), via });
+
+  const nkey = normNo(fp.billNo);
+  if (nkey) {
+    const hit = rows.find(b => { const k = normNo(b.bill_no); return k && k === nkey; });
+    if (hit) return toDup(hit, 'number');
+  }
+  const amt = num(fp.amount);
+  if (amt > 0.5) {
+    const t = fp.billDate ? Date.parse(fp.billDate) : NaN;
+    const hit = rows.find(b => Math.abs(num(b.amount) - amt) < 1
+      && (isNaN(t) || !b.bill_date || Math.abs(Date.parse(b.bill_date) - t) <= 5 * 864e5));
+    if (hit) return toDup(hit, 'amount');
+  }
+  return null;
 }
 
 export interface NewBillInput {

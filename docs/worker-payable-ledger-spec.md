@@ -246,6 +246,12 @@ pre-fills **context**: the Bills page knows nothing (resolves + confirms the ven
 know the vendor + payment (no questions, allocation auto-written); the PO door (parked) knows vendor +
 PO; WhatsApp (parked) knows the sender.
 
+**The fingerprint is forgiving, because bill numbers extract unreliably.** `findDuplicateBill` matches
+on (1) the **normalised** bill number — `SDS/1142`, `sds 1142`, `SDS-1142` all fingerprint to `SDS1142`,
+so OCR/formatting variance can't hide a match — OR (2) a fallback of **same amount (±₹1) + near date
+(±5 days)**, which catches a re-upload whose number wasn't read at all. The check runs **even when no
+number was extracted** (via the amount fallback), and warns rather than blocks.
+
 **Dedupe lives in the pipeline, never in a door** — the same paper genuinely arrives twice through
 different doors (site engineer WhatsApps the photo Tuesday; you attach it to the PO Friday). The
 fingerprint is **vendor + bill-number**; on a collision `intakeCommit` returns the existing bill and the

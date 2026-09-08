@@ -363,14 +363,15 @@ function ConfirmBillSheet({ item, vendors, projects, queueCount, onPatch, onCanc
     if (hit) { setVendorId(hit.stakeholder_id); setVq(hit.name); }
   }, [item.vendorName, vendors, vendorId]);
 
-  // Same vendor + same bill number → warn before minting.
+  // Already on file for this vendor? Check the full fingerprint (number OR amount+date), so a bill with
+  // no readable number is still caught — warn before minting.
   useEffect(() => {
     setDup(null); setDupAck(false);
-    if (!vendorId || !item.billNo) return;
+    if (!vendorId) return;
     let live = true;
-    findDuplicateBill(vendorId, item.billNo).then(d => { if (live) setDup(d); });
+    findDuplicateBill(vendorId, { billNo: item.billNo, amount: item.amount, billDate: item.billDate }).then(d => { if (live) setDup(d); });
     return () => { live = false; };
-  }, [vendorId, item.billNo]);
+  }, [vendorId, item.billNo, item.amount, item.billDate]);
 
   const matches = vq.trim() ? searchPayees(vendors as any, vq).slice(0, 6) : vendors.slice(0, 6);
   const canSave = !!vendorId && item.amount > 0 && (!dup || dupAck);

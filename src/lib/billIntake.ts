@@ -52,8 +52,10 @@ export type CommitResult =
   | { status: 'minted'; billId: string; extracted: ExtractedBill }
   | { status: 'duplicate'; existing: DuplicateBill; extracted: ExtractedBill };
 export async function intakeCommit(ctx: IntakeContext, extracted: ExtractedBill, vendorId: string, opts?: { allowDuplicate?: boolean }): Promise<CommitResult> {
-  if (extracted.billNo && !opts?.allowDuplicate) {
-    const dup = await findDuplicateBill(vendorId, extracted.billNo);
+  // Dedupe on the full fingerprint (number OR amount+date), so a bill with no readable number is
+  // still caught by the amount/date fallback — not only when a number was extracted.
+  if (!opts?.allowDuplicate) {
+    const dup = await findDuplicateBill(vendorId, { billNo: extracted.billNo, amount: extracted.amount, billDate: extracted.billDate });
     if (dup) return { status: 'duplicate', existing: dup, extracted };
   }
   const billId = await createBill({
