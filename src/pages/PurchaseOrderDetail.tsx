@@ -19,6 +19,7 @@ import { RateCheckModal } from '../components/po/RateCheckModal';
 import { useIsMobile } from '../lib/useIsMobile';
 import { loadBillsForPO, convertLegacyPoBill } from '../lib/billsApi';
 import { PoBillSheet } from '../components/po/PoBillSheet';
+import { PoBillVariance } from '../components/po/PoBillVariance';
 import {
   fmtDate as pdfFmtDate, fmtRupee, amountInWords,
   MARGIN, CONTENT, RIGHT, C,
@@ -1274,6 +1275,12 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
 
           {hasBill && (
             <div className="m-sec">
+              <PoBillVariance poLines={(lineItems ?? []) as any} bills={billEntities} />
+            </div>
+          )}
+
+          {hasBill && (
+            <div className="m-sec">
               <div className="m-hh">Vendor bill{billEntities.length > 1 ? 's' : ''}</div>
               <div className="m-billrow" style={{ flexWrap: 'wrap' }}>
                 {billEntities.map(b => (
@@ -1634,6 +1641,9 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
             </div>
           </div>
         </div>
+
+        {/* Bill vs order — per-line variance from the recorded bills' stored lines (no re-read). */}
+        {hasBill && <PoBillVariance poLines={(lineItems ?? []) as any} bills={billEntities} />}
 
         {/* money */}
         <div className="money">
