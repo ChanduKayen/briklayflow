@@ -14,17 +14,54 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { X, FileText, Plus, Loader2, Check, Eye } from 'lucide-react';
 import { V, font } from './ledgerTokens';
-import { openDoc } from '../../lib/storage';
+import { openDoc, useSignedDocUrl } from '../../lib/storage';
 
 const BLZ_CSS = `
-.blz-row{transition:border-color .14s ease, background .14s ease, box-shadow .16s ease}
-.blz-row:hover{background:#FBF7EF}
+.blz-row{transition:border-color .14s ease, background .14s ease, box-shadow .16s ease, transform .1s ease}
+.blz-row:hover{background:#F8E7DE;border-color:rgba(180,83,47,.55)!important;box-shadow:0 4px 14px -10px rgba(180,83,47,.45)}
 .blz-row.on{box-shadow:0 6px 18px -12px rgba(180,83,47,.5)}
 .blz-head{transition:background .12s ease}
 .blz-peek{opacity:.55;transition:opacity .14s ease, background .14s ease, color .14s ease}
 .blz-row:hover .blz-peek{opacity:1}
 .blz-peek:hover{color:#B4532F}
+.blz-peekwrap{animation:blzPeek .18s cubic-bezier(.2,.8,.2,1) both}
+@keyframes blzPeek{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.blz-upload{transition:background .15s ease, border-color .15s ease, transform .1s ease, box-shadow .16s ease}
+.blz-upload:hover{background:#F8E7DE;box-shadow:0 6px 16px -10px rgba(180,83,47,.5)}
+.blz-upload:active{transform:scale(.99)}
+/* skeleton loading rows — shimmer while the vendor's bills load */
+.blz-sk{position:relative;overflow:hidden;background:#EFE8DB;border-radius:6px}
+.blz-sk::after{content:"";position:absolute;inset:0;transform:translateX(-100%);
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.6),transparent);animation:blzShimmer 1.25s infinite}
+@keyframes blzShimmer{100%{transform:translateX(100%)}}
+@media (prefers-reduced-motion:reduce){.blz-sk::after{animation:none}}
 `;
+
+// A shimmering placeholder row shown while the vendor's bills load.
+function SkeletonRow() {
+  return (
+    <div className="rounded-xl" style={{ background: V.surface, border: `1px solid ${V.line}` }}>
+      <div className="flex items-center gap-2.5 px-3 py-2.5">
+        <span className="blz-sk shrink-0" style={{ width: 18, height: 18, borderRadius: 5 }} />
+        <span className="min-w-0 flex-1">
+          <span className="blz-sk block" style={{ width: '55%', height: 11, marginBottom: 6 }} />
+          <span className="blz-sk block" style={{ width: '38%', height: 9 }} />
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// Inline bill peek — the signed image right in the sheet (no new tab). PDFs get a quiet open link.
+function BillPeekImg({ stored }: { stored: string }) {
+  const signed = useSignedDocUrl(stored);
+  const isPdf = /\.pdf(\?|$)/i.test(stored);
+  if (isPdf) return (
+    <button type="button" onClick={(e) => { e.stopPropagation(); void openDoc(stored); }} className="text-[12px] underline" style={{ color: V.terraDeep, textUnderlineOffset: 3 }}>Open the PDF bill</button>
+  );
+  if (!signed) return <div className="text-[11.5px]" style={{ color: V.faint }}>Loading preview…</div>;
+  return <img src={signed} alt="Bill" style={{ maxWidth: '100%', maxHeight: 260, borderRadius: 8, border: `1px solid ${V.line}`, display: 'block' }} />;
+}
 import {
   loadUnpaidBillsForVendor, extractBill, createBill, findDuplicateBill, saveBillAllocations, setAdvanceMemo,
   type UnpaidBill, type DuplicateBill,
@@ -45,6 +82,7 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
   const [busy, setBusy] = useState<'idle' | 'reading' | 'saving' | 'done'>('idle');
   const [err, setErr] = useState<string | null>(null);
   const [dup, setDup] = useState<{ file: string; d: DuplicateBill } | null>(null);
+  const [peekId, setPeekId] = useState<string | null>(null);   // hover/tap → inline bill preview
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Load the vendor's unpaid bills; pre-select on an exact remaining match.
@@ -112,8 +150,6 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
 
   const noBills = bills && bills.length === 0;
 
-  const peek = (url: string) => { void openDoc(url); };
-
   return (
     <div style={{ ...font }}>
       <style>{BLZ_CSS}</style>
@@ -129,7 +165,12 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
         <input ref={fileRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void onUpload(f); }} />
 
         {bills == null ? (
-          <div className="inline-flex items-center gap-2 text-[13px] py-4" style={{ color: V.sys }}><Loader2 size={15} className="animate-spin" /> Loading {vendorName}&apos;s bills…</div>
+          <>
+            <p className="text-[13px] font-medium mb-2" style={{ color: V.faint }}>Finding {vendorName}&apos;s bills…</p>
+            <div className="space-y-1.5">
+              <SkeletonRow /><SkeletonRow /><SkeletonRow />
+            </div>
+          </>
         ) : noBills ? (
           /* No existing bills — uploading is the hero; the advance is just the quiet fallback. */
           <div className="text-center py-2">
@@ -159,8 +200,11 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
             <div className="space-y-1.5">
               {bills.map(b => {
                 const on = sel[b.id] != null;
+                const showPeek = peekId === b.id && !!b.docUrl;
                 return (
-                  <div key={b.id} className={`blz-row rounded-xl${on ? ' on' : ''}`} style={{ background: V.surface, border: `1px solid ${on ? V.terra : V.line}` }}>
+                  <div key={b.id} className={`blz-row rounded-xl${on ? ' on' : ''}`} style={{ background: V.surface, border: `1px solid ${on ? V.terra : V.line}` }}
+                    onMouseEnter={() => { if (b.docUrl) setPeekId(b.id); }}
+                    onMouseLeave={() => setPeekId(p => (p === b.id ? null : p))}>
                     <div className="blz-head flex items-center gap-2.5 px-3 py-2.5">
                       <button type="button" onClick={() => toggle(b)} className="flex items-center gap-2.5 text-left flex-1 min-w-0">
                         <span className="grid place-items-center rounded-md shrink-0" style={{ width: 18, height: 18, border: `1.5px solid ${on ? V.terra : V.faint}`, background: on ? V.terra : 'transparent' }}>{on && <Check size={12} style={{ color: '#fff' }} />}</span>
@@ -171,12 +215,18 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
                         </span>
                       </button>
                       {b.docUrl && (
-                        <button type="button" onClick={(e) => { e.stopPropagation(); peek(b.docUrl!); }} title="Preview the bill"
-                          className="blz-peek shrink-0 grid place-items-center rounded-lg" style={{ width: 30, height: 30, color: V.faint, background: V.field }}>
+                        // Tap toggles the inline peek (touch has no hover); hover already reveals it.
+                        <button type="button" onClick={(e) => { e.stopPropagation(); setPeekId(p => (p === b.id ? null : b.id)); }} title="Peek the bill"
+                          className="blz-peek shrink-0 grid place-items-center rounded-lg" style={{ width: 30, height: 30, color: showPeek ? V.terra : V.faint, background: V.field }}>
                           <Eye size={15} />
                         </button>
                       )}
                     </div>
+                    {showPeek && (
+                      <div className="blz-peekwrap px-3 pb-3">
+                        <BillPeekImg stored={b.docUrl!} />
+                      </div>
+                    )}
                     {on && (
                       <div className="flex items-center gap-2 px-3 pb-2.5" style={{ marginLeft: 28 }}>
                         <span className="text-[11.5px]" style={{ color: V.sys }}>Apply</span>
@@ -193,12 +243,12 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
               })}
             </div>
 
-            {/* upload a new bill for this payment */}
+            {/* Upload a new bill — the hero action, prominent even when bills exist. */}
             <button type="button" onClick={() => fileRef.current?.click()} disabled={busy === 'reading'}
-              className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-left db-attach-row mt-2"
-              style={{ background: V.surface, border: `1px dashed ${V.askLine}` }}>
-              {busy === 'reading' ? <Loader2 size={15} className="animate-spin shrink-0" style={{ color: V.terraDeep }} /> : <Plus size={15} className="shrink-0" style={{ color: V.terraDeep }} />}
-              <span className="text-[12.5px] font-semibold" style={{ color: V.terraDeep }}>{busy === 'reading' ? 'Reading the bill…' : 'Upload a new bill for this payment'}</span>
+              className="blz-upload w-full flex items-center justify-center gap-2 px-3 py-3 rounded-xl mt-3"
+              style={{ background: V.terraWash, border: `1.5px dashed ${V.terra}`, opacity: busy === 'reading' ? 0.6 : 1 }}>
+              {busy === 'reading' ? <Loader2 size={16} className="animate-spin shrink-0" style={{ color: V.terraDeep }} /> : <Plus size={16} className="shrink-0" style={{ color: V.terraDeep }} />}
+              <span className="text-[13.5px] font-semibold" style={{ color: V.terraDeep }}>{busy === 'reading' ? 'Reading the bill…' : 'Upload a new bill'}</span>
             </button>
 
             {dup && (
