@@ -307,7 +307,14 @@ export async function extractBill(file: File): Promise<ExtractedBill> {
   const r = await readVendorBill(b64, file.type || 'image/jpeg');
   return {
     vendor: r.vendor, billNo: r.billNo, billDate: normDate(r.billDate), amount: num(r.total),
-    lines: (r.lines ?? []).map((l: any) => ({ name: l.item ?? '—', spec: null, unit: l.unit ?? null, qty: num(l.qty), rate: num(l.rate), amount: num(l.amount) || num(l.qty) * num(l.rate) })),
+    // A vendor's "bill" is routinely one PDF holding three tax invoices. Keep which invoice each
+    // line came from — otherwise three identical cement lines read as one line entered twice.
+    lines: (r.lines ?? []).map((l: any) => ({
+      name: l.item ?? '—',
+      spec: l.source_doc ? `Bill ${String(l.source_doc).replace(/^bill\s*/i, '')}` : null,
+      unit: l.unit ?? null, qty: num(l.qty), rate: num(l.rate),
+      amount: num(l.amount) || num(l.qty) * num(l.rate),
+    })),
   };
 }
 

@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import OpenAI from 'https://esm.sh/openai@4';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { auditLines } from './_lineAudit.ts';
 
 // Same LLM provider/key as the other AI functions (sku-matcher, ai-extract-entry, …). Anthropic
 // was never wired up as a secret for this project, so this function uses OpenAI's GPT-4o.
@@ -17,8 +18,11 @@ const corsHeaders = {
 
 const SYSTEM_PROMPT = `You are a procurement audit AI for Indian construction companies.
 
-You receive PO (Purchase Order) line items and an image of the vendor's bill/invoice.
-Compare every PO line against the bill and detect ALL discrepancies.
+You receive PO (Purchase Order) line items and the vendor's bill/invoice — a photo, or a PDF that
+MAY RUN TO MANY PAGES and hold SEVERAL invoices, each followed by its own e-Way bill page.
+Read every page to the end. Every "Tax Invoice" page carries its own line items, and the same
+material billed twice on two invoices is two bill lines, never one. Compare every PO line against
+everything the bill charges for, across all of it, and detect ALL discrepancies.
 
 Return ONLY valid JSON — no markdown, no explanation outside the JSON:
 {
@@ -73,24 +77,45 @@ Risk level rules:
 
 // EXTRACT-ONLY mode (no PO to reconcile against): just read the bill and return its lines + total.
 // Used by the transactions "Attach bill" flow, where there is no existing PO yet.
-const EXTRACT_PROMPT = `You are a procurement AI for Indian construction companies. You receive an image of a
-vendor's bill / invoice / estimate. Read it and extract its contents.
+const EXTRACT_PROMPT = `You are a procurement AI for Indian construction companies. You receive a
+vendor's bill / invoice / estimate — a photo, or a PDF that MAY RUN TO MANY PAGES. Read ALL of it and
+extract its contents.
+
+THE DOCUMENT IS OFTEN MORE THAN ONE PAGE, AND OFTEN MORE THAN ONE INVOICE.
+A single upload from an Indian vendor is routinely a PDF holding several tax invoices, each followed
+by its own e-Way bill page. You must read EVERY page to the end before answering.
+
+  · Go page by page. Every "Tax Invoice" page you find is a separate document with its own number,
+    its own date and its OWN line items.
+  · Return the line items from EVERY invoice on EVERY page, in page order. A four-page PDF with
+    three invoices of one line each returns THREE line items — never one.
+  · NEVER merge, deduplicate or collapse lines that look alike. The same material at the same rate
+    on two different invoices is TWO lines, not one. Repetition is normal and must be preserved.
+  · Ignore e-Way bill pages for line items — they repeat the invoice value, they do not add goods.
+    Use them only to confirm an invoice number or a date.
 
 Return ONLY valid JSON — no markdown, no prose outside the JSON:
 {
   "vendor_name": "string or null",
-  "bill_number": "string or null",
-  "bill_date": "YYYY-MM-DD or null",
-  "bill_total_extracted": number or null,   // the grand total payable (incl. taxes) if printed
-  "gst_amount": number or null,             // total GST if shown, else null
+  "bill_number": "string or null",           // several invoices → join their numbers, e.g. "3445/3446/3455"
+  "bill_date": "YYYY-MM-DD or null",         // several invoices → the latest date
+  "bill_total_extracted": number or null,    // grand total payable incl. taxes — the SUM across every invoice in the file
+  "gst_amount": number or null,              // total GST across every invoice, else null
   "line_items": [
-    { "item": "standard item name", "qty": number or null, "unit": "string or null", "rate": number or null, "amount": number or null, "rate_basis": "per_unit" or "lot" }
+    { "item": "standard item name", "qty": number or null, "unit": "string or null", "rate": number or null,
+      "amount": number or null, "rate_basis": "per_unit" or "lot",
+      "source_doc": "the invoice number this line came from, or null if the file holds only one invoice" }
   ]
 }
 
 Rules: item names should be the standard industry name, not vendor shorthand. Numbers are plain
-(no currency symbols/commas). If the grand total is not clearly printed, sum the line amounts. Do NOT
-invent values that aren't on the bill.
+(no currency symbols/commas). Do NOT invent values that aren't on the bill.
+
+BEFORE YOU ANSWER, CHECK YOUR OWN ARITHMETIC:
+  Σ(line amounts) + total GST should equal bill_total_extracted. If it falls short, you have almost
+  certainly missed an invoice or a page — go back through the file and add the lines you skipped.
+  (Example: three invoices totalling 29,500 + 29,500 + 14,750 = 73,750 gross must return three
+  lines summing to 62,500 basic, with 11,250 GST — not a single line of 25,000.)
 
 PRICING BASIS (critical — do not always assume per-piece):
 - "amount" is ALWAYS the true printed total for that line, exactly as written on the bill.
@@ -198,7 +223,7 @@ serve(async (req) => {
     // Call GPT-4o (OpenAI) ─────────────────────────────────────────────────────
     const completion = await openai.chat.completions.create({
       model:       'gpt-4o',
-      max_tokens:  2048,
+      max_tokens:  8000,
       temperature: 0.1,
       messages: [
         { role: 'system', content: extractOnly ? EXTRACT_PROMPT : SYSTEM_PROMPT },
@@ -210,7 +235,48 @@ serve(async (req) => {
     const jsonMatch = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('No JSON found in AI response');
 
-    const result = JSON.parse(jsonMatch[0]);
+    let result = JSON.parse(jsonMatch[0]);
+
+    // ── The arithmetic is the proof that every page was read ────────────────────
+    //
+    // A vendor's upload is routinely one PDF holding three tax invoices, each with its own e-Way
+    // bill page. The failure we actually saw was the reader returning the FIRST invoice's single
+    // line while correctly summing all three totals — so the header said ₹73,750 and the lines said
+    // ₹25,000, and two thirds of the goods were silently missing.
+    //
+    // That gap is detectable without another opinion: the printed lines, plus GST, must reconcile to
+    // the grand total. When they fall materially short we know pages were skipped, so we say exactly
+    // what is missing and ask once more — once, and only when it already found SOME lines, since a
+    // bill with no itemisation at all is a different thing and re-reading it would find nothing.
+    if (extractOnly) {
+      const audit = auditLines(result);
+      if (audit.retry) {
+        const retry = await openai.chat.completions.create({
+          model: 'gpt-4o', max_tokens: 8000, temperature: 0,
+          messages: [
+            { role: 'system', content: EXTRACT_PROMPT },
+            { role: 'user', content: [mediaPart, { type: 'text', text: userText }] as any },
+            { role: 'assistant', content: raw },
+            { role: 'user', content:
+              `Your line items add up to ${audit.lineSum}, but this document's goods come to ` +
+              `${audit.basic} before tax (grand total ${audit.total}). You have missed ` +
+              `${audit.missing} worth of lines — almost certainly a later page, or a second or ` +
+              `third tax invoice inside the same file. Go through EVERY page again and return the ` +
+              `complete JSON with every line from every invoice, each tagged with its source_doc. ` +
+              `Do not merge lines that repeat.` },
+          ],
+        });
+        const rawRetry = retry.choices[0]?.message?.content?.trim() ?? '';
+        const m2 = rawRetry.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').match(/\{[\s\S]*\}/);
+        if (m2) {
+          try {
+            const second = JSON.parse(m2[0]);
+            // Keep the second reading only if it actually accounts for more of the bill.
+            if (auditLines(second).lineSum > audit.lineSum) result = second;
+          } catch { /* keep the first reading */ }
+        }
+      }
+    }
 
     return new Response(
       JSON.stringify({ ok: true, ...result }),

@@ -286,7 +286,11 @@ export async function attachBillDocToTxn(txnId: string, billUrl: string): Promis
   await supabase.from('transactions').update({ bill_doc_url: billUrl }).eq('txn_id', txnId);
 }
 
-export interface BillLine { item: string; qty: number | null; unit: string | null; rate: number | null; amount: number | null }
+export interface BillLine {
+  item: string; qty: number | null; unit: string | null; rate: number | null; amount: number | null;
+  /** Which invoice inside the file this line came from — one upload is often several tax invoices. */
+  source_doc?: string | null;
+}
 export interface BillRead {
   vendor: string | null;
   billNo: string | null;
