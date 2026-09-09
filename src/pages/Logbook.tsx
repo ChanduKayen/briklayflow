@@ -30,6 +30,7 @@ import { ManageTeam } from '../components/day-book/Invitation';
 import { StartOnWhatsAppButton } from '../components/day-book/StartOnWhatsApp';
 import { useCursorLamp } from '../components/nav/useCursorLamp';
 import { useIsMobile } from '../lib/useIsMobile';
+import { useSettleScroll } from '../lib/settleScroll';
 import ReviewMobile from '../components/day-book/ReviewMobile';
 
 // Briklay's WhatsApp business number (same single source the invitation uses) — the band's "Open WhatsApp".
@@ -334,16 +335,9 @@ export default function Logbook({ session }: { session: Session }) {
     [review],
   );
 
-  // On open with no deep-link, land on the first entry card so the cards — not the header
-  // preamble — are the focus (the tabs stay peeking via scroll-margin). Once only.
-  const didInitScroll = useRef(false);
-  useEffect(() => {
-    if (focusId || isLoading || didInitScroll.current) return;
-    const el = document.getElementById(`db-entry-${shown[0]?.id}`);
-    if (!el) return;
-    didInitScroll.current = true;
-    requestAnimationFrame(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-  }, [focusId, isLoading, shown]);
+  // On open with no deep-link, let the page settle, then scroll the header preamble away — as far
+  // as the tabs and no further, so which pile you are looking at stays on screen.
+  useSettleScroll('daybook-tabs', !focusId && !isLoading);
 
   const counts: Record<TabKey, number> = { all: all.length, review: review.length, filed: filed.length, rejected: rejected.length, requests: prs.length };
 
@@ -466,7 +460,7 @@ export default function Logbook({ session }: { session: Session }) {
 
       <div className="mx-auto pt-5 pb-6 sm:pt-6 sm:pb-8" style={{ width: '92%', maxWidth: 1100 }}>
         {/* tabs */}
-        <div className="flex items-center gap-1 mt-8 overflow-x-auto" style={{ borderBottom: `1px solid ${V.line}` }}>
+        <div data-settle-anchor="daybook-tabs" className="flex items-center gap-1 mt-8 overflow-x-auto" style={{ borderBottom: `1px solid ${V.line}` }}>
           {TABS.map((t) => {
             const on = tab === t.key;
             const c = counts[t.key];

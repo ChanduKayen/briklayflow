@@ -12,7 +12,7 @@
  * Writes via set_txn_allocations (complete-set replace; parts sum to the txn total).
  */
 import { useEffect, useMemo, useState } from 'react';
-import { X, FileText, Loader2, Check, Eye } from 'lucide-react';
+import { X, FileText, Loader2, Check, Eye, Upload } from 'lucide-react';
 import { V, font } from './ledgerTokens';
 import { openDoc, useSignedDocUrl } from '../../lib/storage';
 
@@ -67,16 +67,23 @@ import {
   loadUnpaidBillsForVendor, saveBillAllocations, setAdvanceMemo,
   type UnpaidBill,
 } from '../../lib/billsApi';
-// NOTE: creating a brand-new bill lives on the Bills page, NOT inside "attach payment → bill". This sheet
-// only ALLOCATES a payment to bills already on file (the vendor's unpaid bills below).
+import NewBillModal, { type BillDraft } from '../bills/NewBillModal';
+import { intakeCommit } from '../../lib/billIntake';
+// Recording a bill still belongs to ONE pipeline (billIntake — extraction, the org-wide dedupe, the
+// mint) wearing ONE face (NewBillModal). This sheet does not re-implement any of it: it opens that
+// same door with the vendor already known, and when the door hands a bill back it allocates to it.
 
 const num = (n: unknown) => Number(n) || 0;
 const inr = (n: number) => '₹' + Math.round(num(n)).toLocaleString('en-IN');
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : '') || 'Something went wrong';
 
-export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amount, defaultProjectId, onClose, onDone }: {
+export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amount, defaultProjectId, initialFile, onClose, onDone }: {
   txnId: string; orgId: string; stakeholderId: string; vendorName: string; amount: number;
-  defaultProjectId: string | null; onClose: () => void; onDone: () => void;
+  defaultProjectId: string | null;
+  /** A page whose own button already opened the file picker hands the paper straight through, so
+   *  the reading starts without asking for it twice. */
+  initialFile?: File | null;
+  onClose: () => void; onDone: () => void;
 }) {
   const [bills, setBills] = useState<UnpaidBill[] | null>(null);
   const [sel, setSel] = useState<Record<string, number>>({});     // billId → amount allocated
@@ -85,6 +92,9 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
   const [busy, setBusy] = useState<'idle' | 'reading' | 'saving' | 'done'>('idle');
   const [err, setErr] = useState<string | null>(null);
   const [peekId, setPeekId] = useState<string | null>(null);   // hover/tap → inline bill preview
+  // The shared New-bill door, opened mid-payment. `null` while shut; the file it opens with (if the
+  // page already had one in hand) rides along, and is dropped when the door closes.
+  const [door, setDoor] = useState<{ file: File | null } | null>(initialFile ? { file: initialFile } : null);
 
   // Load the vendor's unpaid bills; pre-select on an exact remaining match.
   useEffect(() => {
@@ -97,6 +107,30 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
     }).catch(e => { if (live) setErr(errMsg(e)); });
     return () => { live = false; };
   }, [stakeholderId, amount]);
+
+  /**
+   * A bill has just arrived through the door — either freshly minted, or the one the dedupe found
+   * already on file. Re-read the vendor's bills and tick it, carrying whatever of this payment is
+   * still unspoken for. That is the whole point of uploading from here: the paper and the payment
+   * meet in one motion instead of two visits to two pages.
+   *
+   * It does NOT close the door: after a mint the modal plays its own "Filed ✓" beat and leaves on
+   * its own, and closing it from here would cut that short. Only the duplicate offer closes it.
+   */
+  const adoptBill = async (billId: string) => {
+    setBusy('reading'); setErr(null);
+    try {
+      const bs = await loadUnpaidBillsForVendor(stakeholderId);
+      setBills(bs);
+      const fresh = bs.find(b => b.kind === 'bill' && b.id === billId);
+      if (!fresh) { setErr('That bill is on file, but nothing is left to pay on it.'); return; }
+      setSel(prev => {
+        const spoken = Object.values(prev).reduce((x, v) => x + num(v), 0);
+        const left = Math.max(0, amount - spoken);
+        return { ...prev, [fresh.id]: Math.min(fresh.remaining, left) || fresh.remaining };
+      });
+    } catch (e) { setErr(errMsg(e)); } finally { setBusy('idle'); }
+  };
 
   const allocated = useMemo(() => Object.values(sel).reduce((s, v) => s + num(v), 0), [sel]);
   const remainder = Math.round((amount - allocated) * 100) / 100;
@@ -154,8 +188,13 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
           <div className="text-center py-2">
             <div className="mx-auto grid place-items-center rounded-full mb-3" style={{ width: 44, height: 44, background: V.field }}><FileText size={20} style={{ color: V.faint }} /></div>
             <p className="text-[13px] font-medium" style={{ color: V.ink }}>No bills for {vendorName} yet</p>
-            <p className="text-[12px] mt-1 mb-4" style={{ color: V.sys }}>Add the bill on the Bills page, then attach it here. For now this payment can stay as an advance.</p>
-            <label className="flex items-center justify-center gap-2 mt-1 text-[11.5px]" style={{ color: V.sys }}>
+            <p className="text-[12px] mt-1 mb-3.5" style={{ color: V.sys }}>Upload the paper and Briklay will read it, check it isn&apos;t already on the books, and settle this payment against it.</p>
+            <button type="button" onClick={() => setDoor({ file: null })}
+              className="blz-upload inline-flex items-center justify-center gap-2 w-full rounded-xl px-3 py-2.5 text-[13px] font-semibold"
+              style={{ background: V.terra, color: '#fff', border: `1px solid ${V.terra}` }}>
+              <Upload size={15} /> Upload the bill
+            </button>
+            <label className="flex items-center justify-center gap-2 mt-4 text-[11.5px]" style={{ color: V.sys }}>
               <input type="checkbox" checked={advanceMemoOn} onChange={(e) => setAdvanceMemoOn(e.target.checked)} style={{ accentColor: V.terra }} />
               No bill — note it&apos;s towards an order
             </label>
@@ -167,7 +206,12 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
           </div>
         ) : (
           <>
-            <p className="text-[13px] font-medium mb-2" style={{ color: V.ink }}>Which bill{bills.length > 1 ? 's' : ''} is this payment for?</p>
+            <div className="flex items-baseline justify-between gap-2 mb-2">
+              <p className="text-[13px] font-medium" style={{ color: V.ink }}>Which bill{bills.length > 1 ? 's' : ''} is this payment for?</p>
+              <button type="button" onClick={() => setDoor({ file: null })} className="text-[12px] font-semibold shrink-0" style={{ color: V.terraDeep }}>
+                Upload a new one
+              </button>
+            </div>
 
             <div className="space-y-1.5">
               {bills.map(b => {
@@ -253,6 +297,36 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
           </button>
         )}
       </div>
+
+      {/* The Bills page's own door, opened mid-payment: the vendor is already settled, so it only
+          asks for the paper, reads it, and runs the same dedupe. A collision is not a dead end here
+          — the bill it found is one this payment can settle, so the offer is to attach that one. */}
+      {door && (
+        <NewBillModal
+          open
+          title="Upload the bill"
+          stackAbove={10050}
+          initialFile={door.file}
+          onClose={() => setDoor(null)}
+          lockVendor={{ id: stakeholderId, name: vendorName }}
+          lockProject={defaultProjectId ? { id: defaultProjectId } : null}
+          openBillLabel="Attach that one"
+          onOpenBill={(billId) => { setDoor(null); void adoptBill(billId); }}
+          commit={async (d: BillDraft) => {
+            // Capped, so a stuck writer surfaces an error instead of an endless "Filing…".
+            const res = await Promise.race([
+              intakeCommit(
+                { orgId, source: 'tx_picker', file: d.file, vendorId: stakeholderId, projectId: d.projectId ?? defaultProjectId },
+                { vendor: d.vendorName || vendorName, billNo: d.billNo, billDate: d.billDate, amount: d.amount, lines: d.lines },
+                stakeholderId, { allowDuplicate: d.allowDuplicate },
+              ),
+              new Promise<never>((_, rej) => setTimeout(() => rej(new Error('Saving the bill took too long. Try again.')), 30_000)),
+            ]);
+            if (res.status === 'duplicate') return { duplicate: res.existing };
+            await adoptBill(res.billId);
+          }}
+        />
+      )}
 
     </div>
   );

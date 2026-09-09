@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSearchScope } from '../components/search/searchScope';
 import SearchBar from '../components/search/SearchBar';
+import { useSettleScroll } from '../lib/settleScroll';
 import PartyFilterChip from '../components/search/PartyFilterChip';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
@@ -700,16 +701,9 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
     requestAnimationFrame(() => el.scrollIntoView({ behavior: 'smooth', block: 'center' }));
   }, [focusTxn, isLoading, ledger]);
 
-  // On open with no ?txn deep-link, land on the first transaction row so the entries —
-  // not the search/filter header — are the focus. Once only.
-  const didInitLedgerScroll = useRef(false);
-  useEffect(() => {
-    if (focusTxn || isLoading || didInitLedgerScroll.current) return;
-    const el = document.querySelector('[id^="ledger-txn-"]');
-    if (!el) return;
-    didInitLedgerScroll.current = true;
-    requestAnimationFrame(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-  }, [focusTxn, isLoading, ledger]);
+  // On open with no ?txn deep-link, let the page settle, then scroll the masthead away — as far as
+  // the toolbar and no further, so the search and the filters stay where they were.
+  useSettleScroll('ledger-toolbar', !focusTxn && !isLoading);
 
   // Captures from WhatsApp still waiting in the Day book (same review bucket the
   // Day book uses: PENDING + AWAITING_CONTEXT). Drives the nudge strip below.
@@ -1224,7 +1218,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
         )}
 
         {/* filters — desktop chip bar */}
-        <div ref={filterBarRef} className="hidden sm:flex items-center gap-2 flex-wrap mt-7">
+        <div ref={filterBarRef} data-settle-anchor="ledger-toolbar" className="hidden sm:flex items-center gap-2 flex-wrap mt-7">
           <FilterChip active onClick={(e) => openDrop('date', e)}>{periodLabel}</FilterChip>
           {activeFilterDropdown === 'date' && chipDropPos && createPortal(
             <div ref={chipDropRef} className="rounded-xl overflow-hidden py-1" style={{ position: 'fixed', top: chipDropPos.top, left: chipDropPos.left, zIndex: 9999, width: datePreset === 'custom' ? 250 : 200, background: V.surface, border: `1px solid ${V.line}`, boxShadow: '0 10px 30px rgba(30,26,21,0.12)' }}>
@@ -1290,7 +1284,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
             (filterType.length ? 1 : 0) + (!lockedProject && filterProject.length ? 1 : 0) +
             (filterUnlinked ? 1 : 0) + (datePreset !== 'all' ? 1 : 0);
           return (
-            <div className="sm:hidden mt-2 space-y-2.5">
+            <div data-settle-anchor="ledger-toolbar" className="sm:hidden mt-2 space-y-2.5">
               {/* filter · search · download — one aligned row */}
               <div className="flex items-center gap-2">
                 <button

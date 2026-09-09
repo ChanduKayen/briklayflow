@@ -1316,7 +1316,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
           <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(94vw, 480px)', borderRadius: 16, overflow: 'hidden', background: '#FFFCF7', border: '1px solid #E7DCC9', boxShadow: '0 24px 60px rgba(30,26,21,0.22)' }}>
             {contractHubOpen
               ? <ContractHub txn={trackTxn} onClose={() => setContractHubOpen(false)} onLinked={() => { afterAttach(); setContractHubOpen(false); }} />
-              : <BillAllocateSheet txnId={txnId!} orgId={orgId} stakeholderId={txn.stakeholder_id} vendorName={payeeName} amount={Number(effective.total_amount) || 0} defaultProjectId={primaryAlloc?.project_id ?? null} onClose={() => setAttachBill(null)} onDone={() => { afterAttach(); }} />}
+              : <BillAllocateSheet txnId={txnId!} orgId={orgId} stakeholderId={txn.stakeholder_id} vendorName={payeeName} amount={Number(effective.total_amount) || 0} defaultProjectId={primaryAlloc?.project_id ?? null} initialFile={attachBill?.file ?? null} onClose={() => setAttachBill(null)} onDone={() => { afterAttach(); }} />}
           </div>
         </div>
       )}

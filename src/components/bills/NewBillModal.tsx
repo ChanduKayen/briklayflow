@@ -62,6 +62,8 @@ export interface NewBillModalProps {
   openBillLabel?: string;
   /** The door's own write. Return a duplicate to surface it instead of closing. */
   commit: (d: BillDraft) => Promise<{ duplicate?: DuplicateBill } | void>;
+  /** A door that opens on top of another overlay says how high to stack (default 120). */
+  stackAbove?: number;
 }
 
 type Stage = 'pick' | 'reading' | 'form';
@@ -76,7 +78,7 @@ export default function NewBillModal(props: NewBillModalProps) {
 
 function Modal({
   onClose, title = 'New bill', lockVendor = null, lockProject = null, initialFile = null,
-  initialExtract = null, queueMore = 0, onOpenBill, openBillLabel = 'Open it', commit, isMobile,
+  initialExtract = null, queueMore = 0, onOpenBill, openBillLabel = 'Open it', commit, stackAbove, isMobile,
 }: NewBillModalProps & { isMobile: boolean }) {
   const orgId = useOrgId();
 
@@ -279,7 +281,8 @@ function Modal({
   const rowCls = (k: string, filled: boolean) => `frow${filled ? ' filled' : ''}${inked[k] ? ' inked' : ''}`;
 
   return createPortal(
-    <div className={`nbx${isMobile ? ' sheet' : ''}`} role="dialog" aria-modal="true" aria-label={title}>
+    <div className={`nbx${isMobile ? ' sheet' : ''}`} role="dialog" aria-modal="true" aria-label={title}
+      style={stackAbove ? { zIndex: stackAbove } : undefined}>
       <style>{NBX_CSS}</style>
       <div className="backdrop" onClick={onClose} />
 
