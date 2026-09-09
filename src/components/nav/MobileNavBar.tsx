@@ -86,7 +86,6 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
 
   const [scrolled, setScrolled] = useState(false);
   const [atEnd, setAtEnd] = useState(false);
-  const [overflow, setOverflow] = useState(false);   // does the rail actually scroll? (else no "more" arrow)
   const [sheet, setSheet] = useState<null | 'workspace' | 'quickadd'>(null);
   const [fabMenu, setFabMenu] = useState(false);   // Book's Money-out / Money-in chooser
 
@@ -108,16 +107,14 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
     barRef.current?.querySelectorAll('.mnav-tab svg *').forEach((el) => el.setAttribute('pathLength', '1'));
   }, []);
 
-  // rail scroll/resize → overflow detection + edge fades + pin shadow + DIAL-DETENT HAPTICS. The glow is a
-  // per-tab CSS effect now (never a JS-positioned element), so there is nothing to reposition — that was the
-  // source of the misplacement. As the rail scrolls, each tab crossing a detent gives a tiny "tick", so it
-  // feels like turning a physical dial. `overflow` gates the "more" arrow.
+  // rail scroll/resize → edge fades + pin shadow + DIAL-DETENT HAPTICS. The glow is a per-tab CSS effect
+  // now (never a JS-positioned element), so there is nothing to reposition — that was the source of the
+  // misplacement. As the rail scrolls, each tab crossing a detent gives a tiny "tick" — like a physical dial.
   useEffect(() => {
     const r = railRef.current; if (!r) return;
     const TAB_W = 63;
     const measure = () => {
       const over = r.scrollWidth > r.clientWidth + 4;
-      setOverflow(over);
       setScrolled(r.scrollLeft > 6);
       setAtEnd(!over || r.scrollLeft + r.clientWidth >= r.scrollWidth - 10);
       const d = Math.round(r.scrollLeft / TAB_W);
@@ -128,6 +125,22 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
     r.addEventListener('scroll', measure, { passive: true });
     window.addEventListener('resize', measure);
     return () => { r.removeEventListener('scroll', measure); window.removeEventListener('resize', measure); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible.length]);
+
+  // "There's more" cue — instead of an arrow: once, shortly after load, if the rail overflows and is at the
+  // start, give it a gentle peek-nudge (slide a little, then settle) so it's obvious the row slides. The
+  // edge fade (see .mnav-rail mask) is the persistent hint; this is the one-time reveal.
+  const nudged = useRef(false);
+  useEffect(() => {
+    const r = railRef.current; if (!r) return;
+    const id = window.setTimeout(() => {
+      if (nudged.current || r.scrollWidth <= r.clientWidth + 4 || r.scrollLeft > 6) return;
+      nudged.current = true;
+      r.scrollTo({ left: 40, behavior: 'smooth' });
+      window.setTimeout(() => r.scrollTo({ left: 0, behavior: 'smooth' }), 520);
+    }, 750);
+    return () => window.clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible.length]);
 
@@ -184,13 +197,6 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
     <>
       <style>{CSS}</style>
       <div ref={barRef} className={`mnav-bar${scrolled ? ' scrolled' : ''}${atEnd ? ' atend' : ''}${hidden ? ' gone' : ''}`}>
-        {/* there's-more chevron — only when the rail actually overflows (else it would float over nothing) */}
-        {overflow && (
-          <button className="mnav-more" type="button" aria-label="More tabs" onClick={() => { hapt(5); railRef.current?.scrollBy({ left: railRef.current.clientWidth, behavior: 'smooth' }); }}>
-            <svg viewBox="0 0 24 24" style={{ width: 13, height: 13, stroke: 'currentColor', fill: 'none', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }}>{I.chevron}</svg>
-          </button>
-        )}
-
         {/* pinned tab */}
         {pinned && <div className="mnav-pin">{renderTab(pinned, false)}</div>}
 
@@ -348,10 +354,6 @@ const CSS = `
 .mnav-tab.on::before{opacity:1}
 .mnav-tab.on::after{content:''; position:absolute; top:5px; left:50%; width:22px; height:2px; border-radius:99px; transform:translateX(-50%);
   background:var(--b-clay); opacity:.9; box-shadow:0 0 6px rgba(232,147,95,.55); z-index:0}
-
-.mnav-more{position:absolute; right:58px; top:50%; z-index:2; border:0; background:none; color:#A08C74; padding:6px 3px; cursor:pointer;
-  opacity:.8; transform:translateY(-50%); transition:opacity .3s}
-.mnav-bar.atend .mnav-more{opacity:0; pointer-events:none}
 
 .mnav-fab{flex:none; width:46px; height:46px; border-radius:50%; border:0; background:#C75B2B; color:#FFF7EF; margin-left:2px;
   box-shadow:0 8px 18px -8px rgba(199,91,43,.7); cursor:pointer; position:relative; z-index:1; display:grid; place-items:center;
