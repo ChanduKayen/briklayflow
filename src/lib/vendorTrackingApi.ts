@@ -310,12 +310,19 @@ export async function readVendorBill(base64: string, mime: string): Promise<Bill
   if (error) throw new Error(await fnErrorMessage(error, 'Could not read the bill'));
   const d = (data ?? {}) as {
     vendor_name?: string | null; bill_number?: string | null; bill_date?: string | null;
-    bill_total_extracted?: number | null; gst_amount?: number | null; line_items?: BillLine[] | null;
+    bill_total_extracted?: number | null; gst_amount?: number | null; tax_amount?: number | null;
+    line_items?: BillLine[] | null;
   };
   const lines = Array.isArray(d.line_items) ? d.line_items : [];
   const lineSum = lines.reduce((s, l) => s + num(l.amount), 0);
   const total = Math.round(num(d.bill_total_extracted) || lineSum);
-  const gst = d.gst_amount != null ? Math.round(num(d.gst_amount)) : (total > 0 ? Math.round(total - total / 1.18) : 0);
+  // The tax is what the paper printed — under whatever name it printed it. Where it printed none,
+  // it is the part of the total the lines do not explain, which is the honest answer for an invoice
+  // whose lines are pre-tax and for a utility bill whose charges already come to the total alike.
+  // It is NOT 18% of everything: that assumption invented a GST on papers that carry no tax at all.
+  const printedTax = d.gst_amount ?? d.tax_amount;
+  const gst = printedTax != null ? Math.round(num(printedTax))
+            : (lines.length && total > lineSum ? Math.round(total - lineSum) : 0);
   return { vendor: d.vendor_name ?? null, billNo: d.bill_number ?? null, billDate: d.bill_date ?? null, total, gst, lines };
 }
 

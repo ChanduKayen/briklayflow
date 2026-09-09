@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import OpenAI from 'https://esm.sh/openai@4';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { auditLines } from './_lineAudit.ts';
+import { parseModelJson } from './_parseJson.ts';
 
 // Same LLM provider/key as the other AI functions (sku-matcher, ai-extract-entry, …). Anthropic
 // was never wired up as a secret for this project, so this function uses OpenAI's GPT-4o.
@@ -75,55 +76,113 @@ Risk level rules:
   MEDIUM — 1-2 flags, <5% overcharge; flag for review before payment
   HIGH   — any GHOST_ITEM, GRADE_DOWNGRADE, or total overcharge >5%; escalate`;
 
-// EXTRACT-ONLY mode (no PO to reconcile against): just read the bill and return its lines + total.
-// Used by the transactions "Attach bill" flow, where there is no existing PO yet.
-const EXTRACT_PROMPT = `You are a procurement AI for Indian construction companies. You receive a
-vendor's bill / invoice / estimate — a photo, or a PDF that MAY RUN TO MANY PAGES. Read ALL of it and
-extract its contents.
+// EXTRACT-ONLY mode (no PO to reconcile against): read the paper and report what it says.
+//
+// This prompt used to describe the document instead of the job — "a procurement AI for Indian
+// construction companies", reading "a vendor's bill / invoice / estimate", finding "Tax Invoice"
+// pages and "e-Way bills", naming items by "the standard industry name". Given a materials invoice
+// that worked. Given an electricity bill, a rent receipt or a handwritten hardware chit, the model
+// had been told so firmly what the paper was that it answered about the mismatch instead of
+// answering the question — prose, not JSON, and the reader failed with "No JSON found".
+//
+// So it no longer says what the paper is. It says what to look for on any paper somebody has to
+// pay, and takes the document's own vocabulary as it finds it.
+const EXTRACT_PROMPT = `You are reading a piece of paper that somebody has to pay, or has paid.
 
-THE DOCUMENT IS OFTEN MORE THAN ONE PAGE, AND OFTEN MORE THAN ONE INVOICE.
-A single upload from an Indian vendor is routinely a PDF holding several tax invoices, each followed
-by its own e-Way bill page. You must read EVERY page to the end before answering.
+It could be anything: a printed tax invoice, an electricity or water or telecom bill, a rent or hire
+receipt, a freight note, a delivery challan priced in ink, a handwritten chit from a shop, a repair
+estimate, a statement of account, a photographed message asking for money. Typed or handwritten,
+stamped or scrawled, in any language or a mixture, sharp or badly photographed. One page or many —
+and one file may hold several separate documents.
 
-  · Go page by page. Every "Tax Invoice" page you find is a separate document with its own number,
-    its own date and its OWN line items.
-  · Return the line items from EVERY invoice on EVERY page, in page order. A four-page PDF with
-    three invoices of one line each returns THREE line items — never one.
-  · NEVER merge, deduplicate or collapse lines that look alike. The same material at the same rate
-    on two different invoices is TWO lines, not one. Repetition is normal and must be preserved.
-  · Ignore e-Way bill pages for line items — they repeat the invoice value, they do not add goods.
-    Use them only to confirm an invoice number or a date.
+Read it the way a person would, on its own terms, and report what it says. Do not decide in advance
+what kind of document it ought to be, and never force what you see into the shape of a materials
+invoice.
 
-Return ONLY valid JSON — no markdown, no prose outside the JSON:
+FOUR THINGS MATTER, and nearly every such paper carries them under some name:
+
+  WHO IS OWED   the issuer, biller, supplier, shop, landlord, contractor, department or person —
+                whatever the paper puts at its head or signs at its foot. NOT the customer, not the
+                consumer, not the "bill to" party. The one being PAID.
+  HOW MUCH      the one amount payable, after every tax, charge, rebate, subsidy, arrear and
+                rounding the paper itself applies. Whatever it calls it: amount payable, net
+                payable, grand total, total due, balance, or a figure circled by hand.
+  WHEN          the date the paper carries as its own — invoice date, bill date, reading date, the
+                date written by hand. Not the due date, unless that is the only date on it.
+  WHAT FOR      whatever the paper itemises, in the paper's own words.
+
+WHAT COUNTS AS AN ITEM
+Any priced line the document lists. Often that is goods with a quantity and a rate. Just as often it
+is none of those:
+  · a service, a job or a period — "Rent — Sept 2026", "AMC 1 Apr to 31 Mar"
+  · a charge on a utility bill — energy charge, fixed charge, meter rent, duty, fuel adjustment,
+    late payment surcharge, arrears, previous balance
+  · a reading-based charge — units consumed at a tariff
+  · a DEDUCTION, which is negative — subsidy, rebate, discount, advance adjusted, credit note
+  · one line that is the whole job — "Painting work as agreed — 45000"
+If the paper itemises nothing — a chit carrying only a name and a figure — return an empty list. An
+empty list is a correct answer. Never invent a line to fill it.
+
+NAME EACH ITEM AS THE PAPER NAMES IT. Copy its words, tidied only of obvious abbreviation and OCR
+noise. Do not translate it into a catalogue name, do not classify it, do not add a word the paper
+does not have.
+
+MORE THAN ONE PAGE, MORE THAN ONE DOCUMENT
+Read every page to the end before answering. One file often holds several documents: several
+invoices; a bill and its receipt; an invoice and its transport page; a statement listing many bills.
+Where several of them each charge for something —
+  · return the lines of EVERY one, in page order, each tagged with the document it came from;
+  · never merge, deduplicate or collapse lines that look alike — the same thing at the same price on
+    two documents is two lines, and repetition is normal;
+  · the amount payable is the sum across them;
+  · a page that only repeats another page's value — a transport or e-way page, a duplicate copy, a
+    payment acknowledgement — adds no lines. Use it only to confirm a number or a date.
+
+WHEN SOMETHING IS NOT THERE
+Return null. Do not guess it, do not compute a plausible value, do not carry a number over from
+another field because it looks similar. A missing bill number is null — not the account number,
+unless the account or consumer number is the only reference the paper carries, in which case use it
+and say what it is called.
+
+OUTPUT
+Return ONLY a JSON object. No markdown fence, no sentence before or after it, no apology, and no
+explanation of what the document is. Whatever the paper turns out to be, and however little of it
+you can read, the answer is this object, with null wherever you could not read:
+
 {
-  "vendor_name": "string or null",
-  "bill_number": "string or null",           // several invoices → join their numbers, e.g. "3445/3446/3455"
-  "bill_date": "YYYY-MM-DD or null",         // several invoices → the latest date
-  "bill_total_extracted": number or null,    // grand total payable incl. taxes — the SUM across every invoice in the file
-  "gst_amount": number or null,              // total GST across every invoice, else null
+  "doc_type": "what this paper appears to be, in a few of your own words",
+  "vendor_name": "who is to be paid, or null",
+  "bill_number": "the paper's own reference, or null",
+  "reference_kind": "what that reference is called on the paper (invoice no, consumer no, receipt no, …), or null",
+  "bill_date": "YYYY-MM-DD, or null",
+  "period": "the period it covers, if it states one, else null",
+  "bill_total_extracted": number or null,
+  "tax_amount": number or null,
+  "gst_amount": number or null,
   "line_items": [
-    { "item": "standard item name", "qty": number or null, "unit": "string or null", "rate": number or null,
-      "amount": number or null, "rate_basis": "per_unit" or "lot",
-      "source_doc": "the invoice number this line came from, or null if the file holds only one invoice" }
+    { "item": "the line as the paper words it", "qty": number or null, "unit": "string or null",
+      "rate": number or null, "amount": number or null, "rate_basis": "per_unit" or "lot",
+      "source_doc": "which document in the file this line came from, or null if there is only one" }
   ]
 }
 
-Rules: item names should be the standard industry name, not vendor shorthand. Numbers are plain
-(no currency symbols/commas). Do NOT invent values that aren't on the bill.
+Numbers are plain: no currency symbol, no thousands separator, a decimal point only if the paper has
+one, and a MINUS SIGN on anything deducted.
 
-BEFORE YOU ANSWER, CHECK YOUR OWN ARITHMETIC:
-  Σ(line amounts) + total GST should equal bill_total_extracted. If it falls short, you have almost
-  certainly missed an invoice or a page — go back through the file and add the lines you skipped.
-  (Example: three invoices totalling 29,500 + 29,500 + 14,750 = 73,750 gross must return three
-  lines summing to 62,500 basic, with 11,250 GST — not a single line of 25,000.)
+PRICING BASIS
+"amount" is always the printed total of that line, exactly as written.
+  "per_unit" — the rate is the price of ONE unit, and amount = qty x rate.
+  "lot"      — the printed price covers the whole line however many it covers ("Door set — 4 Nos —
+               8000" where 8000 is the total, not per door), or there is no quantity at all (rent, a
+               fixed charge, a lump-sum job). Put the whole price in "amount"; set rate = amount /
+               qty, or null.
+Never multiply a lot price by its quantity.
 
-PRICING BASIS (critical — do not always assume per-piece):
-- "amount" is ALWAYS the true printed total for that line, exactly as written on the bill.
-- rate_basis = "per_unit" when the rate is the price of ONE unit and the line total = qty × rate.
-- rate_basis = "lot" when the printed price is for the WHOLE line/lot regardless of qty (e.g. one
-  "Door set — 4 Nos — ₹8,000" line where ₹8,000 is the total, not per door). For a lot line, put the
-  whole-line price in "amount" and set rate = amount / qty (or null if qty unknown). NEVER multiply a
-  lot price by qty.`;
+BEFORE YOU ANSWER
+Add your line amounts up. If they, together with the tax and charges the paper prints, cannot reach
+the amount payable, you have most likely stopped before the last page or missed a second document in
+the file — go back through it and add what you skipped. A shortfall the paper itself explains
+(arrears, a previous balance, a charge it never itemised) is fine and needs no line.`;
 
 // Convert ArrayBuffer to base64 in chunks to avoid call-stack limits
 function bufToBase64(buf: ArrayBuffer): string {
@@ -206,7 +265,7 @@ serve(async (req) => {
 
     // Build user text ───────────────────────────────────────────────────────
     const userText = extractOnly
-      ? 'Read the attached vendor bill/invoice (image or PDF) and extract its vendor, total, and line items as JSON.'
+      ? 'Read the attached document — every page of it — and return the JSON described above: who is to be paid, the amount payable, the date, and whatever it itemises.'
       : [
           `PO Reference: ${po_id ?? 'unknown'}`,
           bill_total ? `PO Grand Total: ₹${bill_total}` : null,
@@ -225,6 +284,9 @@ serve(async (req) => {
       model:       'gpt-4o',
       max_tokens:  8000,
       temperature: 0.1,
+      // The model answers in JSON or not at all. Without this a document that surprises it — an
+      // electricity bill where it expected an invoice — comes back as a paragraph explaining itself.
+      response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: extractOnly ? EXTRACT_PROMPT : SYSTEM_PROMPT },
         { role: 'user',   content: [mediaPart, { type: 'text', text: userText }] as any },
@@ -232,10 +294,7 @@ serve(async (req) => {
     });
 
     const raw = completion.choices[0]?.message?.content?.trim() ?? '';
-    const jsonMatch = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('No JSON found in AI response');
-
-    let result = JSON.parse(jsonMatch[0]);
+    let result = parseModelJson(raw);
 
     // ── The arithmetic is the proof that every page was read ────────────────────
     //
@@ -253,28 +312,28 @@ serve(async (req) => {
       if (audit.retry) {
         const retry = await openai.chat.completions.create({
           model: 'gpt-4o', max_tokens: 8000, temperature: 0,
+          response_format: { type: 'json_object' },
           messages: [
             { role: 'system', content: EXTRACT_PROMPT },
             { role: 'user', content: [mediaPart, { type: 'text', text: userText }] as any },
             { role: 'assistant', content: raw },
             { role: 'user', content:
-              `Your line items add up to ${audit.lineSum}, but this document's goods come to ` +
-              `${audit.basic} before tax (grand total ${audit.total}). You have missed ` +
-              `${audit.missing} worth of lines — almost certainly a later page, or a second or ` +
-              `third tax invoice inside the same file. Go through EVERY page again and return the ` +
-              `complete JSON with every line from every invoice, each tagged with its source_doc. ` +
-              `Do not merge lines that repeat.` },
+              `Your lines add up to ${audit.lineSum}. Even allowing for the most tax this paper ` +
+              `could be carrying, an amount payable of ${audit.total} needs at least ${audit.basic} ` +
+              `of lines to explain it, so about ${audit.missing} is unaccounted for. That is ` +
+              `usually a page you stopped before, or a second document inside the same file. Go ` +
+              `through EVERY page again and return the complete JSON, with every line from every ` +
+              `document, each tagged with its source_doc. Do not merge lines that repeat. If the ` +
+              `paper genuinely itemises no more than you already found — the rest being arrears, a ` +
+              `previous balance or a charge it never broke down — return what you have unchanged.` },
           ],
         });
         const rawRetry = retry.choices[0]?.message?.content?.trim() ?? '';
-        const m2 = rawRetry.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').match(/\{[\s\S]*\}/);
-        if (m2) {
-          try {
-            const second = JSON.parse(m2[0]);
-            // Keep the second reading only if it actually accounts for more of the bill.
-            if (auditLines(second).lineSum > audit.lineSum) result = second;
-          } catch { /* keep the first reading */ }
-        }
+        try {
+          const second = parseModelJson(rawRetry);
+          // Keep the second reading only if it actually accounts for more of the paper.
+          if (auditLines(second).lineSum > audit.lineSum) result = second;
+        } catch { /* keep the first reading */ }
       }
     }
 
