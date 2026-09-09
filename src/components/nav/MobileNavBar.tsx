@@ -90,7 +90,6 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
 
   const [scrolled, setScrolled] = useState(false);
   const [atEnd, setAtEnd] = useState(false);
-  const [min, setMin] = useState(false);
   const [sheet, setSheet] = useState<null | 'workspace' | 'quickadd'>(null);
   const [fabMenu, setFabMenu] = useState(false);   // Book's Money-out / Money-in chooser
 
@@ -112,9 +111,6 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
   function positionLamp() {
     const bar = barRef.current, lamp = lampRef.current, r = railRef.current;
     if (!bar || !lamp) return;
-    // In the minimized pill there is no lamp — and the inline opacity we set here would otherwise
-    // override the CSS that hides it, leaking the glow into the short form.
-    if (bar.classList.contains('min')) { lamp.style.opacity = '0'; return; }
     const on = bar.querySelector('.mnav-tab.on') as HTMLElement | null;
     if (!on) { lamp.style.opacity = '0'; return; }
     const bb = bar.getBoundingClientRect(), tb = on.getBoundingClientRect();
@@ -144,33 +140,17 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
     const on = bar.querySelector('.mnav-tab.on') as HTMLElement | null;
     if (on && on.closest('.mnav-rail')) on.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
     const id = requestAnimationFrame(positionLamp);
-    setMin(false);
     return () => cancelAnimationFrame(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeKey]);
 
-  // minimize on scroll-down, expand on scroll-up (the mini pill mirrors the active tab)
+  // Keep the lamp centred on viewport resize. (The capsule NEVER minimizes on page scroll — that toggle
+  // caused a flicker while scrolling up/down; the bar simply stays expanded, only hiding on full-screen forms.)
   useEffect(() => {
-    let ly = window.scrollY;
-    const onScroll = () => {
-      const y = window.scrollY;
-      if (y - ly > 10 && y > 70) setMin(true);
-      else if (ly - y > 10) setMin(false);
-      ly = y;
-    };
-    window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', positionLamp);
-    return () => { window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', positionLamp); };
-  }, []);
-
-  // Minimizing → kill the lamp glow at once (the pill has no light). Expanding → re-centre it AFTER the
-  // capsule finishes widening (a position taken mid-transition lands off, most visibly under pinned Book).
-  useEffect(() => {
-    if (min) { if (lampRef.current) lampRef.current.style.opacity = '0'; return; }
-    const id = window.setTimeout(positionLamp, 340);
-    return () => window.clearTimeout(id);
+    return () => window.removeEventListener('resize', positionLamp);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [min]);
+  }, []);
 
   // close the FAB menu on any outside tap
   useEffect(() => {
@@ -195,8 +175,6 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
     if (fab) go(fab.to);
   };
 
-  const activeTab = visible.find((t) => t.key === activeKey);
-
   const renderTab = (t: Tab, inRail: boolean) => {
     const on = t.key === activeKey;
     return (
@@ -214,15 +192,8 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
   return (
     <>
       <style>{CSS}</style>
-      <div ref={barRef} className={`mnav-bar${scrolled ? ' scrolled' : ''}${atEnd ? ' atend' : ''}${min ? ' min' : ''}${hidden ? ' gone' : ''}`}>
+      <div ref={barRef} className={`mnav-bar${scrolled ? ' scrolled' : ''}${atEnd ? ' atend' : ''}${hidden ? ' gone' : ''}`}>
         <span ref={lampRef} className="mnav-lamp" />
-
-        {/* minimized pill — mirrors the active tab, tap to expand */}
-        <button className="mnav-mini" type="button" aria-label="Expand navigation" onClick={() => setMin(false)}>
-          {activeTab ? <Svg w={20}>{activeTab.icon}</Svg> : <Svg w={20}>{I.book}</Svg>}
-          <span>{activeTab?.label ?? 'Book'}</span>
-          <svg viewBox="0 0 24 24" style={{ width: 11, height: 11, opacity: .6, stroke: 'currentColor', fill: 'none', strokeWidth: 1.9, strokeLinecap: 'round', strokeLinejoin: 'round' }}><path d="M6 14l6-5 6 5" /></svg>
-        </button>
 
         {/* there's-more chevron at the rail edge */}
         <button className="mnav-more" type="button" aria-label="More tabs" onClick={() => railRef.current?.scrollBy({ left: railRef.current.clientWidth, behavior: 'smooth' })}>
