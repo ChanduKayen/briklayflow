@@ -47,17 +47,15 @@ type Tab = {
 const ALL_TABS: Tab[] = [
   { key: 'book', label: 'Book', to: '/ledger', icon: I.book, activePaths: ['/ledger'], show: (r) => r !== 'supervisor' },
   { key: 'review', label: 'Review', to: '/logbook', icon: I.review, activePaths: ['/logbook'], show: () => true },
-  { key: 'payables', label: 'Payables', to: '/payables', icon: I.payables, activePaths: ['/payables'], show: (r) => r !== 'supervisor' },
   { key: 'bills', label: 'Bills', to: '/bills', icon: I.bills, activePaths: ['/bills'], show: (r) => r !== 'supervisor' },
   { key: 'pos', label: 'POs', to: '/purchase-orders', icon: I.pos, activePaths: ['/purchase-orders', '/orders'], show: (r) => r !== 'supervisor' && r !== 'accountant' },
+  { key: 'payables', label: 'Payables', to: '/payables', icon: I.payables, activePaths: ['/payables'], show: (r) => r !== 'supervisor' },
   { key: 'att', label: 'Attendance', to: '/attendance', icon: I.att, activePaths: ['/attendance'], show: () => true },
-  { key: 'contracts', label: 'Contracts', to: '/work-orders', icon: I.contracts, activePaths: ['/work-orders'], show: () => true },
-  { key: 'parties', label: 'Parties', to: '/stakeholders', icon: I.parties, activePaths: ['/stakeholders'], show: (r) => r !== 'supervisor' },
-  // Site Desk, Team & Profile deliberately live in the Workspace hub only (not the rail) — see WORKSPACE_PATHS.
+  // Contracts, Parties, Site Desk, Team & Profile live in the Workspace hub only — see WORKSPACE_PATHS.
 ];
 
-// The "Workspace" tab — a hub, not a route. It lights when on any page it holds (incl. Site Desk/Team/Profile).
-const WORKSPACE_PATHS = ['/insights', '/billing', '/inward-register', '/tasks', '/follow-up-rules', '/site-desk', '/desk', '/team', '/profile'];
+// The "Workspace" tab — a hub, not a route. It lights when on any page it holds.
+const WORKSPACE_PATHS = ['/insights', '/billing', '/inward-register', '/tasks', '/follow-up-rules', '/site-desk', '/desk', '/team', '/profile', '/work-orders', '/stakeholders'];
 
 // The contextual FAB: what each tab creates. null = nothing to create (the FAB steps aside).
 // 'book' is special — it opens a Money-out / Money-in menu (see the FAB handler), not a single route.
@@ -65,8 +63,6 @@ const FAB_BY_TAB: Record<string, { label: string; to: string; icon: ReactNode } 
   book: { label: 'New entry', to: '/ledger/new', icon: I.plus },
   bills: { label: 'New bill', to: '/bills?new=1', icon: <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M12 8v6M9 11h6" /></> },
   pos: { label: 'New PO', to: '/purchase-orders/new', icon: <><path d="M5 7h14l-1.5 12h-11z" /><path d="M9 7a3 3 0 0 1 6 0" /><path d="M12 11v5M9.5 13.5h5" /></> },
-  contracts: { label: 'New contract', to: '/work-orders/new', icon: <><path d="M7 3h7l4 4v14H7z" /><path d="M14 3v4h4" /><path d="M12 11v6M9 14h6" /></> },
-  parties: { label: 'New party', to: '/stakeholders?new=1', icon: <><circle cx="10" cy="8" r="3.2" /><path d="M4 19.5c.8-3.2 3-4.9 6-4.9s5.2 1.7 6 4.9" /><path d="M18 6v6M15 9h6" /></> },
   review: null, payables: null, att: null, workspace: null,
 };
 
@@ -90,8 +86,12 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
 
   const [scrolled, setScrolled] = useState(false);
   const [atEnd, setAtEnd] = useState(false);
+  const [overflow, setOverflow] = useState(false);   // does the rail actually scroll? (else no "more" arrow)
   const [sheet, setSheet] = useState<null | 'workspace' | 'quickadd'>(null);
   const [fabMenu, setFabMenu] = useState(false);   // Book's Money-out / Money-in chooser
+
+  // A short haptic nudge on every nav tap (as in the reference). No-op where unsupported.
+  const hapt = (ms: number | number[] = 6) => { try { navigator.vibrate?.(ms); } catch { /* unsupported */ } };
 
   const visible = useMemo(() => ALL_TABS.filter((t) => t.show(role)), [role]);
   const pinned = visible[0];
@@ -121,18 +121,23 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
     lamp.style.opacity = (tb.right > rr.left + 8 && tb.left < rr.right - 8) ? '1' : '0';
   }
 
-  // rail scroll → edge fades + pin shadow + lamp tracking
+  // rail scroll/resize → overflow detection + edge fades + pin shadow + lamp tracking. `overflow` gates
+  // the "more" arrow so it never floats when the rail already fits (nothing to scroll to).
   useEffect(() => {
     const r = railRef.current; if (!r) return;
-    const onScroll = () => {
+    const measure = () => {
+      const over = r.scrollWidth > r.clientWidth + 4;
+      setOverflow(over);
       setScrolled(r.scrollLeft > 6);
-      setAtEnd(r.scrollLeft + r.clientWidth >= r.scrollWidth - 10);
+      setAtEnd(!over || r.scrollLeft + r.clientWidth >= r.scrollWidth - 10);
       requestAnimationFrame(positionLamp);
     };
-    r.addEventListener('scroll', onScroll, { passive: true });
-    return () => r.removeEventListener('scroll', onScroll);
+    measure();
+    r.addEventListener('scroll', measure, { passive: true });
+    window.addEventListener('resize', measure);
+    return () => { r.removeEventListener('scroll', measure); window.removeEventListener('resize', measure); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [visible.length]);
 
   // active tab changed → recentre it in the rail + move the lamp
   useEffect(() => {
@@ -144,13 +149,8 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeKey]);
 
-  // Keep the lamp centred on viewport resize. (The capsule NEVER minimizes on page scroll — that toggle
-  // caused a flicker while scrolling up/down; the bar simply stays expanded, only hiding on full-screen forms.)
-  useEffect(() => {
-    window.addEventListener('resize', positionLamp);
-    return () => window.removeEventListener('resize', positionLamp);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // (The capsule NEVER minimizes on page scroll — that toggle flickered; the bar stays expanded, only
+  //  hiding on full-screen forms. Lamp re-centres on resize via the measure() effect above.)
 
   // close the FAB menu on any outside tap
   useEffect(() => {
@@ -160,16 +160,17 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
     return () => window.removeEventListener('pointerdown', h);
   }, [fabMenu]);
 
-  const go = (to: string) => { setSheet(null); setFabMenu(false); navigate(to); window.scrollTo({ top: 0 }); };
-  const goDir = (direction: 'out' | 'in') => { setFabMenu(false); navigate('/ledger/new', { state: { direction } }); window.scrollTo({ top: 0 }); };
+  const go = (to: string) => { hapt(6); setSheet(null); setFabMenu(false); navigate(to); window.scrollTo({ top: 0 }); };
+  const goDir = (direction: 'out' | 'in') => { hapt(6); setFabMenu(false); navigate('/ledger/new', { state: { direction } }); window.scrollTo({ top: 0 }); };
 
   // long-press on the FAB → universal quick-add
   const lp = useRef<ReturnType<typeof setTimeout> | null>(null);
   const held = useRef(false);
-  const fabDown = () => { held.current = false; lp.current = setTimeout(() => { held.current = true; setSheet('quickadd'); }, 420); };
+  const fabDown = () => { held.current = false; lp.current = setTimeout(() => { held.current = true; hapt([8, 25, 8]); setSheet('quickadd'); }, 420); };
   const fabUp = () => { if (lp.current) clearTimeout(lp.current); };
   const fabClick = () => {
     if (held.current) return;
+    hapt(8);
     // On the Book page the FAB is the money chooser (Out / In) — like the old ledger FAB.
     if (activeKey === 'book') { setFabMenu((v) => !v); return; }
     if (fab) go(fab.to);
@@ -195,10 +196,12 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
       <div ref={barRef} className={`mnav-bar${scrolled ? ' scrolled' : ''}${atEnd ? ' atend' : ''}${hidden ? ' gone' : ''}`}>
         <span ref={lampRef} className="mnav-lamp" />
 
-        {/* there's-more chevron at the rail edge */}
-        <button className="mnav-more" type="button" aria-label="More tabs" onClick={() => railRef.current?.scrollBy({ left: railRef.current.clientWidth, behavior: 'smooth' })}>
-          <svg viewBox="0 0 24 24" style={{ width: 13, height: 13, stroke: 'currentColor', fill: 'none', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }}>{I.chevron}</svg>
-        </button>
+        {/* there's-more chevron — only when the rail actually overflows (else it would float over nothing) */}
+        {overflow && (
+          <button className="mnav-more" type="button" aria-label="More tabs" onClick={() => { hapt(5); railRef.current?.scrollBy({ left: railRef.current.clientWidth, behavior: 'smooth' }); }}>
+            <svg viewBox="0 0 24 24" style={{ width: 13, height: 13, stroke: 'currentColor', fill: 'none', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }}>{I.chevron}</svg>
+          </button>
+        )}
 
         {/* pinned tab */}
         {pinned && <div className="mnav-pin">{renderTab(pinned, false)}</div>}
@@ -207,7 +210,7 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
         <div ref={railRef} className="mnav-rail">
           {rail.map((t) => renderTab(t, true))}
           {/* Workspace — the hub for everything else */}
-          <button className={`mnav-tab${activeKey === 'workspace' ? ' on' : ''}`} data-rail="1" type="button" onClick={() => setSheet('workspace')}>
+          <button className={`mnav-tab${activeKey === 'workspace' ? ' on' : ''}`} data-rail="1" type="button" onClick={() => { hapt(6); setSheet('workspace'); }}>
             <Svg>{I.workspace}</Svg><small>Workspace</small>
           </button>
         </div>
@@ -259,6 +262,7 @@ function WorkspaceHub({ role, onGo, onSignOut }: { role: Role; onGo: (to: string
   const cards = [
     { label: 'Site Desk', sub: 'sites active', to: '/site-desk', icon: I.sitedesk, show: true },
     { label: 'Contracts', sub: 'work orders', to: '/work-orders', icon: I.contracts, show: true },
+    { label: 'Parties', sub: 'vendors & workers', to: '/stakeholders', icon: I.parties, show: role !== 'supervisor' },
     { label: 'Insights', sub: 'spend & trends', to: '/insights', icon: I.insights, show: true },
     { label: 'Inward Register', sub: 'deliveries', to: '/inward-register', icon: I.inward, show: role !== 'supervisor' && role !== 'accountant' },
     { label: 'Client Billing', sub: 'invoices', to: '/billing', icon: I.billing, show: role !== 'supervisor' },
@@ -347,9 +351,9 @@ const CSS = `
   background:var(--b-clay); opacity:.85; box-shadow:0 0 6px rgba(232,147,95,.55)}
 .mnav-bar.min .mnav-lamp{opacity:0}
 
-.mnav-more{position:absolute; right:60px; top:50%; z-index:2; border:0; background:none; color:#8F7F6A; padding:6px 4px; cursor:pointer;
-  opacity:.7; transform:translateY(-58%); transition:opacity .35s}
-.mnav-bar.atend .mnav-more, .mnav-bar.min .mnav-more{opacity:0; pointer-events:none}
+.mnav-more{position:absolute; right:58px; top:50%; z-index:2; border:0; background:none; color:#A08C74; padding:6px 3px; cursor:pointer;
+  opacity:.8; transform:translateY(-50%); transition:opacity .3s}
+.mnav-bar.atend .mnav-more{opacity:0; pointer-events:none}
 
 .mnav-fab{flex:none; width:46px; height:46px; border-radius:50%; border:0; background:#C75B2B; color:#FFF7EF; margin-left:2px;
   box-shadow:0 8px 18px -8px rgba(199,91,43,.7); cursor:pointer; position:relative; z-index:1; display:grid; place-items:center;
