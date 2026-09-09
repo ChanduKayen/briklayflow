@@ -1735,6 +1735,8 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
           </div>
         </div>
       )}
+      {/* Desktop-only now: on mobile the money-out/in create action lives on the nav capsule's FAB,
+          so this corner FAB is hidden there to avoid a double button (see NewTxnFab: hidden md:flex). */}
       <NewTxnFab />
     </div>
   );

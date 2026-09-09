@@ -52,25 +52,22 @@ const ALL_TABS: Tab[] = [
   { key: 'pos', label: 'POs', to: '/purchase-orders', icon: I.pos, activePaths: ['/purchase-orders', '/orders'], show: (r) => r !== 'supervisor' && r !== 'accountant' },
   { key: 'att', label: 'Attendance', to: '/attendance', icon: I.att, activePaths: ['/attendance'], show: () => true },
   { key: 'contracts', label: 'Contracts', to: '/work-orders', icon: I.contracts, activePaths: ['/work-orders'], show: () => true },
-  { key: 'sitedesk', label: 'Site Desk', to: '/site-desk', icon: I.sitedesk, activePaths: ['/site-desk', '/desk'], show: () => true },
   { key: 'parties', label: 'Parties', to: '/stakeholders', icon: I.parties, activePaths: ['/stakeholders'], show: (r) => r !== 'supervisor' },
-  { key: 'team', label: 'Team', to: '/team', icon: I.team, activePaths: ['/team'], show: (r) => r === 'principal' || r === 'management' },
-  { key: 'profile', label: 'Profile', to: '/profile', icon: I.profile, activePaths: ['/profile'], show: () => true },
+  // Site Desk, Team & Profile deliberately live in the Workspace hub only (not the rail) — see WORKSPACE_PATHS.
 ];
 
-// The "Workspace" tab — a hub, not a route. It lights when on any long-tail page it holds.
-const WORKSPACE_PATHS = ['/insights', '/billing', '/inward-register', '/tasks', '/follow-up-rules'];
+// The "Workspace" tab — a hub, not a route. It lights when on any page it holds (incl. Site Desk/Team/Profile).
+const WORKSPACE_PATHS = ['/insights', '/billing', '/inward-register', '/tasks', '/follow-up-rules', '/site-desk', '/desk', '/team', '/profile'];
 
 // The contextual FAB: what each tab creates. null = nothing to create (the FAB steps aside).
+// 'book' is special — it opens a Money-out / Money-in menu (see the FAB handler), not a single route.
 const FAB_BY_TAB: Record<string, { label: string; to: string; icon: ReactNode } | null> = {
   book: { label: 'New entry', to: '/ledger/new', icon: I.plus },
-  bills: { label: 'New bill', to: '/bills/new', icon: <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M12 8v6M9 11h6" /></> },
+  bills: { label: 'New bill', to: '/bills?new=1', icon: <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M12 8v6M9 11h6" /></> },
   pos: { label: 'New PO', to: '/purchase-orders/new', icon: <><path d="M5 7h14l-1.5 12h-11z" /><path d="M9 7a3 3 0 0 1 6 0" /><path d="M12 11v5M9.5 13.5h5" /></> },
   contracts: { label: 'New contract', to: '/work-orders/new', icon: <><path d="M7 3h7l4 4v14H7z" /><path d="M14 3v4h4" /><path d="M12 11v6M9 14h6" /></> },
-  sitedesk: { label: 'New site', to: '/projects/new', icon: <><path d="M4 20V9l8-5 8 5v11" /><path d="M12 12v5M9.5 14.5h5" /></> },
   parties: { label: 'New party', to: '/stakeholders?new=1', icon: <><circle cx="10" cy="8" r="3.2" /><path d="M4 19.5c.8-3.2 3-4.9 6-4.9s5.2 1.7 6 4.9" /><path d="M18 6v6M15 9h6" /></> },
-  team: { label: 'Invite member', to: '/team?invite=1', icon: <><circle cx="10" cy="8" r="3.2" /><path d="M4 19.5c.8-3.2 3-4.9 6-4.9s5.2 1.7 6 4.9" /><path d="M18 6v6M15 9h6" /></> },
-  review: null, payables: null, att: null, profile: null, workspace: null,
+  review: null, payables: null, att: null, workspace: null,
 };
 
 const QUICK_ADD = [
@@ -84,7 +81,7 @@ const Svg = ({ children, w = 22 }: { children: ReactNode; w?: number }) => (
   <svg viewBox="0 0 24 24" style={{ width: w, height: w, stroke: 'currentColor', fill: 'none', strokeWidth: 1.75, strokeLinecap: 'round', strokeLinejoin: 'round' }}>{children}</svg>
 );
 
-export function MobileNavBar({ role, poBadge = 0, hidden = false }: { role: Role; poBadge?: number; hidden?: boolean }) {
+export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: { role: Role; poBadge?: number; hidden?: boolean; onSignOut?: () => void }) {
   const location = useLocation();
   const navigate = useNavigate();
   const railRef = useRef<HTMLDivElement>(null);
@@ -95,6 +92,7 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false }: { role: Role
   const [atEnd, setAtEnd] = useState(false);
   const [min, setMin] = useState(false);
   const [sheet, setSheet] = useState<null | 'workspace' | 'quickadd'>(null);
+  const [fabMenu, setFabMenu] = useState(false);   // Book's Money-out / Money-in chooser
 
   const visible = useMemo(() => ALL_TABS.filter((t) => t.show(role)), [role]);
   const pinned = visible[0];
@@ -162,14 +160,37 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false }: { role: Role
     return () => { window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', positionLamp); };
   }, []);
 
-  const go = (to: string) => { setSheet(null); navigate(to); window.scrollTo({ top: 0 }); };
+  // Re-centre the lamp AFTER the capsule finishes expanding from the mini pill (the layout width
+  // changes, so a position taken mid-transition lands off — most visibly under the pinned Book).
+  useEffect(() => {
+    if (min) return;
+    const id = window.setTimeout(positionLamp, 340);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [min]);
+
+  // close the FAB menu on any outside tap
+  useEffect(() => {
+    if (!fabMenu) return;
+    const h = () => setFabMenu(false);
+    window.addEventListener('pointerdown', h);
+    return () => window.removeEventListener('pointerdown', h);
+  }, [fabMenu]);
+
+  const go = (to: string) => { setSheet(null); setFabMenu(false); navigate(to); window.scrollTo({ top: 0 }); };
+  const goDir = (direction: 'out' | 'in') => { setFabMenu(false); navigate('/ledger/new', { state: { direction } }); window.scrollTo({ top: 0 }); };
 
   // long-press on the FAB → universal quick-add
   const lp = useRef<ReturnType<typeof setTimeout> | null>(null);
   const held = useRef(false);
   const fabDown = () => { held.current = false; lp.current = setTimeout(() => { held.current = true; setSheet('quickadd'); }, 420); };
   const fabUp = () => { if (lp.current) clearTimeout(lp.current); };
-  const fabClick = () => { if (held.current) return; if (fab) go(fab.to); };
+  const fabClick = () => {
+    if (held.current) return;
+    // On the Book page the FAB is the money chooser (Out / In) — like the old ledger FAB.
+    if (activeKey === 'book') { setFabMenu((v) => !v); return; }
+    if (fab) go(fab.to);
+  };
 
   const activeTab = visible.find((t) => t.key === activeKey);
 
@@ -218,17 +239,31 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false }: { role: Role
         </div>
 
         {/* contextual FAB */}
-        <button className={`mnav-fab${fab ? '' : ' hide'}`} type="button" aria-label={fab?.label ?? 'Create'}
-          onPointerDown={fabDown} onPointerUp={fabUp} onPointerLeave={fabUp} onPointerCancel={fabUp} onClick={fabClick}>
+        <button className={`mnav-fab${fab ? '' : ' hide'}${fabMenu ? ' open' : ''}`} type="button" aria-label={fab?.label ?? 'Create'}
+          onPointerDown={(e) => { e.stopPropagation(); fabDown(); }} onPointerUp={fabUp} onPointerLeave={fabUp} onPointerCancel={fabUp} onClick={fabClick}>
           <Svg w={20}>{fab?.icon ?? I.plus}</Svg>
         </button>
       </div>
+
+      {/* Book's Money-out / Money-in chooser — the old ledger FAB, kept (elegant, two options) */}
+      {fabMenu && activeKey === 'book' && (
+        <div className="mnav-fabmenu" onPointerDown={(e) => e.stopPropagation()}>
+          <button type="button" className="mnav-mopt out" onClick={() => goDir('out')}>
+            <span>Money <u>O</u>ut</span>
+            <span className="mnav-mic"><svg viewBox="0 0 24 24"><path d="M7 17L17 7M9 7h8v8" /></svg></span>
+          </button>
+          <button type="button" className="mnav-mopt in" onClick={() => goDir('in')}>
+            <span>Money <u>I</u>n</span>
+            <span className="mnav-mic"><svg viewBox="0 0 24 24"><path d="M17 7L7 17M15 17H7V9" /></svg></span>
+          </button>
+        </div>
+      )}
 
       {/* sheets */}
       <div className={`mnav-shade${sheet ? ' show' : ''}`} onClick={() => setSheet(null)} />
       <div className={`mnav-sheet${sheet ? ' show' : ''}`}>
         <div className="mnav-grab" />
-        {sheet === 'workspace' && <WorkspaceHub role={role} onGo={go} />}
+        {sheet === 'workspace' && <WorkspaceHub role={role} onGo={go} onSignOut={onSignOut} />}
         {sheet === 'quickadd' && (
           <>
             <div className="mnav-qtitle">Quick add</div>
@@ -246,7 +281,7 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false }: { role: Role
 }
 
 // ── the Workspace hub (the reference's card grid) ──
-function WorkspaceHub({ role, onGo }: { role: Role; onGo: (to: string) => void }) {
+function WorkspaceHub({ role, onGo, onSignOut }: { role: Role; onGo: (to: string) => void; onSignOut?: () => void }) {
   const cards = [
     { label: 'Site Desk', sub: 'sites active', to: '/site-desk', icon: I.sitedesk, show: true },
     { label: 'Contracts', sub: 'work orders', to: '/work-orders', icon: I.contracts, show: true },
@@ -277,6 +312,12 @@ function WorkspaceHub({ role, onGo }: { role: Role; onGo: (to: string) => void }
           <b>{c.label}</b><span className="mnav-ch">›</span>
         </button>
       ))}
+      {onSignOut && (
+        <button type="button" className="mnav-signout" onClick={onSignOut}>
+          <span className="mnav-hic"><svg viewBox="0 0 24 24" style={{ width: 16, height: 16, stroke: 'currentColor', fill: 'none', strokeWidth: 1.7, strokeLinecap: 'round', strokeLinejoin: 'round' }}><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3" /><path d="M10 17l-5-5 5-5" /><path d="M15 12H5" /></svg></span>
+          <b>Sign out</b>
+        </button>
+      )}
     </>
   );
 }
@@ -341,6 +382,31 @@ const CSS = `
   transition:transform .3s cubic-bezier(.2,.9,.3,1.4), width .3s, height .3s, opacity .25s, margin .3s}
 .mnav-fab:active{transform:scale(.9)}
 .mnav-fab.hide{width:0; height:0; opacity:0; margin:0; pointer-events:none}
+.mnav-fab svg{transition:transform .22s cubic-bezier(.2,.9,.3,1.4)}
+.mnav-fab.open svg{transform:rotate(45deg)}
+
+/* Book's Money-out / Money-in chooser — floats above the capsule, right-aligned to the FAB */
+.mnav-fabmenu{position:fixed; right:calc(20px + env(safe-area-inset-right)); bottom:calc(84px + env(safe-area-inset-bottom)); z-index:41;
+  display:flex; flex-direction:column; align-items:flex-end; gap:10px; font-family:'DM Sans',system-ui,sans-serif; animation:mnavpop .18s cubic-bezier(.2,.9,.3,1.4) both}
+@keyframes mnavpop{from{opacity:0; transform:translateY(8px) scale(.96)}to{opacity:1; transform:none}}
+.mnav-mopt{display:inline-flex; align-items:center; gap:10px; padding:9px 8px 9px 14px; border-radius:999px; cursor:pointer;
+  background:#FFFDF9; border:1px solid #E4DCD0; color:#2F2622; box-shadow:0 10px 26px -12px rgba(47,38,34,.4); font-size:13px; font-weight:600;
+  transition:background .15s, color .15s, box-shadow .16s, transform .12s}
+.mnav-mopt:active{transform:scale(.97)}
+.mnav-mopt u{text-underline-offset:3px; text-decoration-thickness:1px; text-decoration-color:color-mix(in srgb, currentColor 45%, transparent)}
+.mnav-mopt.out:hover{background:#C4613A; color:#fff; box-shadow:0 12px 26px -12px rgba(196,97,58,.6)}
+.mnav-mopt.in:hover{background:#5F7F5B; color:#fff; box-shadow:0 12px 26px -12px rgba(95,127,91,.6)}
+.mnav-mic{display:inline-grid; place-items:center; width:26px; height:26px; border-radius:50%; flex:none}
+.mnav-mopt.out .mnav-mic{background:rgba(196,97,58,.14); color:#C4613A}
+.mnav-mopt.in .mnav-mic{background:rgba(95,127,91,.16); color:#5F7F5B}
+.mnav-mopt:hover .mnav-mic{background:rgba(255,255,255,.22); color:#fff}
+.mnav-mic svg{width:15px; height:15px; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round}
+
+.mnav-signout{display:flex; align-items:center; gap:13px; padding:14px 16px; margin-top:9px; width:100%; border-radius:16px; cursor:pointer;
+  background:rgba(178,64,42,.06); border:1px solid rgba(178,64,42,.14); color:#B2402A; font-family:'DM Sans',system-ui,sans-serif; text-align:left}
+.mnav-signout:active{transform:scale(.98)}
+.mnav-signout b{font-size:14px; font-weight:700}
+.mnav-signout .mnav-hic{background:rgba(178,64,42,.10); border-color:rgba(178,64,42,.18); color:#B2402A; margin:0}
 
 /* minimized: capsule shrinks to the active tab pill */
 .mnav-mini{display:flex; align-items:center; gap:8px; border:0; background:none; color:var(--b-clay); cursor:pointer;

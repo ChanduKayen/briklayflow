@@ -281,6 +281,8 @@ export default function Bills() {
   // ?party=<id> — arriving from the search's "Bills" row for one vendor.
   const [searchParams] = useSearchParams();
   const partyId = searchParams.get('party');
+  // ?new=1 — the mobile nav FAB opens the add-bill wizard straight away.
+  useEffect(() => { if (searchParams.get('new') === '1') setManualOpen(true); }, [searchParams]);
   const shown = useMemo(() => bills.filter(b =>
     (!partyId || b.vendorId === partyId) &&
     (!site || b.site === site) && (!vendor || b.vendor === vendor) && (!status || b.status === status) &&

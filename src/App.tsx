@@ -768,6 +768,7 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
   useEffect(() => warmAllTabs(), []);
   const { data: profile } = useUserProfile(session.user.id);
   const role = profile?.role ?? '';
+  const { triggerSignOut } = useSignOut();
 
   const isActivePath = (path: string) =>
     path === '/' ? location.pathname === '/' : location.pathname === path || location.pathname.startsWith(path + '/');
@@ -875,7 +876,7 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
   // ── Global context nav — the floating capsule (pinned Book + scrollable rail + contextual FAB +
   //    Workspace hub). It owns the global create action, so the standalone FAB steps aside off-project.
   //    Only fully hide it on full-screen forms; scroll-down minimizes it to a pill (its own behaviour). ──
-  return <MobileNavBar role={role} poBadge={poUntalliedCount} hidden={hideForRoute} />;
+  return <MobileNavBar role={role} poBadge={poUntalliedCount} hidden={hideForRoute} onSignOut={triggerSignOut} />;
 }
 
 function MoreNavSheet({

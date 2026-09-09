@@ -77,7 +77,9 @@ export function NewTxnFab() {
   return (
     <div
       ref={wrapRef}
-      className="ntf-wrap fixed z-40 flex flex-col items-end gap-3"
+      // Desktop-only: on mobile (<md) the money-out/in create lives on the nav capsule's FAB, so this
+      // corner FAB would be a second button. Hidden below md.
+      className="ntf-wrap fixed z-40 hidden md:flex flex-col items-end gap-3"
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
     >
