@@ -1,7 +1,7 @@
 // Bills — vendor-bill register (list + detail), a port of bills-module-mock.html scoped under .blx.
 // Frontend-first over existing data (see billsApi). /bills is the list; /bills/:billId the detail.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { loadBills, loadBillDetail, deleteBill, extractBill, type BillRow, type BillStatus } from '../lib/billsApi';
 import { intakeCommit } from '../lib/billIntake';
@@ -404,8 +404,16 @@ function BillDetailView({ id }: { id: string }) {
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // Back goes where you came FROM. Opening a bill from a PO and being returned to the bills register
+  // loses the thread you were pulling — you were reading that order, not the register.
+  const { state } = useLocation();
+  const from = (state ?? null) as { backTo?: string; backLabel?: string } | null;
+  const backTo = from?.backTo ?? '/bills';
+  const backLabel = from?.backLabel ?? 'Bills';
+  const goBack = () => navigate(backTo);
+
   if (isLoading) return <div className="blx"><style>{BLX_CSS}</style><div className="shell"><div className="empty">Loading…</div></div></div>;
-  if (!b) return <div className="blx"><style>{BLX_CSS}</style><div className="shell"><button className="backline" onClick={() => navigate('/bills')}>← Bills</button><div className="empty">Bill not found.</div></div></div>;
+  if (!b) return <div className="blx"><style>{BLX_CSS}</style><div className="shell"><button className="backline" onClick={goBack}>← {backLabel}</button><div className="empty">Bill not found.</div></div></div>;
 
   const remaining = Math.max(0, b.amount - b.paid);
   const pct = b.amount > 0 ? Math.min(100, Math.round((b.paid / b.amount) * 100)) : 0;
@@ -425,7 +433,7 @@ function BillDetailView({ id }: { id: string }) {
       qc.invalidateQueries({ queryKey: ['weekly_payments'] });
       qc.invalidateQueries({ queryKey: ['po_detail'] });
       qc.invalidateQueries({ queryKey: ['po_list_sheet'] });
-      navigate('/bills');
+      goBack();
     } catch (e) { show((e as Error)?.message || 'Could not delete the bill', { type: 'error' }); setDeleting(false); }
   };
 
@@ -433,7 +441,7 @@ function BillDetailView({ id }: { id: string }) {
     <div className="blx">
       <style>{BLX_CSS}</style>
       <div className="shell">
-        <button className="backline" onClick={() => navigate('/bills')}>← Bills</button>
+        <button className="backline" onClick={goBack}>← {backLabel}</button>
 
         <header className="dethead">
           <div>

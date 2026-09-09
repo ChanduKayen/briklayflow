@@ -32,12 +32,15 @@ const ATDX_CSS = `
 .atdx :focus-visible{outline:2px solid var(--walnut);outline-offset:2px;border-radius:6px}
 .atdx .mono{font-family:"DM Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
 .atdx .wrap{width:100%;max-width:1180px;margin:0 auto}
-.atdx .top{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;margin-bottom:22px;flex-wrap:wrap}
+/* The two halves must not push each other around. With flex-end the SHORTER column drops, so the
+   title sank whenever the stats were taller than it — which is any width where the lede fits on
+   one line, or none at all. Pinned to the top; the stats are nudged down to sit on the title's cap. */
+.atdx .top{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;margin-bottom:22px;flex-wrap:wrap}
 .atdx h1{font:600 36px/1.05 "Playfair Display",serif;color:var(--ink)}
 .atdx .lede{color:var(--soft);margin-top:6px;font-size:13.5px;max-width:640px}
 .atdx .lede .wa{color:#25a55a;font-weight:500}
 /* hero stat cluster, top-right */
-.atdx .hero{display:flex;gap:34px;text-align:right;align-items:flex-end}
+.atdx .hero{display:flex;gap:34px;text-align:right;align-items:flex-end;padding-top:6px}
 .atdx .hero .h b{display:block;font-family:"DM Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums;font-size:24px;font-weight:500;color:var(--ink)}
 .atdx .hero .h b.warn{color:var(--terracotta)}
 .atdx .hero .h span{font-family:"DM Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--soft)}
@@ -273,11 +276,11 @@ const ATDX_CSS = `
 .atdx .kp-h{font-size:13.5px;color:var(--walnut-2)}
 .atdx .kp-h b{color:var(--walnut);font-weight:600}
 .atdx .kp-opts{display:flex;gap:12px;flex-wrap:wrap}
-.atdx .kindbtn{position:relative;display:flex;align-items:center;gap:11px;min-width:212px;padding:12px 16px;border-radius:12px;border:1px solid var(--line-2);background:var(--paper);cursor:pointer;text-align:left;overflow:hidden;transition:border-color .16s,box-shadow .2s,transform .12s,opacity .2s,filter .2s}
+.atdx .kindbtn{position:relative;display:flex;align-items:center;gap:11px;min-width:264px;padding:12px 16px;border-radius:12px;border:1px solid var(--line-2);background:var(--paper);cursor:pointer;text-align:left;overflow:hidden;transition:border-color .16s,box-shadow .2s,transform .12s,opacity .2s,filter .2s}
 .atdx .kindbtn .ic svg{width:19px;height:19px;stroke:var(--terracotta);stroke-width:1.9;fill:none;stroke-linecap:round;stroke-linejoin:round}
-.atdx .kindbtn .kmeta{display:flex;flex-direction:column;gap:1px}
+.atdx .kindbtn .kmeta{display:flex;flex-direction:column;gap:1px;min-width:0}
 .atdx .kindbtn .kt{font-size:14px;font-weight:600;color:var(--walnut)}
-.atdx .kindbtn .ks{font-size:12px;color:var(--walnut-3)}
+.atdx .kindbtn .ks{font-size:12px;color:var(--walnut-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .atdx .kindbtn:hover{border-color:var(--terracotta);box-shadow:0 5px 16px -9px rgba(59,47,39,.45);transform:translateY(-1px)}
 .atdx .kindbtn:active{transform:translateY(0) scale(.985)}
 .atdx .kindbtn.dim{opacity:.38;filter:grayscale(.35);pointer-events:none;transform:none}
@@ -1037,15 +1040,15 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     const td = q('#add-' + si); if (!td) return;
     const check = `<span class="ok"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7" /></svg></span><span class="spin" />`;
     td.innerHTML = `<div class="kindpick">
-        <div class="kp-h">Add <b>${escapeHtml(p.name)}</b>${p.category ? ` · ${escapeHtml(p.category)}` : ''} as…</div>
+        <div class="kp-h">Add <b>${escapeHtml(p.name)}</b>${p.category ? ` · ${escapeHtml(p.category)}` : ''} —</div>
         <div class="kp-opts">
           <button class="kindbtn" data-kind="worker">
             <span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.1" /><path d="M6 20c0-3.3 2.7-6 6-6s6 2.7 6 6" /></svg></span>
-            <span class="kmeta"><span class="kt">Single worker</span><span class="ks">One person · daily wage</span></span>${check}
+            <span class="kmeta"><span class="kt">Working alone</span><span class="ks">Only this person is on site · a daily wage</span></span>${check}
           </button>
           <button class="kindbtn" data-kind="crew">
             <span class="ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="2.6" /><path d="M4 19c0-2.8 2.2-5 5-5s5 2.2 5 5" /><circle cx="17" cy="8.5" r="2.2" /><path d="M15.2 14.1c2.2.5 3.8 2.4 3.8 4.8" /></svg></span>
-            <span class="kmeta"><span class="kt">Crew / gang</span><span class="ks">A contractor's team</span></span>${check}
+            <span class="kmeta"><span class="kt">Bringing a team</span><span class="ks">Their whole crew is on site · paid as one</span></span>${check}
           </button>
         </div>
         <button class="x kpx">cancel</button>

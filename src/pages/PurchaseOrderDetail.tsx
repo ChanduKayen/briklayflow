@@ -1288,7 +1288,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
               <div className="m-hh">Vendor bill{billEntities.length > 1 ? 's' : ''}</div>
               <div className="m-billrow" style={{ flexWrap: 'wrap' }}>
                 {billEntities.map(b => (
-                  <button key={b.id} className="m-brbtn" onClick={() => navigate(`/bills/${encodeURIComponent('bl~' + b.id)}`)}>
+                  <button key={b.id} className="m-brbtn" onClick={() => navigate(`/bills/${encodeURIComponent('bl~' + b.id)}`, { state: { backTo: `/purchase-orders/${poId}`, backLabel: poId } })}>
                     <svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5" /></svg>{b.billNo ? `Bill ${b.billNo}` : 'Bill'} · {inr0(b.amount)}
                   </button>
                 ))}
@@ -1481,7 +1481,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
               <div className="act" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 {/* The PO holds LINKS to its bill entities, not the bill itself — each opens the bill. */}
                 {billEntities.map(b => (
-                  <button key={b.id} className="btn ghost sm" onClick={() => navigate(`/bills/${encodeURIComponent('bl~' + b.id)}`)}>
+                  <button key={b.id} className="btn ghost sm" onClick={() => navigate(`/bills/${encodeURIComponent('bl~' + b.id)}`, { state: { backTo: `/purchase-orders/${poId}`, backLabel: poId } })}>
                     <svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5" /></svg>
                     {b.billNo ? `Bill ${b.billNo}` : 'Bill'} · {inr0(b.amount)}
                   </button>
