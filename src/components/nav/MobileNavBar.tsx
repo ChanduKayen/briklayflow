@@ -82,7 +82,7 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
   const navigate = useNavigate();
   const railRef = useRef<HTMLDivElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
-  const lampRef = useRef<HTMLSpanElement>(null);
+  const detentRef = useRef(-1);   // last dial detent crossed while scrolling the rail (for haptics)
 
   const [scrolled, setScrolled] = useState(false);
   const [atEnd, setAtEnd] = useState(false);
@@ -108,53 +108,39 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
     barRef.current?.querySelectorAll('.mnav-tab svg *').forEach((el) => el.setAttribute('pathLength', '1'));
   }, []);
 
-  function positionLamp() {
-    const bar = barRef.current, lamp = lampRef.current, r = railRef.current;
-    if (!bar || !lamp) return;
-    const on = bar.querySelector('.mnav-tab.on') as HTMLElement | null;
-    if (!on) { lamp.style.opacity = '0'; return; }
-    const bb = bar.getBoundingClientRect(), tb = on.getBoundingClientRect();
-    lamp.style.left = (tb.left - bb.left + tb.width / 2) + 'px';
-    const inRail = on.closest('.mnav-rail');
-    if (!inRail || !r) { lamp.style.opacity = '1'; return; }
-    const rr = r.getBoundingClientRect();
-    lamp.style.opacity = (tb.right > rr.left + 8 && tb.left < rr.right - 8) ? '1' : '0';
-  }
-
-  // rail scroll/resize → overflow detection + edge fades + pin shadow + lamp tracking. `overflow` gates
-  // the "more" arrow so it never floats when the rail already fits (nothing to scroll to).
+  // rail scroll/resize → overflow detection + edge fades + pin shadow + DIAL-DETENT HAPTICS. The glow is a
+  // per-tab CSS effect now (never a JS-positioned element), so there is nothing to reposition — that was the
+  // source of the misplacement. As the rail scrolls, each tab crossing a detent gives a tiny "tick", so it
+  // feels like turning a physical dial. `overflow` gates the "more" arrow.
   useEffect(() => {
     const r = railRef.current; if (!r) return;
+    const TAB_W = 63;
     const measure = () => {
       const over = r.scrollWidth > r.clientWidth + 4;
       setOverflow(over);
       setScrolled(r.scrollLeft > 6);
       setAtEnd(!over || r.scrollLeft + r.clientWidth >= r.scrollWidth - 10);
-      requestAnimationFrame(positionLamp);
+      const d = Math.round(r.scrollLeft / TAB_W);
+      if (d !== detentRef.current) { detentRef.current = d; hapt(3); }   // the dial tick
     };
     measure();
+    detentRef.current = Math.round(r.scrollLeft / TAB_W);
     r.addEventListener('scroll', measure, { passive: true });
     window.addEventListener('resize', measure);
     return () => { r.removeEventListener('scroll', measure); window.removeEventListener('resize', measure); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible.length]);
 
-  // active tab changed → recentre it in the rail + move the lamp. The rail scroll is animated, so a single
-  // early positionLamp lands the glow where the tab WAS (visibly off for Payables/Attendance/Workspace).
-  // Re-run it a few times across the ~300ms scroll so the lamp settles under the tab's final resting place.
+  // active tab changed → recentre it in the rail (the glow is per-tab, so it rides along automatically).
   useEffect(() => {
     const bar = barRef.current; if (!bar) return;
     const on = bar.querySelector('.mnav-tab.on') as HTMLElement | null;
     if (on && on.closest('.mnav-rail')) on.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-    const raf = requestAnimationFrame(positionLamp);
-    const t1 = window.setTimeout(positionLamp, 180);
-    const t2 = window.setTimeout(positionLamp, 380);
-    return () => { cancelAnimationFrame(raf); clearTimeout(t1); clearTimeout(t2); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeKey]);
 
   // (The capsule NEVER minimizes on page scroll — that toggle flickered; the bar stays expanded, only
-  //  hiding on full-screen forms. Lamp re-centres on resize via the measure() effect above.)
+  //  hiding on full-screen forms.)
 
   // close the FAB menu on any outside tap
   useEffect(() => {
@@ -198,8 +184,6 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
     <>
       <style>{CSS}</style>
       <div ref={barRef} className={`mnav-bar${scrolled ? ' scrolled' : ''}${atEnd ? ' atend' : ''}${hidden ? ' gone' : ''}`}>
-        <span ref={lampRef} className="mnav-lamp" />
-
         {/* there's-more chevron — only when the rail actually overflows (else it would float over nothing) */}
         {overflow && (
           <button className="mnav-more" type="button" aria-label="More tabs" onClick={() => { hapt(5); railRef.current?.scrollBy({ left: railRef.current.clientWidth, behavior: 'smooth' }); }}>
@@ -325,8 +309,12 @@ const CSS = `
 
 .mnav-rail{flex:1; display:flex; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; padding:0 14px 0 2px; max-width:999px;
   transition:max-width .32s, opacity .25s;
+  /* The rail owns horizontal gestures: a sideways swipe here scrolls the rail, NEVER the page, and its
+     scroll never chains out to the body. Gentle snap + the detent haptic give a physical-dial feel. */
+  touch-action:pan-x; overscroll-behavior:contain; scroll-snap-type:x proximity;
   -webkit-mask-image:linear-gradient(to right,#000 0,#000 calc(100% - 30px),transparent);
   mask-image:linear-gradient(to right,#000 0,#000 calc(100% - 30px),transparent)}
+.mnav-tab{scroll-snap-align:center}
 .mnav-bar.scrolled .mnav-rail{
   -webkit-mask-image:linear-gradient(to right,transparent 0,#000 22px,#000 calc(100% - 34px),transparent);
   mask-image:linear-gradient(to right,transparent 0,#000 22px,#000 calc(100% - 34px),transparent)}
@@ -351,12 +339,15 @@ const CSS = `
 .mnav-badge{position:absolute; top:-5px; right:-9px; min-width:15px; height:15px; padding:0 3px; border-radius:99px; background:#D0432C; color:#FFF7EF;
   font-size:9px; font-weight:700; line-height:15px; text-align:center; box-shadow:0 0 0 1.5px #191009}
 
-.mnav-lamp{position:absolute; top:0; bottom:0; width:64px; pointer-events:none; z-index:0;
-  background:radial-gradient(ellipse 46% 40% at 50% 32%, rgba(232,147,95,.32), rgba(232,147,95,.09) 46%, transparent 62%);
-  transform:translateX(-50%); left:37px; transition:left .5s cubic-bezier(.2,.85,.25,1), opacity .3s}
-.mnav-lamp::after{content:''; position:absolute; left:50%; top:5px; width:22px; height:2px; border-radius:99px; transform:translateX(-50%);
-  background:var(--b-clay); opacity:.85; box-shadow:0 0 6px rgba(232,147,95,.55)}
-.mnav-bar.min .mnav-lamp{opacity:0}
+/* THE LAMP, PER TAB — a warm pool of light + a filament, drawn behind the ACTIVE tab itself. Because it
+   lives on the tab, it is always perfectly centred and rides the rail as it scrolls — no JS positioning,
+   so it can never land off (the old misplacement under Payables/Attendance/Workspace is gone). */
+.mnav-tab::before{content:''; position:absolute; inset:-1px 0 0; z-index:0; pointer-events:none; opacity:0;
+  background:radial-gradient(ellipse 62% 46% at 50% 34%, rgba(232,147,95,.34), rgba(232,147,95,.10) 46%, transparent 64%);
+  transition:opacity .3s}
+.mnav-tab.on::before{opacity:1}
+.mnav-tab.on::after{content:''; position:absolute; top:5px; left:50%; width:22px; height:2px; border-radius:99px; transform:translateX(-50%);
+  background:var(--b-clay); opacity:.9; box-shadow:0 0 6px rgba(232,147,95,.55); z-index:0}
 
 .mnav-more{position:absolute; right:58px; top:50%; z-index:2; border:0; background:none; color:#A08C74; padding:6px 3px; cursor:pointer;
   opacity:.8; transform:translateY(-50%); transition:opacity .3s}

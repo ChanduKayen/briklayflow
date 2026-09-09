@@ -101,7 +101,6 @@ const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const ProcurementRequests = lazy(() => import('./pages/ProcurementRequests'));
 const ProcurementQuotes = lazy(() => import('./pages/ProcurementQuotes'));
 const ProcurementOrders = lazy(() => import('./pages/ProcurementOrders'));
-import { FloatingActionButton } from './components/FloatingActionButton';
 import { ownsBottomBar } from './lib/bottomChrome';
 import BottomSheet from './components/BottomSheet';
 import GlobalRefetchIndicator from './components/GlobalRefetchIndicator';
@@ -653,8 +652,8 @@ function App() {
         onClose={() => setShowMoreSheet(false)}
       />
 
-      {/* FAB â€" mobile only */}
-      <FloatingActionButton />
+      {/* The mobile create action now lives on the nav capsule's contextual FAB (MobileNavBar);
+          the old standalone global FAB is retired. */}
     </div>
 
     {/* Background-refetch progress bar (cache-first signal) */}
