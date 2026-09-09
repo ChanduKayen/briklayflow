@@ -92,6 +92,7 @@ import './money_single.test';
 import './project_grounding.test';
 import './financial_doc.test';
 import './bill.test';
+import './payee_match_quality.test';
 import { runAll } from './harness';
 
 await runAll();

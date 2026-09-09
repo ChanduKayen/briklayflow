@@ -107,8 +107,9 @@ function applyPrefix(msg: OutMessage, prefix?: string): OutMessage {
 }
 
 async function loadStakeholders(supabase: any, orgId: string) {
-  const { data } = await supabase.from('stakeholders').select('stakeholder_id, name').eq('org_id', orgId)
-  return (data ?? []) as { stakeholder_id: string; name: string }[]
+  // type + category feed the role-aware payee matcher (disambiguates same-name people: "Raju supervisor").
+  const { data } = await supabase.from('stakeholders').select('stakeholder_id, name, type, category').eq('org_id', orgId)
+  return (data ?? []) as { stakeholder_id: string; name: string; type?: string | null; category?: string | null }[]
 }
 async function loadActiveProjects(supabase: any, orgId: string) {
   const { data } = await supabase.from('projects').select('project_id, name').eq('org_id', orgId).eq('status', 'Active')
@@ -200,6 +201,7 @@ type Plan = {
   slots: Record<string, unknown>
   payeeDisplay: string | null
   payeeMatched: boolean
+  suggestedPayeeName: string | null   // a strong near-match we didn't auto-link (soft-confirm in the reply)
   amount: number | null
   projectName: string | null   // only when auto-linked
   projectRaw: string | null    // mentioned but unmatched
@@ -235,13 +237,13 @@ function projectGroundedInMessage(project: string | null, text: string): boolean
  */
 export function buildPlan(
   ext: TxnExtract,
-  stakeholders: { stakeholder_id: string; name: string }[],
+  stakeholders: { stakeholder_id: string; name: string; type?: string | null; category?: string | null }[],
   projects: { project_id: string; name: string }[],
   from: string,
   text: string,
 ): Plan {
   const payeeM = matchPayee(ext.payee, stakeholders)
-  const payeeAuto = payeeM.band === 'auto'
+  const payeeAuto = payeeM.band === 'auto'   // confident AND unambiguous (a same-name tie is demoted in match())
   const payeeId = payeeAuto ? payeeM.id : null
   const payeeDisplay = payeeAuto ? payeeM.name! : (ext.payee ?? null)   // never the guess
   const payeeSug = ext.payee ? suggestionFrom(payeeM) : null
@@ -278,7 +280,11 @@ export function buildPlan(
     project: safeProject, mode: ext.mode, note: ext.note, direction: ext.direction,
   }
   return {
-    ai, slots, payeeDisplay, payeeMatched: payeeAuto, amount: ext.amount,
+    ai, slots, payeeDisplay, payeeMatched: payeeAuto,
+    // Soft-confirm a strong near-match (>= the 0.6 confirm band) in the reply instead of calling a known
+    // contact "new". Below that it stays a quiet Day Book suggestion only.
+    suggestedPayeeName: (!payeeAuto && payeeSug && payeeSug.score >= 0.6) ? payeeSug.name : null,
+    amount: ext.amount,
     projectName, projectRaw, note: ext.note, amountMissing: ext.amount == null, payeeMissing: !payeeDisplay,
   }
 }
@@ -309,7 +315,7 @@ async function applyPlan(ctx: TxnCtx, plan: Plan, text: string, opts: { prefix?:
     msg = M.mAbandoned(lang, { payee: plan.payeeDisplay, amount: plan.amount, missing })
   } else {
     msg = M.mComplete(lang, {
-      payee: plan.payeeDisplay, payeeMatched: plan.payeeMatched, amount: plan.amount,
+      payee: plan.payeeDisplay, payeeMatched: plan.payeeMatched, suggestedPayee: plan.suggestedPayeeName, amount: plan.amount,
       projectName: plan.projectName, projectRaw: plan.projectRaw, note: plan.note,
     })
   }

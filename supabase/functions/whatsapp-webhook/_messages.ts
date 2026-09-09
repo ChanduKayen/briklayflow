@@ -79,6 +79,7 @@ export function mComplete(
   lang: Lang,
   p: {
     payee: string | null; payeeMatched: boolean;
+    suggestedPayee?: string | null;    // a strong near-match we didn't auto-link — soft-confirm, don't say "new"
     amount: number | null;
     projectName: string | null; projectRaw: string | null;
     note: string | null;
@@ -100,9 +101,17 @@ export function mComplete(
   // 3. THE GAPS — named, each with the one fix, and ignoring is safe (Type 7).
   const flags: string[] = []
   if (p.payee && !p.payeeMatched) {
-    flags.push(pick(lang, {
-      en: `*${p.payee}* is new to me — tap below to add them to contacts, or ignore and I'll keep this as a one-off.`,
-    }))
+    // A STRONG near-match is not a stranger: acknowledge who we think it is, don't announce "new". Only a
+    // genuine no-match gets the add-contact prompt. (The Day Book carries the one-tap confirm either way.)
+    if (p.suggestedPayee) {
+      flags.push(pick(lang, {
+        en: `Recorded for *${p.suggestedPayee}*. If that's not who you meant, fix the contact in the Day Book.`,
+      }))
+    } else {
+      flags.push(pick(lang, {
+        en: `*${p.payee}* is new to me — tap below to add them to contacts, or ignore and I'll keep this as a one-off.`,
+      }))
+    }
   }
   if (p.projectRaw) {
     flags.push(pick(lang, {
@@ -116,7 +125,8 @@ export function mComplete(
 
   // The CTA label still names the state; the target is unchanged.
   const ctaText =
-    (p.payee && !p.payeeMatched) ? pick(lang, { en: 'Add contact' })
+    (p.payee && !p.payeeMatched && p.suggestedPayee) ? pick(lang, { en: 'Confirm payee' })
+    : (p.payee && !p.payeeMatched) ? pick(lang, { en: 'Add contact' })
     : p.projectRaw ? pick(lang, { en: 'Set the site' })
     : pick(lang, { en: 'View entry' })
 

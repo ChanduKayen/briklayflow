@@ -79,8 +79,10 @@ export const PAYEE_AUTO_FLOOR = 0.95;
 
 // ══ ROLE-AWARE, JUMBLE-TOLERANT MATCHING (importer only) ═══════════════════════════════════════════════
 //
-// scorePayeeName above is the WhatsApp/Day-Book mirror and must stay byte-for-byte with _match.ts — do NOT
-// change it. The importer, though, has two facts that path never had: the stakeholder's NATURE (type +
+// scorePayeeName above is the PROJECT-scorer mirror (kept byte-for-byte with _match.ts `scoreName`) — do NOT
+// change it. NOTE: as of the payee-matching fix, the WhatsApp payee path (_match.ts `matchPayee`) now uses
+// `scorePayeeRich` below (token-bag + role-aware) and a 0.90 auto floor with an ambiguity guard — so keep
+// scorePayeeRich here and there in sync. The importer, meanwhile, has two facts that path never had: the stakeholder's NATURE (type +
 // trade) and a full grid where "which Raju?" can be asked cheaply. scorePayeeRich uses both, and treats a
 // name as a BAG OF TOKENS so order and length don't matter:
 //
