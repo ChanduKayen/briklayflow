@@ -139,13 +139,17 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible.length]);
 
-  // active tab changed → recentre it in the rail + move the lamp
+  // active tab changed → recentre it in the rail + move the lamp. The rail scroll is animated, so a single
+  // early positionLamp lands the glow where the tab WAS (visibly off for Payables/Attendance/Workspace).
+  // Re-run it a few times across the ~300ms scroll so the lamp settles under the tab's final resting place.
   useEffect(() => {
     const bar = barRef.current; if (!bar) return;
     const on = bar.querySelector('.mnav-tab.on') as HTMLElement | null;
     if (on && on.closest('.mnav-rail')) on.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-    const id = requestAnimationFrame(positionLamp);
-    return () => cancelAnimationFrame(id);
+    const raf = requestAnimationFrame(positionLamp);
+    const t1 = window.setTimeout(positionLamp, 180);
+    const t2 = window.setTimeout(positionLamp, 380);
+    return () => { cancelAnimationFrame(raf); clearTimeout(t1); clearTimeout(t2); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeKey]);
 
@@ -239,7 +243,10 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
       {/* sheets */}
       <div className={`mnav-shade${sheet ? ' show' : ''}`} onClick={() => setSheet(null)} />
       <div className={`mnav-sheet${sheet ? ' show' : ''}`}>
-        <div className="mnav-grab" />
+        <button type="button" className="mnav-grab" aria-label="Close" onClick={() => setSheet(null)} />
+        <button type="button" className="mnav-close" aria-label="Close" onClick={() => setSheet(null)}>
+          <svg viewBox="0 0 24 24" style={{ width: 16, height: 16, stroke: 'currentColor', fill: 'none', strokeWidth: 2, strokeLinecap: 'round' }}><path d="M6 6l12 12M18 6L6 18" /></svg>
+        </button>
         {sheet === 'workspace' && <WorkspaceHub role={role} onGo={go} onSignOut={onSignOut} />}
         {sheet === 'quickadd' && (
           <>
@@ -400,9 +407,13 @@ const CSS = `
 .mnav-shade.show{opacity:1; pointer-events:auto}
 .mnav-sheet{position:fixed; left:0; right:0; bottom:0; max-width:430px; margin:0 auto; background:#fff;
   border-radius:22px 22px 0 0; padding:10px 20px calc(22px + env(safe-area-inset-bottom)); z-index:61;
-  transform:translateY(105%); transition:transform .38s cubic-bezier(.2,.9,.25,1); font-family:'DM Sans',system-ui,sans-serif}
+  transform:translateY(105%); transition:transform .38s cubic-bezier(.2,.9,.25,1); font-family:'DM Sans',system-ui,sans-serif;
+  /* Never taller than the screen — scroll inside instead of bleeding off the phone. */
+  max-height:85vh; overflow-y:auto; -webkit-overflow-scrolling:touch}
 .mnav-sheet.show{transform:none}
-.mnav-grab{width:36px; height:4px; border-radius:99px; background:#EEE5D8; margin:0 auto 16px}
+.mnav-grab{display:block; width:40px; height:5px; border-radius:99px; background:#E4DACB; margin:2px auto 14px; border:0; padding:0; cursor:pointer}
+.mnav-close{position:absolute; top:12px; right:14px; width:30px; height:30px; border-radius:50%; border:0; background:#F4F0E8; color:#7A6E61; display:grid; place-items:center; cursor:pointer; z-index:1}
+.mnav-close:active{transform:scale(.92)}
 .mnav-qtitle{font-family:'Playfair Display',Georgia,serif; font-size:19px; font-weight:600; margin-bottom:12px; color:#221C14}
 .mnav-qrow{display:flex; align-items:center; gap:13px; padding:14px 2px; border-bottom:1px solid #EEE5D8; width:100%; border-left:0; border-right:0; border-top:0;
   background:none; text-align:left; font-size:15px; font-weight:600; cursor:pointer; color:#221C14}
