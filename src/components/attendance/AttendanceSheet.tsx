@@ -21,77 +21,179 @@ import { CertificationWizard, type CertifyContext } from './CertificationWizard'
 import { setEngagementBasis, submitWorkCertification } from '../../lib/workCertification';
 
 const ATDX_CSS = `
-.atdx{background:var(--cream);color:var(--ink);font:15px/1.45 "DM Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased;padding:44px 40px 80px;
-  --cream:#FAF7F0;--paper:#FFFDF7;--ink:#2A241C;--line:#E6DECD;--line-2:#D8CEBB;--today:#FBF4E6;
-  --walnut:#2A241C;--walnut-2:#6E5F4C;--walnut-3:#9A8C77;--soft:#9A8C77;
-  --terracotta:#C0603F;--terra:#C0603F;--terracotta-bg:#F7E9E2;--terra-soft:#F7E9E2;
-  --sage:#6E8260;--sage-bg:#E4EADD;--sage-soft:#E4EADD;--slate:#5b6b78;--slate-bg:#e8ecef}
-.atdx *{box-sizing:border-box}
-.atdx button,.atdx input,.atdx select{font:inherit;color:inherit}
+.atdx{
+  --cream:#FAF7F0; --paper:#FFFDF7; --ink:#2A241C; --walnut:#6E5F4C; --soft:#9A8C77;
+  --rule:#E6DECD; --terra:#C0603F; --terra-soft:#F7E9E2; --sage:#6E8260; --sage-soft:#E4EADD;
+  --today:#FBF4E6;
+  --serif:'Playfair Display', Georgia, serif;
+  --sans:'DM Sans', -apple-system, sans-serif;
+  --mono:'DM Mono', 'SF Mono', Consolas, monospace;
+}
+.atdx *{margin:0;padding:0;box-sizing:border-box}
+.atdx{background:var(--cream); color:var(--ink); font-family:var(--sans); min-height:100vh; padding:44px 40px 120px}
+.atdx .page{max-width:1120px; margin:0 auto}
+.atdx .head{display:flex; align-items:flex-end; justify-content:space-between; gap:24px; margin-bottom:18px}
+.atdx h1{font-family:var(--serif); font-size:36px; font-weight:600; line-height:1}
+.atdx .hero{display:flex; gap:32px; text-align:right; align-items:flex-end}
+.atdx .hero .h b{display:block; font-family:var(--mono); font-size:22px; font-weight:500}
+.atdx .hero .h span{font-family:var(--mono); font-size:9.5px; letter-spacing:.18em; text-transform:uppercase; color:var(--soft)}
+.atdx .hero .h.gap b{color:var(--terra)}
+.atdx .toolbar{display:flex; align-items:center; gap:14px; margin-bottom:16px; flex-wrap:wrap}
+.atdx .wkpager{display:flex; align-items:center; gap:10px}
+.atdx .wkbtn{width:30px; height:30px; border-radius:50%; border:1px solid var(--rule); background:var(--paper); color:var(--walnut); cursor:pointer}
+.atdx .wkbtn:hover{border-color:var(--walnut)}
+.atdx .wklabel{font-family:var(--serif); font-size:18px; font-weight:600}
+.atdx .tlink{font-size:13px; color:var(--soft); cursor:pointer; border-bottom:1px solid transparent}
+.atdx .tlink:hover{color:var(--walnut); border-color:var(--rule)}
+.atdx .chips{display:flex; gap:8px; margin-left:auto; flex-wrap:wrap}
+.atdx .chip{display:inline-flex; align-items:center; gap:7px; font-size:13px; font-weight:600; color:var(--walnut);
+  background:var(--paper); border:1px solid var(--rule); border-radius:999px; padding:7px 14px; cursor:pointer}
+.atdx .chip .cdot{width:7px; height:7px; border-radius:50%}
+.atdx .chip.on{background:var(--ink); color:var(--cream); border-color:var(--ink)}
+.atdx .info{width:26px; height:26px; border-radius:50%; border:1px solid var(--rule); background:var(--paper); color:var(--soft);
+  font-size:12px; cursor:pointer; position:relative; flex:none}
+.atdx .info:hover{color:var(--walnut)}
+.atdx .tip{position:absolute; right:0; top:calc(100% + 8px); width:280px; background:var(--paper); border:1px solid var(--rule);
+  border-radius:12px; box-shadow:0 24px 48px -24px rgba(42,36,28,.45); padding:14px 16px; text-align:left;
+  font-size:12.5px; color:var(--walnut); line-height:1.6; display:none; z-index:50; font-weight:400}
+.atdx .info.open .tip{display:block}
+.atdx .tip b{color:var(--ink)}
+.atdx .tip .dot{display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--sage); margin:0 3px 1px 0}
+.atdx /* ---------- layout: day header card + site cards,.atdx cream seams between ---------- */
+.cols{display:grid; grid-template-columns:280px repeat(7, 1fr) 150px; align-items:center}
+.atdx .dayhead{position:sticky; top:0; z-index:10; background:var(--paper); border:1px solid var(--rule); border-radius:14px;
+  box-shadow:0 10px 24px -18px rgba(42,36,28,.35); margin-bottom:18px}
+.atdx .dayhead .dh{text-align:center; padding:10px 0 8px; cursor:pointer; border-radius:10px; margin:6px 2px; transition:background .2s}
+.atdx .dayhead .dh:hover{background:var(--cream)}
+.atdx .dayhead .dh small{display:block; font-family:var(--mono); font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--soft)}
+.atdx .dayhead .dh b{font-family:var(--serif); font-size:16px; font-weight:600; color:var(--walnut)}
+.atdx .dayhead .dh.today{background:var(--today)}
+.atdx .dayhead .dh.today b{color:var(--terra)}
+.atdx .dayhead .dh.future{opacity:.35; cursor:default}
+.atdx .dayhead .corner{padding:12px 20px; font-family:var(--mono); font-size:10.5px; letter-spacing:.2em; text-transform:uppercase; color:var(--soft)}
+.atdx .dayhead .wk{text-align:right; padding-right:20px; font-size:12.5px; color:var(--soft)}
+.atdx /* each site = its own card; the cream between them is the seam */
+.siteblock{background:var(--paper); border:1px solid var(--rule); border-radius:16px; margin-bottom:26px}
+.atdx .sitehead{position:sticky; top:74px; z-index:6; display:flex; align-items:center; gap:11px; padding:15px 20px 12px;
+  background:var(--paper); border-radius:16px 16px 0 0; border-bottom:1px solid var(--rule)}
+.atdx .sitedot{width:9px; height:9px; border-radius:50%; flex:none}
+.atdx .sitehead b{font-family:var(--serif); font-size:19px; font-weight:600}
+.atdx .sitehead .area{font-size:12.5px; color:var(--soft)}
+.atdx .sitehead .stotal{margin-left:auto; font-family:var(--mono); font-size:12.5px; color:var(--walnut)}
+.atdx .sitehead .addw{font-size:12.5px; font-weight:600; color:var(--walnut); cursor:pointer; margin-left:18px}
+.atdx .sitehead .addw:hover{color:var(--ink)}
+.atdx .siteempty{padding:14px 20px 16px; font-size:13px; color:var(--soft)}
+.atdx .siteempty a{color:var(--walnut); font-weight:600; cursor:pointer; border-bottom:1px solid var(--rule)}
+.atdx .siteempty a:hover{color:var(--ink)}
+.atdx .wrow{border-top:1px solid var(--rule)}
+.atdx .wrow:first-of-type{border-top:0}
+.atdx .wname{padding:13px 20px; display:flex; align-items:center; gap:12px; min-width:0}
+.atdx .wav{width:34px; height:34px; border-radius:50%; background:var(--cream); border:1px solid var(--rule); flex:none;
+  display:grid; place-items:center; font-family:var(--serif); font-size:13px; color:var(--walnut)}
+.atdx .wmid{min-width:0}
+.atdx .wmid b{display:block; font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.atdx .wmid span{font-size:11.5px; color:var(--soft)}
+.atdx .wmid .crewtag{font-family:var(--mono); font-size:10px; color:var(--terra); background:var(--terra-soft); border-radius:99px; padding:1px 7px; margin-left:5px}
+.atdx .cellwrap{padding:6px 4px; position:relative}
+.atdx .cell{height:44px; border-radius:10px; display:grid; place-items:center; cursor:pointer; user-select:none; position:relative;
+  font-family:var(--mono); font-size:14px; color:transparent;
+  transition:background .15s, box-shadow .2s, transform .12s}
+.atdx .cell:hover{background:var(--cream); box-shadow:inset 0 0 0 1.5px var(--rule)}
+.atdx .cell:active{transform:scale(.94)}
+.atdx .cell.today{background:var(--today)}
+.atdx .cell.future{pointer-events:none; opacity:.3}
+.atdx .cell.filled{color:var(--ink); font-weight:500; background:var(--sage-soft)}
+.atdx .cell.filled:hover{box-shadow:inset 0 0 0 1.5px var(--sage)}
+.atdx .cell.filled.pop{animation:cellpop .3s cubic-bezier(.2,.9,.3,1.6)}
+@keyframes cellpop{0%{transform:scale(.75)}100%{transform:scale(1)}}
+.atdx .cell .src{position:absolute; top:5px; right:6px; width:5px; height:5px; border-radius:50%; background:var(--sage)}
+.atdx .wtotal{text-align:right; padding-right:20px; font-family:var(--mono); font-size:13px; color:var(--walnut); white-space:nowrap}
+.atdx .wtotal b{color:var(--ink); font-weight:500}
+.atdx .sitefoot{border-top:1px solid var(--rule); border-radius:0 0 16px 16px}
+.atdx .sitefoot .lab{padding:8px 20px; font-family:var(--mono); font-size:9.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--soft)}
+.atdx .sitefoot .dc{text-align:center; font-family:var(--mono); font-size:12px; color:var(--walnut)}
+.atdx .sitefoot .dc.today{color:var(--terra); font-weight:500}
+.atdx .sitefoot .sum{text-align:right; padding-right:20px; font-family:var(--mono); font-size:12px; color:var(--walnut)}
+.atdx .bpop{position:absolute; z-index:40; top:calc(100% + 6px); left:50%; transform:translateX(-50%) scale(.92); transform-origin:top center;
+  width:230px; background:var(--paper); border:1px solid var(--rule); border-radius:14px;
+  box-shadow:0 26px 54px -24px rgba(42,36,28,.5); padding:12px 14px; opacity:0; pointer-events:none;
+  transition:opacity .2s, transform .25s cubic-bezier(.2,.9,.3,1.25)}
+.atdx .bpop.show{opacity:1; transform:translateX(-50%) scale(1); pointer-events:auto}
+.atdx .bp-title{font-family:var(--mono); font-size:10px; letter-spacing:.16em; text-transform:uppercase; color:var(--soft); margin-bottom:9px}
+.atdx .bp-row{display:flex; align-items:center; gap:9px; padding:5px 0; font-size:13px}
+.atdx .bp-row .t{flex:1}
+.atdx .bp-row .rate{font-family:var(--mono); font-size:11px; color:var(--soft)}
+.atdx .step{display:flex; align-items:center; gap:6px}
+.atdx .step button{width:24px; height:24px; border-radius:7px; border:1px solid var(--rule); background:var(--paper); color:var(--walnut);
+  cursor:pointer; font-size:13px; line-height:1}
+.atdx .step button:hover{border-color:var(--walnut); color:var(--ink)}
+.atdx .step b{font-family:var(--mono); font-size:13.5px; min-width:22px; text-align:center}
+.atdx .bp-foot{border-top:1px solid var(--rule); margin-top:8px; padding-top:8px; display:flex; justify-content:space-between; align-items:center;
+  font-family:var(--mono); font-size:12px; color:var(--walnut)}
+.atdx .bp-done{width:100%; margin-top:10px; background:var(--ink); color:var(--cream); border:0; border-radius:999px;
+  padding:9px 0; font-family:var(--sans); font-weight:600; font-size:13px; cursor:pointer}
+.atdx #toast{position:fixed; left:50%; bottom:28px; transform:translate(-50%,16px); background:var(--ink); color:var(--cream);
+  font-size:13.5px; border-radius:999px; padding:11px 20px; opacity:0; transition:all .35s cubic-bezier(.2,.9,.3,1.2); z-index:60}
+.atdx #toast.show{opacity:1; transform:translate(-50%,0)}
+
+
+/* ── what the reference has no equivalent for ────────────────────────────────
+   The clean mock shows a single-site week of daily wages. The live sheet also
+   carries contracts measured by stage, a rate card, the add-worker flow and the
+   remove affordance. Those keep their behaviour and are dressed in the mock's
+   own tokens — nothing here restyles anything the mock defines. */
+
+/* the old table palette, kept as aliases so the feature rules below still read */
+.atdx{--line:var(--rule);--line-2:#D8CEBB;--walnut-2:#6E5F4C;--walnut-3:#9A8C77;
+  --terracotta:var(--terra);--terracotta-bg:var(--terra-soft);--sage-bg:var(--sage-soft);
+  --slate:#5b6b78;--slate-bg:#e8ecef}
+/* The mock leaves its two round chrome buttons on the UA font, and they are drawn that way.
+   Everything else in the app needs the inherit, so those two are held out of it. */
+.atdx button:not(.wkbtn):not(.info),.atdx input,.atdx select{font:inherit;color:inherit}
 .atdx button{background:none;border:0;cursor:pointer;padding:0}
-.atdx :focus-visible{outline:2px solid var(--walnut);outline-offset:2px;border-radius:6px}
-.atdx .mono{font-family:"DM Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
-.atdx .wrap{width:100%;max-width:1180px;margin:0 auto}
-/* The two halves must not push each other around. With flex-end the SHORTER column drops, so the
-   title sank whenever the stats were taller than it — which is any width where the lede fits on
-   one line, or none at all. Pinned to the top; the stats are nudged down to sit on the title's cap. */
-.atdx .top{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;margin-bottom:22px;flex-wrap:wrap}
-.atdx h1{font:600 36px/1.05 "Playfair Display",serif;color:var(--ink)}
-.atdx .lede{color:var(--soft);margin-top:6px;font-size:13.5px;max-width:640px}
-.atdx .lede .wa{color:#25a55a;font-weight:500}
-/* hero stat cluster, top-right */
-.atdx .hero{display:flex;gap:34px;text-align:right;align-items:flex-end;padding-top:6px}
-.atdx .hero .h b{display:block;font-family:"DM Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums;font-size:24px;font-weight:500;color:var(--ink)}
-.atdx .hero .h b.warn{color:var(--terracotta)}
-.atdx .hero .h span{font-family:"DM Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--soft)}
-.atdx .week{display:flex;align-items:center;gap:10px;margin-bottom:16px}
-.atdx .week .nav{width:32px;height:32px;border-radius:50%;border:1px solid var(--line);color:var(--walnut-2);display:grid;place-items:center}
-.atdx .week .nav:hover{border-color:var(--walnut-2);color:var(--ink)}
-.atdx .week .range{font:600 18px "Playfair Display",serif;min-width:170px;text-align:center;color:var(--ink)}
-.atdx .week .today{font-size:13px;color:var(--walnut-2);text-decoration:underline;text-decoration-color:var(--line-2);text-underline-offset:3px;margin-left:6px}
-.atdx .week .today:hover{color:var(--terracotta);text-decoration-color:var(--terracotta)}
-.atdx .filters{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 16px}
-.atdx .chip{border:1px solid var(--line);border-radius:999px;padding:4px 11px;font-size:13px;color:var(--walnut-2);background:var(--paper)}
-.atdx .chip[aria-pressed=true]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
-.atdx .reg{background:var(--paper);border:1px solid var(--line);border-radius:16px;overflow:hidden}
-.atdx table{width:100%;border-collapse:collapse}
-.atdx th,.atdx td{padding:0;text-align:center}
-.atdx thead{position:sticky;top:0;z-index:5;background:var(--paper)}
-.atdx thead th{font-size:12px;font-weight:500;color:var(--walnut-3);padding:6px 4px;border-bottom:1px solid var(--ink)}
-.atdx thead th.day{cursor:pointer;border-radius:10px;transition:background .2s}
-.atdx thead th.day:hover{background:var(--cream)}
-.atdx thead th .wl{font-family:"DM Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--soft)}
-.atdx thead th .dn{display:block;font:600 17px "Playfair Display",serif;color:var(--walnut-2);margin-top:1px}
-.atdx thead th .fill-hint{display:block;font-size:9px;color:var(--terracotta);font-family:"DM Mono",ui-monospace,monospace;letter-spacing:.06em;height:11px;opacity:0;transition:opacity .15s}
-.atdx thead th.day:hover .fill-hint{opacity:1}
-.atdx thead th.is-today,.atdx thead th.is-today .dn{color:var(--terracotta)}
-.atdx thead th.is-today{background:var(--today);border-radius:10px 10px 0 0}
-.atdx thead th.sun,.atdx td.sun{background:#F8F3E9}
-.atdx th.sno{width:40px;text-align:center;color:var(--walnut-3);font-weight:500}
-.atdx td.sno{width:40px;text-align:center;vertical-align:top;padding-top:14px;color:var(--walnut-3);font-size:12.5px;font-family:"DM Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
-.atdx th.name{text-align:left;padding-left:18px;width:308px}
-.atdx th.tot{text-align:right;padding-right:18px;width:200px}
-.atdx td.cell{width:72px;position:relative;font-size:15px}
-.atdx td.cell.is-today{background:var(--today)}
-.atdx td.cell.colglow .c:not(.filled){background:var(--cream)}
-.atdx tr.gap td{background:var(--cream);height:16px;padding:0;border:0}
-.atdx tr.site td{background:var(--paper);text-align:left;padding:14px 18px 10px;font:600 19px "Playfair Display",serif;letter-spacing:0;text-transform:none;color:var(--ink);border-top:2px solid var(--line-2);box-shadow:inset 4px 0 0 var(--terracotta);position:relative}
-.atdx tr.site td span.area{letter-spacing:0;text-transform:none;font:400 12.5px "DM Sans",sans-serif;color:var(--soft);margin-left:12px}
-.atdx tr.site td .addcta{position:absolute;right:18px;top:50%;transform:translateY(-50%);font:500 12.5px "DM Sans",sans-serif;color:var(--walnut-2);border-bottom:1px solid transparent;letter-spacing:0;text-transform:none}
-.atdx tr.site td .addcta:hover{color:var(--ink);border-color:var(--line-2)}
-/* worker avatar in the name cell */
-.atdx .wav{width:32px;height:32px;border-radius:50%;background:var(--cream);border:1px solid var(--line);flex:none;display:grid;place-items:center;font:600 13px "Playfair Display",serif;color:var(--walnut-2)}
-.atdx .crewtag{font-family:"DM Mono",ui-monospace,monospace;font-size:10px;color:var(--terracotta);background:var(--terra-soft);border-radius:99px;padding:1px 7px;margin-left:6px;letter-spacing:.02em}
-.atdx .wnamewrap{display:flex;align-items:center;gap:12px;min-width:0}
-.atdx .wnamewrap .wmid{min-width:0}
-.atdx tr.crew td.name.crewhead .wav{margin-right:2px}
-/* site footer — daily headcount */
-.atdx tr.sitefoot td{border-top:1px solid var(--line);background:#FCFAF3;height:34px}
-.atdx tr.sitefoot td.lab{text-align:left;padding-left:18px;font-family:"DM Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--soft)}
-.atdx tr.sitefoot td.dc{font-family:"DM Mono",ui-monospace,monospace;font-size:12px;color:var(--walnut-2)}
-.atdx tr.sitefoot td.dc.is-today{color:var(--terracotta);font-weight:500}
-.atdx tr.sitefoot td.fsum{text-align:right;padding-right:18px;font-family:"DM Mono",ui-monospace,monospace;font-size:12px;color:var(--walnut-2)}
-.atdx .wageslbl{margin-top:6px;font-size:12px;color:var(--walnut-3)}
+.atdx :focus-visible{outline:2px solid var(--ink);outline-offset:2px;border-radius:6px}
+.atdx .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* a stage row of a contract: the name cell holds a select, the total a progress bar */
+.atdx .wname .stsel{max-width:100%}
+.atdx .wrow.sub .wname{padding-left:66px}
+.atdx .wrow.sub .st{font-size:11.5px;color:var(--soft);margin-left:8px}
+
+/* remove-from-sheet: a quiet × that only appears on the row it belongs to */
+.atdx .wrow{position:relative}
+.atdx .wrow button.rmw{position:absolute;left:2px;top:50%;transform:translateY(-50%);width:20px;height:20px;
+  border-radius:50%;color:transparent;font-size:12px;line-height:1;display:grid;place-items:center;
+  transition:color .15s,background .15s}
+.atdx .wrow:hover button.rmw{color:var(--soft)}
+.atdx .wrow button.rmw:hover{background:var(--terra-soft);color:var(--terra)}
+
+/* a cell that is a measured quantity or a percentage rather than a headcount */
+.atdx .cell.qty small{font-size:9px;color:var(--soft);margin-left:1px}
+.atdx .cell.gap{color:var(--soft);font-weight:400}
+.atdx .cell.off{color:#CFC4B0;pointer-events:none}
+
+/* the add-worker flow lives inside the site card, below its rows */
+.atdx .siteblock > [id^="add-"]:not(:empty){padding:14px 20px 16px;border-top:1px solid var(--rule)}
+.atdx .new{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.atdx .new .x{font-size:12.5px;color:var(--soft)}
+.atdx .new .x:hover{color:var(--walnut)}
+.atdx .pp{position:relative;display:inline-block;min-width:320px;max-width:100%}
+
+/* the crew stepper's own extras — the mock has the popover, not these */
+.atdx .bpop .bp-row .rm{opacity:0;color:var(--soft);font-size:13px;width:18px;height:18px;border-radius:50%;transition:opacity .15s,background .15s,color .15s}
+.atdx .bpop .bp-row:hover .rm{opacity:1}
+.atdx .bpop .bp-row .rm:hover{background:var(--terra-soft);color:var(--terra)}
+.atdx .bpop .bp-row .rate{cursor:text}
+.atdx .bpop .bp-row .rate:hover{color:var(--walnut)}
+
+/* the WhatsApp-sourced reading behind a cell */
+.atdx .ctip{position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);
+  background:var(--ink);color:var(--cream);font-size:11px;white-space:nowrap;border-radius:7px;
+  padding:4px 8px;opacity:0;pointer-events:none;transition:opacity .15s;z-index:30}
+.atdx .cell:hover .ctip{opacity:1}
+
+.atdx .seg{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:2px;background:var(--cream);margin-top:6px}
+
 .atdx .oncontract{font-size:12px;color:var(--terracotta);font-weight:500;text-decoration:underline;text-decoration-color:color-mix(in srgb,var(--terracotta) 40%,transparent);text-underline-offset:2px}
 .atdx .oncontract:hover{text-decoration-color:var(--terracotta)}
 .atdx .ocsel{max-width:250px;width:auto;font-size:13px;font-weight:500;color:var(--walnut);border:1px solid var(--line-2);border-radius:9px;background-color:var(--paper);padding:6px 30px 6px 12px;background-position:right 10px center}
@@ -110,64 +212,26 @@ const ATDX_CSS = `
 .atdx .pp-link{height:34px;padding:0 16px;border-radius:9px;background:var(--terracotta);color:var(--paper);font-size:13px;font-weight:600;cursor:pointer}
 .atdx .pp-link:disabled{opacity:.6;cursor:default}
 .atdx .pp-cancel{font-size:12.5px;color:var(--walnut-3)}
-/* the serial-number cell doubles as the remove control — the number morphs to × */
-.atdx td.sno.snorm{cursor:pointer;position:relative}
-.atdx td.sno.snorm .sno-n{transition:opacity .15s ease}
-.atdx td.sno.snorm .sno-x{position:absolute;top:11px;left:50%;transform:translateX(-50%) scale(.7);width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;border-radius:7px;font-size:17px;line-height:1;color:var(--terracotta);background:color-mix(in srgb,var(--terracotta) 12%,transparent);opacity:0;transition:opacity .15s ease,transform .15s cubic-bezier(.34,1.4,.5,1)}
-.atdx td.sno.snorm.armed .sno-n{opacity:0}
-.atdx td.sno.snorm.armed .sno-x{opacity:1;transform:translateX(-50%) scale(1)}
-@media (hover:hover){
-  .atdx tr.crew:hover td.sno.snorm .sno-n,.atdx tr.direct:hover td.sno.snorm .sno-n,.atdx tr.sub:hover td.sno.snorm .sno-n{opacity:0}
-  .atdx tr.crew:hover td.sno.snorm .sno-x,.atdx tr.direct:hover td.sno.snorm .sno-x,.atdx tr.sub:hover td.sno.snorm .sno-x{opacity:1;transform:translateX(-50%) scale(1)}
-}
-.atdx tr.crew td{border-top:1px solid var(--line);padding-top:8px}
-.atdx tr.crew td.name{text-align:left;padding:12px 18px 4px}
-.atdx tr.crew .n{font-weight:600}
-.atdx tr.crew .d{font-size:12.5px;color:var(--walnut-3)}
-/* the party/contractor name is a slim, quiet group heading — the skill rows below are the entries.
-   Name, description and the Contract/Labour toggle sit inline on the one heading row. */
-.atdx tr.crew td.name.crewhead{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;padding:8px 18px}
-.atdx tr.crew td.name.crewhead .n{font:600 11px/1.3 "DM Sans",system-ui,sans-serif;letter-spacing:.07em;text-transform:uppercase;color:var(--walnut-3);flex:0 0 auto}
-.atdx tr.crew td.name.crewhead .d{font-size:11px;color:var(--walnut-3);flex:0 0 auto}
-.atdx tr.crew td.name.crewhead .seg{margin-top:0}
-.atdx tr.crew td.name.crewhead .wageslbl{margin-top:0}
-.atdx tr.crew td.cell{font-size:15px;font-weight:600;height:38px}
-.atdx tr.crew td.tot{text-align:right;padding:10px 18px 2px;font-size:13.5px}
-.atdx tr.crew td.tot .v{font-weight:600}
-.atdx tr.crew td.tot .u{font-size:12.5px;color:var(--walnut-3)}
-.atdx tr.crew td.tot .u b{color:var(--sage);font-weight:500}
-/* group hover — the whole crew (or worker) lights up; the main row is marked with a terracotta edge */
-.atdx tr.crew td,.atdx tr.sub td,.atdx tr.direct td{transition:background .14s ease}
-.atdx tr.hot td{background:color-mix(in srgb,var(--terracotta) 4%,var(--paper))}
-.atdx tr.hot-main td{background:color-mix(in srgb,var(--terracotta) 8%,var(--paper))}
-.atdx tr.hot-main td:first-child{box-shadow:inset 3px 0 0 var(--terracotta)}
 .atdx .assumed{font-size:11px;color:#a9781c;font-style:italic;margin-left:6px;cursor:help}
 .atdx .measurebasis{margin-left:8px;font-size:11px;color:var(--walnut-3);background:none;border:0;cursor:pointer;text-decoration:underline;text-decoration-color:var(--line-2);text-underline-offset:2px}
 .atdx .measurebasis:hover{color:var(--terracotta);text-decoration-color:var(--terracotta)}
 .atdx .measurebasis.on{color:var(--sage);font-weight:500;text-decoration-color:color-mix(in srgb,var(--sage) 45%,transparent)}
-.atdx .seg{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:2px;background:var(--cream);margin-top:6px}
 .atdx .seg button{padding:2px 10px;border-radius:999px;font-size:12px;color:var(--walnut-3)}
 .atdx .seg button[aria-pressed=true]{background:var(--paper);color:var(--walnut);font-weight:500;box-shadow:0 1px 2px rgba(59,47,39,.08)}
-.atdx tr.sub td{height:38px}
-.atdx tr.sub td.name{text-align:left;padding:0 18px 0 34px;font-size:13.5px;color:var(--walnut-2)}
-.atdx tr.sub td.name .rt{font-size:12px;color:var(--walnut-3);margin-left:6px}
+.atdx .wname .rt{font-size:12px;color:var(--walnut-3);margin-left:6px}
 .atdx .rt[data-rate]{cursor:text;border-bottom:1px dashed transparent}
 .atdx .rt[data-rate]:hover{border-bottom-color:var(--line-2);color:var(--walnut)}
 .atdx .rt input{width:54px;border:0;border-bottom:1px solid var(--walnut);background:transparent;font:inherit;padding:0}
 .atdx .rt input:focus{outline:none}
-.atdx tr.sub td.name .st{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--walnut-3);margin-left:8px}
 /* worker-category row — a clear label, a tappable rate chip, a quiet "custom" flag */
-.atdx tr.sub td.name.catn{display:flex;align-items:center;gap:9px;padding:0 12px 0 34px;font-size:13.5px;white-space:nowrap}
+.atdx .catn{display:flex;align-items:center;gap:9px;padding:0 12px 0 34px;font-size:13.5px;white-space:nowrap}
 .atdx .catn .clab{color:var(--walnut);font-weight:500;flex:0 0 auto}
 .atdx .catn .ratechip{flex:0 0 auto;display:inline-flex;align-items:baseline;gap:1px;font-size:12px;color:var(--walnut-2);background:var(--cream);border:1px solid var(--line-2);border-radius:8px;padding:2px 8px;cursor:text;white-space:nowrap;transition:border-color .15s,color .15s}
 .atdx .catn .ratechip small{font-size:10px;color:var(--walnut-3)}
 .atdx .catn .ratechip:hover{border-color:var(--terracotta);color:var(--walnut)}
 .atdx .catn .ratechip input{width:46px;border:0;border-bottom:1px solid var(--walnut);background:transparent;font:inherit;padding:0;outline:none}
 .atdx .catn .ownflag{flex:0 0 auto;font-size:11px;color:var(--walnut-3);font-style:italic}
-.atdx tr.sub td.tot{text-align:right;padding:0 18px;font-size:12.5px;color:var(--walnut-3);white-space:nowrap}
-.atdx tr.sub td.tot b{color:var(--walnut);font-weight:500;font-size:13.5px}
-.atdx tr.sub td.tot .brk{margin-left:7px;color:var(--walnut-3);font-size:11.5px}
-.atdx tr.sub.last td{padding-bottom:8px}
+.atdx .wtotal .brk{margin-left:7px;color:var(--walnut-3);font-size:11.5px}
 .atdx .stsel{appearance:none;-webkit-appearance:none;border:0;background:transparent;font:inherit;color:var(--walnut-2);padding:2px 18px 2px 0;cursor:pointer;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239c9083' stroke-width='1.4'/%3E%3C/svg%3E");
   background-repeat:no-repeat;background-position:right 2px center;max-width:230px;text-overflow:ellipsis}
@@ -178,84 +242,15 @@ const ATDX_CSS = `
 .atdx .stsel.ghost.addskill{max-width:none;width:auto;text-overflow:clip;font-weight:600;line-height:1.4;
   border:1px dashed color-mix(in srgb,var(--terracotta) 55%,transparent);border-radius:9px;background:color-mix(in srgb,var(--terracotta) 7%,transparent);padding:6px 30px 6px 13px;background-position:right 10px center}
 .atdx .stsel.ghost.addskill:hover{border-color:var(--terracotta);background:color-mix(in srgb,var(--terracotta) 12%,transparent)}
-.atdx tr.sub.last td.name{padding-top:6px;padding-bottom:10px}
-/* the "add a skilled worker" row shows ONLY when its crew group is hovered (hover devices);
-   on touch there's no hover, so it stays visible there. */
-@media (hover:hover){
-  .atdx tr.addrow{display:none}
-  .atdx tr.addrow.hot{display:table-row}
-  .atdx tr.addrow.hot .addskill{animation:atdx-fade .18s ease}
-}
-.atdx .c{position:relative;width:calc(100% - 8px);height:44px;margin:5px 4px;display:grid;place-items:center;cursor:text;border-radius:10px;font-family:"DM Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums;color:var(--line-2);
-  transition:background .15s,box-shadow .2s,transform .12s}
-.atdx .c:hover{background:var(--cream);box-shadow:inset 0 0 0 1.5px var(--line);color:var(--soft)}
-.atdx .c:active{transform:scale(.94)}
-/* a filled cell — sage-tinted, dark number; WhatsApp-sourced ones weigh a touch heavier */
-.atdx .c.filled{background:var(--sage-soft);color:var(--ink);font-weight:500}
-.atdx .c.filled:hover{background:var(--sage-soft);box-shadow:inset 0 0 0 1.5px var(--sage);color:var(--ink)}
-.atdx .c.wa{font-weight:500;color:var(--ink)}
-.atdx .c.office{color:var(--walnut-2)}
-.atdx .c.gap{color:var(--terracotta);font-size:14px}
-.atdx .c.off{color:var(--line-2);cursor:default}
-.atdx .c.paid::after{content:"";position:absolute;bottom:4px;left:50%;transform:translateX(-50%);width:14px;height:2px;border-radius:1px;background:var(--sage);opacity:.55}
-.atdx .c .src{position:absolute;top:5px;right:6px;width:5px;height:5px;border-radius:50%;background:var(--sage)}
-.atdx .c.pop{animation:atdx-cellpop .3s cubic-bezier(.2,.9,.3,1.6)}
-@keyframes atdx-cellpop{0%{transform:scale(.75)}100%{transform:scale(1)}}
-.atdx .c input{width:48px;text-align:center;border:0;border-bottom:1.5px solid var(--walnut);background:transparent;font-size:15px;padding:0}
-.atdx .c input:focus{outline:none}
-.atdx .c .half{color:var(--walnut-2)}
-.atdx .c .zero{color:var(--line-2)}
-.atdx .c.qty{font-size:13.5px}
-.atdx .c.qty small{font-size:11px;color:var(--walnut-3);margin-left:2px}
-/* crew breakdown stepper popover */
-.atdx .bpop{position:absolute;z-index:40;top:calc(100% + 6px);left:50%;transform:translateX(-50%) scale(.92);transform-origin:top center;width:236px;background:var(--paper);border:1px solid var(--line);border-radius:14px;box-shadow:0 26px 54px -24px rgba(42,36,28,.5);padding:12px 14px;opacity:0;pointer-events:none;transition:opacity .2s,transform .25s cubic-bezier(.2,.9,.3,1.25);text-align:left}
-.atdx .bpop.show{opacity:1;transform:translateX(-50%) scale(1);pointer-events:auto}
-.atdx .bpop .bp-title{font-family:"DM Mono",ui-monospace,monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--soft);margin-bottom:9px}
-.atdx .bpop .bp-row{display:flex;align-items:center;gap:9px;padding:5px 0;font-size:13px;color:var(--ink)}
-.atdx .bpop .bp-row .t{flex:1}
-.atdx .bpop .bp-row .rate{font-family:"DM Mono",ui-monospace,monospace;font-size:11px;color:var(--soft)}
-.atdx .bpop .step{display:flex;align-items:center;gap:6px}
-.atdx .bpop .step button{width:24px;height:24px;border-radius:7px;border:1px solid var(--line);background:var(--paper);color:var(--walnut-2);cursor:pointer;font-size:13px;line-height:1;transition:all .15s}
-.atdx .bpop .step button:hover{border-color:var(--walnut-2);color:var(--ink)}
-.atdx .bpop .step b{font-family:"DM Mono",ui-monospace,monospace;font-size:13.5px;min-width:22px;text-align:center}
-.atdx .bpop .bp-foot{border-top:1px solid var(--line);margin-top:8px;padding-top:8px;display:flex;justify-content:space-between;align-items:center;font-family:"DM Mono",ui-monospace,monospace;font-size:12px;color:var(--walnut-2)}
-.atdx .bpop .bp-done{width:100%;margin-top:10px;background:var(--ink);color:var(--cream);border:0;border-radius:999px;padding:9px 0;font-family:"DM Sans",sans-serif;font-weight:600;font-size:13px;cursor:pointer;transition:transform .2s cubic-bezier(.2,.9,.3,1.4)}
-.atdx .bpop .bp-done:hover{transform:translateY(-1px)}
-.atdx .bpop .bp-done:active{transform:scale(.97)}
-.atdx .bpop .bp-row .rm{width:18px;height:18px;border-radius:6px;color:var(--walnut-3);font-size:14px;line-height:1;flex:none;opacity:0;transition:opacity .15s}
-.atdx .bpop .bp-row:hover .rm{opacity:1}
-.atdx .bpop .bp-row .rm:hover{color:var(--terracotta);background:var(--terra-soft)}
-.atdx .bpop .bp-row .rate{cursor:text;border-bottom:1px dashed transparent}
-.atdx .bpop .bp-row .rate:hover{border-bottom-color:var(--line-2);color:var(--walnut-2)}
+.atdx .cell .half{color:var(--walnut-2)}
+.atdx .cell .zero{color:var(--line-2)}
+.atdx .cell.qty{font-size:13.5px}
+.atdx .cell.qty small{font-size:11px;color:var(--walnut-3);margin-left:2px}
 .atdx .bpop .bp-addskill{display:block;width:100%;text-align:left;margin-top:8px;font-size:12.5px;color:var(--terracotta);font-weight:500}
 .atdx .bpop .bp-addskill:hover{text-decoration:underline;text-underline-offset:2px}
-/* a labour crew's single collapsed row reads like a worker row */
-.atdx tr.crew.workerrow td{border-top:1px solid var(--line);padding-top:8px;padding-bottom:8px}
-.atdx tr.crew.workerrow td.name{padding:8px 18px}
-.atdx tr.crew.workerrow td.tot{text-align:right;padding:8px 18px}
 .atdx .bar{height:4px;background:var(--line);border-radius:2px;margin-top:5px;position:relative;overflow:hidden;width:120px;margin-left:auto}
 .atdx .bar i{position:absolute;left:0;top:0;bottom:0;background:var(--slate)}
 .atdx .bar b{position:absolute;top:0;bottom:0;background:var(--terracotta)}
-.atdx tr.direct td{border-top:1px solid var(--line);height:46px}
-.atdx tr.direct td.name{text-align:left;padding:8px 18px}
-.atdx tr.direct .n{font-weight:500}
-.atdx tr.direct .d{font-size:12.5px;color:var(--walnut-3)}
-.atdx tr.direct td.tot{text-align:right;padding:8px 18px;font-size:13.5px}
-.atdx tr.direct td.tot .v{font-weight:500}
-.atdx tr.direct td.tot .u{font-size:12.5px;color:var(--walnut-3)}
-.atdx tr.direct td.tot .u b{color:var(--sage);font-weight:500}
-.atdx tr.add td{border-top:1px solid var(--line);text-align:left;padding:8px 18px;background:var(--paper)}
-.atdx tr.add td:empty{padding:0;border-top:0}
-.atdx tr.add button.pill{height:40px;padding:0 18px 0 14px;font-size:14px;font-weight:500;border-radius:10px;display:inline-flex;align-items:center;gap:9px;border:1px solid var(--line-2);background:var(--paper);color:var(--walnut)}
-.atdx tr.add button.pill:hover{border-color:var(--walnut)}
-.atdx tr.add button.pill.main{background:var(--walnut);color:var(--paper);border-color:var(--walnut)}
-.atdx tr.add button.pill.main:hover{background:#2a211b}
-.atdx tr.add .new{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-.atdx tr.add .new input,.atdx tr.add .new select{height:38px;border:1px solid var(--line-2);border-radius:9px;background:var(--paper);padding:0 12px;font-size:14px}
-.atdx tr.add .new input:focus,.atdx tr.add .new select:focus{outline:none;border-color:var(--walnut)}
-.atdx tr.add .new input{width:200px}
-.atdx tr.add .x{font-size:13px;color:var(--walnut-3);margin-left:4px}
-.atdx .pp{position:relative;display:inline-block}
 .atdx .psearch{height:38px;border:1px solid var(--line-2);border-radius:9px;background:var(--paper);padding:0 12px;font-size:14px;width:260px}
 .atdx .psearch:focus{outline:none;border-color:var(--walnut)}
 .atdx .ppmenu{position:absolute;left:0;top:calc(100% + 4px);z-index:5;min-width:280px;background:var(--paper);border:1px solid var(--line-2);border-radius:10px;box-shadow:0 10px 28px -12px rgba(59,47,39,.35);padding:4px;max-height:300px;overflow:auto}
@@ -291,10 +286,6 @@ const ATDX_CSS = `
 .atdx .kindbtn.done{pointer-events:none;border-color:var(--sage);animation:atdx-pop .42s ease}
 .atdx .kindbtn.done .ok{display:flex;background:color-mix(in srgb,var(--sage) 11%,var(--paper))}
 .atdx .kindbtn.done .ok svg{width:23px;height:23px;stroke:var(--sage);stroke-width:2.4;fill:none;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:26;stroke-dashoffset:26;animation:atdx-draw .42s .05s cubic-bezier(.6,0,.2,1) forwards}
-@keyframes atdx-spin{to{transform:rotate(360deg)}}
-@keyframes atdx-draw{to{stroke-dashoffset:0}}
-@keyframes atdx-pop{0%{transform:scale(.99)}45%{transform:scale(1.03)}100%{transform:scale(1)}}
-@keyframes atdx-fade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
 .atdx .pctpop{position:absolute;z-index:7;left:50%;top:-6px;transform:translate(-50%,-100%);background:var(--paper);border:1px solid var(--line-2);border-radius:10px;box-shadow:0 10px 28px -12px rgba(59,47,39,.4);padding:10px 12px;width:158px;display:flex;flex-direction:column;gap:8px;cursor:default}
 .atdx .pctpop input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:4px;border-radius:2px;background:var(--line-2);outline:none;cursor:pointer;margin:2px 0}
 .atdx .pctpop input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:15px;height:15px;border-radius:50%;background:var(--terracotta);border:2px solid var(--paper);box-shadow:0 1px 3px rgba(59,47,39,.3);cursor:pointer}
@@ -302,8 +293,6 @@ const ATDX_CSS = `
 .atdx .pctrow{display:flex;align-items:center;justify-content:space-between}
 .atdx .pctrow .pctval{font-size:15px;font-weight:500;color:var(--walnut)}
 .atdx .pctrow .pctok{font-size:12px;color:var(--terracotta);font-weight:500}
-.atdx .tip{position:absolute;z-index:3;background:var(--walnut);color:var(--paper);font-size:12.5px;padding:7px 10px;border-radius:8px;white-space:nowrap;pointer-events:none;transform:translate(-50%,-110%);left:50%;top:0;display:none}
-.atdx td.cell:hover .tip{display:block}
 .atdx .legend{display:flex;gap:22px;padding:12px 18px;font-size:12.5px;color:var(--walnut-3);border-top:1px solid var(--line);flex-wrap:wrap}
 .atdx .legend span{display:inline-flex;align-items:center;gap:7px}
 .atdx .legend .sw{width:22px;text-align:center;font-size:14px}
@@ -333,33 +322,19 @@ const ATDX_CSS = `
 .atdx .rc-f button:hover{color:var(--walnut)}
 .atdx .state{padding:60px 18px;text-align:center;color:var(--walnut-3);font-size:14px}
 .atdx .hide{display:none!important}
-@media (max-width:760px){
-  .atdx{padding:18px 12px calc(78px + env(safe-area-inset-bottom))}
-  .atdx h1{font-size:28px}
-  .atdx .lede{font-size:13.5px}
-  .atdx .top{gap:14px;align-items:flex-start}
-  /* week + rate-card controls: wrap and give each a real tap target instead of a cramped row */
-  .atdx .week{flex-wrap:wrap;gap:8px}
-  .atdx .week .range{min-width:0;flex:1;font-size:16px}
-  .atdx .week .today{margin-left:0}
-  .atdx .week .today[style]{margin-left:0 !important}
-  /* summary stats: two-per-row grid, filters scroll on their own line */
-  .atdx .summ{gap:14px 20px;padding:13px 14px}
-  .atdx .summ .sp{display:none}
-  .atdx .filters{flex:1 0 100%;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px}
-  .atdx .filters::-webkit-scrollbar{display:none}
-  .atdx .chip{flex:0 0 auto}
-  /* the weekly register is wider than a phone — let it scroll horizontally as one unit */
-  .atdx .reg{overflow-x:auto;-webkit-overflow-scrolling:touch}
-  .atdx .reg>table{min-width:820px}
-  .atdx th.name{width:200px;padding-left:14px}
-  .atdx th.tot{width:130px;padding-right:14px}
-  .atdx td.cell{width:60px}
-  .atdx .phasepick,.atdx .ocsel{max-width:100%}
-}
+
+@keyframes atdx-cellpop{0%{transform:scale(.75)}100%{transform:scale(1)}}
+@keyframes atdx-spin{to{transform:rotate(360deg)}}
+@keyframes atdx-draw{to{stroke-dashoffset:0}}
+@keyframes atdx-pop{0%{transform:scale(.99)}45%{transform:scale(1.03)}100%{transform:scale(1)}}
+@keyframes atdx-fade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
 `;
 
 const inr = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
+/** Each site gets a colour, in the mock's order, so its dot and its chip agree. */
+const SITE_DOT = ['#C0603F', '#6E8260', '#B98A2F', '#5E7A8A'];
+/** The chips carry a short name — the mock takes the first two words. */
+const shortSite = (label: string) => label.split(' ').slice(0, 2).join(' ');
 const isoOf = (d: Date) => d.toISOString().slice(0, 10);
 
 export default function AttendanceSheet({ session }: { session: Session }) {
@@ -377,6 +352,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
 
   const [monday, setMonday] = useState<Date>(() => mondayOf(new Date()));
   const [rcOpen, setRcOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [certCtx, setCertCtx] = useState<CertifyContext | null>(null);   // the certify-work wizard's open context
@@ -470,42 +446,43 @@ export default function AttendanceSheet({ session }: { session: Session }) {
 
   // ── grid render (faithful port) ──────────────────────────────────────────────
   const q = (sel: string) => rootRef.current?.querySelector(sel) as HTMLElement | null;
-  const col = (i: number) => (i === TODAY ? ' is-today' : '') + (i === 6 ? ' sun' : '');
   const sum = (cells: Cell[]) => cells.reduce((s, c) => s + ((c && c !== 'off') ? c.v : 0), 0);
-  const tip = (c: any) => c.by ? `<div class="tip">${c.v} · ${c.by} · ${c.at || ''}${c.photo ? ' · photo' : ''}</div>` : '';
 
   const srcDot = (c: any) => c.src === 'wa' ? '<span class="src"></span>' : '';
+  const ctip = (c: any) => c.by ? `<div class="ctip">${c.v} · ${c.by} · ${c.at || ''}${c.photo ? ' · photo' : ''}</div>` : '';
+  /** Every day is one grid cell: blank until it holds something, dimmed once it is out of reach. */
+  const wrap = (inner: string) => `<div class="cellwrap">${inner}</div>`;
+  const cls = (i: number, extra = '') =>
+    `cell${i === TODAY ? ' today' : ''}${i > TODAY || i === 6 ? ' future' : ''}${extra}`;
+
   function dayCell(c: Cell, i: number, ref: string) {
-    if (c === 'off') return `<td class="cell${col(i)}"><div class="c off">·</div></td>`;
-    if (!c) return `<td class="cell${col(i)}"><div class="c ${i <= TODAY ? 'gap' : 'off'}" data-cycle="${ref}">${i <= TODAY ? '—' : ''}</div></td>`;
+    if (c === 'off') return wrap(`<div class="${cls(i)} off"></div>`);
+    if (!c) return wrap(`<div class="${cls(i)}" data-day="${i}" data-cycle="${ref}"></div>`);
     const t = c.v === 1 ? '1' : c.v === 0.5 ? '<span class="half">½</span>' : '<span class="zero">0</span>';
-    const filled = c.v > 0 ? ' filled' : '';
-    return `<td class="cell${col(i)}"><div class="c${filled} ${c.src} mono" data-cycle="${ref}">${t}${srcDot(c)}${c.at ? `<div class="tip">${c.at}</div>` : ''}</div></td>`;
+    return wrap(`<div class="${cls(i, c.v > 0 ? ' filled' : '')}" data-day="${i}" data-cycle="${ref}">${t}${srcDot(c)}${ctip(c)}</div>`);
   }
   function qtyCell(c: Cell, i: number, ref: string, unit?: string) {
-    if (c === 'off') return `<td class="cell${col(i)}"><div class="c off">·</div></td>`;
-    if (!c) return `<td class="cell${col(i)}"><div class="c off qty" data-edit="${ref}"></div></td>`;
-    const filled = c.v > 0 ? ' filled' : '';
-    return `<td class="cell${col(i)}"><div class="c${filled} ${c.src} qty" data-edit="${ref}">${c.v}<small>${unit || ''}</small>${srcDot(c)}${tip(c)}</div></td>`;
+    if (c === 'off') return wrap(`<div class="${cls(i)} off"></div>`);
+    if (!c) return wrap(`<div class="${cls(i)} qty" data-day="${i}" data-edit="${ref}"></div>`);
+    return wrap(`<div class="${cls(i, c.v > 0 ? ' filled' : '')} qty" data-day="${i}" data-edit="${ref}">${c.v}<small>${unit || ''}</small>${srcDot(c)}${ctip(c)}</div>`);
   }
   // A labour crew shows ONE row; its day cell is the whole crew's headcount for that day (e.g. "1+2"),
   // and a click opens the breakdown popover to set each skill. Keeps the grid uncluttered.
   function crewDayCell(crew: any, i: number, si: number, ci: number) {
     const ref = `${si}.${ci}.${i}`;
-    if (i === 6 || i > TODAY) return `<td class="cell${col(i)}"><div class="c off">·</div></td>`;   // Sunday / future
+    if (i === 6 || i > TODAY) return wrap(`<div class="${cls(i)} off"></div>`);
     const nz = crew.cats.map((cat: any) => { const c = cat.cells[i]; return (c && c !== 'off') ? c.v : 0; });
     const total = nz.reduce((a: number, b: number) => a + b, 0);
     const wa = crew.cats.some((cat: any) => { const c = cat.cells[i]; return c && c !== 'off' && c.src === 'wa'; });
-    if (total <= 0) return `<td class="cell${col(i)}"><div class="c gap" data-crewcell="${ref}">—</div></td>`;
+    if (total <= 0) return wrap(`<div class="${cls(i)}" data-day="${i}" data-crewcell="${ref}"></div>`);
     const disp = nz.filter((v: number) => v > 0).join('+');
-    return `<td class="cell${col(i)}"><div class="c filled" data-crewcell="${ref}">${disp}${wa ? '<span class="src"></span>' : ''}</div></td>`;
+    return wrap(`<div class="${cls(i, ' filled')}" data-day="${i}" data-crewcell="${ref}">${disp}${wa ? '<span class="src"></span>' : ''}</div>`);
   }
   function pctCell(c: Cell, i: number, ref: string, prev: number) {
-    if (c === 'off') return `<td class="cell${col(i)}"><div class="c off">·</div></td>`;
-    if (!c) return `<td class="cell${col(i)}"><div class="c off qty" data-edit="${ref}"></div></td>`;
-    const drop = c.v < prev ? ' style="color:var(--terracotta)"' : '';
-    const filled = c.v > 0 ? ' filled' : '';
-    return `<td class="cell${col(i)}"><div class="c${filled} ${c.src} qty" data-edit="${ref}"${drop}>${c.v}<small>%</small>${srcDot(c)}${tip(c)}</div></td>`;
+    if (c === 'off') return wrap(`<div class="${cls(i)} off"></div>`);
+    if (!c) return wrap(`<div class="${cls(i)} qty" data-day="${i}" data-edit="${ref}"></div>`);
+    const drop = c.v < prev ? ' style="color:var(--terra)"' : '';
+    return wrap(`<div class="${cls(i, c.v > 0 ? ' filled' : '')} qty" data-day="${i}" data-edit="${ref}"${drop}>${c.v}<small>%</small>${srcDot(c)}${ctip(c)}</div>`);
   }
   const latestPct = (st: any) => st.cells.reduce((p: number, c: Cell) => (c && c !== 'off') ? c.v : p, st.before);
   function stageMath(st: any) {
@@ -522,62 +499,54 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     const body = q('#atdxBody'); if (!body) return;
     let wd = 0, wv = 0, we = 0, gaps = 0, todayCount = 0;
     body.innerHTML = DATA.current.map((site, si) => {
-      // A clear gap band before every project except the first, so sites read as separate blocks.
-      let html = si > 0 ? `<tr class="gap" data-site="${site.site}"><td colspan="10"></td></tr>` : '';
-      html += `<tr class="site" data-site="${site.site}"><td colspan="10">${site.label}${site.hint ? `<span class="area">${site.hint}</span>` : ''}<button class="addcta" data-add="${si}">＋ Add worker</button></td></tr>`;
-      let sno = 0; // a running serial for the crews + direct workers on this project
-      const dayHead = [0, 0, 0, 0, 0, 0, 0]; let siteWage = 0;   // per-day headcount + labour wage for the footer
+      // Every site is its own card; the cream between them is the seam.
+      const dot = SITE_DOT[si % SITE_DOT.length];
+      let rows = '';
+      let sno = 0;
+      const dayHead = [0, 0, 0, 0, 0, 0, 0]; let siteWage = 0;
       site.crews.forEach((crew, ci) => {
         const onContract = crew.basis === 'contract';
-        const catDays = crew.cats.reduce((s, cat) => s + sum(cat.cells), 0);
-        const wage = crew.cats.reduce((s, cat) => s + sum(cat.cells) * cat.rate, 0);
-        const earned = crew.stages.reduce((s, st) => s + stageMath(st).earned - st.paid, 0);
-        // The party name is a slim heading; the real per-day entries live on the skill rows below.
-        // So worker-days + gaps are read from the SKILLS, not an aggregate head row. A contract crew
-        // is measured by % completion, so it contributes neither days nor gaps.
+        const catDays = crew.cats.reduce((s2, cat) => s2 + sum(cat.cells), 0);
+        const wage = crew.cats.reduce((s2, cat) => s2 + sum(cat.cells) * cat.rate, 0);
+        const earned = crew.stages.reduce((s2, st) => s2 + stageMath(st).earned - st.paid, 0);
         if (onContract) { we += earned; }
         else {
           wd += catDays; wv += wage; siteWage += wage;
           for (let i = 0; i < 7; i++) crew.cats.forEach(cat => { const c = cat.cells[i]; if (c && c !== 'off') dayHead[i] += c.v; });
           if (crew.cats.length) for (let i = 0; i <= TODAY; i++) { if (i === 6) continue; if (!crew.cats.some(cat => { const c = cat.cells[i]; return c && c !== 'off'; })) gaps++; }
         }
-        // Overall completion across the crew's stages, weighted by each stage's contract value.
-        const stageVal = crew.stages.reduce((s, st) => s + (st.type === 'lump' ? (st.amount || 0) : (st.total || 0) * (st.rate || 0)), 0);
-        const stageEarnedGross = crew.stages.reduce((s, st) => s + stageMath(st).earned, 0);
+        const stageVal = crew.stages.reduce((s2, st) => s2 + (st.type === 'lump' ? (st.amount || 0) : (st.total || 0) * (st.rate || 0)), 0);
+        const stageEarnedGross = crew.stages.reduce((s2, st) => s2 + stageMath(st).earned, 0);
         const overallPct = stageVal ? Math.round(stageEarnedGross / stageVal * 100) : 0;
-        // An unconfirmed engagement (basis assumed at go-live) wears a quiet nudge — clicking the
-        // Contract/Labour toggle confirms it. Only shown until confirmed.
         const assumed = !crew.basisConfirmed ? ` <span class="assumed" title="Basis assumed — pick Contract or Labour to confirm">· assumed</span>` : '';
-        // For a contract crew, offer "measured by attendance" — a measurement engagement auto-certifies
-        // each measured muster day (the day is the reading), vs certifying milestones explicitly.
         const measuring = crew.accrualBasis === 'measurement';
         const measureToggle = (crew.contract && onContract)
           ? ` <button class="measurebasis${measuring ? ' on' : ''}" data-measurebasis="${si}.${ci}" title="${measuring ? 'Measured by attendance — each measured day auto-certifies. Click to switch back to milestone certification.' : 'Certify by milestones. Click to measure by attendance instead.'}">${measuring ? '✓ measured by attendance' : 'measure by attendance'}</button>`
           : '';
+        sno++;
         if (!onContract) {
-          // ── LABOUR crew → ONE collapsed row. Cells are the crew's daily headcount; a click opens the
-          //    stepper popover (the mockup) to set each skill. No sub-rows — the grid stays clean. ──
+          // ── LABOUR crew → ONE row. The cell is the crew's headcount; a click opens the stepper. ──
           const contractLink = crew.contract
             ? `<button class="oncontract" data-basis="${si}.${ci}.contract" title="This party has a contract — switch to tracking it by stages">on a contract?</button>`
             : `<button class="oncontract" data-oncontract="${si}.${ci}">put on contract</button>`;
-          html += `<tr class="crew workerrow" data-site="${site.site}" data-grp="c${si}-${ci}">
-            <td class="sno snorm" data-rmc="${si}.${ci}" title="Remove from sheet" aria-label="Remove ${escapeHtml(crew.n)}"><span class="sno-n">${++sno}</span><span class="sno-x">×</span></td>
-            <td class="name"><div class="wnamewrap"><div class="wav">${avatarOf(crew.n)}</div><div class="wmid"><div class="n">${escapeHtml(crew.n)}<span class="crewtag">crew</span></div><div class="d">${escapeHtml(crew.trade || crew.d || 'Labour')} · daily wages · ${contractLink}</div></div></div></td>
+          rows += `<div class="cols wrow" data-grp="c${si}-${ci}">
+            <div class="wname"><button class="rmw" data-rmc="${si}.${ci}" title="Remove from sheet" aria-label="Remove ${escapeHtml(crew.n)}">×</button>
+              <div class="wav">${avatarOf(crew.n)}</div>
+              <div class="wmid"><b>${escapeHtml(crew.n)}<span class="crewtag">crew</span></b>
+              <span>${escapeHtml(crew.trade || crew.d || 'Labour')} · daily wages · ${contractLink}</span></div></div>
             ${crew.head.map((_c: Cell, i: number) => crewDayCell(crew, i, si, ci)).join('')}
-            <td class="tot"><div class="v">${catDays} worker-day${catDays === 1 ? '' : 's'}</div><div class="u">${wage ? `<b>wages, unpaid</b> ${inr(wage)}` : '<span style="color:var(--walnut-3)">tap a day to mark</span>'}</div></td></tr>`;
-          return; // no sub-rows for a labour crew
+            <div class="wtotal">${catDays ? `<b>${catDays} wd</b> · ${inr(wage)}` : ''}</div></div>`;
+          return;
         }
-        // ── CONTRACT crew → heading + stage rows (measured by % completion / certification) ──
+        // ── CONTRACT crew → heading row + a row per live stage ──
         const seg = `<div class="seg"><button data-basis="${si}.${ci}.contract" aria-pressed="${onContract}">Contract</button><button data-basis="${si}.${ci}.labour" aria-pressed="${!onContract}">Labour</button>${assumed}${measureToggle}</div>`;
-        html += `<tr class="crew" data-site="${site.site}" data-grp="c${si}-${ci}">
-          <td class="sno snorm" data-rmc="${si}.${ci}" title="Remove from sheet" aria-label="Remove ${escapeHtml(crew.n)}"><span class="sno-n">${++sno}</span><span class="sno-x">×</span></td>
-          <td class="name crewhead"><div class="wav">${avatarOf(crew.n)}</div><div class="n">${crew.n}</div><div class="d">${crew.d} · contract</div>${seg}</td>
-          ${crew.head.map((_c: Cell, i: number) => `<td class="cell${col(i)}"><div class="c off">·</div></td>`).join('')}
-          <td class="tot"><div class="v">${overallPct}% complete</div><div class="u"><b>earned, unpaid</b> ${inr(earned)}</div></td></tr>`;
+        rows += `<div class="cols wrow" data-grp="c${si}-${ci}">
+          <div class="wname"><button class="rmw" data-rmc="${si}.${ci}" title="Remove from sheet" aria-label="Remove ${escapeHtml(crew.n)}">×</button>
+            <div class="wav">${avatarOf(crew.n)}</div>
+            <div class="wmid"><b>${escapeHtml(crew.n)}</b><span>${escapeHtml(crew.d || '')} · contract</span>${seg}</div></div>
+          ${crew.head.map((_c: Cell, i: number) => wrap(`<div class="${cls(i)} off"></div>`)).join('')}
+          <div class="wtotal"><b>${overallPct}%</b> · ${inr(earned)}</div></div>`;
         {
-          // Show every live stage by default so a staged contract reads as multiple stage rows
-          // (each a select — "where they worked"), and a lump-sum-only contract shows its one row.
-          // Only a stage that's fully done AND fully paid is folded away.
           (crew as any).shown = (crew as any).shown || crew.stages.map((_st, ki) => ki).filter((ki) => {
             const m = stageMath(crew.stages[ki]); const st = crew.stages[ki];
             return !(m.pct >= 100 && m.earned - st.paid <= 0);
@@ -591,33 +560,36 @@ export default function AttendanceSheet({ session }: { session: Session }) {
               ? st.cells.map((c, i) => { const h = pctCell(c, i, ref, prev); if (c && c !== 'off') prev = c.v; return h; }).join('')
               : st.cells.map((c, i) => qtyCell(c, i, ref, st.unit)).join('');
             const denom = st.type === 'lump' ? (st.amount || 1) : ((st.total || 0) * (st.rate || 0) || 1);
-            html += `<tr class="sub" data-site="${site.site}" data-grp="c${si}-${ci}">
-              <td class="sno"></td>
-              <td class="name"><select class="stsel" data-swap="${si}.${ci}.${n}">${opts(ki)}</select><span class="st">${st.type === 'lump' ? 'lump sum' : `per ${st.unit || ''}`}</span></td>${cells}
-              <td class="tot">${m.label}<div class="bar"><i style="width:${Math.min(100, m.prog * 100)}%"></i><b style="left:0;width:${Math.min(100, st.paid / denom * 100)}%"></b></div></td></tr>`;
+            rows += `<div class="cols wrow sub" data-grp="c${si}-${ci}">
+              <div class="wname"><select class="stsel" data-swap="${si}.${ci}.${n}">${opts(ki)}</select><span class="st">${st.type === 'lump' ? 'lump sum' : `per ${st.unit || ''}`}</span></div>${cells}
+              <div class="wtotal">${m.label}<div class="bar"><i style="width:${Math.min(100, m.prog * 100)}%"></i><b style="left:0;width:${Math.min(100, st.paid / denom * 100)}%"></b></div></div></div>`;
           });
           const hidden = crew.stages.length - (crew as any).shown.length;
-          html += `<tr class="sub last" data-site="${site.site}" data-grp="c${si}-${ci}"><td class="sno"></td><td class="name" colspan="8" id="stadd-${si}-${ci}">
-            <select class="stsel ghost" data-swap="${si}.${ci}.new"><option value="" selected>+ Stage…${hidden ? ` (${hidden} more on this contract)` : ''}</option>${opts(-1)}</select></td>
-            <td class="tot"></td></tr>`;
+          rows += `<div class="cols wrow sub" data-grp="c${si}-${ci}"><div class="wname" id="stadd-${si}-${ci}">
+            <select class="stsel ghost" data-swap="${si}.${ci}.new"><option value="" selected>+ Stage…${hidden ? ` (${hidden} more on this contract)` : ''}</option>${opts(-1)}</select></div>
+            ${dates.map((_d, i) => wrap(`<div class="${cls(i)} off"></div>`)).join('')}<div class="wtotal"></div></div>`;
         }
       });
       site.direct.forEach((w, wi) => {
         const d = sum(w.cells), amt = d * w.rate; wd += d; wv += amt; siteWage += amt;
         w.cells.forEach((c, i) => { if (c && c !== 'off') dayHead[i] += c.v; if (!c && i <= TODAY) gaps++; });
-        html += `<tr class="direct" data-site="${site.site}" data-grp="d${si}-${wi}">
-          <td class="sno snorm" data-rmw="${si}.${wi}" title="Remove from sheet" aria-label="Remove ${escapeHtml(w.n)}"><span class="sno-n">${++sno}</span><span class="sno-x">×</span></td>
-          <td class="name"><div class="wnamewrap"><div class="wav">${avatarOf(w.n)}</div><div class="wmid"><div class="n">${w.n}</div><div class="d" data-ocwrap="${si}.${wi}">${w.d} · <span class="rt mono" data-rate="${si}.d${wi}" title="click to change rate" style="margin-left:0">₹${w.rate}</span>/day · direct · <button class="oncontract" data-ocw="${si}.${wi}">put on contract</button></div></div></div></td>
+        sno++;
+        rows += `<div class="cols wrow" data-grp="d${si}-${wi}">
+          <div class="wname"><button class="rmw" data-rmw="${si}.${wi}" title="Remove from sheet" aria-label="Remove ${escapeHtml(w.n)}">×</button>
+            <div class="wav">${avatarOf(w.n)}</div>
+            <div class="wmid"><b>${escapeHtml(w.n)}</b><span data-ocwrap="${si}.${wi}">${escapeHtml(w.d || '')} · <span class="rt mono" data-rate="${si}.d${wi}" title="click to change rate">₹${w.rate}</span>/day · <button class="oncontract" data-ocw="${si}.${wi}">put on contract</button></span></div></div>
           ${w.cells.map((c, i) => dayCell(c, i, `${si}.d${wi}`)).join('')}
-          <td class="tot"><div class="v">${d} ${d === 1 ? 'day' : 'days'}</div><div class="u"><b>wages, unpaid</b> ${inr(amt)}</div></td></tr>`;
+          <div class="wtotal">${d ? `<b>${d} wd</b> · ${inr(amt)}` : ''}</div></div>`;
       });
-      // Per-site headcount footer + a subtle add-worker row (hosts the inline picker the header CTA opens).
       todayCount += TODAY >= 0 ? dayHead[TODAY] : 0;
-      html += `<tr class="sitefoot" data-site="${site.site}"><td class="lab">On site</td>${dates.map((_d, i) => `<td class="dc${col(i)}">${dayHead[i] || '·'}</td>`).join('')}<td class="fsum">${inr(siteWage)}</td></tr>`;
-      // Quiet host row for the inline add-worker picker (opened from the site header's "＋ Add worker").
-      html += `<tr class="add" data-site="${site.site}"><td colspan="10" id="add-${si}"></td></tr>`;
-      return html;
-    }).join('') || `<tr><td colspan="10" class="state">No active projects yet — create a project to start tracking attendance.</td></tr>`;
+
+      const head = `<div class="sitehead"><span class="sitedot" style="background:${dot}"></span>
+        <b>${escapeHtml(site.label)}</b>${site.hint ? `<span class="area">${escapeHtml(site.hint)}</span>` : ''}
+        <span class="stotal">${siteWage ? inr(siteWage) + ' this week' : ''}</span><span class="addw" data-add="${si}">＋ Add worker</span></div>`;
+      const empty = `<div class="siteempty">No attendance yet this week — <a data-add="${si}">add a worker</a> or wait for the site to WhatsApp it in.</div>`;
+      const foot = `<div class="cols sitefoot"><div class="lab">On site</div>${dates.map((_d, i) => `<div class="dc${i === TODAY ? ' today' : ''}">${dayHead[i] || ''}</div>`).join('')}<div class="sum">${siteWage ? inr(siteWage) : ''}</div></div>`;
+      return `<div class="siteblock" data-site="${site.site}">${head}${sno ? rows + foot : empty}<div id="add-${si}"></div></div>`;
+    }).join('') || `<div class="state">No active projects yet — create a project to start tracking attendance.</div>`;
     const setTxt = (id: string, v: string) => { const el = q('#' + id); if (el) el.textContent = v; };
     setTxt('atdxWd', String(wd)); setTxt('atdxAccrued', inr(wv + we)); setTxt('atdxToday', String(todayCount)); setTxt('atdxGaps', String(gaps));
     bind(); applyFilter();
@@ -631,7 +603,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     if (part[0] === 's') { const st = site.crews[+part.slice(1)].stages[+ki]; return { cells: st.cells, target: st, projectId: site.site, subject: { type: 'stage' as const, milestone_id: st.milestoneId } }; }
     const w = site.direct[+part.slice(1)]; return { cells: w.cells, target: w, projectId: site.site, subject: { type: 'direct' as const, direct_worker_id: w.id } };
   }
-  const colOf = (div: Element) => [...(div.closest('tr')!.querySelectorAll('td.cell'))].indexOf(div.closest('td')!);
+  const colOf = (div: Element) => Number((div as HTMLElement).dataset.day ?? -1);
   const fail = (e: any) => { showSnackbar(e?.message || 'Could not save', { type: 'error' }); load(); };
 
   async function persistCell(subject: any, projectId: string, i: number, value: number) {
@@ -1123,10 +1095,17 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     }));
   }
 
+  useEffect(() => {
+    if (!infoOpen) return;
+    const h = () => setInfoOpen(false);
+    document.addEventListener('click', h);
+    return () => document.removeEventListener('click', h);
+  }, [infoOpen]);
+
   // ── site filter ──────────────────────────────────────────────────────────────
   function applyFilter() {
     const f = filterRef.current;
-    rootRef.current?.querySelectorAll('#atdxBody tr').forEach(tr => (tr as HTMLElement).classList.toggle('hide', f !== 'all' && (tr as HTMLElement).dataset.site !== f));
+    rootRef.current?.querySelectorAll('#atdxBody .siteblock').forEach(el => (el as HTMLElement).classList.toggle('hide', f !== 'all' && (el as HTMLElement).dataset.site !== f));
   }
 
   const sites = DATA.current;
@@ -1141,76 +1120,65 @@ export default function AttendanceSheet({ session }: { session: Session }) {
           // Keep the muster grid + progress bar populated (display-only; the obligation is the cert).
           if (certCtx.projectId && certCtx.milestoneId) void saveCell(orgId, certCtx.projectId, date, { type: 'stage', milestone_id: certCtx.milestoneId }, value, byName).catch(() => {});
         }} />}
-      <div className="wrap">
-        <div className="top">
-          <div>
-            <h1>Attendance</h1>
-            <p className="lede">What your supervisors send on <span className="wa">WhatsApp</span> fills in here — click a cell to correct it, click a day to fill the site. Payables reads what&apos;s unpaid.</p>
-          </div>
+      <div className="page">
+        <div className="head">
+          <h1>Attendance</h1>
           <div className="hero">
-            <div className="h"><b id="atdxWd">—</b><span>worker-days</span></div>
-            <div className="h"><b id="atdxAccrued">—</b><span>accrued this week</span></div>
-            <div className="h"><b id="atdxToday">—</b><span>on site today</span></div>
-            <div className="h"><b className="warn" id="atdxGaps">—</b><span>gaps to fill</span></div>
+            <div className="h"><b id="atdxWd">0</b><span>worker-days</span></div>
+            <div className="h"><b id="atdxAccrued">₹0</b><span>accrued</span></div>
+            <div className="h"><b id="atdxToday">0</b><span>on site today</span></div>
+            <div className="h gap"><b id="atdxGaps">0</b><span>gaps to fill</span></div>
           </div>
         </div>
 
-        <div className="week">
-          <button className="nav" aria-label="Previous week" onClick={() => setMonday(m => { const d = new Date(m); d.setDate(d.getDate() - 7); return d; })}>‹</button>
-          <span className="range">{weekLabel(monday)}</span>
-          <button className="nav" aria-label="Next week" onClick={() => setMonday(m => { const d = new Date(m); d.setDate(d.getDate() + 7); return d; })}>›</button>
-          <button className="today" onClick={() => setMonday(mondayOf(new Date()))}>this week</button>
-          <button className="today" style={{ marginLeft: 14 }} onClick={() => setRcOpen(o => !o)}>{rcOpen ? 'hide rate card' : 'rate card'}</button>
-        </div>
+        <div className="toolbar">
+          <div className="wkpager">
+            <button className="wkbtn" aria-label="Previous week" onClick={() => setMonday(m => { const d = new Date(m); d.setDate(d.getDate() - 7); return d; })}>‹</button>
+            <span className="wklabel">{weekLabel(monday)}</span>
+            <button className="wkbtn" aria-label="Next week" onClick={() => setMonday(m => { const d = new Date(m); d.setDate(d.getDate() + 7); return d; })}>›</button>
+          </div>
+          <span className="tlink" onClick={() => setMonday(mondayOf(new Date()))}>this week</span>
+          <span className="tlink" onClick={() => setRcOpen(o => !o)}>{rcOpen ? 'hide rate card' : 'rate card'}</span>
 
-        <div className="filters" role="group">
-          {[{ k: 'all', l: 'All sites' }, ...sites.map(s => ({ k: s.site, l: s.label }))].map((c, i) => (
-            <button key={c.k} className="chip" aria-pressed={i === 0} onClick={(e) => {
-              filterRef.current = c.k;
-              rootRef.current?.querySelectorAll('.filters .chip').forEach(x => x.setAttribute('aria-pressed', String(x === e.currentTarget)));
-              applyFilter();
-            }}>{c.l}</button>
-          ))}
+          <div className="chips" role="group">
+            {[{ k: 'all', l: 'All sites', c: '' }, ...sites.map((s2, i) => ({ k: s2.site, l: shortSite(s2.label), c: SITE_DOT[i % SITE_DOT.length] }))].map((c, i) => (
+              <span key={c.k} className={`chip${i === 0 ? ' on' : ''}`} onClick={(e) => {
+                filterRef.current = c.k;
+                rootRef.current?.querySelectorAll('.chips .chip').forEach(x => x.classList.toggle('on', x === e.currentTarget));
+                applyFilter();
+              }}>{c.c ? <span className="cdot" style={{ background: c.c }} /> : null}{c.l}</span>
+            ))}
+          </div>
+
+          <button className={`info${infoOpen ? ' open' : ''}`} onClick={(e) => { e.stopPropagation(); setInfoOpen(o => !o); }}>i
+            <span className="tip"><b>How this page fills.</b> WhatsApp reports from site land here with a <span className="dot" /> mark.
+            Click any cell to mark or correct · click a day header to mark every site present ·
+            direct workers cycle 1 → ½ → 0 → clear.</span>
+          </button>
         </div>
 
         <section className="rc" id="atdxRc" hidden>
-          <div className="rc-h"><span className="t">Rate card</span><span className="s">Daily rates by worker type. A trade's helpers can cost differently from general unskilled labour. Click to change — from today; earlier weeks keep the old rate.</span></div>
+          <div className="rc-h"><span className="t">Rate card</span><span className="s">Daily rates by worker type. A trade&apos;s helpers can cost differently from general unskilled labour. Click to change — from today; earlier weeks keep the old rate.</span></div>
           <table id="atdxRcTable" />
           <div className="rc-f"><button onClick={addDepartment}>+ Add department</button></div>
         </section>
 
-        <div className="reg">
-          <table>
-            <thead>
-              <tr>
-                <th className="sno" />
-                <th className="name">Crew · worker</th>
-                {dates.map((d, i) => {
-                  const dt = new Date(d);
-                  const fillable = i <= TODAY && i !== 6;
-                  const cls = ['day', i === TODAY ? 'is-today' : '', i === 6 ? 'sun' : ''].filter(Boolean).join(' ');
-                  return (
-                    <th key={d} className={cls} onClick={fillable ? () => fillDay(i) : undefined} style={fillable ? undefined : { cursor: 'default' }}>
-                      <span className="wl">{dt.toLocaleString('en-US', { weekday: 'short' })}</span>
-                      <span className="dn">{dt.getDate()}</span>
-                      <span className="fill-hint">{fillable ? 'fill site ↓' : ''}</span>
-                    </th>
-                  );
-                })}
-                <th className="tot">This week</th>
-              </tr>
-            </thead>
-            <tbody id="atdxBody" />
-          </table>
-          <div className="legend">
-            <span><i className="srcd" /> filed from WhatsApp</span>
-            <span><b className="sw off">3</b> typed by office</span>
-            <span><b className="sw gap">—</b> working day, nothing yet</span>
-            <span><i className="pl" /> already paid</span>
-            <span><b className="sw wa" style={{ fontSize: 12 }}>70%</b> stage reading, on the day it was assessed</span>
-            <span>Click a cell to correct · click a day header to fill the site · direct workers cycle 1 · ½ · 0</span>
-          </div>
+        <div className="cols dayhead">
+          <div className="corner">Crew · worker</div>
+          {dates.map((d, i) => {
+            const dt = new Date(d);
+            const fillable = i <= TODAY && i !== 6;
+            return (
+              <div key={d} className={`dh${i === TODAY ? ' today' : ''}${i > TODAY ? ' future' : ''}`}
+                onClick={fillable ? () => fillDay(i) : undefined}>
+                <small>{dt.toLocaleString('en-US', { weekday: 'short' })}</small><b>{dt.getDate()}</b>
+              </div>
+            );
+          })}
+          <div className="wk">This week</div>
         </div>
+
+        <div id="atdxBody" />
 
         {loading && <div className="state">Loading attendance…</div>}
         {err && <div className="state" style={{ color: 'var(--terracotta)' }}>{err} · <button style={{ textDecoration: 'underline' }} onClick={() => load()}>retry</button></div>}
