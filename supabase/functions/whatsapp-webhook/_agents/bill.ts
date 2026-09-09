@@ -12,6 +12,7 @@ import { send } from '../_format.ts'
 import { signedMediaUrl, storeMedia } from '../_normalize.ts'
 import { openConversation, closeConversation, type ConvoRow } from '../_conversation.ts'
 import { parseSpokenAmount } from '../_amount.ts'
+import { entryLink } from '../_links.ts'
 import * as M from '../_messages.ts'
 import type { TxnCtx } from './transaction.ts'
 import type { FinDocRead, FinancialAction } from '../_financial_doc.ts'
@@ -102,14 +103,15 @@ export async function runBill(ctx: TxnCtx, read: FinDocRead, action: FinancialAc
   }
   await attachBillDoc(ctx, entryId)
   const vendor = read.vendor
+  const reviewUrl = entryLink(entryId).url   // deep link to the For-review page for THIS bill
 
   if (action.kind === 'BILL_AND_PAYMENT') {
-    await send(supabase, from, M.mBillAndPayment(lang, { vendor, billTotal: read.bill_total, paidAmount: action.paidAmount }), { org_id: orgId, wamid })
+    await send(supabase, from, M.mBillAndPayment(lang, { vendor, billTotal: read.bill_total, paidAmount: action.paidAmount, reviewUrl }), { org_id: orgId, wamid })
     await closeConversation(supabase, { orgId, sender: from, stagedEntryId: entryId, lastMessageId: wamid, lastActionSummary: `Bill + payment — ${vendor ?? 'vendor'}` })
     return
   }
   if (action.kind === 'BILL_ONLY') {
-    await send(supabase, from, M.mBillSaved(lang, { vendor, billTotal: read.bill_total }), { org_id: orgId, wamid })
+    await send(supabase, from, M.mBillSaved(lang, { vendor, billTotal: read.bill_total, reviewUrl }), { org_id: orgId, wamid })
     await closeConversation(supabase, { orgId, sender: from, stagedEntryId: entryId, lastMessageId: wamid, lastActionSummary: `Bill saved — ${vendor ?? 'vendor'}` })
     return
   }
@@ -172,7 +174,8 @@ export async function answerBillPayment(ctx: TxnCtx, text: string, convo: ConvoR
   }
   if (a.kind === 'amount') {
     if (entryId) await patchBillPayment(ctx, entryId, a.amount!)
-    await send(supabase, from, M.mBillAndPayment(lang, { vendor, billTotal: slots.bill_total ?? null, paidAmount: a.amount! }), { org_id: orgId, wamid })
+    const reviewUrl = entryLink(entryId ?? '').url
+    await send(supabase, from, M.mBillAndPayment(lang, { vendor, billTotal: slots.bill_total ?? null, paidAmount: a.amount!, reviewUrl }), { org_id: orgId, wamid })
     await closeConversation(supabase, { orgId, sender: from, stagedEntryId: entryId, lastMessageId: wamid, lastActionSummary: `Bill + payment — ${vendor ?? 'vendor'}` })
     return
   }

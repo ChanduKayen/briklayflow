@@ -31,7 +31,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, X, Pencil, ArrowRight, Image as ImageIcon, Mic, Split } from 'lucide-react';
 import type { RoughEntry } from '../../types';
 import { V, WA, font, nums, display, mono, telugu, T } from './tokens';
-import { WhatsAppGlyph } from './atoms';
+import { WhatsAppGlyph, NatureChip, natureOf } from './atoms';
 import {
   fileRoughEntry, rejectRoughEntry, restoreRoughEntry, isResolved, gapsOf, errMessage,
   type ResolvedFields, type Gap,
@@ -501,6 +501,8 @@ export function ReviewCard({
         {/* ═══ COLUMN 1 — THE FACT ════════════════════════════════════════════════════════════════
             What enters the ledger: the figure, who it went to, which site it belongs to. */}
         <div className={`min-w-0 ${reveal ? 'tf-read' : ''}`}>
+          {/* the quiet mark of what this is — matches the bill card's chip */}
+          <div style={{ marginBottom: 9 }}><NatureChip {...natureOf(entry)} /></div>
           <div className="flex items-baseline gap-2" style={{ ...display, ...nums, fontWeight: 600, fontSize: 23, letterSpacing: '.01em', whiteSpace: 'nowrap', color: V.ink }}>
             {amountNum > 0 ? (
               <span>

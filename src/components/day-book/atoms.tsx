@@ -1,7 +1,7 @@
-/** Day Book atoms — channel signature + confidence chip. */
+/** Day Book atoms — channel signature + confidence chip + the nature chip. */
 import { Camera, Mic } from 'lucide-react';
 import type { RoughEntrySource } from '../../types';
-import { V, WA, font } from './tokens';
+import { V, WA, font, mono } from './tokens';
 
 /** The WhatsApp brand mark, drawn (channel signature only). */
 export function WhatsAppGlyph({ size = 13, color = WA }: { size?: number; color?: string }) {
@@ -30,6 +30,50 @@ export function ChannelBadge({ source }: { source: RoughEntrySource }) {
       <span style={{ color: V.sys }}>{m.label}</span>
     </span>
   );
+}
+
+/**
+ * NATURE CHIP — the quiet mark of what a card IS, in the ledger's own docket voice: a soft wash, a small
+ * dot, a mono uppercase label with generous tracking. It sits beside the voucher furniture (Nº, timestamp),
+ * never shouting — colour carries meaning (terra = money out / a bill, sage = labour / money in), but at low
+ * saturation so it reads as a tab on a document, not a status alarm.
+ */
+export type ChipTone = 'neutral' | 'terra' | 'sage' | 'ask';
+const CHIP_TONES: Record<ChipTone, { bg: string; fg: string; dot: string; border: string }> = {
+  neutral: { bg: V.field,      fg: V.sys,      dot: V.faint, border: 'transparent' },
+  terra:   { bg: V.terraWash,  fg: V.terraDeep, dot: V.terra, border: 'rgba(188,75,39,.16)' },
+  sage:    { bg: V.sageWash,   fg: V.sage,     dot: V.sage,  border: 'rgba(47,93,52,.16)' },
+  ask:     { bg: V.askWash,    fg: V.ask,      dot: V.ask,   border: V.askLine },
+};
+
+export function NatureChip({ label, tone = 'neutral' }: { label: string; tone?: ChipTone }) {
+  const t = CHIP_TONES[tone];
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5.5, padding: '3px 9px', borderRadius: 999,
+      background: t.bg, border: `1px solid ${t.border}`, color: t.fg, lineHeight: 1, whiteSpace: 'nowrap',
+      ...mono, fontSize: 9.5, fontWeight: 600, letterSpacing: '.12em', textTransform: 'uppercase',
+    }}>
+      <span style={{ width: 5, height: 5, borderRadius: '50%', background: t.dot }} />
+      {label}
+    </span>
+  );
+}
+
+/** What KIND of entry this is — the label + tone for its NatureChip. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function natureOf(entry: { ai_extracted?: any }): { label: string; tone: ChipTone } {
+  const ai = (entry.ai_extracted ?? {}) as Record<string, unknown>;
+  if (ai.kind === 'BILL') {
+    const paid = !!(ai.payment as { amount?: number } | null)?.amount;
+    return { label: paid ? 'Bill · Paid' : 'Bill', tone: 'terra' };
+  }
+  const t = ai.transaction_type;
+  if (t === 'Worker Payment') return { label: 'Labour', tone: 'sage' };
+  if (t === 'Material Purchase') return { label: 'Material', tone: 'terra' };
+  if (t === 'General Expense') return { label: 'Overhead', tone: 'neutral' };
+  if (ai.direction === 'in') return { label: 'Receipt', tone: 'sage' };
+  return { label: 'Payment', tone: 'neutral' };
 }
 
 /** ready = the entry can be filed as-is; otherwise it needs the owner's eye. */

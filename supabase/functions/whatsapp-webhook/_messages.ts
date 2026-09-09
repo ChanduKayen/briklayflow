@@ -1003,8 +1003,8 @@ export function pendingRetiredNotice(lang: Lang, subject: string | null): OutMes
 // Each states EXACTLY what happened, so a bill and a paid bill are never confused (crack: presentation).
 const fmtAmt = (n: number | null | undefined) => (n != null ? '₹' + n.toLocaleString('en-IN') : null)
 
-/** A bill saved for record — no money logged. */
-export function mBillSaved(lang: Lang, p: { vendor: string | null; billTotal: number | null }): OutMessage {
+/** A bill saved for record — no money logged. `reviewUrl` deep-links to the For-review page for this bill. */
+export function mBillSaved(lang: Lang, p: { vendor: string | null; billTotal: number | null; reviewUrl: string }): OutMessage {
   const who = p.vendor ?? pick(lang, { en: 'a vendor' })
   const amt = fmtAmt(p.billTotal)
   const head = amt ? `🧾 *Bill saved* — ${who} · ${amt}` : `🧾 *Bill saved* — ${who}`
@@ -1012,15 +1012,15 @@ export function mBillSaved(lang: Lang, p: { vendor: string | null; billTotal: nu
     kind: 'cta',
     body: [
       head,
-      pick(lang, { en: 'Kept for your records — no payment logged. Confirm the vendor & site in the Day Book.' }),
-      `Recorded in *Bills* · Briklay`,
+      pick(lang, { en: 'Kept for your records — no payment logged. Confirm the vendor & site on the For-review page.' }),
+      `Saved to *Bills* · Briklay`,
     ].join('\n\n'),
-    cta: { text: pick(lang, { en: 'Open Day Book' }), url: EDIT_LINK },
+    cta: { text: pick(lang, { en: 'Open for review' }), url: p.reviewUrl },
   }
 }
 
 /** A bill saved AND a payment logged against it, attached. */
-export function mBillAndPayment(lang: Lang, p: { vendor: string | null; billTotal: number | null; paidAmount: number }): OutMessage {
+export function mBillAndPayment(lang: Lang, p: { vendor: string | null; billTotal: number | null; paidAmount: number; reviewUrl: string }): OutMessage {
   const who = p.vendor ?? pick(lang, { en: 'a vendor' })
   const paid = fmtAmt(p.paidAmount)
   const total = fmtAmt(p.billTotal)
@@ -1029,10 +1029,10 @@ export function mBillAndPayment(lang: Lang, p: { vendor: string | null; billTota
     kind: 'cta',
     body: [
       `🧾 *Bill saved* + *${line}* — ${who}`,
-      pick(lang, { en: 'The bill is attached to the payment. Confirm the vendor in the Day Book.' }),
-      `Recorded in *Bills* + *Day Book* · Briklay`,
+      pick(lang, { en: 'The bill is attached to the payment. Confirm the vendor & site on the For-review page.' }),
+      `Saved to *Bills* · Briklay`,
     ].join('\n\n'),
-    cta: { text: pick(lang, { en: 'Open Day Book' }), url: EDIT_LINK },
+    cta: { text: pick(lang, { en: 'Open for review' }), url: p.reviewUrl },
   }
 }
 

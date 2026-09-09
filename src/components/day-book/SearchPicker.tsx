@@ -9,7 +9,7 @@ import { V, font } from './tokens';
 export interface PickerItem { id: string; name: string; tag?: string }
 
 export function SearchPicker({
-  items, valueName, placeholder, initialQuery, onSelect, onCreate, createKind,
+  items, valueName, placeholder, initialQuery, onSelect, onCreate, createKind, onOpenChange,
 }: {
   items: PickerItem[];
   valueName: string | null;            // the current selection's display name (null → nothing picked)
@@ -18,8 +18,10 @@ export function SearchPicker({
   onSelect: (id: string, name: string) => void;
   onCreate?: (name: string) => void;   // omit to disable "add new"
   createKind?: string;                 // e.g. "vendor" → the create row reads "Add “X” as a vendor"
+  onOpenChange?: (open: boolean) => void;  // lets the host lift its own stacking context while the list is open
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(false);
+  const setOpen = (v: boolean) => { setOpenState(v); onOpenChange?.(v); };
   const [q, setQ] = useState('');
   const ref = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -29,6 +31,7 @@ export function SearchPicker({
     const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const openNow = () => { setQ(valueName ? '' : (initialQuery ?? '')); setOpen(true); setTimeout(() => inputRef.current?.focus(), 20); };
@@ -83,8 +86,9 @@ const fieldBtn: React.CSSProperties = {
   border: `1px solid ${V.line}`, background: '#fff', cursor: 'pointer', textAlign: 'left',
 };
 const pop: React.CSSProperties = {
-  position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 30, background: '#fff',
-  border: `1px solid ${V.line}`, borderRadius: 10, boxShadow: '0 12px 30px -12px rgba(27,23,19,.28)', padding: 6,
+  // High z so the list floats above sibling cards, the amount field and the action buttons below it.
+  position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 400, background: '#fff',
+  border: `1px solid ${V.line}`, borderRadius: 10, boxShadow: '0 16px 36px -12px rgba(27,23,19,.32)', padding: 6,
 };
 const searchRow: React.CSSProperties = {
   display: 'flex', alignItems: 'center', gap: 8, background: V.surface, borderRadius: 8, padding: '0 10px', height: 38, marginBottom: 4,

@@ -9,6 +9,7 @@ import type { RoughEntry } from '../../types';
 import { fileRoughEntry, fileRoughEntrySplit, rejectRoughEntry, createParty, errMessage, type ProjectSplit } from './fileEntry';
 import { resolveEntry, type ProjectLite, type StakeholderLite } from './resolveEntry';
 import { BillReviewCard } from './BillReviewCard';
+import { NatureChip, natureOf } from './atoms';
 import DragSheet from '../DragSheet';
 
 const CSS = `
@@ -329,7 +330,7 @@ function Card({
     <div className="cw" ref={register}>
       <div className="rcard enter" ref={cardRef}>
         <div className="top">
-          <i />
+          <NatureChip {...natureOf(entry)} />
           <div className="f">{senderName} · {via} · {sentTime}</div>
           <button type="button" className="editpill" onClick={onMenu}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z" /></svg>
