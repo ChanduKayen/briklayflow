@@ -21,11 +21,11 @@ import RouteRule from './components/brand/RouteRule';
 import { markBooted } from './components/brand/bootSignal';
 import {
   IconChartPie, IconArrowsExchange,
-  IconNotebook, IconClipboardList, IconShoppingBag,
+  IconClipboardList, IconShoppingBag,
   IconFileInvoice,
   IconShieldLock,
   IconLogout, IconChevronLeft, IconDots,
-  IconRepeat, IconLayoutGrid, IconFiles, IconUsers, IconUser,
+  IconLayoutGrid, IconFiles, IconUsers, IconUser,
   IconCircleDot, IconClock, IconChecklist, IconReceipt2,
 } from '@tabler/icons-react';
 
@@ -82,6 +82,7 @@ const NewBill = lazy(() => import('./pages/NewBill'));
 const BillDetail = lazy(() => import('./pages/BillDetail'));
 const Logbook = lazy(loadLogbook);
 import { BriklayDesktopNav } from './components/nav/BriklayRail';
+import { MobileNavBar } from './components/nav/MobileNavBar';
 import { isSecondaryNavRoute } from './components/nav/navTokens';
 const Orders = lazy(() => import('./pages/Orders'));
 import InviteAccept from './pages/InviteAccept';
@@ -869,41 +870,12 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
 
   // The PO pages keep the SAME home nav (no separate PO-context bar) — POs stays highlighted in the
   // home bar instead of swapping the whole navigation out from under the user.
+  void ordersBadge; void onMoreTap; void isActivePath;
 
-  // ── Global context bottom bar ──────────────────────────────────────────
-  // Three primary destinations only — Transactions, For review, Purchase orders — everything else
-  // (Projects, Contracts, Attendance, Billing, Parties, Team, Insights…) lives in More.
-  void ordersBadge;
-  const moreActive = ['/projects', '/work-orders', '/orders', '/attendance', '/billing', '/team', '/profile', '/stakeholders', '/invoices', '/insights', '/inward-register'].some(p => isActivePath(p));
-
-  type Tab = { path: string; icon: React.ElementType; label: string; show: boolean; badge?: number };
-  const tabs: Tab[] = [
-    { path: '/ledger',          icon: IconRepeat,      label: 'Txns',      show: role !== 'supervisor' },
-    { path: '/logbook',         icon: IconNotebook,    label: 'For review', show: true },
-    { path: '/purchase-orders', icon: IconShoppingBag, label: 'POs',       show: role !== 'supervisor' && role !== 'accountant', badge: poUntalliedCount },
-    { path: '/payables',        icon: IconReceipt2,    label: 'Payables',  show: role !== 'supervisor' },
-  ].filter(t => t.show);
-
-  return (
-    <nav className={shellClass} style={shellStyle}>
-      <div className="flex items-stretch h-[56px]" style={innerStyle}>
-        {tabs.map(tab => {
-          const active = isActivePath(tab.path);
-          return (
-            <TabItem
-              key={tab.path}
-              to={tab.path}
-              Icon={tab.icon}
-              label={tab.label}
-              active={active}
-              badge={tab.badge}
-            />
-          );
-        })}
-        <TabItem onClick={onMoreTap} Icon={IconDots} label="More" active={moreActive} />
-      </div>
-    </nav>
-  );
+  // ── Global context nav — the floating capsule (pinned Book + scrollable rail + contextual FAB +
+  //    Workspace hub). It owns the global create action, so the standalone FAB steps aside off-project.
+  //    Only fully hide it on full-screen forms; scroll-down minimizes it to a pill (its own behaviour). ──
+  return <MobileNavBar role={role} poBadge={poUntalliedCount} hidden={hideForRoute} />;
 }
 
 function MoreNavSheet({

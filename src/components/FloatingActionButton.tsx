@@ -70,6 +70,12 @@ export function FloatingActionButton() {
   // "New PO" pill) — get no generic FAB, so nothing ever stacks on top of their buttons.
   if (hidesGlobalFab(location.pathname)) return null;
 
+  // Off-project, the floating MobileNavBar carries its OWN contextual FAB — this standalone global
+  // create menu would be a second FAB. So it now shows ONLY inside a project (where the project
+  // sub-nav has no FAB of its own).
+  const inProject = /^\/projects\/[^/]+/.test(location.pathname) && !location.pathname.startsWith('/projects/new');
+  if (!inProject) return null;
+
   return (
     <div
       className="md:hidden"

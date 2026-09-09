@@ -1,0 +1,381 @@
+/**
+ * MobileNavBar — the floating glass navigation capsule (top-level mobile nav).
+ *
+ * A pixel-faithful build of the briklay-mobile-nav reference: a pinned "Book" tab, a horizontally
+ * scrollable rail of the rest, a warm "site lamp" that tracks the active tab, a "there's more" chevron,
+ * a minimize-to-pill on scroll-down, and a CONTEXTUAL FAB (the page decides what it creates; long-press =
+ * universal quick-add). The long tail (Insights, Client Billing, Inward Register, Follow-up rules…) lives
+ * behind a "Workspace" tab that opens the reference's hub card-grid, so nothing is unreachable on mobile.
+ *
+ * It renders ONLY the top-level nav — inside a project the app keeps its own project sub-nav (see App.tsx).
+ * Navigation is URL-driven (react-router), matching the rest of the app. The CSS is scoped under `.mnav`
+ * so the reference's exact values live here without leaking into the app.
+ */
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+
+// ── icons (inline, exact from the reference so the glyphs match pixel-for-pixel) ──
+const I = {
+  book: <><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z" /><path d="M5 4v13" /><path d="M9.5 9h6M9.5 12.5h6" /></>,
+  review: <><path d="M4 13l4 .01c.7 2 2 3 4 3s3.3-1 4-3l4-.01" /><path d="M4 13V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v7" /><path d="M4 13v5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5" /></>,
+  payables: <><rect x="3.5" y="6" width="17" height="13" rx="2.5" /><path d="M3.5 10h17" /><path d="M7 15h4" /></>,
+  bills: <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M9.5 8.5h5M9.5 12h5" /></>,
+  pos: <><path d="M5 7h14l-1.5 12h-11z" /><path d="M9 7a3 3 0 0 1 6 0" /></>,
+  att: <><rect x="4" y="5" width="16" height="16" rx="2.5" /><path d="M8 3v4M16 3v4" /><path d="M8.5 14l2.2 2.2 4.8-4.8" /></>,
+  contracts: <><path d="M7 3h7l4 4v14H7z" /><path d="M14 3v4h4" /><path d="M10.5 13h6M10.5 16.5h4" /></>,
+  sitedesk: <><path d="M4 20V9l8-5 8 5v11" /><path d="M9 20v-6h6v6" /></>,
+  parties: <><circle cx="9" cy="8" r="3" /><path d="M3.6 19c.7-3 2.7-4.6 5.4-4.6s4.7 1.6 5.4 4.6" /><circle cx="16.8" cy="9" r="2.4" /><path d="M15.6 14.7c2.3.3 3.9 1.7 4.5 4.3" /></>,
+  team: <><path d="M12 3l7 2.8v5.2c0 4.4-2.9 7.4-7 9-4.1-1.6-7-4.6-7-9V5.8z" /><circle cx="12" cy="10" r="2.2" /><path d="M8.8 16c.6-1.8 1.8-2.7 3.2-2.7s2.6.9 3.2 2.7" /></>,
+  profile: <><circle cx="12" cy="8" r="3.5" /><path d="M5 20c.9-3.6 3.5-5.4 7-5.4s6.1 1.8 7 5.4" /></>,
+  workspace: <><rect x="4" y="4" width="7" height="7" rx="1.5" /><rect x="13" y="4" width="7" height="7" rx="1.5" /><rect x="4" y="13" width="7" height="7" rx="1.5" /><rect x="13" y="13" width="7" height="7" rx="1.5" /></>,
+  insights: <><path d="M4 19V5" /><path d="M4 19h16" /><path d="M8 15l3-4 3 2 5-6" /></>,
+  billing: <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M9.5 8.5h5M9.5 12h5" /></>,
+  inward: <><rect x="4" y="4" width="7" height="7" rx="1.5" /><rect x="13" y="4" width="7" height="7" rx="1.5" /><rect x="4" y="13" width="7" height="7" rx="1.5" /><rect x="13" y="13" width="7" height="7" rx="1.5" /></>,
+  clock: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></>,
+  firm: <><circle cx="12" cy="8" r="3.5" /><path d="M5 20c.9-3.6 3.5-5.4 7-5.4s6.1 1.8 7 5.4" /></>,
+  chevron: <path d="M9 5l7 7-7 7" />,
+  plus: <path d="M12 5v14M5 12h14" />,
+};
+
+type Role = string;
+type Tab = {
+  key: string; label: string; to: string; icon: ReactNode;
+  activePaths: string[];        // pathname prefixes that light this tab
+  show: (r: Role) => boolean;
+};
+
+const ALL_TABS: Tab[] = [
+  { key: 'book', label: 'Book', to: '/ledger', icon: I.book, activePaths: ['/ledger'], show: (r) => r !== 'supervisor' },
+  { key: 'review', label: 'Review', to: '/logbook', icon: I.review, activePaths: ['/logbook'], show: () => true },
+  { key: 'payables', label: 'Payables', to: '/payables', icon: I.payables, activePaths: ['/payables'], show: (r) => r !== 'supervisor' },
+  { key: 'bills', label: 'Bills', to: '/bills', icon: I.bills, activePaths: ['/bills'], show: (r) => r !== 'supervisor' },
+  { key: 'pos', label: 'POs', to: '/purchase-orders', icon: I.pos, activePaths: ['/purchase-orders', '/orders'], show: (r) => r !== 'supervisor' && r !== 'accountant' },
+  { key: 'att', label: 'Attendance', to: '/attendance', icon: I.att, activePaths: ['/attendance'], show: () => true },
+  { key: 'contracts', label: 'Contracts', to: '/work-orders', icon: I.contracts, activePaths: ['/work-orders'], show: () => true },
+  { key: 'sitedesk', label: 'Site Desk', to: '/site-desk', icon: I.sitedesk, activePaths: ['/site-desk', '/desk'], show: () => true },
+  { key: 'parties', label: 'Parties', to: '/stakeholders', icon: I.parties, activePaths: ['/stakeholders'], show: (r) => r !== 'supervisor' },
+  { key: 'team', label: 'Team', to: '/team', icon: I.team, activePaths: ['/team'], show: (r) => r === 'principal' || r === 'management' },
+  { key: 'profile', label: 'Profile', to: '/profile', icon: I.profile, activePaths: ['/profile'], show: () => true },
+];
+
+// The "Workspace" tab — a hub, not a route. It lights when on any long-tail page it holds.
+const WORKSPACE_PATHS = ['/insights', '/billing', '/inward-register', '/tasks', '/follow-up-rules'];
+
+// The contextual FAB: what each tab creates. null = nothing to create (the FAB steps aside).
+const FAB_BY_TAB: Record<string, { label: string; to: string; icon: ReactNode } | null> = {
+  book: { label: 'New entry', to: '/ledger/new', icon: I.plus },
+  bills: { label: 'New bill', to: '/bills/new', icon: <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M12 8v6M9 11h6" /></> },
+  pos: { label: 'New PO', to: '/purchase-orders/new', icon: <><path d="M5 7h14l-1.5 12h-11z" /><path d="M9 7a3 3 0 0 1 6 0" /><path d="M12 11v5M9.5 13.5h5" /></> },
+  contracts: { label: 'New contract', to: '/work-orders/new', icon: <><path d="M7 3h7l4 4v14H7z" /><path d="M14 3v4h4" /><path d="M12 11v6M9 14h6" /></> },
+  sitedesk: { label: 'New site', to: '/projects/new', icon: <><path d="M4 20V9l8-5 8 5v11" /><path d="M12 12v5M9.5 14.5h5" /></> },
+  parties: { label: 'New party', to: '/stakeholders?new=1', icon: <><circle cx="10" cy="8" r="3.2" /><path d="M4 19.5c.8-3.2 3-4.9 6-4.9s5.2 1.7 6 4.9" /><path d="M18 6v6M15 9h6" /></> },
+  team: { label: 'Invite member', to: '/team?invite=1', icon: <><circle cx="10" cy="8" r="3.2" /><path d="M4 19.5c.8-3.2 3-4.9 6-4.9s5.2 1.7 6 4.9" /><path d="M18 6v6M15 9h6" /></> },
+  review: null, payables: null, att: null, profile: null, workspace: null,
+};
+
+const QUICK_ADD = [
+  { label: 'New entry', sub: 'Payment, receipt or note', to: '/ledger/new', icon: I.plus },
+  { label: 'New bill', sub: 'Drop a photo — Briklay reads it', to: '/bills/new', icon: <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M9.5 8.5h5" /></> },
+  { label: 'Mark attendance', sub: 'Today, site by site', to: '/attendance', icon: <><rect x="4" y="5" width="16" height="16" rx="2.5" /><path d="M8.5 14l2.2 2.2 4.8-4.8" /></> },
+  { label: 'New purchase order', sub: 'Track what’s been ordered', to: '/purchase-orders/new', icon: <><path d="M5 7h14l-1.5 12h-11z" /><path d="M9 7a3 3 0 0 1 6 0" /></> },
+];
+
+const Svg = ({ children, w = 22 }: { children: ReactNode; w?: number }) => (
+  <svg viewBox="0 0 24 24" style={{ width: w, height: w, stroke: 'currentColor', fill: 'none', strokeWidth: 1.75, strokeLinecap: 'round', strokeLinejoin: 'round' }}>{children}</svg>
+);
+
+export function MobileNavBar({ role, poBadge = 0, hidden = false }: { role: Role; poBadge?: number; hidden?: boolean }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const railRef = useRef<HTMLDivElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  const lampRef = useRef<HTMLSpanElement>(null);
+
+  const [scrolled, setScrolled] = useState(false);
+  const [atEnd, setAtEnd] = useState(false);
+  const [min, setMin] = useState(false);
+  const [sheet, setSheet] = useState<null | 'workspace' | 'quickadd'>(null);
+
+  const visible = useMemo(() => ALL_TABS.filter((t) => t.show(role)), [role]);
+  const pinned = visible[0];
+  const rail = visible.slice(1);
+
+  const path = location.pathname;
+  const isTabActive = (t: Tab) => t.activePaths.some((p) => path === p || path.startsWith(p + '/') || path.startsWith(p + '?'));
+  const workspaceActive = WORKSPACE_PATHS.some((p) => path === p || path.startsWith(p + '/'));
+  const activeKey = visible.find(isTabActive)?.key ?? (workspaceActive ? 'workspace' : (pinned?.key ?? ''));
+  const fab = FAB_BY_TAB[activeKey] ?? null;
+
+  // enable the ink-draw signature (needs pathLength=1 on every drawn segment)
+  useEffect(() => {
+    barRef.current?.querySelectorAll('.mnav-tab svg *').forEach((el) => el.setAttribute('pathLength', '1'));
+  }, []);
+
+  function positionLamp() {
+    const bar = barRef.current, lamp = lampRef.current, r = railRef.current;
+    if (!bar || !lamp) return;
+    const on = bar.querySelector('.mnav-tab.on') as HTMLElement | null;
+    if (!on) { lamp.style.opacity = '0'; return; }
+    const bb = bar.getBoundingClientRect(), tb = on.getBoundingClientRect();
+    lamp.style.left = (tb.left - bb.left + tb.width / 2) + 'px';
+    const inRail = on.closest('.mnav-rail');
+    if (!inRail || !r) { lamp.style.opacity = '1'; return; }
+    const rr = r.getBoundingClientRect();
+    lamp.style.opacity = (tb.right > rr.left + 8 && tb.left < rr.right - 8) ? '1' : '0';
+  }
+
+  // rail scroll → edge fades + pin shadow + lamp tracking
+  useEffect(() => {
+    const r = railRef.current; if (!r) return;
+    const onScroll = () => {
+      setScrolled(r.scrollLeft > 6);
+      setAtEnd(r.scrollLeft + r.clientWidth >= r.scrollWidth - 10);
+      requestAnimationFrame(positionLamp);
+    };
+    r.addEventListener('scroll', onScroll, { passive: true });
+    return () => r.removeEventListener('scroll', onScroll);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // active tab changed → recentre it in the rail + move the lamp
+  useEffect(() => {
+    const bar = barRef.current; if (!bar) return;
+    const on = bar.querySelector('.mnav-tab.on') as HTMLElement | null;
+    if (on && on.closest('.mnav-rail')) on.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    const id = requestAnimationFrame(positionLamp);
+    setMin(false);
+    return () => cancelAnimationFrame(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeKey]);
+
+  // minimize on scroll-down, expand on scroll-up (the mini pill mirrors the active tab)
+  useEffect(() => {
+    let ly = window.scrollY;
+    const onScroll = () => {
+      const y = window.scrollY;
+      if (y - ly > 10 && y > 70) setMin(true);
+      else if (ly - y > 10) setMin(false);
+      ly = y;
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', positionLamp);
+    return () => { window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', positionLamp); };
+  }, []);
+
+  const go = (to: string) => { setSheet(null); navigate(to); window.scrollTo({ top: 0 }); };
+
+  // long-press on the FAB → universal quick-add
+  const lp = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const held = useRef(false);
+  const fabDown = () => { held.current = false; lp.current = setTimeout(() => { held.current = true; setSheet('quickadd'); }, 420); };
+  const fabUp = () => { if (lp.current) clearTimeout(lp.current); };
+  const fabClick = () => { if (held.current) return; if (fab) go(fab.to); };
+
+  const activeTab = visible.find((t) => t.key === activeKey);
+
+  const renderTab = (t: Tab, inRail: boolean) => {
+    const on = t.key === activeKey;
+    return (
+      <button key={t.key} className={`mnav-tab${on ? ' on' : ''}`} data-rail={inRail ? '1' : undefined}
+        onClick={() => go(t.to)} type="button" aria-current={on ? 'page' : undefined}>
+        <span style={{ position: 'relative' }}>
+          <Svg>{t.icon}</Svg>
+          {t.key === 'pos' && poBadge > 0 && <span className="mnav-badge">{poBadge > 9 ? '9+' : poBadge}</span>}
+        </span>
+        <small>{t.label}</small>
+      </button>
+    );
+  };
+
+  return (
+    <>
+      <style>{CSS}</style>
+      <div ref={barRef} className={`mnav-bar${scrolled ? ' scrolled' : ''}${atEnd ? ' atend' : ''}${min ? ' min' : ''}${hidden ? ' gone' : ''}`}>
+        <span ref={lampRef} className="mnav-lamp" />
+
+        {/* minimized pill — mirrors the active tab, tap to expand */}
+        <button className="mnav-mini" type="button" aria-label="Expand navigation" onClick={() => setMin(false)}>
+          {activeTab ? <Svg w={20}>{activeTab.icon}</Svg> : <Svg w={20}>{I.book}</Svg>}
+          <span>{activeTab?.label ?? 'Book'}</span>
+          <svg viewBox="0 0 24 24" style={{ width: 11, height: 11, opacity: .6, stroke: 'currentColor', fill: 'none', strokeWidth: 1.9, strokeLinecap: 'round', strokeLinejoin: 'round' }}><path d="M6 14l6-5 6 5" /></svg>
+        </button>
+
+        {/* there's-more chevron at the rail edge */}
+        <button className="mnav-more" type="button" aria-label="More tabs" onClick={() => railRef.current?.scrollBy({ left: railRef.current.clientWidth, behavior: 'smooth' })}>
+          <svg viewBox="0 0 24 24" style={{ width: 13, height: 13, stroke: 'currentColor', fill: 'none', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }}>{I.chevron}</svg>
+        </button>
+
+        {/* pinned tab */}
+        {pinned && <div className="mnav-pin">{renderTab(pinned, false)}</div>}
+
+        {/* scrollable rail */}
+        <div ref={railRef} className="mnav-rail">
+          {rail.map((t) => renderTab(t, true))}
+          {/* Workspace — the hub for everything else */}
+          <button className={`mnav-tab${activeKey === 'workspace' ? ' on' : ''}`} data-rail="1" type="button" onClick={() => setSheet('workspace')}>
+            <Svg>{I.workspace}</Svg><small>Workspace</small>
+          </button>
+        </div>
+
+        {/* contextual FAB */}
+        <button className={`mnav-fab${fab ? '' : ' hide'}`} type="button" aria-label={fab?.label ?? 'Create'}
+          onPointerDown={fabDown} onPointerUp={fabUp} onPointerLeave={fabUp} onPointerCancel={fabUp} onClick={fabClick}>
+          <Svg w={20}>{fab?.icon ?? I.plus}</Svg>
+        </button>
+      </div>
+
+      {/* sheets */}
+      <div className={`mnav-shade${sheet ? ' show' : ''}`} onClick={() => setSheet(null)} />
+      <div className={`mnav-sheet${sheet ? ' show' : ''}`}>
+        <div className="mnav-grab" />
+        {sheet === 'workspace' && <WorkspaceHub role={role} onGo={go} />}
+        {sheet === 'quickadd' && (
+          <>
+            <div className="mnav-qtitle">Quick add</div>
+            {QUICK_ADD.map((q) => (
+              <button key={q.label} className="mnav-qrow" type="button" onClick={() => go(q.to)}>
+                <span className="mnav-qic"><Svg w={17}>{q.icon}</Svg></span>
+                <span><b>{q.label}</b><small>{q.sub}</small></span>
+              </button>
+            ))}
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ── the Workspace hub (the reference's card grid) ──
+function WorkspaceHub({ role, onGo }: { role: Role; onGo: (to: string) => void }) {
+  const cards = [
+    { label: 'Site Desk', sub: 'sites active', to: '/site-desk', icon: I.sitedesk, show: true },
+    { label: 'Contracts', sub: 'work orders', to: '/work-orders', icon: I.contracts, show: true },
+    { label: 'Insights', sub: 'spend & trends', to: '/insights', icon: I.insights, show: true },
+    { label: 'Inward Register', sub: 'deliveries', to: '/inward-register', icon: I.inward, show: role !== 'supervisor' && role !== 'accountant' },
+    { label: 'Client Billing', sub: 'invoices', to: '/billing', icon: I.billing, show: role !== 'supervisor' },
+    { label: 'Team & Access', sub: 'members', to: '/team', icon: I.team, show: role === 'principal' || role === 'management' },
+  ].filter((c) => c.show);
+  const account = [
+    { label: 'Profile & firm settings', to: '/profile', icon: I.firm },
+    { label: 'Follow-up rules', to: '/follow-up-rules', icon: I.clock, show: role === 'principal' || role === 'management' },
+  ].filter((c) => c.show !== false);
+  return (
+    <>
+      <div className="mnav-qtitle">Workspace</div>
+      <div className="mnav-hubgrid">
+        {cards.map((c) => (
+          <button key={c.label} className="mnav-hcard" type="button" onClick={() => onGo(c.to)}>
+            <span className="mnav-hic"><Svg w={16}>{c.icon}</Svg></span>
+            <b>{c.label}</b><span className="mnav-hsub">{c.sub}</span>
+          </button>
+        ))}
+      </div>
+      <div className="mnav-hublab">Account</div>
+      {account.map((c) => (
+        <button key={c.label} className="mnav-hcard wide" type="button" onClick={() => onGo(c.to)}>
+          <span className="mnav-hic"><Svg w={16}>{c.icon}</Svg></span>
+          <b>{c.label}</b><span className="mnav-ch">›</span>
+        </button>
+      ))}
+    </>
+  );
+}
+
+// ── scoped CSS (the reference, ported verbatim in value) ──
+const CSS = `
+/* Ground matches the desktop sidenav / transaction-page header: the bitter-chocolate "night binding". */
+.mnav-bar{position:fixed; left:14px; right:14px; bottom:calc(14px + env(safe-area-inset-bottom)); max-width:402px; margin:0 auto; z-index:40;
+  --b-rule:#302014; --b-soft:rgba(245,240,231,.55); --b-clay:#E8935F;
+  background:linear-gradient(180deg,#191009,#140D07);
+  border:1px solid rgba(245,240,231,.08); border-radius:999px; overflow:hidden;
+  box-shadow:0 22px 44px -18px rgba(20,13,7,.72), inset 0 1px 0 rgba(245,240,231,.06);
+  display:flex; align-items:center; padding:6px; transition:padding .3s, transform .28s cubic-bezier(.4,0,.2,1), opacity .28s}
+.mnav-bar.gone{transform:translateY(160%); opacity:0; pointer-events:none}
+@media (min-width:768px){ .mnav-bar{display:none} }
+
+.mnav-pin{flex:none; display:flex; padding:0 2px; border-right:1px solid var(--b-rule); position:relative; z-index:1; max-width:80px; overflow:hidden;
+  transition:box-shadow .25s, max-width .32s, opacity .25s, padding .3s}
+.mnav-bar.scrolled .mnav-pin{box-shadow:10px 0 16px -10px rgba(0,0,0,.75)}
+
+.mnav-rail{flex:1; display:flex; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; padding:0 14px 0 2px; max-width:999px;
+  transition:max-width .32s, opacity .25s;
+  -webkit-mask-image:linear-gradient(to right,#000 0,#000 calc(100% - 30px),transparent);
+  mask-image:linear-gradient(to right,#000 0,#000 calc(100% - 30px),transparent)}
+.mnav-bar.scrolled .mnav-rail{
+  -webkit-mask-image:linear-gradient(to right,transparent 0,#000 22px,#000 calc(100% - 34px),transparent);
+  mask-image:linear-gradient(to right,transparent 0,#000 22px,#000 calc(100% - 34px),transparent)}
+.mnav-rail::-webkit-scrollbar{display:none}
+
+.mnav-tab{flex:none; width:63px; border:0; background:none; display:flex; flex-direction:column; align-items:center; gap:4px;
+  cursor:pointer; color:var(--b-soft); padding:7px 0 6px; position:relative; transition:color .3s; font-family:'DM Sans',system-ui,sans-serif}
+.mnav-tab svg{shape-rendering:geometricPrecision; position:relative; z-index:1; transition:transform .2s cubic-bezier(.2,.9,.3,1.4)}
+.mnav-tab small{font-size:9.5px; font-weight:600; letter-spacing:.02em; white-space:nowrap; position:relative; z-index:1; opacity:.8; transition:opacity .25s}
+.mnav-tab:active svg{transform:scale(.85)}
+.mnav-tab.on{color:var(--b-clay)}
+.mnav-tab.on svg{animation:mnavspring .45s cubic-bezier(.2,.9,.3,1.5) both}
+.mnav-tab.on small{opacity:1; font-weight:700}
+@keyframes mnavspring{0%{transform:scale(.88)}55%{transform:scale(1.06) translateY(-1px)}100%{transform:scale(1) translateY(-1px)}}
+.mnav-tab svg *{stroke-dasharray:1; stroke-dashoffset:0}
+.mnav-tab.on svg *{animation:mnavink .5s cubic-bezier(.5,.05,.3,1) both}
+.mnav-tab.on svg *:nth-child(2){animation-delay:.07s}
+.mnav-tab.on svg *:nth-child(3){animation-delay:.14s}
+.mnav-tab.on svg *:nth-child(4){animation-delay:.2s}
+@keyframes mnavink{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
+
+.mnav-badge{position:absolute; top:-5px; right:-9px; min-width:15px; height:15px; padding:0 3px; border-radius:99px; background:#D0432C; color:#FFF7EF;
+  font-size:9px; font-weight:700; line-height:15px; text-align:center; box-shadow:0 0 0 1.5px #191009}
+
+.mnav-lamp{position:absolute; top:0; bottom:0; width:64px; pointer-events:none; z-index:0;
+  background:radial-gradient(ellipse 46% 40% at 50% 32%, rgba(232,147,95,.32), rgba(232,147,95,.09) 46%, transparent 62%);
+  transform:translateX(-50%); left:37px; transition:left .5s cubic-bezier(.2,.85,.25,1), opacity .3s}
+.mnav-lamp::after{content:''; position:absolute; left:50%; top:5px; width:22px; height:2px; border-radius:99px; transform:translateX(-50%);
+  background:var(--b-clay); opacity:.85; box-shadow:0 0 6px rgba(232,147,95,.55)}
+.mnav-bar.min .mnav-lamp{opacity:0}
+
+.mnav-more{position:absolute; right:60px; top:50%; z-index:2; border:0; background:none; color:#8F7F6A; padding:6px 4px; cursor:pointer;
+  opacity:.7; transform:translateY(-58%); transition:opacity .35s}
+.mnav-bar.atend .mnav-more, .mnav-bar.min .mnav-more{opacity:0; pointer-events:none}
+
+.mnav-fab{flex:none; width:46px; height:46px; border-radius:50%; border:0; background:#C75B2B; color:#FFF7EF; margin-left:2px;
+  box-shadow:0 8px 18px -8px rgba(199,91,43,.7); cursor:pointer; position:relative; z-index:1; display:grid; place-items:center;
+  transition:transform .3s cubic-bezier(.2,.9,.3,1.4), width .3s, height .3s, opacity .25s, margin .3s}
+.mnav-fab:active{transform:scale(.9)}
+.mnav-fab.hide{width:0; height:0; opacity:0; margin:0; pointer-events:none}
+
+/* minimized: capsule shrinks to the active tab pill */
+.mnav-mini{display:flex; align-items:center; gap:8px; border:0; background:none; color:var(--b-clay); cursor:pointer;
+  font-family:'DM Sans',system-ui,sans-serif; font-size:12px; font-weight:700; padding:0; max-width:0; opacity:0; overflow:hidden;
+  transition:max-width .32s, opacity .25s, padding .3s; white-space:nowrap; position:relative; z-index:1}
+.mnav-bar.min{left:50%; right:auto; transform:translateX(-50%); padding:9px 10px}
+.mnav-bar.min .mnav-mini{max-width:190px; opacity:1; padding:0 10px}
+.mnav-bar.min .mnav-pin, .mnav-bar.min .mnav-rail{max-width:0; opacity:0; padding:0; border:0; pointer-events:none}
+.mnav-bar.min .mnav-fab{width:0; height:0; opacity:0; margin:0; pointer-events:none}
+
+/* sheets */
+.mnav-shade{position:fixed; inset:0; background:rgba(30,24,17,.4); opacity:0; pointer-events:none; transition:opacity .3s; z-index:60}
+.mnav-shade.show{opacity:1; pointer-events:auto}
+.mnav-sheet{position:fixed; left:0; right:0; bottom:0; max-width:430px; margin:0 auto; background:#fff;
+  border-radius:22px 22px 0 0; padding:10px 20px calc(22px + env(safe-area-inset-bottom)); z-index:61;
+  transform:translateY(105%); transition:transform .38s cubic-bezier(.2,.9,.25,1); font-family:'DM Sans',system-ui,sans-serif}
+.mnav-sheet.show{transform:none}
+.mnav-grab{width:36px; height:4px; border-radius:99px; background:#EEE5D8; margin:0 auto 16px}
+.mnav-qtitle{font-family:'Playfair Display',Georgia,serif; font-size:19px; font-weight:600; margin-bottom:12px; color:#221C14}
+.mnav-qrow{display:flex; align-items:center; gap:13px; padding:14px 2px; border-bottom:1px solid #EEE5D8; width:100%; border-left:0; border-right:0; border-top:0;
+  background:none; text-align:left; font-size:15px; font-weight:600; cursor:pointer; color:#221C14}
+.mnav-qrow:last-child{border-bottom:0}
+.mnav-qrow:active{background:#FAF5EE}
+.mnav-qic{width:36px; height:36px; border-radius:11px; background:#FAF5EE; border:1px solid #EEE5D8; display:grid; place-items:center; color:#C75B2B; flex:none}
+.mnav-qrow small{display:block; font-size:11.5px; color:#9A8C77; font-weight:400; margin-top:1px}
+
+.mnav-hubgrid{display:grid; grid-template-columns:1fr 1fr; gap:11px}
+.mnav-hcard{background:#fff; border:1px solid #EEE5D8; border-radius:16px; padding:15px 15px 13px; cursor:pointer; text-align:left; transition:transform .15s; color:#221C14}
+.mnav-hcard:active{transform:scale(.97)}
+.mnav-hic{width:34px; height:34px; border-radius:10px; background:#FAF5EE; border:1px solid #EEE5D8; display:grid; place-items:center; color:#6E5F4C; margin-bottom:10px}
+.mnav-hcard b{display:block; font-size:14px; font-weight:700}
+.mnav-hsub{display:block; font-size:11.5px; color:#9A8C77; margin-top:3px; font-family:'DM Mono',monospace}
+.mnav-hcard.wide{display:flex; align-items:center; gap:13px; padding:14px 16px; margin-top:9px; width:100%}
+.mnav-hcard.wide .mnav-hic{margin:0}
+.mnav-hcard.wide b{font-size:14px}
+.mnav-ch{margin-left:auto; color:#9A8C77}
+.mnav-hublab{font-family:'DM Mono',monospace; font-size:9.5px; letter-spacing:.2em; text-transform:uppercase; color:#9A8C77; margin:18px 2px 9px}
+`;

@@ -143,10 +143,11 @@ html, body {
     transition: transform 0.1s ease;
   }
 }
-/* Main content — leave room for bottom tab bar on mobile */
+/* Main content — leave room for the floating nav capsule (bottom:14 + ~58px height) on mobile;
+   the in-project sub-nav (56px, bottom:0) fits inside this clearance too. */
 @media (max-width: 767px) {
   .mobile-main-pb {
-    padding-bottom: calc(56px + env(safe-area-inset-bottom) + 16px) !important;
+    padding-bottom: calc(58px + env(safe-area-inset-bottom) + 30px) !important;
   }
   /* FAB sits above tab bar */
   .bk-fab {
