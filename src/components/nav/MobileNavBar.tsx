@@ -112,6 +112,9 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
   function positionLamp() {
     const bar = barRef.current, lamp = lampRef.current, r = railRef.current;
     if (!bar || !lamp) return;
+    // In the minimized pill there is no lamp — and the inline opacity we set here would otherwise
+    // override the CSS that hides it, leaking the glow into the short form.
+    if (bar.classList.contains('min')) { lamp.style.opacity = '0'; return; }
     const on = bar.querySelector('.mnav-tab.on') as HTMLElement | null;
     if (!on) { lamp.style.opacity = '0'; return; }
     const bb = bar.getBoundingClientRect(), tb = on.getBoundingClientRect();
@@ -160,10 +163,10 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
     return () => { window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', positionLamp); };
   }, []);
 
-  // Re-centre the lamp AFTER the capsule finishes expanding from the mini pill (the layout width
-  // changes, so a position taken mid-transition lands off — most visibly under the pinned Book).
+  // Minimizing → kill the lamp glow at once (the pill has no light). Expanding → re-centre it AFTER the
+  // capsule finishes widening (a position taken mid-transition lands off, most visibly under pinned Book).
   useEffect(() => {
-    if (min) return;
+    if (min) { if (lampRef.current) lampRef.current.style.opacity = '0'; return; }
     const id = window.setTimeout(positionLamp, 340);
     return () => window.clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
