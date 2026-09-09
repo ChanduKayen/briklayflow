@@ -998,3 +998,79 @@ export function pendingRetiredNotice(lang: Lang, subject: string | null): OutMes
     }),
   }
 }
+
+// ── BILL readbacks (the financial-document path) ─────────────────────────────────
+// Each states EXACTLY what happened, so a bill and a paid bill are never confused (crack: presentation).
+const fmtAmt = (n: number | null | undefined) => (n != null ? '₹' + n.toLocaleString('en-IN') : null)
+
+/** A bill saved for record — no money logged. */
+export function mBillSaved(lang: Lang, p: { vendor: string | null; billTotal: number | null }): OutMessage {
+  const who = p.vendor ?? pick(lang, { en: 'a vendor' })
+  const amt = fmtAmt(p.billTotal)
+  const head = amt ? `🧾 *Bill saved* — ${who} · ${amt}` : `🧾 *Bill saved* — ${who}`
+  return {
+    kind: 'cta',
+    body: [
+      head,
+      pick(lang, { en: 'Kept for your records — no payment logged. Confirm the vendor & site in the Day Book.' }),
+      `Recorded in *Bills* · Briklay`,
+    ].join('\n\n'),
+    cta: { text: pick(lang, { en: 'Open Day Book' }), url: EDIT_LINK },
+  }
+}
+
+/** A bill saved AND a payment logged against it, attached. */
+export function mBillAndPayment(lang: Lang, p: { vendor: string | null; billTotal: number | null; paidAmount: number }): OutMessage {
+  const who = p.vendor ?? pick(lang, { en: 'a vendor' })
+  const paid = fmtAmt(p.paidAmount)
+  const total = fmtAmt(p.billTotal)
+  const line = total && total !== paid ? `${paid} paid of ${total}` : `${paid} paid`
+  return {
+    kind: 'cta',
+    body: [
+      `🧾 *Bill saved* + *${line}* — ${who}`,
+      pick(lang, { en: 'The bill is attached to the payment. Confirm the vendor in the Day Book.' }),
+      `Recorded in *Bills* + *Day Book* · Briklay`,
+    ].join('\n\n'),
+    cta: { text: pick(lang, { en: 'Open Day Book' }), url: EDIT_LINK },
+  }
+}
+
+/** The ONE question: was this bill paid, and if so how much? A tap answers "not yet"; text gives the amount. */
+export function mBillAskPayment(lang: Lang, p: { vendor: string | null; billTotal: number | null }): OutMessage {
+  const who = p.vendor ?? pick(lang, { en: 'a vendor' })
+  const amt = fmtAmt(p.billTotal)
+  const head = amt ? `🧾 *Bill saved* — ${who} · ${amt}` : `🧾 *Bill saved* — ${who}`
+  return {
+    kind: 'buttons',
+    body: [
+      head,
+      pick(lang, { en: 'Did you already pay this bill? If yes, reply the amount you paid (e.g. 20000). If not, tap below.' }),
+    ].join('\n\n'),
+    buttons: [{ id: 'bill_not_paid', title: trunc(pick(lang, { en: 'Not paid yet' }), 20) }],
+  }
+}
+
+/** Confirm a bill kept as record-only after "not paid". */
+export function mBillKeptAsBill(lang: Lang, p: { vendor: string | null }): OutMessage {
+  const who = p.vendor ?? pick(lang, { en: 'the vendor' })
+  return {
+    kind: 'text',
+    body: pick(lang, { en: `👍 Kept as a bill for ${who} — no payment logged. It's in your Bills to settle later.` }),
+  }
+}
+
+/** Re-ask for just the paid amount (a bare "yes"/garbled number to the bill-payment question). */
+export function mBillJustAmount(lang: Lang): OutMessage {
+  return { kind: 'text', body: pick(lang, { en: 'How much did you pay? Reply just the amount (e.g. 20000), or tap "Not paid yet".' }) }
+}
+
+/** The bill's staging write rolled back — honest failure, no false "saved". */
+export function mBillWriteFailed(lang: Lang): OutMessage {
+  return { kind: 'text', body: pick(lang, { en: "⚠️ I couldn't save that bill just now. Please send it again in a moment." }) }
+}
+
+/** Bill draft discarded on cancel. */
+export function mBillCancelled(lang: Lang): OutMessage {
+  return { kind: 'text', body: pick(lang, { en: 'Okay, I discarded that bill.' }) }
+}

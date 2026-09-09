@@ -39,7 +39,8 @@ export function isNotLinked(txn: any): boolean {
   if (txn?.is_one_time) return false; // a deliberate one-time payment is resolved, not orphaned
   const allocs: any[] = txn?.txn_allocations ?? [];
   if (allocs.length === 0) return true;
-  return allocs.some((a) => !a?.order_type);
+  // A bill_id allocation IS a link (the payment settles a recorded bill) — not orphaned money.
+  return allocs.some((a) => !a?.order_type && !a?.bill_id);
 }
 
 /**

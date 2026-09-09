@@ -81,6 +81,7 @@ const BAND_CSS = `
 @media (prefers-reduced-motion:reduce){.rb-fx{transition:none}}
 `;
 import { ReviewCard, type StakeholderLite, type ProjectLite } from '../components/day-book/ReviewCard';
+import { BillReviewCard } from '../components/day-book/BillReviewCard';
 
 type TabKey = 'all' | 'review' | 'filed' | 'rejected' | 'requests';
 
@@ -306,10 +307,20 @@ export default function Logbook({ session }: { session: Session }) {
   }, [shown]);
 
   // ── ALL-tab table helpers: a compact row per entry + the day's total ──────────
-  const amtOf = (e: RoughEntry) => parseFloat(String(e.ai_extracted?.amount ?? '').replace(/[^\d.]/g, '')) || 0;
+  const amtOf = (e: RoughEntry) => {
+    // A captured bill's figure is its total (or the attached payment), not the payment `amount` field.
+    if (e.ai_extracted?.kind === 'BILL') return Number(e.ai_extracted.payment?.amount ?? e.ai_extracted.bill_total ?? 0) || 0;
+    return parseFloat(String(e.ai_extracted?.amount ?? '').replace(/[^\d.]/g, '')) || 0;
+  };
   const fmtRs = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
   const entryView = (e: RoughEntry) => {
     const ai = e.ai_extracted || {};
+    if (ai.kind === 'BILL') {
+      const payee = ai.vendor_name || stakeholders.find((s) => s.stakeholder_id === ai.payee_id)?.name || 'Vendor';
+      const proj = projects.find((p) => p.project_id === ai.project_id)?.name || ai.project_raw || '';
+      const desc = ai.payment?.amount ? '🧾 Bill + payment' : '🧾 Bill';
+      return { payee, proj, desc, amount: amtOf(e), filed: e.status === 'POSTED', txnId: e.resolved_txn_id ?? null };
+    }
     const payee = stakeholders.find((s) => s.stakeholder_id === ai.payee_id)?.name || ai.payee_name || ai.payee_raw || 'Unknown';
     const proj = projects.find((p) => p.project_id === ai.project_id)?.name || ai.project_name || ai.project_raw || '';
     const desc = (ai.description || ai.description_raw || '').trim();
@@ -575,6 +586,20 @@ export default function Logbook({ session }: { session: Session }) {
                     id={`db-entry-${r.id}`}
                     style={{ scrollMarginTop: 40, ...(focusId === r.id ? { borderRadius: 18, boxShadow: '0 0 0 2px #C8603A', transition: 'box-shadow .3s' } : {}) }}
                   >
+                    {r.ai_extracted?.kind === 'BILL' ? (
+                      <BillReviewCard
+                        entry={r}
+                        orgId={orgId}
+                        canManage={canManage}
+                        stakeholders={stakeholders}
+                        projects={projects}
+                        onFiled={() => handleFiled(r.id)}
+                        onDismiss={() => dismiss(r.id)}
+                        onLightbox={setLightboxUrl}
+                        onError={(m) => showSnackbar(m, { type: 'error' })}
+                        onVendorCreated={() => qc.invalidateQueries({ queryKey: ['daybook_stakeholders'] })}
+                      />
+                    ) : (
                     <ReviewCard
                       entry={r}
                       orgId={orgId}
@@ -593,6 +618,7 @@ export default function Logbook({ session }: { session: Session }) {
                       onLightbox={setLightboxUrl}
                       onError={(m) => showSnackbar(m, { type: 'error' })}
                     />
+                    )}
                   </div>
                 ))}
               </div>

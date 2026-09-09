@@ -377,9 +377,10 @@ export interface NewBillInput {
   billNo: string | null; billDate: string | null; amount: number; vendorName?: string | null;
   lines: ExtractedBill['lines']; note?: string | null; createdBy?: string | null; createdByName?: string | null;
   file: File | null;
+  docUrl?: string | null;   // an ALREADY-uploaded document (e.g. a WhatsApp-staged bill's raw_image_url) — used when file is null
 }
 export async function createBill(input: NewBillInput): Promise<string> {
-  const docUrl = input.file ? await uploadBillDoc(input.file, 'bill') : null;
+  const docUrl = input.file ? await uploadBillDoc(input.file, 'bill') : (input.docUrl ?? null);
   const { data, error } = await supabase.from('bills').insert({
     org_id: input.orgId, stakeholder_id: input.stakeholderId, project_id: input.projectId, po_id: input.poId ?? null,
     bill_no: input.billNo, bill_date: input.billDate, amount: input.amount, doc_url: docUrl, vendor_name: input.vendorName ?? null,

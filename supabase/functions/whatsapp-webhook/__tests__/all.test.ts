@@ -90,6 +90,8 @@ import './confirmation.test';
 import './money_card.test';
 import './money_single.test';
 import './project_grounding.test';
+import './financial_doc.test';
+import './bill.test';
 import { runAll } from './harness';
 
 await runAll();

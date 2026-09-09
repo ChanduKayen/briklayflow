@@ -8,6 +8,7 @@ import { useMemo, useRef, useState } from 'react';
 import type { RoughEntry } from '../../types';
 import { fileRoughEntry, fileRoughEntrySplit, rejectRoughEntry, createParty, errMessage, type ProjectSplit } from './fileEntry';
 import { resolveEntry, type ProjectLite, type StakeholderLite } from './resolveEntry';
+import { BillReviewCard } from './BillReviewCard';
 import DragSheet from '../DragSheet';
 
 const CSS = `
@@ -605,6 +606,24 @@ export default function ReviewMobile(p: ReviewMobileProps) {
       <div className="deckwrap">
         <div className="deck">
           {live.map(e => (
+            e.ai_extracted?.kind === 'BILL' ? (
+              // A captured bill is NOT a payment card — it files into `bills` (never a ₹0 transaction).
+              // Reuse the self-contained bill card so mobile is correct without a second bill UI.
+              <div className="cw" key={e.id} ref={el => { wraps.current[e.id] = el; }}>
+                <BillReviewCard
+                  entry={e}
+                  orgId={p.orgId}
+                  canManage
+                  stakeholders={p.stakeholders}
+                  projects={projects}
+                  onFiled={() => { leave(e.id, 'file'); p.onChanged(); }}
+                  onDismiss={() => { void (async () => { try { await rejectRoughEntry(e); leave(e.id, 'ignore'); p.onChanged(); } catch (err) { p.onError(errMessage(err, 'Could not bin this bill')); } })(); }}
+                  onLightbox={() => { /* mobile deck has no lightbox wired here */ }}
+                  onError={p.onError}
+                  onVendorCreated={p.onChanged}
+                />
+              </div>
+            ) : (
             <Card
               key={e.id}
               entry={e}
@@ -618,6 +637,7 @@ export default function ReviewMobile(p: ReviewMobileProps) {
               onFile={nudge => void doFile(e, nudge)}
               register={el => { wraps.current[e.id] = el; }}
             />
+            )
           ))}
         </div>
         <div className={`hint${acted || !left ? ' off' : ''}`}>File in any order — scroll past what can wait</div>

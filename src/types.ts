@@ -335,6 +335,15 @@ export interface AIExtracted {
     mode: ConfidenceLevel;
     overall: ConfidenceLevel;
   };
+  // ── BILL capture (kind === 'BILL') — a vendor bill sent over WhatsApp, filed into the `bills` table
+  //    (never a Day Book transaction). `payment` is present only when a payment rode with the bill. ──
+  kind?: 'BILL';
+  vendor_name?: string | null;
+  bill_no?: string | null;
+  bill_total?: number | null;
+  lines?: Array<{ name: string | null; spec: string | null; unit: string | null; qty: number | null; rate: number | null; amount: number | null }>;
+  payment?: { amount: number; mode?: string | null; utr?: string | null } | null;
+  payment_status?: 'paid' | 'unpaid' | 'unknown';
 }
 
 export interface RoughEntry {

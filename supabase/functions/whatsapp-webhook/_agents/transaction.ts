@@ -16,8 +16,10 @@
 
 import {
   extractTransaction, extractTransactionFromImage,
-  extractTransactions, extractTransactionsFromImage, type TxnExtract,
+  extractTransactions, extractTransactionsFromImage, extractFinancialDoc, type TxnExtract,
 } from '../_extract.ts'
+import { decideFinancialAction, fuseCaptionPayment } from '../_financial_doc.ts'
+import { runBill, answerBillPayment } from './bill.ts'
 import { parseSpokenAmount } from '../_amount.ts'
 import { matchPayee, matchProject, distinctiveTokens, type Match } from '../_match.ts'
 import { send, renderToWhatsApp, type OutMessage } from '../_format.ts'
@@ -505,6 +507,30 @@ export async function runTransactionMessage(ctx: TxnCtx, text: string, opts: { p
   const { supabase, orgId } = ctx
   const [stakeholders, projects] = await Promise.all([loadStakeholders(supabase, orgId), loadActiveProjects(supabase, orgId)])
   const projectNames = projects.map((p) => p.name)
+
+  // ── A FINANCIAL IMAGE is read as a DOCUMENT first ────────────────────────────────
+  // The router now sends vendor bills here too (not just payments). Read the image once as a document and
+  // let the deterministic disposer decide: a BILL (only / +payment / ask-if-paid) branches to the bill path;
+  // a payment proof (or a misread) falls through UNCHANGED to the proven payment extractor below.
+  // (Latency note: a payment image pays for two vision calls today — this read + the payment read below.
+  //  A later pass can build the payment TxnExtract straight from this read for the single-payment case.)
+  if (ctx.image) {
+    let read = await extractFinancialDoc(ctx.image.base64, ctx.image.mime, ctx.image.caption, projectNames, stakeholders.map((s) => s.name))
+    // CAPTION FUSION — the paid amount is often ONLY in the caption ("paid 10000"), which vision misses
+    // reading the invoice pixels. When it's an invoice and we don't already have a confirmed payment, read
+    // the caption as text and fold an outgoing amount in, so an invoice-with-"paid X" reliably records the
+    // payment instead of asking for the amount again.
+    const caption = ctx.image.caption?.trim()
+    const invoiceish = read.document_kind === 'invoice' || read.document_kind === 'both'
+    if (caption && invoiceish && !(read.payment_occurred === true && (read.paid_amount ?? 0) > 0)) {
+      const cap = await extractTransaction(caption, projectNames)
+      read = fuseCaptionPayment(read, { amount: cap.amount, direction: cap.direction, mode: cap.mode })
+    }
+    const action = decideFinancialAction(read)
+    console.log('[trace] fin-doc', JSON.stringify({ kind: read.document_kind, paid: read.payment_occurred, paidAmt: read.paid_amount, action: action.kind, vendor: read.vendor, total: read.bill_total }))
+    if (action.kind !== 'PAYMENT_ONLY') { await runBill(ctx, read, action); return }
+  }
+
   const entries = ctx.image
     ? await extractTransactionsFromImage(ctx.image.base64, ctx.image.mime, ctx.image.caption, projectNames, stakeholders.map((s) => s.name))
     : await extractTransactions(text, projectNames)
@@ -545,6 +571,9 @@ export async function answerTransaction(ctx: TxnCtx, text: string, convo: ConvoR
   const entryId = convo.staged_entry_id ?? null
 
   if (isHardCancel(text)) { await cancelTransaction(ctx, convo); return }
+
+  // The bill-payment question ("did you pay this bill? how much?") — owned by the bill path.
+  if (pending === 'AWAIT_BILL_PAYMENT') { return await answerBillPayment(ctx, text, convo) }
 
   if (pending === 'AWAIT_AMOUNT') {
     // Deterministic spoken-amount parse first ("muppai aidu vela" = 35000); the

@@ -12,7 +12,7 @@
  * Writes via set_txn_allocations (complete-set replace; parts sum to the txn total).
  */
 import { useEffect, useMemo, useState } from 'react';
-import { X, FileText, Plus, Loader2, Check, Eye } from 'lucide-react';
+import { X, FileText, Loader2, Check, Eye } from 'lucide-react';
 import { V, font } from './ledgerTokens';
 import { openDoc, useSignedDocUrl } from '../../lib/storage';
 
@@ -65,10 +65,10 @@ function BillPeekImg({ stored }: { stored: string }) {
 }
 import {
   loadUnpaidBillsForVendor, saveBillAllocations, setAdvanceMemo,
-  type UnpaidBill, type ExtractedBill,
+  type UnpaidBill,
 } from '../../lib/billsApi';
-import { intakeCommit } from '../../lib/billIntake';
-import NewBillModal from '../bills/NewBillModal';
+// NOTE: creating a brand-new bill lives on the Bills page, NOT inside "attach payment → bill". This sheet
+// only ALLOCATES a payment to bills already on file (the vendor's unpaid bills below).
 
 const num = (n: unknown) => Number(n) || 0;
 const inr = (n: number) => '₹' + Math.round(num(n)).toLocaleString('en-IN');
@@ -85,7 +85,6 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
   const [busy, setBusy] = useState<'idle' | 'reading' | 'saving' | 'done'>('idle');
   const [err, setErr] = useState<string | null>(null);
   const [peekId, setPeekId] = useState<string | null>(null);   // hover/tap → inline bill preview
-  const [uploadOpen, setUploadOpen] = useState(false);
 
   // Load the vendor's unpaid bills; pre-select on an exact remaining match.
   useEffect(() => {
@@ -111,32 +110,6 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
     });
   };
   const setAmt = (b: UnpaidBill, v: number) => setSel(s => ({ ...s, [b.id]: Math.max(0, Math.min(b.remaining, v)) }));
-
-  // Put a bill in the list (if it isn't already) and allocate this payment against it.
-  const selectBill = (b: UnpaidBill) => {
-    setBills(bs => (bs?.some(x => x.id === b.id) ? bs : [b, ...(bs ?? [])]));
-    setSel(s => { const leftover = Math.max(0, amount - Object.values(s).reduce((x, v) => x + num(v), 0)); return { ...s, [b.id]: Math.min(b.remaining, leftover) || b.remaining }; });
-  };
-  // Uploading mid-payment goes through the same door as everywhere else — the vendor is already
-  // known, so it is locked; the figures are shown before anything is minted. Dedupe still lives in
-  // intakeCommit; here a collision reconciles (attach the bill already on file) rather than navigate.
-  const onUpload = async (d: { file: File | null; billNo: string | null; billDate: string | null; amount: number; projectId: string | null; lines: ExtractedBill['lines']; allowDuplicate: boolean }) => {
-    const res = await intakeCommit(
-      { orgId, source: 'tx_picker', file: d.file, vendorId: stakeholderId, projectId: d.projectId ?? defaultProjectId },
-      { vendor: vendorName, billNo: d.billNo, billDate: d.billDate, amount: d.amount, lines: d.lines },
-      stakeholderId, { allowDuplicate: d.allowDuplicate },
-    );
-    if (res.status === 'duplicate') return { duplicate: res.existing };
-    selectBill({ id: res.billId, kind: 'bill', billNo: d.billNo, billDate: d.billDate, amount: d.amount, paid: 0, remaining: d.amount, projectId: d.projectId ?? defaultProjectId, site: null, docUrl: null });
-  };
-
-  // "Attach that one instead" — the paper is already on the books, so settle against it.
-  const reconcile = (billId: string) => {
-    setUploadOpen(false);
-    const existing = (bills ?? []).find(x => x.id === billId);
-    if (existing) { selectBill(existing); setErr(null); }
-    else setErr(`That bill for ${vendorName} is already recorded and settled — nothing to attach.`);
-  };
 
   const confirm = async () => {
     if (over) return;
@@ -181,13 +154,8 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
           <div className="text-center py-2">
             <div className="mx-auto grid place-items-center rounded-full mb-3" style={{ width: 44, height: 44, background: V.field }}><FileText size={20} style={{ color: V.faint }} /></div>
             <p className="text-[13px] font-medium" style={{ color: V.ink }}>No bills for {vendorName} yet</p>
-            <p className="text-[12px] mt-1 mb-4" style={{ color: V.sys }}>Upload the bill this payment is for.</p>
-            <button type="button" onClick={() => setUploadOpen(true)} disabled={busy === 'reading'}
-              className="w-full inline-flex items-center justify-center gap-2 py-3 rounded-xl text-[14px] font-semibold"
-              style={{ background: V.terra, color: '#fff', opacity: busy === 'reading' ? 0.6 : 1 }}>
-              {busy === 'reading' ? <><Loader2 size={16} className="animate-spin" /> Reading the bill…</> : <><Plus size={16} /> Upload a new bill</>}
-            </button>
-            <label className="flex items-center justify-center gap-2 mt-4 text-[11.5px]" style={{ color: V.sys }}>
+            <p className="text-[12px] mt-1 mb-4" style={{ color: V.sys }}>Add the bill on the Bills page, then attach it here. For now this payment can stay as an advance.</p>
+            <label className="flex items-center justify-center gap-2 mt-1 text-[11.5px]" style={{ color: V.sys }}>
               <input type="checkbox" checked={advanceMemoOn} onChange={(e) => setAdvanceMemoOn(e.target.checked)} style={{ accentColor: V.terra }} />
               No bill — note it&apos;s towards an order
             </label>
@@ -247,15 +215,6 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
               })}
             </div>
 
-            {/* Upload a new bill — the hero action, prominent even when bills exist. */}
-            <button type="button" onClick={() => setUploadOpen(true)} disabled={busy === 'reading'}
-              className="blz-upload w-full flex items-center justify-center gap-2 px-3 py-3 rounded-xl mt-3"
-              style={{ background: V.terraWash, border: `1.5px dashed ${V.terra}`, opacity: busy === 'reading' ? 0.6 : 1 }}>
-              {busy === 'reading' ? <Loader2 size={16} className="animate-spin shrink-0" style={{ color: V.terraDeep }} /> : <Plus size={16} className="shrink-0" style={{ color: V.terraDeep }} />}
-              <span className="text-[13.5px] font-semibold" style={{ color: V.terraDeep }}>{busy === 'reading' ? 'Reading the bill…' : 'Upload a new bill'}</span>
-            </button>
-
-
             {/* advance memo */}
             {remainder > 0.5 && (
               <div className="mt-3 rounded-xl px-3 py-2.5" style={{ background: V.field, border: `1px solid ${V.line}` }}>
@@ -295,18 +254,6 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
         )}
       </div>
 
-      {uploadOpen && (
-        <NewBillModal
-          open
-          title="New bill"
-          onClose={() => setUploadOpen(false)}
-          lockVendor={{ id: stakeholderId, name: vendorName }}
-          lockProject={defaultProjectId ? { id: defaultProjectId } : null}
-          onOpenBill={reconcile}
-          openBillLabel="Attach that one instead"
-          commit={onUpload}
-        />
-      )}
     </div>
   );
 }

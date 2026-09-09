@@ -7,6 +7,7 @@
  */
 import { supabase } from '../../lib/supabase';
 import type { RoughEntry } from '../../types';
+import { createBill, saveBillAllocations } from '../../lib/billsApi';
 
 function genTxnId() {
   return `TXN-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
@@ -277,6 +278,76 @@ export async function fileRoughEntrySplit(
 
   enrichProofNotes(entry, ids);   // fire-and-forget: append the proof's UTR/mode/platform to each
   return ids;
+}
+
+// ── Filing a captured BILL (ai_extracted.kind === 'BILL') ────────────────────────
+// A WhatsApp-captured bill is finalized here into the first-class `bills` table (never a Day Book
+// transaction). If the sender said it was also paid, one payment transaction is created and ATTACHED to
+// the bill (a txn_allocations row carrying bill_id, via set_txn_allocations). The bill document is the
+// image already stored on the rough entry (raw_image_url). Composes only already-applied RPCs, so no new
+// migration is needed; a payment-step failure leaves the bill standing (recoverable — attach later).
+
+/** The bill's mandatory resolved fields. A bill needs only a vendor; the site is optional. */
+export interface ResolvedBill {
+  vendorId: string;              // bills.stakeholder_id is NOT NULL — a real stakeholder row
+  projectId: string | null;     // optional site
+  amount: number;               // the bill total
+  paidAmount?: number | null;   // set only when a payment rides with the bill
+}
+
+const BILL_MODE: Record<string, typeof PAYMENT_MODES[number]> = { cash: 'Cash', upi: 'UPI', bank: 'NEFT' };
+
+/** Ready to file a bill once a real vendor and a positive total are resolved. */
+export function isBillResolved(r: ResolvedBill): boolean {
+  return Boolean(r.vendorId) && r.amount > 0;
+}
+
+export async function fileBill(entry: RoughEntry, orgId: string, resolved: ResolvedBill): Promise<{ billId: string; txnId: string | null }> {
+  const ai = (entry.ai_extracted || {}) as Record<string, any>;
+  const billDate = /^\d{4}-\d{2}-\d{2}$/.test(ai.bill_date || '') ? ai.bill_date as string : null;
+
+  const billId = await createBill({
+    orgId, stakeholderId: resolved.vendorId, projectId: resolved.projectId,
+    billNo: ai.bill_no ?? null, billDate, amount: resolved.amount,
+    vendorName: ai.vendor_name ?? null, lines: Array.isArray(ai.lines) ? ai.lines : [],
+    note: ai.description_raw ?? null, createdByName: entry.sender_name ?? null,
+    file: null, docUrl: entry.raw_image_url ?? null,
+  });
+
+  let txnId: string | null = null;
+  const paid = resolved.paidAmount != null && resolved.paidAmount > 0 ? resolved.paidAmount : null;
+  if (paid) {
+    txnId = genTxnId();
+    const mode = BILL_MODE[String(ai?.payment?.mode ?? '').toLowerCase()] ?? 'Cash';
+    const payload = {
+      txn_id: txnId, stakeholder_id: resolved.vendorId,
+      // The PAYMENT happened today — the bill may be past-dated, but the transaction that records paying it
+      // is dated now. (The bill keeps its own bill_date.)
+      date: new Date().toISOString().slice(0, 10),
+      total_amount: paid, payment_mode: mode, category: null,
+      remarks: baseNotes(entry, ai.description_raw || ''),
+      // The document is the BILL — it lives on the bills row and is attached to the payment as a BILL
+      // (bill_id allocation), NOT as the payment's proof screenshot. Leave both doc fields null so the
+      // txn doesn't double-show the bill as a payment proof (and so deleting the bill fully detaches it).
+      bill_doc_url: null, proof_document_url: null,
+      ai_flag_status: 'Clean', ai_flag_data: {}, org_id: orgId,
+    };
+    const allocations = [{
+      project_id: resolved.projectId, order_type: null, order_ref: null,
+      milestone_id: null, allocated_amount: paid,
+    }];
+    const { error: rpcErr } = await supabase.rpc('insert_transaction_with_allocations', { p_txn: payload, p_allocations: allocations });
+    if (rpcErr) throw rpcErr;
+    await supabase.from('transactions').update({ source_re_id: entry.id }).eq('txn_id', txnId);
+    // Repoint the payment's allocation at the bill (bill_id) so the bill's paid/unpaid is a recorded fact.
+    await saveBillAllocations(txnId, orgId, paid, [{ id: billId, kind: 'bill', projectId: resolved.projectId, amount: paid }], resolved.projectId);
+  }
+
+  const { error: postErr } = await supabase.from('rough_entries')
+    .update({ status: 'POSTED', resolved_txn_id: txnId }).eq('id', entry.id);
+  if (postErr) throw postErr;
+
+  return { billId, txnId };
 }
 
 /**

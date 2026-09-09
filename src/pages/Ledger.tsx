@@ -521,7 +521,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
     queryFn: async () => {
       const { data, error } = await supabase
         .from('transactions')
-        .select('*, stakeholders(name, type, category), txn_allocations(allocation_id, project_id, allocated_amount, order_type, order_ref, projects(name))')
+        .select('*, stakeholders(name, type, category), txn_allocations(allocation_id, project_id, allocated_amount, order_type, order_ref, bill_id, projects(name))')
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data;
@@ -1458,12 +1458,17 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                     //  · general expense -> a calm, non-actionable note (no tracking needed)
                     //  · an unlinked outgoing payment to a party -> the gentle Track nudge
                     //  · otherwise -> the existing AnchorChip (linked ref, or default)
+                    // A payment that settles a recorded bill (bill_id allocation) is already linked — show a
+                    // calm "Bill" chip, never the "Attach bill" nudge (the detail already shows it attached).
+                    const billAttached = (txn.txn_allocations || []).some((a: any) => a?.bill_id);
                     const anchorNode: ReactNode =
                       genExp
                         ? <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md" style={{ background: V.field, color: V.inkSoft, ...font }}><span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: V.faint }} />Overhead <span style={{ color: V.faint }}>· no party</span></span>
-                        : (anchor === null && dir === 'out' && txn.stakeholder_id && (txn.txn_allocations || []).length > 0 && txn.status !== 'Voided')
-                          ? <TrackChip txn={txn} onLinked={() => { qc.invalidateQueries({ queryKey: ['ledger'] }); }} />
-                          : undefined;
+                        : billAttached
+                          ? <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md" style={{ background: V.field, color: V.inkSoft, ...font }}>🧾 <span>Bill</span></span>
+                          : (anchor === null && dir === 'out' && txn.stakeholder_id && (txn.txn_allocations || []).length > 0 && txn.status !== 'Voided')
+                            ? <TrackChip txn={txn} onLinked={() => { qc.invalidateQueries({ queryKey: ['ledger'] }); }} />
+                            : undefined;
                     return (
                       <div
                         key={txn.txn_id}
