@@ -114,24 +114,35 @@ const ATDX_CSS = `
 .atdx .sitefoot .dc{text-align:center; font-family:var(--mono); font-size:12px; color:var(--walnut)}
 .atdx .sitefoot .dc.today{color:var(--terra); font-weight:500}
 .atdx .sitefoot .sum{text-align:right; padding-right:20px; font-family:var(--mono); font-size:12px; color:var(--walnut)}
-.atdx .bpop{position:absolute; z-index:40; top:calc(100% + 6px); left:50%; transform:translateX(-50%) scale(.92); transform-origin:top center;
-  width:230px; background:var(--paper); border:1px solid var(--rule); border-radius:14px;
-  box-shadow:0 26px 54px -24px rgba(42,36,28,.5); padding:12px 14px; opacity:0; pointer-events:none;
-  transition:opacity .2s, transform .25s cubic-bezier(.2,.9,.3,1.25)}
+.atdx .bpop{position:absolute; z-index:40; top:calc(100% + 10px); left:50%; transform:translateX(-50%) scale(.94); transform-origin:top center;
+  width:252px; background:var(--paper); border:1px solid var(--rule); border-radius:16px;
+  box-shadow:0 2px 0 rgba(255,255,255,.7) inset, 0 30px 60px -26px rgba(42,36,28,.55); padding:14px 14px 12px; opacity:0; pointer-events:none;
+  transition:opacity .18s ease, transform .28s cubic-bezier(.2,.9,.3,1.25)}
 .atdx .bpop.show{opacity:1; transform:translateX(-50%) scale(1); pointer-events:auto}
-.atdx .bp-title{font-family:var(--mono); font-size:10px; letter-spacing:.16em; text-transform:uppercase; color:var(--soft); margin-bottom:9px}
-.atdx .bp-row{display:flex; align-items:center; gap:9px; padding:5px 0; font-size:13px}
-.atdx .bp-row .t{flex:1}
-.atdx .bp-row .rate{font-family:var(--mono); font-size:11px; color:var(--soft)}
-.atdx .step{display:flex; align-items:center; gap:6px}
-.atdx .step button{width:24px; height:24px; border-radius:7px; border:1px solid var(--rule); background:var(--paper); color:var(--walnut);
-  cursor:pointer; font-size:13px; line-height:1}
-.atdx .step button:hover{border-color:var(--walnut); color:var(--ink)}
-.atdx .step b{font-family:var(--mono); font-size:13.5px; min-width:22px; text-align:center}
-.atdx .bp-foot{border-top:1px solid var(--rule); margin-top:8px; padding-top:8px; display:flex; justify-content:space-between; align-items:center;
-  font-family:var(--mono); font-size:12px; color:var(--walnut)}
-.atdx .bp-done{width:100%; margin-top:10px; background:var(--ink); color:var(--cream); border:0; border-radius:999px;
-  padding:9px 0; font-family:var(--sans); font-weight:600; font-size:13px; cursor:pointer}
+/* a notch, so it is plainly the day you tapped that it belongs to */
+.atdx .bpop::before{content:""; position:absolute; top:-6px; left:50%; margin-left:-6px; width:11px; height:11px;
+  background:var(--paper); border-left:1px solid var(--rule); border-top:1px solid var(--rule); transform:rotate(45deg); border-radius:2px 0 0 0}
+.atdx .bp-title{font-family:var(--mono); font-size:9.5px; letter-spacing:.18em; text-transform:uppercase; color:var(--soft);
+  margin-bottom:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.atdx .bp-row{position:relative; display:flex; align-items:center; gap:10px; padding:7px 0; font-size:13.5px}
+.atdx .bp-row + .bp-row{border-top:1px solid color-mix(in srgb, var(--rule) 55%, transparent)}
+.atdx .bp-row .t{flex:1; min-width:0; line-height:1.25}
+.atdx .bp-row .rate{font-family:var(--mono); font-size:10.5px; color:var(--soft); margin-top:1px}
+/* one pill, split by a hairline — not two loose buttons */
+.atdx .step{display:inline-flex; align-items:center; border:1px solid var(--rule); border-radius:999px; background:var(--cream); flex:none}
+.atdx .step button{width:26px; height:26px; border-radius:999px; color:var(--walnut); font-size:14px; line-height:1;
+  display:grid; place-items:center; transition:background .14s, color .14s}
+.atdx .step button:hover{background:var(--terra-soft); color:var(--terra)}
+.atdx .step b{font-family:var(--mono); font-size:13.5px; min-width:26px; text-align:center; color:var(--soft);
+  border-left:1px solid var(--rule); border-right:1px solid var(--rule); line-height:26px}
+.atdx .bp-row.on .step b{color:var(--ink)}
+.atdx .bp-foot{border-top:1px solid var(--rule); margin-top:10px; padding-top:10px; display:flex; justify-content:space-between;
+  align-items:baseline; font-family:var(--mono); font-size:11px; letter-spacing:.04em; color:var(--soft)}
+.atdx .bp-foot b{font-size:14px; color:var(--ink); font-weight:500}
+.atdx .bp-done{width:100%; margin-top:11px; background:var(--ink); color:var(--cream); border:0; border-radius:999px;
+  padding:10px 0; font-family:var(--sans); font-weight:600; font-size:13px; cursor:pointer; transition:transform .18s cubic-bezier(.2,.9,.3,1.4), background .2s}
+.atdx .bp-done:hover{background:#1d1913; transform:translateY(-1px)}
+.atdx .bp-done:active{transform:scale(.98)}
 .atdx #toast{position:fixed; left:50%; bottom:28px; transform:translate(-50%,16px); background:var(--ink); color:var(--cream);
   font-size:13.5px; border-radius:999px; padding:11px 20px; opacity:0; transition:all .35s cubic-bezier(.2,.9,.3,1.2); z-index:60}
 .atdx #toast.show{opacity:1; transform:translate(-50%,0)}
@@ -147,9 +158,16 @@ const ATDX_CSS = `
 .atdx{--line:var(--rule);--line-2:#D8CEBB;--walnut-2:#6E5F4C;--walnut-3:#9A8C77;
   --terracotta:var(--terra);--terracotta-bg:var(--terra-soft);--sage-bg:var(--sage-soft);
   --slate:#5b6b78;--slate-bg:#e8ecef}
-/* The mock leaves its two round chrome buttons on the UA font, and they are drawn that way.
-   Everything else in the app needs the inherit, so those two are held out of it. */
-.atdx button:not(.wkbtn):not(.info),.atdx input,.atdx select{font:inherit;color:inherit}
+/* The mock never resets buttons: its own controls declare their font where they need one, and the
+   two round chrome buttons (‹ › and i) are drawn on the UA font because of it. A blanket
+   button{font:inherit;color:inherit} both breaks that AND out-specifies every component rule that
+   sets its own colour — which is how the Done button ended up ink-on-ink. So there is no blanket
+   reset; the app's own controls name their font here, and each keeps its own colour. */
+.atdx input,.atdx select,.atdx textarea{font:inherit;color:inherit}
+.atdx .oncontract,.atdx .measurebasis,.atdx .ppitem,.atdx .ppempty,.atdx .new .x,.atdx .addw,
+.atdx .bp-addskill,.atdx .rc-f button,.atdx .pp-link,.atdx .pp-cancel,.atdx .kindbtn,
+.atdx .wrow button.rmw,.atdx .seg button,.atdx .bp-done,.atdx .step button,
+.atdx .siteempty a,.atdx .kpx{font-family:var(--sans)}
 .atdx button{background:none;border:0;cursor:pointer;padding:0}
 .atdx :focus-visible{outline:2px solid var(--ink);outline-offset:2px;border-radius:6px}
 .atdx .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
@@ -180,7 +198,7 @@ const ATDX_CSS = `
 .atdx .pp{position:relative;display:inline-block;min-width:320px;max-width:100%}
 
 /* the crew stepper's own extras — the mock has the popover, not these */
-.atdx .bpop .bp-row .rm{opacity:0;color:var(--soft);font-size:13px;width:18px;height:18px;border-radius:50%;transition:opacity .15s,background .15s,color .15s}
+.atdx .bpop .bp-row .rm{position:absolute;left:-14px;top:50%;margin-top:-7px;opacity:0;color:var(--soft);font-family:var(--sans);font-size:11px;line-height:14px;width:14px;height:14px;border-radius:50%;transition:opacity .15s,background .15s,color .15s}
 .atdx .bpop .bp-row:hover .rm{opacity:1}
 .atdx .bpop .bp-row .rm:hover{background:var(--terra-soft);color:var(--terra)}
 .atdx .bpop .bp-row .rate{cursor:text}
@@ -246,14 +264,14 @@ const ATDX_CSS = `
 .atdx .cell .zero{color:var(--line-2)}
 .atdx .cell.qty{font-size:13.5px}
 .atdx .cell.qty small{font-size:11px;color:var(--walnut-3);margin-left:2px}
-.atdx .bpop .bp-addskill{display:block;width:100%;text-align:left;margin-top:8px;font-size:12.5px;color:var(--terracotta);font-weight:500}
-.atdx .bpop .bp-addskill:hover{text-decoration:underline;text-underline-offset:2px}
+.atdx .bpop .bp-addskill{display:block;width:100%;text-align:left;margin-top:9px;font-size:11.5px;letter-spacing:.02em;color:var(--terra);font-weight:600}
+.atdx .bpop .bp-addskill:hover{color:#a44f2f;text-decoration:underline;text-underline-offset:2px}
 .atdx .bar{height:4px;background:var(--line);border-radius:2px;margin-top:5px;position:relative;overflow:hidden;width:120px;margin-left:auto}
 .atdx .bar i{position:absolute;left:0;top:0;bottom:0;background:var(--slate)}
 .atdx .bar b{position:absolute;top:0;bottom:0;background:var(--terracotta)}
 .atdx .psearch{height:38px;border:1px solid var(--line-2);border-radius:9px;background:var(--paper);padding:0 12px;font-size:14px;width:260px}
 .atdx .psearch:focus{outline:none;border-color:var(--walnut)}
-.atdx .ppmenu{position:absolute;left:0;top:calc(100% + 4px);z-index:5;min-width:280px;background:var(--paper);border:1px solid var(--line-2);border-radius:10px;box-shadow:0 10px 28px -12px rgba(59,47,39,.35);padding:4px;max-height:300px;overflow:auto}
+.atdx .ppmenu{position:absolute;left:0;top:calc(100% + 4px);z-index:45;min-width:280px;background:var(--paper);border:1px solid var(--line-2);border-radius:10px;box-shadow:0 10px 28px -12px rgba(59,47,39,.35);padding:4px;max-height:300px;overflow:auto}
 .atdx .ppitem{display:block;width:100%;text-align:left;padding:8px 10px;border-radius:7px;font-size:13.5px;color:var(--walnut)}
 .atdx .ppitem:hover{background:var(--cream)}
 .atdx .ppitem small{color:var(--walnut-3)}
@@ -418,29 +436,9 @@ export default function AttendanceSheet({ session }: { session: Session }) {
 
   useEffect(() => { load(); }, [load]);
 
-  // Group hover — hovering any row in a crew (or a direct worker) lights the whole group,
-  // and marks the main row. Delegated on the persistent tbody, so it survives every re-render.
-  useEffect(() => {
-    const body = rootRef.current?.querySelector('#atdxBody') as HTMLElement | null;
-    if (!body) return;
-    const clear = () => body.querySelectorAll('tr.hot, tr.hot-main, td.cell.colglow').forEach(x => x.classList.remove('hot', 'hot-main', 'colglow'));
-    const over = (e: Event) => {
-      clear();
-      // column crosshair — glow the whole day column under the pointer
-      const td = (e.target as HTMLElement).closest('td.cell') as HTMLElement | null;
-      if (td && td.parentElement) {
-        const idx = [...td.parentElement.querySelectorAll('td.cell')].indexOf(td);
-        if (idx >= 0) body.querySelectorAll('tr').forEach(r => { const cs = r.querySelectorAll('td.cell'); cs[idx]?.classList.add('colglow'); });
-      }
-      const tr = (e.target as HTMLElement).closest('tr[data-grp]') as HTMLElement | null;
-      const g = tr?.getAttribute('data-grp'); if (!g) return;
-      body.querySelectorAll(`tr[data-grp="${g}"]`).forEach(x => x.classList.add('hot'));
-      (body.querySelector(`tr.crew[data-grp="${g}"], tr.direct[data-grp="${g}"]`) as HTMLElement | null)?.classList.add('hot-main');
-    };
-    body.addEventListener('mouseover', over);
-    body.addEventListener('mouseleave', clear);
-    return () => { body.removeEventListener('mouseover', over); body.removeEventListener('mouseleave', clear); };
-  }, []);
+  // (The column crosshair and group glow went with the table. In the card layout a row is its own
+  //  block and a cell answers for itself on hover, which is what the design asks for.)
+
   useEffect(() => { if (!loading && rcOpen) renderCard(); if (!loading && !rcOpen) { const t = rootRef.current?.querySelector('#atdxRc') as HTMLElement | null; if (t) t.hidden = true; } // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rcOpen, loading]);
 
@@ -686,8 +684,8 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   // The crew breakdown popover (the mockup): steppers per skill for ONE day, live count + cost, a
   // clickable rate, and add/remove skill. Persists each change; the cell repaints live, totals on close.
   function openCrewPopover(cellDiv: HTMLElement, si: number, ci: number, i: number) {
-    const td = cellDiv.closest('td.cell') as HTMLElement | null; if (!td) return;
-    td.querySelector('.bpop')?.remove();
+    const host = cellDiv.closest('.cellwrap') as HTMLElement | null; if (!host) return;
+    host.querySelector('.bpop')?.remove();
     const crew = DATA.current[si].crews[ci];
     const dt = new Date(dates[i]);
     const dayLbl = dt.toLocaleString('en-US', { weekday: 'short' }) + ' ' + dt.getDate();
@@ -702,23 +700,29 @@ export default function AttendanceSheet({ session }: { session: Session }) {
           <div class="step"><button data-d="-1" data-ki="${ki}">−</button><b data-q="${ki}">${valOf(ki)}</b><button data-d="1" data-ki="${ki}">＋</button></div>
         </div>`).join('') +
       `<button class="bp-addskill" data-addcat="${si}.${ci}">＋ add a skill</button>` +
-      `<div class="bp-foot"><span data-foot-c></span><span data-foot-amt></span></div>` +
+      `<div class="bp-foot"><span data-foot-c></span><b data-foot-amt></b></div>` +
       `<button class="bp-done">Done</button>`;
-    td.appendChild(pop);
+    host.appendChild(pop);
     requestAnimationFrame(() => pop.classList.add('show'));
 
     const repaintCell = () => {
       const nz = crew.cats.map(cat => { const c = cat.cells[i]; return (c && c !== 'off') ? c.v : 0; });
       const total = nz.reduce((a, b) => a + b, 0);
       const wa = crew.cats.some(cat => { const c = cat.cells[i]; return c && c !== 'off' && c.src === 'wa'; });
-      if (total <= 0) { cellDiv.className = 'c gap'; cellDiv.innerHTML = '—'; }
-      else { cellDiv.className = 'c filled'; cellDiv.innerHTML = nz.filter(v => v > 0).join('+') + (wa ? '<span class="src"></span>' : ''); }
+      const day = Number(cellDiv.dataset.day ?? -1);
+      cellDiv.className = cls(day, total > 0 ? ' filled' : '');
+      cellDiv.innerHTML = total > 0 ? nz.filter(v => v > 0).join('+') + (wa ? '<span class="src"></span>' : '') : '';
     };
     const foot = () => {
       const count = crew.cats.reduce((s, cat) => s + valOf(crew.cats.indexOf(cat)), 0);
       const cost = crew.cats.reduce((s, cat, ki) => s + valOf(ki) * cat.rate, 0);
-      (pop.querySelector('[data-foot-c]') as HTMLElement).textContent = `${count} on site`;
+      (pop.querySelector('[data-foot-c]') as HTMLElement).textContent = count ? `${count} on site` : 'nobody yet';
       (pop.querySelector('[data-foot-amt]') as HTMLElement).textContent = inr(cost);
+      // a skill with somebody on it reads in ink; the rest stay quiet
+      pop.querySelectorAll('.bp-row').forEach(r => {
+        const ki = Number((r as HTMLElement).dataset.ki ?? -1);
+        r.classList.toggle('on', ki >= 0 && valOf(ki) > 0);
+      });
     };
     foot();
 
