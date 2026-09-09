@@ -336,6 +336,31 @@ export async function promoteDirectToCrew(
 }
 
 /** Remove a crew from the sheet (cascades its categories + attendance). */
+// ── edits the phone's "Edit worker" sheet makes: the name, and a wage type's label + rate ──
+export async function renameCrew(crewId: string, name: string): Promise<void> {
+  const { error } = await supabase.from('labour_crews').update({ name }).eq('crew_id', crewId);
+  if (error) throw error;
+}
+/** A crew's wage-type row: its label and/or its rate (a rate set here is the crew's own). */
+export async function updateCategory(id: string, patch: { category?: string; rate?: number }): Promise<void> {
+  const row: Record<string, unknown> = {};
+  if (patch.category != null) row.category = patch.category;
+  if (patch.rate != null) { row.rate = patch.rate; row.own_rate = true; }
+  if (!Object.keys(row).length) return;
+  const { error } = await supabase.from('labour_crew_categories').update(row).eq('id', id);
+  if (error) throw error;
+}
+/** A single worker: name, wage type and rate all live on the one row. */
+export async function updateDirectWorker(id: string, patch: { name?: string; category?: string; rate?: number }): Promise<void> {
+  const row: Record<string, unknown> = {};
+  if (patch.name != null) row.name = patch.name;
+  if (patch.category != null) row.category = patch.category;
+  if (patch.rate != null) { row.rate = patch.rate; row.own_rate = true; }
+  if (!Object.keys(row).length) return;
+  const { error } = await supabase.from('labour_direct_workers').update(row).eq('id', id);
+  if (error) throw error;
+}
+
 export async function removeCrew(crewId: string): Promise<void> {
   const { error } = await supabase.from('labour_crews').delete().eq('crew_id', crewId);
   if (error) throw error;
