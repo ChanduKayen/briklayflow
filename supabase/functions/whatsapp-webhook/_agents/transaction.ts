@@ -19,6 +19,7 @@ import {
   extractTransactions, extractTransactionsFromImage, extractFinancialDoc, type TxnExtract,
 } from '../_extract.ts'
 import { decideFinancialAction, fuseCaptionPayment } from '../_financial_doc.ts'
+import { reconcileSplitPayment, buildSplitTotal } from '../_split_reconcile.ts'
 import { runBill, answerBillPayment } from './bill.ts'
 import { parseSpokenAmount } from '../_amount.ts'
 import { matchPayee, matchProject, distinctiveTokens, type Match } from '../_match.ts'
@@ -269,6 +270,7 @@ export function buildPlan(
     amount: ext.amount, amount_confidence: ext.amount_confidence ?? null,
     amount_source_phrase: ext.amount_source_phrase ?? null,
     mode: ext.mode, direction: ext.direction, description_raw: ext.note,
+    split: ext.split ?? null,   // a reconciled caption breakdown of THIS one payment (Day Book itemises it)
     project_id: projectId, project_name: projectName, project_raw: safeProject ?? null,
     project_matched: !!projectId, project_unmatched: !!safeProject && !projectId,
     suggested_project: projectSug,
@@ -542,6 +544,20 @@ export async function runTransactionMessage(ctx: TxnCtx, text: string, opts: { p
     : await extractTransactions(text, projectNames)
 
   console.log('[trace] multi-extract(txn)', JSON.stringify({ count: entries.length }))
+
+  // ── SPLIT RECONCILIATION — a caption breakdown is NOT extra payments ──────────────────────────────────
+  // A payment PROOF whose caption itemises the one payment ("salary 15k + 3650 site expenses" on ₹18,650)
+  // was extracted as three payments and filed at ₹37,300 — a double-count. When the parts sum to one of the
+  // entries, collapse to ONE payment carrying the breakdown as a structured split + note, instead of a batch.
+  if (ctx.image) {
+    const recon = reconcileSplitPayment(entries)
+    if (recon) {
+      const total = buildSplitTotal(entries[recon.totalIndex], recon.partIndexes.map((i) => entries[i]))
+      console.log('[trace] split-reconcile', JSON.stringify({ total: total.amount, parts: recon.partIndexes.length, note: total.note }))
+      await runTransaction(ctx, text, { prefix: opts.prefix, lingering: opts.lingering, preExtract: total })
+      return
+    }
+  }
 
   if (entries.length >= 2) { await runBatch(ctx, text, entries, stakeholders, projects, opts.prefix); return }
   // ONE payment -> the UNCHANGED single-entry path, reusing the extract (no 2nd LLM call).

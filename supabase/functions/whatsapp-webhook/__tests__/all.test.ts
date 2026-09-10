@@ -96,6 +96,7 @@ import './payee_match_quality.test';
 import './txn_note.test';
 import './media_race.test';
 import './bill_note_answer.test';
+import './split_reconcile.test';
 import { runAll } from './harness';
 
 await runAll();

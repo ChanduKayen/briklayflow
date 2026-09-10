@@ -148,6 +148,10 @@ async function callOpenAIJson(
 
 // ── Sprint 4: structured transaction extraction ─────────────────────────────────
 
+// One line of a payment's breakdown — when a caption itemises what ONE payment was for
+// (e.g. "salary 15k + 3650 site expenses" on an ₹18,650 proof). Not a separate payment.
+export type SplitLine = { amount: number; purpose: string | null; payee: string | null }
+
 export type TxnExtract = {
   amount: number | null            // the floor
   amount_source_phrase: string | null  // the EXACT span the amount was read from
@@ -158,6 +162,7 @@ export type TxnExtract = {
   mode: 'cash' | 'upi' | 'bank' | null
   note: string | null
   ref: string | null               // pronoun/reference ("him"/"same") for lingering resolution
+  split?: SplitLine[] | null       // set only when a caption breakdown was reconciled INTO this one payment
 }
 
 const TXN_EMPTY: TxnExtract = {
