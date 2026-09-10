@@ -98,6 +98,28 @@ export async function loadBills(): Promise<BillRow[]> {
     const bR = await supabase.from('txn_allocations').select('bill_id, allocated_amount, transactions(status)').in('bill_id', billRows.map(b => b.id));
     (bR.data ?? []).forEach((a: any) => { if (a.transactions?.status === 'Voided' || !a.bill_id) return; paidByBill[a.bill_id] = (paidByBill[a.bill_id] || 0) + num(a.allocated_amount); });
   }
+  // AUTO-APPLY: a payment recorded against a PO (order_type='PO', no bill_id) settles that PO's bill(s).
+  // Pool each PO's such payments across ITS first-class bills, oldest first, on top of the bill_id paid —
+  // so a payment made on the PO reads as paying its bill (the bill no longer shows Unpaid while its PO was
+  // paid). A payment tagged both PO+bill is already in paidByBill, so it's excluded here (no double count).
+  const extraByBill: Record<string, number> = {};
+  const fcPoIds = [...new Set(billRows.map(b => b.po_id).filter(Boolean))];
+  if (fcPoIds.length) {
+    const dR = await supabase.from('txn_allocations').select('order_ref, bill_id, allocated_amount, transactions(status)').eq('order_type', 'PO').in('order_ref', fcPoIds);
+    const poDirect: Record<string, number> = {};
+    (dR.data ?? []).forEach((a: any) => { if (a.transactions?.status === 'Voided' || a.bill_id) return; poDirect[a.order_ref] = (poDirect[a.order_ref] || 0) + num(a.allocated_amount); });
+    const byPo: Record<string, any[]> = {};
+    billRows.forEach(b => { if (b.po_id) (byPo[b.po_id] ??= []).push(b); });
+    for (const [poId, list] of Object.entries(byPo)) {
+      let pool = poDirect[poId] || 0;
+      if (pool <= 0) continue;
+      const ordered = list.slice().sort((x, y) => String(x.bill_date || x.created_at || '').localeCompare(String(y.bill_date || y.created_at || '')));
+      for (const b of ordered) {
+        const rem = num(b.amount) - (paidByBill[b.id] || 0);
+        if (rem > 0 && pool > 0) { const apply = Math.min(rem, pool); extraByBill[b.id] = apply; pool -= apply; }
+      }
+    }
+  }
   // Payments allocated to each PO (non-voided) — only the fallback PO-bills still settle via the PO.
   const poIds = [...new Set(pos.map(p => p.po_id))];
   const paidByPo: Record<string, number> = {};
@@ -125,7 +147,7 @@ export async function loadBills(): Promise<BillRow[]> {
   // First-class bills — paid from recorded payment→bill allocations.
   for (const b of billRows) {
     const amount = num(b.amount);
-    const paid = Math.min(amount, paidByBill[b.id] || 0);
+    const paid = Math.min(amount, (paidByBill[b.id] || 0) + (extraByBill[b.id] || 0));
     rows.push({
       id: `bl~${b.id}`, kind: 'po', vendorId: b.stakeholder_id ?? null, vendor: stkName[b.stakeholder_id] || 'Vendor',
       billNo: b.bill_no || null, billDate: b.bill_date || (b.created_at ? String(b.created_at).slice(0, 10) : null),
@@ -300,16 +322,26 @@ export async function loadBillsForPO(poId: string): Promise<PoBill[]> {
 // Paid per BILL for a PO's bills (Σ non-voided txn_allocations.bill_id) — the per-bill balance rollup the
 // PO detail shows. Keyed by bill id. Plus the PO's rolled-up total (v_po_paid: de-duplicated over
 // bill_id ∪ order_type='PO'), so the PO reflects payments made against its bills even without a direct link.
-export async function poPaidRollup(_poId: string, billIds: string[]): Promise<{ total: number; perBill: Record<string, number> }> {
-  // A PO's paid rolls up strictly from ITS BILLS (txn_allocations.bill_id). A payment recorded straight
-  // against the PO (order_type='PO') with NO bill is an ADVANCE — it belongs to the vendor's ledger, not to
-  // "bill paid", and counting it made the PO read "₹120 paid" while its ₹200 bill sat fully due. So: only
-  // bill payments count here, keeping the PO's paid, its per-bill balances, and its status all consistent.
+export async function poPaidRollup(poId: string, bills: { id: string; amount: number; billDate?: string | null }[]): Promise<{ total: number; perBill: Record<string, number> }> {
+  // A PO's paid rolls up from ITS BILLS. A bill's paid is its own payment→bill allocations (bill_id) PLUS a
+  // share of any payment made against the PO itself (order_type='PO', no bill_id) — auto-applied across the
+  // PO's bills oldest-first. So a payment recorded on the PO settles its bill (bill + PO + status agree), and
+  // only the leftover (a genuine advance beyond the bills) sits on the vendor ledger, not as "paid" here.
+  const billIds = bills.map((b) => b.id);
   const perBill: Record<string, number> = {};
   if (billIds.length) {
     const { data } = await supabase.from('txn_allocations')
       .select('bill_id, allocated_amount, transactions(status)').in('bill_id', billIds);
     (data ?? []).forEach((a: any) => { if (a.transactions?.status === 'Voided' || !a.bill_id) return; perBill[a.bill_id] = (perBill[a.bill_id] || 0) + num(a.allocated_amount); });
+  }
+  let pool = 0;
+  const { data: dta } = await supabase.from('txn_allocations')
+    .select('allocated_amount, bill_id, transactions(status)').eq('order_type', 'PO').eq('order_ref', poId);
+  (dta ?? []).forEach((a: any) => { if (a.transactions?.status === 'Voided' || a.bill_id) return; pool += num(a.allocated_amount); });
+  const ordered = bills.slice().sort((x, y) => String(x.billDate || '').localeCompare(String(y.billDate || '')));
+  for (const b of ordered) {
+    const rem = num(b.amount) - (perBill[b.id] || 0);
+    if (rem > 0 && pool > 0) { const apply = Math.min(rem, pool); perBill[b.id] = (perBill[b.id] || 0) + apply; pool -= apply; }
   }
   const total = Object.values(perBill).reduce((s, v) => s + v, 0);
   return { total, perBill };

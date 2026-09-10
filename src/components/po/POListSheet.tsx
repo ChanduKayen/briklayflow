@@ -323,18 +323,18 @@ function usePOListData(projectId?: string) {
   const paidQ = useQuery({
     queryKey: ['po_list_paid', projectId ?? 'all'],
     queryFn: async () => {
-      // A PO's paid rolls up STRICTLY from its BILLS (bill_id → bills.po_id). A direct order_type='PO'
-      // payment with no bill is an advance (vendor ledger), NOT bill-paid — counting it made a PO show
-      // partially-paid while its bill was fully due. Bill payments only, non-voided.
+      // A PO's paid = payments against its BILLS (bill_id → bills.po_id) PLUS payments made against the PO
+      // itself (order_type='PO', no bill_id) — the latter auto-apply to the PO's bills. Each allocation is
+      // one row → counted once (its bill's PO if bill-tagged, else the PO it names), no double count.
       const { data, error } = await supabase
         .from('txn_allocations')
-        .select('bill_id, allocated_amount, transactions!inner(status), bills(po_id)')
-        .not('bill_id', 'is', null)
+        .select('order_type, order_ref, bill_id, allocated_amount, transactions!inner(status), bills(po_id)')
+        .or('order_type.eq.PO,bill_id.not.is.null')
         .neq('transactions.status', 'Voided');
       if (error) throw error;
       const m: Record<string, number> = {};
       (data ?? []).forEach((r: any) => {
-        const poId = r.bills?.po_id ?? null;
+        const poId = r.bill_id ? (r.bills?.po_id ?? null) : (r.order_type === 'PO' ? r.order_ref : null);
         if (poId) m[poId] = (m[poId] || 0) + (Number(r.allocated_amount) || 0);
       });
       return m;

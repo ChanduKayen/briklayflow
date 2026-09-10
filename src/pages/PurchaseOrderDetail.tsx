@@ -569,7 +569,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const poBillIds = (poBills ?? []).map((b) => b.id);
   const { data: poPaid } = useQuery({
     queryKey: ['po_paid_rollup', poId, poBillIds.slice().sort().join(',')],
-    queryFn: () => poPaidRollup(poId!, poBillIds),
+    queryFn: () => poPaidRollup(poId!, (poBills ?? []).map((b) => ({ id: b.id, amount: b.amount, billDate: b.billDate }))),
     enabled: !!poId && poBills !== undefined,
   });
 
