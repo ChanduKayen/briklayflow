@@ -1084,3 +1084,8 @@ export function mBillWriteFailed(lang: Lang): OutMessage {
 export function mBillCancelled(lang: Lang): OutMessage {
   return { kind: 'text', body: pick(lang, { en: 'Okay, I discarded that bill.' }) }
 }
+
+/** A note that followed a payment/bill was attached to that entry. Brief and calm. */
+export function mNoteAdded(lang: Lang): OutMessage {
+  return { kind: 'text', body: pick(lang, { en: '📝 Added to the note.' }) }
+}

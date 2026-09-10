@@ -392,10 +392,12 @@ async function processJob(
   const mediaKind: 'voice' | 'image' | null =
     message?.type === 'audio' ? 'voice' : message?.type === 'image' ? 'image' : null
   if (mediaKind && registered) {
-    // No transcript yet, so no detected language — use the deployment's regional prior, which is exactly what
-    // WA_STT_LANGUAGE is for. The ack is emoji-led and three words long precisely because it is a guess.
-    const prior = (Deno.env.get('WA_STT_LANGUAGE') ?? '').trim()
-    const lang = (prior === 'te' || prior === 'hi' ? prior : 'en') as 'en' | 'te' | 'hi'
+    // No transcript yet, so no detected language — use the SENDER'S OWN preference (wa_registered_numbers.
+    // preferred_language), defaulting to English. The regional WA_STT_LANGUAGE prior is NOT used here: it
+    // made every ack Telugu for an English-speaking owner (the "andhidhi chusthunna" not-elegant bug). A
+    // Telugu-speaking foreman whose preference is set still gets Telugu.
+    const pref = (registered?.preferred_language ?? '').toString().trim()
+    const lang = (pref === 'te' || pref === 'hi' ? pref : 'en') as 'en' | 'te' | 'hi'
     void sendNow(supabase, from, M.mMediaAck(lang, mediaKind))
   }
 

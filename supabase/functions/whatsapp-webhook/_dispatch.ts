@@ -14,6 +14,8 @@ import { startVendorFlow } from './_agents/procurement.ts'   // direct: vendor-F
 import { runConcierge } from './_agents/concierge.ts'   // direct: first-touch orientation
 import { classifyPhotoFollowup, stampPossibleFollowup, handleQuotedReply, handleUndoResolve, type SiteopsCtx } from './_agents/siteops.ts'   // STEP 2/4b: photo window + readback-correction steering; 2b: undo
 import { send, sendNow } from './_format.ts'
+import { isBareAffirmation } from './_siteops_assoc.ts'
+import { noteVerdict, entrySummary, readsAsTxnNote, attachNoteToEntry } from './_txn_note.ts'
 import * as M from './_messages.ts'
 import type { Lang } from './_messages.ts'
 import type { TxnExtract } from './_extract.ts'
@@ -373,6 +375,31 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
       // fall through: not ANSWERS_PENDING → the interruption block closes the window (commitInterrupted →
       // siteops_photo → clean, no park) → the message routes to its true agent via the switch below.
     }
+  }
+
+  // ── A NOTE right after a money entry → attach it to that entry, never leak it to SiteOps ──────────────
+  // The txn/bill stage CLOSED the conversation carrying staged_entry_id (the lingering row). A following TEXT
+  // that CLEARLY reads as a note/reason/comment about it appends to the entry, instead of routing fresh —
+  // where a site-ish note ("for cement work") parks in SiteOps as "couldn't tell which work you meant" (the
+  // reported bug). LINGERING means there is NO open convo, so this touches none of the pending/credibility
+  // machinery. Conservative (mirrors the siteops photo window): attach ONLY when it clearly reads as a note;
+  // a new payment/order/question/site-update routes fresh; a bare "ok" is noop → fall through unchanged.
+  if (view.lingering?.staged_entry_id && !ctx.image && !isInteractiveReply && text.trim()) {
+    const heldMs = Number(Deno.env.get('WA_TXN_NOTE_HOLD_MS') ?? '90000')
+    const closedMs = Date.parse(view.lingering.closed_at ?? '')
+    const withinHold = Number.isFinite(closedMs) && (Date.now() - closedMs) <= heldMs
+    let readsNote = false
+    if (withinHold && !isBareAffirmation(text)) {
+      const { data: ent } = await supabase.from('rough_entries').select('ai_extracted').eq('id', view.lingering.staged_entry_id).maybeSingle()
+      if (ent?.ai_extracted) readsNote = await readsAsTxnNote(entrySummary(ent.ai_extracted as Record<string, unknown>), text)
+    }
+    if (noteVerdict(withinHold, text, readsNote) === 'note') {
+      const ok = await attachNoteToEntry(supabase, view.lingering.staged_entry_id, text)
+      console.log('[dispatch] txn/bill note attached to', view.lingering.staged_entry_id, '=', ok)
+      await send(supabase, from, M.mNoteAdded(lang), { org_id: orgId, wamid })
+      return
+    }
+    // 'noop' (bare ok) and 'fresh' (a real new turn) fall through to normal routing below — unchanged.
   }
 
   const chosenAgent =
