@@ -153,6 +153,13 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
   const activeWosByProject: Record<string, string[]> = {};
   (woR.data ?? []).forEach((w: any) => { if (w.status !== 'Cancelled' && w.project_id) (activeWosByProject[w.project_id] ??= []).push(w.wo_id); });
   const activeTxns = (txnR.data ?? []).filter((t: any) => t.status !== 'Voided');
+  // Bill references for bill-attached payments — so the row reads "Bill <no>" instead of a raw category code.
+  const payBillIds = [...new Set(activeTxns.flatMap((t: any) => (t.txn_allocations ?? []).map((a: any) => a.bill_id).filter(Boolean)))] as string[];
+  const billRefById: Record<string, string> = {};
+  if (payBillIds.length) {
+    const { data: bref } = await supabase.from('bills').select('id, bill_no').in('id', payBillIds);
+    (bref ?? []).forEach((b: any) => { billRefById[b.id] = b.bill_no ? `Bill ${b.bill_no}` : `Bill ${String(b.id).slice(0, 8)}`; });
+  }
   for (const t of activeTxns) {
     const allocs = (t.txn_allocations ?? []) as any[];
     const linked = allocs.find(a => a.order_type === 'WO' || a.order_type === 'PO');
@@ -163,13 +170,15 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
     // contract on the payment's site (display only — the payment is a debit either way).
     let contractId = linked?.order_ref ?? null;
     if (!contractId && !isVendor && pid) { const wos = activeWosByProject[pid]; if (wos && wos.length === 1) contractId = wos[0]; }
+    const billId = allocs.find(a => a.bill_id)?.bill_id ?? null;   // a first-class bill this payment settles
     entries.push({
       id: `t-${t.txn_id}`, date: t.date, kind: 'payment',
-      particulars: t.category || 'Payment', mode: t.payment_mode || '', narr: t.remarks || undefined,
+      // A bill-attached payment reads by its bill; otherwise the transaction category (or just "Payment").
+      particulars: billId ? (billRefById[billId] || 'Bill') : (t.category || 'Payment'), mode: t.payment_mode || '', narr: t.remarks || undefined,
       clip: !!(t.proof_document_url || t.bill_doc_url),
       projectId: pid, projectName: pid ? (projName[pid] || pid) : null, byProject,
       contractId,   // WO for workers, PO for vendors
-      billId: allocs.find(a => a.bill_id)?.bill_id ?? null,   // a first-class bill settled by this payment
+      billId,   // a first-class bill settled by this payment
       paid: num(t.total_amount), cert: 0,
     });
   }
