@@ -146,6 +146,11 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
   // balance — agrees with the side drawer, the Parties list, and everywhere else. A voided
   // payment never happened; folding it in would overstate what's been paid.
   const isVendor = stk.type === 'Vendor';
+  // Active (non-cancelled) work orders keyed by site — to INFER a worker payment's contract when its
+  // allocation wasn't tagged 'WO' at capture (e.g. a WhatsApp payment auto-matched to the worker but never
+  // linked to the contract). Without this, such payments showed no contract at all in the statement.
+  const activeWosByProject: Record<string, string[]> = {};
+  (woR.data ?? []).forEach((w: any) => { if (w.status !== 'Cancelled' && w.project_id) (activeWosByProject[w.project_id] ??= []).push(w.wo_id); });
   const activeTxns = (txnR.data ?? []).filter((t: any) => t.status !== 'Voided');
   for (const t of activeTxns) {
     const allocs = (t.txn_allocations ?? []) as any[];
@@ -153,12 +158,16 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
     const byProject: Record<string, number> = {};
     allocs.forEach(a => { if (a.project_id) byProject[a.project_id] = (byProject[a.project_id] || 0) + num(a.allocated_amount); });
     const pid = Object.keys(byProject)[0] ?? null;
+    // The tagged WO/PO if capture set one; else, for a WORKER, infer it when there's exactly one active
+    // contract on the payment's site (display only — the payment is a debit either way).
+    let contractId = linked?.order_ref ?? null;
+    if (!contractId && !isVendor && pid) { const wos = activeWosByProject[pid]; if (wos && wos.length === 1) contractId = wos[0]; }
     entries.push({
       id: `t-${t.txn_id}`, date: t.date, kind: 'payment',
       particulars: t.category || 'Payment', mode: t.payment_mode || '', narr: t.remarks || undefined,
       clip: !!(t.proof_document_url || t.bill_doc_url),
       projectId: pid, projectName: pid ? (projName[pid] || pid) : null, byProject,
-      contractId: linked?.order_ref ?? null,   // WO for workers, PO for vendors
+      contractId,   // WO for workers, PO for vendors
       paid: num(t.total_amount), cert: 0,
     });
   }

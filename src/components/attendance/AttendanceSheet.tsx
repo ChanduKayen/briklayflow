@@ -531,7 +531,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
             <div class="wname"><button class="rmw" data-rmc="${si}.${ci}" title="Remove from sheet" aria-label="Remove ${escapeHtml(crew.n)}">×</button>
               <div class="wav">${avatarOf(crew.n)}</div>
               <div class="wmid"><b>${escapeHtml(crew.n)}<span class="crewtag">crew</span></b>
-              <span>${escapeHtml(crew.trade || crew.d || 'Labour')} · daily wages · ${contractLink}</span></div></div>
+              <span data-wageslbl="${si}.${ci}">${escapeHtml(crew.trade || crew.d || 'Labour')} · daily wages · ${contractLink}</span></div></div>
             ${crew.head.map((_c: Cell, i: number) => crewDayCell(crew, i, si, ci)).join('')}
             <div class="wtotal">${catDays ? `<b>${catDays} wd</b> · ${inr(wage)}` : ''}</div></div>`;
           return;

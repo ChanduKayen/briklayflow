@@ -419,6 +419,43 @@ export async function createBill(input: NewBillInput): Promise<string> {
   return (data as any).id;
 }
 
+export interface AttachableBill { id: string; billNo: string | null; billDate: string | null; amount: number; docUrl: string | null; projectId: string | null }
+
+/** Bills for THIS vendor that aren't already tied to a PO — the pick-list for a PO's "attach bill", so an
+ *  already-uploaded bill is LINKED rather than uploaded (and duplicated) again. Newest first. */
+export async function getAttachableBills(orgId: string, stakeholderId: string): Promise<AttachableBill[]> {
+  const { data, error } = await supabase.from('bills')
+    .select('id, bill_no, bill_date, amount, doc_url, project_id, created_at')
+    .eq('org_id', orgId).eq('stakeholder_id', stakeholderId).is('po_id', null)
+    .order('bill_date', { ascending: false }).order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((b: any) => ({
+    id: b.id, billNo: b.bill_no ?? null, billDate: b.bill_date ?? (b.created_at ? String(b.created_at).slice(0, 10) : null),
+    amount: num(b.amount), docUrl: b.doc_url ?? null, projectId: b.project_id ?? null,
+  }));
+}
+
+/** Link an EXISTING first-class bill to a PO (no new bill minted): set bills.po_id, and mirror the bill onto
+ *  the PO (amount / number / date / doc) so the PO detail shows it. The ledger counts it once — via the bills
+ *  row — because the view's PO fallback is suppressed when a bills row names the PO. Prevents duplicate bills. */
+export async function linkExistingBillToPO(billId: string, poId: string, poProjectId: string | null): Promise<void> {
+  const { data: bill, error: bErr } = await supabase.from('bills').select('*').eq('id', billId).single();
+  if (bErr || !bill) throw new Error(bErr?.message || 'Bill not found');
+  const b = bill as any;
+  const { error: upBill } = await supabase.from('bills')
+    .update({ po_id: poId, project_id: b.project_id ?? poProjectId ?? null }).eq('id', billId);
+  if (upBill) throw upBill;
+  const nowIso = new Date().toISOString();
+  const { error: upPo } = await supabase.from('purchase_orders').update({
+    vendor_bill_amount: num(b.amount),
+    vendor_bill_number: b.bill_no ?? null, vendor_bill_no: b.bill_no ?? null,
+    vendor_bill_date: b.bill_date ?? nowIso.split('T')[0],
+    vendor_bill_url: b.doc_url ?? null, vendor_bill_doc_url: b.doc_url ?? null,
+    bill_recorded_at: nowIso, status: 'BILLED',
+  }).eq('po_id', poId);
+  if (upPo) throw upPo;
+}
+
 // ── payment → bill allocation (the tx "attach bill" picker) ────────────────────
 // A pickable bill is either a first-class bills row ('bill') or an OLD PO-recorded bill still living on
 // the PO ('po') — so a payment can settle both. Settling a 'bill' writes bill_id; a 'po' writes the
@@ -469,9 +506,21 @@ export async function loadUnpaidBillsForVendor(stakeholderId: string): Promise<U
 // bills, or "no bill") → one unallocated part = the without-bills / advance bucket.
 export interface BillPick { id: string; kind: 'bill' | 'po'; projectId: string | null; amount: number }
 export async function saveBillAllocations(txnId: string, orgId: string, txnTotal: number, picks: BillPick[], remainderProjectId: string | null): Promise<void> {
-  const parts: any[] = picks.filter(p => p.amount > 0).map(p => p.kind === 'po'
-    ? { project_id: p.projectId ?? '', order_type: 'PO', order_ref: p.id, milestone_id: '', bill_id: '', allocated_amount: p.amount }
-    : { project_id: p.projectId ?? '', order_type: '', order_ref: '', milestone_id: '', bill_id: p.id, allocated_amount: p.amount });
+  // A first-class bill that BELONGS TO A PO must settle that PO too: carry order_type='PO' / order_ref=po_id
+  // on the same allocation (alongside bill_id), so the PO's derived paid (which sums order_type='PO'
+  // allocations) actually sees the payment. Without this the bill's paid updated but its PO stayed at ₹0.
+  // Bills with no PO stay bill_id-only.
+  const billPickIds = picks.filter(p => p.kind === 'bill' && p.amount > 0).map(p => p.id);
+  const poByBill: Record<string, string> = {};
+  if (billPickIds.length) {
+    const { data } = await supabase.from('bills').select('id, po_id').in('id', billPickIds);
+    (data ?? []).forEach((b: any) => { if (b.po_id) poByBill[b.id] = String(b.po_id); });
+  }
+  const parts: any[] = picks.filter(p => p.amount > 0).map(p => {
+    if (p.kind === 'po') return { project_id: p.projectId ?? '', order_type: 'PO', order_ref: p.id, milestone_id: '', bill_id: '', allocated_amount: p.amount };
+    const poId = poByBill[p.id] ?? '';
+    return { project_id: p.projectId ?? '', order_type: poId ? 'PO' : '', order_ref: poId, milestone_id: '', bill_id: p.id, allocated_amount: p.amount };
+  });
   const allocated = picks.reduce((s, p) => s + (p.amount > 0 ? p.amount : 0), 0);
   const remainder = Math.round((txnTotal - allocated) * 100) / 100;
   if (remainder > 0.5) parts.push({ project_id: remainderProjectId ?? '', order_type: '', order_ref: '', milestone_id: '', bill_id: '', allocated_amount: remainder });

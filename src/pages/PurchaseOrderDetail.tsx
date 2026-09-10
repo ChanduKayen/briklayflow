@@ -17,7 +17,7 @@ import ReceiveAtSiteDrawer from '../components/ReceiveAtSiteDrawer';
 import SendToVendorModal from '../components/po-new-ui/SendToVendorModal';
 import { RateCheckModal } from '../components/po/RateCheckModal';
 import { useIsMobile } from '../lib/useIsMobile';
-import { loadBillsForPO, convertLegacyPoBill } from '../lib/billsApi';
+import { loadBillsForPO, convertLegacyPoBill, getAttachableBills, linkExistingBillToPO, type AttachableBill } from '../lib/billsApi';
 import { PoBillSheet } from '../components/po/PoBillSheet';
 import { PoBillVariance } from '../components/po/PoBillVariance';
 import {
@@ -494,7 +494,30 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const poBillInputRef = useRef<HTMLInputElement | null>(null);
   // Record bill = pop the OS picker straight from the click (a real user gesture); the sheet opens with
   // the chosen file already attached + reading — no intermediate "upload" step.
-  const openPoBillPicker = () => poBillInputRef.current?.click();
+  const [billChoiceOpen, setBillChoiceOpen] = useState(false);   // pick an already-uploaded bill vs upload new
+  const [linkingBillId,  setLinkingBillId]  = useState<string | null>(null);
+  // Record bill: if the vendor already has unlinked bills in the Bills module, OFFER them first (link, don't
+  // re-upload → no duplicate bill). Only pop the file picker when there's nothing to link, or the user opts to.
+  const openPoBillPicker = () => {
+    if ((attachableBills?.length ?? 0) > 0) setBillChoiceOpen(true);
+    else poBillInputRef.current?.click();
+  };
+  const uploadNewBill = () => { setBillChoiceOpen(false); poBillInputRef.current?.click(); };
+  const linkPickedBill = async (b: AttachableBill) => {
+    if (!poId) return;
+    setLinkingBillId(b.id);
+    try {
+      await linkExistingBillToPO(b.id, poId, po?.project_id ?? null);
+      setBillChoiceOpen(false);
+      refetchPoBills();
+      qc.invalidateQueries({ queryKey: ['po_detail', poId] });
+      qc.invalidateQueries({ queryKey: ['bills'] });
+      qc.invalidateQueries({ queryKey: ['po_list_sheet'] });
+      qc.invalidateQueries({ queryKey: ['attachable_bills', poId] });
+      showSnackbar('Bill linked to this order');
+    } catch (e: any) { showSnackbar(e?.message || 'Could not link the bill', { type: 'error' }); }
+    finally { setLinkingBillId(null); }
+  };
   const [billEditOpen, setBillEditOpen] = useState(false);   // editing/replacing an already-recorded bill
   const [payRowOpen,   setPayRowOpen]   = useState(false);
   const [refBillNo,    setRefBillNo]    = useState('');
@@ -530,6 +553,14 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     queryKey: ['po_bills', poId],
     queryFn: () => loadBillsForPO(poId!),
     enabled: !!poId,
+  });
+
+  // Already-uploaded bills for THIS vendor not yet tied to any PO — the "attach bill" pick-list, so a bill
+  // recorded in the Bills module is LINKED here instead of uploaded again (no duplicate). See openPoBillPicker.
+  const { data: attachableBills } = useQuery({
+    queryKey: ['attachable_bills', poId, po?.stakeholder_id],
+    queryFn: () => getAttachableBills(po!.org_id, po!.stakeholder_id!),
+    enabled: !!po?.stakeholder_id && !!po?.org_id,
   });
 
   // Convert a legacy PO-column bill into a first-class entity on view (idempotent), so the PO shows a
@@ -1668,6 +1699,37 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
       )}
 
       {renderMobileSheets()}
+
+      {/* Attach a bill: pick one already uploaded for this vendor (link — no duplicate), or upload a new one. */}
+      {billChoiceOpen && (
+        <div onClick={() => setBillChoiceOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', zIndex: 60, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: '#fff', width: '100%', maxWidth: 520, borderRadius: '16px 16px 0 0', padding: 16, maxHeight: '72vh', overflowY: 'auto', fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <b style={{ fontSize: 15, color: '#1B1713' }}>Attach a bill</b>
+              <button onClick={() => setBillChoiceOpen(false)} style={{ border: 'none', background: 'none', fontSize: 16, color: '#87807a', cursor: 'pointer' }}>✕</button>
+            </div>
+            <p style={{ fontSize: 12.5, color: '#87807a', margin: '0 0 12px' }}>
+              {vendor?.name || 'This vendor'} already has bills that aren't on an order. Pick one to attach here — or upload a new one.
+            </p>
+            {(attachableBills ?? []).map((b) => (
+              <button key={b.id} disabled={!!linkingBillId} onClick={() => void linkPickedBill(b)}
+                style={{ width: '100%', display: 'flex', gap: 10, alignItems: 'center', textAlign: 'left', padding: '10px 12px', border: '1px solid #eee', borderRadius: 10, marginBottom: 8, background: '#fff', cursor: 'pointer', opacity: linkingBillId && linkingBillId !== b.id ? 0.5 : 1 }}>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#1B1713' }}>₹{Math.round(b.amount).toLocaleString('en-IN')}{b.billNo ? ` · #${b.billNo}` : ''}</span>
+                  <span style={{ display: 'block', fontSize: 11, color: '#999' }}>{b.billDate || 'no date'}</span>
+                </span>
+                <span style={{ fontSize: 11.5, color: '#C4502B', fontWeight: 600, flexShrink: 0 }}>{linkingBillId === b.id ? 'Linking…' : 'Attach'}</span>
+              </button>
+            ))}
+            <button onClick={uploadNewBill} style={{ width: '100%', padding: '10px 12px', border: '1px dashed #C4502B', borderRadius: 10, color: '#C4502B', fontWeight: 600, fontSize: 13, background: '#fff', cursor: 'pointer', marginTop: 4 }}>
+              + Upload a new bill
+            </button>
+            <button onClick={() => { setBillChoiceOpen(false); navigate('/bills'); }} style={{ width: '100%', padding: 8, color: '#87807a', fontSize: 12, background: 'none', border: 'none', cursor: 'pointer', marginTop: 4 }}>
+              Manage bills in the Bills section
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Direct file picker for Record bill — the sheet opens with the chosen file already attached. */}
       <input ref={poBillInputRef} type="file" accept="image/*,application/pdf" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) setPoBillFile(f); }} />

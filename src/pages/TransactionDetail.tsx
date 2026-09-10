@@ -526,6 +526,21 @@ export default function TransactionDetail({ session }: { session: Session }) {
     },
   });
 
+  // A first-class bill settled by this payment (txn_allocations.bill_id) lives in the `bills` table.
+  // Fetch each linked bill's document so a bill-only allocation (no PO) previews its image inline, the same
+  // way poBills does for a PO. Without this, an attached bill showed as "Not linked to work yet".
+  const linkedBillIds = Array.from(new Set((allocs || []).filter((a) => a.bill_id).map((a) => a.bill_id as string)));
+  const { data: billDocs } = useQuery({
+    queryKey: ['txn_bill_docs', txnId, linkedBillIds.slice().sort().join(',')],
+    enabled: linkedBillIds.length > 0,
+    queryFn: async () => {
+      const { data } = await supabase.from('bills').select('id, doc_url, bill_no').in('id', linkedBillIds);
+      const map: Record<string, { url: string | null; billNo: string | null }> = {};
+      (data || []).forEach((b: any) => { map[b.id] = { url: b.doc_url ?? null, billNo: b.bill_no ?? null }; });
+      return map;
+    },
+  });
+
   useEffect(() => {
     if (!mappingAllocId || !txn?.stakeholder_id || !allocs) {
       setProjectWOs([]); setProjectPOs([]); setSelectedObligation(null); return;
@@ -758,7 +773,10 @@ export default function TransactionDetail({ session }: { session: Session }) {
   const recordedBy: string = (txn as any).created_by_name || (txn as any).recorded_by_name || (txn as any).ordered_by || '';
   const totalAllocated = (allocs || []).reduce((s, a) => s + Number(a.allocated_amount), 0);
   const allAllocs = primaryAlloc ? [primaryAlloc, ...secondaryAllocs] : (allocs || []);
-  const billLinked = !!primaryAlloc?.order_type || !!txn.bill_doc_url;
+  // A payment is bill-linked when an allocation points at a PO/WO (order_type), at a first-class bill
+  // (bill_id — the BillAllocateSheet path), or a bill image sits on the txn itself (bill_doc_url).
+  const anyBillIdAlloc = (allocs || []).some((a: any) => a?.bill_id);
+  const billLinked = !!primaryAlloc?.order_type || anyBillIdAlloc || !!txn.bill_doc_url;
   const rupee = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
   // (vendor bill attach now routes to BillAllocateSheet; the old inline PO picker below is inert)
   void setPickerStep; void setMappingAllocId;
@@ -771,6 +789,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
     const milestoneName = a.wo_milestones?.name ?? null;
     if (isPO || isWO) return { linked: true, k: `✓ ${a.order_ref}`, sub: `${isPO ? 'Bill on PO' : 'Contract'}${milestoneName ? ` · ${milestoneName}` : ''}` };
     if (isAdv) return { linked: true, k: `Advance to ${payeeName}`, sub: 'No bill yet · adjusts into the next bill' };
+    if (a.bill_id) { const bd = billDocs?.[a.bill_id]; return { linked: true, k: '✓ Bill attached', sub: `${bd?.billNo ? `#${bd.billNo} · ` : ''}settles a recorded bill${bd?.url ? ' · tap to preview' : ''}` }; }
     if (txn.bill_doc_url) return { linked: true, k: '✓ Bill attached', sub: 'Uploaded · tap to preview' };
     return { linked: false, k: 'Not linked to work yet', sub: `link ${payeeName}'s ${isVendor ? 'bill' : 'contract'}, and this settles against it` };
   };
@@ -984,7 +1003,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
                 const isAdv = linked === 'ADVANCE';
                 const milestoneName = (a as any).wo_milestones?.name ?? null;
                 const picking = mappingAllocId === a.allocation_id;
-                const hasBill = isPO || isWO || isAdv || !!txn.bill_doc_url;
+                const hasBill = isPO || isWO || isAdv || !!a.bill_id || !!txn.bill_doc_url;
                 return (
                   <tr key={a.allocation_id}>
                     <td><b style={{ fontWeight: 600 }}>{a.projects?.name || 'Unassigned'}</b></td>
@@ -997,6 +1016,11 @@ export default function TransactionDetail({ session }: { session: Session }) {
                           </>
                         ) : isAdv ? (
                           <span className="st adv">Advance to {payeeName}<small>No bill yet · adjusts into the next bill</small></span>
+                        ) : a.bill_id ? (
+                          <>
+                            <span className="st ok">✓ Bill attached<small>{billDocs?.[a.bill_id]?.billNo ? `#${billDocs[a.bill_id].billNo} · ` : ''}settles a recorded bill{billDocs?.[a.bill_id]?.url ? ' · tap to preview' : ''}</small></span>
+                            {billDocs?.[a.bill_id]?.url && <DocThumb stored={billDocs[a.bill_id].url as string} onImageClick={(u) => openLightbox(u, 'Bill / Invoice')} />}
+                          </>
                         ) : txn.bill_doc_url ? (
                           <>
                             <span className="st ok">✓ Bill attached<small>Uploaded · tap to preview</small></span>
