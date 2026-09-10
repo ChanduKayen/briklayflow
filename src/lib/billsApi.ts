@@ -433,22 +433,37 @@ export async function createBill(input: NewBillInput): Promise<string> {
   return (data as any).id;
 }
 
-export interface AttachableBill { id: string; billNo: string | null; billDate: string | null; amount: number; docUrl: string | null; projectId: string | null; projectName: string | null; linked: boolean; poId: string | null }
+export interface AttachBillRow {
+  id: string; billNo: string | null; billDate: string | null; amount: number; docUrl: string | null;
+  projectId: string | null; projectName: string | null; vendorId: string | null; vendorName: string | null;
+  linked: boolean; poId: string | null; paid: number; remaining: number;
+}
 
-/** ALL of THIS vendor's bills for the PO's "Bills" popup — unlinked ones are attachable; ones already on a PO
- *  carry `linked` (shown, not attachable) so "show all bills" can reveal the full set in the same popup.
- *  Carries the site name for the project filter. Newest first. */
-export async function getAttachableBills(orgId: string, stakeholderId: string): Promise<AttachableBill[]> {
+/** ALL of the org's bills for the PO's "Bills" popup — every vendor, with each bill's paid/remaining and
+ *  whether it's already on a PO (`linked`). The popup filters by site + payee and hides attached/settled ones
+ *  by default; the caller passes the PO's site + vendor as the default filters. Newest first. */
+export async function getBillsForAttach(orgId: string): Promise<AttachBillRow[]> {
   const { data, error } = await supabase.from('bills')
-    .select('id, bill_no, bill_date, amount, doc_url, project_id, po_id, created_at, projects(name)')
-    .eq('org_id', orgId).eq('stakeholder_id', stakeholderId)
+    .select('id, bill_no, bill_date, amount, doc_url, project_id, po_id, stakeholder_id, created_at, projects(name), stakeholders(name)')
+    .eq('org_id', orgId)
     .order('bill_date', { ascending: false }).order('created_at', { ascending: false });
   if (error) throw error;
-  return (data ?? []).map((b: any) => ({
-    id: b.id, billNo: b.bill_no ?? null, billDate: b.bill_date ?? (b.created_at ? String(b.created_at).slice(0, 10) : null),
-    amount: num(b.amount), docUrl: b.doc_url ?? null, projectId: b.project_id ?? null, projectName: b.projects?.name ?? null,
-    linked: !!b.po_id, poId: b.po_id ?? null,
-  }));
+  const rows = (data ?? []) as any[];
+  const ids = rows.map((b) => b.id);
+  const paidBy: Record<string, number> = {};
+  if (ids.length) {
+    const { data: al } = await supabase.from('txn_allocations').select('bill_id, allocated_amount, transactions(status)').in('bill_id', ids);
+    (al ?? []).forEach((a: any) => { if (a.transactions?.status === 'Voided' || !a.bill_id) return; paidBy[a.bill_id] = (paidBy[a.bill_id] || 0) + num(a.allocated_amount); });
+  }
+  return rows.map((b) => {
+    const amount = num(b.amount); const paid = Math.min(amount, paidBy[b.id] || 0);
+    return {
+      id: b.id, billNo: b.bill_no ?? null, billDate: b.bill_date ?? (b.created_at ? String(b.created_at).slice(0, 10) : null),
+      amount, docUrl: b.doc_url ?? null, projectId: b.project_id ?? null, projectName: b.projects?.name ?? null,
+      vendorId: b.stakeholder_id ?? null, vendorName: b.stakeholders?.name ?? null,
+      linked: !!b.po_id, poId: b.po_id ?? null, paid, remaining: amount - paid,
+    };
+  });
 }
 
 /** Link an EXISTING first-class bill to a PO (no new bill minted): set bills.po_id, and mirror the bill onto

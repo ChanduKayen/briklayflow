@@ -17,7 +17,7 @@ import ReceiveAtSiteDrawer from '../components/ReceiveAtSiteDrawer';
 import SendToVendorModal from '../components/po-new-ui/SendToVendorModal';
 import { RateCheckModal } from '../components/po/RateCheckModal';
 import { useIsMobile } from '../lib/useIsMobile';
-import { loadBillsForPO, convertLegacyPoBill, getAttachableBills, linkExistingBillToPO, poPaidRollup } from '../lib/billsApi';
+import { loadBillsForPO, convertLegacyPoBill, getBillsForAttach, linkExistingBillToPO, poPaidRollup } from '../lib/billsApi';
 import { PoAttachBillPopup } from '../components/po/PoAttachBillPopup';
 
 // The PO is show-only for payments: its paid/balance is rolled up from its BILLS (v_po_paid), and payments
@@ -558,9 +558,9 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   // Already-uploaded bills for THIS vendor not yet tied to any PO — the "attach bill" pick-list, so a bill
   // recorded in the Bills module is LINKED here instead of uploaded again (no duplicate). See openPoBillPicker.
   const { data: attachableBills } = useQuery({
-    queryKey: ['attachable_bills', poId, po?.stakeholder_id],
-    queryFn: () => getAttachableBills(po!.org_id, po!.stakeholder_id!),
-    enabled: !!po?.stakeholder_id && !!po?.org_id,
+    queryKey: ['attachable_bills', poId, po?.org_id],
+    queryFn: () => getBillsForAttach(po!.org_id),
+    enabled: !!po?.org_id,
   });
 
   // The PO's paid, rolled up from its BILLS (v_po_paid, de-duplicated) + per-bill paid for the balance table.
@@ -1723,8 +1723,8 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
       {billChoiceOpen && (
         <PoAttachBillPopup
           bills={attachableBills ?? []}
-          vendorName={vendor?.name || 'this vendor'}
           poProjectId={po.project_id ?? null}
+          poVendorId={po.stakeholder_id ?? null}
           onLink={linkBillById}
           onUploadNew={uploadNewBill}
           onClose={() => setBillChoiceOpen(false)}
