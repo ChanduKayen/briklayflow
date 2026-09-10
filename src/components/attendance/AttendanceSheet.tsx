@@ -109,6 +109,9 @@ const ATDX_CSS = `
 .atdx .cell .src{position:absolute; top:5px; right:6px; width:5px; height:5px; border-radius:50%; background:var(--sage)}
 .atdx .wtotal{text-align:right; padding-right:20px; font-family:var(--mono); font-size:13px; color:var(--walnut); white-space:nowrap}
 .atdx .wtotal b{color:var(--ink); font-weight:500}
+/* a contract stage's total can carry the contract value — let it wrap in its column, value on its own line */
+.atdx .wrow.sub .wtotal{white-space:normal; line-height:1.3}
+.atdx .wtotal .ofval{display:block; font-family:var(--mono); font-size:11px; color:var(--walnut-3); margin-top:1px}
 .atdx .sitefoot{border-top:1px solid var(--rule); border-radius:0 0 16px 16px}
 .atdx .sitefoot .lab{padding:8px 20px; font-family:var(--mono); font-size:9.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--soft)}
 .atdx .sitefoot .dc{text-align:center; font-family:var(--mono); font-size:12px; color:var(--walnut)}
@@ -487,11 +490,13 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   function stageMath(st: any) {
     if (st.type === 'lump') {
       const pct = latestPct(st), earned = (st.amount || 0) * pct / 100;
-      return { earned, prog: pct / 100, pct, label: `<b>${pct}%</b> of ${inr(st.amount || 0)} · ${inr(earned)}` };
+      // pct + earned on the main line; the contract value drops to its own small line so it can't
+      // overflow the fixed-width total column (the "bleeding out" bug).
+      return { earned, prog: pct / 100, pct, label: `<b>${pct}%</b> · ${inr(earned)}<span class="ofval">of ${inr(st.amount || 0)}</span>` };
     }
     const done = st.before + sum(st.cells), earned = done * (st.rate || 0);
     return { earned, prog: st.total ? done / st.total : 0, pct: st.total ? Math.round(done / st.total * 100) : 0,
-             label: `<b>${done.toLocaleString('en-IN')}</b> / ${(st.total || 0).toLocaleString('en-IN')} ${st.unit || ''} · ${inr(earned)}` };
+             label: `<b>${done.toLocaleString('en-IN')}</b> · ${inr(earned)}<span class="ofval">of ${(st.total || 0).toLocaleString('en-IN')} ${st.unit || ''}</span>` };
   }
 
   function render() {
