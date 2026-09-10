@@ -12,6 +12,8 @@ import { agentFor } from './_registry.ts'
 import { runTransaction, retryBatchEntries, type TxnCtx } from './_agents/transaction.ts'   // direct: the replay path
 import { startVendorFlow } from './_agents/procurement.ts'   // direct: vendor-Flow test trigger
 import { runConcierge } from './_agents/concierge.ts'   // direct: first-touch orientation
+import { billReplyKind } from './_agents/bill.ts'   // note-vs-amount during the open bill-payment question
+import { looksLikeBillCaption, hasInflightPhoto } from './_media_race.ts'   // hold a bare caption for its photo
 import { classifyPhotoFollowup, stampPossibleFollowup, handleQuotedReply, handleUndoResolve, type SiteopsCtx } from './_agents/siteops.ts'   // STEP 2/4b: photo window + readback-correction steering; 2b: undo
 import { send, sendNow } from './_format.ts'
 import { isBareAffirmation } from './_siteops_assoc.ts'
@@ -246,6 +248,27 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
     ? { agent: view.open.owning_agent ?? 'CONCIERGE', question: view.open.pending_question ?? '', slots: view.open.slots_so_far }
     : null
   const lingering = view.lingering ? { last_action_summary: view.lingering.last_action_summary ?? '' } : null
+  // A button tap / list pick / Flow completion is structurally an answer, not a fresh caption — declared here
+  // (not lower) so the caption-hold below can read it (moving it up fixed a temporal-dead-zone ReferenceError).
+  const isInteractiveReply = !!(ctx.interactiveId || ctx.flowResponse)
+  // ── A bare CAPTION for a bill photo, sent BEFORE the photo → hold it, don't mint a junk entry ─────────
+  // "Asm site bill" typed as its own message (no amount, no payee) has nothing to record on its own. Routed
+  // fresh it either mints an empty transaction ("I don't have the amount and payee yet") or parks in SiteOps
+  // ("which work?") — both reported. It is a CAPTION for a bill photo that hasn't arrived yet. Hold it (it's
+  // in wa_message_log; runBill folds it into the bill the photo becomes). Only when there is NO bill anywhere
+  // to attach to — an open/lingering bill is the note-attach blocks' job, below. If a photo is already in
+  // flight, stay silent (it's coming); otherwise guide the user to send it. Conservative + reversible: the
+  // worst case is a short "send the photo" nudge on a stray doc-word message.
+  if (!ctx.image && !isInteractiveReply && text.trim()
+      && !view.open && !view.lingering?.staged_entry_id
+      && looksLikeBillCaption(text)) {
+    const captionLang = detectLanguage(text)
+    const photoComing = await hasInflightPhoto(supabase, from, wamid)
+    console.log('[dispatch] holding a bill caption for its photo:', JSON.stringify(text.slice(0, 80)), 'photoComing=', photoComing)
+    if (!photoComing) await send(supabase, from, M.mCaptionHeld(captionLang, text), { org_id: orgId, wamid })
+    return
+  }
+
   // THE CONVERSATION — the recent turns of this thread, including OUR outbound ones. This replaces the
   // one-line `lingering` summary the router used to get (which a real lingering conversation also SHADOWED,
   // so the chase digest never reached it). The current inbound message is already logged, so exclude it.
@@ -272,7 +295,7 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
   // bare "ok", a regex for an order) and second-guessed a model that had read the conversation. This
   // guesses at nothing: he tapped a row on a list WE sent, against a question WE have open. It is a
   // structural fact, and the dispatcher already said so — it just said so five seconds too late.
-  const isInteractiveReply = !!(ctx.interactiveId || ctx.flowResponse)
+  // (isInteractiveReply is declared above, right after the router view, so the caption-hold can read it.)
   const structuralAnswer = !!(view.open && isInteractiveReply)
   const d = structuralAnswer
     ? {
@@ -375,6 +398,32 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
       // fall through: not ANSWERS_PENDING → the interruption block closes the window (commitInterrupted →
       // siteops_photo → clean, no park) → the message routes to its true agent via the switch below.
     }
+  }
+
+  // ── A NOTE arriving WHILE the bill-payment question is still open → attach it to the bill ─────────────
+  // A staged bill in AWAIT_BILL_PAYMENT is asking "how much did you pay?". A trailing TEXT here is one of:
+  // a CLEAN amount / "not paid" / "cancel" → the real answer (fall through to answerBillPayment); OR a NOTE
+  // (e.g. "Asm site bill" — the site/context typed as a second message) → it must ATTACH to the bill and the
+  // question be re-asked. Never force-parsed into a phantom payment (the ₹21,677 bug), and never routed fresh
+  // to SiteOps (where it parked as "which work?" — the second reported bug). This runs BEFORE routing so a
+  // note can't be classified away. Conservative: only a clear note attaches; a bare "ok" or a genuine new
+  // intent falls through. (The LINGERING case — a note after the bill closed — is the block below.)
+  if (view.open && !ctx.image && !isInteractiveReply && text.trim()
+      && view.open.owning_agent === 'TRANSACTION'
+      && view.open.pending_question === 'AWAIT_BILL_PAYMENT'
+      && view.open.staged_entry_id) {
+    const kind = billReplyKind(text, ctx.interactiveId).kind
+    if (kind === 'other' && !isBareAffirmation(text)) {
+      const { data: ent } = await supabase.from('rough_entries').select('ai_extracted').eq('id', view.open.staged_entry_id).maybeSingle()
+      const readsNote = ent?.ai_extracted ? await readsAsTxnNote(entrySummary(ent.ai_extracted as Record<string, unknown>), text) : false
+      if (readsNote) {
+        const ok = await attachNoteToEntry(supabase, view.open.staged_entry_id, text)
+        console.log('[dispatch] bill note attached during AWAIT_BILL_PAYMENT to', view.open.staged_entry_id, '=', ok)
+        await send(supabase, from, M.mBillNoteReAsk(lang), { org_id: orgId, wamid })
+        return   // keep the question open — the note is recorded, the amount is still awaited
+      }
+    }
+    // amount / no / cancel / bare-ok / a genuine new intent → fall through to normal routing below
   }
 
   // ── A NOTE right after a money entry → attach it to that entry, never leak it to SiteOps ──────────────

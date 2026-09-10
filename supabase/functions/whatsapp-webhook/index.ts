@@ -11,6 +11,7 @@ import {
 } from './_spine.ts'
 import { send, sendNow, keepTyping } from './_format.ts'
 import { normalize, deriveDispatchMedia } from './_normalize.ts'
+import { waitForInflightPhoto } from './_media_race.ts'
 import { dispatch } from './_dispatch.ts'
 import { handleReaction } from './_agents/siteops.ts'   // STEP 5: reactions-as-confirm / retract
 import { runConcierge } from './_agents/concierge.ts'
@@ -474,6 +475,16 @@ async function processJob(
     if (typeof raw !== 'string') return null
     try { return JSON.parse(raw) as Record<string, unknown> } catch { return null }
   })()
+
+  // A TEXT that trails a still-in-flight PHOTO from the same sender is almost always that photo's caption /
+  // note (you send the bill, then type the site/context as a second message). The photo pays for vision
+  // BEFORE it locks, so a fast text overtakes it and routes before the bill exists — then a site-ish caption
+  // is classified fresh, lands in SiteOps, and parks as "couldn't tell which work" (the reported bug). Yield
+  // here, PRE-LOCK, so the photo can take the lock and stage the bill while this text waits; then the caption
+  // attaches to it downstream. Best-effort + bounded — a slow/crashed photo just times out and we proceed.
+  if (norm.source_type === 'text' && norm.text.trim()) {
+    await waitForInflightPhoto(supabase, from, messageId)
+  }
 
   // Feed the normalized text into the dispatcher, serialized per sender.
   const lockKey = messageId || from

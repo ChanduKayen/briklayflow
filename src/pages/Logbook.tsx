@@ -83,6 +83,7 @@ const BAND_CSS = `
 `;
 import { ReviewCard, type StakeholderLite, type ProjectLite } from '../components/day-book/ReviewCard';
 import { BillReviewCard } from '../components/day-book/BillReviewCard';
+import { rejectRoughEntry, errMessage } from '../components/day-book/fileEntry';
 
 type TabKey = 'all' | 'review' | 'filed' | 'rejected' | 'requests';
 
@@ -588,7 +589,12 @@ export default function Logbook({ session }: { session: Session }) {
                         stakeholders={stakeholders}
                         projects={projects}
                         onFiled={() => handleFiled(r.id)}
-                        onDismiss={() => dismiss(r.id)}
+                        onDismiss={() => { void (async () => {
+                          // "Not a bill" — persist the rejection (status→DISMISSED), then let the list catch up.
+                          // (The desktop parent used to only do UI cleanup, so the entry returned on refresh.)
+                          try { await rejectRoughEntry(r); handleRejected(r.id); }
+                          catch (e) { showSnackbar(errMessage(e, 'Could not set this bill aside'), { type: 'error' }); }
+                        })(); }}
                         onLightbox={setLightboxUrl}
                         onError={(m) => showSnackbar(m, { type: 'error' })}
                         onVendorCreated={() => qc.invalidateQueries({ queryKey: ['daybook_stakeholders'] })}

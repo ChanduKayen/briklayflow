@@ -12,6 +12,7 @@ import { send } from '../_format.ts'
 import { signedMediaUrl, storeMedia } from '../_normalize.ts'
 import { openConversation, closeConversation, type ConvoRow } from '../_conversation.ts'
 import { parseSpokenAmount } from '../_amount.ts'
+import { looksLikeBillCaption } from '../_media_race.ts'
 import { entryLink } from '../_links.ts'
 import * as M from '../_messages.ts'
 import type { TxnCtx } from './transaction.ts'
@@ -70,11 +71,40 @@ function billRawText(read: FinDocRead): string {
   return read.note?.trim() || `Bill from ${who}${amt ? ` for ${amt}` : ''}${read.bill_no ? ` (No. ${read.bill_no})` : ''}`
 }
 
+/**
+ * A caption the user typed as a SEPARATE message just before the bill photo ("Asm site bill", sent first).
+ * It's in wa_message_log (logged pre-dispatch), and — sent on its own — it was HELD, not minted as an entry
+ * (see the dispatcher's caption-hold). Fold it into the bill here so the two messages become one captioned
+ * bill. Returns the most recent preceding inbound TEXT within the window, only if it reads as a caption.
+ */
+async function findPrecedingCaption(ctx: TxnCtx, windowMs = 90_000): Promise<string | null> {
+  try {
+    const { data } = await ctx.supabase
+      .from('wa_message_log')
+      .select('content, message_type, created_at')
+      .eq('phone_number', ctx.from).eq('direction', 'IN')
+      .order('created_at', { ascending: false }).limit(5)
+    if (!Array.isArray(data)) return null
+    const now = Date.now()
+    for (const row of data) {
+      const mt = (row.message_type ?? '').toString()
+      if (mt === 'image' || mt === 'audio' || mt === 'voice') continue   // skip the photo itself / media rows
+      const t = (row.content ?? '').toString().trim()
+      if (!t) continue
+      const age = now - new Date(row.created_at as string).getTime()
+      if (!Number.isFinite(age) || age > windowMs) return null
+      return looksLikeBillCaption(t) ? t : null   // the most recent text — fold only if it reads as a caption
+    }
+  } catch (e) { console.error('[bill] findPrecedingCaption error:', (e as Error).message) }
+  return null
+}
+
 /** Stage the BILL rough-entry via the shared idempotent RPC. Returns the entry id, or null if it rolled back. */
-async function stageBillEntry(ctx: TxnCtx, ai: Record<string, unknown>, read: FinDocRead): Promise<string | null> {
-  // raw_text is the "message" the Day Book shows (like a txn card). Prefer the sender's actual caption;
-  // fall back to a synthesized one-liner only when there was no caption.
-  const rawText = ctx.image?.caption?.trim() || billRawText(read)
+async function stageBillEntry(ctx: TxnCtx, ai: Record<string, unknown>, read: FinDocRead, caption?: string | null): Promise<string | null> {
+  // raw_text is the "message" the Day Book shows (like a txn card). Prefer the sender's caption — whether it
+  // rode on the photo or arrived as its own message just before it (folded in by runBill); fall back to a
+  // synthesized one-liner only when there was no caption at all.
+  const rawText = (caption ?? ctx.image?.caption)?.trim() || billRawText(read)
   const { data, error } = await ctx.supabase.rpc('stage_entry_v3', {
     p_org_id: ctx.orgId, p_sender: ctx.from, p_wamid: ctx.wamid, p_entry_index: 0,
     p_status: 'PENDING', p_source: SOURCE_IMAGE, p_sender_name: ctx.senderName,
@@ -96,7 +126,17 @@ async function stageBillEntry(ctx: TxnCtx, ai: Record<string, unknown>, read: Fi
 export async function runBill(ctx: TxnCtx, read: FinDocRead, action: FinancialAction): Promise<void> {
   const { supabase, from, orgId, wamid, lang } = ctx
   const ai = billAi(read, action)
-  const entryId = await stageBillEntry(ctx, ai, read)
+  // Fold in a caption the user typed as its own message just before the photo ("Asm site bill"). Prefer a
+  // caption that rode ON the photo; otherwise look just behind it in the log. It rides raw_text (the card's
+  // line) AND the note fields, so the Day Book shows it with the bill and the site can be picked from it.
+  const foldedCaption = ctx.image?.caption?.trim() || await findPrecedingCaption(ctx)
+  if (foldedCaption) {
+    const prevDesc = (ai.description_raw ?? '').toString().trim()
+    ai.description_raw = prevDesc ? `${prevDesc} · ${foldedCaption}` : foldedCaption
+    ai.wa_notes = [foldedCaption]
+    console.log('[bill] folded a preceding caption into the bill:', JSON.stringify(foldedCaption.slice(0, 80)))
+  }
+  const entryId = await stageBillEntry(ctx, ai, read, foldedCaption)
   if (!entryId) {
     await send(supabase, from, M.mBillWriteFailed(lang), { org_id: orgId, wamid })
     return
@@ -124,10 +164,30 @@ export async function runBill(ctx: TxnCtx, read: FinDocRead, action: FinancialAc
 }
 
 // ── the answer to "did you pay this?" ────────────────────────────────────────────
-/** PURE: read the reply to the bill-payment question. A tap on "Not paid yet" (interactiveId) is the
- *  keyword-free path; the word tests are a scoped fallback for a specific yes/no (English/Telugu/Hindi),
- *  and the amount is parsed by the shared spoken-amount parser + a digit fallback. */
-export function parseBillAnswer(text: string, interactiveId?: string | null): { kind: 'cancel' | 'no' | 'amount' | 'unclear'; amount?: number } {
+/**
+ * PURE, STRICT: return the paid amount ONLY when the WHOLE message is an amount — a bare number, an amount
+ * with a currency word, or "paid <amount>". A number sitting inside a sentence ("asm site bill 21677",
+ * "21677 for the asm site") is NOT an amount and returns null. This is the phantom-payment fix: the old
+ * `parseSpokenAmount(t).amount ?? parseFloat(t)` grabbed the FIRST number out of ANY text, so a note the
+ * user typed during "how much did you pay?" (which was never an amount) minted a payment larger than the
+ * bill. We accept a spoken/digit amount only when `fullyRecognized` — i.e. every non-numeric token in the
+ * span is a currency/connector word — so a phrase can never become the paid amount.
+ */
+export function isCleanAmount(text: string): number | null {
+  const t = (text ?? '').trim()
+  if (!t) return null
+  // Allow a leading payment/label verb so "paid ₹20,000" / "amount 20000" still reads as clean.
+  const span = t.replace(/^(paid|pay|gave|give|amount|total)\b/i, '').trim()
+  const sp = parseSpokenAmount(span)
+  if (sp.amount != null && sp.amount > 0 && sp.fullyRecognized) return sp.amount
+  return null
+}
+
+/** PURE: classify a reply to the bill-payment question into a disposition. A tap on "Not paid yet"
+ *  (interactiveId) is the keyword-free path; the word tests are a scoped yes/no (English/Telugu/Hindi); an
+ *  amount must be CLEAN (see isCleanAmount). Everything else is `other` — a bare "yes", a garbled number, or
+ *  a NOTE/comment — which the caller disposes (a note attaches to the bill; a bare yes is re-asked). */
+export function billReplyKind(text: string, interactiveId?: string | null): { kind: 'cancel' | 'no' | 'amount' | 'other'; amount?: number } {
   const t = (text ?? '').trim()
   const low = t.toLowerCase()
   if (interactiveId === 'bill_not_paid') return { kind: 'no' }
@@ -135,18 +195,16 @@ export function parseBillAnswer(text: string, interactiveId?: string | null): { 
   if (/^(cancel|stop|discard|vaddu)\b/i.test(low) || /^వద్దు/.test(t)) return { kind: 'cancel' }
   // "not paid" / "no" / Telugu ledu / Hindi nahi — a scoped answer to THIS yes/no, not open routing.
   if (/^(no|nope|nah|not\s*yet|not\s*paid|kaadu|kadu|nahi|ledu|led)\b/i.test(low) || /^(లేదు|కాదు|नहीं)/.test(t)) return { kind: 'no' }
-  const sp = parseSpokenAmount(t)
-  const amt = sp.amount ?? parseAmountLocal(t)
+  const amt = isCleanAmount(t)
   if (amt && amt > 0) return { kind: 'amount', amount: amt }
-  return { kind: 'unclear' }   // a bare "yes"/garbled number → we re-ask for the amount
+  return { kind: 'other' }   // a bare "yes", a garbled number, or a note → the caller decides
 }
 
-function parseAmountLocal(text: string): number | null {
-  const s = text.trim().toLowerCase().replace(/₹|rs\.?\s*|rupees?\s*/gi, '').replace(/,/g, '').trim()
-  if (/^\d+(\.\d+)?k$/i.test(s)) return parseFloat(s) * 1000
-  if (/^\d+(\.\d+)?\s*l(akh)?$/i.test(s)) return parseFloat(s) * 100_000
-  const n = parseFloat(s)
-  return isNaN(n) ? null : n
+/** PURE: the disposition answerBillPayment resumes on. `other` (a note/bare-yes) is re-asked in place —
+ *  a note is attached BEFORE this, at the dispatcher, so it never reaches here as an amount. */
+export function parseBillAnswer(text: string, interactiveId?: string | null): { kind: 'cancel' | 'no' | 'amount' | 'unclear'; amount?: number } {
+  const k = billReplyKind(text, interactiveId)
+  return k.kind === 'other' ? { kind: 'unclear' } : k
 }
 
 /** Resume the bill-payment question. A clear "no" keeps it a record-only bill; an amount attaches the

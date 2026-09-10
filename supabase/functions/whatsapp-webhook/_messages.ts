@@ -1089,3 +1089,29 @@ export function mBillCancelled(lang: Lang): OutMessage {
 export function mNoteAdded(lang: Lang): OutMessage {
   return { kind: 'text', body: pick(lang, { en: '📝 Added to the note.' }) }
 }
+
+/** A bare caption ("Asm site bill") arrived with no bill yet: we're holding it for the photo, not minting a
+ *  junk entry. Tell the user plainly what to do next (send the photo), and that an amount also works. */
+export function mCaptionHeld(lang: Lang, caption: string): OutMessage {
+  const c = (caption ?? '').trim().slice(0, 60)
+  return {
+    kind: 'text',
+    body: [
+      pick(lang, { en: `📎 Got "${c}" — send the bill photo and I'll file it under that.` }),
+      pick(lang, { en: "(If it's a payment, just reply the amount instead.)" }),
+    ].join('\n'),
+  }
+}
+
+/** A note arrived WHILE the bill-payment question is still open: attach it, then re-ask the ONE question
+ *  (keeping the "Not paid yet" tap), so the note is recorded and never mistaken for the paid amount. */
+export function mBillNoteReAsk(lang: Lang): OutMessage {
+  return {
+    kind: 'buttons',
+    body: [
+      pick(lang, { en: '📝 Added to the bill.' }),
+      pick(lang, { en: 'And did you pay it? If yes, reply the amount (e.g. 20000). If not, tap below.' }),
+    ].join('\n\n'),
+    buttons: [{ id: 'bill_not_paid', title: trunc(pick(lang, { en: 'Not paid yet' }), 20) }],
+  }
+}
