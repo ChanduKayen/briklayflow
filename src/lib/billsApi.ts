@@ -300,22 +300,18 @@ export async function loadBillsForPO(poId: string): Promise<PoBill[]> {
 // Paid per BILL for a PO's bills (Σ non-voided txn_allocations.bill_id) — the per-bill balance rollup the
 // PO detail shows. Keyed by bill id. Plus the PO's rolled-up total (v_po_paid: de-duplicated over
 // bill_id ∪ order_type='PO'), so the PO reflects payments made against its bills even without a direct link.
-export async function poPaidRollup(poId: string, billIds: string[]): Promise<{ total: number; perBill: Record<string, number> }> {
+export async function poPaidRollup(_poId: string, billIds: string[]): Promise<{ total: number; perBill: Record<string, number> }> {
+  // A PO's paid rolls up strictly from ITS BILLS (txn_allocations.bill_id). A payment recorded straight
+  // against the PO (order_type='PO') with NO bill is an ADVANCE — it belongs to the vendor's ledger, not to
+  // "bill paid", and counting it made the PO read "₹120 paid" while its ₹200 bill sat fully due. So: only
+  // bill payments count here, keeping the PO's paid, its per-bill balances, and its status all consistent.
   const perBill: Record<string, number> = {};
   if (billIds.length) {
     const { data } = await supabase.from('txn_allocations')
       .select('bill_id, allocated_amount, transactions(status)').in('bill_id', billIds);
     (data ?? []).forEach((a: any) => { if (a.transactions?.status === 'Voided' || !a.bill_id) return; perBill[a.bill_id] = (perBill[a.bill_id] || 0) + num(a.allocated_amount); });
   }
-  // Direct PO payments (order_type='PO') that AREN'T already one of this PO's bill payments — so a legacy
-  // direct payment counts, but a bill-settling payment tagged both ways isn't double-counted. Computed
-  // client-side (not v_po_paid) so the rollup is correct whether or not that view migration is applied.
-  const billSet = new Set(billIds);
-  let direct = 0;
-  const { data: dta } = await supabase.from('txn_allocations')
-    .select('allocated_amount, bill_id, transactions(status)').eq('order_type', 'PO').eq('order_ref', poId);
-  (dta ?? []).forEach((a: any) => { if (a.transactions?.status === 'Voided') return; if (a.bill_id && billSet.has(a.bill_id)) return; direct += num(a.allocated_amount); });
-  const total = Object.values(perBill).reduce((s, v) => s + v, 0) + direct;
+  const total = Object.values(perBill).reduce((s, v) => s + v, 0);
   return { total, perBill };
 }
 

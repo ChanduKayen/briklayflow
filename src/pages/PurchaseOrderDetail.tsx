@@ -1119,9 +1119,9 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const payBase = billForBalance > 0 ? billForBalance : orderValue;
   const balNum = payBase - paidTotal;
   const paidDone = paidTotal > 0 && balNum <= 0;
-  // The PO's payment status — the only three states, derived from paid vs billed (never the stale column).
-  // null until there's a bill to pay against.
-  const payState = payBase > 0 ? poPayState(paidTotal, payBase) : null;
+  // The PO's payment status — the only three states, derived from paid vs BILLED (never the stale column,
+  // never the order estimate). null until a real bill exists to pay against (before that it's "Awaiting bill").
+  const payState = billForBalance > 0 ? poPayState(paidTotal, billForBalance) : null;
   const payPillStyle: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 12px', borderRadius: 999, fontSize: 12.5, fontWeight: 700,
     ...(payState === 'paid' ? { background: '#EAF6ED', color: '#2FA04C' } : payState === 'partial' ? { background: '#FBF0DF', color: '#B45309' } : { background: '#FBEBE6', color: '#C4502B' }) };
 
