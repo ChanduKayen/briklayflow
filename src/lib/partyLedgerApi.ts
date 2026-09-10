@@ -21,6 +21,7 @@ export interface LedgerEntry {
   running: number;                             // "ahead" after this entry
   unbilled?: boolean;                          // vendor payment with no bill on file
   covered?: boolean;                           // covered by a consolidated bill
+  billId?: string | null;                      // a first-class bill this payment settles (txn_allocations.bill_id)
   state?: string;                              // a short status note for the sub-line
   unclassified?: boolean;                      // new-engine payment with an unallocated remainder (set only by readParty)
   remainder?: number;                          // the unallocated amount, for the classify flow
@@ -108,7 +109,7 @@ export async function loadWorkerWageEntries(stakeholderId: string): Promise<Omit
 export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedger> {
   const [stkR, txnR, woR, poR, obR, adjR, cbR, wcR, balR, blvR] = await Promise.all([
     supabase.from('stakeholders').select('stakeholder_id, name, type, category').eq('stakeholder_id', stakeholderId).single(),
-    supabase.from('transactions').select('*, txn_allocations(project_id, order_type, order_ref, milestone_id, allocated_amount, projects(name))').eq('stakeholder_id', stakeholderId).order('date', { ascending: false }),
+    supabase.from('transactions').select('*, txn_allocations(project_id, order_type, order_ref, milestone_id, bill_id, allocated_amount, projects(name))').eq('stakeholder_id', stakeholderId).order('date', { ascending: false }),
     supabase.from('work_orders').select('wo_id, project_id, title, scope_of_work, order_value, status, projects(name), wo_milestones(milestone_id, name, planned_amount, unit_type, quantity, rate, seq_no)').eq('stakeholder_id', stakeholderId),
     // POs are read ONLY for the by-contract projection + paid-per-PO — NOT for the bill LINES. The bill
     // lines come from v_party_ledger_line (blvR) so the visible rows and the balance are one definition
@@ -168,6 +169,7 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
       clip: !!(t.proof_document_url || t.bill_doc_url),
       projectId: pid, projectName: pid ? (projName[pid] || pid) : null, byProject,
       contractId,   // WO for workers, PO for vendors
+      billId: allocs.find(a => a.bill_id)?.bill_id ?? null,   // a first-class bill settled by this payment
       paid: num(t.total_amount), cert: 0,
     });
   }
@@ -326,6 +328,7 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
     const cbStats: Record<string, { count: number; total: number }> = {};
     for (const e of entries) {
       if (e.kind !== 'payment') continue;
+      if (e.billId) { e.state = 'Billed'; continue; }          // a first-class bill IS attached — not "No bill yet"
       if (e.contractId) { e.state = 'Billed on a PO'; continue; }
       const cb = covers(e.date);
       if (cb) { e.covered = true; e.state = 'Covered by a consolidated bill'; (cbStats[cb.id] ||= { count: 0, total: 0 }); cbStats[cb.id].count++; cbStats[cb.id].total += e.paid; }
