@@ -297,6 +297,20 @@ export async function loadBillsForPO(poId: string): Promise<PoBill[]> {
   const { data } = await supabase.from('bills').select('id, bill_no, bill_date, amount, doc_url, lines, created_at').eq('po_id', poId).order('bill_date', { ascending: true });
   return ((data ?? []) as any[]).map(b => ({ id: b.id, billNo: b.bill_no || null, billDate: b.bill_date || (b.created_at ? String(b.created_at).slice(0, 10) : null), amount: num(b.amount), docUrl: b.doc_url || null, lines: Array.isArray(b.lines) ? b.lines : [] }));
 }
+// Paid per BILL for a PO's bills (Σ non-voided txn_allocations.bill_id) — the per-bill balance rollup the
+// PO detail shows. Keyed by bill id. Plus the PO's rolled-up total (v_po_paid: de-duplicated over
+// bill_id ∪ order_type='PO'), so the PO reflects payments made against its bills even without a direct link.
+export async function poPaidRollup(poId: string, billIds: string[]): Promise<{ total: number; perBill: Record<string, number> }> {
+  const perBill: Record<string, number> = {};
+  if (billIds.length) {
+    const { data } = await supabase.from('txn_allocations')
+      .select('bill_id, allocated_amount, transactions(status)').in('bill_id', billIds);
+    (data ?? []).forEach((a: any) => { if (a.transactions?.status === 'Voided' || !a.bill_id) return; perBill[a.bill_id] = (perBill[a.bill_id] || 0) + num(a.allocated_amount); });
+  }
+  const { data: tot } = await supabase.from('v_po_paid').select('paid').eq('po_id', poId).maybeSingle();
+  return { total: num((tot as any)?.paid), perBill };
+}
+
 // Σ billed per PO, for a batch of POs (the PO list). Only counts first-class bills.
 export async function billedByPO(poIds: string[]): Promise<Record<string, number>> {
   const out: Record<string, number> = {};

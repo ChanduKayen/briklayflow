@@ -17,7 +17,11 @@ import ReceiveAtSiteDrawer from '../components/ReceiveAtSiteDrawer';
 import SendToVendorModal from '../components/po-new-ui/SendToVendorModal';
 import { RateCheckModal } from '../components/po/RateCheckModal';
 import { useIsMobile } from '../lib/useIsMobile';
-import { loadBillsForPO, convertLegacyPoBill, getAttachableBills, linkExistingBillToPO, type AttachableBill } from '../lib/billsApi';
+import { loadBillsForPO, convertLegacyPoBill, getAttachableBills, linkExistingBillToPO, poPaidRollup, type AttachableBill } from '../lib/billsApi';
+
+// The PO is show-only for payments: its paid/balance is rolled up from its BILLS (v_po_paid), and payments
+// are recorded in the ledger / against a bill — not minted here. Flip to re-enable the on-PO record flow.
+const ALLOW_PO_PAYMENTS = false;
 import { PoBillSheet } from '../components/po/PoBillSheet';
 import { PoBillVariance } from '../components/po/PoBillVariance';
 import {
@@ -563,6 +567,15 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
     enabled: !!po?.stakeholder_id && !!po?.org_id,
   });
 
+  // The PO's paid, rolled up from its BILLS (v_po_paid, de-duplicated) + per-bill paid for the balance table.
+  // This is what makes a payment against a bill show on its PO, and the per-bill/overall balances real.
+  const poBillIds = (poBills ?? []).map((b) => b.id);
+  const { data: poPaid } = useQuery({
+    queryKey: ['po_paid_rollup', poId, poBillIds.slice().sort().join(',')],
+    queryFn: () => poPaidRollup(poId!, poBillIds),
+    enabled: !!poId && poBills !== undefined,
+  });
+
   // Convert a legacy PO-column bill into a first-class entity on view (idempotent), so the PO shows a
   // link to its bill like every new one. Runs once the PO + its bills are loaded.
   const convertedRef = useRef(false);
@@ -1042,7 +1055,10 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const totalValue = Number(po.total_value || po.order_value) || 0;
 
   const activeTxns = (linkedTxns ?? []).filter((t: any) => t.transactions?.status !== 'Voided');
-  const paidTotal = activeTxns.reduce((s: number, t: any) => s + (Number(t.allocated_amount) || 0), 0);
+  const linkedPaid = activeTxns.reduce((s: number, t: any) => s + (Number(t.allocated_amount) || 0), 0);
+  // Rolled up from the PO's bills (v_po_paid) when available — so a payment against a bill counts toward the
+  // PO even with no direct PO allocation. Falls back to the direct-PO sum if the view isn't applied yet.
+  const paidTotal = poPaid?.total ?? linkedPaid;
   // Billed = Σ of the PO's first-class bill entities (a PO can carry several). Fall back to the legacy
   // column only until convert-on-view has minted an entity for an old bill.
   const billEntities = poBills ?? [];
@@ -1200,10 +1216,12 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
         ghost: !sent ? sendBtn : undefined,
         primary: { label: 'Record bill', sub: 'from the vendor', icon: 'bill', tone: 'terra', onClick: () => openPoBillPicker() },
       };
-      if (nowStage === 'pay') return {
-        ghost: (po.vendor_bill_url || po.vendor_bill_doc_url) ? { label: 'View bill', icon: 'eye', tone: 'neutral', onClick: () => previewBill(po.vendor_bill_doc_url || po.vendor_bill_url) } : undefined,
-        primary: { label: 'Record payment', sub: balNum > 0 ? `${inr0(balNum)} due` : undefined, icon: 'pay', tone: 'terra', onClick: () => setShowMobilePay(true) },
-      };
+      if (nowStage === 'pay') {
+        const viewBill = (po.vendor_bill_url || po.vendor_bill_doc_url) ? { label: 'View bill', icon: 'eye' as BarIcon, tone: 'neutral' as BarTone, onClick: () => previewBill(po.vendor_bill_doc_url || po.vendor_bill_url) } : undefined;
+        // Show-only: the PO reflects paid/balance rolled up from its bills; payments are recorded in the ledger.
+        if (!ALLOW_PO_PAYMENTS) return { note: balNum > 0 ? `${inr0(paidTotal)} paid · ${inr0(balNum)} due — record payments against the bill` : 'Fully paid', ghost: viewBill };
+        return { ghost: viewBill, primary: { label: 'Record payment', sub: balNum > 0 ? `${inr0(balNum)} due` : undefined, icon: 'pay', tone: 'terra', onClick: () => setShowMobilePay(true) } };
+      }
       return { ghost: { label: 'Download PDF', icon: 'pdf', tone: 'neutral', onClick: handleDownloadPDF }, primary: !sent ? sendBtn : undefined };
     })();
 
@@ -1511,12 +1529,17 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
             {hasBill && !cancelled && (
               <div className="act" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 {/* The PO holds LINKS to its bill entities, not the bill itself — each opens the bill. */}
-                {billEntities.map(b => (
+                {billEntities.map(b => {
+                  const bPaid = poPaid?.perBill?.[b.id] ?? 0;
+                  const bBal = (Number(b.amount) || 0) - bPaid;
+                  return (
                   <button key={b.id} className="btn ghost sm" onClick={() => navigate(`/bills/${encodeURIComponent('bl~' + b.id)}`, { state: { backTo: `/purchase-orders/${poId}`, backLabel: poId } })}>
                     <svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5" /></svg>
                     {b.billNo ? `Bill ${b.billNo}` : 'Bill'} · {inr0(b.amount)}
+                    <span style={{ opacity: .65, marginLeft: 5 }}>· {bBal <= 0.5 ? 'paid' : `${inr0(bBal)} due`}</span>
                   </button>
-                ))}
+                  );
+                })}
                 <button className="btn ghost sm" onClick={() => openPoBillPicker()}>
                   <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
                   Add another bill
@@ -1529,7 +1552,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
             <div className="ico"><span>4</span><Check /></div>
             <div className="t">Paid</div>
             <div className="s">{paidTotal > 0 ? `${inr0(paidTotal)} paid · ${balNum > 0 ? inr0(balNum) + ' due' : 'settled'}` : 'Nothing paid'}</div>
-            {!paidDone && !cancelled && (
+            {!paidDone && !cancelled && ALLOW_PO_PAYMENTS && (
               <div className="act"><button className={`btn sm${nowStage === 'pay' ? ' primary' : ''}`} onClick={() => { setPayRowOpen(true); setBillingOpen(false); setPayAmount(''); setTimeout(() => document.getElementById('podxItems')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 30); }}>Record payment</button></div>
             )}
           </div>

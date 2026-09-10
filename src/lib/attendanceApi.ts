@@ -317,6 +317,61 @@ export async function linkCrewToWorkOrder(crewId: string, woId: string, stageIds
   if (error) throw error;
 }
 
+// ── Put on contract — the daily-wage → contract cutover ────────────────────────────────────────────────
+export type AccruedWages = { days: number; amount: number };
+export type ContractMode = 'keep_wages' | 'fold';
+
+/** Day-wages accrued by a CREW so far (Σ attendance value × that skill's rate) — the "N days · ₹X" a
+ *  conversion must decide the fate of. Read-only. */
+export async function accruedDayWagesForCrew(crewId: string): Promise<AccruedWages> {
+  const { data: cats } = await supabase.from('labour_crew_categories').select('id, rate').eq('crew_id', crewId);
+  const rateById: Record<string, number> = {};
+  (cats ?? []).forEach((c: any) => { rateById[c.id] = Number(c.rate) || 0; });
+  const ids = Object.keys(rateById);
+  if (!ids.length) return { days: 0, amount: 0 };
+  const { data: att } = await supabase.from('labour_attendance').select('value, category_id').eq('subject_type', 'crew_category').in('category_id', ids);
+  let days = 0, amount = 0;
+  (att ?? []).forEach((a: any) => { const v = Number(a.value) || 0; days += v; amount += v * (rateById[a.category_id] || 0); });
+  return { days, amount: Math.round(amount) };
+}
+
+/** Day-wages accrued by a single DIRECT worker (Σ attendance value × their rate). Read-only. */
+export async function accruedDayWagesForDirect(workerId: string, rate: number): Promise<AccruedWages> {
+  const { data: att } = await supabase.from('labour_attendance').select('value').eq('subject_type', 'direct').eq('direct_worker_id', workerId);
+  let days = 0; (att ?? []).forEach((a: any) => { days += Number(a.value) || 0; });
+  return { days, amount: Math.round(days * (Number(rate) || 0)) };
+}
+
+/** Snapshot the accrued day-wages as ONE fixed certified credit at the cutover, so flipping the engagement
+ *  to 'work' (which stops day-accrual) doesn't erase the money already earned by the day. */
+async function snapshotDayWages(orgId: string, stakeholderId: string, projectId: string, amount: number, cutover: string): Promise<void> {
+  if (!(amount > 0) || !stakeholderId) return;
+  const { error } = await supabase.from('party_adjustments').insert({
+    org_id: orgId, stakeholder_id: stakeholderId, project_id: projectId,
+    adj_date: cutover, side: 'certified', amount: Math.round(amount),
+    note: `Daily wages through ${cutover} (put on contract)`,
+  });
+  if (error) throw error;
+}
+
+/** Put a CREW on a contract with a dated cutover. 'keep_wages' snapshots the accrued day-wages as a fixed
+ *  credit first; 'fold' discards them (the contract value absorbs that work). Non-destructive — attendance
+ *  stays; it just stops accruing a wage from the cutover. */
+export async function putCrewOnContract(p: {
+  crewId: string; orgId: string; projectId: string; stakeholderId: string | null;
+  woId: string; stageIds?: string[] | null; mode: ContractMode; snapshotAmount?: number;
+}): Promise<void> {
+  const cutover = new Date().toISOString().split('T')[0];
+  if (p.mode === 'keep_wages' && p.stakeholderId && (p.snapshotAmount ?? 0) > 0) {
+    await snapshotDayWages(p.orgId, p.stakeholderId, p.projectId, p.snapshotAmount!, cutover);
+  }
+  const { error } = await supabase.from('labour_crews').update({
+    wo_id: p.woId, is_contract: true, basis: 'contract', accrual_basis: 'work', basis_confirmed: true,
+    basis_changed_at: cutover, stage_ids: p.stageIds && p.stageIds.length ? p.stageIds : null,
+  }).eq('crew_id', p.crewId);
+  if (error) throw error;
+}
+
 // Promote a single direct worker into a one-person crew on contract (so it gains the
 // Contract/Labour toggle + stages). The old direct-worker row is removed (its attendance
 // cascades away) — from here the person is tracked by the crew's % completion, not days.
@@ -324,9 +379,15 @@ export async function promoteDirectToCrew(
   orgId: string, projectId: string,
   worker: { id: string; name: string; category: string; rate: number; stakeholderId: string | null },
   woId: string, trade: string | null, stageIds?: string[] | null,
+  opts?: { mode?: ContractMode; snapshotAmount?: number },
 ): Promise<void> {
+  const cutover = new Date().toISOString().split('T')[0];
+  // Keep the day-wages this worker already earned before we drop the direct row (its attendance cascades).
+  if (opts?.mode === 'keep_wages' && worker.stakeholderId && (opts.snapshotAmount ?? 0) > 0) {
+    await snapshotDayWages(orgId, worker.stakeholderId, projectId, opts.snapshotAmount!, cutover);
+  }
   const { data, error } = await supabase.from('labour_crews')
-    .insert({ org_id: orgId, project_id: projectId, name: worker.name, stakeholder_id: worker.stakeholderId, trade, description: worker.category, is_contract: true, basis: 'contract', accrual_basis: 'work', basis_confirmed: true, wo_id: woId, stage_ids: stageIds && stageIds.length ? stageIds : null })
+    .insert({ org_id: orgId, project_id: projectId, name: worker.name, stakeholder_id: worker.stakeholderId, trade, description: worker.category, is_contract: true, basis: 'contract', accrual_basis: 'work', basis_confirmed: true, wo_id: woId, stage_ids: stageIds && stageIds.length ? stageIds : null, basis_changed_at: cutover })
     .select('crew_id').single();
   if (error) throw error;
   const { error: e2 } = await supabase.from('labour_crew_categories').insert({ org_id: orgId, crew_id: data!.crew_id, category: worker.category, rate: worker.rate });

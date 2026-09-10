@@ -4,20 +4,20 @@
 // tables, and every cell edit / rate change / add persists back. The grid render
 // stays imperative (a faithful port of the reference script) inside a scoped root.
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
 import type { Session } from '@supabase/supabase-js';
 import { useOrgId } from '../../lib/auth/AuthProvider';
 import { useSnackbar } from '../Snackbar';
 import {
   loadWeek, loadParties, mondayOf, weekDates, weekLabel,
   saveCell, saveRate, setCategoryRate, setDirectRate, setCrewBasis, addCategory, addDirectWorker, addCrew,
-  loadWorkOrdersForProject, loadWorkOrderStages, linkCrewToWorkOrder, promoteDirectToCrew, removeCrew, removeDirectWorker, removeCategory,
+  accruedDayWagesForCrew, accruedDayWagesForDirect, removeCrew, removeDirectWorker, removeCategory,
   cardIsEmpty, seedRateCard, SUPERVISOR_KEY,
   type SiteRow, type RateCard, type Cell,
 } from '../../lib/attendanceApi';
 import { searchPayees } from '../../lib/payeeSearch';
 import { createParty } from '../day-book/fileEntry';
 import { CertificationWizard, type CertifyContext } from './CertificationWizard';
+import { PutOnContractSheet, type ContractContext } from './PutOnContractSheet';
 import { setEngagementBasis, submitWorkCertification } from '../../lib/workCertification';
 
 const ATDX_CSS = `
@@ -357,7 +357,6 @@ const isoOf = (d: Date) => d.toISOString().slice(0, 10);
 
 export default function AttendanceSheet({ session }: { session: Session }) {
   const orgId = useOrgId();
-  const navigate = useNavigate();
   const { show: showSnackbar } = useSnackbar();
   const byName = (session.user?.user_metadata?.name as string) || (session.user?.user_metadata?.full_name as string) || session.user?.email || 'Office';
 
@@ -374,6 +373,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [certCtx, setCertCtx] = useState<CertifyContext | null>(null);   // the certify-work wizard's open context
+  const [contractCtx, setContractCtx] = useState<ContractContext | null>(null);   // the "put on contract" sheet's context
 
   const dates = weekDates(monday);
   const todayISO = isoOf(new Date());
@@ -877,93 +877,25 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     }));
   }
 
-  // Put a wage crew on a contract: link an existing work order (reveals its stages + the
-  // Contract/Labour toggle), or start a new contract prefilled for this crew's project + party.
+  // Put a wage crew on a contract → open the real sheet (pick/create contract, phases, and the
+  // keep-or-fold decision for wages already logged). Replaces the old injected-DOM picker.
   async function onContractForm(si: number, ci: number) {
     const crew = DATA.current[si].crews[ci]; const site = DATA.current[si];
-    const lbl = q(`[data-wageslbl="${si}.${ci}"]`); if (!lbl) return;
-    lbl.textContent = 'Loading contracts…';
-    const startNew = () => navigate('/work-orders/new', { state: { projectId: site.site, stakeholderId: crew.stakeholderId } });
-    let wos;
-    try { wos = await loadWorkOrdersForProject(site.site); } catch (e) { fail(e); return; }
-    // Only contracts for THIS crew's party on THIS project (the query already scopes the project).
-    wos = crew.stakeholderId ? wos.filter(w => w.stakeholderId === crew.stakeholderId) : [];
-    if (wos.length === 0) {
-      lbl.innerHTML = `No contract for this party yet · <button class="oncontract ocnew">start a contract</button> · <button class="x ocx">cancel</button>`;
-      (lbl.querySelector('.ocnew') as HTMLButtonElement).addEventListener('click', startNew);
-      (lbl.querySelector('.ocx') as HTMLButtonElement).addEventListener('click', () => render());
-      return;
-    }
-    const opts = wos.map(w => `<option value="${w.wo_id}">${escapeHtml(w.label)}${w.orderValue ? ` · ${inr(w.orderValue)}` : ''}</option>`).join('');
-    lbl.innerHTML = `<select class="stsel ocsel"><option value="">Link this party's contract…</option>${opts}<option value="__new">+ New contract…</option></select> <button class="x ocx">cancel</button>`;
-    const sel = lbl.querySelector('.ocsel') as HTMLSelectElement;
-    (lbl.querySelector('.ocx') as HTMLButtonElement).addEventListener('click', () => render());
-    sel.addEventListener('change', async () => {
-      if (sel.value === '__new') { startNew(); return; }
-      if (!sel.value) return;
-      const woId = sel.value;
-      let stages; try { stages = await loadWorkOrderStages(woId); } catch (e) { fail(e); return; }
-      const link = async (ids: string[] | null) => { try { await linkCrewToWorkOrder(crew.crewId, woId, ids); await load(); } catch (e) { fail(e); } };
-      if (stages.length <= 1) { await link(null); return; }   // single / lump-sum → just link
-      phasePicker(lbl, stages, link);                          // has phases → pick which apply
-    });
-    sel.focus();
+    const accrued = await accruedDayWagesForCrew(crew.crewId).catch(() => ({ days: 0, amount: 0 }));
+    setContractCtx({ kind: 'crew', orgId, projectId: site.site, stakeholderId: crew.stakeholderId ?? null, crewId: crew.crewId, name: crew.n, accrued });
   }
 
-  // The phase multi-select — only the ticked phases become the crew's stage rows (the payments
-  // section). Defaults to all ticked; persists via labour_crews.stage_ids.
-  function phasePicker(container: HTMLElement, stages: { milestone_id: string; name: string }[], onLink: (ids: string[] | null) => Promise<void>) {
-    container.innerHTML = `<div class="phasepick">
-        <div class="pp-h">Which phases will they work? <span class="pp-s">only these show in payments</span></div>
-        <div class="pp-list">${stages.map(s => `<label class="pp-opt"><input type="checkbox" value="${s.milestone_id}" checked><span>${escapeHtml(s.name)}</span></label>`).join('')}</div>
-        <div class="pp-acts"><button class="pp-link">Link contract</button><button class="x pp-cancel">cancel</button></div>
-      </div>`;
-    const boxes = [...container.querySelectorAll('input[type=checkbox]')] as HTMLInputElement[];
-    (container.querySelector('.pp-cancel') as HTMLButtonElement).addEventListener('click', () => render());
-    const btn = container.querySelector('.pp-link') as HTMLButtonElement;
-    btn.addEventListener('click', async () => {
-      const ids = boxes.filter(b => b.checked).map(b => b.value);
-      if (!ids.length) { showSnackbar('Tick at least one phase.'); return; }
-      btn.disabled = true; btn.textContent = 'Linking…';
-      await onLink(ids.length === stages.length ? null : ids); // all ticked → null (all phases)
-    });
-  }
-
-  // Put a single (direct) worker on a contract — promotes them into a one-person crew linked
-  // to a work order, which then shows the Contract/Labour toggle + stages. Same picker as crews.
+  // Put a single (direct) worker on a contract — same sheet; the write promotes them into a one-person crew.
   async function onContractDirect(si: number, wi: number) {
     const site = DATA.current[si]; const w = site.direct[wi];
-    const wrap = q(`[data-ocwrap="${si}.${wi}"]`); if (!wrap) return;
-    wrap.textContent = 'Loading contracts…';
-    const trade = resolveTrade(w.cat);
-    const startNew = () => navigate('/work-orders/new', { state: { projectId: site.site, stakeholderId: w.stakeholderId } });
-    const promote = async (woId: string, ids: string[] | null) => {
-      try { await promoteDirectToCrew(orgId, site.site, { id: w.id, name: w.n, category: w.cat, rate: w.rate, stakeholderId: w.stakeholderId }, woId, trade, ids); await load(); }
-      catch (e) { fail(e); }
-    };
-    let wos;
-    try { wos = await loadWorkOrdersForProject(site.site); } catch (e) { fail(e); return; }
-    wos = w.stakeholderId ? wos.filter(x => x.stakeholderId === w.stakeholderId) : [];
-    if (wos.length === 0) {
-      wrap.innerHTML = `No contract for this worker yet · <button class="oncontract ocnew">start a contract</button> · <button class="x ocx">cancel</button>`;
-      (wrap.querySelector('.ocnew') as HTMLButtonElement).addEventListener('click', startNew);
-      (wrap.querySelector('.ocx') as HTMLButtonElement).addEventListener('click', () => render());
-      return;
-    }
-    const opts = wos.map(x => `<option value="${x.wo_id}">${escapeHtml(x.label)}${x.orderValue ? ` · ${inr(x.orderValue)}` : ''}</option>`).join('');
-    wrap.innerHTML = `<select class="stsel ocsel"><option value="">Put on this contract…</option>${opts}<option value="__new">+ New contract…</option></select> <button class="x ocx">cancel</button>`;
-    const sel = wrap.querySelector('.ocsel') as HTMLSelectElement;
-    (wrap.querySelector('.ocx') as HTMLButtonElement).addEventListener('click', () => render());
-    sel.addEventListener('change', async () => {
-      if (sel.value === '__new') { startNew(); return; }
-      if (!sel.value) return;
-      const woId = sel.value;
-      let stages; try { stages = await loadWorkOrderStages(woId); } catch (e) { fail(e); return; }
-      if (stages.length <= 1) { await promote(woId, null); return; }
-      phasePicker(wrap, stages, (ids) => promote(woId, ids));
+    const accrued = await accruedDayWagesForDirect(w.id, w.rate).catch(() => ({ days: 0, amount: 0 }));
+    setContractCtx({
+      kind: 'direct', orgId, projectId: site.site, stakeholderId: w.stakeholderId ?? null, name: w.n, accrued,
+      worker: { id: w.id, name: w.n, category: w.cat, rate: w.rate, stakeholderId: w.stakeholderId ?? null },
+      trade: resolveTrade(w.cat),
     });
-    sel.focus();
   }
+
 
   // A single search box: type a name → ranked party matches (same searchPayees the
   // transaction payee field uses) → pick one, or create a new party if not found.
@@ -1124,6 +1056,10 @@ export default function AttendanceSheet({ session }: { session: Session }) {
           // Keep the muster grid + progress bar populated (display-only; the obligation is the cert).
           if (certCtx.projectId && certCtx.milestoneId) void saveCell(orgId, certCtx.projectId, date, { type: 'stage', milestone_id: certCtx.milestoneId }, value, byName).catch(() => {});
         }} />}
+      {contractCtx && <PutOnContractSheet ctx={contractCtx}
+        onClose={() => setContractCtx(null)}
+        onDone={() => { setContractCtx(null); showSnackbar('Put on contract'); void load(); }}
+        onError={(m) => { setContractCtx(null); fail(new Error(m)); }} />}
       <div className="page">
         <div className="head">
           <h1>Attendance</h1>
