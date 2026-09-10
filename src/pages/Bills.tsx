@@ -4,17 +4,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { loadBills, loadBillDetail, deleteBill, extractBill, type BillRow, type BillStatus } from '../lib/billsApi';
-import { intakeCommit } from '../lib/billIntake';
 import { DocThumb } from '../components/DocThumb';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { openDoc } from '../lib/storage';
-import { useOrgId, useAuth } from '../lib/auth/AuthProvider';
-import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
 import NewBillModal, { type BillDraft } from '../components/bills/NewBillModal';
 import { useSearchScope } from '../components/search/searchScope';
 import SearchBar from '../components/search/SearchBar';
 import PartyFilterChip from '../components/search/PartyFilterChip';
+import BillsMobile from '../components/bills/BillsMobile';
+import { useMintBill } from '../components/bills/useMintBill';
+import { useIsMobile } from '../lib/useIsMobile';
 
 const BLX_CSS = `
 .blx{--cream:#F6F2EA;--paper:#FDFBF7;--walnut:#3B3128;--walnut-60:#7A6E61;--walnut-soft:#B4A897;--line:#E4DCCE;--line-strong:#D3C8B4;--terracotta:#B85C38;--sage:#6E7F5E;--sage-tint:#EEF1E8;--terra-tint:#F6E8E0;--amber-tint:#F3ECD9;
@@ -188,13 +188,15 @@ const IconDrop = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColo
 const IconAlert = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M12 8v5" /><circle cx="12" cy="16.5" r=".6" fill="currentColor" /><path d="M10.3 4.3 3.5 16a2 2 0 0 0 1.7 3h13.6a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0Z" /></svg>);
 
 // ── list ───────────────────────────────────────────────────────────────────
+// Two surfaces over the same register: the desktop ledger table, and the phone's one column. Both
+// read through billsApi, so a bill paid on either shows up on the other.
 export default function Bills() {
+  const isMobile = useIsMobile();
+  return isMobile ? <BillsMobile /> : <BillsDesktop />;
+}
+
+function BillsDesktop() {
   const navigate = useNavigate();
-  const qc = useQueryClient();
-  const orgId = useOrgId();
-  const { userId } = useAuth();
-  const { data: profile } = useUserProfile(userId ?? '');
-  const { show } = useSnackbar();
   const { data: bills = [], isLoading } = useQuery({ queryKey: ['bills'], queryFn: loadBills });
   const [site, setSite] = useState('');
   const [vendor, setVendor] = useState('');
@@ -254,25 +256,12 @@ export default function Bills() {
   const errCount = queue.filter(x => x.state === 'error').length;
   const busy = reading + saving > 0;
 
-  // Mint through the shared pipeline (dedupe lives there). The confirm sheet gates on the dup-ack, so
-  // we pass allowDuplicate once the user has chosen to add it anyway.
+  // Mint through the shared pipeline (dedupe lives there), the same call the phone list makes.
+  const mintBill = useMintBill();
   const mint = async (d: BillDraft) => {
-    const res = await intakeCommit(
-      // NOTE: useAuth().userId is the ORG MEMBERSHIP id, not an auth.users id — writing it to
-      // bills.created_by (FK → auth.users) violates the constraint. Provenance rides on created_by_name;
-      // leave created_by null rather than send a non-auth id.
-      { orgId, source: 'bills_page', file: d.file, vendorId: d.vendorId, projectId: d.projectId, createdBy: null, createdByName: (profile as { full_name?: string; name?: string } | undefined)?.full_name ?? (profile as { full_name?: string; name?: string } | undefined)?.name ?? null },
-      { vendor: d.vendorName, billNo: d.billNo, billDate: d.billDate, amount: d.amount, lines: d.lines },
-      d.vendorId, { allowDuplicate: d.allowDuplicate },
-    );
-    // The modal offers the reconcile ("open it") and the override; hand it the collision and let it ask.
-    if (res.status === 'duplicate') return { duplicate: res.existing };
+    const res = await mintBill(d);
+    if (res && 'duplicate' in res && res.duplicate) return res;
     setFlash(true); setTimeout(() => setFlash(false), 1800);
-    show('Bill added');
-    qc.invalidateQueries({ queryKey: ['bills'] });
-    qc.invalidateQueries({ queryKey: ['party_ledger'] });
-    qc.invalidateQueries({ queryKey: ['weekly_payments'] });
-    qc.invalidateQueries({ queryKey: ['party_topay_map'] });
   };
 
   const sites = useMemo(() => [...new Set(bills.map(b => b.site).filter(Boolean))] as string[], [bills]);

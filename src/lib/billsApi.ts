@@ -7,6 +7,7 @@
 //   · PO bill      → payments allocated to that PO (txn_allocations, non-voided)
 //   · consolidated → the vendor's covered payments inside the period (no PO/WO allocation)
 import { supabase } from './supabase';
+import { rankLoosePayments, linkParts } from './billPayMath';
 import { billDateOf, BILL_DATE_COLUMNS } from './partyLedger';
 import { readVendorBill, uploadBillDoc } from './vendorTrackingApi';
 
@@ -29,12 +30,17 @@ export interface BillRow {
   paid: number;
   status: BillStatus;
   ref: BillRef;
+  /** The bill's own photo/PDF, when one was filed with it. The phone's list shows it. */
+  docUrl: string | null;
+  /** How many separate invoices this one upload turned out to hold (1 for the ordinary case).
+   *  The reader tags each line with the invoice it came from, so counting those tags is the
+   *  honest answer — a "×3" on a row means three invoices really are inside that paper. */
+  docCount: number;
 }
 
 export interface BillLine { name: string; spec: string | null; unit: string | null; qty: number; rate: number; amount: number }
 export interface BillPayment { txnId: string; date: string | null; mode: string | null; amount: number }
 export interface BillDetail extends BillRow {
-  docUrl: string | null;
   lines: BillLine[];
   payments: BillPayment[];
   poId: string | null;
@@ -47,11 +53,29 @@ const statusOf = (amount: number, paid: number): BillStatus =>
   paid >= amount - 0.5 ? 'settled' : paid > 0.5 ? 'part' : 'unpaid';
 
 // ── list ─────────────────────────────────────────────────────────────────────
+/**
+ * How many separate invoices one filed paper turned out to hold.
+ *
+ * The reader tags every line with the invoice it came from (`spec: "Bill 3445"`), because one
+ * upload from a vendor is routinely three tax invoices in one PDF. Counting the distinct tags is
+ * the only honest source for the "×3" a row wears — the bill NUMBER can't be counted on, since a
+ * single invoice numbered SVD/26-27-1358 has slashes of its own.
+ */
+function invoiceCount(lines: unknown): number {
+  if (!Array.isArray(lines)) return 1;
+  const tags = new Set<string>();
+  for (const l of lines as Array<Record<string, unknown>>) {
+    const spec = typeof l?.spec === 'string' ? l.spec.trim() : '';
+    if (spec) tags.add(spec);
+  }
+  return Math.max(1, tags.size);
+}
+
 export async function loadBills(): Promise<BillRow[]> {
   const [billsR, poR, stkR, projR, cbR] = await Promise.all([
-    supabase.from('bills').select('id, stakeholder_id, project_id, po_id, bill_no, bill_date, amount, created_at'),
+    supabase.from('bills').select('id, stakeholder_id, project_id, po_id, bill_no, bill_date, amount, created_at, doc_url, lines'),
     supabase.from('purchase_orders')
-      .select(`po_id, stakeholder_id, project_id, vendor_bill_number, ${BILL_DATE_COLUMNS}, status, approval_status`)
+      .select(`po_id, stakeholder_id, project_id, vendor_bill_number, vendor_bill_doc_url, vendor_bill_url, ${BILL_DATE_COLUMNS}, status, approval_status`)
       .eq('approval_status', 'APPROVED')
       .not('status', 'in', '("CANCELLED","Cancelled","cancelled")')
       .not('vendor_bill_amount', 'is', null).gt('vendor_bill_amount', 0),
@@ -108,6 +132,7 @@ export async function loadBills(): Promise<BillRow[]> {
       projectId: b.project_id ?? null, site: b.project_id ? (projName[b.project_id] || b.project_id) : null,
       amount, paid, status: statusOf(amount, paid),
       ref: b.po_id ? { kind: 'po', poId: b.po_id } : { kind: 'none' },
+      docUrl: b.doc_url || null, docCount: invoiceCount(b.lines),
     });
   }
   for (const p of pos) {
@@ -118,6 +143,7 @@ export async function loadBills(): Promise<BillRow[]> {
       billNo: p.vendor_bill_number || null, billDate: billDateOf(p), projectId: p.project_id ?? null,
       site: p.project_id ? (projName[p.project_id] || p.project_id) : null,
       amount, paid, status: statusOf(amount, paid), ref: { kind: 'po', poId: p.po_id },
+      docUrl: p.vendor_bill_doc_url || p.vendor_bill_url || null, docCount: 1,
     });
   }
   const fmtP = (d: string) => new Date(d).toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
@@ -129,6 +155,7 @@ export async function loadBills(): Promise<BillRow[]> {
       billNo: null, billDate: cb.period_to, projectId: null, site: null,
       amount, paid, status: statusOf(amount, paid),
       ref: { kind: 'consolidated', label: `Consolidated ${fmtP(cb.period_from)}–${fmtP(cb.period_to)}` },
+      docUrl: null, docCount: 1,
     });
   }
   // Newest first.
@@ -160,7 +187,8 @@ export async function loadBillDetail(id: string): Promise<BillDetail | null> {
       id, kind: 'po', vendorId: b.stakeholder_id ?? null, vendor: (stk.data as any)?.name || 'Vendor',
       billNo: b.bill_no || null, billDate: b.bill_date || (b.created_at ? String(b.created_at).slice(0, 10) : null),
       projectId: b.project_id ?? null, site: (proj.data as any)?.name || null, amount, paid, status: statusOf(amount, paid),
-      ref: b.po_id ? { kind: 'po', poId: b.po_id } : { kind: 'none' }, docUrl: b.doc_url || null,
+      ref: b.po_id ? { kind: 'po', poId: b.po_id } : { kind: 'none' },
+      docUrl: b.doc_url || null, docCount: invoiceCount(lines),
       lines, payments, poId: b.po_id ?? null, poProjectId: b.project_id ?? null, note: b.note || undefined,
     };
   }
@@ -189,7 +217,8 @@ export async function loadBillDetail(id: string): Promise<BillDetail | null> {
       id, kind: 'po', vendorId: p.stakeholder_id ?? null, vendor: (stk.data as any)?.name || 'Vendor',
       billNo: p.vendor_bill_number || null, billDate: billDateOf(p), projectId: p.project_id ?? null,
       site: (proj.data as any)?.name || null, amount, paid, status: statusOf(amount, paid),
-      ref: { kind: 'po', poId: p.po_id }, docUrl: p.vendor_bill_doc_url || p.vendor_bill_url || null,
+      ref: { kind: 'po', poId: p.po_id },
+      docUrl: p.vendor_bill_doc_url || p.vendor_bill_url || null, docCount: 1,
       lines, payments, poId: p.po_id, poProjectId: p.project_id ?? null,
     };
   }
@@ -213,7 +242,7 @@ export async function loadBillDetail(id: string): Promise<BillDetail | null> {
       id, kind: 'consolidated', vendorId: cb.stakeholder_id ?? null, vendor: (stk.data as any)?.name || 'Vendor',
       billNo: null, billDate: cb.period_to, projectId: null, site: null, amount, paid, status: statusOf(amount, paid),
       ref: { kind: 'consolidated', label: `Consolidated ${fmtP(cb.period_from)}–${fmtP(cb.period_to)}` },
-      docUrl: cb.photo_url || null, lines: [], payments, poId: null, poProjectId: null,
+      docUrl: cb.photo_url || null, docCount: 1, lines: [], payments, poId: null, poProjectId: null,
       periodFrom: cb.period_from, periodTo: cb.period_to, note: cb.note || undefined,
     };
   }
@@ -452,6 +481,126 @@ export async function saveBillAllocations(txnId: string, orgId: string, txnTotal
   const r = data as { success?: boolean; error?: string } | null;
   if (error || !r?.success) throw new Error(r?.error || error?.message || 'Could not record the allocation');
 }
+
+/**
+ * PAY A BILL, from the bill.
+ *
+ * Everywhere else in Briklay a payment starts as a payment and finds its bill afterwards. Standing
+ * in front of the paper on a phone the order is the other way round, and the two facts a payment
+ * needs — who, how much — are already on the screen. So this writes both halves in the order the
+ * ledger expects: the transaction first, then the allocation that says which bill it settles.
+ *
+ * It is the same pair of writes the ledger's own attach-bill flow makes (insert_transaction_with_
+ * allocations, then set_txn_allocations); nothing here is a private path to money.
+ */
+export interface PayBillInput {
+  orgId: string;
+  bill: { id: string; kind: 'bill' | 'po'; vendorId: string | null; projectId: string | null };
+  amount: number;
+  date: string;                 // yyyy-mm-dd
+  mode: 'NEFT' | 'UPI' | 'Cheque' | 'Cash';
+  remarks?: string | null;
+}
+export async function payBill(input: PayBillInput): Promise<string> {
+  const { orgId, bill, amount, date, mode } = input;
+  if (!(amount > 0)) throw new Error('Enter an amount to pay');
+  const txnId = `TXN-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+  const { error } = await supabase.rpc('insert_transaction_with_allocations', {
+    p_txn: {
+      txn_id: txnId, stakeholder_id: bill.vendorId, date, total_amount: amount,
+      payment_mode: mode, category: 'Material Purchase',
+      remarks: input.remarks ?? null, ai_flag_status: 'Clean', ai_flag_data: {}, org_id: orgId,
+    },
+    p_allocations: [{ project_id: bill.projectId ?? '', order_type: null, order_ref: null, milestone_id: null, allocated_amount: amount }],
+  });
+  if (error) throw error;
+  // Second write: the same allocation, now naming the bill it settles.
+  await saveBillAllocations(txnId, orgId, amount, [{ id: rawBillId(bill.id), kind: bill.kind, projectId: bill.projectId, amount }], bill.projectId);
+  return txnId;
+}
+
+/**
+ * A payment already on the books that could be the one settling this bill.
+ *
+ * Site offices pay first and file the paper days later, so by the time a bill is recorded its money
+ * is often already in the ledger with nothing to point at. These are this vendor's payments with
+ * something still unattached — the same project first (a payment carrying no project at all is
+ * still offered; it has simply not been placed yet), and within that, the one whose loose amount is
+ * nearest what this bill is asking for. That closest match is what a person is looking for, so it
+ * comes to the top rather than being hunted for by date.
+ */
+export interface LinkablePayment {
+  txnId: string; date: string | null; mode: string | null;
+  total: number;
+  /** What of it is not yet spoken for by a bill or an order. */
+  free: number;
+  projectId: string | null;
+  sameProject: boolean;
+  /** Everything already allocated on that payment — set_txn_allocations replaces the whole set,
+   *  so linking must hand these back untouched alongside the new part. */
+  parts: Array<{ project_id: string; order_type: string; order_ref: string; milestone_id: string; bill_id: string; allocated_amount: number }>;
+}
+export async function loadLinkablePayments(
+  stakeholderId: string, projectId: string | null, target: number,
+): Promise<LinkablePayment[]> {
+  if (!stakeholderId) return [];
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('txn_id, date, payment_mode, total_amount, status, txn_allocations(project_id, order_type, order_ref, milestone_id, bill_id, allocated_amount)')
+    .eq('stakeholder_id', stakeholderId)
+    .order('date', { ascending: false })
+    .limit(120);
+  if (error) throw error;
+
+  interface AllocRow { project_id?: string | null; order_type?: string | null; order_ref?: string | null; milestone_id?: string | null; bill_id?: string | null; allocated_amount?: number | string | null }
+  interface TxnRow { txn_id: string; date?: string | null; payment_mode?: string | null; total_amount?: number | string | null; status?: string | null; txn_allocations?: AllocRow[] | null }
+
+  const out: LinkablePayment[] = [];
+  for (const t of (data ?? []) as TxnRow[]) {
+    if (t.status === 'Voided') continue;
+    const allocs: AllocRow[] = t.txn_allocations ?? [];
+    // "Spoken for" is an allocation that names something — a bill or an order. A part with neither
+    // is the without-bills bucket: money sitting on the payment, free to be pointed at this bill.
+    const spoken = allocs.reduce((s, a) => s + ((a.bill_id || a.order_ref) ? num(a.allocated_amount) : 0), 0);
+    const total = num(t.total_amount);
+    const free = Math.round((total - spoken) * 100) / 100;
+    if (free <= 0.5) continue;
+    const txnProject = allocs.find(a => a.project_id)?.project_id ?? null;
+    // Same site, or not yet placed on one. A payment already tied to a different site is not this
+    // bill's money and is never offered.
+    if (projectId && txnProject && txnProject !== projectId) continue;
+    out.push({
+      txnId: t.txn_id, date: t.date ?? null, mode: t.payment_mode ?? null,
+      total, free, projectId: txnProject, sameProject: !!projectId && txnProject === projectId,
+      parts: allocs.map(a => ({
+        project_id: a.project_id ?? '', order_type: a.order_type ?? '', order_ref: a.order_ref ?? '',
+        milestone_id: a.milestone_id ?? '', bill_id: a.bill_id ?? '', allocated_amount: num(a.allocated_amount),
+      })),
+    });
+  }
+  return rankLoosePayments(out, target);
+}
+
+/**
+ * Point an existing payment at this bill.
+ *
+ * set_txn_allocations replaces a payment's whole allocation set, so everything it already carried
+ * is handed back unchanged and only the free part is re-pointed: whatever the bill still needs, up
+ * to what the payment has loose. Any remainder stays exactly where it was — the without-bills
+ * bucket — so linking can never move money the payment had already placed somewhere else.
+ */
+export async function linkPaymentToBill(
+  orgId: string, pay: LinkablePayment,
+  bill: { id: string; kind: 'bill' | 'po'; projectId: string | null }, amount: number,
+): Promise<void> {
+  const parts = linkParts(pay, { rawId: rawBillId(bill.id), kind: bill.kind, projectId: bill.projectId }, amount);
+  const { data, error } = await supabase.rpc('set_txn_allocations', { p_txn_id: pay.txnId, p_org_id: orgId, p_parts: parts });
+  const r = data as { success?: boolean; error?: string } | null;
+  if (error || !r?.success) throw new Error(r?.error || error?.message || 'Could not link that payment');
+}
+
+/** A list row's id is prefixed for routing ('bl~<uuid>', 'po~<poId>'); the allocation wants the bare one. */
+const rawBillId = (id: string) => id.replace(/^(bl|po|cb)~/, '');
 
 // The inert "towards PO-xxx" advance memo — pure tracking on the transaction, never a money link.
 export async function setAdvanceMemo(txnId: string, poRef: string | null): Promise<void> {
