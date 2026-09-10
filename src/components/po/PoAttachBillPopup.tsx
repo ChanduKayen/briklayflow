@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { AttachBillRow } from '../../lib/billsApi';
+import { resolveDocUrl } from '../../lib/storage';
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 const isPdf = (u: string) => /\.pdf(\?|#|$)/i.test(u);
@@ -63,6 +64,21 @@ export function PoAttachBillPopup({ bills, poProjectId, poVendorId, onLink, onUp
   const selected = bills.find((b) => b.id === selectedId && !b.linked) || null;
   const anyAttached = bills.some((b) => b.linked);
 
+  // The documents bucket is PRIVATE — a stored doc_url is a dead public URL until re-signed. Sign each
+  // visible bill's doc on demand (short-lived signed URLs) so the thumbnails/PDF previews actually render.
+  const [signed, setSigned] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let active = true;
+    const todo = shown.filter((b) => b.docUrl && !signed[b.id]);
+    if (!todo.length) return;
+    void Promise.all(todo.map(async (b) => [b.id, await resolveDocUrl(b.docUrl)] as const)).then((pairs) => {
+      if (!active) return;
+      setSigned((prev) => { const n = { ...prev }; pairs.forEach(([id, u]) => { if (u) n[id] = u; }); return n; });
+    });
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shown]);
+
   async function attach() {
     if (!selectedId || linking || done) return;
     setLinking(true);
@@ -119,11 +135,13 @@ export function PoAttachBillPopup({ bills, poProjectId, poVendorId, onLink, onUp
                   onClick={() => { if (!b.linked && !done) setSelectedId(isSel ? null : b.id); }} disabled={done || b.linked}
                   title={b.linked ? `Already on ${b.poId || 'an order'}` : undefined}>
                   <span className="pabx-thumb">
-                    {b.docUrl && isPdf(b.docUrl)
-                      ? <object className="pabx-media" data={`${b.docUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH&page=1`} type="application/pdf" aria-label="bill" />
-                      : b.docUrl
-                        ? <img className="pabx-media" src={b.docUrl} alt="" loading="lazy" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
-                        : null}
+                    {(() => {
+                      const src = signed[b.id];
+                      if (!src) return null;   // still resolving (or nothing) → the doc icon shows underneath
+                      return isPdf(b.docUrl || '')
+                        ? <object className="pabx-media" data={`${src}#toolbar=0&navpanes=0&scrollbar=0&view=FitH&page=1`} type="application/pdf" aria-label="bill" />
+                        : <img className="pabx-media" src={src} alt="" loading="lazy" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />;
+                    })()}
                     <span className="pabx-thumb-ic"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5M9 13h6M9 17h4" /></svg></span>
                     <span className="pabx-check"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></svg></span>
                     {b.docUrl && isPdf(b.docUrl) && <span className="pabx-pdf">PDF</span>}
