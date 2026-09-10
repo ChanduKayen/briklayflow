@@ -241,7 +241,7 @@ const WOX_CSS = `
 @keyframes woxstamp{60%{opacity:1;transform:rotate(-8deg) scale(.95)}100%{opacity:1;transform:rotate(-8deg) scale(1)}}
 .wox.locked .sheet{opacity:.75;pointer-events:none}
 
-.woxbar{position:fixed;left:0;right:0;bottom:0;background:rgba(246,242,234,.85);backdrop-filter:blur(10px);border-top:1px solid #E4DCD0;z-index:40}
+.woxbar{position:fixed;left:0;right:0;bottom:0;min-height:0;background:rgba(246,242,234,.85);backdrop-filter:blur(10px);border-top:1px solid #E4DCD0;z-index:40}
 @media (min-width:768px){.woxbar{left:18rem}}
 .woxbar .in{max-width:1020px;margin:0 auto;padding:12px 32px;display:flex;align-items:center;gap:10px}
 .woxbar .stat{margin-right:auto;color:#6E635B;font-size:13px;line-height:1.4}
@@ -812,8 +812,9 @@ export default function NewWorkOrder({ session }: { session: Session }) {
         </div>
       </div>
 
-      {/* fixed bottom bar */}
-      <div className="woxbar">
+      {/* fixed bottom bar — carries the `wox` class so the scoped .btn/.svg/.alt styles + design tokens
+          reach its buttons (it renders as a sibling of the main .wox block, not a child). */}
+      <div className="wox woxbar">
         <div className="in">
           <div className="stat">
             <b>{namedStages.length ? `${namedStages.length} stage${namedStages.length > 1 ? 's' : ''}` : 'No stages'}</b>
