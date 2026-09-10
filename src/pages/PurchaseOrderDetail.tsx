@@ -19,6 +19,7 @@ import { RateCheckModal } from '../components/po/RateCheckModal';
 import { useIsMobile } from '../lib/useIsMobile';
 import { loadBillsForPO, convertLegacyPoBill, getBillsForAttach, linkExistingBillToPO, poPaidRollup } from '../lib/billsApi';
 import { PoAttachBillPopup } from '../components/po/PoAttachBillPopup';
+import { poPayState, poPayLabel } from '../lib/poLifecycle';
 
 // The PO is show-only for payments: its paid/balance is rolled up from its BILLS (v_po_paid), and payments
 // are recorded in the ledger / against a bill — not minted here. Flip to re-enable the on-PO record flow.
@@ -1118,6 +1119,11 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const payBase = billForBalance > 0 ? billForBalance : orderValue;
   const balNum = payBase - paidTotal;
   const paidDone = paidTotal > 0 && balNum <= 0;
+  // The PO's payment status — the only three states, derived from paid vs billed (never the stale column).
+  // null until there's a bill to pay against.
+  const payState = payBase > 0 ? poPayState(paidTotal, payBase) : null;
+  const payPillStyle: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 12px', borderRadius: 999, fontSize: 12.5, fontWeight: 700,
+    ...(payState === 'paid' ? { background: '#EAF6ED', color: '#2FA04C' } : payState === 'partial' ? { background: '#FBF0DF', color: '#B45309' } : { background: '#FBEBE6', color: '#C4502B' }) };
 
   // ── Delivered-vs-paying: what's actually landed (and accepted) against what you're about to pay ──
   // Value the accepted quantities at the ordered rate, capped per line at what was ordered — anything
@@ -1299,6 +1305,14 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
 
           <div className="m-sec">
             <div className="m-hh">Money</div>
+            {payState && !cancelled && (
+              <div style={{ marginBottom: 8 }}>
+                <span style={payPillStyle}>
+                  <span style={{ width: 7, height: 7, borderRadius: 999, background: 'currentColor' }} />
+                  {poPayLabel[payState]}{payState !== 'paid' && balNum > 0 ? ` · ${inr0(balNum)} to pay` : ''}
+                </span>
+              </div>
+            )}
             <div className="m-card">
               <div className="m-row"><span className="k">Ordered</span><span className={`v${orderValue > 0 ? '' : ' zero'}`}>{orderValue > 0 ? inr0(orderValue) : '₹0 · no rates'}</span></div>
               <div className="m-row"><span className="k">Billed</span>{overOrder && <span className="flag">over order</span>}<span className={`v${billForBalance > 0 ? '' : ' zero'}`}>{billForBalance > 0 ? inr0(billForBalance) : '—'}</span></div>
@@ -1699,11 +1713,21 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
         {/* Bill vs order — per-line variance from the recorded bills' stored lines (no re-read). */}
         {hasBill && <PoBillVariance poLines={(lineItems ?? []) as any} bills={billEntities} />}
 
+        {/* payment status — the one clear pill (Unpaid / Partially paid / Paid) */}
+        {payState && !cancelled && (
+          <div style={{ margin: '0 0 12px' }}>
+            <span style={payPillStyle}>
+              <span style={{ width: 7, height: 7, borderRadius: 999, background: 'currentColor' }} />
+              {poPayLabel[payState]}{payState !== 'paid' && balNum > 0 ? ` · ${inr0(balNum)} to pay` : ''}
+            </span>
+          </div>
+        )}
+
         {/* money */}
         <div className="money">
           <div><small>Ordered</small><span className="mono">{inr0(orderValue)}</span><div className="sub">{fmtDate(po.date_issued)}</div></div>
           <div><small>Billed</small><span className="mono">{billForBalance > 0 ? inr0(billForBalance) : '—'}</span><div className="sub">{billForBalance > 0 ? (hasBill ? (billNo || 'Vendor bill') : 'Read from bill · not yet saved') + (billForBalance > subTotal ? ` · ${inr0(billForBalance - subTotal)} over order` : ' · matches order') : 'Estimate used until bill arrives'}</div></div>
-          <div><small>Paid</small><span className="mono">{inr0(paidTotal)}</span><div className="sub">{paidTotal > 0 ? `${activeTxns.length} payment${activeTxns.length !== 1 ? 's' : ''}` : 'No payments'}</div></div>
+          <div><small>Paid</small><span className="mono">{inr0(paidTotal)}</span><div className="sub">{payState ? poPayLabel[payState] : (paidTotal > 0 ? `${activeTxns.length} payment${activeTxns.length !== 1 ? 's' : ''}` : 'No payments')}</div></div>
           <div className={`bal ${balNum > 0 ? 'owe' : 'nil'}`}><small>Balance to vendor</small><span className="mono">{balNum > 0 ? inr0(balNum) : (balNum < 0 ? 'Over by ' + inr0(-balNum) : 'Nil')}</span><div className="sub">{balNum > 0 ? (billForBalance > 0 ? 'Against vendor bill' : 'On credit · against estimate') : (balNum < 0 ? 'Refund or adjust next PO' : 'Settled in full')}</div></div>
         </div>
 

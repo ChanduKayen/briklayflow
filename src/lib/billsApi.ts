@@ -307,8 +307,16 @@ export async function poPaidRollup(poId: string, billIds: string[]): Promise<{ t
       .select('bill_id, allocated_amount, transactions(status)').in('bill_id', billIds);
     (data ?? []).forEach((a: any) => { if (a.transactions?.status === 'Voided' || !a.bill_id) return; perBill[a.bill_id] = (perBill[a.bill_id] || 0) + num(a.allocated_amount); });
   }
-  const { data: tot } = await supabase.from('v_po_paid').select('paid').eq('po_id', poId).maybeSingle();
-  return { total: num((tot as any)?.paid), perBill };
+  // Direct PO payments (order_type='PO') that AREN'T already one of this PO's bill payments — so a legacy
+  // direct payment counts, but a bill-settling payment tagged both ways isn't double-counted. Computed
+  // client-side (not v_po_paid) so the rollup is correct whether or not that view migration is applied.
+  const billSet = new Set(billIds);
+  let direct = 0;
+  const { data: dta } = await supabase.from('txn_allocations')
+    .select('allocated_amount, bill_id, transactions(status)').eq('order_type', 'PO').eq('order_ref', poId);
+  (dta ?? []).forEach((a: any) => { if (a.transactions?.status === 'Voided') return; if (a.bill_id && billSet.has(a.bill_id)) return; direct += num(a.allocated_amount); });
+  const total = Object.values(perBill).reduce((s, v) => s + v, 0) + direct;
+  return { total, perBill };
 }
 
 // Σ billed per PO, for a batch of POs (the PO list). Only counts first-class bills.

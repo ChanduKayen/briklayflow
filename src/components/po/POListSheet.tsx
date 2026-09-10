@@ -5,6 +5,7 @@
 // Used by both the main /purchase-orders page and the per-project PO list — pass projectId to scope.
 import type React from 'react';
 import { useCallback, useMemo, useState, useTransition } from 'react';
+import { poPayState } from '../../lib/poLifecycle';
 import { useSearch, useSearchScope } from '../search/searchScope';
 import SearchBar from '../search/SearchBar';
 import PartyFilterChip from '../search/PartyFilterChip';
@@ -322,14 +323,20 @@ function usePOListData(projectId?: string) {
   const paidQ = useQuery({
     queryKey: ['po_list_paid', projectId ?? 'all'],
     queryFn: async () => {
+      // A PO's paid rolls up from its BILLS: a payment tagged order_type='PO' OR one against a bill that
+      // sits on a PO (bill_id → bills.po_id). Each allocation is one row → counted once (its PO is the
+      // order_ref if present, else the bill's PO), so a bill-settling payment tagged both ways isn't doubled.
       const { data, error } = await supabase
         .from('txn_allocations')
-        .select('order_ref, allocated_amount, transactions!inner(status)')
-        .eq('order_type', 'PO')
+        .select('order_type, order_ref, bill_id, allocated_amount, transactions!inner(status), bills(po_id)')
+        .or('order_type.eq.PO,bill_id.not.is.null')
         .neq('transactions.status', 'Voided');
       if (error) throw error;
       const m: Record<string, number> = {};
-      (data ?? []).forEach((r: any) => { if (r.order_ref) m[r.order_ref] = (m[r.order_ref] || 0) + (Number(r.allocated_amount) || 0); });
+      (data ?? []).forEach((r: any) => {
+        const poId = (r.order_type === 'PO' && r.order_ref) ? r.order_ref : (r.bills?.po_id ?? null);
+        if (poId) m[poId] = (m[poId] || 0) + (Number(r.allocated_amount) || 0);
+      });
       return m;
     },
   });
@@ -688,9 +695,13 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
       if (p.cancelled) { tone = 'dim-s'; st = 'Cancelled'; }
       else if (p.approvalStatus === 'PENDING') { tone = 'gold-s'; st = 'Awaiting approval'; sub = `· ${dstr(D(p.createdAt))}${p.by ? ', ' + p.by : ''}`; }
       else if (p.billed <= 0) { tone = 'motion'; st = 'Awaiting bill'; sub = goodsSub || (full(p) ? `· all at site ${dstr(D(p.recv))}` : ''); }
-      else if (b > 0.5) { tone = 'needs'; st = p.paid > 0 ? `Part paid · ${fmt(b)} pending` : `Payment pending · ${fmt(b)}`; sub = goodsSub; }
-      else if (!full(p)) { tone = 'motion'; st = 'Yet to receive at site'; sub = goodsSub; }
-      else { tone = 'landed'; st = 'Done'; sub = `· ${dstr(D(p.recv))}`; }
+      else {
+        // Payment is the ONLY three states, derived from paid vs billed. Delivery rides the sub-line.
+        const ps = poPayState(p.paid, p.billed);
+        if (ps === 'unpaid') { tone = 'needs'; st = `Unpaid · ${fmt(b)}`; sub = goodsSub; }
+        else if (ps === 'partial') { tone = 'needs'; st = `Partially paid · ${fmt(b)} pending`; sub = goodsSub; }
+        else { tone = 'landed'; st = 'Paid'; sub = full(p) ? `· all at site ${dstr(D(p.recv))}` : (goodsSub || ''); }
+      }
       const notSent = !p.cancelled && !p.sent && p.approvalStatus !== 'PENDING';
       // Amount: red "to pay" once there's a real bill / it's landed; plain ordered value in transit; — when nothing owed.
       let amtNode: React.ReactNode = <span className="amt zero">—</span>;

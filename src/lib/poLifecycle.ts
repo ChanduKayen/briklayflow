@@ -13,6 +13,19 @@
 export type PoGateTone = 'pending' | 'rejected' | 'attention';
 export interface PoGate { label: string; tone: PoGateTone }
 
+// The PO's PAYMENT status — the ONLY three states, DERIVED from money actually paid (rolled up from the
+// PO's bills) vs what's billed. Never read from the stored `status` column, which drifts (a bill paid via
+// bill_id never updated it; createDeliveredBillPO could stamp PAID up front). billed<=0 = no bill yet.
+export type PoPayState = 'unpaid' | 'partial' | 'paid';
+export function poPayState(paid: number, billed: number): PoPayState {
+  const p = Number(paid) || 0, b = Number(billed) || 0;
+  if (b <= 0) return 'unpaid';
+  if (p >= b - 0.5) return 'paid';
+  if (p > 0.5) return 'partial';
+  return 'unpaid';
+}
+export const poPayLabel: Record<PoPayState, string> = { unpaid: 'Unpaid', partial: 'Partially paid', paid: 'Paid' };
+
 /** A priced PO has a real value (header total or any line amount). A request promoted
  *  to a PO lands price-less (rate 0) and must be finished before it's a real order. */
 export function poIsPriced(po: { total_value?: unknown; order_value?: unknown; items?: unknown }): boolean {
