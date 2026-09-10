@@ -1735,7 +1735,7 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
       <input ref={poBillInputRef} type="file" accept="image/*,application/pdf" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) setPoBillFile(f); }} />
       {poBillFile && (
         <PoBillSheet
-          poId={poId!} orgId={po.org_id} stakeholderId={po.stakeholder_id} projectId={po.project_id}
+          orgId={po.org_id} stakeholderId={po.stakeholder_id} projectId={po.project_id}
           vendorName={vendor?.name || 'Vendor'} initialFile={poBillFile}
           onClose={() => setPoBillFile(null)}
           onDone={() => { refetchPoBills(); qc.invalidateQueries({ queryKey: ['po_detail', poId] }); qc.invalidateQueries({ queryKey: ['bills'] }); qc.invalidateQueries({ queryKey: ['po_list_sheet'] }); qc.invalidateQueries({ queryKey: ['attachable_bills', poId] }); qc.invalidateQueries({ queryKey: ['po_paid_rollup', poId] }); }}

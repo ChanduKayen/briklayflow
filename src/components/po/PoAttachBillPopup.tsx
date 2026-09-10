@@ -3,7 +3,6 @@
 // thumbnails (like files): tap one to select it (green tick), then Attach. "Upload a new bill" saves it to
 // the Bills module and it loads into the grid, auto-selected. Platform cream/terracotta, states + motion.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import type { AttachableBill } from '../../lib/billsApi';
 
@@ -13,12 +12,13 @@ export function PoAttachBillPopup({ bills, vendorName, poProjectId, onLink, onUp
   bills: AttachableBill[]; vendorName: string; poProjectId: string | null;
   onLink: (billId: string) => Promise<void>; onUploadNew: () => void; onClose: () => void;
 }) {
-  const navigate = useNavigate();
+  const [showAll, setShowAll] = useState(false);   // include bills already on an order (shown, not attachable)
+  const pool = useMemo(() => (showAll ? bills : bills.filter((b) => !b.linked)), [bills, showAll]);
   const sites = useMemo(() => {
     const m = new Map<string, string>();
-    bills.forEach((b) => { if (b.projectId) m.set(b.projectId, b.projectName || b.projectId); });
+    pool.forEach((b) => { if (b.projectId) m.set(b.projectId, b.projectName || b.projectId); });
     return [...m.entries()].map(([id, name]) => ({ id, name }));
-  }, [bills]);
+  }, [pool]);
   const [filter, setFilter] = useState<string>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [linking, setLinking] = useState(false);
@@ -26,20 +26,24 @@ export function PoAttachBillPopup({ bills, vendorName, poProjectId, onLink, onUp
 
   // Default the site filter to the PO's own site once we know the bills carry it.
   useEffect(() => { if (poProjectId && sites.some((s) => s.id === poProjectId)) setFilter(poProjectId); }, [poProjectId, sites]);
+  // If the current site filter no longer exists in the pool (e.g. after toggling), fall back to All.
+  useEffect(() => { if (filter !== 'all' && !sites.some((s) => s.id === filter)) setFilter('all'); }, [sites, filter]);
 
-  // A newly-uploaded bill lands in the grid → auto-select it (green tick), ready to attach.
+  // A newly-uploaded bill (unlinked) lands in the grid → auto-select it (green tick), like any other tile;
+  // one click unselects it. Shown so the user chooses to attach it.
   const seen = useRef<Set<string> | null>(null);
   useEffect(() => {
     const ids = new Set(bills.map((b) => b.id));
     if (seen.current) {
-      const fresh = bills.find((b) => !seen.current!.has(b.id));
+      const fresh = bills.find((b) => !seen.current!.has(b.id) && !b.linked);
       if (fresh) { setSelectedId(fresh.id); setFilter('all'); }
     }
     seen.current = ids;
   }, [bills]);
 
-  const shown = filter === 'all' ? bills : bills.filter((b) => b.projectId === filter);
-  const selected = bills.find((b) => b.id === selectedId) || null;
+  const shown = filter === 'all' ? pool : pool.filter((b) => b.projectId === filter);
+  const selected = bills.find((b) => b.id === selectedId && !b.linked) || null;
+  const anyLinked = bills.some((b) => b.linked);
 
   async function attach() {
     if (!selectedId || linking || done) return;
@@ -74,28 +78,38 @@ export function PoAttachBillPopup({ bills, vendorName, poProjectId, onLink, onUp
             <div className="pabx-empty">
               <svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5" /></svg>
               <p>No bills{filter === 'all' ? '' : ' on this site'} for {vendorName} yet.</p>
-              <span>Upload one below — it's saved to the Bills module and attached here.</span>
+              <span>Upload one below — it's saved to the Bills module and lands here to attach.</span>
             </div>
           ) : (
             <div className="pabx-grid">
-              {shown.map((b) => (
-                <button key={b.id} className={`pabx-tile${selectedId === b.id ? ' on' : ''}`} onClick={() => setSelectedId(b.id)} disabled={done}>
+              {shown.map((b) => {
+                const isSel = selectedId === b.id && !b.linked;
+                return (
+                <button key={b.id} className={`pabx-tile${isSel ? ' on' : ''}${b.linked ? ' linked' : ''}`}
+                  onClick={() => { if (!b.linked && !done) setSelectedId(isSel ? null : b.id); }} disabled={done || b.linked}
+                  title={b.linked ? `Already on ${b.poId || 'an order'}` : undefined}>
                   <span className="pabx-thumb">
                     {b.docUrl
                       ? <img src={b.docUrl} alt="" loading="lazy" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
                       : null}
                     <span className="pabx-thumb-ic"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5M9 13h6M9 17h4" /></svg></span>
                     <span className="pabx-check"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></svg></span>
+                    {b.linked && <span className="pabx-onpo">On order</span>}
                   </span>
                   <span className="pabx-cap">
                     <b>{inr(b.amount)}</b>
-                    <small>{b.billNo ? `#${b.billNo}` : (b.billDate || 'bill')}</small>
+                    <small>{b.linked ? (b.poId || 'on an order') : (b.billNo ? `#${b.billNo}` : (b.billDate || 'bill'))}</small>
                   </span>
                 </button>
-              ))}
+                );
+              })}
             </div>
           )}
-          <button className="pabx-showall" onClick={() => { onClose(); navigate('/bills'); }}>Show all bills in the Bills module →</button>
+          {anyLinked && (
+            <button className="pabx-showall" onClick={() => setShowAll((v) => !v)}>
+              {showAll ? 'Show only bills I can attach' : 'Show all bills (including ones on an order) →'}
+            </button>
+          )}
         </div>
 
         <div className="pabx-foot">
@@ -154,6 +168,11 @@ const PABX_CSS = `
 .pabx-cap{display:flex;flex-direction:column;line-height:1.2}
 .pabx-cap b{font-size:12.5px;font-weight:600}
 .pabx-cap small{font-size:10.5px;color:#9A8C77}
+.pabx-tile.linked{cursor:default;opacity:.7}
+.pabx-tile.linked .pabx-thumb{border-color:#ECE5D9;filter:grayscale(.35)}
+.pabx-tile.linked:hover .pabx-thumb{transform:none;border-color:#ECE5D9}
+.pabx-onpo{position:absolute;bottom:5px;left:5px;right:5px;z-index:2;font-size:9px;font-weight:600;color:#fff;
+  background:rgba(42,36,28,.72);border-radius:5px;padding:2px 4px;text-align:center;letter-spacing:.02em}
 
 .pabx-empty{display:flex;flex-direction:column;align-items:center;text-align:center;gap:4px;padding:26px 16px;color:#9A8C77}
 .pabx-empty svg{width:26px;height:26px;fill:none;stroke:#C9BFAF;stroke-width:1.5;stroke-linejoin:round;margin-bottom:4px}

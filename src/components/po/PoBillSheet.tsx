@@ -8,8 +8,8 @@
 import NewBillModal from '../bills/NewBillModal';
 import { intakeCommit } from '../../lib/billIntake';
 
-export function PoBillSheet({ poId, orgId, stakeholderId, projectId, vendorName, initialFile, onClose, onDone }: {
-  poId: string; orgId: string; stakeholderId: string | null; projectId: string | null; vendorName: string;
+export function PoBillSheet({ orgId, stakeholderId, projectId, vendorName, initialFile, onClose, onDone }: {
+  orgId: string; stakeholderId: string | null; projectId: string | null; vendorName: string;
   initialFile?: File | null; onClose: () => void; onDone: () => void;
 }) {
   if (!stakeholderId) return null;   // a PO with no vendor has nothing to bill against
@@ -26,7 +26,9 @@ export function PoBillSheet({ poId, orgId, stakeholderId, projectId, vendorName,
         // Capped, so a stuck writer surfaces an error instead of an endless "Filing…".
         const res = await Promise.race([
           intakeCommit(
-            { orgId, source: 'po', file: d.file, vendorId: stakeholderId, poId, projectId },
+            // poId: null → the bill is saved to the Bills module UNLINKED, then lands in the popup grid where
+            // the user selects it and attaches (one attach point). The PO never auto-owns an uploaded bill.
+            { orgId, source: 'po', file: d.file, vendorId: stakeholderId, poId: null, projectId },
             { vendor: d.vendorName || vendorName, billNo: d.billNo, billDate: d.billDate, amount: d.amount, lines: d.lines },
             stakeholderId, { allowDuplicate: d.allowDuplicate },
           ),

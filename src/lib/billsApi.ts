@@ -433,20 +433,21 @@ export async function createBill(input: NewBillInput): Promise<string> {
   return (data as any).id;
 }
 
-export interface AttachableBill { id: string; billNo: string | null; billDate: string | null; amount: number; docUrl: string | null; projectId: string | null; projectName: string | null }
+export interface AttachableBill { id: string; billNo: string | null; billDate: string | null; amount: number; docUrl: string | null; projectId: string | null; projectName: string | null; linked: boolean; poId: string | null }
 
-/** Bills for THIS vendor that aren't already tied to a PO — the pick-list for a PO's "attach bill", so an
- *  already-uploaded bill is LINKED rather than uploaded (and duplicated) again. Carries the site name for the
- *  project filter. Newest first. */
+/** ALL of THIS vendor's bills for the PO's "Bills" popup — unlinked ones are attachable; ones already on a PO
+ *  carry `linked` (shown, not attachable) so "show all bills" can reveal the full set in the same popup.
+ *  Carries the site name for the project filter. Newest first. */
 export async function getAttachableBills(orgId: string, stakeholderId: string): Promise<AttachableBill[]> {
   const { data, error } = await supabase.from('bills')
-    .select('id, bill_no, bill_date, amount, doc_url, project_id, created_at, projects(name)')
-    .eq('org_id', orgId).eq('stakeholder_id', stakeholderId).is('po_id', null)
+    .select('id, bill_no, bill_date, amount, doc_url, project_id, po_id, created_at, projects(name)')
+    .eq('org_id', orgId).eq('stakeholder_id', stakeholderId)
     .order('bill_date', { ascending: false }).order('created_at', { ascending: false });
   if (error) throw error;
   return (data ?? []).map((b: any) => ({
     id: b.id, billNo: b.bill_no ?? null, billDate: b.bill_date ?? (b.created_at ? String(b.created_at).slice(0, 10) : null),
     amount: num(b.amount), docUrl: b.doc_url ?? null, projectId: b.project_id ?? null, projectName: b.projects?.name ?? null,
+    linked: !!b.po_id, poId: b.po_id ?? null,
   }));
 }
 
