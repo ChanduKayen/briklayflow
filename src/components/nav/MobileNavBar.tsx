@@ -316,11 +316,12 @@ const CSS = `
 .mnav-rail{flex:1; display:flex; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; padding:0 14px 0 2px; max-width:999px;
   transition:max-width .32s, opacity .25s;
   /* The rail owns horizontal gestures: a sideways swipe here scrolls the rail, NEVER the page, and its
-     scroll never chains out to the body. Gentle snap + the detent haptic give a physical-dial feel. */
-  touch-action:pan-x; overscroll-behavior:contain; scroll-snap-type:x proximity;
+     scroll never chains out to the body. FREE momentum scroll (no scroll-snap) — a small swipe nudges a
+     little, a flick coasts; snap was centering a tab and, on this short rail, jumped every swipe to the end
+     ("one swipe = complete scroll"). The detent haptic on scroll keeps the physical-dial feel. */
+  touch-action:pan-x; overscroll-behavior:contain;
   -webkit-mask-image:linear-gradient(to right,#000 0,#000 calc(100% - 30px),transparent);
   mask-image:linear-gradient(to right,#000 0,#000 calc(100% - 30px),transparent)}
-.mnav-tab{scroll-snap-align:center}
 .mnav-bar.scrolled .mnav-rail{
   -webkit-mask-image:linear-gradient(to right,transparent 0,#000 22px,#000 calc(100% - 34px),transparent);
   mask-image:linear-gradient(to right,transparent 0,#000 22px,#000 calc(100% - 34px),transparent)}
