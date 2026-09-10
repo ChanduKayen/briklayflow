@@ -210,7 +210,8 @@ const ATDX_CSS = `
   padding:4px 8px;opacity:0;pointer-events:none;transition:opacity .15s;z-index:30}
 .atdx .cell:hover .ctip{opacity:1}
 
-.atdx .seg{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:2px;background:var(--cream);margin-top:6px}
+.atdx .segwrap{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px}
+.atdx .seg{display:inline-flex;align-items:center;flex-wrap:nowrap;white-space:nowrap;border:1px solid var(--line);border-radius:999px;padding:2px;background:var(--cream)}
 
 .atdx .oncontract{font-size:12px;color:var(--terracotta);font-weight:500;text-decoration:underline;text-decoration-color:color-mix(in srgb,var(--terracotta) 40%,transparent);text-underline-offset:2px}
 .atdx .oncontract:hover{text-decoration-color:var(--terracotta)}
@@ -231,7 +232,7 @@ const ATDX_CSS = `
 .atdx .pp-link:disabled{opacity:.6;cursor:default}
 .atdx .pp-cancel{font-size:12.5px;color:var(--walnut-3)}
 .atdx .assumed{font-size:11px;color:#a9781c;font-style:italic;margin-left:6px;cursor:help}
-.atdx .measurebasis{margin-left:8px;font-size:11px;color:var(--walnut-3);background:none;border:0;cursor:pointer;text-decoration:underline;text-decoration-color:var(--line-2);text-underline-offset:2px}
+.atdx .measurebasis{white-space:nowrap;font-size:11px;color:var(--walnut-3);background:none;border:0;cursor:pointer;text-decoration:underline;text-decoration-color:var(--line-2);text-underline-offset:2px}
 .atdx .measurebasis:hover{color:var(--terracotta);text-decoration-color:var(--terracotta)}
 .atdx .measurebasis.on{color:var(--sage);font-weight:500;text-decoration-color:color-mix(in srgb,var(--sage) 45%,transparent)}
 .atdx .seg button{padding:2px 10px;border-radius:999px;font-size:12px;color:var(--walnut-3)}
@@ -537,7 +538,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
           return;
         }
         // ── CONTRACT crew → heading row + a row per live stage ──
-        const seg = `<div class="seg"><button data-basis="${si}.${ci}.contract" aria-pressed="${onContract}">Contract</button><button data-basis="${si}.${ci}.labour" aria-pressed="${!onContract}">Labour</button>${assumed}${measureToggle}</div>`;
+        const seg = `<div class="segwrap"><div class="seg"><button data-basis="${si}.${ci}.contract" aria-pressed="${onContract}">Contract</button><button data-basis="${si}.${ci}.labour" aria-pressed="${!onContract}">Labour</button></div>${assumed}${measureToggle}</div>`;
         rows += `<div class="cols wrow" data-grp="c${si}-${ci}">
           <div class="wname"><button class="rmw" data-rmc="${si}.${ci}" title="Remove from sheet" aria-label="Remove ${escapeHtml(crew.n)}">×</button>
             <div class="wav">${avatarOf(crew.n)}</div>

@@ -17,6 +17,7 @@ export function PoBillSheet({ poId, orgId, stakeholderId, projectId, vendorName,
     <NewBillModal
       open
       title="Record the bill"
+      stackAbove={90}
       onClose={onClose}
       initialFile={initialFile ?? null}
       lockVendor={{ id: stakeholderId, name: vendorName }}
