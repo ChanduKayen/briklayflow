@@ -5,6 +5,7 @@
 import { useMemo, useState, useEffect, createContext, useContext, type ReactElement } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { usePeek } from '../context/PeekContextCore';
 import { useIsMobile } from '../lib/useIsMobile';
 import PartyLedgerMobile, { type PartyMenuItem } from '../components/party/PartyLedgerMobile';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -33,8 +34,8 @@ type Period = 'all' | 'month' | '3m' | 'fy' | 'custom';
 // contracts; a vendor's is BILLED amounts against POs, and the balance is what you owe.
 interface Terms { credit: string; creditWord: string; contractCol: string; contract: string; byContract: string; aheadCol: string; aheadPos: string; aheadNeg: string; noContract: string }
 const terms = (kind: 'worker' | 'vendor'): Terms => kind === 'vendor'
-  ? { credit: 'Billed', creditWord: 'billed', contractCol: 'PO', contract: 'PO', byContract: 'By PO', aheadCol: 'Balance', aheadPos: 'paid in advance of billing', aheadNeg: 'still to pay', noContract: 'Billed against POs' }
-  : { credit: 'Certified', creditWord: 'certified', contractCol: 'Contract', contract: 'contract', byContract: 'By contract', aheadCol: 'Ahead', aheadPos: 'paid ahead of certified work', aheadNeg: 'certified work not yet paid', noContract: 'No contract, weekly payments' };
+  ? { credit: 'Billed', creditWord: 'billed', contractCol: 'Reference', contract: 'PO', byContract: 'By PO', aheadCol: 'Balance', aheadPos: 'paid in advance of billing', aheadNeg: 'still to pay', noContract: 'Billed against POs' }
+  : { credit: 'Certified', creditWord: 'certified', contractCol: 'Reference', contract: 'contract', byContract: 'By contract', aheadCol: 'Ahead', aheadPos: 'paid ahead of certified work', aheadNeg: 'certified work not yet paid', noContract: 'No contract, weekly payments' };
 
 const CSS = `
 .plx{--cream:#F5F0E7;--paper:#FFFCF7;--line:#E5DCCD;--line-soft:#EFE8DB;--walnut:#33251B;--walnut-2:#6A5A4C;--walnut-3:#9A8B7B;--terra:#B4532F;--terra-soft:#F6E7DF;--sage:#5F7F5C;--sage-soft:#E7EEE3;
@@ -101,6 +102,18 @@ const CSS = `
 .plx .ledger tr:last-child td{border-bottom:0}
 .plx .ledger .date{width:82px;color:var(--walnut-2);font-size:12.5px;white-space:nowrap}
 .plx .ledger .part .p{font-weight:500}
+.plx .ledger .part .more{font:inherit;font-size:11.5px;font-weight:500;color:var(--walnut-3);background:none;border:0;padding:0;margin-left:6px;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.plx .ledger .part .more:hover{color:var(--terra)}
+.plx .ledger .part .plusn{display:inline-block;font:500 11px/1 var(--mono);color:var(--walnut-2);background:var(--cream);border:1px solid var(--line-soft);padding:2px 5px;border-radius:4px;margin-left:6px;vertical-align:1px;cursor:help}
+.plx .ledger .part .plusn:hover{background:var(--terra-soft);border-color:transparent;color:var(--terra)}
+.plx .ledger .contract{text-align:right;white-space:nowrap}
+.plx .ledger .refwrap{display:inline-flex;flex-direction:column;align-items:flex-end;gap:2px;vertical-align:middle}
+.plx .ledger .reflink{display:inline-block;font:inherit;font-family:var(--mono);font-size:12.5px;text-align:right;white-space:nowrap;color:var(--walnut-2);background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px;text-decoration-color:var(--line);transition:color .15s,text-decoration-color .15s}
+.plx .ledger .reflink:hover{color:var(--terra);text-decoration-color:color-mix(in srgb,var(--terra) 55%,transparent)}
+.plx .ledger .contract .refstate{padding:0;font-size:12px;color:var(--walnut-2);white-space:nowrap;text-align:right}
+.plx .ledger .contract .refstate.open{color:var(--terra)}
+.plx .ledger .untracked{font-family:var(--sans);font-size:10.5px;line-height:1.25;color:#B07A1E;cursor:help;max-width:120px;display:inline-flex;align-items:center;gap:3px}
+.plx .ledger .untracked::before{content:"";width:5px;height:5px;border-radius:50%;background:#D9A62B;flex:none}
 .plx .ledger .part .s{font-size:12.5px;color:var(--walnut-3);margin-top:1px}
 .plx .ledger .part .s .narr{font-family:var(--mono);font-size:11.5px}
 .plx .ledger .clip{display:inline-block;vertical-align:-2px;margin-left:6px;color:var(--walnut-3)}.plx .ledger .clip svg{width:12px;height:12px}
@@ -258,6 +271,7 @@ const fyLabel = () => { const now = new Date(); const s = now.getMonth() >= 3 ? 
 // app. `compact` tightens it for the drawer; `onClose` (drawer only) turns the back link into a close.
 export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { stakeholderId: string; compact?: boolean; onClose?: () => void }) {
   const navigate = useNavigate();
+  const { openPeek } = usePeek();
   // Arriving from a transaction or an order, "back" belongs to that page — not the parties list,
   // which is where this button went regardless of how you got here.
   const location = useLocation();
@@ -352,6 +366,12 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
 
   return (
     <RowActionsCtx.Provider value={isManager ? { onRemove: onRemoveLine } : null}>
+    <LedgerNavCtx.Provider value={{ openRef: (ref) => {
+      // A PO/WO opens as a peek overlay — visible even over the ledger drawer, no navigation/unmount race.
+      // A bill (no peek) navigates, closing the drawer first so the bill page isn't left hidden underneath.
+      if (ref.peek) openPeek(ref.peek.type, ref.peek.id);
+      else { navigate(ref.to); onClose?.(); }
+    } }}>
     <div className={`plx${compact ? ' compact' : ''}`}>
       <style>{CSS}</style>
       {isMobile ? (
@@ -559,6 +579,7 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
       {classifyEntry && <ClassifyModal L={L} entry={classifyEntry} onClose={() => setClassifyEntry(null)} onSaved={(msg) => { setClassifyEntry(null); showSnackbar(msg); refetch(); }} onError={m => showSnackbar(m, { type: 'error' })} />}
       {certifyOpen && <CertifyModal L={L} onClose={() => setCertifyOpen(false)} onSaved={(msg) => { setCertifyOpen(false); showSnackbar(msg); refetch(); }} onError={m => showSnackbar(m, { type: 'error' })} />}
     </div>
+    </LedgerNavCtx.Provider>
     </RowActionsCtx.Provider>
   );
 }
@@ -659,22 +680,55 @@ const ClipSvg = () => <span className="clip" title="Attachment"><svg viewBox="0 
 // Per-row correction affordance, provided by the ledger page (management-only). Kept in context so
 // the three views (date / contract / site) don't each have to thread a callback through.
 const RowActionsCtx = createContext<{ onRemove: (e: LedgerEntry) => void } | null>(null);
+// Opening a ledger row's reference (a Bill / PO / WO). Provided by the page (where navigate lives) so the
+// Reference column can be clicked straight through. The route is pre-resolved in partyLedgerApi (e.ref.to).
+const LedgerNavCtx = createContext<{ openRef: (ref: NonNullable<LedgerEntry['ref']>) => void } | null>(null);
 
+const NARR_MAX = 48;   // a payment's description reads on one line; the rest folds behind "more".
 function Row({ e, showContract = true, showSite = true, first = false }: { e: LedgerEntry; showContract?: boolean; showSite?: boolean; first?: boolean }) {
-  const sub = [e.mode, showSite ? e.projectName : null, e.detail].filter(Boolean).join(', ');
   const stateCls = e.kind === 'consolidated' ? (e.state === 'confirmed' ? 'state ok' : 'state open')
     : e.unbilled ? 'state open' : e.covered ? 'state' : 'state ok';
   const acts = useContext(RowActionsCtx);
+  const nav = useContext(LedgerNavCtx);
   const removable = !!acts && isRemovableLine(e.id);
+  const [open, setOpen] = useState(false);
+  // Sub-line: a purchase reads "site" then the materials bought (a couple, the rest behind a "+N" peek,
+  // like the PO list); every other row reads "mode, site, detail" and carries its status chip.
+  const site = showSite ? e.projectName : null;
+  const isPurchase = e.kind === 'bill';
+  const items = e.items ?? [];
+  const shownItems = items.slice(0, 2).join(', ');
+  const restItems = Math.max(0, items.length - 2);
+  const subLine = (isPurchase ? [site] : [e.mode, site, e.detail]).filter(Boolean).join(', ');
+  const narr = e.narr || '';
+  const narrLong = narr.length > NARR_MAX;
+  // "Billed" is never spelled out — the reference link IS the proof. Only a consolidated credit keeps its
+  // confirmation note on the sub-line; a payment's status (e.g. "No bill yet") moves to the Reference column.
+  const subState = e.kind === 'consolidated' ? e.state : null;
+  const refState = e.kind === 'payment' && !e.ref ? e.state : null;   // shown where the reference would be
+  const hasSub = !!(subLine || (isPurchase && items.length) || subState);
+  // The Reference column is the row's only hyperlink — a Bill / PO / WO, pre-routed in partyLedgerApi.
+  const openRef = nav && e.ref ? () => nav.openRef(e.ref!) : null;
   return (
     <tr className={`row${e.kind === 'opening' ? ' opening' : ''}${removable ? ' removable' : ''}`}>
       <td className="date">{e.date ? fmtDate(e.date) : '—'}</td>
       <td className="part">
         <div className="p">{e.particulars}{e.clip ? <ClipSvg /> : null}{removable && <button className="rm" title="Remove this line — a mistaken entry" onClick={() => acts!.onRemove(e)} aria-label="Remove this line">×</button>}</div>
-        {(sub || e.state) ? <div className="s">{sub}{sub && e.state ? ', ' : ''}{e.state ? <span className={stateCls}>{e.state}</span> : null}</div> : null}
-        {e.narr ? <div className="s"><span className="narr">{e.narr}</span></div> : null}
+        {hasSub ? (
+          <div className="s">
+            {subLine}
+            {isPurchase && items.length ? <>{subLine ? ' · ' : ''}{shownItems}{restItems > 0 ? <span className="plusn" title={items.join(', ')}>+{restItems}</span> : null}</> : null}
+            {subState ? <>{subLine ? ', ' : ''}<span className={stateCls}>{subState}</span></> : null}
+          </div>
+        ) : null}
+        {narr ? <div className="s"><span className="narr">{open || !narrLong ? narr : narr.slice(0, NARR_MAX).trimEnd() + '…'}</span>{narrLong ? <button type="button" className="more" onClick={() => setOpen(o => !o)}>{open ? 'less' : 'more'}</button> : null}</div> : null}
       </td>
-      {showContract && <td className="contract">{e.contractId ? e.contractId : <span className="dash">—</span>}</td>}
+      {showContract && <td className="contract"><div className="refwrap">{e.ref ? (
+        <>
+          {openRef ? <button type="button" className="reflink" onClick={openRef} title={`Open ${e.ref.label}`}>{e.ref.label}</button> : <span className="reflink">{e.ref.label}</span>}
+          {e.ref.untracked ? <span className="untracked" title="This bill isn't linked to a purchase order — it isn't tracked by a PO.">Not on a PO</span> : null}
+        </>
+      ) : refState ? <span className={`refstate${e.unbilled ? ' open' : ''}`} title={refState}>{refState.startsWith('Covered') ? 'Covered' : refState}</span> : <span className="dash">—</span>}</div></td>}
       <td className="r paid num">{e.paid ? inr(e.paid) : ''}</td>
       <td className="r cert num">{e.cert ? inr(e.cert) : ''}</td>
       <td className={`r bal num ${first ? 'now' : ''}`}>{inr(e.running)}</td>
@@ -682,7 +736,7 @@ function Row({ e, showContract = true, showSite = true, first = false }: { e: Le
   );
 }
 function Head({ showContract, T }: { showContract: boolean; T: Terms }) {
-  return <thead><tr><th>Date</th><th>Particulars</th>{showContract && <th>{T.contractCol}</th>}<th className="r">Paid</th><th className="r">{T.credit}</th><th className="r">{T.aheadCol}</th></tr></thead>;
+  return <thead><tr><th>Date</th><th>Particulars</th>{showContract && <th className="r">{T.contractCol}</th>}<th className="r">Paid</th><th className="r">{T.credit}</th><th className="r">{T.aheadCol}</th></tr></thead>;
 }
 function OpeningRow({ L, onEdit, sub }: { L: PartyLedger; onEdit: () => void; sub: string }) {
   if (L.opening) {

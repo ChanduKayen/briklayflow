@@ -22,6 +22,10 @@ export interface LedgerEntry {
   unbilled?: boolean;                          // vendor payment with no bill on file
   covered?: boolean;                           // covered by a consolidated bill
   billId?: string | null;                      // a first-class bill this payment settles (txn_allocations.bill_id)
+  // Reference column: a Bill / PO / WO — the row's only hyperlink. A PO/WO opens as a peek overlay (works
+  // even inside the ledger drawer); a bill has no peek, so it navigates via `to`. untracked = a bill with no PO.
+  ref?: { label: string; to: string; untracked?: boolean; peek?: { type: 'PO' | 'WO'; id: string } } | null;
+  items?: string[];                            // material names on a purchase row — a couple shown, the rest behind "more"
   state?: string;                              // a short status note for the sub-line
   unclassified?: boolean;                      // new-engine payment with an unallocated remainder (set only by readParty)
   remainder?: number;                          // the unallocated amount, for the classify flow
@@ -50,6 +54,8 @@ export interface PartyLedger {
 }
 
 const num = (v: any) => Number(v) || 0;
+// A first-class bill id is a UUID; a PO id is 'PO-<site>-<n>'. Used to route a credit line's reference.
+const isUuid = (v: any) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 
 // Day-wage ledger lines for one worker, derived from the muster (units × rate per attendance day),
 // grouped to ONE credit per crew/direct-worker per work_date. This is the SAME obligation the balance
@@ -107,7 +113,7 @@ export async function loadWorkerWageEntries(stakeholderId: string): Promise<Omit
 }
 
 export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedger> {
-  const [stkR, txnR, woR, poR, obR, adjR, cbR, wcR, balR, blvR] = await Promise.all([
+  const [stkR, txnR, woR, poR, obR, adjR, cbR, wcR, balR, blvR, billMetaR, poItemsR] = await Promise.all([
     supabase.from('stakeholders').select('stakeholder_id, name, type, category').eq('stakeholder_id', stakeholderId).single(),
     supabase.from('transactions').select('*, txn_allocations(project_id, order_type, order_ref, milestone_id, bill_id, allocated_amount, projects(name))').eq('stakeholder_id', stakeholderId).order('date', { ascending: false }),
     supabase.from('work_orders').select('wo_id, project_id, title, scope_of_work, order_value, status, projects(name), wo_milestones(milestone_id, name, planned_amount, unit_type, quantity, rate, seq_no)').eq('stakeholder_id', stakeholderId),
@@ -125,6 +131,10 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
     // Bill LINES from the SAME view the balance sums — so headline and rows are two projections of one
     // definition (bills-union-fallback). Falls back to POs below only if the view isn't applied yet.
     supabase.from('v_party_ledger_line').select('ref_id, project_id, line_date, label, billed').eq('stakeholder_id', stakeholderId).eq('kind', 'po_bill'),
+    // Per-bill: the materials (lines) shown on a purchase row, and whether it's tracked by a PO (po_id).
+    supabase.from('bills').select('id, po_id, lines').eq('stakeholder_id', stakeholderId),
+    // Line-item names for the PO-fallback purchase rows (a PO carrying its own vendor_bill_amount, no bills row).
+    supabase.from('po_line_items').select('po_id, item_name, purchase_orders!inner(stakeholder_id)').eq('purchase_orders.stakeholder_id', stakeholderId),
   ]);
   if (stkR.error) throw stkR.error;
   const stk = stkR.data as any;
@@ -173,8 +183,10 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
     const billId = allocs.find(a => a.bill_id)?.bill_id ?? null;   // a first-class bill this payment settles
     entries.push({
       id: `t-${t.txn_id}`, date: t.date, kind: 'payment',
-      // A bill-attached payment reads by its bill; otherwise the transaction category (or just "Payment").
-      particulars: billId ? (billRefById[billId] || 'Bill') : (t.category || 'Payment'), mode: t.payment_mode || '', narr: t.remarks || undefined,
+      // The Particulars column names the ACTIVITY only (no reference, no hyperlink) — the bill/PO it
+      // settles rides the Reference column. A bill-settling payment is a "Bill payment"; otherwise the
+      // transaction's category (or just "Payment").
+      particulars: billId ? 'Bill payment' : (t.category || 'Payment'), mode: t.payment_mode || '', narr: t.remarks || undefined,
       clip: !!(t.proof_document_url || t.bill_doc_url),
       projectId: pid, projectName: pid ? (projName[pid] || pid) : null, byProject,
       contractId,   // WO for workers, PO for vendors
@@ -284,22 +296,38 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
   //    standalone bill shows as a row and the visible rows always re-derive the headline. If the view
   //    isn't present yet (migration pending), fall back to the PO read so the page still renders. ──
   if (isVendor) {
+    // A purchase row's materials + PO-tracking, keyed for the credit rows below.
+    const itemNames = (arr: any): string[] => Array.isArray(arr) ? arr.map((l: any) => (l?.name ?? l?.item ?? '').toString().trim()).filter(Boolean) : [];
+    const billMetaById: Record<string, { poId: string | null; items: string[] }> = {};
+    (billMetaR?.data ?? []).forEach((b: any) => { billMetaById[b.id] = { poId: b.po_id ?? null, items: itemNames(b.lines) }; });
+    const poItemsById: Record<string, string[]> = {};
+    (poItemsR?.data ?? []).forEach((r: any) => { if (r.item_name) (poItemsById[r.po_id] ??= []).push(r.item_name); });
+
     const viewBills = (blvR?.data ?? []) as any[];
     if (viewBills.length || !blvR?.error) {
       for (const l of viewBills) {
         const pid = l.project_id ?? null;
+        // ref_id is a first-class bill (UUID) or, in the PO fallback, a PO id — route accordingly.
+        const isBill = isUuid(l.ref_id);
+        const meta = isBill ? billMetaById[l.ref_id] : null;
         entries.push({
-          id: `billv-${l.ref_id}`, date: l.line_date, kind: 'bill', particulars: l.label || 'Bill',
+          id: `billv-${l.ref_id}`, date: l.line_date, kind: 'bill', particulars: 'Purchase',
           projectId: pid, projectName: pid ? (projName[pid] || pid) : null,
           contractId: null, paid: 0, cert: num(l.billed),
+          items: isBill ? (meta?.items ?? []) : (poItemsById[l.ref_id] ?? []),
+          // A first-class bill with no PO behind it is billed but NOT tracked by a purchase order — flag it.
+          // A bill navigates (no peek exists for bills); a PO-fallback row opens the PO as a peek.
+          ref: { label: l.label || 'Bill', to: isBill ? `/bills/${encodeURIComponent('bl~' + l.ref_id)}` : `/purchase-orders/${l.ref_id}`, untracked: isBill && !meta?.poId, ...(isBill ? {} : { peek: { type: 'PO' as const, id: l.ref_id } }) },
         });
       }
     } else {
       for (const p of (poR.data ?? [])) {
         entries.push({
-          id: `bill-${p.po_id}`, date: billDateOf(p), kind: 'bill', particulars: `Bill ${p.vendor_bill_number || p.po_id}`,
+          id: `bill-${p.po_id}`, date: billDateOf(p), kind: 'bill', particulars: 'Purchase',
           projectId: p.project_id ?? null, projectName: p.project_id ? (projName[p.project_id] || p.project_id) : null,
           contractId: null, paid: 0, cert: num(p.vendor_bill_amount),
+          items: poItemsById[p.po_id] ?? [],
+          ref: { label: `Bill ${p.vendor_bill_number || p.po_id}`, to: `/purchase-orders/${p.po_id}`, peek: { type: 'PO', id: p.po_id } },
         });
       }
     }
@@ -354,6 +382,17 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
         state: cb.confirmed ? 'confirmed' : 'awaiting confirmation',
       });
     }
+  }
+
+  // ── Reference column — the row's single hyperlink. A debit (payment) points AT the credit it settles
+  //    (bill-wise "against reference"): its bill, or the PO/WO it was booked on. A credit bill row set its
+  //    own ref above. Everything else (wages, adjustments, consolidated, opening) carries no reference. ──
+  for (const e of entries) {
+    if (e.ref) continue;
+    if (e.billId) e.ref = { label: billRefById[e.billId] || 'Bill', to: `/bills/${encodeURIComponent('bl~' + e.billId)}` };
+    else if (e.contractId) e.ref = isVendor
+      ? { label: e.contractId, to: `/purchase-orders/${e.contractId}`, peek: { type: 'PO', id: e.contractId } }
+      : { label: e.contractId, to: `/work-orders/${e.contractId}`, peek: { type: 'WO', id: e.contractId } };
   }
 
   // ── The opening's as-of date is THIS party's cutover floor: everything before it is SETTLED by the

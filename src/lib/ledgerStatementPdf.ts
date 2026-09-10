@@ -87,7 +87,8 @@ export function buildPartyStatementDoc(L: PartyLedger): jsPDF {
       : e.kind === 'certified' ? 'Measurement'
       : (e.kind === 'opening' || e.kind === 'start') ? 'Op. Bal.'
       : 'Journal';
-  const vchNo = (e: LedgerEntry) => e.contractId || (e.kind === 'bill' ? e.id.replace(/^bill-/, '') : '—');
+  // The reference (Bill / PO / WO) — plain text here; the statement is shared externally and carries no links.
+  const vchNo = (e: LedgerEntry) => e.ref?.label || e.contractId || (e.kind === 'bill' ? e.id.replace(/^billv?-/, '') : '—');
   const particularsOf = (e: LedgerEntry) => {
     if (e.kind === 'opening' || e.kind === 'start') return 'Opening Balance b/f';
     if ((e.paid || 0) > 0) { const m = (e.mode || '').trim(); return !m ? 'To Bank / Cash' : /cash/i.test(m) ? 'To Cash' : `To Bank (${m})`; }
