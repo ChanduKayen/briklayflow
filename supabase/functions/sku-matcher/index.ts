@@ -1615,28 +1615,44 @@ Return ONLY valid JSON (no markdown):
         return new Response(JSON.stringify({ error: 'image_base64 or image_url required' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
       }
-      const systemPrompt = `You are a construction BOQ (Bill of Quantities) extraction assistant for Indian construction work orders and quotations.
+      const systemPrompt = `You are a construction BOQ (Bill of Quantities) extraction assistant for Indian construction work orders, agreements and quotations.
 
-Extract the document header fields AND each work stage/line item. Determine if each stage is MEASURED (qty × rate) or LUMP SUM.
+Read the whole document, then return: the CONTRACT VALUE, a WORK SUMMARY, and every work STAGE / line item — each as MEASURED (qty × rate) or LUMP SUM. Take a second pass to make the pieces fit together (see RECONCILE).
 
 DETECTION RULES:
 MEASURED — all three present: Unit (Sqft, Cum, Rmt etc.), Quantity, Rate. Amount should equal qty × rate.
-LUMP SUM — when: LS / L.S. / Lump Sum / Lumpsum / Fixed / Package mentioned, OR only amount given, OR work described as "complete job".
-AMBIGUOUS — Amount present but qty × rate doesn't match, OR unit present but qty/rate missing.
+LUMP SUM — when: LS / L.S. / Lump Sum / Lumpsum / Fixed / Package mentioned, OR only an amount is given, OR the work is described as a "complete job".
+AMBIGUOUS — Amount present but qty × rate doesn't match, OR a unit is present but qty/rate are missing.
 
 INDIAN UNITS:
 Sqft, Sft, sq.ft → Sqft | Sqm, sq.m → Sqm | Cum, Cu.m, cmt → Cum | Cft, cu.ft → Cft
 Rmt, RM, rft → Rmt | Nos, No., Nrs → Nos | Kg, KG → Kg | MT, M.T. → MT
 Per point, point → Per Point | Per flat → Per Flat | Per floor → Per Floor | LS, L.S. → LS
 
-AMOUNT VERIFICATION: if qty and rate both extracted, compute expected = qty × rate. If |extracted - expected| / expected > 0.02, set arithmetic_mismatch: true.
+CONTRACT VALUE (order_value):
+Find the grand total — labelled "Total", "Grand Total", "Contract Value", "Total Amount", "Nett", the last/bottom figure, or the amount in words. Return it as a plain number (no ₹, no commas).
+If NO total is stated anywhere, set order_value to the SUM of the stage amounts. Never return null when there is at least one stage with an amount.
+
+WORK SUMMARY (scope_of_work):
+A short, plain one-line description of the whole job (e.g. "Civil + finishing for a G+2 residence" or "Painting — 3 flats, interior & exterior").
+If the document does not state an overall scope explicitly, WRITE the summary yourself from the line items / stage names. Only null when the document is truly empty of work.
+
+For EVERY stage extract as much as the document gives — name, unit, qty, rate, amount. For a measured stage all four of unit/qty/rate/amount should be present; if the amount is blank but qty and rate are there, compute amount = qty × rate. For a lump stage give the amount.
+
+AMOUNT VERIFICATION: if qty and rate are both extracted, compute expected = qty × rate. If |extracted − expected| / expected > 0.02, set arithmetic_mismatch: true and explain in mismatch_note.
+
+RECONCILE (do this before answering): the stage amounts should add up to order_value.
+- If Σ(stage amounts) differs materially (> 2%) from a stated total, RE-READ the document — you likely missed a stage, misread a qty/rate, or merged two lines. Correct the stages so they reconcile; if you genuinely cannot, keep the stated total and flag the offending stage(s) with arithmetic_mismatch.
+- If a total is stated but only some lines have amounts, distribute nothing — leave blank amounts null and flag them; do not invent figures.
 
 Return ONLY this JSON object, no other text:
 {
   "worker_name_fuzzy": "contractor name or null",
-  "scope_of_work": "overall scope or null",
-  "order_value": totalValueOrNull,
+  "scope_of_work": "one-line work summary (write one if not stated); null only if no work at all",
+  "order_value": totalValueNumberOrNull,
   "date_issued": "YYYY-MM-DD or null",
+  "stages_sum": sumOfStageAmountsNumber,
+  "reconciles": "boolean — does stages_sum match order_value within 2%",
   "stages": [
     {
       "name": "string", "mode": "measured | lumpsum | ambiguous",

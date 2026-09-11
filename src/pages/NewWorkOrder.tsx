@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
@@ -87,6 +88,35 @@ function suggestUnit(name: string): string {
   return '';
 }
 
+// A dropdown that renders in a PORTAL on <body>, positioned under its anchor. This is the only reliable
+// way past the page's clipping/stacking ancestors (the cards, the fixed footer, the app's scroll shell) —
+// a plain absolute .pop kept getting clipped or painted under later cards. The transparent `.wox` wrapper
+// carries the scope so the existing `.wox .pop` styles still apply; inline styles pin it to the anchor.
+function PortalPop({ open, anchor, children }: { open: boolean; anchor: React.RefObject<HTMLElement>; children: React.ReactNode }) {
+  const [box, setBox] = useState<{ top: number; left: number; width: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const el = anchor.current; if (!el) return;
+      const r = el.getBoundingClientRect();
+      setBox({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    place();
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => { window.removeEventListener('scroll', place, true); window.removeEventListener('resize', place); };
+  }, [open, anchor]);
+  if (!open || !box) return null;
+  return createPortal(
+    <div className="wox" style={{ background: 'transparent', minHeight: 0 }}>
+      <div className="pop open" style={{ position: 'fixed', top: box.top, left: box.left, width: box.width, right: 'auto', zIndex: 1000 }}>
+        {children}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 // Stage-name suggestions offered in the row popover (purely a typing aid).
 const STAGE_NAMES = [
   'Foundation & footing', 'Plinth beam', 'GF columns', 'GF slab', 'Brickwork',
@@ -117,7 +147,8 @@ const WOX_CSS = `
   background:#FBF9F6; color:var(--ink);
   font:15px/1.45 "DM Sans",system-ui,sans-serif; -webkit-font-smoothing:antialiased; min-height:100vh;
 }
-.wox .page{max-width:1020px;margin:0 auto;padding:26px 32px 120px}
+.wox .page{max-width:1180px;margin:0 auto;padding:26px 32px 120px}
+@media(min-width:1500px){.wox .page{max-width:1360px}}
 .wox .page>*{animation:woxrise .5s var(--ease) both}
 .wox .page>*:nth-child(2){animation-delay:.05s}.wox .page>*:nth-child(3){animation-delay:.1s}.wox .page>*:nth-child(4){animation-delay:.15s}.wox .page>*:nth-child(5){animation-delay:.2s}
 @keyframes woxrise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
@@ -165,7 +196,7 @@ const WOX_CSS = `
 .wox .cell.calc .pre{color:var(--sage);font-weight:600}
 .wox .cell.calc .pre::after{content:" ="}
 
-.wox .pop{position:absolute;left:-1px;right:-1px;top:calc(100% + 4px);z-index:30;background:var(--paper);border:1px solid var(--line);border-radius:var(--r);box-shadow:0 12px 30px -12px rgba(47,38,34,.28);padding:4px;display:none;max-height:250px;overflow:auto}
+.wox .pop{position:absolute;left:-1px;right:-1px;top:calc(100% + 4px);z-index:55;background:var(--paper);border:1px solid var(--line);border-radius:var(--r);box-shadow:0 12px 30px -12px rgba(47,38,34,.28);padding:4px;display:none;max-height:250px;overflow:auto}
 .wox .pop.open{display:block;animation:woxpop .16s var(--ease)}
 @keyframes woxpop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
 .wox .pop button{display:flex;align-items:center;width:100%;gap:10px;text-align:left;border:0;background:transparent;padding:8px 10px;border-radius:6px;cursor:pointer}
@@ -243,7 +274,8 @@ const WOX_CSS = `
 
 .woxbar{position:fixed;left:0;right:0;bottom:0;min-height:0;background:rgba(246,242,234,.85);backdrop-filter:blur(10px);border-top:1px solid #E4DCD0;z-index:40}
 @media (min-width:768px){.woxbar{left:18rem}}
-.woxbar .in{max-width:1020px;margin:0 auto;padding:12px 32px;display:flex;align-items:center;gap:10px}
+.woxbar .in{max-width:1180px;margin:0 auto;padding:12px 32px;display:flex;align-items:center;gap:10px}
+@media(min-width:1500px){.woxbar .in{max-width:1360px}}
 .woxbar .stat{margin-right:auto;color:#6E635B;font-size:13px;line-height:1.4}
 .woxbar .stat b{color:#2F2622;font-weight:500}
 .woxbar .stat small{display:block;color:#A39A91}
@@ -639,7 +671,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
                         placeholder="Search contractor…"
                         autoComplete="off"
                       />
-                      <div className={`pop${conOpen && (conHits.length > 0 || conSearch.trim()) ? ' open' : ''}`}>
+                      <PortalPop open={conOpen && (conHits.length > 0 || !!conSearch.trim())} anchor={conCellRef}>
                         {conHits.map(w => (
                           <button type="button" key={w.stakeholder_id} onMouseDown={e => { e.preventDefault(); selectContractor(w.stakeholder_id, w.name); }}>
                             <span>{w.name}</span>{w.category && <small>{w.category}</small>}
@@ -650,7 +682,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
                             <b>+</b>Add “{conSearch.trim()}” as new contractor
                           </button>
                         )}
-                      </div>
+                      </PortalPop>
                     </div>
                   </td>
                   <th>Project</th>
@@ -867,6 +899,7 @@ function StageRow({
   onAddRow: () => void;
 }) {
   const [namePop, setNamePop] = useState(false);
+  const nameCellRef = useRef<HTMLDivElement>(null);
   const mode = getMode(stage);
   const isLS = stage.unit_type === 'LS';
   const amount = calcAmount(stage);
@@ -883,7 +916,7 @@ function StageRow({
 
       {/* Stage name + suggestions */}
       <td>
-        <div className={`cell${badName ? ' bad' : ''}${stage.name ? ' filled' : ''}`}>
+        <div className={`cell${badName ? ' bad' : ''}${stage.name ? ' filled' : ''}`} ref={nameCellRef}>
           <input
             data-stage-name={stage.id}
             value={stage.name}
@@ -894,13 +927,13 @@ function StageRow({
             placeholder="Stage name…"
             autoComplete="off"
           />
-          <div className={`pop${namePop && usedFilter.length > 0 ? ' open' : ''}`}>
+          <PortalPop open={namePop && usedFilter.length > 0} anchor={nameCellRef}>
             {usedFilter.map(n => (
               <button type="button" key={n} onMouseDown={e => { e.preventDefault(); onChange({ name: n }); setNamePop(false); }}>
                 <span>{n}</span>
               </button>
             ))}
-          </div>
+          </PortalPop>
         </div>
       </td>
 
