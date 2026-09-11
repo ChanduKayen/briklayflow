@@ -86,7 +86,7 @@ function AttentionBadge({ n }: { n?: number }) {
 }
 
 // ── one rail row (icon spine, label appears on expand) ────────────────────────
-type Item = { route: string; label: string; icon?: React.ElementType; node?: React.ReactNode; badge?: number; accent?: boolean; hasPanel?: boolean; special?: boolean };
+type Item = { route: string; label: string; icon?: React.ElementType; node?: React.ReactNode; badge?: number; accent?: boolean; hasPanel?: boolean; special?: boolean; match?: (pathname: string) => boolean };
 
 function RailItem({ item, active, open, onNavigate }: { item: Item; active: boolean; open: boolean; onNavigate: () => void }) {
   const [hov, setHov] = useState(false);
@@ -279,7 +279,8 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
       label: 'Site',
       items: ([
         { route: '/insights', label: 'Insights', icon: IconChartPie },
-        SITE_DESK_ENABLED && { route: '/desk', label: 'Site Desk', icon: IconLayoutGrid, special: true },
+        SITE_DESK_ENABLED && { route: '/desk/all/plan', label: 'Site Desk', icon: IconLayoutGrid, special: true, match: (p: string) => p === '/desk' || /^\/desk\/[^/]+\/plan/.test(p) },
+        SITE_DESK_ENABLED && { route: '/desk/all/problems', label: 'Site Problems', icon: IconAlertTriangle, match: (p: string) => /^\/desk\/[^/]+\/problems/.test(p) },
       ].filter(Boolean) as Item[]),
     },
   ];
@@ -315,7 +316,10 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
      * settings, where a settings page belongs.
      */
     ...(canDesk
-      ? [{ route: `${projBase}/desk/plan`, label: 'Site Desk', icon: IconLayoutGrid }]
+      ? [
+        { route: `${projBase}/desk/plan`, label: 'Site Desk', icon: IconLayoutGrid },
+        { route: `${projBase}/desk/problems`, label: 'Site Problems', icon: IconAlertTriangle },
+      ]
       : [
         { route: projBase, label: 'Overview', icon: IconLayoutGrid },
         { route: `${projBase}/tasks`, label: 'Task Manager', icon: IconChecklist },
@@ -442,7 +446,7 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
                 {!open && i > 0 && <div style={{ height: 16 }} />}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {s.items.map(it => (
-                    <RailItem key={it.route} item={it} open={open} active={isActive(it.route)} onNavigate={close} />
+                    <RailItem key={it.route} item={it} open={open} active={it.match ? it.match(location.pathname) : isActive(it.route)} onNavigate={close} />
                   ))}
                 </div>
               </div>

@@ -25,15 +25,14 @@ import {
   SITE_FLOOR, BUILDING_FLOOR, AMENITY_FLOOR,
 } from '../lib/desk/derive'
 import { PlanSetup } from '../components/desk/PlanSetup'
-import { HeaderTabs, ScopePicker, SettingsGear, Sheet, SupervisorPill, UndoToast, type ToastState } from '../components/desk/Chrome'
+import { ScopePicker, SettingsGear, Sheet, SupervisorPill, UndoToast, type ToastState } from '../components/desk/Chrome'
 import { useScrollCue } from '../components/desk/ScrollCue'
 import { DetailBar, DetailContent, type Mode } from '../components/desk/Detail'
 import {
-  PendingView, ProblemControls, ProblemList,
+  ProblemControls, ProblemList,
   type KindFilter, type Segment, type SortBy,
 } from '../components/desk/Problems'
-import { TaskGroups, type Group } from '../components/desk/Plan'
-import { Building } from '../components/desk/Building'
+import { type Group } from '../components/desk/Plan'
 import { Celebrate } from '../components/desk/Celebrate'
 import { TaskSheetBody, TaskSheetBar } from '../components/desk/TaskSheet'
 import { TaskDelete } from '../components/desk/TaskDelete'
@@ -54,6 +53,69 @@ const GROUP_NOTES: Record<string, string> = {
   'Floor common': 'corridor, lobby, stairs',
   'Site-wide': 'whole site — no floor',
   Foundation: 'before anything stands',
+}
+
+/** THE BUILDING — the bottom floor dock. A real horizontal scroller: fades + chevron arrows appear
+ *  only when the chips overflow, and an arrow scrolls the strip ~a screenful. Hides on scroll-down. */
+function FloorDock({
+  floors, focus, onFloor, units, currentUnit, onUnit, hidden,
+}: {
+  floors: { n: string; pct: number }[]
+  focus: string
+  onFloor: (n: string) => void
+  units: { u: string }[] | null
+  currentUnit: string
+  onUnit: (u: string) => void
+  hidden: boolean
+}) {
+  const stripRef = useRef<HTMLDivElement>(null)
+  const [edges, setEdges] = useState({ l: false, r: false })
+  useEffect(() => {
+    const el = stripRef.current
+    if (!el) return
+    const measure = () => {
+      const max = el.scrollWidth - el.clientWidth
+      setEdges({ l: el.scrollLeft > 4, r: el.scrollLeft < max - 4 })
+    }
+    measure()
+    el.addEventListener('scroll', measure, { passive: true })
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => { el.removeEventListener('scroll', measure); ro.disconnect() }
+  }, [floors.length, units, currentUnit])
+  const nudge = (dir: 1 | -1) => stripRef.current?.scrollBy({ left: dir * stripRef.current.clientWidth * 0.8, behavior: 'smooth' })
+  return (
+    <div className={`wp-dock${hidden ? ' hidden' : ''}`}>
+      <div className={`wp-dock-fade left${edges.l ? ' show' : ''}`} />
+      <button className={`wp-dock-arrow left${edges.l ? ' show' : ''}`} aria-label="Scroll floors left" onClick={() => nudge(-1)}>‹</button>
+      <nav className="wp-floor-strip" ref={stripRef} aria-label="Floors">
+        <div className="wp-floor-strip-label">THE BUILDING</div>
+        {floors.map((f) => (
+          <button
+            key={f.n}
+            className={`wp-floor-chip${f.n === focus ? ' active' : ''}`}
+            style={{ '--p': f.pct } as React.CSSProperties}
+            onClick={() => onFloor(f.n)}
+          >
+            <span className="wp-ring" /> {floorName(f.n)} <span className="wp-pct">{f.pct}%</span>
+          </button>
+        ))}
+        {units ? (
+          <>
+            <span className="wp-floor-sep">· flats</span>
+            <button className={`wp-unit-chip${currentUnit === 'Common' ? ' active' : ''}`} onClick={() => onUnit('Common')}>Common</button>
+            {units.map((u) => (
+              <button key={u.u} className={`wp-unit-chip${currentUnit === u.u ? ' active' : ''}`} onClick={() => onUnit(u.u)}>{u.u}</button>
+            ))}
+          </>
+        ) : (
+          <div className="wp-floor-note">Whole floor · not split into flats</div>
+        )}
+      </nav>
+      <button className={`wp-dock-arrow right${edges.r ? ' show' : ''}`} aria-label="Scroll floors right" onClick={() => nudge(1)}>›</button>
+      <div className={`wp-dock-fade right${edges.r ? ' show' : ''}`} />
+    </div>
+  )
 }
 
 /**
@@ -107,7 +169,8 @@ export default function SiteDeskV2({
    * URL itself, /desk/:site/problems/:ref, and the segment derives from the item's own state.) */
   const [segmentPick, setSegment] = useState<Segment | null>(() => {
     const seg = params.get('seg')
-    return seg === 'pending' || seg === 'open' || seg === 'sorted' ? seg : null
+    // 'pending' is retired from this view — a stale ?seg=pending link just lands on Open.
+    return seg === 'open' || seg === 'sorted' ? seg : null
   })
   const [sortBy, setSortBy] = useState<SortBy>('severe')
   const [kindF, setKindF] = useState<KindFilter>('all')
@@ -121,8 +184,10 @@ export default function SiteDeskV2({
     setToastState(t ? { ...t, id: ++TOAST_SEQ } : null)   // a fresh id → a fresh mount → it slides in
   }, [])
   const [reopeningId, setReopeningId] = useState<string | null>(null)
-  const [folded, setFolded] = useState<Record<string, boolean>>({})
   const [taskNote, setTaskNote] = useState('')
+  const [peekFull, setPeekFull] = useState(false)       // the peek's ⤢ expand-to-full toggle (plan redesign)
+  const [dockHidden, setDockHidden] = useState(false)   // the floor dock hides on scroll-down, returns on up
+  const [listSettling, setListSettling] = useState(true) // the one-pass row load-in animation
   const { closingId, close: animateClose } = useRowClose()
 
   /* FINISHING IS A MOMENT, AND IT BELONGS TO THE CARD.
@@ -161,14 +226,23 @@ export default function SiteDeskV2({
   /* THE EDGE OF EACH LIST. A list that runs under the fold has to say so — the desk's lists ended at the
      bottom of the window with a clean card border, and a clean edge is a full stop. One per scrolling
      column; the pinned card beside them has nothing to do with it. */
-  const planCue = useScrollCue()
   const listCue = useScrollCue()
   useEffect(() => {
     let queued = false
+    let lastY = window.scrollY
     const onScroll = () => {
       if (queued) return
       queued = true
-      requestAnimationFrame(() => { queued = false; setLifted(window.scrollY > 4) })
+      requestAnimationFrame(() => {
+        queued = false
+        const y = window.scrollY
+        setLifted(y > 4)
+        // The floor dock (plan redesign) rides out of the way on the way down and comes back on the way up.
+        if (y < 40) setDockHidden(false)
+        else if (y > lastY + 6) setDockHidden(true)
+        else if (y < lastY - 6) setDockHidden(false)
+        lastY = y
+      })
     }
     onScroll()
     window.addEventListener('scroll', onScroll, { passive: true })
@@ -191,12 +265,6 @@ export default function SiteDeskV2({
    * And it fires only on a SITE PICK, never on mount: clicking the Problems tab yourself must always show
    * you Problems, empty or not. Choosing to look at nothing is a valid thing to choose.
    */
-  const tabForSite = useCallback((code: string): 'problems' | 'plan' => {
-    if (code === 'all' || tab === 'plan') return tab
-    const hasOpen = api.problems.some((p) => p.siteCode === code && p.state !== 'resolved')
-    return hasOpen ? 'problems' : 'plan'
-  }, [api.problems, tab])
-
   /** Where a link goes. Under a project the site is IMPLIED by the address, so it is not repeated in it:
    *  /projects/PRJ-X/desk/problems/CHAK-14 — not /projects/PRJ-X/desk/chak/problems/CHAK-14. */
   const href = useCallback((s: string, t: 'problems' | 'plan', ref?: string) => (
@@ -230,13 +298,6 @@ export default function SiteDeskV2({
       ? list.slice().sort((a, b) => a.last - b.last)
       : list.slice().sort((a, b) => sevScore(b) - sevScore(a))
   }, [api.problems, segment, scope, kindF, sortBy])
-
-  const pending = useMemo(
-    () => (scope === 'all' ? api.pending : api.pending.filter((p) => !p.site || api.sites.find((s) => s.code === scope)?.name === p.site)),
-    [api.pending, api.sites, scope],
-  )
-
-  const needsYou = api.problems.filter((p) => p.state === 'you' && (scope === 'all' || p.siteCode === scope)).length
 
   // Opening an item KEEPS the current scope — reading DSR-21 from "All projects" must not
   // silently narrow the list to DSR. Only an explicit cross-link (gotoRef) changes site.
@@ -500,6 +561,64 @@ export default function SiteDeskV2({
     setParams(next, { replace: true })
   }
 
+  /* ── PLAN REDESIGN (workplan mock) ─────────────────────────────────────────────────────────────
+   * The rendered order of the list — sections in build order, tasks within — flattened to refs, so
+   * ↑/↓ walks the visible sequence and the build spine can ask "was the row above me done?". */
+  const planOrderedRefs = useMemo(
+    () => planGroups.flatMap((g) => planTasks.filter((t) => t.group === g.n)).map((t) => t.ref),
+    [planGroups, planTasks],
+  )
+
+  /** Pick a floor from the dock — the same move the old Building rail made: the floor lives in the URL,
+   *  the flat it carried is dropped, and the open task lets go so the new floor lands on its own edge. */
+  const onFloorPick = (n: string) => {
+    const next = new URLSearchParams(params)
+    next.set('floor', n)
+    next.delete('loc')
+    setParams(next, { replace: true })
+    setOpenTaskRef(null)
+  }
+
+  // The list plays its one-pass load-in whenever the floor / flat / site changes, then settles.
+  useEffect(() => {
+    if (tab !== 'plan') return
+    setListSettling(true)
+    const t = setTimeout(() => setListSettling(false), 900)
+    return () => clearTimeout(t)
+  }, [tab, scope, plan?.focus, currentUnit])
+
+  // ↑/↓ walk the plan's task list; Esc closes the peek. Desktop only — the phone uses the sheet.
+  useEffect(() => {
+    if (tab !== 'plan' || !isDesktop) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setOpenTaskRef(null); setPeekFull(false); return }
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+      if (!planOrderedRefs.length) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      e.preventDefault()
+      const cur = openTaskRef ?? edgeRef
+      const i = cur ? planOrderedRefs.indexOf(cur) : -1
+      const nextI = e.key === 'ArrowDown'
+        ? Math.min(planOrderedRefs.length - 1, i + 1)
+        : Math.max(0, i - 1)
+      const ref = planOrderedRefs[nextI < 0 ? 0 : nextI]
+      if (ref) setOpenTaskRef(ref)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [tab, isDesktop, planOrderedRefs, openTaskRef, edgeRef])
+
+  // Problems peek: Esc closes it (the ✕ is the other way). Desktop only.
+  useEffect(() => {
+    if (tab !== 'problems' || !isDesktop) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && openItem) { dismissDetail(); setPeekFull(false) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [tab, isDesktop, openItem, dismissDetail])
+
   const onTaskState = async (s: TaskState) => {
     if (!openTask) return
     const t = openTask
@@ -636,6 +755,11 @@ export default function SiteDeskV2({
   const detail = detailFor()
   const sheetOpen = !isDesktop && !!detail
 
+  /* The redesigned Work Plan (workplan mock) OWNS the whole frame — its own topbar, a full-width task
+   * list, a bottom floor dock and a right peek. It shows only once a real plan with tasks is in hand;
+   * every other plan state (all-projects picker, plan loading, empty→setup) keeps the shared chrome. */
+  const planWorkspace = tab === 'plan' && scope !== 'all' && !api.loading && !!plan && plan.tasks.length > 0
+
   /**
    * BRING THE DETAIL INTO THE FRAME.
    *
@@ -674,7 +798,9 @@ export default function SiteDeskV2({
   return (
     <div className="desk-root">
       <div className="shell">
-        {/* ONE LINE: where you are · what you are looking at · who it answers to. */}
+        {/* ONE LINE: where you are · what you are looking at · who it answers to. The redesigned Work
+            Plan renders its OWN topbar (inside .wp), so the shared one steps aside for that view. */}
+        {!planWorkspace && (
         <header className={`topbar ${lifted ? 'lifted' : ''}`}>
           <div className="topbar-left">
             <SettingsGear variant="desktop" onClick={() => nav('/desk/settings/chasing')} />
@@ -689,14 +815,9 @@ export default function SiteDeskV2({
                 <ScopePicker
                   sites={api.sites}
                   scope={scope}
-                  onScope={(code) => { setOpenTaskRef(null); goto(code, tabForSite(code)) }}
+                  onScope={(code) => { setOpenTaskRef(null); goto(code, tab) }}
                 />
               )}
-            <HeaderTabs
-              tab={tab === 'plan' ? 'plan' : 'problems'}
-              onTab={(t) => goto(scope, t === 'plan' ? 'plan' : 'problems')}
-              needsYou={needsYou}
-            />
           </div>
 
           <div className="topbar-right">
@@ -713,6 +834,7 @@ export default function SiteDeskV2({
             <SettingsGear variant="mobile" onClick={() => nav('/desk/settings/chasing')} />
           </div>
         </header>
+        )}
 
         {api.error && (
           <div className="headline-card hot" style={{ marginTop: 16 }}>
@@ -785,167 +907,183 @@ export default function SiteDeskV2({
               />
             </div>
           ) : (
-            <>
-              {/* THREE COLUMNS: the building · the work on the floor you picked · the task itself. */}
-              <div className="workspace plan-workspace">
-                <Building
-                  floors={plan.floors}
-                  focus={plan.focus}
-                  units={slice?.units?.list ?? null}
-                  common={slice?.common ?? []}
-                  problems={api.problems}
-                  currentUnit={currentUnit}
-                  onFloor={(n) => {
-                    const next = new URLSearchParams(params)
-                    next.set('floor', n)
-                    next.delete('loc')            // the flats belong to the floor you just left
-                    setParams(next, { replace: true })
-                    setOpenTaskRef(null)
-                  }}
-                  onUnit={setUnit}
-                  onRef={gotoRef}
-                />
-
-                <div className="plan-col" ref={planCue.ref}>
-                  {/* SAY WHAT THE COLUMN IS. "Fourth · Flat Unit A" is a breadcrumb, and a breadcrumb
-                      above a list of tasks makes you work out for yourself what you are looking at. */}
-                  <div className="col-cap">
-                    <span>
-                      Tasks for {floorName(plan.focus)}
-                      {slice?.units
-                        ? currentUnit === 'Common' ? ' · common areas' : ` · Flat ${currentUnit}`
-                        : ''}
-                    </span>
-                    <em>{planTasks.length}</em>
+            <div className="wp">
+              {/* ── Redesigned Work Plan — its own topbar, full-width list, floor dock, right peek.
+                  Mock: workplan-redesign-mock.html. ────────────────────────────────────────────── */}
+              <header className="wp-topbar">
+                <button className="wp-gear" title="Settings" onClick={() => nav('/desk/settings/chasing')}>⚙</button>
+                {/* The project name IS the picker — a dropdown, never a jump to a list page. Locked
+                    under a project, it's a plain label. */}
+                {lockedSite ? (
+                  <div className="wp-proj">
+                    <div className="wp-proj-eyebrow">PROJECT</div>
+                    <div className="wp-proj-name wp-proj-locked">{scopedSite?.name ?? scope}</div>
                   </div>
-
-                  <div className="list plan-list">
-                    {/* Blocks render ONLY when a site has more than one — and INSIDE the card, so a
-                        site that has two blocks does not sit one band lower than a site that has one. */}
-                    {plan.blocks && plan.blocks.length > 1 && (
-                      <div className="blockbar">
-                        {plan.blocks.map((b) => <button key={b} className="blockchip">{b}</button>)}
-                      </div>
-                    )}
-                    <div className="list-head">
-                      {api.canReorder
-                        ? 'Drag a task to reorder it — you’ll be told if a job can’t come before another'
-                        : 'In the order the work has to happen'}
-                    </div>
-                    {/* The across-flats rollup is GONE. On the prototype's 4 activities it read as one
-                        crisp sentence; against a real 26-type engine plan it was a wall of "0/2" that
-                        said nothing. A summary that lists everything is not a summary. */}
-                    {planTasks.length === 0 ? (
-                      <div className="empty">
-                        <b>Nothing on this floor yet</b>
-                        No tasks are laid out for {plan.focus}.
-                      </div>
-                    ) : (
-                      <TaskGroups
-                        tasks={planTasks} groups={planGroups} problems={api.problems} allTasks={allTasks}
-                        // DRAG WORKS ON EVERY FLOOR, INCLUDING ONES WITH FLATS. This used to be
-                        // `&& !slice?.units` — switched off the moment a floor had flats on it, which
-                        // is most floors, which is why "dragging doesn't work". That guard was written
-                        // when a drop had no referee and nowhere to persist to: reordering a slice of
-                        // a floor would have meant guessing at the project-wide sequence. It does not
-                        // guess now. The referee is the engine (checkMove) and the write is the whole
-                        // project's order in one statement (siteops_resequence).
-                        draggable={api.canReorder} isTouch={isTouch} openRef={selectedRef}
-                        folded={folded} onFold={(g) => setFolded((f) => ({ ...f, [g]: true }))}
-                        onOpen={setOpenTaskRef} onRef={gotoRef} onDrop={onDrop}
-                        onDelete={setDeleteRef} onMove={api.canReorder ? setMoveRef : undefined}
-                        onAdd={setAddSection}
-                      />
-                    )}
+                ) : (
+                  <div className="wp-scope">
+                    <ScopePicker
+                      sites={api.sites}
+                      scope={scope}
+                      onScope={(code) => { setOpenTaskRef(null); goto(code, tab) }}
+                    />
                   </div>
-                  {planCue.cue}
-                </div>
-                <div className="panel-col">
-                  {/* .pin holds the caption AND the card together for the whole scroll — the column
-                      is full-height so this never gets released when the task list runs out. */}
-                  <div className="pin">
-                    <div className="col-cap">
-                      <span>{openTask ? `Task · ${openTask.ref}` : 'Task detail'}</span>
-                    </div>
-                    <aside className="panel" ref={panelRef} aria-label="Task detail">
-                      {isDesktop && detail ? (
-                        <>
-                          <div className="d-scroll">{detail.content}</div>
-                          <div className="d-bar">{detail.bar}</div>
-                        </>
-                      ) : (
-                        <div className="panel-empty">Select a task to see its details.</div>
+                )}
+                <div className="wp-topbar-right">
+                  {scopedSite && (
+                    <SupervisorPill
+                      members={api.members}
+                      current={scopedSite.supervisorId}
+                      onAssign={(uid) => attemptQuiet(
+                        () => api.assignSupervisor(scope, uid),
+                        uid ? `Supervisor set — ${api.members.find((m) => m.id === uid)?.name}` : 'Supervisor cleared',
                       )}
-                      {/* the card takes the moment, names what it finished, and hands you the next one */}
-                      {cheer && <Celebrate verb={cheer.verb} title={cheer.title} next={nextUp} onDone={cheerDone} />}
-                    </aside>
-                  </div>
+                    />
+                  )}
                 </div>
-              </div>
-            </>
+              </header>
+
+              <main className="wp-main">
+                <div className="wp-list-head">
+                  <div className="wp-list-title">
+                    TASKS FOR {floorName(plan.focus).toUpperCase()}
+                    {slice?.units ? (currentUnit === 'Common' ? ' · COMMON AREAS' : ` · FLAT ${currentUnit.toUpperCase()}`) : ''}
+                  </div>
+                  <div className="wp-list-count">{planTasks.length}</div>
+                  <div className="wp-hint">Click a task to peek · <kbd>↑</kbd><kbd>↓</kbd> to move · <kbd>Esc</kbd> to close</div>
+                </div>
+
+                <div className={`wp-tasklist plan-list${listSettling ? ' loading' : ''}`}>
+                  {planTasks.length === 0 ? (
+                    <div className="wp-section-row">NOTHING ON THIS FLOOR YET <span>· {floorName(plan.focus)}</span></div>
+                  ) : (() => {
+                    const byRef = (r: string) => allTasks.find((x) => x.ref === r)
+                    // Sections in build order (Structure → Services → Finishes), tasks within — the same
+                    // flat sequence ↑/↓ walks and the build spine reads adjacency from.
+                    const ordered = planGroups.flatMap((g) => planTasks.filter((t) => t.group === g.n))
+                    const out: React.ReactNode[] = []
+                    let lastGroup: string | null = null
+                    ordered.forEach((t, i) => {
+                      if (t.group !== lastGroup) {
+                        lastGroup = t.group
+                        const note = planGroups.find((g) => g.n === t.group)?.note
+                        out.push(
+                          <div key={`sec-${t.group}`} className="wp-section-row">
+                            {t.group.toUpperCase()}{note ? <span>· {note}</span> : null}
+                          </div>,
+                        )
+                      }
+                      const vm = taskStatus(t, api.problems, byRef)
+                      const done = t.state === 'done'
+                      const live = vm.cls === 'live'
+                      const tickCls = done ? 'done' : live ? 'inprogress' : 'pending'
+                      const total = parseInt(t.dur, 10) || 0
+                      let chip: React.ReactNode = null
+                      if (live && t.started && total && t.started > total) chip = <span className="wp-tchip overdue">{t.started - total}d over</span>
+                      else if (!done && !live && t.ref === edgeRef && vm.cls === 'ready') chip = <span className="wp-tchip next">up next</span>
+                      const date = done ? (t.doneW ?? '') : live ? (t.started ? `day ${t.started}` : 'running') : t.dur
+                      const prevDone = i > 0 && ordered[i - 1].state === 'done'
+                      const cls = ['wp-trow']
+                      if (done) cls.push('is-done')
+                      if (t.ref === selectedRef) cls.push('selected')
+                      if (i === 0) cls.push('first')
+                      if (i === ordered.length - 1) cls.push('last')
+                      if (prevDone) cls.push('conn-top-done')
+                      if (done) cls.push('conn-bottom-done')
+                      out.push(
+                        <button
+                          key={t.ref} data-ref={t.ref} className={cls.join(' ')}
+                          style={{ '--i': i } as React.CSSProperties}
+                          onClick={() => setOpenTaskRef(t.ref)}
+                        >
+                          <span className={`wp-tick ${tickCls}`}>{done ? '✓' : ''}</span>
+                          <span className="wp-tmain">
+                            <span className="wp-tname">{t.title}</span>
+                            <span className="wp-tid">{t.ref}</span>
+                          </span>
+                          {chip}
+                          <span className="wp-tdate">{date}</span>
+                        </button>,
+                      )
+                    })
+                    return out
+                  })()}
+                </div>
+              </main>
+
+              {/* THE BUILDING — the floor dock (its own component: overflow fades + scroll arrows). */}
+              <FloorDock
+                floors={plan.floors}
+                focus={plan.focus}
+                onFloor={onFloorPick}
+                units={slice?.units ? slice.units.list : null}
+                currentUnit={currentUnit}
+                onUnit={setUnit}
+                hidden={dockHidden}
+              />
+
+              {/* THE PEEK — desktop task detail slide-over. The phone keeps the shared bottom sheet. */}
+              {isDesktop && (
+                <aside className={`wp-peek${openTask ? ' open' : ''}${peekFull ? ' full' : ''}`} aria-label="Task detail">
+                  <div className="wp-peek-bar">
+                    <button className="wp-icon-btn" title="Close (Esc)" onClick={() => { setOpenTaskRef(null); setPeekFull(false) }}>✕</button>
+                    <button className="wp-icon-btn" title="Open full" onClick={() => setPeekFull((v) => !v)}>⤢</button>
+                    <div className="wp-nav-hint"><kbd>↑</kbd> <kbd>↓</kbd> previous / next task</div>
+                  </div>
+                  <div className="wp-peek-body">
+                    {detail ? (
+                      <>
+                        <div className="d-scroll">{detail.content}</div>
+                        <div className="d-bar">{detail.bar}</div>
+                      </>
+                    ) : null}
+                    {/* the card takes the moment, names what it finished, and hands you the next one */}
+                    {cheer && <Celebrate verb={cheer.verb} title={cheer.title} next={nextUp} onDone={cheerDone} />}
+                  </div>
+                </aside>
+              )}
+            </div>
           )
         )}
 
         {/* ================= PROBLEMS ================= */}
         {tab === 'problems' && (
-          <>
-            {/* ══ THE CONTROLS BELONG TO THE LIST ═══════════════════════════════════════════════════
-                They used to sit ABOVE the grid, spanning both columns — so Pending·Open·Sorted was a
-                page-level banner, and the card's column began underneath it. Two things followed, and
-                both were wrong: the tabs scrolled away on their own while the list they govern stayed,
-                and the card started a whole control-bar lower than the top of the frame it had to fit
-                into.
+          <div className="wp wp-problems">
+            {/* The Problems list is the full-width column; the item opens in the SAME slide-over peek
+                the Work Plan uses (close only via ✕ / Esc — never an incidental tap). */}
+            <div className="wp-problems-main" ref={listCue.ref}>
+              <ProblemControls
+                segment={segment} setSegment={setSegment}
+                sortBy={sortBy} setSort={setSortBy}
+                kindF={kindF} setKind={setKindF}
+              />
+              <ProblemList
+                items={problems} segment={segment} sortBy={sortBy}
+                openId={openItem?.id ?? null} closingId={closingId} reopeningId={reopeningId}
+                isTouch={isTouch} siteName={scopedSite?.name ?? null} kindF={kindF}
+                onOpen={openDetail} onSwipeClose={swipeClose}
+              />
+              {listCue.cue}
+            </div>
 
-                They are the LIST's controls. They name what it is showing and how it is sorted, and
-                nothing on the right-hand card answers to them. So they live in the list's column and
-                travel with it: tabs and rows move as one thing, and the card — which the scroll has no
-                business touching — is pinned from the top of the frame and whole in it. */}
-            <div className="workspace">
-              <div className="list-col" ref={listCue.ref}>
-                <ProblemControls
-                  segment={segment} setSegment={setSegment}
-                  sortBy={sortBy} setSort={setSortBy}
-                  kindF={kindF} setKind={setKindF}
-                  pendingCount={pending.length}
-                />
-                {segment === 'pending' ? (
-                  <PendingView
-                    items={pending}
-                    onPlace={(id) => attempt(() => api.place(id), 'Opening placement — pick where it belongs')}
-                    onDismiss={(id) => attempt(() => api.dismissPending(id), 'Dismissed')}
-                  />
-                ) : (
-                  <ProblemList
-                    items={problems} segment={segment} sortBy={sortBy}
-                    openId={openItem?.id ?? null} closingId={closingId} reopeningId={reopeningId}
-                    isTouch={isTouch} siteName={scopedSite?.name ?? null} kindF={kindF}
-                    onOpen={openDetail} onSwipeClose={swipeClose}
-                  />
-                )}
-                {listCue.cue}
-              </div>
-
-              {/* ONE SCROLLBAR, AND THE ONLY THING IT MOVES IS THE LIST.
-                  The plan already worked this way: the detail is PINNED, you spin the wheel and the work
-                  scrolls past it. The problems tab let the whole page move instead, so reading a long
-                  thread carried the item you were reading off the top of the screen. Same rule, both
-                  tabs — the thing you are looking AT stays still, and the things you are looking THROUGH
-                  move. */}
-              <div className="pin">
-                <aside className="panel" ref={panelRef} aria-label="Item detail">
-                  {isDesktop && detail ? (
+            {isDesktop && (
+              <aside className={`wp-peek${openItem ? ' open' : ''}${peekFull ? ' full' : ''}`} aria-label="Item detail">
+                <div className="wp-peek-bar">
+                  <button className="wp-icon-btn" title="Close (Esc)" onClick={() => { dismissDetail(); setPeekFull(false) }}>✕</button>
+                  <button className="wp-icon-btn" title="Open full" onClick={() => setPeekFull((v) => !v)}>⤢</button>
+                  <div className="wp-nav-hint">Esc to close</div>
+                </div>
+                <div className="wp-peek-body">
+                  {detail ? (
                     <>
                       <div className="d-scroll">{detail.content}</div>
                       <div className="d-bar">{detail.bar}</div>
                     </>
-                  ) : (
-                    <div className="panel-empty">Select an item to see its full story.</div>
-                  )}
+                  ) : null}
                   {cheer && <Celebrate verb={cheer.verb} title={cheer.title} next={nextUp} onDone={cheerDone} />}
-                </aside>
-              </div>
-            </div>
-          </>
+                </div>
+              </aside>
+            )}
+          </div>
         )}
         </>}
         </div>

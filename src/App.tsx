@@ -541,7 +541,7 @@ function App() {
               so every WhatsApp deep link, notification and bookmark ever sent still lands somewhere
               true — at the same work, on the better surface. Follow-up Rules keeps its own address
               (it is a settings page, and the desk's gear points straight at it). */}
-          <Route path="/site-desk" element={<Navigate to="/desk/all/problems" replace />} />
+          <Route path="/site-desk" element={<Navigate to="/desk/all/plan" replace />} />
 
           {/* ── SITE DESK v30 (feature-flagged) ──────────────────────────────────────────
               Registered ONLY when the flag is on, so with it off the portal is byte-identical
@@ -550,7 +550,7 @@ function App() {
               the EXISTING Follow-up Rules page unchanged (restyle is out of scope). */}
           {SITE_DESK_ENABLED && (
             <>
-              <Route path="/desk" element={<Navigate to="/desk/all/problems" replace />} />
+              <Route path="/desk" element={<Navigate to="/desk/all/plan" replace />} />
               <Route path="/desk/settings/chasing" element={<FollowUpRules session={session} />} />
               <Route path="/desk/:site/problems" element={<SiteDeskV2 session={session} tab="problems" />} />
               <Route path="/desk/:site/problems/:ref" element={<SiteDeskV2 session={session} tab="problems" />} />
@@ -911,7 +911,8 @@ function MoreNavSheet({
   const globalItems = [
     { path: '/projects',      icon: IconLayoutGrid,            label: 'Projects',        show: true },
     { path: '/work-orders',   icon: IconClipboardList,         label: 'Contracts',       show: true },
-    { path: '/site-desk',     icon: IconClipboardList,         label: 'Site Desk',       show: true },
+    { path: '/desk/all/plan', icon: IconClipboardList, label: 'Site Desk', show: true, match: (p: string) => p === '/desk' || /^\/desk\/[^/]+\/plan/.test(p) },
+    { path: '/desk/all/problems', icon: IconClipboardList, label: 'Site Problems', show: true, match: (p: string) => /^\/desk\/[^/]+\/problems/.test(p) },
     { path: '/tasks',         icon: IconChecklist,             label: 'Task Manager',    show: true },
     { path: '/attendance',    icon: IconChecklist,             label: 'Attendance',      show: true },
     { path: '/stakeholders',  icon: IconUsers,                 label: 'Parties',         show: role !== 'supervisor' },
@@ -934,7 +935,8 @@ function MoreNavSheet({
       <div className="pb-2">
         {items.map(item => {
           const Icon = item.icon;
-          const active = isActivePath(item.path);
+          const m = (item as { match?: (p: string) => boolean }).match;
+          const active = m ? m(location.pathname) : isActivePath(item.path);
           return (
             <button
               key={item.path}

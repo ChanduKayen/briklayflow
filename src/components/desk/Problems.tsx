@@ -11,7 +11,6 @@ import type { DeskPending, DeskProblem, ProblemKind } from '../../lib/desk/types
 import { isOldAge } from '../../lib/desk/derive'
 import { useSwipe } from './useDesk'
 import { Btn } from './Btn'
-import { Seg } from './Seg'
 import { Medallion } from './Medallion'
 import { problemTone } from '../../lib/desk/medTone'
 
@@ -193,7 +192,7 @@ export function PendingView({
  * Severity sort and the kind filter HIDE in Pending: an unplaced capture has no kind and no
  * severity yet — that is precisely what makes it pending. Chronological only. */
 export function ProblemControls({
-  segment, setSegment, sortBy, setSort, kindF, setKind, pendingCount,
+  segment, setSegment, sortBy, setSort, kindF, setKind,
 }: {
   segment: Segment
   setSegment: (s: Segment) => void
@@ -201,7 +200,6 @@ export function ProblemControls({
   setSort: (s: SortBy) => void
   kindF: KindFilter
   setKind: (k: KindFilter) => void
-  pendingCount: number
 }) {
   const [menu, setMenu] = useState(false)
   const wrap = useRef<HTMLDivElement>(null)
@@ -219,45 +217,37 @@ export function ProblemControls({
   return (
     <div className="controls" style={{ paddingTop: 16 }}>
       <div className="ctl-row">
-        {/* The lifecycle, left to right — and the thumb glides between them. */}
-        <Seg<Segment>
-          ariaLabel="Item lifecycle"
-          value={segment}
-          onChange={setSegment}
-          options={[
-            { value: 'pending', label: 'Pending', count: pendingCount },
-            { value: 'open', label: 'Open' },
-            { value: 'sorted', label: 'Sorted' },
-          ]}
-        />
+        {/* Open vs Sorted — a quiet text toggle, not a heavy pill. ('Pending' is retired.) */}
+        <div className="subtle-seg" role="tablist" aria-label="Item lifecycle">
+          <button role="tab" aria-selected={segment === 'open'} className={segment === 'open' ? 'on' : ''} onClick={() => setSegment('open')}>Open</button>
+          <button role="tab" aria-selected={segment === 'sorted'} className={segment === 'sorted' ? 'on' : ''} onClick={() => setSegment('sorted')}>Sorted</button>
+        </div>
         <div className="spacer" />
 
-        {segment !== 'pending' && (
-          <div className="menuwrap" ref={wrap}>
-            <button className="iconbtn" onClick={(e) => { e.stopPropagation(); setMenu((m) => !m) }} aria-label="Sort and filter">
-              <span>{label}</span>
-              <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
-                <path d="M3 5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-              </svg>
-            </button>
-            {menu && (
-              <div className="menu">
-                {segment === 'open' && (
-                  <>
-                    <div className="menu-label">Sort</div>
-                    <button className={sortBy === 'severe' ? 'on' : ''} onClick={() => setSort('severe')}>Most urgent first</button>
-                    <button className={sortBy === 'new' ? 'on' : ''} onClick={() => setSort('new')}>Newest first</button>
-                    <div className="menu-sep" />
-                  </>
-                )}
-                <div className="menu-label">Show</div>
-                <button className={kindF === 'all' ? 'on' : ''} onClick={() => setKind('all')}>Everything</button>
-                <button className={kindF === 'issue' ? 'on' : ''} onClick={() => setKind('issue')}>Only issues</button>
-                <button className={kindF === 'snag' ? 'on' : ''} onClick={() => setKind('snag')}>Only snags</button>
-              </div>
-            )}
-          </div>
-        )}
+        <div className="menuwrap" ref={wrap}>
+          <button className="iconbtn" onClick={(e) => { e.stopPropagation(); setMenu((m) => !m) }} aria-label="Sort and filter">
+            <span>{label}</span>
+            <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+              <path d="M3 5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+            </svg>
+          </button>
+          {menu && (
+            <div className="menu">
+              {segment === 'open' && (
+                <>
+                  <div className="menu-label">Sort</div>
+                  <button className={sortBy === 'severe' ? 'on' : ''} onClick={() => setSort('severe')}>Most urgent first</button>
+                  <button className={sortBy === 'new' ? 'on' : ''} onClick={() => setSort('new')}>Newest first</button>
+                  <div className="menu-sep" />
+                </>
+              )}
+              <div className="menu-label">Show</div>
+              <button className={kindF === 'all' ? 'on' : ''} onClick={() => setKind('all')}>Everything</button>
+              <button className={kindF === 'issue' ? 'on' : ''} onClick={() => setKind('issue')}>Only issues</button>
+              <button className={kindF === 'snag' ? 'on' : ''} onClick={() => setKind('snag')}>Only snags</button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

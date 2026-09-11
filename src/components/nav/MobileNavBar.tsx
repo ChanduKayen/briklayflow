@@ -257,7 +257,8 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
 // ── the Workspace hub (the reference's card grid) ──
 function WorkspaceHub({ role, onGo, onSignOut }: { role: Role; onGo: (to: string) => void; onSignOut?: () => void }) {
   const cards = [
-    { label: 'Site Desk', sub: 'sites active', to: '/site-desk', icon: I.sitedesk, show: true },
+    { label: 'Site Desk', sub: 'work plan', to: '/desk/all/plan', icon: I.sitedesk, show: true },
+    { label: 'Site Problems', sub: 'issues & snags', to: '/desk/all/problems', icon: I.sitedesk, show: true },
     { label: 'Contracts', sub: 'work orders', to: '/work-orders', icon: I.contracts, show: true },
     { label: 'Parties', sub: 'vendors & workers', to: '/stakeholders', icon: I.parties, show: role !== 'supervisor' },
     { label: 'Insights', sub: 'spend & trends', to: '/insights', icon: I.insights, show: true },
