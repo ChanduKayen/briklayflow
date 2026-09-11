@@ -33,7 +33,6 @@ import { taskStatus } from '../../lib/desk/derive'
 import { briefOf } from '../../lib/siteOps/engine'
 import { StoryPhoto } from './Detail'
 import { Check } from './icons'
-import { Seg } from './Seg'
 
 const initials = (name: string) =>
   name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('') || '—'
@@ -239,7 +238,7 @@ function useTaskEdit(t: DeskTask, allTasks: DeskTask[], onEdit?: (p: TaskEdit) =
 
 export function TaskSheetBody({
   task: t, problems, allTasks, members,
-  onOpen, onRef, onState, onDur, onNote, onQc, onAssign, onEdit, note, setNote,
+  onOpen, onRef, onDur, onNote, onQc, onAssign, onEdit, note, setNote,
 }: {
   task: DeskTask
   problems: DeskProblem[]
@@ -261,433 +260,289 @@ export function TaskSheetBody({
   const byRef = (r: string) => allTasks.find((x) => x.ref === r)
   const st = taskStatus(t, problems, byRef)
 
-  // "Why can't I start this?" — answered with EVERY gate still standing, not just the first.
-  // The row stays silent about dependencies (that is the sequence quietly doing its job); the sheet
-  // is where he comes to ask, so the sheet owes him the whole answer. It used to show one.
+  // Every unmet gate, not just the first — the sheet is where he comes to ask "why can't I start?".
   const deps = (st.cls === 'after' ? st.waiting : [])
     .map((r) => byRef(r))
     .filter((d): d is DeskTask => !!d)
+
   const qc = t.qc ?? []
   const confirmed = qc.filter((c) => c.status === 'confirmed').length
-  const allPassed = qc.length > 0 && confirmed === qc.length
+  const left = qc.length - confirmed
   const days = parseInt(t.dur, 10) || 1
   const over = t.started ? t.started - days : 0
-
-  // Not started → the BRIEF. You cannot grade work that has not happened, so the checks stay away
-  // until there is work to grade; what a man needs before he starts is what the job IS.
   const notStarted = t.state === 'todo'
-  const [openQc, setOpenQc] = useState(false)
-  const qcOpen = t.state === 'active' ? true : (openQc || !allPassed)
+  const hasBrief = !!briefOf(t.taskTypeId, 'te')
+  const story = t.story ?? []
 
-  /* THE HEADER FROSTS ONCE YOU SCROLL PAST IT.
-   *
-   * Who this task is and — the reason it stays — the ONE control that changes its state are welded to
-   * the top of the card. At rest the header IS the paper: no glass, nothing to explain. The moment the
-   * brief and the story slide up beneath it, it lifts onto frosted glass with a hairline under it,
-   * because now it is a layer above the page and has to say so — and the state is reachable from
-   * anywhere in a long story, not just the top of it. (rAF-throttled: the card's own scroll must never
-   * be the thing that stutters.) */
-  const headRef = useRef<HTMLDivElement>(null)
-  const [stuck, setStuck] = useState(false)
-  useEffect(() => {
-    const box = headRef.current?.closest('.d-scroll') as HTMLElement | null
-    if (!box) return
-    let queued = false
-    const onScroll = () => {
-      if (queued) return
-      queued = true
-      requestAnimationFrame(() => { queued = false; setStuck(box.scrollTop > 4) })
-    }
-    onScroll()
-    box.addEventListener('scroll', onScroll, { passive: true })
-    return () => box.removeEventListener('scroll', onScroll)
-  }, [t.ref])
-
-  // FOCUS ON START. The moment a task goes in-progress — from Not started, or reopened from Done —
-  // the cursor lands in the note box. Starting a job and saying you've started it are one motion.
-  //
-  // Only on a TRANSITION, never on mount: opening a task that is already active must not steal the
-  // cursor, and neither must a WhatsApp update flipping the status while someone is mid-sentence here.
+  // FOCUS ON START — the moment a task goes in-progress, the cursor lands in the note box. Only on a
+  // TRANSITION, never on mount (opening an already-active task must not steal the cursor).
   const noteRef = useRef<HTMLInputElement>(null)
   const prevState = useRef<TaskState | null>(null)
   useEffect(() => {
     const became = prevState.current !== null && prevState.current !== 'active' && t.state === 'active'
     prevState.current = t.state
     if (!became) return
-    // the Story section GROWS (0fr → 1fr) — wait for it to have a height before scrolling to it
     const id = window.setTimeout(() => {
       const el = noteRef.current
       if (!el) return
-
-      // SCROLL THE PANEL, NOT THE PAGE.
-      //
-      // The detail is its own scroll container (.d-scroll, overflow-y:auto) — on desktop inside a STICKY
-      // panel, on mobile inside the sheet. Both of the browser's helpful defaults get this wrong:
-      //
-      //   focus()            scrolls the element into view its own way, walking up EVERY scrollable
-      //                      ancestor — including the window.
-      //   scrollIntoView()   does the same, so it centres the box in the VIEWPORT rather than in the panel.
-      //
-      // So the page lurched under a sticky panel that never moved, and the note box — the whole point of
-      // the motion — stayed exactly where it was. Take both jobs away from the browser: focus WITHOUT a
-      // scroll, then scroll the container by the exact amount that centres the box inside IT. Nothing else
-      // on the screen moves, and the thing that moves is the thing he is about to type into.
       el.focus({ preventScroll: true })
       const box = el.closest('.d-scroll') as HTMLElement | null
       if (!box) { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); return }
-      const r = el.getBoundingClientRect()
-      const c = box.getBoundingClientRect()
+      const r = el.getBoundingClientRect(); const c = box.getBoundingClientRect()
       box.scrollBy({ top: (r.top - c.top) - (c.height - r.height) / 2, behavior: 'smooth' })
     }, 260)
     return () => window.clearTimeout(id)
   }, [t.state])
 
+  // ── the status SENTENCE (no segmented control) ──
+  let dotCls = 'wait'
+  let statusNode: React.ReactNode
+  if (t.state === 'done') {
+    dotCls = 'live'
+    statusNode = <><em>Done</em>{t.doneW ? ` · ${t.doneW}` : ''}</>
+  } else if (t.state === 'active') {
+    dotCls = 'live'
+    const dayPhrase = t.started
+      ? (over > 0
+          ? `running for ${t.started} days · ${over} day${over > 1 ? 's' : ''} over the ${days}-day plan`
+          : (t.started === 1 ? '1st day of work' : `running for ${t.started} days`))
+      : null
+    statusNode = <><em>In progress</em>{dayPhrase ? ` · ${dayPhrase}` : ''} · {t.assignee && t.assignee !== 'Unassigned' ? t.assignee : 'nobody assigned'}</>
+  } else if (st.cls === 'blocked') {
+    statusNode = <>Waits on <a onClick={() => onRef(st.ref)}>{st.ref}</a> — can’t start until it’s done</>
+  } else if (st.cls === 'after' && deps.length > 0) {
+    statusNode = <>Waits on {deps.map((d, i) => (
+      <span key={d.ref}>{i > 0 && (i === deps.length - 1 ? ' and ' : ', ')}<a onClick={() => onOpen(d.ref)}>{d.title}</a></span>
+    ))}, in progress now</>
+  } else if (st.cls === 'unknown') {
+    statusNode = <>Can’t confirm this is ready — {st.missing.join(', ')} {st.missing.length > 1 ? 'are' : 'is'} not in this project’s task list</>
+  } else {
+    statusNode = <>Ready to start</>
+  }
+
+  // one feed row, styled by who spoke
+  const feedRow = (s: NonNullable<DeskTask['story']>[number], i: number): React.ReactNode => {
+    if (s.t === 'photo') {
+      return (
+        <div className="tpk-ev" key={i}>
+          <div className="tpk-who ai" aria-hidden>📷</div>
+          <div className="tpk-evbody">
+            <div className="tpk-l1"><b>From the site</b>{s.w ? <span className="tpk-t">{s.w}</span> : null}</div>
+            <div className="tpk-photos"><StoryPhoto step={s} /></div>
+            {s.caption ? <div className="tpk-msg wa" style={{ marginTop: 7 }}>{s.caption}</div> : null}
+          </div>
+        </div>
+      )
+    }
+    if (s.t === 'msg') {
+      return (
+        <div className="tpk-ev" key={i}>
+          <div className="tpk-who person">{initials(s.from)}</div>
+          <div className="tpk-evbody">
+            <div className="tpk-l1"><b>{s.from}</b> <span>on WhatsApp</span>{s.w ? <span className="tpk-t">{s.w}</span> : null}</div>
+            <div className="tpk-msg wa">{s.text}</div>
+          </div>
+        </div>
+      )
+    }
+    if (s.t === 'note') {
+      return (
+        <div className="tpk-ev" key={i}>
+          <div className="tpk-who you">C</div>
+          <div className="tpk-evbody">
+            <div className="tpk-l1"><b>You</b> <span>note</span>{s.w ? <span className="tpk-t">{s.w}</span> : null}</div>
+            <div className="tpk-sys">{s.text}</div>
+          </div>
+        </div>
+      )
+    }
+    // event | miss | next | resolve → Babai / the system
+    return (
+      <div className="tpk-ev" key={i}>
+        <div className="tpk-who ai">B</div>
+        <div className="tpk-evbody">
+          <div className="tpk-l1"><b>Babai</b>{s.w ? <span className="tpk-t">{s.w}</span> : null}</div>
+          <div className="tpk-sys">{s.l}</div>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className={`tsheet s-${t.state}`}>
-      {/* ── the sticky head: identity + the state control, pinned and frosted on scroll ── */}
-      <div className={`t-head ${stuck ? 'stuck' : ''}`} ref={headRef}>
-      {/* ── identity: one block, one voice ── */}
-      <div className="t-eyebrow">
-        <span className="t-ref">{t.ref}</span>
-        Task · {t.group}{t.floor ? ` · ${t.floor}` : ''}
+    <div className={`tpk s-${t.state}`}>
+      {/* ── top: identity, title, the status sentence, meta, folded scope ── */}
+      <div className="tpk-top">
+        <div className="tpk-idrow">
+          <span className="tpk-chip">{t.ref}</span>
+          <span className="tpk-kind">{t.group}{t.trade ? ` · ${t.trade}` : ''}</span>
+          {onEdit && (ed.editing
+            ? (
+              <span className="tpk-editbar">
+                <button className="tpk-cancel" onClick={ed.cancel} disabled={ed.save === 'saving'}>Cancel</button>
+                <button
+                  className={`tpk-save ${ed.save}`}
+                  onClick={() => void ed.commit()}
+                  disabled={!ed.name.trim() || ed.save === 'saving' || (ed.save === 'idle' && !ed.dirty)}
+                >{ed.save === 'saving' ? 'Saving…' : ed.save === 'saved' ? 'Saved ✓' : 'Save'}</button>
+              </span>
+            )
+            : <button className="tpk-edit" onClick={() => ed.begin('name')}>Edit</button>)}
+        </div>
 
-        {/* THE ONE CONTROL FOR THE WHOLE SESSION, and it reports on itself. */}
-        {onEdit && (ed.editing
+        {ed.editing
           ? (
-            <span className="t-editbar">
-              <button className="t-cancel" onClick={ed.cancel} disabled={ed.save === 'saving'}>Cancel</button>
-              <button
-                className={`t-save ${ed.save}`}
-                onClick={() => void ed.commit()}
-                disabled={!ed.name.trim() || ed.save === 'saving' || (ed.save === 'idle' && !ed.dirty)}
-              >
-                {ed.save === 'saving' ? 'Saving…' : ed.save === 'saved' ? 'Saved ✓' : 'Save'}
-              </button>
-            </span>
+            <>
+              <input
+                className="tpk-title-in" value={ed.name} aria-label="Task name"
+                autoFocus={ed.focus === 'name'} onFocus={ed.caretToEnd}
+                onChange={(e) => ed.setName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') void ed.commit(); if (e.key === 'Escape') ed.cancel() }}
+              />
+              {ed.canScope && (
+                <div className="tpk-scope-pick">
+                  {([['type', `Rename all ${ed.kin.length} of these on the site`], ['row', 'Rename only this one']] as const).map(([k, label]) => (
+                    <label key={k} className={`tpk-opt ${ed.scope === k ? 'on' : ''}`}>
+                      <input type="radio" name="rename-scope" checked={ed.scope === k} onChange={() => ed.setScope(k)} />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </>
           )
-          : <button className="t-edit" onClick={() => ed.begin('name')}>Edit</button>
-        )}
-      </div>
+          : <h2 className={`tpk-title ${onEdit ? 'editable' : ''}`} onClick={() => onEdit && ed.begin('name')}>{t.title}</h2>}
 
-      {/* THE HEADING IS EDITED WHERE IT STANDS. Same size, same weight, same place — click the words
-          and the cursor is in them. Nothing is covered, nothing moves, and the sequence behind the
-          card stays where it was, which is exactly what a dialog cannot promise. */}
-      {ed.editing
-        ? (
-          <>
-            <input
-              className="t-title-in" value={ed.name} aria-label="Task name"
-              autoFocus={ed.focus === 'name'} onFocus={ed.caretToEnd}
-              onChange={(e) => ed.setName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') void ed.commit(); if (e.key === 'Escape') ed.cancel() }}
-            />
-            {ed.canScope && (
-              <div className="t-scope-pick">
-                {([
-                  ['type', `Rename all ${ed.kin.length} of these on the site`],
-                  ['row', 'Rename only this one'],
-                ] as const).map(([k, label]) => (
-                  <label key={k} className={`t-opt ${ed.scope === k ? 'on' : ''}`}>
-                    <input type="radio" name="rename-scope" checked={ed.scope === k} onChange={() => ed.setScope(k)} />
-                    <span>{label}</span>
-                  </label>
-                ))}
-                <p className="t-hint">WhatsApp keeps understanding “{t.title}” either way — the old word is remembered.</p>
-              </div>
-            )}
-          </>
-        )
-        : (
-          <h1
-            className={`t-title ${onEdit ? 'editable' : ''}`}
-            onClick={() => ed.begin('name')}
-            title={onEdit ? 'Click to rename' : undefined}
-          >
-            {t.title}
-          </h1>
-        )}
-
-      {/* ── the status spine ── */}
-      <div className="statwrap">
-        <Seg<TaskState>
-          ariaLabel="Task status"
-          value={t.state}
-          finished={t.state === 'done'}
-          onChange={(s) => { void onState(s) }}
-          options={[
-            { value: 'todo', label: 'Not started' },
-            { value: 'active', label: 'In progress' },
-            { value: 'done', label: 'Done' },
-          ]}
-        />
-
-        {/* THE DEPENDENCY LIVES HERE, ONCE. Not in a "Comes after" row as well — saying it twice
-            is how a card starts feeling like a form. */}
-        <div className={`statline ${t.state === 'done' ? 'done' : ''}`}>
-          {t.state === 'done' && <>Done ✓{t.doneW ? ` · ${t.doneW}` : ''}</>}
-
-          {t.state === 'active' && (
-            <>
-              <span className="ldot" aria-hidden="true" />
-              {t.assignee} on it
-              {/* SAID THE WAY A SITE SAYS IT. Not "day 1 of 1" — the first day of work; not "day 3" —
-                  running for three days. "Day 6 of 4" is nonsense anyway; two days over is a fact. */}
-              {t.started && (over > 0
-                ? <> · <span className="over">running for {t.started} days · {over} day{over > 1 ? 's' : ''} over the {days}-day plan</span></>
-                : <> · {t.started === 1 ? '1st day of work' : `running for ${t.started} days`}</>)}
-            </>
-          )}
-
-          {t.state === 'todo' && st.cls === 'blocked' && (
-            <>Blocked by <button className="dep" onClick={() => onRef(st.ref)}>{st.ref}</button></>
-          )}
-          {t.state === 'todo' && st.cls === 'after' && deps.length > 0 && (
-            <>
-              Waits for{' '}
-              {deps.map((d, i) => (
-                <span key={d.ref}>
-                  {i > 0 && (i === deps.length - 1 ? ' and ' : ', ')}
-                  <button className="dep" onClick={() => onOpen(d.ref)}>{d.ref}</button> {d.title}
-                </span>
-              ))}
-            </>
-          )}
-          {/* THE PLAN HAS DRIFTED FROM THE BUILDING, and we say so instead of guessing. The work this
-              task waits for has no task on this project, so we cannot see whether it is finished — and
-              the honest answer to "can I start?" is "I can't tell you", not "yes". */}
-          {t.state === 'todo' && st.cls === 'unknown' && (
-            <span className="stat-unknown">
-              Can’t confirm this is ready — {st.missing.join(', ')} {st.missing.length > 1 ? 'are' : 'is'} not
-              in this project’s task list. Regenerate the plan to fix it.
-            </span>
-          )}
-          {t.state === 'todo' && st.cls === 'ready' && <>Ready — can start now</>}
+        <div className="tpk-status">
+          <span className={`tpk-dot ${dotCls}`} aria-hidden />
+          <span>{statusNode}</span>
         </div>
-      </div>
-      </div>{/* /.t-head */}
 
-      {/* ── properties: quiet, editable on approach ── */}
-      <div className="props">
-        <label className="prop">
-          <span className="k">With</span>
-          <span className="v">
-            <span className="avatar">{initials(t.assignee)}</span>
-            {t.assignee}
-          </span>
-          {/* a real <select>, invisible over the row — native picker, custom skin */}
-          <select
-            className="prop-pick"
-            aria-label="Assignee"
-            value={t.ownerId ?? ''}
-            onChange={(e) => onAssign(e.target.value || null)}
-          >
-            <option value="">Unassigned</option>
-            {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </select>
-          <svg className="chev" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
-            <path d="M3 5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-          </svg>
-        </label>
-
-        {/* TRADE LIVES ON THE GROUP HEADER NOW, not down here. Every task in a phase is the same
-            trade's work, so printing it once per task was printing it twenty times to say one thing
-            — and it said it in the one place you only reach AFTER you have already chosen the task. */}
-
-        <div className="prop">
-          <span className="k">Takes</span>
-          <span className="v">{days} {days === 1 ? 'day' : 'days'}</span>
-          {/* the stepper only appears when you approach it */}
-          <span className="stepper">
-            <button onClick={() => onDur(-1)} aria-label="Shorter">−</button>
-            <button onClick={() => onDur(1)} aria-label="Longer">+</button>
+        <div className="tpk-meta">
+          <label className="tpk-with">
+            <span>With <b>{t.assignee && t.assignee !== 'Unassigned' ? t.assignee : 'nobody yet'}</b></span>
+            <select className="tpk-pick" aria-label="Assignee" value={t.ownerId ?? ''} onChange={(e) => onAssign(e.target.value || null)}>
+              <option value="">Unassigned</option>
+              {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          </label>
+          <span className="tpk-takes">
+            Takes <b>{days} {days === 1 ? 'day' : 'days'}</b>
+            <span className="tpk-stepper"><button onClick={() => onDur(-1)} aria-label="Shorter">−</button><button onClick={() => onDur(1)} aria-label="Longer">+</button></span>
           </span>
         </div>
-      </div>
 
-      {/* ── the description and scope: what this job IS. Not a checklist — an explanation. ──
-          It shows before the work starts (a man about to begin needs to know what he is beginning),
-          and it keeps showing WHENEVER the site has written its own words about this one, because a
-          note that vanishes the moment the task goes in-progress is a note nobody will ever read. */}
-      {(notStarted || ed.editing || t.desc) && (
-        <Brief
-          taskTypeId={t.taskTypeId}
-          desc={t.desc}
-          editing={ed.editing}
-          autoFocus={ed.focus === 'desc'}
-          onCaret={ed.caretToEnd}
-          value={ed.desc}
-          onChange={ed.setDesc}
-          onEdit={onEdit ? () => ed.begin('desc') : undefined}
-          onCommit={() => void ed.commit()}
-          onCancel={ed.cancel}
-        />
-      )}
-
-      {/* Where it is and what trade it is are the BUILDING's facts, not this row's: change a generated
-          task's floor and the next reconcile puts it straight back and leaves you a duplicate. A task
-          somebody ADDED has no such tie — the engine never placed it and never will. */}
-      {ed.editing && (
-        <p className="t-hint t-fixed">
-          {t.manual
-            ? `You added this one — it sits on ${[t.floor, t.unit].filter(Boolean).join(' · ') || 'the whole site'}. Drag it wherever the work belongs.`
-            : `${[t.floor, t.unit].filter(Boolean).join(' · ') || 'Site-wide'} · ${t.trade} — where this task sits, and what trade it is, come from the site setup.`}
-        </p>
-      )}
-
-      {/* ── quality: FROM IN-PROGRESS ONWARDS. Never on a task nobody has touched. ── */}
-      {qc.length > 0 && !notStarted && (
-        <div className={`qsec ${qcOpen ? 'open' : ''}`}>
-          <button className="qhead" onClick={() => setOpenQc((o) => !o)}>
-            <span className="t">{t.state === 'done' ? 'Quality' : 'Quality checks'}</span>
-            {allPassed
-              ? <span className="qpill in">QC passed ✓</span>
-              : <span className="n">{confirmed} of {qc.length}</span>}
-            <svg className="chevron" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
-              <path d="M3 5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-            </svg>
-          </button>
-
-          {/* A TABLE, NOT A PILE.
-           *
-           * Every check used to be a row of scattered parts — a box on the left, a sentence, and a
-           * ghost "Not right?" that only appeared under the cursor. Three shapes per row, none of
-           * them in a column, and the one control that MATTERS was invisible until you hovered it.
-           *
-           * A quality check has exactly two facts: WHAT was asked, and WHAT the verdict is. So: two
-           * columns, hairline-ruled, verdicts stacked in one aligned strip on the right. Pass and
-           * fail are both always there, side by side, so calling something wrong is one click and not
-           * a discovery — and you can read the whole column top to bottom and see where the site
-           * stands without reading a word. */}
-          <div className="qbody">
-            <div>
-              <div className="qtable" role="table">
-                <div className="qt-head" role="row">
-                  <span role="columnheader">Check</span>
-                  <span role="columnheader">Verdict</span>
-                </div>
-
-                {qc.map((c) => (
-                  <div
-                    key={c.id}
-                    role="row"
-                    className={`qr ${c.status === 'confirmed' ? 'ok' : ''} ${c.status === 'failed' ? 'bad' : ''}`}
-                  >
-                    <span className="qr-q" role="cell">
-                      {c.critical && <span className="crit" title="Critical check" />}
-                      {c.question}
-                      {c.answer && <span className="qr-a">{c.answer}</span>}
-                    </span>
-
-                    <span className="qr-v" role="cell">
-                      {/* the two verdicts sit together — one is not hidden behind the other */}
-                      <button
-                        className={`qv ok ${c.status === 'confirmed' ? 'on' : ''}`}
-                        aria-pressed={c.status === 'confirmed'}
-                        title="Passed"
-                        onClick={() => void onQc(c.id, c.status === 'confirmed' ? 'pending' : 'confirmed')}
-                      >
-                        {Check}
-                      </button>
-                      <button
-                        className={`qv bad ${c.status === 'failed' ? 'on' : ''}`}
-                        aria-pressed={c.status === 'failed'}
-                        title="Not right"
-                        onClick={() => void onQc(c.id, c.status === 'failed' ? 'pending' : 'failed')}
-                      >
-                        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
-                          <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" fill="none" />
-                        </svg>
-                      </button>
-                    </span>
-                  </div>
-                ))}
-              </div>
+        {(hasBrief || t.desc || ed.editing) && (
+          <details className="tpk-scope">
+            <summary><span className="tri">▶</span> What this task covers</summary>
+            <div className="tpk-scope-body">
+              <Brief
+                taskTypeId={t.taskTypeId}
+                desc={t.desc}
+                editing={ed.editing}
+                autoFocus={ed.focus === 'desc'}
+                onCaret={ed.caretToEnd}
+                value={ed.desc}
+                onChange={ed.setDesc}
+                onEdit={onEdit ? () => ed.begin('desc') : undefined}
+                onCommit={() => void ed.commit()}
+                onCancel={ed.cancel}
+              />
             </div>
+          </details>
+        )}
+      </div>
+
+      {/* ── the feed: the spine ── */}
+      <div className="tpk-feed">
+        <div className="tpk-feedhead">FROM THE SITE</div>
+        {story.length === 0
+          ? (
+            <div className="tpk-empty">
+              <p>Nothing yet.</p>
+              <p>When the site reports on this task over WhatsApp, it lands here.</p>
+            </div>
+          )
+          : story.map((s, i) => feedRow(s, i))}
+      </div>
+
+      {/* ── note compose ── */}
+      <div className="tpk-compose">
+        <input
+          ref={noteRef}
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') void onNote() }}
+          placeholder={t.state === 'active' && story.length === 0 ? 'Started — what are you doing first?' : 'Add a note…'}
+        />
+        <button onClick={() => void onNote()}>Save</button>
+      </div>
+
+      {/* ── checks: from in-progress onwards, they gate the button ── */}
+      {qc.length > 0 && !notStarted && (
+        <div className="tpk-checks">
+          <div className="tpk-checks-head">
+            <b>Before it’s done</b>
+            <span>{left === 0 ? 'All confirmed' : `${left} to confirm`}</span>
           </div>
+          {qc.map((c) => (
+            <div key={c.id} className={`tpk-check ${c.status === 'confirmed' ? 'pass' : ''} ${c.status === 'failed' ? 'fail' : ''}`}>
+              <div
+                className="tpk-box"
+                role="button"
+                tabIndex={0}
+                title="Passed"
+                onClick={() => void onQc(c.id, c.status === 'confirmed' ? 'pending' : 'confirmed')}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void onQc(c.id, c.status === 'confirmed' ? 'pending' : 'confirmed') } }}
+              >{Check}</div>
+              <div className="tpk-txt">{c.critical && <span className="tpk-crit" title="Critical check" />}{c.question}{c.answer && <span className="tpk-a">{c.answer}</span>}</div>
+              <div className="tpk-flag" onClick={() => void onQc(c.id, c.status === 'failed' ? 'pending' : 'failed')}>Failed</div>
+            </div>
+          ))}
         </div>
       )}
-
-      {/* ── the story: there is none until the work has started ── */}
-      <div className={`story stage-sec ${notStarted ? 'gone' : ''}`}>
-        <div>
-          <div className="slabel">Story</div>
-          <div className="mtl">
-            {(t.story ?? []).map((s, i) => {
-              // A photo is not a line of text — it gets its own shape. Everything else stays as it was:
-              // a message in somebody's words, or an event line saying what moved.
-              if (s.t === 'photo') return <StoryPhoto step={s} key={i} />
-              return (
-                <div className={`mte ${s.t === 'msg' ? 'note' : ''}`} key={i}>
-                  {s.t === 'msg'
-                    ? <><b>{s.from}</b> — “{s.text}”</>
-                    : <>{'l' in s ? s.l : ''}</>}
-                  {s.w && <span className="w">{s.w}</span>}
-                </div>
-              )
-            })}
-            {(t.story ?? []).length === 0 && <div className="mte">Nothing yet.</div>}
-          </div>
-
-          {/* the input looks like a SENTENCE until you commit to it */}
-          <div className="notein">
-            <input
-              ref={noteRef}
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') void onNote() }}
-              placeholder={t.state === 'active' && !(t.story ?? []).length
-                ? 'Started — what are you doing first?'
-                : "Add an update — it joins this task's story"}
-            />
-            <button className={`noteadd ${note.trim() ? 'live' : ''}`} onClick={() => void onNote()}>Add</button>
-          </div>
-        </div>
-      </div>
     </div>
   )
 }
 
-/** ONE ACTION, ONE WORD. It says what to do now, and on Done it stops being a button at all. */
+/** ONE ACTION — driven by state + the checks, which gate Done. On Done it stops being a button. */
 export function TaskSheetBar({
-  task: t, onState, onReopen,
+  task: t, onState, onReopen, startable = true, blockerLabel,
 }: {
   task: DeskTask
   onState: (s: TaskState) => Promise<void>
   onReopen: () => void
+  /** false = a hard/soft predecessor is unmet → Start is honest about it and does nothing. */
+  startable?: boolean
+  /** the thing it waits on, for the "· after X is done" sub. */
+  blockerLabel?: string
 }) {
   const qc = t.qc ?? []
   const left = qc.filter((c) => c.status !== 'confirmed').length
+  const failed = qc.some((c) => c.status === 'failed')
   const [swap, setSwap] = useState(false)
-
-  const go = (s: TaskState) => {
-    setSwap(true)
-    void onState(s).finally(() => setTimeout(() => setSwap(false), 180))
-  }
+  const go = (s: TaskState) => { setSwap(true); void onState(s).finally(() => setTimeout(() => setSwap(false), 180)) }
 
   if (t.state === 'todo') {
-    return (
-      <button className={`cta ${swap ? 'swap' : ''}`} onClick={() => go('active')}>
-        <span className="lbl">Start</span>
-      </button>
-    )
+    if (!startable) {
+      return <button className="tpk-cta blocked" disabled>Start{blockerLabel ? <span className="sub">· after {blockerLabel} is done</span> : null}</button>
+    }
+    return <button className={`tpk-cta primary ${swap ? 'swap' : ''}`} onClick={() => go('active')}>Start</button>
   }
 
   if (t.state === 'active') {
-    return (
-      <button className={`cta finish ${swap ? 'swap' : ''}`} onClick={() => go('done')}>
-        <span className="lbl">
-          Mark done
-          {left > 0 && <span className="sub">{left} check{left > 1 ? 's' : ''} left</span>}
-        </span>
-      </button>
-    )
+    if (failed) {
+      return <button className="tpk-cta blocked" disabled>Mark done<span className="sub">· a check failed — sort it on site first</span></button>
+    }
+    if (left > 0) {
+      return <button className="tpk-cta" disabled>Mark done<span className="sub">· {left} check{left > 1 ? 's' : ''} left</span></button>
+    }
+    return <button className={`tpk-cta primary ${swap ? 'swap' : ''}`} onClick={() => go('done')}>Mark done</button>
   }
 
-  // Done: the work is in the record. The button stops being one — but the record can be reopened.
   return (
-    <div className="cta-row">
-      <div className="cta record"><span className="lbl">In the record ✓</span></div>
-      <button className="cta-reopen" onClick={onReopen}>Reopen</button>
+    <div className="tpk-cta-row">
+      <div className="tpk-cta record">Done{t.doneW ? <span className="sub">· {t.doneW}</span> : null}</div>
+      <button className="tpk-reopen" onClick={onReopen}>Reopen</button>
     </div>
   )
 }

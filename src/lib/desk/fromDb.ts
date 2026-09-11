@@ -822,6 +822,12 @@ export function toDeskTask(
     // you, and we were the ones hiding it.
     started: t.started_at ? daysBetween(t.started_at, ctx.now) + 1 : undefined,
     doneW: t.status === 'done' ? new Date(t.updated_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : undefined,
+    // Real dates for the plan row: start = when it actually began; end = the finish (done) or the
+    // projected finish (start + duration). Formatted "d Mon"; left undefined when there's no start yet.
+    startDate: t.started_at ? new Date(t.started_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : undefined,
+    endDate: t.status === 'done'
+      ? new Date(t.updated_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+      : (t.started_at ? new Date(new Date(t.started_at).getTime() + (t.duration_days ?? 1) * 86400000).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : undefined),
     floor: t.floor_label,
     unit: t.unit_label,
     qc: ctx.qcByTaskId?.get(t.task_id) ?? undefined,

@@ -55,10 +55,10 @@ const GROUP_NOTES: Record<string, string> = {
   Foundation: 'before anything stands',
 }
 
-/** THE BUILDING — the bottom floor dock. A real horizontal scroller: fades + chevron arrows appear
- *  only when the chips overflow, and an arrow scrolls the strip ~a screenful. Hides on scroll-down. */
-function FloorDock({
-  floors, focus, onFloor, units, currentUnit, onUnit, hidden,
+/** THE BUILDING — a compact header dropdown (replaces the old bottom floor dock). Opens a menu of every
+ *  floor (name + % ring, the active one marked); a floor with flats also lists Common + each unit. */
+function BuildingMenu({
+  floors, focus, onFloor, units, currentUnit, onUnit,
 }: {
   floors: { n: string; pct: number }[]
   focus: string
@@ -66,54 +66,59 @@ function FloorDock({
   units: { u: string }[] | null
   currentUnit: string
   onUnit: (u: string) => void
-  hidden: boolean
 }) {
-  const stripRef = useRef<HTMLDivElement>(null)
-  const [edges, setEdges] = useState({ l: false, r: false })
+  const [open, setOpen] = useState(false)
+  const wrap = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    const el = stripRef.current
-    if (!el) return
-    const measure = () => {
-      const max = el.scrollWidth - el.clientWidth
-      setEdges({ l: el.scrollLeft > 4, r: el.scrollLeft < max - 4 })
-    }
-    measure()
-    el.addEventListener('scroll', measure, { passive: true })
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    return () => { el.removeEventListener('scroll', measure); ro.disconnect() }
-  }, [floors.length, units, currentUnit])
-  const nudge = (dir: 1 | -1) => stripRef.current?.scrollBy({ left: dir * stripRef.current.clientWidth * 0.8, behavior: 'smooth' })
+    if (!open) return
+    const away = (e: MouseEvent) => { if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false) }
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', away)
+    document.addEventListener('keydown', esc)
+    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc) }
+  }, [open])
+  const cur = floors.find((f) => f.n === focus)
+  const label = floorName(focus) + (units ? (currentUnit === 'Common' ? ' · Common' : ` · Flat ${currentUnit}`) : '')
   return (
-    <div className={`wp-dock${hidden ? ' hidden' : ''}`}>
-      <div className={`wp-dock-fade left${edges.l ? ' show' : ''}`} />
-      <button className={`wp-dock-arrow left${edges.l ? ' show' : ''}`} aria-label="Scroll floors left" onClick={() => nudge(-1)}>‹</button>
-      <nav className="wp-floor-strip" ref={stripRef} aria-label="Floors">
-        <div className="wp-floor-strip-label">THE BUILDING</div>
-        {floors.map((f) => (
-          <button
-            key={f.n}
-            className={`wp-floor-chip${f.n === focus ? ' active' : ''}`}
-            style={{ '--p': f.pct } as React.CSSProperties}
-            onClick={() => onFloor(f.n)}
-          >
-            <span className="wp-ring" /> {floorName(f.n)} <span className="wp-pct">{f.pct}%</span>
-          </button>
-        ))}
-        {units ? (
-          <>
-            <span className="wp-floor-sep">· flats</span>
-            <button className={`wp-unit-chip${currentUnit === 'Common' ? ' active' : ''}`} onClick={() => onUnit('Common')}>Common</button>
-            {units.map((u) => (
-              <button key={u.u} className={`wp-unit-chip${currentUnit === u.u ? ' active' : ''}`} onClick={() => onUnit(u.u)}>{u.u}</button>
-            ))}
-          </>
-        ) : (
-          <div className="wp-floor-note">Whole floor · not split into flats</div>
-        )}
-      </nav>
-      <button className={`wp-dock-arrow right${edges.r ? ' show' : ''}`} aria-label="Scroll floors right" onClick={() => nudge(1)}>›</button>
-      <div className={`wp-dock-fade right${edges.r ? ' show' : ''}`} />
+    <div className={`wp-bld ${open ? 'open' : ''}`} ref={wrap}>
+      <button className="wp-bld-btn" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}>
+        <span className="wp-bld-eyebrow">BUILDING</span>
+        <span className="wp-bld-row">
+          {cur && <span className="wp-ring" style={{ '--p': cur.pct } as React.CSSProperties} />}
+          <span className="wp-bld-nm">{label}</span>
+          <span className="wp-bld-chev">▾</span>
+        </span>
+      </button>
+      {open && (
+        <div className="wp-bld-menu" role="menu">
+          <div className="wp-bld-head">Floors</div>
+          {floors.map((f) => (
+            <button
+              key={f.n}
+              className={`wp-bld-item${f.n === focus ? ' on' : ''}`}
+              role="menuitem"
+              onClick={() => { onFloor(f.n); setOpen(false) }}
+            >
+              <span className="wp-ring" style={{ '--p': f.pct } as React.CSSProperties} />
+              <span className="wp-bld-item-n">{floorName(f.n)}</span>
+              <span className="wp-bld-item-p">{f.pct}%</span>
+            </button>
+          ))}
+          {units && (
+            <>
+              <div className="wp-bld-head">Flats on {floorName(focus)}</div>
+              <button className={`wp-bld-item${currentUnit === 'Common' ? ' on' : ''}`} role="menuitem" onClick={() => { onUnit('Common'); setOpen(false) }}>
+                <span className="wp-bld-item-n">Common areas</span>
+              </button>
+              {units.map((u) => (
+                <button key={u.u} className={`wp-bld-item${currentUnit === u.u ? ' on' : ''}`} role="menuitem" onClick={() => { onUnit(u.u); setOpen(false) }}>
+                  <span className="wp-bld-item-n">Flat {u.u}</span>
+                </button>
+              ))}
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -175,6 +180,11 @@ export default function SiteDeskV2({
   const [sortBy, setSortBy] = useState<SortBy>('severe')
   const [kindF, setKindF] = useState<KindFilter>('all')
   const [openTaskRef, setOpenTaskRef] = useState<string | null>(() => params.get('task'))
+  // The peek auto-opens the live edge / first problem on arrival — but a manual ✕/Esc must STAY closed
+  // (it used to spring back open because the plan peek falls back to the edge task and Problems re-navigates
+  // to the first item). peekClosed latches a deliberate close; it clears whenever the CONTEXT changes
+  // (tab / site / floor / flat) so each destination still opens itself.
+  const [peekClosed, setPeekClosed] = useState(false)
   const [deleteRef, setDeleteRef] = useState<string | null>(null)   // the ⋯ → Delete confirmation
   const [moveRef, setMoveRef] = useState<string | null>(null)       // the ⋯ → Move (the drag, for fingers)
   const [addSection, setAddSection] = useState<string | null>(null) // the section "+" → Add a task
@@ -186,7 +196,6 @@ export default function SiteDeskV2({
   const [reopeningId, setReopeningId] = useState<string | null>(null)
   const [taskNote, setTaskNote] = useState('')
   const [peekFull, setPeekFull] = useState(false)       // the peek's ⤢ expand-to-full toggle (plan redesign)
-  const [dockHidden, setDockHidden] = useState(false)   // the floor dock hides on scroll-down, returns on up
   const [listSettling, setListSettling] = useState(true) // the one-pass row load-in animation
   const { closingId, close: animateClose } = useRowClose()
 
@@ -229,19 +238,12 @@ export default function SiteDeskV2({
   const listCue = useScrollCue()
   useEffect(() => {
     let queued = false
-    let lastY = window.scrollY
     const onScroll = () => {
       if (queued) return
       queued = true
       requestAnimationFrame(() => {
         queued = false
-        const y = window.scrollY
-        setLifted(y > 4)
-        // The floor dock (plan redesign) rides out of the way on the way down and comes back on the way up.
-        if (y < 40) setDockHidden(false)
-        else if (y > lastY + 6) setDockHidden(true)
-        else if (y < lastY - 6) setDockHidden(false)
-        lastY = y
+        setLifted(window.scrollY > 4)
       })
     }
     onScroll()
@@ -305,11 +307,13 @@ export default function SiteDeskV2({
     const p = api.problems.find((x) => x.id === id)
     if (!p) return
     setMode({ k: 'view' })
+    setPeekClosed(false)
     nav(href(scope, 'problems', p.ref), { replace: true })
   }, [api.problems, nav, href, scope])
 
   const dismissDetail = useCallback(() => {
     setMode({ k: 'view' })
+    setPeekClosed(true)              // a deliberate close stays closed — don't auto-reopen the first item
     nav(href(scope, 'problems'), { replace: true })
   }, [nav, href, scope])
 
@@ -317,8 +321,8 @@ export default function SiteDeskV2({
    *  this resolves a problem OR a task without the caller having to know which it was. */
   const gotoRef = useCallback((r: string) => {
     const p = api.problems.find((x) => x.ref === r)
-    if (p) { setMode({ k: 'view' }); goto(p.siteCode, 'problems', p.ref); return }
-    setOpenTaskRef(r)
+    if (p) { setMode({ k: 'view' }); setPeekClosed(false); goto(p.siteCode, 'problems', p.ref); return }
+    setOpenTaskRef(r); setPeekClosed(false)
     goto(scope, 'plan')
   }, [api.problems, goto, scope])
 
@@ -505,6 +509,8 @@ export default function SiteDeskV2({
    * work open, and anything you pick (or deep-link to) wins over what it volunteered. */
   const selectedRef = openTaskRef ?? edgeRef
   const openTask = selectedRef ? allTasks.find((t) => t.ref === selectedRef) ?? null : null
+  // A change of context (tab / site / floor / flat) is a fresh screen — let it auto-open again.
+  useEffect(() => { setPeekClosed(false) }, [tab, scope, plan?.focus, currentUnit])
 
   /* AND YOU SEE IT HAPPEN. The list does NOT arrive pre-scrolled — that reads as "the page loaded
    * weird", and it silently steals the fact that there is finished work above. So: the floor lands at
@@ -591,7 +597,7 @@ export default function SiteDeskV2({
   useEffect(() => {
     if (tab !== 'plan' || !isDesktop) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { setOpenTaskRef(null); setPeekFull(false); return }
+      if (e.key === 'Escape') { setOpenTaskRef(null); setPeekFull(false); setPeekClosed(true); return }
       if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
       if (!planOrderedRefs.length) return
       const t = e.target as HTMLElement | null
@@ -603,7 +609,7 @@ export default function SiteDeskV2({
         ? Math.min(planOrderedRefs.length - 1, i + 1)
         : Math.max(0, i - 1)
       const ref = planOrderedRefs[nextI < 0 ? 0 : nextI]
-      if (ref) setOpenTaskRef(ref)
+      if (ref) { setOpenTaskRef(ref); setPeekClosed(false) }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -699,6 +705,14 @@ export default function SiteDeskV2({
 
   const detailFor = (): { content: React.ReactNode; bar: React.ReactNode } | null => {
     if (tab === 'plan' && openTask) {
+      // The foot button needs to know whether the task can start and what it waits on.
+      const stBar = taskStatus(openTask, api.problems, (r) => allTasks.find((x) => x.ref === r))
+      const startableBar = !(stBar.cls === 'blocked' || stBar.cls === 'after')
+      const blockerLabel = stBar.cls === 'blocked'
+        ? stBar.ref
+        : stBar.cls === 'after'
+          ? (allTasks.find((x) => x.ref === stBar.waiting[0])?.title ?? stBar.waiting[0])
+          : undefined
       return {
         content: (
           <TaskSheetBody
@@ -721,6 +735,8 @@ export default function SiteDeskV2({
             task={openTask}
             onState={onTaskState}
             onReopen={() => { void onTaskState('active') }}
+            startable={startableBar}
+            blockerLabel={blockerLabel}
           />
         ),
       }
@@ -753,7 +769,7 @@ export default function SiteDeskV2({
   }
 
   const detail = detailFor()
-  const sheetOpen = !isDesktop && !!detail
+  const sheetOpen = !isDesktop && !!detail && !peekClosed
 
   /* The redesigned Work Plan (workplan mock) OWNS the whole frame — its own topbar, a full-width task
    * list, a bottom floor dock and a right peek. It shows only once a real plan with tasks is in hand;
@@ -784,9 +800,9 @@ export default function SiteDeskV2({
    */
   useEffect(() => {
     if (tab !== 'problems' || !isDesktop) return
-    if (routeRef || segment === 'pending' || !problems.length) return
+    if (routeRef || segment === 'pending' || !problems.length || peekClosed) return
     nav(href(scope, 'problems', problems[0].ref), { replace: true })
-  }, [tab, isDesktop, routeRef, segment, problems, nav, href, scope])
+  }, [tab, isDesktop, routeRef, segment, problems, nav, href, scope, peekClosed])
 
   const panelRef = useRef<HTMLElement>(null)
   const selectedKey = openTaskRef ?? openItem?.id ?? null
@@ -928,6 +944,14 @@ export default function SiteDeskV2({
                     />
                   </div>
                 )}
+                <BuildingMenu
+                  floors={plan.floors}
+                  focus={plan.focus}
+                  onFloor={onFloorPick}
+                  units={slice?.units ? slice.units.list : null}
+                  currentUnit={currentUnit}
+                  onUnit={setUnit}
+                />
                 <div className="wp-topbar-right">
                   {scopedSite && (
                     <SupervisorPill
@@ -980,7 +1004,20 @@ export default function SiteDeskV2({
                       let chip: React.ReactNode = null
                       if (live && t.started && total && t.started > total) chip = <span className="wp-tchip overdue">{t.started - total}d over</span>
                       else if (!done && !live && t.ref === edgeRef && vm.cls === 'ready') chip = <span className="wp-tchip next">up next</span>
-                      const date = done ? (t.doneW ?? '') : live ? (t.started ? `day ${t.started}` : 'running') : t.dur
+                      // Start → end dates, elegantly. Done: start → done. In progress: start → ~projected end.
+                      // Not started (no start_at yet): a subtle projected duration — never a fabricated date.
+                      let dateEl: React.ReactNode
+                      if (done) {
+                        dateEl = t.startDate && t.endDate
+                          ? <>{t.startDate}<i className="wp-arr">→</i>{t.endDate}</>
+                          : (t.endDate ?? t.doneW ?? '')
+                      } else if (live) {
+                        dateEl = t.startDate
+                          ? <>{t.startDate}<i className="wp-arr">→</i><span className="wp-proj">~{t.endDate ?? ''}</span></>
+                          : 'running'
+                      } else {
+                        dateEl = <span className="wp-approx">≈ {t.dur}</span>
+                      }
                       const prevDone = i > 0 && ordered[i - 1].state === 'done'
                       const cls = ['wp-trow']
                       if (done) cls.push('is-done')
@@ -993,7 +1030,7 @@ export default function SiteDeskV2({
                         <button
                           key={t.ref} data-ref={t.ref} className={cls.join(' ')}
                           style={{ '--i': i } as React.CSSProperties}
-                          onClick={() => setOpenTaskRef(t.ref)}
+                          onClick={() => { setOpenTaskRef(t.ref); setPeekClosed(false) }}
                         >
                           <span className={`wp-tick ${tickCls}`}>{done ? '✓' : ''}</span>
                           <span className="wp-tmain">
@@ -1001,7 +1038,7 @@ export default function SiteDeskV2({
                             <span className="wp-tid">{t.ref}</span>
                           </span>
                           {chip}
-                          <span className="wp-tdate">{date}</span>
+                          <span className="wp-tdate">{dateEl}</span>
                         </button>,
                       )
                     })
@@ -1010,22 +1047,11 @@ export default function SiteDeskV2({
                 </div>
               </main>
 
-              {/* THE BUILDING — the floor dock (its own component: overflow fades + scroll arrows). */}
-              <FloorDock
-                floors={plan.floors}
-                focus={plan.focus}
-                onFloor={onFloorPick}
-                units={slice?.units ? slice.units.list : null}
-                currentUnit={currentUnit}
-                onUnit={setUnit}
-                hidden={dockHidden}
-              />
-
               {/* THE PEEK — desktop task detail slide-over. The phone keeps the shared bottom sheet. */}
               {isDesktop && (
-                <aside className={`wp-peek${openTask ? ' open' : ''}${peekFull ? ' full' : ''}`} aria-label="Task detail">
+                <aside className={`wp-peek${openTask && !peekClosed ? ' open' : ''}${peekFull ? ' full' : ''}`} aria-label="Task detail">
                   <div className="wp-peek-bar">
-                    <button className="wp-icon-btn" title="Close (Esc)" onClick={() => { setOpenTaskRef(null); setPeekFull(false) }}>✕</button>
+                    <button className="wp-icon-btn" title="Close (Esc)" onClick={() => { setOpenTaskRef(null); setPeekFull(false); setPeekClosed(true) }}>✕</button>
                     <button className="wp-icon-btn" title="Open full" onClick={() => setPeekFull((v) => !v)}>⤢</button>
                     <div className="wp-nav-hint"><kbd>↑</kbd> <kbd>↓</kbd> previous / next task</div>
                   </div>
@@ -1090,7 +1116,7 @@ export default function SiteDeskV2({
       </div>
 
       {/* Mobile: the same content, in a sheet. */}
-      <Sheet open={sheetOpen} onClose={() => { if (tab === 'plan') setOpenTaskRef(null); else dismissDetail() }}>
+      <Sheet open={sheetOpen} onClose={() => { setPeekClosed(true); if (tab === 'plan') setOpenTaskRef(null); else dismissDetail() }}>
         {detail && (
           <>
             <div className="d-scroll">{detail.content}</div>

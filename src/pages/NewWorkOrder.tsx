@@ -92,7 +92,7 @@ function suggestUnit(name: string): string {
 // way past the page's clipping/stacking ancestors (the cards, the fixed footer, the app's scroll shell) —
 // a plain absolute .pop kept getting clipped or painted under later cards. The transparent `.wox` wrapper
 // carries the scope so the existing `.wox .pop` styles still apply; inline styles pin it to the anchor.
-function PortalPop({ open, anchor, children }: { open: boolean; anchor: React.RefObject<HTMLElement | null>; children: React.ReactNode }) {
+function PortalPop({ open, anchor, children }: { open: boolean; anchor: React.RefObject<HTMLDivElement | null>; children: React.ReactNode }) {
   const [box, setBox] = useState<{ top: number; left: number; width: number } | null>(null);
   useLayoutEffect(() => {
     if (!open) return;

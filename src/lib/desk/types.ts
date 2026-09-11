@@ -203,6 +203,8 @@ export interface DeskTask {
   assignee: string
   dur: string                    // "3d"
   started?: number               // day N of the duration → "day 3 of 4"
+  startDate?: string             // "3 Sep" — when work actually started (started_at)
+  endDate?: string               // "12 Sep" — done: the finish date; running: projected (start + duration)
   doneW?: string
   note?: string
   floor?: string | null
