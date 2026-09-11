@@ -2,7 +2,7 @@
 // the attendance week; each figure shows its basis + arithmetic on expand; paying ≠ the computed
 // figure asks WHY (carried / advance / re-agreed); Mark-paid records a REAL transaction.
 // Vendors, salaries, bills and the WhatsApp receipt are the next slices.
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import type { Session } from '@supabase/supabase-js';
@@ -243,6 +243,8 @@ const CSS = `
   .wpx .cutover{margin-top:10px;font-size:12px;line-height:1.45;color:var(--walnut-3);display:block}
 
   /* money card — what is still owed leads; planned and paid support it underneath */
+  .wpx .statcol{width:100%;align-items:stretch;gap:10px}
+  .wpx .viewtoggle{align-self:flex-start}
   .wpx .stats{width:100%;display:grid;grid-template-columns:1fr 1fr;gap:0 14px;text-align:left;
     background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:15px 16px 13px}
   .wpx .stats .st.left{grid-column:1/-1;order:-1;padding-bottom:12px}
@@ -322,6 +324,25 @@ const CSS = `
   .wpx .psrch>input{height:44px;font-size:16px}
   .wpx .recitem{gap:10px;font-size:13.5px}
 }
+/* Run | Week-matrix view toggle (sits in the week nav) */
+/* the right column: three stats, then the Run | Week-matrix toggle beneath them (mock's .top + .toggle) */
+.wpx .statcol{display:flex;flex-direction:column;align-items:flex-end;gap:14px}
+.wpx .viewtoggle{display:inline-flex;border:1px solid var(--line,#E4DDCE);border-radius:999px;background:var(--card,#FBF9F3);padding:3px}
+.wpx .viewtoggle button{border:0;background:none;font:600 12.5px inherit;color:var(--walnut-2,#736B5D);padding:6px 16px;border-radius:999px;cursor:pointer;transition:background .15s,color .15s}
+.wpx .viewtoggle button.on{background:var(--ink,#27221A);color:var(--card,#FBF9F3)}
+.wpx .ratelink{background:none;border:0;color:var(--walnut-2);cursor:pointer;text-decoration:underline;text-decoration-color:var(--line-2);text-underline-offset:3px;font:inherit}
+.wpx .ratelink:hover{color:var(--walnut)}
+/* band chips — the mock's .chips, shared header, matrix view */
+.wpx .chips{display:flex;gap:8px;flex-wrap:wrap;margin:-6px 0 20px}
+.wpx .chip-f{border:1px solid var(--line);background:var(--card,var(--paper));border-radius:999px;padding:6px 15px;font:500 12.5px inherit;color:var(--walnut-2);cursor:pointer;transition:background .15s,color .15s,border-color .15s}
+.wpx .chip-f:hover{color:var(--walnut)}
+.wpx .chip-f.on{background:var(--ink,#27221A);border-color:var(--ink,#27221A);color:var(--card,#FBF9F3)}
+/* rate-card overlay — opened from the header link */
+.wpx .rate-ov{position:fixed;inset:0;z-index:90;background:rgba(39,34,26,.34);backdrop-filter:blur(2px);display:flex;align-items:flex-start;justify-content:center;padding:24px;animation:rateov .16s ease}
+@keyframes rateov{from{opacity:0}to{opacity:1}}
+.wpx .rate-modal{position:relative;background:var(--paper,#FBF9F3);border:1px solid var(--line);border-radius:16px;box-shadow:0 24px 60px rgba(39,34,26,.22);width:100%;max-width:660px;margin-top:6vh;max-height:82vh;overflow:auto;padding:20px 22px}
+.wpx .rate-x{position:absolute;top:12px;right:12px;width:30px;height:30px;border:0;background:none;border-radius:8px;color:var(--walnut-2);cursor:pointer;font-size:14px}
+.wpx .rate-x:hover{background:var(--cream,#F2EEE6);color:var(--walnut)}
 `;
 
 type Diff = { kind: 'carry' | 'advance' | 're'; reason: string };
@@ -345,6 +366,9 @@ export default function Payables({ session }: { session: Session }) {
   // 640px, the width at which the run stops being a table and becomes the phone design.
   const isPhone = useIsMobile(640);
   const [addSheet, setAddSheet] = useState<null | 'worker' | 'recurring'>(null);
+  const [view, setView] = useState<'run' | 'matrix'>('run');   // the Run list vs the Week matrix
+  const [band, setBand] = useState<'all' | 'workers' | 'vendors' | 'fixed'>('workers');   // matrix band filter
+  const [rateOpen, setRateOpen] = useState(false);            // the rate-card overlay (opened from the header link)
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['weekly_payments', monday.toISOString().slice(0, 10)],
@@ -434,6 +458,19 @@ export default function Payables({ session }: { session: Session }) {
     return { planned: pl, paid: pd, left: pl - pd, count: n };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sections, plan, paid, serverPaid]);
+
+  // The matrix view's headline retotals to the chosen band (the mock's stats follow the filter).
+  const matrixBandOf = (pid: string) => pid === '__vendors__' ? 'vendors' : pid === '__recurring__' ? 'fixed' : 'workers';
+  const matrixStats = useMemo(() => {
+    let pl = 0, pd = 0;
+    allSections.forEach(sec => {
+      if (band !== 'all' && matrixBandOf(sec.projectId) !== band) return;
+      sec.rows.forEach(r => { pl += Math.round(r.thisWeek); pd += (paidOf(r) || 0); });
+    });
+    return { planned: pl, paid: pd, left: pl - pd };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allSections, band, paid, serverPaid]);
+  const headStats = view === 'matrix' ? matrixStats : totals;
 
   // The one place a payment is recorded. The desktop row and the phone's pay sheet both come
   // through here, so a payment made on a phone is the same transaction, settled the same way.
@@ -563,33 +600,53 @@ export default function Payables({ session }: { session: Session }) {
           <div className="lead">
             <h1>Payments</h1>
             <div className="sub wknav">
-              <span className="wklab"><span className="wkw">Week of </span>{weekLabel(monday)}<span className="wkw"> ·</span></span>
+              <span className="wklab"><span className="wkw">Week of </span>{weekLabel(monday)}</span>
               <button className="wkstep prev" onClick={() => shiftWeek(-1)} aria-label="Previous week">‹<span className="wkw"> last week</span></button>
               <button className="wkstep next" onClick={() => shiftWeek(1)} aria-label="Next week"><span className="wkw">next week </span>›</button>
               <button className="wknow" onClick={() => setMonday(mondayOf(new Date()))}>this week</button>
+              {orgId && <button className="ratelink" onClick={() => setRateOpen(true)}>rate card</button>}
             </div>
             <div className="sub"><SearchBar label="the run" /></div>
             {orgId && <div className="sub cutover"><LedgerCutoverControl orgId={orgId} isManager={isManager} /></div>}
             {readOnly && <div className="sub" style={{ color: 'var(--gold, #8A6A1F)' }}>A past week — a record of what was logged and paid then. The live balance is on each party&apos;s ledger.</div>}
           </div>
-          <div className="stats">
-            <div className="st"><div className="l">Planned</div><div className="v mono">{inr(totals.planned)}</div></div>
-            <div className="st paid"><div className="l">Paid</div><div className="v mono">{inr(totals.paid)}</div></div>
-            <div className="st left"><div className="l">Still to pay</div><div className="v mono">{inr(totals.left)}</div></div>
+          <div className="statcol">
+            <div className="stats">
+              <div className="st"><div className="l">Planned</div><div className="v mono">{inr(headStats.planned)}</div></div>
+              <div className="st paid"><div className="l">Paid</div><div className="v mono">{inr(headStats.paid)}</div></div>
+              <div className="st left"><div className="l">Still to pay</div><div className="v mono">{inr(headStats.left)}</div></div>
+            </div>
+            <div className="viewtoggle" role="tablist" aria-label="View">
+              <button role="tab" aria-selected={view === 'run'} className={view === 'run' ? 'on' : ''} onClick={() => setView('run')}>Run</button>
+              <button role="tab" aria-selected={view === 'matrix'} className={view === 'matrix' ? 'on' : ''} onClick={() => setView('matrix')}>Week matrix</button>
+            </div>
           </div>
         </div>
 
-        {/* Work awaiting sign-off — approving here mints the obligation into the run below. */}
-        {orgId && session.user?.id && <PendingCertifications orgId={orgId} userId={session.user.id} />}
+        {/* Band chips live in the shared header for the matrix (mock's .chips); the Run view groups by
+            site, not band, so the chips only show in matrix view. */}
+        {view === 'matrix' && (
+          <div className="chips">
+            {([['all', 'All'], ['workers', 'Workers'], ['vendors', 'Vendors'], ['fixed', 'Recurring & staff']] as const).map(([k, label]) => (
+              <button key={k} className={`chip-f${band === k ? ' on' : ''}`} onClick={() => setBand(k)}>{label}</button>
+            ))}
+          </div>
+        )}
 
-        {/* The day rates that produced the labour figures below — collapsed until asked for. */}
-        {orgId && <RateCardPanel orgId={orgId} isManager={isManager} />}
+        {/* Work awaiting sign-off — approving here mints the obligation into the run below. Run view only. */}
+        {view === 'run' && orgId && session.user?.id && <PendingCertifications orgId={orgId} userId={session.user.id} />}
+
 
         {isLoading && <div className="state">Loading the week…</div>}
         {error && <div className="state" style={{ color: 'var(--terracotta)' }}>Could not load — {(error as any)?.message || 'try again'}</div>}
         {!isLoading && !error && sections.length === 0 && <div className="state">No active projects yet — create a project to start the payment run.</div>}
 
-        {sections.map(section => {
+        {/* ═══ WEEK MATRIX — payee × site, bands, live totals (see payments-week-matrix mock) ═══ */}
+        {view === 'matrix' && !isLoading && !error && sections.length > 0 && (
+          <WeekMatrix allSections={allSections} paidOf={paidOf} band={band} />
+        )}
+
+        {view === 'run' && sections.map(section => {
           const sPlan = section.rows.reduce((a, r) => a + planned(r), 0);
           const sPaid = section.rows.reduce((a, r) => a + (paidOf(r) || 0), 0);
           return (
@@ -654,18 +711,28 @@ export default function Payables({ session }: { session: Session }) {
           );
         })}
 
-        <RecurringManager orgId={orgId} recurring={recurring ?? []} projects={(projects ?? []) as { project_id: string; name: string }[]}
-          onChanged={() => refetchRec()} onError={(m) => showSnackbar(m, { type: 'error' })} />
+        {view === 'run' && <RecurringManager orgId={orgId} recurring={recurring ?? []} projects={(projects ?? []) as { project_id: string; name: string }[]}
+          onChanged={() => refetchRec()} onError={(m) => showSnackbar(m, { type: 'error' })} />}
 
-        <div className="foot"><div className="foot-in">
+        {view === 'run' && <div className="foot"><div className="foot-in">
           <div className="s">{totals.count ? <><b>{totals.count}</b> payments planned, not yet made · <b className="mono">{inr(totals.left)}</b></> : 'Everything planned is paid.'}</div>
           <div className="acts">
             <span className="lbl">pay by</span>
             <select className="modesel" value={mode} onChange={(e) => setMode(e.target.value)}>{MODES.map(m => <option key={m}>{m}</option>)}</select>
             <span className="hint">· each payment is recorded to the ledger</span>
           </div>
-        </div></div>
+        </div></div>}
       </div>
+
+      {/* Rate card — opened from the header link as a light overlay (no longer an inline page block). */}
+      {rateOpen && orgId && (
+        <div className="rate-ov" onClick={() => setRateOpen(false)}>
+          <div className="rate-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="rate-x" onClick={() => setRateOpen(false)} aria-label="Close">✕</button>
+            <RateCardPanel orgId={orgId} isManager={isManager} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -882,3 +949,254 @@ function WhyPopover({ row, planned, onPutBack, onDone }: { row: PayRow; planned:
     </div>
   );
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// WEEK MATRIX — payee × site, banded (Workers / Vendors / Recurring), with live totals.
+// Mock: payments-week-matrix.html. Pivots the run's `allSections` (party × site rows) into a grid;
+// Mark-paid is the SAME real payment as the run (doPay).
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+const SITE_PALETTE = ['#B5472F', '#7C8B72', '#B9892C', '#5D7183', '#8A6A9B', '#4F8A8B', '#C08552', '#6B7A4F'];
+const BAND_DEFS: { key: 'workers' | 'vendors' | 'fixed'; label: string; pid: string }[] = [
+  { key: 'workers', label: 'Workers', pid: '__workers__' },
+  { key: 'vendors', label: 'Vendors — bills to pay', pid: '__vendors__' },
+  { key: 'fixed', label: 'Recurring & fixed', pid: '__recurring__' },
+];
+interface MxCell { rows: PayRow[]; thisWeek: number; paid: number; meta: string }
+interface MxPayee { key: string; name: string; meta: string; cells: Record<string, MxCell>; due: number; paid: number }
+
+// How a cell's figure is worked out — the lines shown when a card is expanded.
+function cellDerivation(c: MxCell): { lines: [string, number][]; total: number } {
+  const lines: [string, number][] = [];
+  c.rows.forEach(r => {
+    if (r.att) r.att.ledger.forEach(([l, v]) => lines.push([l, v]));
+    else if (r.stage) r.stage.readings.forEach(([n, d, e]) => lines.push([`${n} · ${d}`, e]));
+    else if (r.bills?.length) r.bills.forEach(b => lines.push([`Bill ${b.no}${b.date ? ` · ${b.date}` : ''}`, b.balance]));
+    else lines.push([r.basis || 'this week', Math.round(r.thisWeek)]);
+  });
+  return { lines, total: c.thisWeek };
+}
+
+function WeekMatrix({ allSections, paidOf, band }: {
+  allSections: PaySection[];
+  paidOf: (r: PayRow) => number | null;
+  band: 'all' | 'workers' | 'vendors' | 'fixed';
+}) {
+  const [hover, setHover] = useState<{ row: string | null; col: number | null }>({ row: null, col: null });
+  const [open, setOpen] = useState<string | null>(null);   // the one expanded cell — `${payee}|${site}`
+
+  // ── pivot — strictly what is owed THIS WEEK, by whom, on which site ───────────────────────────
+  const model = useMemo(() => {
+    const rowsFor = (pid: string) => allSections.find(s => s.projectId === pid)?.rows ?? [];
+    // Sites = every project that carries money this week, in first-seen order.
+    const siteOrder: string[] = [];
+    const siteName: Record<string, string> = {};
+    allSections.forEach(s => s.rows.forEach(r => {
+      if (r.thisWeek <= 0) return;
+      if (!(r.projectId in siteName)) { siteName[r.projectId] = r.projectName; siteOrder.push(r.projectId); }
+    }));
+    const sites = siteOrder.map((id, i) => ({ id, name: siteName[id], color: SITE_PALETTE[i % SITE_PALETTE.length] }));
+
+    const bands = BAND_DEFS.map(bd => {
+      const byPayee = new Map<string, MxPayee>();
+      rowsFor(bd.pid).forEach(r => {
+        if (r.thisWeek <= 0) return;
+        const key = r.stakeholderId ?? r.party;
+        let p = byPayee.get(key);
+        if (!p) { p = { key, name: r.party, meta: r.trade || '', cells: {}, due: 0, paid: 0 }; byPayee.set(key, p); }
+        let cell = p.cells[r.projectId];
+        if (!cell) { cell = { rows: [], thisWeek: 0, paid: 0, meta: r.basis }; p.cells[r.projectId] = cell; }
+        cell.rows.push(r);
+        cell.thisWeek += Math.round(r.thisWeek);
+        cell.paid += (paidOf(r) || 0);
+      });
+      const payees = [...byPayee.values()].filter(p => Object.values(p.cells).some(c => c.thisWeek > 0));
+      payees.forEach(p => {
+        const cs = Object.values(p.cells);
+        p.due = cs.reduce((a, c) => a + c.thisWeek, 0);
+        p.paid = cs.reduce((a, c) => a + c.paid, 0);
+        const nSites = cs.filter(c => c.thisWeek > 0).length;
+        p.meta = [p.meta, nSites > 1 ? `${nSites} sites` : null].filter(Boolean).join(' · ');
+      });
+      const total = payees.reduce((a, p) => a + p.due, 0);
+      const paid = payees.reduce((a, p) => a + p.paid, 0);
+      return { ...bd, payees, total, paid };
+    }).filter(b => b.payees.length > 0);
+
+    return { sites, bands };
+  }, [allSections, paidOf]);
+
+  const shown = band === 'all' ? model.bands : model.bands.filter(b => b.key === band);
+  const sites = model.sites;
+  const N = sites.length;
+  const gridStyle = { gridTemplateColumns: `196px repeat(${N}, minmax(140px,1fr)) 156px` } as CSSProperties;
+
+  // visible per-site + grand (respect the band filter)
+  const visSite: Record<string, { plan: number; paid: number }> = {};
+  sites.forEach(s => { visSite[s.id] = { plan: 0, paid: 0 }; });
+  shown.forEach(b => b.payees.forEach(p => Object.entries(p.cells).forEach(([sid, c]) => {
+    if (visSite[sid]) { visSite[sid].plan += c.thisWeek; visSite[sid].paid += c.paid; }
+  })));
+  const grandPlan = Object.values(visSite).reduce((a, v) => a + v.plan, 0);
+  const grandPaid = Object.values(visSite).reduce((a, v) => a + v.paid, 0);
+
+  const hl = (row: string | null, col: number | null) =>
+    ((col != null && hover.col === col) || (row != null && hover.row === row)) ? ' hl' : '';
+  const enter = (row: string | null, col: number | null) => setHover({ row, col });
+  const leave = () => setHover({ row: null, col: null });
+
+  return (
+    <div className="wkm" onMouseLeave={leave}>
+      <style>{WKM_CSS}</style>
+
+      <div className="sheet">
+        <div className="grid" style={gridStyle}>
+          {/* header */}
+          <div className={`c who head${hl('__head__', null)}`} onMouseEnter={() => enter('__head__', null)}>who × site</div>
+          {sites.map((s, i) => (
+            <div key={s.id} className={`c head${hl(null, i)}`} onMouseEnter={() => enter('__head__', i)}>
+              <span className="site-nm"><span className="dot" style={{ background: s.color }} />{s.name}</span>
+            </div>
+          ))}
+          <div className="c head paycol">to settle</div>
+
+          {shown.map(b => (
+            <div className="row" key={b.key}>
+              {/* The band title only earns its row when several bands share the sheet (the "All" view);
+                  with one band chosen, the chip already names it. */}
+              {band === 'all' && (
+                <div className="c band"><h3>{b.label}</h3><span className="bt"><b>{inr(b.total)}</b> this week{b.paid ? ` · ${inr(b.paid)} paid` : ''}</span></div>
+              )}
+              {b.payees.map(p => (
+                <div className="rowline" key={p.key}>
+                  <div className={`c who${hl(p.key, null)}`} onMouseEnter={() => enter(p.key, null)}>
+                    <span className="nm">{p.name}</span>{p.meta ? <span className="meta">{p.meta}</span> : null}
+                  </div>
+                  {sites.map((s, i) => {
+                    const c = p.cells[s.id];
+                    const cls = `c${hl(p.key, i)}`;
+                    if (!c || c.thisWeek <= 0) {
+                      return <div key={s.id} className={cls} onMouseEnter={() => enter(p.key, i)}><span className="none">—</span></div>;
+                    }
+                    const paid = c.rows.length > 0 && c.rows.every(r => paidOf(r) != null);
+                    const cellKey = `${p.key}|${s.id}`;
+                    const isOpen = open === cellKey;
+                    const d = isOpen ? cellDerivation(c) : null;
+                    return (
+                      <div key={s.id} className={cls} onMouseEnter={() => enter(p.key, i)}>
+                        <div
+                          className={`pcell${paid ? ' paid' : ''}${isOpen ? ' open' : ''}`}
+                          style={{ '--site-c': s.color } as CSSProperties}
+                          role="button" tabIndex={0}
+                          onClick={() => setOpen(o => o === cellKey ? null : cellKey)}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(o => o === cellKey ? null : cellKey); } }}
+                        >
+                          <div className="amt">{inr(c.thisWeek)}</div>
+                          <div className="meta">{c.meta}</div>
+                          {d && (
+                            <div className="pderiv">
+                              {d.lines.map(([l, v], k) => (
+                                <div className="dl" key={k}><span className="dlabel">{l}</span><span className="dv">{inr(v)}</span></div>
+                              ))}
+                              <div className="dl dtot"><span className="dlabel">this week</span><span className="dv">{inr(d.total)}</span></div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div className={`c pay${hl(p.key, null)}`} onMouseEnter={() => enter(p.key, null)}>
+                    {p.due - p.paid > 0 ? (
+                      <>
+                        <span className="amt">{inr(p.due - p.paid)}</span>
+                        {p.paid ? <span className="sub">{inr(p.paid)} paid</span> : null}
+                      </>
+                    ) : (
+                      <><span className="ok">✓ settled</span><span className="sub">{inr(p.paid)} paid</span></>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+
+          {/* footer */}
+          <div className={`c who foot${hl('__foot__', null)}`} onMouseEnter={() => enter('__foot__', null)}>site outgo</div>
+          {sites.map((s, i) => {
+            const v = visSite[s.id]; const due = v.plan - v.paid;
+            return (
+              <div key={s.id} className={`c foot${hl(null, i)}`} onMouseEnter={() => enter('__foot__', i)}>
+                {v.plan ? <>
+                  <span className="amt" style={due === 0 ? { color: 'var(--wkm-paid)' } : undefined}>{inr(due)}</span>
+                  <span className="sub">{v.paid ? `${inr(v.paid)} paid of ${inr(v.plan)}` : `of ${inr(v.plan)} planned`}</span>
+                </> : <span className="none">—</span>}
+              </div>
+            );
+          })}
+          <div className="c foot grand"><span className="amt">{inr(grandPlan - grandPaid)}</span><span className="sub">still to pay · {inr(grandPlan)} planned</span></div>
+        </div>
+      </div>
+
+      <p className="hint">Row end = what you hand each person this week · bottom = each site&apos;s outgo · click a cell to see how it&apos;s worked out</p>
+    </div>
+  );
+}
+
+const WKM_CSS = `
+.wkm{--wkm-card:#FBF9F3;--wkm-card2:#F7F3EA;--wkm-ink:#27221A;--wkm-ink2:#736B5D;--wkm-ink3:#A79E8D;
+  --wkm-line:#E4DDCE;--wkm-line2:#EFE9DC;--wkm-due:#B5472F;--wkm-paid:#66794F;
+  --wkm-serif:"Source Serif 4",Georgia,serif;--wkm-mono:"IBM Plex Mono",ui-monospace,monospace;--wkm-sans:"Karla",system-ui,sans-serif;
+  font-family:var(--wkm-sans);color:var(--wkm-ink);margin-top:6px}
+.wkm .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.wkm .chip-f{border:1px solid var(--wkm-line);background:var(--wkm-card);border-radius:999px;padding:6px 15px;font:500 12.5px var(--wkm-sans);color:var(--wkm-ink2);cursor:pointer}
+.wkm .chip-f:hover{color:var(--wkm-ink)}
+.wkm .chip-f.on{background:var(--wkm-ink);border-color:var(--wkm-ink);color:var(--wkm-card)}
+.wkm .sheet{border:1px solid var(--wkm-line);border-radius:14px;background:var(--wkm-card);overflow-x:auto}
+.wkm .grid{display:grid;min-width:1000px}
+.wkm .row,.wkm .rowline{display:contents}
+.wkm .c{border-top:1px solid var(--wkm-line2);display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;min-height:46px;padding:5px 8px}
+.wkm .c.who{position:sticky;left:0;background:var(--wkm-card);z-index:3;align-items:flex-start;justify-content:center;padding:7px 14px;border-right:1px solid var(--wkm-line2)}
+.wkm .who .nm{font-family:var(--wkm-serif);font-weight:600;font-size:13.5px;line-height:1.2}
+.wkm .who .meta{font-size:10.5px;color:var(--wkm-ink2);margin-top:1px}
+.wkm .c.head{min-height:38px;background:var(--wkm-card2);border-top:0;gap:5px}
+.wkm .c.who.head{background:var(--wkm-card2);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--wkm-ink2);font-weight:500}
+.wkm .c.head .site-nm{display:flex;align-items:center;gap:7px;font-family:var(--wkm-serif);font-weight:600;font-size:13.5px;color:var(--wkm-ink)}
+.wkm .c.head .site-nm .dot{width:7px;height:7px;border-radius:50%}
+.wkm .c.head.paycol{align-items:flex-end;padding-right:16px;font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--wkm-ink2);gap:3px}
+.wkm .c.band{grid-column:1 / -1;flex-direction:row;justify-content:space-between;background:var(--wkm-card2);border-top:1px solid var(--wkm-line);min-height:32px;padding:6px 16px}
+.wkm .c.band h3{font-family:var(--wkm-serif);font-weight:600;font-size:14px}
+.wkm .c.band .bt{font-family:var(--wkm-mono);font-size:11.5px;color:var(--wkm-ink2)}
+.wkm .c.band .bt b{color:var(--wkm-ink);font-weight:500}
+.wkm .pcell{width:100%;background:transparent;border:1px solid transparent;border-radius:8px;padding:4px 10px 4px 12px;position:relative;text-align:left;cursor:pointer;transition:border-color .15s ease,background .15s ease}
+.wkm .pcell::before{content:"";position:absolute;left:1px;top:5px;bottom:5px;width:2px;border-radius:2px;background:var(--site-c);opacity:.7}
+.wkm .pcell .amt{font-family:var(--wkm-mono);font-weight:500;font-size:13.5px;color:var(--wkm-ink)}
+.wkm .pcell .meta{font-family:var(--wkm-sans);font-size:10px;color:var(--wkm-ink3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wkm .pcell:hover{border-color:var(--wkm-line2);background:rgba(255,255,255,.55)}
+.wkm .pcell.open{border-color:var(--wkm-line);background:rgba(255,255,255,.8);box-shadow:0 4px 14px rgba(39,34,26,.06)}
+.wkm .pcell.paid .amt{color:var(--wkm-paid)}
+.wkm .pcell.paid::before{opacity:.35}
+/* click-to-expand derivation — a soft inset panel, hairline-separated */
+.wkm .pderiv{margin-top:6px;padding-top:6px;border-top:1px solid var(--wkm-line2);animation:wkm-deriv .18s ease}
+.wkm .pderiv .dl{display:flex;justify-content:space-between;gap:10px;font-family:var(--wkm-mono);font-size:10.5px;color:var(--wkm-ink2);padding:1.5px 0}
+.wkm .pderiv .dl .dlabel{font-family:var(--wkm-sans);color:var(--wkm-ink3);white-space:normal}
+.wkm .pderiv .dl .dv{color:var(--wkm-ink2);flex:none}
+.wkm .pderiv .dtot{margin-top:3px;padding-top:4px;border-top:1px dotted var(--wkm-line);color:var(--wkm-ink)}
+.wkm .pderiv .dtot .dlabel{color:var(--wkm-ink2);font-weight:600}
+.wkm .pderiv .dtot .dv{color:var(--wkm-ink);font-weight:600}
+@keyframes wkm-deriv{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
+.wkm .c .none{font-family:var(--wkm-mono);font-size:12px;color:var(--wkm-ink3)}
+.wkm .c.pay{align-items:flex-end;padding-right:16px;gap:2px;border-left:1px solid var(--wkm-line2);background:rgba(247,243,234,.55)}
+.wkm .c.pay .amt{font-family:var(--wkm-mono);font-weight:500;font-size:13.5px;letter-spacing:-.01em}
+.wkm .c.pay .sub{font-family:var(--wkm-mono);font-size:9.5px;color:var(--wkm-ink3)}
+.wkm .c.pay .ok{font:600 11.5px var(--wkm-sans);color:var(--wkm-paid)}
+.wkm .c.head.paycol,.wkm .c.foot.grand{border-left:1px solid var(--wkm-line2)}
+.wkm .c.foot{background:var(--wkm-card2);border-top:1px solid var(--wkm-line);min-height:46px;gap:2px}
+.wkm .c.foot .amt{font-family:var(--wkm-mono);font-weight:600;font-size:13.5px}
+.wkm .c.foot .sub{font-family:var(--wkm-mono);font-size:10.5px;color:var(--wkm-ink2)}
+.wkm .c.who.foot{background:var(--wkm-card2);align-items:flex-start;font:500 10.5px var(--wkm-sans);letter-spacing:.13em;text-transform:uppercase;color:var(--wkm-ink2)}
+.wkm .c.foot.grand{align-items:flex-end;padding-right:18px}
+.wkm .c.foot.grand .amt{font-size:15px;color:var(--wkm-due)}
+.wkm .c.hl{background:rgba(120,104,76,.045)}
+.wkm .c.foot.hl,.wkm .c.head.hl{background:rgba(120,104,76,.07)}
+.wkm .c.who.hl{background:rgba(120,104,76,.03)}
+.wkm .hint{margin-top:12px;font-size:12px;color:var(--wkm-ink3)}
+`;
