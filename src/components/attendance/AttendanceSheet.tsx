@@ -179,6 +179,10 @@ const ATDX_CSS = `
 .atdx .wname .stsel{max-width:100%}
 .atdx .wrow.sub .wname{padding-left:66px}
 .atdx .wrow.sub .st{font-size:11.5px;color:var(--soft);margin-left:8px}
+/* the first-phase row carries the crew identity — its stage picker sits in the sub-line */
+.atdx .wmid .stpick{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+.atdx .wmid .stpick .stsel{max-width:170px;font-size:12.5px}
+.atdx .wmid .stpick .sty{font-style:normal;font-size:11.5px;color:var(--soft)}
 
 /* remove-from-sheet: a quiet × that only appears on the row it belongs to */
 .atdx .wrow{position:relative}
@@ -519,9 +523,6 @@ export default function AttendanceSheet({ session }: { session: Session }) {
           for (let i = 0; i < 7; i++) crew.cats.forEach(cat => { const c = cat.cells[i]; if (c && c !== 'off') dayHead[i] += c.v; });
           if (crew.cats.length) for (let i = 0; i <= TODAY; i++) { if (i === 6) continue; if (!crew.cats.some(cat => { const c = cat.cells[i]; return c && c !== 'off'; })) gaps++; }
         }
-        const stageVal = crew.stages.reduce((s2, st) => s2 + (st.type === 'lump' ? (st.amount || 0) : (st.total || 0) * (st.rate || 0)), 0);
-        const stageEarnedGross = crew.stages.reduce((s2, st) => s2 + stageMath(st).earned, 0);
-        const overallPct = stageVal ? Math.round(stageEarnedGross / stageVal * 100) : 0;
         const assumed = !crew.basisConfirmed ? ` <span class="assumed" title="Basis assumed — pick Contract or Labour to confirm">· assumed</span>` : '';
         const measuring = crew.accrualBasis === 'measurement';
         const measureToggle = (crew.contract && onContract)
@@ -542,37 +543,72 @@ export default function AttendanceSheet({ session }: { session: Session }) {
             <div class="wtotal">${catDays ? `<b>${catDays} wd</b> · ${inr(wage)}` : ''}</div></div>`;
           return;
         }
-        // ── CONTRACT crew → heading row + a row per live stage ──
-        const seg = `<div class="segwrap"><div class="seg"><button data-basis="${si}.${ci}.contract" aria-pressed="${onContract}">Contract</button><button data-basis="${si}.${ci}.labour" aria-pressed="${!onContract}">Labour</button></div>${assumed}${measureToggle}</div>`;
-        rows += `<div class="cols wrow" data-grp="c${si}-${ci}">
-          <div class="wname"><button class="rmw" data-rmc="${si}.${ci}" title="Remove from sheet" aria-label="Remove ${escapeHtml(crew.n)}">×</button>
-            <div class="wav">${avatarOf(crew.n)}</div>
-            <div class="wmid"><b>${escapeHtml(crew.n)}</b><span>${escapeHtml(crew.d || '')} · contract</span>${seg}</div></div>
-          ${crew.head.map((_c: Cell, i: number) => wrap(`<div class="${cls(i)} off"></div>`)).join('')}
-          <div class="wtotal"><b>${overallPct}%</b> · ${inr(earned)}</div></div>`;
-        {
-          (crew as any).shown = (crew as any).shown || crew.stages.map((_st, ki) => ki).filter((ki) => {
-            const m = stageMath(crew.stages[ki]); const st = crew.stages[ki];
-            return !(m.pct >= 100 && m.earned - st.paid <= 0);
-          });
-          const opts = (sel: number) => crew.stages.map((st, ki) => `<option value="${ki}" ${ki === sel ? 'selected' : ''} ${(crew as any).shown.includes(ki) && ki !== sel ? 'disabled' : ''}>${st.n}${stageMath(st).pct >= 100 ? ' · done' : ''}</option>`).join('')
-            + `<option disabled>──────</option><option value="new">+ Add a stage…</option>`;
-          (crew as any).shown.forEach((ki: number, n: number) => {
-            const st = crew.stages[ki], ref = `${si}.s${ci}.${ki}`, m = stageMath(st);
-            let prev = st.before;
-            const cells = st.type === 'lump'
-              ? st.cells.map((c, i) => { const h = pctCell(c, i, ref, prev); if (c && c !== 'off') prev = c.v; return h; }).join('')
-              : st.cells.map((c, i) => qtyCell(c, i, ref, st.unit)).join('');
-            const denom = st.type === 'lump' ? (st.amount || 1) : ((st.total || 0) * (st.rate || 0) || 1);
-            rows += `<div class="cols wrow sub" data-grp="c${si}-${ci}">
-              <div class="wname"><select class="stsel" data-swap="${si}.${ci}.${n}">${opts(ki)}</select><span class="st">${st.type === 'lump' ? 'lump sum' : `per ${st.unit || ''}`}</span></div>${cells}
-              <div class="wtotal">${m.label}<div class="bar"><i style="width:${Math.min(100, m.prog * 100)}%"></i><b style="left:0;width:${Math.min(100, st.paid / denom * 100)}%"></b></div></div></div>`;
-          });
-          const hidden = crew.stages.length - (crew as any).shown.length;
-          rows += `<div class="cols wrow sub" data-grp="c${si}-${ci}"><div class="wname" id="stadd-${si}-${ci}">
-            <select class="stsel ghost" data-swap="${si}.${ci}.new"><option value="" selected>+ Stage…${hidden ? ` (${hidden} more on this contract)` : ''}</option>${opts(-1)}</select></div>
-            ${dates.map((_d, i) => wrap(`<div class="${cls(i)} off"></div>`)).join('')}<div class="wtotal"></div></div>`;
+        // ── CONTRACT crew ─────────────────────────────────────────────────────────────────────────
+        // Wages mode ('day' accrual): ONE row — the crew's daily attendance + wage total, with the
+        // contract phase it feeds as sub-text (no separate stage rows). % mode: no separate heading —
+        // the FIRST phase row carries the crew identity; the rest follow as sub rows.
+        const wagesMode = crew.accrualBasis === 'day';
+        const seg = `<div class="segwrap"><div class="seg"><button data-basis="${si}.${ci}.contract" aria-pressed="${onContract}">Contract</button><button data-basis="${si}.${ci}.labour" aria-pressed="${!onContract}">Labour</button></div>${assumed}${wagesMode ? '' : measureToggle}</div>`;
+        (crew as any).shown = (crew as any).shown || crew.stages.map((_st, ki) => ki).filter((ki) => {
+          const m = stageMath(crew.stages[ki]); const st = crew.stages[ki];
+          return !(m.pct >= 100 && m.earned - st.paid <= 0);
+        });
+        const shownList: number[] = (crew as any).shown;
+        const opts = (sel: number) => crew.stages.map((st, ki) => `<option value="${ki}" ${ki === sel ? 'selected' : ''} ${shownList.includes(ki) && ki !== sel ? 'disabled' : ''}>${st.n}${stageMath(st).pct >= 100 ? ' · done' : ''}</option>`).join('')
+          + `<option disabled>──────</option><option value="new">+ Add a stage…</option>`;
+        const stageCells = (st: any, ref: string) => {
+          let prev = st.before;
+          return st.type === 'lump'
+            ? st.cells.map((c: Cell, i: number) => { const h = pctCell(c, i, ref, prev); if (c && c !== 'off') prev = (c as any).v; return h; }).join('')
+            : st.cells.map((c: Cell, i: number) => qtyCell(c, i, ref, st.unit)).join('');
+        };
+        const stageTotal = (st: any, m: ReturnType<typeof stageMath>) => {
+          const denom = st.type === 'lump' ? (st.amount || 1) : ((st.total || 0) * (st.rate || 0) || 1);
+          return `${m.label}<div class="bar"><i style="width:${Math.min(100, m.prog * 100)}%"></i><b style="left:0;width:${Math.min(100, st.paid / denom * 100)}%"></b></div>`;
+        };
+
+        if (wagesMode) {
+          // Wages are the payable (they show in the ledger + payables); the contract phase is what they
+          // count toward. Sub-text names that phase + its budget; the row total is the week's wage.
+          const totalVal = crew.stages.reduce((s2, st) => s2 + (st.type === 'lump' ? (st.amount || 0) : (st.total || 0) * (st.rate || 0)), 0);
+          const target = crew.stages[0];
+          const phaseSub = target ? `wages → ${escapeHtml(target.n)}${totalVal ? ` · contract ${inr(totalVal)}` : ''}` : 'wages → contract';
+          rows += `<div class="cols wrow" data-grp="c${si}-${ci}">
+            <div class="wname"><button class="rmw" data-rmc="${si}.${ci}" title="Remove from sheet" aria-label="Remove ${escapeHtml(crew.n)}">×</button>
+              <div class="wav">${avatarOf(crew.n)}</div>
+              <div class="wmid"><b>${escapeHtml(crew.n)}</b><span>${escapeHtml(crew.d || '')} · ${phaseSub}</span>${seg}</div></div>
+            ${crew.head.map((_c: Cell, i: number) => crewDayCell(crew, i, si, ci)).join('')}
+            <div class="wtotal"><b>${catDays} wd</b> · ${inr(wage)}</div></div>`;
+          return;
         }
+
+        // % MODE — the first phase row IS the crew's main row (identity + toggle live in it).
+        if (!shownList.length) {
+          rows += `<div class="cols wrow" data-grp="c${si}-${ci}">
+            <div class="wname"><button class="rmw" data-rmc="${si}.${ci}" title="Remove from sheet" aria-label="Remove ${escapeHtml(crew.n)}">×</button>
+              <div class="wav">${avatarOf(crew.n)}</div>
+              <div class="wmid"><b>${escapeHtml(crew.n)}</b><span>${escapeHtml(crew.d || '')} · contract</span>${seg}</div></div>
+            ${dates.map((_d, i) => wrap(`<div class="${cls(i)} off"></div>`)).join('')}<div class="wtotal"><b>0%</b> · ₹0</div></div>`;
+        }
+        shownList.forEach((ki: number, n: number) => {
+          const st = crew.stages[ki], ref = `${si}.s${ci}.${ki}`, m = stageMath(st);
+          const typeLbl = st.type === 'lump' ? 'lump sum' : `per ${st.unit || ''}`;
+          if (n === 0) {
+            rows += `<div class="cols wrow" data-grp="c${si}-${ci}">
+              <div class="wname"><button class="rmw" data-rmc="${si}.${ci}" title="Remove from sheet" aria-label="Remove ${escapeHtml(crew.n)}">×</button>
+                <div class="wav">${avatarOf(crew.n)}</div>
+                <div class="wmid"><b>${escapeHtml(crew.n)}</b><span class="stpick"><select class="stsel" data-swap="${si}.${ci}.0">${opts(ki)}</select><i class="sty">${typeLbl}</i></span>${seg}</div></div>
+              ${stageCells(st, ref)}<div class="wtotal">${stageTotal(st, m)}</div></div>`;
+          } else {
+            rows += `<div class="cols wrow sub" data-grp="c${si}-${ci}">
+              <div class="wname"><select class="stsel" data-swap="${si}.${ci}.${n}">${opts(ki)}</select><span class="st">${typeLbl}</span></div>${stageCells(st, ref)}
+              <div class="wtotal">${stageTotal(st, m)}</div></div>`;
+          }
+        });
+        const hidden = crew.stages.length - shownList.length;
+        rows += `<div class="cols wrow sub" data-grp="c${si}-${ci}"><div class="wname" id="stadd-${si}-${ci}">
+          <select class="stsel ghost" data-swap="${si}.${ci}.new"><option value="" selected>+ Stage…${hidden ? ` (${hidden} more on this contract)` : ''}</option>${opts(-1)}</select></div>
+          ${dates.map((_d, i) => wrap(`<div class="${cls(i)} off"></div>`)).join('')}<div class="wtotal"></div></div>`;
       });
       site.direct.forEach((w, wi) => {
         const d = sum(w.cells), amt = d * w.rate; wd += d; wv += amt; siteWage += amt;
@@ -838,8 +874,15 @@ export default function AttendanceSheet({ session }: { session: Session }) {
       try { await addCategory(orgId, crew.crewId, n, rateFor(crew.trade, n)); await load(); } catch (e) { fail(e); }
     }));
     body.querySelectorAll('[data-basis]').forEach(b => b.addEventListener('click', () => {
-      const [si, ci, basis] = (b as HTMLElement).dataset.basis!.split('.'); const crew = DATA.current[+si].crews[+ci];
-      crew.basis = basis as 'contract' | 'labour'; crew.accrualBasis = basis === 'contract' ? 'work' : 'day'; crew.basisConfirmed = true;
+      const [si, ci, basis] = (b as HTMLElement).dataset.basis!.split('.');
+      // Labour → Contract opens the put-on-contract wizard (which WO, how it's measured, which phases) —
+      // never a silent flip. Contract → Labour is a plain switch back to daily wages.
+      if (basis === 'contract') { onContractForm(+si, +ci); return; }
+      const crew = DATA.current[+si].crews[+ci];
+      // Contract → Labour fully unlinks: clear the work-order link in memory so the row reads as a clean
+      // wage crew right away (the DB is cleared by setCrewBasis).
+      crew.basis = 'labour'; crew.accrualBasis = 'day'; crew.basisConfirmed = true;
+      crew.woId = null; crew.contract = false; crew.stages = [];
       setCrewBasis(crew.crewId, crew.basis).catch(fail); render();
     }));
     // Toggle a contract crew between milestone certification ('work') and attendance measurement ('measurement').

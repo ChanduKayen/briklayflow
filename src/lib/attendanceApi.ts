@@ -3,6 +3,7 @@
 // (sites → crews → {head, cats, stages} + direct workers, plus the rate CARD),
 // and persists every edit back to the labour_* tables (see migration 20260901000000).
 import { supabase } from './supabase';
+import { submitWorkCertification } from './workCertification';
 
 // ── the reference's cell shape ───────────────────────────────────────────────
 // A grid cell is either a value object, null (a gap on a working day), or 'off'
@@ -238,10 +239,14 @@ export async function setDirectRate(id: string, rate: number): Promise<void> {
 }
 export async function setCrewBasis(crewId: string, basis: 'contract' | 'labour'): Promise<void> {
   // The toggle IS the basis declaration: Contract → work (certified), Labour → day (attendance wage).
-  // Setting it confirms the engagement's accrual basis (clears the "assumed" chip).
-  const { error } = await supabase.from('labour_crews')
-    .update({ basis, accrual_basis: basis === 'contract' ? 'work' : 'day', basis_confirmed: true })
-    .eq('crew_id', crewId);
+  // Setting it confirms the engagement's accrual basis (clears the "assumed" chip). Switching to Labour
+  // FULLY UNLINKS the crew from its work order (wo_id / is_contract / stage_ids cleared) — it becomes a
+  // clean wage crew; past payments made while on the contract stay as history. Re-linking runs the
+  // put-on-contract wizard again. (The Contract direction is handled by that wizard, not here.)
+  const patch = basis === 'labour'
+    ? { basis, accrual_basis: 'day', basis_confirmed: true, wo_id: null, is_contract: false, stage_ids: null }
+    : { basis, accrual_basis: 'work', basis_confirmed: true };
+  const { error } = await supabase.from('labour_crews').update(patch).eq('crew_id', crewId);
   if (error) throw error;
 }
 export async function addCategory(orgId: string, crewId: string, category: string, rate: number): Promise<void> {
@@ -357,16 +362,28 @@ async function snapshotDayWages(orgId: string, stakeholderId: string, projectId:
 /** Put a CREW on a contract with a dated cutover. 'keep_wages' snapshots the accrued day-wages as a fixed
  *  credit first; 'fold' discards them (the contract value absorbs that work). Non-destructive — attendance
  *  stays; it just stops accruing a wage from the cutover. */
+// measure: how the contract is valued.
+//   'percent' → paid by certified % of the stages (basis 'contract', accrual 'work'). The default.
+//   'wages'   → a contract crew (phases show) that keeps daily attendance (accrual 'day'). The day-wages
+//               are AUTO-folded into the chosen phase(s) on every attendance save — the fold certifies
+//               against the phase (reduces its value) and marks the attendance settled. stage_ids = the
+//               ordered phase(s) the wages subtract from (capped, rolling to the next).
+export type MeasureMode = 'percent' | 'wages';
 export async function putCrewOnContract(p: {
   crewId: string; orgId: string; projectId: string; stakeholderId: string | null;
   woId: string; stageIds?: string[] | null; mode: ContractMode; snapshotAmount?: number;
+  measure?: MeasureMode;
 }): Promise<void> {
   const cutover = new Date().toISOString().split('T')[0];
-  if (p.mode === 'keep_wages' && p.stakeholderId && (p.snapshotAmount ?? 0) > 0) {
+  const wages = p.measure === 'wages';
+  // A snapshot only makes sense for 'percent' (there the day-accrual stops). In 'wages' mode the
+  // day-wages keep counting, so there is nothing to freeze.
+  if (!wages && p.mode === 'keep_wages' && p.stakeholderId && (p.snapshotAmount ?? 0) > 0) {
     await snapshotDayWages(p.orgId, p.stakeholderId, p.projectId, p.snapshotAmount!, cutover);
   }
   const { error } = await supabase.from('labour_crews').update({
-    wo_id: p.woId, is_contract: true, basis: 'contract', accrual_basis: 'work', basis_confirmed: true,
+    wo_id: p.woId, is_contract: true,
+    basis: 'contract', accrual_basis: wages ? 'day' : 'work', basis_confirmed: true,
     basis_changed_at: cutover, stage_ids: p.stageIds && p.stageIds.length ? p.stageIds : null,
   }).eq('crew_id', p.crewId);
   if (error) throw error;
@@ -379,21 +396,152 @@ export async function promoteDirectToCrew(
   orgId: string, projectId: string,
   worker: { id: string; name: string; category: string; rate: number; stakeholderId: string | null },
   woId: string, trade: string | null, stageIds?: string[] | null,
-  opts?: { mode?: ContractMode; snapshotAmount?: number },
+  opts?: { mode?: ContractMode; snapshotAmount?: number; measure?: MeasureMode },
 ): Promise<void> {
   const cutover = new Date().toISOString().split('T')[0];
+  const wages = opts?.measure === 'wages';
   // Keep the day-wages this worker already earned before we drop the direct row (its attendance cascades).
-  if (opts?.mode === 'keep_wages' && worker.stakeholderId && (opts.snapshotAmount ?? 0) > 0) {
+  // Only for 'percent' — in 'wages' mode the day-wages keep counting into the contract.
+  if (!wages && opts?.mode === 'keep_wages' && worker.stakeholderId && (opts.snapshotAmount ?? 0) > 0) {
     await snapshotDayWages(orgId, worker.stakeholderId, projectId, opts.snapshotAmount!, cutover);
   }
   const { data, error } = await supabase.from('labour_crews')
-    .insert({ org_id: orgId, project_id: projectId, name: worker.name, stakeholder_id: worker.stakeholderId, trade, description: worker.category, is_contract: true, basis: 'contract', accrual_basis: 'work', basis_confirmed: true, wo_id: woId, stage_ids: stageIds && stageIds.length ? stageIds : null, basis_changed_at: cutover })
+    .insert({ org_id: orgId, project_id: projectId, name: worker.name, stakeholder_id: worker.stakeholderId, trade, description: worker.category, is_contract: true, basis: 'contract', accrual_basis: wages ? 'day' : 'work', basis_confirmed: true, wo_id: woId, stage_ids: stageIds && stageIds.length ? stageIds : null, basis_changed_at: cutover })
     .select('crew_id').single();
   if (error) throw error;
   const { error: e2 } = await supabase.from('labour_crew_categories').insert({ org_id: orgId, crew_id: data!.crew_id, category: worker.category, rate: worker.rate });
   if (e2) throw e2;
   const { error: e3 } = await supabase.from('labour_direct_workers').delete().eq('id', worker.id);
   if (e3) throw e3;
+}
+
+// ── Settle attendance to a contract's phases ─────────────────────────────────────────────────────
+// A crew linked to a WO but marked in daily LABOUR (accrual_basis='day') accrues day-wages. Settling
+// folds those wages into the contract: each amount is certified against a phase (which reduces the
+// phase's contract value AND posts the single ledger credit), and the underlying attendance rows are
+// stamped settled_at so they stop minting a separate day-wage credit (no double-count). The phase is
+// confirmed each time, capped at its remaining value, with the remainder rolling to the next phase.
+export interface SettlementPhase {
+  milestoneId: string; name: string; kind: 'lump' | 'measured';
+  value: number;      // the phase's full contract value (planned_amount, or qty × rate)
+  rate: number;       // measured: the unit rate; lump: 0
+  certified: number;  // ₹ already approved-certified (latest lump / Σ measured)
+  remaining: number;  // max(0, value − certified)
+}
+export interface SettlementRow { id: string; date: string; amount: number }
+export interface CrewSettlement {
+  woId: string | null; stakeholderId: string | null; projectId: string | null;
+  unsettled: { days: number; amount: number };
+  rows: SettlementRow[];     // unsettled day-wage rows, oldest first, ₹ each
+  phases: SettlementPhase[]; // the crew's contract phases with remaining
+}
+
+async function crewPhases(woId: string, stageIds: string[] | null): Promise<SettlementPhase[]> {
+  const { data: ms } = await supabase.from('wo_milestones')
+    .select('milestone_id, name, unit_type, planned_amount, quantity, rate, seq_no').eq('wo_id', woId).order('seq_no');
+  const rows = (ms ?? []).filter((m: any) => !stageIds || !stageIds.length || stageIds.includes(m.milestone_id));
+  const ids = rows.map((m: any) => m.milestone_id);
+  const certByMs: Record<string, { lump?: { amt: number; date: string }; measured: number }> = {};
+  if (ids.length) {
+    const { data: certs } = await supabase.from('work_certifications')
+      .select('milestone_id, reading_kind, computed_amount, reading_date, status').in('milestone_id', ids).eq('status', 'approved');
+    (certs ?? []).forEach((wc: any) => {
+      const e = (certByMs[wc.milestone_id] ||= { measured: 0 });
+      if (wc.reading_kind === 'lump') { if (!e.lump || wc.reading_date > e.lump.date) e.lump = { amt: Number(wc.computed_amount) || 0, date: wc.reading_date }; }
+      else e.measured += Number(wc.computed_amount) || 0;
+    });
+  }
+  return rows.map((m: any) => {
+    const isLump = (m.unit_type || 'LS') === 'LS';
+    const value = isLump ? (Number(m.planned_amount) || 0) : (Number(m.quantity) || 0) * (Number(m.rate) || 0);
+    const c = certByMs[m.milestone_id];
+    const certified = isLump ? (c?.lump?.amt || 0) : (c?.measured || 0);
+    return { milestoneId: m.milestone_id, name: m.name, kind: isLump ? 'lump' as const : 'measured' as const, value, rate: Number(m.rate) || 0, certified, remaining: Math.max(0, value - certified) };
+  });
+}
+
+/** What a crew can settle: its unsettled day-wage rows (oldest first) + the contract phases with room. */
+export async function loadCrewSettlement(crewId: string): Promise<CrewSettlement> {
+  const { data: crew } = await supabase.from('labour_crews')
+    .select('crew_id, wo_id, stakeholder_id, project_id, stage_ids').eq('crew_id', crewId).single();
+  const woId = crew?.wo_id ?? null;
+  const { data: cats } = await supabase.from('labour_crew_categories').select('id, rate').eq('crew_id', crewId);
+  const rateById: Record<string, number> = {}; (cats ?? []).forEach((c: any) => { rateById[c.id] = Number(c.rate) || 0; });
+  const catIds = Object.keys(rateById);
+  let rows: SettlementRow[] = []; let days = 0;
+  if (catIds.length) {
+    const { data: att } = await supabase.from('labour_attendance')
+      .select('id, work_date, value, category_id')
+      .eq('subject_type', 'crew_category').in('category_id', catIds).is('settled_at', null).gt('value', 0)
+      .order('work_date', { ascending: true });
+    (att ?? []).forEach((a: any) => {
+      const v = Number(a.value) || 0; days += v;
+      rows.push({ id: a.id, date: a.work_date, amount: Math.round(v * (rateById[a.category_id] || 0)) });
+    });
+  }
+  const phases = woId ? await crewPhases(woId, (Array.isArray(crew?.stage_ids) && crew!.stage_ids.length ? crew!.stage_ids : null)) : [];
+  return {
+    woId, stakeholderId: crew?.stakeholder_id ?? null, projectId: crew?.project_id ?? null,
+    unsettled: { days, amount: rows.reduce((s, r) => s + r.amount, 0) }, rows, phases,
+  };
+}
+
+export interface SettlementStep { milestoneId: string; applied: number }
+/** Commit a settlement: certify each step's amount to its phase (governed), then stamp the covered
+ *  attendance rows settled_at so they no longer mint a day-wage credit. rowIds should cover Σ applied. */
+export async function commitCrewSettlement(p: {
+  orgId: string; crewId: string; projectId: string | null; woId: string; stakeholderId: string | null;
+  phases: SettlementPhase[]; steps: SettlementStep[]; rowIds: string[]; settleDate: string;
+}): Promise<void> {
+  const byId: Record<string, SettlementPhase> = {}; p.phases.forEach(ph => { byId[ph.milestoneId] = ph; });
+  for (const st of p.steps) {
+    if (!(st.applied > 0)) continue;
+    const ph = byId[st.milestoneId]; if (!ph) continue;
+    let readingValue: number, computedAmount: number;
+    if (ph.kind === 'lump') {
+      const cum = ph.certified + st.applied;                 // lump: the cert asserts the CUMULATIVE ₹ (latest wins)
+      readingValue = ph.value ? Math.round(cum / ph.value * 100) : 100;
+      computedAmount = Math.round(cum);
+    } else {
+      readingValue = ph.rate ? st.applied / ph.rate : 0;     // measured: the INCREMENTAL qty (Σ approved = total)
+      computedAmount = Math.round(st.applied);
+    }
+    await submitWorkCertification({
+      orgId: p.orgId, projectId: p.projectId || '', woId: p.woId, milestoneId: st.milestoneId,
+      crewId: p.crewId, stakeholderId: p.stakeholderId, readingKind: ph.kind,
+      readingValue, computedAmount, readingDate: p.settleDate, note: `Attendance settled to ${ph.name}`,
+    });
+  }
+  if (p.rowIds.length) {
+    const { error } = await supabase.from('labour_attendance').update({ settled_at: p.settleDate }).in('id', p.rowIds);
+    if (error) throw error;
+  }
+}
+
+/** Auto-fold a wages-mode crew's unsettled day-wages into its chosen phases (stage_ids order, capped,
+ *  rolling to the next). Certifies against each phase (reduces its value) and stamps the covered
+ *  attendance settled. No-op when nothing is unsettled or no phase has room. Runs on each attendance save. */
+export async function autoSettleCrewWages(crewId: string, orgId: string): Promise<void> {
+  const s = await loadCrewSettlement(crewId);
+  if (!s.woId || s.unsettled.amount <= 0 || !s.phases.length) return;
+  let left = s.unsettled.amount;
+  const steps: SettlementStep[] = [];
+  for (const ph of s.phases) {                       // phases are in seq order
+    if (left <= 0) break;
+    if (ph.remaining <= 0) continue;
+    const applied = Math.min(left, ph.remaining);
+    steps.push({ milestoneId: ph.milestoneId, applied });
+    left -= applied;
+  }
+  if (!steps.length) return;
+  const placed = steps.reduce((a, b) => a + b.applied, 0);
+  let cum = 0; const rowIds: string[] = [];
+  for (const r of s.rows) { if (cum + r.amount <= placed) { cum += r.amount; rowIds.push(r.id); } else break; }
+  let over = placed - cum;                            // trim the last step(s) so certified == settled (whole days)
+  for (let k = steps.length - 1; k >= 0 && over > 0; k--) { const cut = Math.min(steps[k].applied, over); steps[k].applied -= cut; over -= cut; }
+  const finalSteps = steps.filter((st) => st.applied > 0);
+  if (!finalSteps.length || !rowIds.length) return;
+  await commitCrewSettlement({ orgId, crewId, projectId: s.projectId, woId: s.woId, stakeholderId: s.stakeholderId, phases: s.phases, steps: finalSteps, rowIds, settleDate: new Date().toISOString().slice(0, 10) });
 }
 
 /** Remove a crew from the sheet (cascades its categories + attendance). */

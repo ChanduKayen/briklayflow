@@ -157,11 +157,6 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
   // balance — agrees with the side drawer, the Parties list, and everywhere else. A voided
   // payment never happened; folding it in would overstate what's been paid.
   const isVendor = stk.type === 'Vendor';
-  // Active (non-cancelled) work orders keyed by site — to INFER a worker payment's contract when its
-  // allocation wasn't tagged 'WO' at capture (e.g. a WhatsApp payment auto-matched to the worker but never
-  // linked to the contract). Without this, such payments showed no contract at all in the statement.
-  const activeWosByProject: Record<string, string[]> = {};
-  (woR.data ?? []).forEach((w: any) => { if (w.status !== 'Cancelled' && w.project_id) (activeWosByProject[w.project_id] ??= []).push(w.wo_id); });
   const activeTxns = (txnR.data ?? []).filter((t: any) => t.status !== 'Voided');
   // Bill references for bill-attached payments — so the row reads "Bill <no>" instead of a raw category code.
   const payBillIds = [...new Set(activeTxns.flatMap((t: any) => (t.txn_allocations ?? []).map((a: any) => a.bill_id).filter(Boolean)))] as string[];
@@ -176,17 +171,19 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
     const byProject: Record<string, number> = {};
     allocs.forEach(a => { if (a.project_id) byProject[a.project_id] = (byProject[a.project_id] || 0) + num(a.allocated_amount); });
     const pid = Object.keys(byProject)[0] ?? null;
-    // The tagged WO/PO if capture set one; else, for a WORKER, infer it when there's exactly one active
-    // contract on the payment's site (display only — the payment is a debit either way).
-    let contractId = linked?.order_ref ?? null;
-    if (!contractId && !isVendor && pid) { const wos = activeWosByProject[pid]; if (wos && wos.length === 1) contractId = wos[0]; }
+    // Only a REAL WO/PO allocation attributes a payment to a contract — a plain wage payment carries no
+    // contract reference (we no longer infer one from "one contract on this site").
+    const contractId = linked?.order_ref ?? null;
     const billId = allocs.find(a => a.bill_id)?.bill_id ?? null;   // a first-class bill this payment settles
     entries.push({
       id: `t-${t.txn_id}`, date: t.date, kind: 'payment',
-      // The Particulars column names the ACTIVITY only (no reference, no hyperlink) — the bill/PO it
-      // settles rides the Reference column. A bill-settling payment is a "Bill payment"; otherwise the
-      // transaction's category (or just "Payment").
-      particulars: billId ? 'Bill payment' : (t.category || 'Payment'), mode: t.payment_mode || '', narr: t.remarks || undefined,
+      // Particulars names the ACTIVITY (the bill/PO/WO it's against rides the Reference column):
+      //   vendor → "Bill payment" when it settles a bill, else its category.
+      //   worker → "Contract payment" when it's against a contract, else "Wage payment".
+      particulars: isVendor
+        ? (billId ? 'Bill payment' : (t.category || 'Payment'))
+        : (contractId ? 'Contract payment' : 'Wage payment'),
+      mode: t.payment_mode || '', narr: t.remarks || undefined,
       clip: !!(t.proof_document_url || t.bill_doc_url),
       projectId: pid, projectName: pid ? (projName[pid] || pid) : null, byProject,
       contractId,   // WO for workers, PO for vendors
@@ -219,7 +216,7 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
       const pid = wc.project_id ?? null;
       entries.push({
         id: `cert-${wc.id}`, date: wc.reading_date, kind: 'certified',
-        particulars: 'Work certified', projectId: pid, projectName: pid ? (projName[pid] || pid) : null,
+        particulars: 'Contract certified work', projectId: pid, projectName: pid ? (projName[pid] || pid) : null,
         contractId: wc.wo_id ?? null, paid: 0, cert: amt,
       });
       if (wc.wo_id) contractCert[wc.wo_id] = (contractCert[wc.wo_id] || 0) + amt;

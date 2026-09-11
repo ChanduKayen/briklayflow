@@ -57,7 +57,10 @@ export async function loadWeeklyPayments(monday: Date): Promise<WeeklyPayments> 
     const rows: PayRow[] = [];
 
     site.crews.forEach((crew, ci) => {
-      if (crew.basis === 'contract') {
+      // A wages-mode crew (on a contract, but paid by daily attendance) is a WAGES row here — its
+      // this-week figure is days × rate, not stage certifications. Only a %-of-work contract uses the
+      // stage-cert path below.
+      if (crew.basis === 'contract' && crew.accrualBasis !== 'day') {
         // This-week earned vs prior earned, per stage; carried b/f = prior earned − paid.
         let thisWeekEarned = 0, priorEarned = 0, paid = 0;
         const readings: [string, string, number][] = [];
@@ -94,10 +97,14 @@ export async function loadWeeklyPayments(monday: Date): Promise<WeeklyPayments> 
         const wage = crew.cats.reduce((s, cat) => s + sumCells(cat.cells) * cat.rate, 0);
         if (wage <= 0) return;
         const ledger = crew.cats.map(cat => [`${sumCells(cat.cells)} × ${inrShort(cat.rate)}`, sumCells(cat.cells) * cat.rate] as [string, number]).filter(l => l[1] > 0);
+        // A wages-mode crew is paid by attendance but SITS ON a contract — carry its WO (+ first phase)
+        // so the payment links to the contract (subtracts from it) instead of landing unlinked.
+        const onWo = crew.basis === 'contract' && crew.accrualBasis === 'day';
         rows.push({
           key: `w${site.site}-${ci}`, projectId: site.site, projectName: site.label,
           stakeholderId: crew.stakeholderId, party: crew.n, trade: crew.trade || crew.d || 'Labour',
-          kind: 'wages', basis: 'attendance', thisWeek: wage, balanceBf: 0, woId: null, milestoneId: null,
+          kind: 'wages', basis: onWo ? 'attendance · on a contract' : 'attendance', thisWeek: wage, balanceBf: 0,
+          woId: onWo ? crew.woId : null, milestoneId: onWo ? (crew.stages[0]?.milestoneId ?? null) : null,
           att: { period, days: dayLabels, cats, ledger, sum: wage },
         });
       }
@@ -381,7 +388,9 @@ export async function recordWeeklyPayment(
   // Contract → the work order + milestone. Vendor → spread across the open POs, oldest bill first
   // (anything beyond stays on account = a bare project allocation). Wages/recurring → project only.
   let allocations: Record<string, unknown>[];
-  if (row.kind === 'contract' && row.woId) {
+  // Any row that carries a WO links to it — a %-contract row, and a wages-mode crew's attendance row
+  // (so paying its wages subtracts from the contract and shows linked, not on-account).
+  if (row.woId) {
     allocations = [{ project_id: row.projectId, order_type: 'WO', order_ref: row.woId, milestone_id: row.milestoneId, allocated_amount: amount }];
   } else if (row.kind === 'vendor' && row.bills?.length) {
     // Oldest bill first — each PO allocation carries THAT bill's own project (a vendor row spans sites).
@@ -414,7 +423,7 @@ export async function recordWeeklyPayment(
 // contract payment is an advance against measurement (§3.2 → the pool). A vendor payment settles the
 // open bill credits, oldest first. Called only when the org has flipped to the new ledger.
 export async function settleWeeklyPaymentOnLedger(txnId: string, row: PayRow, amount: number, monday: Date): Promise<void> {
-  if (row.kind === 'contract' && row.woId) { await allocateToPool(txnId, row.woId, amount); return; }
+  if (row.woId) { await allocateToPool(txnId, row.woId, amount); return; }
   if (row.kind === 'vendor') { await settleFIFO(txnId); return; }         // settle open vendor bills oldest-first
   if (!row.stakeholderId) return;                                          // an ad-hoc payee with no party can't accrue
   // wages / recurring — a plan credit for what was paid, settled by this payment

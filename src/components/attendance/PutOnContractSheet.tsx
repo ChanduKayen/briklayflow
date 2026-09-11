@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import {
   loadWorkOrdersForProject, loadWorkOrderStages, putCrewOnContract, promoteDirectToCrew,
-  type ContractMode, type AccruedWages, type WOStage,
+  type ContractMode, type AccruedWages, type WOStage, type MeasureMode,
 } from '../../lib/attendanceApi';
 
 export type ContractContext = {
@@ -31,6 +31,7 @@ export function PutOnContractSheet({ ctx, onClose, onDone, onError }: {
   const [stages, setStages] = useState<WOStage[] | null>(null);
   const [stageIds, setStageIds] = useState<string[]>([]);
   const [mode, setMode] = useState<ContractMode | null>(ctx.accrued.amount > 0 ? null : 'fold');
+  const [measure, setMeasure] = useState<MeasureMode>('percent');   // how the contract is valued
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
 
@@ -53,18 +54,22 @@ export function PutOnContractSheet({ ctx, onClose, onDone, onError }: {
 
   const startNew = () => navigate('/work-orders/new', { state: { projectId: ctx.projectId, stakeholderId: ctx.stakeholderId } });
   const toggleStage = (id: string) => setStageIds((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
-  const canConfirm = !!woId && (ctx.accrued.amount <= 0 || mode != null) && !busy && !done;
+  // In 'wages' mode the past-wages keep/fold question is moot (day-wages keep counting), so it isn't required.
+  const canConfirm = !!woId && (measure === 'wages' || ctx.accrued.amount <= 0 || mode != null) && !busy && !done;
 
   async function confirm() {
     if (!woId || !canConfirm) return;
-    const picked = stages && stageIds.length && stageIds.length < stages.length ? stageIds : null;
+    // In 'wages' mode the picked phases are the wage TARGET, so keep them even if it's all of them.
+    const picked = measure === 'wages'
+      ? (stageIds.length ? stageIds : null)
+      : (stages && stageIds.length && stageIds.length < stages.length ? stageIds : null);
     const effMode: ContractMode = ctx.accrued.amount > 0 ? mode! : 'fold';
     setBusy(true);
     try {
       if (ctx.kind === 'crew' && ctx.crewId) {
-        await putCrewOnContract({ crewId: ctx.crewId, orgId: ctx.orgId, projectId: ctx.projectId, stakeholderId: ctx.stakeholderId, woId, stageIds: picked, mode: effMode, snapshotAmount: ctx.accrued.amount });
+        await putCrewOnContract({ crewId: ctx.crewId, orgId: ctx.orgId, projectId: ctx.projectId, stakeholderId: ctx.stakeholderId, woId, stageIds: picked, mode: effMode, snapshotAmount: ctx.accrued.amount, measure });
       } else if (ctx.kind === 'direct' && ctx.worker) {
-        await promoteDirectToCrew(ctx.orgId, ctx.projectId, ctx.worker, woId, ctx.trade ?? null, picked, { mode: effMode, snapshotAmount: ctx.accrued.amount });
+        await promoteDirectToCrew(ctx.orgId, ctx.projectId, ctx.worker, woId, ctx.trade ?? null, picked, { mode: effMode, snapshotAmount: ctx.accrued.amount, measure });
       }
       setBusy(false); setDone(true);
       window.setTimeout(onDone, 900);   // let the success beat land before the sheet leaves
@@ -112,10 +117,22 @@ export function PutOnContractSheet({ ctx, onClose, onDone, onError }: {
             </div>
           )}
 
+          {woId && (
+            <div className="pocx-measure">
+              <p className="pocx-label">How is this contract measured?</p>
+              <button className={`pocx-opt${measure === 'percent' ? ' on' : ''}`} onClick={() => setMeasure('percent')}>
+                <b>By % of work done</b><small>Certify each phase as work completes — the usual contract flow.</small>
+              </button>
+              <button className={`pocx-opt${measure === 'wages' ? ' on' : ''}`} onClick={() => setMeasure('wages')}>
+                <b>Keep counting wages, subtract from the contract</b><small>Stay on daily attendance; the day-wages get settled into a phase you choose (capped, rolling to the next).</small>
+              </button>
+            </div>
+          )}
+
           {woId && stages && stages.length > 1 && (
             <div className="pocx-phases">
-              <p className="pocx-label">Which phases will they work?</p>
-              <p className="pocx-hint">Only these show in their payments.</p>
+              <p className="pocx-label">{measure === 'wages' ? 'Which phase(s) do the wages subtract from?' : 'Which phases will they work?'}</p>
+              <p className="pocx-hint">{measure === 'wages' ? 'Wages fill these in order — you can still change the target when you settle.' : 'Only these show in their payments.'}</p>
               {stages.map((s) => (
                 <label key={s.milestone_id} className={`pocx-ph${stageIds.includes(s.milestone_id) ? ' on' : ''}`}>
                   <input type="checkbox" checked={stageIds.includes(s.milestone_id)} onChange={() => toggleStage(s.milestone_id)} />
@@ -126,7 +143,7 @@ export function PutOnContractSheet({ ctx, onClose, onDone, onError }: {
             </div>
           )}
 
-          {ctx.accrued.amount > 0 && (
+          {measure === 'percent' && ctx.accrued.amount > 0 && (
             <div className="pocx-wages">
               <p className="pocx-wages-h"><b>{ctx.accrued.days} day{ctx.accrued.days === 1 ? '' : 's'} · {inr(ctx.accrued.amount)}</b> in daily wages logged so far.</p>
               <p className="pocx-hint">From now they're paid by certified stages. What about those?</p>
@@ -195,6 +212,7 @@ const POCX_CSS = `
   color:#C4502B;font-weight:600;font-size:13px;cursor:pointer;transition:.18s}
 .pocx-new:hover{background:#FCF3EF;border-color:#C4502B}
 
+.pocx-measure{margin-top:18px;animation:pocx-fade .22s ease}
 .pocx-phases{margin-top:18px;animation:pocx-fade .22s ease}
 .pocx-ph{display:flex;align-items:center;gap:9px;padding:7px 4px;font-size:13px;color:#2A241C;cursor:pointer}
 .pocx-ph input{position:absolute;opacity:0;width:0;height:0}
