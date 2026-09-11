@@ -5,7 +5,7 @@
 // Mark-paid records a REAL transaction via insert_transaction_with_allocations.
 import { supabase } from './supabase';
 import { loadWeek, mondayOf, weekDates, weekLabel, type Cell } from './attendanceApi';
-import { createCredit, allocateToCredit, allocateToPool, settleFIFO } from './ledgerWrite';
+import { createCredit, allocateToCredit, allocateToPool, settleFIFO, voidPayment } from './ledgerWrite';
 
 export { mondayOf, weekLabel };
 
@@ -229,20 +229,38 @@ export async function loadWeeklyPayments(monday: Date): Promise<WeeklyPayments> 
 /** What this week's run has already settled, by row key. Read back from the stamp
  *  recordWeeklyPayment writes, so a paid row stays paid across a reload — on every surface.
  *  Payments made before that stamp existed carry no key and cannot be matched. */
-export async function loadWeeklyPaid(monday: Date): Promise<Record<string, number>> {
+/** What a row has already been paid on this run, and by which transactions — the ids are what an
+ *  undo reverses, so they come back with the amount rather than being hunted for afterwards. */
+export interface RunPaid { amount: number; txnIds: string[] }
+export async function loadWeeklyPaid(monday: Date): Promise<Record<string, RunPaid>> {
   const key = mondayOf(monday).toISOString().slice(0, 10);
   const { data, error } = await supabase
     .from('transactions')
-    .select('total_amount, status, ai_flag_data')
+    .select('txn_id, total_amount, status, ai_flag_data')
     .eq('ai_flag_data->>weekly_run', key);
   if (error) return {};
-  const out: Record<string, number> = {};
-  for (const t of (data ?? []) as { total_amount: number; status: string | null; ai_flag_data: { row_key?: string } | null }[]) {
+  const out: Record<string, RunPaid> = {};
+  for (const t of (data ?? []) as { txn_id: string; total_amount: number; status: string | null; ai_flag_data: { row_key?: string } | null }[]) {
     if (t.status === 'Voided') continue;                   // a voided payment leaves the row owing again
     const rk = t.ai_flag_data?.row_key;
-    if (rk) out[rk] = (out[rk] || 0) + Number(t.total_amount || 0);
+    if (!rk) continue;
+    const e = out[rk] ?? (out[rk] = { amount: 0, txnIds: [] });
+    e.amount += Number(t.total_amount || 0);
+    e.txnIds.push(t.txn_id);
   }
   return out;
+}
+
+/**
+ * Take a payment back off the run.
+ *
+ * A row is marked paid by RECORDING a transaction, so undoing it is voiding that transaction — the
+ * one void the ledger has: the transaction is kept and marked Voided, its allocations are deleted,
+ * and any credit it minted goes with them. loadWeeklyPaid then skips it and the row is owing again.
+ * A row settled by more than one payment voids all of them, because a row is either paid or it is not.
+ */
+export async function undoWeeklyPayment(txnIds: string[]): Promise<void> {
+  for (const id of txnIds) await voidPayment(id);
 }
 
 // ── vendor payments — ONE net-payable row per vendor, from the party-ledger view ─────────────
