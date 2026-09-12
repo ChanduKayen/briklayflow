@@ -25,7 +25,7 @@ import { useOrgId } from '../lib/auth/AuthProvider';
 import { useSnackbar } from '../components/Snackbar';
 import { searchPayees } from '../lib/payeeSearch';
 import { useSearchScope } from '../components/search/searchScope';
-import SearchBar from '../components/search/SearchBar';
+import { useCursorLamp } from '../components/nav/useCursorLamp';
 import { createParty } from '../components/day-book/fileEntry';
 import {
   loadWeeklyPayments, recordWeeklyPayment, settleWeeklyPaymentOnLedger, loadWeeklyPaid,
@@ -45,6 +45,77 @@ const MODES = ['UPI', 'NEFT', 'Cash', 'Cheque'];
 
 /** The four site dots the reference paints, in its order. A project takes the next one along. */
 const SITE_DOT = ['var(--asm)', 'var(--chak)', 'var(--shyam)', 'var(--sound)'];
+
+// The Payments header — payments-header-v2.html, matching the Vendor Bills page: an espresso hero with
+// the transactions page's cursor lamp, the "still to pay" figure + a per-site breakdown, over a sticky
+// controls row. Scoped under `.pyr-page .ph` so its generic class names never touch the run's body styles.
+const PH_CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500&family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+.pyr-page .ph{--espresso:#171008;--card:#FFFDF9;--ink:#1B1813;--ink-2:#5A544A;--ink-3:#948C7C;--rule:#E9E1D1;--terra:#B4552E;--terra-wash:#FAEFE7;--green:#4E8A5C;--on-dark:#F5EFE4;--on-dark-2:#B7AA97;--on-dark-3:#7C7062;--serif:'Newsreader',Georgia,serif;--sans:'Instrument Sans',system-ui,sans-serif;--mono:'IBM Plex Mono',ui-monospace,monospace;font-family:var(--sans)}
+.pyr-page .ph .hwrap{max-width:1240px;margin:0 auto;padding:0 clamp(18px,4vw,64px)}
+.pyr-page .ph .hero{position:relative;overflow:hidden;background:var(--espresso);color:var(--on-dark);padding:32px 0 28px;--mx:50%;--my:50%}
+.pyr-page .ph .hero>*{position:relative;z-index:1}
+.pyr-page .ph .hero .fx{position:absolute;inset:0;z-index:0;pointer-events:none;opacity:0;transition:opacity .45s ease}
+.pyr-page .ph .hero.lit .fx{opacity:1}
+.pyr-page .ph .hero .fx.glow{background:radial-gradient(220px circle at var(--mx) var(--my),rgba(196,99,59,.15),rgba(196,99,59,.05) 55%,transparent 75%),radial-gradient(360px circle at var(--mx) var(--my),rgba(245,239,228,.05),transparent 74%)}
+.pyr-page .ph .hero .fx.grid{background:repeating-linear-gradient(0deg,rgba(255,220,180,.05) 0 1px,transparent 1px 26px),repeating-linear-gradient(90deg,rgba(255,220,180,.05) 0 1px,transparent 1px 26px);-webkit-mask-image:radial-gradient(200px circle at var(--mx) var(--my),#000 0%,rgba(0,0,0,.55) 55%,transparent 82%);mask-image:radial-gradient(200px circle at var(--mx) var(--my),#000 0%,rgba(0,0,0,.55) 55%,transparent 82%)}
+.pyr-page .ph .hero .hwrap{z-index:1}
+.pyr-page .ph .hero-top{display:flex;align-items:center;justify-content:space-between;gap:36px}
+.pyr-page .ph .titleline{display:flex;align-items:baseline;gap:18px;flex-wrap:wrap}
+.pyr-page .ph h1{font-family:var(--serif);font-weight:400;font-size:33px;letter-spacing:-.02em;line-height:1;color:var(--on-dark);margin:0}
+.pyr-page .ph .week{display:flex;align-items:center;gap:6px}
+.pyr-page .ph .week button{width:24px;height:24px;border:0;background:none;color:var(--on-dark-3);border-radius:50%;cursor:pointer;display:grid;place-items:center;font-size:15px;line-height:1;transition:color .15s,background .15s}
+.pyr-page .ph .week button:hover{color:var(--on-dark);background:rgba(245,239,228,.08)}
+.pyr-page .ph .week .label{font-size:13.5px;color:var(--on-dark-2);padding:0 4px;white-space:nowrap}
+.pyr-page .ph .tolink{font:inherit;font-size:12.5px;color:var(--on-dark-3);background:none;border:0;cursor:pointer;padding:0;text-decoration:underline;text-underline-offset:3px}
+.pyr-page .ph .tolink:hover{color:var(--on-dark-2)}
+.pyr-page .ph .actions{display:flex;align-items:center;gap:6px}
+.pyr-page .ph .actions .linkbtn{font:inherit;font-size:13.5px;color:var(--on-dark-2);background:none;border:0;cursor:pointer;padding:7px 13px;border-radius:8px;transition:color .15s,background .15s}
+.pyr-page .ph .actions .linkbtn:hover{color:var(--on-dark);background:rgba(245,239,228,.07)}
+.pyr-page .ph .actions .linkbtn.on{color:#fff;background:var(--terra)}
+.pyr-page .ph .figure{margin-top:24px;display:flex;align-items:flex-end;justify-content:space-between;gap:56px;flex-wrap:wrap}
+.pyr-page .ph .amount{font-family:var(--mono);font-size:38px;line-height:1.05;letter-spacing:-.01em;font-variant-numeric:tabular-nums;color:var(--on-dark)}
+.pyr-page .ph .amount .cap{font-family:var(--sans);font-size:14px;color:var(--on-dark-3);margin-left:11px}
+.pyr-page .ph .progress{height:2px;background:rgba(245,239,228,.14);border-radius:2px;margin-top:10px;max-width:290px}
+.pyr-page .ph .progress .fill{height:100%;background:var(--green);border-radius:2px;transition:width .5s cubic-bezier(.3,.9,.3,1)}
+.pyr-page .ph .under{font-size:12.5px;color:var(--on-dark-3);margin-top:11px;min-height:18px}
+.pyr-page .ph .under b{color:var(--on-dark-2);font-weight:400;font-family:var(--mono);font-size:12px}
+.pyr-page .ph .sites{flex:1;min-width:340px;max-width:520px}
+.pyr-page .ph .sbar{display:flex;height:6px;border-radius:2px;overflow:hidden;gap:2px}
+.pyr-page .ph .sbar .seg{cursor:pointer;transition:opacity .18s,transform .18s;transform-origin:bottom;border:0;padding:0}
+.pyr-page .ph .sbar .seg:hover{transform:scaleY(1.8)}
+.pyr-page .ph .sites.dim .sbar .seg:not(.hot){opacity:.3}
+.pyr-page .ph .c1{background:#C4633B}.pyr-page .ph .c2{background:#96613C}.pyr-page .ph .c3{background:#6B523A}.pyr-page .ph .c4{background:#453A2C}
+.pyr-page .ph .legend{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:14px}
+.pyr-page .ph .li{background:none;border:0;padding:0;cursor:pointer;font:inherit;display:inline-flex;align-items:baseline;gap:7px;transition:opacity .18s}
+.pyr-page .ph .sites.dim .li:not(.hot){opacity:.35}
+.pyr-page .ph .li i{width:6px;height:6px;border-radius:50%;display:block;flex:none;transform:translateY(1px)}
+.pyr-page .ph .li .nm{font-size:12px;color:var(--on-dark-3)}
+.pyr-page .ph .li .amt{font-family:var(--mono);font-size:12px;color:var(--on-dark-2);font-variant-numeric:tabular-nums}
+.pyr-page .ph .li:hover .nm{color:var(--on-dark-2)}
+.pyr-page .ph .controls{background:#FBF9F6;border-bottom:1px solid var(--rule);position:sticky;top:0;z-index:5}
+.pyr-page .ph .bar{display:flex;align-items:center;gap:18px;padding:14px 0;flex-wrap:wrap}
+.pyr-page .ph .search{flex:1;min-width:220px;max-width:440px;display:flex;align-items:center;gap:11px;background:var(--card);border:1px solid var(--rule);border-radius:9px;padding:10px 14px;transition:border-color .15s,box-shadow .15s}
+.pyr-page .ph .search:focus-within{border-color:var(--terra);box-shadow:0 0 0 3px rgba(180,85,46,.12)}
+.pyr-page .ph .search svg{color:var(--ink-3);flex:none}
+.pyr-page .ph .search input{flex:1;font:inherit;font-size:14.5px;border:0;outline:none;background:none;color:var(--ink)}
+.pyr-page .ph .search input::placeholder{color:var(--ink-3)}
+.pyr-page .ph .kbd{font-family:var(--mono);font-size:11px;color:var(--ink-3);border:1px solid var(--rule);border-radius:4px;padding:2px 6px}
+.pyr-page .ph .search .clear{background:none;border:0;color:var(--ink-3);cursor:pointer;padding:2px;line-height:0;display:flex}
+.pyr-page .ph .count{font-size:13.5px;color:var(--ink-3);font-variant-numeric:tabular-nums;white-space:nowrap}
+.pyr-page .ph .count b{color:var(--ink);font-weight:500}
+.pyr-page .ph .rightgrp{margin-left:auto;display:flex;align-items:center;gap:14px}
+.pyr-page .ph .grp{display:flex;align-items:center;gap:9px}
+.pyr-page .ph .grp-label{font-size:12.5px;color:var(--ink-3)}
+.pyr-page .ph .seg{display:flex;background:#EFE8DA;border-radius:8px;padding:3px;gap:2px}
+.pyr-page .ph .seg button{font:inherit;font-size:13px;color:var(--ink-2);background:none;border:0;padding:6px 12px;border-radius:6px;cursor:pointer;white-space:nowrap;transition:all .15s}
+.pyr-page .ph .seg button:hover{color:var(--ink)}
+.pyr-page .ph .seg button.on{background:var(--card);color:var(--ink);font-weight:500;box-shadow:0 1px 2px rgba(80,60,30,.14),inset 0 1px 0 #fff}
+.pyr-page .ph .chip{font:inherit;font-size:13px;color:var(--terra);background:var(--terra-wash);border:1px solid rgba(180,85,46,.35);border-radius:99px;padding:6px 13px;display:inline-flex;align-items:center;gap:8px;cursor:pointer}
+.pyr-page .ph .chip:hover{background:#F6E3D7;border-color:var(--terra)}
+.pyr-page .ph .cutover{font-size:12.5px;color:var(--ink-3)}
+@media(max-width:1080px){.pyr-page .ph .hwrap{padding:0 20px}.pyr-page .ph .sites{min-width:100%}}
+`;
 
 type Diff = { kind: 'carry' | 'advance' | 're'; reason: string };
 /** A party as the pickers here need it — the stakeholders columns those queries select. */
@@ -67,6 +138,9 @@ export default function Payables({ session }: { session: Session }) {
   const [extra, setExtra] = useState<Record<string, PayRow[]>>({});  // ad-hoc "Add a payment" rows, per project
   const [view, setView] = useState<'run' | 'matrix'>('run');   // the Run list vs the Week matrix
   const [band, setBand] = useState<'all' | 'workers' | 'vendors' | 'fixed'>('workers');   // matrix band filter
+  const [siteFilter, setSiteFilter] = useState<string | null>(null);   // hero: a site clicked in the breakdown
+  const [peekSite, setPeekSite] = useState<string | null>(null);       // hero: a site hovered in the breakdown
+  const heroRef = useCursorLamp<HTMLElement>();
   const navigate = useNavigate();
 
   const { data, isLoading, error, refetch } = useQuery({
@@ -120,11 +194,11 @@ export default function Payables({ session }: { session: Session }) {
   const [q, setQ] = useState('');
   const sections = useMemo(() => {
     const t = q.trim().toLowerCase();
-    if (!t) return allSections;
-    return allSections
-      .map(sec => ({ ...sec, rows: sec.rows.filter(r => `${r.party} ${r.trade ?? ''} ${r.projectName ?? ''} ${r.basis ?? ''}`.toLowerCase().includes(t)) }))
-      .filter(sec => sec.rows.length > 0);
-  }, [allSections, q]);
+    let secs = allSections;
+    if (siteFilter) secs = secs.map(sec => ({ ...sec, rows: sec.rows.filter(r => (r.projectName || '') === siteFilter) })).filter(sec => sec.rows.length > 0);
+    if (t) secs = secs.map(sec => ({ ...sec, rows: sec.rows.filter(r => `${r.party} ${r.trade ?? ''} ${r.projectName ?? ''} ${r.basis ?? ''}`.toLowerCase().includes(t)) })).filter(sec => sec.rows.length > 0);
+    return secs;
+  }, [allSections, q, siteFilter]);
 
   useSearchScope('Payables', useMemo(() => sections.flatMap(sec => sec.rows.map(r => ({
     id: r.key, title: r.party, sub: `${r.trade || ''}${r.projectName ? ' · ' + r.projectName : ''}`.replace(/^ · /, ''),
@@ -172,6 +246,29 @@ export default function Payables({ session }: { session: Session }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allSections, band, paid, serverPaid]);
   const headStats = view === 'matrix' ? matrixStats : totals;
+
+  // The hero's picture of the week: how much is still to pay, spread across the top sites (people + dues),
+  // and how much was carried in. Hovering a site peeks its figure; clicking it filters the run.
+  const heroData = useMemo(() => {
+    const rows = allSections.flatMap(s => s.rows);
+    const carried = rows.reduce((s, r) => s + Math.max(0, r.balanceBf), 0);
+    const bySite = new Map<string, { due: number; people: Set<string> }>();
+    const allPeople = new Set<string>();
+    for (const r of rows) {
+      const done = paidOf(r);
+      const due = done ? 0 : planned(r);
+      allPeople.add(r.party);
+      const k = r.projectName || 'Other';
+      const e = bySite.get(k) ?? { due: 0, people: new Set<string>() };
+      if (due > 0) { e.due += due; e.people.add(r.party); }
+      bySite.set(k, e);
+    }
+    const list = [...bySite.entries()].map(([name, v]) => ({ name, due: v.due, people: v.people.size })).filter(x => x.due > 0).sort((a, b) => b.due - a.due).slice(0, 4);
+    return { people: allPeople.size, carried, sites: list.length, list };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allSections, plan, paid, serverPaid]);
+  const focusSite = peekSite ?? siteFilter;
+  const focus = focusSite ? heroData.list.find(s => s.name === focusSite) ?? null : null;
 
   // The one place a payment is recorded. The desktop row and the phone's pay sheet both come
   // through here, so a payment made on a phone is the same transaction, settled the same way.
@@ -284,50 +381,89 @@ export default function Payables({ session }: { session: Session }) {
 
   return (
     <div className="pyr-page">
+      <style>{PH_CSS}</style>
+      <div className="ph">
+        <header className="hero" ref={heroRef}>
+          <div className="fx glow" aria-hidden="true" />
+          <div className="fx grid" aria-hidden="true" />
+          <div className="hwrap">
+            <div className="hero-top">
+              <div className="titleline">
+                <h1>Payments</h1>
+                <div className="week">
+                  <button aria-label="Previous week" onClick={() => shiftWeek(-1)}>‹</button>
+                  <span className="label">{weekLabel(monday)}</span>
+                  <button aria-label="Next week" onClick={() => shiftWeek(1)}>›</button>
+                </div>
+                {readOnly && <button className="tolink" onClick={() => setMonday(mondayOf(new Date()))}>this week</button>}
+              </div>
+              <div className="actions">
+                <button className={`linkbtn${view === 'run' ? ' on' : ''}`} onClick={() => setView('run')}>Run</button>
+                <button className={`linkbtn${view === 'matrix' ? ' on' : ''}`} onClick={() => setView('matrix')}>Week matrix</button>
+              </div>
+            </div>
+            <div className="figure">
+              <div>
+                <div className="amount">{inr(focus ? focus.due : headStats.left)}<span className="cap">still to pay{!focus && headStats.paid > 0 ? ` · ${inr(headStats.paid)} paid` : ''}</span></div>
+                {headStats.paid > 0 && <div className="progress"><div className="fill" style={{ width: `${headStats.planned > 0 ? Math.min(100, Math.round(headStats.paid / headStats.planned * 100)) : 0}%` }} /></div>}
+                <div className="under">{focus
+                  ? <><b>{focus.people}</b> {focus.people === 1 ? 'person' : 'people'} on {focus.name}</>
+                  : <><b>{heroData.people}</b> {heroData.people === 1 ? 'person' : 'people'}, <b>{heroData.sites}</b> site{heroData.sites === 1 ? '' : 's'}{heroData.carried > 0 ? <> · <b>{inr(heroData.carried)}</b> carried from earlier weeks</> : null}</>}</div>
+              </div>
+              {heroData.list.length > 0 && (
+                <div className={`sites${focusSite ? ' dim' : ''}`}>
+                  <div className="sbar">
+                    {heroData.list.map((s, i) => (
+                      <div key={s.name} className={`seg c${i + 1}${focusSite === s.name ? ' hot' : ''}`} style={{ flex: Math.max(1, Math.round(s.due)) }}
+                        onMouseEnter={() => setPeekSite(s.name)} onMouseLeave={() => setPeekSite(null)}
+                        onClick={() => setSiteFilter(siteFilter === s.name ? null : s.name)} title={s.name} />
+                    ))}
+                  </div>
+                  <div className="legend">
+                    {heroData.list.map((s, i) => (
+                      <button key={s.name} className={`li${focusSite === s.name ? ' hot' : ''}`}
+                        onMouseEnter={() => setPeekSite(s.name)} onMouseLeave={() => setPeekSite(null)}
+                        onClick={() => setSiteFilter(siteFilter === s.name ? null : s.name)}>
+                        <i className={`c${i + 1}`} /><span className="nm">{s.name}</span><span className="amt">{inr(s.due)}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </header>
+
+        <div className="controls"><div className="hwrap">
+          <div className="bar">
+            <label className={`search${q ? ' has' : ''}`}>
+              <svg width="15" height="15" viewBox="0 0 14 14" fill="none"><circle cx="6.2" cy="6.2" r="4.4" stroke="currentColor" strokeWidth="1.4" /><path d="M9.6 9.6L12.5 12.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
+              <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search a person, trade or site" />
+              {q
+                ? <button className="clear" aria-label="Clear search" onClick={(e) => { e.preventDefault(); setQ(''); }}><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg></button>
+                : <span className="kbd">/</span>}
+            </label>
+            <span className="count"><b>{totals.count}</b> to pay</span>
+            <div className="rightgrp">
+              {view === 'matrix' && (
+                <div className="grp"><span className="grp-label">Band</span>
+                  <div className="seg">
+                    {([['all', 'All'], ['workers', 'Workers'], ['vendors', 'Vendors'], ['fixed', 'Recurring']] as const).map(([k, label]) => (
+                      <button key={k} className={band === k ? 'on' : ''} onClick={() => setBand(k)}>{label}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {siteFilter && <button className="chip" onClick={() => setSiteFilter(null)}>{siteFilter}<svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 2l6 6M8 2L2 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg></button>}
+              {orgId && <span className="cutover"><LedgerCutoverControl orgId={orgId} isManager={isManager} /></span>}
+            </div>
+          </div>
+        </div></div>
+      </div>
+
     <div className="pyr">
       <style>{PYR_CSS}</style>
       <div className="wrap">
-
-        <div className="masthead">
-          <h1>Payments</h1>
-          <div className="stats">
-            <div className="stat"><b>{inr(headStats.planned)}</b><span>planned</span></div>
-            <div className="stat pd"><b>{inr(headStats.paid)}</b><span>paid</span></div>
-            <div className="stat due"><b>{inr(headStats.left)}</b><span>still to pay</span></div>
-          </div>
-        </div>
-
-        <div className="nav">
-          <div className="wk">
-            <button className="arrow" aria-label="Previous week" onClick={() => shiftWeek(-1)}>‹</button>
-            <b>{weekLabel(monday)}</b>
-            <button className="arrow" aria-label="Next week" onClick={() => shiftWeek(1)}>›</button>
-          </div>
-          <a onClick={() => setMonday(mondayOf(new Date()))} role="button" tabIndex={0}
-            onKeyDown={(e) => { if (e.key === 'Enter') setMonday(mondayOf(new Date())); }}
-            style={{ cursor: 'pointer' }}>this week</a>
-          {/* The rate card lives on the Attendance page (its single source) — not duplicated here. */}
-          <div className="toggle" role="tablist">
-            <button className={view === 'run' ? 'on' : ''} role="tab" aria-selected={view === 'run'} onClick={() => setView('run')}>Run</button>
-            {/* The same week, pivoted: who is owed what, on which site. */}
-            <button className={view === 'matrix' ? 'on' : ''} role="tab" aria-selected={view === 'matrix'} onClick={() => setView('matrix')}>Week matrix</button>
-          </div>
-        </div>
-
-        <div className="searchrow">
-          <SearchBar label="the run" />
-          <span className="s-count">{q.trim() ? `${rowsAll.length} row${rowsAll.length === 1 ? '' : 's'}` : ''}</span>
-        </div>
-
-        {view === 'matrix' && (
-          <div className="chips">
-            {([['all', 'All'], ['workers', 'Workers'], ['vendors', 'Vendors'], ['fixed', 'Recurring & staff']] as const).map(([k, label]) => (
-              <button key={k} className={`chip-f${band === k ? ' on' : ''}`} onClick={() => setBand(k)}>{label}</button>
-            ))}
-          </div>
-        )}
-
-        {orgId && <div className="cutover"><LedgerCutoverControl orgId={orgId} isManager={isManager} /></div>}
         {readOnly && <div className="readonly">A past week — a record of what was logged and paid then. The live balance is on each party&apos;s ledger.</div>}
 
         {/* Work awaiting sign-off — approving here mints the obligation into the run below. It draws
