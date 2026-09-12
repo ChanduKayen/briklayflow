@@ -176,10 +176,10 @@ export default function BillsMobile() {
       <div className="blm" ref={rootRef}>
         <style>{BLM_CSS}</style>
 
-        <div className={`small${scrolled ? ' show' : ''}`}><b>Bills</b><span>{rupees(openTotal)}</span></div>
+        <div className={`small${scrolled ? ' show' : ''}`}><b>Vendor Bills</b><span>{rupees(openTotal)}</span></div>
 
         <div className="big">
-          <h1>Bills</h1>
+          <h1>Vendor Bills</h1>
           <div className="line"><CountUp to={openTotal} /> unpaid · <span>{open.length}</span> bill{open.length === 1 ? '' : 's'}</div>
         </div>
 

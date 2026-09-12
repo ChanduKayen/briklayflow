@@ -36,6 +36,9 @@ export interface BillRow {
    *  The reader tags each line with the invoice it came from, so counting those tags is the
    *  honest answer — a "×3" on a row means three invoices really are inside that paper. */
   docCount: number;
+  /** When the bill was ADDED to Briklay (created_at, falling back to its date) — the register sorts and
+   *  groups on this, newest first, so the bill you just filed is at the top regardless of its printed date. */
+  addedAt: string | null;
 }
 
 export interface BillLine { name: string; spec: string | null; unit: string | null; qty: number; rate: number; amount: number }
@@ -155,6 +158,7 @@ export async function loadBills(): Promise<BillRow[]> {
       amount, paid, status: statusOf(amount, paid),
       ref: b.po_id ? { kind: 'po', poId: b.po_id } : { kind: 'none' },
       docUrl: b.doc_url || null, docCount: invoiceCount(b.lines),
+      addedAt: b.created_at ? String(b.created_at) : (b.bill_date || null),
     });
   }
   for (const p of pos) {
@@ -166,6 +170,7 @@ export async function loadBills(): Promise<BillRow[]> {
       site: p.project_id ? (projName[p.project_id] || p.project_id) : null,
       amount, paid, status: statusOf(amount, paid), ref: { kind: 'po', poId: p.po_id },
       docUrl: p.vendor_bill_doc_url || p.vendor_bill_url || null, docCount: 1,
+      addedAt: billDateOf(p),
     });
   }
   const fmtP = (d: string) => new Date(d).toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
@@ -178,6 +183,7 @@ export async function loadBills(): Promise<BillRow[]> {
       amount, paid, status: statusOf(amount, paid),
       ref: { kind: 'consolidated', label: `Consolidated ${fmtP(cb.period_from)}–${fmtP(cb.period_to)}` },
       docUrl: null, docCount: 1,
+      addedAt: cb.created_at ? String(cb.created_at) : cb.period_to,
     });
   }
   // Newest first.
@@ -211,6 +217,7 @@ export async function loadBillDetail(id: string): Promise<BillDetail | null> {
       projectId: b.project_id ?? null, site: (proj.data as any)?.name || null, amount, paid, status: statusOf(amount, paid),
       ref: b.po_id ? { kind: 'po', poId: b.po_id } : { kind: 'none' },
       docUrl: b.doc_url || null, docCount: invoiceCount(lines),
+      addedAt: b.created_at ? String(b.created_at) : (b.bill_date || null),
       lines, payments, poId: b.po_id ?? null, poProjectId: b.project_id ?? null, note: b.note || undefined,
     };
   }
@@ -241,6 +248,7 @@ export async function loadBillDetail(id: string): Promise<BillDetail | null> {
       site: (proj.data as any)?.name || null, amount, paid, status: statusOf(amount, paid),
       ref: { kind: 'po', poId: p.po_id },
       docUrl: p.vendor_bill_doc_url || p.vendor_bill_url || null, docCount: 1,
+      addedAt: billDateOf(p),
       lines, payments, poId: p.po_id, poProjectId: p.project_id ?? null,
     };
   }
@@ -264,7 +272,8 @@ export async function loadBillDetail(id: string): Promise<BillDetail | null> {
       id, kind: 'consolidated', vendorId: cb.stakeholder_id ?? null, vendor: (stk.data as any)?.name || 'Vendor',
       billNo: null, billDate: cb.period_to, projectId: null, site: null, amount, paid, status: statusOf(amount, paid),
       ref: { kind: 'consolidated', label: `Consolidated ${fmtP(cb.period_from)}–${fmtP(cb.period_to)}` },
-      docUrl: cb.photo_url || null, docCount: 1, lines: [], payments, poId: null, poProjectId: null,
+      docUrl: cb.photo_url || null, docCount: 1, addedAt: cb.created_at ? String(cb.created_at) : cb.period_to,
+      lines: [], payments, poId: null, poProjectId: null,
       periodFrom: cb.period_from, periodTo: cb.period_to, note: cb.note || undefined,
     };
   }
