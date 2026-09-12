@@ -638,10 +638,30 @@ export default function TransactionDetail({ session }: { session: Session }) {
         if (txnErr) throw new Error(`The allocation moved but the transaction row did not: ${txnErr.message}`);
       }
 
+      const snap = newAmendment.snapshot;
       const existing: AmendmentRecord[] = (txn as any).amendments || [];
-      const { error } = await supabase.from('transactions').update({ amendments: [...existing, newAmendment] }).eq('txn_id', txnId);
+      // Write the amended values onto the ROW itself — not only into the amendments trail — so the
+      // ledger, the transaction list, payables and every report (all of which read the row's columns)
+      // show the corrected figure. This mirrors how a project move is "written for real"; the amendments
+      // array stays behind as the audit history (who changed what, when).
+      const { error } = await supabase.from('transactions').update({
+        amendments: [...existing, newAmendment],
+        total_amount: snap.total_amount,
+        date: snap.date,
+        payment_mode: snap.payment_mode,
+        category: snap.category,
+        remarks: snap.remarks,
+      }).eq('txn_id', txnId);
       // The move has already happened by this point; say so rather than implying nothing changed.
       if (error) throw new Error(moved ? `The project was moved, but recording the amendment failed: ${error.message}` : error.message);
+      // A single, fully-allocated payment keeps its one allocation in step with the new total, so the
+      // per-project ledger (which sums allocations) matches the row. A split is left to be re-spread by
+      // hand — this modal does not reallocate a split.
+      if (soleAlloc && Number(soleAlloc.allocated_amount) === Number(txn.total_amount) && Number(snap.total_amount) !== Number(txn.total_amount)) {
+        const { error: aErr } = await supabase.from('txn_allocations')
+          .update({ allocated_amount: snap.total_amount }).eq('allocation_id', soleAlloc.allocation_id);
+        if (aErr) throw new Error(`The amount was amended, but updating its allocation failed: ${aErr.message}`);
+      }
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['transaction', txnId] }); qc.invalidateQueries({ queryKey: ['transactions'] }); qc.invalidateQueries({ queryKey: ['txn_allocations', txnId] }); qc.invalidateQueries({ queryKey: ['ledger'] }); setAmendStep('idle'); setAmendError(null); setShowAmendHistory(true); },
     onError: (err: any) => setAmendError(err.message || 'Amendment failed.'),

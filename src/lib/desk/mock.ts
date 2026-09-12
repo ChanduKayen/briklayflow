@@ -291,6 +291,7 @@ const DSR_PLAN: DeskPlan = {
   ],
   focus: 'Ground',
   tasks: DSR_TASKS.map((t) => ({ ...t, floor: 'Ground' })),
+  projectStart: '2026-08-24', location: 'Suresh Nagar',
 }
 
 /** The apartment: floors, then flats + common. Every task carries its own floor/unit, so the
@@ -340,6 +341,7 @@ const ASM_PLAN: DeskPlan = {
     ...ASM_COMMON,
     ...ASM_UNITS.flatMap((u) => u.tasks.map((t) => ({ ...t, floor: 'First', unit: u.u }))),
   ],
+  projectStart: '2026-07-13', location: 'Pratap Nagar',
 }
 
 export const MOCK_PLANS: Record<string, DeskPlan> = { DSR: DSR_PLAN, ASM: ASM_PLAN }

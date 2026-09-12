@@ -98,10 +98,19 @@ const POLX_CSS = `
 .polx .when{white-space:nowrap}.polx .when small{display:block;color:var(--ink-3);font-size:12px}
 .polx .dim{color:var(--ink-3)}
 .polx .val{font-weight:500}
+/* Bill column: a link to the attached bill (number + amount), or a quiet "not attached". */
+.polx td.bill{white-space:nowrap}
+.polx .billlink{display:inline-block;font-family:inherit;font-weight:500;color:var(--terra);cursor:pointer;border-bottom:1px solid transparent;transition:border-color .15s}
+.polx .billlink:hover{border-bottom-color:color-mix(in srgb,var(--terra) 45%,transparent)}
+/* An attached bill is a "done" tick — green like Received / paid, so a finished row reads three ticks. */
+.polx .billlink.ok{color:var(--sage)}
+.polx .billlink.ok:hover{border-bottom-color:color-mix(in srgb,var(--sage) 45%,transparent)}
+.polx .billlink small{display:block;font-size:11.5px;font-family:var(--sans);font-weight:400;color:var(--ink-3)}
+.polx .nobill{color:var(--ink-3);font-size:12.5px}
 .polx .val small{display:block;font-size:11.5px;font-family:var(--sans);font-weight:400;color:var(--ink-3)}
 .polx .val small.over{color:var(--terra)}
-.polx .bal.owe{color:var(--terra);font-weight:500}.polx .bal.adv{color:var(--sage);font-weight:500}.polx .bal.nil{color:var(--sage)}.polx .bal small{font-size:10.5px;font-weight:600;opacity:.72;margin-left:1px}
-.polx .dlv{white-space:nowrap}
+.polx .bal.owe{color:var(--terra);font-weight:500}.polx .bal.adv{color:var(--sage);font-weight:500}.polx .bal.nil{color:var(--sage)}.polx .bal.paid{color:var(--sage);font-weight:500}.polx .bal small{font-size:10.5px;font-weight:600;opacity:.72;margin-left:1px}
+.polx .dlv{white-space:nowrap;display:flex;flex-direction:column;align-items:flex-start;gap:1px}
 .polx .dlv .late{color:var(--terra);font-weight:500}
 .polx .dlv .due{color:var(--gold);font-weight:500}
 .polx .dlv .ok{display:inline-flex;align-items:center;gap:5px;color:var(--sage);font-weight:500}
@@ -110,7 +119,7 @@ const POLX_CSS = `
 .polx .dlv .sent{display:inline-flex;align-items:center;gap:5px;color:var(--gold);font-weight:500}
 .polx .dlv .sent svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .polx .dlv .none{color:var(--ink-2)}
-.polx .dlv small{display:block;color:var(--ink-3);font-size:12px}
+.polx .dlv small{display:block;color:var(--ink-3);font-size:12px;max-width:210px;overflow:hidden;text-overflow:ellipsis}
 .polx .dlv .send-link{display:inline-flex;align-items:center;gap:5px;margin-top:5px;background:none;border:0;padding:0;font-family:inherit;font-size:12px;font-weight:500;color:var(--terra);cursor:pointer;transition:color .15s}
 .polx .dlv .send-link svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;transition:transform .28s cubic-bezier(.34,1.56,.64,1)}
 .polx .dlv .send-link:hover{color:var(--terra-deep)}
@@ -283,6 +292,7 @@ interface PORow {
   site: string; by: string; ordered: string; createdAt: string; approvalStatus: string;
   items: POItem[]; value: number; billed: number; paid: number;
   due: string | null; recv: string | null; sent: string | null; cancelled: boolean; rfq: boolean;
+  bills: { id: string; no: string | null; docUrl: string | null }[];   // first-class bill entities linked to this PO
 }
 
 const fmt = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
@@ -349,6 +359,21 @@ function usePOListData(projectId?: string) {
     queryFn: () => billedByPO(poIds),
   });
 
+  // The bill ENTITIES on each PO (id / number / doc) — so the list can link straight to the bill.
+  const billEntitiesQ = useQuery({
+    queryKey: ['po_list_bill_entities', poIds],
+    enabled: poIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase.from('bills')
+        .select('id, po_id, bill_no, doc_url, bill_date, created_at').in('po_id', poIds)
+        .order('bill_date', { ascending: true }).order('created_at', { ascending: true });
+      if (error) throw error;
+      const m: Record<string, { id: string; no: string | null; docUrl: string | null }[]> = {};
+      (data ?? []).forEach((b: any) => { if (!b.po_id) return; (m[b.po_id] ??= []).push({ id: b.id, no: b.bill_no || null, docUrl: b.doc_url || null }); });
+      return m;
+    },
+  });
+
   // Per-line received quantities (drives the accurate got/pending counts + tooltip).
   const grnQ = useQuery({
     queryKey: ['po_list_grn', poIds],
@@ -376,6 +401,7 @@ function usePOListData(projectId?: string) {
     const paid = paidQ.data ?? {};
     const recvByLine = grnQ.data ?? {};
     const billsByPo = billsQ.data ?? {};
+    const billEntitiesByPo = billEntitiesQ.data ?? {};
     return pos.map((po: any): PORow => {
       const cancelled = po.status === 'CANCELLED';
       const value = Number(po.total_value || po.order_value) || 0;
@@ -412,6 +438,7 @@ function usePOListData(projectId?: string) {
         approvalStatus: (po.approval_status ?? 'APPROVED') as string,
         items,
         value, billed,
+        bills: billEntitiesByPo[po.po_id] ?? [],
         paid: paid[po.po_id] || 0,
         due: po.expected_delivery || null,
         recv: po.received_at_site || receipt[po.po_id]?.last_receipt_date || null,
@@ -419,7 +446,7 @@ function usePOListData(projectId?: string) {
         cancelled, rfq,
       };
     });
-  }, [pos, receiptQ.data, paidQ.data, grnQ.data, billsQ.data]);
+  }, [pos, receiptQ.data, paidQ.data, grnQ.data, billsQ.data, billEntitiesQ.data]);
 
   return { rows, isLoading: posQ.isLoading };
 }
@@ -520,7 +547,30 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
     const b = balance(p);
     if (b > 0.5) return <span className="bal owe">{fmt(b)}<small>Cr</small></span>;
     if (b < -0.5) return <span className="bal adv">{fmt(-b)}<small>Dr</small></span>;
+    // Settled: money actually moved AND nothing is left owed → the third green tick on a done row.
+    if (p.billed > 0.5 && p.paid > 0.5) return <span className="bal paid">✓ paid</span>;
     return <span className="bal nil">—</span>;
+  };
+  // The Bill column: a link straight to the attached bill (its number + amount), or a quiet "not
+  // attached" when there is none. A first-class bill opens its own page; a legacy vendor bill (billed
+  // with no entity yet) opens the PO, where it lives.
+  const billCell = (p: PORow) => {
+    if (p.cancelled) return <span className="dim">—</span>;
+    const bs = p.bills;
+    if (bs.length === 1) {
+      const b = bs[0];
+      return <a className="billlink ok" title="Open the bill" onClick={(e) => { e.stopPropagation(); navigate(`/bills/${encodeURIComponent('bl~' + b.id)}`); }}>
+        ✓ {b.no ? `Bill ${b.no}` : 'Bill'}<small>{fmt(p.billed)}</small></a>;
+    }
+    if (bs.length > 1) {
+      return <a className="billlink ok" title="Open the PO to see its bills" onClick={(e) => { e.stopPropagation(); openPO(p.id); }}>
+        ✓ {bs.length} bills<small>{fmt(p.billed)}</small></a>;
+    }
+    if (p.billed > 0) {
+      return <a className="billlink ok" title="Open the PO to see its bill" onClick={(e) => { e.stopPropagation(); openPO(p.id); }}>
+        ✓ Bill<small>{fmt(p.billed)}</small></a>;
+    }
+    return <span className="nobill">Bill not attached</span>;
   };
   const got = (p: PORow) => p.items.filter(i => i.r).length;
   const pend = (p: PORow) => p.items.filter(i => !i.r);
@@ -620,8 +670,10 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   };
   const arr = (k: string) => sortK === k ? (sortDir < 0 ? '▼' : '▲') : '▲';
 
+  // No vendor date → nothing (the old "no date from vendor" only crammed the column). Callers append
+  // this after a "·" ONLY when it exists, so a dateless row just reads "to vendor · 8 Sept".
   const dueLabel = (p: PORow): React.ReactNode => {
-    if (!p.due) return 'no date from vendor';
+    if (!p.due) return null;
     const d = days(TODAY, D(p.due));
     if (d < 0) return <b className="late">{-d} day{-d > 1 ? 's' : ''} late</b>;
     if (d === 0) return <b className="due">due today</b>;
@@ -643,19 +695,20 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
       ? { onMouseEnter: (e: React.MouseEvent) => showTip(e, p.id, true), onMouseLeave: () => setTip(null) }
       : {};
 
-    // The status line for this PO's delivery.
+    // The status line for this PO's delivery. The due label is appended only when a vendor date exists.
+    const due = dueLabel(p);
     let status: React.ReactNode;
     if (fully) status = <><span className="ok">✓ Received</span><small>{dstr(D(p.recv))}</small></>;
     else if (g > 0) status = (
       <>
         <span className="partial"><i style={{ ['--w' as any]: `${g / n * 100}%` }} />{g} of {n} received</span>
-        <small>{pl.length === 1 ? pl[0].n + ' pending' : pl.length + ' pending'} · {dueLabel(p)}</small>
+        <small>{pl.length === 1 ? pl[0].n + ' pending' : pl.length + ' pending'}{due && <> · {due}</>}</small>
       </>
     );
     // Sent to the vendor (ordered, on its way) — wins over the "awaiting price" RFQ label.
-    else if (p.sent) status = <><span className="sent"><svg viewBox="0 0 24 24"><path d="M21 3L3 10.5l6 2.5 2.5 6L21 3z" /><path d="M9 13l3-3" /></svg>PO sent</span><small>to vendor · {dstr(D(p.sent))} · {dueLabel(p)}</small></>;
-    else if (p.rfq) status = <><span className="dim">Not ordered yet</span><small>awaiting price</small></>;
-    else status = <><span className={late(p) ? 'late' : 'none'}>Not received</span><small>{n} item{n !== 1 ? 's' : ''} · {dueLabel(p)}</small></>;
+    else if (p.sent) status = <><span className="sent"><svg viewBox="0 0 24 24"><path d="M21 3L3 10.5l6 2.5 2.5 6L21 3z" /><path d="M9 13l3-3" /></svg>PO sent</span><small>to vendor · {dstr(D(p.sent))}{due && <> · {due}</>}</small></>;
+    else if (p.rfq) status = <span className="dim">Not ordered yet</span>;
+    else status = <><span className={late(p) ? 'late' : 'none'}>Not received</span><small>{n} item{n !== 1 ? 's' : ''}{due && <> · {due}</>}</small></>;
 
     // Not yet sent and not delivered → a subtle, clearly-clickable way to send the PO to the vendor.
     const canSend = !p.sent && !fully && !!p.stakeholderId;
@@ -880,7 +933,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
               <th className={sortK === 'site' ? 'sorted' : ''} onClick={() => onSort('site')}>Site<span className="arr">{arr('site')}</span></th>
               <th className={sortK === 'ordered' ? 'sorted' : ''} onClick={() => onSort('ordered')}>Ordered<span className="arr">{arr('ordered')}</span></th>
               <th className={sortK === 'delivery' ? 'sorted' : ''} onClick={() => onSort('delivery')}>Delivery<span className="arr">{arr('delivery')}</span></th>
-              <th className={`num${sortK === 'value' ? ' sorted' : ''}`} onClick={() => onSort('value')}>Value<span className="arr">{arr('value')}</span></th>
+              <th style={{ cursor: 'default' }}>Bill</th>
               <th className={`num${sortK === 'balance' ? ' sorted' : ''}`} onClick={() => onSort('balance')} title="Owed to vendor = Credit · Advance = Debit">Balance<span className="arr">{arr('balance')}</span></th>
             </tr></thead>
             <tbody>
@@ -925,7 +978,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
                           ? <button type="button" className="approve-btn" disabled={approving === p.id} onClick={(e) => { e.stopPropagation(); approve(p.id); }}>{approving === p.id ? 'Approving…' : 'Approve'}</button>
                           : <small>needs an approver</small>}</div>
                       : recvCell(p)}</td>
-                    <td className="num val">{p.rfq ? <span className="dim">—</span> : p.cancelled ? <span className="dim">{fmt(p.value)}</span> : fmt(p.value)}</td>
+                    <td className="bill">{billCell(p)}</td>
                     <td className="num">{balCell(p)}</td>
                   </tr>
                 );

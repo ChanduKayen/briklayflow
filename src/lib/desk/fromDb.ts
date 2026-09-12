@@ -91,6 +91,15 @@ export interface TaskRow {
   seq_no: number
   duration_days: number | null
   started_at: string | null
+  /** Hand-set schedule dates — optional; absent until the planned_* columns are migrated (RICH select). */
+  planned_start?: string | null
+  planned_end?: string | null
+  /** Frozen promised-plan snapshot — optional; absent until the baseline_* columns are migrated
+   *  (20260916000001, part of the RICH select). See DeskTask.baselineStart. */
+  baseline_start?: string | null
+  baseline_end?: string | null
+  /** Why the task ran late — optional; absent until delay_reason is migrated (20260916000002, RICH). */
+  delay_reason?: string | null
   owner_id: string | null
   node_key: string | null
   task_type_id: string | null
@@ -822,12 +831,25 @@ export function toDeskTask(
     // you, and we were the ones hiding it.
     started: t.started_at ? daysBetween(t.started_at, ctx.now) + 1 : undefined,
     doneW: t.status === 'done' ? new Date(t.updated_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : undefined,
-    // Real dates for the plan row: start = when it actually began; end = the finish (done) or the
-    // projected finish (start + duration). Formatted "d Mon"; left undefined when there's no start yet.
-    startDate: t.started_at ? new Date(t.started_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : undefined,
-    endDate: t.status === 'done'
-      ? new Date(t.updated_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
-      : (t.started_at ? new Date(new Date(t.started_at).getTime() + (t.duration_days ?? 1) * 86400000).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : undefined),
+    // Hand-set schedule dates (raw ISO) — the row's date editors bind to these.
+    plannedStart: t.planned_start ?? null,
+    plannedEnd: t.planned_end ?? null,
+    // The frozen promised plan (raw ISO), and the seq the Gantt's computed fallback schedule walks.
+    baselineStart: t.baseline_start ?? null,
+    baselineEnd: t.baseline_end ?? null,
+    delayReason: t.delay_reason ?? null,
+    seq: t.seq_no,
+    // Display dates for the plan row: PREFER the hand-set planned dates; else start = when work actually
+    // began, end = the finish (done) or the projected finish (start + duration). "d Mon"; undefined when
+    // there's nothing to show. planned dates come back as "YYYY-MM-DD".
+    startDate: t.planned_start
+      ? new Date(t.planned_start).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+      : (t.started_at ? new Date(t.started_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : undefined),
+    endDate: t.planned_end
+      ? new Date(t.planned_end).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+      : (t.status === 'done'
+        ? new Date(t.updated_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+        : (t.started_at ? new Date(new Date(t.started_at).getTime() + (t.duration_days ?? 1) * 86400000).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : undefined)),
     floor: t.floor_label,
     unit: t.unit_label,
     qc: ctx.qcByTaskId?.get(t.task_id) ?? undefined,

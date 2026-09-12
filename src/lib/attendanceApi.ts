@@ -40,7 +40,11 @@ export interface SiteRow { site: string; label: string; hint: string; crews: Cre
 export interface WeekData { sites: SiteRow[]; card: RateCard }
 
 // ── date helpers ─────────────────────────────────────────────────────────────
-const iso = (d: Date) => d.toISOString().slice(0, 10);
+// LOCAL date, not UTC. `toISOString()` renders in UTC, so east of Greenwich (IST is +5:30)
+// a local Monday 00:00 becomes the previous Sunday 18:30Z and serialises to Sunday's date —
+// which shifted the whole muster week back a day (grid ran Sun…Sat, and the Sunday-off cell at
+// index 6 landed on Saturday). We key attendance by the LOCAL calendar day the site worked.
+const iso = (d: Date) => `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
 /** Monday (00:00) of the week containing `d`. */
 export function mondayOf(d: Date): Date {
   const x = new Date(d); x.setHours(0, 0, 0, 0);
@@ -229,12 +233,15 @@ export async function saveRate(orgId: string, key: string, kind: 'skilled' | 'hm
   if (error) throw error;
 }
 
-export async function setCategoryRate(id: string, rate: number): Promise<void> {
-  const { error } = await supabase.from('labour_crew_categories').update({ rate, own_rate: true }).eq('id', id);
+// `own` marks a per-row override. With rates two-way-linked to the card (one number per trade+skill,
+// no overrides) the cascade passes own=false — it is just mirroring the card onto the stored row so
+// the money math (accrual, settlement, ledger) reads the same number the sheet shows.
+export async function setCategoryRate(id: string, rate: number, own = true): Promise<void> {
+  const { error } = await supabase.from('labour_crew_categories').update({ rate, own_rate: own }).eq('id', id);
   if (error) throw error;
 }
-export async function setDirectRate(id: string, rate: number): Promise<void> {
-  const { error } = await supabase.from('labour_direct_workers').update({ rate, own_rate: true }).eq('id', id);
+export async function setDirectRate(id: string, rate: number, own = true): Promise<void> {
+  const { error } = await supabase.from('labour_direct_workers').update({ rate, own_rate: own }).eq('id', id);
   if (error) throw error;
 }
 export async function setCrewBasis(crewId: string, basis: 'contract' | 'labour'): Promise<void> {

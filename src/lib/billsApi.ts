@@ -523,6 +523,35 @@ export async function linkExistingBillToPO(billId: string, poId: string, poProje
   if (upPo) throw upPo;
 }
 
+/** Detach a first-class bill from a PO. The bill STAYS in the Bills module (its own row, payments and
+ *  history intact) — it just no longer belongs to this PO. The PO's mirrored bill fields are re-derived
+ *  from whatever bills remain linked; when none remain they are cleared so the PO reads "no bill yet"
+ *  again (and its fallback bill isn't resurrected by loadBills / convertLegacyPoBill). Any payment that
+ *  was allocated to the PO stays on the ledger — detaching a paid bill is the caller's call to confirm. */
+export async function unlinkBillFromPO(billId: string, poId: string): Promise<void> {
+  const { error: upBill } = await supabase.from('bills').update({ po_id: null }).eq('id', billId).eq('po_id', poId);
+  if (upBill) throw upBill;
+  // Re-mirror the PO from whatever bills still name it (most recent wins, matching linkExistingBillToPO).
+  const { data: remaining } = await supabase.from('bills')
+    .select('bill_no, bill_date, amount, doc_url, created_at').eq('po_id', poId)
+    .order('bill_date', { ascending: false }).order('created_at', { ascending: false });
+  const rows = (remaining ?? []) as any[];
+  if (!rows.length) {
+    const { error } = await supabase.from('purchase_orders').update({
+      vendor_bill_amount: null, vendor_bill_number: null, vendor_bill_no: null,
+      vendor_bill_date: null, vendor_bill_url: null, vendor_bill_doc_url: null, bill_recorded_at: null,
+    }).eq('po_id', poId);
+    if (error) throw error;
+  } else {
+    const b = rows[0];
+    const { error } = await supabase.from('purchase_orders').update({
+      vendor_bill_amount: num(b.amount), vendor_bill_number: b.bill_no ?? null, vendor_bill_no: b.bill_no ?? null,
+      vendor_bill_date: b.bill_date ?? null, vendor_bill_url: b.doc_url ?? null, vendor_bill_doc_url: b.doc_url ?? null,
+    }).eq('po_id', poId);
+    if (error) throw error;
+  }
+}
+
 // ── payment → bill allocation (the tx "attach bill" picker) ────────────────────
 // A pickable bill is either a first-class bills row ('bill') or an OLD PO-recorded bill still living on
 // the PO ('po') — so a payment can settle both. Settling a 'bill' writes bill_id; a 'po' writes the

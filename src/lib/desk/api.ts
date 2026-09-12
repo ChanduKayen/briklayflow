@@ -78,6 +78,12 @@ export interface DeskApi {
    *  not a cosmetic act: the name IS what the WhatsApp resolver matches an inbound report against. */
   editTask: (siteCode: string, ref: string, patch: TaskEdit) => Promise<void>
 
+  /** Set a task's hand-picked schedule dates (site_tasks.planned_start / planned_end), the promised-plan
+   *  baseline (baseline_start / baseline_end) the Gantt ghost reads — written on an explicit per-phase
+   *  "Approve plan" and OVERWRITTEN on re-approval (no freeze-once) — and/or the delay_reason. Any field
+   *  may be null to clear it. Degrades to a no-op if the columns aren't migrated yet. */
+  setTaskDates: (siteCode: string, ref: string, dates: { plannedStart?: string | null; plannedEnd?: string | null; baselineStart?: string | null; baselineEnd?: string | null; delayReason?: string | null }) => Promise<void>
+
   /** Delete a task, for good. The row goes AND its node_key is suppressed on the project — without
    *  the second half, reconcile() re-creates it on the next read. See deleteImpact() for what it
    *  costs; the confirmation is required to say so. */
@@ -263,6 +269,30 @@ function useMockDeskApi(): DeskApi {
           ? { ...t, qc: t.qc.map((c) => (c.id === qcId ? { ...c, status } : c)) }
           : t)),
       }])))
+    },
+    setTaskDates: async (siteCode: string, ref: string, dates: { plannedStart?: string | null; plannedEnd?: string | null; baselineStart?: string | null; baselineEnd?: string | null; delayReason?: string | null }) => {
+      const fmt = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : undefined)
+      setPlans((p) => {
+        const plan = p[siteCode]
+        if (!plan) return p
+        return {
+          ...p,
+          [siteCode]: {
+            ...plan,
+            tasks: plan.tasks.map((t) => {
+              if (t.ref !== ref) return t
+              const ps = dates.plannedStart !== undefined ? dates.plannedStart : (t.plannedStart ?? null)
+              const pe = dates.plannedEnd !== undefined ? dates.plannedEnd : (t.plannedEnd ?? null)
+              // Plain patch — no freeze-once. The baseline is written only when Approve sends it, and a
+              // re-approval overwrites the old promise.
+              const bs = dates.baselineStart !== undefined ? dates.baselineStart : (t.baselineStart ?? null)
+              const be = dates.baselineEnd !== undefined ? dates.baselineEnd : (t.baselineEnd ?? null)
+              const dr = dates.delayReason !== undefined ? dates.delayReason : (t.delayReason ?? null)
+              return { ...t, plannedStart: ps, plannedEnd: pe, baselineStart: bs, baselineEnd: be, delayReason: dr, startDate: ps ? fmt(ps) : t.startDate, endDate: pe ? fmt(pe) : t.endDate }
+            }),
+          },
+        }
+      })
     },
     deleteTask: async (siteCode: string, ref: string) => {
       setPlans((p) => {

@@ -495,7 +495,7 @@ export function TaskSheetBody({
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void onQc(c.id, c.status === 'confirmed' ? 'pending' : 'confirmed') } }}
               >{Check}</div>
               <div className="tpk-txt">{c.critical && <span className="tpk-crit" title="Critical check" />}{c.question}{c.answer && <span className="tpk-a">{c.answer}</span>}</div>
-              <div className="tpk-flag" onClick={() => void onQc(c.id, c.status === 'failed' ? 'pending' : 'failed')}>Failed</div>
+              <div className="tpk-flag" onClick={() => void onQc(c.id, c.status === 'failed' ? 'pending' : 'failed')}>{c.status === 'failed' ? 'Failed' : 'Flag'}</div>
             </div>
           ))}
         </div>
@@ -506,15 +506,11 @@ export function TaskSheetBody({
 
 /** ONE ACTION — driven by state + the checks, which gate Done. On Done it stops being a button. */
 export function TaskSheetBar({
-  task: t, onState, onReopen, startable = true, blockerLabel,
+  task: t, onState, onReopen,
 }: {
   task: DeskTask
   onState: (s: TaskState) => Promise<void>
   onReopen: () => void
-  /** false = a hard/soft predecessor is unmet → Start is honest about it and does nothing. */
-  startable?: boolean
-  /** the thing it waits on, for the "· after X is done" sub. */
-  blockerLabel?: string
 }) {
   const qc = t.qc ?? []
   const left = qc.filter((c) => c.status !== 'confirmed').length
@@ -522,10 +518,9 @@ export function TaskSheetBar({
   const [swap, setSwap] = useState(false)
   const go = (s: TaskState) => { setSwap(true); void onState(s).finally(() => setTimeout(() => setSwap(false), 180)) }
 
+  // Start is NEVER blocked — any task can be started regardless of its predecessors (the site decides
+  // the order; the plan just records what actually happened). Starting shifts the bar to today.
   if (t.state === 'todo') {
-    if (!startable) {
-      return <button className="tpk-cta blocked" disabled>Start{blockerLabel ? <span className="sub">· after {blockerLabel} is done</span> : null}</button>
-    }
     return <button className={`tpk-cta primary ${swap ? 'swap' : ''}`} onClick={() => go('active')}>Start</button>
   }
 

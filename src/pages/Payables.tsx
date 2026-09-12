@@ -39,7 +39,6 @@ import { addAdjustment } from '../lib/partyLedgerApi';
 import { PendingCertifications } from '../components/attendance/PendingCertifications';
 import { LedgerCutoverControl } from '../components/attendance/LedgerCutoverControl';
 import { useUserProfile } from '../App';
-import { RateCardPanel } from '../components/attendance/RateCardPanel';
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 const MODES = ['UPI', 'NEFT', 'Cash', 'Cheque'];
@@ -68,7 +67,6 @@ export default function Payables({ session }: { session: Session }) {
   const [extra, setExtra] = useState<Record<string, PayRow[]>>({});  // ad-hoc "Add a payment" rows, per project
   const [view, setView] = useState<'run' | 'matrix'>('run');   // the Run list vs the Week matrix
   const [band, setBand] = useState<'all' | 'workers' | 'vendors' | 'fixed'>('workers');   // matrix band filter
-  const [rateOpen, setRateOpen] = useState(false);            // the rate-card overlay (opened from the nav link)
   const navigate = useNavigate();
 
   const { data, isLoading, error, refetch } = useQuery({
@@ -306,9 +304,7 @@ export default function Payables({ session }: { session: Session }) {
           <a onClick={() => setMonday(mondayOf(new Date()))} role="button" tabIndex={0}
             onKeyDown={(e) => { if (e.key === 'Enter') setMonday(mondayOf(new Date())); }}
             style={{ cursor: 'pointer' }}>this week</a>
-          {/* The day rates that produced the labour figures — a link here, opened over the page. */}
-          {orgId && <a className="ratelink" onClick={() => setRateOpen(true)} role="button" tabIndex={0}
-            onKeyDown={(e) => { if (e.key === 'Enter') setRateOpen(true); }} style={{ cursor: 'pointer' }}>rate card</a>}
+          {/* The rate card lives on the Attendance page (its single source) — not duplicated here. */}
           <div className="toggle" role="tablist">
             <button className={view === 'run' ? 'on' : ''} role="tab" aria-selected={view === 'run'} onClick={() => setView('run')}>Run</button>
             {/* The same week, pivoted: who is owed what, on which site. */}
@@ -473,15 +469,6 @@ export default function Payables({ session }: { session: Session }) {
 
       </div>
 
-      {/* The rate card, opened over the run rather than sitting inside it. */}
-      {rateOpen && orgId && (
-        <div className="rate-ov" onClick={() => setRateOpen(false)}>
-          <div className="rate-modal" onClick={(e) => e.stopPropagation()}>
-            <button className="rate-x" onClick={() => setRateOpen(false)} aria-label="Close">✕</button>
-            <RateCardPanel orgId={orgId} isManager={isManager} />
-          </div>
-        </div>
-      )}
     </div>
     </div>
   );

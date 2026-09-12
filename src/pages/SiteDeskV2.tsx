@@ -19,7 +19,7 @@ import type { Session } from '@supabase/supabase-js'
 import '../styles/desk.css'
 import { useAuth } from '../lib/auth/AuthProvider'
 import { useDeskApi, type TaskEdit as TaskEditPatch } from '../lib/desk/api'
-import type { DeskPlan, DeskProblem, DeskTask, Outcome, TaskState } from '../lib/desk/types'
+import type { DeskPlan, DeskProblem, DeskSite, DeskTask, Outcome, TaskState } from '../lib/desk/types'
 import {
   sevScore, sliceFloor, taskStatus, floorName, setTaskState as applyState, bumpDuration,
   SITE_FLOOR, BUILDING_FLOOR, AMENITY_FLOOR,
@@ -55,70 +55,523 @@ const GROUP_NOTES: Record<string, string> = {
   Foundation: 'before anything stands',
 }
 
-/** THE BUILDING — a compact header dropdown (replaces the old bottom floor dock). Opens a menu of every
- *  floor (name + % ring, the active one marked); a floor with flats also lists Common + each unit. */
-function BuildingMenu({
-  floors, focus, onFloor, units, currentUnit, onUnit,
-}: {
-  floors: { n: string; pct: number }[]
-  focus: string
-  onFloor: (n: string) => void
-  units: { u: string }[] | null
-  currentUnit: string
-  onUnit: (u: string) => void
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   THE WORK PLAN GANTT (mock: sitedesk-tasks-redesign.html).
+
+   A per-phase Gantt: one card per phase group, each row a draggable green bar (the LIVE schedule) over a
+   dashed ghost (the promised plan). Slide the bar to move the work; pull its ends to stretch it; the ±
+   stepper nudges its duration. Every gesture persists through api.setTaskDates (planned_start/end). The
+   promised plan (baseline) is set ONLY by an explicit per-phase "Approve plan" — until then a phase is a
+   free draft with no ghost and no drift; "Edit" re-opens an approved phase and a re-approval overwrites the
+   baseline. The date axis runs from the project's start_date. The site-pulse row and the leak-bar /
+   cost-of-delay drawer from the mock are DELIBERATELY omitted.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+
+const G_DAY = 86400000
+const parseISO = (s: string): Date => { const [y, m, d] = s.split('-').map(Number); return new Date(y, (m || 1) - 1, d || 1) }
+const isoOf = (d: Date): string => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+const addDays = (d: Date, n: number): Date => { const x = new Date(d); x.setDate(x.getDate() + n); return x }
+const fmtD = (d: Date): string => d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+const fmtDW = (d: Date): string => d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
+const initialsOf = (name: string): string => name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase() || '?'
+const projDot = (s: DeskSite): string => (s.state === 'hot' ? '#C2553B' : s.state === 'mid' ? '#B9892C' : '#7C8B72')
+
+type Win = { o: number; d: number }
+type DragState = {
+  ref: string; mode: 'move' | 'l' | 'r'; x0: number; o0: number; d0: number; dayW: number
+  baseO: number; baseD: number; hasBaseline: boolean; curO: number; curD: number
+}
+
+/* ── DELAY REASON PROMPT ──────────────────────────────────────────────────────────────────────────────
+ * Shown when a LATE task's peek is closed: a few one-tap reasons plus an optional note. Saving records
+ * the reason (it surfaces in the Gantt's "why delayed" tooltip); Skip / Esc / backdrop just closes — the
+ * peek is already closed underneath, so capturing a reason is always optional. */
+const DELAY_CHIPS = ['waiting material', 'waiting machine', 'rain', 'labour short']
+function DelayPrompt({ title, initial, onSave, onSkip }: {
+  title: string; initial: string; onSave: (reason: string) => void; onSkip: () => void
 }) {
-  const [open, setOpen] = useState(false)
-  const wrap = useRef<HTMLDivElement>(null)
+  const [text, setText] = useState(initial)
   useEffect(() => {
-    if (!open) return
-    const away = (e: MouseEvent) => { if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false) }
-    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onSkip() } }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [onSkip])
+  const chosen = text.trim().toLowerCase()
+  return (
+    <div className="delay-scrim" onMouseDown={onSkip}>
+      <div className="delay-card" role="dialog" aria-label="Delay reason" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="delay-h">Running late — why?</div>
+        <div className="delay-sub">{title}</div>
+        <div className="delay-chips">
+          {DELAY_CHIPS.map((c) => (
+            <button key={c} type="button" className={`delay-chip${chosen === c ? ' on' : ''}`} onClick={() => setText(c)}>{c}</button>
+          ))}
+        </div>
+        <textarea className="delay-text" rows={2} placeholder="add a note (optional)"
+          value={text} onChange={(e) => setText(e.target.value)} autoFocus />
+        <div className="delay-foot">
+          <button type="button" className="delay-skip" onClick={onSkip}>Skip</button>
+          <button type="button" className="delay-save" onClick={() => onSave(text)}>Save reason</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PlanGantt({
+  plan, groups, planTasks, allTasks, problems, edgeRef, selectedRef,
+  scope, sites, scopedSite, members, lockedSite, unitList, currentUnit, resetKey,
+  onSelectTask, onPickProject, onFloorPick, onUnit, onAssignSupervisor, onSetDates,
+}: {
+  plan: DeskPlan
+  groups: Group[]
+  planTasks: DeskTask[]
+  allTasks: DeskTask[]
+  problems: DeskProblem[]
+  edgeRef: string | null
+  selectedRef: string | null
+  scope: string
+  sites: DeskSite[]
+  scopedSite: DeskSite | null
+  members: Array<{ id: string; name: string }>
+  lockedSite?: string
+  unitList: { u: string }[] | null
+  currentUnit: string
+  resetKey: string
+  onSelectTask: (ref: string) => void
+  onPickProject: (code: string) => void
+  onFloorPick: (n: string) => void
+  onUnit: (u: string) => void
+  onAssignSupervisor: (uid: string | null) => void
+  onSetDates: (ref: string, dates: { plannedStart?: string | null; plannedEnd?: string | null; baselineStart?: string | null; baselineEnd?: string | null }) => void
+}) {
+  const [panel, setPanel] = useState<'proj' | 'bld' | 'who' | null>(null)
+  const [override, setOverride] = useState<Record<string, Win>>({})
+  const [dragging, setDragging] = useState<string | null>(null)
+  const [hinted, setHinted] = useState(false)
+  // Which phases are being (re-)edited right now — transient client state, keyed by group name. A phase
+  // whose tasks carry a baseline is "approved"; putting it here returns it to editable/unapproved (the
+  // ghost + drift hide, the bars free up, "Approve plan" reappears) until it is approved again.
+  const [editingPhase, setEditingPhase] = useState<Record<string, boolean>>({})
+  const drag = useRef<DragState | null>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  // A fresh floor / flat / project is a fresh schedule — let go of every in-session drag override and
+  // any transient editing state.
+  useEffect(() => { setOverride({}); setHinted(false); setPanel(null); setEditingPhase({}) }, [resetKey])
+
+  // Close the header panels on an outside click or Esc.
+  useEffect(() => {
+    if (!panel) return
+    const away = (e: MouseEvent) => { if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setPanel(null) }
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setPanel(null) }
     document.addEventListener('mousedown', away)
     document.addEventListener('keydown', esc)
     return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc) }
-  }, [open])
-  const cur = floors.find((f) => f.n === focus)
-  const label = floorName(focus) + (units ? (currentUnit === 'Common' ? ' · Common' : ` · Flat ${currentUnit}`) : '')
+  }, [panel])
+
+  const durOf = (t: DeskTask) => Math.max(1, parseInt(t.dur, 10) || 1)
+
+  // Tasks in the rendered order (build order across groups, seq within) — the sequence the computed
+  // fallback schedule walks and the cascade steps through.
+  const ordered = useMemo(
+    () => groups.flatMap((g) => planTasks.filter((t) => t.group === g.n)),
+    [groups, planTasks],
+  )
+
+  // Everything the geometry needs, computed once: the axis origin, each task's live + baseline windows
+  // (as day-offsets from the axis), and the span the ticks and bars scale to.
+  const geo = useMemo(() => {
+    const today = new Date(); today.setHours(0, 0, 0, 0)
+    // computed fallback: lay the tasks end-to-end from the project start, each consuming its duration.
+    const computed = new Map<string, number>()
+    let cursor = 0
+    for (const t of ordered) { computed.set(t.ref, cursor); cursor += durOf(t) }
+
+    // axis origin: the project start; failing that, the earliest hand-set date; failing that, today.
+    let axis: Date
+    if (plan.projectStart) axis = parseISO(plan.projectStart)
+    else {
+      const firsts = ordered
+        .map((t) => t.plannedStart ?? t.baselineStart)
+        .filter(Boolean)
+        .map((s) => parseISO(s as string).getTime())
+      axis = firsts.length ? new Date(Math.min(...firsts)) : today
+    }
+    axis.setHours(0, 0, 0, 0)
+    const off = (d: Date) => Math.round((d.getTime() - axis.getTime()) / G_DAY)
+
+    const live = new Map<string, Win>()
+    const base = new Map<string, Win>()
+    for (const t of ordered) {
+      const c = computed.get(t.ref) ?? 0
+      const dur = durOf(t)
+      if (t.plannedStart && t.plannedEnd) {
+        const o = off(parseISO(t.plannedStart))
+        live.set(t.ref, { o, d: Math.max(1, off(parseISO(t.plannedEnd)) - o + 1) })
+      } else live.set(t.ref, { o: c, d: dur })
+      if (t.baselineStart && t.baselineEnd) {
+        const o = off(parseISO(t.baselineStart))
+        base.set(t.ref, { o, d: Math.max(1, off(parseISO(t.baselineEnd)) - o + 1) })
+      } else base.set(t.ref, { o: c, d: dur })
+    }
+
+    const todayOff = off(today)
+    let lo = Math.min(0, todayOff)
+    let hi = Math.max(todayOff + 1, 1)
+    for (const t of ordered) {
+      const l = override[t.ref] ?? live.get(t.ref)!
+      const b = base.get(t.ref)!
+      lo = Math.min(lo, l.o, b.o)
+      hi = Math.max(hi, l.o + l.d, b.o + b.d)
+    }
+    const span = Math.max(14, Math.ceil((hi - lo + 2) / 7) * 7)
+    return { axis, off, live, base, lo, span, todayOff }
+  }, [ordered, plan.projectStart, override])
+
+  const pct = (o: number) => ((o - geo.lo) / geo.span) * 100
+  const wid = (d: number) => (d / geo.span) * 100
+
+  const liveWin = (t: DeskTask): Win => override[t.ref] ?? geo.live.get(t.ref) ?? { o: 0, d: durOf(t) }
+  const baseWin = (t: DeskTask): Win => geo.base.get(t.ref) ?? { o: 0, d: durOf(t) }
+
+  /* ── drag: slide the bar (move) or pull an end (l / r), then persist ──────────────────────────── */
+  const onBarDown = (e: React.PointerEvent, t: DeskTask) => {
+    if (t.state === 'done') return
+    const grip = (e.target as HTMLElement).closest('.grip')
+    const mode: DragState['mode'] = grip ? (grip.classList.contains('l') ? 'l' : 'r') : 'move'
+    const track = (e.currentTarget as HTMLElement).parentElement as HTMLElement
+    const dayW = track.getBoundingClientRect().width / geo.span
+    const lw = liveWin(t); const bw = baseWin(t)
+    drag.current = {
+      ref: t.ref, mode, x0: e.clientX, o0: lw.o, d0: lw.d, dayW,
+      baseO: bw.o, baseD: bw.d, hasBaseline: !!(t.baselineStart && t.baselineEnd), curO: lw.o, curD: lw.d,
+    }
+    setDragging(t.ref); setHinted(true)
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    e.preventDefault()
+  }
+  const onBarMove = (e: React.PointerEvent) => {
+    const d = drag.current; if (!d) return
+    const dd = Math.round((e.clientX - d.x0) / d.dayW)
+    let o = d.o0; let dur = d.d0
+    if (d.mode === 'move') o = Math.max(geo.lo, Math.min(geo.lo + geo.span - dur, d.o0 + dd))
+    else if (d.mode === 'r') dur = Math.max(1, Math.min(geo.lo + geo.span - d.o0, d.d0 + dd))
+    else { const end = d.o0 + d.d0; o = Math.max(geo.lo, Math.min(end - 1, d.o0 + dd)); dur = end - o }
+    d.curO = o; d.curD = dur
+    setOverride((s) => ({ ...s, [d.ref]: { o, d: dur } }))
+  }
+  // A drag persists the task's PLANNED window only — never a baseline. The baseline (the promised plan)
+  // is set solely by an explicit per-phase "Approve plan"; a bar is otherwise free to move.
+  const commit = (t: DeskTask, o: number, dur: number) => {
+    const start = isoOf(addDays(geo.axis, o))
+    const end = isoOf(addDays(geo.axis, o + dur - 1))
+    onSetDates(t.ref, { plannedStart: start, plannedEnd: end })
+    // Cascade one level: give the next task a start of the day after this end — only if it has none yet.
+    const i = ordered.findIndex((x) => x.ref === t.ref)
+    const nx = ordered[i + 1]
+    if (nx && !nx.plannedStart) onSetDates(nx.ref, { plannedStart: isoOf(addDays(geo.axis, o + dur)) })
+  }
+
+  /** Approve a phase: snapshot every task's CURRENT window (its dragged/planned position, or the computed
+   *  schedule if it has none) into BOTH planned and baseline — the promised plan is now locked, the dashed
+   *  ghost appears, and drift/late start measuring against it. Re-approving after an Edit OVERWRITES the
+   *  old promise (setTaskDates is a plain patch now). Clears the transient editing flag for the phase. */
+  const approvePhase = (rows: DeskTask[], gn: string) => {
+    for (const t of rows) {
+      const w = liveWin(t)
+      const s = isoOf(addDays(geo.axis, w.o))
+      const e = isoOf(addDays(geo.axis, w.o + w.d - 1))
+      onSetDates(t.ref, { plannedStart: s, plannedEnd: e, baselineStart: s, baselineEnd: e })
+    }
+    setEditingPhase((m) => { const n = { ...m }; delete n[gn]; return n })
+  }
+  // Re-open an approved phase for editing — the ghost/drift hide and "Approve plan" returns. The baseline
+  // stays in the DB until a re-approval overwrites it.
+  const editPhase = (gn: string) => setEditingPhase((m) => ({ ...m, [gn]: true }))
+  const onBarUp = (t: DeskTask) => () => {
+    const d = drag.current; if (!d || d.ref !== t.ref) { drag.current = null; setDragging(null); return }
+    drag.current = null; setDragging(null)
+    // Only persist a real move — a plain click (down + up, no travel) must not write dates or freeze
+    // a baseline.
+    if (d.curO === d.o0 && d.curD === d.d0) return
+    commit(t, d.curO, d.curD)
+  }
+  const stepDur = (t: DeskTask, delta: number) => {
+    const lw = liveWin(t)
+    const dur = Math.max(1, Math.min(geo.lo + geo.span - lw.o, lw.d + delta))
+    if (dur === lw.d) return
+    setOverride((s) => ({ ...s, [t.ref]: { o: lw.o, d: dur } }))
+    commit(t, lw.o, dur)
+  }
+
+  // ruler ticks + grid, shared by every card so the bars line up.
+  const ticks = useMemo(() => {
+    const out: { k: number; p: number; label: string }[] = []
+    for (let k = 0; k <= geo.span; k += 7) out.push({ k, p: (k / geo.span) * 100, label: fmtD(addDays(geo.axis, geo.lo + k)) })
+    return out
+  }, [geo.span, geo.lo, geo.axis])
+  const todayP = ((geo.todayOff - geo.lo) / geo.span) * 100
+  const showToday = todayP >= 0 && todayP <= 100
+
+  // The terracotta "today" pill rides its own row ABOVE the date ticks (desk.css), so they no longer
+  // overprint vertically. The one date label that still sits under the pill (within ~1.4 days of today)
+  // is hushed so the two never read as one smudged label — the red line itself always stays.
+  const nearWin = (100 / geo.span) * 1.4
+  const Ruler = () => (
+    <div className="ruler">
+      {ticks.map((t) => {
+        const hush = showToday && Math.abs(t.p - todayP) < nearWin
+        return (
+          <span key={`t${t.k}`}>
+            <span className="tick" style={{ left: `${t.p}%` }} />
+            <span className={`tlbl${hush ? ' hush' : ''}`} style={{ left: `${t.p}%` }}>{t.label}</span>
+          </span>
+        )
+      })}
+      {showToday && <div className="tdy" style={{ left: `${todayP}%` }}><i>today</i></div>}
+    </div>
+  )
+  const gridLines = ticks.filter((t) => t.k > 0 && t.k < geo.span)
+
+  const byRef = (r: string) => allTasks.find((x) => x.ref === r)
+
+  const focusLabel = floorName(plan.focus) + (unitList ? (currentUnit === 'Common' ? ' · Common' : ` · Flat ${currentUnit}`) : '')
+  const supName = scopedSite?.supervisorId ? members.find((m) => m.id === scopedSite.supervisorId)?.name ?? null : null
+
+  // The header sub-line — location, block count, and the running focus. Every part that has no real
+  // value is dropped, never faked.
+  const subParts = [
+    plan.location || null,
+    plan.blocks && plan.blocks.length > 1 ? `${plan.blocks.length} buildings` : null,
+    plan.focus ? `${floorName(plan.focus)} running` : null,
+  ].filter(Boolean) as string[]
+
   return (
-    <div className={`wp-bld ${open ? 'open' : ''}`} ref={wrap}>
-      <button className="wp-bld-btn" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}>
-        <span className="wp-bld-eyebrow">BUILDING</span>
-        <span className="wp-bld-row">
-          {cur && <span className="wp-ring" style={{ '--p': cur.pct } as React.CSSProperties} />}
-          <span className="wp-bld-nm">{label}</span>
-          <span className="wp-bld-chev">▾</span>
-        </span>
-      </button>
-      {open && (
-        <div className="wp-bld-menu" role="menu">
-          <div className="wp-bld-head">Floors</div>
-          {floors.map((f) => (
-            <button
-              key={f.n}
-              className={`wp-bld-item${f.n === focus ? ' on' : ''}`}
-              role="menuitem"
-              onClick={() => { onFloor(f.n); setOpen(false) }}
-            >
-              <span className="wp-ring" style={{ '--p': f.pct } as React.CSSProperties} />
-              <span className="wp-bld-item-n">{floorName(f.n)}</span>
-              <span className="wp-bld-item-p">{f.pct}%</span>
+    <div className="wg-wrap" ref={wrapRef}>
+      {/* header: project is the title; building & supervisor are twin controls */}
+      <div className="head">
+        <div className="htitle">
+          {lockedSite ? (
+            <h1 style={{ fontFamily: 'var(--g-serif)', fontWeight: 700, fontSize: 38, letterSpacing: '-.01em', color: 'var(--g-ink)', margin: 0 }}>{scopedSite?.name ?? scope}</h1>
+          ) : (
+            <button className={`t-btn${panel === 'proj' ? ' open' : ''}`} onClick={() => setPanel((p) => (p === 'proj' ? null : 'proj'))}>
+              <h1>{scopedSite?.name ?? scope} <span className="car">▾</span></h1>
             </button>
-          ))}
-          {units && (
-            <>
-              <div className="wp-bld-head">Flats on {floorName(focus)}</div>
-              <button className={`wp-bld-item${currentUnit === 'Common' ? ' on' : ''}`} role="menuitem" onClick={() => { onUnit('Common'); setOpen(false) }}>
-                <span className="wp-bld-item-n">Common areas</span>
-              </button>
-              {units.map((u) => (
-                <button key={u.u} className={`wp-bld-item${currentUnit === u.u ? ' on' : ''}`} role="menuitem" onClick={() => { onUnit(u.u); setOpen(false) }}>
-                  <span className="wp-bld-item-n">Flat {u.u}</span>
+          )}
+          {subParts.length > 0 && (
+            <div className="sub">{subParts.map((s, i) => <span key={s}>{i > 0 && <i>·</i>}{s}</span>)}</div>
+          )}
+          {!lockedSite && (
+            <div className={`panel${panel === 'proj' ? ' open' : ''}`}>
+              <div className="p-head">your projects</div>
+              {sites.map((s) => (
+                <button key={s.code} className={`opt${s.code === scope ? ' cur' : ''}`} onClick={() => { setPanel(null); onPickProject(s.code) }}>
+                  <span className="odot" style={{ background: projDot(s) }} />
+                  <span className="obd"><span className="onm">{s.name}</span><span className="osub">{s.focus} · {s.note}</span></span>
+                  <span className="oprog"><i style={{ width: `${s.pct}%` }} /></span>
+                  <span className="ock">✓</span>
                 </button>
               ))}
-            </>
+            </div>
           )}
         </div>
-      )}
+
+        <div className="hctl">
+          <div className="pick bld">
+            <button className={`pick-btn${panel === 'bld' ? ' open' : ''}`} onClick={() => setPanel((p) => (p === 'bld' ? null : 'bld'))}>
+              <span className="pb-l"><span className="lbl">building</span><span className="val">{focusLabel}</span></span>
+              <span className="car">▾</span>
+            </button>
+            <div className={`panel${panel === 'bld' ? ' open' : ''}`}>
+              <div className="p-head">in this project</div>
+              {plan.floors.map((f) => {
+                const on = f.n === plan.focus
+                const total = plan.tasks.filter((t) => t.floor === f.n).length
+                const done = plan.tasks.filter((t) => t.floor === f.n && t.state === 'done').length
+                const sub = total ? `${total} tasks · ${done} done${on ? ' · running' : ''}` : `${f.pct}% done`
+                return (
+                  <button key={f.n} className={`opt${on ? ' cur' : ''}`} onClick={() => { setPanel(null); onFloorPick(f.n) }}>
+                    <span className="obd"><span className="onm">{floorName(f.n)}</span><span className="osub">{sub}</span></span>
+                    <span className="oprog"><i style={{ width: `${f.pct}%` }} /></span>
+                    <span className="ock">✓</span>
+                  </button>
+                )
+              })}
+              {unitList && (
+                <>
+                  <div className="p-head">flats on {floorName(plan.focus)}</div>
+                  <button className={`opt${currentUnit === 'Common' ? ' cur' : ''}`} onClick={() => { setPanel(null); onUnit('Common') }}>
+                    <span className="obd"><span className="onm">Common areas</span></span><span className="ock">✓</span>
+                  </button>
+                  {unitList.map((u) => (
+                    <button key={u.u} className={`opt${currentUnit === u.u ? ' cur' : ''}`} onClick={() => { setPanel(null); onUnit(u.u) }}>
+                      <span className="obd"><span className="onm">Flat {u.u}</span></span><span className="ock">✓</span>
+                    </button>
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="pick who">
+            <button className={`pick-btn ${supName ? 'set' : 'unset'}${panel === 'who' ? ' open' : ''}`} onClick={() => setPanel((p) => (p === 'who' ? null : 'who'))}>
+              <span className="wava">{supName ? initialsOf(supName) : '+'}</span>
+              <span className="pb-l"><span className="lbl">supervisor</span><span className="val">{supName ?? 'Tap to assign'}</span></span>
+              <span className="car">▾</span>
+            </button>
+            <div className={`panel${panel === 'who' ? ' open' : ''}`}>
+              <div className="p-head">people who can run it</div>
+              {members.map((m) => (
+                <button key={m.id} className="opt" onClick={() => { setPanel(null); onAssignSupervisor(m.id) }}>
+                  <span className="oava">{initialsOf(m.name)}</span>
+                  <span className="obd"><span className="onm sans">{m.name}</span></span>
+                  {scopedSite?.supervisorId === m.id && <span className="ock" style={{ opacity: 1 }}>✓</span>}
+                </button>
+              ))}
+              {scopedSite?.supervisorId && (
+                <button className="opt" onClick={() => { setPanel(null); onAssignSupervisor(null) }}>
+                  <span className="oava">–</span><span className="obd"><span className="onm sans">Clear supervisor</span></span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="metaline">
+        <span className="l">Tasks for {floorName(plan.focus)}<b>{planTasks.length}</b></span>
+        <span className="r">Slide a green bar to move the work · pull its ends to stretch · approve a phase to lock its promised plan</span>
+      </div>
+
+      {ordered.length === 0 ? (
+        <div className="g-empty">Nothing on this floor yet · {floorName(plan.focus)}</div>
+      ) : groups.map((g) => {
+        const rows = ordered.filter((t) => t.group === g.n)
+        if (!rows.length) return null
+        // A phase is APPROVED once every task carries a baseline — unless it has been re-opened for editing.
+        // Approval is what turns on the dashed ghost, the drift, and the promised-vs-landing foot; before it,
+        // the bars are a free draft and the foot just offers "Approve plan".
+        const phaseApproved = rows.every((t) => !!(t.baselineStart && t.baselineEnd))
+        const editing = !!editingPhase[g.n]
+        const approved = phaseApproved && !editing
+        // phase foot: the promised end vs where the live plan now lands (only meaningful once approved).
+        let promisedEnd = -Infinity; let liveEnd = -Infinity
+        for (const t of rows) {
+          const l = liveWin(t); const b = baseWin(t)
+          liveEnd = Math.max(liveEnd, l.o + l.d - 1)
+          promisedEnd = Math.max(promisedEnd, b.o + b.d - 1)
+        }
+        const shift = liveEnd - promisedEnd
+        const endsIn = liveEnd - geo.todayOff
+        return (
+          <div className="card" key={g.n}>
+            <div className="card-head">
+              <span className="grp">{g.n}{g.note ? <i>· {g.note}</i> : null}</span>
+              <Ruler />
+              <span className="sp" /><span className="sp" />
+            </div>
+            <div>
+              {rows.map((t) => {
+                const vm = taskStatus(t, problems, byRef)
+                const done = t.state === 'done'
+                const lw = liveWin(t); const bw = baseWin(t)
+                // Drift / late only exist against an APPROVED promise. An un-approved draft never reads "late".
+                const drift = approved ? (lw.o + lw.d - 1) - (bw.o + bw.d - 1) : 0
+                const late = !done && approved && drift > 0
+                const isEdge = t.ref === edgeRef
+                const s = addDays(geo.axis, lw.o); const e = addDays(geo.axis, lw.o + lw.d - 1)
+                // A short bar can't hold the "Nd" label between its grips without crowding — so once the
+                // bar is narrower than the label needs, the duration moves to a quiet tag just past its right end.
+                const narrowBar = wid(lw.d) < 15
+                const cls = ['trow']
+                if (done) cls.push('done')
+                if (late) cls.push('late')
+                if (dragging === t.ref) cls.push('dragging')
+                if (isEdge && !done) cls.push('next')
+                else if (t.ref === selectedRef) cls.push('selected')
+                return (
+                  <div className={cls.join(' ')} data-ref={t.ref} key={t.ref}>
+                    <div className="task" role="button" tabIndex={0}
+                      onClick={() => onSelectTask(t.ref)}
+                      onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onSelectTask(t.ref) } }}>
+                      <span className="rail"><span className="dot">✓</span></span>
+                      <span className="tname">
+                        <span className="nm">{t.title}</span>
+                        <span className="code">{t.ref}</span>
+                        {isEdge && !done && vm.cls === 'ready' && <span className="chip-next">up next</span>}
+                      </span>
+                    </div>
+
+                    <div className="track">
+                      {gridLines.map((gl) => <div key={`g${gl.k}`} className="grid-t" style={{ left: `${gl.p}%` }} />)}
+                      <div className="base" />
+                      {showToday && <div className="today" style={{ left: `${todayP}%` }} />}
+                      {/* the dashed promised plan — only once the phase is approved */}
+                      <div className={`ghost${approved ? ' show' : ''}`} style={{ left: `${pct(bw.o)}%`, width: `${wid(bw.d)}%` }} />
+                      {late && (
+                        <div className="why" style={{ left: `${Math.min(pct(lw.o), 60)}%` }}>
+                          <b>+{drift}d vs plan</b> — <em>{t.delayReason?.trim() || 'no reason on record yet — ask the site'}</em>
+                        </div>
+                      )}
+                      <div className={`bar${narrowBar ? ' narrow' : ''}`} style={{ left: `${pct(lw.o)}%`, width: `${wid(lw.d)}%` }}
+                        onPointerDown={(ev) => onBarDown(ev, t)}
+                        onPointerMove={onBarMove}
+                        onPointerUp={onBarUp(t)}
+                        onPointerCancel={onBarUp(t)}>
+                        {isEdge && !done && !hinted && <span className="dragme">slide me — ends stretch</span>}
+                        {!done && <span className="grip l" />}
+                        {!narrowBar && <span className="bd-d">{lw.d}d</span>}
+                        {!done && <span className="grip r" />}
+                        {narrowBar && <span className="bd-d out" aria-hidden>{lw.d}d</span>}
+                      </div>
+                    </div>
+
+                    <div className="dur">
+                      {done ? <b>{lw.d}d</b> : (
+                        <>
+                          <button onClick={() => stepDur(t, -1)} aria-label="Shorten">−</button>
+                          <b>{lw.d}d</b>
+                          <button onClick={() => stepDur(t, 1)} aria-label="Lengthen">+</button>
+                        </>
+                      )}
+                    </div>
+
+                    <div className="dates">
+                      {done ? fmtD(s) : (
+                        <>
+                          <b>{fmtDW(s)}</b><span className="arr">→</span>{fmtD(e)}
+                          {drift > 0 && <span className="drift">+{drift}d</span>}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            <div className={`phase-foot${approved ? '' : ' draft'}`}>
+              {approved ? (
+                <>
+                  <span className="l">phase</span>
+                  <span className="r">
+                    promised <b>{fmtD(addDays(geo.axis, promisedEnd))}</b> · now landing <b>{fmtD(addDays(geo.axis, liveEnd))}</b>
+                    {shift ? <span className="shift"> ({shift > 0 ? '+' : ''}{shift}d)</span> : ' · on plan'}
+                    {' · ends in '}<b>{endsIn} days</b>
+                  </span>
+                  <button className="ph-btn edit" onClick={() => editPhase(g.n)}>Edit</button>
+                </>
+              ) : (
+                <>
+                  <span className="l">phase · {phaseApproved ? 'editing' : 'draft'}</span>
+                  <span className="r muted">Line the bars up, then lock this phase as the promised plan.</span>
+                  <button className="ph-btn approve" onClick={() => approvePhase(rows, g.n)}>Approve plan</button>
+                </>
+              )}
+            </div>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -196,7 +649,6 @@ export default function SiteDeskV2({
   const [reopeningId, setReopeningId] = useState<string | null>(null)
   const [taskNote, setTaskNote] = useState('')
   const [peekFull, setPeekFull] = useState(false)       // the peek's ⤢ expand-to-full toggle (plan redesign)
-  const [listSettling, setListSettling] = useState(true) // the one-pass row load-in animation
   const { closingId, close: animateClose } = useRowClose()
 
   /* FINISHING IS A MOMENT, AND IT BELONGS TO THE CARD.
@@ -512,6 +964,33 @@ export default function SiteDeskV2({
   // A change of context (tab / site / floor / flat) is a fresh screen — let it auto-open again.
   useEffect(() => { setPeekClosed(false) }, [tab, scope, plan?.focus, currentUnit])
 
+  /* CLOSING A LATE TASK ASKS WHY.
+   *
+   * A task is "running late" when its approved promise has slipped — it has a baseline (the phase was
+   * approved) and its planned end now sits past that baseline end. Closing the peek on such a task is the
+   * natural moment to capture the reason the site already knows, so the Gantt's "why delayed" tooltip can
+   * say something true instead of "no reason on record yet". On-time tasks close silently. */
+  const openTaskLate = !!(openTask && openTask.state !== 'done'
+    && openTask.baselineEnd && openTask.plannedEnd
+    && openTask.plannedEnd > openTask.baselineEnd)
+  const [delayPrompt, setDelayPrompt] = useState<{ ref: string; title: string; reason: string } | null>(null)
+
+  /** Close the desktop plan peek — and, if the task it was showing is running late, ask for a delay
+   *  reason afterwards (the close itself always goes through; the reason is optional / skippable). */
+  const closePeek = useCallback(() => {
+    if (peekClosed || !openTask) return       // already closed → don't re-fire on a stray Esc
+    const late = openTaskLate; const t = openTask
+    setOpenTaskRef(null); setPeekFull(false); setPeekClosed(true)
+    if (late) setDelayPrompt({ ref: t.ref, title: t.title, reason: t.delayReason ?? '' })
+  }, [peekClosed, openTask, openTaskLate])
+
+  const saveDelayReason = useCallback((reason: string) => {
+    setDelayPrompt((p) => {
+      if (p) { const r = reason.trim(); if (r) void api.setTaskDates(scope, p.ref, { delayReason: r }).catch(() => {}) }
+      return null
+    })
+  }, [api, scope])
+
   /* AND YOU SEE IT HAPPEN. The list does NOT arrive pre-scrolled — that reads as "the page loaded
    * weird", and it silently steals the fact that there is finished work above. So: the floor lands at
    * its top, you get a beat to see it whole, and then the page GLIDES down to the live edge. The
@@ -585,19 +1064,11 @@ export default function SiteDeskV2({
     setOpenTaskRef(null)
   }
 
-  // The list plays its one-pass load-in whenever the floor / flat / site changes, then settles.
-  useEffect(() => {
-    if (tab !== 'plan') return
-    setListSettling(true)
-    const t = setTimeout(() => setListSettling(false), 900)
-    return () => clearTimeout(t)
-  }, [tab, scope, plan?.focus, currentUnit])
-
   // ↑/↓ walk the plan's task list; Esc closes the peek. Desktop only — the phone uses the sheet.
   useEffect(() => {
     if (tab !== 'plan' || !isDesktop) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { setOpenTaskRef(null); setPeekFull(false); setPeekClosed(true); return }
+      if (e.key === 'Escape') { closePeek(); return }
       if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
       if (!planOrderedRefs.length) return
       const t = e.target as HTMLElement | null
@@ -613,7 +1084,7 @@ export default function SiteDeskV2({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [tab, isDesktop, planOrderedRefs, openTaskRef, edgeRef])
+  }, [tab, isDesktop, planOrderedRefs, openTaskRef, edgeRef, closePeek])
 
   // Problems peek: Esc closes it (the ✕ is the other way). Desktop only.
   useEffect(() => {
@@ -633,6 +1104,14 @@ export default function SiteDeskV2({
       s === 'done' ? `${t.ref} done — next task unlocked`
         : s === 'active' ? `${t.ref} started` : `${t.ref} reset`,
     )
+    if (s === 'active') {
+      // Starting shifts the bar to the day it ACTUALLY started (today), keeping the task's duration —
+      // so the timeline reflects when work really began (drift shows against the approved baseline).
+      const days = parseInt(t.dur, 10) || 1
+      const iso = (d: Date) => d.toISOString().slice(0, 10)
+      const start = new Date(); const end = new Date(start); end.setDate(end.getDate() + days - 1)
+      await api.setTaskDates(scope, t.ref, { plannedStart: iso(start), plannedEnd: iso(end) }).catch(() => {})
+    }
     if (s === 'done') setCheer({ verb: 'Done', title: t.title })
   }
 
@@ -705,14 +1184,6 @@ export default function SiteDeskV2({
 
   const detailFor = (): { content: React.ReactNode; bar: React.ReactNode } | null => {
     if (tab === 'plan' && openTask) {
-      // The foot button needs to know whether the task can start and what it waits on.
-      const stBar = taskStatus(openTask, api.problems, (r) => allTasks.find((x) => x.ref === r))
-      const startableBar = !(stBar.cls === 'blocked' || stBar.cls === 'after')
-      const blockerLabel = stBar.cls === 'blocked'
-        ? stBar.ref
-        : stBar.cls === 'after'
-          ? (allTasks.find((x) => x.ref === stBar.waiting[0])?.title ?? stBar.waiting[0])
-          : undefined
       return {
         content: (
           <TaskSheetBody
@@ -735,8 +1206,6 @@ export default function SiteDeskV2({
             task={openTask}
             onState={onTaskState}
             onReopen={() => { void onTaskState('active') }}
-            startable={startableBar}
-            blockerLabel={blockerLabel}
           />
         ),
       }
@@ -923,135 +1392,41 @@ export default function SiteDeskV2({
               />
             </div>
           ) : (
-            <div className="wp">
-              {/* ── Redesigned Work Plan — its own topbar, full-width list, floor dock, right peek.
-                  Mock: workplan-redesign-mock.html. ────────────────────────────────────────────── */}
-              <header className="wp-topbar">
-                <button className="wp-gear" title="Settings" onClick={() => nav('/desk/settings/chasing')}>⚙</button>
-                {/* The project name IS the picker — a dropdown, never a jump to a list page. Locked
-                    under a project, it's a plain label. */}
-                {lockedSite ? (
-                  <div className="wp-proj">
-                    <div className="wp-proj-eyebrow">PROJECT</div>
-                    <div className="wp-proj-name wp-proj-locked">{scopedSite?.name ?? scope}</div>
-                  </div>
-                ) : (
-                  <div className="wp-scope">
-                    <ScopePicker
-                      sites={api.sites}
-                      scope={scope}
-                      onScope={(code) => { setOpenTaskRef(null); goto(code, tab) }}
-                    />
-                  </div>
+            <div className="wp wp-gantt">
+              {/* ── Redesigned Work Plan — a draggable per-phase Gantt (mock: sitedesk-tasks-redesign.html).
+                  The site-pulse row and leak-bar / cost-of-delay drawer are omitted by design. ──────── */}
+              <PlanGantt
+                plan={plan}
+                groups={planGroups}
+                planTasks={planTasks}
+                allTasks={allTasks}
+                problems={api.problems}
+                edgeRef={edgeRef}
+                selectedRef={selectedRef}
+                scope={scope}
+                sites={api.sites}
+                scopedSite={scopedSite}
+                members={api.members}
+                lockedSite={lockedSite}
+                unitList={slice?.units ? slice.units.list : null}
+                currentUnit={currentUnit}
+                resetKey={`${scope}|${plan.focus}|${currentUnit}`}
+                onSelectTask={(ref) => { setOpenTaskRef(ref); setPeekClosed(false) }}
+                onPickProject={(code) => { setOpenTaskRef(null); goto(code, 'plan') }}
+                onFloorPick={onFloorPick}
+                onUnit={setUnit}
+                onAssignSupervisor={(uid) => attemptQuiet(
+                  () => api.assignSupervisor(scope, uid),
+                  uid ? `Supervisor set — ${api.members.find((m) => m.id === uid)?.name}` : 'Supervisor cleared',
                 )}
-                <BuildingMenu
-                  floors={plan.floors}
-                  focus={plan.focus}
-                  onFloor={onFloorPick}
-                  units={slice?.units ? slice.units.list : null}
-                  currentUnit={currentUnit}
-                  onUnit={setUnit}
-                />
-                <div className="wp-topbar-right">
-                  {scopedSite && (
-                    <SupervisorPill
-                      members={api.members}
-                      current={scopedSite.supervisorId}
-                      onAssign={(uid) => attemptQuiet(
-                        () => api.assignSupervisor(scope, uid),
-                        uid ? `Supervisor set — ${api.members.find((m) => m.id === uid)?.name}` : 'Supervisor cleared',
-                      )}
-                    />
-                  )}
-                </div>
-              </header>
-
-              <main className="wp-main">
-                <div className="wp-list-head">
-                  <div className="wp-list-title">
-                    TASKS FOR {floorName(plan.focus).toUpperCase()}
-                    {slice?.units ? (currentUnit === 'Common' ? ' · COMMON AREAS' : ` · FLAT ${currentUnit.toUpperCase()}`) : ''}
-                  </div>
-                  <div className="wp-list-count">{planTasks.length}</div>
-                  <div className="wp-hint">Click a task to peek · <kbd>↑</kbd><kbd>↓</kbd> to move · <kbd>Esc</kbd> to close</div>
-                </div>
-
-                <div className={`wp-tasklist plan-list${listSettling ? ' loading' : ''}`}>
-                  {planTasks.length === 0 ? (
-                    <div className="wp-section-row">NOTHING ON THIS FLOOR YET <span>· {floorName(plan.focus)}</span></div>
-                  ) : (() => {
-                    const byRef = (r: string) => allTasks.find((x) => x.ref === r)
-                    // Sections in build order (Structure → Services → Finishes), tasks within — the same
-                    // flat sequence ↑/↓ walks and the build spine reads adjacency from.
-                    const ordered = planGroups.flatMap((g) => planTasks.filter((t) => t.group === g.n))
-                    const out: React.ReactNode[] = []
-                    let lastGroup: string | null = null
-                    ordered.forEach((t, i) => {
-                      if (t.group !== lastGroup) {
-                        lastGroup = t.group
-                        const note = planGroups.find((g) => g.n === t.group)?.note
-                        out.push(
-                          <div key={`sec-${t.group}`} className="wp-section-row">
-                            {t.group.toUpperCase()}{note ? <span>· {note}</span> : null}
-                          </div>,
-                        )
-                      }
-                      const vm = taskStatus(t, api.problems, byRef)
-                      const done = t.state === 'done'
-                      const live = vm.cls === 'live'
-                      const tickCls = done ? 'done' : live ? 'inprogress' : 'pending'
-                      const total = parseInt(t.dur, 10) || 0
-                      let chip: React.ReactNode = null
-                      if (live && t.started && total && t.started > total) chip = <span className="wp-tchip overdue">{t.started - total}d over</span>
-                      else if (!done && !live && t.ref === edgeRef && vm.cls === 'ready') chip = <span className="wp-tchip next">up next</span>
-                      // Start → end dates, elegantly. Done: start → done. In progress: start → ~projected end.
-                      // Not started (no start_at yet): a subtle projected duration — never a fabricated date.
-                      let dateEl: React.ReactNode
-                      if (done) {
-                        dateEl = t.startDate && t.endDate
-                          ? <>{t.startDate}<i className="wp-arr">→</i>{t.endDate}</>
-                          : (t.endDate ?? t.doneW ?? '')
-                      } else if (live) {
-                        dateEl = t.startDate
-                          ? <>{t.startDate}<i className="wp-arr">→</i><span className="wp-proj">~{t.endDate ?? ''}</span></>
-                          : 'running'
-                      } else {
-                        dateEl = <span className="wp-approx">≈ {t.dur}</span>
-                      }
-                      const prevDone = i > 0 && ordered[i - 1].state === 'done'
-                      const cls = ['wp-trow']
-                      if (done) cls.push('is-done')
-                      if (t.ref === selectedRef) cls.push('selected')
-                      if (i === 0) cls.push('first')
-                      if (i === ordered.length - 1) cls.push('last')
-                      if (prevDone) cls.push('conn-top-done')
-                      if (done) cls.push('conn-bottom-done')
-                      out.push(
-                        <button
-                          key={t.ref} data-ref={t.ref} className={cls.join(' ')}
-                          style={{ '--i': i } as React.CSSProperties}
-                          onClick={() => { setOpenTaskRef(t.ref); setPeekClosed(false) }}
-                        >
-                          <span className={`wp-tick ${tickCls}`}>{done ? '✓' : ''}</span>
-                          <span className="wp-tmain">
-                            <span className="wp-tname">{t.title}</span>
-                            <span className="wp-tid">{t.ref}</span>
-                          </span>
-                          {chip}
-                          <span className="wp-tdate">{dateEl}</span>
-                        </button>,
-                      )
-                    })
-                    return out
-                  })()}
-                </div>
-              </main>
+                onSetDates={(ref, dates) => { void api.setTaskDates(scope, ref, dates).catch(() => {}) }}
+              />
 
               {/* THE PEEK — desktop task detail slide-over. The phone keeps the shared bottom sheet. */}
               {isDesktop && (
                 <aside className={`wp-peek${openTask && !peekClosed ? ' open' : ''}${peekFull ? ' full' : ''}`} aria-label="Task detail">
                   <div className="wp-peek-bar">
-                    <button className="wp-icon-btn" title="Close (Esc)" onClick={() => { setOpenTaskRef(null); setPeekFull(false); setPeekClosed(true) }}>✕</button>
+                    <button className="wp-icon-btn" title="Close (Esc)" onClick={closePeek}>✕</button>
                     <button className="wp-icon-btn" title="Open full" onClick={() => setPeekFull((v) => !v)}>⤢</button>
                     <div className="wp-nav-hint"><kbd>↑</kbd> <kbd>↓</kbd> previous / next task</div>
                   </div>
@@ -1116,7 +1491,7 @@ export default function SiteDeskV2({
       </div>
 
       {/* Mobile: the same content, in a sheet. */}
-      <Sheet open={sheetOpen} onClose={() => { setPeekClosed(true); if (tab === 'plan') setOpenTaskRef(null); else dismissDetail() }}>
+      <Sheet open={sheetOpen} onClose={() => { if (tab === 'plan') closePeek(); else { setPeekClosed(true); dismissDetail() } }}>
         {detail && (
           <>
             <div className="d-scroll">{detail.content}</div>
@@ -1158,6 +1533,15 @@ export default function SiteDeskV2({
             if (openTaskRef === deleteTask.ref) setOpenTaskRef(null)
             await attempt(() => api.deleteTask(scope, deleteTask.ref), `${deleteTask.ref} deleted`)
           }}
+        />
+      )}
+
+      {delayPrompt && (
+        <DelayPrompt
+          title={delayPrompt.title}
+          initial={delayPrompt.reason}
+          onSave={saveDelayReason}
+          onSkip={() => setDelayPrompt(null)}
         />
       )}
 

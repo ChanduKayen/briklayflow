@@ -136,7 +136,9 @@ export default function AttendanceMobile({ session }: { session: Session }) {
   const [certCtx, setCertCtx] = useState<CertifyContext | null>(null);
 
   const dates = weekDates(monday);
-  const todayISO = new Date().toISOString().slice(0, 10);
+  // LOCAL date, not UTC — a UTC slice shifted the muster week back a day in IST (see attendanceApi.ts).
+  const now = new Date();
+  const todayISO = `${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, '0')}-${`${now.getDate()}`.padStart(2, '0')}`;
   const TODAY = todayISO > dates[6] ? 6 : todayISO < dates[0] ? -1 : dates.indexOf(todayISO);
 
   // ── rate helpers — the wage-type prefills come from the org's own card ───────

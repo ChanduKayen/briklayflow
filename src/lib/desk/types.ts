@@ -203,8 +203,24 @@ export interface DeskTask {
   assignee: string
   dur: string                    // "3d"
   started?: number               // day N of the duration → "day 3 of 4"
-  startDate?: string             // "3 Sep" — when work actually started (started_at)
-  endDate?: string               // "12 Sep" — done: the finish date; running: projected (start + duration)
+  startDate?: string             // "3 Sep" display — prefers plannedStart, else the actual/derived start
+  endDate?: string               // "12 Sep" display — prefers plannedEnd, else done/projected finish
+  /** Hand-set schedule dates (site_tasks.planned_start / planned_end), raw ISO YYYY-MM-DD for the row's
+   *  date inputs. Null until the supervisor sets them; the display startDate/endDate prefer these. */
+  plannedStart?: string | null
+  plannedEnd?: string | null
+  /** THE PROMISED PLAN (site_tasks.baseline_start / baseline_end), raw ISO. Snapshotted by an explicit
+   *  per-phase "Approve plan" (SiteDeskV2 · PlanGantt.approvePhase → setTaskDates); re-approving after an
+   *  Edit OVERWRITES it. The Gantt's dashed ghost reads these; null (unapproved) → NO ghost, and the bar
+   *  is freely draggable with no drift measured against it. */
+  baselineStart?: string | null
+  baselineEnd?: string | null
+  /** Why this task ran late (site_tasks.delay_reason), captured when its peek is closed while the task
+   *  is drifting past its approved baseline. Feeds the Gantt's "why delayed" tooltip. Null until asked. */
+  delayReason?: string | null
+  /** The engine's sequence position (site_tasks.seq_no) — the order the work happens in, and the basis
+   *  for the Gantt's auto-computed fallback schedule when a task has no hand-set dates yet. */
+  seq?: number
   doneW?: string
   note?: string
   floor?: string | null
@@ -276,6 +292,11 @@ export interface DeskPlan {
   tasks: DeskTask[]
   /** Rendered ONLY when a site has more than one block. */
   blocks?: string[]
+  /** projects.start_date (raw ISO) — the ORIGIN of the Gantt's date axis. Null → the axis falls back to
+   *  the earliest task start. */
+  projectStart?: string | null
+  /** projects.site_location — the header sub-line ("{location} · {focus} running"). */
+  location?: string | null
 }
 
 /** What one floor shows: the flats on it, and everything on it that is not inside a flat. */

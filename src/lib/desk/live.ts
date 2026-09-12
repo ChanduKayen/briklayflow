@@ -35,6 +35,10 @@ interface ProjectRow extends EngineProjectRow {
   project_code: string | null
   project_type: string | null
   supervisor_id: string | null
+  /** The Gantt axis origin + the header sub-line. Both live in the base schema (initial_schema), so they
+   *  are safe to select unconditionally alongside the geometry. */
+  start_date?: string | null
+  site_location?: string | null
   // NOTE: task_synonyms is deliberately NOT selected here — see editTask(). It is read just in time,
   // so an org that has not run 20260714000000 can still open the desk.
 }
@@ -87,6 +91,13 @@ const PROBLEM_COLS_BASE =
   'id, ref, kind, title, status, cause, confidence, project_id, task_id, owner_id, floor_label, unit_label, area_label, next_followup_at, deadline, created_at, updated_at'
 const TASK_COLS =
   'task_id, ref, project_id, name, description, source, phase, trade, status, floor_label, unit_label, seq_no, duration_days, started_at, owner_id, node_key, task_type_id, binding, status_history, updated_at'
+// RICH adds the hand-set schedule dates AND the frozen baseline snapshot. Selected first; falls back to
+// TASK_COLS if planned_*/baseline_* aren't migrated yet (same drifted-schema idiom as unplacedSelect).
+// See migrations 20260916000000 (planned_*) and 20260916000001 (baseline_*).
+const TASK_COLS_RICH = TASK_COLS + ', planned_start, planned_end, baseline_start, baseline_end'
+// RICH2 adds the delay reason (20260916000002). A separate tier so an org that has planned_*/baseline_*
+// but not yet delay_reason still gets the schedule columns instead of collapsing all the way to BASE.
+const TASK_COLS_RICH2 = TASK_COLS_RICH + ', delay_reason'
 
 interface Ctx { orgId: string; userId: string | null }
 
@@ -353,7 +364,7 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
         // setup wizard unreachable: planFor() returned null, and the page could not tell "no plan yet"
         // apart from "no project chosen", so it showed the project picker instead of the wizard.
         if (!rows.length) {
-          plans[code] = { floors: [], focus: '', tasks: [] }
+          plans[code] = { floors: [], focus: '', tasks: [], projectStart: proj.start_date ?? null, location: proj.site_location ?? null }
           continue
         }
 
@@ -377,7 +388,7 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
         // but it is only a DEFAULT: the page can look at any floor it likes (sliceFloor).
         const focus = floors.find((f) => f.pct < 100)?.n ?? floors.at(-1)?.n ?? ''
 
-        plans[code] = { floors, focus, tasks: all }
+        plans[code] = { floors, focus, tasks: all, projectStart: proj.start_date ?? null, location: proj.site_location ?? null }
       }
     }
 
@@ -604,6 +615,53 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
     await must('Saving the task', () => supabase.from('site_tasks').update(patch).eq('ref', ref).eq('org_id', orgId))
     invalidatePlan()
   }, [model.plans, orgId, invalidatePlan, patchPlan])
+
+  /** Hand-set schedule dates on a task (site_tasks.planned_start / planned_end), the promised-plan
+   *  baseline (baseline_start / baseline_end) the Gantt's dashed ghost reads, and/or the delay_reason.
+   *  This is a PLAIN PATCH — no freeze-once: the baseline is written only when an explicit per-phase
+   *  "Approve plan" sends it, and a re-approval overwrites it. Optimistic now; the write soft-degrades if
+   *  planned_ / baseline_ / delay_reason columns aren't migrated yet (keeps the visual, doesn't persist),
+   *  and if only the newer columns are missing it retries with just the migrated ones so a drag still saves. */
+  const setTaskDates = useCallback(async (_site: string, ref: string, dates: { plannedStart?: string | null; plannedEnd?: string | null; baselineStart?: string | null; baselineEnd?: string | null; delayReason?: string | null }) => {
+    const patch: Record<string, unknown> = {}
+    if (dates.plannedStart !== undefined) patch.planned_start = dates.plannedStart
+    if (dates.plannedEnd !== undefined) patch.planned_end = dates.plannedEnd
+    if (dates.baselineStart !== undefined) patch.baseline_start = dates.baselineStart
+    if (dates.baselineEnd !== undefined) patch.baseline_end = dates.baselineEnd
+    if (dates.delayReason !== undefined) patch.delay_reason = dates.delayReason
+    if (!Object.keys(patch).length) return
+
+    // The optimistic cache holds RAW DB rows (fromDb re-derives the display dates), so patch the columns.
+    patchPlan((d) => ({
+      ...d,
+      tasks: d.tasks.map((t) => (t.ref === ref ? { ...t, ...(patch as Partial<TaskRow>) } : t)),
+    }))
+
+    const missing = (e: { code?: string; message: string }) =>
+      e.code === '42703' || /planned_start|planned_end|baseline_start|baseline_end|delay_reason|schema cache|column/i.test(e.message)
+
+    let { error } = await supabase.from('site_tasks').update(patch).eq('ref', ref).eq('org_id', orgId)
+    const newer = patch.baseline_start !== undefined || patch.baseline_end !== undefined || patch.delay_reason !== undefined
+    if (error && missing(error) && newer) {
+      // A newer column (baseline_* / delay_reason) isn't migrated yet, but planned_* may well be — retry
+      // WITHOUT those keys so the schedule edit itself still persists. The ghost falls back to the computed
+      // schedule regardless, and the delay reason simply isn't recorded this session.
+      const { baseline_start: _bs, baseline_end: _be, delay_reason: _dr, ...plannedOnly } = patch
+      if (Object.keys(plannedOnly).length) {
+        const retry = await supabase.from('site_tasks').update(plannedOnly).eq('ref', ref).eq('org_id', orgId)
+        error = retry.error
+      } else {
+        error = null
+      }
+    }
+    if (error) {
+      // Undefined column = planned or baseline columns not migrated yet — keep the optimistic value for
+      // the session, don't refetch (which would wipe it) and don't surface an error.
+      if (missing(error)) return
+      throw new Error(error.message)
+    }
+    invalidatePlan()
+  }, [orgId, invalidatePlan, patchPlan])
 
   /** A note on a TASK. Goes to site_task_comments — the same table the WhatsApp resolver writes
    *  to, so a typed note and a spoken one land in the same trail and read as one story. */
@@ -962,8 +1020,8 @@ export function useLiveDeskApi({ orgId, userId }: Ctx): DeskApi {
     say,
     nudge,
     approve: unsupported('Approving from the portal'),
-    place, dismissPending, patchTask, editTask, deleteTask, addTask, answerQc, reorder,
-  }), [model, message, core.isLoading, plan.isLoading, plan.fetchStatus, core.isSuccess, planData, orgId, coreData, close, undo, reopen, addNote, addTaskNote, assignTask, assignSupervisor, assignProblem, say, nudge, place, dismissPending, patchTask, editTask, deleteTask, addTask, answerQc, reorder])
+    place, dismissPending, patchTask, editTask, setTaskDates, deleteTask, addTask, answerQc, reorder,
+  }), [model, message, core.isLoading, plan.isLoading, plan.fetchStatus, core.isSuccess, planData, orgId, coreData, close, undo, reopen, addNote, addTaskNote, assignTask, assignSupervisor, assignProblem, say, nudge, place, dismissPending, patchTask, editTask, setTaskDates, deleteTask, addTask, answerQc, reorder])
 }
 
 /** Thrown by an action the backend cannot honour yet. The UI catches it and says so. */
@@ -1001,11 +1059,11 @@ export function deskCoreQuery(orgId: string) {
         // (gates.ts). DEGRADED SELECT (engine/project.ts idiom): a geometry column that a hand-applied
         // migration hasn't landed must never blank the desk; fall back to the always-present columns.
         fetchAll<ProjectRow>(async (f, t) => {
-          const cols = `project_id, name, project_code, project_type, supervisor_id, ${GEOMETRY_COLUMNS}`
+          const cols = `project_id, name, project_code, project_type, supervisor_id, start_date, site_location, ${GEOMETRY_COLUMNS}`
           const res = await supabase.from('projects').select(cols).eq('org_id', orgId).range(f, t)
           if (!res.error) return res
           return supabase.from('projects')
-            .select('project_id, name, project_code, project_type, construction_stack, supervisor_id')
+            .select('project_id, name, project_code, project_type, construction_stack, supervisor_id, start_date, site_location')
             .eq('org_id', orgId).range(f, t)
         }),
         // problems — RICH (owner_source) → BASE (without). See PROBLEM_COLS_BASE.
@@ -1068,9 +1126,16 @@ export function deskPlanQuery(orgId: string) {
   return {
     queryKey: ['deskPlan', orgId] as const,
     queryFn: async (): Promise<DeskPlanData> => {
+      const tasksSelect = async () => {
+        const q = (cols: string) => fetchAll<TaskRow & { project_id?: string }>((f, t) =>
+          supabase.from('site_tasks').select(cols).eq('org_id', orgId).order('seq_no').order('task_id').range(f, t))
+        const rich2 = await q(TASK_COLS_RICH2)
+        if (!rich2.error) return rich2
+        const rich = await q(TASK_COLS_RICH)      // delay_reason not migrated → keep planned_*/baseline_*
+        return rich.error ? q(TASK_COLS) : rich   // planned_* not migrated yet → the computed dates still show
+      }
       const [tasks, qc, comments] = await Promise.all([
-        fetchAll<TaskRow & { project_id?: string }>((f, t) =>
-          supabase.from('site_tasks').select(TASK_COLS).eq('org_id', orgId).order('seq_no').order('task_id').range(f, t)),
+        tasksSelect(),
         fetchAll<QcRow>((f, t) =>
           supabase.from('site_task_qc').select('id, task_id, question, is_critical, seq, answer, qc_status').eq('org_id', orgId).order('id').range(f, t)),
         // The task's own trail — where a resolved WhatsApp update lands.

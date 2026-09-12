@@ -3076,6 +3076,16 @@ main:has(.desk-root) { padding-bottom: 0; }
 .desk-root .wp .wp-tdate .wp-proj{color:var(--wp-ink-soft)}
 .desk-root .wp .wp-tdate .wp-approx{color:var(--wp-muted)}
 
+/* editable start → end dates on the plan row */
+.desk-root .wp .wp-dates{display:inline-flex;align-items:center;gap:1px;justify-content:flex-end;white-space:nowrap;font-variant-numeric:tabular-nums}
+.desk-root .wp .wp-dates .wp-arr{font-style:normal;color:var(--wp-muted);margin:0 3px;font-weight:400}
+.desk-root .wp .wp-datechip{font:inherit;font-size:13px;color:var(--wp-ink-soft);background:none;border:0;padding:2px 5px;border-radius:6px;cursor:pointer;font-variant-numeric:tabular-nums;transition:background .12s,color .12s}
+.desk-root .wp .wp-datechip:hover{background:var(--wp-line-soft);color:var(--wp-ink)}
+.desk-root .wp .wp-datechip.empty{color:var(--wp-muted);font-size:12px;opacity:.75}
+.desk-root .wp .wp-trow.is-done .wp-datechip{color:var(--wp-muted)}
+.desk-root .wp .wp-datein{font:inherit;font-size:12.5px;color:var(--wp-ink);border:1px solid var(--wp-line);border-radius:6px;padding:1px 5px;background:var(--wp-card);outline:none}
+.desk-root .wp .wp-datein:focus{border-color:var(--wp-moss)}
+
 /* subtle Open / Sorted toggle (replaces the heavy Pending·Open·Sorted pill) */
 .desk-root .subtle-seg{display:inline-flex;gap:4px;align-items:center}
 .desk-root .subtle-seg button{padding:5px 11px;border-radius:8px;font-size:13.5px;font-weight:600;color:#9B978A;transition:color .15s,background .15s}
@@ -3085,6 +3095,218 @@ main:has(.desk-root) { padding-bottom: 0; }
 /* Problems tab under the redesign: full-width list, the peek overlays it */
 .desk-root .wp.wp-problems{padding-bottom:0}
 .desk-root .wp .wp-problems-main{padding:18px 28px 72px;max-width:960px}
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════
+   WORK PLAN — GANTT REDESIGN (mock: sitedesk-tasks-redesign.html).
+   A draggable per-phase Gantt: a dashed frozen-baseline ghost behind a green live bar the supervisor
+   slides and stretches. The site-pulse row and the leak bar / cost-of-delay drawer are DELIBERATELY
+   omitted. Scoped under .wp-gantt so the generic mock class names (.head, .card, .bar, .pick, .panel)
+   never touch the shared desk chrome or the Problems tab.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════ */
+.desk-root .wp-gantt{
+  --g-paper:#F3EFE6; --g-card:#FBF9F3; --g-card2:#F7F3EA;
+  --g-ink:#27221B; --g-ink2:#79705F; --g-ink3:#A99F8C;
+  --g-line:#E7E0D1; --g-line2:#EFE9DB;
+  --g-terra:#C2553B; --g-terra-l:#F6E5DD;
+  --g-sage:#7C8B72; --g-sage-d:#66794F; --g-sage-l:#E7ECE0;
+  --g-gold:#B9892C;
+  --g-serif:'Source Serif 4',Georgia,serif;
+  --g-mono:'IBM Plex Mono',ui-monospace,monospace;
+  --g-sans:'Karla',system-ui,sans-serif;
+  background:var(--g-paper); font-family:var(--g-sans);
+}
+.desk-root .wp-gantt .wg-wrap{max-width:1220px;margin:0 auto;padding:30px clamp(16px,4vw,48px) 90px}
+
+/* header — one serif title, two matched controls */
+.desk-root .wp-gantt .head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;flex-wrap:wrap;margin-bottom:26px}
+.desk-root .wp-gantt .htitle{position:relative;min-width:0}
+.desk-root .wp-gantt .t-btn{border:0;background:none;cursor:pointer;text-align:left;padding:0}
+.desk-root .wp-gantt .t-btn h1{font-family:var(--g-serif);font-weight:700;font-size:38px;letter-spacing:-.01em;display:flex;align-items:center;gap:13px;color:var(--g-ink);margin:0}
+.desk-root .wp-gantt .t-btn .car{width:24px;height:24px;border:1px solid var(--g-line);border-radius:50%;background:var(--g-card);display:grid;place-items:center;font-family:var(--g-sans);font-size:10px;color:var(--g-ink2);flex:none;transition:transform .18s ease,border-color .15s ease}
+.desk-root .wp-gantt .t-btn:hover .car{border-color:var(--g-ink2);color:var(--g-ink)}
+.desk-root .wp-gantt .t-btn.open .car{transform:rotate(180deg);border-color:var(--g-ink)}
+.desk-root .wp-gantt .htitle .sub{margin-top:7px;font-size:12.5px;color:var(--g-ink2)}
+.desk-root .wp-gantt .htitle .sub i{font-style:normal;color:var(--g-ink3);margin:0 7px}
+
+.desk-root .wp-gantt .hctl{display:flex;gap:10px;flex-wrap:wrap}
+.desk-root .wp-gantt .pick{position:relative}
+.desk-root .wp-gantt .pick-btn{display:flex;align-items:center;gap:12px;height:56px;border:1px solid var(--g-line);background:var(--g-card);border-radius:12px;padding:0 16px;cursor:pointer;text-align:left;transition:border-color .15s ease,box-shadow .15s ease}
+.desk-root .wp-gantt .pick-btn:hover{border-color:var(--g-ink2)}
+.desk-root .wp-gantt .pick-btn.open{border-color:var(--g-ink);box-shadow:0 0 0 1px var(--g-ink)}
+.desk-root .wp-gantt .pick-btn .pb-l{display:flex;flex-direction:column;gap:3px;min-width:0}
+.desk-root .wp-gantt .pick-btn .lbl{font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--g-ink2)}
+.desk-root .wp-gantt .pick-btn .val{font-family:var(--g-serif);font-weight:600;font-size:15px;white-space:nowrap;color:var(--g-ink)}
+.desk-root .wp-gantt .pick-btn .car{width:17px;height:17px;border-radius:50%;border:1px solid var(--g-line);display:grid;place-items:center;font-family:var(--g-sans);font-size:9px;color:var(--g-ink2);flex:none;transition:transform .18s ease,border-color .15s ease}
+.desk-root .wp-gantt .pick-btn:hover .car{border-color:var(--g-ink2);color:var(--g-ink)}
+.desk-root .wp-gantt .pick-btn.open .car{transform:rotate(180deg)}
+.desk-root .wp-gantt .pick-btn .wava{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;font-family:var(--g-serif);font-size:12.5px;flex:none}
+.desk-root .wp-gantt .pick-btn.unset .wava{border:1.5px dashed var(--g-ink3);color:var(--g-ink3);background:none}
+.desk-root .wp-gantt .pick-btn.set .wava{background:var(--g-sage);color:#fff}
+.desk-root .wp-gantt .pick-btn.unset .val{font-family:var(--g-sans);font-weight:500;font-size:13px;color:var(--g-ink2)}
+.desk-root .wp-gantt .pick-btn .wp-ring{flex:none}
+
+.desk-root .wp-gantt .panel{position:absolute;top:calc(100% + 8px);left:0;z-index:30;min-width:310px;max-height:70vh;overflow-y:auto;background:var(--g-card);border:1px solid var(--g-line);border-radius:13px;box-shadow:0 16px 40px rgba(50,44,32,.14);padding:7px;display:none}
+.desk-root .wp-gantt .panel.open{display:block}
+.desk-root .wp-gantt .panel .p-head{font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--g-ink2);padding:8px 12px 6px}
+.desk-root .wp-gantt .opt{display:flex;align-items:center;gap:12px;width:100%;border:0;background:none;text-align:left;padding:10px 12px;border-radius:9px;cursor:pointer;transition:background .12s ease}
+.desk-root .wp-gantt .opt:hover,.desk-root .wp-gantt .opt:focus-visible{background:var(--g-card2);outline:none}
+.desk-root .wp-gantt .opt .odot{width:8px;height:8px;border-radius:50%;flex:none}
+.desk-root .wp-gantt .opt .obd{flex:1;min-width:0}
+.desk-root .wp-gantt .opt .onm{font-family:var(--g-serif);font-weight:600;font-size:14.5px;color:var(--g-ink)}
+.desk-root .wp-gantt .opt .osub{font-size:11.5px;color:var(--g-ink2);margin-top:1px}
+.desk-root .wp-gantt .opt .ock{font-size:12px;color:var(--g-sage-d);opacity:0}
+.desk-root .wp-gantt .opt.cur .ock{opacity:1}
+.desk-root .wp-gantt .opt .oprog{flex:none;width:44px;height:3px;border-radius:2px;background:var(--g-line2);position:relative;overflow:hidden}
+.desk-root .wp-gantt .opt .oprog i{position:absolute;left:0;top:0;bottom:0;background:var(--g-sage);border-radius:2px}
+.desk-root .wp-gantt .opt .oava{width:30px;height:30px;border-radius:50%;background:var(--g-card2);border:1px solid var(--g-line);display:grid;place-items:center;font-family:var(--g-serif);font-size:12px;color:var(--g-ink2);flex:none}
+.desk-root .wp-gantt .opt .onm.sans{font-family:var(--g-sans);font-weight:700;font-size:13.5px}
+.desk-root .wp-gantt .pick.who .panel{left:auto;right:0;min-width:280px}
+
+.desk-root .wp-gantt .metaline{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:12px;padding:0 4px}
+.desk-root .wp-gantt .metaline .l{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--g-ink2)}
+.desk-root .wp-gantt .metaline .l b{color:var(--g-sage-d);margin-left:6px;font-family:var(--g-mono);letter-spacing:0}
+.desk-root .wp-gantt .metaline .r{font-size:12px;color:var(--g-ink3)}
+
+/* card */
+.desk-root .wp-gantt .card{border:1px solid var(--g-line);border-radius:13px;background:var(--g-card);overflow:hidden}
+.desk-root .wp-gantt .card + .card{margin-top:18px}
+.desk-root .wp-gantt .card-head{display:grid;grid-template-columns:minmax(240px,1fr) 300px 84px 168px;gap:0 20px;align-items:end;padding:11px 20px 0;border-bottom:1px solid var(--g-line);background:var(--g-card);box-shadow:0 1px 0 rgba(185,137,44,.12)}
+.desk-root .wp-gantt .card-head .grp{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--g-ink2);padding-bottom:10px}
+.desk-root .wp-gantt .card-head .grp i{font-style:normal;color:var(--g-ink3);text-transform:none;font-size:12px;margin-left:6px}
+.desk-root .wp-gantt .ruler{position:relative;height:26px}
+.desk-root .wp-gantt .ruler .tick{position:absolute;bottom:0;top:12px;width:1px;background:var(--g-line)}
+.desk-root .wp-gantt .ruler .tlbl{position:absolute;top:0;transform:translateX(-50%);font:400 9.5px var(--g-mono);color:var(--g-ink3);white-space:nowrap;transition:opacity .15s ease}
+/* a date tick that lands under the terracotta "today" pill is hushed so the two never overprint */
+.desk-root .wp-gantt .ruler .tlbl.hush{opacity:0}
+.desk-root .wp-gantt .ruler .tdy{position:absolute;top:12px;bottom:0;width:1px;background:var(--g-terra)}
+/* the pill rides above the date row on its own paper chip — it always reads clean, and the red line stays */
+.desk-root .wp-gantt .ruler .tdy i{position:absolute;top:-13px;left:50%;transform:translateX(-50%);font:600 9px var(--g-sans);font-style:normal;color:var(--g-terra);letter-spacing:.06em;background:var(--g-card);padding:0 4px;border-radius:4px;z-index:2}
+.desk-root .wp-gantt .card-head .sp{grid-column:span 1}
+
+/* rows */
+.desk-root .wp-gantt .trow{display:grid;grid-template-columns:minmax(240px,1fr) 300px 84px 168px;gap:0 20px;align-items:center;padding:0 20px;border-bottom:1px solid var(--g-line2);min-height:62px;position:relative;transition:background .15s ease}
+.desk-root .wp-gantt .trow:last-of-type{border-bottom:0}
+.desk-root .wp-gantt .trow:hover{background:rgba(120,110,85,.03)}
+.desk-root .wp-gantt .trow.next{background:var(--g-card2);box-shadow:inset 3px 0 0 var(--g-ink)}
+.desk-root .wp-gantt .trow.dragging{background:var(--g-card2)}
+.desk-root .wp-gantt .trow.selected{background:var(--g-card2)}
+.desk-root .wp-gantt .task{display:flex;align-items:center;gap:14px;padding:12px 0;min-width:0;cursor:pointer}
+.desk-root .wp-gantt .rail{position:relative;flex:none;width:24px;display:grid;place-items:center}
+.desk-root .wp-gantt .rail::before{content:"";position:absolute;top:-26px;bottom:-26px;left:50%;width:1px;background:var(--g-line)}
+.desk-root .wp-gantt .trow:first-of-type .rail::before{top:50%}
+.desk-root .wp-gantt .trow:last-of-type .rail::before{bottom:50%}
+.desk-root .wp-gantt .dot{width:22px;height:22px;border-radius:50%;border:1.5px solid var(--g-line);background:var(--g-card);position:relative;z-index:1;display:grid;place-items:center;color:transparent;font-size:11px}
+.desk-root .wp-gantt .trow.done .dot{background:var(--g-sage);border-color:var(--g-sage);color:#fff}
+.desk-root .wp-gantt .tname{min-width:0}
+.desk-root .wp-gantt .tname .nm{font-weight:700;font-size:14px;color:var(--g-ink)}
+.desk-root .wp-gantt .trow.done .tname .nm{color:var(--g-ink2);font-weight:500}
+.desk-root .wp-gantt .tname .code{font-family:var(--g-mono);font-size:10px;color:var(--g-ink3);margin-left:8px}
+.desk-root .wp-gantt .chip-next{font:600 10.5px var(--g-sans);color:var(--g-ink);background:var(--g-card);border:1px solid var(--g-line);border-radius:999px;padding:2px 9px;margin-left:10px;white-space:nowrap}
+
+/* track: planned ghost lane + draggable actual bar */
+.desk-root .wp-gantt .track{position:relative;height:38px;touch-action:none}
+.desk-root .wp-gantt .track .grid-t{position:absolute;top:4px;bottom:4px;width:1px;background:var(--g-line2)}
+.desk-root .wp-gantt .track .base{position:absolute;left:0;right:0;top:62%;height:1px;background:var(--g-line2)}
+.desk-root .wp-gantt .track .today{position:absolute;top:0;bottom:0;width:1px;background:var(--g-terra);opacity:.5}
+.desk-root .wp-gantt .ghost{position:absolute;top:13px;height:20px;border-radius:10px;border:1.5px dashed var(--g-ink3);background:none;opacity:0;z-index:0;transition:opacity .2s ease}
+.desk-root .wp-gantt .ghost.show{opacity:.8}
+.desk-root .wp-gantt .trow.late .ghost.show{border-color:var(--g-terra);opacity:.6}
+.desk-root .wp-gantt .bar{position:absolute;z-index:1;top:13px;height:20px;border-radius:10px;background:var(--g-sage-l);border:1px solid var(--g-sage);cursor:grab;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 2px rgba(60,54,40,.08);transition:box-shadow .15s ease}
+.desk-root .wp-gantt .why{position:absolute;z-index:8;bottom:calc(100% + 9px);min-width:210px;max-width:260px;background:var(--g-ink);color:var(--g-card);border-radius:10px;padding:9px 12px;font-size:11.5px;line-height:1.5;opacity:0;pointer-events:none;transform:translateY(3px);transition:opacity .15s ease,transform .15s ease}
+.desk-root .wp-gantt .why b{color:#EBC3AF;font-weight:600}
+.desk-root .wp-gantt .why em{font-style:normal;color:#CFC8B8}
+.desk-root .wp-gantt .why::after{content:"";position:absolute;top:100%;left:22px;border:5px solid transparent;border-top-color:var(--g-ink)}
+.desk-root .wp-gantt .trow.late .track:hover .why{opacity:1;transform:none}
+.desk-root .wp-gantt .trow.dragging .why{opacity:0 !important}
+.desk-root .wp-gantt .bar:hover,.desk-root .wp-gantt .trow.dragging .bar{box-shadow:0 2px 7px rgba(60,54,40,.18);border-color:var(--g-sage-d)}
+.desk-root .wp-gantt .bar:active{cursor:grabbing}
+.desk-root .wp-gantt .bar .bd-d{font-family:var(--g-mono);font-size:10px;font-weight:500;letter-spacing:.01em;color:var(--g-sage-d);pointer-events:none;white-space:nowrap}
+/* On a bar too short to hold it, the duration steps outside — a quiet tag just past the right end,
+   so a 1-day bar stays a clean pill instead of cramming "1d" between two grips. */
+.desk-root .wp-gantt .bar.narrow{justify-content:flex-start}
+.desk-root .wp-gantt .bar .bd-d.out{position:absolute;left:calc(100% + 6px);top:50%;transform:translateY(-50%);color:var(--g-ink3)}
+.desk-root .wp-gantt .trow.late .bar .bd-d.out{color:var(--g-terra)}
+.desk-root .wp-gantt .trow.done .bar .bd-d.out{color:var(--g-sage-d)}
+.desk-root .wp-gantt .bar .grip{position:absolute;top:0;bottom:0;width:12px;cursor:ew-resize;display:grid;place-items:center}
+.desk-root .wp-gantt .bar .grip.l{left:-3px}
+.desk-root .wp-gantt .bar .grip.r{right:-3px}
+.desk-root .wp-gantt .bar .grip::after{content:"";width:3px;height:9px;border-left:1.5px solid var(--g-sage-d);border-right:1.5px solid var(--g-sage-d);opacity:.55;transition:opacity .12s ease}
+.desk-root .wp-gantt .bar:hover .grip::after{opacity:1}
+.desk-root .wp-gantt .trow.done .bar{background:var(--g-sage);border-color:var(--g-sage);cursor:default;box-shadow:none}
+.desk-root .wp-gantt .trow.done .bar .bd-d{color:#fff}
+.desk-root .wp-gantt .trow.done .bar .grip{display:none}
+.desk-root .wp-gantt .trow.late .bar{border-color:var(--g-terra)}
+.desk-root .wp-gantt .trow.late .bar .bd-d{color:var(--g-terra)}
+.desk-root .wp-gantt .dragme{position:absolute;z-index:5;top:-14px;left:50%;transform:translateX(-50%);font:600 9.5px var(--g-sans);letter-spacing:.03em;color:var(--g-card);background:var(--g-ink);border-radius:999px;padding:3px 10px;white-space:nowrap;pointer-events:none}
+.desk-root .wp-gantt .dragme::after{content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);border:4px solid transparent;border-top-color:var(--g-ink)}
+
+.desk-root .wp-gantt .dur{display:flex;align-items:center;justify-content:flex-end;gap:2px}
+.desk-root .wp-gantt .dur button{width:20px;height:22px;border:0;background:none;color:var(--g-ink3);font:600 13px var(--g-sans);cursor:pointer;opacity:0;transition:opacity .12s ease}
+.desk-root .wp-gantt .trow:hover .dur button{opacity:1}
+.desk-root .wp-gantt .dur button:hover{color:var(--g-ink)}
+.desk-root .wp-gantt .dur b{font-family:var(--g-mono);font-weight:500;font-size:13px;min-width:30px;text-align:center;border-bottom:1px dashed var(--g-line);padding-bottom:2px;color:var(--g-ink)}
+.desk-root .wp-gantt .trow.done .dur b{border-bottom-color:transparent;color:var(--g-ink3)}
+.desk-root .wp-gantt .trow.done .dur button{display:none}
+.desk-root .wp-gantt .dates{font-family:var(--g-mono);font-size:12px;color:var(--g-ink2);text-align:right;white-space:nowrap}
+.desk-root .wp-gantt .dates b{font-weight:500;color:var(--g-ink)}
+.desk-root .wp-gantt .dates .arr{color:var(--g-ink3);margin:0 5px}
+.desk-root .wp-gantt .dates .drift{color:var(--g-terra);font-weight:500;font-size:11px;margin-left:6px}
+.desk-root .wp-gantt .trow.done .dates{color:var(--g-sage-d);font-weight:500}
+.desk-root .wp-gantt .trow.done .dates::before{content:"done ";color:var(--g-ink3);font-family:var(--g-sans);font-size:11px}
+.desk-root .wp-gantt .trow.dragging .dates b{color:var(--g-ink);font-weight:600}
+
+.desk-root .wp-gantt .phase-foot{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;padding:13px 20px;background:var(--g-card2)}
+.desk-root .wp-gantt .phase-foot .l{font-size:10.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--g-ink2)}
+.desk-root .wp-gantt .phase-foot .r{flex:1;min-width:0;font-family:var(--g-mono);font-size:12.5px;color:var(--g-ink2)}
+.desk-root .wp-gantt .phase-foot .r.muted{font-family:var(--g-sans);color:var(--g-ink3)}
+.desk-root .wp-gantt .phase-foot .r b{color:var(--g-ink);font-weight:600}
+.desk-root .wp-gantt .phase-foot .shift{color:var(--g-terra);font-weight:500}
+/* an un-approved phase is a draft — a warm terracotta seam and the Approve call-to-action */
+.desk-root .wp-gantt .phase-foot.draft{background:var(--g-terra-l);box-shadow:inset 0 2px 0 rgba(194,85,59,.16)}
+.desk-root .wp-gantt .phase-foot .ph-btn{flex:none;border:1px solid var(--g-line);background:var(--g-card);border-radius:999px;padding:7px 16px;font:600 12px var(--g-sans);cursor:pointer;transition:border-color .14s ease,background .14s ease,box-shadow .14s ease}
+.desk-root .wp-gantt .phase-foot .ph-btn:hover{box-shadow:0 3px 10px -6px rgba(33,29,24,.28)}
+.desk-root .wp-gantt .phase-foot .ph-btn.approve{background:var(--g-sage);border-color:var(--g-sage);color:#fff}
+.desk-root .wp-gantt .phase-foot .ph-btn.approve:hover{background:var(--g-sage-d);border-color:var(--g-sage-d)}
+.desk-root .wp-gantt .phase-foot .ph-btn.edit{color:var(--g-ink2)}
+.desk-root .wp-gantt .phase-foot .ph-btn.edit:hover{border-color:var(--g-ink2);color:var(--g-ink)}
+
+/* ── DELAY REASON PROMPT — a small centred card over a dimmed page, shown when a late task's peek closes */
+.desk-root .delay-scrim{position:fixed;inset:0;z-index:80;display:grid;place-items:center;padding:20px;background:rgba(33,29,24,.42);backdrop-filter:blur(2px)}
+.desk-root .delay-card{width:min(420px,100%);background:var(--g-card,#FBF9F3);border:1px solid var(--g-line,#E7E0D1);border-radius:16px;box-shadow:0 24px 60px rgba(40,38,28,.28);padding:22px 22px 18px}
+.desk-root .delay-card .delay-h{font-family:var(--g-serif,'Source Serif 4',Georgia,serif);font-weight:700;font-size:19px;color:var(--g-ink,#27221B)}
+.desk-root .delay-card .delay-sub{margin-top:3px;font-size:13px;color:var(--g-ink2,#79705F)}
+.desk-root .delay-card .delay-chips{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 12px}
+.desk-root .delay-card .delay-chip{border:1px solid var(--g-line,#E7E0D1);background:var(--g-card2,#F7F3EA);border-radius:999px;padding:6px 13px;font:500 12.5px var(--g-sans,'Karla',system-ui,sans-serif);color:var(--g-ink2,#79705F);cursor:pointer;transition:all .14s ease}
+.desk-root .delay-card .delay-chip:hover{border-color:var(--g-ink3,#A99F8C);color:var(--g-ink,#27221B)}
+.desk-root .delay-card .delay-chip.on{background:var(--g-ink,#27221B);border-color:var(--g-ink,#27221B);color:var(--g-card,#FBF9F3)}
+.desk-root .delay-card .delay-text{width:100%;resize:none;border:1px solid var(--g-line,#E7E0D1);border-radius:10px;background:var(--g-card2,#F7F3EA);padding:9px 11px;font:400 13.5px var(--g-sans,'Karla',system-ui,sans-serif);color:var(--g-ink,#27221B);outline:none;transition:border-color .14s ease}
+.desk-root .delay-card .delay-text:focus{border-color:var(--g-sage,#7C8B72)}
+.desk-root .delay-card .delay-text::placeholder{color:var(--g-ink3,#A99F8C)}
+.desk-root .delay-card .delay-foot{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:16px}
+.desk-root .delay-card .delay-skip{border:0;background:none;color:var(--g-ink2,#79705F);font:600 13px var(--g-sans,'Karla',system-ui,sans-serif);padding:9px 12px;cursor:pointer}
+.desk-root .delay-card .delay-skip:hover{color:var(--g-ink,#27221B)}
+.desk-root .delay-card .delay-save{border:1px solid var(--g-sage,#7C8B72);background:var(--g-sage,#7C8B72);color:#fff;border-radius:10px;padding:9px 18px;font:600 13px var(--g-sans,'Karla',system-ui,sans-serif);cursor:pointer;transition:background .14s ease}
+.desk-root .delay-card .delay-save:hover{background:var(--g-sage-d,#66794F)}
+
+.desk-root .wp-gantt .g-empty{padding:26px 20px;color:var(--g-ink3);font-size:13px;background:var(--g-card);border:1px solid var(--g-line);border-radius:13px}
+
+@media (max-width:820px){
+  .desk-root .wp-gantt .wg-wrap{padding:20px 14px 80px}
+  .desk-root .wp-gantt .t-btn h1{font-size:29px}
+  .desk-root .wp-gantt .hctl{width:100%}
+  .desk-root .wp-gantt .hctl .pick{flex:1}
+  .desk-root .wp-gantt .hctl .pick-btn{width:100%;height:52px}
+  .desk-root .wp-gantt .panel{min-width:270px;left:0 !important;right:auto !important}
+  .desk-root .wp-gantt .card-head{grid-template-columns:1fr;padding-bottom:0}
+  .desk-root .wp-gantt .card-head .ruler,.desk-root .wp-gantt .card-head .sp{display:none}
+  .desk-root .wp-gantt .trow{grid-template-columns:1fr 80px;grid-template-areas:"task dur" "track track" "dates dates";gap:4px 12px;padding:12px 14px}
+  .desk-root .wp-gantt .task{grid-area:task;padding:0}
+  .desk-root .wp-gantt .track{grid-area:track;margin-left:38px;height:40px}
+  .desk-root .wp-gantt .dur{grid-area:dur}
+  .desk-root .wp-gantt .dur button{opacity:1}
+  .desk-root .wp-gantt .dates{grid-area:dates;margin-left:38px;text-align:left;font-size:11px}
+  .desk-root .wp-gantt .rail::before{display:none}
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    TASK PEEK — the side-card body, redesigned to side-peek-redesign.html.
@@ -3105,8 +3327,8 @@ main:has(.desk-root) { padding-bottom: 0; }
 .tpk-idrow{display:flex;align-items:center;gap:10px}
 .tpk-chip{font-size:10.5px;font-weight:600;letter-spacing:.08em;color:#7A7466;background:var(--tpk-line-soft);padding:3px 7px;border-radius:5px}
 .tpk-kind{font-size:12px;color:var(--tpk-faint)}
-.tpk-edit{margin-left:auto;font-size:12px;color:var(--tpk-faint);background:none;border:0;cursor:pointer}
-.tpk-edit:hover{color:var(--tpk-ink)}
+.tpk-edit{margin-left:auto;font-size:11.5px;font-weight:600;color:var(--tpk-muted);background:none;border:1px solid var(--tpk-line);border-radius:7px;padding:3px 11px;cursor:pointer;transition:color .13s,border-color .13s,background .13s}
+.tpk-edit:hover{color:var(--tpk-ink);border-color:var(--tpk-faint);background:var(--tpk-card)}
 .tpk-editbar{margin-left:auto;display:flex;gap:8px}
 .tpk-cancel,.tpk-save{font-size:12px;font-weight:600;border:1px solid var(--tpk-line);background:var(--tpk-card);border-radius:7px;padding:4px 10px;cursor:pointer;color:var(--tpk-muted)}
 .tpk-save.idle{color:var(--tpk-moss-ink);border-color:var(--tpk-moss)}
@@ -3128,11 +3350,12 @@ main:has(.desk-root) { padding-bottom: 0; }
 .tpk-status a{color:var(--tpk-muted);text-decoration:underline;text-decoration-color:var(--tpk-line);text-underline-offset:3px;cursor:pointer}
 .tpk-status a:hover{color:var(--tpk-ink)}
 
-.tpk-meta{margin-top:14px;padding-top:12px;border-top:1px solid var(--tpk-line-soft);display:flex;gap:22px;font-size:12.5px;color:var(--tpk-muted)}
-.tpk-meta b{color:var(--tpk-ink);font-weight:500}
-.tpk-with{position:relative;cursor:pointer}
+.tpk-meta{margin-top:16px;display:flex;font-size:12.5px;color:var(--tpk-muted);background:#FBF9F1;border:1px solid var(--tpk-line-soft);border-radius:10px;overflow:hidden}
+.tpk-meta b{color:var(--tpk-ink);font-weight:600}
+.tpk-with{position:relative;cursor:pointer;flex:1;display:flex;align-items:center;padding:11px 15px;transition:background .13s}
+.tpk-with:hover{background:rgba(120,110,85,.04)}
 .tpk-pick{position:absolute;inset:0;opacity:0;cursor:pointer;font:inherit}
-.tpk-takes{position:relative;display:inline-flex;align-items:center;gap:6px}
+.tpk-takes{position:relative;display:inline-flex;align-items:center;gap:6px;padding:11px 15px;border-left:1px solid var(--tpk-line-soft)}
 .tpk-stepper{display:inline-flex;gap:2px;opacity:0;transition:opacity .15s}
 .tpk-takes:hover .tpk-stepper{opacity:1}
 .tpk-stepper button{width:18px;height:18px;border:1px solid var(--tpk-line);border-radius:5px;background:var(--tpk-card);color:var(--tpk-muted);font-size:12px;line-height:1;cursor:pointer}
@@ -3163,16 +3386,17 @@ main:has(.desk-root) { padding-bottom: 0; }
 .tpk-msg.wa{background:var(--tpk-wa);border:1px solid #E2EAD8;border-radius:4px 12px 12px 12px;padding:8px 11px;display:inline-block;max-width:100%}
 .tpk-sys{margin-top:3px;font-size:13px;color:var(--tpk-muted)}
 .tpk-photos{display:flex;gap:6px;margin-top:7px;flex-wrap:wrap}
-.tpk-empty{padding:22px 4px;color:var(--tpk-faint);font-size:13px}
-.tpk-empty p+p{margin-top:4px}
+.tpk-empty{margin:4px 0 6px;padding:22px 18px;text-align:center;color:var(--tpk-faint);font-size:12.5px;line-height:1.55;border:1px dashed var(--tpk-line);border-radius:11px;background:var(--tpk-card)}
+.tpk-empty p:first-child{color:var(--tpk-muted);font-weight:600;font-size:13.5px}
+.tpk-empty p+p{margin-top:3px}
 
 /* compose */
-.tpk-compose{margin:4px 22px 0;padding:10px 0 14px;display:flex;gap:10px;align-items:center}
-.tpk-compose input{flex:1;font:inherit;font-size:13.5px;color:var(--tpk-ink);background:transparent;border:0;outline:none;border-bottom:1px solid var(--tpk-line);padding:6px 2px}
+.tpk-compose{margin:12px 22px 0;padding:0 0 16px;display:flex;gap:8px;align-items:center}
+.tpk-compose input{flex:1;font:inherit;font-size:13.5px;color:var(--tpk-ink);background:var(--tpk-card);border:1px solid var(--tpk-line);border-radius:9px;outline:none;padding:9px 12px;transition:border-color .13s,box-shadow .13s}
 .tpk-compose input::placeholder{color:var(--tpk-faint)}
-.tpk-compose input:focus{border-bottom-color:var(--tpk-moss)}
-.tpk-compose button{font:inherit;font-size:12.5px;font-weight:600;color:var(--tpk-muted);background:none;border:0;cursor:pointer;padding:6px 4px}
-.tpk-compose button:hover{color:var(--tpk-moss-ink)}
+.tpk-compose input:focus{border-color:var(--tpk-moss);box-shadow:0 0 0 3px rgba(78,107,72,.1)}
+.tpk-compose button{flex:none;font:inherit;font-size:12.5px;font-weight:600;color:#fff;background:var(--tpk-moss);border:0;border-radius:9px;cursor:pointer;padding:9px 16px;transition:background .13s}
+.tpk-compose button:hover{background:var(--tpk-moss-ink)}
 
 /* checks */
 .tpk-checks{border-top:1px solid var(--tpk-line);padding:14px 22px 6px;background:var(--tpk-card)}
@@ -3191,9 +3415,9 @@ main:has(.desk-root) { padding-bottom: 0; }
 .tpk-check.fail .tpk-txt{color:var(--tpk-clay)}
 .tpk-a{display:block;margin-top:3px;font-size:12px;color:var(--tpk-faint)}
 .tpk-crit{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--tpk-clay);margin-right:6px;vertical-align:middle}
-.tpk-flag{flex:none;font-size:11.5px;color:var(--tpk-faint);cursor:pointer;margin-top:3px}
-.tpk-flag:hover{color:var(--tpk-clay)}
-.tpk-check.fail .tpk-flag{color:var(--tpk-clay);font-weight:600}
+.tpk-flag{flex:none;font-size:11px;font-weight:600;color:var(--tpk-faint);cursor:pointer;margin-top:1px;padding:2px 10px;border:1px solid var(--tpk-line);border-radius:999px;white-space:nowrap;transition:color .12s,border-color .12s,background .12s}
+.tpk-flag:hover{color:var(--tpk-clay);border-color:var(--tpk-clay);background:#FBEFEA}
+.tpk-check.fail .tpk-flag{color:#fff;background:var(--tpk-clay);border-color:var(--tpk-clay)}
 
 /* the one button (in .d-bar) */
 .tpk-cta{width:100%;padding:13px 16px;border-radius:11px;font:inherit;font-size:14.5px;font-weight:600;border:1px solid #E7E2D3;cursor:pointer;background:#FFFEFA;color:#2A2924;transition:all .15s;text-align:center}

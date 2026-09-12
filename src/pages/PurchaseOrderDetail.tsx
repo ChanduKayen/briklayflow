@@ -17,7 +17,7 @@ import ReceiveAtSiteDrawer from '../components/ReceiveAtSiteDrawer';
 import SendToVendorModal from '../components/po-new-ui/SendToVendorModal';
 import { RateCheckModal } from '../components/po/RateCheckModal';
 import { useIsMobile } from '../lib/useIsMobile';
-import { loadBillsForPO, convertLegacyPoBill, getBillsForAttach, linkExistingBillToPO, poPaidRollup } from '../lib/billsApi';
+import { loadBillsForPO, convertLegacyPoBill, getBillsForAttach, linkExistingBillToPO, unlinkBillFromPO, poPaidRollup } from '../lib/billsApi';
 import { PoAttachBillPopup } from '../components/po/PoAttachBillPopup';
 import { poPayState, poPayLabel } from '../lib/poLifecycle';
 
@@ -177,6 +177,21 @@ const PODX_CSS = `
 .podx .stage .s{font-size:12.5px;color:var(--ink-3)}
 .podx .stage.done .s{color:var(--ink-2)}
 .podx .stage .act{grid-column:2;margin-top:8px}
+/* Linked bills — a clean vertical list: each row opens the bill, unlink sits right-aligned. */
+.podx .pobills{grid-column:2;margin-top:10px;display:flex;flex-direction:column;gap:6px;max-width:440px}
+.podx .pobill{display:flex;align-items:center;gap:6px}
+.podx .pobill-open{flex:1;min-width:0;display:flex;align-items:center;gap:9px;background:var(--paper);border:1px solid var(--line);border-radius:9px;padding:8px 12px;cursor:pointer;font:inherit;text-align:left;transition:border-color .15s,background .15s}
+.podx .pobill-open:hover{border-color:var(--ink-3);background:var(--paper-2)}
+.podx .pobill-ic{width:15px;height:15px;flex:none;stroke:var(--ink-3);fill:none;stroke-width:1.6;stroke-linejoin:round;stroke-linecap:round}
+.podx .pobill-nm{font-weight:600;font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.podx .pobill-amt{font-weight:600;font-size:13px;color:var(--ink);flex:none}
+.podx .pobill-st{margin-left:auto;flex:none;font-size:11.5px;font-weight:500;color:var(--ink-3);padding-left:8px}
+.podx .pobill-st.ok{color:var(--sage)}
+.podx .pobill-x{flex:none;width:30px;height:30px;border:1px solid var(--line);border-radius:8px;background:none;color:var(--ink-3);cursor:pointer;display:grid;place-items:center;font-size:13px;line-height:1;transition:color .15s,border-color .15s,background .15s}
+.podx .pobill-x:hover{color:var(--terra);border-color:var(--terra);background:var(--terra-tint)}
+.podx .pobill-add{display:inline-flex;align-items:center;gap:6px;align-self:flex-start;margin-top:3px;background:none;border:0;padding:3px 2px;color:var(--terra);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+.podx .pobill-add svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.podx .pobill-add:hover{color:var(--terra-deep)}
 .podx .stage.next-later .t{color:var(--ink-3)}
 /* NB: .sec here is the desktop SECTION header (note the margin). The mobile action-bar and
    sheet buttons deliberately use .is-sec / .is-pri so this rule cannot leak into them —
@@ -518,6 +533,25 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
       qc.invalidateQueries({ queryKey: ['attachable_bills', poId] });
       qc.invalidateQueries({ queryKey: ['po_paid_rollup', poId] });
     } catch (e: any) { showSnackbar(e?.message || 'Could not link the bill', { type: 'error' }); throw e; }
+  };
+  // Remove a bill from this PO's linked bills. The bill itself stays in the Bills module; only the link
+  // is cut. A bill with payments already recorded is a firmer decision — confirm, and say the payments stay.
+  const removeLinkedBill = async (billId: string, billLabel: string, paid: number): Promise<void> => {
+    if (!poId) return;
+    const warn = paid > 0
+      ? `${billLabel} has ${inr0(paid)} paid against it. Remove it from this PO anyway? The bill and its payments stay in Bills — only the link to this PO is removed.`
+      : `Remove ${billLabel} from this PO? The bill stays in Bills; only its link to this PO is removed.`;
+    if (!window.confirm(warn)) return;
+    try {
+      await unlinkBillFromPO(billId, poId);
+      refetchPoBills();
+      qc.invalidateQueries({ queryKey: ['po_detail', poId] });
+      qc.invalidateQueries({ queryKey: ['bills'] });
+      qc.invalidateQueries({ queryKey: ['po_list_sheet'] });
+      qc.invalidateQueries({ queryKey: ['attachable_bills', poId] });
+      qc.invalidateQueries({ queryKey: ['po_paid_rollup', poId] });
+      showSnackbar('Bill removed from this PO');
+    } catch (e: any) { showSnackbar(e?.message || 'Could not remove the bill', { type: 'error' }); }
   };
   const [billEditOpen, setBillEditOpen] = useState(false);   // editing/replacing an already-recorded bill
   const [payRowOpen,   setPayRowOpen]   = useState(false);
@@ -1347,9 +1381,15 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
               <div className="m-hh">Vendor bill{billEntities.length > 1 ? 's' : ''}</div>
               <div className="m-billrow" style={{ flexWrap: 'wrap' }}>
                 {billEntities.map(b => (
-                  <button key={b.id} className="m-brbtn" onClick={() => navigate(`/bills/${encodeURIComponent('bl~' + b.id)}`, { state: { backTo: `/purchase-orders/${poId}`, backLabel: poId } })}>
-                    <svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5" /></svg>{b.billNo ? `Bill ${b.billNo}` : 'Bill'} · {inr0(b.amount)}
-                  </button>
+                  <span key={b.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                    <button className="m-brbtn" onClick={() => navigate(`/bills/${encodeURIComponent('bl~' + b.id)}`, { state: { backTo: `/purchase-orders/${poId}`, backLabel: poId } })}>
+                      <svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5" /></svg>{b.billNo ? `Bill ${b.billNo}` : 'Bill'} · {inr0(b.amount)}
+                    </button>
+                    {!cancelled && (
+                      <button className="m-brbtn" title="Remove this bill from the PO" style={{ color: 'var(--terracotta, #b5502f)' }}
+                        onClick={() => void removeLinkedBill(b.id, b.billNo ? `Bill ${b.billNo}` : 'this bill', poPaid?.perBill?.[b.id] ?? 0)}>✕</button>
+                    )}
+                  </span>
                 ))}
                 {!cancelled && (
                   <button className="m-brbtn" onClick={() => openPoBillPicker()}>
@@ -1537,20 +1577,27 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
               <div className="act"><button className={`btn sm${nowStage === 'bill' ? ' primary' : ''}`} onClick={() => openPoBillPicker()}>Record bill</button></div>
             )}
             {hasBill && !cancelled && (
-              <div className="act" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                {/* The PO holds LINKS to its bill entities, not the bill itself — each opens the bill. */}
+              /* The PO holds LINKS to its bill entities, not the bill itself — a clean list, each row
+                 opening the bill, with a right-aligned unlink. "Add another" closes it off. */
+              <div className="pobills">
                 {billEntities.map(b => {
                   const bPaid = poPaid?.perBill?.[b.id] ?? 0;
                   const bBal = (Number(b.amount) || 0) - bPaid;
+                  const settled = bBal <= 0.5;
                   return (
-                  <button key={b.id} className="btn ghost sm" onClick={() => navigate(`/bills/${encodeURIComponent('bl~' + b.id)}`, { state: { backTo: `/purchase-orders/${poId}`, backLabel: poId } })}>
-                    <svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5" /></svg>
-                    {b.billNo ? `Bill ${b.billNo}` : 'Bill'} · {inr0(b.amount)}
-                    <span style={{ opacity: .65, marginLeft: 5 }}>· {bBal <= 0.5 ? 'paid' : `${inr0(bBal)} due`}</span>
-                  </button>
+                  <div className="pobill" key={b.id}>
+                    <button className="pobill-open" onClick={() => navigate(`/bills/${encodeURIComponent('bl~' + b.id)}`, { state: { backTo: `/purchase-orders/${poId}`, backLabel: poId } })}>
+                      <svg className="pobill-ic" viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5" /></svg>
+                      <span className="pobill-nm">{b.billNo ? `Bill ${b.billNo}` : 'Bill'}</span>
+                      <span className="pobill-amt">{inr0(b.amount)}</span>
+                      <span className={`pobill-st${settled ? ' ok' : ''}`}>{settled ? 'paid' : `${inr0(bBal)} due`}</span>
+                    </button>
+                    <button className="pobill-x" title="Remove this bill from the PO"
+                      onClick={() => void removeLinkedBill(b.id, b.billNo ? `Bill ${b.billNo}` : 'this bill', bPaid)}>✕</button>
+                  </div>
                   );
                 })}
-                <button className="btn ghost sm" onClick={() => openPoBillPicker()}>
+                <button className="pobill-add" onClick={() => openPoBillPicker()}>
                   <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
                   Add another bill
                 </button>

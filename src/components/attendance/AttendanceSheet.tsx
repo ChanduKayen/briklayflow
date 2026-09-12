@@ -196,6 +196,11 @@ const ATDX_CSS = `
 .atdx .cell.qty small{font-size:9px;color:var(--soft);margin-left:1px}
 .atdx .cell.gap{color:var(--soft);font-weight:400}
 .atdx .cell.off{color:#CFC4B0;pointer-events:none}
+/* A settled (past) week is frozen: cells read-only + greyed, so a paid run can't be edited under the money. */
+.atdx .wklock{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:var(--terracotta);background:color-mix(in srgb,var(--terracotta) 9%,transparent);border:1px solid color-mix(in srgb,var(--terracotta) 22%,transparent);border-radius:999px;padding:3px 11px}
+.atdx.wk-locked #atdxBody{opacity:.62;filter:saturate(.6)}
+.atdx.wk-locked #atdxBody .cell,.atdx.wk-locked #atdxBody .cellwrap,.atdx.wk-locked #atdxBody [data-rate]{pointer-events:none;cursor:default}
+.atdx.wk-locked .dayhead .dh{cursor:default}
 
 /* the add-worker flow lives inside the site card, below its rows */
 .atdx .siteblock > [id^="add-"]:not(:empty){padding:14px 20px 16px;border-top:1px solid var(--rule)}
@@ -361,7 +366,20 @@ const inr = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
 const SITE_DOT = ['#C0603F', '#6E8260', '#B98A2F', '#5E7A8A'];
 /** The chips carry a short name — the mock takes the first two words. */
 const shortSite = (label: string) => label.split(' ').slice(0, 2).join(' ');
-const isoOf = (d: Date) => d.toISOString().slice(0, 10);
+// LOCAL date, not UTC — matches attendanceApi's `iso` so today's column lines up with the muster
+// week (a UTC slice shifted the whole grid back a day in IST; see attendanceApi.ts).
+const isoOf = (d: Date) => `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
+
+// The inverse of `rateFor`: which org rate-card cell a (crew trade, wage-type) is paid from. Rates are
+// two-way linked to the card — there are no per-worker overrides, so an edit anywhere lands on the one
+// (trade, kind) the card keeps and every worker of that trade+skill moves with it.
+type CardCell = { key: string; kind: 'skilled' | 'hm' | 'hf' };
+function cardCellFor(trade: string | null, cat: string): CardCell {
+  if (cat === 'Supervisor') return { key: 'supervisor', kind: 'skilled' };
+  if (cat === 'Helper · male') return { key: trade ?? 'unskilled', kind: 'hm' };
+  if (cat === 'Helper · female') return { key: trade ?? 'unskilled', kind: 'hf' };
+  return { key: cat, kind: 'skilled' };   // a skilled trade — the category name IS the card trade
+}
 
 export default function AttendanceSheet({ session }: { session: Session }) {
   const orgId = useOrgId();
@@ -386,6 +404,10 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   const dates = weekDates(monday);
   const todayISO = isoOf(new Date());
   const TODAY = todayISO > dates[6] ? 6 : todayISO < dates[0] ? -1 : dates.indexOf(todayISO);
+  // A week that has fully passed is SETTLED: its wages are already netted in the ledger and the payment
+  // for that run has been made. It stays visible for reference but its cells are frozen — greyed and not
+  // editable — so a finished, paid week can't be silently changed under the money that already moved.
+  const locked = isoOf(monday) < isoOf(mondayOf(new Date()));
 
   // ── rate helpers (ported from the reference, reading the live CARD) ──────────
   const rateFor = useCallback((trade: string | null, cat: string): number => {
@@ -434,6 +456,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
         try { await seedRateCard(orgId); const r2 = await loadWeek(monday); sites = r2.sites; card = r2.card; } catch { /* seeding is best-effort */ }
       }
       DATA.current = sites; CARD.current = card; PARTIES.current = parties;
+      deriveRates();   // rates come off the card, not the stored per-row snapshot
       setLoading(false);
       requestAnimationFrame(() => { render(); if (rcOpen) renderCard(); });
     } catch (e: any) {
@@ -650,10 +673,46 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     try { await saveCell(orgId, projectId, dates[i], subject, value, byName); } catch (e) { fail(e); }
   }
 
+  // Every worker's daily rate DERIVES from the org rate card (no per-worker overrides). Recompute after
+  // a load or any rate edit so the grid, the marking popover's cost and the site totals all read the one
+  // number the card keeps for that trade + skill.
+  const deriveRates = () => {
+    const C = CARD.current; if (!C) return;
+    for (const s of DATA.current) {
+      for (const cr of s.crews) for (const cat of cr.cats) cat.rate = rateFor(cr.trade, cat.n);
+      for (const w of s.direct) w.rate = rateFor(resolveTrade(w.cat), w.cat);
+    }
+  };
+
+  // Edit a rate — from the card table, the marking popover, or a worker row. It is two-way linked: the
+  // card is the source of truth, so we (1) write the card (org-wide, from today), (2) re-derive every
+  // worker's rate, and (3) mirror the new number onto every stored row it now governs, so Payables /
+  // the ledger read exactly what the sheet shows. One number per trade + skill, everywhere.
+  const editRate = (cell: CardCell, v: number) => {
+    const C = CARD.current; if (!C) return;
+    const before = new Map<string, number>();
+    for (const s of DATA.current) {
+      for (const cr of s.crews) for (const cat of cr.cats) before.set('c' + cat.id, cat.rate);
+      for (const w of s.direct) before.set('d' + w.id, w.rate);
+    }
+    if (cell.key === 'unskilled') C.unskilled[cell.kind as 'hm' | 'hf'] = v;
+    else if (cell.key === 'supervisor') C.supervisor = v;
+    else (C.trades[cell.key] ||= { skilled: null, hm: null, hf: null })[cell.kind] = v;
+    C.since[cell.key + '.' + cell.kind] = 'today';
+    saveRate(orgId, cell.key, cell.kind, v).catch(fail);
+    deriveRates();
+    const jobs: Promise<void>[] = [];
+    for (const s of DATA.current) {
+      for (const cr of s.crews) for (const cat of cr.cats) if (before.get('c' + cat.id) !== cat.rate) jobs.push(setCategoryRate(cat.id, cat.rate, false));
+      for (const w of s.direct) if (before.get('d' + w.id) !== w.rate) jobs.push(setDirectRate(w.id, w.rate, false));
+    }
+    if (jobs.length) Promise.all(jobs).catch(fail);
+  };
+
   // Click a day header → mark everyone with an empty cell present (1) for that day. Only fills gaps
   // (never overwrites a real mark), skips contract crews (measured, not mustered) and days off.
   function fillDay(i: number) {
-    if (i < 0 || i > 6) return;
+    if (locked || i < 0 || i > 6) return;
     let marked = 0;
     const saves: Promise<void>[] = [];
     const mark = (cells: Cell[], subject: any, projectId: string) => {
@@ -726,6 +785,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   // The crew breakdown popover (the mockup): steppers per skill for ONE day, live count + cost, a
   // clickable rate, and add/remove skill. Persists each change; the cell repaints live, totals on close.
   function openCrewPopover(cellDiv: HTMLElement, si: number, ci: number, i: number) {
+    if (locked) return;   // a settled week is frozen — no marking, no rate edits from its cells
     const host = cellDiv.closest('.cellwrap') as HTMLElement | null; if (!host) return;
     host.querySelector('.bpop')?.remove();
     const crew = DATA.current[si].crews[ci];
@@ -788,7 +848,8 @@ export default function AttendanceSheet({ session }: { session: Session }) {
       const inp = r.querySelector('input') as HTMLInputElement; inp.focus(); inp.select();
       const commit = () => {
         const v = parseInt(inp.value.replace(/,/g, ''), 10);
-        if (!isNaN(v)) { crew.cats[ki].rate = v; crew.cats[ki].own = true; setCategoryRate(crew.cats[ki].id, v).catch(fail); (r as HTMLElement).textContent = `${inr(v)}/day`; dirty = true; foot(); }
+        // Two-way linked: this writes the card for the crew's (trade, skill) and moves every worker on it.
+        if (!isNaN(v)) { editRate(cardCellFor(crew.trade, crew.cats[ki].n), v); (r as HTMLElement).textContent = `${inr(crew.cats[ki].rate)}/day`; dirty = true; foot(); if (rcOpen) renderCard(); }
         else (r as HTMLElement).textContent = `${inr(crew.cats[ki].rate)}/day`;
       };
       inp.addEventListener('blur', commit);
@@ -813,11 +874,12 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     const body = q('#atdxBody'); if (!body) return;
     body.querySelectorAll('[data-crewcell]').forEach(div => div.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (locked) return;
       const [si, ci, i] = (div as HTMLElement).dataset.crewcell!.split('.').map(Number);
       openCrewPopover(div as HTMLElement, si, ci, i);
     }));
     body.querySelectorAll('[data-edit]').forEach(div => div.addEventListener('click', () => {
-      if (div.querySelector('input')) return;
+      if (locked || div.querySelector('input')) return;
       const t = resolve((div as HTMLElement).dataset.edit!), i = colOf(div);
       // A contract stage's reading MINTS a governed obligation. Measurement-basis + a measured stage
       // auto-certifies inline (the day is the reading); everything else opens the Certification Wizard.
@@ -835,6 +897,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
       inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.removeEventListener('blur', commit); render(); } });
     }));
     body.querySelectorAll('[data-cycle]').forEach(div => div.addEventListener('click', () => {
+      if (locked) return;
       const t = resolve((div as HTMLElement).dataset.cycle!), i = colOf(div), c = t.cells[i];
       let v: number;
       if (!c || c === 'off') { v = 1; t.cells[i] = { v, src: 'office', by: byName, at: 'just now' }; }
@@ -858,9 +921,12 @@ export default function AttendanceSheet({ session }: { session: Session }) {
       const commit = () => {
         const v = parseInt(inp.value.replace(/,/g, ''), 10);
         if (!isNaN(v)) {
-          target.rate = v; target.own = true;
-          const save = t.subject.type === 'crew_category' ? setCategoryRate(t.subject.category_id, v) : setDirectRate((t.subject as any).direct_worker_id, v);
-          save.catch(fail);
+          // Two-way linked: a worker's rate writes the card cell for their (trade, skill). This row is a
+          // direct worker (helpers/unskilled map to the unskilled card row; a trade maps to its own).
+          const cat = target.cat ?? target.n;
+          const trade = t.subject.type === 'crew_category' ? null : resolveTrade(cat);
+          editRate(cardCellFor(trade, cat), v);
+          if (rcOpen) renderCard();
         }
         render();
       };
@@ -1068,11 +1134,9 @@ export default function AttendanceSheet({ session }: { session: Session }) {
       const inp = div.querySelector('input') as HTMLInputElement; inp.focus(); inp.select();
       const commit = () => {
         const v = parseInt(inp.value.replace(/,/g, ''), 10);
-        if (!isNaN(v)) {
-          if (key === 'unskilled') C.unskilled[f as 'hm' | 'hf'] = v; else if (key === 'supervisor') C.supervisor = v; else C.trades[key][f] = v;
-          C.since[key + '.' + f] = 'today';
-          saveRate(orgId, key, f, v).catch(fail);
-        }
+        // Editing the card here is the same act as editing a rate on the floor — it writes the card,
+        // re-derives every worker and mirrors the number onto their rows. Refresh the grid too.
+        if (!isNaN(v)) { editRate({ key, kind: f }, v); render(); }
         renderCard();
       };
       inp.addEventListener('blur', commit);
@@ -1096,7 +1160,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   const sites = DATA.current;
 
   return (
-    <div className="atdx" ref={rootRef}>
+    <div className={`atdx${locked ? ' wk-locked' : ''}`} ref={rootRef}>
       <style>{ATDX_CSS}</style>
       {certCtx && <CertificationWizard ctx={certCtx}
         onClose={() => setCertCtx(null)}
@@ -1128,6 +1192,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
           </div>
           <span className="tlink" onClick={() => setMonday(mondayOf(new Date()))}>this week</span>
           <span className="tlink" onClick={() => setRcOpen(o => !o)}>{rcOpen ? 'hide rate card' : 'rate card'}</span>
+          {locked && <span className="wklock" title="This week is settled — its wages are already netted in the ledger and paid.">🔒 Settled · read-only</span>}
 
           <div className="chips" role="group">
             {[{ k: 'all', l: 'All sites', c: '' }, ...sites.map((s2, i) => ({ k: s2.site, l: shortSite(s2.label), c: SITE_DOT[i % SITE_DOT.length] }))].map((c, i) => (
@@ -1156,7 +1221,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
           <div className="corner">Crew · worker</div>
           {dates.map((d, i) => {
             const dt = new Date(d);
-            const fillable = i <= TODAY && i !== 6;
+            const fillable = !locked && i <= TODAY && i !== 6;
             return (
               <div key={d} className={`dh${i === TODAY ? ' today' : ''}${i > TODAY ? ' future' : ''}`}
                 onClick={fillable ? () => fillDay(i) : undefined}>

@@ -1,8 +1,10 @@
 // The PO's "Bills" door — the SAME bills that live in the Bills module (a PO never uploads one of its own;
 // bills come from the module or WhatsApp). Shows the org's bills as document thumbnails (images AND PDFs),
-// filterable by Site and Payee like a file picker. By default it shows unattached, still-owed bills; already-
-// attached ones are hidden until "Show attached" is on. Tap to select (green tick), tap again to unselect,
-// then Attach. "Upload a new bill" saves it to the module and it lands in the grid, auto-selected.
+// filterable by Site and Payee like a file picker. By default it shows every bill NOT already on an order —
+// whether still owed OR fully settled (a paid bill can still belong on a PO; being settled is unrelated to
+// being on an order). Bills already on an order are hidden until "Show bills on order" is ticked. Tap to
+// select (green tick), tap again to unselect — SEVERAL at once — then Attach them all. "Upload a new bill"
+// saves it to the module and it lands in the grid, auto-selected.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { AttachBillRow } from '../../lib/billsApi';
@@ -18,7 +20,7 @@ export function PoAttachBillPopup({ bills, poProjectId, poVendorId, onLink, onUp
   const [site, setSite] = useState<string>('all');
   const [payee, setPayee] = useState<string>('all');
   const [showAttached, setShowAttached] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [linking, setLinking] = useState(false);
   const [done, setDone] = useState(false);
 
@@ -49,19 +51,22 @@ export function PoAttachBillPopup({ bills, poProjectId, poVendorId, onLink, onUp
     const ids = new Set(bills.map((b) => b.id));
     if (seen.current) {
       const fresh = bills.find((b) => !seen.current!.has(b.id) && !b.linked);
-      if (fresh) { setSite(fresh.projectId || 'all'); setPayee(fresh.vendorId || 'all'); setSelectedId(fresh.id); }
+      if (fresh) { setSite(fresh.projectId || 'all'); setPayee(fresh.vendorId || 'all'); setSelectedIds((s) => new Set(s).add(fresh.id)); }
     }
     seen.current = ids;
   }, [bills]);
 
   const shown = useMemo(() => bills.filter((b) => {
-    if (!showAttached && (b.linked || b.remaining <= 0.5)) return false;   // default: unattached + still owed
+    // Default: every bill NOT on an order — settled or still owed alike. Being paid off is unrelated to
+    // whether it belongs on this PO. On-order bills appear only when "Show bills on order" is ticked.
+    if (!showAttached && b.linked) return false;
     if (site !== 'all' && b.projectId !== site) return false;
     if (payee !== 'all' && b.vendorId !== payee) return false;
     return true;
   }), [bills, showAttached, site, payee]);
 
-  const selected = bills.find((b) => b.id === selectedId && !b.linked) || null;
+  const selectedList = bills.filter((b) => selectedIds.has(b.id) && !b.linked);
+  const selTotal = selectedList.reduce((s, b) => s + (Number(b.amount) || 0), 0);
   const anyAttached = bills.some((b) => b.linked);
 
   // The documents bucket is PRIVATE — a stored doc_url is a dead public URL until re-signed. Sign each
@@ -80,10 +85,12 @@ export function PoAttachBillPopup({ bills, poProjectId, poVendorId, onLink, onUp
   }, [shown]);
 
   async function attach() {
-    if (!selectedId || linking || done) return;
+    if (!selectedList.length || linking || done) return;
     setLinking(true);
-    try { await onLink(selectedId); setLinking(false); setDone(true); window.setTimeout(onClose, 850); }
-    catch { setLinking(false); }
+    try {
+      for (const b of selectedList) await onLink(b.id);   // link each selected bill to the PO, in turn
+      setLinking(false); setDone(true); window.setTimeout(onClose, 850);
+    } catch { setLinking(false); }
   }
 
   return createPortal(
@@ -114,7 +121,7 @@ export function PoAttachBillPopup({ bills, poProjectId, poVendorId, onLink, onUp
           {anyAttached && (
             <label className="pabx-toggle">
               <input type="checkbox" checked={showAttached} onChange={(e) => setShowAttached(e.target.checked)} />
-              Show attached
+              Show bills on order
             </label>
           )}
         </div>
@@ -129,10 +136,10 @@ export function PoAttachBillPopup({ bills, poProjectId, poVendorId, onLink, onUp
           ) : (
             <div className="pabx-grid">
               {shown.map((b) => {
-                const isSel = selectedId === b.id && !b.linked;
+                const isSel = selectedIds.has(b.id) && !b.linked;
                 return (
                 <button key={b.id} className={`pabx-tile${isSel ? ' on' : ''}${b.linked ? ' linked' : ''}`}
-                  onClick={() => { if (!b.linked && !done) setSelectedId(isSel ? null : b.id); }} disabled={done || b.linked}
+                  onClick={() => { if (!b.linked && !done) setSelectedIds((s) => { const n = new Set(s); if (n.has(b.id)) n.delete(b.id); else n.add(b.id); return n; }); }} disabled={done || b.linked}
                   title={b.linked ? `Already on ${b.poId || 'an order'}` : undefined}>
                   <span className="pabx-thumb">
                     {(() => {
@@ -164,10 +171,10 @@ export function PoAttachBillPopup({ bills, poProjectId, poVendorId, onLink, onUp
             <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4M5 20h14" /></svg>
             Upload a new bill
           </button>
-          <button className={`pabx-attach${done ? ' done' : ''}`} disabled={!selected || linking || done} onClick={() => void attach()}>
+          <button className={`pabx-attach${done ? ' done' : ''}`} disabled={!selectedList.length || linking || done} onClick={() => void attach()}>
             {done ? <><svg className="tk" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></svg> Attached</>
               : linking ? <><span className="pabx-spin light" /> Attaching…</>
-              : <>Attach{selected ? ` · ${inr(selected.amount)}` : ' bill'}</>}
+              : <>Attach{selectedList.length > 1 ? ` ${selectedList.length} bills` : ''}{selectedList.length ? ` · ${inr(selTotal)}` : ' bill'}</>}
           </button>
         </div>
       </div>
