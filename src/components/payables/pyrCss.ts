@@ -199,7 +199,10 @@ export const PYR_CSS = `
   border-radius:10px;margin-bottom:7px;cursor:pointer;transition:border-color .14s ease,background .14s ease}
 .pyr .pop label:hover{border-color:var(--ink2)}
 .pyr .pop label.on{border-color:var(--ink);background:var(--card2)}
-.pyr .pop label input[type=radio]{accent-color:var(--ink);margin-top:2px;flex:none}
+/* The popover lives INSIDE .amt-wrap, whose input width:100% (the payment field) would otherwise
+   leak onto these radios and blow each one up to the full popover width. Reset them explicitly. */
+.pyr .pop label input[type=radio]{width:auto;height:auto;accent-color:var(--ink);margin:2px 0 0;flex:none}
+.pyr .pop label span{flex:1;min-width:0}
 .pyr .pop label .t{font-weight:600;font-size:13px;line-height:1.35}
 .pyr .pop label .d{font-size:12px;color:var(--ink3);margin-top:2px}
 .pyr .pop .why{width:100%;border:1px solid var(--line);border-radius:9px;background:var(--paper);

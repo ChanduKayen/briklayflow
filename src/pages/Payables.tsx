@@ -145,10 +145,12 @@ export default function Payables({ session }: { session: Session }) {
       if (Math.abs(rem) < 1) return { v: 0, m: 'settled', cls: 'zero' };
       return rem > 0 ? { v: rem, m: 'carried', cls: '' } : { v: -rem, m: 'advance to them', cls: '' };
     }
-    // Not paid yet — never say "settled". A pure wage row has no running balance to show.
-    if (r.balanceBf < 1 && Math.abs(rem) < 1) return null;
-    if (Math.abs(rem) < 1) return { v: 0, m: 'clears the balance', cls: 'zero' };
-    return rem > 0 ? { v: rem, m: 'would carry', cls: '' } : { v: -rem, m: 'advance', cls: '' };
+    // Not paid yet — the "after" column reads the running total the party is owed once this week's work
+    // is added on top of what they carried: balance b/f + this week. (After payment, above, it flips to
+    // the remainder — settled / carried / advance — which is what matters once money has moved.)
+    const owedTotal = Math.round(owed(r));
+    if (owedTotal < 1) return null;
+    return { v: owedTotal, m: 'owed', cls: '' };
   };
 
   const totals = useMemo(() => {
