@@ -2,7 +2,7 @@
 // Paid / Certified / "ahead" running balance, in By-date / By-contract / By-site views, with
 // period + search filters. Certified is inferred from the attendance stage readings. Opening
 // balance and Adjustments are recorded here; Payment reuses QuickTransactionSheet.
-import { useMemo, useState, useEffect, createContext, useContext, type ReactElement } from 'react';
+import { useMemo, useRef, useState, useEffect, createContext, useContext, type ReactElement } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { usePeek } from '../context/PeekContextCore';
@@ -892,7 +892,10 @@ function OpeningModal({ orgId, L, onClose, onSaved, onError }: { orgId: string; 
 
   // A row per site the balance is split across; projectId '' = not site-specific (whole party).
   type Row = { key: string; projectId: string; amount: string };
-  let rk = 0; const nk = () => `r${++rk}`;
+  // Row keys must be UNIQUE and STABLE across renders. A plain `let rk = 0` reset to 0 every render, so
+  // addRow's nk() handed out keys (r1, r2…) that already existed — two rows then shared a key and setRow
+  // updated BOTH, which is why editing one site's row bled into another. A ref keeps the counter monotonic.
+  const rkRef = useRef(0); const nk = () => `r${++rkRef.current}`;
   const [rows, setRows] = useState<Row[]>(() => {
     if (L.opening) {
       const r: Row[] = Object.entries(L.opening.bySite).map(([pid, amt]) => ({ key: nk(), projectId: pid, amount: String(amt) }));
