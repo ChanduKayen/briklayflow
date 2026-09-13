@@ -166,17 +166,27 @@ export async function loadWeeklyPayments(monday: Date): Promise<WeeklyPayments> 
       const projName: Record<string, string> = {};
       if (needProj.size) { const pr = await supabase.from('projects').select('project_id, name').in('project_id', [...needProj]); (pr.data ?? []).forEach((p: any) => { projName[p.project_id] = p.name; }); }
 
+      // (A) Reconcile each worker's this-week row to its site's owed:
+      //     balance b/f = site owed − this week's payable on it. It CAN be negative — a site whose work
+      //     this week was already paid nets b/f + this week = the site's owed (e.g. ASM: 0 − 21,000 =
+      //     −21,000 b/f, +21,000 this week, total 0), instead of leaving this week's figure hanging.
+      //     Only the first row per (worker, site) carries the adjustment (repBySite summed the rest).
+      sections.forEach(s => s.rows.forEach(r => {
+        if (!r.stakeholderId || r.kind === 'recurring') return;
+        if (rowBySite[r.stakeholderId]?.[r.projectId] !== r) return;
+        const owedHere = siteOwed[r.stakeholderId]?.[r.projectId] ?? 0;
+        const repHere = repBySite[r.stakeholderId]?.[r.projectId] ?? 0;
+        r.balanceBf += Math.round(owedHere - repHere);
+      }));
+      // (B) A site a worker is owed on but did NO work this week → a standalone "owed from earlier" row.
       const standalone: PayRow[] = [];
       for (const w of workers) {
         const sid = w.stakeholder_id;
-        const sites = siteOwed[sid] || {};
-        // Per SITE: balance b/f = what's owed on that site − this week's payable on it.
-        for (const proj of Object.keys(sites)) {
-          const carried = Math.round(sites[proj] - ((repBySite[sid]?.[proj]) || 0));
+        for (const proj of Object.keys(siteOwed[sid] || {})) {
+          if (rowBySite[sid]?.[proj]) continue;   // already reconciled in (A)
+          const carried = Math.round(siteOwed[sid][proj]);
           if (carried <= 0.5) continue;
-          const foldRow = rowBySite[sid]?.[proj];
-          if (foldRow) foldRow.balanceBf += carried;
-          else standalone.push({
+          standalone.push({
             key: `carry-${sid}-${proj}`, projectId: proj, projectName: projName[proj] || proj,
             stakeholderId: sid, party: w.name || 'Worker', trade: w.category || 'Worker',
             kind: 'wages', basis: 'owed from earlier · no work logged this week', thisWeek: 0, balanceBf: carried,

@@ -208,7 +208,9 @@ export default function Payables({ session }: { session: Session }) {
   }))), [sections]), setQ);
 
   const paidOf = (r: PayRow): number | null => paid[r.key] ?? serverPaid[r.key]?.amount ?? null;
+  // "This week" stays the computed figure (drives the pay amount + the why-popover) — untouched.
   const planned = (r: PayRow) => paidOf(r) ?? plan[r.key] ?? Math.round(r.thisWeek);
+  // Total = balance b/f + this week (b/f can be negative when this week was already paid → nets down).
   const owed = (r: PayRow) => r.balanceBf + r.thisWeek;
   const afterOf = (r: PayRow, isPaid: boolean): { v: number; m: string; cls: string } | null => {
     // "This week's figure is actually ₹X" (re-agreed): the paid amount IS the correct figure, so the
@@ -221,11 +223,11 @@ export default function Payables({ session }: { session: Session }) {
       if (Math.abs(rem) < 1) return { v: 0, m: 'settled', cls: 'zero' };
       return rem > 0 ? { v: rem, m: 'carried', cls: '' } : { v: -rem, m: 'advance to them', cls: '' };
     }
-    // Not paid yet — the "after" column reads the running total the party is owed once this week's work
-    // is added on top of what they carried: balance b/f + this week. (After payment, above, it flips to
-    // the remainder — settled / carried / advance — which is what matters once money has moved.)
+    // Not paid yet — the total is the running figure: balance b/f + this week. When b/f offsets this week
+    // (already paid this week) it nets to 0 → "settled"; a net advance shows as such. (After payment,
+    // above, it flips to the remainder — settled / carried / advance.)
     const owedTotal = Math.round(owed(r));
-    if (owedTotal < 1) return null;
+    if (owedTotal <= 0) return { v: Math.abs(owedTotal), m: owedTotal <= -1 ? 'advance' : 'settled', cls: 'zero' };
     return { v: owedTotal, m: 'owed', cls: '' };
   };
 
@@ -551,7 +553,7 @@ export default function Payables({ session }: { session: Session }) {
                       </div>
 
                       <div className={`bf${r.balanceBf ? '' : ' none'}`}>
-                        {r.balanceBf ? <>{inr(r.balanceBf)}<small>carried</small></> : '—'}
+                        {r.balanceBf ? <>{inr(r.balanceBf)}<small>{r.balanceBf < 0 ? 'paid ahead' : 'carried'}</small></> : '—'}
                       </div>
 
                       <div className="amt-wrap">
