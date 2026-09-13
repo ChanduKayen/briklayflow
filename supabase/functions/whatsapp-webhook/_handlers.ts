@@ -140,23 +140,30 @@ async function matchPayee(
 
   const { data: stakeholders } = await supabase
     .from('stakeholders')
-    .select('stakeholder_id, name')
+    .select('stakeholder_id, name, aliases')
     .limit(50)
 
   if (!stakeholders?.length) return null
 
+  // each party is matched by its name AND its aliases (other names it goes by)
+  const namesOf = (s: any): string[] => [s.name, ...((s.aliases ?? []) as string[])].filter(Boolean)
+
   // Priority 1: exact or strong contains match
   for (const s of stakeholders) {
-    const full  = s.name.toLowerCase()
-    const first = full.split(' ')[0]
-    if (full === lower) return { id: s.stakeholder_id, name: s.name }
-    if (full.includes(lower) || lower.includes(first)) return { id: s.stakeholder_id, name: s.name }
+    for (const nm of namesOf(s)) {
+      const full  = nm.toLowerCase()
+      const first = full.split(' ')[0]
+      if (full === lower) return { id: s.stakeholder_id, name: s.name }
+      if (full.includes(lower) || lower.includes(first)) return { id: s.stakeholder_id, name: s.name }
+    }
   }
 
   // Priority 2: Levenshtein ≤ 2 on first name
   for (const s of stakeholders) {
-    const first = s.name.toLowerCase().split(' ')[0]
-    if (levenshtein(lower, first) <= 2) return { id: s.stakeholder_id, name: s.name }
+    for (const nm of namesOf(s)) {
+      const first = nm.toLowerCase().split(' ')[0]
+      if (levenshtein(lower, first) <= 2) return { id: s.stakeholder_id, name: s.name }
+    }
   }
 
   return null

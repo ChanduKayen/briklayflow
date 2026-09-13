@@ -188,7 +188,7 @@ async function roleOf(supabase: DB, from: string): Promise<string | null> {
 /** `type` decides which ledger a party has: 'Vendor' -> POs and v_vendor_balance; 'Worker'/'Labour' -> work
  *  orders (not read yet — they keep the paid-to-date answer); anything else -> no contract, so no balance. */
 async function loadStakeholders(supabase: DB, orgId: string): Promise<{ stakeholder_id: string; name: string; type?: string | null }[]> {
-  const { data } = await supabase.from('stakeholders').select('stakeholder_id, name, type').eq('org_id', orgId)
+  const { data } = await supabase.from('stakeholders').select('stakeholder_id, name, type, aliases').eq('org_id', orgId)
   return (data ?? []) as { stakeholder_id: string; name: string; type?: string | null }[]
 }
 

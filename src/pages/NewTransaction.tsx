@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { searchPayees } from '../lib/payeeSearch';
 import { Loader2 } from 'lucide-react';
 import type { Stakeholder, Project } from '../types';
 import type { Session } from '@supabase/supabase-js';
@@ -665,7 +666,7 @@ export default function NewTransaction({ session: _session }: { session: Session
   // ── Queries ──────────────────────────────────────────────────────────────
   const { data: stakeholders } = useQuery({
     queryKey: ['stakeholders'],
-    queryFn: async () => { const { data } = await supabase.from('stakeholders').select('*'); return data as Stakeholder[]; },
+    queryFn: async () => { const { data } = await supabase.from('stakeholders').select('*').is('merged_into', null); return data as Stakeholder[]; },
   });
   const { data: projects } = useQuery({
     queryKey: ['projects'],
@@ -757,12 +758,17 @@ export default function NewTransaction({ session: _session }: { session: Session
   const _qNorm = _pn(stkSearch);
   const _qCompact = _qNorm.replace(/\s+/g, '');
   const _qTokens = _qNorm.split(' ').filter(Boolean);
-  const filtStk = (stakeholders || []).filter((s) => {
-    if (!allowPayee(s.type)) return false;
-    if (!_qCompact) return true;
-    const nName = _pn(s.name);
-    return nName.replace(/\s+/g, '').includes(_qCompact) || _qTokens.every((t) => nName.includes(t));
-  });
+  // A name (or an ALIAS — the other names a party goes by) matches when the compacted query is a
+  // substring ("b.r"→"br") or every token appears in any order.
+  const _matchRaw = (text: string) => {
+    const t = _pn(text);
+    return t.replace(/\s+/g, '').includes(_qCompact) || _qTokens.every((tok) => t.includes(tok));
+  };
+  const _dirAllowed = (stakeholders || []).filter((s) => allowPayee(s.type));
+  // fuzzy rescue (alias-aware) for spellings a substring can never reach — sreenu→Srinu, etc.
+  const _fuzzyIds = _qCompact ? new Set(searchPayees(_dirAllowed as any, stkSearch).map((s: any) => s.stakeholder_id)) : null;
+  const filtStk = !_qCompact ? _dirAllowed : _dirAllowed.filter((s) =>
+    _matchRaw(s.name) || (s.aliases ?? []).some(_matchRaw) || _fuzzyIds!.has(s.stakeholder_id));
   const selName = stakeholders?.find((s) => s.stakeholder_id === stkId)?.name || '';
   const filteredRecents = recentPayees.filter((p) => allowPayee(p.type));
   // Money out: the party search ALSO surfaces general-expense heads (overheads) — shown below the

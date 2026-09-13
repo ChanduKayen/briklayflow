@@ -41,7 +41,7 @@ export function intakeExtract(file: File): Promise<ExtractedBill> { return extra
 export async function intakeResolveVendor(extracted: ExtractedBill, prefVendorId?: string | null): Promise<{ vendorId: string | null; name: string | null }> {
   if (prefVendorId) return { vendorId: prefVendorId, name: null };
   if (!extracted.vendor) return { vendorId: null, name: null };
-  const { data } = await supabase.from('stakeholders').select('stakeholder_id, name').eq('type', 'Vendor');
+  const { data } = await supabase.from('stakeholders').select('stakeholder_id, name, aliases').eq('type', 'Vendor').is('merged_into', null);
   const hit = searchPayees((data ?? []) as any, extracted.vendor)[0] as any;
   return hit ? { vendorId: hit.stakeholder_id, name: hit.name } : { vendorId: null, name: extracted.vendor };
 }

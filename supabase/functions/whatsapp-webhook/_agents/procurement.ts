@@ -27,7 +27,7 @@ type VendorRow = {
 }
 async function loadVendors(ctx: ProcCtx): Promise<VendorRow[]> {
   const { data } = await ctx.supabase.from('stakeholders')
-    .select('stakeholder_id, name, category, is_approved, rating')
+    .select('stakeholder_id, name, category, is_approved, rating, aliases')
     .eq('org_id', ctx.orgId).eq('type', 'Vendor')
   return (data ?? []) as VendorRow[]
 }

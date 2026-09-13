@@ -351,6 +351,11 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
     });
   }
 
+  // The opening's as-of date is THIS party's cutover floor (also used below to scope the running).
+  // Everything before it is SETTLED by the opening figure, so it must not drive any obligation — not
+  // the running balance, and not the "paid without a bill" requirement either.
+  const floor = opening?.asOf ?? null;
+
   // ── Vendor consolidated bills: mark each payment billed(PO) / covered / still unbilled,
   //    and add a "consolidated bill" billed row per booked bill ──
   const cbs = (cbR.data ?? []) as any[];
@@ -362,6 +367,9 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
     const cbStats: Record<string, { count: number; total: number }> = {};
     for (const e of entries) {
       if (e.kind !== 'payment') continue;
+      // Pre-cutover payments are settled by the opening balance — never "No bill yet", never counted
+      // toward what needs a consolidated bill. (No opening → floor null → normal classification.)
+      if (floor && e.date && e.date < floor) { e.state = 'Settled by opening'; continue; }
       if (e.billId) { e.state = 'Billed'; continue; }          // a first-class bill IS attached — not "No bill yet"
       if (e.contractId) { e.state = 'Billed on a PO'; continue; }
       const cb = covers(e.date);
@@ -396,7 +404,6 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
   //    opening. We don't delete those rows — the running balance is scoped to the opening onward (so it
   //    matches v_party_balance), and the pre-cutover rows are returned separately to show collapsed and
   //    muted (their own historical running, for reference/audit — the "before the books started" tail). ──
-  const floor = opening?.asOf ?? null;
   const scoped = floor ? entries.filter(e => e.kind === 'opening' || !e.date || e.date >= floor) : entries;
   const preRows = floor ? entries.filter(e => e.kind !== 'opening' && !!e.date && e.date < floor) : [];
 

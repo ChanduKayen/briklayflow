@@ -160,16 +160,22 @@ function roleVerdict(qRoles: string[], cand: { name: string; type?: string | nul
   const candHasKnownRole = candCanon.size > 0 || isKnownTrade(cand.category)
   return candHasKnownRole ? -1 : 0
 }
-/** The payee score: token-bag name similarity + nature, floored by the whole-name scorer so nothing regresses. */
-export function scorePayeeRich(q: string, cand: { name: string; type?: string | null; category?: string | null }): number {
+/** The payee score: token-bag name similarity + nature, floored by the whole-name scorer so nothing regresses.
+ *  A party's ALIASES (other spellings / nicknames, never shown) score exactly like the name; the best wins —
+ *  KEEP IN SYNC with src/lib/payeeSearch.ts scorePayeeRich. */
+export function scorePayeeRich(q: string, cand: { name: string; type?: string | null; category?: string | null; aliases?: string[] | null }): number {
   const query = q.trim().toLowerCase()
-  const cname = cand.name.toLowerCase()
   const qAll = payeeTokens(query)
   const qRoles = qAll.filter(isOccupation)
   let qName = qAll.filter((t) => !isOccupation(t))
   if (!qName.length) qName = qAll
-  const base = nameTokenScore(qName, payeeTokens(cname))
-  let score = Math.max(base, scoreName(query, cname))
+  let score = 0
+  for (const nm of [cand.name, ...(cand.aliases ?? [])]) {
+    if (!nm) continue
+    const cl = nm.toLowerCase()
+    score = Math.max(score, nameTokenScore(qName, payeeTokens(cl)), scoreName(query, cl))
+    if (score >= 1) break
+  }
   if (qRoles.length) {
     const v = roleVerdict(qRoles, cand)
     if (v > 0) score = Math.min(1, score + ROLE_BONUS)
@@ -178,7 +184,7 @@ export function scorePayeeRich(q: string, cand: { name: string; type?: string | 
   return score
 }
 
-type ScoreRow = { id: string; name: string; type?: string | null; category?: string | null }
+type ScoreRow = { id: string; name: string; type?: string | null; category?: string | null; aliases?: string[] | null }
 
 function match(raw: string | null, rows: ScoreRow[], autoThreshold: number, scorer: (q: string, r: ScoreRow) => number): Match {
   const empty: Match = { band: 'open', id: null, name: null, score: 0, ambiguous: false, closest: [] }
@@ -219,12 +225,12 @@ export function pickable(m: Match): { id: string; name: string; score: number }[
 
 export function matchPayee(
   raw: string | null,
-  stakeholders: { stakeholder_id: string; name: string; type?: string | null; category?: string | null }[],
+  stakeholders: { stakeholder_id: string; name: string; type?: string | null; category?: string | null; aliases?: string[] | null }[],
 ): Match {
   // Rich token-bag + role-aware scorer (nature breaks same-name ties when type/category are supplied).
   return match(
     raw,
-    stakeholders.map((s) => ({ id: s.stakeholder_id, name: s.name, type: s.type ?? null, category: s.category ?? null })),
+    stakeholders.map((s) => ({ id: s.stakeholder_id, name: s.name, type: s.type ?? null, category: s.category ?? null, aliases: s.aliases ?? null })),
     TXN_PAYEE_AUTO,
     (q, r) => scorePayeeRich(q, r),
   )

@@ -353,6 +353,16 @@ const ATDX_CSS = `
 .atdx .rc-f button:hover{color:var(--walnut)}
 .atdx .state{padding:60px 18px;text-align:center;color:var(--walnut-3);font-size:14px}
 .atdx .hide{display:none!important}
+/* elegant skeleton — the muster's site cards, in place, gently shimmering until the week loads */
+.atdx .sk-bar,.atdx .sk-av,.atdx .sk-cell{display:inline-block;background:linear-gradient(90deg,#ECE6D9 25%,#F7F2E8 50%,#ECE6D9 75%);background-size:200% 100%;animation:atdx-sk 1.5s ease-in-out infinite}
+.atdx .sk-bar{height:11px;border-radius:6px}
+.atdx .sk-av{width:34px;height:34px;border-radius:50%;flex:none}
+.atdx .sk-cell{width:24px;height:24px;border-radius:7px}
+.atdx .sk-block{animation:atdx-skin .4s ease both}
+.atdx .sk-block:nth-of-type(2){animation-delay:.06s}
+.atdx .sk-block .wrow .wname{padding:14px 20px}
+@keyframes atdx-sk{0%{background-position:200% 0}100%{background-position:-200% 0}}
+@keyframes atdx-skin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 
 @keyframes atdx-cellpop{0%{transform:scale(.75)}100%{transform:scale(1)}}
 @keyframes atdx-spin{to{transform:rotate(360deg)}}
@@ -1234,7 +1244,21 @@ export default function AttendanceSheet({ session }: { session: Session }) {
 
         <div id="atdxBody" />
 
-        {loading && <div className="state">Loading attendance…</div>}
+        {loading && (
+          <div aria-hidden>
+            {[0, 1].map(bi => (
+              <div className="siteblock sk-block" key={bi}>
+                {[0, 1, 2].map(ri => (
+                  <div className="cols wrow" key={ri}>
+                    <div className="wname"><span className="sk-av" /><span className="sk-bar" style={{ width: `${44 + ri * 12}%` }} /></div>
+                    {[0, 1, 2, 3, 4, 5, 6].map(d => <div key={d} style={{ display: 'grid', placeItems: 'center' }}><span className="sk-cell" /></div>)}
+                    <div style={{ textAlign: 'right', paddingRight: 20 }}><span className="sk-bar" style={{ width: 62 }} /></div>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
         {err && <div className="state" style={{ color: 'var(--terracotta)' }}>{err} · <button style={{ textDecoration: 'underline' }} onClick={() => load()}>retry</button></div>}
       </div>
     </div>

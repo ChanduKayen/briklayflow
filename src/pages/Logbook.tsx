@@ -219,7 +219,7 @@ export default function Logbook({ session }: { session: Session }) {
   const { data: stakeholders = [] } = useQuery({
     queryKey: ['daybook_stakeholders'],
     queryFn: async (): Promise<StakeholderLite[]> => {
-      const { data, error } = await supabase.from('stakeholders').select('stakeholder_id, name, type, category').order('name');
+      const { data, error } = await supabase.from('stakeholders').select('stakeholder_id, name, type, category, aliases').is('merged_into', null).order('name');
       if (error) throw error;
       return (data ?? []) as StakeholderLite[];
     },

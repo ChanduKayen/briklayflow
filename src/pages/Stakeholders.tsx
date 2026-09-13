@@ -12,6 +12,7 @@ import PhoneInput from '../components/PhoneInput';
 import { usePrefetchStakeholder } from '../hooks/usePrefetch';
 import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
 import { isNewLedgerOrg, loadProjectionMap } from '../lib/ledgerRead';
+import { mergeStakeholders } from '../lib/stakeholderMerge';
 import { useSearchScope } from '../components/search/searchScope';
 import SearchBar from '../components/search/SearchBar';
 
@@ -67,11 +68,11 @@ type Tab = 'all' | 'vendor' | 'worker' | 'client';
 type DrawerForm = {
   name: string; type: StakeholderType; category: string; categoryOther: string;
   contact: string; gstin: string; gstRegType: GSTRegType; isApproved: boolean;
-  bank: string; rating: number; rd: number; rq: number; rp: number;
+  bank: string; rating: number; rd: number; rq: number; rp: number; aliases: string[];
 };
 const EMPTY_FORM: DrawerForm = {
   name: '', type: 'Vendor', category: '', categoryOther: '', contact: '',
-  gstin: '', gstRegType: 'Regular', isApproved: false, bank: '', rating: 0, rd: 0, rq: 0, rp: 0,
+  gstin: '', gstRegType: 'Regular', isApproved: false, bank: '', rating: 0, rd: 0, rq: 0, rp: 0, aliases: [],
 };
 
 export default function Stakeholders({ session }: { session: Session }) {
@@ -82,7 +83,16 @@ export default function Stakeholders({ session }: { session: Session }) {
   const prefetchStakeholder = usePrefetchStakeholder();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const [tab, setTab] = useState<Tab>('all');
+  // The rail deep-links here by role: Sales → Clients opens ?tab=client, Contacts →
+  // Workers & vendors opens the directory plain. Read that on arrival, and keep in
+  // sync when the query changes (React Router keeps this page mounted across those
+  // two nav items, so a plain useState initializer alone would never switch tabs).
+  const TAB_SET: Tab[] = ['all', 'vendor', 'worker', 'client'];
+  const tabFromUrl = (): Tab => {
+    const t = searchParams.get('tab');
+    return t && (TAB_SET as string[]).includes(t) ? (t as Tab) : 'all';
+  };
+  const [tab, setTab] = useState<Tab>(tabFromUrl);
   const [q, setQ] = useState('');
   const [showSpreadsheet, setShowSpreadsheet] = useState(false);
 
@@ -95,6 +105,7 @@ export default function Stakeholders({ session }: { session: Session }) {
   const [showSub, setShowSub] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [aliasInput, setAliasInput] = useState('');
   const nameRef = useRef<HTMLInputElement>(null);
 
   const orgName = authState.status === 'authenticated' ? authState.context.orgName : '';
@@ -108,6 +119,7 @@ export default function Stakeholders({ session }: { session: Session }) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('stakeholders').select('*').eq('org_id', orgId!)
+        .is('merged_into', null)
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data as Stakeholder[];
@@ -162,6 +174,10 @@ export default function Stakeholders({ session }: { session: Session }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Follow the rail's ?tab= deep-link (Clients vs Workers & vendors) whenever it changes.
+  useEffect(() => { setTab(tabFromUrl()); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   // ── KPIs (all honest, from the facts above) ─────────────────────────────────
   const totalOutstanding = all.reduce((s, p) => s + outstandingOf(p.stakeholder_id), 0);
   const advancesIssued   = all.reduce((s, p) => s + creditOf(p.stakeholder_id), 0);
@@ -199,7 +215,9 @@ export default function Stakeholders({ session }: { session: Session }) {
       contact: party.contact || '', gstin: party.gstin || '', gstRegType: party.gst_reg_type || 'Regular',
       isApproved: !!party.is_approved, bank: party.bank_details || '',
       rating: party.rating || 0, rd: party.rating_delivery || 0, rq: party.rating_quality || 0, rp: party.rating_pricing || 0,
+      aliases: party.aliases ?? [],
     } : EMPTY_FORM);
+    setAliasInput('');
     setGstErr(''); setShowSub(false); setDirty(false); setSaving(false);
     setDrawerOpen(true);
     document.body.style.overflow = 'hidden';
@@ -216,6 +234,14 @@ export default function Stakeholders({ session }: { session: Session }) {
   }, []);
 
   const set = <K extends keyof DrawerForm>(k: K, v: DrawerForm[K]) => { setForm((f) => ({ ...f, [k]: v })); setDirty(true); };
+  const addAlias = () => {
+    const a = aliasInput.trim();
+    if (!a) return;
+    const lower = a.toLowerCase();
+    if (lower === form.name.trim().toLowerCase() || form.aliases.some((x) => x.toLowerCase() === lower)) { setAliasInput(''); return; }
+    set('aliases', [...form.aliases, a]); setAliasInput('');
+  };
+  const removeAlias = (a: string) => set('aliases', form.aliases.filter((x) => x !== a));
 
   // toast
   const [toastMsg, setToastMsg] = useState('');
@@ -225,6 +251,48 @@ export default function Stakeholders({ session }: { session: Session }) {
     clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToastMsg(''), 2400);
   }
+
+  // ── merge duplicates ─────────────────────────────────────────────────────────
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeName, setMergeName] = useState('');
+  const [merging, setMerging] = useState(false);
+  const selList = all.filter((p) => selected.has(p.stakeholder_id));
+  const toggleSel = (p: Stakeholder) => {
+    setSelected((s) => {
+      const n = new Set(s);
+      if (n.has(p.stakeholder_id)) { n.delete(p.stakeholder_id); return n; }
+      if (n.size > 0) {
+        const firstType = all.find((x) => x.stakeholder_id === [...n][0])?.type;
+        if (firstType && firstType !== p.type) { toast(`Pick parties of the same type (${firstType})`); return n; }
+      }
+      n.add(p.stakeholder_id); return n;
+    });
+  };
+  const openMerge = () => {
+    if (selected.size < 2) return;
+    const longest = selList.map((p) => p.name).reduce((a, b) => (b.length > a.length ? b : a), selList[0]?.name ?? '');
+    setMergeName(longest); setMergeOpen(true);
+  };
+  const doMerge = async () => {
+    const ids = selList.map((p) => p.stakeholder_id);
+    const name = mergeName.trim();
+    if (ids.length < 2 || !name) return;
+    const survivor = selList.find((p) => p.name.trim() === name)?.stakeholder_id ?? ids[0];
+    const losers = ids.filter((id) => id !== survivor);
+    setMerging(true);
+    try {
+      await mergeStakeholders(orgId!, survivor, losers, name);
+      toast(`Merged ${ids.length} into ${name}`);
+      setMergeOpen(false); setSelecting(false); setSelected(new Set());
+      queryClient.invalidateQueries({ queryKey: ['stakeholders'] });
+      queryClient.invalidateQueries({ queryKey: ['party_projection'] });
+      queryClient.invalidateQueries({ queryKey: ['stakeholders_paid'] });
+      queryClient.invalidateQueries({ queryKey: ['stakeholders_billed'] });
+    } catch (e: any) { toast(e?.message || 'Could not merge'); }
+    finally { setMerging(false); }
+  };
 
   const isVendor = form.type === 'Vendor';
   const isClient = form.type === 'Client';
@@ -238,10 +306,16 @@ export default function Stakeholders({ session }: { session: Session }) {
     }
     const category = form.category === OTHER_TRADE ? (form.categoryOther.trim() || 'Other') : form.category;
 
+    // fold any half-typed alias still in the box, and drop one equal to the name
+    const aliases = [...form.aliases, aliasInput.trim()]
+      .map((a) => a.trim()).filter(Boolean)
+      .filter((a, i, arr) => a.toLowerCase() !== name.toLowerCase() && arr.findIndex((x) => x.toLowerCase() === a.toLowerCase()) === i);
+
     const payload: Record<string, unknown> = {
       name, type: form.type, category,
       contact: form.contact.trim() || null,
       bank_details: form.bank.trim() || null,
+      aliases,
       org_id: orgId,
     };
     if (isVendor) {
@@ -318,6 +392,11 @@ export default function Stakeholders({ session }: { session: Session }) {
               Export
             </button>
             {canManage && <button className="btn" onClick={() => setShowSpreadsheet(true)}>Bulk add</button>}
+            {canManage && (
+              <button className={`btn ${selecting ? 'primary' : ''}`} onClick={() => { setSelecting((v) => !v); setSelected(new Set()); }}>
+                {selecting ? 'Cancel merge' : 'Merge duplicates'}
+              </button>
+            )}
             {canManage && <button className="btn primary" onClick={() => openDrawer(null)}>+ New party</button>}
           </div>
         </div>
@@ -380,13 +459,19 @@ export default function Stakeholders({ session }: { session: Session }) {
                 const st = statusOf(p);
                 const out = outstandingOf(p.stakeholder_id);
                 const pf = prefetchStakeholder(p.stakeholder_id);
+                const sel = selected.has(p.stakeholder_id);
                 return (
-                  <tr key={p.stakeholder_id} className="row" tabIndex={0} data-search-row={p.stakeholder_id}
-                    onClick={() => setLedgerId(p.stakeholder_id)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') setLedgerId(p.stakeholder_id); }}
+                  <tr key={p.stakeholder_id} className={`row ${sel ? 'sel' : ''}`} tabIndex={0} data-search-row={p.stakeholder_id}
+                    onClick={() => selecting ? toggleSel(p) : setLedgerId(p.stakeholder_id)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') (selecting ? toggleSel(p) : setLedgerId(p.stakeholder_id)); }}
                     onMouseEnter={pf.onMouseEnter} onTouchStart={pf.onTouchStart} onPointerDown={pf.onPointerDown}>
                     <td>
                       <div className="pid">
+                        {selecting && (
+                          <span className={`selbox ${sel ? 'on' : ''}`} aria-hidden>
+                            {sel && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>}
+                          </span>
+                        )}
                         <div className={`avatar ${p.type.toLowerCase()}`}>{initials(p.name)}</div>
                         <div>
                           <div className="pname">{p.name}{p.gstin ? <span className="gst">✓ GST</span> : null}</div>
@@ -504,6 +589,21 @@ export default function Stakeholders({ session }: { session: Session }) {
             <input className="m" placeholder="Account no / UPI id" value={form.bank}
               disabled={!canManage} onChange={(e) => set('bank', e.target.value)} /></div>
 
+          {/* Also known as — match-only nicknames/spellings, never shown on the ledger */}
+          <div className="field col"><label>Also known as <span style={{ color: 'var(--ink-faint)' }}>· never shown, used to find them</span></label>
+            <div className="aliaswrap">
+              {form.aliases.map((a) => (
+                <span key={a} className="aliaschip">{a}{canManage && <button type="button" onClick={() => removeAlias(a)} aria-label={`Remove ${a}`}>×</button>}</span>
+              ))}
+              {canManage && (
+                <input className="aliasin" value={aliasInput} placeholder={form.aliases.length ? 'Add another…' : 'e.g. Sreenu, Srinu mestri…'}
+                  onChange={(e) => setAliasInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addAlias(); } }}
+                  onBlur={addAlias} />
+              )}
+            </div>
+          </div>
+
           {/* vendor-only: GST + rating */}
           {isVendor && (
             <>
@@ -566,6 +666,35 @@ export default function Stakeholders({ session }: { session: Session }) {
 
       {/* party ledger — the same ledger as the /stakeholders/:id page, opened from the side */}
       <StakeholderLedgerDrawer isOpen={!!ledgerId} onClose={() => setLedgerId(null)} stakeholderId={ledgerId ?? ''} />
+
+      {/* merge action bar — floats while selecting */}
+      {selecting && (
+        <div className="mergebar">
+          <span className="mb-count">{selected.size === 0 ? 'Tick the duplicates to merge' : `${selected.size} selected`}</span>
+          <button className="btn" onClick={() => { setSelecting(false); setSelected(new Set()); }}>Cancel</button>
+          <button className="btn primary" disabled={selected.size < 2} onClick={openMerge}>Merge {selected.size >= 2 ? selected.size : ''} →</button>
+        </div>
+      )}
+
+      {/* merge dialog — name the survivor */}
+      {mergeOpen && (
+        <div className="mscrim" onClick={() => setMergeOpen(false)}>
+          <div className="mcard" onClick={(e) => e.stopPropagation()}>
+            <h3>Merge {selList.length} into one</h3>
+            <p>Their ledgers, bills, orders and balances fold into a single party under the name below. The others are hidden. This can’t be casually undone.</p>
+            <div className="mchips">
+              {selList.map((p) => <span key={p.stakeholder_id} className="mchip">{p.name}</span>)}
+            </div>
+            <label className="mlbl">Keep as</label>
+            <input className="minput" value={mergeName} autoFocus onChange={(e) => setMergeName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && mergeName.trim()) doMerge(); }} placeholder="Name to carry" />
+            <div className="mfoot">
+              <button className="btn" onClick={() => setMergeOpen(false)}>Cancel</button>
+              <button className="btn primary" disabled={merging || !mergeName.trim()} onClick={doMerge}>{merging ? 'Merging…' : 'Merge'}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* toast */}
       <div className={`toast ${toastMsg ? 'show' : ''}`}>{toastMsg}</div>
@@ -722,6 +851,33 @@ const CSS = `
 .pt .toast{position:fixed;bottom:28px;left:50%;transform:translate(-50%,16px);opacity:0;background:var(--ink);color:var(--cream);font-size:13px;padding:10px 20px;border-radius:999px;transition:all .3s;z-index:60;pointer-events:none;font-family:'DM Sans',sans-serif}
 .pt .toast.show{opacity:1;transform:translate(-50%,0)}
 
+/* aliases (also-known-as) chip input */
+.pt .aliaswrap{flex:1;display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:flex-end}
+.pt .aliaschip{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:var(--walnut);background:var(--walnut-tint);border-radius:999px;padding:3px 6px 3px 11px}
+.pt .aliaschip button{border:0;background:none;cursor:pointer;color:var(--walnut);font-size:15px;line-height:1;padding:0 2px;opacity:.7}
+.pt .aliaschip button:hover{opacity:1}
+.pt .aliasin{border:none;background:transparent;outline:none;text-align:right;font-family:'DM Sans',sans-serif;font-size:14px;color:var(--ink);border-bottom:1px dashed transparent;min-width:140px;flex:1;padding:2px 0}
+.pt .aliasin:hover{border-bottom-color:var(--line)}
+.pt .aliasin:focus{border-bottom-color:var(--terracotta);border-bottom-style:solid}
+.pt .aliasin::placeholder{color:var(--ink-faint)}
+
+/* merge: selection + bar + dialog */
+.pt tr.row.sel{background:var(--terracotta-tint)}
+.pt tr.row.sel:hover{background:var(--terracotta-tint)}
+.pt .selbox{width:20px;height:20px;flex-shrink:0;border-radius:6px;border:1.5px solid var(--line);background:var(--paper);display:grid;place-items:center;transition:background .12s,border-color .12s}
+.pt .selbox.on{background:var(--terracotta);border-color:var(--terracotta)}
+.pt .mergebar{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:62;display:flex;align-items:center;gap:12px;background:var(--paper);border:1px solid var(--line);border-radius:999px;padding:8px 10px 8px 20px;box-shadow:0 18px 44px -18px rgba(51,42,32,.4)}
+.pt .mergebar .mb-count{font-size:13px;color:var(--ink-soft);white-space:nowrap}
+.pt .mscrim{position:fixed;inset:0;z-index:63;background:rgba(51,42,32,.42);display:grid;place-items:center;padding:16px}
+.pt .mcard{width:min(440px,100%);background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:22px 22px 16px;box-shadow:0 28px 70px -22px rgba(51,42,32,.5)}
+.pt .mcard h3{font-family:'Playfair Display',serif;font-weight:600;font-size:21px;margin:0}
+.pt .mcard p{color:var(--ink-soft);font-size:13px;margin:6px 0 14px;line-height:1.5}
+.pt .mchips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+.pt .mchip{font-size:12px;color:var(--ink-soft);background:var(--cream);border:1px solid var(--line-soft);border-radius:999px;padding:4px 11px}
+.pt .mlbl{font-family:'DM Mono',monospace;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint)}
+.pt .minput{width:100%;margin-top:6px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--cream);font-family:'DM Sans',sans-serif;font-size:14.5px;color:var(--ink);outline:none}
+.pt .minput:focus{border-color:var(--terracotta)}
+.pt .mfoot{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
 @media(prefers-reduced-motion:reduce){.pt *{transition:none!important;animation:none!important}}
 @media(max-width:900px){
   .pt .wrap{padding:28px 18px 70px}

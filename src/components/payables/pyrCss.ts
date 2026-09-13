@@ -296,6 +296,16 @@ export const PYR_CSS = `
 /* ── the run's own furniture ──────────────────────────────────────────────── */
 .pyr .state{padding:72px 18px;text-align:center;color:var(--ink2);font-size:14px}
 .pyr .emptyrow{padding:16px 22px;color:var(--ink3);font-size:13px;border-bottom:1px solid var(--line2)}
+/* elegant skeleton — the run's cards, in place, gently shimmering until the week loads */
+.pyr .sk-bar,.pyr .sk-btn{display:inline-block;border-radius:6px;background:linear-gradient(90deg,#ECE4D6 25%,#F8F3EA 50%,#ECE4D6 75%);background-size:200% 100%;animation:pyr-sk 1.5s ease-in-out infinite}
+.pyr .sk-bar{height:11px}
+.pyr .sk-btn{height:30px;width:88px;border-radius:8px}
+.pyr .sk-head{height:18px;width:132px;border-radius:6px}
+.pyr .avatar.sk-block{background:linear-gradient(90deg,#ECE4D6 25%,#F8F3EA 50%,#ECE4D6 75%)!important;background-size:200% 100%!important;color:transparent!important;box-shadow:none!important;animation:pyr-sk 1.5s ease-in-out infinite}
+.pyr .card-sec.sk-card{animation:pyr-skin .4s ease both}
+.pyr .card-sec.sk-card:nth-child(2){animation-delay:.06s}
+@keyframes pyr-sk{0%{background-position:200% 0}100%{background-position:-200% 0}}
+@keyframes pyr-skin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 .pyr .cutover{font-size:12px;line-height:1.5;color:var(--ink3);margin-bottom:14px}
 .pyr .readonly{font-size:12.5px;color:var(--gold);margin-bottom:14px}
 /* pay-by rides in the closing line — the run has to name a method, and this is where it closes.

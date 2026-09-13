@@ -168,17 +168,24 @@ function roleVerdict(qRoles: string[], cand: { name: string; type?: string | nul
 }
 
 /** The importer's payee score: token-bag name similarity + the stakeholder's nature, floored by the
- *  whole-name mirror so nothing the parity scorer caught is lost. */
-export function scorePayeeRich(q: string, cand: { name: string; type?: string | null; category?: string | null }): number {
+ *  whole-name mirror so nothing the parity scorer caught is lost. A party's ALIASES (its other spellings /
+ *  nicknames, never shown) are scored exactly like the name and the best wins, so an alias resolves as
+ *  surely as the canonical name — KEEP IN SYNC with _match.ts scorePayeeRich. */
+export function scorePayeeRich(q: string, cand: { name: string; type?: string | null; category?: string | null; aliases?: string[] | null }): number {
   const query = q.trim().toLowerCase();
-  const cname = cand.name.toLowerCase();
   const qAll = tokenize(query);
   const qRoles = qAll.filter(isOccupation);
   let qName = qAll.filter((t) => !isOccupation(t));
   if (!qName.length) qName = qAll;                    // the sheet gave ONLY a role word — use it as the name
 
-  const base = nameTokenScore(qName, tokenize(cname));
-  let score = Math.max(base, scorePayeeName(query, cname));
+  // score the query against the canonical name AND every alias; the best spelling wins
+  let score = 0;
+  for (const nm of [cand.name, ...(cand.aliases ?? [])]) {
+    if (!nm) continue;
+    const cl = nm.toLowerCase();
+    score = Math.max(score, nameTokenScore(qName, tokenize(cl)), scorePayeeName(query, cl));
+    if (score >= 1) break;
+  }
 
   if (qRoles.length) {
     const v = roleVerdict(qRoles, cand);
@@ -195,11 +202,11 @@ export function scorePayeeRich(q: string, cand: { name: string; type?: string | 
  */
 export function matchPayee(
   raw: string | null | undefined,
-  stakeholders: { stakeholder_id: string; name: string; type?: string | null; category?: string | null }[],
+  stakeholders: { stakeholder_id: string; name: string; type?: string | null; category?: string | null; aliases?: string[] | null }[],
 ): BandedMatch {
   return bandedMatch(
     raw,
-    stakeholders.map((s) => ({ id: s.stakeholder_id, name: s.name, type: s.type ?? null, category: s.category ?? null })),
+    stakeholders.map((s) => ({ id: s.stakeholder_id, name: s.name, type: s.type ?? null, category: s.category ?? null, aliases: s.aliases ?? null })),
     (q, r) => scorePayeeRich(q, r),
     PAYEE_AUTO_FLOOR,
     PAYEE_SEARCH_FLOOR,
@@ -225,11 +232,17 @@ export function rankPayeeName(query: string, name: string): number {
  * The picker's list for a typed query: everything that plausibly matches, tightest first.
  * An empty query is not a search — it is browsing, so the list is returned whole and untouched.
  */
-export function searchPayees<T extends { name: string }>(list: T[], query: string): T[] {
+export function searchPayees<T extends { name: string; aliases?: string[] | null }>(list: T[], query: string): T[] {
   const q = query.trim().toLowerCase();
   if (!q) return list;
+  // rank against the name AND any aliases (never displayed) — the best spelling floats the row up
+  const rankOf = (s: T) => {
+    let r = rankPayeeName(q, s.name);
+    for (const a of s.aliases ?? []) { if (a) r = Math.max(r, rankPayeeName(q, a)); }
+    return r;
+  };
   return list
-    .map((s) => ({ s, r: rankPayeeName(q, s.name) }))
+    .map((s) => ({ s, r: rankOf(s) }))
     .filter((x) => x.r >= PAYEE_SEARCH_FLOOR)
     .sort((a, b) => b.r - a.r || a.s.name.length - b.s.name.length)
     .map((x) => x.s);

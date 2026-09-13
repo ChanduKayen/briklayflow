@@ -261,6 +261,17 @@ const CSS = `
 .plx.compact table.ledger{min-width:600px}
 .plx.compact .ledger .contract,.plx.compact .ledger .cert{display:table-cell}
 .plx.compact .modal{max-width:560px}
+
+/* ── data skeleton: the chrome (Close, Ledger, By-date/site) stays real; the party's
+   name, figures and rows shimmer in until loadPartyLedger returns ── */
+.plx .sk-b{background:linear-gradient(90deg,#EDE6DA 25%,#F8F3EA 50%,#EDE6DA 75%);background-size:200% 100%;animation:plx-sweep 1.5s ease-in-out infinite;border-radius:6px}
+.plx .sk-av{width:52px;height:52px;border-radius:50%;flex-shrink:0}
+.plx .sk-row{display:flex;align-items:center;gap:16px;padding:14px 0;border-top:1px solid var(--line-soft);animation:plx-fade .4s ease both}
+.plx .sk-row:first-of-type{border-top:0}
+.plx .sk-cell{flex-shrink:0}
+@keyframes plx-sweep{0%{background-position:200% 0}100%{background-position:-200% 0}}
+@keyframes plx-fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.plx .sk-b{animation:none}.plx .sk-row{animation:none}}
 `;
 
 const parseInr = (s: string) => Number(String(s).replace(/[^\d]/g, '')) || 0;
@@ -327,7 +338,72 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
     });
   }, [L, period, range, search]);
 
-  if (isLoading) return <div className={`plx${compact ? ' compact' : ''}`}><style>{CSS}</style><div className="page"><div className="state">Loading ledger…</div></div></div>;
+  if (isLoading) return (
+    <div className={`plx${compact ? ' compact' : ''}`}>
+      <style>{CSS}</style>
+      <div className="page">
+        <button className="back" onClick={() => (compact && onClose ? onClose() : navigate(cameFrom?.backTo ?? '/stakeholders'))}>
+          {compact
+            ? <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l12 12M18 6L6 18" /></svg>Close</>
+            : <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>{cameFrom?.backLabel ?? 'Parties'}</>}
+        </button>
+
+        {/* identity — avatar + name/meta shimmer in */}
+        <div className="who">
+          <div className="who-left">
+            <div className="sk-b sk-av" />
+            <div>
+              <div className="sk-b" style={{ height: 22, width: 176 }} />
+              <div className="sk-b" style={{ height: 13, width: 128, marginTop: 8, opacity: 0.75 }} />
+            </div>
+          </div>
+          <div className="actions">
+            <div className="sk-b sk-cell" style={{ height: 36, width: 132, borderRadius: 8 }} />
+            <div className="sk-b sk-cell" style={{ height: 36, width: 108, borderRadius: 8 }} />
+          </div>
+        </div>
+
+        {/* hero — the balance figure + facts + by-site */}
+        <section className="hero">
+          <div>
+            <div className="sk-b" style={{ height: 50, width: 240 }} />
+            <div className="sk-b" style={{ height: 14, width: 200, marginTop: 12, opacity: 0.75 }} />
+            <ul className="facts" style={{ marginTop: 22 }}>
+              {[0, 1, 2].map(i => (
+                <li key={i}>
+                  <span className="sk-b" style={{ height: 17, width: 78 }} />
+                  <span className="sk-b" style={{ height: 11, width: 62, marginTop: 6, opacity: 0.7 }} />
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="bysite">
+            <div className="sk-b" style={{ height: 13, width: 104, marginBottom: 14 }} />
+            {[0, 1, 2].map(i => (
+              <div key={i} className="sk-row" style={{ padding: '11px 0' }}>
+                <div className="sk-b" style={{ height: 14, flex: 1 }} />
+                <div className="sk-b sk-cell" style={{ height: 14, width: 54 }} />
+                <div className="sk-b sk-cell" style={{ height: 14, width: 54 }} />
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* ledger — the label + controls stay real; the rows shimmer */}
+        <div className="ledger-head"><h2>Ledger</h2></div>
+        <div style={{ marginTop: 8 }}>
+          {[0, 1, 2, 3, 4, 5].map(i => (
+            <div key={i} className="sk-row">
+              <div className="sk-b sk-cell" style={{ height: 13, width: 74 }} />
+              <div className="sk-b" style={{ height: 14, flex: 1 }} />
+              <div className="sk-b sk-cell" style={{ height: 14, width: 72 }} />
+              <div className="sk-b sk-cell" style={{ height: 14, width: 84 }} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
   if (error || !L) return <div className={`plx${compact ? ' compact' : ''}`}><style>{CSS}</style><div className="page"><div className="state" style={{ color: 'var(--terra)' }}>Could not load — {(error as any)?.message || 'try again'}</div></div></div>;
 
   const isEmpty = L.entries.length === 0;

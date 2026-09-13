@@ -11,6 +11,7 @@ import { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
+import { searchPayees } from '../../lib/payeeSearch';
 import { useSnackbar } from '../Snackbar';
 import PhoneInput from '../PhoneInput';
 import { useIsMobile } from '../../lib/useIsMobile';
@@ -29,7 +30,7 @@ interface Props {
   onSent?: (rfqId: string) => void;
 }
 
-interface Vendor { stakeholder_id: string; name: string; category: string | null; contact: string | null }
+interface Vendor { stakeholder_id: string; name: string; category: string | null; contact: string | null; aliases?: string[] | null }
 
 // A loose trade match: share a meaningful word (e.g. "Plumbing") between the buy trade
 // and the vendor's category. Falls back to showing everyone if we can't tell.
@@ -237,7 +238,7 @@ export default function RequestQuotesModal({ orgId, projectId, deliveryLocation,
     queryKey: ['rfq_vendors', orgId],
     queryFn: async () => {
       const { data, error } = await supabase.from('stakeholders')
-        .select('stakeholder_id, name, category, contact').eq('type', 'Vendor').order('name');
+        .select('stakeholder_id, name, category, contact, aliases').eq('type', 'Vendor').is('merged_into', null).order('name');
       if (error) throw error;
       return (data ?? []) as Vendor[];
     },
@@ -251,15 +252,17 @@ export default function RequestQuotesModal({ orgId, projectId, deliveryLocation,
   const hasTrade = !!tradeCategory && tradeMatched.length > 0;
 
   const base = showAll || !hasTrade ? vendors : tradeMatched;
-  const shown = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return q ? base.filter((v) => v.name.toLowerCase().includes(q)) : base;
-  }, [base, search]);
+  // alias-aware: search matches a vendor by name OR any of its other names
+  const shown = useMemo(() => (search.trim() ? searchPayees(base, search) : base), [base, search]);
 
-  // The phone's list: everyone, name or trade, search only.
+  // The phone's list: everyone, name/alias or trade, search only.
   const mobileShown = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return q ? vendors.filter((v) => `${v.name} ${v.category ?? ''}`.toLowerCase().includes(q)) : vendors;
+    if (!q) return vendors;
+    const byName = searchPayees(vendors, search);
+    const seen = new Set(byName.map((v) => v.stakeholder_id));
+    const byCat = vendors.filter((v) => (v.category ?? '').toLowerCase().includes(q) && !seen.has(v.stakeholder_id));
+    return [...byName, ...byCat];
   }, [vendors, search]);
 
   const phoneOf = (v: Vendor) => phones[v.stakeholder_id] ?? v.contact ?? '';

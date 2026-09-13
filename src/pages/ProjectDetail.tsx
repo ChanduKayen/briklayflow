@@ -194,7 +194,7 @@ function QuickTransactionDrawer({ projectId, projectName, onClose, onSuccess }: 
     queryKey: ['stk_quick', txnType],
     queryFn: async () => {
       const catMap: Record<string, string[]> = { worker: ['Worker', 'Contractor'], material: ['Vendor', 'Supplier'], expense: ['Vendor', 'Supplier', 'Others'] };
-      const { data } = await supabase.from('stakeholders').select('stakeholder_id, name, category').in('category', catMap[txnType]).order('name');
+      const { data } = await supabase.from('stakeholders').select('stakeholder_id, name, category').in('category', catMap[txnType]).is('merged_into', null).order('name');
       return data ?? [];
     },
     staleTime: 60_000,
@@ -654,7 +654,7 @@ export default function ProjectDetail({ session }: { session: Session }) {
             </>
           )}
         <NavTile href={`/projects/${projectId}/transactions`} icon="swap_horiz" label="Transactions" count={uniqueTxns.length} />
-        <NavTile href={`/projects/${projectId}/work-orders`} icon="assignment" label="Contracts" count={workOrders.length} />
+        <NavTile href={`/projects/${projectId}/work-orders`} icon="assignment" label="Worker contracts" count={workOrders.length} />
         <NavTile href={`/projects/${projectId}/purchase-orders`} icon="shopping_bag" label="Purchase Orders" count={purchaseOrders.length} />
         <NavTile href={`/projects/${projectId}/inventory`} icon="inventory_2" label="Inventory" color="#7c3aed" />
         <NavTile href={`/projects/${projectId}/boqs`} icon="format_list_numbered" label="BOQs" color="#2563eb" />

@@ -20,7 +20,6 @@ import BottomSheet from '../components/BottomSheet';
 import { WhatsAppGlyph } from '../components/day-book/atoms';
 import { StartOnWhatsAppButton } from '../components/day-book/StartOnWhatsApp';
 import { ImageLightbox } from '../components/ImageLightbox';
-import { PageSkeleton } from '../components/SkeletonLoader';
 import { useQueryGate } from '../components/QueryGate';
 import { deriveDirection, isNotLinked, resolveAnchor, isGeneralExpense, generalExpenseLabel, payeeLabel, type TxnAnchor, type TxnDirection } from '../lib/transactions';
 import { V, font, serif, nums, terraGrad } from '../components/txn-ledger/ledgerTokens';
@@ -32,6 +31,7 @@ import { useOrgId } from '../lib/auth/AuthProvider';
 import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
 import { NewTxnFab } from '../components/NewTxnFab';
 import { NewTxnMenuButton } from '../components/NewTxnMenuButton';
+import { LedgerCutoverControl } from '../components/attendance/LedgerCutoverControl';
 // Lazy — its xlsx parser is heavy and only needed when the import modal actually opens.
 const ImportTransactions = lazy(() => import('./ImportTransactions'));
 
@@ -373,7 +373,61 @@ const LEDGER_BAND_CSS = `
 }
 @media (max-width:640px){.tb-in,.txn-rhythm{padding-left:18px;padding-right:18px}.txn-rhythm{margin-top:18px;padding-bottom:13px}.txn-rhythm svg{height:58px}.txn-cap{font-size:11.5px;margin-top:7px}.tb-in{padding-top:20px}.tb-h1{font-size:25px;flex:1 1 100%}.tb-actions{margin-left:0;flex:1 1 100%;margin-top:12px;gap:10px}.tb-btn{flex:1;min-width:0;height:44px;padding:0 10px}.tb-lead{margin-top:20px}.tb-amt{font-size:28px}}
 @media (max-width:380px){.tb-amt{font-size:24px}.tb-btn{font-size:13px;gap:6px}}
+
+/* ── data skeleton: the header/toolbar stay real; only the day-book shimmers in ── */
+.lsk-day{animation:lsk-fade .4s ease both}
+.lsk-day:nth-of-type(2){animation-delay:70ms}
+.lsk-day:nth-of-type(3){animation-delay:140ms}
+.lsk-dhead{height:13px;width:118px;border-radius:5px;margin:0 0 10px 16px}
+.lsk-card{border-radius:16px;border:1px solid #E3DDD4;background:#FFFFFF;overflow:hidden;position:relative}
+.lsk-spine{position:absolute;left:29px;top:16px;bottom:56px;width:1px;background:#EAE6E0}
+.lsk-row{display:flex;align-items:center;gap:14px;padding:15px 18px}
+.lsk-row+.lsk-row{border-top:1px solid #F1ECE4}
+.lsk-med{width:30px;height:30px;border-radius:50%;flex-shrink:0}
+.lsk-lines{flex:1;min-width:0;display:flex;flex-direction:column;gap:7px}
+.lsk-chip{height:20px;width:74px;border-radius:6px;flex-shrink:0}
+.lsk-amt{height:15px;width:82px;border-radius:5px;flex-shrink:0}
+.lsk-foot{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-top:1px solid #EAE6E0}
+.lsk-b{background:linear-gradient(90deg,#ECE7DF 25%,#F8F4ED 50%,#ECE7DF 75%);background-size:200% 100%;animation:lsk-sweep 1.5s ease-in-out infinite}
+@keyframes lsk-sweep{0%{background-position:200% 0}100%{background-position:-200% 0}}
+@keyframes lsk-fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.lsk-day{animation:none}.lsk-b{animation:none}}
 `;
+
+// The day-book's data skeleton — the header band, mini bar and filter toolbar are
+// already real (they render above the gate), so this shimmers ONLY the entries:
+// a few day groups, each a card of rows ruled off with a "Day closed" footer, in the
+// exact shape the real feed takes so nothing shifts when the data lands.
+function LedgerSkeleton() {
+  const days = [4, 3, 2]; // rows per day group, tapering like a real recent slice
+  return (
+    <div className="mt-7">
+      {days.map((rows, di) => (
+        <section className="lsk-day" key={di} style={{ marginTop: di === 0 ? 0 : 28 }}>
+          <div className="lsk-dhead lsk-b" />
+          <div className="lsk-card">
+            <div className="lsk-spine" aria-hidden="true" />
+            {Array.from({ length: rows }).map((_, ri) => (
+              <div className="lsk-row" key={ri}>
+                <div className="lsk-med lsk-b" />
+                <div className="lsk-lines">
+                  <div className="lsk-b" style={{ height: 14, width: `${52 + ((ri * 13) % 34)}%`, borderRadius: 5 }} />
+                  <div className="lsk-b" style={{ height: 11, width: `${34 + ((ri * 17) % 28)}%`, borderRadius: 5, opacity: 0.75 }} />
+                </div>
+                <div className="lsk-chip lsk-b" style={{ opacity: 0.7 }} />
+                <div className="lsk-amt lsk-b" />
+              </div>
+            ))}
+            <div className="lsk-foot">
+              <div className="lsk-b" style={{ height: 12, width: 68, borderRadius: 5, opacity: 0.7 }} />
+              <div className="lsk-b" style={{ height: 12, width: 130, borderRadius: 5, opacity: 0.7 }} />
+            </div>
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
 
 // 14-day daily-outflow bars — grows on mount, hover shows the day + amount, click jumps to that day
 // in the feed (matches the reference rhythm).
@@ -537,7 +591,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   // S1-1 gate — skeleton → retry card on a hung/failed load post-relogin, never a blank perpetual spinner.
   const ledgerGate = useQueryGate({
     isLoading, isError, hasData: ledger !== undefined, refetch,
-    skeleton: <div className="mt-7"><PageSkeleton /></div>, label: 'your ledger',
+    skeleton: <LedgerSkeleton />, label: 'your ledger',
   });
 
   // The distinct WO/PO ids referenced by the visible ledger's allocations. These
@@ -757,7 +811,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   };
 
   // fetched to warm the react-query cache for the peek/editor surfaces; data unused here
-  useQuery({ queryKey: ['stakeholders'], queryFn: async () => { const { data } = await supabase.from('stakeholders').select('*'); return data as Stakeholder[]; } });
+  useQuery({ queryKey: ['stakeholders'], queryFn: async () => { const { data } = await supabase.from('stakeholders').select('*').is('merged_into', null); return data as Stakeholder[]; } });
   useQuery({ queryKey: ['projects'], queryFn: async () => { const { data } = await supabase.from('projects').select('*'); return data as Project[]; } });
 
   const { show: showSnackbar } = useSnackbar();
@@ -1179,6 +1233,15 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
 
         {/* ── main column: the day-book ── */}
         <div className="min-w-0">
+
+        {/* the org's ledger go-live (opening cutover) — a quiet, right-aligned line that stays out of the
+            way once set; managers get the "configure" affordance, everyone else just reads the date.
+            Desktop only, and only on the whole-org ledger (a project view inherits the org's date). */}
+        {!lockedProject && orgId && (
+          <div className="hidden sm:flex justify-end mt-4 -mb-1">
+            <LedgerCutoverControl orgId={orgId} isManager={canManageTeam} />
+          </div>
+        )}
 
         {/* subtle invite: has entries, but never set up WhatsApp capture. Quiet,
             dismissible, manager-only — a builder typing every entry by hand may

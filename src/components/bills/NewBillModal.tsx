@@ -118,7 +118,7 @@ function Modal({
   // ── the org's parties, and what each is already owed ─────────────────────────
   const { data: vendors = [] } = useQuery<Vendor[]>({
     queryKey: ['bill_vendors'],
-    queryFn: async () => ((await supabase.from('stakeholders').select('stakeholder_id, name').eq('type', 'Vendor').order('name')).data ?? []) as Vendor[],
+    queryFn: async () => ((await supabase.from('stakeholders').select('stakeholder_id, name, aliases').eq('type', 'Vendor').is('merged_into', null).order('name')).data ?? []) as Vendor[],
   });
   // v_party_balance is the single source the party ledger's own hero reads, so the number promised
   // here is the number the ledger will show a second later.

@@ -41,7 +41,7 @@ import { CardSplitPanel } from './CardSplitPanel';
 import { useSignedDocUrl } from '../../lib/storage';
 import { resolveEntry } from './resolveEntry';
 
-export interface StakeholderLite { stakeholder_id: string; name: string; type?: string; category?: string }
+export interface StakeholderLite { stakeholder_id: string; name: string; type?: string; category?: string; aliases?: string[] | null }
 export interface ProjectLite { project_id: string; name: string }
 
 type Phase = null | 'filing' | 'filed' | 'collapsed' | 'rejected';

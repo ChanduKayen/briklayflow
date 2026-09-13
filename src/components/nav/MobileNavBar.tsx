@@ -259,15 +259,17 @@ function WorkspaceHub({ role, onGo, onSignOut }: { role: Role; onGo: (to: string
   const cards = [
     { label: 'Site Desk', sub: 'work plan', to: '/desk/all/plan', icon: I.sitedesk, show: true },
     { label: 'Site Problems', sub: 'issues & snags', to: '/desk/all/problems', icon: I.sitedesk, show: true },
-    { label: 'Contracts', sub: 'work orders', to: '/work-orders', icon: I.contracts, show: true },
-    { label: 'Parties', sub: 'vendors & workers', to: '/stakeholders', icon: I.parties, show: role !== 'supervisor' },
+    { label: 'Worker contracts', sub: 'work orders', to: '/work-orders', icon: I.contracts, show: true },
+    { label: 'Client Billing', sub: 'invoices', to: '/billing', icon: I.billing, show: role !== 'supervisor' },
+    { label: 'Clients', sub: 'you bill', to: '/stakeholders?tab=client', icon: I.parties, show: role !== 'supervisor' },
+    { label: 'Workers & vendors', sub: 'you pay', to: '/stakeholders', icon: I.parties, show: role !== 'supervisor' },
     { label: 'Insights', sub: 'spend & trends', to: '/insights', icon: I.insights, show: true },
     { label: 'Inward Register', sub: 'deliveries', to: '/inward-register', icon: I.inward, show: role !== 'supervisor' && role !== 'accountant' },
-    { label: 'Client Billing', sub: 'invoices', to: '/billing', icon: I.billing, show: role !== 'supervisor' },
-    { label: 'Team & Access', sub: 'members', to: '/team', icon: I.team, show: role === 'principal' || role === 'management' },
   ].filter((c) => c.show);
   const account = [
     { label: 'Profile & firm settings', to: '/profile', icon: I.firm },
+    // Team & access is admin/settings, not a daily-work card — it lives with the account, matching the desktop rail.
+    { label: 'Members & roles', to: '/team', icon: I.team, show: role === 'principal' || role === 'management' },
     { label: 'Follow-up rules', to: '/follow-up-rules', icon: I.clock, show: role === 'principal' || role === 'management' },
   ].filter((c) => c.show !== false);
   return (

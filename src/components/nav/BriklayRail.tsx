@@ -13,14 +13,14 @@
  * the day-book icon's WhatsApp tease. The rail is desktop-only (md+); mobile nav
  * lives in App's BottomTabBar / MoreNavSheet.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import type { Session } from '@supabase/supabase-js';
 import {
   IconArrowsExchange, IconNotebook, IconFileInvoice, IconChartPie,
   IconShoppingBag, IconLayoutGrid, IconClipboardList, IconUsersGroup,
-  IconShieldLock,
+  IconShieldLock, IconBuilding,
   IconChevronDown, IconChevronLeft, IconDots,
   IconSettings, IconLogout, IconUser,
   IconBox, IconListNumbers, IconTruck, IconLoader2, IconChecklist, IconAlertTriangle,
@@ -163,6 +163,25 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
   // The cursor-following lamp — the shared hook (scrolls: the rail scrolls internally).
   const railRef = useCursorLamp<HTMLElement>({ scrolls: true });
 
+  // Scroll affordance — with more sections the nav can now overflow. A soft edge scrim
+  // fades in at whichever end has more content (the bottom one riding just above the
+  // pinned account bar), the way Gmail/Slack/macOS hint "there's more below". Recomputed
+  // after every render (cheap, converges) plus on the nav's own scroll.
+  const navScrollRef = useRef<HTMLElement>(null);
+  const [scrollEdge, setScrollEdge] = useState({ top: false, bottom: false });
+  const checkScroll = () => {
+    const el = navScrollRef.current; if (!el) return;
+    const top = el.scrollTop > 4;
+    const bottom = el.scrollTop + el.clientHeight < el.scrollHeight - 4;
+    setScrollEdge(s => (s.top === top && s.bottom === bottom) ? s : { top, bottom });
+  };
+  useLayoutEffect(() => { checkScroll(); });
+  useEffect(() => {
+    window.addEventListener('resize', checkScroll);
+    return () => window.removeEventListener('resize', checkScroll);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Sign out in place — no full-screen veil, no blur. The button shows a calm
   // loader; when the session actually clears, the auth listener swaps in Login.
   const doSignOut = async () => {
@@ -246,13 +265,18 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
   const isActive = (path: string) => location.pathname === path || location.pathname.startsWith(path + '/');
 
   // ── sections (semantic grouping; all real routes + roles + badges) ──
+  // Two Contacts entries share the /stakeholders directory and differ only by ?tab= —
+  // Clients opens it on the client tab, Workers & vendors on the rest. These closures
+  // read the live query so exactly one of them lights up (the rail's own isActive is
+  // pathname-only and would light both).
+  const stkTab = new URLSearchParams(location.search).get('tab');
+  const onStk = location.pathname === '/stakeholders' || location.pathname.startsWith('/stakeholders/');
   const SECTIONS: { label?: string; items: Item[] }[] = [
     {
       label: 'Payments',
       items: ([
         can(role !== 'supervisor') && { route: '/ledger', label: 'Transactions', icon: IconArrowsExchange, accent: true },
         { route: '/logbook', label: 'For review', node: <DayBookIcon />, badge: inbox },
-        can(role !== 'supervisor') && { route: '/billing', label: 'Client billing', icon: IconFileInvoice, badge: billOverdue },
         can(role !== 'supervisor') && { route: '/bills', label: 'Vendor Bills', icon: IconReceipt },
         can(role !== 'supervisor') && { route: '/payables', label: 'Payables', icon: IconReceipt2, badge: pendingCerts },
       ].filter(Boolean) as Item[]),
@@ -262,15 +286,28 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
       items: ([
         can(role !== 'supervisor' && role !== 'accountant') && { route: '/purchase-orders', label: 'Purchase orders', icon: IconShoppingBag, badge: poUntallied, hasPanel: true },
         // Inward register lives in the per-project nav (see projBase/inward below), not the main rail.
-        { route: '/work-orders', label: 'Contracts', icon: IconClipboardList, badge: woPending },
+        { route: '/work-orders', label: 'Worker contracts', icon: IconClipboardList, badge: woPending },
         { route: '/attendance', label: 'Attendance', icon: IconChecklist },
       ].filter(Boolean) as Item[]),
     },
     {
-      label: 'Workspace',
+      // Money IN — receivables. Client billing lived under Payments (money out); it belongs
+      // with the customers it bills. (Clients themselves are people you deal with, so they
+      // live in Contacts alongside workers & vendors.)
+      label: 'Sales',
       items: ([
-        can(role !== 'supervisor') && { route: '/stakeholders', label: 'Parties', icon: IconUsersGroup },
-        can(role === 'principal' || role === 'management') && { route: '/team', label: 'Team & access', icon: IconShieldLock },
+        can(role !== 'supervisor') && { route: '/billing', label: 'Client billing', icon: IconFileInvoice, badge: billOverdue },
+      ].filter(Boolean) as Item[]),
+    },
+    {
+      // Everyone you deal with — the people directory. Clients (money-in) sit beside
+      // workers & vendors (money-out) here, so there is one place to find a contact.
+      // (Team & access moved to the account menu — it's an admin/settings surface, not a
+      // daily-work destination, the way Notion/Slack/Stripe/QuickBooks all place it.)
+      label: 'Contacts',
+      items: ([
+        can(role !== 'supervisor') && { route: '/stakeholders', label: 'Workers & vendors', icon: IconUsersGroup, match: () => onStk && stkTab !== 'client' },
+        can(role !== 'supervisor') && { route: '/stakeholders?tab=client', label: 'Clients', icon: IconBuilding, match: () => onStk && stkTab === 'client' },
       ].filter(Boolean) as Item[]),
     },
     {
@@ -328,7 +365,7 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
         { route: `${projBase}/issues?view=snags`, label: 'Snags', icon: IconListCheck },
       ]),
     { route: `${projBase}/transactions`, label: 'Transactions', icon: IconArrowsExchange },
-    { route: `${projBase}/work-orders`, label: 'Contracts', icon: IconClipboardList },
+    { route: `${projBase}/work-orders`, label: 'Worker contracts', icon: IconClipboardList },
     { route: `${projBase}/purchase-orders`, label: 'Purchase orders', icon: IconShoppingBag },
     { route: `${projBase}/inventory`, label: 'Inventory', icon: IconBox },
     { route: `${projBase}/boqs`, label: 'BOQs', icon: IconListNumbers },
@@ -434,8 +471,10 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
         </div>
 
         {/* sections — the PRIMARY rail always shows the top-level nav (icon spine when collapsed).
-            In-project / Site-Management sub-navs live in the secondary navbar beside it. */}
-        <nav className="nav-scroll flex-1 overflow-y-auto overflow-x-hidden mt-4 flex flex-col" style={pad}>
+            In-project / Site-Management sub-navs live in the secondary navbar beside it. The
+            wrapper is the positioning context for the two edge scrims below. */}
+        <div style={{ position: 'relative', flex: '1 1 0%', minHeight: 0, display: 'flex', flexDirection: 'column', marginTop: 16 }}>
+        <nav ref={navScrollRef} onScroll={checkScroll} className="nav-scroll flex-1 overflow-y-auto overflow-x-hidden flex flex-col" style={pad}>
           {SECTIONS.map((s, i) => (
             s.items.length === 0 ? null : (
               // The last section ("Site") is pushed to the bottom of the rail when there's room.
@@ -453,6 +492,12 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
             )
           ))}
         </nav>
+        {/* edge scrims — fade the nav into the rail at whichever end has more to see.
+            The bottom one rides just above the pinned account bar, so it reads as
+            "scroll down for more" rather than a hard cut. */}
+        <div aria-hidden style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 18, background: 'linear-gradient(#17100A, rgba(23,16,10,0))', opacity: scrollEdge.top ? 1 : 0, transition: 'opacity .18s ease', pointerEvents: 'none' }} />
+        <div aria-hidden style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 24, background: 'linear-gradient(rgba(20,13,7,0), #140D07)', opacity: scrollEdge.bottom ? 1 : 0, transition: 'opacity .18s ease', pointerEvents: 'none' }} />
+        </div>
 
         {/* user identity + menu */}
         <div className="mt-2" style={{ ...pad, position: 'relative' }} ref={userRef}>
@@ -479,6 +524,12 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
                 <IconUser size={15} strokeWidth={1.7} style={{ color: V.faint }} /> Profile
                 {emailMissing && <span style={{ marginLeft: 'auto', fontSize: 10.5, fontWeight: 600, color: '#B2402A' }}>email</span>}
               </button>
+              {(role === 'principal' || role === 'management') && (
+                <button onClick={() => { navigate('/team'); setShowUser(false); }} className="w-full flex items-center gap-2.5 px-3 py-2 text-left" style={{ fontSize: 13, color: V.inkSoft, background: 'transparent' }}
+                  onMouseEnter={e => (e.currentTarget.style.background = V.field)} onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                  <IconShieldLock size={15} strokeWidth={1.7} style={{ color: V.faint }} /> Members &amp; roles
+                </button>
+              )}
               <div style={{ borderTop: `1px solid ${V.line}` }} />
               <button onClick={doSignOut} disabled={signingOut} aria-busy={signingOut}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-left relative overflow-hidden"

@@ -38,6 +38,7 @@ import { isNewLedgerOrg } from '../lib/ledgerRead';
 import { addAdjustment } from '../lib/partyLedgerApi';
 import { PendingCertifications } from '../components/attendance/PendingCertifications';
 import { LedgerCutoverControl } from '../components/attendance/LedgerCutoverControl';
+import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
 import { useUserProfile } from '../App';
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
@@ -132,6 +133,7 @@ export default function Payables({ session }: { session: Session }) {
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [diffs, setDiffs] = useState<Record<string, Diff>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [drawerStk, setDrawerStk] = useState<string | null>(null); // party ledger opened OVER this page
   const [why, setWhy] = useState<string | null>(null);       // row key with an open why-popover
   const [mode, setMode] = useState('UPI');
   const [busy, setBusy] = useState<string | null>(null);
@@ -166,7 +168,7 @@ export default function Payables({ session }: { session: Session }) {
   const { data: vendorRows } = useQuery({ queryKey: ['vendor_payables'], queryFn: loadVendorRows });
   const { data: parties } = useQuery({
     queryKey: ['payables_parties'],
-    queryFn: async () => (await supabase.from('stakeholders').select('stakeholder_id, name, type, category').order('name')).data ?? [] as any[],
+    queryFn: async () => (await supabase.from('stakeholders').select('stakeholder_id, name, type, category').is('merged_into', null).order('name')).data ?? [] as any[],
   });
   const { data: projects } = useQuery({
     queryKey: ['projects_active_min'],
@@ -333,10 +335,12 @@ export default function Payables({ session }: { session: Session }) {
     return [...seen].map(([id, name]) => ({ id, name }));
   };
 
-  // Where a row's "open ledger" / "open bills" link goes.
+  // Where a row's "open ledger" / "open bills" link goes. The ledger opens as a drawer
+  // OVER this page (so closing it drops you back onto the run, not on the transactions
+  // list); bills still route to the bills page filtered to the party.
   const openSource = (r: PayRow) => {
     if (r.bills && r.stakeholderId) navigate(`/bills?party=${r.stakeholderId}`);
-    else if (r.stakeholderId) navigate(`/ledger?stakeholder=${r.stakeholderId}`);
+    else if (r.stakeholderId) setDrawerStk(r.stakeholderId);
   };
 
   // The detail line, in the reference's shape: the days of the week for a wage row, the stage
@@ -470,7 +474,27 @@ export default function Payables({ session }: { session: Session }) {
             nothing when the inbox is empty, so it gets no card of its own to leave behind. */}
         {view === 'run' && orgId && session.user?.id && <PendingCertifications orgId={orgId} userId={session.user.id} />}
 
-        {isLoading && <div className="state">Loading the week…</div>}
+        {isLoading && (
+          <div aria-hidden>
+            {[0, 1].map(si => (
+              <div className="card-sec sk-card" key={si}>
+                <div className="sec-head"><span className="sk-bar sk-head" /><span className="sk-bar" style={{ width: 84, height: 13 }} /></div>
+                <div className="colkey"><span>who · for</span><span>balance b/f</span><span>this week</span><span>after</span><span /></div>
+                {[0, 1, 2, 3].map(ri => (
+                  <div className="prow" key={ri}>
+                    <div className="prow-main">
+                      <div className="pwho"><div className="avatar sk-block">&nbsp;</div><div className="id"><span className="sk-bar" style={{ width: `${52 + ri * 8}%` }} /><span className="sk-bar" style={{ width: `${34 + ri * 5}%`, marginTop: 7 }} /></div></div>
+                      <div style={{ textAlign: 'right' }}><span className="sk-bar" style={{ width: 54 }} /></div>
+                      <div style={{ textAlign: 'right' }}><span className="sk-bar" style={{ width: 72 }} /></div>
+                      <div style={{ textAlign: 'right' }}><span className="sk-bar" style={{ width: 48 }} /></div>
+                      <div style={{ textAlign: 'right' }}><span className="sk-btn" /></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
         {error && <div className="state" style={{ color: 'var(--red)' }}>Could not load — {(error as { message?: string } | null)?.message || 'try again'}</div>}
         {!isLoading && !error && sections.length === 0 && <div className="state">No active projects yet — create a project to start the payment run.</div>}
 
@@ -608,6 +632,10 @@ export default function Payables({ session }: { session: Session }) {
       </div>
 
     </div>
+
+    {drawerStk && (
+      <StakeholderLedgerDrawer isOpen={!!drawerStk} onClose={() => setDrawerStk(null)} stakeholderId={drawerStk} />
+    )}
     </div>
   );
 }
@@ -623,7 +651,7 @@ function RecurringManager({ orgId, recurring, projects, onChanged, onError, defa
   const [busy, setBusy] = useState(false);
   const { data: parties } = useQuery({
     queryKey: ['payables_parties'],
-    queryFn: async () => (await supabase.from('stakeholders').select('stakeholder_id, name, type').order('name')).data ?? [],
+    queryFn: async () => (await supabase.from('stakeholders').select('stakeholder_id, name, type').is('merged_into', null).order('name')).data ?? [],
   });
   const amt = parseInt((f.amount || '').replace(/[^\d]/g, ''), 10) || 0;
   const whoOk = f.who && (f.who !== '__other' || f.party.trim());

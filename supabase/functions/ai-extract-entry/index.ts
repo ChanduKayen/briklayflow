@@ -31,7 +31,7 @@ function getInitials(name: string): string {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Conf = 'HIGH' | 'MEDIUM' | 'LOW';
-interface StakeholderRow { stakeholder_id: string; name: string; type: string; category: string; }
+interface StakeholderRow { stakeholder_id: string; name: string; type: string; category: string; aliases?: string[] | null; }
 interface ProjectRow { project_id: string; name: string; }
 interface MatchEntry { id: string; name: string; type: string; category: string; confidence: Conf; score: number; }
 
@@ -46,41 +46,34 @@ function matchPayee(raw: string, stakeholders: StakeholderRow[]): {
   const q = raw.toLowerCase().trim();
   const candidates: MatchEntry[] = [];
 
-  for (const s of stakeholders) {
-    const sn = s.name.toLowerCase();
-    let score = Infinity;
-    let conf: Conf = 'LOW';
+  // Score one spelling (the name, or one of the party's aliases). Lower score = better.
+  const scoreOne = (name: string): { score: number; conf: Conf } => {
+    const sn = name.toLowerCase();
+    if (sn === q) return { score: 0, conf: 'HIGH' };
+    if (sn.includes(q) && q.length >= 3) return { score: 1, conf: 'HIGH' };
+    if (q.includes(sn) && sn.length >= 3) return { score: 1, conf: 'HIGH' };
+    const snFirst = sn.split(/\s+/)[0];
+    const qFirst = q.split(/\s+/)[0];
+    if (snFirst === qFirst && snFirst.length > 2) return { score: 2, conf: 'MEDIUM' };
+    const dist = levenshtein(q, sn);
+    if (dist <= 2) return { score: dist + 3, conf: 'MEDIUM' };
+    if (dist / Math.max(q.length, sn.length) <= 0.4) return { score: dist + 6, conf: 'LOW' };
+    const abbr = getInitials(name);
+    const qClean = q.replace(/\s+/g, '').toUpperCase();
+    if (abbr === qClean && qClean.length >= 2) return { score: 4, conf: 'MEDIUM' };
+    if (sn.split(/\s+/).some((w: string) => w.startsWith(q) && q.length >= 3)) return { score: 5, conf: 'MEDIUM' };
+    return { score: Infinity, conf: 'LOW' };
+  };
 
-    if (sn === q) {
-      score = 0; conf = 'HIGH';
-    } else if (sn.includes(q) && q.length >= 3) {
-      score = 1; conf = 'HIGH';
-    } else if (q.includes(sn) && sn.length >= 3) {
-      score = 1; conf = 'HIGH';
-    } else {
-      const snFirst = sn.split(/\s+/)[0];
-      const qFirst = q.split(/\s+/)[0];
-      if (snFirst === qFirst && snFirst.length > 2) {
-        score = 2; conf = 'MEDIUM';
-      } else {
-        const dist = levenshtein(q, sn);
-        if (dist <= 2) {
-          score = dist + 3; conf = 'MEDIUM';
-        } else if (dist / Math.max(q.length, sn.length) <= 0.4) {
-          score = dist + 6; conf = 'LOW';
-        } else {
-          const abbr = getInitials(s.name);
-          const qClean = q.replace(/\s+/g, '').toUpperCase();
-          if (abbr === qClean && qClean.length >= 2) {
-            score = 4; conf = 'MEDIUM';
-          } else if (sn.split(/\s+/).some((w: string) => w.startsWith(q) && q.length >= 3)) {
-            score = 5; conf = 'MEDIUM';
-          }
-        }
-      }
+  for (const s of stakeholders) {
+    // a party matches by its name OR any alias (the other names it goes by) — best spelling wins
+    let best = { score: Infinity, conf: 'LOW' as Conf };
+    for (const nm of [s.name, ...((s.aliases ?? []) as string[])].filter(Boolean)) {
+      const r = scoreOne(nm);
+      if (r.score < best.score) best = r;
     }
-    if (score < Infinity) {
-      candidates.push({ id: s.stakeholder_id, name: s.name, type: s.type, category: s.category, confidence: conf, score });
+    if (best.score < Infinity) {
+      candidates.push({ id: s.stakeholder_id, name: s.name, type: s.type, category: s.category, confidence: best.conf, score: best.score });
     }
   }
 
@@ -201,7 +194,7 @@ serve(async (req) => {
     if (entryErr || !entry) throw new Error('Entry not found');
 
     const [{ data: stakeholders }, { data: projects }] = await Promise.all([
-      supabase.from('stakeholders').select('stakeholder_id, name, type, category').order('name'),
+      supabase.from('stakeholders').select('stakeholder_id, name, type, category, aliases').order('name'),
       supabase.from('projects').select('project_id, name').eq('status', 'Active'),
     ]);
 

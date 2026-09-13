@@ -4,6 +4,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import type { Stakeholder } from '../types';
+import { searchPayees } from '../lib/payeeSearch';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useOrgId } from '../lib/auth/AuthProvider';
@@ -396,9 +397,9 @@ export default function NewWorkOrder({ session }: { session: Session }) {
   const { data: workers } = useQuery({
     queryKey: ['workers'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('stakeholders').select('stakeholder_id, name, category').eq('type', 'Worker').order('name');
+      const { data, error } = await supabase.from('stakeholders').select('stakeholder_id, name, category, aliases').eq('type', 'Worker').is('merged_into', null).order('name');
       if (error) throw error;
-      return data as Pick<Stakeholder, 'stakeholder_id' | 'name' | 'category'>[];
+      return data as Pick<Stakeholder, 'stakeholder_id' | 'name' | 'category' | 'aliases'>[];
     },
   });
 
@@ -541,7 +542,7 @@ export default function NewWorkOrder({ session }: { session: Session }) {
       if (data.order_value) setAgreedValue(Number(data.order_value) || 0);
       if (data.date_issued && !isNaN(Date.parse(data.date_issued))) setDateIssued(data.date_issued);
       if (data.worker_name_fuzzy && workers) {
-        const match = workers.find(w => w.name.toLowerCase().includes((data.worker_name_fuzzy as string).toLowerCase()));
+        const match = searchPayees(workers, data.worker_name_fuzzy as string)[0];
         if (match) selectContractor(match.stakeholder_id, match.name);
       }
 
@@ -629,8 +630,10 @@ export default function NewWorkOrder({ session }: { session: Session }) {
     );
   }
 
-  const conHits = (workers ?? []).filter(w => w.name.toLowerCase().includes(conSearch.trim().toLowerCase()));
-  const conExact = conHits.some(w => w.name.toLowerCase() === conSearch.trim().toLowerCase());
+  // alias-aware: matches a worker by name OR any of their other names, tightest first
+  const conHits = searchPayees((workers ?? []), conSearch);
+  const _conQ = conSearch.trim().toLowerCase();
+  const conExact = conHits.some(w => w.name.toLowerCase() === _conQ || (w.aliases ?? []).some(a => a.toLowerCase() === _conQ));
 
   // ─── Render ────────────────────────────────────────────────────────────────
   return (

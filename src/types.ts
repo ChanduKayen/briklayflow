@@ -48,6 +48,8 @@ export interface Stakeholder {
   rating_delivery?: number | null;
   rating_quality?: number | null;
   rating_pricing?: number | null;
+  /** Other names this party is called by — used only for name-matching, never displayed. */
+  aliases?: string[] | null;
   created_at: string;
 }
 

@@ -8,6 +8,7 @@ import { useOrgId } from '../lib/auth/AuthProvider';
 import { ImageLightbox } from './ImageLightbox';
 import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 import { searchPayees, rankPayeeName, PAYEE_SEARCH_FLOOR } from '../lib/payeeSearch';
+import { addStakeholderAlias } from '../lib/stakeholderMerge';
 import { fileRoughEntry, fileRoughEntrySplit } from './day-book/fileEntry';
 import { GEN_HEADS, getCostCode } from '../lib/costCodes';
 
@@ -1081,6 +1082,7 @@ function PopupContents({
 }: ContentProps) {
   const payeeDropRef    = useRef<HTMLDivElement>(null);
   const [showCreateStkForm, setShowCreateStkForm] = useState(false);
+  const qc = useQueryClient();
 
   const ai = entry.ai_extracted;
 
@@ -1110,6 +1112,24 @@ function PopupContents({
     setShowCreateStkForm(false);
     // Auto-advance to the next still-empty mandatory field (cursor active on mobile).
     advanceAfter('payee');
+  };
+
+  // A typed spelling is worth remembering as another name only if it's genuinely different from the
+  // party's name and known aliases — not a substring the fuzzy matcher already resolves.
+  const worthAlias = (raw: string, name: string, aliases?: string[] | null): boolean => {
+    const r = raw.trim().toLowerCase(); if (!r) return false;
+    const n = name.trim().toLowerCase();
+    if (r === n || n.includes(r) || r.includes(n)) return false;
+    return !(aliases ?? []).some((a) => a.trim().toLowerCase() === r);
+  };
+
+  // Dropdown action: pick this party AND remember the typed spelling as one of its other names.
+  const learnAlias = async (party: any, raw: string) => {
+    selectPayee(party.stakeholder_id, party.name);
+    try {
+      await addStakeholderAlias(party.stakeholder_id, raw, party.aliases, party.name);
+      qc.invalidateQueries({ queryKey: ['stakeholders'] });
+    } catch { /* a failed remember never blocks the pick */ }
   };
 
   // Pick a general-expense head (overhead, no party): the head stands in for the payee.
@@ -1518,6 +1538,27 @@ function PopupContents({
                         </button>
                       );
                     })}
+
+                    {/* ── "Also called" — remember the typed spelling as another name for the top match, so
+                         it resolves next time. Shown only when the spelling is genuinely a new one (not the
+                         name itself, not a substring, not already an alias). Sits by "Create" to steer the
+                         near-duplicate toward the real party instead of a new one. ── */}
+                    {hasMatches && (() => {
+                      const best = searchedPayees[0] as any;
+                      if (!best || !worthAlias(typedName, best.name, best.aliases)) return null;
+                      return (
+                        <button type="button" onMouseDown={(e) => { e.preventDefault(); learnAlias(best, typedName); }}
+                          className="group w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors"
+                          style={{ background: VOICE.askWash, borderTop: `1px solid ${VOICE.line}` }}>
+                          <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0" style={{ background: VOICE.walnut, color: VOICE.ivory }}>
+                            <span className="material-symbols-outlined text-[14px]">bookmark_add</span>
+                          </span>
+                          <span className="flex-1 min-w-0 text-[12px]" style={{ color: VOICE.system }}>
+                            Save <span className="font-semibold" style={{ color: VOICE.user }}>&ldquo;{typedName}&rdquo;</span> as another name for <span className="font-semibold" style={{ color: VOICE.user }}>{best.name}</span>
+                          </span>
+                        </button>
+                      );
+                    })()}
 
                     {/* ── General-expense heads (overheads) — shown BELOW the party matches.
                          An overhead has no party; picking a head files the entry party-less

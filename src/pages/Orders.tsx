@@ -81,7 +81,7 @@ export default function Orders({ session: _ }: { session: Session }) {
             className="relative z-10 flex-1 h-9 text-[13px] font-semibold rounded-lg"
             style={{ color: tab === t ? V.terraDeep : V.faint, transition: 'color .2s ease' }}
           >
-            {t === 'po' ? 'Purchase Orders' : 'Contracts'}
+            {t === 'po' ? 'Purchase Orders' : 'Worker contracts'}
           </button>
         ))}
       </div>

@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { searchPayees } from '../lib/payeeSearch';
 import { useSnackbar } from '../components/Snackbar';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
@@ -990,8 +991,9 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('stakeholders')
-        .select('stakeholder_id, name, category, gstin, is_approved, type, contact')
+        .select('stakeholder_id, name, category, gstin, is_approved, type, contact, aliases')
         .in('type', ['Vendor'])
+        .is('merged_into', null)
         .order('name');
       if (error) throw error;
       return data as any[];
@@ -1000,21 +1002,22 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
 
   const selectedProjectObj = projects?.find(p => p.project_id === projectId);
 
-  const vendorSuggestions = useMemo(() => {
-    if (!vendorSearch || !vendors) return [];
-    const q = vendorSearch.toLowerCase();
-    return vendors.filter(v => v.name.toLowerCase().includes(q) || v.category?.toLowerCase().includes(q)).slice(0, 8);
-  }, [vendorSearch, vendors]);
-
-  // Step 1 vendor list — full universe, filtered by the hero search input.
+  // Step 1 vendor list — full universe, filtered by the hero search input. Matches by name OR any
+  // ALIAS (via the shared alias-aware scorer), and still by trade/category as before.
   const filteredVendors = useMemo(() => {
     if (!vendors) return [] as any[];
     const q = vendorSearch.trim().toLowerCase();
     if (!q) return vendors as any[];
-    return (vendors as any[]).filter(v =>
-      v.name.toLowerCase().includes(q) || v.category?.toLowerCase().includes(q)
-    );
+    const byName = searchPayees(vendors as any[], vendorSearch);
+    const seen = new Set(byName.map((v: any) => v.stakeholder_id));
+    const byCat = (vendors as any[]).filter(v => v.category?.toLowerCase().includes(q) && !seen.has(v.stakeholder_id));
+    return [...byName, ...byCat];
   }, [vendors, vendorSearch]);
+
+  const vendorSuggestions = useMemo(() => {
+    if (!vendorSearch || !vendors) return [];
+    return filteredVendors.slice(0, 8);
+  }, [vendorSearch, vendors, filteredVendors]);
 
   const vendorSKUCategories = useMemo<string[] | null>(() => {
     if (!selectedVendor?.category) return null;

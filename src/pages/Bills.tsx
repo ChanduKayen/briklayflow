@@ -4,17 +4,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { loadBills, loadBillDetail, deleteBill, extractBill, type BillRow, type BillStatus } from '../lib/billsApi';
+import { loadBills, loadBillDetail, deleteBill, extractBill, type BillRow, type BillStatus, type ExtractedBill } from '../lib/billsApi';
 import { DocThumb } from '../components/DocThumb';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { openDoc, resolveDocUrl } from '../lib/storage';
 import { useSnackbar } from '../components/Snackbar';
-import NewBillModal, { type BillDraft } from '../components/bills/NewBillModal';
+import { type BillDraft } from '../components/bills/NewBillModal';
 import { useSearchScope } from '../components/search/searchScope';
 import { useCursorLamp } from '../components/nav/useCursorLamp';
 import BillsMobile from '../components/bills/BillsMobile';
 import { useMintBill } from '../components/bills/useMintBill';
 import { useIsMobile } from '../lib/useIsMobile';
+import { supabase } from '../lib/supabase';
+import { useOrgId } from '../lib/auth/AuthProvider';
+import { createParty } from '../components/day-book/fileEntry';
 
 const BLX_CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500&family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
@@ -32,8 +35,11 @@ const BLX_CSS = `
 /* ===== bills header — bills-header-v5.html, scoped under .bh so its generic class names
    (.seg .chip .btn .amt) can't collide with the register's body classes ===== */
 .blx .bh .hwrap{max-width:1180px;margin:0 auto;padding:0 40px}
-.blx .bh .hero{position:relative;overflow:hidden;background:var(--espresso);color:var(--on-dark);padding:42px 0 40px;--mx:50%;--my:50%}
+/* the whole hero is a FIXED height; its inner wrap is a flex column and the stage flex-fills, so the
+   header never resizes as the title row (the sub only shows at rest) or the stage content changes. */
+.blx .bh .hero{position:relative;overflow:hidden;background:var(--espresso);color:var(--on-dark);padding:38px 0 34px;height:352px;--mx:50%;--my:50%}
 .blx .bh .hero>*{position:relative;z-index:1}
+.blx .bh .hero .hwrap{display:flex;flex-direction:column;height:100%}
 /* the transactions page's cursor lamp — a warm glow + revealed grid that follow the pointer on the dark band */
 .blx .bh .hero .fx{position:absolute;inset:0;z-index:0;pointer-events:none;opacity:0;transition:opacity .45s ease}
 .blx .bh .hero.lit .fx{opacity:1}
@@ -44,11 +50,86 @@ const BLX_CSS = `
 .blx .bh .tb-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 14px;border-radius:9px;font-family:inherit;font-weight:500;font-size:13.5px;line-height:1;white-space:nowrap;color:rgba(245,240,231,.72);background:rgba(245,240,231,.07);box-shadow:inset 0 0 0 1px rgba(245,240,231,.14);border:0;cursor:pointer;transition:background .15s,color .15s}
 .blx .bh .tb-btn svg{flex-shrink:0;width:15px;height:15px}
 .blx .bh .tb-btn:hover{color:#F5F0E7;background:rgba(245,240,231,.11)}
-.blx .bh .tb-btn.primary{background:#B4532F;box-shadow:none;color:#fff}
-.blx .bh .tb-btn.primary:hover{background:#9C4526}
+/* Add bill is the page's primary act — a longer, weightier pill that earns its place */
+.blx .bh .tb-btn.primary{height:44px;min-width:156px;padding:0 26px;gap:10px;font-size:15px;font-weight:600;border-radius:11px;background:#B4532F;color:#fff;box-shadow:0 2px 0 #8B3F1E,0 10px 22px -10px rgba(150,68,32,.85)}
+.blx .bh .tb-btn.primary svg{width:17px;height:17px}
+.blx .bh .tb-btn.primary:hover{background:#9C4526;transform:translateY(-1px);box-shadow:0 2px 0 #8B3F1E,0 14px 28px -10px rgba(150,68,32,.9)}
+.blx .bh .tb-btn.primary:active{transform:translateY(1px);box-shadow:0 1px 0 #8B3F1E}
 .blx .bh .tb-btn.primary.busy{cursor:progress}
 .blx .bh .tb-btn.primary.done{background:#5F7F5B}
-.blx .bh .hero-top{display:flex;align-items:flex-start;justify-content:space-between;gap:40px}
+/* in-header bill capture — catch zone + reading/confirm surface (briklay-bill-capture-v5.html) */
+/* the stage is a FIXED height so the header never resizes as the content morphs between states */
+.blx .bh .hero-stage{position:relative;flex:1;min-height:0;margin-top:10px;display:flex;flex-direction:column;justify-content:center}
+/* the animated "Uploading…" title dots — a synced wave while the extractor reads */
+.blx .bh h1 .dots{display:inline-flex;gap:5px;margin-left:9px;vertical-align:middle}
+.blx .bh h1 .dots i{width:6px;height:6px;border-radius:50%;background:currentColor;display:block;animation:bh-jump 1s ease-in-out infinite}
+.blx .bh h1 .dots i:nth-child(2){animation-delay:.16s}
+.blx .bh h1 .dots i:nth-child(3){animation-delay:.32s}
+@keyframes bh-jump{0%,62%,100%{transform:translateY(0);opacity:.45}31%{transform:translateY(-7px);opacity:1}}
+@keyframes bh-morphin{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.blx .bh .catch,.blx .bh .read{animation:bh-morphin .34s cubic-bezier(.2,.8,.3,1)}
+.blx .bh .catch{position:relative;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(245,239,228,.035);border-radius:16px}
+.blx .bh .catch .rule{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.blx .bh .catch .rule rect{fill:none;stroke:rgba(196,99,59,.75);stroke-width:1.4;stroke-dasharray:5 8;stroke-linecap:round;animation:bh-march 26s linear infinite}
+@keyframes bh-march{to{stroke-dashoffset:-260}}
+.blx .bh .catch .c-arrow{font-size:22px;color:var(--terra-lo);animation:bh-drift 2.6s ease-in-out infinite}
+@keyframes bh-drift{0%,100%{transform:translateY(0);opacity:.85}50%{transform:translateY(-3px);opacity:1}}
+.blx .bh .catch .c-big{font-family:var(--serif);font-size:23px;color:var(--on-dark)}
+.blx .bh .catch .c-up{font:inherit;font-size:23px;background:none;border:0;color:var(--terra-lo);cursor:pointer;text-decoration:underline;text-underline-offset:4px}
+.blx .bh .catch .c-up:hover{color:#E8875A}
+.blx .bh .catch .c-sm{font-size:13.5px;color:rgba(245,239,228,.55)}
+.blx .bh .catch .c-alt{margin-top:8px}
+.blx .bh .catch .c-alt button{background:none;border:0;color:rgba(245,239,228,.55);font:inherit;font-size:13px;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.blx .bh .catch .c-alt button:hover{color:var(--on-dark)}
+.blx .bh .read{position:relative}
+.blx .bh .read .filed{position:absolute;right:0;top:-6px;font-size:13px;color:#A7C08F}
+.blx .bh .doc-row{display:flex;gap:22px;align-items:flex-start;margin-top:4px}
+.blx .bh .doc-thumb{width:82px;height:106px;border-radius:8px;background:#FCF9F2;flex-shrink:0;position:relative;overflow:hidden;box-shadow:0 6px 20px rgba(0,0,0,.35)}
+.blx .bh .doc-thumb .lines{position:absolute;inset:14px 12px;display:flex;flex-direction:column;gap:7px}
+.blx .bh .doc-thumb .lines i{display:block;height:5px;border-radius:3px;background:#E7DECB}
+.blx .bh .doc-thumb .lines i:nth-child(1){width:60%}.blx .bh .doc-thumb .lines i:nth-child(3){width:80%}.blx .bh .doc-thumb .lines i:nth-child(5){width:45%;background:#E8C9B4}
+.blx .bh .doc-thumb .scanline{position:absolute;left:0;right:0;height:26px;top:-30px;background:linear-gradient(to bottom,rgba(196,99,59,0),rgba(196,99,59,.3),rgba(196,99,59,0));animation:bh-scan 1.5s infinite ease-in-out}
+@keyframes bh-scan{0%{top:-30px}55%{top:104px}100%{top:104px}}
+.blx .bh .doc-name{margin-top:8px;font-size:11.5px;color:rgba(245,239,228,.45);max-width:82px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.blx .bh .read-main{flex:1;min-width:0}
+.blx .bh .read-status{font-size:14px;color:rgba(245,239,228,.6);margin-bottom:15px;display:flex;align-items:center;gap:10px;min-height:20px}
+.blx .bh .read-status .pulse{width:7px;height:7px;border-radius:50%;background:var(--terra-lo);animation:bh-pulse 1.4s infinite;flex-shrink:0}
+@keyframes bh-pulse{0%,100%{opacity:1}50%{opacity:.25}}
+.blx .bh .read-status.ok{color:#B5C79E}
+.blx .bh .read-status.ok .pulse{animation:none;background:#8FA576}
+.blx .bh .fields{display:grid;grid-template-columns:1.5fr 1fr .9fr 1fr;gap:20px 34px;max-width:840px}
+.blx .bh .vfield{position:relative}
+.blx .bh .vmenu2{position:absolute;top:calc(100% + 5px);left:0;min-width:250px;max-width:340px;z-index:20;background:#FCF9F2;border:1px solid #E5DCCC;border-radius:9px;overflow:hidden;box-shadow:0 18px 44px -14px rgba(0,0,0,.5);max-height:216px;overflow-y:auto}
+.blx .bh .vmenu2 button{display:block;width:100%;text-align:left;padding:9px 13px;background:none;border:0;font:inherit;font-size:14px;color:#2B2118;cursor:pointer}
+.blx .bh .vmenu2 button:hover{background:#F1E9DB}
+.blx .bh .vmenu2 .vadd{color:var(--terracotta);font-weight:600;border-top:1px solid #EFE7D8}
+.blx .bh .field label{display:flex;align-items:center;gap:7px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:rgba(245,239,228,.42);margin-bottom:5px;font-weight:600}
+.blx .bh .field .tick{color:#8FA576;font-size:12px}
+.blx .bh .field input{width:100%;background:transparent;border:0;outline:none;border-bottom:1px solid rgba(245,239,228,.22);color:var(--on-dark);font:inherit;font-size:17px;padding:4px 0 7px;transition:border-color .15s}
+.blx .bh .field input:focus{border-color:var(--terra-lo)}
+.blx .bh .field.amount input{font-family:var(--mono);font-size:22px;color:#F0C9AE}
+.blx .bh .field.weak input{border-bottom:1.5px dashed var(--terra-lo)}
+.blx .bh .field.weak label{color:var(--terra-lo)}
+.blx .bh .field .why{font-size:11.5px;color:rgba(196,99,59,.9);margin-top:5px}
+.blx .bh .field.site{grid-column:1/-1}
+.blx .bh .site-chips{display:flex;gap:8px;flex-wrap:nowrap;overflow-x:auto;padding-bottom:2px;scrollbar-width:none}
+.blx .bh .site-chips::-webkit-scrollbar{display:none}
+.blx .bh .site-chips button{flex:none}
+.blx .bh .site-chips button{background:rgba(245,239,228,.07);border:1px solid rgba(245,239,228,.22);color:rgba(245,239,228,.75);border-radius:99px;padding:5px 12px;font:inherit;font-size:12.5px;cursor:pointer;transition:all .15s}
+.blx .bh .site-chips button:hover{background:rgba(245,239,228,.14)}
+.blx .bh .site-chips button.on{background:rgba(196,99,59,.2);border-color:rgba(196,99,59,.7);color:var(--on-dark);font-weight:500}
+.blx .bh .confirm-foot{display:flex;justify-content:space-between;align-items:center;margin-top:20px;max-width:820px;gap:16px}
+.blx .bh .ledger-line{font-size:13.5px;color:rgba(245,239,228,.55);max-width:440px}
+.blx .bh .ledger-line b{color:rgba(245,239,228,.9);font-weight:500;font-family:var(--mono)}
+.blx .bh .confirm-actions{display:flex;gap:10px;flex:none}
+.blx .bh .btn-back{background:none;border:1px solid rgba(245,239,228,.3);color:rgba(245,239,228,.75);border-radius:9px;padding:9px 16px;font:inherit;font-size:14px;cursor:pointer}
+.blx .bh .btn-back:hover{border-color:rgba(245,239,228,.6);color:var(--on-dark)}
+.blx .bh .btn-file{background:var(--terra);border:0;color:#fff;border-radius:9px;padding:9px 18px;font:inherit;font-size:14px;font-weight:600;opacity:.45;cursor:pointer;transition:all .18s}
+.blx .bh .btn-file.ready{opacity:1}
+.blx .bh .btn-file.ready:hover{background:#C2521F}
+.blx .bh .btn-file:disabled{cursor:default}
+@media(max-width:760px){.blx .bh .fields{grid-template-columns:1fr 1fr}}
+.blx .bh .hero-top{display:flex;align-items:flex-start;justify-content:space-between;gap:40px;min-height:66px}
 .blx .bh .hero h1{font-family:var(--serif);font-weight:400;font-size:40px;letter-spacing:-.02em;line-height:1;color:var(--on-dark);margin:0}
 .blx .bh .hero .sub{font-size:14.5px;color:var(--on-dark-2);margin-top:10px;max-width:46ch;line-height:1.5}
 .blx .bh .actions{display:flex;align-items:center;gap:10px;justify-content:flex-end}
@@ -345,14 +426,6 @@ function StatusCell({ s, left }: { s: BillStatus; left: number }) {
   );
 }
 
-type QState = 'reading' | 'ready' | 'saving' | 'done' | 'error';
-interface QItem {
-  id: string; file: File; state: QState; error?: string;
-  vendorName: string | null; billNo: string | null; billDate: string | null; amount: number;
-  lines: { name: string; spec: string | null; unit: string | null; qty: number; rate: number; amount: number }[];
-}
-let qseq = 0;
-
 // The /bills/:billId route — a SEPARATE component from the list so React never reuses one instance
 // across the two routes (which changed the hook count and crashed with "fewer hooks than expected").
 export function BillDetailPage() {
@@ -362,9 +435,7 @@ export function BillDetailPage() {
 
 // Small inline glyphs for the Add-bill control (no icon dep; stroke follows currentColor).
 const IconUpload = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M12 15V4" /><path d="m7.5 8.5 4.5-4.5 4.5 4.5" /><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" /></svg>);
-const IconCheck = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12.5 4.5 4.5L19 7" /></svg>);
 const IconDrop = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="4" width="16" height="16" rx="3" strokeDasharray="3 3" /><path d="M12 9v6M9 12h6" /></svg>);
-const IconAlert = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M12 8v5" /><circle cx="12" cy="16.5" r=".6" fill="currentColor" /><path d="M10.3 4.3 3.5 16a2 2 0 0 0 1.7 3h13.6a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0Z" /></svg>);
 
 // ── list ───────────────────────────────────────────────────────────────────
 // Two surfaces over the same register: the desktop ledger table, and the phone's one column. Both
@@ -384,74 +455,90 @@ function BillsDesktop() {
   const [scope, setScope] = useState<'outstanding' | 'all'>('outstanding');
   const [peekSite, setPeekSite] = useState<string | null>(null);   // hero: hovering a site's slice/legend
 
-  // ── drag-drop upload + queue ──
-  const [dragging, setDragging] = useState(false);
-  const [queue, setQueue] = useState<QItem[]>([]);
-  const [flash, setFlash] = useState(false);   // brief "Added ✓" pulse on the button after a mint
-  const dragDepth = useRef(0);
-  // The hero opens the door itself. Its stage one IS the drop — plus the way in for a bill that has
-  // no paper at all, which an OS file picker can never offer.
-  const [manualOpen, setManualOpen] = useState(false);
-
-  const current0 = queue.find(x => x.state === 'ready') ?? null;
-  const sheetOpen = !!current0 || manualOpen;
-
-  const enqueue = useCallback((files: FileList | File[]) => {
-    const list = Array.from(files).filter(f => /^image\/|application\/pdf/.test(f.type));
-    if (!list.length) return;
-    const items: QItem[] = list.map(f => ({ id: `q${++qseq}`, file: f, state: 'reading', vendorName: null, billNo: null, billDate: null, amount: 0, lines: [] }));
-    setQueue(q => [...q, ...items]);
-    // Read each in the background; the confirm sheet picks up 'ready' items one at a time.
-    items.forEach(async (it) => {
-      try {
-        const ex = await extractBill(it.file);
-        setQueue(q => q.map(x => x.id === it.id ? { ...x, state: 'ready', vendorName: ex.vendor, billNo: ex.billNo, billDate: ex.billDate, amount: ex.amount, lines: ex.lines } : x));
-      } catch (e) {
-        setQueue(q => q.map(x => x.id === it.id ? { ...x, state: 'error', error: (e as Error)?.message || 'Could not read the bill' } : x));
-      }
-    });
-  }, []);
-
-  // Page-wide drag-and-drop. Silent while the modal is open: it has its own dropzone, and two
-  // listeners reading the same file would read — and bill — it twice.
-  useEffect(() => {
-    if (sheetOpen) return;
-    const onOver = (e: DragEvent) => { if (e.dataTransfer?.types?.includes('Files')) { e.preventDefault(); } };
-    const onEnter = (e: DragEvent) => { if (e.dataTransfer?.types?.includes('Files')) { dragDepth.current++; setDragging(true); } };
-    const onLeave = () => { dragDepth.current = Math.max(0, dragDepth.current - 1); if (dragDepth.current === 0) setDragging(false); };
-    const onDrop = (e: DragEvent) => { e.preventDefault(); dragDepth.current = 0; setDragging(false); if (e.dataTransfer?.files?.length) enqueue(e.dataTransfer.files); };
-    window.addEventListener('dragover', onOver);
-    window.addEventListener('dragenter', onEnter);
-    window.addEventListener('dragleave', onLeave);
-    window.addEventListener('drop', onDrop);
-    return () => { window.removeEventListener('dragover', onOver); window.removeEventListener('dragenter', onEnter); window.removeEventListener('dragleave', onLeave); window.removeEventListener('drop', onDrop); };
-  }, [enqueue, sheetOpen]);
-
-  // The modal confirms the first item ready for review; the rest stay counted on the button.
-  const current = current0;
-  const drop = (id: string) => setQueue(q => q.filter(x => x.id !== id));
-
-  // Live progress surfaced ON the button (no bottom-right toast): how many are being read / saved,
-  // and how many failed to read.
-  const reading = queue.filter(x => x.state === 'reading').length;
-  const saving = queue.filter(x => x.state === 'saving').length;
-  const errCount = queue.filter(x => x.state === 'error').length;
-  const busy = reading + saving > 0;
-
-  // Mint through the shared pipeline (dedupe lives there), the same call the phone list makes.
+  const orgId = useOrgId();
+  const { show: showSnackbar } = useSnackbar();
   const mintBill = useMintBill();
-  const mint = async (d: BillDraft) => {
-    const res = await mintBill(d);
-    if (res && 'duplicate' in res && res.duplicate) return res;
-    setFlash(true); setTimeout(() => setFlash(false), 1800);
-  };
+
+  // Known vendors (to resolve a read name to a party) + active sites (the confirm's site chips).
+  const { data: vendorParties = [] } = useQuery({
+    queryKey: ['bill_vendor_parties'],
+    queryFn: async () => (await supabase.from('stakeholders').select('stakeholder_id, name').eq('type', 'Vendor').is('merged_into', null).order('name')).data ?? [],
+  });
+  const { data: projectOpts = [] } = useQuery({
+    queryKey: ['bill_projects_active'],
+    queryFn: async () => (await supabase.from('projects').select('project_id, name').eq('status', 'Active').order('name')).data ?? [],
+  });
+
+  // ── in-header bill capture (briklay-bill-capture-v5.html) ──────────────────────────────────────────
+  // The hero IS the door: 'rest' shows the figures; 'catch' is the drop zone (opened by Add bill or a
+  // drag); 'read' is the reading + confirm surface — fields fill from the real extractor, Enter files it
+  // through the same pipeline the modal used, and the header then invites the next drop.
+  type Cap = 'rest' | 'catch' | 'read';
+  const EMPTY_RD = { vendor: '', billNo: '', billDate: '', amount: '', lines: [] as ExtractedBill['lines'], file: null as File | null, fileName: '', weak: false };
+  const [cap, setCap] = useState<Cap>('rest');
+  const [reading, setReading] = useState(false);
+  const [rd, setRd] = useState(EMPTY_RD);
+  const [rdSite, setRdSite] = useState<{ id: string; name: string } | null>(null);
+  const [filed, setFiled] = useState(false);     // the "✓ Filed" flash
+  const [filing, setFiling] = useState(false);
+  const [vOpen, setVOpen] = useState(false);     // the vendor typeahead menu
+  const dragDepth = useRef(0);
+  const captureFileRef = useRef<HTMLInputElement>(null);
+
+  const startRead = useCallback(async (file: File | null) => {
+    setCap('read'); setFiled(false); setRdSite(null);
+    if (!file) { setRd({ ...EMPTY_RD, fileName: 'typed manually' }); setReading(false); return; }
+    setRd({ ...EMPTY_RD, file, fileName: file.name }); setReading(true);
+    try {
+      const ex = await extractBill(file);
+      const match = ex.vendor ? vendorParties.find((v: any) => v.name.toLowerCase() === ex.vendor!.trim().toLowerCase()) : null;
+      setRd({ vendor: match?.name ?? ex.vendor ?? '', billNo: ex.billNo ?? '', billDate: ex.billDate ?? '', amount: ex.amount ? String(Math.round(ex.amount)) : '', lines: ex.lines, file, fileName: file.name, weak: !!(ex.vendor && !match) });
+      setReading(false);
+    } catch { setReading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vendorParties]);
+
+  const fileBill = useCallback(async () => {
+    const vName = rd.vendor.trim();
+    const amt = Number((rd.amount || '').replace(/[^\d]/g, '')) || 0;
+    if (!vName || !amt || !rdSite || filing) return;   // site is required — a bill belongs to a project
+    setFiling(true);
+    try {
+      let vendorId = vendorParties.find((v: any) => v.name.toLowerCase() === vName.toLowerCase())?.stakeholder_id ?? '';
+      if (!vendorId) { const p = await createParty(vName, 'Vendor', orgId); vendorId = p.id; }
+      const draft: BillDraft = { file: rd.file, vendorId, vendorName: vName, billNo: rd.billNo.trim() || null, billDate: rd.billDate.trim() || null, amount: amt, projectId: rdSite?.id ?? null, lines: rd.lines, allowDuplicate: false };
+      const res = await mintBill(draft);
+      if (res && 'duplicate' in res && res.duplicate) await mintBill({ ...draft, allowDuplicate: true });
+      setFiled(true);
+      window.setTimeout(() => { setFiled(false); setCap('catch'); window.setTimeout(() => setCap(c => c === 'catch' ? 'rest' : c), 4000); }, 950);
+    } catch (e) { showSnackbar((e as Error)?.message || 'Could not add the bill', { type: 'error' }); }
+    finally { setFiling(false); }
+  }, [rd, rdSite, vendorParties, orgId, mintBill, showSnackbar, filing]);
+
+  // Page-wide drag-and-drop + Enter/Esc drive the capture state (refs keep the window listeners stable).
+  const capRef = useRef(cap); capRef.current = cap;
+  const startReadRef = useRef(startRead); startReadRef.current = startRead;
+  const fileBillRef = useRef(fileBill); fileBillRef.current = fileBill;
+  useEffect(() => {
+    const onOver = (e: DragEvent) => { if (e.dataTransfer?.types?.includes('Files')) e.preventDefault(); };
+    const onEnter = (e: DragEvent) => { if (e.dataTransfer?.types?.includes('Files')) { dragDepth.current++; if (capRef.current === 'rest') setCap('catch'); } };
+    const onLeave = () => { dragDepth.current = Math.max(0, dragDepth.current - 1); if (dragDepth.current === 0 && capRef.current === 'catch') setCap('rest'); };
+    const onDrop = (e: DragEvent) => { e.preventDefault(); dragDepth.current = 0; const f = e.dataTransfer?.files?.[0]; if (f && /^image\/|application\/pdf/.test(f.type)) void startReadRef.current(f); else if (capRef.current === 'catch') setCap('rest'); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && capRef.current !== 'rest') setCap('rest');
+      if (e.key === 'Enter' && capRef.current === 'read' && (e.target as HTMLElement)?.tagName !== 'BUTTON') { e.preventDefault(); void fileBillRef.current(); }
+    };
+    window.addEventListener('dragover', onOver); window.addEventListener('dragenter', onEnter); window.addEventListener('dragleave', onLeave); window.addEventListener('drop', onDrop);
+    document.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('dragover', onOver); window.removeEventListener('dragenter', onEnter); window.removeEventListener('dragleave', onLeave); window.removeEventListener('drop', onDrop); document.removeEventListener('keydown', onKey); };
+  }, []);
 
   const [q, setQ] = useState('');
   // ?party=<id> — arriving from the search's "Bills" row for one vendor.
   const [searchParams] = useSearchParams();
   const partyId = searchParams.get('party');
-  // ?new=1 — the mobile nav FAB opens the add-bill wizard straight away.
-  useEffect(() => { if (searchParams.get('new') === '1') setManualOpen(true); }, [searchParams]);
+  // ?new=1 — the mobile nav FAB opens the capture straight into type-it-in.
+  useEffect(() => { if (searchParams.get('new') === '1') void startReadRef.current(null); }, [searchParams]);
   const shown = useMemo(() => bills.filter(b =>
     (!partyId || b.vendorId === partyId) &&
     (!site || b.site === site) &&
@@ -512,6 +599,12 @@ function BillsDesktop() {
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
+  // Vendor typeahead (the read surface): matches on the typed name + an "add new" when it's not one yet.
+  const vq = rd.vendor.trim().toLowerCase();
+  const vMatches = vq ? (vendorParties as any[]).filter((v) => v.name.toLowerCase().includes(vq)).slice(0, 6) : (vendorParties as any[]).slice(0, 6);
+  const vExact = (vendorParties as any[]).some((v) => v.name.toLowerCase() === vq);
+  const readReady = !!(rd.vendor.trim() && rd.amount.trim() && rdSite);   // vendor + amount + site (site is required)
+
   return (
     <div className="blx">
       <style>{BLX_CSS}</style>
@@ -522,23 +615,23 @@ function BillsDesktop() {
           <div className="hwrap">
           <div className="hero-top">
             <div>
-              <h1>Vendor Bills</h1>
-              <p className="sub">Every bill recorded across your sites. Purchase orders, payments and ledgers all point back here.</p>
+              <h1>{cap === 'rest' ? 'Vendor Bills' : (cap === 'read' && reading) ? <>Uploading<span className="dots"><i /><i /><i /></span></> : 'New bill'}</h1>
+              {cap === 'rest' && <p className="sub">Every bill recorded across your sites. Purchase orders, payments and ledgers all point back here.</p>}
             </div>
             <div>
               <div className="actions">
-                <button className={`tb-btn primary${busy ? ' busy' : flash ? ' done' : ''}`} onClick={() => setManualOpen(true)} aria-busy={busy}
+                <button className="tb-btn primary" onClick={() => setCap(cap === 'rest' ? 'catch' : 'rest')}
                   title="Add a bill — drop the paper and we'll read it, or type it in. You can also drop files anywhere on this page.">
-                  {busy ? <span className="aspin" /> : flash ? <IconCheck /> : <IconUpload />}
-                  <span>{saving > 0 ? (saving > 1 ? `Saving ${saving}…` : 'Saving…') : reading > 0 ? `Reading ${reading}…` : flash ? 'Added' : 'Add bill'}</span>
+                  <IconUpload /><span>{cap === 'rest' ? 'Add bill' : 'Close'}</span>
                 </button>
               </div>
-              {errCount > 0
-                ? <div className="adderr"><IconAlert />{errCount} couldn{'’'}t be read — <button onClick={() => setQueue(q => q.filter(x => x.state !== 'error'))}>dismiss</button></div>
-                : <div className="hint"><IconDrop />or drop a bill anywhere on this page</div>}
+              {cap === 'rest' && <div className="hint"><IconDrop />or drop a bill anywhere on this page</div>}
             </div>
           </div>
 
+          <div className="hero-stage">
+          {/* REST — the figures */}
+          {cap === 'rest' && (
           <div className="figure">
             <div>
               <div className="amount">{inr(focus ? focus.due : hero.total)}<span className="cap">{scope === 'all' ? 'due' : 'unpaid'}</span></div>
@@ -571,7 +664,84 @@ function BillsDesktop() {
               </div>
             )}
           </div>
+          )}
+
+          {/* CATCH — the drop zone */}
+          {cap === 'catch' && (
+          <div className="catch">
+            <svg className="rule" preserveAspectRatio="none"><rect x="1" y="1" width="99.5%" height="96%" rx="15" /></svg>
+            <div className="c-arrow">⤒</div>
+            <div className="c-big">Drop it here — or <button className="c-up" onClick={() => captureFileRef.current?.click()}>upload</button></div>
+            <div className="c-sm">Photo or PDF · vendor, number, date and amount fill themselves</div>
+            <div className="c-alt"><button onClick={() => void startRead(null)}>or type it in manually</button></div>
+          </div>
+          )}
+
+          {/* READ / CONFIRM */}
+          {cap === 'read' && (
+          <div className="read">
+            {filed && <div className="filed">✓ Filed — it&apos;s on the vendor&apos;s ledger</div>}
+            <div className="doc-row">
+              <div>
+                <div className={`doc-thumb${!reading ? ' done' : ''}`}>
+                  <div className="lines"><i /><i /><i /><i /><i /></div>
+                  {reading && <div className="scanline" />}
+                </div>
+                <div className="doc-name">{rd.fileName}</div>
+              </div>
+              <div className="read-main">
+                <div className="fields">
+                  <div className={`field vfield${rd.weak ? ' weak' : ''}`}>
+                    <label>{!rd.weak && rd.vendor.trim() ? <span className="tick">✓</span> : null} Vendor</label>
+                    <input value={rd.vendor} autoComplete="off"
+                      onChange={e => { setRd(r => ({ ...r, vendor: e.target.value, weak: false })); setVOpen(true); }}
+                      onFocus={() => setVOpen(true)} onBlur={() => window.setTimeout(() => setVOpen(false), 150)} />
+                    {rd.weak && <div className="why">Read off the bill — pick the right vendor, or add it as a new one.</div>}
+                    {vOpen && (vMatches.length > 0 || (vq && !vExact)) && (
+                      <div className="vmenu2">
+                        {vMatches.map((v: any) => (
+                          <button key={v.stakeholder_id} type="button" onMouseDown={e => e.preventDefault()}
+                            onClick={() => { setRd(r => ({ ...r, vendor: v.name, weak: false })); setVOpen(false); }}>{v.name}</button>
+                        ))}
+                        {vq && !vExact && (
+                          <button type="button" className="vadd" onMouseDown={e => e.preventDefault()}
+                            onClick={() => { setRd(r => ({ ...r, weak: false })); setVOpen(false); }}>+ Add “{rd.vendor.trim()}” as a new vendor</button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <div className="field"><label>{rd.billNo.trim() ? <span className="tick">✓</span> : null} Bill / invoice no</label><input value={rd.billNo} onChange={e => setRd(r => ({ ...r, billNo: e.target.value }))} /></div>
+                  <div className="field"><label>{rd.billDate.trim() ? <span className="tick">✓</span> : null} Bill date</label><input value={rd.billDate} placeholder="dd-mm-yyyy" onChange={e => setRd(r => ({ ...r, billDate: e.target.value }))} /></div>
+                  <div className="field amount"><label>{rd.amount.trim() ? <span className="tick">✓</span> : null} Amount</label><input value={rd.amount} onChange={e => setRd(r => ({ ...r, amount: e.target.value }))} /></div>
+                  <div className={`field site${!rdSite ? ' weak' : ''}`}>
+                    <label>{rdSite ? <span className="tick">✓</span> : null} Site — which project</label>
+                    <div className="site-chips">
+                      {(projectOpts as any[]).map((p) => (
+                        <button key={p.project_id} type="button" className={rdSite?.id === p.project_id ? 'on' : ''}
+                          onClick={() => setRdSite(s => s?.id === p.project_id ? null : { id: p.project_id, name: p.name })}>
+                          {p.name.replace(' Residence', '').replace(' Apartments', '')}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="confirm-foot">
+                  <div className="ledger-line">{readReady
+                    ? <><b>{inr(Number(rd.amount.replace(/[^\d]/g, '')) || 0)}</b> lands on {rd.vendor.trim()}&apos;s ledger · {rdSite!.name} — raises what you owe.</>
+                    : !rd.vendor.trim() ? (rd.amount.trim() ? 'Name the vendor and it lands on their ledger.' : '')
+                      : !rdSite ? 'Pick the site this bill is for.' : 'Enter the amount.'}</div>
+                  <div className="confirm-actions">
+                    <button className="btn-back" onClick={() => setCap('rest')}>Discard</button>
+                    <button className={`btn-file${readReady ? ' ready' : ''}`} disabled={filing || !readReady} onClick={() => void fileBill()}>{filing ? 'Filing…' : 'Add bill · Enter'}</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          )}
+          </div>
         </div></header>
+        <input ref={captureFileRef} type="file" accept="image/*,application/pdf" hidden onChange={e => { const f = e.target.files?.[0]; e.currentTarget.value = ''; if (f) void startRead(f); }} />
 
         <div className="controls"><div className="hwrap">
           <div className="bar">
@@ -641,30 +811,6 @@ function BillsDesktop() {
         )}
       </div>
 
-      {dragging && (
-        <div className="dropveil"><div className="card"><div className="big">Drop the bill{'’'}s here</div><div className="sub">We{'’'}ll read each one — image or PDF — then ask the vendor & site.</div></div></div>
-      )}
-
-      {current && (
-        <NewBillModal
-          key={current.id}
-          open
-          onClose={() => drop(current.id)}
-          queueMore={queue.filter(q => q.state === 'ready').length - 1}
-          initialExtract={{ vendor: current.vendorName, billNo: current.billNo, billDate: current.billDate, amount: current.amount, lines: current.lines }}
-          onOpenBill={(id) => { drop(current.id); navigate(`/bills/${encodeURIComponent('bl~' + id)}`); }}
-          commit={(d) => mint({ ...d, file: current.file })}
-        />
-      )}
-
-      {manualOpen && !current && (
-        <NewBillModal
-          open
-          onClose={() => setManualOpen(false)}
-          onOpenBill={(id) => { setManualOpen(false); navigate(`/bills/${encodeURIComponent('bl~' + id)}`); }}
-          commit={mint}
-        />
-      )}
     </div>
   );
 }

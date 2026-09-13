@@ -16,19 +16,19 @@ import { WhatsAppGlyph, NatureChip } from './atoms';
 import { fileBill, createParty, errMessage } from './fileEntry';
 import { useSignedDocUrl } from '../../lib/storage';
 import { SearchPicker, type PickerItem } from './SearchPicker';
+import { matchPayee } from '../../lib/payeeSearch';
 
 const inr = (n: number) => Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 const low = (s: string | null | undefined) => (s ?? '').toLowerCase().trim();
 
-/** Best existing vendor match for the read name — exact, then containment either way. */
+/** Best existing vendor match for the read name — alias-aware (fuzzy + the party's other names). */
 function guessVendor(name: string | null | undefined, stakeholders: StakeholderLite[]): StakeholderLite | null {
   const n = low(name);
   if (!n) return null;
   const vendors = stakeholders.filter((s) => !s.type || /vendor|supplier/i.test(s.type));
   const pool = vendors.length ? vendors : stakeholders;
-  return pool.find((s) => low(s.name) === n)
-    || pool.find((s) => low(s.name).includes(n) || n.includes(low(s.name)))
-    || null;
+  const m = matchPayee(name, pool.map((s) => ({ stakeholder_id: s.stakeholder_id, name: s.name, type: s.type ?? null, category: s.category ?? null, aliases: s.aliases ?? null })));
+  return m.best ? (pool.find((s) => s.stakeholder_id === m.best!.id) ?? null) : null;
 }
 
 export function BillReviewCard({

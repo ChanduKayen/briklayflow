@@ -910,17 +910,18 @@ function MoreNavSheet({
 
   const globalItems = [
     { path: '/projects',      icon: IconLayoutGrid,            label: 'Projects',        show: true },
-    { path: '/work-orders',   icon: IconClipboardList,         label: 'Contracts',       show: true },
+    { path: '/work-orders',   icon: IconClipboardList,         label: 'Worker contracts', show: true },
     { path: '/desk/all/plan', icon: IconClipboardList, label: 'Site Desk', show: true, match: (p: string) => p === '/desk' || /^\/desk\/[^/]+\/plan/.test(p) },
     { path: '/desk/all/problems', icon: IconClipboardList, label: 'Site Problems', show: true, match: (p: string) => /^\/desk\/[^/]+\/problems/.test(p) },
     { path: '/tasks',         icon: IconChecklist,             label: 'Task Manager',    show: true },
     { path: '/attendance',    icon: IconChecklist,             label: 'Attendance',      show: true },
-    { path: '/stakeholders',  icon: IconUsers,                 label: 'Parties',         show: role !== 'supervisor' },
-    { path: '/inward-register', icon: IconLayoutGrid,          label: 'Inward Register', show: role !== 'supervisor' && role !== 'accountant' },
     { path: '/billing',       icon: IconFileInvoice,           label: 'Client Billing', show: role !== 'supervisor' },
-    { path: '/bills',         icon: IconReceipt2,              label: 'Bills',          show: role !== 'supervisor' },
+    { path: '/stakeholders?tab=client', icon: IconUsers,       label: 'Clients',        show: role !== 'supervisor', match: (p: string) => (p === '/stakeholders' || p.startsWith('/stakeholders/')) && new URLSearchParams(location.search).get('tab') === 'client' },
+    { path: '/stakeholders',  icon: IconUsers,                 label: 'Workers & vendors', show: role !== 'supervisor', match: (p: string) => (p === '/stakeholders' || p.startsWith('/stakeholders/')) && new URLSearchParams(location.search).get('tab') !== 'client' },
+    { path: '/inward-register', icon: IconLayoutGrid,          label: 'Inward Register', show: role !== 'supervisor' && role !== 'accountant' },
+    { path: '/bills',         icon: IconReceipt2,              label: 'Vendor Bills',   show: role !== 'supervisor' },
     { path: '/insights',      icon: IconChartPie,              label: 'Insights',       show: true },
-    { path: '/team',          icon: IconShieldLock,            label: 'Team & Access',  show: role === 'principal' || role === 'management' },
+    { path: '/team',          icon: IconShieldLock,            label: 'Members & roles', show: role === 'principal' || role === 'management' },
     { path: '/follow-up-rules', icon: IconClock,               label: 'Follow-up Rules', show: role === 'principal' || role === 'management' },
     { path: '/profile',       icon: IconUser,                  label: 'Profile',        show: true },
   ].filter(i => i.show);

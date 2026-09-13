@@ -125,7 +125,7 @@ export default function ImportTransactions({ onClose }: { session: Session; onCl
     if (!orgId) return;
     (async () => {
       const [s, p] = await Promise.all([
-        supabase.from('stakeholders').select('stakeholder_id,name,type,category').eq('org_id', orgId),
+        supabase.from('stakeholders').select('stakeholder_id,name,type,category,aliases').eq('org_id', orgId),
         supabase.from('projects').select('project_id,name').eq('org_id', orgId).eq('status', 'Active').order('name'),
       ]);
       setStakeholders((s.data ?? []) as SB[]);

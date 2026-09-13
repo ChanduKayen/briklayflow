@@ -109,7 +109,7 @@ function applyPrefix(msg: OutMessage, prefix?: string): OutMessage {
 
 async function loadStakeholders(supabase: any, orgId: string) {
   // type + category feed the role-aware payee matcher (disambiguates same-name people: "Raju supervisor").
-  const { data } = await supabase.from('stakeholders').select('stakeholder_id, name, type, category').eq('org_id', orgId)
+  const { data } = await supabase.from('stakeholders').select('stakeholder_id, name, type, category, aliases').eq('org_id', orgId)
   return (data ?? []) as { stakeholder_id: string; name: string; type?: string | null; category?: string | null }[]
 }
 async function loadActiveProjects(supabase: any, orgId: string) {
