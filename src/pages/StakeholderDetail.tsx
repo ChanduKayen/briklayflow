@@ -299,6 +299,16 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
   const [range, setRange] = useState({ from: '', to: '' });
   const [search, setSearch] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [dlOpen, setDlOpen] = useState(false);
+  // Build + download the statement in the chosen format (both read the already-loaded ledger L).
+  const downloadStatement = async (fmt: 'pdf' | 'excel') => {
+    setDlOpen(false);
+    if (!L) return;
+    try {
+      if (fmt === 'excel') { const { downloadPartyStatementExcel } = await import('../lib/ledgerStatementExcel'); await downloadPartyStatementExcel(L); }
+      else { const { downloadPartyStatement } = await import('../lib/ledgerStatementPdf'); downloadPartyStatement(L); }
+    } catch (e) { showSnackbar((e as Error)?.message || 'Could not build the statement', { type: 'error' }); }
+  };
   const [txnSheet, setTxnSheet] = useState(false);
   const [obOpen, setObOpen] = useState(false);
   const [adjOpen, setAdjOpen] = useState(false);
@@ -466,7 +476,7 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
           menu={mobileMenu}
         />
       ) : (
-      <div className="page" onClick={() => menuOpen && setMenuOpen(false)}>
+      <div className="page" onClick={() => { if (menuOpen) setMenuOpen(false); if (dlOpen) setDlOpen(false); }}>
         <button className="back" onClick={() => (compact && onClose ? onClose() : navigate(cameFrom?.backTo ?? '/stakeholders'))}>
           {compact
             ? <><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 6l12 12M18 6L6 18" /></svg>Close</>
@@ -487,14 +497,16 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
             <button className="btn" onClick={() => showSnackbar('Send statement on WhatsApp — coming soon')}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.4 8.5 8.5 0 0 1-4-1L3 21l2.1-5.4A8.4 8.4 0 1 1 21 11.5z" /></svg>Send statement
             </button>
-            <button className="btn" onClick={async () => {
-              try {
-                const { downloadPartyStatement } = await import('../lib/ledgerStatementPdf');
-                downloadPartyStatement(L);
-              } catch (e) { showSnackbar((e as Error)?.message || 'Could not build the statement', { type: 'error' }); }
-            }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>Download
-            </button>
+            <div className={`menu-wrap${dlOpen ? ' open' : ''}`} onClick={(e) => e.stopPropagation()}>
+              <button className="btn" onClick={() => setDlOpen(o => !o)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>Download
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 14, height: 14 }}><path d="m6 9 6 6 6-6" /></svg>
+              </button>
+              <div className="menu">
+                <button onClick={() => downloadStatement('pdf')}>PDF statement</button>
+                <button onClick={() => downloadStatement('excel')}>Excel (.xlsx)</button>
+              </div>
+            </div>
             <div className={`menu-wrap${menuOpen ? ' open' : ''}`} onClick={(e) => e.stopPropagation()}>
               <button className="btn primary" onClick={() => setMenuOpen(o => !o)}>Record <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" /></svg></button>
               <div className="menu">
