@@ -1085,6 +1085,10 @@ function PopupContents({
   // "add the typed name as another name for an EXISTING contact" — a second search to pick that contact.
   const [aliasPick, setAliasPick] = useState(false);
   const [aliasQ, setAliasQ] = useState('');
+  // THE MAIN CASE: an unknown captured name was resolved to a known party — offer to remember the
+  // captured name as that party's alias. Handled ids never re-ask; savedId shows the brief confirmation.
+  const [offerHandled, setOfferHandled] = useState<Set<string>>(new Set());
+  const [offerSavedId, setOfferSavedId] = useState<string | null>(null);
   const qc = useQueryClient();
 
   const ai = entry.ai_extracted;
@@ -1129,11 +1133,22 @@ function PopupContents({
   // Dropdown action: pick this party AND remember the typed spelling as one of its other names.
   const learnAlias = async (party: any, raw: string) => {
     setAliasPick(false); setAliasQ('');
+    setOfferHandled((s) => new Set(s).add(party.stakeholder_id));   // already learned — don't also offer
     selectPayee(party.stakeholder_id, party.name);
     try {
       await addStakeholderAlias(party.stakeholder_id, raw, party.aliases, party.name);
       qc.invalidateQueries({ queryKey: ['stakeholders'] });
     } catch { /* a failed remember never blocks the pick */ }
+  };
+
+  // The main-case offer: remember the captured name for the party that was just picked.
+  const rememberCaptured = async (party: any, captured: string) => {
+    setOfferHandled((s) => new Set(s).add(party.stakeholder_id));
+    try {
+      await addStakeholderAlias(party.stakeholder_id, captured, party.aliases, party.name);
+      setOfferSavedId(party.stakeholder_id);
+      qc.invalidateQueries({ queryKey: ['stakeholders'] });
+    } catch { /* nothing to do; the pick already stands */ }
   };
 
   // Pick a general-expense head (overhead, no party): the head stands in for the payee.
@@ -1660,6 +1675,32 @@ function PopupContents({
                   );
                 })()}
               </div>
+
+              {/* THE MAIN CASE — an unknown captured name was resolved to a known party: offer to remember
+                  the captured name as that party's alias, so the site's spelling auto-resolves next time. */}
+              {!showPayeeDrop && payeeId && !genHead && (() => {
+                const party = stakeholders.find((s: any) => s.stakeholder_id === payeeId);
+                const captured = (ai.payee_raw || ai.payee_name || '').trim();
+                if (!party || !captured) return null;
+                if (offerSavedId === payeeId) {
+                  return (
+                    <div className="mt-1.5 flex items-center gap-1.5 text-[11.5px]" style={{ color: VOICE.innLine }}>
+                      <span className="material-symbols-outlined text-[14px]">check_circle</span>
+                      Saved — &ldquo;{captured}&rdquo; now finds {party.name}
+                    </div>
+                  );
+                }
+                if (offerHandled.has(payeeId) || !worthAlias(captured, party.name, party.aliases)) return null;
+                return (
+                  <div className="mt-1.5 flex items-center gap-2 flex-wrap text-[11.5px]" style={{ color: VOICE.system }}>
+                    <span>Remember <span className="font-semibold" style={{ color: VOICE.user }}>&ldquo;{captured}&rdquo;</span> as another name for <span className="font-semibold" style={{ color: VOICE.user }}>{party.name}</span>?</span>
+                    <button type="button" onMouseDown={(e) => { e.preventDefault(); rememberCaptured(party, captured); }}
+                      className="px-2 py-0.5 rounded-full font-semibold" style={{ background: VOICE.askWash, color: VOICE.accentDeep }}>Yes</button>
+                    <button type="button" onMouseDown={(e) => { e.preventDefault(); setOfferHandled((s) => new Set(s).add(payeeId)); }}
+                      className="px-1.5 py-0.5 rounded-full" style={{ color: VOICE.systemFaint }}>No</button>
+                  </div>
+                );
+              })()}
 
             </>
           ))}
