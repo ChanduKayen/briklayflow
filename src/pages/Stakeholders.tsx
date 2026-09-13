@@ -372,13 +372,18 @@ export default function Stakeholders({ session }: { session: Session }) {
       const total = (tx.count || 0) + (wo.count || 0) + (po.count || 0) + (bl.count || 0);
       if (total > 0) { toast(`Has ${total} record${total !== 1 ? 's' : ''} on file — open its ledger, or merge it instead of deleting.`); return; }
       if (!window.confirm(`Delete ${form.name}? This can't be undone.`)) return;
+      // transactions.stakeholder_id is ON DELETE RESTRICT, so any leftover VOIDED transactions (the guard
+      // cleared all live ones) would block the delete. Unlink them first — they become "(removed contact)".
+      const clr = await supabase.from('transactions').update({ stakeholder_id: null }).eq('stakeholder_id', editingId);
+      if (clr.error) throw clr.error;
       const { error } = await supabase.from('stakeholders').delete().eq('stakeholder_id', editingId);
       if (error) throw error;
       toast(`Deleted — ${form.name}`);
       queryClient.invalidateQueries({ queryKey: ['stakeholders'] });
       closeDrawer();
     } catch (e: any) {
-      toast(e?.message || 'Could not delete');
+      const msg = String(e?.message || '');
+      toast(/foreign key|violates/i.test(msg) ? 'Still has linked records — merge this party instead of deleting.' : (msg || 'Could not delete'));
     } finally {
       setDeleting(false);
     }
