@@ -93,7 +93,7 @@ export const PYR_CSS = `
 .pyr .amt-wrap input::placeholder{color:var(--ink3)}
 .pyr .prow.zero .amt-wrap{border-bottom-color:transparent}
 .pyr .prow.zero .amt-wrap input{color:var(--ink3);font-size:13px}
-.pyr .after{font-family:var(--mono);font-size:13px;text-align:right;color:var(--ink)}
+.pyr .after{font-family:var(--mono);font-size:13px;text-align:right;color:var(--ink);background:rgba(182,92,56,.05);border-radius:8px;padding:6px 8px;margin:-6px 0}
 .pyr .after small{display:block;font-family:var(--sans);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink3);margin-top:3px}
 .pyr .after.none{color:var(--ink3)}
 .pyr .act{text-align:center}

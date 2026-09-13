@@ -479,7 +479,7 @@ export default function Payables({ session }: { session: Session }) {
             {[0, 1].map(si => (
               <div className="card-sec sk-card" key={si}>
                 <div className="sec-head"><span className="sk-bar sk-head" /><span className="sk-bar" style={{ width: 84, height: 13 }} /></div>
-                <div className="colkey"><span>who · for</span><span>balance b/f</span><span>this week</span><span>after</span><span /></div>
+                <div className="colkey"><span>who · for</span><span>balance b/f</span><span>this week</span><span>total due</span><span /></div>
                 {[0, 1, 2, 3].map(ri => (
                   <div className="prow" key={ri}>
                     <div className="prow-main">
@@ -512,7 +512,7 @@ export default function Payables({ session }: { session: Session }) {
                 <h2>{section.projectId === '__workers__' ? 'Workers' : section.projectName}</h2>
                 <span className="tot">{inr(sPlan)}<small>this week</small></span>
               </div>
-              <div className="colkey"><span>who · for</span><span>balance b/f</span><span>this week</span><span>after</span><span /></div>
+              <div className="colkey"><span>who · for</span><span>balance b/f</span><span>this week</span><span>total due</span><span /></div>
 
               {section.rows.length === 0 && section.projectId === '__workers__' &&
                 <div className="emptyrow">No labour on the attendance sheet this week — add a payment below.</div>}
@@ -570,7 +570,8 @@ export default function Payables({ session }: { session: Session }) {
                         )}
                       </div>
 
-                      <div className={`after${af ? '' : ' none'}`}>
+                      <div className={`after${af ? '' : ' none'}`}
+                        style={af ? { fontWeight: 700, color: af.cls === 'zero' ? 'var(--ink3)' : af.m === 'advance to them' ? 'var(--sage)' : 'var(--terracotta)' } : undefined}>
                         {af ? <>{inr(af.v)}<small>{af.m}</small></> : '—'}
                       </div>
 
