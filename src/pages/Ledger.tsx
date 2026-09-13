@@ -13,7 +13,8 @@ import type { Stakeholder, Project } from '../types';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
-import { getCostCode, GEN_HEADS } from '../lib/costCodes';
+import { getCostCode, GEN_HEADS, costCodeLabel } from '../lib/costCodes';
+import { CostCodePicker } from '../components/CostCodePicker';
 import { searchPayees } from '../lib/payeeSearch';
 import { Plus, Download, Paperclip, Check, ArrowRight, ChevronRight, X, SlidersHorizontal } from 'lucide-react';
 import { useIsMobile } from '../lib/useIsMobile';
@@ -573,10 +574,6 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   const [reclassSearch, setReclassSearch] = useState('');
   const [reclassParty, setReclassParty] = useState<{ id: string; name: string } | null>(null);
   const [reclassGen, setReclassGen] = useState('');
-
-  const ALL_CATEGORIES = ['Advance', 'Running Bill', 'Final Settlement', 'Retention Release',
-    'Material Supply', 'PO Advance', 'PO Settlement', 'Transport & Handling',
-    'Site Overhead', 'Labour Welfare', 'Tools & Equipment', 'Professional Fees', 'Utilities', 'Other'];
 
   const { data: ledger, isLoading, isError, refetch } = useQuery({
     queryKey: ['ledger'],
@@ -1148,6 +1145,9 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   const toggleTxn = (id: string) => {
     setSelectedTxnIds(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   };
+  // Select-all works on everything the current filters show (not just the loaded page).
+  const allFilteredSelected = filteredTransactions.length > 0 && filteredTransactions.every(t => selectedTxnIds.has(t.txn_id));
+  const selectAllFiltered = () => setSelectedTxnIds(allFilteredSelected ? new Set() : new Set(filteredTransactions.map(t => t.txn_id)));
 
   const selectedTxns = (ledger || []).filter(t => selectedTxnIds.has(t.txn_id));
   const selectedCategories = Array.from(new Set(selectedTxns.map((t) => t.category).filter(Boolean))) as string[];
@@ -1754,7 +1754,19 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
       {selectedCount > 0 && (
         <div className="fixed bottom-0 left-0 right-0 z-50 flex justify-center pb-4 px-4 pointer-events-none">
           <div className="pointer-events-auto bg-on-surface/95 backdrop-blur-sm text-surface rounded-2xl shadow-2xl px-5 py-3 flex items-center gap-3 flex-wrap animate-in slide-in-from-bottom-4 duration-200">
-            <span className="text-[13px] font-semibold whitespace-nowrap text-surface/90">{selectedCount} selected</span>
+            {/* select-all: a checkbox that covers the WHOLE filtered set (every matching row, on-screen or
+                not) — checked when all are in, a dash when only some are. Only ever seen here, i.e. once a
+                selection exists. */}
+            <button onClick={selectAllFiltered} className="flex items-center gap-2 whitespace-nowrap" title={allFilteredSelected ? 'Deselect all' : `Select all ${filteredTransactions.length}`}>
+              <span className="flex items-center justify-center rounded" style={{ width: 18, height: 18, border: `1.5px solid ${allFilteredSelected ? 'currentColor' : 'rgba(255,255,255,0.45)'}`, background: allFilteredSelected ? 'rgba(255,255,255,0.9)' : 'transparent' }}>
+                {allFilteredSelected
+                  ? <Check size={12} strokeWidth={3} style={{ color: '#1E1A15' }} />
+                  : <span style={{ width: 8, height: 2, borderRadius: 1, background: 'rgba(255,255,255,0.7)' }} />}
+              </span>
+              <span className="text-[13px] font-semibold text-surface/90">
+                {allFilteredSelected ? `All ${filteredTransactions.length} selected` : `${selectedCount} selected · Select all ${filteredTransactions.length}`}
+              </span>
+            </button>
             <div className="w-px h-5 bg-surface/20" />
             <button onClick={exportCSV} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-bold bg-surface/10 hover:bg-surface/20 transition-colors">
               <span className="material-symbols-outlined text-[16px]">download</span>Export CSV
@@ -1787,20 +1799,20 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
             {selectedCategories.length > 1 ? (
               <p className="text-body-sm text-on-surface-variant mb-4">
                 <span className="inline-flex items-center gap-1 text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded text-[11px] font-bold mr-1">
-                  <span className="material-symbols-outlined text-[13px]">warning</span>Mixed types
+                  <span className="material-symbols-outlined text-[13px]">warning</span>Mixed
                 </span>
-                Current: <span className="font-semibold">{selectedCategories.join(', ')}</span>
+                Current: <span className="font-semibold">{selectedCategories.map(costCodeLabel).join(', ')}</span>
               </p>
             ) : (
-              <p className="text-body-sm text-on-surface-variant mb-4">Current: <span className="font-semibold">{selectedCategories[0] || '—'}</span></p>
+              <p className="text-body-sm text-on-surface-variant mb-4">Current: <span className="font-semibold">{selectedCategories[0] ? costCodeLabel(selectedCategories[0]) : '—'}</span></p>
             )}
-            <div className="space-y-2 mb-5">
-              <label className="text-label-caps font-label-caps text-on-surface-variant">NEW CATEGORY</label>
-              <select value={recatCategory} onChange={e => setRecatCategory(e.target.value)} className="bk-input w-full">
-                <option value="">Select category…</option>
-                {ALL_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
+            <div className="space-y-2 mb-4">
+              <label className="text-label-caps font-label-caps text-on-surface-variant">NEW COST CODE</label>
+              {/* the real MAT/WRK cost-code taxonomy — the same searchable picker New Transaction uses */}
+              <CostCodePicker value={recatCategory} onChange={setRecatCategory} />
+              {recatCategory && <p className="text-[12px] mt-1" style={{ color: V.sys }}>→ {costCodeLabel(recatCategory)}</p>}
             </div>
+            <p className="text-[11.5px] mb-4" style={{ color: V.faint }}>Only the classification changes — PO/WO and bill links stay exactly as they are.</p>
             <div className="flex gap-3 justify-end">
               <button onClick={() => setShowRecategorize(false)} className="bk-btn-ghost px-4 py-2 rounded-xl text-body-sm">Cancel</button>
               <button disabled={!recatCategory || recatMutation.isPending}
