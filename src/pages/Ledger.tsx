@@ -13,7 +13,8 @@ import type { Stakeholder, Project } from '../types';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
-import { getCostCode } from '../lib/costCodes';
+import { getCostCode, GEN_HEADS } from '../lib/costCodes';
+import { searchPayees } from '../lib/payeeSearch';
 import { Plus, Download, Paperclip, Check, ArrowRight, ChevronRight, X, SlidersHorizontal } from 'lucide-react';
 import { useIsMobile } from '../lib/useIsMobile';
 import BottomSheet from '../components/BottomSheet';
@@ -566,6 +567,12 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   const [showRecategorize, setShowRecategorize] = useState(false);
   const [showVoidAll, setShowVoidAll] = useState(false);
   const [recatCategory, setRecatCategory] = useState('');
+  // Reclassify (re-attribution): move selected expenses onto a party, or convert them to an overhead head.
+  const [showReclassify, setShowReclassify] = useState(false);
+  const [reclassMode, setReclassMode] = useState<'party' | 'overhead'>('party');
+  const [reclassSearch, setReclassSearch] = useState('');
+  const [reclassParty, setReclassParty] = useState<{ id: string; name: string } | null>(null);
+  const [reclassGen, setReclassGen] = useState('');
 
   const ALL_CATEGORIES = ['Advance', 'Running Bill', 'Final Settlement', 'Retention Release',
     'Material Supply', 'PO Advance', 'PO Settlement', 'Transport & Handling',
@@ -811,7 +818,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   };
 
   // fetched to warm the react-query cache for the peek/editor surfaces; data unused here
-  useQuery({ queryKey: ['stakeholders'], queryFn: async () => { const { data } = await supabase.from('stakeholders').select('*').is('merged_into', null); return data as Stakeholder[]; } });
+  const { data: allStakeholders = [] } = useQuery({ queryKey: ['stakeholders'], queryFn: async () => { const { data } = await supabase.from('stakeholders').select('*').is('merged_into', null); return data as Stakeholder[]; } });
   useQuery({ queryKey: ['projects'], queryFn: async () => { const { data } = await supabase.from('projects').select('*'); return data as Project[]; } });
 
   const { show: showSnackbar } = useSnackbar();
@@ -836,6 +843,41 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['ledger'] }); setSelectedTxnIds(new Set()); setShowRecategorize(false); setRecatCategory(''); showSnackbar('Category updated'); },
     onError: (err: unknown) => showSnackbar((err instanceof Error && err.message) || 'Failed to update', { type: 'error' }),
+  });
+
+  // ── Reclassify: re-attribute selected OUT expenses. Only ever touches the eligible ids passed in
+  //    (out, not voided) — computed by the caller. Assign-to-party sets the payee (and drops a stale
+  //    GEN category); make-overhead nulls the payee, sets the head, and UNLINKS any PO/WO/bill (choice
+  //    (b)) so no order keeps counting a payment that is no longer against it. ──
+  const reclassifyMutation = useMutation({
+    mutationFn: async (v: { ids: string[]; target: { kind: 'party'; id: string } | { kind: 'overhead'; code: string }; linked?: any[] }) => {
+      if (v.ids.length === 0) throw new Error('Nothing eligible to reclassify');
+      if (v.target.kind === 'party') {
+        // point the money at the party…
+        const r1 = await supabase.from('transactions').update({ stakeholder_id: v.target.id }).in('txn_id', v.ids).neq('status', 'Voided');
+        if (r1.error) throw r1.error;
+        // …and drop a leftover GEN overhead category (a party payment isn't an overhead head)
+        const r2 = await supabase.from('transactions').update({ category: null }).in('txn_id', v.ids).like('category', 'GEN-%');
+        if (r2.error) throw r2.error;
+      } else {
+        // overhead: clear each PO/WO/bill link the SANCTIONED way (set_txn_allocations rebuilds the
+        // allocation rows, keeping site + amount, dropping order_ref/bill) — never a raw allocations write.
+        if (!orgId) throw new Error('No organisation in context');
+        for (const t of (v.linked ?? [])) await unlinkTxnOrder(t, orgId);
+        // then: no party + the chosen head
+        const r1 = await supabase.from('transactions').update({ stakeholder_id: null, category: v.target.code }).in('txn_id', v.ids).neq('status', 'Voided');
+        if (r1.error) throw r1.error;
+      }
+    },
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ['ledger'] });
+      qc.invalidateQueries({ queryKey: ['ledger_order_info'] });
+      qc.invalidateQueries({ queryKey: ['party_ledger'] });
+      setSelectedTxnIds(new Set());
+      setShowReclassify(false); setReclassParty(null); setReclassGen(''); setReclassSearch('');
+      showSnackbar(`Reclassified ${v.ids.length} transaction${v.ids.length !== 1 ? 's' : ''}`);
+    },
+    onError: (err: unknown) => showSnackbar((err instanceof Error && err.message) || 'Failed to reclassify', { type: 'error' }),
   });
 
   const filterBarRef = useRef<HTMLDivElement>(null);
@@ -1111,6 +1153,12 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   const selectedCategories = Array.from(new Set(selectedTxns.map((t) => t.category).filter(Boolean))) as string[];
   const hasAmendedSelected = selectedTxns.some((t) => t.amendments?.length > 0);
   const voidableSelected = selectedTxns.filter((t) => t.status !== 'Voided');
+  // Reclassify only touches OUT expenses that aren't voided (a client receipt or a closed record is never
+  // re-attributed). `linked` = eligible rows tied to a PO/WO/bill — those get UNLINKED on make-overhead.
+  const reclassEligible = selectedTxns.filter((t) => t.status !== 'Voided' && deriveDirection(t) === 'out');
+  const reclassSkipped = selectedCount - reclassEligible.length;
+  const reclassLinkedCount = reclassEligible.filter((t) => (t.txn_allocations || []).some((a: TxnAlloc) => a.order_type || a.bill_id)).length;
+  const reclassMatches = reclassSearch.trim() ? searchPayees(allStakeholders as any[], reclassSearch) : [];
 
   // ── Drag-to-sum, direction-aware ────────────────────────────────────────────
   const sumRows = (ledger || []).filter((t) => sumSel.has(t.txn_id));
@@ -1714,6 +1762,11 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
             <button onClick={() => { setRecatCategory(''); setShowRecategorize(true); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-bold bg-surface/10 hover:bg-surface/20 transition-colors">
               <span className="material-symbols-outlined text-[16px]">category</span>Re-categorize
             </button>
+            {(profile?.role === 'management' || profile?.role === 'accountant' || profile?.role === 'principal') && reclassEligible.length > 0 && (
+              <button onClick={() => { setReclassMode('party'); setReclassParty(null); setReclassGen(''); setReclassSearch(''); setShowReclassify(true); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-bold bg-surface/10 hover:bg-surface/20 transition-colors">
+                <span className="material-symbols-outlined text-[16px]">swap_horiz</span>Reclassify
+              </button>
+            )}
             {(profile?.role === 'management' || profile?.role === 'accountant' || profile?.role === 'principal') && voidableSelected.length > 0 && (
               <button onClick={() => setShowVoidAll(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-bold bg-error/80 hover:bg-error transition-colors text-white">
                 <span className="material-symbols-outlined text-[16px]">block</span>Void All
@@ -1754,6 +1807,83 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                 onClick={() => recatMutation.mutate({ ids: Array.from(selectedTxnIds), category: recatCategory })}
                 className="bk-btn px-4 py-2 rounded-xl text-body-sm disabled:opacity-50">
                 {recatMutation.isPending ? 'Applying…' : `Apply to all ${selectedCount}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reclassify modal — re-attribute selected expenses to a party, or to an overhead head */}
+      {showReclassify && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowReclassify(false)}>
+          <div className="bg-surface-container-lowest rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4 animate-in fade-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+            <h3 className="text-headline-sm font-bold mb-1">Reclassify {reclassEligible.length} transaction{reclassEligible.length !== 1 ? 's' : ''}</h3>
+            {reclassSkipped > 0 && (
+              <p className="text-[12px] mb-3" style={{ color: V.faint }}>{reclassSkipped} of {selectedCount} skipped (client receipts or voided — not reclassifiable).</p>
+            )}
+
+            {/* mode toggle */}
+            <div className="flex gap-2 mb-4 p-1 rounded-xl" style={{ background: V.field }}>
+              {(['party', 'overhead'] as const).map((m) => (
+                <button key={m} onClick={() => setReclassMode(m)}
+                  className="flex-1 py-1.5 rounded-lg text-[12.5px] font-semibold transition-colors"
+                  style={{ background: reclassMode === m ? V.surface : 'transparent', color: reclassMode === m ? V.ink : V.sys, boxShadow: reclassMode === m ? '0 1px 3px rgba(20,16,12,0.08)' : 'none' }}>
+                  {m === 'party' ? 'Assign to a party' : 'Make it overhead'}
+                </button>
+              ))}
+            </div>
+
+            {reclassMode === 'party' ? (
+              <div className="mb-5">
+                {reclassParty ? (
+                  <div className="flex items-center justify-between px-3 py-2 rounded-lg" style={{ background: V.field, border: `1px solid ${V.line}` }}>
+                    <span className="text-[13.5px] font-medium" style={{ color: V.ink }}>{reclassParty.name}</span>
+                    <button onClick={() => { setReclassParty(null); setReclassSearch(''); }} className="text-[12px]" style={{ color: V.sys }}>change</button>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <input value={reclassSearch} onChange={(e) => setReclassSearch(e.target.value)} autoFocus
+                      placeholder="Search a vendor or worker…"
+                      className="w-full text-[13.5px] px-3 py-2 rounded-lg outline-none" style={{ border: `1px solid ${V.line}`, background: V.surface, color: V.ink }} />
+                    {reclassMatches.length > 0 && (
+                      <div className="absolute left-0 right-0 top-full mt-1 z-10 rounded-lg overflow-hidden max-h-52 overflow-y-auto" style={{ background: V.surface, border: `1px solid ${V.line}`, boxShadow: '0 12px 30px -14px rgba(20,16,12,0.4)' }}>
+                        {reclassMatches.slice(0, 8).map((s: any) => (
+                          <button key={s.stakeholder_id} onClick={() => { setReclassParty({ id: s.stakeholder_id, name: s.name }); }}
+                            className="block w-full text-left px-3 py-2 text-[13.5px] hover:bg-black/[0.03]" style={{ color: V.ink }}>
+                            {s.name} <span style={{ color: V.faint, fontSize: 12 }}>· {s.type}{s.category ? ` · ${s.category}` : ''}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                <p className="text-[11.5px] mt-2" style={{ color: V.faint }}>The money will belong to this party (it may then show as “paid without a bill”). Order/site links are kept.</p>
+              </div>
+            ) : (
+              <div className="mb-5">
+                <label className="text-label-caps font-label-caps text-on-surface-variant">OVERHEAD HEAD</label>
+                <select value={reclassGen} onChange={(e) => setReclassGen(e.target.value)} className="bk-input w-full mt-1.5">
+                  <option value="">Select a head…</option>
+                  {GEN_HEADS.map((h) => <option key={h.code} value={h.code}>{h.name}</option>)}
+                </select>
+                <p className="text-[11.5px] mt-2" style={{ color: reclassLinkedCount > 0 ? V.terraDeep : V.faint }}>
+                  {reclassLinkedCount > 0
+                    ? `${reclassLinkedCount} linked to a PO/WO/bill will be UNLINKED (the amount + site are kept).`
+                    : 'Becomes a party-less overhead; the amount + site are kept.'}
+                </p>
+              </div>
+            )}
+
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setShowReclassify(false)} className="bk-btn-ghost px-4 py-2 rounded-xl text-body-sm">Cancel</button>
+              <button disabled={reclassifyMutation.isPending || (reclassMode === 'party' ? !reclassParty : !reclassGen)}
+                onClick={() => reclassifyMutation.mutate({
+                  ids: reclassEligible.map((t) => t.txn_id),
+                  target: reclassMode === 'party' ? { kind: 'party', id: reclassParty!.id } : { kind: 'overhead', code: reclassGen },
+                  linked: reclassMode === 'overhead' ? reclassEligible.filter((t) => (t.txn_allocations || []).some((a: TxnAlloc) => a.order_type || a.bill_id)) : undefined,
+                })}
+                className="bk-btn px-4 py-2 rounded-xl text-body-sm disabled:opacity-50">
+                {reclassifyMutation.isPending ? 'Applying…' : `Apply to ${reclassEligible.length}`}
               </button>
             </div>
           </div>

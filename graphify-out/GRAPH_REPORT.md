@@ -1,12 +1,12 @@
 # Graph Report - Briklay Fly  (2026-09-13)
 
 ## Corpus Check
-- 827 files · ~1,485,389 words
+- 827 files · ~1,485,675 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 3594 nodes · 5684 edges · 79 communities detected
-- Extraction: 85% EXTRACTED · 15% INFERRED · 0% AMBIGUOUS · INFERRED: 874 edges (avg confidence: 0.8)
+- 3595 nodes · 5686 edges · 80 communities detected
+- Extraction: 85% EXTRACTED · 15% INFERRED · 0% AMBIGUOUS · INFERRED: 875 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
 ## Community Hubs (Navigation)
@@ -42,6 +42,7 @@
 - [[_COMMUNITY_Community 29|Community 29]]
 - [[_COMMUNITY_Community 30|Community 30]]
 - [[_COMMUNITY_Community 31|Community 31]]
+- [[_COMMUNITY_Community 32|Community 32]]
 - [[_COMMUNITY_Community 33|Community 33]]
 - [[_COMMUNITY_Community 34|Community 34]]
 - [[_COMMUNITY_Community 35|Community 35]]
@@ -70,25 +71,25 @@
 - [[_COMMUNITY_Community 63|Community 63]]
 - [[_COMMUNITY_Community 65|Community 65]]
 - [[_COMMUNITY_Community 68|Community 68]]
-- [[_COMMUNITY_Community 75|Community 75]]
-- [[_COMMUNITY_Community 76|Community 76]]
+- [[_COMMUNITY_Community 72|Community 72]]
+- [[_COMMUNITY_Community 73|Community 73]]
+- [[_COMMUNITY_Community 78|Community 78]]
+- [[_COMMUNITY_Community 79|Community 79]]
+- [[_COMMUNITY_Community 80|Community 80]]
 - [[_COMMUNITY_Community 81|Community 81]]
 - [[_COMMUNITY_Community 82|Community 82]]
-- [[_COMMUNITY_Community 83|Community 83]]
 - [[_COMMUNITY_Community 84|Community 84]]
-- [[_COMMUNITY_Community 86|Community 86]]
-- [[_COMMUNITY_Community 87|Community 87]]
-- [[_COMMUNITY_Community 88|Community 88]]
-- [[_COMMUNITY_Community 94|Community 94]]
-- [[_COMMUNITY_Community 95|Community 95]]
-- [[_COMMUNITY_Community 103|Community 103]]
-- [[_COMMUNITY_Community 104|Community 104]]
-- [[_COMMUNITY_Community 108|Community 108]]
-- [[_COMMUNITY_Community 112|Community 112]]
-- [[_COMMUNITY_Community 117|Community 117]]
-- [[_COMMUNITY_Community 129|Community 129]]
+- [[_COMMUNITY_Community 85|Community 85]]
+- [[_COMMUNITY_Community 91|Community 91]]
+- [[_COMMUNITY_Community 92|Community 92]]
+- [[_COMMUNITY_Community 100|Community 100]]
+- [[_COMMUNITY_Community 101|Community 101]]
+- [[_COMMUNITY_Community 105|Community 105]]
+- [[_COMMUNITY_Community 109|Community 109]]
+- [[_COMMUNITY_Community 114|Community 114]]
+- [[_COMMUNITY_Community 126|Community 126]]
+- [[_COMMUNITY_Community 128|Community 128]]
 - [[_COMMUNITY_Community 131|Community 131]]
-- [[_COMMUNITY_Community 134|Community 134]]
 
 ## God Nodes (most connected - your core abstractions)
 1. `pick()` - 64 edges
@@ -105,8 +106,8 @@
 ## Surprising Connections (you probably didn't know these)
 - `openContractPicker()` --calls--> `loadWorkOrdersForProject()`  [INFERRED]
   src\components\attendance\AttendanceMobile.tsx → src\lib\attendanceApi.ts
-- `bookConsolidatedBill()` --calls--> `save()`  [INFERRED]
-  src\lib\partyLedgerApi.ts → src\pages\StakeholderDetail.tsx
+- `buildChase()` --calls--> `nameOf()`  [INFERRED]
+  src\lib\desk\fromDb.ts → supabase\functions\siteops-notify-assignment\index.ts
 - `cadenceFor()` --calls--> `loadCadenceMap()`  [INFERRED]
   supabase\functions\siteops-chase\index.ts → supabase\functions\whatsapp-webhook\_siteops_timing.ts
 - `scoreProjects()` --calls--> `resolveProject()`  [INFERRED]
@@ -117,164 +118,168 @@
 ## Communities
 
 ### Community 0 - "Community 0"
-Cohesion: 0.02
-Nodes (150): composeLLM(), fallbackReply(), isGreeting(), runConcierge(), systemFor(), userContent(), commitInterruptedProc(), answerSiteops() (+142 more)
+Cohesion: 0.01
+Nodes (105): answerSiteops(), answerWithPhoto(), applyBatchResolution(), applyQcFailures(), applyTaskBlockedById(), applyTaskProgressById(), applyTaskUpdate(), applyTerminals() (+97 more)
 
 ### Community 1 - "Community 1"
-Cohesion: 0.01
-Nodes (37): baseSeed(), twoAskSeed(), ask(), ctxFor(), model(), tUpdated(), upd(), seed() (+29 more)
+Cohesion: 0.02
+Nodes (147): bindingKey(), graphIsMaterialized(), materializeProjectTasksUncached(), placeOfTask(), gatesByTask(), gatesFromBinding(), safeGeometry(), safeInstantiate() (+139 more)
 
 ### Community 2 - "Community 2"
 Cohesion: 0.02
-Nodes (127): bindingKey(), graphIsMaterialized(), materializeProjectTasksUncached(), placeOfTask(), gatesByTask(), gatesFromBinding(), safeGeometry(), safeInstantiate() (+119 more)
+Nodes (118): intakeCommit(), intakeExtract(), intakeResolveVendor(), runIntake(), linkParts(), rankLoosePayments(), convertLegacyPoBill(), createBill() (+110 more)
 
 ### Community 3 - "Community 3"
 Cohesion: 0.02
-Nodes (94): clearOpening(), fmtDate(), inr(), rowAmount(), rowDir(), rowExpanded(), saveDate(), saveRow() (+86 more)
+Nodes (91): submit(), clearOpening(), fmtDate(), inr(), rowAmount(), rowDir(), rowExpanded(), saveDate() (+83 more)
 
 ### Community 4 - "Community 4"
 Cohesion: 0.03
 Nodes (104): answerBillPayment(), attachBillDoc(), billAi(), billRawText(), billReplyKind(), findPrecedingCaption(), fmtNum(), isCleanAmount() (+96 more)
 
 ### Community 5 - "Community 5"
+Cohesion: 0.02
+Nodes (32): baseSeed(), twoAskSeed(), ask(), ctxFor(), model(), tUpdated(), upd(), base() (+24 more)
+
+### Community 6 - "Community 6"
+Cohesion: 0.03
+Nodes (95): answerPaymentTotal(), answerReporting(), groupBySite(), loadProjects(), loadStakeholders(), num(), orderRows(), pickFrom() (+87 more)
+
+### Community 7 - "Community 7"
 Cohesion: 0.04
 Nodes (82): isStopWord(), addCustomBrand(), brandsFor(), getCustomBrands(), LS_KEY(), buildConflictPills(), buildNovelVariantPills(), buildPills() (+74 more)
 
-### Community 6 - "Community 6"
-Cohesion: 0.04
-Nodes (106): answerProcurement(), finalizeDirectVendor(), flowIdFor(), handleSingle(), loadApprover(), loadProjects(), loadVendors(), markReadyForApproval() (+98 more)
-
-### Community 7 - "Community 7"
-Cohesion: 0.03
-Nodes (61): submit(), inr(), submit(), confirm(), commit(), autoSettleCrewWages(), cardKeyToCols(), cellFrom() (+53 more)
-
 ### Community 8 - "Community 8"
-Cohesion: 0.03
-Nodes (52): call(), issue(), prog(), seed(), task(), src(), stripComments(), classifyWithLLM() (+44 more)
+Cohesion: 0.04
+Nodes (99): answerProcurement(), commitInterruptedProc(), finalizeDirectVendor(), flowIdFor(), handleSingle(), loadApprover(), loadProjects(), loadVendors() (+91 more)
 
 ### Community 9 - "Community 9"
-Cohesion: 0.04
-Nodes (64): intakeCommit(), intakeExtract(), intakeResolveVendor(), runIntake(), linkParts(), rankLoosePayments(), convertLegacyPoBill(), extractBill() (+56 more)
+Cohesion: 0.03
+Nodes (64): confirm(), commit(), autoSettleCrewWages(), cardKeyToCols(), cellFrom(), commitCrewSettlement(), crewPhases(), iso() (+56 more)
 
 ### Community 10 - "Community 10"
-Cohesion: 0.04
-Nodes (40): wa(), buildComponents(), buildTemplateMessage(), sendTemplate(), line(), promptFor(), withTask(), cadenceFor() (+32 more)
+Cohesion: 0.03
+Nodes (53): wa(), buildComponents(), buildTemplateMessage(), sendTemplate(), line(), promptFor(), withTask(), cadenceFor() (+45 more)
 
 ### Community 11 - "Community 11"
-Cohesion: 0.04
-Nodes (58): createBill(), allocIdOf(), assertLinkable(), attachToContract(), createContract(), fallbackTitle(), fileAsLabour(), generateContractTitle() (+50 more)
+Cohesion: 0.03
+Nodes (35): call(), issue(), prog(), seed(), task(), bestTokenOverlap(), pickTokens(), resolveTypedPick() (+27 more)
 
 ### Community 12 - "Community 12"
-Cohesion: 0.04
-Nodes (35): answerPaymentTotal(), answerReporting(), groupBySite(), loadProjects(), loadStakeholders(), num(), orderRows(), pickFrom() (+27 more)
-
-### Community 13 - "Community 13"
-Cohesion: 0.03
-Nodes (28): parseAmount(), inr(), rupees(), Thumb(), commitEdit(), deleteBill(), openDoc(), parseStoredPath() (+20 more)
-
-### Community 14 - "Community 14"
-Cohesion: 0.04
-Nodes (45): handleCreateProject(), buildImportRows(), commitImport(), clearImportDraft(), key(), loadImportDraft(), saveImportDraft(), detectColumns() (+37 more)
-
-### Community 15 - "Community 15"
 Cohesion: 0.03
 Nodes (38): NewBillModal(), DragSheet(), PeekLink(), handleSave(), suggestCostCode(), fmtDate(), Label(), summarizeScope() (+30 more)
 
-### Community 16 - "Community 16"
+### Community 13 - "Community 13"
 Cohesion: 0.05
 Nodes (36): balStr(), buildPartyStatementDoc(), downloadPartyStatement(), money(), ordered(), amountInWords(), amountText(), dataPair() (+28 more)
 
-### Community 17 - "Community 17"
+### Community 14 - "Community 14"
 Cohesion: 0.05
 Nodes (50): createVendor(), guessVendor(), low(), save(), whatsMissing(), autoSplit(), blank(), doCreate() (+42 more)
 
-### Community 18 - "Community 18"
+### Community 15 - "Community 15"
 Cohesion: 0.04
-Nodes (34): doMerge(), learnAlias(), matchGenHeads(), normHead(), selectPayee(), searchPayees(), addStakeholderAlias(), mergeStakeholders() (+26 more)
+Nodes (42): handleCreateProject(), buildImportRows(), commitImport(), clearImportDraft(), key(), loadImportDraft(), saveImportDraft(), detectColumns() (+34 more)
 
-### Community 19 - "Community 19"
+### Community 16 - "Community 16"
+Cohesion: 0.03
+Nodes (26): inr(), rupees(), Thumb(), deleteBill(), unlinkBillFromPO(), openDoc(), parseStoredPath(), resolveDocUrl() (+18 more)
+
+### Community 17 - "Community 17"
+Cohesion: 0.04
+Nodes (33): doMerge(), learnAlias(), matchGenHeads(), normHead(), rememberCaptured(), selectPayee(), addStakeholderAlias(), mergeStakeholders() (+25 more)
+
+### Community 18 - "Community 18"
 Cohesion: 0.07
 Nodes (35): closeSheet(), contractPct(), countOf(), end(), engagementForm(), esc(), fail(), go() (+27 more)
 
-### Community 20 - "Community 20"
+### Community 19 - "Community 19"
 Cohesion: 0.05
 Nodes (27): handler(), close(), go(), handleClose(), handleOpen(), toggle(), handler(), go() (+19 more)
+
+### Community 20 - "Community 20"
+Cohesion: 0.05
+Nodes (28): patchProblem(), toggleSnag(), patchProblem(), toggleSnag(), appendEvent(), legacyToFollowupType(), notifyAssignment(), trailKey() (+20 more)
 
 ### Community 21 - "Community 21"
 Cohesion: 0.05
 Nodes (23): AttendanceSheet(), isoOf(), readStoredSession(), useAuth(), useCan(), useOrgId(), classifyRefreshError(), extractErrorCode() (+15 more)
 
 ### Community 22 - "Community 22"
-Cohesion: 0.05
-Nodes (28): patchProblem(), toggleSnag(), patchProblem(), toggleSnag(), appendEvent(), legacyToFollowupType(), notifyAssignment(), trailKey() (+20 more)
-
-### Community 23 - "Community 23"
 Cohesion: 0.06
 Nodes (26): addDays(), approvePhase(), attempt(), attemptQuiet(), baseWin(), commit(), durOf(), isoOf() (+18 more)
 
+### Community 23 - "Community 23"
+Cohesion: 0.06
+Nodes (34): applyAll(), imgCtx(), runTurn(), seed(), task(), checkExprAt(), findMigrationsDir(), loadEnumChecks() (+26 more)
+
 ### Community 24 - "Community 24"
-Cohesion: 0.08
-Nodes (29): ago(), assignReasonOf(), bucketRef(), buildChase(), buildStory(), buildTaskStory(), capitalise(), chaseWhen() (+21 more)
+Cohesion: 0.09
+Nodes (37): commitEdit(), callOpenAI(), classifyImage(), classifyImageAnthropic(), classifyImageOpenAI(), classifyIntent(), classifyIntentAI(), classifyMessage() (+29 more)
 
 ### Community 25 - "Community 25"
-Cohesion: 0.07
-Nodes (32): applyAll(), imgCtx(), runTurn(), seed(), task(), checkExprAt(), findMigrationsDir(), loadEnumChecks() (+24 more)
+Cohesion: 0.09
+Nodes (28): ago(), assignReasonOf(), bucketRef(), buildChase(), buildStory(), buildTaskStory(), capitalise(), chaseWhen() (+20 more)
 
 ### Community 26 - "Community 26"
-Cohesion: 0.1
-Nodes (36): callOpenAI(), classifyImage(), classifyImageAnthropic(), classifyImageOpenAI(), classifyIntent(), classifyIntentAI(), classifyMessage(), isValidClass() (+28 more)
-
-### Community 27 - "Community 27"
 Cohesion: 0.09
 Nodes (18): isTouch(), startLamp(), byTypeFor(), commitMove(), goTo(), loop(), measure(), moveTo() (+10 more)
 
-### Community 28 - "Community 28"
+### Community 27 - "Community 27"
 Cohesion: 0.12
 Nodes (14): auditLines(), n(), parseModelJson(), expect(), expectThrows(), fmt(), norm(), runAll() (+6 more)
 
-### Community 29 - "Community 29"
-Cohesion: 0.1
-Nodes (22): saidAsOf(), fiveFloors(), line(), buildCandidateSet(), buildResolutionUser(), disposeRawResponse(), isBool(), isStr() (+14 more)
+### Community 28 - "Community 28"
+Cohesion: 0.08
+Nodes (3): taskStatus(), upNextRefs(), statusOf()
 
-### Community 30 - "Community 30"
+### Community 29 - "Community 29"
 Cohesion: 0.14
 Nodes (20): buildClassifierPrompt(), clamp01(), classifyUserTask(), dedupe(), gatewayAnchor(), introducesCycle(), resolveFreedomSet(), sanitizeScope() (+12 more)
 
-### Community 31 - "Community 31"
+### Community 30 - "Community 30"
 Cohesion: 0.15
 Nodes (18): bandedMatch(), canonRole(), isKnownTrade(), levenshtein(), matchPayee(), nameTokenScore(), rankPayeeName(), roleVerdict() (+10 more)
 
-### Community 33 - "Community 33"
+### Community 31 - "Community 31"
 Cohesion: 0.2
 Nodes (3): Evaluator, messageFor(), verdictFor()
 
-### Community 34 - "Community 34"
+### Community 32 - "Community 32"
 Cohesion: 0.19
 Nodes (14): buildExtractionPrompt(), buildReRankPrompt(), cleanExtractionResult(), extractItems(), generateStructuredSkuWithContext(), generateVectorEmbedding(), looksLikePlaceholder(), matchItems() (+6 more)
 
-### Community 35 - "Community 35"
+### Community 33 - "Community 33"
+Cohesion: 0.12
+Nodes (2): seed(), SEED2()
+
+### Community 34 - "Community 34"
 Cohesion: 0.17
 Nodes (7): addPhotos(), fmt(), goodOf(), handleSubmit(), parseTiffDate(), readExifDate(), readPhotoDate()
 
-### Community 36 - "Community 36"
+### Community 35 - "Community 35"
 Cohesion: 0.15
 Nodes (3): cand(), floorSeed(), fourFloors()
 
-### Community 37 - "Community 37"
+### Community 36 - "Community 36"
 Cohesion: 0.14
 Nodes (2): clearPersistedCache(), doSignOut()
 
+### Community 37 - "Community 37"
+Cohesion: 0.19
+Nodes (6): ctxFor(), imgCtx(), tQItem(), tTaskUpdate(), tUpdateResolve(), upd()
+
 ### Community 38 - "Community 38"
+Cohesion: 0.19
+Nodes (6): useDeskApi(), useMockDeskApi(), deskCoreQuery(), deskPlanQuery(), DeskUnsupported, useLiveDeskApi()
+
+### Community 39 - "Community 39"
 Cohesion: 0.18
 Nodes (3): BI(), chaseSeed(), seed()
 
-### Community 39 - "Community 39"
+### Community 40 - "Community 40"
 Cohesion: 0.32
 Nodes (11): act(), briklayChat(), checkRegistration(), greetOnce(), local10(), onlyDigits(), onTap(), prettyPhone() (+3 more)
-
-### Community 40 - "Community 40"
-Cohesion: 0.21
-Nodes (5): base(), nearest(), upd(), updResolve(), withNearest()
 
 ### Community 42 - "Community 42"
 Cohesion: 0.29
@@ -356,84 +361,86 @@ Nodes (6): audio(), cueFail(), cueStart(), cueStop(), haptic(), note()
 Cohesion: 0.33
 Nodes (2): handled(), minsAgo()
 
-### Community 75 - "Community 75"
+### Community 72 - "Community 72"
 Cohesion: 0.33
 Nodes (2): BootLoader(), isBooted()
 
-### Community 76 - "Community 76"
+### Community 73 - "Community 73"
 Cohesion: 0.53
 Nodes (4): importPO(), importTxn(), importWO(), preloadPeekChunks()
 
-### Community 81 - "Community 81"
+### Community 78 - "Community 78"
 Cohesion: 0.6
 Nodes (3): isValidMobile(), localDigits(), PhoneInput()
 
-### Community 82 - "Community 82"
+### Community 79 - "Community 79"
 Cohesion: 0.6
 Nodes (3): close(), handleSave(), reset()
 
-### Community 83 - "Community 83"
+### Community 80 - "Community 80"
 Cohesion: 0.5
 Nodes (2): prefetchTxn(), txnPeekKey()
 
-### Community 84 - "Community 84"
-Cohesion: 0.6
-Nodes (3): classificationsByName(), norm(), snapClassification()
-
-### Community 86 - "Community 86"
-Cohesion: 0.7
-Nodes (4): nodeKey(), nodeKeyOf(), unitKeyOf(), zoneIdOf()
-
-### Community 87 - "Community 87"
+### Community 81 - "Community 81"
 Cohesion: 0.5
 Nodes (3): crossCutsFor(), hrefOf(), titles()
 
-### Community 88 - "Community 88"
+### Community 82 - "Community 82"
+Cohesion: 0.6
+Nodes (3): classificationsByName(), norm(), snapClassification()
+
+### Community 84 - "Community 84"
+Cohesion: 0.7
+Nodes (4): nodeKey(), nodeKeyOf(), unitKeyOf(), zoneIdOf()
+
+### Community 85 - "Community 85"
 Cohesion: 0.5
 Nodes (2): FinancialsCashflow(), lastNMonths()
 
-### Community 94 - "Community 94"
+### Community 91 - "Community 91"
 Cohesion: 0.67
 Nodes (2): handleClose(), handleSubmit()
 
-### Community 95 - "Community 95"
+### Community 92 - "Community 92"
 Cohesion: 0.67
 Nodes (2): bloom(), REDUCED()
 
-### Community 103 - "Community 103"
+### Community 100 - "Community 100"
 Cohesion: 0.83
 Nodes (3): hidesGlobalFab(), ownsBottomBar(), ownsCreateAction()
 
-### Community 104 - "Community 104"
+### Community 101 - "Community 101"
 Cohesion: 0.67
 Nodes (2): poGateState(), poIsPriced()
 
-### Community 108 - "Community 108"
+### Community 105 - "Community 105"
 Cohesion: 0.67
 Nodes (2): concealedByPlaster(), unit()
 
-### Community 112 - "Community 112"
+### Community 109 - "Community 109"
 Cohesion: 0.83
 Nodes (3): json(), judge(), serperListings()
 
-### Community 117 - "Community 117"
+### Community 114 - "Community 114"
 Cohesion: 1.0
 Nodes (2): handleClose(), onKey()
 
-### Community 129 - "Community 129"
+### Community 126 - "Community 126"
 Cohesion: 1.0
 Nodes (2): downloadGRNChallan(), fmtDate()
 
-### Community 131 - "Community 131"
+### Community 128 - "Community 128"
 Cohesion: 1.0
 Nodes (2): insertionIndex(), withNewTask()
 
-### Community 134 - "Community 134"
+### Community 131 - "Community 131"
 Cohesion: 1.0
 Nodes (2): placeOf(), stageOfFloorless()
 
 ## Knowledge Gaps
-- **Thin community `Community 37`** (14 nodes): `clearPersistedCache()`, `shouldPersistQuery()`, `can()`, `checkScroll()`, `doSignOut()`, `e()`, `h()`, `initials()`, `isActive()`, `measure()`, `RailItem()`, `RailLabel()`, `BriklayRail.tsx`, `queryClient.ts`
+- **Thin community `Community 33`** (17 nodes): `no_such_floor_ask.test.ts`, `base()`, `blindModel()`, `convoOf()`, `ctxPin()`, `geo()`, `imgCtx()`, `model()`, `preambleOf()`, `projConvoOf()`, `row()`, `seed()`, `SEED2()`, `shortlist()`, `stateWrites()`, `textCtx()`, `tUpd()`
+  Too small to be a meaningful cluster - may be noise or needs more connections extracted.
+- **Thin community `Community 36`** (14 nodes): `clearPersistedCache()`, `shouldPersistQuery()`, `can()`, `checkScroll()`, `doSignOut()`, `e()`, `h()`, `initials()`, `isActive()`, `measure()`, `RailItem()`, `RailLabel()`, `BriklayRail.tsx`, `queryClient.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 45`** (10 nodes): `WOListSheet.tsx`, `balance()`, `closed()`, `D()`, `doneStages()`, `dstr()`, `fmt()`, `openLive()`, `pctPaid()`, `useWOListData()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
@@ -451,38 +458,38 @@ Nodes (2): placeOf(), stageOfFloorless()
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 - **Thin community `Community 68`** (7 nodes): `duplicate_narration.test.ts`, `calls()`, `ctxFor()`, `handled()`, `minsAgo()`, `model()`, `seed()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 75`** (6 nodes): `BootLoader()`, `isBooted()`, `markBooted()`, `onBooted()`, `BootLoader.tsx`, `bootSignal.ts`
+- **Thin community `Community 72`** (6 nodes): `BootLoader()`, `isBooted()`, `markBooted()`, `onBooted()`, `BootLoader.tsx`, `bootSignal.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 83`** (5 nodes): `fmtDate()`, `prefetchTxn()`, `txnPeekFn()`, `txnPeekKey()`, `TransactionPeek.tsx`
+- **Thin community `Community 80`** (5 nodes): `fmtDate()`, `prefetchTxn()`, `txnPeekFn()`, `txnPeekKey()`, `TransactionPeek.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 88`** (5 nodes): `FinancialsCashflow()`, `fmt()`, `lastNMonths()`, `monthLabel()`, `FinancialsCashflow.tsx`
+- **Thin community `Community 85`** (5 nodes): `FinancialsCashflow()`, `fmt()`, `lastNMonths()`, `monthLabel()`, `FinancialsCashflow.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 94`** (4 nodes): `handleClose()`, `handleSubmit()`, `updateRow()`, `QuoteEntryDrawer.tsx`
+- **Thin community `Community 91`** (4 nodes): `handleClose()`, `handleSubmit()`, `updateRow()`, `QuoteEntryDrawer.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 95`** (4 nodes): `bloom()`, `Btn()`, `REDUCED()`, `Btn.tsx`
+- **Thin community `Community 92`** (4 nodes): `bloom()`, `Btn()`, `REDUCED()`, `Btn.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 104`** (4 nodes): `poGateState()`, `poIsPriced()`, `poPayState()`, `poLifecycle.ts`
+- **Thin community `Community 101`** (4 nodes): `poGateState()`, `poIsPriced()`, `poPayState()`, `poLifecycle.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 108`** (4 nodes): `evaluate.test.ts`, `blockworkDoneGround()`, `concealedByPlaster()`, `unit()`
+- **Thin community `Community 105`** (4 nodes): `evaluate.test.ts`, `blockworkDoneGround()`, `concealedByPlaster()`, `unit()`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 117`** (3 nodes): `handleClose()`, `onKey()`, `StakeholderLedgerDrawer.tsx`
+- **Thin community `Community 114`** (3 nodes): `handleClose()`, `onKey()`, `StakeholderLedgerDrawer.tsx`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 129`** (3 nodes): `downloadGRNChallan()`, `fmtDate()`, `grnChallan.ts`
+- **Thin community `Community 126`** (3 nodes): `downloadGRNChallan()`, `fmtDate()`, `grnChallan.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 131`** (3 nodes): `insertionIndex()`, `withNewTask()`, `add.ts`
+- **Thin community `Community 128`** (3 nodes): `insertionIndex()`, `withNewTask()`, `add.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
-- **Thin community `Community 134`** (3 nodes): `placeOf()`, `stageOfFloorless()`, `stages.ts`
+- **Thin community `Community 131`** (3 nodes): `placeOf()`, `stageOfFloorless()`, `stages.ts`
   Too small to be a meaningful cluster - may be noise or needs more connections extracted.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `parseAmount()` connect `Community 13` to `Community 4`, `Community 21`?**
-  _High betweenness centrality (0.125) - this node is a cross-community bridge._
-- **Why does `NewInvoice()` connect `Community 21` to `Community 26`, `Community 13`, `Community 7`?**
-  _High betweenness centrality (0.106) - this node is a cross-community bridge._
-- **Why does `show()` connect `Community 3` to `Community 18`, `Community 13`, `Community 7`?**
-  _High betweenness centrality (0.080) - this node is a cross-community bridge._
+- **Why does `parseAmount()` connect `Community 6` to `Community 24`, `Community 16`, `Community 21`?**
+  _High betweenness centrality (0.135) - this node is a cross-community bridge._
+- **Why does `NewInvoice()` connect `Community 21` to `Community 24`, `Community 9`, `Community 6`?**
+  _High betweenness centrality (0.117) - this node is a cross-community bridge._
+- **Why does `show()` connect `Community 3` to `Community 16`, `Community 17`?**
+  _High betweenness centrality (0.078) - this node is a cross-community bridge._
 - **Are the 43 inferred relationships involving `send()` (e.g. with `processJob()` and `resurfacePending()`) actually correct?**
   _`send()` has 43 INFERRED edges - model-reasoned connections that need verification._
 - **Are the 37 inferred relationships involving `dispatch()` (e.g. with `processJob()` and `send()`) actually correct?**
