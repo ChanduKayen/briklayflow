@@ -1082,6 +1082,9 @@ function PopupContents({
 }: ContentProps) {
   const payeeDropRef    = useRef<HTMLDivElement>(null);
   const [showCreateStkForm, setShowCreateStkForm] = useState(false);
+  // "add the typed name as another name for an EXISTING contact" — a second search to pick that contact.
+  const [aliasPick, setAliasPick] = useState(false);
+  const [aliasQ, setAliasQ] = useState('');
   const qc = useQueryClient();
 
   const ai = entry.ai_extracted;
@@ -1125,6 +1128,7 @@ function PopupContents({
 
   // Dropdown action: pick this party AND remember the typed spelling as one of its other names.
   const learnAlias = async (party: any, raw: string) => {
+    setAliasPick(false); setAliasQ('');
     selectPayee(party.stakeholder_id, party.name);
     try {
       await addStakeholderAlias(party.stakeholder_id, raw, party.aliases, party.name);
@@ -1457,6 +1461,7 @@ function PopupContents({
                       setPayeeSearch(e.target.value);
                       if (payeeId) { setPayeeId(''); setPayeeName(''); }
                       if (genHead) { setGenHead(''); setGenName(''); }
+                      if (aliasPick) { setAliasPick(false); setAliasQ(''); }
                       setShowPayeeDrop(true);
                     }}
                     onFocus={() => setShowPayeeDrop(true)}
@@ -1470,10 +1475,46 @@ function PopupContents({
                   </span>
                 </div>
 
-                {showPayeeDrop && (() => {
+                {showPayeeDrop && aliasPick && (
+                  /* "attach the typed name to an existing contact" — a second search to choose which one */
+                  <div className="absolute left-0 right-0 top-full mt-1 z-10 rounded-xl shadow-lg max-h-64 overflow-y-auto"
+                       style={{ background: VOICE.surface, border: `1px solid ${VOICE.line}` }}
+                       onMouseDown={(e) => e.stopPropagation()}>
+                    <div className="px-3 pt-2.5 pb-2" style={{ borderBottom: `1px solid ${VOICE.line}` }}>
+                      <button type="button" onMouseDown={(e) => { e.preventDefault(); setAliasPick(false); setAliasQ(''); }}
+                        className="text-[11px] font-medium flex items-center gap-1 mb-2" style={{ color: VOICE.systemFaint }}>
+                        <span className="material-symbols-outlined text-[13px]">arrow_back</span> Back
+                      </button>
+                      <p className="text-[12px] mb-2" style={{ color: VOICE.system }}>
+                        Save <span className="font-semibold" style={{ color: VOICE.user }}>&ldquo;{typedName}&rdquo;</span> as another name for…
+                      </p>
+                      <input autoFocus value={aliasQ} onChange={(e) => setAliasQ(e.target.value)}
+                        placeholder="Search an existing contact…"
+                        className="w-full text-[13px] px-2.5 py-2 rounded-lg outline-none"
+                        style={{ border: `1px solid ${VOICE.line}`, background: VOICE.surface, color: VOICE.user }} />
+                    </div>
+                    {(aliasQ ? searchPayees(stakeholders, aliasQ) : stakeholders).slice(0, 8).map((s: any) => (
+                      <button key={s.stakeholder_id} type="button"
+                        onMouseDown={(e) => { e.preventDefault(); learnAlias(s, typedName); }}
+                        className="w-full flex items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-black/[0.025]"
+                        style={{ borderBottom: `1px solid ${VOICE.line}` }}>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[13px] font-semibold" style={{ color: VOICE.user }}>{s.name}</p>
+                          <p className="text-[11px]" style={{ color: VOICE.systemFaint }}>{s.type}{s.category ? ` · ${s.category}` : ''}</p>
+                        </div>
+                      </button>
+                    ))}
+                    {(aliasQ ? searchPayees(stakeholders, aliasQ) : stakeholders).length === 0 && (
+                      <p className="px-3 py-3 text-[12px]" style={{ color: VOICE.systemFaint }}>No contact by that name.</p>
+                    )}
+                  </div>
+                )}
+
+                {showPayeeDrop && !aliasPick && (() => {
                   /* stopPropagation on mousedown prevents the hidden PopupContents instance's
                      document mousedown handler from closing this dropdown before onClick fires */
                   const hasMatches = searchedPayees.length > 0;
+                  const exactExists = !!typedName && stakeholders.some((s: any) => s.name.trim().toLowerCase() === typedName.toLowerCase());
                   const openCreate = (e: React.MouseEvent) => {
                     e.preventDefault();
                     setShowPayeeDrop(false);
@@ -1595,6 +1636,23 @@ function PopupContents({
                           ) : (
                             <span className="font-semibold" style={{ color: VOICE.accentDeep }}>Add a new contact</span>
                           )}
+                        </span>
+                      </button>
+                    )}
+
+                    {/* ── Always available: the typed name is really an EXISTING contact under a different
+                         name (a nickname fuzzy can't reach). Pick who, and we remember it. Quiet, below
+                         Create, so a genuinely new name still leads with Create. ── */}
+                    {!!typedName && !exactExists && (
+                      <button type="button" onMouseDown={(e) => { e.preventDefault(); setAliasPick(true); setAliasQ(''); }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-black/[0.02]"
+                        style={{ borderTop: `1px solid ${VOICE.line}` }}
+                      >
+                        <span className="w-6 h-6 rounded-full flex items-center justify-center shrink-0" style={{ background: 'rgba(0,0,0,0.04)', color: VOICE.systemFaint }}>
+                          <span className="material-symbols-outlined text-[14px]">bookmark_add</span>
+                        </span>
+                        <span className="flex-1 min-w-0 text-[12px]" style={{ color: VOICE.system }}>
+                          Or add <span className="font-semibold" style={{ color: VOICE.user }}>&ldquo;{typedName}&rdquo;</span> as another name for an existing contact…
                         </span>
                       </button>
                     )}
