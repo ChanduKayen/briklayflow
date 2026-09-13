@@ -360,15 +360,17 @@ export default function Stakeholders({ session }: { session: Session }) {
     if (!editingId || !canManage || deleting) return;
     setDeleting(true);
     try {
-      const [tx, wo, po, bl, ob] = await Promise.all([
-        supabase.from('transactions').select('*', { count: 'exact', head: true }).eq('stakeholder_id', editingId),
-        supabase.from('work_orders').select('*', { count: 'exact', head: true }).eq('stakeholder_id', editingId),
-        supabase.from('purchase_orders').select('*', { count: 'exact', head: true }).eq('stakeholder_id', editingId),
+      // Count only REAL, live activity — exactly what the ledger shows. Voided transactions and cancelled
+      // orders don't block (they're closed records); an opening balance alone doesn't either (it's the
+      // party's own seed and is removed with it). This matches "the ledger shows 0" → deletable.
+      const [tx, wo, po, bl] = await Promise.all([
+        supabase.from('transactions').select('*', { count: 'exact', head: true }).eq('stakeholder_id', editingId).neq('status', 'Voided'),
+        supabase.from('work_orders').select('*', { count: 'exact', head: true }).eq('stakeholder_id', editingId).neq('status', 'Cancelled'),
+        supabase.from('purchase_orders').select('*', { count: 'exact', head: true }).eq('stakeholder_id', editingId).neq('status', 'Cancelled'),
         supabase.from('bills').select('*', { count: 'exact', head: true }).eq('stakeholder_id', editingId),
-        supabase.from('stakeholder_opening_balances').select('*', { count: 'exact', head: true }).eq('stakeholder_id', editingId),
       ]);
-      const total = (tx.count || 0) + (wo.count || 0) + (po.count || 0) + (bl.count || 0) + (ob.count || 0);
-      if (total > 0) { toast(`Has ${total} record${total !== 1 ? 's' : ''} — merge this party instead of deleting.`); return; }
+      const total = (tx.count || 0) + (wo.count || 0) + (po.count || 0) + (bl.count || 0);
+      if (total > 0) { toast(`Has ${total} record${total !== 1 ? 's' : ''} on file — open its ledger, or merge it instead of deleting.`); return; }
       if (!window.confirm(`Delete ${form.name}? This can't be undone.`)) return;
       const { error } = await supabase.from('stakeholders').delete().eq('stakeholder_id', editingId);
       if (error) throw error;
