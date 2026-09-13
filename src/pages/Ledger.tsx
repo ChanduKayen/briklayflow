@@ -13,8 +13,7 @@ import type { Stakeholder, Project } from '../types';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
-import { getCostCode, GEN_HEADS, costCodeLabel } from '../lib/costCodes';
-import { CostCodePicker } from '../components/CostCodePicker';
+import { getCostCode, GEN_HEADS, costCodeLabel, MAT_DIVISIONS, WRK_DIVISIONS } from '../lib/costCodes';
 import { searchPayees } from '../lib/payeeSearch';
 import { Plus, Download, Paperclip, Check, ArrowRight, ChevronRight, X, SlidersHorizontal } from 'lucide-react';
 import { useIsMobile } from '../lib/useIsMobile';
@@ -1807,10 +1806,17 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
               <p className="text-body-sm text-on-surface-variant mb-4">Current: <span className="font-semibold">{selectedCategories[0] ? costCodeLabel(selectedCategories[0]) : '—'}</span></p>
             )}
             <div className="space-y-2 mb-4">
-              <label className="text-label-caps font-label-caps text-on-surface-variant">NEW COST CODE</label>
-              {/* the real MAT/WRK cost-code taxonomy — the same searchable picker New Transaction uses */}
-              <CostCodePicker value={recatCategory} onChange={setRecatCategory} />
-              {recatCategory && <p className="text-[12px] mt-1" style={{ color: V.sys }}>→ {costCodeLabel(recatCategory)}</p>}
+              <label className="text-label-caps font-label-caps text-on-surface-variant">NEW CATEGORY</label>
+              {/* MAIN cost codes only (divisions) — not the leaf sub-codes; bulk classification is by head */}
+              <select value={recatCategory} onChange={e => setRecatCategory(e.target.value)} className="bk-input w-full">
+                <option value="">Select a category…</option>
+                <optgroup label="Materials">
+                  {MAT_DIVISIONS.map(d => <option key={d.code} value={d.code}>{d.code} · {d.name}</option>)}
+                </optgroup>
+                <optgroup label="Works">
+                  {WRK_DIVISIONS.map(d => <option key={d.code} value={d.code}>{d.code} · {d.name}</option>)}
+                </optgroup>
+              </select>
             </div>
             <p className="text-[11.5px] mb-4" style={{ color: V.faint }}>Only the classification changes — PO/WO and bill links stay exactly as they are.</p>
             <div className="flex gap-3 justify-end">

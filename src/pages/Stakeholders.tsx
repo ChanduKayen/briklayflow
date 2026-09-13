@@ -352,6 +352,36 @@ export default function Stakeholders({ session }: { session: Session }) {
     }
   }
 
+  // Delete a party — ONLY when it has no real activity. A party with any transaction / order / bill /
+  // opening carries money history that a delete would orphan or cascade away, so those must be MERGED,
+  // not deleted. We check first and refuse with a count rather than ever destroying records.
+  const [deleting, setDeleting] = useState(false);
+  async function deleteParty() {
+    if (!editingId || !canManage || deleting) return;
+    setDeleting(true);
+    try {
+      const [tx, wo, po, bl, ob] = await Promise.all([
+        supabase.from('transactions').select('*', { count: 'exact', head: true }).eq('stakeholder_id', editingId),
+        supabase.from('work_orders').select('*', { count: 'exact', head: true }).eq('stakeholder_id', editingId),
+        supabase.from('purchase_orders').select('*', { count: 'exact', head: true }).eq('stakeholder_id', editingId),
+        supabase.from('bills').select('*', { count: 'exact', head: true }).eq('stakeholder_id', editingId),
+        supabase.from('stakeholder_opening_balances').select('*', { count: 'exact', head: true }).eq('stakeholder_id', editingId),
+      ]);
+      const total = (tx.count || 0) + (wo.count || 0) + (po.count || 0) + (bl.count || 0) + (ob.count || 0);
+      if (total > 0) { toast(`Has ${total} record${total !== 1 ? 's' : ''} — merge this party instead of deleting.`); return; }
+      if (!window.confirm(`Delete ${form.name}? This can't be undone.`)) return;
+      const { error } = await supabase.from('stakeholders').delete().eq('stakeholder_id', editingId);
+      if (error) throw error;
+      toast(`Deleted — ${form.name}`);
+      queryClient.invalidateQueries({ queryKey: ['stakeholders'] });
+      closeDrawer();
+    } catch (e: any) {
+      toast(e?.message || 'Could not delete');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   // export the current view as CSV
   function exportCsv() {
     const head = ['ID', 'Name', 'Category', 'Trade', 'Phone', 'GSTIN', 'Paid to date', 'Outstanding'];
@@ -655,6 +685,11 @@ export default function Stakeholders({ session }: { session: Session }) {
 
         {canManage && (
           <div className="d-foot">
+            {editingId && (
+              <button className="btn danger" onClick={deleteParty} disabled={deleting || saving} title="Delete this party">
+                {deleting ? '…' : 'Delete'}
+              </button>
+            )}
             <button className={`btn primary ${dirty ? 'dirty' : ''}`} style={{ flex: 1, justifyContent: 'center', padding: 12 }}
               onClick={saveParty} disabled={saving}>
               {saving ? 'Saving…' : editingId ? 'Save changes' : 'Add party'}
@@ -847,6 +882,8 @@ const CSS = `
 .pt .sub-toggle{border:none;background:none;color:var(--terracotta);font-size:12.5px;cursor:pointer;padding:10px 0 2px;font-family:'DM Sans',sans-serif}
 .pt .sub-toggle:hover{text-decoration:underline;text-underline-offset:3px}
 .pt .d-foot{padding:18px 28px;border-top:1px solid var(--line);display:flex;gap:10px;align-items:center;background:var(--cream)}
+.pt .btn.danger{background:var(--paper);border-color:rgba(178,64,42,.3);color:#B2402A}
+.pt .btn.danger:hover{background:rgba(178,64,42,.06);border-color:rgba(178,64,42,.5)}
 
 .pt .toast{position:fixed;bottom:28px;left:50%;transform:translate(-50%,16px);opacity:0;background:var(--ink);color:var(--cream);font-size:13px;padding:10px 20px;border-radius:999px;transition:all .3s;z-index:60;pointer-events:none;font-family:'DM Sans',sans-serif}
 .pt .toast.show{opacity:1;transform:translate(-50%,0)}

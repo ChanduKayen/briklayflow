@@ -728,6 +728,11 @@ export function getCostCode(code: string): {
     const item = div.items.find((i) => i.code === code);
     if (item) return { division: div, item };
   }
+  // A MAIN/division code (e.g. "MAT-09") resolves to itself — so a transaction classified at the
+  // division level still reads its type + label correctly (getTxnType, costCodeLabel).
+  for (const div of [...COST_DIVISIONS, GEN]) {
+    if (div.code === code) return { division: div, item: { code: div.code, name: div.name } };
+  }
   return null;
 }
 
