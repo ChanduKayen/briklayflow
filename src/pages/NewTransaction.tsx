@@ -549,7 +549,10 @@ export default function NewTransaction({ session: _session }: { session: Session
   const [stkSearch, setStkSearch] = useState(initialStkName);
   const [showSug, setShowSug] = useState(false);
   // A vendor payment's bill picker, opened on the just-saved txn before the create flow continues.
-  const [postSaveBill, setPostSaveBill] = useState<{ txnId: string; amount: number; stakeholderId: string; vendorName: string; projectId: string | null; after: () => void } | null>(null);
+  // `prefill` = 'fifo' when the payment was declared "against the payable" (auto-tick oldest bills).
+  const [postSaveBill, setPostSaveBill] = useState<{ txnId: string; amount: number; stakeholderId: string; vendorName: string; projectId: string | null; prefill: 'exact' | 'fifo'; after: () => void } | null>(null);
+  // "What is this payment for?" — the purpose the user declares once a payee is chosen (drives settlement).
+  const [purpose, setPurpose] = useState<'payable' | 'advance' | 'weekly' | 'other' | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   // The quick-add now owns the "what is this" choice (was inferred from the top-level txnType) — so
   // it stays correct once the top-level selector collapses into in/out. Vendor/Worker create a
@@ -770,6 +773,20 @@ export default function NewTransaction({ session: _session }: { session: Session
   const filtStk = !_qCompact ? _dirAllowed : _dirAllowed.filter((s) =>
     _matchRaw(s.name) || (s.aliases ?? []).some(_matchRaw) || _fuzzyIds!.has(s.stakeholder_id));
   const selName = stakeholders?.find((s) => s.stakeholder_id === stkId)?.name || '';
+  const selPayeeType = stakeholders?.find((s) => s.stakeholder_id === stkId)?.type ?? null;
+  const isVendorPayee = selPayeeType === 'Vendor';
+  const isWorkerPayee = selPayeeType === 'Worker';
+  // The chosen payee's outstanding payable (what we owe them) — authoritative from v_party_balance.
+  const { data: payeeToPay = 0 } = useQuery({
+    queryKey: ['vendor_payable', stkId],
+    enabled: !!stkId && (isVendorPayee || isWorkerPayee) && direction === 'out',
+    queryFn: async () => {
+      const { data } = await supabase.from('v_party_balance').select('to_pay').eq('stakeholder_id', stkId).maybeSingle();
+      return Number((data as any)?.to_pay) || 0;
+    },
+  });
+  // Reset the declared purpose whenever the payee or direction changes — it's a per-payment choice.
+  useEffect(() => { setPurpose(null); }, [stkId, direction]);
   const filteredRecents = recentPayees.filter((p) => allowPayee(p.type));
   // Money out: the party search ALSO surfaces general-expense heads (overheads) — shown below the
   // worker/vendor matches — so "transport", "hamali", "fuel" etc. are one search away.
@@ -963,9 +980,10 @@ export default function NewTransaction({ session: _session }: { session: Session
       const stk = stakeholders?.find((s) => s.stakeholder_id === stkId);
       if (stk) setRecentPayees((prev) => [{ id: stk.stakeholder_id, name: stk.name, type: stk.type }, ...prev.filter((p) => p.id !== stk.stakeholder_id)].slice(0, 5));
       // A vendor payment finishes by attaching its bill(s) — the picker opens on the just-saved txn,
-      // and the normal continuation (reset / navigate) runs when it's closed.
-      if (stk?.type === 'Vendor' && stkId && (Number(totalAmt) || 0) > 0) {
-        setPostSaveBill({ txnId: savedId, amount: Number(totalAmt) || 0, stakeholderId: stkId, vendorName: stk.name, projectId: allocs[0]?.project_id || null, after: () => runAfterSave(savedId, saveMode) });
+      // and the normal continuation (reset / navigate) runs when it's closed. A declared ADVANCE skips
+      // the picker (deliberately no bill); "against the payable" pre-ticks oldest bills first (FIFO).
+      if (stk?.type === 'Vendor' && stkId && (Number(totalAmt) || 0) > 0 && purpose !== 'advance') {
+        setPostSaveBill({ txnId: savedId, amount: Number(totalAmt) || 0, stakeholderId: stkId, vendorName: stk.name, projectId: allocs[0]?.project_id || null, prefill: purpose === 'payable' ? 'fifo' : 'exact', after: () => runAfterSave(savedId, saveMode) });
         return;
       }
       runAfterSave(savedId, saveMode);
@@ -1495,6 +1513,46 @@ export default function NewTransaction({ session: _session }: { session: Session
                 <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.5px', color: 'rgba(243,234,219,.28)' }}>DRAFT</span>
               </div>
             </div>
+
+            {/* ━━ What is this payment for? — declared once a party payee is chosen (money out). Drives how
+                 the payment settles. "Other" keeps today's behaviour exactly. ━━ */}
+            {direction === 'out' && !splitMode && stkId && (isVendorPayee || isWorkerPayee) && (
+              <div className="mb-2 rounded-2xl border border-black/[0.05] bg-white p-4 shadow-[0_8px_30px_rgb(0,0,0,0.02)]">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-on-surface-variant/60 mb-2.5">What is this payment for?</p>
+                <div className="flex flex-wrap gap-2">
+                  {(isVendorPayee
+                    ? [['payable', 'Against a bill / payable'], ['advance', 'Advance (no bill yet)'], ['other', 'Other']]
+                    : [['weekly', 'Weekly payment'], ['advance', 'Advance'], ['other', 'Other']]
+                  ).map(([val, label]) => {
+                    const on = purpose === val;
+                    return (
+                      <button key={val} type="button"
+                        onClick={() => {
+                          setPurpose(val as any);
+                          if (val === 'payable' && payeeToPay > 0 && !amountTouched) { setAmountTouched(true); setTotalAmt(payeeToPay); }
+                        }}
+                        className="px-3.5 py-2 rounded-full text-[13px] font-semibold transition-colors"
+                        style={{ border: `1px solid ${on ? '#C8603A' : 'rgba(0,0,0,0.10)'}`, background: on ? 'rgba(200,96,58,0.08)' : '#fff', color: on ? '#8F3318' : 'var(--md-sys-color-on-surface-variant, #6B6258)' }}>
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {isVendorPayee && purpose === 'payable' && (
+                  <p className="text-[12.5px] mt-3" style={{ color: payeeToPay > 0 ? '#8F3318' : '#6B6258' }}>
+                    {payeeToPay > 0
+                      ? <>They're owed <b>₹{Math.round(payeeToPay).toLocaleString('en-IN')}</b> — after you save, pick the bills this clears (oldest first are pre-ticked). Anything left stays as their balance.</>
+                      : 'Nothing outstanding right now — this will sit as an advance until a bill arrives.'}
+                  </p>
+                )}
+                {isVendorPayee && purpose === 'advance' && (
+                  <p className="text-[12.5px] mt-3" style={{ color: '#6B6258' }}>Filed as an advance (paid without a bill) — it settles automatically when the bill is recorded.</p>
+                )}
+                {isWorkerPayee && purpose === 'weekly' && (
+                  <p className="text-[12.5px] mt-3" style={{ color: '#6B6258' }}>Marked as a weekly payment.</p>
+                )}
+              </div>
+            )}
 
             {/* ━━ 01 · Payment / Receipt Details ━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
             <div>
@@ -2647,6 +2705,7 @@ export default function NewTransaction({ session: _session }: { session: Session
             <BillAllocateSheet
               txnId={postSaveBill.txnId} orgId={orgId} stakeholderId={postSaveBill.stakeholderId}
               vendorName={postSaveBill.vendorName} amount={postSaveBill.amount} defaultProjectId={postSaveBill.projectId}
+              prefill={postSaveBill.prefill}
               onClose={() => { const a = postSaveBill.after; setPostSaveBill(null); a(); }}
               onDone={() => { qc.invalidateQueries({ queryKey: ['bills'] }); }}
             />

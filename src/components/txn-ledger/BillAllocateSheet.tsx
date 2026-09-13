@@ -77,12 +77,15 @@ const num = (n: unknown) => Number(n) || 0;
 const inr = (n: number) => '₹' + Math.round(num(n)).toLocaleString('en-IN');
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : '') || 'Something went wrong';
 
-export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amount, defaultProjectId, initialFile, onClose, onDone }: {
+export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amount, defaultProjectId, initialFile, prefill = 'exact', onClose, onDone }: {
   txnId: string; orgId: string; stakeholderId: string; vendorName: string; amount: number;
   defaultProjectId: string | null;
   /** A page whose own button already opened the file picker hands the paper straight through, so
    *  the reading starts without asking for it twice. */
   initialFile?: File | null;
+  /** 'exact' (default): tick a bill only when the payment equals its remaining. 'fifo': pre-tick the
+   *  OLDEST bills up to the payment amount (the "apply to the payable" flow) — for review before commit. */
+  prefill?: 'exact' | 'fifo';
   onClose: () => void; onDone: () => void;
 }) {
   const [bills, setBills] = useState<UnpaidBill[] | null>(null);
@@ -102,11 +105,23 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
     loadUnpaidBillsForVendor(stakeholderId).then(bs => {
       if (!live) return;
       setBills(bs);
-      const exact = bs.find(b => Math.abs(b.remaining - amount) < 1);
-      if (exact) setSel({ [exact.id]: exact.remaining });
+      if (prefill === 'fifo') {
+        // fill the OLDEST bills first, up to the payment amount (bs is already oldest-first)
+        const picks: Record<string, number> = {};
+        let left = amount;
+        for (const b of bs) {
+          if (left <= 0.5) break;
+          const take = Math.min(b.remaining, left);
+          if (take > 0.5) { picks[b.id] = take; left -= take; }
+        }
+        setSel(picks);
+      } else {
+        const exact = bs.find(b => Math.abs(b.remaining - amount) < 1);
+        if (exact) setSel({ [exact.id]: exact.remaining });
+      }
     }).catch(e => { if (live) setErr(errMsg(e)); });
     return () => { live = false; };
-  }, [stakeholderId, amount]);
+  }, [stakeholderId, amount, prefill]);
 
   /**
    * A bill has just arrived through the door — either freshly minted, or the one the dedupe found
