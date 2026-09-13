@@ -5,8 +5,9 @@
  * submits through submit_work_certification — which auto-approves within the submitter's authority or
  * routes to the project's Works Approver (project-first, member-fallback). Only APPROVED becomes a payable.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { V, font } from '../txn-ledger/ledgerTokens';
+import { supabase } from '../../lib/supabase';
 import {
   submitWorkCertification, computeCertAmount, type CertifyResult,
 } from '../../lib/workCertification';
@@ -33,6 +34,32 @@ export function CertificationWizard({ ctx, onClose, onDone, onReading }: {
 }) {
   const [step, setStep] = useState<'reading' | 'confirm' | 'busy' | 'done'>('reading');
   const [reading, setReading] = useState<number>(ctx.kind === 'lump' ? (ctx.priorReading ?? 0) : 0);
+  // What this milestone has already been PAID — you can't certify below it (the money's gone; that much
+  // work is agreed). It becomes the slider's locked floor. Fetched here so the wizard is self-contained.
+  const [paidOnMs, setPaidOnMs] = useState(0);
+  useEffect(() => {
+    if (!ctx.milestoneId) return;
+    let live = true;
+    supabase.from('txn_allocations')
+      .select('allocated_amount, transactions!inner(status)')
+      .eq('milestone_id', ctx.milestoneId)
+      .then(({ data }) => {
+        if (!live) return;
+        const paid = (data ?? []).reduce((s: number, a: any) => s + (a?.transactions?.status !== 'Voided' ? Number(a.allocated_amount) || 0 : 0), 0);
+        setPaidOnMs(paid);
+      });
+    return () => { live = false; };
+  }, [ctx.milestoneId]);
+  // The paid floor as a reading: lump → % of the planned value; measured → qty at the rate.
+  const paidFloor = ctx.kind === 'lump'
+    ? (ctx.planned > 0 ? Math.min(100, Math.round((paidOnMs / ctx.planned) * 100)) : 0)
+    : ctx.kind === 'measured'
+      ? (ctx.rate > 0 ? Math.floor(paidOnMs / ctx.rate) : 0)
+      : paidOnMs;                                    // piece: the ₹ itself
+  // The reading can never go below EITHER the last certified reading or what's already paid.
+  const floor = Math.max(ctx.priorReading ?? 0, paidFloor);
+  // Keep the reading at/above the floor as paid loads in.
+  useEffect(() => { setReading((r) => (r < floor ? floor : r)); }, [floor]);
   const [date, setDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [note, setNote] = useState('');
   const [err, setErr] = useState<string | null>(null);
@@ -82,26 +109,27 @@ export function CertificationWizard({ ctx, onClose, onDone, onReading }: {
                     <span style={{ fontSize: 13, color: V.sys }}>Progress</span>
                     <span style={{ fontSize: 22, fontWeight: 700, color: V.terraDeep }}>{Math.round(reading)}%</span>
                   </div>
-                  <input type="range" min={ctx.priorReading ?? 0} max={100} value={reading} onChange={(e) => setReading(Number(e.target.value))}
+                  <input type="range" min={floor} max={100} value={reading} onChange={(e) => setReading(Math.max(floor, Number(e.target.value)))}
                     style={{ width: '100%', marginTop: 8, accentColor: V.terra }} />
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: V.faint, marginTop: 2 }}>
-                    <span>was {Math.round(ctx.priorReading ?? 0)}%</span><span>100%</span>
+                    <span>{paidFloor > (ctx.priorReading ?? 0) ? `paid ${paidFloor}% · locked` : `was ${Math.round(ctx.priorReading ?? 0)}%`}</span><span>100%</span>
                   </div>
                 </>
               )}
               {ctx.kind === 'measured' && (
                 <>
                   <span style={{ fontSize: 13, color: V.sys }}>Quantity done{ctx.unit ? ` (${ctx.unit})` : ''}</span>
-                  <input inputMode="decimal" value={reading || ''} onChange={(e) => setReading(parseFloat(e.target.value.replace(/[^\d.]/g, '')) || 0)}
+                  <input inputMode="decimal" value={reading || ''} onChange={(e) => setReading(Math.max(floor, parseFloat(e.target.value.replace(/[^\d.]/g, '')) || 0))}
                     placeholder="0" style={{ width: '100%', marginTop: 6, padding: '10px 12px', borderRadius: 10, border: `1px solid ${V.line}`, fontSize: 16, color: V.ink, outline: 'none' }} />
-                  <p style={{ fontSize: 11.5, color: V.faint, marginTop: 4 }}>at {inr(ctx.rate)} / {ctx.unit || 'unit'}</p>
+                  <p style={{ fontSize: 11.5, color: V.faint, marginTop: 4 }}>at {inr(ctx.rate)} / {ctx.unit || 'unit'}{paidFloor > 0 ? ` · ${paidFloor} already paid for` : ''}</p>
                 </>
               )}
               {ctx.kind === 'piece' && (
                 <>
                   <span style={{ fontSize: 13, color: V.sys }}>Amount for this job (₹)</span>
-                  <input inputMode="numeric" value={reading || ''} onChange={(e) => setReading(parseFloat(e.target.value.replace(/[^\d.]/g, '')) || 0)}
+                  <input inputMode="numeric" value={reading || ''} onChange={(e) => setReading(Math.max(floor, parseFloat(e.target.value.replace(/[^\d.]/g, '')) || 0))}
                     placeholder="0" style={{ width: '100%', marginTop: 6, padding: '10px 12px', borderRadius: 10, border: `1px solid ${V.line}`, fontSize: 16, color: V.ink, outline: 'none' }} />
+                  {paidFloor > 0 && <p style={{ fontSize: 11.5, color: V.faint, marginTop: 4 }}>{inr(paidFloor)} already paid — certify at least that</p>}
                 </>
               )}
               <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 10, background: V.sageWash, border: `1px solid ${V.sage}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

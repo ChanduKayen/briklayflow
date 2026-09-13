@@ -867,6 +867,10 @@
     "mtime": 1788858036.1135387,
     "hash": "1216f22114deca0f3f7a130721cc6d49"
   },
+  "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\ledgerStatementExcel.ts": {
+    "mtime": 1789313289.1455407,
+    "hash": "259a2ed2fef2a2844d5291472f72e383"
+  },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\lib\\ledgerStatementPdf.ts": {
     "mtime": 1789042812.6187036,
     "hash": "beaaf5a1403bb5acc8c34aabab904259"
@@ -1552,8 +1556,8 @@
     "hash": "af591dfa9c748ef0aecfc0fcf37d1884"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\StakeholderDetail.tsx": {
-    "mtime": 1789269522.0522964,
-    "hash": "9468ef4b64bd7e60a2e4d9c5c561f8b1"
+    "mtime": 1789313405.3009243,
+    "hash": "af7f1e59a5ba9c4004a82366fdde7de0"
   },
   "C:\\Users\\koppi\\OneDrive\\Desktop\\Briklay Fly\\src\\pages\\Stakeholders.tsx": {
     "mtime": 1789306828.3641214,
