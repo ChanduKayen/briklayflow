@@ -259,19 +259,14 @@ export default function Stakeholders({ session }: { session: Session }) {
   const [mergeName, setMergeName] = useState('');
   const [merging, setMerging] = useState(false);
   const selList = all.filter((p) => selected.has(p.stakeholder_id));
+  // Selection is general now (merge OR delete), so it isn't type-locked; the same-type rule is enforced
+  // only when you go to MERGE (below).
   const toggleSel = (p: Stakeholder) => {
-    setSelected((s) => {
-      const n = new Set(s);
-      if (n.has(p.stakeholder_id)) { n.delete(p.stakeholder_id); return n; }
-      if (n.size > 0) {
-        const firstType = all.find((x) => x.stakeholder_id === [...n][0])?.type;
-        if (firstType && firstType !== p.type) { toast(`Pick parties of the same type (${firstType})`); return n; }
-      }
-      n.add(p.stakeholder_id); return n;
-    });
+    setSelected((s) => { const n = new Set(s); n.has(p.stakeholder_id) ? n.delete(p.stakeholder_id) : n.add(p.stakeholder_id); return n; });
   };
   const openMerge = () => {
     if (selected.size < 2) return;
+    if (new Set(selList.map((p) => p.type)).size > 1) { toast('Merge parties of the same type — mixed types selected.'); return; }
     const longest = selList.map((p) => p.name).reduce((a, b) => (b.length > a.length ? b : a), selList[0]?.name ?? '');
     setMergeName(longest); setMergeOpen(true);
   };
@@ -352,32 +347,36 @@ export default function Stakeholders({ session }: { session: Session }) {
     }
   }
 
-  // Delete a party — ONLY when it has no real activity. A party with any transaction / order / bill /
-  // opening carries money history that a delete would orphan or cascade away, so those must be MERGED,
-  // not deleted. We check first and refuse with a count rather than ever destroying records.
+  // Delete a party — ONLY when it has no real activity. A party with any transaction / order / bill
+  // carries money history a delete would orphan, so those must be MERGED, not deleted. These two helpers
+  // are shared by the single (drawer) delete and the bulk (selection-bar) delete.
   const [deleting, setDeleting] = useState(false);
+  // Live activity = exactly what the ledger shows: non-voided transactions + non-cancelled orders + bills.
+  // (Voided txns / cancelled orders / an opening alone don't block — they're closed or the party's seed.)
+  async function partyHasActivity(id: string): Promise<boolean> {
+    const [tx, wo, po, bl] = await Promise.all([
+      supabase.from('transactions').select('*', { count: 'exact', head: true }).eq('stakeholder_id', id).neq('status', 'Voided'),
+      supabase.from('work_orders').select('*', { count: 'exact', head: true }).eq('stakeholder_id', id).neq('status', 'Cancelled'),
+      supabase.from('purchase_orders').select('*', { count: 'exact', head: true }).eq('stakeholder_id', id).neq('status', 'Cancelled'),
+      supabase.from('bills').select('*', { count: 'exact', head: true }).eq('stakeholder_id', id),
+    ]);
+    return ((tx.count || 0) + (wo.count || 0) + (po.count || 0) + (bl.count || 0)) > 0;
+  }
+  // Removes an empty party. transactions.stakeholder_id is ON DELETE RESTRICT, so leftover VOIDED
+  // transactions are unlinked first (→ "(removed contact)"). Caller must have checked partyHasActivity.
+  async function hardDeleteParty(id: string): Promise<void> {
+    const clr = await supabase.from('transactions').update({ stakeholder_id: null }).eq('stakeholder_id', id);
+    if (clr.error) throw clr.error;
+    const { error } = await supabase.from('stakeholders').delete().eq('stakeholder_id', id);
+    if (error) throw error;
+  }
   async function deleteParty() {
     if (!editingId || !canManage || deleting) return;
     setDeleting(true);
     try {
-      // Count only REAL, live activity — exactly what the ledger shows. Voided transactions and cancelled
-      // orders don't block (they're closed records); an opening balance alone doesn't either (it's the
-      // party's own seed and is removed with it). This matches "the ledger shows 0" → deletable.
-      const [tx, wo, po, bl] = await Promise.all([
-        supabase.from('transactions').select('*', { count: 'exact', head: true }).eq('stakeholder_id', editingId).neq('status', 'Voided'),
-        supabase.from('work_orders').select('*', { count: 'exact', head: true }).eq('stakeholder_id', editingId).neq('status', 'Cancelled'),
-        supabase.from('purchase_orders').select('*', { count: 'exact', head: true }).eq('stakeholder_id', editingId).neq('status', 'Cancelled'),
-        supabase.from('bills').select('*', { count: 'exact', head: true }).eq('stakeholder_id', editingId),
-      ]);
-      const total = (tx.count || 0) + (wo.count || 0) + (po.count || 0) + (bl.count || 0);
-      if (total > 0) { toast(`Has ${total} record${total !== 1 ? 's' : ''} on file — open its ledger, or merge it instead of deleting.`); return; }
+      if (await partyHasActivity(editingId)) { toast('Has records on file — open its ledger, or merge it instead of deleting.'); return; }
       if (!window.confirm(`Delete ${form.name}? This can't be undone.`)) return;
-      // transactions.stakeholder_id is ON DELETE RESTRICT, so any leftover VOIDED transactions (the guard
-      // cleared all live ones) would block the delete. Unlink them first — they become "(removed contact)".
-      const clr = await supabase.from('transactions').update({ stakeholder_id: null }).eq('stakeholder_id', editingId);
-      if (clr.error) throw clr.error;
-      const { error } = await supabase.from('stakeholders').delete().eq('stakeholder_id', editingId);
-      if (error) throw error;
+      await hardDeleteParty(editingId);
       toast(`Deleted — ${form.name}`);
       queryClient.invalidateQueries({ queryKey: ['stakeholders'] });
       closeDrawer();
@@ -386,6 +385,31 @@ export default function Stakeholders({ session }: { session: Session }) {
       toast(/foreign key|violates/i.test(msg) ? 'Still has linked records — merge this party instead of deleting.' : (msg || 'Could not delete'));
     } finally {
       setDeleting(false);
+    }
+  }
+
+  // Bulk delete the selected parties — only the empty ones go; any with activity are skipped and counted,
+  // never destroyed. One confirm, then a per-party guarded delete.
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  async function bulkDeleteSelected() {
+    if (!canManage || bulkDeleting || selected.size === 0) return;
+    if (!window.confirm(`Delete ${selected.size} selected part${selected.size !== 1 ? 'ies' : 'y'}? Only those with no records will be removed. This can't be undone.`)) return;
+    setBulkDeleting(true);
+    let done = 0, skipped = 0, failed = 0;
+    try {
+      for (const id of Array.from(selected)) {
+        try {
+          if (await partyHasActivity(id)) { skipped++; continue; }
+          await hardDeleteParty(id);
+          done++;
+        } catch { failed++; }
+      }
+      const bits = [done ? `${done} deleted` : '', skipped ? `${skipped} kept (have records)` : '', failed ? `${failed} failed` : ''].filter(Boolean);
+      toast(bits.join(' · ') || 'Nothing to delete');
+      setSelecting(false); setSelected(new Set());
+      queryClient.invalidateQueries({ queryKey: ['stakeholders'] });
+    } finally {
+      setBulkDeleting(false);
     }
   }
 
@@ -431,7 +455,7 @@ export default function Stakeholders({ session }: { session: Session }) {
             {canManage && <button className="btn" onClick={() => setShowSpreadsheet(true)}>Bulk add</button>}
             {canManage && (
               <button className={`btn ${selecting ? 'primary' : ''}`} onClick={() => { setSelecting((v) => !v); setSelected(new Set()); }}>
-                {selecting ? 'Cancel merge' : 'Merge duplicates'}
+                {selecting ? 'Cancel' : 'Select'}
               </button>
             )}
             {canManage && <button className="btn primary" onClick={() => openDrawer(null)}>+ New party</button>}
@@ -709,11 +733,20 @@ export default function Stakeholders({ session }: { session: Session }) {
       {/* party ledger — the same ledger as the /stakeholders/:id page, opened from the side */}
       <StakeholderLedgerDrawer isOpen={!!ledgerId} onClose={() => setLedgerId(null)} stakeholderId={ledgerId ?? ''} />
 
-      {/* merge action bar — floats while selecting */}
+      {/* selection action bar — floats while selecting: merge (≥2, same type) or bulk-delete (≥1) */}
       {selecting && (
         <div className="mergebar">
-          <span className="mb-count">{selected.size === 0 ? 'Tick the duplicates to merge' : `${selected.size} selected`}</span>
+          {(() => {
+            const allShownSelected = rows.length > 0 && rows.every((p) => selected.has(p.stakeholder_id));
+            return (
+              <button className="mb-selall" onClick={() => setSelected(allShownSelected ? new Set() : new Set(rows.map((p) => p.stakeholder_id)))} title={allShownSelected ? 'Clear' : `Select all ${rows.length}`}>
+                <span className={`mb-box ${allShownSelected ? 'on' : selected.size ? 'some' : ''}`}>{allShownSelected ? '✓' : selected.size ? '–' : ''}</span>
+                {selected.size === 0 ? `Select all ${rows.length}` : allShownSelected ? `All ${rows.length}` : `${selected.size} selected`}
+              </button>
+            );
+          })()}
           <button className="btn" onClick={() => { setSelecting(false); setSelected(new Set()); }}>Cancel</button>
+          <button className="btn danger" disabled={selected.size < 1 || bulkDeleting} onClick={bulkDeleteSelected}>{bulkDeleting ? 'Deleting…' : `Delete ${selected.size || ''}`}</button>
           <button className="btn primary" disabled={selected.size < 2} onClick={openMerge}>Merge {selected.size >= 2 ? selected.size : ''} →</button>
         </div>
       )}
@@ -912,6 +945,10 @@ const CSS = `
 .pt .selbox.on{background:var(--terracotta);border-color:var(--terracotta)}
 .pt .mergebar{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:62;display:flex;align-items:center;gap:12px;background:var(--paper);border:1px solid var(--line);border-radius:999px;padding:8px 10px 8px 20px;box-shadow:0 18px 44px -18px rgba(51,42,32,.4)}
 .pt .mergebar .mb-count{font-size:13px;color:var(--ink-soft);white-space:nowrap}
+.pt .mb-selall{display:inline-flex;align-items:center;gap:8px;border:0;background:none;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:13px;color:var(--ink-soft);white-space:nowrap;padding:0 2px}
+.pt .mb-box{width:18px;height:18px;border-radius:5px;border:1.5px solid var(--line);display:inline-flex;align-items:center;justify-content:center;font-size:12px;line-height:1;color:#fff}
+.pt .mb-box.on{background:var(--terracotta);border-color:var(--terracotta)}
+.pt .mb-box.some{background:var(--terracotta);border-color:var(--terracotta);color:#fff}
 .pt .mscrim{position:fixed;inset:0;z-index:63;background:rgba(51,42,32,.42);display:grid;place-items:center;padding:16px}
 .pt .mcard{width:min(440px,100%);background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:22px 22px 16px;box-shadow:0 28px 70px -22px rgba(51,42,32,.5)}
 .pt .mcard h3{font-family:'Playfair Display',serif;font-weight:600;font-size:21px;margin:0}
