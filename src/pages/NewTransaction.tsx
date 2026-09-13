@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { searchPayees } from '../lib/payeeSearch';
+import { mondayOf } from '../lib/attendanceApi';
 import { Loader2 } from 'lucide-react';
 import type { Stakeholder, Project } from '../types';
 import type { Session } from '@supabase/supabase-js';
@@ -938,13 +939,20 @@ export default function NewTransaction({ session: _session }: { session: Session
         return { savedId: splits[0]?.txn_id ?? txnId, saveMode, autoCloseWoId: null as string | null };
       }
 
+      // A worker "Weekly payment" is stamped to its week for provenance so it shows with that week's run.
+      // We deliberately DON'T tag a grid row_key: the run already reflects this payment through the
+      // worker's running balance (balanceBf reads the live v_party_balance), so row-netting it would
+      // double-count. The stamp only groups it to the week.
+      const aiFlagData: Record<string, unknown> = (purpose === 'weekly' && isWorkerPayee)
+        ? { weekly_run: mondayOf(new Date(date)).toISOString().slice(0, 10) }
+        : {};
       const payload = {
         txn_id: txnId, stakeholder_id: stkId || null, date, total_amount: totalAmt,
         payment_mode: mode,
         category: effectiveCategory,
         remarks: effectiveRemarks, bill_doc_url, proof_document_url,
         ai_flag_status: 'Clean',
-        ai_flag_data: {},
+        ai_flag_data: aiFlagData,
         org_id: orgId,
       };
       const mapped = effectiveAllocs.map((a) => {
