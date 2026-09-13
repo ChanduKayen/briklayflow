@@ -252,8 +252,7 @@ export default function Stakeholders({ session }: { session: Session }) {
     toastTimer.current = window.setTimeout(() => setToastMsg(''), 2400);
   }
 
-  // ── merge duplicates ─────────────────────────────────────────────────────────
-  const [selecting, setSelecting] = useState(false);
+  // ── selection (hover-driven, like the transactions ledger) — no separate mode toggle ─────────────
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [mergeOpen, setMergeOpen] = useState(false);
   const [mergeName, setMergeName] = useState('');
@@ -280,7 +279,7 @@ export default function Stakeholders({ session }: { session: Session }) {
     try {
       await mergeStakeholders(orgId!, survivor, losers, name);
       toast(`Merged ${ids.length} into ${name}`);
-      setMergeOpen(false); setSelecting(false); setSelected(new Set());
+      setMergeOpen(false); setSelected(new Set());
       queryClient.invalidateQueries({ queryKey: ['stakeholders'] });
       queryClient.invalidateQueries({ queryKey: ['party_projection'] });
       queryClient.invalidateQueries({ queryKey: ['stakeholders_paid'] });
@@ -406,7 +405,7 @@ export default function Stakeholders({ session }: { session: Session }) {
       }
       const bits = [done ? `${done} deleted` : '', skipped ? `${skipped} kept (have records)` : '', failed ? `${failed} failed` : ''].filter(Boolean);
       toast(bits.join(' · ') || 'Nothing to delete');
-      setSelecting(false); setSelected(new Set());
+      setSelected(new Set());
       queryClient.invalidateQueries({ queryKey: ['stakeholders'] });
     } finally {
       setBulkDeleting(false);
@@ -453,11 +452,6 @@ export default function Stakeholders({ session }: { session: Session }) {
               Export
             </button>
             {canManage && <button className="btn" onClick={() => setShowSpreadsheet(true)}>Bulk add</button>}
-            {canManage && (
-              <button className={`btn ${selecting ? 'primary' : ''}`} onClick={() => { setSelecting((v) => !v); setSelected(new Set()); }}>
-                {selecting ? 'Cancel' : 'Select'}
-              </button>
-            )}
             {canManage && <button className="btn primary" onClick={() => openDrawer(null)}>+ New party</button>}
           </div>
         </div>
@@ -523,17 +517,20 @@ export default function Stakeholders({ session }: { session: Session }) {
                 const sel = selected.has(p.stakeholder_id);
                 return (
                   <tr key={p.stakeholder_id} className={`row ${sel ? 'sel' : ''}`} tabIndex={0} data-search-row={p.stakeholder_id}
-                    onClick={() => selecting ? toggleSel(p) : setLedgerId(p.stakeholder_id)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') (selecting ? toggleSel(p) : setLedgerId(p.stakeholder_id)); }}
+                    onClick={() => setLedgerId(p.stakeholder_id)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') setLedgerId(p.stakeholder_id); }}
                     onMouseEnter={pf.onMouseEnter} onTouchStart={pf.onTouchStart} onPointerDown={pf.onPointerDown}>
                     <td>
                       <div className="pid">
-                        {selecting && (
-                          <span className={`selbox ${sel ? 'on' : ''}`} aria-hidden>
+                        {/* select slot — the whole left region is the (wide) hit target; the avatar becomes a
+                            checkbox on hover or when selected. Clicking selects; it never opens the ledger. */}
+                        <span className={`selslot ${sel ? 'sel' : ''}`} role="button" aria-label={sel ? `Deselect ${p.name}` : `Select ${p.name}`}
+                          onClick={(e) => { e.stopPropagation(); toggleSel(p); }}>
+                          <span className={`avatar ${p.type.toLowerCase()}`}>{initials(p.name)}</span>
+                          <span className="selbox" aria-hidden>
                             {sel && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>}
                           </span>
-                        )}
-                        <div className={`avatar ${p.type.toLowerCase()}`}>{initials(p.name)}</div>
+                        </span>
                         <div>
                           <div className="pname">{p.name}{p.gstin ? <span className="gst">✓ GST</span> : null}</div>
                           <div className="psub">{p.contact || p.stakeholder_id}</div>
@@ -733,8 +730,8 @@ export default function Stakeholders({ session }: { session: Session }) {
       {/* party ledger — the same ledger as the /stakeholders/:id page, opened from the side */}
       <StakeholderLedgerDrawer isOpen={!!ledgerId} onClose={() => setLedgerId(null)} stakeholderId={ledgerId ?? ''} />
 
-      {/* selection action bar — floats while selecting: merge (≥2, same type) or bulk-delete (≥1) */}
-      {selecting && (
+      {/* selection action bar — appears once anything is picked: merge (≥2, same type) or bulk-delete (≥1) */}
+      {selected.size > 0 && (
         <div className="mergebar">
           {(() => {
             const allShownSelected = rows.length > 0 && rows.every((p) => selected.has(p.stakeholder_id));
@@ -745,7 +742,7 @@ export default function Stakeholders({ session }: { session: Session }) {
               </button>
             );
           })()}
-          <button className="btn" onClick={() => { setSelecting(false); setSelected(new Set()); }}>Cancel</button>
+          <button className="btn" onClick={() => setSelected(new Set())}>Cancel</button>
           <button className="btn danger" disabled={selected.size < 1 || bulkDeleting} onClick={bulkDeleteSelected}>{bulkDeleting ? 'Deleting…' : `Delete ${selected.size || ''}`}</button>
           <button className="btn primary" disabled={selected.size < 2} onClick={openMerge}>Merge {selected.size >= 2 ? selected.size : ''} →</button>
         </div>
@@ -941,8 +938,16 @@ const CSS = `
 /* merge: selection + bar + dialog */
 .pt tr.row.sel{background:var(--terracotta-tint)}
 .pt tr.row.sel:hover{background:var(--terracotta-tint)}
-.pt .selbox{width:20px;height:20px;flex-shrink:0;border-radius:6px;border:1.5px solid var(--line);background:var(--paper);display:grid;place-items:center;transition:background .12s,border-color .12s}
-.pt .selbox.on{background:var(--terracotta);border-color:var(--terracotta)}
+/* select slot: avatar by default; a checkbox appears on ROW hover or when selected. The hit area is
+   WIDE (padding + negative margin so nearby clicks snap to it) while the visible box stays small. */
+.pt .selslot{position:relative;display:grid;place-items:center;width:38px;height:38px;flex-shrink:0;cursor:pointer;padding:9px 12px 9px 8px;margin:-9px 2px -9px -8px;border-radius:14px;transition:background .12s}
+.pt .selslot > *{grid-area:1/1}
+.pt .selslot:hover{background:rgba(51,42,32,.05)}
+.pt .selbox{width:20px;height:20px;border-radius:6px;border:1.5px solid var(--ink-faint);background:var(--paper);display:grid;place-items:center;opacity:0;transition:opacity .12s,background .12s,border-color .12s}
+.pt .row:hover .selbox,.pt .selslot.sel .selbox{opacity:1}
+.pt .row:hover .selslot .avatar,.pt .selslot.sel .avatar{opacity:0}
+.pt .selslot.sel .selbox{background:var(--terracotta);border-color:var(--terracotta)}
+@media (hover:none){.pt .selbox{opacity:0}.pt .selslot.sel .selbox{opacity:1}}
 .pt .mergebar{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:62;display:flex;align-items:center;gap:12px;background:var(--paper);border:1px solid var(--line);border-radius:999px;padding:8px 10px 8px 20px;box-shadow:0 18px 44px -18px rgba(51,42,32,.4)}
 .pt .mergebar .mb-count{font-size:13px;color:var(--ink-soft);white-space:nowrap}
 .pt .mb-selall{display:inline-flex;align-items:center;gap:8px;border:0;background:none;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:13px;color:var(--ink-soft);white-space:nowrap;padding:0 2px}
