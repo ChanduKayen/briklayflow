@@ -18,8 +18,8 @@ import { QuickTransactionSheet } from '../components/QuickTransactionSheet';
 import { loadPartyLedger, saveOpeningBalance, addAdjustment, bookConsolidatedBill, removeLedgerLine, isRemovableLine, type LedgerEntry, type PartyLedger } from '../lib/partyLedgerApi';
 import { readParty, isNewLedgerOrg } from '../lib/ledgerRead';
 import { PieceWorkEntry } from '../components/attendance/PieceWorkEntry';
-import { loadPartyCertifications, loadLedgerCutover, loadUncertifiedStage } from '../lib/workCertification';
-import { createCredit, fillCredit, allocateToCredit, allocateToPool, openCreditsFor, certifyStage, type OpenCredit } from '../lib/ledgerWrite';
+import { loadPartyCertifications, loadLedgerCutover } from '../lib/workCertification';
+import { createCredit, fillCredit, allocateToCredit, allocateToPool, openCreditsFor, setPaymentCertified, type OpenCredit } from '../lib/ledgerWrite';
 
 const inr = (n: number) => n.toLocaleString('en-IN');
 const initials = (name: string) => name.split(' ').slice(0, 2).map(w => w[0] || '').join('').toUpperCase();
@@ -132,6 +132,15 @@ const CSS = `
 .plx .row.removable:hover .rm{opacity:.75}
 .plx .row .rm:hover{color:var(--terra);background:var(--terra-soft);opacity:1}
 @media (hover:none){.plx .row.removable .rm{opacity:.6}}
+/* Certify-from-payment: a hover chip in the Credit column of an eligible contract payment. */
+.plx .row .pcert-do{opacity:0;font-family:var(--sans);font-size:11.5px;font-weight:500;color:var(--sage);border:1px solid var(--sage-soft);background:var(--sage-soft);border-radius:999px;padding:2px 9px;transition:opacity .12s,background .12s;white-space:nowrap}
+.plx .row:hover .pcert-do{opacity:.9}
+.plx .row .pcert-do:hover{opacity:1;background:#d9e6d4}
+@media (hover:none){.plx .row .pcert-do{opacity:.85}}
+.plx .row .pcert{color:var(--sage);display:inline-flex;align-items:center;gap:7px;justify-content:flex-end}
+.plx .row .pcert-undo{opacity:0;font-family:var(--sans);font-size:10.5px;color:var(--walnut-3);text-decoration:underline;text-underline-offset:2px;transition:opacity .12s}
+.plx .row:hover .pcert-undo{opacity:.8}
+.plx .row .pcert-undo:hover{color:var(--terra);opacity:1}
 .plx .group{background:var(--paper);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:16px}
 .plx .group-head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;padding:16px 18px 14px;border-bottom:1px solid var(--line)}
 .plx .group-head .title{font-weight:500;font-size:15px}
@@ -315,20 +324,12 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
   const [cbOpen, setCbOpen] = useState(false);
   const [billOpen, setBillOpen] = useState(false);
   const [classifyEntry, setClassifyEntry] = useState<LedgerEntry | null>(null);
-  const [certifyOpen, setCertifyOpen] = useState(false);
   const [pieceOpen, setPieceOpen] = useState(false);
 
   const { data: L, isLoading, error, refetch } = useQuery({
     queryKey: ['party_ledger', stakeholderId, orgId],
     queryFn: async () => (orgId && await isNewLedgerOrg(orgId)) ? readParty(stakeholderId) : loadPartyLedger(stakeholderId),
     enabled: !!stakeholderId,
-  });
-  // Contract work recorded in the muster but not yet certified — captured, correctly off the ledger,
-  // and worth nudging so it doesn't look lost.
-  const { data: uncertified } = useQuery({
-    queryKey: ['uncertified_stage', stakeholderId],
-    queryFn: () => loadUncertifiedStage(stakeholderId),
-    enabled: !!stakeholderId && L?.kind === 'worker',
   });
 
   const entries = useMemo(() => {
@@ -439,9 +440,23 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
     } catch (err) { showSnackbar((err as Error)?.message || 'Could not remove this line', { type: 'error' }); }
   };
 
+  // Certify-from-payment: a contract-linked payment on an UNTRACKED contract can BE the accepted work.
+  // Toggling on mints a capped payment-certification; off removes it. Recording=certified still governs
+  // muster-tracked contracts, so this only ever applies to contracts with no site readings.
+  const onCertifyPayment = async (e: LedgerEntry, on: boolean) => {
+    const txnId = e.id.replace(/^t-/, '');
+    try {
+      const r = await setPaymentCertified(txnId, on);
+      showSnackbar(on ? `Certified ₹${inr(r.amount ?? e.paid)} as accepted work` : 'Certification removed');
+      refetch();
+      qc.invalidateQueries({ queryKey: ['party_certs', stakeholderId] });
+    } catch (err) { showSnackbar((err as Error)?.message || 'Could not certify this payment', { type: 'error' }); }
+  };
+
   const mobileMenu: PartyMenuItem[] = [
-    ...(newLedger && L.contracts.length > 0 ? [{ label: 'Certify work', onSelect: () => setCertifyOpen(true) }] : []),
-    ...(!newLedger && L.kind === 'worker' ? [{ label: 'Work certified', onSelect: () => navigate('/attendance') }] : []),
+    // Contract stage work is certified by the muster reading itself (recording = certified) — no
+    // separate "Certify work" step. Only the attendance link remains, to view/record readings.
+    ...(L.kind === 'worker' ? [{ label: 'Work recorded', onSelect: () => navigate('/attendance') }] : []),
     ...(L.kind === 'worker' ? [{ label: 'Record piece / gutha work', onSelect: () => setPieceOpen(true) }] : []),
     ...(L.kind === 'vendor' ? [{ label: 'Enter a bill', onSelect: () => setBillOpen(true) }] : []),
     ...(L.kind === 'vendor' && L.unbilledCount > 0 ? [{ label: 'Consolidated bill', onSelect: () => setCbOpen(true) }] : []),
@@ -451,7 +466,7 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
   ];
 
   return (
-    <RowActionsCtx.Provider value={isManager ? { onRemove: onRemoveLine } : null}>
+    <RowActionsCtx.Provider value={isManager ? { onRemove: onRemoveLine, onCertify: onCertifyPayment } : { onCertify: onCertifyPayment }}>
     <LedgerNavCtx.Provider value={{ openRef: (ref) => {
       // A PO/WO opens as a peek overlay — visible even over the ledger drawer, no navigation/unmount race.
       // A bill (no peek) navigates, closing the drawer first so the bill page isn't left hidden underneath.
@@ -511,8 +526,7 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
               <button className="btn primary" onClick={() => setMenuOpen(o => !o)}>Record <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" /></svg></button>
               <div className="menu">
                 <button onClick={() => { setMenuOpen(false); setTxnSheet(true); }}>Payment to {L.stakeholder.name.split(' ')[0]}</button>
-                {newLedger && L.contracts.length > 0 && <button onClick={() => { setMenuOpen(false); setCertifyOpen(true); }}>Certify work</button>}
-                {!newLedger && L.kind === 'worker' && <button onClick={() => { setMenuOpen(false); navigate('/attendance'); }}>Work certified</button>}
+                {L.kind === 'worker' && <button onClick={() => { setMenuOpen(false); navigate('/attendance'); }}>Work recorded</button>}
                 {L.kind === 'worker' && <button onClick={() => { setMenuOpen(false); setPieceOpen(true); }}>Record piece / gutha work</button>}
                 {L.kind === 'vendor' && <button onClick={() => { setMenuOpen(false); setBillOpen(true); }}>Enter a bill</button>}
                 {L.kind === 'vendor' && L.unbilledCount > 0 && <button onClick={() => { setMenuOpen(false); setCbOpen(true); }}>Consolidated bill</button>}
@@ -542,7 +556,7 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
                 {L.toPay > 0
                   ? <><span className="big due">₹{inr(L.toPay)} <span style={{ fontSize: 26 }}>to pay</span></span>wages and certified work not yet paid</>
                   : L.advance > 0
-                    ? <><span className="big">₹{inr(L.advance)} <span style={{ fontSize: 26 }}>in advance</span></span>paid ahead of work done</>
+                    ? <><span className="big">₹{inr(L.advance)} <span style={{ fontSize: 26 }}>ahead</span></span>paid ahead of work recorded so far</>
                     : <><span className="big">₹0 <span style={{ fontSize: 26 }}>to pay</span></span>everything owed is settled</>}
               </p>
               <ul className="facts">
@@ -577,17 +591,6 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
           </section>
         )}
 
-        {/* contract work recorded but not yet certified — captured, off the ledger until certified */}
-        {uncertified && uncertified.total > 0 && (
-          <div className="uncert-band">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>
-            <div className="ub-txt">
-              <b>{inr(uncertified.total)} of contract work recorded, not yet certified</b>
-              <span>{uncertified.count} stage{uncertified.count !== 1 ? 's' : ''} read on the muster but awaiting certification — certify to add it to the ledger.</span>
-            </div>
-            <button className="ub-go" onClick={() => navigate('/attendance')}>Certify →</button>
-          </div>
-        )}
 
         {/* money to classify — new-engine orgs only */}
         {newLedger && toClassify.length > 0 && (
@@ -665,7 +668,6 @@ export function PartyLedgerView({ stakeholderId, compact = false, onClose }: { s
       {billOpen && <BillModal L={L} onClose={() => setBillOpen(false)} onSaved={(msg) => { setBillOpen(false); showSnackbar(msg); refetch(); }} onError={m => showSnackbar(m, { type: 'error' })} />}
       {pieceOpen && <PieceWorkEntry stakeholderId={L.stakeholder.id} partyName={L.stakeholder.name} onClose={() => setPieceOpen(false)} onDone={() => refetch()} />}
       {classifyEntry && <ClassifyModal L={L} entry={classifyEntry} onClose={() => setClassifyEntry(null)} onSaved={(msg) => { setClassifyEntry(null); showSnackbar(msg); refetch(); }} onError={m => showSnackbar(m, { type: 'error' })} />}
-      {certifyOpen && <CertifyModal L={L} onClose={() => setCertifyOpen(false)} onSaved={(msg) => { setCertifyOpen(false); showSnackbar(msg); refetch(); }} onError={m => showSnackbar(m, { type: 'error' })} />}
     </div>
     </LedgerNavCtx.Provider>
     </RowActionsCtx.Provider>
@@ -767,7 +769,7 @@ const ClipSvg = () => <span className="clip" title="Attachment"><svg viewBox="0 
 
 // Per-row correction affordance, provided by the ledger page (management-only). Kept in context so
 // the three views (date / contract / site) don't each have to thread a callback through.
-const RowActionsCtx = createContext<{ onRemove: (e: LedgerEntry) => void } | null>(null);
+const RowActionsCtx = createContext<{ onRemove?: (e: LedgerEntry) => void; onCertify?: (e: LedgerEntry, on: boolean) => void } | null>(null);
 // Opening a ledger row's reference (a Bill / PO / WO). Provided by the page (where navigate lives) so the
 // Reference column can be clicked straight through. The route is pre-resolved in partyLedgerApi (e.ref.to).
 const LedgerNavCtx = createContext<{ openRef: (ref: NonNullable<LedgerEntry['ref']>) => void } | null>(null);
@@ -778,7 +780,7 @@ function Row({ e, showContract = true, showSite = true, first = false }: { e: Le
     : e.unbilled ? 'state open' : e.covered ? 'state' : 'state ok';
   const acts = useContext(RowActionsCtx);
   const nav = useContext(LedgerNavCtx);
-  const removable = !!acts && isRemovableLine(e.id);
+  const removable = !!acts?.onRemove && isRemovableLine(e.id);
   const [open, setOpen] = useState(false);
   // Sub-line: a purchase reads "site" then the materials bought (a couple, the rest behind a "+N" peek,
   // like the PO list); every other row reads "mode, site, detail" and carries its status chip.
@@ -801,7 +803,7 @@ function Row({ e, showContract = true, showSite = true, first = false }: { e: Le
     <tr className={`row${e.kind === 'opening' ? ' opening' : ''}${removable ? ' removable' : ''}`}>
       <td className="date">{e.date ? fmtDate(e.date) : '—'}</td>
       <td className="part">
-        <div className="p">{e.particulars}{e.clip ? <ClipSvg /> : null}{removable && <button className="rm" title="Remove this line — a mistaken entry" onClick={() => acts!.onRemove(e)} aria-label="Remove this line">×</button>}</div>
+        <div className="p">{e.particulars}{e.clip ? <ClipSvg /> : null}{removable && <button className="rm" title="Remove this line — a mistaken entry" onClick={() => acts?.onRemove?.(e)} aria-label="Remove this line">×</button>}</div>
         {hasSub ? (
           <div className="s">
             {subLine}
@@ -818,7 +820,13 @@ function Row({ e, showContract = true, showSite = true, first = false }: { e: Le
         </>
       ) : refState ? <span className={`refstate${e.unbilled ? ' open' : ''}`} title={refState}>{refState.startsWith('Covered') ? 'Covered' : refState}</span> : <span className="dash">—</span>}</div></td>}
       <td className="r paid num">{e.paid ? inr(e.paid) : ''}</td>
-      <td className="r cert num">{e.cert ? inr(e.cert) : ''}</td>
+      <td className="r cert num">
+        {e.certifiedFromPayment
+          ? <span className="pcert" title="This payment is certified as accepted work — it counts toward the contract.">{inr(e.cert)}{acts?.onCertify ? <button className="pcert-undo" title="Undo — treat as an advance again" onClick={() => acts?.onCertify?.(e, false)}>undo</button> : null}</span>
+          : (e.canCertifyPayment && acts?.onCertify)
+            ? <button className="pcert-do" title="This payment is against a contract with no site readings. Certify it as accepted work so it stops showing as an advance." onClick={() => acts?.onCertify?.(e, true)}>✓ certify</button>
+            : (e.cert ? inr(e.cert) : '')}
+      </td>
       <td className={`r bal num ${first ? 'now' : ''}`}>{inr(e.running)}</td>
     </tr>
   );
@@ -1129,49 +1137,6 @@ function BillModal({ L, onClose, onSaved, onError }: { L: PartyLedger; onClose: 
           <label className="check"><input type="checkbox" checked={settle} onChange={e => setSettle(e.target.checked)} /><span><b>Settle earlier payments against this bill.</b> Points the money already paid without a bill at this one, oldest first.</span></label>
         </div>
         <footer><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy || amt <= 0} onClick={save}>{busy ? '…' : 'Record bill'}</button></footer>
-      </div>
-    </div>
-  );
-}
-
-// Certify a contract stage (§2.4 / §6.2): mints the certified credit and settles the advance pool
-// against it, oldest first. Shortfall → the remainder is to-pay; excess advances stay for next stage.
-function CertifyModal({ L, onClose, onSaved, onError }: { L: PartyLedger; onClose: () => void; onSaved: (m: string) => void; onError: (m: string) => void }) {
-  const [contractRef, setContractRef] = useState(L.contracts[0]?.woId || '');
-  const [amount, setAmount] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [note, setNote] = useState('');
-  const [busy, setBusy] = useState(false);
-  const amt = parseInr(amount);
-  const c = L.contracts.find(x => x.woId === contractRef);
-  const advanced = c?.paidLinked ?? 0;
-
-  const save = async () => {
-    if (busy || amt <= 0 || !contractRef) return; setBusy(true);
-    try {
-      const r = await certifyStage({ stakeholderId: L.stakeholder.id, contractRef, amount: amt, entryDate: date, projectId: c?.projectId ?? null, note: note.trim() || null });
-      let msg = `Certified ₹${inr(amt)}`;
-      if (r.settled > 0) msg += ` · ₹${inr(r.settled)} of advances settled`;
-      if (r.open > 0.5) msg += ` · ₹${inr(r.open)} now to pay`;
-      onSaved(msg);
-    } catch (e: any) { onError(e?.message || 'Could not certify'); setBusy(false); }
-  };
-
-  return (
-    <div className="scrim" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal" role="dialog">
-        <header><h3>Certify work for {L.stakeholder.name}</h3><p>Records measured work as certified. Advances already paid on the contract settle against it, oldest first.</p></header>
-        <div className="body">
-          <div className="field"><label>Contract</label><select className="in" value={contractRef} onChange={e => setContractRef(e.target.value)}>{L.contracts.map(x => <option key={x.woId} value={x.woId}>{x.title}</option>)}</select>
-            {c && <div className="help">Advanced so far ₹{inr(advanced)} · certified so far ₹{inr(c.value)}{advanced > c.value ? ` · ₹${inr(advanced - c.value)} paid beyond certified` : ''}</div>}
-          </div>
-          <div className="field"><label>Certified this time</label><div className="amount" style={{ maxWidth: 220 }}><input className="in num" inputMode="numeric" value={amount} onChange={e => setAmount(e.target.value)} autoFocus /></div>
-            {amt > 0 && advanced > 0 && <div className="help">{advanced >= amt ? `Fully covered by advances — nothing new to pay.` : `₹${inr(amt - advanced)} will remain to pay after advances.`}</div>}
-          </div>
-          <div className="field"><label>Date</label><input className="in" type="date" value={date} onChange={e => setDate(e.target.value)} style={{ maxWidth: 200 }} /></div>
-          <div className="field"><label>Note <span style={{ color: 'var(--walnut-3)', fontWeight: 400 }}>(optional)</span></label><textarea className="in" placeholder="e.g. slab concreting, 2nd floor — measured 2 Sep" value={note} onChange={e => setNote(e.target.value)} /></div>
-        </div>
-        <footer><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={busy || amt <= 0 || !contractRef} onClick={save}>{busy ? '…' : 'Certify'}</button></footer>
       </div>
     </div>
   );

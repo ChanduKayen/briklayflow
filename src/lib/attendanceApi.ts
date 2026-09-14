@@ -26,6 +26,9 @@ export interface StageRow {
   milestoneId: string; n: string; type: 'lump' | 'measured';
   amount?: number; unit?: string; rate?: number; total?: number;
   before: number; paid: number; cells: Cell[];
+  // ₹ approved-certified so far (lump = latest, measured = Σ), and the slice of it certified BEFORE this
+  // week — so "this week's difference" = certified − certifiedBefore (the only payable this week).
+  certified: number; certifiedBefore: number;
 }
 export interface CrewRow {
   crewId: string; n: string; d: string; trade: string | null; stakeholderId: string | null;
@@ -111,6 +114,35 @@ export async function loadWeek(monday: Date): Promise<WeekData> {
     paidByMs[a.milestone_id] = (paidByMs[a.milestone_id] || 0) + Number(a.allocated_amount || 0);
   });
 
+  // Approved certifications per milestone — the cumulative ₹ (certByMs) and the ₹ as of BEFORE the LATEST
+  // certification event (certBeforeByMs). "This week's difference" = certByMs − certBeforeByMs = the last
+  // increment you added (e.g. 79% → 94% shows +15%, never the whole 94%), regardless of which week the
+  // earlier progress was logged in. Lump = cumulative-per-cert (latest wins); measured/piece = Σ.
+  const subjectMs = milestones.map((m: any) => m.milestone_id);
+  const certByMs: Record<string, number> = {}, certBeforeByMs: Record<string, number> = {};
+  if (subjectMs.length) {
+    const wcR = await supabase.from('work_certifications')
+      .select('milestone_id, reading_kind, computed_amount, reading_date, created_at, status')
+      .in('milestone_id', subjectMs).eq('status', 'approved');
+    const byMs: Record<string, { amt: number; ord: string; lump: boolean }[]> = {};
+    for (const w of (wcR.data ?? []) as any[]) {
+      if (!w.milestone_id) continue;
+      (byMs[w.milestone_id] ||= []).push({ amt: Number(w.computed_amount) || 0, ord: `${w.reading_date || ''}#${w.created_at || ''}`, lump: w.reading_kind === 'lump' });
+    }
+    for (const [mid, list] of Object.entries(byMs)) {
+      list.sort((a, b) => a.ord.localeCompare(b.ord));       // oldest → newest
+      const latest = list[list.length - 1];
+      if (latest.lump) {
+        certByMs[mid] = latest.amt;                          // cumulative ₹ the latest cert asserts
+        certBeforeByMs[mid] = list.length > 1 ? list[list.length - 2].amt : 0;  // the cert just before it
+      } else {
+        const total = list.reduce((s, x) => s + x.amt, 0);
+        certByMs[mid] = total;
+        certBeforeByMs[mid] = Math.max(0, total - latest.amt);  // all but the latest increment
+      }
+    }
+  }
+
   // All attendance rows: this week (for the grid) + prior stage readings (for "before").
   const subjectMsIds = milestones.map((m: any) => m.milestone_id);
   const attThisWeek = (await supabase.from('labour_attendance').select('*').gte('work_date', weekStart).lte('work_date', weekEnd)).data ?? [];
@@ -168,6 +200,8 @@ export async function loadWeek(monday: Date): Promise<WeekData> {
           total: isLump ? undefined : Number(m.quantity) || 0,
           before: isLump ? (lumpLatest[m.milestone_id]?.v ?? 0) : (measuredBefore[m.milestone_id] ?? 0),
           paid: paidByMs[m.milestone_id] || 0,
+          certified: certByMs[m.milestone_id] || 0,
+          certifiedBefore: certBeforeByMs[m.milestone_id] || 0,
           cells: cellsFor(byStage[m.milestone_id] ?? [], dates),
         };
       });

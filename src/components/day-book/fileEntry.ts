@@ -8,6 +8,7 @@
 import { supabase } from '../../lib/supabase';
 import type { RoughEntry } from '../../types';
 import { createBill, saveBillAllocations } from '../../lib/billsApi';
+import { walletForSender } from '../../lib/walletApi';
 
 function genTxnId() {
   return `TXN-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
@@ -100,6 +101,12 @@ export interface ResolvedFields {
   description: string;
   generalExpense?: boolean;       // a general expense needs no linked party
   generalExpenseHead?: string;    // the GEN-xx head it's filed under (default GEN-99)
+  // Site-cash wallet (§2.1-A): the funding source. Undefined → auto-default to the SENDER's wallet if
+  // they hold one (a supervisor's WhatsApp spend is his site cash almost always). 'bank' = the review-card
+  // override. 'wallet' = an explicit wallet spend.
+  funding?: 'wallet' | 'bank';
+  // Wallet REFILL: when set, this payment IS a float (bank → this wallet), not a spend to the payee.
+  topUpWalletId?: string | null;
 }
 
 /**
@@ -160,21 +167,32 @@ export async function fileRoughEntry(entry: RoughEntry, orgId: string, resolved:
   // "auto driver"). Preserve it so the detail page can show who it was for.
   const genName = isGeneral ? String(ai.payee_name || ai.payee_raw || '').trim() : '';
 
+  // TOP-UP: paying a wallet-holder can BE a float (bank → their wallet) — no payee, no cost, no alloc.
+  const isTopUp = !!resolved.topUpWalletId;
+  // Wallet default (spends only): a WhatsApp spend by a wallet-holding sender draws his site cash — unless
+  // the review card overrode it to 'bank'. Auto-default to the wallet ONLY if it holds money.
+  const w = (isTopUp || resolved.funding === 'bank') ? null : await walletForSender(orgId, entry.sender_number).catch(() => null);
+  const wallet = w && (resolved.funding === 'wallet' || w.balance > 0) ? w : null;
+  const walletFields = isTopUp
+    ? { wallet_id: resolved.topUpWalletId, wallet_dir: 'in', is_transfer: true }
+    : wallet ? { wallet_id: wallet.walletId, wallet_dir: 'out', is_transfer: false } : {};
+
   const payload = {
     txn_id: newTxnId,
-    stakeholder_id: isGeneral ? null : resolved.payeeId,
+    stakeholder_id: (isGeneral || isTopUp) ? null : resolved.payeeId,
     date,
     total_amount: resolved.amount,
     payment_mode: mode,
-    category: isGeneral ? (resolved.generalExpenseHead || 'GEN-99') : (ai.category_code || null),
+    category: isTopUp ? 'Site advance (float)' : isGeneral ? (resolved.generalExpenseHead || 'GEN-99') : (ai.category_code || null),
     remarks: baseNotes(entry, resolved.description),
     bill_doc_url: null,
     proof_document_url: entry.raw_image_url || null,
     ai_flag_status: 'Clean',
-    ai_flag_data: genName ? { general_payee: genName } : {},
+    ai_flag_data: isTopUp ? { wallet_transfer: true } : genName ? { general_payee: genName } : {},
     org_id: orgId,
+    ...walletFields,
   };
-  const allocations = [{
+  const allocations = isTopUp ? [] : [{
     project_id: resolved.projectId, order_type: null, order_ref: null,
     milestone_id: null, allocated_amount: resolved.amount,
   }];
@@ -232,6 +250,10 @@ export async function fileRoughEntrySplit(
   const isGeneral = !!base.generalExpense;
   const genName = isGeneral ? String(ai.payee_name || ai.payee_raw || '').trim() : '';
 
+  const w = base.funding === 'bank' ? null : await walletForSender(orgId, entry.sender_number).catch(() => null);
+  const wallet = w && (base.funding === 'wallet' || w.balance > 0) ? w : null;   // auto-default only if it holds money
+  const walletFields = wallet ? { wallet_id: wallet.walletId, wallet_dir: 'out', is_transfer: false } : {};
+
   const p_base = {
     stakeholder_id: isGeneral ? null : base.payeeId,
     date,
@@ -243,6 +265,7 @@ export async function fileRoughEntrySplit(
     ai_flag_status: 'Clean',
     ai_flag_data: genName ? { general_payee: genName } : {},
     org_id: orgId,
+    ...walletFields,
   };
   const baseTs = Date.now();
   const rnd = Math.random().toString(36).slice(2, 5).toUpperCase();

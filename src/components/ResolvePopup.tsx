@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import type { RoughEntry } from '../types';
 import { useSnackbar } from './Snackbar';
 import { useOrgId } from '../lib/auth/AuthProvider';
+import { walletForSender, loadWallets, type WalletBalance } from '../lib/walletApi';
 import { ImageLightbox } from './ImageLightbox';
 import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 import { searchPayees, rankPayeeName, PAYEE_SEARCH_FLOOR } from '../lib/payeeSearch';
@@ -532,10 +533,16 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
     ? String((ai as any).category_code).toUpperCase() : '';
   const initGenName = initGenHead ? (getCostCode(initGenHead)?.item.name || '') : '';
 
+  // A confirm-band WhatsApp match: the webhook stashes the matched stakeholder in `suggested_payee` (NOT
+  // payee_id) when the score is 0.6–0.9, yet the confirmation message shows that name. Surface it here as
+  // a LOW-confidence match to confirm — otherwise the review reads "unmatched" though a name was matched.
+  const sugPayee = (!ai.payee_id && (ai as any).suggested_payee?.id)
+    ? (ai as any).suggested_payee as { id: string; name: string } : null;
+
   // ── Field state ────────────────────────────────────────────────────────────
-  const [payeeId, setPayeeId] = useState(ai.payee_id || '');
-  const [payeeName, setPayeeName] = useState(initGenName || ai.payee_name || '');
-  const [payeeSearch, setPayeeSearch] = useState(initGenName || ai.payee_name || ai.payee_raw || '');
+  const [payeeId, setPayeeId] = useState(ai.payee_id || sugPayee?.id || '');
+  const [payeeName, setPayeeName] = useState(initGenName || ai.payee_name || sugPayee?.name || '');
+  const [payeeSearch, setPayeeSearch] = useState(initGenName || ai.payee_name || sugPayee?.name || ai.payee_raw || '');
   const [showPayeeDrop, setShowPayeeDrop] = useState(false);
   // When genHead is set this entry IS a general expense (payeeId stays empty); genName
   // is the head's display name shown in the "who" slot.
@@ -548,7 +555,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
   // expense counts as confirmed the moment its head is chosen.
   const [payeeState, setPayeeState] = useState<PayeeState>(() => {
     if (initGenHead) return 'confirmed';
-    if (!ai.payee_id) return 'C';
+    if (!ai.payee_id) return sugPayee ? 'B' : 'C';   // a near-match → confirm it, not "unmatched"
     if (ai.payee_matched === true && ai.payee_confidence === 'LOW') return 'B';
     return 'A';
   });
@@ -561,6 +568,20 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
   //    split amounts must sum to the total. A single-payee (general) split varies project + amount;
   //    otherwise each row carries its own payee + description (a distinct transaction).
   const [splitMode, setSplitMode] = useState(false);
+  // Site-cash wallet (§2.1-A): a WhatsApp spend by a wallet-holding sender defaults to HIS wallet, with a
+  // one-tap override here to bank. `funding` null = the default (wallet if the sender holds one).
+  const [funding, setFunding] = useState<'wallet' | 'bank' | null>(null);
+  const { data: senderWallet } = useQuery({
+    queryKey: ['sender_wallet', orgId, entry.sender_number],
+    queryFn: () => walletForSender(orgId ?? '', entry.sender_number),
+    enabled: !!orgId && !!entry.sender_number,
+  });
+  // Effective source. Auto-default to the wallet ONLY if it holds money (a ₹0 / settled wallet defaults to
+  // bank so a spend never silently overdraws); an explicit choice always wins.
+  const fromWallet = funding === 'wallet' ? true : funding === 'bank' ? false : !!(senderWallet && senderWallet.balance > 0);
+  // Wallet REFILL: if the PAYEE holds a wallet, this payment can be a float (bank → their wallet).
+  const { data: rpWallets = [] } = useQuery({ queryKey: ['wallets', orgId], queryFn: () => loadWallets(orgId ?? ''), enabled: !!orgId });
+  const [topUp, setTopUp] = useState(false);
   const [splits, setSplits] = useState<SplitRow[]>([{ id: 's1', projectId: '', amount: '' }]);
   const enableSplit = (on: boolean) => {
     setSplitMode(on);
@@ -636,6 +657,18 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
     },
   });
 
+  // The payee's wallet, if any (name match) — powers the "top up their wallet" option.
+  const payeeWallet = useMemo(() => {
+    const nm = stakeholders.find((s: any) => s.stakeholder_id === payeeId)?.name || payeeSearch;
+    if (!nm) return null;
+    const norm = (s: string) => s.trim().toLowerCase();
+    const p = norm(nm);
+    return rpWallets.find(w => norm(w.holderName) === p || norm(w.holderName).split(' ')[0] === p.split(' ')[0]) || null;
+  }, [payeeId, payeeSearch, stakeholders, rpWallets]);
+  // If the payee holds a wallet, DEFAULT to a refill (paying them = topping up their site cash); the user
+  // can uncheck it. Re-defaults when the payee changes or the wallet match resolves.
+  useEffect(() => { setTopUp(!!payeeWallet); }, [payeeId, payeeWallet]);
+
   // ── Auto-split: read the original message/proof and seed the split rows (payee · amount · project · note) ──
   const autoSplit = useCallback(async () => {
     if (autoSplitting) return;
@@ -703,6 +736,17 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
       setPayeeState('C');
     }
   }, [stakeholders, ai.payee_id, ai.payee_name, ai.payee_raw]);
+
+  // Validate a seeded suggestion the same way — a suggested_payee id that names no live contact is a
+  // heard name in a key's clothes; clear it to a question rather than let it FK-crash on save.
+  const sugChecked = useRef(false);
+  useEffect(() => {
+    if (sugChecked.current || !stakeholders.length || ai.payee_id || !sugPayee) return;
+    sugChecked.current = true;
+    if (!stakeholders.some((s) => s.stakeholder_id === sugPayee.id)) {
+      setPayeeId(''); setPayeeState('C'); setPayeeSearch(ai.payee_name || ai.payee_raw || sugPayee.name || '');
+    }
+  }, [stakeholders, sugPayee, ai.payee_id, ai.payee_name, ai.payee_raw]);
 
   const projectChecked = useRef(false);
   // The check can only run once the real list has ARRIVED, so it is an effect by nature — there is no
@@ -859,10 +903,11 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
       const { data: updatedEntry } = await supabase.from('rough_entries')
         .update({ ai_extracted: nextAi }).eq('id', entry.id).select().single();
 
-      if (splitMode) {
+      const topUpId = topUp && payeeWallet ? payeeWallet.walletId : null;
+      if (splitMode && !topUpId) {
         await fileRoughEntrySplit(
           updatedEntry as RoughEntry, orgId ?? '',
-          { payeeId, amount: Number(amount), description: description.trim(), generalExpense: isGeneral, generalExpenseHead: genHead || undefined },
+          { payeeId, amount: Number(amount), description: description.trim(), generalExpense: isGeneral, generalExpenseHead: genHead || undefined, funding: senderWallet ? (fromWallet ? 'wallet' : 'bank') : undefined },
           splits.map((s) => ({
             projectId: s.projectId,
             amount: Number(s.amount),
@@ -874,6 +919,8 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
         await fileRoughEntry(updatedEntry as RoughEntry, orgId ?? '', {
           payeeId, projectId, amount: Number(amount), description: description.trim(),
           generalExpense: isGeneral, generalExpenseHead: genHead || undefined,
+          funding: senderWallet ? (fromWallet ? 'wallet' : 'bank') : undefined,
+          topUpWalletId: topUpId,
         });
       }
 
@@ -881,6 +928,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
       // back its own moment (the fly-off), so an entry approved from here leaves the list exactly as
       // one approved on the card does. Two ways in, one way out.
       setApproval('filed');
+      if (topUpId || senderWallet) { qc.invalidateQueries({ queryKey: ['wallets'] }); qc.invalidateQueries({ queryKey: ['wallet_ledger'] }); }
       window.setTimeout(() => {
         qc.invalidateQueries({ queryKey: ['inbox_badge'] });
         onUpdated({ ...(updatedEntry as RoughEntry), status: 'POSTED' } as RoughEntry);
@@ -954,6 +1002,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
     payeeState, setPayeeState,
     show, confirmMode, only, approval, handleApprove,
     armAutoFile: () => setAutoFile(true),
+    walletFunding: { senderWallet, fromWallet, setFunding, payeeWallet, topUp, setTopUp },
   };
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -1057,6 +1106,7 @@ interface ContentProps {
   approval: 'ask' | 'filing' | 'filed';
   handleApprove: () => void;
   armAutoFile: () => void;
+  walletFunding: { senderWallet: WalletBalance | null | undefined; fromWallet: boolean; setFunding: (v: 'wallet' | 'bank' | null) => void; payeeWallet: WalletBalance | null; topUp: boolean; setTopUp: (v: boolean) => void };
 }
 
 function PopupContents({
@@ -1079,6 +1129,7 @@ function PopupContents({
   payeeRef, advanceAfter, nextGap, goToGap,
   payeeState, setPayeeState,
   show, confirmMode, only, approval, handleApprove, armAutoFile,
+  walletFunding,
 }: ContentProps) {
   const payeeDropRef    = useRef<HTMLDivElement>(null);
   const [showCreateStkForm, setShowCreateStkForm] = useState(false);
@@ -1359,6 +1410,42 @@ function PopupContents({
         </div>
 
         )}
+
+        {/* Wallet controls — a refill checkmark (the payee holds a wallet) and a funding toggle (the sender
+            holds a wallet). Grouped in one calm card; stacks cleanly on mobile. */}
+        {(walletFunding.payeeWallet || walletFunding.senderWallet) && (() => {
+          const senderShort = (entry.sender_name || '').split(' ')[0] || 'They';
+          const paidTo = ((payeeName || payeeSearch || '').split(' ')[0]) || 'them';
+          const refillWho = walletFunding.payeeWallet?.holderName.split(' ')[0] || paidTo;
+          return (
+            <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${VOICE.innLine}` }}>
+              {/* Refill — this payment tops up the payee's wallet (a float), not a spend to them. */}
+              {walletFunding.payeeWallet && (
+                <button type="button" onClick={() => walletFunding.setTopUp(!walletFunding.topUp)}
+                  className="w-full flex items-center gap-3 px-3.5 py-3 text-left transition-colors"
+                  style={{ background: walletFunding.topUp ? VOICE.outWash : VOICE.surface }}>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[13.5px]" style={{ color: VOICE.user }}>This payment is <b>refilling {refillWho}'s wallet</b></span>
+                    <span className="block text-[11.5px] mt-0.5" style={{ color: VOICE.system }}>{walletFunding.topUp ? 'Bank → their wallet · a site advance, not a spend' : 'Uncheck if it’s a normal payment to them'}</span>
+                  </span>
+                  <span className="shrink-0 w-[22px] h-[22px] rounded-md grid place-items-center transition-colors" style={{ border: `1.5px solid ${walletFunding.topUp ? VOICE.out : VOICE.innLine}`, background: walletFunding.topUp ? VOICE.out : 'transparent', color: '#fff', fontSize: 13 }}>{walletFunding.topUp ? '✓' : ''}</span>
+                </button>
+              )}
+              {/* Funding — who paid, and from where. Only when it's NOT a refill. */}
+              {walletFunding.senderWallet && !walletFunding.topUp && (
+                <div className="flex items-center justify-between gap-3 px-3.5 py-3 flex-wrap" style={{ borderTop: walletFunding.payeeWallet ? `1px solid ${VOICE.innLine}` : undefined, background: VOICE.surface }}>
+                  <span className="text-[13px] min-w-0" style={{ color: VOICE.user }}>
+                    {senderShort} is paying {paidTo} from <b>{walletFunding.fromWallet ? 'their wallet' : 'company bank'}</b>
+                  </span>
+                  <div className="flex rounded-lg overflow-hidden border shrink-0" style={{ borderColor: VOICE.innLine }}>
+                    <button type="button" onClick={() => walletFunding.setFunding('wallet')} className="px-2.5 py-1 text-[11px] font-semibold" style={walletFunding.fromWallet ? { background: VOICE.walnut, color: VOICE.ivory } : { background: VOICE.page, color: VOICE.system }}>Their wallet</button>
+                    <button type="button" onClick={() => walletFunding.setFunding('bank')} className="px-2.5 py-1 text-[11px] font-semibold" style={{ borderLeft: `1px solid ${VOICE.innLine}`, ...(!walletFunding.fromWallet ? { background: VOICE.walnut, color: VOICE.ivory } : { background: VOICE.page, color: VOICE.system }) }}>Bank</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* 2. Payee */}
         {show('payee') && (

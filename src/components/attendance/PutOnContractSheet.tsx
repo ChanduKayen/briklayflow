@@ -47,15 +47,19 @@ export function PutOnContractSheet({ ctx, onClose, onDone, onError }: {
     if (!woId) { setStages(null); setStageIds([]); return; }
     let off = false;
     loadWorkOrderStages(woId)
-      .then((s) => { if (!off) { setStages(s); setStageIds(s.map((x) => x.milestone_id)); } })
+      // Don't presume they work EVERY phase — start with none checked and let the user pick the phases
+      // that apply. A single-phase contract needs no picking (it's implied).
+      .then((s) => { if (!off) { setStages(s); setStageIds(s.length === 1 ? [s[0].milestone_id] : []); } })
       .catch(() => { if (!off) { setStages([]); setStageIds([]); } });
     return () => { off = true; };
   }, [woId]);
 
   const startNew = () => navigate('/work-orders/new', { state: { projectId: ctx.projectId, stakeholderId: ctx.stakeholderId } });
   const toggleStage = (id: string) => setStageIds((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  // At least one phase must be chosen (a single-phase contract is auto-selected above).
+  const phasesOk = !!stages && (stages.length <= 1 || stageIds.length > 0);
   // In 'wages' mode the past-wages keep/fold question is moot (day-wages keep counting), so it isn't required.
-  const canConfirm = !!woId && (measure === 'wages' || ctx.accrued.amount <= 0 || mode != null) && !busy && !done;
+  const canConfirm = !!woId && phasesOk && (measure === 'wages' || ctx.accrued.amount <= 0 || mode != null) && !busy && !done;
 
   async function confirm() {
     if (!woId || !canConfirm) return;

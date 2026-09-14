@@ -29,6 +29,12 @@ export interface LedgerEntry {
   state?: string;                              // a short status note for the sub-line
   unclassified?: boolean;                      // new-engine payment with an unallocated remainder (set only by readParty)
   remainder?: number;                          // the unallocated amount, for the classify flow
+  // Certify-from-payment (contract-linked worker payments): a payment on an UNTRACKED contract can BE the
+  // accepted work. certifiedFromPayment = it already has a payment-certification (its cert is folded onto
+  // this same row); canCertifyPayment = eligible to toggle on. Muster-tracked contracts certify from
+  // readings, so they're never certifiable here.
+  certifiedFromPayment?: boolean;
+  canCertifyPayment?: boolean;
 }
 export interface SiteBalance { projectId: string; projectName: string; paid: number; cert: number; unbilled: number; ahead: number; hasContract: boolean }
 export interface ConsolidatedBill { id: string; from: string; to: string; amount: number; docType: 'vendor' | 'kacha' | 'none'; note: string; confirmed: boolean; coversCount: number; coversTotal: number }
@@ -125,7 +131,7 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
     supabase.from('party_adjustments').select('*').eq('stakeholder_id', stakeholderId),
     supabase.from('consolidated_bills').select('*').eq('stakeholder_id', stakeholderId).order('period_to'),
     // Approved work certifications = the governed certified obligation (replaces raw stage readings).
-    supabase.from('work_certifications').select('id, wo_id, milestone_id, reading_kind, computed_amount, reading_date, project_id, status').eq('stakeholder_id', stakeholderId).eq('status', 'approved'),
+    supabase.from('work_certifications').select('id, wo_id, milestone_id, reading_kind, computed_amount, reading_date, project_id, status, source, txn_id').eq('stakeholder_id', stakeholderId).eq('status', 'approved'),
     // The single-source balance (cutover-applied) — authoritative for the hero's to_pay / advance.
     supabase.from('v_party_balance').select('billed, paid, without_bills, to_pay, advance').eq('stakeholder_id', stakeholderId).maybeSingle(),
     // Bill LINES from the SAME view the balance sums — so headline and rows are two projections of one
@@ -165,6 +171,18 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
     const { data: bref } = await supabase.from('bills').select('id, bill_no').in('id', payBillIds);
     (bref ?? []).forEach((b: any) => { billRefById[b.id] = b.bill_no ? `Bill ${b.bill_no}` : `Bill ${String(b.id).slice(0, 8)}`; });
   }
+  // Certify-from-payment: a work_certification linked to a payment (source='payment', txn_id set) means
+  // "this payment IS the accepted work". Fold its amount onto that payment row (paid + cert on one line)
+  // rather than as a separate credit. A contract is muster-TRACKED if it has any non-payment certification
+  // (wizard/legacy/reading) — those certify from readings, so their payments are never certifiable here.
+  const paymentCertByTxn: Record<string, { amt: number; id: string; wo: string | null }> = {};
+  const trackedWo = new Set<string>();
+  for (const wc of ((wcR.data ?? []) as any[])) {
+    if (wc.txn_id && wc.source === 'payment') paymentCertByTxn[wc.txn_id] = { amt: num(wc.computed_amount), id: wc.id, wo: wc.wo_id ?? null };
+    else if (wc.wo_id) trackedWo.add(wc.wo_id);
+  }
+  const contractCert: Record<string, number> = {}; // wo_id → total certified (declared here so folded payment-certs count)
+
   for (const t of activeTxns) {
     const allocs = (t.txn_allocations ?? []) as any[];
     const linked = allocs.find(a => a.order_type === 'WO' || a.order_type === 'PO');
@@ -175,6 +193,8 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
     // contract reference (we no longer infer one from "one contract on this site").
     const contractId = linked?.order_ref ?? null;
     const billId = allocs.find(a => a.bill_id)?.bill_id ?? null;   // a first-class bill this payment settles
+    const pcert = paymentCertByTxn[t.txn_id];                       // this payment's own certification, if any
+    if (pcert && pcert.wo) contractCert[pcert.wo] = (contractCert[pcert.wo] || 0) + pcert.amt;
     entries.push({
       id: `t-${t.txn_id}`, date: t.date, kind: 'payment',
       // Particulars names the ACTIVITY (the bill/PO/WO it's against rides the Reference column):
@@ -188,17 +208,20 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
       projectId: pid, projectName: pid ? (projName[pid] || pid) : null, byProject,
       contractId,   // WO for workers, PO for vendors
       billId,   // a first-class bill settled by this payment
-      paid: num(t.total_amount), cert: 0,
+      paid: num(t.total_amount), cert: pcert ? pcert.amt : 0,
+      certifiedFromPayment: !!pcert,
+      // Eligible to certify: a worker payment on a contract that ISN'T muster-tracked and isn't already done.
+      canCertifyPayment: !isVendor && !!contractId && !pcert && !trackedWo.has(contractId),
     });
   }
 
   // ── Certified: APPROVED work certifications (the governed obligation source; a pending one is not
-  //    owed, exactly like a pending PO). measured/piece each count; lump = latest per milestone. ──
-  const contractCert: Record<string, number> = {}; // wo_id → total certified
+  //    owed, exactly like a pending PO). measured/piece each count; lump = latest per milestone.
+  //    Payment-certs (source='payment') are excluded here — already folded onto their payment row above. ──
   {
     // A cancelled contract owes nothing — drop its certifications (the WO its cert points to is Cancelled).
     const cancelledWo = new Set((woR.data ?? []).filter((w: any) => w.status === 'Cancelled').map((w: any) => w.wo_id));
-    const certs = ((wcR.data ?? []) as any[]).filter((wc: any) => !cancelledWo.has(wc.wo_id));
+    const certs = ((wcR.data ?? []) as any[]).filter((wc: any) => !cancelledWo.has(wc.wo_id) && !(wc.txn_id && wc.source === 'payment'));
     const latestLump: Record<string, any> = {};
     const certLines: any[] = [];
     for (const wc of certs) {

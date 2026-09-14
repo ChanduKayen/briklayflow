@@ -19,9 +19,13 @@ import {
 } from './pdfHelpers';
 
 const money = (n: number) => (Math.abs(n) < 0.5 ? '' : fmtRupee(Math.round(n)));
-/** A balance with its Dr/Cr sense: +payable → Cr, −advance → Dr. */
+/** A balance with its Dr/Cr sense: +payable → Cr, −advance → Dr. Used ONLY in the ledger table's
+ *  Balance column, where the header + column context make Dr/Cr unambiguous. */
 const balStr = (payable: number) =>
   Math.abs(payable) < 0.5 ? 'Rs. 0' : `${fmtRupee(Math.abs(Math.round(payable)))} ${payable > 0 ? 'Cr' : 'Dr'}`;
+/** The same balance SPELLED OUT — for summary cards / callouts where a bare "Cr" reads as crore. */
+const balLong = (payable: number) =>
+  Math.abs(payable) < 0.5 ? 'Rs. 0' : `${fmtRupee(Math.abs(Math.round(payable)))} ${payable > 0 ? 'payable' : 'advance'}`;
 
 /** Oldest-first, with the opening/start seed pinned to the very top. */
 function ordered(entries: LedgerEntry[]): LedgerEntry[] {
@@ -57,13 +61,17 @@ export function buildPartyStatementDoc(L: PartyLedger): jsPDF {
   y += 8;
 
   // ── Summary band — four bordered KPI cells ──
+  const isWorker = L.kind === 'worker';
   const openingSigned = L.opening ? (L.opening.direction === 'work_owed' ? L.opening.total : -L.opening.total) : 0; // + = payable
   const closingPayable = L.totalCert - L.totalPaid;
-  const closeLabel = closingPayable > 0.5 ? 'AMOUNT PAYABLE' : closingPayable < -0.5 ? 'ADVANCE WITH PARTY' : 'BALANCE';
+  // A worker's credit side is work RECORDED (measured + wages), not "billed"; and a negative balance for
+  // a worker is "paid ahead of recorded work", not a plain "advance".
+  const closeLabel = closingPayable > 0.5 ? (isWorker ? 'BALANCE PAYABLE' : 'AMOUNT PAYABLE')
+    : closingPayable < -0.5 ? (isWorker ? 'PAID AHEAD OF WORK' : 'ADVANCE WITH PARTY') : 'BALANCE';
   const boxGap = 3.5, boxW = (CONTENT - boxGap * 3) / 4, boxH = 18;
   const cells: { label: string; val: string; accent?: boolean }[] = [
-    { label: 'OPENING BALANCE', val: balStr(openingSigned) },
-    { label: 'TOTAL BILLED', val: fmtRupee(Math.round(L.totalCert)) },
+    { label: 'OPENING BALANCE', val: balLong(openingSigned) },
+    { label: isWorker ? 'WORK RECORDED' : 'TOTAL BILLED', val: fmtRupee(Math.round(L.totalCert)) },
     { label: 'TOTAL PAID', val: fmtRupee(Math.round(L.totalPaid)) },
     { label: closeLabel, val: fmtRupee(Math.abs(Math.round(closingPayable))), accent: closingPayable > 0.5 },
   ];
@@ -77,6 +85,24 @@ export function buildPartyStatementDoc(L: PartyLedger): jsPDF {
     doc.text(cel.val, x + 4, y + 13.5);
   });
   y += boxH + 8;
+
+  // ── Contract context — why a worker shows "paid ahead". Frame the gap against the CONTRACT value so
+  //    the reader sees progress-on-a-contract, not a naked overpayment. Only when actually paid ahead. ──
+  const paidAhead = -closingPayable; // positive = paid beyond recorded work
+  const contractTotal = isWorker ? L.contracts.reduce((s, c) => s + (c.value || 0), 0) : 0;
+  if (isWorker && paidAhead > 0.5 && contractTotal > 0.5) {
+    const pct = Math.min(100, Math.round((L.totalPaid / contractTotal) * 100));
+    const note = `Against ${L.contracts.length > 1 ? `${L.contracts.length} contracts` : 'a contract'} worth ${fmtRupee(Math.round(contractTotal))}, `
+      + `${fmtRupee(Math.round(L.totalCert))} of work is recorded and ${fmtRupee(Math.round(L.totalPaid))} paid (${pct}% of contract). `
+      + `The ${fmtRupee(Math.round(paidAhead))} shown as "paid ahead" is work not yet recorded on site — recording it reconciles the balance.`;
+    const lines = doc.splitTextToSize(note, CONTENT - 8);
+    const bandH = lines.length * 3.8 + 5;
+    setFill(doc, [250, 246, 240]); setDraw(doc, C.border); doc.setLineWidth(0.3);
+    doc.roundedRect(MARGIN, y, CONTENT, bandH, 1.6, 1.6, 'FD');
+    doc.setFontSize(7.5); doc.setFont('helvetica', 'normal'); setColor(doc, C.mid);
+    doc.text(lines, MARGIN + 4, y + 5);
+    y += bandH + 6;
+  }
 
   // ── The ledger table — Tally shape: To/By CONTRA narration (never our internal remarks, since this
   //    is shared with the party), a voucher type + number, Debit / Credit, and a running Dr/Cr Balance ──
@@ -94,7 +120,7 @@ export function buildPartyStatementDoc(L: PartyLedger): jsPDF {
     if ((e.paid || 0) > 0) { const m = (e.mode || '').trim(); return !m ? 'To Bank / Cash' : /cash/i.test(m) ? 'To Cash' : `To Bank (${m})`; }
     if (e.kind === 'consolidated') return 'By Purchases (Consolidated)';
     if (e.kind === 'wage') return 'By Wages (Attendance)';
-    if (e.kind === 'certified') return 'By Work Certified';
+    if (e.kind === 'certified') return 'By Work Recorded';
     if (e.kind === 'adjustment') return 'By Adjustment';
     return 'By Purchases';
   };
@@ -144,10 +170,12 @@ export function buildPartyStatementDoc(L: PartyLedger): jsPDF {
   if (y > PAGE_H - 42) { doc.addPage(); y = 24; }
   const closeAmt = Math.abs(Math.round(closingPayable));
   doc.setFontSize(9); doc.setFont('helvetica', 'bold'); setColor(doc, C.dark);
-  const lead = closingPayable > 0.5 ? 'Amount payable by us' : closingPayable < -0.5 ? 'Advance held with the party' : 'Account settled';
+  const lead = closingPayable > 0.5 ? 'Amount payable by us'
+    : closingPayable < -0.5 ? (isWorker ? 'Paid ahead of recorded work' : 'Advance held with the party')
+    : 'Account settled';
   doc.text(lead, MARGIN, y);
   doc.setFont('courier', 'bold'); setColor(doc, closingPayable > 0.5 ? C.accent : C.dark);
-  doc.text(balStr(closingPayable), RIGHT, y, { align: 'right' });
+  doc.text(balLong(closingPayable), RIGHT, y, { align: 'right' });
   y += 5;
   if (closeAmt >= 1) {
     doc.setFontSize(8); doc.setFont('helvetica', 'italic'); setColor(doc, C.mid);

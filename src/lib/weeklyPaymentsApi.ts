@@ -10,7 +10,6 @@ import { createCredit, allocateToCredit, allocateToPool, settleFIFO, voidPayment
 export { mondayOf, weekLabel };
 
 const sumCells = (cells: Cell[]) => cells.reduce((s, c) => s + ((c && c !== 'off') ? c.v : 0), 0);
-const latestPct = (st: { cells: Cell[]; before: number }) => st.cells.reduce((p, c) => (c && c !== 'off') ? c.v : p, st.before);
 
 export interface AttDetail {
   period: string;
@@ -62,29 +61,23 @@ export async function loadWeeklyPayments(monday: Date): Promise<WeeklyPayments> 
       // stage-cert path below.
       if (crew.basis === 'contract' && crew.accrualBasis !== 'day') {
         // This-week earned vs prior earned, per stage; carried b/f = prior earned − paid.
+        // CERTIFIED is the payable. This week = the latest increment (certified − certifiedBefore); the
+        // carried b/f = everything certified before it, minus paid. Mirrors the attendance sheet exactly.
         let thisWeekEarned = 0, priorEarned = 0, paid = 0;
         const readings: [string, string, number][] = [];
         crew.stages.forEach(st => {
-          if (st.type === 'lump') {
-            const pct = latestPct(st), amt = st.amount || 0;
-            const earned = amt * pct / 100, before = amt * st.before / 100;
-            thisWeekEarned += earned - before; priorEarned += before; paid += st.paid;
-            readings.push([st.n, `${pct}% of ${inrShort(amt)}`, earned]);
-          } else {
-            const done = st.before + sumCells(st.cells), rate = st.rate || 0;
-            const earned = done * rate, before = st.before * rate;
-            thisWeekEarned += earned - before; priorEarned += before; paid += st.paid;
-            readings.push([st.n, `${done} ${st.unit || ''} · ${inrShort(earned)}`, earned]);
-          }
+          const budget = st.type === 'lump' ? (st.amount || 0) : (st.total || 0) * (st.rate || 0);
+          const earned = st.certified || 0;
+          const before = Math.min(earned, st.certifiedBefore || 0);
+          thisWeekEarned += Math.max(0, earned - before); priorEarned += before; paid += st.paid;
+          const pct = budget ? Math.round(earned / budget * 100) : 0;
+          readings.push([st.n, `${pct}% of ${inrShort(budget)}`, earned]);
         });
         const balanceBf = Math.max(0, priorEarned - paid);
         const thisWeek = Math.max(0, thisWeekEarned);
         if (thisWeek <= 0 && balanceBf <= 0) return;
         // Allocate a contract payment to the WO + the first stage that still has a balance.
-        const target = crew.stages.find(st => {
-          const e = st.type === 'lump' ? (st.amount || 0) * latestPct(st) / 100 : (st.before + sumCells(st.cells)) * (st.rate || 0);
-          return e - st.paid > 0.5;
-        }) ?? crew.stages[0];
+        const target = crew.stages.find(st => (st.certified || 0) - st.paid > 0.5) ?? crew.stages[0];
         rows.push({
           key: `c${site.site}-${ci}`, projectId: site.site, projectName: site.label,
           stakeholderId: crew.stakeholderId, party: crew.n, trade: crew.trade || crew.d || 'Contract',

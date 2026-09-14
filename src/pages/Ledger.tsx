@@ -22,13 +22,14 @@ import { WhatsAppGlyph } from '../components/day-book/atoms';
 import { StartOnWhatsAppButton } from '../components/day-book/StartOnWhatsApp';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { useQueryGate } from '../components/QueryGate';
-import { deriveDirection, isNotLinked, resolveAnchor, isGeneralExpense, generalExpenseLabel, payeeLabel, type TxnAnchor, type TxnDirection } from '../lib/transactions';
+import { deriveDirection, cashDirection, isNotLinked, resolveAnchor, isGeneralExpense, generalExpenseLabel, payeeLabel, isWalletTransfer, isWalletSpend, type TxnAnchor, type TxnDirection } from '../lib/transactions';
 import { V, font, serif, nums, terraGrad } from '../components/txn-ledger/ledgerTokens';
 import { useCursorLamp } from '../components/nav/useCursorLamp';
 import { DirMedallion, Amount, AnchorChip, FilterChip } from '../components/txn-ledger/LedgerAtoms';
 import { TrackChip, TRACK_CHIP_CSS } from '../components/txn-ledger/TrackChip';
 import { unlinkTxnOrder } from '../lib/trackingApi';
 import { useOrgId } from '../lib/auth/AuthProvider';
+import WalletRail from '../components/wallets/WalletRail';
 import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
 import { NewTxnFab } from '../components/NewTxnFab';
 import { NewTxnMenuButton } from '../components/NewTxnMenuButton';
@@ -579,7 +580,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
     queryFn: async () => {
       const { data, error } = await supabase
         .from('transactions')
-        .select('*, stakeholders(name, type, category), txn_allocations(allocation_id, project_id, allocated_amount, order_type, order_ref, bill_id, projects(name))')
+        .select('*, stakeholders(name, type, category), wallets(holder_name), txn_allocations(allocation_id, project_id, allocated_amount, order_type, order_ref, bill_id, projects(name))')
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data;
@@ -1028,7 +1029,8 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   // ── Aggregations over the FULL filtered set (never the visible slice) ────────
   let monthOut = 0, monthIn = 0;
   for (const t of filteredTransactions) {
-    if (deriveDirection(t) === 'in') monthIn += Number(t.total_amount); else monthOut += Number(t.total_amount);
+    const d = cashDirection(t);   // wallet spends skip; returns come back in; floats are real cash out
+    if (d === 'in') monthIn += Number(t.total_amount); else if (d === 'out') monthOut += Number(t.total_amount);
   }
   const monthTotal = monthIn + monthOut;
   const outPct = monthTotal > 0 ? (monthOut / monthTotal) * 100 : 0;
@@ -1046,7 +1048,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   const spark = useMemo(() => {
     const byDay = new Map<string, number>();
     for (const t of filteredTransactions) {
-      if (deriveDirection(t) !== 'out') continue;
+      if (cashDirection(t) !== 'out') continue;
       byDay.set(String(t.date).slice(0, 10), (byDay.get(String(t.date).slice(0, 10)) || 0) + Number(t.total_amount || 0));
     }
     const out: { k: string; v: number; iso: string }[] = [];
@@ -1067,7 +1069,8 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   const dayTotals = new Map<string, { out: number; in: number }>();
   for (const t of sortedTxns) {
     const cur = dayTotals.get(t.date) ?? { out: 0, in: 0 };
-    if (deriveDirection(t) === 'in') cur.in += Number(t.total_amount); else cur.out += Number(t.total_amount);
+    const d = cashDirection(t);
+    if (d === 'in') cur.in += Number(t.total_amount); else if (d === 'out') cur.out += Number(t.total_amount);
     dayTotals.set(t.date, cur);
   }
 
@@ -1162,7 +1165,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   // ── Drag-to-sum, direction-aware ────────────────────────────────────────────
   const sumRows = (ledger || []).filter((t) => sumSel.has(t.txn_id));
   let sumOut = 0, sumIn = 0;
-  for (const t of sumRows) { if (deriveDirection(t) === 'in') sumIn += Number(t.total_amount); else sumOut += Number(t.total_amount); }
+  for (const t of sumRows) { const d = cashDirection(t); if (d === 'in') sumIn += Number(t.total_amount); else if (d === 'out') sumOut += Number(t.total_amount); }
   const sumNet = sumIn - sumOut;
 
   const exportCSV = () => {
@@ -1276,6 +1279,9 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
         }} />
       </header>
 
+      {/* Wallets rail — supervisors' site cash, a full-width sticky bar below the header (self-contained). */}
+      {orgId && <WalletRail orgId={orgId} canManage={canManageTeam} />}
+
       <div className="mx-auto px-5 sm:px-8 py-4 sm:py-8 max-w-[880px] lg:max-w-[1040px] xl:max-w-[1200px] min-[1700px]:max-w-[1640px] min-[1700px]:grid min-[1700px]:grid-cols-[minmax(0,1fr)_340px] min-[1700px]:gap-12 min-[1700px]:items-start">
 
         {/* ── main column: the day-book ── */}
@@ -1284,11 +1290,6 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
         {/* the org's ledger go-live (opening cutover) — a quiet, right-aligned line that stays out of the
             way once set; managers get the "configure" affordance, everyone else just reads the date.
             Desktop only, and only on the whole-org ledger (a project view inherits the org's date). */}
-        {!lockedProject && orgId && (
-          <div className="hidden sm:flex justify-end mt-4 -mb-1">
-            <LedgerCutoverControl orgId={orgId} isManager={canManageTeam} />
-          </div>
-        )}
 
         {/* subtle invite: has entries, but never set up WhatsApp capture. Quiet,
             dismissible, manager-only — a builder typing every entry by hand may
@@ -1515,15 +1516,21 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
             </div>
           )
         ) : (
-          visibleDays.map(day => {
+          visibleDays.map((day, dayIdx) => {
             const tot = dayTotals.get(day.date) ?? { out: 0, in: 0 };
             const weekday = new Date(day.date).toLocaleDateString('en-IN', { weekday: 'long' });
             const dshort = new Date(day.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
             return (
               <section className="mt-4 sm:mt-7 mo-rise-day" key={day.date} id={`txn-day-${day.date}`} style={{ scrollMarginTop: 60 }}>
-                <p className="px-4 py-2 text-sm sticky top-0" style={{ background: V.page, color: V.ink, zIndex: 2, ...serif }}>
-                  {dshort} <span className="text-xs" style={{ color: V.faint, ...font }}>· {weekday}</span>
-                </p>
+                {/* Date on the left; the ledger cutover line rides the RIGHT of the first day's header only. */}
+                <div className="px-4 py-2 sticky top-0 flex items-center justify-between gap-3" style={{ background: V.page, zIndex: 2 }}>
+                  <p className="text-sm" style={{ color: V.ink, ...serif }}>
+                    {dshort} <span className="text-xs" style={{ color: V.faint, ...font }}>· {weekday}</span>
+                  </p>
+                  {dayIdx === 0 && !lockedProject && orgId && (
+                    <div className="hidden sm:block"><LedgerCutoverControl orgId={orgId} isManager={canManageTeam} /></div>
+                  )}
+                </div>
                 <div className="rounded-2xl pt-1 overflow-hidden relative" style={{ background: V.surface, border: '1px solid #E3DDD4' }}>
                   {/* the spine: one thread of money through the day */}
                   <div aria-hidden="true" className="absolute" style={{ left: 29, top: 16, bottom: 64, width: 1, background: V.line }} />
@@ -1544,6 +1551,9 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                     // carries its free-text description.
                     const ctxParts = genExp ? [txn.remarks] : [trade, txn.remarks];
                     if (!(filterProject.length === 1) && projName) ctxParts.push(projName);
+                    // Wallet marker: a transfer shows the money movement (accounting); a spend notes it drew site cash.
+                    if (isWalletTransfer(txn)) ctxParts.unshift(txn.wallet_dir === 'in' ? 'Bank → wallet · site advance' : 'Wallet → bank · cash returned');
+                    else if (isWalletSpend(txn)) ctxParts.unshift(`paid from ${txn.wallets?.holder_name ? txn.wallets.holder_name + "'s" : ''} wallet`.replace('  ', ' '));
                     const context = ctxParts.filter(Boolean).join(' · ');
                     const proofUrl = txn.bill_doc_url || txn.proof_document_url || null;
                     // Silent depth cue: how many OTHER open obligations of the same kind
@@ -1565,8 +1575,15 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                     // A payment that settles a recorded bill (bill_id allocation) is already linked — show a
                     // calm "Bill" chip, never the "Attach bill" nudge (the detail already shows it attached).
                     const billAttached = (txn.txn_allocations || []).some((a: any) => a?.bill_id);
+                    // Wallet display: a transfer (float/return) names the wallet + carries a "Wallet transfer"
+                    // chip; a spend keeps its payee but is tinted as site cash. Both get a slight warm tint.
+                    const isWTransfer = isWalletTransfer(txn);
+                    const isWSpend = isWalletSpend(txn);
+                    const walletHolder = txn.wallets?.holder_name || 'Wallet';
                     const anchorNode: ReactNode =
-                      genExp
+                      isWTransfer
+                        ? <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md" style={{ background: '#EEEAF4', color: '#5E5473', ...font }}><span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: '#8A7BA6' }} />Wallet transfer</span>
+                      : genExp
                         ? <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md" style={{ background: V.field, color: V.inkSoft, ...font }}><span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: V.faint }} />Overhead <span style={{ color: V.faint }}>· no party</span></span>
                         : billAttached
                           ? <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md" style={{ background: V.field, color: V.inkSoft, ...font }}>🧾 <span>Bill</span></span>
@@ -1578,11 +1595,14 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                         key={txn.txn_id}
                         id={`ledger-txn-${txn.txn_id}`}
                         data-search-row={txn.txn_id}
-                        style={{ scrollMarginTop: 40, ...(focusTxn === txn.txn_id ? { borderRadius: 12, boxShadow: '0 0 0 2px #C8603A', transition: 'box-shadow .3s' } : {}) }}
+                        style={{ scrollMarginTop: 40,
+                          // A very slight warm-violet wash sets wallet rows apart without shouting.
+                          ...((isWTransfer || isWSpend) ? { borderRadius: 12, background: 'linear-gradient(90deg, rgba(138,123,166,.07) 0%, rgba(138,123,166,0) 60%)' } : {}),
+                          ...(focusTxn === txn.txn_id ? { borderRadius: 12, boxShadow: '0 0 0 2px #C8603A', transition: 'box-shadow .3s' } : {}) }}
                       >
                       <EntryRow
                         dir={dir}
-                        payee={genExp ? genLabel : (txn.stakeholders?.name || 'Unknown')}
+                        payee={isWTransfer ? `${walletHolder}'s wallet` : (genExp ? genLabel : (txn.stakeholders?.name || 'Unknown'))}
                         stakeholderId={genExp ? null : (txn.stakeholder_id ?? null)}
                         onPayeeClick={isPhone ? undefined : () => { if (txn.stakeholder_id) { setDrawerProject(txn.stakeholder_id === deepLinkStk ? deepLinkProject : null); setDrawerStk(txn.stakeholder_id); } }}
                         context={context}

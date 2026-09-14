@@ -65,15 +65,14 @@ export function CertificationWizard({ ctx, onClose, onDone, onReading }: {
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<CertifyResult | null>(null);
 
-  // For a lump milestone the reading is the NEW cumulative %; the credit is the delta over prior.
-  const amount = useMemo(() => {
-    if (ctx.kind === 'lump') {
-      const full = computeCertAmount('lump', reading, ctx.planned, 0);
-      const prior = computeCertAmount('lump', ctx.priorReading ?? 0, ctx.planned, 0);
-      return Math.max(0, full - prior);
-    }
-    return computeCertAmount(ctx.kind, reading, 0, ctx.rate);
-  }, [ctx, reading]);
+  // Certify only the NEW progress: the amount is what the reading asserts MINUS what's already accounted
+  // (the floor = already paid, or previously certified). At the floor the delta is ₹0 — you never
+  // re-certify work that's already been paid/certified; slide up to certify the increment beyond it.
+  const at = (r: number) => computeCertAmount(ctx.kind, r, ctx.planned, ctx.rate);
+  const amount = useMemo(() => Math.max(0, at(reading) - at(floor)), [ctx, reading, floor]);
+  // How much is already done/accounted, for the "already X done" copy.
+  const floorPct = ctx.kind === 'lump' ? Math.round(floor) : (ctx.planned > 0 ? Math.round((at(floor) / ctx.planned) * 100) : 0);
+  const floorPaid = paidFloor >= (ctx.priorReading ?? 0);   // the floor came from a payment vs a prior cert
 
   const submit = async () => {
     setStep('busy'); setErr(null);
@@ -112,8 +111,13 @@ export function CertificationWizard({ ctx, onClose, onDone, onReading }: {
                   <input type="range" min={floor} max={100} value={reading} onChange={(e) => setReading(Math.max(floor, Number(e.target.value)))}
                     style={{ width: '100%', marginTop: 8, accentColor: V.terra }} />
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: V.faint, marginTop: 2 }}>
-                    <span>{paidFloor > (ctx.priorReading ?? 0) ? `paid ${paidFloor}% · locked` : `was ${Math.round(ctx.priorReading ?? 0)}%`}</span><span>100%</span>
+                    <span>already {floorPct}% done{floorPct > 0 ? (floorPaid ? ' · paid' : ' · certified') : ''}</span><span>100%</span>
                   </div>
+                  {floorPct > 0 && (
+                    <p style={{ fontSize: 11.5, color: V.sys, marginTop: 8 }}>
+                      {floorPct}% is already done and {floorPaid ? 'paid' : 'certified'}. Slide to where the work stands now — you'll certify only the {reading > floor ? `${Math.round(reading) - floorPct}%` : 'progress'} beyond it.
+                    </p>
+                  )}
                 </>
               )}
               {ctx.kind === 'measured' && (
@@ -132,9 +136,9 @@ export function CertificationWizard({ ctx, onClose, onDone, onReading }: {
                   {paidFloor > 0 && <p style={{ fontSize: 11.5, color: V.faint, marginTop: 4 }}>{inr(paidFloor)} already paid — certify at least that</p>}
                 </>
               )}
-              <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 10, background: V.sageWash, border: `1px solid ${V.sage}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 12.5, color: V.sage }}>Certifies</span>
-                <span style={{ fontSize: 18, fontWeight: 700, color: V.sage }}>{inr(amount)}</span>
+              <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 10, background: amount > 0 ? V.sageWash : V.surface, border: `1px solid ${amount > 0 ? V.sage : V.line}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 12.5, color: amount > 0 ? V.sage : V.faint }}>{floorPct > 0 ? 'Certifies (new work)' : 'Certifies'}</span>
+                <span style={{ fontSize: 18, fontWeight: 700, color: amount > 0 ? V.sage : V.faint }}>{amount > 0 ? inr(amount) : '—'}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
                 <button onClick={onClose} style={{ fontSize: 13, color: V.sys, background: 'none', border: 0, cursor: 'pointer' }}>Cancel</button>

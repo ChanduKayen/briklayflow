@@ -206,6 +206,17 @@ export async function certifyStage(input: { stakeholderId: string; contractRef: 
   return { creditId, settled, open: Math.max(0, input.amount - settled), poolLeft };
 }
 
+// ── certify-from-payment: treat a contract-linked payment AS the accepted work ──
+// Toggles a payment-certification (see migration 20260918000001). The RPC guards it: only for a contract
+// with NO muster readings, capped at the contract value. Returns { on, amount } or throws with the reason.
+export async function setPaymentCertified(txnId: string, on: boolean): Promise<{ on: boolean; amount?: number }> {
+  const { data, error } = await supabase.rpc('set_payment_certified', { p_txn_id: txnId, p_on: on });
+  if (error) throw error;
+  const r = data as any;
+  if (!r?.success) throw new Error(r?.error || 'Could not update certification');
+  return { on: !!r.on, amount: r.amount };
+}
+
 // ── self-settling payment (§2.5): mint a matching credit AND allocate to it ──
 // "against work done / goods received, no bill". The credit is a child of the payment (INV-6).
 export async function selfSettle(paymentId: string, opts?: { projectId?: string | null; contractRef?: string | null; docFlag?: 'vendor' | 'kacha' | 'none'; note?: string; entryDate?: string }): Promise<{ creditId: string }> {

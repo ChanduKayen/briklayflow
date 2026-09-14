@@ -33,7 +33,7 @@ const particularsOf = (e: LedgerEntry) => {
   if ((e.paid || 0) > 0) { const m = (e.mode || '').trim(); return !m ? 'To Bank / Cash' : /cash/i.test(m) ? 'To Cash' : `To Bank (${m})`; }
   if (e.kind === 'consolidated') return 'By Purchases (Consolidated)';
   if (e.kind === 'wage') return 'By Wages (Attendance)';
-  if (e.kind === 'certified') return 'By Work Certified';
+  if (e.kind === 'certified') return 'By Work Recorded';
   if (e.kind === 'adjustment') return 'By Adjustment';
   return 'By Purchases';
 };
@@ -42,8 +42,13 @@ const particularsOf = (e: LedgerEntry) => {
 export async function downloadPartyStatementExcel(L: PartyLedger): Promise<void> {
   const XLSX = await import('xlsx');
   const rows = ordered(L.entries);
+  const isWorker = L.kind === 'worker';
   const closingPayable = L.totalCert - L.totalPaid;
+  const paidAhead = -closingPayable;
+  const contractTotal = isWorker ? L.contracts.reduce((s, c) => s + (c.value || 0), 0) : 0;
   const kind = [L.stakeholder.category, L.stakeholder.type].filter(Boolean).join(' · ') || (L.kind === 'vendor' ? 'Vendor' : 'Worker');
+  const closeLabel = closingPayable > 0.5 ? (isWorker ? 'Balance payable' : 'Amount payable')
+    : closingPayable < -0.5 ? (isWorker ? 'Paid ahead of work' : 'Advance with party') : 'Balance';
 
   const aoa: (string | number)[][] = [
     ['Statement of Account'],
@@ -52,12 +57,19 @@ export async function downloadPartyStatementExcel(L: PartyLedger): Promise<void>
     ['Account ID', L.stakeholder.id],
     ['As on', new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })],
     [],
-    ['Total billed', Math.round(L.totalCert)],
+    [isWorker ? 'Work recorded' : 'Total billed', Math.round(L.totalCert)],
     ['Total paid', Math.round(L.totalPaid)],
-    [closingPayable > 0.5 ? 'Amount payable' : closingPayable < -0.5 ? 'Advance with party' : 'Balance', Math.abs(Math.round(closingPayable))],
-    [],
-    ['Date', 'Particulars', 'Vch Type', 'Vch No', 'Debit (Paid)', 'Credit (Billed)', 'Balance'],
+    [closeLabel, Math.abs(Math.round(closingPayable))],
   ];
+  // Contract context — the denominator that explains why a worker is "paid ahead".
+  if (isWorker && paidAhead > 0.5 && contractTotal > 0.5) {
+    const pct = Math.min(100, Math.round((L.totalPaid / contractTotal) * 100));
+    aoa.push([], [`Against ${L.contracts.length > 1 ? `${L.contracts.length} contracts` : 'a contract'} worth ${Math.round(contractTotal).toLocaleString('en-IN')}, ${Math.round(L.totalCert).toLocaleString('en-IN')} recorded and ${Math.round(L.totalPaid).toLocaleString('en-IN')} paid (${pct}% of contract). ${Math.round(paidAhead).toLocaleString('en-IN')} is paid ahead of recorded work — recording site progress reconciles it.`]);
+  }
+  aoa.push(
+    [],
+    ['Date', 'Particulars', 'Vch Type', 'Vch No', 'Debit (Paid)', isWorker ? 'Credit (Recorded)' : 'Credit (Billed)', 'Balance'],
+  );
 
   let run = 0, sumPaid = 0, sumBilled = 0;
   for (const e of rows) {

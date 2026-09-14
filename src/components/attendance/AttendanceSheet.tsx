@@ -263,12 +263,53 @@ const ATDX_CSS = `
 .atdx .catn .ratechip input{width:46px;border:0;border-bottom:1px solid var(--walnut);background:transparent;font:inherit;padding:0;outline:none}
 .atdx .catn .ownflag{flex:0 0 auto;font-size:11px;color:var(--walnut-3);font-style:italic}
 .atdx .wtotal .brk{margin-left:7px;color:var(--walnut-3);font-size:11.5px}
-.atdx .stsel{appearance:none;-webkit-appearance:none;border:0;background:transparent;font:inherit;color:var(--walnut-2);padding:2px 18px 2px 0;cursor:pointer;
+/* Phase / stage picker — a designed chip, not a bare native select. */
+.atdx .stsel{appearance:none;-webkit-appearance:none;font:inherit;font-size:12.5px;font-weight:500;color:var(--walnut-2);cursor:pointer;
+  border:1px solid var(--line-2);border-radius:8px;background:var(--paper);padding:5px 26px 5px 11px;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239c9083' stroke-width='1.4'/%3E%3C/svg%3E");
-  background-repeat:no-repeat;background-position:right 2px center;max-width:230px;text-overflow:ellipsis}
-.atdx .stsel:hover{color:var(--walnut)}
-.atdx .stsel:focus{outline:none;border-bottom:1px solid var(--walnut)}
-.atdx .stsel.ghost{color:var(--terracotta);font-size:13px;font-weight:500}
+  background-repeat:no-repeat;background-position:right 10px center;max-width:230px;text-overflow:ellipsis;transition:border-color .12s,box-shadow .12s,color .12s}
+.atdx .stsel:hover{color:var(--walnut);border-color:var(--walnut-3)}
+.atdx .stsel:focus{outline:none;border-color:var(--terracotta);box-shadow:0 0 0 3px color-mix(in srgb,var(--terracotta) 12%,transparent)}
+.atdx .stsel.ghost{color:var(--terracotta);font-size:13px;font-weight:500;border-color:transparent;background-color:transparent}
+/* the subtle % strip — a lump stage spans the week; two tones: PAST work (muted) + THIS WEEK (terracotta) */
+.atdx .pctstrip{grid-column:2 / 9;display:flex;align-items:center;gap:12px;height:44px;padding:0 12px;cursor:pointer;border-radius:10px;transition:background .12s}
+.atdx .pctstrip:hover{background:color-mix(in srgb,var(--terracotta) 5%,transparent)}
+.atdx .pctstrip.locked{cursor:default}
+.atdx .pctstrip .ps-track{flex:1;height:5px;border-radius:999px;background:var(--rule);position:relative;overflow:hidden}
+.atdx .pctstrip .ps-track i{position:absolute;top:0;height:100%;border-radius:999px}
+.atdx .pctstrip .ps-past{left:0;background:color-mix(in srgb,var(--walnut-3) 50%,transparent)}
+.atdx .pctstrip .ps-now{background:var(--terracotta)}
+.atdx .pctstrip .ps-lbl{font-size:12px;color:var(--walnut-3);white-space:nowrap}
+.atdx .pctstrip .ps-lbl em{font-style:normal;color:var(--terracotta);font-weight:600}
+.atdx .pctstrip .ps-edit{width:14px;height:14px;flex:0 0 auto;color:var(--walnut-3);opacity:0;transition:opacity .12s}
+.atdx .pctstrip:hover .ps-edit{opacity:.85}
+@media(hover:none){.atdx .pctstrip .ps-edit{opacity:.6}}
+/* row total — this week's difference leads; cumulative is muted context. Sizes kept small so ₹ never
+   overflows the fixed 150px column. */
+.atdx .wtotal .twk{display:block;font-family:var(--mono);font-size:13px;color:var(--ink);font-weight:500;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.atdx .wtotal .twk::first-letter{color:var(--terracotta)}
+.atdx .wtotal .twkl{display:block;font-size:10px;color:var(--walnut-3);margin-top:-1px}
+.atdx .wtotal .twkl.none{color:var(--soft)}
+.atdx .wtotal .cuml{display:block;font-family:var(--mono);font-size:10.5px;color:var(--walnut-3);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* custom stage dropdown — a designed chip + popover menu (a native <select> option list can't be styled) */
+.atdx .phdrop{position:relative;display:inline-block;vertical-align:middle}
+.atdx .phdrop-btn{display:inline-flex;align-items:center;gap:7px;max-width:230px;font:inherit;font-size:12.5px;font-weight:600;color:var(--walnut);cursor:pointer;border:1px solid var(--line-2);border-radius:8px;background:var(--paper);padding:6px 10px;transition:border-color .12s,box-shadow .12s,background .12s}
+.atdx .phdrop-btn:hover{border-color:var(--walnut-3)}
+.atdx .phdrop-btn .phdrop-lbl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.atdx .phdrop-btn .phdrop-chev{width:10px;height:6px;flex:0 0 auto;color:var(--walnut-3)}
+.atdx .phdrop-btn.add{color:var(--terracotta);border-style:dashed;border-color:color-mix(in srgb,var(--terracotta) 45%,transparent);background:color-mix(in srgb,var(--terracotta) 6%,transparent)}
+.atdx .phdrop-btn.add .phdrop-chev{color:var(--terracotta)}
+.atdx .phdrop-menu{position:absolute;top:calc(100% + 6px);left:0;z-index:40;min-width:230px;max-width:300px;background:var(--paper);border:1px solid var(--line-2);border-radius:12px;box-shadow:0 16px 40px -12px rgba(59,47,39,.28);padding:6px;animation:phpop .14s ease}
+@keyframes phpop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.atdx .phdrop-menu .ph-cur{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:var(--terra-soft);color:var(--walnut);font-size:12.5px;font-weight:600}
+.atdx .phdrop-menu .ph-cur .ph-check{color:var(--terracotta);font-weight:700}
+.atdx .phdrop-menu .ph-cur .ph-meta{margin-left:auto;font-weight:400;font-size:11px;color:var(--walnut-3)}
+.atdx .phdrop-menu .ph-hd{padding:9px 10px 4px;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--walnut-3)}
+.atdx .phdrop-menu .ph-item{display:flex;align-items:baseline;gap:8px;width:100%;text-align:left;padding:8px 10px;border-radius:8px;border:0;background:none;cursor:pointer;color:var(--walnut);font:inherit;font-size:13px}
+.atdx .phdrop-menu .ph-item:hover{background:var(--terra-soft);color:var(--terracotta)}
+.atdx .phdrop-menu .ph-item .ph-name{font-weight:500}
+.atdx .phdrop-menu .ph-item .ph-meta{margin-left:auto;font-size:11px;color:var(--walnut-3)}
+.atdx .phdrop-menu .ph-none{padding:10px;font-size:12px;color:var(--walnut-3);text-align:center}
 /* a clear "add" affordance — a dashed terracotta pill, fully visible (no width cap / truncation) */
 .atdx .stsel.ghost.addskill{max-width:none;width:auto;text-overflow:clip;font-weight:600;line-height:1.4;
   border:1px dashed color-mix(in srgb,var(--terracotta) 55%,transparent);border-radius:9px;background:color-mix(in srgb,var(--terracotta) 7%,transparent);padding:6px 30px 6px 13px;background-position:right 10px center}
@@ -517,23 +558,21 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     const disp = nz.filter((v: number) => v > 0).join('+');
     return wrap(`<div class="${cls(i, ' filled')}" data-day="${i}" data-crewcell="${ref}">${disp}${wa ? '<span class="src"></span>' : ''}</div>`);
   }
-  function pctCell(c: Cell, i: number, ref: string, prev: number) {
-    if (c === 'off') return wrap(`<div class="${cls(i)} off"></div>`);
-    if (!c) return wrap(`<div class="${cls(i)} qty" data-day="${i}" data-edit="${ref}"></div>`);
-    const drop = c.v < prev ? ' style="color:var(--terra)"' : '';
-    return wrap(`<div class="${cls(i, c.v > 0 ? ' filled' : '')} qty" data-day="${i}" data-edit="${ref}"${drop}>${c.v}<small>%</small>${srcDot(c)}${ctip(c)}</div>`);
-  }
-  const latestPct = (st: any) => st.cells.reduce((p: number, c: Cell) => (c && c !== 'off') ? c.v : p, st.before);
+  // Progress is measured by what's been CERTIFIED (the payable truth), split PAST (certified before this
+  // week) vs THIS WEEK (certified − certifiedBefore). The row figure is ONLY this week's difference; past
+  // work is already accounted and shown muted for context.
   function stageMath(st: any) {
-    if (st.type === 'lump') {
-      const pct = latestPct(st), earned = (st.amount || 0) * pct / 100;
-      // pct + earned on the main line; the contract value drops to its own small line so it can't
-      // overflow the fixed-width total column (the "bleeding out" bug).
-      return { earned, prog: pct / 100, pct, label: `<b>${pct}%</b> · ${inr(earned)}<span class="ofval">of ${inr(st.amount || 0)}</span>` };
-    }
-    const done = st.before + sum(st.cells), earned = done * (st.rate || 0);
-    return { earned, prog: st.total ? done / st.total : 0, pct: st.total ? Math.round(done / st.total * 100) : 0,
-             label: `<b>${done.toLocaleString('en-IN')}</b> · ${inr(earned)}<span class="ofval">of ${(st.total || 0).toLocaleString('en-IN')} ${st.unit || ''}</span>` };
+    const budget = st.type === 'lump' ? (st.amount || 0) : (st.total || 0) * (st.rate || 0);
+    const earned = st.certified || 0;                         // ₹ certified so far
+    const before = Math.min(earned, st.certifiedBefore || 0); // ₹ certified before this week
+    const twEarned = Math.max(0, earned - before);            // ₹ certified THIS WEEK = the payable
+    const frac = (v: number) => (budget > 0 ? v / budget : 0);
+    return {
+      kind: st.type as 'lump' | 'measured', earned, budget, twEarned,
+      prog: frac(earned), pastProg: frac(before), twProg: frac(twEarned),
+      pct: Math.round(frac(earned) * 100), twPct: Math.round(frac(twEarned) * 100),
+      done: st.type === 'measured' && st.rate ? Math.round(earned / st.rate) : 0, total: st.total || 0, unit: st.unit || '',
+    };
   }
 
   function render() {
@@ -561,17 +600,20 @@ export default function AttendanceSheet({ session }: { session: Session }) {
         const measureToggle = (crew.contract && onContract)
           ? ` <button class="measurebasis${measuring ? ' on' : ''}" data-measurebasis="${si}.${ci}" title="${measuring ? 'Measured by attendance — each measured day auto-certifies. Click to switch back to milestone certification.' : 'Certify by milestones. Click to measure by attendance instead.'}">${measuring ? '✓ measured by attendance' : 'measure by attendance'}</button>`
           : '';
+        // The SAME Contract/Labour toggle for every crew row — on-contract or not. "Contract" opens the
+        // put-on-contract sheet (data-basis handler), "Labour" switches back to daily wages. measureToggle
+        // only applies to a % (accrual 'work') contract crew, so it's naturally empty for a wages/labour row.
+        const wagesMode = crew.accrualBasis === 'day';
+        const seg = `<div class="segwrap"><div class="seg"><button data-basis="${si}.${ci}.contract" aria-pressed="${onContract}">Contract</button><button data-basis="${si}.${ci}.labour" aria-pressed="${!onContract}">Labour</button></div>${assumed}${wagesMode ? '' : measureToggle}</div>`;
         sno++;
         if (!onContract) {
-          // ── LABOUR crew → ONE row. The cell is the crew's headcount; a click opens the stepper. ──
-          const contractLink = crew.contract
-            ? `<button class="oncontract" data-basis="${si}.${ci}.contract" title="This party has a contract — switch to tracking it by stages">on a contract?</button>`
-            : `<button class="oncontract" data-oncontract="${si}.${ci}">put on contract</button>`;
+          // ── LABOUR crew → ONE row. The cell is the crew's headcount; a click opens the stepper. The
+          // Contract/Labour toggle replaces the old "put on contract" link — same control as a contract crew. ──
           rows += `<div class="cols wrow" data-grp="c${si}-${ci}">
             <div class="wname"><button class="rmw" data-rmc="${si}.${ci}" title="Remove from sheet" aria-label="Remove ${escapeHtml(crew.n)}">×</button>
               <div class="wav">${avatarOf(crew.n)}</div>
               <div class="wmid"><b>${escapeHtml(crew.n)}<span class="crewtag">crew</span></b>
-              <span data-wageslbl="${si}.${ci}">${escapeHtml(crew.trade || crew.d || 'Labour')} · daily wages · ${contractLink}</span></div></div>
+              <span data-wageslbl="${si}.${ci}">${escapeHtml(crew.trade || crew.d || 'Labour')} · daily wages</span>${seg}</div></div>
             ${crew.head.map((_c: Cell, i: number) => crewDayCell(crew, i, si, ci)).join('')}
             <div class="wtotal">${catDays ? `<b>${catDays} wd</b> · ${inr(wage)}` : ''}</div></div>`;
           return;
@@ -580,24 +622,49 @@ export default function AttendanceSheet({ session }: { session: Session }) {
         // Wages mode ('day' accrual): ONE row — the crew's daily attendance + wage total, with the
         // contract phase it feeds as sub-text (no separate stage rows). % mode: no separate heading —
         // the FIRST phase row carries the crew identity; the rest follow as sub rows.
-        const wagesMode = crew.accrualBasis === 'day';
-        const seg = `<div class="segwrap"><div class="seg"><button data-basis="${si}.${ci}.contract" aria-pressed="${onContract}">Contract</button><button data-basis="${si}.${ci}.labour" aria-pressed="${!onContract}">Labour</button></div>${assumed}${wagesMode ? '' : measureToggle}</div>`;
         (crew as any).shown = (crew as any).shown || crew.stages.map((_st, ki) => ki).filter((ki) => {
           const m = stageMath(crew.stages[ki]); const st = crew.stages[ki];
           return !(m.pct >= 100 && m.earned - st.paid <= 0);
         });
         const shownList: number[] = (crew as any).shown;
-        const opts = (sel: number) => crew.stages.map((st, ki) => `<option value="${ki}" ${ki === sel ? 'selected' : ''} ${shownList.includes(ki) && ki !== sel ? 'disabled' : ''}>${st.n}${stageMath(st).pct >= 100 ? ' · done' : ''}</option>`).join('')
-          + `<option disabled>──────</option><option value="new">+ Add a stage…</option>`;
-        const stageCells = (st: any, ref: string) => {
-          let prev = st.before;
-          return st.type === 'lump'
-            ? st.cells.map((c: Cell, i: number) => { const h = pctCell(c, i, ref, prev); if (c && c !== 'off') prev = (c as any).v; return h; }).join('')
-            : st.cells.map((c: Cell, i: number) => qtyCell(c, i, ref, st.unit)).join('');
+        // A custom, designed stage dropdown (a native <select>'s option list can't be styled). The trigger
+        // is a chip; the menu shows the current stage (checked) and, under an "Add a stage" heading, the
+        // stages not yet on the sheet — picking one adds it as a new row. currentKi < 0 → pure "add" mode.
+        const phDrop = (currentKi: number) => {
+          const cur = currentKi >= 0 ? crew.stages[currentKi] : null;
+          const notShown = crew.stages.map((_s, ki) => ki).filter((ki) => !shownList.includes(ki));
+          const metaOf = (st: any) => (st.type === 'lump' ? inr(st.amount || 0) : `per ${st.unit || 'unit'}`);
+          const addItems = notShown.length
+            ? notShown.map((ki) => { const st = crew.stages[ki]; const done = stageMath(st).pct >= 100; return `<button type="button" class="ph-item" data-phadd="${si}.${ci}.${ki}"><span class="ph-name">${escapeHtml(st.n)}</span><span class="ph-meta">${metaOf(st)}${done ? ' · done' : ''}</span></button>`; }).join('')
+            : `<div class="ph-none">All stages are on the sheet</div>`;
+          return `<span class="phdrop">
+            <button type="button" class="phdrop-btn${cur ? '' : ' add'}" data-phtoggle><span class="phdrop-lbl">${cur ? escapeHtml(cur.n) : '＋ Add a stage'}</span><svg class="phdrop-chev" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button>
+            <div class="phdrop-menu" hidden>${cur ? `<div class="ph-cur"><span class="ph-check">✓</span><span class="ph-name">${escapeHtml(cur.n)}</span><span class="ph-meta">current</span></div><div class="ph-hd">Add a stage</div>` : ''}${addItems}</div>
+          </span>`;
         };
-        const stageTotal = (st: any, m: ReturnType<typeof stageMath>) => {
-          const denom = st.type === 'lump' ? (st.amount || 1) : ((st.total || 0) * (st.rate || 0) || 1);
-          return `${m.label}<div class="bar"><i style="width:${Math.min(100, m.prog * 100)}%"></i><b style="left:0;width:${Math.min(100, st.paid / denom * 100)}%"></b></div>`;
+        const stageCells = (st: any, ref: string) => {
+          // A LUMP (%) stage is cumulative progress, not a per-day thing — so it is ONE subtle strip
+          // spanning the week (tap → certify wizard). Two tones: PAST work (muted) and THIS WEEK's added
+          // progress (terracotta). A measured stage stays day-wise (a qty per day makes sense).
+          if (st.type === 'lump') {
+            const m = stageMath(st);
+            const now = Math.min(100, Math.max(0, Math.round(m.pct)));
+            const past = Math.min(100, Math.max(0, Math.round(m.pastProg * 100)));
+            const tw = Math.max(0, now - past);
+            return `<div class="pctstrip${locked ? ' locked' : ''}"${locked ? '' : ` data-cert="${ref}"`} style="grid-column:2 / 9">
+              <div class="ps-track"><i class="ps-past" style="width:${past}%"></i><i class="ps-now" style="left:${past}%;width:${tw}%"></i></div>
+              <span class="ps-lbl">${now}%${tw > 0 ? ` · <em>+${tw}% this week</em>` : ''}</span>
+              <svg class="ps-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+            </div>`;
+          }
+          return st.cells.map((c: Cell, i: number) => qtyCell(c, i, ref, st.unit)).join('');
+        };
+        // The row total leads with THIS WEEK's difference (the payable this week); cumulative progress
+        // rides underneath as muted context — never the headline, since it's already-done/paid work.
+        const stageTotal = (_st: any, m: ReturnType<typeof stageMath>) => {
+          const tw = Math.round(m.twEarned);
+          return `${tw > 0 ? `<b class="twk">+${inr(tw)}</b><span class="twkl">this week</span>` : `<span class="twkl none">no change</span>`}`
+            + `<span class="cuml">${Math.round(m.pct)}% of ${inr(m.budget)}</span>`;
         };
 
         if (wagesMode) {
@@ -620,28 +687,23 @@ export default function AttendanceSheet({ session }: { session: Session }) {
           rows += `<div class="cols wrow" data-grp="c${si}-${ci}">
             <div class="wname"><button class="rmw" data-rmc="${si}.${ci}" title="Remove from sheet" aria-label="Remove ${escapeHtml(crew.n)}">×</button>
               <div class="wav">${avatarOf(crew.n)}</div>
-              <div class="wmid"><b>${escapeHtml(crew.n)}</b><span>${escapeHtml(crew.d || '')} · contract</span>${seg}</div></div>
+              <div class="wmid"><b>${escapeHtml(crew.n)}</b><span class="stpick">${phDrop(-1)}</span>${seg}</div></div>
             ${dates.map((_d, i) => wrap(`<div class="${cls(i)} off"></div>`)).join('')}<div class="wtotal"><b>0%</b> · ₹0</div></div>`;
         }
         shownList.forEach((ki: number, n: number) => {
           const st = crew.stages[ki], ref = `${si}.s${ci}.${ki}`, m = stageMath(st);
-          const typeLbl = st.type === 'lump' ? 'lump sum' : `per ${st.unit || ''}`;
           if (n === 0) {
             rows += `<div class="cols wrow" data-grp="c${si}-${ci}">
               <div class="wname"><button class="rmw" data-rmc="${si}.${ci}" title="Remove from sheet" aria-label="Remove ${escapeHtml(crew.n)}">×</button>
                 <div class="wav">${avatarOf(crew.n)}</div>
-                <div class="wmid"><b>${escapeHtml(crew.n)}</b><span class="stpick"><select class="stsel" data-swap="${si}.${ci}.0">${opts(ki)}</select><i class="sty">${typeLbl}</i></span>${seg}</div></div>
+                <div class="wmid"><b>${escapeHtml(crew.n)}</b><span class="stpick">${phDrop(ki)}</span>${seg}</div></div>
               ${stageCells(st, ref)}<div class="wtotal">${stageTotal(st, m)}</div></div>`;
           } else {
             rows += `<div class="cols wrow sub" data-grp="c${si}-${ci}">
-              <div class="wname"><select class="stsel" data-swap="${si}.${ci}.${n}">${opts(ki)}</select><span class="st">${typeLbl}</span></div>${stageCells(st, ref)}
+              <div class="wname">${phDrop(ki)}</div>${stageCells(st, ref)}
               <div class="wtotal">${stageTotal(st, m)}</div></div>`;
           }
         });
-        const hidden = crew.stages.length - shownList.length;
-        rows += `<div class="cols wrow sub" data-grp="c${si}-${ci}"><div class="wname" id="stadd-${si}-${ci}">
-          <select class="stsel ghost" data-swap="${si}.${ci}.new"><option value="" selected>+ Stage…${hidden ? ` (${hidden} more on this contract)` : ''}</option>${opts(-1)}</select></div>
-          ${dates.map((_d, i) => wrap(`<div class="${cls(i)} off"></div>`)).join('')}<div class="wtotal"></div></div>`;
       });
       site.direct.forEach((w, wi) => {
         const d = sum(w.cells), amt = d * w.rate; wd += d; wv += amt; siteWage += amt;
@@ -754,7 +816,9 @@ export default function AttendanceSheet({ session }: { session: Session }) {
       partyName: crew.n, milestoneName: st.n,
       kind: st.type === 'lump' ? 'lump' : 'measured',
       planned: st.amount || 0, rate: st.rate || 0, unit: st.unit,
-      priorReading: st.type === 'lump' ? (st.before || 0) : 0,
+      // Floor at what's already CERTIFIED (not the raw prior reading) so the wizard certifies only the
+      // increment and never re-certifies past work.
+      priorReading: st.type === 'lump' ? (st.amount ? Math.round((st.certified || 0) / st.amount * 100) : 0) : 0,
     });
   }
 
@@ -906,6 +970,10 @@ export default function AttendanceSheet({ session }: { session: Session }) {
       inp.addEventListener('blur', commit);
       inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.removeEventListener('blur', commit); render(); } });
     }));
+    // A lump (%) stage's blocked strip → the certification wizard (the % is set there, not per-day).
+    body.querySelectorAll('[data-cert]').forEach(div => div.addEventListener('click', () => {
+      if (locked) return; openCertWizard((div as HTMLElement).dataset.cert!);
+    }));
     body.querySelectorAll('[data-cycle]').forEach(div => div.addEventListener('click', () => {
       if (locked) return;
       const t = resolve((div as HTMLElement).dataset.cycle!), i = colOf(div), c = t.cells[i];
@@ -914,13 +982,25 @@ export default function AttendanceSheet({ session }: { session: Session }) {
       else { v = c.v === 1 ? 0.5 : c.v === 0.5 ? 0 : 1; t.cells[i] = { v, src: 'office', by: byName, at: 'just now' }; }
       persistCell(t.subject, t.projectId, i, v); render();
     }));
-    body.querySelectorAll('[data-swap]').forEach(sel => sel.addEventListener('change', () => {
-      const [si, ci, slot] = (sel as HTMLElement).dataset.swap!.split('.'), crew = DATA.current[+si].crews[+ci] as any;
-      const val = (sel as HTMLSelectElement).value;
-      if (val === 'new') { showSnackbar('Add stages from the contract for this crew, then they show up here.'); (sel as HTMLSelectElement).value = ''; return; }
-      if (val === '') return;
-      const ki = +val;
-      if (slot === 'new') crew.shown.push(ki); else crew.shown[+slot] = ki;
+    // Custom stage dropdown: toggle opens the designed menu (closing any other); a doc-level pointerdown
+    // closes it when you click away. Adding a stage pushes it onto the shown rows and re-renders.
+    const closeStageMenus = () => body.querySelectorAll('.phdrop-menu:not([hidden])').forEach(m => m.setAttribute('hidden', ''));
+    body.querySelectorAll('[data-phtoggle]').forEach(btn => btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const menu = (btn as HTMLElement).parentElement!.querySelector('.phdrop-menu') as HTMLElement;
+      const wasOpen = !menu.hasAttribute('hidden');
+      closeStageMenus();
+      if (wasOpen) return;
+      menu.removeAttribute('hidden');
+      document.addEventListener('pointerdown', function onDoc(ev) {
+        if ((ev.target as HTMLElement).closest('.phdrop')) return;
+        closeStageMenus(); document.removeEventListener('pointerdown', onDoc, true);
+      }, true);
+    }));
+    body.querySelectorAll('[data-phadd]').forEach(btn => btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const [si, ci, ki] = (btn as HTMLElement).dataset.phadd!.split('.'); const crew = DATA.current[+si].crews[+ci] as any;
+      if (!crew.shown.includes(+ki)) crew.shown.push(+ki);
       render();
     }));
     body.querySelectorAll('[data-rate]').forEach(sp => sp.addEventListener('click', () => {
@@ -971,7 +1051,6 @@ export default function AttendanceSheet({ session }: { session: Session }) {
       showSnackbar(next === 'measurement' ? 'Measured by attendance — each measured day auto-certifies' : 'Certify by milestones');
     }));
     body.querySelectorAll('[data-add]').forEach(b => b.addEventListener('click', () => addEntity(+(b as HTMLElement).dataset.add!)));
-    body.querySelectorAll('[data-oncontract]').forEach(b => b.addEventListener('click', () => { const [si, ci] = (b as HTMLElement).dataset.oncontract!.split('.'); onContractForm(+si, +ci); }));
     body.querySelectorAll('[data-ocw]').forEach(b => b.addEventListener('click', () => { const [si, wi] = (b as HTMLElement).dataset.ocw!.split('.'); onContractDirect(+si, +wi); }));
     // The serial-number cell IS the remove control. On a device with hover (desktop) the
     // number morphs to × on row-hover and a click removes; on touch (no hover) the first tap

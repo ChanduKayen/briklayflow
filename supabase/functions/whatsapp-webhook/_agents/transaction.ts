@@ -254,7 +254,10 @@ export function buildPlan(
   const projGrounded = projectGroundedInMessage(ext.project, text)
   if (ext.project) {
     const pm = matchProject(ext.project, projects)
-    if (pm.band === 'auto') { projectId = pm.id; projectName = pm.name }
+    // Grounding gates BOTH branches: an auto-match to a site whose words aren't in the message is a
+    // context inference (or a carried-over project on a follow-up), not something the user said. Don't
+    // set it — a site never appears in the review unless it was actually named.
+    if (pm.band === 'auto' && projGrounded) { projectId = pm.id; projectName = pm.name }
     else if (projGrounded) projectSug = suggestionFrom(pm)   // ungrounded -> don't even suggest
   }
   // Trust a project only if it auto-matched a REAL one, or its words are grounded in the message.

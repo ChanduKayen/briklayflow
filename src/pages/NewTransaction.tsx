@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
@@ -10,6 +10,7 @@ import type { Session } from '@supabase/supabase-js';
 import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 import { useSnackbar } from '../components/Snackbar';
 import { useOrgId } from '../lib/auth/AuthProvider';
+import { loadMyWallet, loadWallets } from '../lib/walletApi';
 import { useUserProfile } from '../App';
 import { CostCodePicker } from '../components/CostCodePicker';
 import { GenHeadPicker } from '../components/GenHeadPicker';
@@ -643,6 +644,17 @@ export default function NewTransaction({ session: _session }: { session: Session
   const { show: showSnackbar } = useSnackbar();
   const orgId = useOrgId();
   const { data: _profile } = useUserProfile(_session.user.id);
+  // Site-cash wallet (docs/site-cash-wallet-spec.md §2.1-B): if the ENTRANT holds a wallet, New Transaction
+  // asks outright — Bank/Cash or your wallet. No silent default (a desk entrant may pay from either).
+  const { data: myWallet } = useQuery({
+    queryKey: ['my_wallet', orgId, _session.user.id],
+    queryFn: () => loadMyWallet(orgId!, _session.user.id),
+    enabled: !!orgId,
+  });
+  const [fundWallet, setFundWallet] = useState(false);
+  // Refilling a holder's wallet: paying a wallet-holder can BE a float (bank → their wallet), not a spend.
+  const { data: allWallets = [] } = useQuery({ queryKey: ['wallets', orgId], queryFn: () => loadWallets(orgId!), enabled: !!orgId });
+  const [topUp, setTopUp] = useState(false);
   const payeeRef = useRef<HTMLInputElement>(null);
   const stkDropRef = useRef<HTMLDivElement>(null);
 
@@ -676,6 +688,17 @@ export default function NewTransaction({ session: _session }: { session: Session
     queryKey: ['projects'],
     queryFn: async () => { const { data } = await supabase.from('projects').select('*'); return data as Project[]; },
   });
+
+  // Does the selected payee hold a wallet? If so, this payment can be a FLOAT that tops up their wallet.
+  const payeeName = stakeholders?.find((s) => s.stakeholder_id === stkId)?.name || '';
+  const payeeWallet = useMemo(() => {
+    if (!payeeName) return null;
+    const norm = (s: string) => s.trim().toLowerCase();
+    const p = norm(payeeName);
+    return allWallets.find((w) => norm(w.holderName) === p || norm(w.holderName).split(' ')[0] === p.split(' ')[0]) || null;
+  }, [payeeName, allWallets]);
+  // If the payee holds a wallet, DEFAULT to a refill (paying them = topping up their wallet); user can undo.
+  useEffect(() => { setTopUp(!!payeeWallet); }, [stkId, payeeWallet]);
 
   useEffect(() => {
     if (stakeholders && stakeholders.length > 0 && recentPayees.length === 0) {
@@ -917,11 +940,13 @@ export default function NewTransaction({ session: _session }: { session: Session
       // entries), created atomically via insert_split_transactions. Shared party/
       // date/mode/bill/remarks; the amount is divided per row, and each row carries
       // its own WO/PO + milestone link.
-      if (splitMode && !isClientReceipt) {
+      if (splitMode && !isClientReceipt && !(topUp && payeeWallet)) {
         const base = {
           stakeholder_id: stkId || null, date, payment_mode: mode,
           category: effectiveCategory, remarks: effectiveRemarks, bill_doc_url, proof_document_url,
           ai_flag_status: 'Clean', ai_flag_data: {}, org_id: orgId,
+          // a wallet spend split across sites tags every split row (§2.1-B)
+          ...(fundWallet && myWallet ? { wallet_id: myWallet.walletId, wallet_dir: 'out', is_transfer: false } : {}),
         };
         const baseTs = Date.now();
         const rnd = Math.random().toString(36).slice(2, 5).toUpperCase();
@@ -946,16 +971,25 @@ export default function NewTransaction({ session: _session }: { session: Session
       const aiFlagData: Record<string, unknown> = (purpose === 'weekly' && isWorkerPayee)
         ? { weekly_run: mondayOf(new Date(date)).toISOString().slice(0, 10) }
         : {};
+      // TOP-UP: paying a wallet-holder can BE a float (bank → their wallet) — no payee, no cost, no alloc.
+      const isTopUp = topUp && !!payeeWallet && !isClientReceipt;
+      // Otherwise, funded from the entrant's wallet → a wallet SPEND (draws the balance, still an expense).
+      const walletFields = isTopUp
+        ? { wallet_id: payeeWallet!.walletId, wallet_dir: 'in', is_transfer: true }
+        : (fundWallet && myWallet && !isClientReceipt)
+          ? { wallet_id: myWallet.walletId, wallet_dir: 'out', is_transfer: false }
+          : {};
       const payload = {
-        txn_id: txnId, stakeholder_id: stkId || null, date, total_amount: totalAmt,
+        txn_id: txnId, stakeholder_id: isTopUp ? null : (stkId || null), date, total_amount: totalAmt,
         payment_mode: mode,
-        category: effectiveCategory,
-        remarks: effectiveRemarks, bill_doc_url, proof_document_url,
+        category: isTopUp ? 'Site advance (float)' : effectiveCategory,
+        remarks: isTopUp ? (effectiveRemarks || `Wallet top-up · ${payeeWallet!.holderName}`) : effectiveRemarks, bill_doc_url, proof_document_url,
         ai_flag_status: 'Clean',
-        ai_flag_data: aiFlagData,
+        ai_flag_data: isTopUp ? { wallet_transfer: true } : aiFlagData,
         org_id: orgId,
+        ...walletFields,
       };
-      const mapped = effectiveAllocs.map((a) => {
+      const mapped = isTopUp ? [] : effectiveAllocs.map((a) => {
         if (isClientReceipt) {
           return { project_id: a.project_id, order_type: null, order_ref: null, milestone_id: null, allocated_amount: a.allocated_amount };
         }
@@ -984,6 +1018,7 @@ export default function NewTransaction({ session: _session }: { session: Session
       qc.invalidateQueries({ queryKey: ['ledger'] });
       qc.invalidateQueries({ queryKey: ['po_payment_totals'] });
       qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
+      if (fundWallet || topUp) { qc.invalidateQueries({ queryKey: ['wallets'] }); qc.invalidateQueries({ queryKey: ['my_wallet'] }); qc.invalidateQueries({ queryKey: ['wallet_ledger'] }); setFundWallet(false); setTopUp(false); }
       if (autoCloseWoId) autoCloseWOIfFullyPaid(autoCloseWoId, qc);
       const stk = stakeholders?.find((s) => s.stakeholder_id === stkId);
       if (stk) setRecentPayees((prev) => [{ id: stk.stakeholder_id, name: stk.name, type: stk.type }, ...prev.filter((p) => p.id !== stk.stakeholder_id)].slice(0, 5));
@@ -1785,6 +1820,42 @@ export default function NewTransaction({ session: _session }: { session: Session
                       ))}
                     </div>
                   </div>
+
+                  {/* Top up their wallet — the payee holds a wallet, so this payment can BE a float
+                      (bank → their wallet), not a spend to them. */}
+                  {payeeWallet && direction !== 'in' && (
+                    <button type="button" onClick={() => setTopUp(v => !v)}
+                      className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl transition-colors text-left"
+                      style={{ border: `1px solid ${topUp ? VOICE.out : VOICE.line}`, background: topUp ? VOICE.outWash : VOICE.surface }}>
+                      <span className="w-8 h-8 rounded-full grid place-items-center shrink-0" style={{ background: topUp ? VOICE.out : VOICE.field, color: topUp ? '#fff' : VOICE.system, fontSize: 15 }}>↑</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[13px] font-medium" style={{ color: VOICE.user }}>Top up {payeeWallet.holderName.split(' ')[0]}'s wallet</span>
+                        <span className="block text-[11.5px]" style={{ color: VOICE.system }}>{topUp ? 'Bank → wallet · site advance (not a payment to them)' : 'They hold a site-cash wallet — record this as a refill'}</span>
+                      </span>
+                      <span className="shrink-0 w-5 h-5 rounded-full grid place-items-center" style={{ border: `1.5px solid ${topUp ? VOICE.out : VOICE.line}`, background: topUp ? VOICE.out : 'transparent', color: '#fff', fontSize: 11 }}>{topUp ? '✓' : ''}</span>
+                    </button>
+                  )}
+
+                  {/* Paying from — only when the entrant holds a wallet, and only for money OUT. Hidden while
+                      topping up (a float is always bank → wallet). Explicit choice (spec §2.1-B). */}
+                  {myWallet && direction !== 'in' && !topUp && (
+                    <div>
+                      <label className="block text-[11px] font-medium text-on-surface-variant/60 mb-2">Paying from</label>
+                      <div className="flex rounded-xl overflow-hidden border" style={{ borderColor: VOICE.line }}>
+                        <button type="button" onClick={() => setFundWallet(false)}
+                          className="flex-1 py-2.5 text-[12px] font-semibold transition-colors"
+                          style={!fundWallet ? { background: VOICE.walnut, color: VOICE.ivory } : { background: VOICE.surface, color: VOICE.system }}>
+                          Bank / Cash
+                        </button>
+                        <button type="button" onClick={() => setFundWallet(true)}
+                          className="flex-1 py-2.5 text-[12px] font-semibold transition-colors"
+                          style={fundWallet ? { background: VOICE.walnut, color: VOICE.ivory, borderLeft: `1px solid ${VOICE.walnut}` } : { background: VOICE.surface, color: VOICE.system, borderLeft: `1px solid ${VOICE.line}` }}>
+                          My wallet · ₹{Math.round(myWallet.balance).toLocaleString('en-IN')}
+                        </button>
+                      </div>
+                      {fundWallet && <p className="text-[11px] mt-1.5" style={{ color: VOICE.system }}>Drawn from your site cash — it lowers your wallet balance.</p>}
+                    </div>
+                  )}
 
                 </div>
               </div>

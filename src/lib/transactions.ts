@@ -29,6 +29,21 @@ export function deriveDirection(txn: any): TxnDirection {
 }
 
 /**
+ * Spend direction — for the Transactions rollups only (what was actually spent). The wallet (site-cash)
+ * channel is money MOVING, not spending, until it's used (docs/site-cash-wallet-spec.md):
+ *   • a FLOAT (wallet_dir 'in') is a transfer bank→wallet — still the company's money → 'skip'.
+ *   • a RETURN (wallet_dir 'out', is_transfer) is a transfer wallet→bank → 'skip'.
+ *   • a wallet SPEND (wallet_dir 'out', not a transfer) IS the real expense → 'out'.
+ *   • everything else = the normal deriveDirection.
+ * So a float never inflates the "out" total (it isn't spent yet); the spend counts once, when it happens.
+ * This is ONLY for aggregate totals; a row's own display direction still uses deriveDirection.
+ */
+export function cashDirection(txn: any): 'in' | 'out' | 'skip' {
+  if (txn?.wallet_dir) return (txn.wallet_dir === 'out' && !txn.is_transfer) ? 'out' : 'skip';
+  return deriveDirection(txn);
+}
+
+/**
  * Orphaned money: an outgoing transaction not fully anchored to a WO/PO.
  * Client receipts (money in) legitimately carry no WO/PO and are excluded.
  * An out txn is "not linked" if it has zero allocations, or ANY allocation
@@ -71,9 +86,20 @@ export function generalExpenseLabel(txn: any): string {
  * isn't a general expense -> the party was removed.
  */
 export function payeeLabel(txn: any): string {
+  // A wallet transfer (float in / return out) names the wallet it moved to/from, never a payee.
+  if (txn?.wallet_dir && txn?.is_transfer) return txn?.wallets?.holder_name ? `${txn.wallets.holder_name}'s wallet` : 'Wallet';
   if (txn?.stakeholders?.name) return txn.stakeholders.name;
   if (!txn?.stakeholder_id) return isGeneralExpense(txn) ? generalExpenseLabel(txn) : '(removed contact)';
   return 'Unknown';
+}
+
+/** True for a wallet float/return — a transfer, not a spend (excluded from cost, marked in the list). */
+export function isWalletTransfer(txn: any): boolean {
+  return !!(txn?.wallet_dir && txn?.is_transfer);
+}
+/** True for a spend funded from a wallet (still a real expense, but drawn from site cash). */
+export function isWalletSpend(txn: any): boolean {
+  return txn?.wallet_dir === 'out' && !txn?.is_transfer;
 }
 
 function escapeRegExp(s: string): string {
