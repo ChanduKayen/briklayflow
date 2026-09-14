@@ -4,13 +4,21 @@
 // can wait. Actions run through the code that already owns them — fileRoughEntry /
 // fileRoughEntrySplit / rejectRoughEntry / createParty — and the AI's guessed ids go through
 // resolveEntry, the same check the desktop card makes.
+//
+// Site cash rides with it (docs/site-cash-wallet-spec.md). Two facts change where the money comes
+// from and where it goes, and the desktop editor has always shown both: a payment TO a wallet-holder
+// is usually a refill of their site cash (bank → their wallet, no site, no cost), and a payment sent
+// BY a wallet-holder is usually drawn from the cash already in their hand. Filing applied both
+// silently on the phone; now the card says so, and lets either be overruled before it files.
 import { useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { RoughEntry } from '../../types';
 import { fileRoughEntry, fileRoughEntrySplit, rejectRoughEntry, createParty, errMessage, type ProjectSplit } from './fileEntry';
 import { resolveEntry, type ProjectLite, type StakeholderLite } from './resolveEntry';
 import { BillReviewCard } from './BillReviewCard';
 import { NatureChip, natureOf } from './atoms';
 import DragSheet from '../DragSheet';
+import { loadWallets, walletForSender, type WalletBalance } from '../../lib/walletApi';
 
 const CSS = `
 .rvm{--tint:#C4502B;--tint-press:#A8431F;--ink:#1B1713;--ink-2:#87807A;--ink-3:#B5AEA7;
@@ -102,6 +110,31 @@ const CSS = `
 .rvm .notice i{width:6px;height:6px;border-radius:50%;flex-shrink:0;background:var(--ink-3)}
 .rvm .notice.newp i{background:var(--warn)}
 .rvm .notice b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+
+/* ---------- site cash: the refill tick and the funding toggle ---------- */
+.rvm .wal{margin-top:12px;border:1px solid var(--hair);border-radius:16px;overflow:hidden;background:var(--card)}
+.rvm .walrow{display:flex;align-items:center;gap:12px;width:100%;text-align:left;
+  padding:13px 14px;border:0;background:none;color:inherit;font:inherit}
+.rvm .walrow+.walrow{border-top:1px solid var(--hair)}
+.rvm .walrow .wl{flex:1;min-width:0}
+.rvm .walrow .wt{display:block;font-size:13.5px;font-weight:600;letter-spacing:-.01em}
+.rvm .walrow .wt b{font-weight:800}
+.rvm .walrow .ws{display:block;font-size:11.5px;line-height:1.45;color:var(--ink-2);margin-top:2px;
+  font-variant-numeric:tabular-nums}
+.rvm button.walrow:active{background:rgba(27,23,19,.04)}
+.rvm .walrow.on{background:rgba(196,80,43,.07)}
+.rvm .wck{flex-shrink:0;width:23px;height:23px;border-radius:7px;display:grid;place-items:center;
+  border:1.5px solid var(--hair);color:#fff;font-size:13px;line-height:1;
+  transition:background .18s var(--ease),border-color .18s var(--ease)}
+.rvm .walrow.on .wck{background:var(--tint);border-color:var(--tint)}
+.rvm .walrow.fund{flex-direction:column;align-items:stretch}
+.rvm .seg{flex-shrink:0;display:flex;border:1px solid var(--hair);border-radius:10px;overflow:hidden}
+.rvm .walrow.fund .seg{align-self:flex-start;margin-top:10px}
+.rvm .walrow.fund .seg button{padding:8px 16px;font-size:12px}
+.rvm .seg button{border:0;background:var(--bg);color:var(--ink-2);cursor:pointer;
+  padding:7px 11px;font-size:11.5px;font-weight:700;letter-spacing:-.01em;transition:background .15s,color .15s}
+.rvm .seg button+button{border-left:1px solid var(--hair)}
+.rvm .seg button.on{background:var(--ink);color:#fff}
 
 .rvm .splits{margin-top:12px;background:var(--bg);border-radius:14px;padding:4px 14px;cursor:pointer;
   width:100%;border:0;text-align:left;color:inherit;transition:transform .15s var(--spring)}
@@ -230,6 +263,8 @@ const CSS = `
 `;
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
+/** People are called by their first name on a card this small. */
+const first = (n: string) => (n || '').trim().split(/\s+/)[0] || 'They';
 const CHEV = <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>;
 
 /** A card's local edits — the list never writes to the row until it is filed. */
@@ -241,6 +276,10 @@ export interface Draft {
   description: string;
   /** built in the split sheet; the extractor produces no split of its own */
   split: { payeeId: string | null; payeeName: string; projectId: string; amount: number }[] | null;
+  /** Site cash. null = leave it as it stands — refill if the payee holds a wallet, drawn from the
+   *  sender's wallet if theirs holds money. A tap here is the owner overruling that. */
+  topUp: boolean | null;
+  funding: 'wallet' | 'bank' | null;
 }
 
 export interface ReviewMobileProps {
@@ -258,13 +297,18 @@ export interface ReviewMobileProps {
 
 /** One entry's card. Its own open/closed state lives here so a long list stays independent. */
 function Card({
-  entry, draft, projects, stakeholders, busy, onPatch, onMenu, onSplit, onFile, register,
+  entry, draft, projects, stakeholders, busy, payeeWallet, senderWallet,
+  onPatch, onMenu, onSplit, onFile, register,
 }: {
   entry: RoughEntry;
   draft: Draft;
   projects: ProjectLite[];
   stakeholders: StakeholderLite[];
   busy: boolean;
+  /** the wallet the money would land in — the payee holds one */
+  payeeWallet: WalletBalance | null;
+  /** the wallet the money would come out of — whoever sent the message holds one */
+  senderWallet: WalletBalance | null;
   onPatch: (d: Partial<Draft>) => void;
   onMenu: () => void;
   onSplit: () => void;
@@ -277,6 +321,14 @@ function Card({
   const [flash, setFlash] = useState<null | 'to' | 'site'>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const ddRef = useRef<HTMLInputElement>(null);
+
+  // A refill is the default when the payee holds a wallet — paying a supervisor is nearly always
+  // site cash for him, not money he keeps. The tick unmakes it.
+  const refill = !!payeeWallet && (draft.topUp ?? true) && !draft.split;
+  // And a spend sent by a wallet-holder draws that wallet, so long as it has money in it.
+  const fromWallet = draft.funding === 'wallet' ? true
+    : draft.funding === 'bank' ? false
+    : !!(senderWallet && senderWallet.balance > 0);
 
   const projectName = draft.projectId ? projects.find(x => x.project_id === draft.projectId)?.name ?? null : null;
   const isNewParty = !draft.payeeId && !!draft.payeeName?.trim();
@@ -384,12 +436,12 @@ function Card({
               </div>
             </div>
 
-            <button type="button" className={`kv tap${sug === 'site' ? ' open' : ''}${flash === 'site' ? ' flash' : ''}`} onClick={() => toggleSug('site')}>
+            {!refill && <button type="button" className={`kv tap${sug === 'site' ? ' open' : ''}${flash === 'site' ? ' flash' : ''}`} onClick={() => toggleSug('site')}>
               <div className="k">Site</div>
               <div className={`v${projectName ? '' : ' dim'}`}>{projectName || projectRaw || 'Pick a site'}</div>
               <span className="chev">{CHEV}</span>
-            </button>
-            <div className={`sug${sug === 'site' ? ' open' : ''}`}>
+            </button>}
+            <div className={`sug${sug === 'site' && !refill ? ' open' : ''}`}>
               <div className="sug-w">
                 <div className="ddlist">
                   {projects.map(s => (
@@ -403,6 +455,41 @@ function Card({
             </div>
 
             <div className="kv"><div className="k">For</div><div className="v" style={{ fontWeight: 500 }}>{draft.description || '—'}</div></div>
+          </div>
+        )}
+
+        {/* Site cash — where this money comes from, and whether it is a spend at all. Both read the
+            way the desktop editor asks them, in the phone's own card. */}
+        {!draft.split && (payeeWallet || senderWallet) && (
+          <div className="wal">
+            {payeeWallet && (
+              <button type="button" className={`walrow${refill ? ' on' : ''}`}
+                onClick={() => onPatch({ topUp: !refill })}>
+                <span className="wl">
+                  <span className="wt">Refilling <b>{first(payeeWallet.holderName)}’s wallet</b></span>
+                  <span className="ws">{refill
+                    ? `A site advance, not a spend · ${inr(payeeWallet.balance)} in it now`
+                    : `A normal payment to them · their wallet holds ${inr(payeeWallet.balance)}`}</span>
+                </span>
+                <span className="wck">{refill ? '✓' : ''}</span>
+              </button>
+            )}
+            {senderWallet && !refill && (
+              <div className="walrow fund">
+                <span className="wl">
+                  <span className="wt">{first(entry.sender_name || 'They')} paid from {fromWallet ? 'their wallet' : 'the company bank'}</span>
+                  <span className="ws">{fromWallet
+                    ? `${inr(senderWallet.balance)} in hand${senderWallet.balance >= draft.amount
+                        ? ` · ${inr(senderWallet.balance - draft.amount)} after this`
+                        : ` · ${inr(draft.amount - senderWallet.balance)} short of this`}`
+                    : `Their wallet holds ${inr(senderWallet.balance)} · untouched by this`}</span>
+                </span>
+                <span className="seg">
+                  <button type="button" className={fromWallet ? 'on' : ''} onClick={() => onPatch({ funding: 'wallet' })}>Wallet</button>
+                  <button type="button" className={!fromWallet ? 'on' : ''} onClick={() => onPatch({ funding: 'bank' })}>Bank</button>
+                </span>
+              </div>
+            )}
           </div>
         )}
 
@@ -427,10 +514,10 @@ function Card({
           <button type="button" className="cta" disabled={busy} onClick={() => onFile(nudge)}>
             {draft.split ? `File ${draft.split.length} entries` : 'File it'}
           </button>
-          <button type="button" className={`splitbtn${draft.split ? ' has' : ''}`} onClick={onSplit}>
+          {!refill && <button type="button" className={`splitbtn${draft.split ? ' has' : ''}`} onClick={onSplit}>
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5" /><line x1="12" y1="5" x2="12" y2="19" /></svg>
             Split
-          </button>
+          </button>}
         </div>
       </div>
     </div>
@@ -448,17 +535,62 @@ export default function ReviewMobile(p: ReviewMobileProps) {
   const [busy, setBusy] = useState(false);
   const [acted, setActed] = useState(false);
   const wraps = useRef<Record<string, HTMLDivElement | null>>({});
+  const qc = useQueryClient();
 
   const live = useMemo(() => p.entries.filter(e => !gone.includes(e.id)), [p.entries, gone]);
+
+  // ── site cash ───────────────────────────────────────────────────────────────
+  // Every wallet in the org (to know whether the PAYEE holds one), and the wallet of each distinct
+  // sender (to know what the money would be drawn from). Senders repeat across a deck, so they are
+  // resolved once each, not once per card.
+  const { data: wallets = [] } = useQuery({
+    queryKey: ['wallets', p.orgId],
+    queryFn: () => loadWallets(p.orgId),
+    enabled: !!p.orgId,
+  });
+  const senderNums = useMemo(
+    () => [...new Set(p.entries.map(e => e.sender_number).filter(Boolean) as string[])].sort(),
+    [p.entries]);
+  const { data: senderWallets = {} } = useQuery<Record<string, WalletBalance | null>>({
+    queryKey: ['sender_wallets', p.orgId, senderNums],
+    queryFn: async () => Object.fromEntries(await Promise.all(
+      senderNums.map(async n => [n, await walletForSender(p.orgId, n).catch(() => null)] as const))),
+    enabled: !!p.orgId && senderNums.length > 0,
+  });
+  const senderWalletOf = (e: RoughEntry) => (e.sender_number ? senderWallets[e.sender_number] ?? null : null);
+  // The payee's wallet, by name — the same match the desktop editor makes, minus any wallet that
+  // has been retired.
+  const payeeWalletOf = (d: Draft): WalletBalance | null => {
+    const norm = (x: string) => (x || '').trim().toLowerCase();
+    const nm = norm((d.payeeId ? p.stakeholders.find(x => x.stakeholder_id === d.payeeId)?.name : null) ?? d.payeeName ?? '');
+    if (!nm) return null;
+    return wallets.find(w => w.active && (norm(w.holderName) === nm || norm(w.holderName).split(' ')[0] === nm.split(' ')[0])) ?? null;
+  };
+  /** What this entry would do as it stands: a refill, and/or a spend out of the sender's wallet. */
+  const walletPlan = (e: RoughEntry, d: Draft) => {
+    const payeeWallet = payeeWalletOf(d), senderWallet = senderWalletOf(e);
+    const refill = !!payeeWallet && (d.topUp ?? true) && !d.split;
+    const fromWallet = d.funding === 'wallet' ? true : d.funding === 'bank' ? false : !!(senderWallet && senderWallet.balance > 0);
+    return {
+      payeeWallet, senderWallet, refill,
+      topUpWalletId: refill ? payeeWallet!.walletId : null,
+      funding: senderWallet ? (fromWallet ? 'wallet' as const : 'bank' as const) : undefined,
+    };
+  };
 
   const draftOf = (e: RoughEntry): Draft => {
     const d = drafts[e.id];
     if (d) return d;
     const r = resolveEntry(e, p.stakeholders, projects);
-    return { payeeId: r.payeeId, payeeName: r.payeeName, projectId: r.projectId, amount: r.amount, description: r.description, split: null };
+    return { payeeId: r.payeeId, payeeName: r.payeeName, projectId: r.projectId, amount: r.amount, description: r.description, split: null, topUp: null, funding: null };
   };
+  // Naming a different payee un-answers the refill question: it was answered about someone else.
   const patch = (e: RoughEntry, d: Partial<Draft>) =>
-    setDrafts(s => ({ ...s, [e.id]: { ...draftOf(e), ...d } }));
+    setDrafts(s => {
+      const was = draftOf(e);
+      const renamed = ('payeeId' in d || 'payeeName' in d) && (d.payeeId !== was.payeeId || d.payeeName !== was.payeeName);
+      return { ...s, [e.id]: { ...was, ...(renamed && !('topUp' in d) ? { topUp: null } : null), ...d } };
+    });
 
   const active = activeId ? live.find(e => e.id === activeId) ?? null : null;
   const activeDraft = active ? draftOf(active) : null;
@@ -493,9 +625,11 @@ export default function ReviewMobile(p: ReviewMobileProps) {
   const doFile = async (e: RoughEntry, nudge: (which: 'to' | 'site') => void) => {
     const d = draftOf(e);
     if (busy) return;
+    const w = walletPlan(e, d);
     if (!d.split) {
       if (!d.payeeId && !d.payeeName?.trim()) { nudge('to'); return; }
-      if (!d.projectId) { nudge('site'); return; }
+      // A refill is bank → their wallet. It buys nothing yet, so there is no site to ask for.
+      if (!d.projectId && !w.refill) { nudge('site'); return; }
       if (!d.payeeId) { setActiveId(e.id); setNpName(d.payeeName ?? ''); setSheet('np'); return; }
     }
     setBusy(true);
@@ -505,11 +639,21 @@ export default function ReviewMobile(p: ReviewMobileProps) {
           projectId: s.projectId, amount: s.amount, payeeId: s.payeeId,
           description: autoDesc(d, s.projectId, true),
         }));
-        await fileRoughEntrySplit(e, p.orgId, { payeeId: d.payeeId || '', amount: d.amount, description: d.description }, splits);
+        await fileRoughEntrySplit(e, p.orgId, { payeeId: d.payeeId || '', amount: d.amount, description: d.description, funding: w.funding }, splits);
       } else {
-        await fileRoughEntry(e, p.orgId, { payeeId: d.payeeId || '', projectId: d.projectId || '', amount: d.amount, description: d.description });
+        await fileRoughEntry(e, p.orgId, {
+          payeeId: d.payeeId || '', projectId: d.projectId || '', amount: d.amount, description: d.description,
+          funding: w.funding, topUpWalletId: w.topUpWalletId,
+        });
       }
       setFiledSum(s => s + d.amount);
+      // A refill lands IN a wallet, a wallet spend goes OUT of one — either way the balances the
+      // card just quoted are stale the moment it files.
+      if (w.topUpWalletId || w.senderWallet) {
+        qc.invalidateQueries({ queryKey: ['wallets'] });
+        qc.invalidateQueries({ queryKey: ['wallet_ledger'] });
+        qc.invalidateQueries({ queryKey: ['sender_wallets'] });
+      }
       leave(e.id, 'file');
       p.onChanged();
     } catch (err) {
@@ -632,6 +776,8 @@ export default function ReviewMobile(p: ReviewMobileProps) {
               projects={projects}
               stakeholders={p.stakeholders}
               busy={busy}
+              payeeWallet={payeeWalletOf(draftOf(e))}
+              senderWallet={senderWalletOf(e)}
               onPatch={d => patch(e, d)}
               onMenu={() => { setActiveId(e.id); setSheet('menu'); }}
               onSplit={() => openSplit(e)}
