@@ -793,16 +793,20 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
   // THE REMARK IS NOT MANDATORY. Payee + site + amount is a complete transaction — who, where, how
   // much. The remark is a note ON it, and a ledger that refuses to record a payment because nobody
   // typed "cement" is a ledger arguing with its own owner.
-  const mandatoryFilled = (isGeneral || !!payeeId) && !!amount && Number(amount) > 0 && !!projectId;
+  // A wallet REFILL is a float (bank → the payee's wallet) — it has no site, so the project requirement is
+  // dropped entirely in that case.
+  const topUpNow = topUp && !!payeeWallet;
+  const projectOk = topUpNow || !!projectId;
+  const mandatoryFilled = (isGeneral || !!payeeId) && !!amount && Number(amount) > 0 && projectOk;
   // Filing is allowed either with a single project OR a valid split across sites. A general
   // expense needs no party — its head stands in for the payee.
-  const canFile = (isGeneral || !!payeeId) && splitTotal > 0 && (splitMode ? splitValid : !!projectId);
+  const canFile = (isGeneral || !!payeeId) && splitTotal > 0 && (splitMode ? splitValid : projectOk);
   const missingPayee = !payeeId && !isGeneral;
   const missingAmount = !amount || Number(amount) <= 0;
   const missingDescription = !description.trim();
-  const missingProject = !projectId;
+  const missingProject = !projectId && !topUpNow;
   const payeeUnmatched = !payeeId && !isGeneral && !!(ai.payee_unmatched || ai.payee_name || ai.payee_raw);
-  const projectUnmatched = !projectId && !!ai.project_unmatched;
+  const projectUnmatched = !projectId && !topUpNow && !!ai.project_unmatched;
 
   // ── Auto-focus / auto-advance (copied from NewTransaction) ──────────────────
   // Focus SYNCHRONOUSLY inside the tap so the cursor/keyboard activates on mobile.
@@ -822,7 +826,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
   const payeeResolved = isGeneral || (!!payeeId && (payeeState === 'A' || payeeState === 'confirmed'));
   const descriptionResolved = !!description.trim();
   // In split mode "project" is resolved once the split is valid (sites chosen, amounts sum to total).
-  const projectResolved = splitMode ? splitValid : !!projectId;
+  const projectResolved = splitMode ? splitValid : projectOk;
 
   type GapKey = 'amount' | 'payee' | 'description' | 'project';
   const fieldEl = (k: GapKey): HTMLElement | null =>

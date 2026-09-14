@@ -699,6 +699,8 @@ export default function NewTransaction({ session: _session }: { session: Session
   }, [payeeName, allWallets]);
   // If the payee holds a wallet, DEFAULT to a refill (paying them = topping up their wallet); user can undo.
   useEffect(() => { setTopUp(!!payeeWallet); }, [stkId, payeeWallet]);
+  // A refill is a float (bank → the payee's wallet) — no site, so the project requirement is dropped.
+  const isTopUpNow = topUp && !!payeeWallet;
 
   useEffect(() => {
     if (stakeholders && stakeholders.length > 0 && recentPayees.length === 0) {
@@ -1231,7 +1233,7 @@ export default function NewTransaction({ session: _session }: { session: Session
     const firstMissing: HTMLElement | null = (() => {
       if (txnType !== 'expense' && !stkId) return payeeRef.current;
       if (!totalAmt || totalAmt <= 0) return document.getElementById('txn-amount-input');
-      if (effectiveAllocs.some((a) => !a.project_id)) return document.getElementById('txn-project-0');
+      if (!isTopUpNow && effectiveAllocs.some((a) => !a.project_id)) return document.getElementById('txn-project-0');
       if (txnType !== 'client_receipt' && !remarks.trim()) return document.getElementById('txn-remarks');
       return null;
     })();
@@ -1252,7 +1254,7 @@ export default function NewTransaction({ session: _session }: { session: Session
     // General expenses carry no payee — only amount/remarks/project are mandatory.
     const payeeRequired = txnType !== 'expense';
     if ((payeeRequired && !stkId) || !totalAmt || totalAmt <= 0 || !remarks.trim() || isOver) return;
-    if (effectiveAllocs.some((a) => !a.project_id)) return;
+    if (!isTopUpNow && effectiveAllocs.some((a) => !a.project_id)) return;
     if (splitMode && remaining !== 0) return;   // splits must sum EXACTLY to the total
 
     // Bug 6: WO linked at header level but has phases — user must select a specific phase
@@ -1302,7 +1304,7 @@ export default function NewTransaction({ session: _session }: { session: Session
   const missingPayee = saveAttempted && !stkId && txnType !== 'expense';
   const missingAmount = saveAttempted && totalAmt <= 0;
   const missingRemarks = saveAttempted && !remarks.trim() && txnType !== 'client_receipt';
-  const missingProject = saveAttempted && effectiveAllocs.some((a) => !a.project_id);
+  const missingProject = saveAttempted && !isTopUpNow && effectiveAllocs.some((a) => !a.project_id);
 
   // Smart CTA: the next still-empty MANDATORY field, in form order. While a gap remains the
   // primary button names it ("Enter the amount" → jumps & focuses it); once none remain it
@@ -1311,7 +1313,7 @@ export default function NewTransaction({ session: _session }: { session: Session
     if (!totalAmt || totalAmt <= 0) return { label: 'Enter the amount', el: () => document.getElementById('txn-amount-input') };
     if (txnType !== 'expense' && !stkId) return { label: txnType === 'client_receipt' ? 'Who is paying?' : 'Add the payee', el: () => payeeRef.current };
     if (txnType !== 'client_receipt' && !remarks.trim()) return { label: 'Add a remark', el: () => document.getElementById('txn-remarks') };
-    if (effectiveAllocs.some((a) => !a.project_id)) return { label: 'Choose a project', el: () => document.getElementById('txn-project-0') };
+    if (!isTopUpNow && effectiveAllocs.some((a) => !a.project_id)) return { label: 'Choose a project', el: () => document.getElementById('txn-project-0') };
     return null;
   })();
   // Focus SYNCHRONOUSLY inside the tap so the cursor/keyboard activates on mobile (a deferred
@@ -1348,7 +1350,7 @@ export default function NewTransaction({ session: _session }: { session: Session
       amount: !totalAmt || totalAmt <= 0,
       payee: txnType !== 'expense' && !stkId,
       remark: txnType !== 'client_receipt' && !remarks.trim(),
-      project: effectiveAllocs.some((a) => !a.project_id),
+      project: !isTopUpNow && effectiveAllocs.some((a) => !a.project_id),
     };
     for (const k of ['amount', 'payee', 'remark', 'project'] as const) {
       if (k !== justFilled && empty[k]) { bringIntoFrame(fieldEl(k)); return; }
