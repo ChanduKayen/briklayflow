@@ -8,12 +8,14 @@
  * Vendor and site are BOTH required; a payment is optional and offered right here.
  */
 import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Check, X } from 'lucide-react';
 import type { RoughEntry } from '../../types';
 import type { StakeholderLite, ProjectLite } from './ReviewCard';
 import { V, font, nums, display, mono } from './tokens';
 import { WhatsAppGlyph, NatureChip } from './atoms';
 import { fileBill, createParty, errMessage } from './fileEntry';
+import { walletForSender } from '../../lib/walletApi';
 import { useSignedDocUrl } from '../../lib/storage';
 import { SearchPicker, type PickerItem } from './SearchPicker';
 import { matchPayee } from '../../lib/payeeSearch';
@@ -65,6 +67,10 @@ export function BillReviewCard({
   const [paidOn, setPaidOn] = useState<boolean>(!!capturedPaid);           // "was this bill paid?"
   const [paidAmt, setPaidAmt] = useState<string>(capturedPaid != null ? String(capturedPaid) : '');
   const [busy, setBusy] = useState(false);
+  // The ride-along payment's source: if the SENDER holds a wallet, it draws his site cash by default.
+  const { data: senderWallet } = useQuery({ queryKey: ['sender_wallet', orgId, entry.sender_number], queryFn: () => walletForSender(orgId, entry.sender_number), enabled: !!orgId && !!entry.sender_number });
+  const [billFunding, setBillFunding] = useState<'wallet' | 'bank' | null>(null);
+  const fromWallet = billFunding === 'wallet' ? true : billFunding === 'bank' ? false : !!(senderWallet && senderWallet.balance > 0);
   const [msgOpen, setMsgOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);   // lift the card above its neighbours while a list is open
 
@@ -106,7 +112,7 @@ export function BillReviewCard({
     if (!canSave) { onError(whatsMissing()); return; }
     setBusy(true);
     try {
-      await fileBill(entry, orgId, { vendorId, projectId, amount: total, paidAmount: effectivePaid });
+      await fileBill(entry, orgId, { vendorId, projectId, amount: total, paidAmount: effectivePaid, funding: (effectivePaid && senderWallet) ? (fromWallet ? 'wallet' : 'bank') : undefined });
       onFiled();
     } catch (e) { onError(errMessage(e, 'Could not save the bill')); }
     finally { setBusy(false); }
@@ -217,6 +223,16 @@ export function BillReviewCard({
               <span style={{ ...font, fontSize: 11, color: V.sys, display: 'block', marginTop: 4 }}>Partial — {'₹' + inr(total - paidVal)} will stay unpaid on the bill.</span>
             )}
           </label>
+        )}
+        {/* Funding source — only when a wallet-holding sender pays a bill; draws their site cash by default. */}
+        {paidOn && senderWallet && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 8 }}>
+            <span style={{ ...font, fontSize: 12.5, color: V.sys }}>Paid from <b style={{ color: V.ink }}>{fromWallet ? `${senderWallet.holderName.split(' ')[0]}'s wallet` : 'company bank'}</b></span>
+            <div style={{ display: 'flex', border: `1px solid ${V.line}`, borderRadius: 8, overflow: 'hidden' }}>
+              <button type="button" onClick={() => setBillFunding('wallet')} style={{ ...font, fontSize: 11, fontWeight: 600, padding: '4px 10px', border: 'none', cursor: 'pointer', background: fromWallet ? V.terra : V.surface, color: fromWallet ? '#fff' : V.sys }}>Wallet</button>
+              <button type="button" onClick={() => setBillFunding('bank')} style={{ ...font, fontSize: 11, fontWeight: 600, padding: '4px 10px', border: 'none', borderLeft: `1px solid ${V.line}`, cursor: 'pointer', background: !fromWallet ? V.terra : V.surface, color: !fromWallet ? '#fff' : V.sys }}>Bank</button>
+            </div>
+          </div>
         )}
       </div>
 

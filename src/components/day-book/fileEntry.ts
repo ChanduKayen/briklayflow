@@ -316,6 +316,7 @@ export interface ResolvedBill {
   projectId: string | null;     // optional site
   amount: number;               // the bill total
   paidAmount?: number | null;   // set only when a payment rides with the bill
+  funding?: 'wallet' | 'bank';  // the ride-along payment's source; undefined → auto (sender's wallet)
 }
 
 const BILL_MODE: Record<string, typeof PAYMENT_MODES[number]> = { cash: 'Cash', upi: 'UPI', bank: 'NEFT' };
@@ -342,6 +343,12 @@ export async function fileBill(entry: RoughEntry, orgId: string, resolved: Resol
   if (paid) {
     txnId = genTxnId();
     const mode = BILL_MODE[String(ai?.payment?.mode ?? '').toLowerCase()] ?? 'Cash';
+    // The ride-along payment follows the wallet rule too: a wallet-holding sender's bill payment draws
+    // his site cash (settles the bill AND lowers his wallet) — unless overridden to bank, and only if the
+    // wallet holds money. Same auto-default as a plain Day Book spend.
+    const w = resolved.funding === 'bank' ? null : await walletForSender(orgId, entry.sender_number).catch(() => null);
+    const wallet = w && (resolved.funding === 'wallet' || w.balance > 0) ? w : null;
+    const walletFields = wallet ? { wallet_id: wallet.walletId, wallet_dir: 'out', is_transfer: false } : {};
     const payload = {
       txn_id: txnId, stakeholder_id: resolved.vendorId,
       // The PAYMENT happened today — the bill may be past-dated, but the transaction that records paying it
@@ -354,6 +361,7 @@ export async function fileBill(entry: RoughEntry, orgId: string, resolved: Resol
       // txn doesn't double-show the bill as a payment proof (and so deleting the bill fully detaches it).
       bill_doc_url: null, proof_document_url: null,
       ai_flag_status: 'Clean', ai_flag_data: {}, org_id: orgId,
+      ...walletFields,
     };
     const allocations = [{
       project_id: resolved.projectId, order_type: null, order_ref: null,

@@ -1,7 +1,7 @@
 # Graph Report - Briklay Fly  (2026-09-14)
 
 ## Corpus Check
-- 835 files · ~1,502,991 words
+- 835 files · ~1,503,071 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
