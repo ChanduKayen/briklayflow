@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSearchScope } from '../components/search/searchScope';
 import SearchBar from '../components/search/SearchBar';
 import { useSettleScroll } from '../lib/settleScroll';
+import { useLongPress } from '../lib/useLongPress';
 import PartyFilterChip from '../components/search/PartyFilterChip';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
@@ -101,6 +102,8 @@ type EntryProps = {
   selectionMode: boolean;
   sumSelected: boolean;
   onRowClick: () => void;
+  /** A finger held on the row — on a phone this is how a selection starts. */
+  onLongPress?: () => void;
   onToggleSelect: (e: MouseEvent) => void;
   onAnchorClick: (e: MouseEvent) => void;
   onAnchorHover?: () => void;
@@ -116,23 +119,34 @@ function EntryRow(p: EntryProps) {
   // The press is toggled by hand rather than left to :active — iOS never gives :active
   // to a plain div — and the contact point is written onto the element so the tint
   // blooms from under the thumb instead of from the middle of the row.
+  // Hold a row and the list turns into a set of things to choose from (useLongPress). A mouse
+  // never starts that clock — it has the hover checkbox already.
+  const hold = useLongPress(p.onLongPress && ((el) => {
+    el.classList.remove('is-press');
+    navigator.vibrate?.(12);                          // the little knock that says it took
+    p.onLongPress!();
+  }));
   const press = (e: PointerEvent<HTMLElement>) => {
     const el = e.currentTarget;
     const r = el.getBoundingClientRect();
     el.style.setProperty('--px', `${e.clientX - r.left}px`);
     el.style.setProperty('--py', `${e.clientY - r.top}px`);
     el.classList.add('is-press');
+    hold.down(e);
   };
-  const unpress = (e: PointerEvent<HTMLElement>) => e.currentTarget.classList.remove('is-press');
+  const unpress = (e: PointerEvent<HTMLElement>) => { hold.cancel(); e.currentTarget.classList.remove('is-press'); };
   return (
     <div
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      onClick={p.onRowClick}
+      onClick={() => { if (hold.swallowsClick()) return; p.onRowClick(); }}
       onPointerDown={press}
+      onPointerMove={hold.move}
       onPointerUp={unpress}
       onPointerCancel={unpress}
       onPointerLeave={unpress}
+      // The system's own long-press menu ("Copy") would land on top of the selection.
+      onContextMenu={(e) => { if (p.onLongPress) e.preventDefault(); }}
       className="bk-ledger-row rounded-xl relative cursor-pointer"
       style={{
         background: p.sumSelected ? V.terraWash : hover ? V.field : 'transparent',
@@ -1147,6 +1161,11 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   const toggleTxn = (id: string) => {
     setSelectedTxnIds(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   };
+  /** A held row joins the selection — holding never takes one back out (the tap does that). */
+  const holdTxn = (id: string) => setSelectedTxnIds(prev => prev.has(id) ? prev : new Set(prev).add(id));
+  // On a phone, once rows are being chosen a tap chooses one rather than opening it. The list stays
+  // that way until the last tick comes off or Cancel is pressed — nothing else drops out of it.
+  const choosing = isPhone && selectedCount > 0;
   // Select-all works on everything the current filters show (not just the loaded page).
   const allFilteredSelected = filteredTransactions.length > 0 && filteredTransactions.every(t => selectedTxnIds.has(t.txn_id));
   const selectAllFiltered = () => setSelectedTxnIds(allFilteredSelected ? new Set() : new Set(filteredTransactions.map(t => t.txn_id)));
@@ -1622,7 +1641,8 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                         selectionMode={selectedCount > 0}
                         sumSelected={sumSel.has(txn.txn_id)}
                         anchorNode={anchorNode}
-                        onRowClick={() => navigate(`/ledger/${txn.txn_id}`)}
+                        onRowClick={() => { if (choosing) toggleTxn(txn.txn_id); else navigate(`/ledger/${txn.txn_id}`); }}
+                        onLongPress={isPhone ? () => holdTxn(txn.txn_id) : undefined}
                         onToggleSelect={(e) => { e.stopPropagation(); toggleTxn(txn.txn_id); }}
                         onAnchorClick={() => {
                           // A linked WO/PO chip opens that order's card; CLIENT/unlinked
@@ -1771,7 +1791,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
 
       {/* bulk action bar */}
       {selectedCount > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 z-50 flex justify-center pb-4 px-4 pointer-events-none">
+        <div className="bk-bulkbar fixed bottom-0 left-0 right-0 z-50 flex justify-center pb-4 px-4 pointer-events-none">
           <div className="pointer-events-auto bg-on-surface/95 backdrop-blur-sm text-surface rounded-2xl shadow-2xl px-5 py-3 flex items-center gap-3 flex-wrap animate-in slide-in-from-bottom-4 duration-200">
             {/* select-all: a checkbox that covers the WHOLE filtered set (every matching row, on-screen or
                 not) — checked when all are in, a dash when only some are. Only ever seen here, i.e. once a

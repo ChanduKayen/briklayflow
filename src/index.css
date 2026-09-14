@@ -243,6 +243,22 @@ html, body {
 
   /* A phone row is one target: the transaction. The payee's ledger link is handed over
      only on a desktop, so the name here is plain text with nothing to aim at. */
+
+  /* A long press on a row starts a selection, so the row must not hand that same press to
+     the system first: no copy callout, no blue text selection, no image drag. */
+  .bk-ledger-row {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}
+
+/* The bulk bar clears the floating nav capsule on a phone (bottom:14 + ~58px), and sits
+   where any other page-level bar would. */
+@media (max-width: 767px) {
+  .bk-bulkbar {
+    padding-bottom: calc(58px + env(safe-area-inset-bottom) + 26px) !important;
+  }
 }
 
 /* ── Inbox entry bar positioning ── */
